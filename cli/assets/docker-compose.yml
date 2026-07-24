@@ -32,7 +32,6 @@ name: livecontext-ce
 services:
   postgres:
     image: pgvector/pgvector:pg16
-    container_name: livecontext-db
     restart: unless-stopped
     environment:
       POSTGRES_DB: livecontext
@@ -52,7 +51,6 @@ services:
 
   redis:
     image: redis:7-alpine
-    container_name: livecontext-redis
     restart: unless-stopped
     volumes:
       - livecontext_redis:/data
@@ -69,7 +67,6 @@ services:
 
   minio:
     image: minio/minio:latest
-    container_name: livecontext-minio
     restart: unless-stopped
     environment:
       MINIO_ROOT_USER: ${MINIO_ROOT_USER:-minioadmin}
@@ -90,7 +87,6 @@ services:
 
   minio-init:
     image: minio/mc:latest
-    container_name: livecontext-minio-init
     depends_on:
       minio:
         condition: service_healthy
@@ -104,8 +100,7 @@ services:
     restart: "no"
 
   bridge:
-    image: ghcr.io/livecontext-ai/livecontext-ce-bridge:v0.2.3
-    container_name: livecontext-bridge
+    image: ghcr.io/livecontext-ai/livecontext-ce-bridge:latest
     restart: unless-stopped
     depends_on:
       redis:
@@ -132,8 +127,7 @@ services:
           memory: 512M
 
   livecontext:
-    image: ghcr.io/livecontext-ai/livecontext-ce:v0.2.3
-    container_name: livecontext-app
+    image: ghcr.io/livecontext-ai/livecontext-ce:latest
     restart: unless-stopped
     depends_on:
       postgres:
@@ -240,7 +234,6 @@ services:
     build:
       context: ./websearch-service
     image: livecontext-ce-websearch:local
-    container_name: livecontext-websearch
     restart: unless-stopped
     depends_on:
       redis:
@@ -289,7 +282,6 @@ services:
   searxng:
     profiles: ["browser-agent"]
     image: searxng/searxng:latest
-    container_name: livecontext-searxng
     restart: unless-stopped
     environment:
       SEARXNG_SETTINGS_PATH: /etc/searxng/settings.yml
@@ -316,8 +308,7 @@ services:
   # secrets - HTML in, bytes out; reached only by the app over the compose network.
   screenshot-renderer:
     profiles: ["renderer"]
-    image: ghcr.io/livecontext-ai/livecontext-ce-screenshot-renderer:v0.2.3
-    container_name: livecontext-screenshot-renderer
+    image: ghcr.io/livecontext-ai/livecontext-ce-screenshot-renderer:latest
     restart: unless-stopped
     environment:
       PORT: "8094"
@@ -340,8 +331,7 @@ services:
           memory: 1024M
 
   frontend:
-    image: ghcr.io/livecontext-ai/livecontext-ce-frontend:v0.2.3
-    container_name: livecontext-frontend
+    image: ghcr.io/livecontext-ai/livecontext-ce-frontend:latest
     restart: unless-stopped
     depends_on:
       livecontext:

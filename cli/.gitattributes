@@ -1,0 +1,7 @@
+# The npm bin must stay LF: a CRLF shebang (#!/usr/bin/env node\r) breaks on
+# Linux/macOS. Force LF for the launcher and shipped text assets.
+* text=auto
+bin/livecontext.mjs text eol=lf
+*.mjs text eol=lf
+*.yml text eol=lf
+.env.example text eol=lf

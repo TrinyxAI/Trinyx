@@ -15,6 +15,10 @@ const landingPageSrc = readFileSync(
   path.resolve(__dirname, '../../../app/[locale]/page.tsx'),
   'utf8',
 );
+const globalsCssSrc = readFileSync(
+  path.resolve(__dirname, '../../../app/globals.css'),
+  'utf8',
+);
 
 describe('public-site self-contained theme contract', () => {
   it('defines a LIGHT palette on .landing-root and a DARK palette on .landing-root.dark', () => {
@@ -22,6 +26,19 @@ describe('public-site self-contained theme contract', () => {
     expect(shellSrc).toMatch(/\.landing-root\.dark\s*\{[\s\S]*?--bg-primary:\s*#171614/i); // dark override (the app's warm dark palette)
     expect(shellSrc).toMatch(/--text-primary:\s*#111827/i); // light text (cool neutral, matches the app)
     expect(shellSrc).toMatch(/--text-primary:\s*#edecea/i); // dark text
+  });
+
+  it('makes a LIGHT .landing-root a "light island" so reused app `dark:` utilities do not leak the OS/<body> .dark', () => {
+    // Reused app components inside the landing (marketplace card, node-icon bubbles,
+    // preview/skeleton pulses) rely on Tailwind `dark:` variants keyed off <html> .dark.
+    // The dark custom-variant must exclude descendants of a light `.landing-root` so
+    // those stay LIGHT while the landing shows light, even on an OS-dark visitor.
+    expect(globalsCssSrc).toMatch(
+      /@custom-variant dark \(&:where\(\.dark, \.dark \*\):not\(:where\(\.landing-root:not\(\.dark\) \*\)\)\);/,
+    );
+    // The exclusion is wrapped in :where(...) so it adds ZERO specificity: no `dark:`
+    // rule may change precedence anywhere else in the app.
+    expect(globalsCssSrc).toMatch(/:not\(:where\(/);
   });
 
   it('drives the dark palette from the .landing-root class, NOT from <body> .dark (decoupled from the app)', () => {

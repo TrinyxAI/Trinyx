@@ -75,6 +75,18 @@ This repository is the **Community Edition (CE)**: the full platform as a single
 
 ## Quick start
 
+The fastest way is one npm command (Docker must be installed and running):
+
+```bash
+npx livecontext
+```
+
+It pulls the images, boots the whole stack, and serves on **http://localhost:3000**.
+`npx livecontext down` stops it and `npx livecontext update` upgrades it. The CLI wraps
+Docker Compose, it does not replace Docker.
+
+Or run **Docker Compose** directly from a clone of this repo:
+
 ```bash
 # From the repo root:
 docker compose up -d

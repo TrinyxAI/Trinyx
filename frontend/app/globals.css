@@ -1,8 +1,20 @@
 @import "tailwindcss";
 @import "../styles/orbit.css";
 
-/* Configure dark mode to use class-based selector */
-@custom-variant dark (&:where(.dark, .dark *));
+/* Configure dark mode to use class-based selector.
+   The public site (landing + /about, /contact, /legal/*, /changelog, /docs) owns a
+   SELF-CONTAINED theme on `.landing-root` (default LIGHT), decoupled from the app-wide
+   ThemeProvider which still writes `.dark`/`.light` on <html>/<body> from the visitor's
+   OS. Reused APP components rendered inside the landing (marketplace PublicationCard,
+   WorkflowNodeIcons bubbles, preview/skeleton pulses, price pills, …) use Tailwind
+   `dark:` variants that key off that <html> `.dark` - so on an OS-dark visitor they
+   stayed dark even while the landing showed LIGHT (dark app icons, dark skeletons, …).
+   The `:not(:where(.landing-root:not(.dark) *))` clause turns a LIGHT `.landing-root`
+   into a "light island": inside it every `dark:` utility is neutralized regardless of
+   the ancestor <html> `.dark`, while a DARK `.landing-root.dark` (it carries `.dark`)
+   and the app itself are unaffected. `:where(...)` keeps the added clause at ZERO
+   specificity, so no `dark:` rule changes precedence anywhere else. */
+@custom-variant dark (&:where(.dark, .dark *):not(:where(.landing-root:not(.dark) *)));
 
 /* Map shadcn/ui theme color tokens to our custom CSS variables.
    This makes classes like bg-background, text-foreground, ring-ring, etc. work.

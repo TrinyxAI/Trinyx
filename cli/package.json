@@ -1,0 +1,30 @@
+{
+  "name": "livecontext",
+  "version": "0.2.2",
+  "description": "One-command launcher for LiveContext Community Edition. Runs the self-hosted Docker stack (workflows, AI agents, apps) with a single npm command.",
+  "type": "module",
+  "bin": {
+    "livecontext": "bin/livecontext.mjs"
+  },
+  "files": [
+    "bin",
+    "assets"
+  ],
+  "engines": {
+    "node": ">=18"
+  },
+  "keywords": [
+    "livecontext",
+    "self-hosted",
+    "ai-automation",
+    "workflow-engine",
+    "docker",
+    "n8n-alternative"
+  ],
+  "license": "AGPL-3.0-only",
+  "homepage": "https://github.com/livecontext-ai/livecontext-ce",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/livecontext-ai/livecontext-ce.git"
+  }
+}

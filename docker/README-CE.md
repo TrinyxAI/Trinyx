@@ -33,11 +33,13 @@ docker compose ps
 > yourself, use the per-service Dockerfiles (`backend/monolith-service/Dockerfile` with the
 > `ce` Maven profile, `frontend/Dockerfile`, `mcp/bridge/Dockerfile`).
 
-> **Accessing from another machine (not localhost)?** The web UI bakes the API URL as
-> `http://localhost:8080` at image build time, so out of the box CE expects to be
-> reached at `localhost`. To serve it on a server/VM by IP or domain, build the
-> frontend from source with `NEXT_PUBLIC_GATEWAY_WS_URL` set to your public backend URL
-> (or front the stack with a reverse proxy that maps it). See the build-args table below.
+> **Accessing from another machine (not localhost)?** Works out of the box, nothing to
+> rebuild. The web UI resolves the backend origin at runtime from the address you opened
+> it with, so `http://192.168.1.50:3000` connects to `http://192.168.1.50:8080`. Just make
+> sure BOTH ports are published and reachable. If the backend is not at
+> `<the address you opened the app with>:BACKEND_PORT` (typically a reverse proxy serving
+> everything on one origin), set `GATEWAY_PUBLIC_URL` on the `frontend` service to the
+> browser-facing backend URL, e.g. `GATEWAY_PUBLIC_URL=https://livecontext.example.com`.
 
 ## Architecture
 
@@ -150,7 +152,15 @@ Key build args injected by docker-compose:
 | `NEXT_PUBLIC_APP_EDITION` | `ce` | Edition SSOT - drives landing bypass, robots.txt disallow, edition-aware UI |
 | `NEXT_PUBLIC_AUTH_MODE` | `embedded` | Use built-in auth (not Keycloak). Kept as legacy shim for one release |
 | `NEXT_PUBLIC_SPRING_BASE_URL` | `http://livecontext:8080` | Backend URL for SSR proxy (container-to-container) |
-| `NEXT_PUBLIC_GATEWAY_WS_URL` | `http://localhost:8080` | WebSocket URL the **browser** uses to reach the backend. Baked at build time, so the prebuilt image defaults to `localhost:8080` (localhost-only). To serve CE on a server by IP/domain, rebuild the frontend with this set to your public backend URL. |
+| `NEXT_PUBLIC_GATEWAY_WS_URL` | `http://localhost:8080` | Build-time fallback for the browser-facing backend URL. Inlined into the client bundle, so it is only a last resort now: the running app prefers the RUNTIME values below. Leave it alone unless you build your own image. |
+
+**Runtime** env vars on the `frontend` service (no rebuild needed, this is how you serve CE
+anywhere other than localhost):
+
+| Variable | Default | Purpose |
+|----------|---------|---------|
+| `GATEWAY_PUBLIC_URL` | empty | Browser-facing backend origin. Empty means "derive it from the address the app was opened with, on `BACKEND_PORT`", which is what makes an install reachable by LAN IP or domain work unmodified. Set it when the backend is elsewhere, e.g. a reverse proxy on one origin: `https://livecontext.example.com`. |
+| `BACKEND_PORT` | `8080` | Port the backend is published on, used for that derivation. Keep it equal to the port mapping on the `livecontext` service. |
 
 ### next.config.mjs - `compress: false`
 
@@ -328,10 +338,14 @@ FRONTEND_PORT=9870 \
   docker compose up -d
 ```
 
-Then open `http://localhost:9870`. NOTE: changing `BACKEND_PORT` with the prebuilt
-image breaks the browser WebSocket (the API URL `localhost:8080` is baked in). To move
-the backend port you must rebuild the frontend image from `frontend/Dockerfile` with
-`NEXT_PUBLIC_GATEWAY_WS_URL` pointing at the new port.
+Then open `http://localhost:9870`. Changing `BACKEND_PORT` is also safe with the prebuilt
+image: the compose passes it to the `frontend` service, which serves it at runtime, and the
+browser derives the backend origin from the address you opened the app with. Set both and
+they stay consistent, no rebuild:
+
+```bash
+FRONTEND_PORT=9870 BACKEND_PORT=18080 docker compose up -d
+```
 
 ### Backend out of memory
 

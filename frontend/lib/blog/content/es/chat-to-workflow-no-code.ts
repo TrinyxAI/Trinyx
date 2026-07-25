@@ -1,76 +1,111 @@
-// chat-to-workflow-no-code - es
-const content = `No necesitas escribir código para construir una automatización con IA. Necesitas decir, en lenguaje sencillo, qué quieres que ocurra. La herramienta convierte esa frase en un flujo de trabajo que puedes ver, ejecutar y modificar.
+// Spanish translation of chat-to-workflow-no-code (public register, 2026-07-24).
+const content = `No necesitas escribir código para construir una automatización con IA. Describes lo que debe ocurrir, en una frase, y obtienes un flujo de trabajo que puedes ver, ejecutar y modificar.
 
-Esa es toda la promesa de la automatización con IA sin código: describe la tarea, obtén un sistema que funciona, conserva el control sobre él.
+Esa es toda la idea de la automatización con IA sin código: di el trabajo en voz alta y quédate con el sistema que recibes.
 
-## Empieza por el resultado, no por los pasos
+## En resumen
 
-El hábito que la gente trae de las herramientas de automatización antiguas es pensar primero en pasos. Qué disparador, qué nodo, qué campo se asigna a cuál. Aquí eso está al revés.
+- Describe el resultado, no los pasos. La herramienta se encarga de la fontanería.
+- Lo que recibes es un diagrama, no una caja negra. Cada paso está en pantalla.
+- Puedes refinarlo de dos formas: seguir conversando, o abrir un paso y editarlo.
+- Mantén una aprobación humana antes de cualquier cosa irreversible para un cliente.
+- Unas pocas líneas de código siguen siendo la respuesta correcta para el trabajo exacto y mecánico.
 
-Empieza por el resultado. Di cómo se ve "terminado".
+## Di cómo se ve "terminado"
 
-"Cuando llega un correo de soporte, léelo, decide si es un error, una consulta de facturación o algo general, redacta una respuesta con el tono adecuado, y coloca el borrador en una cola de revisión para una persona."
+La gente llega con un hábito de las herramientas de automatización antiguas: pensar primero en los pasos, elegir un disparador, conectar el campo A con el campo B. Aquí es al revés.
 
-Esa sola frase basta para comenzar. Describiste el objetivo y la forma del trabajo. La herramienta rellena la fontanería.
+Parte del resultado. Basta una frase:
 
-## Obtienes un grafo, no una caja negra
+"Cada mañana, busca los nuevos registros en mi tabla y envía a cada uno un mensaje de bienvenida por Slack."
 
-Cuando describes la tarea, la herramienta construye un grafo legible: un disparador, unos cuantos pasos, las ramas entre ellos. Puedes mirarlo y entenderlo de una sola pasada. Esto importa más de lo que suena.
+Eso describe un objetivo y la forma del trabajo. El disparador, el bucle, la búsqueda y la escritura de vuelta son fontanería, y la fontanería es justo lo que hace la herramienta.
 
-Muchas herramientas de IA ocultan el trabajo. Escribes una petición, algo ocurre, y cruzas los dedos. Cuando sale mal, no tienes nada que inspeccionar.
+![Un chat de LiveContext con una petición en lenguaje corriente a la izquierda, "cada mañana, busca los nuevos registros en mi tabla y envía a cada uno un mensaje de bienvenida por Slack", y a la derecha el flujo generado en el lienzo: un disparador matinal, un paso que busca los nuevos registros, los recorre uno a uno, envía el mensaje de Slack y los marca como bienvenidos.](/blog/chat-to-workflow-no-code-generated.png)
 
-Aquí ves cada nodo. Ves dónde entra el correo, dónde ocurre la clasificación, qué rama toma una consulta de facturación, dónde se escribe el borrador, y dónde espera a una persona. Nada queda implícito. Si un paso existe, está en el lienzo.
+*Una frase de entrada, un flujo legible de salida. La petición a la izquierda, los pasos generados a la derecha.*
 
-## Refina charlando, o a mano
+## Obtienes un diagrama, no una caja negra
 
-La primera versión rara vez es la definitiva. Refinar es donde el sin código demuestra su valor.
+Esta es la parte que importa mucho más de lo que parece.
 
-Tienes dos formas de cambiar el flujo de trabajo, y puedes mezclarlas con libertad:
+Muchas herramientas de IA esconden el trabajo. Escribes una petición, ocurre algo y cruzas los dedos. Cuando sale mal no hay nada que inspeccionar ni que corregir, así que tu única opción es reformular y volver a intentarlo.
 
-- **Sigue charlando.** "Etiqueta también como urgente cualquier cosa que mencione un reembolso." La herramienta añade la rama y la conecta.
-- **Edita los nodos directamente.** Abre el paso de clasificación y ajusta las categorías. Abre el paso de borrador y afina el tono. Renombra una rama. Mueve un paso más adelante.
+| | Un prompt en una caja negra | Un flujo generado |
+|---|---|---|
+| ¿Ves los pasos? | No | Sí, todos |
+| ¿Puedes cambiar un solo paso? | No, solo el prompt | Sí, ábrelo y edítalo |
+| ¿Sabes por qué hizo eso? | En realidad no | El camino recorrido queda registrado |
+| ¿Se comporta igual dos veces? | Sin garantía | La estructura es fija |
+| ¿Puedes pasárselo a un compañero? | Solo el prompt | El diagrama completo |
 
-Charlar es rápido para cambios estructurales. La edición directa es precisa para ajustes pequeños. Ninguna te cierra la puerta de la otra. El grafo es la fuente de verdad, y ambos caminos escriben en el mismo grafo.
+Si un paso existe, está en el lienzo. Nada queda implícito.
 
-## Cada paso está acotado, lo que lo mantiene barato
+## Cámbialo conversando o a mano
 
-Un flujo de trabajo no es un gran agente que lo hace todo. Es un conjunto de pasos pequeños, y cada paso solo ve lo que necesita.
+La primera versión rara vez es la definitiva, y el refinado es donde el sin código se gana su sitio. Tienes dos formas de hacerlo y puedes mezclarlas libremente.
 
-El paso de clasificación ve el texto del correo y devuelve una categoría. Eso es todo lo que necesita, así que eso es todo lo que recibe. El paso de borrador ve el correo y la categoría. El paso de revisión ve el borrador.
+| Quieres | Haz esto | Por qué |
+|---|---|---|
+| Añadir una rama entera | Sigue conversando: "marca también como urgente todo lo que mencione un reembolso" | Los cambios de estructura son más rápidos en palabras |
+| Corregir una redacción o una categoría | Abre el paso y edítalo | Preciso, sin reinterpretación |
+| Reordenar pasos | Cualquiera de las dos | El diagrama manda |
+| Cambiar un umbral | Abre el paso | Quieres la cifra exacta, no una paráfrasis |
 
-Como cada paso recibe una porción estrecha de contexto en lugar de todo el historial, los tokens se mantienen bajos y el coste se mantiene bajo. La misma tarea se ejecuta unas diez veces más barata que entregarle todo a un único agente que lo hace todo y esperar que no se descarríe. No diseñaste ese ahorro a mano. Sale solo de construir la tarea como un grafo acotado.
+Ambos caminos escriben en el mismo diagrama, así que ninguno te cierra el otro.
 
-## Cuándo aún recurres a un nodo de código
+## Cuándo sigue conviniendo una línea de código
 
-El sin código cubre la mayor parte del trabajo. No tiene por qué cubrirlo todo, y fingir lo contrario es donde estas herramientas se ganan mala fama.
+El sin código cubre la mayor parte del trabajo. Pretender que lo cubre todo es como estas herramientas se ganan mala fama.
 
-Recurre a un nodo de código cuando la lógica es genuinamente mecánica y exacta:
+Recurre a un paso de código cuando la lógica es mecánica y exacta:
 
-- Reformar una carga de datos en la estructura exacta que otro paso espera.
-- Un cálculo preciso, una regla de aritmética de fechas, un umbral sin ambigüedad.
-- Analizar un formato que los pasos integrados no reconocen.
+- Reorganizar datos en la estructura precisa que espera el paso siguiente.
+- Cálculo de fechas, una operación, un umbral sin ambigüedad.
+- Interpretar un formato que ninguna otra cosa reconoce.
 
-Estos son los casos en los que unas pocas líneas de código son más claras y fiables que un párrafo de instrucciones para un modelo. El objetivo no es evitar el código. El objetivo es no escribir código para las partes que una descripción maneja mejor. Usa el lenguaje para el criterio. Usa un nodo de código para la exactitud.
+Lenguaje corriente para el juicio. Unas líneas de código para la exactitud. Ese reparto aguanta bien en la práctica.
 
-## Un ejemplo concreto: triaje de la bandeja de soporte
+## Un ejemplo concreto: clasificar la bandeja de soporte
 
-Recorramos el ejemplo de soporte de principio a fin.
+Misma idea, trabajo algo mayor. Llega un correo de soporte y quieres que se clasifique, se responda y se revise.
 
-**Disparador.** Un correo nuevo cae en la bandeja de soporte.
+| Paso | Qué ocurre | Quién decide |
+|---|---|---|
+| Disparador | Llega un correo nuevo a la bandeja de soporte | La bandeja |
+| Clasificar | Un pequeño paso de IA lo lee y devuelve una etiqueta: error, facturación o general | El modelo, solo sobre ese correo |
+| Ramificar | El diagrama se divide en tres según la etiqueta | La estructura, no el modelo |
+| Redactar | Cada rama escribe una respuesta con el tono adecuado | El modelo |
+| Revisar | El borrador espera a una persona en una cola | Una persona, siempre |
+| Registrar | Qué entró, la etiqueta, la rama, el borrador, quién aprobó | Se registra automáticamente |
 
-**Clasificar.** Un agente acotado lee el correo y devuelve una etiqueta: error, facturación o general. Ve el correo y nada más.
+Fíjate en qué decisiones son del modelo y cuáles del diagrama. El modelo lee y juzga. La estructura decide qué pasa después. Esa separación es lo que mantiene el conjunto predecible, y se detalla en [flujo de trabajo frente a un único agente](/es/blog/workflow-beats-do-everything-agent).
 
-**Ramificar.** El grafo se divide en tres según esa etiqueta. Es una rama real que puedes ver, no una decisión oculta. Un error va por un lado, facturación por otro, general por un tercero.
+## Preguntas frecuentes
 
-**Borrador.** En cada rama, un paso escribe una respuesta con el tono que encaja. La rama de facturación puede consultar antes el estado de la cuenta. La rama de error puede adjuntar un enlace a la página de estado.
+### ¿Necesito saber qué es un disparador o un nodo?
 
-**Revisión.** Cada borrador cae en una cola. Una persona lo lee, edita si hace falta, y aprueba. Nada llega a un cliente sin esa aprobación.
+No. Ayuda más adelante, cuando empieces a editar pasos directamente, pero no hace falta nada de eso para tener una primera versión que funcione.
 
-**Auditoría.** Cada ejecución deja un rastro: qué entró, qué etiqueta recibió, qué rama tomó, qué se redactó, quién aprobó.
+### ¿Y si el flujo generado está mal?
 
-Construiste eso describiéndolo. Puedes leerlo porque es un grafo. Puedes cambiarlo charlando o editando. Y cuando alguien pregunta por qué un correo concreto recibió la respuesta que recibió, puedes señalar el camino exacto que tomó.
+Di qué está mal y se reconstruye, o abre el paso problemático y corrígelo tú. Como ves cada paso, "mal" suele ser un paso concreto y no un misterio.
 
-Eso es lo que debería significar la automatización con IA sin código. No una caja mágica en la que confías a ciegas, sino un sistema que describes con palabras y luego sostienes en tus manos.
+### ¿No es solo un prompt con pasos de más?
+
+No. Un prompt es una llamada y una salida. Un flujo es una estructura fija con pasos separados, ramas reales y el registro del camino que siguió cada ejecución, que es lo que te permite depurarlo un mes después.
+
+### ¿Puede tocar sistemas reales, como el correo o Slack?
+
+Sí, ese es el objetivo. Pon una aprobación humana delante de todo lo que no se pueda deshacer, como enviar a un cliente o gastar dinero.
+
+### ¿Cuánto cuesta ejecutarlo?
+
+Menos que entregar todo el trabajo a un único agente autónomo, en la mayoría de los casos, porque cada paso solo ve lo que necesita. Cuánto menos depende de cuántos pasos tenga el trabajo: [la comparación de costes](/es/blog/workflow-beats-do-everything-agent) lo calcula con las cifras a la vista.
+
+## El siguiente paso
+
+Elige una tarea rutinaria que hagas cada semana, escríbela en una sola frase y mira qué recibes. Después cambia una cosa. Ese es todo el ciclo, y lleva unos diez minutos.
 `;
 
 export default content;

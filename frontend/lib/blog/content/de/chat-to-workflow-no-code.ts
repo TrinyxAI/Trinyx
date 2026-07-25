@@ -1,76 +1,111 @@
-// chat-to-workflow-no-code - de
-const content = `Du musst keinen Code schreiben, um eine KI-Automatisierung zu bauen. Du musst nur in klarer Sprache sagen, was passieren soll. Das Werkzeug verwandelt diesen Satz in einen Workflow, den du sehen, ausführen und verändern kannst.
+// German translation of chat-to-workflow-no-code (public register, 2026-07-24).
+const content = `Sie müssen keinen Code schreiben, um eine KI-Automatisierung zu bauen. Sie beschreiben in einem Satz, was passieren soll, und bekommen einen Workflow, den Sie ansehen, ausführen und ändern können.
 
-Das ist das ganze Versprechen der No-Code-KI-Automatisierung: die Aufgabe beschreiben, ein funktionierendes System bekommen, die Kontrolle behalten.
+Das ist die ganze Idee von No-Code-KI-Automatisierung: Sagen Sie die Aufgabe laut, behalten Sie das System, das Sie bekommen.
 
-## Beginne mit dem Ergebnis, nicht mit den Schritten
+## Kurz gefasst
 
-Die Gewohnheit, die Menschen von älteren Automatisierungswerkzeugen mitbringen, ist, zuerst in Schritten zu denken. Welcher Auslöser, welcher Knoten, welches Feld wird auf welches abgebildet. Das ist hier verkehrt herum.
+- Beschreiben Sie das Ergebnis, nicht die Schritte. Die Verkabelung übernimmt das Werkzeug.
+- Sie bekommen ein Diagramm, keine Blackbox. Jeder Schritt steht auf dem Bildschirm.
+- Verfeinern geht auf zwei Wegen: weiter chatten oder einen Schritt öffnen und bearbeiten.
+- Behalten Sie eine menschliche Freigabe vor allem, was unumkehrbar beim Kunden landet.
+- Ein paar Zeilen Code bleiben die richtige Antwort für exakte, mechanische Arbeit.
 
-Beginne mit dem Ergebnis. Sag, wie "fertig" aussieht.
+## Sagen Sie, wie "fertig" aussieht
 
-"Wenn eine Support-E-Mail eingeht, lies sie, entscheide, ob es ein Fehler, eine Abrechnungsfrage oder allgemein ist, entwirf eine Antwort im richtigen Ton und lege den Entwurf in eine Prüfwarteschlange für einen Menschen."
+Viele bringen eine Gewohnheit aus älteren Automatisierungswerkzeugen mit: erst in Schritten denken, einen Auslöser wählen, Feld A auf Feld B legen. Hier ist es umgekehrt.
 
-Dieser eine Satz genügt zum Anfangen. Du hast das Ziel und die Gestalt der Arbeit beschrieben. Das Werkzeug füllt die Verrohrung aus.
+Gehen Sie vom Ergebnis aus. Ein Satz reicht:
 
-## Du bekommst einen Graphen, keine Blackbox
+"Finde jeden Morgen die neuen Anmeldungen in meiner Tabelle und schicke jeder eine Slack-Willkommensnachricht."
 
-Wenn du die Aufgabe beschreibst, baut das Werkzeug einen lesbaren Graphen: einen Auslöser, ein paar Schritte, die Verzweigungen dazwischen. Du kannst ihn ansehen und in einem Durchgang verstehen. Das ist wichtiger, als es klingt.
+Das beschreibt ein Ziel und die Form der Arbeit. Auslöser, Schleife, Nachschlagen und Zurückschreiben sind Verkabelung, und Verkabelung ist genau das, wofür das Werkzeug da ist.
 
-Viele KI-Werkzeuge verbergen die Arbeit. Du tippst eine Anfrage, etwas passiert, und du drückst die Daumen. Wenn es schiefgeht, hast du nichts, was du prüfen könntest.
+![Ein LiveContext-Chat: links eine Anfrage in Alltagssprache, „jeden Morgen neue Anmeldungen in meiner Tabelle finden und jeder eine Slack-Willkommensnachricht senden“, und rechts der auf dem Canvas generierte Workflow: ein Morgen-Trigger, ein Schritt, der neue Anmeldungen findet, jede einzeln durchläuft, die Slack-Nachricht sendet und sie als begrüßt markiert.](/blog/chat-to-workflow-no-code-generated.png)
 
-Hier siehst du jeden Knoten. Du siehst, wo die E-Mail eintritt, wo die Klassifizierung geschieht, welche Verzweigung eine Abrechnungsfrage nimmt, wo der Entwurf geschrieben wird und wo er auf einen Menschen wartet. Nichts ist bloß angedeutet. Wenn ein Schritt existiert, steht er auf der Arbeitsfläche.
+*Ein Satz hinein, ein lesbarer Workflow heraus. Die Anfrage links, die erzeugten Schritte rechts.*
 
-## Verfeinern per Chat oder von Hand
+## Sie bekommen ein Diagramm, keine Blackbox
 
-Die erste Fassung ist selten die endgültige. Beim Verfeinern zahlt sich No-Code aus.
+Das ist der Teil, der viel mehr zählt, als es klingt.
 
-Du hast zwei Wege, den Workflow zu ändern, und du kannst sie frei mischen:
+Viele KI-Werkzeuge verstecken die Arbeit. Sie tippen eine Anfrage, irgendetwas passiert, und Sie drücken die Daumen. Geht es schief, gibt es nichts zu prüfen und nichts zu reparieren, also bleibt nur: umformulieren und nochmal versuchen.
 
-- **Weiterchatten.** "Markiere außerdem alles, was eine Rückerstattung erwähnt, als dringend." Das Werkzeug fügt die Verzweigung hinzu und verdrahtet sie.
-- **Die Knoten direkt bearbeiten.** Öffne den Klassifizierungsschritt und passe die Kategorien an. Öffne den Entwurfsschritt und straffe den Ton. Benenne eine Verzweigung um. Verschiebe einen Schritt nach vorne.
+| | Ein Prompt in einer Blackbox | Ein erzeugter Workflow |
+|---|---|---|
+| Sehen Sie die Schritte? | Nein | Ja, jeden |
+| Können Sie einen Schritt ändern? | Nein, nur den Prompt | Ja, öffnen und bearbeiten |
+| Wissen Sie, warum es so lief? | Nicht wirklich | Der genommene Weg ist protokolliert |
+| Läuft es zweimal gleich? | Keine Garantie | Die Struktur liegt fest |
+| Können Sie es übergeben? | Nur den Prompt | Das ganze Diagramm |
 
-Chatten ist schnell für strukturelle Änderungen. Direktes Bearbeiten ist präzise für kleine Feinabstimmungen. Keines sperrt dich vom anderen aus. Der Graph ist die Quelle der Wahrheit, und beide Wege schreiben in denselben Graphen.
+Wenn ein Schritt existiert, steht er auf dem Canvas. Nichts bleibt implizit.
 
-## Jeder Schritt ist eng gefasst, was ihn günstig hält
+## Ändern Sie es im Chat oder von Hand
 
-Ein Workflow ist nicht ein großer Agent, der alles tut. Er ist eine Reihe kleiner Schritte, und jeder Schritt sieht nur, was er braucht.
+Die erste Fassung ist selten die letzte, und beim Verfeinern verdient No-Code seinen Platz. Sie haben zwei Wege und können sie frei mischen.
 
-Der Klassifizierungsschritt sieht den E-Mail-Text und gibt eine Kategorie zurück. Das ist alles, was er braucht, also ist das alles, was er bekommt. Der Entwurfsschritt sieht die E-Mail und die Kategorie. Der Prüfschritt sieht den Entwurf.
+| Sie wollen | Tun Sie das | Warum |
+|---|---|---|
+| Einen ganzen Zweig ergänzen | Weiter chatten: "markiere außerdem alles mit Erstattung als dringend" | Strukturänderungen gehen in Worten schneller |
+| Eine Formulierung oder Kategorie korrigieren | Schritt öffnen und bearbeiten | Präzise, ohne Neuinterpretation |
+| Schritte umsortieren | Beides | Das Diagramm ist maßgeblich |
+| Einen Schwellenwert ändern | Schritt öffnen | Sie wollen die exakte Zahl, keine Umschreibung |
 
-Weil jeder Schritt einen schmalen Ausschnitt des Kontexts statt der ganzen Historie bekommt, bleiben die Tokens klein und die Kosten niedrig. Dieselbe Aufgabe läuft etwa zehnmal günstiger, als alles einem Alleskönner-Agenten zu übergeben und zu hoffen, dass er auf Kurs bleibt. Diese Ersparnis hast du nicht von Hand entworfen. Sie fällt daraus ab, dass du die Aufgabe als eng gefassten Graphen baust.
+Beide Wege schreiben in dasselbe Diagramm, keiner sperrt den anderen aus.
 
-## Wann du doch zu einem Code-Knoten greifst
+## Wann ein paar Zeilen Code besser sind
 
-No-Code deckt den Großteil der Arbeit ab. Es muss nicht alles abdecken, und so zu tun ist der Punkt, an dem sich diese Werkzeuge einen schlechten Ruf einhandeln.
+No-Code deckt den größten Teil der Arbeit ab. Zu behaupten, es decke alles ab, ist der Grund für den schlechten Ruf solcher Werkzeuge.
 
-Greif zu einem Code-Knoten, wenn die Logik wirklich mechanisch und exakt ist:
+Greifen Sie zum Code-Schritt, wenn die Logik mechanisch und exakt ist:
 
-- Eine Nutzlast in die exakte Struktur umformen, die ein anderer Schritt erwartet.
-- Eine präzise Berechnung, eine Datumsrechenregel, ein Schwellenwert ohne Unschärfe.
-- Ein Format parsen, das die eingebauten Schritte nicht erkennen.
+- Daten in genau die Struktur bringen, die der nächste Schritt erwartet.
+- Datumsrechnung, eine Berechnung, eine Schwelle ohne jede Unschärfe.
+- Ein Format lesen, das sonst nichts erkennt.
 
-Das sind die Fälle, in denen ein paar Zeilen Code klarer und verlässlicher sind als ein Absatz Anweisungen an ein Modell. Es geht nicht darum, Code zu vermeiden. Es geht darum, keinen Code für die Teile zu schreiben, die eine Beschreibung besser erledigt. Nutze Sprache für Urteilsvermögen. Nutze einen Code-Knoten für Exaktheit.
+Alltagssprache für Urteilsfragen. Ein paar Zeilen Code für Exaktheit. Diese Aufteilung hält in der Praxis.
 
-## Ein konkretes Beispiel: Triage im Support-Postfach
+## Ein konkretes Beispiel: Support-Posteingang sortieren
 
-Gehen wir das Support-Beispiel von Anfang bis Ende durch.
+Gleiche Idee, etwas größere Aufgabe. Eine Support-Mail kommt an und soll sortiert, beantwortet und geprüft werden.
 
-**Auslöser.** Eine neue E-Mail landet im Support-Postfach.
+| Schritt | Was passiert | Wer entscheidet |
+|---|---|---|
+| Auslöser | Eine neue Mail landet im Support-Postfach | Das Postfach |
+| Klassifizieren | Ein kleiner KI-Schritt liest sie und gibt ein Label zurück: Fehler, Abrechnung oder Allgemein | Das Modell, nur auf dieser Mail |
+| Verzweigen | Das Diagramm teilt sich anhand des Labels dreifach | Die Struktur, nicht das Modell |
+| Entwerfen | Jeder Zweig schreibt eine Antwort im passenden Ton | Das Modell |
+| Prüfen | Der Entwurf wartet in einer Warteschlange auf einen Menschen | Immer ein Mensch |
+| Protokollieren | Was hereinkam, das Label, der Zweig, der Entwurf, wer freigegeben hat | Automatisch erfasst |
 
-**Klassifizieren.** Ein eng gefasster Agent liest die E-Mail und gibt ein Label zurück: Fehler, Abrechnung oder allgemein. Er sieht die E-Mail und sonst nichts.
+Achten Sie darauf, welche Entscheidungen dem Modell gehören und welche dem Diagramm. Das Modell liest und urteilt. Die Struktur entscheidet, was als Nächstes passiert. Diese Trennung hält das Ganze vorhersehbar, und sie wird vertieft in [Workflow oder ein einziger Agent](/de/blog/workflow-beats-do-everything-agent).
 
-**Verzweigen.** Der Graph teilt sich anhand dieses Labels in drei Wege. Das ist eine echte Verzweigung, die du sehen kannst, keine verborgene Entscheidung. Ein Fehler geht einen Weg, Abrechnung einen anderen, allgemein einen dritten.
+## Häufige Fragen
 
-**Entwerfen.** Auf jeder Verzweigung schreibt ein Schritt eine Antwort im passenden Ton. Die Abrechnungsverzweigung kann zuerst den Kontostatus ziehen. Die Fehlerverzweigung kann einen Link zur Statusseite anhängen.
+### Muss ich wissen, was ein Auslöser oder eine Node ist?
 
-**Prüfen.** Jeder Entwurf landet in einer Warteschlange. Ein Mensch liest ihn, bearbeitet ihn bei Bedarf und gibt ihn frei. Ohne diese Freigabe erreicht nichts einen Kunden.
+Nein. Später hilft es, wenn Sie Schritte direkt bearbeiten, aber für eine erste funktionierende Fassung brauchen Sie nichts davon.
 
-**Prüfspur.** Jeder Durchlauf hinterlässt eine Spur: was hereinkam, welches Label es erhielt, welche Verzweigung es nahm, was entworfen wurde, wer freigab.
+### Was, wenn der erzeugte Workflow falsch ist?
 
-Das hast du gebaut, indem du es beschrieben hast. Du kannst es lesen, weil es ein Graph ist. Du kannst es ändern, per Chat oder durch Bearbeiten. Und wenn jemand fragt, warum eine bestimmte E-Mail die Antwort bekam, die sie bekam, kannst du genau auf den Weg zeigen, den sie nahm.
+Sagen Sie, was falsch ist, und er wird neu gebaut, oder öffnen Sie den betreffenden Schritt und korrigieren ihn selbst. Weil Sie jeden Schritt sehen, ist "falsch" meist ein konkreter Schritt und kein Rätsel.
 
-Das ist es, was No-Code-KI-Automatisierung bedeuten sollte. Keine Zauberkiste, der du blind vertraust, sondern ein System, das du in Worten beschreibst und dann in Händen hältst.
+### Ist das nicht nur ein Prompt mit Zusatzschritten?
+
+Nein. Ein Prompt ist ein Aufruf und eine Ausgabe. Ein Workflow ist eine feste Struktur mit getrennten Schritten, echten Verzweigungen und einer Aufzeichnung des Weges jeder Ausführung, und genau das macht ihn einen Monat später noch debuggbar.
+
+### Kann er echte Systeme anfassen, etwa E-Mail oder Slack?
+
+Ja, das ist der Sinn. Setzen Sie eine menschliche Freigabe vor alles, was sich nicht rückgängig machen lässt, etwa an Kunden senden oder Geld ausgeben.
+
+### Was kostet der Betrieb?
+
+Meist weniger, als die ganze Aufgabe einem einzigen autonomen Agenten zu übergeben, weil jeder Schritt nur sieht, was er braucht. Wie viel weniger, hängt an der Zahl der Schritte: [der Kostenvergleich](/de/blog/workflow-beats-do-everything-agent) rechnet es mit offenen Zahlen vor.
+
+## Der nächste Schritt
+
+Suchen Sie sich eine wöchentliche Routineaufgabe, schreiben Sie sie als einen Satz und sehen Sie, was zurückkommt. Ändern Sie dann eine Sache daran. Das ist der ganze Kreislauf, und er dauert etwa zehn Minuten.
 `;
 
 export default content;

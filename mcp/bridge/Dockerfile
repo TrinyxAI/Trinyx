@@ -33,6 +33,10 @@ RUN if [ -s /tmp/build-extra-ca.pem ]; then \
     fi
 
 # Node.js CLIs (Claude Code, Gemini CLI, Codex)
+# arm64 note: each of these ships prebuilt native binaries via optional dependencies
+# (ripgrep for Claude Code, a Rust binary for Codex). They install on linux/arm64 musl,
+# but this is the image most likely to break first if an upstream CLI drops an arm64
+# musl build - check this step first when a multi-arch CE release fails.
 RUN npm install -g @anthropic-ai/claude-code
 RUN npm install -g @google/gemini-cli
 RUN npm install -g @openai/codex

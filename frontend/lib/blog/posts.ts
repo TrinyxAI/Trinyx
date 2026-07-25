@@ -29,10 +29,10 @@ export { estimateReadingMinutes, formatBlogDate, formatAuthors } from './postUti
 const BLOG_POSTS: BlogPost[] = [
   {
     slug: 'the-niche-data-advantage',
-    title: 'The niche data advantage, priced',
+    title: 'Niche data: when a small dataset beats a big one',
     date: '2026-07-07',
     excerpt:
-      'The anti-moat evidence is stronger than the pro. So this prices the niche-data thesis instead of praising it: the strongest case against first, then one parameter to measure, a seven-row scorecard, and a build-buy-or-do-nothing break-even.',
+      'Owning data is not a moat. Keeping it current is closer to one. How to tell a niche dataset worth building from an expensive one, in five questions.',
     authors: ['theo p.', 'noah_schmidt'],
     tags: ['niche data', 'strategy'],
     cover: '/blog/the-niche-data-advantage.jpg',
@@ -41,10 +41,10 @@ const BLOG_POSTS: BlogPost[] = [
   },
   {
     slug: 'chat-to-workflow-no-code',
-    title: 'Chat to workflow: no-code AI automation',
+    title: 'No-code AI automation: from one sentence to a working workflow',
     date: '2026-07-05',
     excerpt:
-      'Describe the job in plain language and get a workflow you can see, run, and change. No nodes to wire by hand, no black box.',
+      'Describe the job in plain language and get a workflow you can see, run and change. No nodes to wire by hand, and no black box to trust blindly.',
     authors: ['Sophie M.', 'Emma R.'],
     tags: ['no-code', 'automation'],
     cover: '/blog/chat-to-workflow-no-code.jpg',
@@ -53,10 +53,10 @@ const BLOG_POSTS: BlogPost[] = [
   },
   {
     slug: 'from-dataset-to-live-workflow',
-    title: 'From dataset to live workflow, node by node',
+    title: 'How to turn a dataset into a workflow that runs itself',
     date: '2026-07-03',
     excerpt:
-      'One real graph on a production engine: a scheduled price watch that refreshes, decides, and gates a write. With the exact template strings that resolve, the ones that silently fail, and the idempotent guard that stops it duplicating rows.',
+      'Six steps from a file you check by hand to a price watch that refreshes, decides and asks before it acts. Plus the four traps that fail silently.',
     authors: ['Camille R.', 'noah_schmidt'],
     tags: ['workflows', 'how-to'],
     cover: '/blog/from-dataset-to-live-workflow.jpg',
@@ -65,10 +65,10 @@ const BLOG_POSTS: BlogPost[] = [
   },
   {
     slug: 'workflow-beats-do-everything-agent',
-    title: 'What a scoped workflow actually costs versus a do-everything agent',
+    title: 'AI workflow vs AI agent: what each one really costs',
     date: '2026-07-01',
     excerpt:
-      'We deleted our own "10x cheaper" claim because it had no derivation. Here is the cost model instead: two functions, one quadratic, a worked triage ledger, and the conditions where the ratio collapses to 1.3x or inverts.',
+      'On a support ticket, one agent runs about 19 cents and a split-up workflow about 2. Why the gap exists, when it shrinks, and when the agent is the right call.',
     authors: ['theo p.', 'nora_a'],
     tags: ['ai agents', 'cost'],
     cover: '/blog/workflow-beats-do-everything-agent.jpg',
@@ -77,10 +77,10 @@ const BLOG_POSTS: BlogPost[] = [
   },
   {
     slug: 'cap-ai-agent-cost-budgets',
-    title: 'The budget that actually stops the agent',
+    title: 'How to stop an AI agent from overspending',
     date: '2026-06-24',
     excerpt:
-      'Most agent budgets are a number that has never refused a single call. What a real ceiling is made of, why it can only ever stop the call after the expensive one, and what each stack can actually enforce.',
+      'An alert is not a limit, and most provider spend caps only send a notification. What a real ceiling looks like, and how to prove yours would refuse a call.',
     authors: ['theo p.', 'ines_l'],
     tags: ['ai agents', 'cost'],
     cover: '/blog/cap-ai-agent-cost-budgets.jpg',
@@ -90,9 +90,9 @@ const BLOG_POSTS: BlogPost[] = [
   {
     slug: 'size-an-ai-agent-budget',
     date: '2026-06-22',
-    title: 'How to size an agent budget you can actually enforce',
+    title: 'How much should you budget for one AI agent?',
     excerpt:
-      'The sizing half: a generating model you can reproduce, a derived safety factor, the floor below which a money cap cannot be enforced at all, and how many runs you need before you may quote a p99.',
+      'What a step actually costs, how much margin to add, and why capping loops is a poor way to cap money. A practical way to get to a number you can defend.',
     authors: ['ines_l', 'nora_a'],
     tags: ['ai agents', 'cost'],
     // Temporary: reuses the calculator cover currently on small-data-sharp-decisions,
@@ -103,10 +103,10 @@ const BLOG_POSTS: BlogPost[] = [
   },
   {
     slug: 'ai-agent-audit-trail',
-    title: 'The agent audit trail: a field schema you can copy',
+    title: 'What to log for every AI agent run',
     date: '2026-06-20',
     excerpt:
-      'An audit trail is not a longer log, it is a different artifact with a different reader. A copyable run-level and step-level schema where every field carries its type, cardinality, personal-data flag, and the reason it exists.',
+      'Your dashboard is not an audit trail, and standard AI tracing stores no prompts by default. What to record per run and per step so you can answer for it later.',
     authors: ['ines_l', 'noah_schmidt'],
     tags: ['ai agents', 'governance'],
     cover: '/blog/ai-agent-audit-trail.jpg',
@@ -116,9 +116,9 @@ const BLOG_POSTS: BlogPost[] = [
   {
     slug: 'ai-agent-audit-log-retention',
     date: '2026-06-18',
-    title: 'How long to keep an agent audit trail, and what you actually owe',
+    title: 'How long should you keep AI agent logs?',
     excerpt:
-      'The storage arithmetic that makes retention a derived decision, the tiering that follows, and an honest map of the EU AI Act logging duties, including the part where most agents are out of scope entirely.',
+      'Keep the small skeleton for years and the bulky content for months. What the EU AI Act really requires, and why most agents are out of scope entirely.',
     authors: ['ines_l', 'nora_a'],
     tags: ['ai agents', 'governance'],
     // Temporary: reuses the from-dataset cover (a whiteboard diagram) until a

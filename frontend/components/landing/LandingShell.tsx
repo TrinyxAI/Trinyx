@@ -5,6 +5,7 @@ import LandingNavAnchor from '@/app/[locale]/_landing/LandingNavAnchor';
 import LandingLanguageSelect from '@/components/landing/LandingLanguageSelect';
 import LandingThemeProvider from '@/components/landing/LandingThemeProvider';
 import LandingThemeToggle from '@/components/landing/LandingThemeToggle';
+import { docsHref } from '@/lib/docs/docsHostRewrite';
 
 // Shared chrome (header + footer + base CSS vars) used by the landing page
 // (`app/[locale]/page.tsx`) and the public sub-pages (`/about`, `/contact`,
@@ -131,6 +132,7 @@ function withBase(base: string | undefined, path: string): string {
   return base ? `${base}${path}` : path;
 }
 
+
 /** The GitHub octocat mark (currentColor), shared by the header nav, the footer
  *  social circle and the landing's Self-host CTAs so they all use the SAME icon. */
 export function GithubMark({ className }: { className?: string }) {
@@ -158,7 +160,7 @@ export function LandingHeader({ extra, siteBaseUrl }: { extra?: React.ReactNode;
           <LandingNavAnchor targetId="pricing" baseUrl={siteBaseUrl} className="hover:opacity-80 transition-opacity cursor-pointer">Pricing</LandingNavAnchor>
           <Link href={withBase(siteBaseUrl, '/blog')} className="hover:opacity-80 transition-opacity">Blog</Link>
           <Link href={withBase(siteBaseUrl, '/changelog')} className="hover:opacity-80 transition-opacity">Changelog</Link>
-          <Link href={siteBaseUrl ? '/' : '/docs'} prefetch={false} className="hover:opacity-80 transition-opacity">Docs</Link>
+          <Link href={docsHref(siteBaseUrl)} prefetch={false} className="hover:opacity-80 transition-opacity">Docs</Link>
           <a
             href="https://github.com/livecontext-ai"
             target="_blank"
@@ -272,7 +274,16 @@ export function LandingFooter({ siteBaseUrl }: { siteBaseUrl?: string } = {}) {
         <div className="flex-1 grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-8 gap-y-10">
         <div>
           <p className="text-[11px] uppercase tracking-wider mb-3" style={{ color: 'var(--text-muted)' }}>Product</p>
+          {/* The capability entries point at the docs page that explains each one:
+              a visitor who is not signed in yet has something to read, and the
+              column stops being two sign-in prompts. Titles match the docs nav
+              (`app/docs/_nav.ts`) so the label and the destination agree. */}
           <ul className="space-y-2" style={{ color: 'var(--text-secondary)' }}>
+            <li><Link href={docsHref(siteBaseUrl, 'workflows')} prefetch={false}>Workflows</Link></li>
+            <li><Link href={docsHref(siteBaseUrl, 'agents')} prefetch={false}>Agents</Link></li>
+            <li><Link href={docsHref(siteBaseUrl, 'interfaces')} prefetch={false}>Interfaces &amp; apps</Link></li>
+            <li><Link href={docsHref(siteBaseUrl, 'tables')} prefetch={false}>Tables &amp; data</Link></li>
+            <li><Link href={docsHref(siteBaseUrl, 'integrations')} prefetch={false}>Integrations</Link></li>
             <li>
               <SignInButton variant="link" returnTo="/app/marketplace" baseUrl={siteBaseUrl} className="cursor-pointer">
                 Marketplace
@@ -292,7 +303,7 @@ export function LandingFooter({ siteBaseUrl }: { siteBaseUrl?: string } = {}) {
           <ul className="space-y-2" style={{ color: 'var(--text-secondary)' }}>
             <li><Link href={withBase(siteBaseUrl, '/blog')}>Blog</Link></li>
             <li><Link href={withBase(siteBaseUrl, '/changelog')}>Changelog</Link></li>
-            <li><Link href={siteBaseUrl ? '/' : '/docs'} prefetch={false}>Docs</Link></li>
+            <li><Link href={docsHref(siteBaseUrl)} prefetch={false}>Docs</Link></li>
             <li>
               <a href="https://github.com/livecontext-ai" target="_blank" rel="noopener noreferrer">
                 Self-hosted

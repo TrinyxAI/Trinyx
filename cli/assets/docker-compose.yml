@@ -15,8 +15,12 @@
 # Ports (override via env or --env-file):
 #   FRONTEND_PORT=3000   (the app; open http://localhost:3000)
 #   BACKEND_PORT=8080    (the API the browser talks to, e.g. WebSocket)
-# NOTE: the web UI bakes the API URL at build time as http://localhost:8080. If you change
-# BACKEND_PORT you must rebuild the frontend image (see docker/README-CE.md).
+#
+# Reaching it from another machine (NAS, LAN, server, VPS): nothing to rebuild. The web
+# UI resolves the backend origin at RUNTIME from the address you opened it with, so
+# http://192.168.1.50:3000 talks to http://192.168.1.50:8080. Publish BOTH ports.
+# Behind a reverse proxy serving everything on one origin, set GATEWAY_PUBLIC_URL on the
+# frontend service instead (see its comment below).
 #
 # No Keycloak required: CE uses embedded auth (email/password).
 #
@@ -191,8 +195,16 @@ services:
       MISTRAL_API_KEY: ${MISTRAL_API_KEY:-}
       DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY:-}
       # OAuth2 redirect URLs (for end-user credential connections)
-      OAUTH2_FRONTEND_URL: "http://localhost:${FRONTEND_PORT:-3000}"
-      OAUTH2_CALLBACK_URL: "http://localhost:${BACKEND_PORT:-8080}/api/credentials/oauth2/callback"
+      # Followed by the user's BROWSER after the provider redirects, so a remote install
+      # needs an address the browser can reach. Defaults keep localhost working; set
+      # PUBLIC_BASE_URL and GATEWAY_PUBLIC_URL when serving CE on a LAN address or domain,
+      # and register the same values as redirect URIs with each OAuth provider.
+      # NO TRAILING SLASH: compose cannot normalise it, and a trailing slash yields
+      # https://host//api/credentials/oauth2/callback, which will not match the registered
+      # redirect URI. It breaks OAuth only, not the WebSocket, so a working realtime layer
+      # is not proof the value is well formed.
+      OAUTH2_FRONTEND_URL: "${PUBLIC_BASE_URL:-http://localhost:${FRONTEND_PORT:-3000}}"
+      OAUTH2_CALLBACK_URL: "${GATEWAY_PUBLIC_URL:-http://localhost:${BACKEND_PORT:-8080}}/api/credentials/oauth2/callback"
       # Catalog seed: import the bundled OpenAPI specs at first boot
       CATALOG_SEED_ENABLED: "true"
       CATALOG_SEED_PATH: /app/catalog-seeds
@@ -338,6 +350,20 @@ services:
         condition: service_healthy
     ports:
       - "${FRONTEND_PORT:-3000}:3000"
+    environment:
+      # Where the BROWSER reaches the backend. Read at runtime (GET /api/runtime-config),
+      # so the same prebuilt image serves localhost, a LAN address and a public domain.
+      #
+      # Leave GATEWAY_PUBLIC_URL empty (the default) and the app derives the origin from
+      # the address you opened it with, on BACKEND_PORT: `npx livecontext` on a server and
+      # opening http://192.168.1.50:3000 connects to http://192.168.1.50:8080, with nothing
+      # to rebuild.
+      #
+      # Set it only when the backend is NOT at <the address you opened the app with>:BACKEND_PORT,
+      # typically a reverse proxy serving both on one origin:
+      #   GATEWAY_PUBLIC_URL=https://livecontext.example.com
+      GATEWAY_PUBLIC_URL: ${GATEWAY_PUBLIC_URL:-}
+      BACKEND_PORT: ${BACKEND_PORT:-8080}
 
 volumes:
   livecontext_data:

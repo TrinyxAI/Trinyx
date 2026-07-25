@@ -3,6 +3,7 @@
 import { useEffect, useRef } from 'react';
 import { useAuth } from '@/lib/providers/smart-providers';
 import { wsClient } from './ws-client';
+import { fetchGatewayRuntimeConfig, resolveGatewayHttpUrl, toWebSocketUrl } from './gatewayUrl';
 import { useCurrentOrgStore } from '@/lib/stores/current-org-store';
 
 /**
@@ -35,6 +36,17 @@ export function WebSocketProvider({ children }: { children: React.ReactNode }) {
 
   const startedRef = useRef(false);
   const lastOrgRef = useRef<string | null | undefined>(undefined);
+  // Resolving the gateway origin is async, so "we intend to connect" (startedRef) and
+  // "wsClient.connect has actually run" (connectedRef) are no longer the same instant. The
+  // workspace-switch branch needs the second one: reconnect() on a client that has never
+  // connected throws (its token provider is still null, before the URL is even used) and
+  // burns a spurious failed attempt plus a backoff.
+  const connectedRef = useRef(false);
+  // Cleared by the unmount-only effect's cleanup and re-armed by its body. When teardown
+  // happens first, the in-flight resolution sees it and abandons; when the resolution wins
+  // the race instead, it connects and the cleanup then disconnects normally. Both orders
+  // are correct, so this is a guard, not an ordering assumption.
+  const mountedRef = useRef(true);
 
   // Connection lifecycle: connect once · reconnect on workspace switch · disconnect on logout.
   useEffect(() => {
@@ -45,28 +57,64 @@ export function WebSocketProvider({ children }: { children: React.ReactNode }) {
       if (startedRef.current) {
         wsClient.disconnect();
         startedRef.current = false;
+        connectedRef.current = false;
         lastOrgRef.current = undefined;
       }
       return;
     }
 
     if (!startedRef.current) {
-      const gatewayHttp = process.env.NEXT_PUBLIC_GATEWAY_WS_URL
-        || `${window.location.protocol}//${window.location.host}`;
-      const gatewayUrl = gatewayHttp.replace(/^https:/, 'wss:').replace(/^http:/, 'ws:');
-
       // Stable providers - read live values; never re-created per render.
       const tokenProvider = (): Promise<string> => getAccessTokenRef.current();
       const activeOrgProvider = (): string | null => useCurrentOrgStore.getState().currentOrgId;
 
-      console.log(`[WS:provider] Connecting to gateway: ${gatewayUrl} (activeOrg=${currentOrgId ?? 'personal'})`);
-      wsClient.connect(gatewayUrl, tokenProvider, activeOrgProvider);
+      // Claim the slot BEFORE awaiting: a re-render during the config fetch must not
+      // start a second connection.
       startedRef.current = true;
       lastOrgRef.current = currentOrgId;
+
+      // The gateway origin is resolved at runtime rather than from the build-time
+      // NEXT_PUBLIC_GATEWAY_WS_URL alone, because that value is inlined into the
+      // client bundle: the published CE image bakes `http://localhost:8080`, which in
+      // a browser is the VISITOR's machine, so every install opened from anywhere but
+      // the Docker host silently lost the socket. fetchGatewayRuntimeConfig never
+      // rejects - on failure the resolver falls back to its later ranks.
+      //
+      // Because this awaits, connect() no longer runs synchronously inside the effect.
+      // Both teardown paths must therefore be re-checked after the await: logout resets
+      // startedRef, and real unmount (the effect at the bottom of this component) calls
+      // wsClient.disconnect() without touching it. Connecting after either would set
+      // intentionalClose=false again and leak a socket that reconnects forever.
+      void (async () => {
+        const config = await fetchGatewayRuntimeConfig();
+        if (!mountedRef.current || !startedRef.current) return;
+
+        const gatewayUrl = toWebSocketUrl(
+          resolveGatewayHttpUrl(config, process.env.NEXT_PUBLIC_GATEWAY_WS_URL, window.location),
+        );
+        // Read the live org rather than the value captured when this effect ran: the
+        // workspace may have switched while the config was in flight, and
+        // activeOrgProvider is about to send the live one.
+        const activeOrg = useCurrentOrgStore.getState().currentOrgId;
+        console.log(`[WS:provider] Connecting to gateway: ${gatewayUrl} (activeOrg=${activeOrg ?? 'personal'})`);
+        wsClient.connect(gatewayUrl, tokenProvider, activeOrgProvider);
+        connectedRef.current = true;
+      })().catch((error) => {
+        // connect() handles its own failures today; this keeps a future throw from
+        // becoming an unhandled rejection.
+        console.error('[WS:provider] gateway resolution failed', error);
+      });
     } else if (lastOrgRef.current !== currentOrgId) {
-      // Workspace switched - re-handshake so the session's organizationId updates.
-      console.log(`[WS:provider] Active workspace changed (${lastOrgRef.current ?? 'personal'} → ${currentOrgId ?? 'personal'}); reconnecting WS`);
       lastOrgRef.current = currentOrgId;
+      if (!connectedRef.current) {
+        // The first connect is still resolving its gateway origin. activeOrgProvider
+        // reads the live store, so the pending connect will already use the new
+        // workspace; calling reconnect() on a client that has never connected throws on
+        // its null token provider and burns a spurious failed attempt plus a backoff.
+        return;
+      }
+      // Workspace switched - re-handshake so the session's organizationId updates.
+      console.log(`[WS:provider] Active workspace changed to ${currentOrgId ?? 'personal'}; reconnecting WS`);
       wsClient.reconnect();
     }
   }, [isAuthenticated, isLoading, currentOrgId]);
@@ -81,7 +129,17 @@ export function WebSocketProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   // Disconnect ONLY on real unmount (app teardown) - never on navigation/re-render.
-  useEffect(() => () => { wsClient.disconnect(); }, []);
+  // mountedRef is cleared in the cleanup so a gateway resolution still in flight abandons
+  // instead of calling connect() on the socket this just tore down, and RE-ARMED in the
+  // body: a ref survives a teardown that preserves the component INSTANCE (StrictMode's dev
+  // double-invoke, Offscreen/Activity), so without re-arming it every later resolution
+  // would abort forever - dead realtime with no error. A conditionally remounted subtree is
+  // NOT such a path (fresh hook state re-initialises the ref), and StrictMode is off in
+  // this app, so this is defence rather than a live bug.
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => { mountedRef.current = false; wsClient.disconnect(); };
+  }, []);
 
   return <>{children}</>;
 }

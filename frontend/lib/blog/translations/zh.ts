@@ -10,16 +10,16 @@ import aiAgentAuditLogRetention from '../content/zh/ai-agent-audit-log-retention
 
 export const zhBlog: BlogTranslation = {
   ui: {
-    eyebrow: "实战手记", blogTitle: "Blog", lead: "关于利基数据以及在其之上构建的自动化的手记。为什么窄数据集胜过宽数据集，以及如何把一个数据源变成一个自行运行的工作流。", latest: "最新", readThePost: "阅读文章", readMore: "阅读更多", allPosts: "全部文章", minRead: "分钟阅读", by: "作者", and: "和", ctaTitle: "把你的利基数据变成一个能用的自动化", ctaText: "在聊天里描述这份任务，LiveContext 就在你眼前构建出工作流。", startFree: "免费开始", metaTitle: "Blog - LiveContext", metaDescription: "关于利基数据以及在其之上构建的自动化的实战手记：为什么窄数据集胜过宽数据集，以及如何把一个数据源变成一个自行运行的工作流。",
+    eyebrow: "实战手记", blogTitle: "Blog", lead: "AI 自动化的实用指南：智能体到底要花多少钱、该记录些什么，以及如何把一个数据集变成能自行运行的工作流。", latest: "最新", readThePost: "阅读文章", readMore: "阅读更多", allPosts: "全部文章", minRead: "分钟阅读", by: "作者", and: "和", ctaTitle: "把你的利基数据变成一个能用的自动化", ctaText: "在聊天里描述这份任务，LiveContext 就在你眼前构建出工作流。", startFree: "免费开始", metaTitle: "Blog - LiveContext", metaDescription: "AI 自动化与利基数据的实用指南：AI 智能体到底要花多少钱、每次运行该记录些什么，以及如何把一个数据集变成能自行运行的工作流。",
   },
   posts: {
-    "the-niche-data-advantage": { title: "利基数据的优势，算笔账", excerpt: "反对护城河的证据比支持它的更有力。所以这篇给利基数据的论点算笔账，而不是吹捧它：先摆出最强的反方论证，再给出一个要测量的参数、一张七行评分卡，以及自建、购买还是什么都不做的盈亏平衡点。", coverAlt: "一台笔记本电脑展示着带有图表、地图和指标的分析仪表盘", content: theNicheDataAdvantage },
-    "chat-to-workflow-no-code": { title: "从聊天到工作流：无代码 AI 自动化", excerpt: "用大白话描述任务，得到一个你能看见、能运行、能修改的工作流。无需手动接线节点，没有黑盒。", coverAlt: "一只手在手机上输入消息，屏幕上显示着一段聊天对话", content: chatToWorkflowNoCode },
-    "from-dataset-to-live-workflow": { title: "从数据集到运行中的工作流，逐个节点讲", excerpt: "一个跑在生产引擎上的真实工作流图：一套定时的竞品价格监控，会刷新、判断，并为写入把关。附上能正确解析的模板字符串、会悄无声息失败的那些，以及防止它重复插入行的幂等守卫。", coverAlt: "一只手在白板上画出由方块和箭头连成的工作流示意图", content: fromDatasetToLiveWorkflow },
-    "workflow-beats-do-everything-agent": { title: "限定范围的工作流相比全能智能体的真实成本", excerpt: "我们删掉了自己那句「便宜 10 倍」的说法，因为它没有任何推导。取而代之的是成本模型：两个函数，其中一个是二次的，一份算到底的工单分流账本，以及比率跌到 1.3x 甚至反转的条件。", coverAlt: "一个立在支架上的单臂机械臂，代表一个自主智能体", content: workflowBeatsDoEverythingAgent },
-    "cap-ai-agent-cost-budgets": { title: "真正能拦住智能体的预算", excerpt: "大多数智能体预算只是一个从未拒绝过任何一次调用的数字。一个真正的上限由什么构成，为什么它只能拦住下一次调用，以及每个技术栈实际能强制执行什么。", coverAlt: "散落在桌面上的硬币，旁边有一本笔记本和一支笔用于做预算", content: capAiAgentCostBudgets },
-    "size-an-ai-agent-budget": { title: "如何设定一个真正能强制执行的智能体预算", excerpt: "关于设定数值的另一半：一个可复现的生成模型、一个推导出来的安全系数、金额上限低于该下限就完全无法强制执行的临界点，以及在能够引用 p99 之前需要多少次运行。", coverAlt: "双手在打印的图表旁使用计算器分析数据", content: sizeAnAiAgentBudget },
-    "ai-agent-audit-trail": { title: "智能体的审计轨迹：一份可以照抄的字段模式", excerpt: "审计轨迹不是更长的日志，而是另一种工件，面向另一类读者。一份可照抄的 run 级与 step 级字段模式，每个字段都带上它的类型、基数、个人数据标记，以及它存在的理由。", coverAlt: "一只放大镜和一个计算器搁在打印的文件上", content: aiAgentAuditTrail },
-    "ai-agent-audit-log-retention": { title: "智能体的审计轨迹要留多久，以及你到底负有什么义务", excerpt: "把留存变成推导结果的存储算术、由此得出的分级留存，以及一张诚实的 EU AI Act 日志义务地图，包括其中大多数智能体根本不在适用范围内的那部分。", coverAlt: "一只手在白板上画出由方块和箭头连成的工作流示意图", content: aiAgentAuditLogRetention },
+    "the-niche-data-advantage": { title: "利基数据：小数据集什么时候能胜过大数据集", excerpt: "拥有数据本身不是护城河，把它保持最新才更接近。用五个问题分辨哪份利基数据集值得投入。", coverAlt: "一台笔记本电脑展示着带有图表、地图和指标的分析仪表盘", content: theNicheDataAdvantage },
+    "chat-to-workflow-no-code": { title: "无代码 AI 自动化：从一句话到可运行的工作流", excerpt: "用日常语言描述任务，得到一个可以看见、运行和修改的工作流。不用手工连节点，也不必盲信一个黑盒。", coverAlt: "一只手在手机上输入消息，屏幕上显示着一段聊天对话", content: chatToWorkflowNoCode },
+    "from-dataset-to-live-workflow": { title: "如何把数据集变成自行运行的工作流", excerpt: "六个步骤，从手动核对的文件到会自动刷新、判断并在行动前征询的价格监控。外加四个静默失败的陷阱。", coverAlt: "一只手在白板上画出由方块和箭头连成的工作流示意图", content: fromDatasetToLiveWorkflow },
+    "workflow-beats-do-everything-agent": { title: "AI 工作流还是 AI 智能体：各自到底花多少钱", excerpt: "一个客服工单上，单个智能体约 19 美分，拆分后的工作流约 2 美分。差距为何存在、何时缩小，以及什么时候该选智能体。", coverAlt: "一个立在支架上的单臂机械臂，代表一个自主智能体", content: workflowBeatsDoEverythingAgent },
+    "cap-ai-agent-cost-budgets": { title: "如何避免 AI 智能体超支", excerpt: "告警不是限制，多数服务商的支出上限只发一条通知。真正的天花板长什么样，以及如何证明你的上限会拒绝一次调用。", coverAlt: "散落在桌面上的硬币，旁边有一本笔记本和一支笔用于做预算", content: capAiAgentCostBudgets },
+    "size-an-ai-agent-budget": { title: "一个 AI 智能体该给多少预算？", excerpt: "一步到底花多少钱、该加多少余量，以及为什么限制迭代次数控不住钱。一套得出可辩护数字的实用方法。", coverAlt: "双手在打印的图表旁使用计算器分析数据", content: sizeAnAiAgentBudget },
+    "ai-agent-audit-trail": { title: "每次 AI 智能体运行该记录什么", excerpt: "你的面板不是审计记录，标准 AI 追踪默认不保存提示词。按运行和按步骤该记下什么，才能在事后说得清楚。", coverAlt: "一只放大镜和一个计算器搁在打印的文件上", content: aiAgentAuditTrail },
+    "ai-agent-audit-log-retention": { title: "AI 智能体日志该保留多久？", excerpt: "小小的骨架保留数年，庞大的内容保留数月。欧盟《人工智能法案》到底要求什么，以及为什么多数智能体根本不在范围内。", coverAlt: "一只手在白板上画出由方块和箭头连成的工作流示意图", content: aiAgentAuditLogRetention },
   },
 };

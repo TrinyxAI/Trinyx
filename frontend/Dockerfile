@@ -2,6 +2,14 @@
 # (ghcr.io/<repo>/base/*) and dodge Docker Hub anonymous pull rate limits;
 # the Docker Hub defaults keep local/CE builds working unauthenticated.
 ARG NODE_IMAGE=node:20-alpine
+# Deliberately NOT pinned to $BUILDPLATFORM (unlike the monolith's Maven stage, which
+# emits an architecture-independent jar). `next build` resolves and traces NATIVE
+# node_modules into .next/standalone - @next/swc-linux-<arch>-musl and friends - so a
+# build stage running on amd64 would bake amd64 binaries into an arm64 runtime image
+# and the server would fail to start. Cross-building this stage is therefore a
+# correctness bug, not an optimisation: on a multi-arch build the whole Next build runs
+# once per target platform (emulated under QEMU when there is no native runner, which
+# is the slowest part of a multi-arch CE release).
 FROM ${NODE_IMAGE} AS build
 WORKDIR /app
 

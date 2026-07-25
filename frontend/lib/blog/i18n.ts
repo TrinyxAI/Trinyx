@@ -48,7 +48,7 @@ export const EN_BLOG_UI: BlogUi = {
   eyebrow: 'Field notes',
   blogTitle: 'Blog',
   lead:
-    'Notes on niche data and the automations built on top of it. Why narrow datasets beat broad ones, and how to turn a source into a workflow that runs itself.',
+    'Practical guides to AI automation: what agents really cost, what to log, and how to turn a niche dataset into a workflow that runs itself.',
   latest: 'Latest',
   readThePost: 'Read the post',
   readMore: 'Read more',
@@ -61,5 +61,5 @@ export const EN_BLOG_UI: BlogUi = {
   startFree: 'Start free',
   metaTitle: 'Blog - LiveContext',
   metaDescription:
-    'Field notes on niche data and the automations built on top of it: why narrow datasets beat broad ones, and how to turn a source into a workflow that runs itself.',
+    'Practical guides to AI automation and niche data: what AI agents really cost, what to log for every run, and how to turn a dataset into a workflow that runs itself.',
 };

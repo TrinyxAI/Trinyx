@@ -103,6 +103,31 @@ file away when you want them, see [Optional features](#optional-features) below.
 Configuration (LLM keys, SMTP, ports) is documented in [docker/README-CE.md](docker/README-CE.md).
 Copy `docker/.env.ce.example` to set your own values, and never commit it.
 
+### Running it on a server, NAS or VPS
+
+Nothing extra to build. Publish both ports (`3000` for the web UI, `8080` for the backend)
+and open the app at that machine's address: `http://192.168.1.50:3000` talks to
+`http://192.168.1.50:8080` on its own. If you put a reverse proxy in front and serve
+everything on a single origin, set `GATEWAY_PUBLIC_URL` on the `frontend` service to the
+browser-facing backend URL instead.
+
+Deploying through Portainer, Coolify, Dokploy or a similar platform: see
+[templates/README.md](templates/README.md).
+
+### Images
+
+Built for **linux/amd64**. The Compose file pulls from GHCR:
+
+```
+ghcr.io/livecontext-ai/livecontext-ce
+ghcr.io/livecontext-ai/livecontext-ce-frontend
+ghcr.io/livecontext-ai/livecontext-ce-bridge
+ghcr.io/livecontext-ai/livecontext-ce-screenshot-renderer   # opt-in renderer profile
+```
+
+Each release is tagged `vX.Y.Z` (immutable) plus `vX.Y`, `vX` and `latest` if you would
+rather track a line than pin an exact version.
+
 ## Optional features
 
 Two heavy features are **opt-in** and start with no container by default, keeping the base stack

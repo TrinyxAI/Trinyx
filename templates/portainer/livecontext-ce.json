@@ -1,0 +1,66 @@
+{
+  "version": "3",
+  "templates": [
+    {
+      "type": 3,
+      "title": "LiveContext CE",
+      "name": "livecontext-ce",
+      "description": "Self-hosted AI workflow and agent platform. Build workflows with 600+ API integrations, run agents against your own LLM keys, and ship interactive interfaces. AGPL-3.0.",
+      "note": "Publish BOTH ports: the web UI is on FRONTEND_PORT and the browser talks to the backend on BACKEND_PORT. The app derives the backend origin from the address you open it with, so a LAN or domain install needs no rebuild. To connect OAuth credentials (Gmail, Slack) set PUBLIC_BASE_URL to the address you actually open the app at, otherwise the provider sends the user back to their own machine; register the same URL as the redirect URI with each provider, and use no trailing slash. Behind a reverse proxy serving everything on one origin, set GATEWAY_PUBLIC_URL to the browser-facing backend URL as well. Agents need at least one LLM key, which you can also add later from Settings inside the app.",
+      "categories": ["AI", "Automation", "Productivity"],
+      "platform": "linux",
+      "logo": "https://raw.githubusercontent.com/livecontext-ai/livecontext-ce/main/frontend/public/liveContext-logo.png",
+      "repository": {
+        "url": "https://github.com/livecontext-ai/livecontext-ce",
+        "stackfile": "docker-compose.yml"
+      },
+      "env": [
+        {
+          "name": "FRONTEND_PORT",
+          "label": "Web UI port",
+          "default": "3000"
+        },
+        {
+          "name": "BACKEND_PORT",
+          "label": "Backend port (must be reachable from your browser)",
+          "default": "8080"
+        },
+        {
+          "name": "GATEWAY_PUBLIC_URL",
+          "label": "Browser-facing backend URL (leave empty unless behind a reverse proxy; no trailing slash)",
+          "default": ""
+        },
+        {
+          "name": "PUBLIC_BASE_URL",
+          "label": "Browser-facing web UI URL, e.g. http://192.168.1.50:3000 (needed for OAuth credential connections; no trailing slash)",
+          "default": ""
+        },
+        {
+          "name": "DB_PASSWORD",
+          "label": "PostgreSQL password",
+          "default": "postgres"
+        },
+        {
+          "name": "MINIO_ROOT_PASSWORD",
+          "label": "Object storage password",
+          "default": "minioadmin"
+        },
+        {
+          "name": "ANTHROPIC_API_KEY",
+          "label": "Anthropic API key (optional, can be added in the app)",
+          "default": ""
+        },
+        {
+          "name": "OPENAI_API_KEY",
+          "label": "OpenAI API key (optional, can be added in the app)",
+          "default": ""
+        },
+        {
+          "name": "GOOGLE_API_KEY",
+          "label": "Google API key (optional, can be added in the app)",
+          "default": ""
+        }
+      ]
+    }
+  ]
+}

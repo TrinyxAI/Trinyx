@@ -1,76 +1,111 @@
-// chat-to-workflow-no-code - pt
-const content = `Não precisa de escrever código para construir uma automatização de IA. Precisa de dizer, em linguagem simples, o que quer que aconteça. A ferramenta transforma essa frase num workflow que consegue ver, executar e alterar.
+// Portuguese translation of chat-to-workflow-no-code (public register, 2026-07-24).
+const content = `Não precisa de escrever código para construir uma automatização com IA. Descreve numa frase o que deve acontecer e recebe um workflow que pode ver, executar e alterar.
 
-É essa toda a promessa da automatização de IA no-code: descreva a tarefa, obtenha um sistema que funciona, mantenha o controlo sobre ele.
+É essa a ideia da automatização com IA sem código: diga a tarefa em voz alta e fique com o sistema que recebe.
 
-## Comece pelo resultado, não pelos passos
+## Em resumo
 
-O hábito que as pessoas trazem das ferramentas de automatização mais antigas é pensar primeiro em passos. Que gatilho, que nó, que campo mapeia para qual. Aqui isso está ao contrário.
+- Descreva o resultado, não os passos. Da canalização trata a ferramenta.
+- O que recebe é um diagrama, não uma caixa negra. Todos os passos estão no ecrã.
+- Pode refinar de duas maneiras: continuar a conversar, ou abrir um passo e editá-lo.
+- Mantenha uma aprovação humana antes de tudo o que é irreversível para um cliente.
+- Umas linhas de código continuam a ser a resposta certa para trabalho exato e mecânico.
 
-Comece pelo resultado. Diga como é o "concluído".
+## Diga como é "concluído"
 
-"Quando chega um email de suporte, ler, decidir se é um bug, uma questão de faturação ou geral, redigir uma resposta no tom certo e colocar o rascunho numa fila de revisão para um humano."
+As pessoas chegam com um hábito das ferramentas de automatização antigas: pensar primeiro nos passos, escolher um gatilho, ligar o campo A ao campo B. Aqui é ao contrário.
 
-Essa única frase basta para começar. Descreveu o objetivo e a forma do trabalho. A ferramenta trata das ligações.
+Parta do resultado. Uma frase chega:
 
-## Recebe um grafo, não uma caixa preta
+"Todas as manhãs, encontra os novos registos na minha tabela e envia a cada um uma mensagem de boas-vindas no Slack."
 
-Quando descreve a tarefa, a ferramenta constrói um grafo legível: um gatilho, alguns passos, as ramificações entre eles. Consegue olhar para ele e compreendê-lo numa só passagem. Isto importa mais do que parece.
+Isso descreve um objetivo e a forma do trabalho. O gatilho, o ciclo, a consulta e a escrita de volta são canalização, e é para isso que a ferramenta existe.
 
-Muitas ferramentas de IA escondem o trabalho. Escreve um pedido, algo acontece, e cruza os dedos. Quando corre mal, não tem nada para inspecionar.
+![Um chat do LiveContext com um pedido em linguagem corrente à esquerda, "todas as manhãs, encontra os novos registos na minha tabela e envia a cada um uma mensagem de boas-vindas no Slack", e à direita o workflow gerado na tela: um gatilho matinal, um passo que encontra os novos registos, percorre-os um a um, envia a mensagem de Slack e marca-os como recebidos.](/blog/chat-to-workflow-no-code-generated.png)
 
-Aqui vê cada nó. Vê onde o email entra, onde acontece a classificação, que ramificação segue uma questão de faturação, onde o rascunho é escrito e onde aguarda por um humano. Nada fica subentendido. Se um passo existe, está na tela.
+*Uma frase à entrada, um workflow legível à saída. O pedido à esquerda, os passos gerados à direita.*
 
-## Refine por conversa, ou à mão
+## Recebe um diagrama, não uma caixa negra
 
-A primeira versão raramente é a final. Refinar é onde o no-code prova o seu valor.
+Esta é a parte que conta muito mais do que parece.
 
-Tem duas formas de alterar o workflow, e pode combiná-las livremente:
+Muitas ferramentas de IA escondem o trabalho. Escreve um pedido, acontece alguma coisa e cruza os dedos. Quando corre mal não há nada para inspecionar nem para corrigir, por isso a única opção é reformular e tentar de novo.
 
-- **Continuar a conversar.** "Marca também como urgente tudo o que mencione um reembolso." A ferramenta acrescenta a ramificação e liga-a.
-- **Editar os nós diretamente.** Abra o passo de classificação e ajuste as categorias. Abra o passo de rascunho e afine o tom. Renomeie uma ramificação. Mova um passo para antes.
+| | Um prompt numa caixa negra | Um workflow gerado |
+|---|---|---|
+| Vê os passos? | Não | Sim, todos |
+| Pode mudar um passo só? | Não, só o prompt | Sim, abra-o e edite |
+| Sabe porque fez aquilo? | Nem por isso | O caminho seguido fica registado |
+| Comporta-se igual duas vezes? | Sem garantia | A estrutura é fixa |
+| Pode passá-lo a um colega? | Só o prompt | O diagrama inteiro |
 
-Conversar é rápido para alterações estruturais. Editar diretamente é preciso para pequenos ajustes. Nenhum o impede do outro. O grafo é a fonte da verdade, e ambos os caminhos escrevem no mesmo grafo.
+Se um passo existe, está na tela. Nada fica implícito.
 
-## Cada passo é delimitado, o que o mantém barato
+## Altere a conversar ou à mão
 
-Um workflow não é um grande agente a fazer tudo. É um conjunto de pequenos passos, e cada passo só vê aquilo de que precisa.
+A primeira versão raramente é a última, e é no refinamento que o sem código ganha o seu lugar. Tem duas formas de o fazer e pode misturá-las à vontade.
 
-O passo de classificação vê o texto do email e devolve uma categoria. É tudo o que precisa, por isso é tudo o que recebe. O passo de rascunho vê o email e a categoria. O passo de revisão vê o rascunho.
+| Quer | Faça isto | Porquê |
+|---|---|---|
+| Acrescentar um ramo inteiro | Continue a conversar: "marca também como urgente tudo o que fale de reembolso" | Mudanças de estrutura são mais rápidas em palavras |
+| Corrigir uma frase ou categoria | Abra o passo e edite | Preciso, sem reinterpretação |
+| Reordenar passos | Qualquer uma | O diagrama é que manda |
+| Mudar um limiar | Abra o passo | Quer o número exato, não uma paráfrase |
 
-Como cada passo recebe uma fatia estreita de contexto em vez de todo o histórico, os tokens mantêm-se pequenos e o custo mantém-se baixo. A mesma tarefa corre cerca de dez vezes mais barata do que entregar tudo a um único agente que faz tudo e torcer para que se mantenha no rumo. Não desenhou essa poupança à mão. Ela decorre de construir a tarefa como um grafo delimitado.
+Ambos os caminhos escrevem no mesmo diagrama, por isso nenhum lhe fecha o outro.
 
-## Quando ainda recorre a um nó de código
+## Quando ainda compensa uma linha de código
 
-O no-code cobre a maior parte do trabalho. Não tem de cobrir tudo, e fingir o contrário é onde estas ferramentas ganham má fama.
+O sem código cobre a maior parte do trabalho. Fingir que cobre tudo é como estas ferramentas ganham má fama.
 
-Recorra a um nó de código quando a lógica é genuinamente mecânica e exata:
+Use um passo de código quando a lógica é mecânica e exata:
 
-- Reformatar um payload para a estrutura exata que outro passo espera.
-- Um cálculo preciso, uma regra de aritmética de datas, um limiar sem ambiguidade.
-- Analisar um formato que os passos incorporados não reconhecem.
+- Reorganizar dados na estrutura precisa que o passo seguinte espera.
+- Cálculo de datas, uma conta, um limiar sem qualquer ambiguidade.
+- Interpretar um formato que mais nada reconhece.
 
-Estes são os casos em que algumas linhas de código são mais claras e mais fiáveis do que um parágrafo de instruções a um modelo. O objetivo não é evitar código. O objetivo é não escrever código para as partes que uma descrição trata melhor. Use linguagem para o discernimento. Use um nó de código para a exatidão.
+Linguagem corrente para o julgamento. Umas linhas de código para a exatidão. Essa divisão aguenta-se na prática.
 
-## Um exemplo concreto: triagem da caixa de entrada de suporte
+## Um exemplo concreto: triagem da caixa de suporte
 
-Percorra o exemplo de suporte de ponta a ponta.
+Mesma ideia, tarefa um pouco maior. Chega um email de suporte e quer que seja triado, respondido e revisto.
 
-**Gatilho.** Um novo email chega à caixa de entrada de suporte.
+| Passo | O que acontece | Quem decide |
+|---|---|---|
+| Gatilho | Chega um email novo à caixa de suporte | A caixa |
+| Classificar | Um pequeno passo de IA lê-o e devolve uma etiqueta: erro, faturação ou geral | O modelo, só sobre esse email |
+| Ramificar | O diagrama divide-se em três consoante a etiqueta | A estrutura, não o modelo |
+| Redigir | Cada ramo escreve uma resposta no tom certo | O modelo |
+| Rever | O rascunho espera por uma pessoa numa fila | Uma pessoa, sempre |
+| Registar | O que entrou, a etiqueta, o ramo, o rascunho, quem aprovou | Registado automaticamente |
 
-**Classificar.** Um agente delimitado lê o email e devolve uma etiqueta: bug, faturação ou geral. Vê o email e nada mais.
+Repare em que decisões pertencem ao modelo e quais pertencem ao diagrama. O modelo lê e julga. A estrutura decide o que acontece a seguir. Essa separação é o que mantém tudo previsível, e é aprofundada em [workflow ou um único agente](/pt/blog/workflow-beats-do-everything-agent).
 
-**Ramificar.** O grafo divide-se em três a partir dessa etiqueta. Esta é uma ramificação real que consegue ver, não uma decisão escondida. Um bug segue por um lado, a faturação por outro, o geral por um terceiro.
+## Perguntas frequentes
 
-**Rascunhar.** Em cada ramificação, um passo escreve uma resposta no tom adequado. A ramificação de faturação pode primeiro obter o estado da conta. A ramificação de bug pode anexar uma ligação para a página de estado.
+### Preciso de saber o que é um gatilho ou um nó?
 
-**Revisão.** Cada rascunho chega a uma fila. Um humano lê-o, edita se necessário e aprova. Nada chega a um cliente sem essa aprovação.
+Não. Ajuda mais tarde, quando começar a editar passos diretamente, mas não precisa de nada disso para ter uma primeira versão funcional.
 
-**Auditoria.** Cada execução deixa um rasto: o que entrou, que etiqueta recebeu, que ramificação seguiu, o que foi rascunhado, quem aprovou.
+### E se o workflow gerado estiver errado?
 
-Construiu isto descrevendo-o. Consegue lê-lo porque é um grafo. Consegue alterá-lo conversando ou editando. E quando alguém pergunta porque é que um determinado email recebeu a resposta que recebeu, consegue apontar para o caminho exato que seguiu.
+Diga o que está errado e ele é reconstruído, ou abra o passo problemático e corrija-o. Como vê todos os passos, "errado" costuma ser um passo concreto e não um mistério.
 
-É isto que a automatização de IA no-code deve significar. Não uma caixa mágica em que confia cegamente, mas um sistema que descreve por palavras e depois tem nas suas mãos.
+### Isto não é só um prompt com passos a mais?
+
+Não. Um prompt é uma chamada e uma saída. Um workflow é uma estrutura fixa com passos separados, ramos reais e o registo do caminho de cada execução, e é isso que permite depurá-lo um mês depois.
+
+### Pode mexer em sistemas reais, como email ou Slack?
+
+Sim, é essa a ideia. Ponha uma aprovação humana antes de tudo o que não se desfaz, como enviar a um cliente ou gastar dinheiro.
+
+### Quanto custa executá-lo?
+
+Menos do que entregar toda a tarefa a um único agente autónomo, na maioria dos casos, porque cada passo só vê o que precisa. Quanto menos depende do número de passos: [a comparação de custos](/pt/blog/workflow-beats-do-everything-agent) faz as contas com os números à vista.
+
+## O passo seguinte
+
+Escolha uma rotina que faça todas as semanas, escreva-a numa só frase e veja o que recebe. Depois mude uma coisa. É esse o ciclo inteiro, e demora uns dez minutos.
 `;
 
 export default content;

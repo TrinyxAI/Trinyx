@@ -1,76 +1,112 @@
-// chat-to-workflow-no-code - fr
-const content = `Vous n'avez pas besoin d'écrire du code pour construire une automatisation IA. Vous avez besoin de dire, en langage courant, ce que vous voulez qu'il se passe. L'outil transforme cette phrase en un workflow que vous pouvez voir, exécuter et modifier.
+// French translation of chat-to-workflow-no-code (public register, 2026-07-24).
+// Structure identical to the English source. Internal links point at /fr/blog.
+const content = `Vous n'avez pas besoin d'écrire du code pour construire une automatisation IA. Vous décrivez ce qui doit se passer, en une phrase, et vous obtenez un workflow que vous pouvez regarder, exécuter et modifier.
 
-C'est toute la promesse de l'automatisation IA no-code : décrivez la tâche, obtenez un système qui fonctionne, gardez-en le contrôle.
+C'est toute l'idée de l'automatisation IA no-code : dites le travail à voix haute, gardez le système que vous récupérez.
 
-## Partez du résultat, pas des étapes
+## L'essentiel en bref
 
-L'habitude que les gens héritent des anciens outils d'automatisation est de penser d'abord en étapes. Quel déclencheur, quel nœud, quel champ correspond à quel autre. Ici, c'est à l'envers.
+- Décrivez le résultat, pas les étapes. L'outil se charge de la tuyauterie.
+- Ce que vous récupérez est un schéma, pas une boîte noire. Chaque étape est à l'écran.
+- Vous pouvez l'affiner de deux façons : continuer à discuter, ou ouvrir une étape et l'éditer.
+- Gardez une validation humaine avant tout ce qui est irréversible pour un client.
+- Quelques lignes de code restent la bonne réponse pour le travail exact et mécanique.
 
-Partez du résultat. Dites à quoi ressemble le mot "terminé".
+## Dites à quoi ressemble « terminé »
 
-"Quand un e-mail de support arrive, lis-le, décide s'il s'agit d'un bug, d'une question de facturation ou d'un sujet général, rédige une réponse dans le bon ton, et place le brouillon dans une file de relecture pour un humain."
+Les gens arrivent avec une habitude prise sur les anciens outils d'automatisation : penser aux étapes d'abord, choisir un déclencheur, relier le champ A au champ B. C'est l'inverse ici.
 
-Cette seule phrase suffit pour commencer. Vous avez décrit l'objectif et la forme du travail. L'outil comble la tuyauterie.
+Partez du résultat. Une phrase suffit :
 
-## Vous obtenez un graphe, pas une boîte noire
+« Chaque matin, trouver les nouvelles inscriptions dans ma table et envoyer à chacune un message de bienvenue Slack. »
 
-Quand vous décrivez la tâche, l'outil construit un graphe lisible : un déclencheur, quelques étapes, les branches entre elles. Vous pouvez le regarder et le comprendre en un coup d'œil. Cela compte plus qu'il n'y paraît.
+Cela décrit un objectif et la forme du travail. Le déclencheur, la boucle, la recherche et l'écriture en retour sont de la tuyauterie, et la tuyauterie est précisément ce que l'outil prend en charge.
 
-Beaucoup d'outils d'IA cachent le travail. Vous tapez une requête, quelque chose se produit, et vous croisez les doigts. Quand ça se passe mal, vous n'avez rien à inspecter.
+![Un chat LiveContext : à gauche une demande en langage courant, « chaque matin, trouver les nouvelles inscriptions dans ma table et envoyer à chacune un message de bienvenue Slack », et à droite le workflow généré sur le canvas : un déclencheur matinal, une étape qui trouve les nouvelles inscriptions, les parcourt une à une, envoie le message Slack et les marque comme accueillies.](/blog/chat-to-workflow-no-code-generated.png)
 
-Ici, vous voyez chaque nœud. Vous voyez où l'e-mail entre, où se fait la classification, quelle branche prend une question de facturation, où le brouillon est écrit, et où il attend un humain. Rien n'est sous-entendu. Si une étape existe, elle est sur le canevas.
+*Une phrase en entrée, un workflow lisible en sortie. La demande à gauche, les étapes générées à droite.*
 
-## Affinez en discutant, ou à la main
+## Vous obtenez un schéma, pas une boîte noire
 
-La première version est rarement la dernière. C'est en affinant que le no-code prouve sa valeur.
+C'est la partie qui compte le plus, bien plus qu'il n'y paraît.
 
-Vous avez deux façons de modifier le workflow, et vous pouvez les mélanger librement :
+Beaucoup d'outils IA cachent le travail. Vous tapez une demande, quelque chose se produit, et vous espérez. Quand ça se passe mal, il n'y a rien à inspecter et rien à corriger : votre seule option est de reformuler et de réessayer.
 
-- **Continuez à discuter.** "Marque aussi comme urgent tout ce qui mentionne un remboursement." L'outil ajoute la branche et la câble.
-- **Éditez les nœuds directement.** Ouvrez l'étape de classification et ajustez les catégories. Ouvrez l'étape de brouillon et resserrez le ton. Renommez une branche. Déplacez une étape plus tôt.
+| | Un prompt dans une boîte noire | Un workflow généré |
+|---|---|---|
+| Voyez-vous les étapes ? | Non | Oui, toutes |
+| Pouvez-vous changer une seule étape ? | Non, seulement le prompt | Oui, ouvrez-la et éditez |
+| Savez-vous pourquoi il a fait ça ? | Pas vraiment | Le chemin suivi est enregistré |
+| Se comporte-t-il pareil deux fois ? | Aucune garantie | La structure est fixe |
+| Pouvez-vous le passer à un collègue ? | Seulement le prompt | Le schéma complet |
 
-Discuter est rapide pour les changements de structure. L'édition directe est précise pour les petits ajustements. Aucune ne vous ferme l'accès à l'autre. Le graphe est la source de vérité, et les deux chemins écrivent dans le même graphe.
+Si une étape existe, elle est sur le canvas. Rien n'est implicite.
 
-## Chaque étape est cadrée, ce qui la garde bon marché
+## Modifiez-le en discutant, ou à la main
 
-Un workflow n'est pas un gros agent qui fait tout. C'est un ensemble de petites étapes, et chaque étape ne voit que ce dont elle a besoin.
+La première version est rarement la dernière, et c'est dans l'affinage que le no-code justifie sa place. Vous avez deux manières de le faire, et vous pouvez les mélanger librement.
 
-L'étape de classification voit le texte de l'e-mail et renvoie une catégorie. C'est tout ce dont elle a besoin, donc c'est tout ce qu'elle reçoit. L'étape de brouillon voit l'e-mail et la catégorie. L'étape de relecture voit le brouillon.
+| Vous voulez | Faites ceci | Pourquoi |
+|---|---|---|
+| Ajouter une branche entière | Continuez à discuter : « marque aussi comme urgent tout ce qui parle de remboursement » | Les changements de structure vont plus vite en mots |
+| Corriger une formulation ou une catégorie | Ouvrez l'étape et éditez | Précis, sans réinterprétation |
+| Réordonner les étapes | L'un ou l'autre | Le schéma fait foi |
+| Changer un seuil | Ouvrez l'étape | Vous voulez le chiffre exact, pas une paraphrase |
 
-Parce que chaque étape reçoit une tranche étroite de contexte plutôt que tout l'historique, les jetons restent peu nombreux et le coût reste bas. La même tâche tourne environ dix fois moins cher que de tout confier à un seul agent bon à tout faire en espérant qu'il reste sur les rails. Vous n'avez pas conçu cette économie à la main. Elle découle du fait de construire la tâche comme un graphe cadré.
+Les deux chemins écrivent dans le même schéma : aucun ne vous ferme l'autre.
 
-## Quand vous avez quand même recours à un nœud de code
+## Quand une ligne de code reste préférable
 
-Le no-code couvre l'essentiel du travail. Il n'a pas à tout couvrir, et prétendre le contraire est ce qui vaut à ces outils une mauvaise réputation.
+Le no-code couvre l'essentiel du travail. Prétendre qu'il couvre tout, c'est ainsi que ces outils se font une mauvaise réputation.
 
-Ayez recours à un nœud de code quand la logique est réellement mécanique et exacte :
+Passez à une étape de code quand la logique est mécanique et exacte :
 
-- Remodeler une charge utile dans la structure exacte qu'une autre étape attend.
-- Un calcul précis, une règle d'arithmétique de dates, un seuil sans flou.
-- Analyser un format que les étapes intégrées ne reconnaissent pas.
+- Remettre des données dans la structure précise attendue par l'étape suivante.
+- Un calcul de dates, une opération, un seuil sans la moindre ambiguïté.
+- Analyser un format que rien d'autre ne reconnaît.
 
-Ce sont les cas où quelques lignes de code sont plus claires et plus fiables qu'un paragraphe d'instructions à un modèle. L'idée n'est pas d'éviter le code. L'idée est de ne pas écrire de code pour les parties qu'une description gère mieux. Utilisez le langage pour le jugement. Utilisez un nœud de code pour l'exactitude.
+Le langage courant pour le jugement. Quelques lignes de code pour l'exactitude. Cette répartition tient bien en pratique.
 
-## Un exemple concret : le tri de la boîte de support
+## Un exemple concret : le tri de la boîte support
 
-Déroulons l'exemple du support de bout en bout.
+Même idée, travail un peu plus gros. Un e-mail de support arrive et vous voulez qu'il soit trié, traité et vérifié.
 
-**Déclencheur.** Un nouvel e-mail arrive dans la boîte de support.
+| Étape | Ce qui se passe | Qui décide |
+|---|---|---|
+| Déclencheur | Un nouvel e-mail arrive dans la boîte support | La boîte |
+| Classer | Une petite étape IA le lit et renvoie une étiquette : bug, facturation ou général | Le modèle, sur cet e-mail uniquement |
+| Brancher | Le schéma se divise en trois selon l'étiquette | La structure, pas le modèle |
+| Rédiger | Chaque branche écrit une réponse au bon ton | Le modèle |
+| Relire | Le brouillon attend une personne dans une file | Un humain, toujours |
+| Journaliser | Ce qui est entré, l'étiquette, la branche, le brouillon, qui a validé | Enregistré automatiquement |
 
-**Classification.** Un agent cadré lit l'e-mail et renvoie une seule étiquette : bug, facturation ou général. Il voit l'e-mail et rien d'autre.
+Remarquez quelles décisions appartiennent au modèle et lesquelles appartiennent au schéma. Le modèle lit et juge. La structure décide de la suite. C'est cette séparation qui rend l'ensemble prévisible, et elle est détaillée dans [workflow ou gros agent unique](/fr/blog/workflow-beats-do-everything-agent).
 
-**Branche.** Le graphe se divise en trois selon cette étiquette. C'est une vraie branche que vous pouvez voir, pas une décision cachée. Un bug part d'un côté, la facturation d'un autre, le général d'un troisième.
+## Les questions qu'on nous pose
 
-**Brouillon.** Sur chaque branche, une étape écrit une réponse dans le ton qui convient. La branche facturation peut d'abord récupérer le statut du compte. La branche bug peut joindre un lien vers la page de statut.
+### Dois-je savoir ce qu'est un déclencheur ou un nœud ?
 
-**Relecture.** Chaque brouillon atterrit dans une file. Un humain le lit, l'édite si besoin, et l'approuve. Rien n'atteint un client sans cette approbation.
+Non. Cela aide plus tard, quand vous commencez à éditer les étapes directement, mais rien de tout cela n'est nécessaire pour obtenir une première version qui marche.
 
-**Audit.** Chaque exécution laisse une trace : ce qui est entré, quelle étiquette il a reçue, quelle branche il a prise, ce qui a été rédigé, qui a approuvé.
+### Et si le workflow généré est faux ?
 
-Vous avez construit cela en le décrivant. Vous pouvez le lire parce que c'est un graphe. Vous pouvez le modifier en discutant ou en éditant. Et quand quelqu'un demande pourquoi un e-mail précis a reçu la réponse qu'il a reçue, vous pouvez pointer le chemin exact qu'il a suivi.
+Dites ce qui ne va pas et il est reconstruit, ou ouvrez l'étape fautive et corrigez-la vous-même. Comme vous voyez chaque étape, « faux » désigne en général une étape précise plutôt qu'un mystère.
 
-Voilà ce que devrait signifier l'automatisation IA no-code. Pas une boîte magique en laquelle vous vous fiez aveuglément, mais un système que vous décrivez avec des mots puis que vous tenez entre vos mains.
+### N'est-ce pas juste un prompt avec des étapes en plus ?
+
+Non. Un prompt, c'est un appel et une sortie. Un workflow, c'est une structure fixe avec des étapes séparées, de vraies branches, et l'enregistrement du chemin suivi par chaque exécution : c'est ce qui permet de le déboguer un mois plus tard.
+
+### Peut-il toucher de vrais systèmes, comme l'e-mail ou Slack ?
+
+Oui, c'est tout l'intérêt. Mettez une validation humaine devant tout ce qui est irréversible, comme envoyer à un client ou dépenser de l'argent.
+
+### Combien coûte son exécution ?
+
+Moins que confier tout le travail à un seul agent autonome, dans la plupart des cas, parce que chaque étape ne voit que ce dont elle a besoin. De combien en moins, cela dépend du nombre d'étapes : [la comparaison des coûts](/fr/blog/workflow-beats-do-everything-agent) fait le calcul avec les chiffres affichés.
+
+## La prochaine étape
+
+Choisissez une corvée que vous faites chaque semaine, écrivez-la en une phrase, et regardez ce qui revient. Puis changez-y une chose. C'est toute la boucle, et elle prend une dizaine de minutes.
 `;
 
 export default content;

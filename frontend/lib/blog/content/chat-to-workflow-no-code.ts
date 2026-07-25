@@ -1,76 +1,121 @@
-// Markdown body for "From a chat message to a working automation". Plain string module.
-const content = `You do not need to write code to build an AI automation. You need to say, in plain language, what you want to happen. The tool turns that sentence into a workflow you can see, run, and change.
+// Markdown body for "No-code AI automation: turn a sentence into a workflow".
+// Plain string module.
+//
+// PUBLIC register (rewritten 2026-07-24): the entry-level post of the blog, and
+// usually a reader's first page. Keep it concrete and short, keep the screenshot
+// high on the page, and keep the promise honest.
+//
+// One editorial rule: this post used to claim a scoped workflow runs "about ten
+// times cheaper" than one big agent. That claim was retracted blog-wide because
+// it had no derivation behind it. Do not reintroduce a bare multiple here; link
+// to the cost article instead, which derives its numbers on the page.
+const content = `You do not need to write code to build an AI automation. You describe what should happen, in a sentence, and you get a workflow you can look at, run, and change.
 
-That is the whole promise of no-code AI automation: describe the job, get a working system, keep control of it.
+That is the whole idea of no-code AI automation: say the job out loud, keep the system you get.
 
-## Start with the outcome, not the steps
+## The short version
 
-The habit people bring from older automation tools is thinking in steps first. Which trigger, which node, which field maps to which. That is backwards here.
+- Describe the outcome, not the steps. The tool works out the plumbing.
+- What you get back is a diagram, not a black box. Every step is on screen.
+- You can refine it two ways: keep chatting, or open a step and edit it.
+- Keep a human approval before anything irreversible reaches a customer.
+- A few lines of code are still the right answer for exact, mechanical work.
 
-Start with the outcome. Say what "done" looks like.
+## Say what "done" looks like
 
-"When a support email comes in, read it, decide if it is a bug, a billing question, or general, draft a reply in the right tone, and put the draft in a review queue for a human."
+People arrive with a habit from older automation tools: think in steps first, pick a trigger, wire field A to field B. That is backwards here.
 
-That one sentence is enough to begin. You described the goal and the shape of the work. The tool fills in the plumbing.
+Start from the outcome instead. One sentence is enough:
 
-## You get a graph, not a black box
+"Every morning, find new signups in my table and send each one a Slack welcome message."
 
-When you describe the job, the tool builds a readable graph: a trigger, a few steps, the branches between them. You can look at it and understand it in one pass. This matters more than it sounds.
+That describes a goal and the shape of the work. The trigger, the loop, the lookup and the write-back are plumbing, and plumbing is what the tool is for.
 
-A lot of AI tools hide the work. You type a request, something happens, and you cross your fingers. When it goes wrong, you have nothing to inspect.
+![A LiveContext chat with a plain-language request on the left, "every morning, find new signups in my table and send each one a Slack welcome message", and the workflow it generated on the canvas on the right: a morning trigger into a step that finds new signups, iterates over each one, sends a Slack welcome, and marks them welcomed.](/blog/chat-to-workflow-no-code-generated.png)
 
-Here you see every node. You see where the email enters, where the classification happens, which branch a billing question takes, where the draft gets written, and where it waits for a human. Nothing is implied. If a step exists, it is on the canvas.
+*One sentence in, a readable workflow out. The request on the left, the generated steps on the right.*
 
-## Refine by chatting, or by hand
+## You get a diagram, not a black box
 
-The first version is rarely the final one. Refining is where no-code earns its keep.
+This is the part that matters more than it sounds.
 
-You have two ways to change the workflow, and you can mix them freely:
+A lot of AI tools hide the work. You type a request, something happens, and you hope. When it goes wrong there is nothing to inspect and nothing to fix, so your only option is to rephrase and try again.
 
-- **Keep chatting.** "Also tag anything mentioning a refund as urgent." The tool adds the branch and wires it in.
-- **Edit the nodes directly.** Open the classify step and adjust the categories. Open the draft step and tighten the tone. Rename a branch. Move a step earlier.
+| | A prompt in a black box | A generated workflow |
+|---|---|---|
+| Can you see the steps? | No | Yes, every one |
+| Can you change one step? | No, only the prompt | Yes, open it and edit |
+| Do you know why it did that? | Not really | The path it took is recorded |
+| Does it run the same way twice? | Not guaranteed | The structure is fixed |
+| Can you hand it to a colleague? | Only the prompt | The whole diagram |
 
-Chatting is fast for structural changes. Direct editing is precise for small tweaks. Neither locks you out of the other. The graph is the source of truth, and both paths write to the same graph.
+If a step exists, it is on the canvas. Nothing is implied.
 
-## Each step is scoped, which keeps it cheap
+## Change it by chatting, or by hand
 
-A workflow is not one big agent doing everything. It is a set of small steps, and each step only sees what it needs.
+The first version is rarely the last one, and refining is where no-code earns its place. You have two ways to do it, and you can mix them freely.
 
-The classify step sees the email text and returns a category. That is all it needs, so that is all it gets. The draft step sees the email and the category. The review step sees the draft.
+| You want to | Do this | Why |
+|---|---|---|
+| Add a whole branch | Keep chatting: "also tag anything mentioning a refund as urgent" | Structural changes are faster in words |
+| Fix wording or a category | Open the step and edit it | Precise, no reinterpretation |
+| Reorder steps | Either | The diagram is the source of truth |
+| Change a threshold | Open the step | You want the exact number, not a paraphrase |
 
-Because each step gets a narrow slice of context instead of the whole history, the tokens stay small and the cost stays low. The same job runs about ten times cheaper than handing everything to one do-everything agent and hoping it stays on track. You did not design that saving by hand. It falls out of building the job as a scoped graph.
+Both paths write to the same diagram, so neither locks you out of the other.
 
-## When you still reach for a code node
+## When you still want a line of code
 
-No-code covers most of the work. It does not have to cover all of it, and pretending otherwise is where these tools earn a bad name.
+No-code covers most of the work. Pretending it covers all of it is how these tools earn a bad reputation.
 
-Reach for a code node when the logic is genuinely mechanical and exact:
+Reach for a code step when the logic is mechanical and exact:
 
-- Reshaping a payload into the exact structure another step expects.
-- A precise calculation, a date math rule, a threshold with no fuzziness.
-- Parsing a format the built-in steps do not recognize.
+- Reshaping data into the precise structure the next step expects.
+- Date maths, a calculation, a threshold with no fuzziness in it.
+- Parsing a format nothing else recognises.
 
-These are the cases where a few lines of code are clearer and more reliable than a paragraph of instructions to a model. The point is not to avoid code. The point is to not write code for the parts a description handles better. Use language for judgment. Use a code node for exactness.
+Use plain language for judgment. Use a few lines of code for exactness. That split holds up in practice.
 
-## A concrete example: support inbox triage
+## A worked example: support inbox triage
 
-Walk through the support example end to end.
+Same idea, slightly bigger job. A support email arrives and you want it sorted, answered and checked.
 
-**Trigger.** A new email lands in the support inbox.
+| Step | What happens | Who decides |
+|---|---|---|
+| Trigger | A new email lands in the support inbox | The inbox |
+| Classify | A small AI step reads it and returns one label: bug, billing, or general | The model, on that email only |
+| Branch | The diagram splits three ways on the label | The structure, not the model |
+| Draft | Each branch writes a reply in the right tone | The model |
+| Review | The draft waits in a queue for a person | A human, always |
+| Log | What came in, the label, the branch, the draft, who approved | Recorded automatically |
 
-**Classify.** A scoped agent reads the email and returns one label: bug, billing, or general. It sees the email and nothing else.
+Notice which decisions belong to the model and which belong to the diagram. The model reads and judges. The structure decides what happens next. That split is what keeps the thing predictable, and it is covered in more depth in [workflow versus one big agent](/blog/workflow-beats-do-everything-agent).
 
-**Branch.** The graph splits three ways on that label. This is a real branch you can see, not a hidden decision. A bug goes one way, billing another, general a third.
+## Questions people ask
 
-**Draft.** On each branch, a step writes a reply in the tone that fits. The billing branch can pull the account status first. The bug branch can attach a link to the status page.
+### Do I need to know what a trigger or a node is?
 
-**Review.** Every draft lands in a queue. A human reads it, edits if needed, and approves. Nothing reaches a customer without that approval.
+No. It helps later, when you start editing steps directly, but you do not need any of it to get a first working version.
 
-**Audit.** Every run leaves a trail: what came in, which label it got, which branch it took, what was drafted, who approved.
+### What if the generated workflow is wrong?
 
-You built that by describing it. You can read it because it is a graph. You can change it by chatting or by editing. And when someone asks why a particular email got the reply it did, you can point at the exact path it took.
+Say what is wrong and it gets rebuilt, or open the offending step and fix it yourself. Because you can see every step, "wrong" is usually a specific step rather than a mystery.
 
-That is what no-code AI automation should mean. Not a magic box you trust blindly, but a system you describe in words and then hold in your hands.
+### Is this just a prompt with extra steps?
+
+No. A prompt is one call and one output. A workflow is a fixed structure with separate steps, real branches, and a record of the path each run took, which is what lets you debug it a month later.
+
+### Can it touch real systems, like email or Slack?
+
+Yes, that is the point. Put a human approval before anything you cannot undo, such as sending to a customer or spending money.
+
+### How much does running it cost?
+
+Less than handing the whole job to one autonomous agent, in most cases, because each step only sees what it needs. How much less depends on how many steps the job takes: [the cost comparison](/blog/workflow-beats-do-everything-agent) works it out with the numbers shown.
+
+## What to do next
+
+Pick one chore you do every week, write it as a single sentence, and see what comes back. Then change one thing about it. That is the whole loop, and it takes about ten minutes.
 `;
 
 export default content;

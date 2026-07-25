@@ -1,0 +1,20 @@
+{
+  "name": "screenshot-renderer",
+  "version": "0.2.0",
+  "private": true,
+  "description": "Headless Chromium sidecar that renders pre-assembled interface HTML to PNG/JPEG screenshots or PDF. Consumed by orchestrator-service for the Interface node's generateScreenshot / generatePdf toggles.",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "test": "node --test",
+    "install:browsers": "playwright install chromium"
+  },
+  "dependencies": {
+    "busboy": "^1.6.0",
+    "express": "^4.21.0",
+    "playwright": "1.60.0"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

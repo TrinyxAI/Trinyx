@@ -1,0 +1,15 @@
+-- V412: Remove the legacy "Instagram Scraper" API.
+--
+-- V43/V44/V46 recreate this API (fixed id 9b962417-1510-450a-b6a6-6b7649146cff)
+-- from a legacy import, but it is NOT part of the shipped catalog seed
+-- (catalog-data.sql.gz). On a normally-seeded install the seed import already
+-- drops it (it deletes every catalog.apis row with source='import' and reloads
+-- the clean 673-API set), so this statement is a no-op there. It makes the
+-- removal explicit and deterministic, and keeps the API out even when catalog
+-- seeding is disabled (CATALOG_SEED_ENABLED=false), so the onboarding never
+-- surfaces a stray "Instagram Scraper" default.
+--
+-- FK children of catalog.apis / catalog.api_tools are ON DELETE CASCADE, so this
+-- single DELETE also removes its tools, tool_responses, lexical index, params and
+-- protocol configs. Idempotent: a no-op once the row is gone.
+DELETE FROM catalog.apis WHERE id = '9b962417-1510-450a-b6a6-6b7649146cff';

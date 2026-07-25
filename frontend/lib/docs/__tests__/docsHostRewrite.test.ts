@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { resolveDocsRoute, DOCS_HOST } from '../docsHostRewrite';
+import { resolveDocsRoute, docsHref, DOCS_HOST } from '../docsHostRewrite';
 
 describe('resolveDocsRoute', () => {
   it('rewrites clean paths on the docs host onto the /docs routes', () => {
@@ -33,5 +33,33 @@ describe('resolveDocsRoute', () => {
   it('does not treat a host that merely contains "docs" as the docs subdomain', () => {
     // 'mydocs.' does not start with 'docs.', so a clean path there is a no-op.
     expect(resolveDocsRoute('mydocs.livecontext.ai', '/agents')).toBeNull();
+  });
+});
+
+describe('docsHref', () => {
+  const APEX = undefined;
+  const ON_DOCS_HOST = 'https://livecontext.ai';
+
+  it('links to the /docs tree from the apex', () => {
+    expect(docsHref(APEX)).toBe('/docs');
+    expect(docsHref(APEX, 'workflows')).toBe('/docs/workflows');
+  });
+
+  it('links to the clean path when the chrome renders on the docs host', () => {
+    expect(docsHref(ON_DOCS_HOST)).toBe('/');
+    expect(docsHref(ON_DOCS_HOST, 'workflows')).toBe('/workflows');
+  });
+
+  it('produces a link the router actually resolves, on either host', () => {
+    // Apex: the /docs form is exactly what 308s to the canonical subdomain URL.
+    expect(resolveDocsRoute('livecontext.ai', docsHref(APEX, 'agents'))).toEqual({
+      kind: 'redirect',
+      url: `https://${DOCS_HOST}/agents`,
+    });
+    // Docs host: the clean form is exactly what rewrites onto the real route.
+    expect(resolveDocsRoute(DOCS_HOST, docsHref(ON_DOCS_HOST, 'agents'))).toEqual({
+      kind: 'rewrite',
+      pathname: '/docs/agents',
+    });
   });
 });

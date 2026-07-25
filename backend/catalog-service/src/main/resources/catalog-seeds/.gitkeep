@@ -1,0 +1,9 @@
+# The 673-API catalog seed (catalog-data.sql.gz) is baked HERE by CI
+# (publish-ce build-images) before the image build, so Maven packages it into
+# catalog-service.jar and CatalogDataBootstrapService can load it from
+# `classpath:catalog-seeds/catalog-data.sql.gz`. This is the fallback that seeds
+# the catalog for installs with NO bind-mounted seed (npx / image-only): the
+# compose bind-mount `./catalog-seeds:/app/catalog-seeds` is empty there, so the
+# file-path lookup misses and the classpath copy takes over.
+# Empty on local/from-source builds (those seed via the mounted repo copy at
+# catalog-seeds/catalog-data.sql.gz). Do not commit the ~11 MB dump here.

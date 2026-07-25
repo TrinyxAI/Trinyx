@@ -281,6 +281,30 @@ export const blogStyles = `
     white-space: pre;
   }
 
+  /* ---- In-body screenshots (markdown images) ----------------------------- */
+  /* ReactMarkdown wraps an image in its own <p>; give the figure real breathing
+     room and a framed surface that matches the code blocks and cards. */
+  .landing-root .docs-prose p:has(> img) {
+    margin: 1.75rem 0 0.5rem;
+  }
+  .landing-root .docs-prose img {
+    display: block;
+    width: 100%;
+    height: auto;
+    border: 1px solid var(--border-color);
+    border-radius: 0.75rem;
+    background: var(--bg-tertiary);
+    box-shadow: var(--landing-card-shadow);
+  }
+  /* An italic-only paragraph immediately after an image reads as its caption. */
+  .landing-root .docs-prose p:has(> img) + p > em:only-child {
+    display: block;
+    text-align: center;
+    font-size: 0.8125rem;
+    color: var(--text-muted);
+    margin: -0.25rem 0 1.5rem;
+  }
+
   /* ---- Article ----------------------------------------------------------- */
   .landing-root .blog-back {
     display: inline-flex;

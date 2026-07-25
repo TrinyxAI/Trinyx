@@ -45,3 +45,17 @@ export function resolveDocsRoute(host: string | null | undefined, pathname: stri
 
   return null;
 }
+
+/**
+ * Build a link to a docs page from the shared public chrome, the mirror image of
+ * `resolveDocsRoute`: on the docs host the clean path is the one that renders, and
+ * on the apex the `/docs/...` form is what 308-redirects there.
+ *
+ * `base` is the main-site origin the chrome was given, which the docs layout sets
+ * and nothing else does, so it doubles as "am I rendering on the docs host".
+ * Pass no `page` for the docs home.
+ */
+export function docsHref(base: string | undefined, page?: string): string {
+  if (!page) return base ? '/' : '/docs';
+  return base ? `/${page}` : `/docs/${page}`;
+}

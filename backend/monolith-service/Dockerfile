@@ -8,7 +8,14 @@ ARG JRE_IMAGE=eclipse-temurin:21-jre-alpine
 # Or standalone: docker build -t livecontext-ce -f backend/monolith-service/Dockerfile backend/
 
 # ---- Build stage ----
-FROM ${MAVEN_IMAGE} AS build
+# Pinned to $BUILDPLATFORM (the builder's own architecture), NOT the target platform.
+# The output is a Java fat jar, which is architecture-independent: no module declares a
+# native classifier and none of the poms use os-maven-plugin / ${os.detected.*}, so the
+# same jar is correct for every target. Without this pin, a `--platform linux/arm64`
+# build would run the whole Maven reactor under QEMU emulation on an amd64 runner -
+# tens of minutes of emulated compilation for a byte-identical artifact. Only the
+# runtime stage below is genuinely per-architecture (JRE, apk packages, tsx binary).
+FROM --platform=$BUILDPLATFORM ${MAVEN_IMAGE} AS build
 WORKDIR /app
 
 # Optional TLS-interception root CA (corporate proxy / AV HTTPS scanning, e.g.

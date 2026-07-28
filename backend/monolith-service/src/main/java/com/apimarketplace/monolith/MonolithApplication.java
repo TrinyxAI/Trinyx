@@ -119,19 +119,75 @@ public class MonolithApplication {
 
     private static final Set<String> PGVECTOR_REPAIRABLE_FAILED_VERSIONS = Set.of("74", "75");
 
+    /**
+     * Migrations whose CE build content deliberately differs from the cloud one, so their
+     * recorded checksum can legitimately mismatch on an install created by an older image.
+     *
+     * <p>V44 shipped ~1 MB of captured third-party API response bodies (real usernames)
+     * inside the published image. The CE build now substitutes the byte-identical no-op the
+     * public export already writes (see the {@code ce} profile in migration-service/pom.xml),
+     * which changes the file's checksum. Flyway refuses to start on a checksum mismatch, so
+     * without this an install created by an earlier image would stop booting after a routine
+     * {@code docker compose pull}, with nothing telling the operator why.
+     */
+    private static final Set<String> CE_NEUTRALIZED_VERSIONS = Set.of("44");
+
     public static void main(String[] args) {
         System.setProperty("spring.profiles.active", "ce");
         SpringApplication.run(MonolithApplication.class, args);
     }
 
+    /**
+     * Repairs the schema history ONLY for the two situations known to need it, then migrates.
+     *
+     * <p>Deliberately narrow. An unconditional {@code repair()} on every boot would also run
+     * Flyway's {@code removeFailedMigrations}, silently deleting the record of a genuinely
+     * failed migration on each restart. With {@code mixed: true} and the V204+ migrations
+     * that run CREATE INDEX CONCURRENTLY outside a transaction, a failure can leave partial
+     * effects, and destroying its history entry on every restart would hide exactly the
+     * problem an operator needs to see.
+     *
+     * <p>Accepted one-off cost: every install created before V44 was neutralised repairs
+     * ONCE, on its first boot after that release, because its recorded checksum no longer
+     * matches. If such an install also carries a genuinely failed migration, that record is
+     * cleared in the same pass. It happens once (afterwards the checksum matches and the
+     * condition is false again), and the alternative is refusing to boot at all, but it is a
+     * real trade rather than a free one.
+     */
     @Bean
     FlywayMigrationStrategy repairKnownPgvectorFailureThenMigrate() {
         return flyway -> {
-            if (hasFailedPgvectorMigrationHistory(flyway)) {
+            if (hasFailedPgvectorMigrationHistory(flyway) || hasNeutralizedMigrationChecksumMismatch(flyway)) {
                 flyway.repair();
             }
             flyway.migrate();
         };
+    }
+
+    /**
+     * True when an applied migration this CE build intentionally neutralised no longer
+     * matches its recorded checksum. Scoped to {@link #CE_NEUTRALIZED_VERSIONS} so an
+     * unexpected mismatch on any other migration still fails the boot loudly, which is the
+     * behaviour you want when a migration was edited after being applied.
+     */
+    boolean hasNeutralizedMigrationChecksumMismatch(Flyway flyway) {
+        for (MigrationInfo migration : flyway.info().all()) {
+            if (migration.getVersion() == null) {
+                continue;
+            }
+            if (!CE_NEUTRALIZED_VERSIONS.contains(migration.getVersion().toString())) {
+                continue;
+            }
+            // Only an APPLIED migration can mismatch: a pending one has no recorded
+            // checksum to compare against, and isChecksumMatching() reports true for it.
+            if (migration.getAppliedChecksum() == null) {
+                continue;
+            }
+            if (!migration.isChecksumMatching()) {
+                return true;
+            }
+        }
+        return false;
     }
 
     boolean hasFailedPgvectorMigrationHistory(Flyway flyway) {

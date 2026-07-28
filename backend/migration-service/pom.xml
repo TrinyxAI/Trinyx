@@ -86,6 +86,104 @@
                 <artifactId>maven-surefire-plugin</artifactId>
                 <version>3.2.5</version>
             </plugin>
+            <!--
+                Wipe the packaged migrations before every build, in EVERY profile.
+
+                The `ce` profile below overwrites V44 in target/classes with a no-op. That
+                is a build-OUTPUT mutation, so it survives into the next build of the same
+                workspace: Maven's default resource copy only refreshes a file whose source
+                is newer, so a cloud build run after a CE build WITHOUT `clean` would
+                happily package the CE no-op into the cloud jar, and the cloud database
+                would then reject that migration's checksum.
+
+                This must run unconditionally, not inside the `ce` profile: it is the CLOUD
+                build that needs protecting from the leftovers of a previous CE build.
+                Container builds always `clean`; a developer or a reused CI workspace does
+                not. Re-copying ~350 small SQL files each build is not measurable.
+            -->
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-clean-plugin</artifactId>
+                <version>3.3.2</version>
+                <executions>
+                    <execution>
+                        <id>reset-migration-output-before-resources</id>
+                        <phase>initialize</phase>
+                        <goals>
+                            <goal>clean</goal>
+                        </goals>
+                        <configuration>
+                            <!-- Only this directory: never the whole target/. -->
+                            <excludeDefaultDirectories>true</excludeDefaultDirectories>
+                            <filesets>
+                                <fileset>
+                                    <directory>${project.build.outputDirectory}/db/migration</directory>
+                                </fileset>
+                            </filesets>
+                        </configuration>
+                    </execution>
+                </executions>
+            </plugin>
         </plugins>
     </build>
+
+    <profiles>
+        <!--
+            CE image/repo parity for migrations carrying captured third-party data.
+
+            V44__instagram_scraper_tool_responses.sql is ~1 MB of raw
+            `INSERT INTO catalog.tool_responses` rows holding captured Instagram API
+            response bodies, including real usernames. The public CE export already
+            replaces its body with a no-op (deploy/ce-export/neutralize-tool-response-
+            migrations.py), but the published IMAGES are built from the PRIVATE checkout,
+            so monolith-service - which depends on this module - shipped the raw file
+            inside its fat jar and every CE install EXECUTED it. That contradicts the
+            AGENTS.md rule that anything excluded from the public repo must also be kept
+            out of the images.
+
+            src/main/ce-overrides holds the byte-identical no-op the export writes, copied
+            over target/classes under -Pce only. Byte-identical matters: it makes the
+            migration in the image and the one in the public repo the same file, so
+            rebuilding CE from public source against a database migrated by the image no
+            longer trips a Flyway checksum mismatch.
+
+            Overwriting (rather than a jar-plugin <exclude>) is deliberate: dropping the
+            file would leave a version gap that Flyway reports as an applied-but-missing
+            migration on every existing install. Keeping the version present with an empty
+            body is the same shape the public tree has.
+
+            Cloud builds (no -Pce) are untouched and keep the real migration.
+        -->
+        <profile>
+            <id>ce</id>
+            <build>
+                <plugins>
+                    <plugin>
+                        <groupId>org.apache.maven.plugins</groupId>
+                        <artifactId>maven-resources-plugin</artifactId>
+                        <version>3.3.1</version>
+                        <executions>
+                            <execution>
+                                <id>ce-neutralize-tool-response-migrations</id>
+                                <phase>process-resources</phase>
+                                <goals>
+                                    <goal>copy-resources</goal>
+                                </goals>
+                                <configuration>
+                                    <outputDirectory>${project.build.outputDirectory}</outputDirectory>
+                                    <overwrite>true</overwrite>
+                                    <resources>
+                                        <resource>
+                                            <directory>src/main/ce-overrides</directory>
+                                            <filtering>false</filtering>
+                                        </resource>
+                                    </resources>
+                                </configuration>
+                            </execution>
+                        </executions>
+                    </plugin>
+                </plugins>
+            </build>
+        </profile>
+    </profiles>
 </project>

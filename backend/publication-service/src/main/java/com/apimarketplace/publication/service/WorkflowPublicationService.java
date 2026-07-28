@@ -411,6 +411,7 @@ public class WorkflowPublicationService {
         // identity is resolved server-side via AuthClient at every
         // (re)publish. See PublisherProfileSnapshotter for the rule.
         PublisherProfileSnapshotter.snapshotInto(publication, authClient, tenantId);
+        PublicationSlugAssigner.assignIfMissing(publication, publicationRepository);
         publication.setVisibility(effectiveVisibility);
         publication.setDisplayMode(effectiveDisplayMode);
         if (effectiveVisibility == PublicationVisibility.PRIVATE) {
@@ -1024,6 +1025,23 @@ public class WorkflowPublicationService {
     @Transactional(readOnly = true)
     public Optional<WorkflowPublicationEntity> getPublicationById(UUID publicationId) {
         return publicationRepository.findById(publicationId);
+    }
+
+    /**
+     * Resolve a publication id from its public URL slug (V413).
+     *
+     * <p>Returns the id only - the caller re-reads through the normal by-id path
+     * so the visibility gate and the non-owner PII scrub apply unchanged. This
+     * finder is deliberately visibility-agnostic: it answers "which row owns this
+     * slug", not "may you see it".
+     */
+    @Transactional(readOnly = true)
+    public Optional<UUID> findIdByPublicSlug(String publicSlug) {
+        if (publicSlug == null || publicSlug.isBlank()) {
+            return Optional.empty();
+        }
+        return publicationRepository.findByPublicSlug(publicSlug)
+                .map(WorkflowPublicationEntity::getId);
     }
 
     /**

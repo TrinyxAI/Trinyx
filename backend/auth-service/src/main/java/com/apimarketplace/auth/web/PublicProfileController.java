@@ -5,6 +5,7 @@ import com.apimarketplace.auth.service.UserService;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
+import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
@@ -45,9 +46,29 @@ public class PublicProfileController {
                 .orElseGet(() -> ResponseEntity.notFound().build());
     }
 
-    /** Lookup by numeric user id - for internal links (DM / publication cards carry the id). */
+    /**
+     * Lookup by numeric user id - for in-app links (DM threads / publication
+     * cards carry the id, not the handle).
+     *
+     * <p><b>Requires an authenticated caller.</b> The id is sequential, so an
+     * anonymous by-id would let anyone walk 1..N and harvest every profile on
+     * the platform: display name and handle for the whole user base. The
+     * cloud gateway already keeps this path off its public allowlist (only
+     * {@code /by-handle} is public), but CE has no gateway - its monolith
+     * filter passes any request with no Authorization header straight through
+     * and leaves the decision to this layer. Enforcing it here is what makes
+     * the rule hold in BOTH editions instead of only on cloud.
+     *
+     * <p>Answers 404, not 401, so it stays indistinguishable from a missing or
+     * private profile and cannot be used to probe which ids exist.
+     */
     @GetMapping("/by-id/{userId}")
-    public ResponseEntity<PublicProfileDto> getById(@PathVariable Long userId) {
+    public ResponseEntity<PublicProfileDto> getById(
+            @PathVariable Long userId,
+            @RequestHeader(value = "X-User-ID", required = false) String requesterId) {
+        if (requesterId == null || requesterId.isBlank()) {
+            return ResponseEntity.notFound().build();
+        }
         return userService.findById(userId)
                 .flatMap(userService::getPublicProfile)
                 .map(ResponseEntity::ok)

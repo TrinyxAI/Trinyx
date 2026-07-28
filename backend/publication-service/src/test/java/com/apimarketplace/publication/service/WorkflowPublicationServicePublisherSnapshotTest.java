@@ -99,7 +99,7 @@ class WorkflowPublicationServicePublisherSnapshotTest {
     void firstPublishStoresAuthClientValuesIgnoringRequestBody() {
         stubFirstPublish();
         when(authClient.getPublisherProfile(TENANT)).thenReturn(new PublisherProfileDto(
-                TENANT, "Real Admin Name", "admin@example.com", "avatar-uuid-admin"));
+                TENANT, "Real Admin Name", "admin@example.com", "avatar-uuid-admin", "real-admin"));
 
         // Service signature no longer carries publisherName/Email/AvatarUrl
         // parameters - M-1 cleanup removed them entirely so the bug class is
@@ -131,7 +131,7 @@ class WorkflowPublicationServicePublisherSnapshotTest {
 
         stubRepublish(existing);
         when(authClient.getPublisherProfile(TENANT)).thenReturn(new PublisherProfileDto(
-                TENANT, "Updated Admin Name", "fresh@example.com", "fresh-avatar"));
+                TENANT, "Updated Admin Name", "fresh@example.com", "fresh-avatar", "updated-admin"));
 
         WorkflowPublicationEntity pub = service.publishWorkflow(
                 WORKFLOW_ID, TENANT, null,
@@ -170,7 +170,7 @@ class WorkflowPublicationServicePublisherSnapshotTest {
         // Persona without avatar uploaded → avatarUrl is null in auth.users.
         // The publication freezes null, not the request body's stale value.
         when(authClient.getPublisherProfile(TENANT)).thenReturn(new PublisherProfileDto(
-                TENANT, "Léa T.", null, null));
+                TENANT, "Léa T.", null, null, null));
 
         WorkflowPublicationEntity pub = service.publishWorkflow(
                 WORKFLOW_ID, TENANT, null,

@@ -31,6 +31,27 @@ public interface WorkflowPublicationRepository extends JpaRepository<WorkflowPub
 
     void deleteByAgentConfigId(UUID agentConfigId);
 
+    // ========================================================================
+    // V413 - public SEO slug
+    // ========================================================================
+
+    /**
+     * Resolve a publication from its crawlable URL slug. Callers must still apply
+     * the anonymous-readability gate (ACTIVE + PUBLIC/UNLISTED) before exposing
+     * the row: this finder is visibility-agnostic on purpose, so the owner-facing
+     * paths can reuse it.
+     */
+    Optional<WorkflowPublicationEntity> findByPublicSlug(String publicSlug);
+
+    boolean existsByPublicSlug(String publicSlug);
+
+    /**
+     * Ids of rows still missing a slug, oldest first. Drives the idempotent
+     * boot-time backfill; paged so a large catalog does not load at once.
+     */
+    @Query("SELECT p.id FROM WorkflowPublicationEntity p WHERE p.publicSlug IS NULL ORDER BY p.publishedAt ASC")
+    List<UUID> findIdsWithoutPublicSlug(Pageable pageable);
+
     Optional<WorkflowPublicationEntity> findByPublicationTypeAndResourceId(PublicationType publicationType, String resourceId);
 
     boolean existsByPublicationTypeAndResourceId(PublicationType publicationType, String resourceId);

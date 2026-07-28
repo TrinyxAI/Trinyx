@@ -240,7 +240,7 @@ class AgentPublicationServicePublishGuardsTest {
         when(agentClient.getSkillsForAgent(any(UUID.class), any(), any())).thenReturn(List.of());
         when(publicationRepository.findByAgentConfigId(ROOT_ID)).thenReturn(Optional.empty());
         when(authClient.getPublisherProfile(TENANT_ID))
-                .thenReturn(new PublisherProfileDto(TENANT_ID, "Publisher", "publisher@example.test", null));
+                .thenReturn(new PublisherProfileDto(TENANT_ID, "Publisher", "publisher@example.test", null, null));
         when(publicationRepository.save(any(WorkflowPublicationEntity.class)))
                 .thenAnswer(invocation -> invocation.getArgument(0));
     }

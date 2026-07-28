@@ -109,7 +109,9 @@ class PublicationListQueryServiceTest {
                 null,                           // 38 agent_avatar_url
                 null,                           // 39 agent_model_provider
                 null,                           // 40 agent_model_name
-                "resource-1"                    // 41 resource_id
+                "resource-1",                   // 41 resource_id
+                "a-description",                // 42 public_slug
+                "john-doe"                      // 43 publisher_handle
         };
     }
 
@@ -152,6 +154,14 @@ class PublicationListQueryServiceTest {
             // indices 16/17 - an off-by-one there would silently misalign every later column.
             assertThat(item.ownerType()).isEqualTo("ORG");
             assertThat(item.ownerId()).isEqualTo("org-1");
+            // V413 - the two public-SEO columns are the LAST entries of
+            // SELECT_COLUMNS, so a column appended without extending mapRow's
+            // index walk would silently shift these two off the end.
+            assertThat(item.publicSlug()).isEqualTo("a-description");
+            assertThat(item.publisherHandle()).isEqualTo("john-doe");
+            assertThat(item.toResponseMap())
+                    .containsEntry("publicSlug", "a-description")
+                    .containsEntry("publisherHandle", "john-doe");
         }
 
         @Test

@@ -567,6 +567,7 @@ public class ResourcePublicationService {
         // server-side via AuthClient at every (re)publish. See
         // PublisherProfileSnapshotter for the uniform rule across paths.
         PublisherProfileSnapshotter.snapshotInto(publication, authClient, tenantId);
+        PublicationSlugAssigner.assignIfMissing(publication, publicationRepository);
     }
 
     private void applyVisibilityAndStatus(WorkflowPublicationEntity publication, Object visRaw) {

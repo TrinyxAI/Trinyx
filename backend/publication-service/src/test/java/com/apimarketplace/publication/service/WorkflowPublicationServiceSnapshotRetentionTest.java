@@ -82,7 +82,7 @@ class WorkflowPublicationServiceSnapshotRetentionTest {
                 orchestratorClient, agentClient, interfaceClient, dataSourceClient, breakdownService,
                 new ObjectMapper(), snapshotCloneService, entitlementGuard, authClient);
         lenient().when(authClient.getPublisherProfile(TENANT))
-                .thenReturn(new PublisherProfileDto(TENANT, "Publisher", "p@example.com", "avatar"));
+                .thenReturn(new PublisherProfileDto(TENANT, "Publisher", "p@example.com", "avatar", null));
     }
 
     @Test

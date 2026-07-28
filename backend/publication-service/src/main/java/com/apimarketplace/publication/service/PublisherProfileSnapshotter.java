@@ -44,5 +44,8 @@ final class PublisherProfileSnapshotter {
         publication.setPublisherName(profile.displayName());
         publication.setPublisherEmail(profile.email());
         publication.setPublisherAvatarUrl(profile.avatarUrl());
+        // V413 - null when the publisher has no handle yet; the public marketplace
+        // then renders their name without a link to /u/{handle}.
+        publication.setPublisherHandle(profile.handle());
     }
 }

@@ -1,8 +1,10 @@
 package com.apimarketplace.auth.web;
 
 import com.apimarketplace.auth.domain.UserOnboarding;
+import com.apimarketplace.auth.domain.UserProfileEntity;
 import com.apimarketplace.auth.repository.OrganizationMemberRepository;
 import com.apimarketplace.auth.repository.UserOnboardingRepository;
+import com.apimarketplace.auth.repository.UserProfileRepository;
 import com.apimarketplace.common.auth.UserSummaryDto;
 import com.apimarketplace.auth.dto.CeLinkEntitlements;
 import com.apimarketplace.auth.service.CreditConsumptionDeadLetterService;
@@ -55,6 +57,10 @@ public class InternalAuthController {
     // bean is absent and the /ce-link entitlements probe returns the no-subscription
     // shape instead of failing context startup.
     private final ObjectProvider<CeLinkEntitlementsService> ceLinkEntitlementsServiceProvider;
+    // V413 - reads user_profiles.handle so the publisher snapshot frozen onto a
+    // publication can link to the author's public profile without an extra
+    // round-trip per marketplace card.
+    private final UserProfileRepository userProfileRepository;
 
     public InternalAuthController(OrgRestrictionQueryService restrictionService,
                                   CreditConsumptionDeadLetterService deadLetterService,
@@ -64,7 +70,8 @@ public class InternalAuthController {
                                   PlanLimitService planLimitService,
                                   OrganizationMemberRepository memberRepository,
                                   ObjectProvider<CeLinkService> ceLinkServiceProvider,
-                                  ObjectProvider<CeLinkEntitlementsService> ceLinkEntitlementsServiceProvider) {
+                                  ObjectProvider<CeLinkEntitlementsService> ceLinkEntitlementsServiceProvider,
+                                  UserProfileRepository userProfileRepository) {
         this.restrictionService = restrictionService;
         this.deadLetterService = deadLetterService;
         this.onboardingRepository = onboardingRepository;
@@ -74,6 +81,7 @@ public class InternalAuthController {
         this.memberRepository = memberRepository;
         this.ceLinkServiceProvider = ceLinkServiceProvider;
         this.ceLinkEntitlementsServiceProvider = ceLinkEntitlementsServiceProvider;
+        this.userProfileRepository = userProfileRepository;
     }
 
     /**
@@ -408,7 +416,18 @@ public class InternalAuthController {
      * never by the frontend.
      *
      * <p>Body shape (any field may be absent / null):
-     * <pre>{@code {userId, displayName, email, avatarUrl}}</pre>
+     * <pre>{@code {userId, displayName, email, avatarUrl, handle}}</pre>
+     *
+     * <p>{@code handle} is read, never generated: this is a GET on the publish
+     * path and must stay side-effect free. A publisher who has not been assigned
+     * a handle yet simply gets none, and the public marketplace renders their
+     * name without a profile link.
+     *
+     * <p>It is also withheld when the profile is PRIVATE, mirroring the gate in
+     * {@code UserService.getPublicProfile} (which 404s those profiles). Without
+     * that filter the handle would be frozen onto the publication and served
+     * anonymously with it, advertising a profile URL that then 404s - and
+     * exposing a handle its owner deliberately made non-public.
      *
      * <p>Dual-form dispatch (numeric internal id vs Keycloak provider UUID)
      * mirrors {@link #getDisplayName} so callers can pass whichever form they
@@ -442,6 +461,13 @@ public class InternalAuthController {
             if (ob.getUser() != null) {
                 if (ob.getUser().getEmail() != null) body.put("email", ob.getUser().getEmail());
                 if (ob.getUser().getAvatarUrl() != null) body.put("avatarUrl", ob.getUser().getAvatarUrl());
+                userProfileRepository.findByUserId(ob.getUser().getId())
+                        // Page visibility, not indexability: an UNLISTED profile
+                        // still has a working page, so its listings should link to
+                        // it. Only PRIVATE withholds the handle.
+                        .filter(UserProfileEntity::isPageVisible)
+                        .map(UserProfileEntity::getHandle)
+                        .ifPresent(handle -> body.put("handle", handle));
             }
         }
         return ResponseEntity.ok(body);

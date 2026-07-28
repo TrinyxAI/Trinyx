@@ -79,7 +79,7 @@ class WorkflowPublicationServiceCategoryDefaultTest {
                 orchestratorClient, agentClient, interfaceClient, dataSourceClient, breakdownService,
                 new ObjectMapper(), snapshotCloneService, entitlementGuard, authClient);
         lenient().when(authClient.getPublisherProfile(any()))
-                .thenReturn(new PublisherProfileDto(TENANT_ID, "Test Publisher", "test@publisher.com", "avatar-uuid"));
+                .thenReturn(new PublisherProfileDto(TENANT_ID, "Test Publisher", "test@publisher.com", "avatar-uuid", null));
     }
 
     @Test

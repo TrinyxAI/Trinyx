@@ -62,7 +62,8 @@ class InternalAuthControllerCeLinkOptionalTest {
                 org.mockito.Mockito.mock(com.apimarketplace.auth.service.OnboardingService.class),
                 modelPricingService, planLimitService,
                 memberRepository, ceLinkServiceProvider,
-                ceLinkEntitlementsServiceProvider);
+                ceLinkEntitlementsServiceProvider,
+                org.mockito.Mockito.mock(com.apimarketplace.auth.repository.UserProfileRepository.class));
     }
 
     @Test

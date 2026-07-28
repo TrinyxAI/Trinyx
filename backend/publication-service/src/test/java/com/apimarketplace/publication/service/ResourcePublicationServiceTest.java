@@ -247,7 +247,7 @@ class ResourcePublicationServiceTest {
         // publishResource → applyPublisherInfo → AuthClient.getPublisherProfile.
         // Lenient because the constructor itself never triggers this call.
         lenient().when(authClient.getPublisherProfile(any()))
-                .thenReturn(new PublisherProfileDto(TENANT_ID, "Test Publisher", "test@publisher.com", "test-avatar-uuid"));
+                .thenReturn(new PublisherProfileDto(TENANT_ID, "Test Publisher", "test@publisher.com", "test-avatar-uuid", null));
         return new ResourcePublicationService(
                 publicationRepository,
                 receiptRepository,

@@ -62,7 +62,12 @@ public record PublicationListItem(
         // Resource id for standalone TABLE / INTERFACE / SKILL publications (null for WORKFLOW/AGENT,
         // which use workflowId / agentConfigId). Lets the resource listing pages resolve a card's
         // shared/private state from ONE /publications/my fetch instead of one status call per item.
-        String resourceId
+        String resourceId,
+        // V413 - public SEO surface. publicSlug backs /marketplace/{slug};
+        // publisherHandle backs the author link /u/{handle}. Both may be null
+        // (rows predating the backfill, publishers without a handle).
+        String publicSlug,
+        String publisherHandle
 ) {
 
     public Map<String, Object> toResponseMap() {
@@ -100,6 +105,10 @@ public record PublicationListItem(
         response.put("publisherId", publisherId);
         response.put("publisherName", publisherName);
         response.put("publisherAvatarUrl", publisherAvatarUrl);
+        // publisherHandle is the ONLY publisher field safe to put in a public URL:
+        // it is user-chosen and already public by design, unlike publisherId.
+        response.put("publisherHandle", publisherHandle);
+        response.put("publicSlug", publicSlug);
         response.put("status", status);
         response.put("published", "ACTIVE".equals(status));
         response.put("visibility", visibility);

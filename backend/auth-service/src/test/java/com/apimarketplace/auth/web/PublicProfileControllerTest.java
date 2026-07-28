@@ -44,7 +44,7 @@ class PublicProfileControllerTest {
 
     private PublicProfileDto sampleProfile() {
         return new PublicProfileDto(7L, "Alice A.", "alice_a", "/api/users/7/avatar",
-                "Builder", LocalDateTime.of(2024, 3, 1, 0, 0));
+                "Builder", LocalDateTime.of(2024, 3, 1, 0, 0), false);
     }
 
     @Test
@@ -54,7 +54,7 @@ class PublicProfileControllerTest {
         when(userService.findById(7L)).thenReturn(Optional.of(u));
         when(userService.getPublicProfile(u)).thenReturn(Optional.of(sampleProfile()));
 
-        mockMvc.perform(get("/api/users/public/by-id/7"))
+        mockMvc.perform(get("/api/users/public/by-id/7").header("X-User-ID", "42"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.userId").value(7))
                 .andExpect(jsonPath("$.displayName").value("Alice A."))
@@ -97,7 +97,7 @@ class PublicProfileControllerTest {
     void byIdUnknownReturns404() throws Exception {
         when(userService.findById(404L)).thenReturn(Optional.empty());
 
-        mockMvc.perform(get("/api/users/public/by-id/404"))
+        mockMvc.perform(get("/api/users/public/by-id/404").header("X-User-ID", "42"))
                 .andExpect(status().isNotFound());
     }
 
@@ -108,7 +108,33 @@ class PublicProfileControllerTest {
         when(userService.findById(7L)).thenReturn(Optional.of(u));
         when(userService.getPublicProfile(u)).thenReturn(Optional.empty());
 
+        mockMvc.perform(get("/api/users/public/by-id/7").header("X-User-ID", "42"))
+                .andExpect(status().isNotFound());
+    }
+
+    @Test
+    @DisplayName("GET /by-id/{userId} → 404 for an ANONYMOUS caller, and the profile is never looked up")
+    void byIdAnonymousIsRefused() throws Exception {
+        // Found by e2e against a live CE stack: by-id answered 200 with a full
+        // profile to an unauthenticated caller. CE has no gateway, so the cloud
+        // allowlist (which exposes only /by-handle) never applied there, and the
+        // monolith filter passes credential-less requests straight through for
+        // "the controller layer to decide". The id is sequential, so that let
+        // anyone walk 1..N and harvest every display name and handle.
         mockMvc.perform(get("/api/users/public/by-id/7"))
                 .andExpect(status().isNotFound());
+
+        // 404 rather than 401 keeps it indistinguishable from a missing or
+        // private profile, so it cannot be used to probe which ids exist.
+        org.mockito.Mockito.verifyNoInteractions(userService);
+    }
+
+    @Test
+    @DisplayName("GET /by-id/{userId} → 404 when the caller header is present but blank")
+    void byIdBlankRequesterIsRefused() throws Exception {
+        mockMvc.perform(get("/api/users/public/by-id/7").header("X-User-ID", "   "))
+                .andExpect(status().isNotFound());
+
+        org.mockito.Mockito.verifyNoInteractions(userService);
     }
 }

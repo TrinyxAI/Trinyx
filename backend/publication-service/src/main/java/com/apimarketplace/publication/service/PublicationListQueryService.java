@@ -61,7 +61,8 @@ public class PublicationListQueryService {
             p.agent_snapshot->'agent'->>'avatarUrl',
             p.agent_snapshot->'agent'->>'modelProvider',
             p.agent_snapshot->'agent'->>'modelName',
-            p.resource_id
+            p.resource_id,
+            p.public_slug, p.publisher_handle
             """;
 
     private static final String FROM_CLAUSE = """
@@ -661,7 +662,9 @@ public class PublicationListQueryService {
                 toStr(row[i++]),           // agentAvatarUrl
                 toStr(row[i++]),           // agentModelProvider
                 toStr(row[i++]),           // agentModelName
-                toStr(row[i++])            // resourceId
+                toStr(row[i++]),           // resourceId
+                toStr(row[i++]),           // publicSlug
+                toStr(row[i++])            // publisherHandle
         );
     }
 

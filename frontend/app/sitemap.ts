@@ -4,6 +4,8 @@ import { COMPARISONS } from './compare/_lib/comparisons';
 import { DOCS_PAGES } from './docs/_nav';
 import { getAllPosts } from '@/lib/blog/posts';
 import { blogHreflang } from '@/lib/blog/localized';
+import { fetchAllPublicPublications } from '@/lib/marketplace/publicPublications';
+import { isIndexable, marketplacePath } from '@/lib/marketplace/indexability';
 
 // Configurable at deploy time; falls back to the production domain.
 const SITE_URL = process.env.NEXT_PUBLIC_SITE_URL ?? 'https://livecontext.ai';
@@ -43,7 +45,23 @@ const SITE_URL = process.env.NEXT_PUBLIC_SITE_URL ?? 'https://livecontext.ai';
  * CE deployments emit an empty sitemap: robots.ts already disallows everything
  * for self-hosted editions, and the build cannot know the deployer's domain.
  */
-export default function sitemap(): MetadataRoute.Sitemap {
+/**
+ * Rendered per request, NOT prerendered at build time.
+ *
+ * The rest of the sitemap is enumerated from in-repo content, but listings
+ * appear whenever someone publishes, so it cannot be frozen at build. More
+ * importantly, the gateway is unreachable from the CI builder: prerendering
+ * bakes a sitemap with ZERO listings, and each frontend replica then serves that
+ * copy until it revalidates on its own. Verified in production: the sitemap had
+ * regenerated (a fresh lastmod) and still advertised no listings, because other
+ * replicas were still answering from the build-time copy.
+ *
+ * The catalog walk keeps its own hourly cache window, so this is one gateway
+ * read per hour per replica, not one per sitemap fetch.
+ */
+export const dynamic = 'force-dynamic';
+
+export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
   if (IS_CE) {
     return [];
   }
@@ -106,5 +124,30 @@ export default function sitemap(): MetadataRoute.Sitemap {
     })),
   ];
 
-  return [...landing, ...compare, ...pages, ...docs, ...blog];
+  // Marketplace: the index plus every listing that passes the indexability gate.
+  // The SAME predicate drives each page's robots meta, so the sitemap can never
+  // advertise a URL that then tells the crawler not to index it.
+  // Pass the sitemap's own window explicitly: Next takes the SHORTEST revalidate
+  // among a route's fetches, so leaving the reader's 15 minute default here
+  // would quietly override the hourly window declared above and rebuild the
+  // whole catalog walk four times as often as intended.
+  const { publications, truncated } = await fetchAllPublicPublications({ revalidateSeconds: 3600 });
+  if (truncated) {
+    // Never let a partial catalog look like a complete one.
+    console.warn(
+      `[sitemap] marketplace walk stopped early after ${publications.length} listings; `
+      + 'the sitemap is incomplete (page cap reached or a gateway read failed).',
+    );
+  }
+  const marketplace: MetadataRoute.Sitemap = [
+    { url: `${SITE_URL}/marketplace`, lastModified: now, changeFrequency: 'daily', priority: 0.8 },
+    ...publications.filter(isIndexable).map((publication) => ({
+      url: `${SITE_URL}${marketplacePath(publication.publicSlug as string)}`,
+      lastModified: publication.updatedAt ? new Date(publication.updatedAt) : now,
+      changeFrequency: 'weekly' as const,
+      priority: 0.6,
+    })),
+  ];
+
+  return [...landing, ...compare, ...pages, ...docs, ...blog, ...marketplace];
 }

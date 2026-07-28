@@ -88,7 +88,7 @@ class WorkflowPublicationServiceReshareReviewTest {
                 entitlementGuard,
                 authClient);
         lenient().when(authClient.getPublisherProfile(any()))
-                .thenReturn(new PublisherProfileDto(TENANT_ID, "Test Publisher", "test@publisher.com", "test-avatar-uuid"));
+                .thenReturn(new PublisherProfileDto(TENANT_ID, "Test Publisher", "test@publisher.com", "test-avatar-uuid", null));
     }
 
     @Test

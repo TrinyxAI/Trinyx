@@ -7,7 +7,14 @@ import { routing } from '@/i18n/routing';
 // public site (landing, /compare, /about, docs...), leaving nothing for
 // crawlers that do not execute JavaScript. The auth context is still provided;
 // public chrome (Sign in buttons) reads it and settles right after hydration.
-const PUBLIC_MARKETING_PREFIXES = ['/compare', '/about', '/contact', '/legal', '/changelog', '/docs', '/blog'];
+// `/marketplace` is the public, crawlable listing tree (server-rendered, outside
+// the `/app` SPA). It belongs here for exactly the reason above: it is the one
+// public surface whose content comes from the backend rather than from the
+// repo, so shipping spinner-only HTML would leave crawlers with nothing at all
+// on the pages this whole effort exists to get indexed.
+// `/u` is the public author page reached from a listing. It is server-rendered
+// for the same reason and would hit the same spinner problem.
+const PUBLIC_MARKETING_PREFIXES = ['/compare', '/about', '/contact', '/legal', '/changelog', '/docs', '/blog', '/marketplace', '/u'];
 
 export function isPublicMarketingPath(pathname: string | null): boolean {
   if (!pathname) return false;

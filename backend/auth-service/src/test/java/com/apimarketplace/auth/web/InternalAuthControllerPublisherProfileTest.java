@@ -2,8 +2,10 @@ package com.apimarketplace.auth.web;
 
 import com.apimarketplace.auth.domain.User;
 import com.apimarketplace.auth.domain.UserOnboarding;
+import com.apimarketplace.auth.domain.UserProfileEntity;
 import com.apimarketplace.auth.repository.OrganizationMemberRepository;
 import com.apimarketplace.auth.repository.UserOnboardingRepository;
+import com.apimarketplace.auth.repository.UserProfileRepository;
 import com.apimarketplace.auth.service.CeLinkEntitlementsService;
 import com.apimarketplace.auth.service.CeLinkService;
 import com.apimarketplace.auth.service.CreditConsumptionDeadLetterService;
@@ -23,6 +25,8 @@ import java.util.Map;
 import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 /**
@@ -45,6 +49,7 @@ class InternalAuthControllerPublisherProfileTest {
     @Mock private CeLinkService ceLinkService;
     @Mock private ObjectProvider<CeLinkService> ceLinkServiceProvider;
     @Mock private ObjectProvider<CeLinkEntitlementsService> ceLinkEntitlementsServiceProvider;
+    @Mock private UserProfileRepository userProfileRepository;
 
     private InternalAuthController controller;
 
@@ -56,7 +61,8 @@ class InternalAuthControllerPublisherProfileTest {
                 org.mockito.Mockito.mock(com.apimarketplace.auth.service.OnboardingService.class),
                 modelPricingService, planLimitService,
                 memberRepository, ceLinkServiceProvider,
-                ceLinkEntitlementsServiceProvider);
+                ceLinkEntitlementsServiceProvider,
+                userProfileRepository);
     }
 
     @Test
@@ -77,6 +83,81 @@ class InternalAuthControllerPublisherProfileTest {
         assertThat(body).containsEntry("displayName", "Real Admin Name");
         assertThat(body).containsEntry("email", "admin@example.com");
         assertThat(body).containsEntry("avatarUrl", "avatar-uuid-123");
+    }
+
+    @Test
+    @DisplayName("Publisher with a handle → handle is included so the public page can link to /u/{handle}")
+    void includesHandleWhenProfileHasOne() {
+        User user = new User();
+        user.setId(42L);
+        user.setEmail("admin@example.com");
+        UserOnboarding ob = new UserOnboarding(user, "Real Admin Name");
+        when(onboardingRepository.findByUserIdFetchUser(42L)).thenReturn(Optional.of(ob));
+        UserProfileEntity profile = new UserProfileEntity();
+        profile.setHandle("real-admin");
+        when(userProfileRepository.findByUserId(42L)).thenReturn(Optional.of(profile));
+
+        ResponseEntity<Map<String, String>> response = controller.getPublisherProfile("42");
+
+        assertThat(response.getBody()).containsEntry("handle", "real-admin");
+    }
+
+    @Test
+    @DisplayName("Publisher without a profile → no handle key, and no handle is generated")
+    void omitsHandleWhenProfileIsMissing() {
+        User user = new User();
+        user.setId(42L);
+        UserOnboarding ob = new UserOnboarding(user, "Real Admin Name");
+        when(onboardingRepository.findByUserIdFetchUser(42L)).thenReturn(Optional.of(ob));
+        when(userProfileRepository.findByUserId(42L)).thenReturn(Optional.empty());
+
+        ResponseEntity<Map<String, String>> response = controller.getPublisherProfile("42");
+
+        // This is a GET on the publish path: it must stay side-effect free.
+        // Lazily creating a handle here would hand every publisher a public
+        // profile URL they never asked for.
+        assertThat(response.getBody()).doesNotContainKey("handle");
+        verify(userProfileRepository, never()).save(org.mockito.ArgumentMatchers.any());
+    }
+
+    @Test
+    @DisplayName("PRIVATE profile → handle is withheld even though one exists")
+    void withholdsHandleForPrivateProfile() {
+        User user = new User();
+        user.setId(42L);
+        UserOnboarding ob = new UserOnboarding(user, "Real Admin Name");
+        when(onboardingRepository.findByUserIdFetchUser(42L)).thenReturn(Optional.of(ob));
+        UserProfileEntity profile = new UserProfileEntity();
+        profile.setHandle("real-admin");
+        profile.setProfileVisibility(UserProfileEntity.VISIBILITY_PRIVATE);
+        when(userProfileRepository.findByUserId(42L)).thenReturn(Optional.of(profile));
+
+        ResponseEntity<Map<String, String>> response = controller.getPublisherProfile("42");
+
+        // The handle is frozen onto the publication and then served anonymously
+        // with it. Leaking it here would both advertise a /u/{handle} page that
+        // 404s (UserService.getPublicProfile refuses PRIVATE profiles) and expose
+        // a handle its owner deliberately made non-public.
+        assertThat(response.getBody()).doesNotContainKey("handle");
+        // The rest of the publisher snapshot is unaffected: a private profile
+        // still publishes under their display name.
+        assertThat(response.getBody()).containsEntry("displayName", "Real Admin Name");
+    }
+
+    @Test
+    @DisplayName("Profile row present but handle still null → no handle key")
+    void omitsHandleWhenProfileHasNoHandleYet() {
+        User user = new User();
+        user.setId(42L);
+        UserOnboarding ob = new UserOnboarding(user, "Real Admin Name");
+        when(onboardingRepository.findByUserIdFetchUser(42L)).thenReturn(Optional.of(ob));
+        when(userProfileRepository.findByUserId(42L)).thenReturn(Optional.of(new UserProfileEntity()));
+
+        ResponseEntity<Map<String, String>> response = controller.getPublisherProfile("42");
+
+        // Map.put(key, null) would have thrown on the immutable-map path and,
+        // worse, serialized as "handle": null downstream.
+        assertThat(response.getBody()).doesNotContainKey("handle");
     }
 
     @Test

@@ -1040,13 +1040,25 @@ public class StepCompletionOrchestrator {
         );
     }
 
+    /**
+     * Removes the engine-internal handshake keys from the output that gets persisted and shown
+     * as the node's output.
+     *
+     * <p>Both keys reach the output the same way: {@code NodeCompletionService} merges a
+     * result's {@code metadata()} into its {@code output()} when building the
+     * {@link StepExecutionResult}, so anything a node puts in metadata surfaces to readers.
+     * {@code CASCADE_SKIP_TO_SUCCESSORS} is a signal to the engine, never node data, and it is
+     * consumed well before this point.
+     */
     private StepExecutionResult stripInternalCompletionMetadata(StepExecutionResult result) {
         if (result.output() == null
-                || !result.output().containsKey(ExecutionMetadataKeys.DEFER_SKIPPED_AGGREGATE_EVENT)) {
+                || !(result.output().containsKey(ExecutionMetadataKeys.DEFER_SKIPPED_AGGREGATE_EVENT)
+                    || result.output().containsKey(ExecutionMetadataKeys.CASCADE_SKIP_TO_SUCCESSORS))) {
             return result;
         }
         Map<String, Object> sanitizedOutput = new HashMap<>(result.output());
         sanitizedOutput.remove(ExecutionMetadataKeys.DEFER_SKIPPED_AGGREGATE_EVENT);
+        sanitizedOutput.remove(ExecutionMetadataKeys.CASCADE_SKIP_TO_SUCCESSORS);
         return new StepExecutionResult(
             result.stepId(),
             result.status(),

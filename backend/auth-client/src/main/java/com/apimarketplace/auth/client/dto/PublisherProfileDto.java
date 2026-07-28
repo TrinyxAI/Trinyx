@@ -7,7 +7,7 @@ import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
  *
  * <p>Returned by {@code GET /api/internal/auth/users/{userId}/publisher-profile}
  * and consumed by publication-service when a workflow / agent / resource is
- * (re)published. The publication freezes these three fields into its row so
+ * (re)published. The publication freezes these fields into its row so
  * the marketplace view stays stable even if the publisher later renames
  * themselves or changes their avatar.
  *
@@ -20,5 +20,12 @@ public record PublisherProfileDto(
         String userId,
         String displayName,
         String email,
-        String avatarUrl
+        String avatarUrl,
+        /**
+         * The publisher's public {@code @handle} (V413). Null when they have none
+         * yet: handles are generated lazily, and this endpoint reads without
+         * creating one. Consumers must render the publisher name unlinked in that
+         * case rather than fabricating a profile URL.
+         */
+        String handle
 ) {}

@@ -289,6 +289,7 @@ public class AgentPublicationService {
         // server-side via AuthClient at every (re)publish. See
         // PublisherProfileSnapshotter for the uniform rule across paths.
         PublisherProfileSnapshotter.snapshotInto(publication, authClient, tenantId);
+        PublicationSlugAssigner.assignIfMissing(publication, publicationRepository);
 
         // Visibility
         String visStr = (String) request.get("visibility");

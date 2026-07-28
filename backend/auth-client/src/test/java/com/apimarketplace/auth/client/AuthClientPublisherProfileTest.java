@@ -26,7 +26,7 @@ class AuthClientPublisherProfileTest {
     @Test
     @DisplayName("Returns DTO when auth-service answers 2xx with body")
     void returnsDtoOnSuccess() {
-        PublisherProfileDto expected = new PublisherProfileDto("42", "Real Name", "real@x.com", "avatar-uuid");
+        PublisherProfileDto expected = new PublisherProfileDto("42", "Real Name", "real@x.com", "avatar-uuid", null);
         when(restTemplate.exchange(
                 eq(BASE_URL + "/api/internal/auth/users/42/publisher-profile"),
                 eq(HttpMethod.GET),

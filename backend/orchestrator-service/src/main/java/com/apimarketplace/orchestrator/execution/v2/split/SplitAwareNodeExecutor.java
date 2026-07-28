@@ -673,14 +673,50 @@ public class SplitAwareNodeExecutor {
             String skipReason = emptyBecauseExecuteOnce
                 ? EXECUTE_ONCE_SKIP_REASON + " (split item 0 was routed to another branch)"
                 : "No items routed to this branch";
-            Map<String, Object> skippedMetadata = Map.of(
+            Map<String, Object> skippedOutput = Map.of(
                 "skip_reason", skipReason,
                 ExecutionMetadataKeys.DEFER_SKIPPED_AGGREGATE_EVENT, Boolean.TRUE
             );
+
+            // PROVEN-EMPTY exception to the bare-skip rule above. The revert exists because
+            // an empty routing set is AMBIGUOUS: it means either "every predecessor ran and
+            // routed nothing here" (real) or "the predecessor's step_data never landed"
+            // (persistence regression). Only the second one must not cascade. We can tell
+            // them apart: a predecessor that really ran leaves TERMINAL rows for this epoch
+            // (COMPLETED/FAILED/SKIPPED), a predecessor whose writes failed leaves none. When
+            // every predecessor has terminal rows the emptiness is PROVEN, and withholding
+            // the cascade strands the whole downstream chain with no status at all - prod run
+            // run_<id>, where agent:draft_reply was SKIPPED "No items routed
+            // to this branch" in 22 of 29 epochs and core:prep_draft / core:approve_reply /
+            // core:send_reply / table:log_replied / table:log_reply_rejected got no row in any
+            // of them (step-by-step mode: ReadyNodeCalculator returns [] for a SKIPPED
+            // predecessor, so nothing ever enqueues them either).
+            //
+            // Excluded on purpose: explicit choice-branch targets, whose descendants were
+            // already materialized per item by the block above. Adding a global cascade on
+            // top would double-mark them - exactly the counter inflation the revert fought.
+            boolean cascadeProvenEmpty = !explicitChoiceBranchTarget
+                && isUnroutedEmptinessProven(node, runId, context.epoch(), splitContext.splitNodeId());
+            Map<String, Object> skippedMetadata = cascadeProvenEmpty
+                ? Map.of(
+                    "skip_reason", skipReason,
+                    ExecutionMetadataKeys.DEFER_SKIPPED_AGGREGATE_EVENT, Boolean.TRUE,
+                    ExecutionMetadataKeys.CASCADE_SKIP_TO_SUCCESSORS, Boolean.TRUE)
+                : skippedOutput;
+            if (cascadeProvenEmpty) {
+                logger.info("[SplitAware] Unrouted skip is PROVEN empty (every predecessor has terminal rows for this epoch), cascading SKIPPED to descendants: nodeId={}, epoch={}",
+                    nodeId, context.epoch());
+            }
+
+            // The cascade flag rides in metadata, never in the result's own output. It still
+            // reaches the persisted output via NodeCompletionService (which merges metadata into
+            // output), so StepCompletionOrchestrator.stripInternalCompletionMetadata removes it
+            // there, exactly as it already does for the defer flag - the stored node output
+            // keeps the shape readers expect.
             return new NodeExecutionResult(
                 nodeId,
                 NodeStatus.SKIPPED,
-                skippedMetadata,
+                skippedOutput,
                 Optional.of(skipReason),
                 skippedMetadata,
                 0
@@ -3144,6 +3180,70 @@ public class SplitAwareNodeExecutor {
         Set<Integer> allItems = new HashSet<>();
         for (int i = 0; i < totalItems; i++) allItems.add(i);
         return getTransitiveRoutedItemIndices(node, runId, totalItems, epoch, allItems, splitNodeId);
+    }
+
+    /**
+     * Tells whether an empty routing set is PROVEN, i.e. every predecessor really ran in this
+     * epoch and routed nothing here, as opposed to the routing lookup coming back empty because
+     * the predecessor's {@code workflow_step_data} writes never landed.
+     *
+     * <p>The discriminator is the presence of TERMINAL rows (COMPLETED/FAILED/SKIPPED) for each
+     * predecessor in this epoch. {@code getTransitiveRoutedItemIndices} only asks for COMPLETED
+     * indices, so it cannot tell "ran and skipped every item" from "never wrote a row" - both
+     * come back empty. A predecessor that executed always leaves terminal rows (a fully skipped
+     * branch writes SKIPPED rows through {@code persistSkippedItemRecords}); a predecessor whose
+     * persistence aborted leaves none.
+     *
+     * <p>Deliberately conservative: no repository, no predecessors, a predecessor with zero
+     * terminal rows, or any query error all return {@code false}, which preserves today's
+     * bare-skip behavior. Only an unambiguous "everything upstream is resolved" answers
+     * {@code true}. Called from the cold unrouted-skip path only (the node is being skipped),
+     * never on the hot per-item execution path.
+     *
+     * @return {@code true} when every non-split predecessor has at least one terminal row for
+     *         {@code epoch}, so the empty routing is a real routing outcome
+     */
+    private boolean isUnroutedEmptinessProven(ExecutionNode node, String runId, int epoch, String splitNodeId) {
+        if (stepDataRepository == null || node == null) {
+            return false;
+        }
+        List<String> predecessors = node.getPredecessorIds();
+        if (predecessors == null || predecessors.isEmpty()) {
+            return false;
+        }
+
+        String baseSplitId = extractBaseSplitKey(splitNodeId);
+        boolean sawPredecessor = false;
+
+        for (String predecessorId : predecessors) {
+            EdgeRefParser.EdgeRef ref = EdgeRefParser.parse(predecessorId);
+            if (ref == null) {
+                continue;
+            }
+            String predKey = ref.nodeType() + ":" + ref.nodeLabel();
+            // The split node itself is the source of items, not a routing filter - same
+            // exclusion as getTransitiveRoutedItemIndices.
+            if (predKey.equals(baseSplitId)) {
+                continue;
+            }
+
+            try {
+                List<Integer> terminalIndices =
+                    stepDataRepository.findTerminalItemIndicesByEpoch(runId, predKey, epoch);
+                if (terminalIndices == null || terminalIndices.isEmpty()) {
+                    logger.info("[SplitAware] Unrouted skip NOT proven - predecessor {} has no terminal row for epoch {}, withholding descendant cascade: nodeId={}",
+                        predKey, epoch, node.getNodeId());
+                    return false;
+                }
+                sawPredecessor = true;
+            } catch (Exception e) {
+                logger.warn("[SplitAware] Unrouted skip provability check failed, withholding descendant cascade: nodeId={}, pred={}, error={}",
+                    node.getNodeId(), predKey, e.getMessage());
+                return false;
+            }
+        }
+
+        return sawPredecessor;
     }
 
     private Set<Integer> getTransitiveRoutedItemIndices(ExecutionNode node, String runId, int totalItems, int epoch, Set<Integer> allItems, String splitNodeId) {

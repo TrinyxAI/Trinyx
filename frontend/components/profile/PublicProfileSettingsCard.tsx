@@ -46,7 +46,9 @@ export function PublicProfileSettingsCard() {
 
   const [handleInput, setHandleInput] = useState('');
   const [bio, setBio] = useState('');
-  const [visibility, setVisibility] = useState<'PUBLIC' | 'PRIVATE'>('PUBLIC');
+  // UNLISTED is the default state, matching the backend: a profile is reachable
+  // by link but not search-indexed until its owner explicitly chooses PUBLIC.
+  const [visibility, setVisibility] = useState<'PUBLIC' | 'UNLISTED' | 'PRIVATE'>('UNLISTED');
   const [isSaving, setIsSaving] = useState(false);
   const [saved, setSaved] = useState(false);
 
@@ -76,7 +78,13 @@ export function PublicProfileSettingsCard() {
     if (seededRef.current || !profile) return;
     setHandleInput(profile.handle ?? '');
     setBio(profile.bio ?? '');
-    setVisibility(profile.profileVisibility === 'PRIVATE' ? 'PRIVATE' : 'PUBLIC');
+    // Anything unrecognised seeds as UNLISTED, the safe middle state: a stored
+    // value we cannot read must never present as search-indexable.
+    setVisibility(
+      profile.profileVisibility === 'PRIVATE' || profile.profileVisibility === 'PUBLIC'
+        ? profile.profileVisibility
+        : 'UNLISTED',
+    );
     seededRef.current = true;
   }, [profile]);
 
@@ -362,7 +370,12 @@ export function PublicProfileSettingsCard() {
           <Select
             value={visibility}
             onValueChange={(v) => {
-              setVisibility(v === 'PRIVATE' ? 'PRIVATE' : 'PUBLIC');
+              // Explicit allow-list rather than "anything that is not PRIVATE".
+              // With three states that shorthand would turn an unexpected value
+              // into PUBLIC, which here means search-indexable.
+              setVisibility(
+                v === 'PRIVATE' || v === 'PUBLIC' || v === 'UNLISTED' ? v : 'UNLISTED',
+              );
               scheduleSave();
             }}
           >
@@ -371,6 +384,7 @@ export function PublicProfileSettingsCard() {
             </SelectTrigger>
             <SelectContent>
               <SelectItem value="PUBLIC">{t('visibilityPublic')}</SelectItem>
+              <SelectItem value="UNLISTED">{t('visibilityUnlisted')}</SelectItem>
               <SelectItem value="PRIVATE">{t('visibilityPrivate')}</SelectItem>
             </SelectContent>
           </Select>

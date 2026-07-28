@@ -35,13 +35,30 @@ class PublisherProfileSnapshotterTest {
     void writesAuthClientValuesVerbatim() {
         WorkflowPublicationEntity pub = new WorkflowPublicationEntity();
         when(authClient.getPublisherProfile(TENANT)).thenReturn(
-                new PublisherProfileDto(TENANT, "Real Name", "real@x.com", "storage-uuid"));
+                new PublisherProfileDto(TENANT, "Real Name", "real@x.com", "storage-uuid", "real-name"));
 
         PublisherProfileSnapshotter.snapshotInto(pub, authClient, TENANT);
 
         assertThat(pub.getPublisherName()).isEqualTo("Real Name");
         assertThat(pub.getPublisherEmail()).isEqualTo("real@x.com");
         assertThat(pub.getPublisherAvatarUrl()).isEqualTo("storage-uuid");
+        assertThat(pub.getPublisherHandle()).isEqualTo("real-name");
+    }
+
+    @Test
+    @DisplayName("Null handle is persisted as-is - a publisher without a handle gets no fabricated profile URL")
+    void nullHandlePersistedAsIs() {
+        WorkflowPublicationEntity pub = new WorkflowPublicationEntity();
+        when(authClient.getPublisherProfile(TENANT)).thenReturn(
+                new PublisherProfileDto(TENANT, "Real Name", "real@x.com", "storage-uuid", null));
+
+        PublisherProfileSnapshotter.snapshotInto(pub, authClient, TENANT);
+
+        // Handles are generated lazily and the publisher-profile endpoint reads
+        // without creating one. Null must stay null so the public page renders
+        // the name unlinked rather than pointing at /u/null.
+        assertThat(pub.getPublisherHandle()).isNull();
+        assertThat(pub.getPublisherName()).isEqualTo("Real Name");
     }
 
     @Test
@@ -49,7 +66,7 @@ class PublisherProfileSnapshotterTest {
     void nullDisplayNamePersistedAsIsNoTenantIdFallback() {
         WorkflowPublicationEntity pub = new WorkflowPublicationEntity();
         when(authClient.getPublisherProfile(TENANT)).thenReturn(
-                new PublisherProfileDto(TENANT, null, "x@y.z", "avatar"));
+                new PublisherProfileDto(TENANT, null, "x@y.z", "avatar", null));
 
         PublisherProfileSnapshotter.snapshotInto(pub, authClient, TENANT);
 
@@ -65,7 +82,7 @@ class PublisherProfileSnapshotterTest {
     void partialNullsPersistedAsIs() {
         WorkflowPublicationEntity pub = new WorkflowPublicationEntity();
         when(authClient.getPublisherProfile(TENANT)).thenReturn(
-                new PublisherProfileDto(TENANT, "Léa T.", null, null));
+                new PublisherProfileDto(TENANT, "Léa T.", null, null, null));
 
         PublisherProfileSnapshotter.snapshotInto(pub, authClient, TENANT);
 

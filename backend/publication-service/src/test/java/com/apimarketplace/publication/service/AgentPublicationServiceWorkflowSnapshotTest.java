@@ -98,7 +98,7 @@ class AgentPublicationServiceWorkflowSnapshotTest {
         when(agentClient.getAgent(AGENT_ID, TENANT_ID, ORG_ID)).thenReturn(agent);
         when(publicationRepository.findByAgentConfigId(AGENT_ID)).thenReturn(Optional.empty());
         when(authClient.getPublisherProfile(TENANT_ID))
-                .thenReturn(new PublisherProfileDto(TENANT_ID, "Publisher", "publisher@example.test", null));
+                .thenReturn(new PublisherProfileDto(TENANT_ID, "Publisher", "publisher@example.test", null, null));
 
         AgentPublicationService service = newService();
         Throwable thrown = org.assertj.core.api.Assertions.catchThrowable(() ->
@@ -753,7 +753,7 @@ class AgentPublicationServiceWorkflowSnapshotTest {
         when(agentClient.getAgent(AGENT_ID, TENANT_ID, ORG_ID)).thenReturn(agent);
         when(publicationRepository.findByAgentConfigId(AGENT_ID)).thenReturn(Optional.empty());
         when(authClient.getPublisherProfile(TENANT_ID))
-                .thenReturn(new PublisherProfileDto(TENANT_ID, "Publisher", "publisher@example.test", null));
+                .thenReturn(new PublisherProfileDto(TENANT_ID, "Publisher", "publisher@example.test", null, null));
         when(agentClient.getSkillsForAgent(AGENT_ID, TENANT_ID, ORG_ID)).thenReturn(List.of());
         when(landingInterfaceSnapshotter.buildSnapshot(landingInterfaceId, TENANT_ID, ORG_ID))
                 .thenReturn(landingSnapshot);
@@ -783,7 +783,7 @@ class AgentPublicationServiceWorkflowSnapshotTest {
         when(agentClient.getAgent(AGENT_ID, TENANT_ID, ORG_ID)).thenReturn(agent);
         when(publicationRepository.findByAgentConfigId(AGENT_ID)).thenReturn(Optional.empty());
         when(authClient.getPublisherProfile(TENANT_ID))
-                .thenReturn(new PublisherProfileDto(TENANT_ID, "Publisher", "publisher@example.test", null));
+                .thenReturn(new PublisherProfileDto(TENANT_ID, "Publisher", "publisher@example.test", null, null));
         when(agentClient.getSkillsForAgent(AGENT_ID, TENANT_ID, ORG_ID)).thenReturn(List.of());
         when(publicationRepository.save(any(WorkflowPublicationEntity.class)))
                 .thenAnswer(invocation -> invocation.getArgument(0));

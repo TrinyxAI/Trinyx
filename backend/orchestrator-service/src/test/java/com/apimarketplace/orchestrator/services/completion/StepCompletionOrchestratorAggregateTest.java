@@ -374,6 +374,49 @@ class StepCompletionOrchestratorAggregateTest {
     }
 
     @Test
+    @DisplayName("the CASCADE_SKIP_TO_SUCCESSORS handshake is stripped from the persisted output and the emitted event")
+    void cascadeFlagIsStrippedFromPersistedOutput() {
+        // The flag is set in a node result's METADATA (SplitAwareNodeExecutor on a proven-empty
+        // routing, SplitAggregateHandler, MergeNode) purely to tell the engine to cascade the
+        // SKIP. NodeCompletionService merges metadata into output when building the
+        // StepExecutionResult, so without this strip an engine-internal signal would show up as
+        // node output in the inspector and in step_data.
+        WorkflowExecution execution = mock(WorkflowExecution.class);
+        when(execution.getRunId()).thenReturn(RUN_ID);
+        when(persistenceService.recordStep(
+            eq(execution), eq("agent:draft_reply"), eq("draft_reply"), eq("agent:draft_reply"),
+            any(StepExecutionResult.class), eq(29), eq(TRIGGER_ID)))
+            .thenReturn(StepPersistenceResult.success(UUID.randomUUID()));
+        when(stateSnapshotService.recordNodeCompletionAndGetCounts(
+            RUN_ID, "agent:draft_reply", "SKIPPED", TRIGGER_ID, 29, 0L))
+            .thenReturn(new StateSnapshot.NodeCounts(0, 0, 0, 1, 0L, 0L, 0L));
+
+        StepExecutionResult result = new StepExecutionResult(
+            "agent:draft_reply",
+            NodeStatus.SKIPPED,
+            "No items routed to this branch",
+            Map.of(
+                "skip_reason", "No items routed to this branch",
+                ExecutionMetadataKeys.CASCADE_SKIP_TO_SUCCESSORS, true
+            ),
+            0L,
+            null
+        );
+        StepCompletionContext ctx = StepCompletionContext.of(
+            execution, "agent:draft_reply", "draft_reply", result, 0, 0, 29);
+
+        orchestrator.complete(ctx, TRIGGER_ID);
+
+        ArgumentCaptor<StepExecutionResult> persistedResult = ArgumentCaptor.forClass(StepExecutionResult.class);
+        verify(persistenceService).recordStep(
+            eq(execution), eq("agent:draft_reply"), eq("draft_reply"), eq("agent:draft_reply"),
+            persistedResult.capture(), eq(29), eq(TRIGGER_ID));
+        assertThat(persistedResult.getValue().output())
+            .doesNotContainKey(ExecutionMetadataKeys.CASCADE_SKIP_TO_SUCCESSORS)
+            .containsEntry("skip_reason", "No items routed to this branch");
+    }
+
+    @Test
     @DisplayName("regression: no-items-routed split emits deferred aggregated SKIPPED event after node-level count reaches final value")
     void completeSkippedWithDeferredAggregateEmitsFinalAggregatedEventLast() {
         WorkflowExecution execution = mock(WorkflowExecution.class);

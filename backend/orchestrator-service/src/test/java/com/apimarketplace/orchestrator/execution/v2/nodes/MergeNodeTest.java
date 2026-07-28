@@ -307,6 +307,37 @@ class MergeNodeTest {
         }
 
         @Test
+        @DisplayName("A strategy-skipped merge cascades SKIPPED to its descendants (no-status-behind-a-skip family)")
+        void strategySkippedMergeCascadesToDescendants() {
+            // Same family as the split unrouted-skip bug found on prod run
+            // run_<id>: a bare SKIPPED leaves everything behind the node
+            // with no status at all. The engine only cascades on CASCADE_SKIP_TO_SUCCESSORS,
+            // and ReadyNodeCalculator never traverses the regular successors of a SKIPPED
+            // node, so in step-by-step mode nothing else picks them up.
+            //
+            // Cascading is unambiguous here: every strategy reaches shouldSkip only when not
+            // one source succeeded, so the branch behind the merge is dead.
+            when(mockStrategy.name()).thenReturn("COMBINE_ALL");
+            when(mockStrategy.shouldSkip(any(), any())).thenReturn(true);
+            when(mockStrategy.getSkipReason(any(), any())).thenReturn("All sources failed or were skipped");
+
+            MergeNode node = new MergeNode(
+                "core:merge",
+                List.of("mcp:step1", "mcp:step2"),
+                mockStrategy
+            );
+
+            NodeExecutionResult result = node.execute(context);
+
+            assertTrue(result.isSkipped());
+            assertEquals(
+                Boolean.TRUE,
+                result.metadata().get(
+                    com.apimarketplace.orchestrator.execution.v2.constants.ExecutionMetadataKeys.CASCADE_SKIP_TO_SUCCESSORS),
+                "a merge skipped because no source succeeded must hand the engine the cascade flag");
+        }
+
+        @Test
         @DisplayName("Should return failure when strategy throws exception")
         void shouldReturnFailureWhenStrategyThrowsException() {
             when(mockStrategy.name()).thenReturn("QUEUE_1_TO_1");

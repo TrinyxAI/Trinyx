@@ -89,7 +89,7 @@ class WorkflowPublicationServiceShowcaseEpochClearTest {
         // call, see WorkflowPublicationService line ~384. Lenient so tests
         // that never invoke publishWorkflow don't trip strict-stubbing.
         lenient().when(authClient.getPublisherProfile(any()))
-                .thenReturn(new PublisherProfileDto(TENANT_ID, "Test Publisher", "test@publisher.com", "test-avatar-uuid"));
+                .thenReturn(new PublisherProfileDto(TENANT_ID, "Test Publisher", "test@publisher.com", "test-avatar-uuid", null));
     }
 
     @Test

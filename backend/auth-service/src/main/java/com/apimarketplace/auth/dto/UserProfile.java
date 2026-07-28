@@ -25,7 +25,11 @@ public class UserProfile {
     // settings page reads/writes them through the existing /api/users/profile.
     private String handle;
     private String bio;
-    private String profileVisibility = "PUBLIC";
+    // UNLISTED, matching UserProfileEntity's default. mapToUserProfile always
+    // overwrites this from the entity, so the value is not reachable today, but
+    // "PUBLIC" here would mean any future path that forgets that setter presents
+    // the user as search-indexable. The safe state is the safe default.
+    private String profileVisibility = "UNLISTED";
 
     // Constructeur par defaut
     public UserProfile() {}

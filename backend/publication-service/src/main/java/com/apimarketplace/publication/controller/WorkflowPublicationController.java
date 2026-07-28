@@ -540,6 +540,29 @@ public class WorkflowPublicationController {
     }
 
     /**
+     * Public-browsing alias resolved by URL slug instead of UUID (V413).
+     *
+     * <p>Backs the crawlable marketplace page {@code /marketplace/{slug}}. Slug
+     * resolution is the only difference from {@code /by-id/…}: the row is then
+     * read through the exact same handler, so the visibility gate and the
+     * non-owner PII scrub are shared, not re-implemented.
+     *
+     * <p>Returns 404 for an unknown slug, indistinguishable from a slug whose
+     * publication is not anonymously readable - a probe must not be able to tell
+     * "no such page" from "exists but private".
+     */
+    @GetMapping("/by-slug/{publicSlug}")
+    public ResponseEntity<?> getPublicationBySlugPublic(
+            @PathVariable String publicSlug,
+            @RequestHeader(value = "X-User-ID", required = false) String requestingUserId,
+            @RequestHeader(value = "X-Organization-ID", required = false) String organizationId) {
+        return publicationService.findIdByPublicSlug(publicSlug)
+                .<ResponseEntity<?>>map(id ->
+                        getPublicationById(id.toString(), requestingUserId, organizationId, null, null, null))
+                .orElseGet(() -> ResponseEntity.notFound().build());
+    }
+
+    /**
      * Get the current user's APPLICATION workflow for a given publication.
      * Works for both publishers and acquirers.
      * Uses OrchestratorInternalClient to find the application workflow.
@@ -1612,6 +1635,14 @@ public class WorkflowPublicationController {
         response.put("publisherName", pub.getPublisherName());
         response.put("publisherEmail", pub.getPublisherEmail());
         response.put("publisherAvatarUrl", pub.getPublisherAvatarUrl());
+        // V413 - the public SEO fields must be on the DETAIL response too, not
+        // only on the list items. The crawlable listing page reads THIS payload:
+        // without publicSlug its indexability gate fails (no slug means no
+        // canonical URL), so every listing page shipped noindex and no
+        // structured data, defeating the entire point of the public pages.
+        // publisherHandle is what turns the author's name into a link.
+        response.put("publicSlug", pub.getPublicSlug());
+        response.put("publisherHandle", pub.getPublisherHandle());
         response.put("status", pub.getStatus().name());
         response.put("published", pub.getStatus() == WorkflowPublicationEntity.PublicationStatus.ACTIVE);
         response.put("visibility", pub.getVisibility().name());

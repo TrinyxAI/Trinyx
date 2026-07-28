@@ -17,7 +17,7 @@ export interface UserProfile {
   avatarUrl?: string | null;
   // In-app profile fields (from auth.user_profiles), edited in account settings.
   handle?: string | null;
-  profileVisibility?: 'PUBLIC' | 'PRIVATE';
+  profileVisibility?: 'PUBLIC' | 'UNLISTED' | 'PRIVATE';
   createdAt: string;
   updatedAt: string;
 }

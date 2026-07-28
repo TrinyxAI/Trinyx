@@ -77,7 +77,8 @@ class WorkflowPublicationControllerMarketplaceWiringTest {
                 null, 0, 0, 0, 0, 0, null, 0,
                 Instant.now(), Instant.now(),
                 null, null, null, null, null,
-                null, null, null, null, null, null);
+                null, null, null, null, null, null,
+                null, null);
     }
 
     @SuppressWarnings("unchecked")

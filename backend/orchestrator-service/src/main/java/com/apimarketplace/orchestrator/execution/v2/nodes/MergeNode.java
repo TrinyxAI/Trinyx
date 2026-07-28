@@ -100,7 +100,17 @@ public class MergeNode extends BaseNode {
                 String reason = strategy.getSkipReason(sources, context);
                 logger.info("Merge skipped ({}): nodeId={}, reason={}",
                     strategy.name(), nodeId, reason);
-                return NodeExecutionResult.skipped(nodeId, reason);
+                // Cascade to descendants. Every strategy only reaches shouldSkip when NOT ONE
+                // source succeeded (CombineAll / Queue1To1: no isSuccess among the sources;
+                // FirstAvailable: all resolved and none successful), so the whole branch behind
+                // this merge is dead and its descendants must be marked SKIPPED. Without the
+                // flag they get no status at all: the engine declines to cascade a bare SKIPPED,
+                // and ReadyNodeCalculator never traverses the regular successors of a SKIPPED
+                // node, so in step-by-step mode nothing enqueues them either. This mirrors
+                // V2SkipPropagationService.checkAndSkipMergeIfNoSuccessfulPredecessor, which
+                // already cascades when it reaches the same "all predecessors resolved, none
+                // COMPLETED" verdict from the other direction.
+                return NodeExecutionResult.skippedWithCascade(nodeId, reason);
             }
 
             // Delegate to strategy for actual merge

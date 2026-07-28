@@ -156,6 +156,27 @@ public class WorkflowPublicationEntity {
     @Column(name = "publisher_avatar_url", columnDefinition = "TEXT")
     private String publisherAvatarUrl;
 
+    /**
+     * V413 - the publisher's public handle, frozen at publish time next to
+     * {@link #publisherName} / {@link #publisherAvatarUrl}. Lets a public page
+     * link to {@code /u/{handle}} without one auth-service round-trip per card.
+     * Null for publishers who have no handle yet.
+     */
+    @Column(name = "publisher_handle", length = 32)
+    private String publisherHandle;
+
+    /**
+     * V413 - URL slug backing the crawlable public page
+     * {@code /marketplace/{publicSlug}}.
+     *
+     * <p>Assigned once, at first publish, and deliberately NOT recomputed when the
+     * title changes: an indexed URL that moves loses its ranking and breaks every
+     * shared link. Null on rows created before V413 until the backfill runs; those
+     * stay reachable by UUID.
+     */
+    @Column(name = "public_slug", length = 120)
+    private String publicSlug;
+
     @Column(name = "project_id")
     private UUID projectId;
 
@@ -530,6 +551,22 @@ public class WorkflowPublicationEntity {
 
     public void setPublisherAvatarUrl(String publisherAvatarUrl) {
         this.publisherAvatarUrl = publisherAvatarUrl;
+    }
+
+    public String getPublisherHandle() {
+        return publisherHandle;
+    }
+
+    public void setPublisherHandle(String publisherHandle) {
+        this.publisherHandle = publisherHandle;
+    }
+
+    public String getPublicSlug() {
+        return publicSlug;
+    }
+
+    public void setPublicSlug(String publicSlug) {
+        this.publicSlug = publicSlug;
     }
 
     public UUID getProjectId() {

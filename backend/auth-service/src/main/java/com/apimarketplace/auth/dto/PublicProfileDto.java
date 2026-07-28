@@ -21,6 +21,15 @@ public record PublicProfileDto(
         String handle,
         String avatarUrl,
         String bio,
-        LocalDateTime joinedAt
+        LocalDateTime joinedAt,
+        /**
+         * Whether the owner opted this profile into search indexing (the PUBLIC
+         * visibility state). False for UNLISTED, which is the default and means
+         * "reachable by link, but not advertised to search engines".
+         *
+         * <p>Exposed because the page that renders this profile is the only place
+         * that can emit the noindex directive, and it must not have to guess.
+         */
+        boolean searchIndexable
 ) {
 }

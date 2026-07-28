@@ -35,7 +35,8 @@ class PublicationListItemTest {
                 "[{\"icon\":\"zap\",\"color\":\"#3b82f6\"}]",
                 0, 0, 2, 1, 0, 4.2, 12, PUBLISHED_AT, UPDATED_AT,
                 CATEGORY_ID, "automation", "Automation", "zap", "#8b5cf6",
-                PROJECT_ID, null, null, null, null, null
+                PROJECT_ID, null, null, null, null, null,
+                "test-title", "john-doe"
         );
     }
 
@@ -54,7 +55,8 @@ class PublicationListItemTest {
                 0, 0, interfaceCount, datasourceCount, 0, null, 0,
                 publishedAt, updatedAt,
                 null, null, null, null, null,
-                null, null, null, null, null, null
+                null, null, null, null, null, null,
+                null, null
         );
     }
 
@@ -234,7 +236,8 @@ class PublicationListItemTest {
                     1, 3, 0, 0, 0, null, 0,
                     PUBLISHED_AT, UPDATED_AT,
                     null, null, null, null, null,
-                    null, null, "preset:robot", "anthropic", "claude-sonnet", null
+                    null, null, "preset:robot", "anthropic", "claude-sonnet", null,
+                    null, null
             );
             Map<String, Object> response = item.toResponseMap();
             assertThat(response).containsEntry("agentAvatarUrl", "preset:robot");
@@ -255,7 +258,8 @@ class PublicationListItemTest {
                     0, 0, 0, 0, 0, null, 0,
                     PUBLISHED_AT, UPDATED_AT,
                     null, null, null, null, null,
-                    null, null, null, null, null, "datasource-42"
+                    null, null, null, null, null, "datasource-42",
+                    null, null
             );
             Map<String, Object> response = item.toResponseMap();
             assertThat(response).containsEntry("resourceId", "datasource-42");

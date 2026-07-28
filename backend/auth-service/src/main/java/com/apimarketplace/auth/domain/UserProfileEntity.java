@@ -22,7 +22,28 @@ import java.time.LocalDateTime;
 @Table(name = "user_profiles")
 public class UserProfileEntity {
 
+    /**
+     * Profile visibility, three states mirroring {@code PublicationVisibility}
+     * so users learn one vocabulary and the two models cannot drift apart.
+     *
+     * <ul>
+     *   <li>{@link #VISIBILITY_PRIVATE} - no page at all; listings show the
+     *       author's name but never link to them.</li>
+     *   <li>{@link #VISIBILITY_UNLISTED} - the page is reachable by direct link
+     *       (and from a listing), but carries noindex and stays out of the
+     *       sitemap. This is the DEFAULT.</li>
+     *   <li>{@link #VISIBILITY_PUBLIC} - listed and indexable by search
+     *       engines.</li>
+     * </ul>
+     *
+     * <p>The split exists because "PUBLIC" had quietly meant three different
+     * things over time: visible to logged-in users, then readable by anyone
+     * with the link, and now potentially indexed by Google. Users only ever
+     * consented to the first. Making search indexing its own explicit state is
+     * what stops that drift from silently widening again.
+     */
     public static final String VISIBILITY_PUBLIC = "PUBLIC";
+    public static final String VISIBILITY_UNLISTED = "UNLISTED";
     public static final String VISIBILITY_PRIVATE = "PRIVATE";
 
     @Id
@@ -48,8 +69,10 @@ public class UserProfileEntity {
     @Column(name = "bio", length = 500)
     private String bio;
 
+    // Defaults to UNLISTED: a new user gets a working, linkable profile page
+    // without being opted into search indexing they never asked for.
     @Column(name = "profile_visibility", length = 20, nullable = false)
-    private String profileVisibility = VISIBILITY_PUBLIC;
+    private String profileVisibility = VISIBILITY_UNLISTED;
 
     @Column(name = "created_at", nullable = false, updatable = false)
     private LocalDateTime createdAt;
@@ -78,9 +101,27 @@ public class UserProfileEntity {
         updatedAt = LocalDateTime.now();
     }
 
-    /** A profile is publicly visible unless explicitly set to PRIVATE. */
-    public boolean isPublic() {
+    /**
+     * Whether the profile page exists at all for someone other than its owner.
+     * True for UNLISTED and PUBLIC.
+     *
+     * <p>Replaces the old {@code isPublic()}, which returned true for anything
+     * that was not literally "PRIVATE". With a third state that shape would have
+     * made UNLISTED behave exactly like PUBLIC everywhere, including search
+     * indexing: the one outcome this split exists to prevent. Callers must now
+     * say which question they are asking.
+     */
+    public boolean isPageVisible() {
         return !VISIBILITY_PRIVATE.equalsIgnoreCase(profileVisibility);
+    }
+
+    /**
+     * Whether search engines may index the profile page. True ONLY for the
+     * explicit PUBLIC state, never by default and never by falling through from
+     * an unrecognised value.
+     */
+    public boolean isSearchIndexable() {
+        return VISIBILITY_PUBLIC.equalsIgnoreCase(profileVisibility);
     }
 
     public Long getUserId() {

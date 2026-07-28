@@ -157,7 +157,12 @@ public class UserService {
         }
         if (request.getProfileVisibility() != null) {
             String v = request.getProfileVisibility().trim().toUpperCase();
-            if (UserProfileEntity.VISIBILITY_PUBLIC.equals(v) || UserProfileEntity.VISIBILITY_PRIVATE.equals(v)) {
+            // Allow-list, not a parse: an unrecognised value is ignored and the
+            // stored state is left untouched, so a typo can never silently widen
+            // someone's exposure.
+            if (UserProfileEntity.VISIBILITY_PUBLIC.equals(v)
+                    || UserProfileEntity.VISIBILITY_UNLISTED.equals(v)
+                    || UserProfileEntity.VISIBILITY_PRIVATE.equals(v)) {
                 profile.setProfileVisibility(v);
             }
         }
@@ -262,7 +267,10 @@ public class UserService {
             return Optional.empty();
         }
         Optional<UserProfileEntity> profileOpt = userProfileRepository.findByUserId(user.getId());
-        if (profileOpt.isPresent() && !profileOpt.get().isPublic()) {
+        // Page existence, NOT indexability: an UNLISTED profile is readable by
+        // anyone holding the link (that is what "unlisted" means), it simply
+        // must not be advertised to search engines. Only PRIVATE 404s here.
+        if (profileOpt.isPresent() && !profileOpt.get().isPageVisible()) {
             return Optional.empty();
         }
 
@@ -290,7 +298,8 @@ public class UserService {
                 handle,
                 storageBackedAvatarUrl(user),
                 p.getBio(),
-                user.getCreatedAt()
+                user.getCreatedAt(),
+                p.isSearchIndexable()
         ));
     }
 

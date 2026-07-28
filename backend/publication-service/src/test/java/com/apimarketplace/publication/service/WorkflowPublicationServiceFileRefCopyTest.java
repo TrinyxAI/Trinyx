@@ -90,7 +90,7 @@ class WorkflowPublicationServiceFileRefCopyTest {
         // calls AuthClient.getPublisherProfile. Lenient so non-publish tests
         // don't trip strict-stubbing.
         lenient().when(authClient.getPublisherProfile(any()))
-                .thenReturn(new PublisherProfileDto(PUBLISHER_TENANT, "Test Publisher", "test@publisher.com", "test-avatar-uuid"));
+                .thenReturn(new PublisherProfileDto(PUBLISHER_TENANT, "Test Publisher", "test@publisher.com", "test-avatar-uuid", null));
     }
 
     // ========================================================================

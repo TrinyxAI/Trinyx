@@ -8,6 +8,7 @@ import type { AgentExecutionMessage, AgentExecutionToolCall } from '@/lib/api/or
 import { useExecutionPagedResource } from '@/hooks/agent/useExecutionPagedResource';
 import { LoadOlderSentinel } from '@/components/agent-fleet/LoadOlderSentinel';
 import { cn } from '@/lib/utils';
+import { panelTabClass } from '@/components/ui/panel-tab';
 
 interface AgentExecutionConversationProps {
   executionId: string;
@@ -65,28 +66,32 @@ export function AgentExecutionConversation({ executionId, systemPrompt }: AgentE
         )}
       </div>
 
-      {/* Tabs - bottom bar (styled like WorkflowPanelContent bottom tabs) */}
-      <div className="flex-shrink-0 border-t border-theme bg-theme-secondary">
-        <div className="flex overflow-x-auto">
+      {/* Tabs - bottom bar (shared panel tab style, see panelTabClass) */}
+      <div className="flex-shrink-0 border-t border-theme bg-theme-primary">
+        <div className="flex items-center gap-1 px-2 py-1.5 overflow-x-auto">
           <button
+            type="button"
+            aria-pressed={activeTab === 'conversation'}
+            data-testid="panel-sub-tab"
+            data-active={activeTab === 'conversation' ? 'true' : undefined}
             onClick={() => setActiveTab('conversation')}
             className={cn(
-              'flex items-center gap-2 px-4 py-2.5 text-sm whitespace-nowrap transition-colors',
-              activeTab === 'conversation'
-                ? 'bg-theme-primary text-theme-primary font-medium'
-                : 'text-theme-muted hover:bg-theme-tertiary'
+              panelTabClass(activeTab === 'conversation', 'sm'),
+              'flex-shrink-0'
             )}
           >
             <MessageSquare className="h-3.5 w-3.5" />
             {t('conversation')} ({visibleMessages.length})
           </button>
           <button
+            type="button"
+            aria-pressed={activeTab === 'toolCalls'}
+            data-testid="panel-sub-tab"
+            data-active={activeTab === 'toolCalls' ? 'true' : undefined}
             onClick={() => setActiveTab('toolCalls')}
             className={cn(
-              'flex items-center gap-2 px-4 py-2.5 text-sm whitespace-nowrap transition-colors',
-              activeTab === 'toolCalls'
-                ? 'bg-theme-primary text-theme-primary font-medium'
-                : 'text-theme-muted hover:bg-theme-tertiary'
+              panelTabClass(activeTab === 'toolCalls', 'sm'),
+              'flex-shrink-0'
             )}
           >
             <Wrench className="h-3.5 w-3.5" />

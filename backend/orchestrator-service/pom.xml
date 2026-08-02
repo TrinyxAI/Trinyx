@@ -451,6 +451,23 @@
                                 <include>**/e2e/nodes/ForkMergeE2ETest.java</include>
                                 <include>**/e2e/nodes/MergeEdgeCasesE2ETest.java</include>
                                 <include>**/e2e/nodes/SplitLoopEdgeCasesE2ETest.java</include>
+                                <!-- Declared (hub-less) back-edges. The handler-level unit tests
+                                     mock WorkflowEventPublisher, so they cannot see an invariant the
+                                     REAL publisher enforces (LoopEvent rejects a null loopId). Only a
+                                     run through the live drive path - reusable trigger -> execution
+                                     queue -> V2StepByStepService -> executeSingleNode - proves the
+                                     loop actually iterates. -->
+                                <include>**/e2e/nodes/DeclaredBackEdgeE2ETest.java</include>
+                                <!-- Guards "a loop body that is a sub_workflow fires the child on
+                                     EVERY iteration", over one epoch and over two, including with a
+                                     delayed HTTP call in the child. Added while chasing a production
+                                     report of a 5-iteration chain silently stopping at 4; that stall
+                                     did not reproduce, but the loop back-edge is under active change
+                                     (cross-replica iteration reconciliation), so the iteration-count
+                                     contract is worth gating. Deliberately NOT SubWorkflowE2ETest:
+                                     that class asserts wall-clock cycle-guard timing, which is a
+                                     flake risk in a required job. -->
+                                <include>**/e2e/nodes/SubWorkflowLoopE2ETest.java</include>
                                 <include>**/e2e/nodes/GuardrailAgentE2ETest.java</include>
                                 <include>**/e2e/nodes/XmlE2ETest.java</include>
                                 <include>**/e2e/nodes/SkipCascadeMergeE2ETest.java</include>

@@ -33,12 +33,28 @@ public class SessionEdgeManager {
      * @param condition Deprecated - kept for display only, not persisted in V2 format
      */
     public void addConnection(String fromNodeId, String toNodeId, String condition) {
+        addConnection(fromNodeId, toNodeId, condition, null);
+    }
+
+    /**
+     * Add a connection, optionally marking it as a loop-back.
+     *
+     * @param backEdge {@code {condition, maxIterations}} when this connection re-enters an
+     *                 earlier node, else null. Unlike {@code condition}, this one IS persisted:
+     *                 without it the connection reads as a forward dependency and the engine
+     *                 would have the target wait for a node that runs after it.
+     */
+    public void addConnection(String fromNodeId, String toNodeId, String condition,
+                              Map<String, Object> backEdge) {
         Map<String, Object> edge = new LinkedHashMap<>();
         edge.put("from", fromNodeId);
         edge.put("to", toNodeId);
         // Note: condition is stored for session display but filtered out in getPersistableEdges()
         if (condition != null && !condition.isBlank()) {
             edge.put("condition", condition);
+        }
+        if (backEdge != null) {
+            edge.put("backEdge", backEdge);
         }
         edges.add(edge);
     }
@@ -203,13 +219,14 @@ public class SessionEdgeManager {
     }
 
     /**
-     * Get persistable edges in V2 format (from, to, input only).
+     * Get persistable edges in V2 format (from, to, input, backEdge).
      * Filters out visualization-only edges and removes non-V2 fields like "condition".
      *
      * V2 Edge Format:
      * - from: source node with optional port (e.g., "core:label:if")
      * - to: target node
      * - input: optional input mappings
+     * - backEdge: optional loop-back marker {condition, maxIterations} for a declared back-edge
      *
      * Conditions for branching are stored in cores[].decisionConditions, NOT in edges.
      */
@@ -217,7 +234,7 @@ public class SessionEdgeManager {
         List<Map<String, Object>> persistable = new ArrayList<>();
         for (Map<String, Object> edge : edges) {
             if (!Boolean.TRUE.equals(edge.get("_visualOnly"))) {
-                // Create V2-compliant edge (only from, to, input)
+                // Create V2-compliant edge (only from, to, input, backEdge)
                 Map<String, Object> v2Edge = new LinkedHashMap<>();
                 v2Edge.put("from", edge.get("from"));
                 v2Edge.put("to", edge.get("to"));
@@ -226,6 +243,14 @@ public class SessionEdgeManager {
                 Object input = edge.get("input");
                 if (input != null) {
                     v2Edge.put("input", input);
+                }
+
+                // Include the loop-back marker if present. Dropping it here would silently
+                // turn a declared back-edge into a forward edge on the next save, which
+                // re-introduces the cycle into the wired graph.
+                Object backEdge = edge.get("backEdge");
+                if (backEdge != null) {
+                    v2Edge.put("backEdge", backEdge);
                 }
 
                 // NOTE: "condition" field is NOT included in V2 format.

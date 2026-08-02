@@ -28,6 +28,17 @@ import static org.mockito.Mockito.*;
 
 /**
  * Unit tests for DownloadFileNode.
+ *
+ * <p><b>Why the URLs use an IP literal rather than a hostname.</b> Before downloading, the node
+ * runs the SSRF guard, which RESOLVES the host to check it is not a private address - a real DNS
+ * lookup, with a 3-second timeout. With a hostname these "unit" tests therefore depended on DNS
+ * latency: under load the lookup timed out, {@code execute()} returned failure, and a different
+ * test failed on each run (observed: 4 runs of this class, 4 different outcomes). An IP literal
+ * is resolved by {@code InetAddress.getAllByName} without touching the network, so the guard
+ * still runs - and still exercises the public-address branch - but deterministically and offline.
+ *
+ * <p>The negative cases below deliberately keep their own hosts: they assert the guard REJECTS
+ * localhost, private ranges and non-http schemes, and those paths never reach DNS.
  */
 @ExtendWith(MockitoExtension.class)
 @MockitoSettings(strictness = Strictness.LENIENT)
@@ -62,13 +73,13 @@ class DownloadFileNodeTest {
         @Test
         @DisplayName("executeOutputMatchesPersistedShape: only `file` FileRef + source_url, no legacy flats")
         void executeOutputMatchesPersistedShape() throws Exception {
-            DownloadFileNode node = new DownloadFileNode("mcp:download", "http://example.com/doc.pdf", "doc.pdf", "application/pdf");
+            DownloadFileNode node = new DownloadFileNode("mcp:download", "http://93.184.216.34/doc.pdf", "doc.pdf", "application/pdf");
             node.setFileStorageService(mockFileStorageService);
             node.setFileDownloader(mockFileDownloader);
             node.setMimeTypeRegistry(mockMimeTypeRegistry);
 
             byte[] content = "file content".getBytes();
-            when(mockFileDownloader.download("http://example.com/doc.pdf")).thenReturn(content);
+            when(mockFileDownloader.download("http://93.184.216.34/doc.pdf")).thenReturn(content);
 
             FileRef stored = FileRef.of("tenant/wf/run/node/doc.pdf", "doc.pdf", "application/pdf", content.length);
             when(mockFileStorageService.upload(any(), any(), any(), any(), any(), any(), any(byte[].class),
@@ -113,7 +124,7 @@ class DownloadFileNodeTest {
         @Test
         @DisplayName("should have DOWNLOAD_FILE node type")
         void shouldHaveDownloadFileType() {
-            DownloadFileNode node = new DownloadFileNode("mcp:download", "http://example.com/file.pdf", "file.pdf", "application/pdf");
+            DownloadFileNode node = new DownloadFileNode("mcp:download", "http://93.184.216.34/file.pdf", "file.pdf", "application/pdf");
             assertEquals(NodeType.DOWNLOAD_FILE, node.getType());
         }
 
@@ -134,7 +145,7 @@ class DownloadFileNodeTest {
         @Test
         @DisplayName("should fail when FileStorageService is not configured")
         void shouldFailWhenNoFileStorageService() {
-            DownloadFileNode node = new DownloadFileNode("mcp:download", "http://example.com/file.pdf", null, null);
+            DownloadFileNode node = new DownloadFileNode("mcp:download", "http://93.184.216.34/file.pdf", null, null);
             node.setFileDownloader(mockFileDownloader);
 
             NodeExecutionResult result = node.execute(context);
@@ -145,7 +156,7 @@ class DownloadFileNodeTest {
         @Test
         @DisplayName("should fail when FileDownloader is not configured")
         void shouldFailWhenNoFileDownloader() {
-            DownloadFileNode node = new DownloadFileNode("mcp:download", "http://example.com/file.pdf", null, null);
+            DownloadFileNode node = new DownloadFileNode("mcp:download", "http://93.184.216.34/file.pdf", null, null);
             node.setFileStorageService(mockFileStorageService);
 
             NodeExecutionResult result = node.execute(context);
@@ -180,13 +191,13 @@ class DownloadFileNodeTest {
         @Test
         @DisplayName("should download and store file successfully")
         void shouldDownloadAndStoreFile() throws Exception {
-            DownloadFileNode node = new DownloadFileNode("mcp:download", "http://example.com/doc.pdf", "doc.pdf", "application/pdf");
+            DownloadFileNode node = new DownloadFileNode("mcp:download", "http://93.184.216.34/doc.pdf", "doc.pdf", "application/pdf");
             node.setFileStorageService(mockFileStorageService);
             node.setFileDownloader(mockFileDownloader);
             node.setMimeTypeRegistry(mockMimeTypeRegistry);
 
             byte[] content = "file content".getBytes();
-            when(mockFileDownloader.download("http://example.com/doc.pdf")).thenReturn(content);
+            when(mockFileDownloader.download("http://93.184.216.34/doc.pdf")).thenReturn(content);
 
             FileRef mockFileRef = mock(FileRef.class);
             when(mockFileRef.path()).thenReturn("s3://bucket/path");
@@ -199,7 +210,7 @@ class DownloadFileNodeTest {
 
             assertTrue(result.isSuccess());
             assertEquals("DOWNLOAD_FILE", result.output().get("node_type"));
-            assertEquals("http://example.com/doc.pdf", result.output().get("source_url"));
+            assertEquals("http://93.184.216.34/doc.pdf", result.output().get("source_url"));
             // Canonical FileRef object emitted under `file` (recognised by frontend
             // `injectFileProxyToken` + showcase HMAC rewriter for anonymous viewers).
             assertSame(mockFileRef, result.output().get("file"),
@@ -217,13 +228,13 @@ class DownloadFileNodeTest {
                 /* triggerId */ "trigger:default", /* epoch */ 3, /* spawn */ 2,
                 Map.of(), mockPlan);
 
-            DownloadFileNode node = new DownloadFileNode("mcp:download", "http://example.com/doc.pdf", "doc.pdf", "application/pdf");
+            DownloadFileNode node = new DownloadFileNode("mcp:download", "http://93.184.216.34/doc.pdf", "doc.pdf", "application/pdf");
             node.setFileStorageService(mockFileStorageService);
             node.setFileDownloader(mockFileDownloader);
             node.setMimeTypeRegistry(mockMimeTypeRegistry);
 
             byte[] content = "file content".getBytes();
-            when(mockFileDownloader.download("http://example.com/doc.pdf")).thenReturn(content);
+            when(mockFileDownloader.download("http://93.184.216.34/doc.pdf")).thenReturn(content);
             FileRef stored = FileRef.of("k", "doc.pdf", "application/pdf", content.length);
 
             org.mockito.ArgumentCaptor<Integer> epochCaptor = org.mockito.ArgumentCaptor.forClass(Integer.class);
@@ -254,13 +265,13 @@ class DownloadFileNodeTest {
             // object (`file` key) because the showcase rewriter only recognises {_type:"file"}.
             // PR2 (2026-05-15) dropped the legacy flat fields entirely - workflows must use
             // {{core:label.output.file}} or sub-paths like {{...output.file.path}}.
-            DownloadFileNode node = new DownloadFileNode("mcp:download", "http://example.com/img.png", "img.png", "image/png");
+            DownloadFileNode node = new DownloadFileNode("mcp:download", "http://93.184.216.34/img.png", "img.png", "image/png");
             node.setFileStorageService(mockFileStorageService);
             node.setFileDownloader(mockFileDownloader);
             node.setMimeTypeRegistry(mockMimeTypeRegistry);
 
             byte[] content = "png-bytes".getBytes();
-            when(mockFileDownloader.download("http://example.com/img.png")).thenReturn(content);
+            when(mockFileDownloader.download("http://93.184.216.34/img.png")).thenReturn(content);
 
             FileRef mockFileRef = mock(FileRef.class);
             when(mockFileRef.path()).thenReturn("tenant/wf/run/step/abc_img.png");
@@ -283,7 +294,7 @@ class DownloadFileNodeTest {
         @Test
         @DisplayName("should handle FileDownloadException")
         void shouldHandleDownloadException() throws Exception {
-            DownloadFileNode node = new DownloadFileNode("mcp:download", "http://example.com/file", null, null);
+            DownloadFileNode node = new DownloadFileNode("mcp:download", "http://93.184.216.34/file", null, null);
             node.setFileStorageService(mockFileStorageService);
             node.setFileDownloader(mockFileDownloader);
 
@@ -304,7 +315,7 @@ class DownloadFileNodeTest {
         @Test
         @DisplayName("failureOutputContainsCanonicalKeys: failure output has canonical `file` (null) + source_url, no legacy flats")
         void failureOutputContainsCanonicalKeys() throws Exception {
-            DownloadFileNode node = new DownloadFileNode("mcp:download", "http://example.com/file.pdf", null, null);
+            DownloadFileNode node = new DownloadFileNode("mcp:download", "http://93.184.216.34/file.pdf", null, null);
             node.setFileStorageService(mockFileStorageService);
             node.setFileDownloader(mockFileDownloader);
 
@@ -328,7 +339,7 @@ class DownloadFileNodeTest {
             // Safe defaults
             assertNull(output.get("file"),       "file default must be null on failure");
             // source_url carries the resolved URL when available (null when URL resolution itself fails)
-            assertEquals("http://example.com/file.pdf", output.get("source_url"),
+            assertEquals("http://93.184.216.34/file.pdf", output.get("source_url"),
                 "source_url must carry the resolved URL when it was resolved before failure");
         }
 
@@ -340,7 +351,7 @@ class DownloadFileNodeTest {
         @Test
         @DisplayName("failureOutputIncludesPersistenceMetadata: failure output stamps DOWNLOAD_FILE and item metadata")
         void failureOutputIncludesPersistenceMetadata() throws Exception {
-            DownloadFileNode node = new DownloadFileNode("core:download_asset", "http://example.com/file.pdf", null, null);
+            DownloadFileNode node = new DownloadFileNode("core:download_asset", "http://93.184.216.34/file.pdf", null, null);
             node.setFileStorageService(mockFileStorageService);
             node.setFileDownloader(mockFileDownloader);
 
@@ -362,7 +373,7 @@ class DownloadFileNodeTest {
         @DisplayName("failureBeforeUrlResolutionHasNullSourceUrl: source_url is null when URL not yet resolved")
         void failureBeforeUrlResolutionHasNullSourceUrl() {
             // FileStorageService not set → fails before URL resolution
-            DownloadFileNode node = new DownloadFileNode("mcp:download", "http://example.com/file.pdf", null, null);
+            DownloadFileNode node = new DownloadFileNode("mcp:download", "http://93.184.216.34/file.pdf", null, null);
             node.setFileDownloader(mockFileDownloader);
             // no fileStorageService set
 
@@ -402,13 +413,13 @@ class DownloadFileNodeTest {
                 .mimeTypeRegistry(mockMimeTypeRegistry)
                 .workflowRunRepository(mockRunRepository)
                 .build();
-            DownloadFileNode node = new DownloadFileNode("mcp:download", "http://example.com/real.png", "real.png", "image/png");
+            DownloadFileNode node = new DownloadFileNode("mcp:download", "http://93.184.216.34/real.png", "real.png", "image/png");
             node.acceptServices(registry);
             return node;
         }
 
         private org.mockito.ArgumentCaptor<Integer> stubUploadCapturingEpoch() throws Exception {
-            when(mockFileDownloader.download("http://example.com/real.png")).thenReturn("png-bytes".getBytes());
+            when(mockFileDownloader.download("http://93.184.216.34/real.png")).thenReturn("png-bytes".getBytes());
             org.mockito.ArgumentCaptor<Integer> epochCaptor = org.mockito.ArgumentCaptor.forClass(Integer.class);
             when(mockFileStorageService.upload(any(), any(), any(), any(), any(), any(), any(byte[].class),
                     epochCaptor.capture(), anyInt(), nullable(Integer.class), any()))

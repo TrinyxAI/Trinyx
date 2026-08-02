@@ -111,7 +111,9 @@ class PublicationListQueryServiceTest {
                 null,                           // 40 agent_model_name
                 "resource-1",                   // 41 resource_id
                 "a-description",                // 42 public_slug
-                "john-doe"                      // 43 publisher_handle
+                "john-doe",                     // 43 publisher_handle
+                false,                          // 44 ce_exclusive
+                null                            // 45 ce_exclusive_features (jsonb CAST to TEXT)
         };
     }
 
@@ -593,6 +595,70 @@ class PublicationListQueryServiceTest {
             assertThat(item.publisherName()).isNull();
             assertThat(item.planVersion()).isNull();
             assertThat(item.nodeIcons()).isNull();
+        }
+
+        @Test
+        @DisplayName("should map the CE-exclusive columns and expose them on the response")
+        void mapsCeExclusiveColumns() {
+            Object[] row = buildRow(UUID.randomUUID(), UUID.randomUUID(), "RAG App", null);
+            row[44] = true;                                  // ce_exclusive
+            row[45] = "[\"CLI_AGENT\",\"VECTOR_SEARCH\"]";   // ce_exclusive_features
+
+            stubForSimpleQuery(List.<Object[]>of(row));
+
+            PublicationListItem item = service.findByPublisher("pub-1").get(0);
+
+            assertThat(item.ceExclusive()).isTrue();
+            assertThat(item.toResponseMap())
+                    .containsEntry("ceExclusive", true)
+                    .containsEntry("ceExclusiveFeatures", List.of("CLI_AGENT", "VECTOR_SEARCH"));
+        }
+
+        @Test
+        @DisplayName("a non-exclusive row still emits ceExclusive=false and an EMPTY feature list")
+        void ceExclusiveDefaultsAreExplicit() {
+            // The UI must never have to guess: an absent key would read as unknown.
+            Object[] row = buildRow(UUID.randomUUID(), UUID.randomUUID(), "Plain App", null);
+
+            stubForSimpleQuery(List.<Object[]>of(row));
+
+            assertThat(service.findByPublisher("pub-1").get(0).toResponseMap())
+                    .containsEntry("ceExclusive", false)
+                    .containsEntry("ceExclusiveFeatures", List.of());
+        }
+
+        @Test
+        @DisplayName("a boolean column returned as a Number (H2) still maps to true")
+        void ceExclusiveAcceptsNumericBoolean() {
+            Object[] row = buildRow(UUID.randomUUID(), UUID.randomUUID(), "RAG App", null);
+            row[44] = 1;
+
+            stubForSimpleQuery(List.<Object[]>of(row));
+
+            assertThat(service.findByPublisher("pub-1").get(0).ceExclusive()).isTrue();
+        }
+
+        @Test
+        @DisplayName("a boolean returned TEXTUALLY maps on Postgres' own spellings, not just \"true\"")
+        void ceExclusiveAcceptsTextualBooleans() {
+            // Boolean.parseBoolean("t") is FALSE - taking that path would silently
+            // un-flag the row and offer the Install button on managed cloud.
+            for (Object truthy : List.of("t", "T", "1", "true", "TRUE")) {
+                Object[] row = buildRow(UUID.randomUUID(), UUID.randomUUID(), "RAG App", null);
+                row[44] = truthy;
+                stubForSimpleQuery(List.<Object[]>of(row));
+
+                assertThat(service.findByPublisher("pub-1").get(0).ceExclusive())
+                        .as("value %s", truthy).isTrue();
+            }
+            for (Object falsy : List.of("f", "0", "false")) {
+                Object[] row = buildRow(UUID.randomUUID(), UUID.randomUUID(), "Plain App", null);
+                row[44] = falsy;
+                stubForSimpleQuery(List.<Object[]>of(row));
+
+                assertThat(service.findByPublisher("pub-1").get(0).ceExclusive())
+                        .as("value %s", falsy).isFalse();
+            }
         }
     }
 

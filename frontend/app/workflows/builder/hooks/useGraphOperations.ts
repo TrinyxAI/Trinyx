@@ -11,41 +11,18 @@ import { BuilderNodeData, PaletteDragItem, PaletteItem, createDefaultDecisionCon
 import type { ConnectionType } from '../components/ConnectionTypeSelector';
 import { stripRuntimeProps } from '../utils/nodeDataUtils';
 import { nodeRegistry } from '../registry/nodeRegistry';
+import { isAncestor as isAncestorOverForwardEdges } from '../utils/backEdgeDetection';
 
 /**
- * Check if targetId is an ancestor of sourceId in the graph.
- * If true, an edge from source to target would be a back-edge.
- * Uses BFS from targetId following forward edges to see if sourceId is reachable.
+ * Check if targetId is an ancestor of sourceId, ignoring edges already known to be loop-backs.
+ * If true, an edge from source to target would close a loop.
  */
 function isAncestor(targetId: string, sourceId: string, edges: Edge[]): boolean {
-  // Build adjacency list (forward edges only)
-  const successors = new Map<string, Set<string>>();
-  for (const edge of edges) {
-    if (edge.data?.isBackEdge) continue; // skip existing back-edges
-    const sources = successors.get(edge.source) || new Set<string>();
-    sources.add(edge.target);
-    successors.set(edge.source, sources);
-  }
-
-  // BFS from target to see if we can reach source
-  const visited = new Set<string>();
-  const queue = [targetId];
-  visited.add(targetId);
-
-  while (queue.length > 0) {
-    const current = queue.shift()!;
-    if (current === sourceId) return true;
-    const succs = successors.get(current);
-    if (succs) {
-      for (const next of succs) {
-        if (!visited.has(next)) {
-          visited.add(next);
-          queue.push(next);
-        }
-      }
-    }
-  }
-  return false;
+  return isAncestorOverForwardEdges(
+    targetId,
+    sourceId,
+    edges.filter((edge) => !edge.data?.isBackEdge),
+  );
 }
 
 // Simple deep equality for plain data objects (no functions/cycles expected here)
@@ -244,10 +221,11 @@ export function useGraphOperations(
         const edgeData: Record<string, any> = {
           connectionType: reactFlowConnectionType,
         };
+        // Only the flag is stamped. condition and maxIterations stay undefined until the user
+        // sets them in the back-edge config panel - a hardcoded cap here would shadow the
+        // per-workflow and global max-iteration settings for every edge drawn in the builder.
         if (detectedBackEdge) {
           edgeData.isBackEdge = true;
-          edgeData.backEdgeCondition = '';
-          edgeData.backEdgeMaxIterations = 10;
         }
 
         return addEdge(
@@ -377,6 +355,10 @@ export function useGraphOperations(
         return [...updatedNodes, newNode];
       });
       setSelectedNodeIds([id]);
+      // Hand back the id: a caller that needs to act on the node it just created
+      // (pan onto it, wire it up) would otherwise guess it from the end of the
+      // nodes array, which is only correct until something else appends.
+      return id;
     },
     [setNodes, setSelectedNodeIds]
   );

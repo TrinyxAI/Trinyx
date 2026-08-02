@@ -784,7 +784,10 @@ public class UtilityNodeCreator extends CreatorBase {
         }
 
         // 2. Extract loop config
-        String condition = getString(parameters, "condition", "loop_condition", "expression", "while");
+        // "loopCondition" is the camelCase form the node help advertises and that
+        // workflow(action='modify') already accepts - read it here too, otherwise add_node would
+        // take the param and silently drop the condition, which is worse than rejecting it.
+        String condition = getString(parameters, "condition", "loopCondition", "loop_condition", "expression", "while");
         Integer maxIterations = getInt(parameters, "max_iterations", "maxIterations", "limit");
         if (maxIterations == null) maxIterations = 10;
         if (maxIterations < 1 || maxIterations > 10000) {

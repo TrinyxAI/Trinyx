@@ -130,6 +130,37 @@ class MonolithCeConfigContractTest {
     }
 
     @Test
+    @DisplayName("CE component scan excludes the cloud-only catalog-sync controller but keeps the bundle path mounted")
+    void componentScanExcludesCatalogSyncController() {
+        ComponentScan scan = MonolithApplication.class.getAnnotation(ComponentScan.class);
+
+        // The LiteLLM/OpenRouter sync is a CLOUD operation. Mounted in CE, an
+        // admin could POST ?mode=apply and let the feeds rewrite the local
+        // catalog - including renaming the curated seed display names
+        // ("Kimi K2.6" -> "kimi-k2.6"), which V416 cannot protect for rows a
+        // fresh CE seeds AFTER the migration ran. Asserted by FQCN so a rename
+        // or package move, which would silently turn the regex into a no-op,
+        // fails here instead of in production.
+        assertThat(matchesAnyExclude(scan,
+                "com.apimarketplace.agent.catalog.sync.ModelCatalogSyncController"))
+            .as("catalog-sync is cloud-only; CE receives the catalog via signed bundles and the seed")
+            .isTrue();
+
+        // Only the REST surface is filtered. CatalogBundleController is how CE
+        // legitimately receives catalog updates and must stay mounted, and
+        // BridgeModelDeriver lives in the same package as the excluded
+        // controller - a package-wide regex would take both out.
+        assertThat(matchesAnyExclude(scan,
+                "com.apimarketplace.agent.catalog.bundle.CatalogBundleController"))
+            .as("the bundle path is CE's supported route to catalog updates")
+            .isFalse();
+        assertThat(matchesAnyExclude(scan,
+                "com.apimarketplace.agent.catalog.sync.BridgeModelDeriver"))
+            .as("only the controller is excluded, not its whole package")
+            .isFalse();
+    }
+
+    @Test
     @DisplayName("application-ce.yml disables http.server.requests metrics to avoid high-cardinality URI tag warnings")
     @SuppressWarnings("unchecked")
     void ceDisablesHttpServerRequestMetrics() throws Exception {

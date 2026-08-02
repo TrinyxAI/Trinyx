@@ -17,6 +17,13 @@ import { useWorkflowMode } from '@/contexts/WorkflowModeContext';
 import { useWorkflowRunContext } from '@/contexts/WorkflowRunContext';
 import { useWorkflowEventBridge } from '@/components/views/workflow/hooks';
 import { streamDebug } from '@/contexts/workflow-run/streamingDebug';
+import {
+  makeEmptyRunPanelData,
+  publishRunPanelData,
+  RUN_PANEL_ACTION_EVENT,
+  type RunPanelActionDetail,
+} from '@/components/workflow/run-panel/runPanelBus';
+import { useDefaultEpochSelection } from '@/components/workflow/run-panel/useDefaultEpochSelection';
 
 // ============================================
 // Types
@@ -56,11 +63,6 @@ export interface WorkflowRunCanvasProps {
   executeTriggerRef?: React.MutableRefObject<((triggerId: string, triggerType: 'chat' | 'form' | 'webhook', payload: Record<string, any>) => Promise<string[] | undefined>) | null>;
   applicationActionRef?: React.MutableRefObject<((triggerRef: string, data: Record<string, unknown>) => Promise<void>) | null>;
   nodesRef?: React.MutableRefObject<Node<BuilderNodeData>[]>;
-
-  // Runs history (controlled by parent - panel lives outside canvas)
-  isRunsHistoryOpen?: boolean;
-  onOpenRunsHistory?: () => void;
-  onCloseRunsHistory?: () => void;
 }
 
 // ============================================
@@ -89,12 +91,9 @@ export function WorkflowRunCanvas({
   executeTriggerRef: externalExecuteTriggerRef,
   applicationActionRef: externalApplicationActionRef,
   nodesRef: externalNodesRef,
-  isRunsHistoryOpen = false,
-  onOpenRunsHistory,
-  onCloseRunsHistory,
 }: WorkflowRunCanvasProps) {
   const t = useTranslations('common');
-  const { mode: workflowMode, isPreviewOnly, setViewingEpoch } = useWorkflowMode();
+  const { mode: workflowMode, isPreviewOnly, viewingEpoch, setViewingEpoch, runId: contextRunId } = useWorkflowMode();
   const runContext = useWorkflowRunContext();
 
   // ── Diagnostic: confirm whether this component renders on the marketplace
@@ -115,37 +114,23 @@ export function WorkflowRunCanvas({
   const [epochTimestamps, setEpochTimestamps] = useState<Array<{ epoch: number; startedAt: string; endedAt: string | null }>>([]);
   const [streamedSteps, setStreamedSteps] = useState<any[] | undefined>(undefined);
   const [pinnedVersion, setPinnedVersion] = useState<number | null>(null);
-  const [latestPinnedRunId, setLatestPinnedRunId] = useState<string | null>(null);
 
-  // ── Fetch pinnedVersion + latestPinnedRunId when entering run mode ──
+  // ── Fetch pinnedVersion when entering run mode (drives the pin badge) ──
   useEffect(() => {
     if (workflowMode !== 'run' || !workflowId) return;
-    Promise.all([
-      orchestratorApi.listVersions(workflowId),
-      orchestratorApi.getPinnedWorkflowRun(workflowId),
-    ]).then(([vData, pinnedRun]) => {
-      setPinnedVersion(vData.pinnedVersion ?? null);
-      setLatestPinnedRunId(pinnedRun?.runId ?? null);
-    }).catch(() => {});
+    orchestratorApi.listVersions(workflowId)
+      .then((vData) => setPinnedVersion(vData.pinnedVersion ?? null))
+      .catch(() => {});
   }, [workflowMode, workflowId]);
 
   // ── Listen for pin/unpin changes from WorkflowVersionHistory ──
   useEffect(() => {
     const handler = (e: Event) => {
-      const detail = (e as CustomEvent).detail;
-      const pv = detail?.pinnedVersion ?? null;
-      setPinnedVersion(pv);
-      if (pv == null) {
-        setLatestPinnedRunId(null);
-      } else if (workflowId) {
-        orchestratorApi.getPinnedWorkflowRun(workflowId)
-          .then((pinnedRun) => setLatestPinnedRunId(pinnedRun?.runId ?? null))
-          .catch(() => {});
-      }
+      setPinnedVersion((e as CustomEvent).detail?.pinnedVersion ?? null);
     };
     window.addEventListener('workflowPinnedVersionChange', handler);
     return () => window.removeEventListener('workflowPinnedVersionChange', handler);
-  }, [workflowId]);
+  }, []);
 
   // ── Internal refs (use external if provided) ──
   const internalExecuteTriggerRef = useRef<((triggerId: string, triggerType: 'chat' | 'form' | 'webhook', payload: Record<string, any>) => Promise<string[] | undefined>) | null>(null);
@@ -229,6 +214,70 @@ export function WorkflowRunCanvas({
     }
   }, [currentRunInfo, runId, runContext]);
 
+  // ── The run the surfaces are bound to (URL run, in-place run, or the one the
+  // run info itself reports) ──
+  const activeRunId = currentRunInfo?.runId || currentRunInfo?.id || runId || contextRunId || null;
+
+  // ── Publish the run snapshot to the side-panel Run tab ──
+  // The panel lives in the app-layout tree (no shared provider), so the state
+  // travels through the run-panel bus, which also caches it for a panel that
+  // mounts later. Mirrors how trigger/application configs already reach it.
+  useEffect(() => {
+    if (!workflowId) return;
+    publishRunPanelData({
+      workflowId,
+      runId: activeRunId,
+      runInfo: currentRunInfo,
+      isStepByStep,
+      currentEpoch,
+      epochTimestamps,
+      streamedSteps,
+      pinnedVersion,
+      isPreviewOnly,
+    });
+  }, [workflowId, activeRunId, currentRunInfo, isStepByStep, currentEpoch, epochTimestamps, streamedSteps, pinnedVersion, isPreviewOnly]);
+
+  // Drop the cached snapshot when this canvas goes away. The cache exists so a
+  // panel mounting LATER is not empty; kept past the canvas's life it answers the
+  // next visit to the same workflow with the previous run, and the Run tab and the
+  // application carousel render that stale run for a frame before the new canvas
+  // publishes.
+  useEffect(() => {
+    if (!workflowId) return;
+    return () => { publishRunPanelData(makeEmptyRunPanelData(workflowId)); };
+  }, [workflowId]);
+
+  // ── Run actions requested from the panel (it cannot call these handlers) ──
+  useEffect(() => {
+    const handler = (event: Event) => {
+      const detail = (event as CustomEvent<RunPanelActionDetail>).detail;
+      if (!detail) return;
+      if (detail.workflowId && workflowId && detail.workflowId !== workflowId) return;
+      if (isPreviewOnly) return;
+      if (detail.action === 'stop') handleStopRun();
+      else if (detail.action === 'cancel') handleCancelRun();
+      else if (detail.action === 'reactivate') handleReactivateRun();
+    };
+    window.addEventListener(RUN_PANEL_ACTION_EVENT, handler);
+    return () => window.removeEventListener(RUN_PANEL_ACTION_EVENT, handler);
+  }, [workflowId, isPreviewOnly, handleStopRun, handleCancelRun, handleReactivateRun]);
+
+  // ── A run is always read through an epoch: seed the selection with the newest
+  // one and keep following new epochs until the user picks one explicitly ──
+  //
+  // This deliberately changes the canvas default from "all epochs" (aggregate)
+  // to "the latest epoch". Node badges therefore show that epoch's status rather
+  // than the cumulative counts, and the run panel reads its steps per epoch. That
+  // is the intent: a run is a sequence of fires, and "which fire am I looking at"
+  // should never be implicit. "All epochs" stays one click away in the selector.
+  useDefaultEpochSelection({
+    runId: activeRunId,
+    epochTimestamps,
+    selectedEpoch: viewingEpoch,
+    onSelectEpoch: setViewingEpoch,
+    enabled: workflowMode === 'run',
+  });
+
   return (
     <>
       {/* Workflow Mode Toggle (stop button hidden in preview) */}
@@ -239,18 +288,12 @@ export function WorkflowRunCanvas({
         showReadOnlyBadge={isPreviewOnly}
         currentRunInfo={currentRunInfo}
         isStepByStep={isStepByStep}
-        isRunsHistoryOpen={isRunsHistoryOpen}
-        onOpenRunsHistory={onOpenRunsHistory}
         onStop={isPreviewOnly ? undefined : handleStopRun}
         onCancel={isPreviewOnly || hideToggle ? undefined : handleCancelRun}
         onReactivate={isPreviewOnly ? undefined : handleReactivateRun}
-        canvasNodesRef={canvasNodesRef}
         currentEpoch={currentEpoch}
         epochTimestamps={epochTimestamps}
-        onViewEpoch={setViewingEpoch}
-        streamedSteps={streamedSteps}
         pinnedVersion={pinnedVersion}
-        latestPinnedRunId={latestPinnedRunId}
         isSettingsOpen={isSettingsOpen}
       />
 
@@ -270,9 +313,6 @@ export function WorkflowRunCanvas({
         applicationActionRef={applicationActionRef}
         saveRef={saveRef}
         nodesRef={canvasNodesRef}
-        isRunsHistoryOpen={isRunsHistoryOpen}
-        onOpenRunsHistory={onOpenRunsHistory}
-        onCloseRunsHistory={onCloseRunsHistory}
         onSettingsOpenChange={setIsSettingsOpen}
       />
     </>

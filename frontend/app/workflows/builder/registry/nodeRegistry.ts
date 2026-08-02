@@ -60,7 +60,7 @@ export type NodeKind =
   | 'convert_to_file'  // Convert JSON to file (CSV, XLSX, JSON, TXT)
   | 'extract_from_file' // Extract data from file (CSV, XLSX, JSON)
   | 'compare_datasets' // Compare two datasets (diff)
-  | 'sub_workflow'  // Execute another workflow as a function
+  | 'sub_workflow'  // Trigger another workflow that already has a live run
   | 'respond_to_webhook' // Control HTTP response to webhook caller
   | 'send_email' // Send email via SMTP
   | 'email_inbox' // Read a mailbox + act on messages via IMAP

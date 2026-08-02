@@ -211,6 +211,14 @@ public class CeDownloadController {
         if (agentSnapshot != null) {
             response.put("agentSnapshot", agentSnapshot);
         }
+        // CE-exclusive label. This endpoint deliberately does NOT gate on it: it
+        // runs on cloud but SERVES self-hosted installs, which is exactly the
+        // deployment such a publication needs. The flag is reported for the
+        // caller's information (the CE acquire path does not read it today, and
+        // must not start gating on it - that would re-block the very installs
+        // this endpoint exists to serve).
+        response.put("ceExclusive", publication.isCeExclusive());
+        response.put("ceExclusiveFeatures", publication.getCeExclusiveFeatures());
         return response;
     }
 

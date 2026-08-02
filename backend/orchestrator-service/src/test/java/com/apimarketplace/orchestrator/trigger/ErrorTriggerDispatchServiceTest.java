@@ -44,6 +44,9 @@ class ErrorTriggerDispatchServiceTest {
     private WorkflowRunRepository runRepository;
 
     @Mock
+    private ProductionRunResolver productionRunResolver;
+
+    @Mock
     private ReusableTriggerService triggerService;
 
     private ErrorTriggerDispatchService service;
@@ -57,7 +60,27 @@ class ErrorTriggerDispatchServiceTest {
 
     @BeforeEach
     void setUp() {
-        service = new ErrorTriggerDispatchService(triggerLookupService, runRepository, triggerService);
+        service = new ErrorTriggerDispatchService(
+            triggerLookupService, runRepository, productionRunResolver, triggerService);
+    }
+
+    /** The handler has a fireable run: what {@code resolveActiveRun} returns on the happy path. */
+    private void stubActiveRun(WorkflowRunEntity run) {
+        when(productionRunResolver.resolveActiveRun(any(WorkflowEntity.class), anyList()))
+            .thenReturn(new ProductionRunResolver.Resolution(
+                Optional.of(run), ProductionRunResolver.Outcome.FOUND, "Error Handler Workflow"));
+    }
+
+    /**
+     * The handler has no fireable run. This single outcome now covers what used to be two
+     * distinct code paths in the service: "no run row at all" and "the newest run is
+     * terminal". The resolver filters on status inside the query, so a terminal run is
+     * simply not selected instead of being selected and then rejected.
+     */
+    private void stubNoActiveRun() {
+        when(productionRunResolver.resolveActiveRun(any(WorkflowEntity.class), anyList()))
+            .thenReturn(new ProductionRunResolver.Resolution(
+                Optional.empty(), ProductionRunResolver.Outcome.NO_PRODUCTION_RUN, "Error Handler Workflow"));
     }
 
     /**
@@ -92,16 +115,38 @@ class ErrorTriggerDispatchServiceTest {
         return execution;
     }
 
-    private WorkflowRunEntity createParentRunEntity(Map<String, Object> plan) {
+    /**
+     * The parent run, shaped like production: {@code getWorkflow()} returns a LAZY proxy
+     * whose only safe accessor off-session is {@code getId()}. The workspace columns are
+     * read from the RUN, which carries them (NOT NULL since V263).
+     *
+     * @param workflowFieldsUsable when false, every non-id accessor on the workflow proxy
+     *                             throws like an uninitialised Hibernate proxy does on the
+     *                             {@code @Async} dispatch thread.
+     */
+    private WorkflowRunEntity createParentRunEntity(Map<String, Object> plan, boolean workflowFieldsUsable) {
         WorkflowRunEntity runEntity = mock(WorkflowRunEntity.class);
         WorkflowEntity workflow = mock(WorkflowEntity.class);
         when(workflow.getId()).thenReturn(PARENT_WORKFLOW_ID);
-        when(workflow.getTenantId()).thenReturn(TENANT_ID);
-        when(workflow.getOrganizationId()).thenReturn(null);
+        if (workflowFieldsUsable) {
+            lenient().when(workflow.getTenantId()).thenReturn(TENANT_ID);
+            lenient().when(workflow.getOrganizationId()).thenReturn(null);
+        } else {
+            lenient().when(workflow.getTenantId()).thenThrow(
+                new org.hibernate.LazyInitializationException("could not initialize proxy - no Session"));
+            lenient().when(workflow.getOrganizationId()).thenThrow(
+                new org.hibernate.LazyInitializationException("could not initialize proxy - no Session"));
+        }
         when(runEntity.getWorkflow()).thenReturn(workflow);
         when(runEntity.getPlan()).thenReturn(plan);
         when(runEntity.getRunIdPublic()).thenReturn(PARENT_RUN_ID);
+        lenient().when(runEntity.getTenantId()).thenReturn(TENANT_ID);
+        lenient().when(runEntity.getOrganizationId()).thenReturn(null);
         return runEntity;
+    }
+
+    private WorkflowRunEntity createParentRunEntity(Map<String, Object> plan) {
+        return createParentRunEntity(plan, true);
     }
 
     private WorkflowRunEntity createDownstreamRunEntity(Map<String, Object> plan) {
@@ -150,8 +195,7 @@ class ErrorTriggerDispatchServiceTest {
             Map<String, Object> downstreamPlan = buildPlanWithTrigger("error", PARENT_WORKFLOW_ID.toString());
             WorkflowRunEntity downstreamRun = createDownstreamRunEntity(downstreamPlan);
             when(runRepository.countByWorkflowIdAndStatus(DOWNSTREAM_WORKFLOW_ID, RunStatus.RUNNING)).thenReturn(0L);
-            when(runRepository.findFirstByWorkflowIdOrderByStartedAtDesc(DOWNSTREAM_WORKFLOW_ID))
-                .thenReturn(Optional.of(downstreamRun));
+            stubActiveRun(downstreamRun);
 
             TriggerExecutionResult triggerResult = TriggerExecutionResult.success(
                 DOWNSTREAM_RUN_ID, "trigger:error_handler", TriggerType.ERROR, Set.of(), 1);
@@ -179,8 +223,7 @@ class ErrorTriggerDispatchServiceTest {
             Map<String, Object> downstreamPlan = buildPlanWithTrigger("error", PARENT_WORKFLOW_ID.toString());
             WorkflowRunEntity downstreamRun = createDownstreamRunEntity(downstreamPlan);
             when(runRepository.countByWorkflowIdAndStatus(DOWNSTREAM_WORKFLOW_ID, RunStatus.RUNNING)).thenReturn(0L);
-            when(runRepository.findFirstByWorkflowIdOrderByStartedAtDesc(DOWNSTREAM_WORKFLOW_ID))
-                .thenReturn(Optional.of(downstreamRun));
+            stubActiveRun(downstreamRun);
 
             TriggerExecutionResult triggerResult = TriggerExecutionResult.success(
                 DOWNSTREAM_RUN_ID, "trigger:error_handler", TriggerType.ERROR, Set.of(), 1);
@@ -262,8 +305,7 @@ class ErrorTriggerDispatchServiceTest {
             when(triggerLookupService.findByErrorTrigger(PARENT_WORKFLOW_ID.toString()))
                 .thenReturn(List.of(downstream));
             when(runRepository.countByWorkflowIdAndStatus(DOWNSTREAM_WORKFLOW_ID, RunStatus.RUNNING)).thenReturn(0L);
-            when(runRepository.findFirstByWorkflowIdOrderByStartedAtDesc(DOWNSTREAM_WORKFLOW_ID))
-                .thenReturn(Optional.empty());
+            stubNoActiveRun();
 
             service.dispatchWorkflowFailure(execution);
 
@@ -335,8 +377,7 @@ class ErrorTriggerDispatchServiceTest {
             Map<String, Object> downstreamPlan = buildPlanWithTrigger("error", PARENT_WORKFLOW_ID.toString());
             WorkflowRunEntity downstreamRun = createDownstreamRunEntity(downstreamPlan);
             when(runRepository.countByWorkflowIdAndStatus(DOWNSTREAM_WORKFLOW_ID, RunStatus.RUNNING)).thenReturn(0L);
-            when(runRepository.findFirstByWorkflowIdOrderByStartedAtDesc(DOWNSTREAM_WORKFLOW_ID))
-                .thenReturn(Optional.of(downstreamRun));
+            stubActiveRun(downstreamRun);
 
             TriggerExecutionResult triggerResult = TriggerExecutionResult.success(
                 DOWNSTREAM_RUN_ID, "trigger:error_handler", TriggerType.ERROR, Set.of(), 1);
@@ -369,104 +410,83 @@ class ErrorTriggerDispatchServiceTest {
         }
     }
 
+    /**
+     * Run resolution moved from a hand-rolled repository lookup to
+     * {@link ProductionRunResolver#resolveActiveRun}. These tests pin the SEAM: the
+     * service must ask the resolver and must never fall back to the raw, unfiltered
+     * queries it used before.
+     *
+     * <p>The behaviour BEHIND the seam is pinned elsewhere: version scoping, FK
+     * preference and the pin-optional contract in
+     * {@code ProductionRunResolverTest.ResolveActiveRunTests}; the SQL-level status
+     * filtering, showcase exclusion and the CANCELLED-shadowing regression in
+     * {@code WorkflowRunRepositoryIntegrationTest} (nested {@code ProductionRunsBatch},
+     * {@code cancelledRunDoesNotShadowWaitingTrigger}).
+     */
     @Nested
-    @DisplayName("Version-Aware Dispatch")
-    class VersionAwareDispatchTests {
+    @DisplayName("Run resolution is delegated to ProductionRunResolver")
+    class RunResolutionDelegationTests {
 
-        @Test
-        @DisplayName("Pinned downstream: should find run by version")
-        void pinnedFindsRunByVersion() {
+        private WorkflowExecution arrangeFailure(WorkflowEntity downstream) {
             Map<String, Object> parentPlan = buildPlanWithTrigger("manual", "start");
             WorkflowRunEntity parentRun = createParentRunEntity(parentPlan);
             WorkflowExecution execution = createFailedExecution(RunStatus.FAILED);
             when(runRepository.findById(PARENT_WORKFLOW_RUN_ID)).thenReturn(Optional.of(parentRun));
-
-            WorkflowEntity downstream = createDownstreamWorkflow(5);
             when(triggerLookupService.findByErrorTrigger(PARENT_WORKFLOW_ID.toString()))
                     .thenReturn(List.of(downstream));
-
-            Map<String, Object> downstreamPlan = buildPlanWithTrigger("error", PARENT_WORKFLOW_ID.toString());
-            WorkflowRunEntity downstreamRun = createDownstreamRunEntity(downstreamPlan);
             when(runRepository.countByWorkflowIdAndStatus(DOWNSTREAM_WORKFLOW_ID, RunStatus.RUNNING)).thenReturn(0L);
-            when(runRepository.findFirstByWorkflowIdAndPlanVersionOrderByStartedAtDesc(DOWNSTREAM_WORKFLOW_ID, 5))
-                    .thenReturn(Optional.of(downstreamRun));
+            return execution;
+        }
+
+        @Test
+        @DisplayName("REGRESSION: never uses the raw unfiltered run queries - a newer terminal run can no longer shadow a healthy one")
+        void neverUsesRawUnfilteredQueries() {
+            WorkflowEntity downstream = createDownstreamWorkflow(5);
+            WorkflowExecution execution = arrangeFailure(downstream);
+
+            WorkflowRunEntity downstreamRun = createDownstreamRunEntity(
+                    buildPlanWithTrigger("error", PARENT_WORKFLOW_ID.toString()));
+            stubActiveRun(downstreamRun);
             when(triggerService.executeTrigger(eq(downstreamRun), any(), eq(TriggerType.ERROR), any()))
                     .thenReturn(TriggerExecutionResult.success(DOWNSTREAM_RUN_ID, "trigger:error_handler", TriggerType.ERROR, Set.of(), 1));
 
             service.dispatchWorkflowFailure(execution);
 
-            verify(runRepository).findFirstByWorkflowIdAndPlanVersionOrderByStartedAtDesc(DOWNSTREAM_WORKFLOW_ID, 5);
-            verify(runRepository, never()).findFirstByWorkflowIdOrderByStartedAtDesc(DOWNSTREAM_WORKFLOW_ID);
+            // The error lane must keep accepting every NON-TERMINAL status, including
+            // AWAITING_SIGNAL / PENDING: a handler parked on an approval is still live,
+            // and that is exactly what the pre-fix "reject isTerminal()" check allowed.
+            verify(productionRunResolver).resolveActiveRun(eq(downstream), eq(ProductionRunResolver.NON_TERMINAL_STATUSES));
+            // These two are the pre-fix lookups. Both order by started_at with no status
+            // predicate, which is what let a cancelled editor test permanently kill the
+            // error handler. They must never run again.
+            verify(runRepository, never()).findFirstByWorkflowIdOrderByStartedAtDesc(any());
+            verify(runRepository, never()).findFirstByWorkflowIdAndPlanVersionOrderByStartedAtDesc(any(), any());
             verify(triggerService).executeTrigger(eq(downstreamRun), any(), eq(TriggerType.ERROR), any());
         }
 
         @Test
-        @DisplayName("Pinned downstream: no matching run → skip dispatch")
-        void pinnedNoMatchSkipsDispatch() {
-            Map<String, Object> parentPlan = buildPlanWithTrigger("manual", "start");
-            WorkflowRunEntity parentRun = createParentRunEntity(parentPlan);
-            WorkflowExecution execution = createFailedExecution(RunStatus.FAILED);
-            when(runRepository.findById(PARENT_WORKFLOW_RUN_ID)).thenReturn(Optional.of(parentRun));
+        @DisplayName("Unpinned downstream: resolver still answers, dispatch proceeds (pin stays optional for error handlers)")
+        void unpinnedDownstreamStillDispatches() {
+            WorkflowEntity downstream = createDownstreamWorkflow(null);
+            WorkflowExecution execution = arrangeFailure(downstream);
 
-            WorkflowEntity downstream = createDownstreamWorkflow(5);
-            when(triggerLookupService.findByErrorTrigger(PARENT_WORKFLOW_ID.toString()))
-                    .thenReturn(List.of(downstream));
-            when(runRepository.countByWorkflowIdAndStatus(DOWNSTREAM_WORKFLOW_ID, RunStatus.RUNNING)).thenReturn(0L);
-            when(runRepository.findFirstByWorkflowIdAndPlanVersionOrderByStartedAtDesc(DOWNSTREAM_WORKFLOW_ID, 5))
-                    .thenReturn(Optional.empty());
-
-            service.dispatchWorkflowFailure(execution);
-
-            verifyNoInteractions(triggerService);
-        }
-
-        @Test
-        @DisplayName("Pinned v0: zero is a valid version")
-        void pinnedVersionZeroIsValid() {
-            Map<String, Object> parentPlan = buildPlanWithTrigger("manual", "start");
-            WorkflowRunEntity parentRun = createParentRunEntity(parentPlan);
-            WorkflowExecution execution = createFailedExecution(RunStatus.FAILED);
-            when(runRepository.findById(PARENT_WORKFLOW_RUN_ID)).thenReturn(Optional.of(parentRun));
-
-            WorkflowEntity downstream = createDownstreamWorkflow(0);
-            when(triggerLookupService.findByErrorTrigger(PARENT_WORKFLOW_ID.toString()))
-                    .thenReturn(List.of(downstream));
-
-            Map<String, Object> downstreamPlan = buildPlanWithTrigger("error", PARENT_WORKFLOW_ID.toString());
-            WorkflowRunEntity downstreamRun = createDownstreamRunEntity(downstreamPlan);
-            when(runRepository.countByWorkflowIdAndStatus(DOWNSTREAM_WORKFLOW_ID, RunStatus.RUNNING)).thenReturn(0L);
-            when(runRepository.findFirstByWorkflowIdAndPlanVersionOrderByStartedAtDesc(DOWNSTREAM_WORKFLOW_ID, 0))
-                    .thenReturn(Optional.of(downstreamRun));
+            WorkflowRunEntity downstreamRun = createDownstreamRunEntity(
+                    buildPlanWithTrigger("error", PARENT_WORKFLOW_ID.toString()));
+            stubActiveRun(downstreamRun);
             when(triggerService.executeTrigger(eq(downstreamRun), any(), eq(TriggerType.ERROR), any()))
                     .thenReturn(TriggerExecutionResult.success(DOWNSTREAM_RUN_ID, "trigger:error_handler", TriggerType.ERROR, Set.of(), 1));
 
             service.dispatchWorkflowFailure(execution);
 
-            verify(runRepository).findFirstByWorkflowIdAndPlanVersionOrderByStartedAtDesc(DOWNSTREAM_WORKFLOW_ID, 0);
+            verify(triggerService).executeTrigger(eq(downstreamRun), any(), eq(TriggerType.ERROR), any());
         }
-    }
-
-    @Nested
-    @DisplayName("Terminal Run Rejection")
-    class TerminalRunRejectionTests {
 
         @Test
-        @DisplayName("CANCELLED downstream run → skip dispatch")
-        void cancelledRunSkipsDispatch() {
-            Map<String, Object> parentPlan = buildPlanWithTrigger("manual", "start");
-            WorkflowRunEntity parentRun = createParentRunEntity(parentPlan);
-            WorkflowExecution execution = createFailedExecution(RunStatus.FAILED);
-            when(runRepository.findById(PARENT_WORKFLOW_RUN_ID)).thenReturn(Optional.of(parentRun));
-
-            WorkflowEntity downstream = createDownstreamWorkflow();
-            when(triggerLookupService.findByErrorTrigger(PARENT_WORKFLOW_ID.toString()))
-                    .thenReturn(List.of(downstream));
-            when(runRepository.countByWorkflowIdAndStatus(DOWNSTREAM_WORKFLOW_ID, RunStatus.RUNNING)).thenReturn(0L);
-
-            WorkflowRunEntity cancelledRun = createDownstreamRunEntity(
-                    buildPlanWithTrigger("error", PARENT_WORKFLOW_ID.toString()), RunStatus.CANCELLED);
-            when(runRepository.findFirstByWorkflowIdOrderByStartedAtDesc(DOWNSTREAM_WORKFLOW_ID))
-                    .thenReturn(Optional.of(cancelledRun));
+        @DisplayName("NO_PRODUCTION_RUN → skip dispatch (covers both 'no run at all' and 'only terminal runs')")
+        void noProductionRunSkipsDispatch() {
+            WorkflowEntity downstream = createDownstreamWorkflow(5);
+            WorkflowExecution execution = arrangeFailure(downstream);
+            stubNoActiveRun();
 
             service.dispatchWorkflowFailure(execution);
 
@@ -474,10 +494,15 @@ class ErrorTriggerDispatchServiceTest {
         }
 
         @Test
-        @DisplayName("TIMEOUT downstream run → skip dispatch")
-        void timeoutRunSkipsDispatch() {
+        @DisplayName("REGRESSION: dispatch works when the parent workflow is an uninitialised lazy proxy")
+        void dispatchesWhenParentWorkflowProxyCannotInitialise() {
+            // dispatchEpochFailure is @Async and open-in-view is off, so runEntity.getWorkflow()
+            // hands back a proxy that throws on every field but the id. Reading the parent's
+            // workspace off that proxy made the whole dispatch die in the outer catch: from
+            // 2026-05-17 until this fix, NO error handler ever fired in production, and the
+            // only trace was one ERROR line per failure.
             Map<String, Object> parentPlan = buildPlanWithTrigger("manual", "start");
-            WorkflowRunEntity parentRun = createParentRunEntity(parentPlan);
+            WorkflowRunEntity parentRun = createParentRunEntity(parentPlan, false);
             WorkflowExecution execution = createFailedExecution(RunStatus.FAILED);
             when(runRepository.findById(PARENT_WORKFLOW_RUN_ID)).thenReturn(Optional.of(parentRun));
 
@@ -486,10 +511,25 @@ class ErrorTriggerDispatchServiceTest {
                     .thenReturn(List.of(downstream));
             when(runRepository.countByWorkflowIdAndStatus(DOWNSTREAM_WORKFLOW_ID, RunStatus.RUNNING)).thenReturn(0L);
 
-            WorkflowRunEntity timeoutRun = createDownstreamRunEntity(
-                    buildPlanWithTrigger("error", PARENT_WORKFLOW_ID.toString()), RunStatus.TIMEOUT);
-            when(runRepository.findFirstByWorkflowIdOrderByStartedAtDesc(DOWNSTREAM_WORKFLOW_ID))
-                    .thenReturn(Optional.of(timeoutRun));
+            WorkflowRunEntity downstreamRun = createDownstreamRunEntity(
+                    buildPlanWithTrigger("error", PARENT_WORKFLOW_ID.toString()));
+            stubActiveRun(downstreamRun);
+            when(triggerService.executeTrigger(eq(downstreamRun), any(), eq(TriggerType.ERROR), any()))
+                    .thenReturn(TriggerExecutionResult.success(DOWNSTREAM_RUN_ID, "trigger:error_handler", TriggerType.ERROR, Set.of(), 1));
+
+            service.dispatchWorkflowFailure(execution);
+
+            verify(triggerService).executeTrigger(eq(downstreamRun), any(), eq(TriggerType.ERROR), any());
+        }
+
+        @Test
+        @DisplayName("WORKFLOW_MISSING → skip dispatch")
+        void workflowMissingSkipsDispatch() {
+            WorkflowEntity downstream = createDownstreamWorkflow(5);
+            WorkflowExecution execution = arrangeFailure(downstream);
+            when(productionRunResolver.resolveActiveRun(any(WorkflowEntity.class), anyList()))
+                    .thenReturn(new ProductionRunResolver.Resolution(
+                            Optional.empty(), ProductionRunResolver.Outcome.WORKFLOW_MISSING, null));
 
             service.dispatchWorkflowFailure(execution);
 
@@ -574,8 +614,7 @@ class ErrorTriggerDispatchServiceTest {
             Map<String, Object> downstreamPlan = buildPlanWithTrigger("error", PARENT_WORKFLOW_ID.toString());
             WorkflowRunEntity downstreamRun = createDownstreamRunEntity(downstreamPlan);
             when(runRepository.countByWorkflowIdAndStatus(DOWNSTREAM_WORKFLOW_ID, RunStatus.RUNNING)).thenReturn(0L);
-            when(runRepository.findFirstByWorkflowIdOrderByStartedAtDesc(DOWNSTREAM_WORKFLOW_ID))
-                .thenReturn(Optional.of(downstreamRun));
+            stubActiveRun(downstreamRun);
 
             TriggerExecutionResult triggerResult = TriggerExecutionResult.success(
                 DOWNSTREAM_RUN_ID, "trigger:error_handler", TriggerType.ERROR, Set.of(), 1);
@@ -608,8 +647,7 @@ class ErrorTriggerDispatchServiceTest {
             Map<String, Object> downstreamPlan = buildPlanWithTrigger("error", PARENT_WORKFLOW_ID.toString());
             WorkflowRunEntity downstreamRun = createDownstreamRunEntity(downstreamPlan);
             when(runRepository.countByWorkflowIdAndStatus(DOWNSTREAM_WORKFLOW_ID, RunStatus.RUNNING)).thenReturn(0L);
-            when(runRepository.findFirstByWorkflowIdOrderByStartedAtDesc(DOWNSTREAM_WORKFLOW_ID))
-                .thenReturn(Optional.of(downstreamRun));
+            stubActiveRun(downstreamRun);
 
             TriggerExecutionResult triggerResult = TriggerExecutionResult.success(
                 DOWNSTREAM_RUN_ID, "trigger:error_handler", TriggerType.ERROR, Set.of(), 1);

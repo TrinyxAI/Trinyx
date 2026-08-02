@@ -26,7 +26,13 @@ vi.mock('@/components/marketplace/AcquirePublicationModal', () => ({
 // Controllable CE-cloud state so we can exercise both the local and the
 // cloud-linked routing of the self-fetched publication.
 const cloud = vi.hoisted(() => ({ isCe: false, isCloudLinked: false, isInstallCloudLinked: false }));
-vi.mock('@/lib/edition', () => ({ get IS_CE() { return cloud.isCe; } }));
+// IS_MANAGED_CLOUD mirrors IS_CE here: the component reads it to decide whether
+// a CE-exclusive publication may be installed at all.
+vi.mock('@/lib/edition', () => ({
+  get IS_CE() { return cloud.isCe; },
+  get IS_CLOUD() { return !cloud.isCe; },
+  get IS_MANAGED_CLOUD() { return !cloud.isCe; },
+}));
 vi.mock('@/hooks/useCeCloudLinkStatus', () => ({
   useCeCloudLinkStatus: () => ({ isCloudLinked: cloud.isCloudLinked, isInstallCloudLinked: cloud.isInstallCloudLinked, isLoading: false, status: null }),
 }));
@@ -82,6 +88,41 @@ describe('MarketplaceHeaderActions - credit shimmer', () => {
     const { container, findByRole } = render(<MarketplaceHeaderActions publicationId="p2" />);
     await findByRole('button');
     expect(container.querySelector('span[aria-hidden="true"]')).toBeTruthy();
+  });
+});
+
+describe('MarketplaceHeaderActions - CE-exclusive publications', () => {
+  it('managed cloud: the price/Install button is replaced by the self-hosted-only badge', async () => {
+    // cloud.isCe stays false => IS_MANAGED_CLOUD true.
+    getPublicationByIdPublic.mockResolvedValue({
+      id: 'p1', creditsPerUse: 0, publicationType: 'WORKFLOW',
+      ceExclusive: true, ceExclusiveFeatures: ['CLI_AGENT'],
+    });
+    const { findByTestId, queryByRole } = render(<MarketplaceHeaderActions publicationId="p1" />);
+
+    expect(await findByTestId('ce-exclusive-badge')).toBeTruthy();
+    // No button at all: nothing here can start an install the backend accepts.
+    expect(queryByRole('button')).toBeNull();
+  });
+
+  it('self-hosted: the same publication keeps its Install button', async () => {
+    cloud.isCe = true;
+    getPublicationByIdPublic.mockResolvedValue({
+      id: 'p1', creditsPerUse: 0, publicationType: 'WORKFLOW',
+      ceExclusive: true, ceExclusiveFeatures: ['CLI_AGENT'],
+    });
+    const { findByRole, queryByTestId } = render(<MarketplaceHeaderActions publicationId="p1" />);
+
+    expect(await findByRole('button')).toBeTruthy();
+    expect(queryByTestId('ce-exclusive-badge')).toBeNull();
+  });
+
+  it('managed cloud: a normal publication keeps its Install button', async () => {
+    getPublicationByIdPublic.mockResolvedValue({ id: 'p1', creditsPerUse: 0, publicationType: 'WORKFLOW' });
+    const { findByRole, queryByTestId } = render(<MarketplaceHeaderActions publicationId="p1" />);
+
+    expect(await findByRole('button')).toBeTruthy();
+    expect(queryByTestId('ce-exclusive-badge')).toBeNull();
   });
 });
 

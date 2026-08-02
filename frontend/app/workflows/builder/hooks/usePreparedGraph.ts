@@ -5,6 +5,7 @@ import { normalizeLabel } from '../utils/labelNormalizer';
 import { ConnectionType } from '../components/ConnectionTypeSelector';
 import { useValidationOptional } from '../contexts/ValidationContext';
 import { nodeRegistry } from '../registry/nodeRegistry';
+import { withDerivedBackEdges } from '../utils/backEdgeDetection';
 
 /**
  * Prepares nodes and edges for rendering in React Flow.
@@ -255,9 +256,15 @@ export function usePreparedGraph(
       }
     }
 
+    // Which edges close a loop, recomputed from the graph so the flag cannot go stale when
+    // edges are added or deleted after the loop-back was drawn. The SAME function decides this
+    // at save time (generateWorkflowPlan), so the orange edge on screen and the loop the engine
+    // is told to run can never disagree.
+    const classifiedEdges = withDerivedBackEdges(edges);
+
     // Deduplicate edges and apply current connection type
     const seenEdgeIds = new Set<string>();
-    const updatedEdges = edges.filter((e) => {
+    const updatedEdges = classifiedEdges.filter((e) => {
       if (seenEdgeIds.has(e.id)) return false;
       seenEdgeIds.add(e.id);
       return true;

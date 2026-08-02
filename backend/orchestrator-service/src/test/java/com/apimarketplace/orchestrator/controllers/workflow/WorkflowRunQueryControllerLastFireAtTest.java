@@ -139,6 +139,59 @@ class WorkflowRunQueryControllerLastFireAtTest {
     @Test
     @DisplayName("listRuns leaves lastFireAt null for runs with no fired epoch (single-shot)")
     @SuppressWarnings("unchecked")
+    void listRunsThreadsLastEpochDuration() {
+        // WorkflowRunSummary is a 16-component POSITIONAL record: handing the wrong
+        // map to the mapper compiles and yields a plausible number. Asserting the
+        // duration and the fire TIME stay distinct is what makes the wiring provable.
+        Instant lastFire = Instant.now().minusSeconds(3_600);
+        WorkflowRunSummaryProjection dp = projection(RUN_ID_PUBLIC, Instant.now().minusSeconds(86_400));
+        Page<WorkflowRunSummaryProjection> dpage = new PageImpl<>(List.of(dp), Pageable.ofSize(15), 1);
+
+        when(workflowRunRepository.findRunSummariesByWorkflowIdInScope(
+                eq(WORKFLOW_ID), eq(OWNER), any(), any(Pageable.class)))
+                .thenReturn(dpage);
+        when(workflowEpochRepository.getMaxEpochByRunIds(anyList()))
+                .thenReturn(Map.of(RUN_ID_PUBLIC, 12));
+        when(workflowEpochRepository.getLatestEpochStartedAtByRunIds(anyList()))
+                .thenReturn(Map.of(RUN_ID_PUBLIC, lastFire));
+        when(workflowEpochRepository.getLatestEpochDurationByRunIds(anyList()))
+                .thenReturn(Map.of(RUN_ID_PUBLIC, 7_000L));
+
+        ResponseEntity<List<WorkflowRunSummary>> dresponse =
+                (ResponseEntity<List<WorkflowRunSummary>>) (ResponseEntity<?>)
+                        controller.listRuns(WORKFLOW_ID, 15, 0, OWNER, null);
+
+        WorkflowRunSummary dsummary = dresponse.getBody().get(0);
+        assertThat(dsummary.lastEpochDurationMs()).isEqualTo(7_000L);
+        assertThat(dsummary.lastFireAt()).isEqualTo(lastFire);
+    }
+
+    @Test
+    @DisplayName("listRuns leaves lastEpochDurationMs null when no epoch has closed yet")
+    @SuppressWarnings("unchecked")
+    void listRunsLeavesLastEpochDurationNullWhenNoneClosed() {
+        // An epoch still executing has no settled figure; null keeps the column
+        // blank instead of claiming the run took no time at all.
+        WorkflowRunSummaryProjection np = projection(RUN_ID_PUBLIC, Instant.now().minusSeconds(60));
+        Page<WorkflowRunSummaryProjection> npage = new PageImpl<>(List.of(np), Pageable.ofSize(15), 1);
+
+        when(workflowRunRepository.findRunSummariesByWorkflowIdInScope(
+                eq(WORKFLOW_ID), eq(OWNER), any(), any(Pageable.class)))
+                .thenReturn(npage);
+        when(workflowEpochRepository.getMaxEpochByRunIds(anyList())).thenReturn(Map.of());
+        when(workflowEpochRepository.getLatestEpochStartedAtByRunIds(anyList())).thenReturn(Map.of());
+        when(workflowEpochRepository.getLatestEpochDurationByRunIds(anyList())).thenReturn(Map.of());
+
+        ResponseEntity<List<WorkflowRunSummary>> nresponse =
+                (ResponseEntity<List<WorkflowRunSummary>>) (ResponseEntity<?>)
+                        controller.listRuns(WORKFLOW_ID, 15, 0, OWNER, null);
+
+        assertThat(nresponse.getBody().get(0).lastEpochDurationMs()).isNull();
+    }
+
+    @Test
+    @DisplayName("listRuns leaves lastFireAt null for runs with no fired epoch (single-shot)")
+    @SuppressWarnings("unchecked")
     void listRunsLeavesLastFireAtNullWhenNoEpochsFired() {
         Instant runBirth = Instant.now().minusSeconds(60);
 

@@ -6,6 +6,7 @@ import { Play, Bug } from 'lucide-react';
 import { useTranslations } from 'next-intl';
 import { cn } from '@/lib/utils';
 import { useCanMutateInCurrentOrg } from '@/lib/stores/current-org-store';
+import { usePortalMenu } from '../../hooks/usePortalMenu';
 import type { TriggerButtonVariant } from '../NodePlayButton';
 
 interface TriggerEditLaunchButtonProps {
@@ -52,66 +53,23 @@ export function TriggerEditLaunchButton({ nodeId, variant, borderColor }: Trigge
   // run auto-saves the plan and the backend 403s VIEWER, so the launcher hides
   // (useWorkflowExecution also no-ops the events as a second line of defense).
   const canMutate = useCanMutateInCurrentOrg();
-  const [open, setOpen] = React.useState(false);
-  const [rect, setRect] = React.useState<{ left: number; top: number } | null>(null);
-  const buttonRef = React.useRef<HTMLButtonElement>(null);
-  const panelRef = React.useRef<HTMLDivElement>(null);
-  const [mounted, setMounted] = React.useState(false);
-
-  React.useEffect(() => { setMounted(true); return () => setMounted(false); }, []);
-
-  const toggle = React.useCallback((e: React.MouseEvent) => {
-    e.stopPropagation();
-    const btn = buttonRef.current;
-    if (!btn) return;
-    if (open) { setOpen(false); return; }
-    const r = btn.getBoundingClientRect();
-    // Anchor the menu just below the button, centered on its horizontal axis.
-    setRect({ left: r.left + r.width / 2, top: r.bottom + 6 });
-    setOpen(true);
-  }, [open]);
-
-  React.useEffect(() => {
-    if (!open) return;
-    // Capture phase so we run BEFORE React Flow's pane handlers can stop
-    // propagation - otherwise clicking the canvas wouldn't bubble to the
-    // document listener and the menu would stay open.
-    const onPointerDown = (e: Event) => {
-      const target = e.target as Node;
-      if (buttonRef.current?.contains(target)) return;
-      if (panelRef.current?.contains(target)) return;
-      setOpen(false);
-    };
-    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setOpen(false); };
-    const onDismiss = () => setOpen(false);
-    document.addEventListener('mousedown', onPointerDown, true);
-    document.addEventListener('pointerdown', onPointerDown, true);
-    document.addEventListener('keydown', onKey);
-    window.addEventListener('scroll', onDismiss, true);
-    window.addEventListener('resize', onDismiss);
-    return () => {
-      document.removeEventListener('mousedown', onPointerDown, true);
-      document.removeEventListener('pointerdown', onPointerDown, true);
-      document.removeEventListener('keydown', onKey);
-      window.removeEventListener('scroll', onDismiss, true);
-      window.removeEventListener('resize', onDismiss);
-    };
-  }, [open]);
+  // Anchored just below the button, centered on its horizontal axis.
+  const { open, isVisible, toggle, close, triggerRef, menuRef, menuStyle } = usePortalMenu('below');
 
   const startAuto = React.useCallback(() => {
-    setOpen(false);
+    close();
     // Auto mode: enter run mode and fire THIS trigger directly. handleStartEvent
     // fires only the selected trigger (no-payload types) when startFromNode is set;
     // the header run button sends no startFromNode and keeps firing all root triggers.
     window.dispatchEvent(new CustomEvent('workflowViewStart', { detail: { startFromNode: nodeId } }));
-  }, [nodeId]);
+  }, [nodeId, close]);
 
   const startStepByStep = React.useCallback(() => {
-    setOpen(false);
+    close();
     window.dispatchEvent(new CustomEvent('workflowStartStepByStep', {
       detail: { startFromNode: nodeId },
     }));
-  }, [nodeId]);
+  }, [nodeId, close]);
 
   // After every hook (rules of hooks): read-only VIEWERs get no launcher at all.
   if (!canMutate) return null;
@@ -122,7 +80,7 @@ export function TriggerEditLaunchButton({ nodeId, variant, borderColor }: Trigge
   return (
     <>
       <button
-        ref={buttonRef}
+        ref={triggerRef}
         type="button"
         onClick={toggle}
         onMouseDown={(e) => e.stopPropagation()}
@@ -145,12 +103,12 @@ export function TriggerEditLaunchButton({ nodeId, variant, borderColor }: Trigge
         </span>
       </button>
 
-      {mounted && open && rect && createPortal(
+      {isVisible && createPortal(
         <div
-          ref={panelRef}
+          ref={menuRef}
           role="menu"
           className="fixed z-[9999] min-w-[200px] bg-theme-primary rounded-2xl p-2 border border-gray-300/70 dark:border-gray-600/70 shadow-2xl animate-in fade-in-0 zoom-in-95 duration-150 nodrag nopan"
-          style={{ left: rect.left, top: rect.top, transform: 'translateX(-50%)' }}
+          style={menuStyle}
           onMouseDown={(e) => e.stopPropagation()}
         >
           <div className="space-y-1">

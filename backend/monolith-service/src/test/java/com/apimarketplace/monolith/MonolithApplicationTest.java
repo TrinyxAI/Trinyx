@@ -98,6 +98,48 @@ class MonolithApplicationTest {
     }
 
     @Test
+    @DisplayName("repairs when the neutralized V328 launch-promo checksum no longer matches")
+    void repairsNeutralizedPromoSeedChecksumMismatch() {
+        // V328 seeded a cloud-only uncapped 20k-credit code that shipped readable inside every
+        // published image. The CE build now substitutes the scrubbed copy the export writes, so
+        // an install created by an earlier image meets a changed checksum on the next pull.
+        MonolithApplication application = new MonolithApplication();
+        FlywayMigrationStrategy strategy = application.repairKnownPgvectorFailureThenMigrate();
+        Flyway flyway = mock(Flyway.class);
+        MigrationInfoService infoService = mock(MigrationInfoService.class);
+        MigrationInfo mismatchedV328 = appliedMigration("328", MigrationState.SUCCESS, 111, false);
+        when(flyway.info()).thenReturn(infoService);
+        when(infoService.all()).thenReturn(new MigrationInfo[] { mismatchedV328 });
+
+        strategy.migrate(flyway);
+
+        var inOrder = inOrder(flyway);
+        inOrder.verify(flyway).repair();
+        inOrder.verify(flyway).migrate();
+    }
+
+    @Test
+    @DisplayName("repairs when the neutralized V346 promo-retirement checksum no longer matches")
+    void repairsNeutralizedPromoRetirementChecksumMismatch() {
+        // V346 is kept as a no-op rather than dropped, so the image and the public repo keep
+        // describing the same history. Keeping it means its checksum changes too, hence the
+        // same repair.
+        MonolithApplication application = new MonolithApplication();
+        FlywayMigrationStrategy strategy = application.repairKnownPgvectorFailureThenMigrate();
+        Flyway flyway = mock(Flyway.class);
+        MigrationInfoService infoService = mock(MigrationInfoService.class);
+        MigrationInfo mismatchedV346 = appliedMigration("346", MigrationState.SUCCESS, 111, false);
+        when(flyway.info()).thenReturn(infoService);
+        when(infoService.all()).thenReturn(new MigrationInfo[] { mismatchedV346 });
+
+        strategy.migrate(flyway);
+
+        var inOrder = inOrder(flyway);
+        inOrder.verify(flyway).repair();
+        inOrder.verify(flyway).migrate();
+    }
+
+    @Test
     @DisplayName("does NOT repair a checksum mismatch on a migration the CE build never neutralized")
     void doesNotRepairMismatchOnUnrelatedMigration() {
         // The scope guard. A migration edited after being applied is an operator error and

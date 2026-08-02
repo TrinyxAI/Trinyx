@@ -59,10 +59,9 @@ public class GuardrailCreator extends CreatorBase {
 
         // 3. Validate required fields: input/content, rules
         // Accept both 'input' (canonical per V221) and 'content' (legacy)
-        String content = safeString(parameters.get("input"));
-        if (content == null || content.isBlank()) {
-            content = safeString(parameters.get("content"));
-        }
+        // 'text' completes the set NodeParamsValidator.PARAM_ALIASES accepts for guardrail's
+        // input - it validated, then failed here with "'input' is required".
+        String content = firstNonBlank(parameters, "input", "content", "text");
         if (content == null || content.isBlank()) {
             return ToolExecutionResult.failure(ToolErrorCode.EXECUTION_FAILED, "'input' is required - the text to validate. MUST use {{type:label.output.field}} to reference data. Example: " + EXAMPLE);
         }
@@ -123,8 +122,8 @@ public class GuardrailCreator extends CreatorBase {
         ));
         guardrailNode.put("guardrailOutputs", guardrailOutputs);
 
-        // Optional parameters
-        String prompt = safeString(parameters.get("prompt"));
+        // Optional parameters - same alias set the validator accepts for the prompt.
+        String prompt = firstNonBlank(parameters, "prompt", "system_prompt", "instruction");
         if (prompt != null && !prompt.isBlank()) {
             guardrailNode.put("prompt", prompt);
         }

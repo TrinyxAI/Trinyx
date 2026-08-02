@@ -461,7 +461,30 @@ class ScheduleExecutorServiceTest {
             TriggerExecutionResult result = service.executeNow(schedule);
 
             assertThat(result.success()).isFalse();
-            assertThat(result.message()).contains("No active run found");
+            // Pre-fix this said "No active run found. Start a run from the workflow builder first.",
+            // which pointed an MCP agent at a UI it cannot reach and hid the commonest cause (the
+            // workflow is not pinned, and a schedule only ever fires the pinned version).
+            assertThat(result.message())
+                .doesNotContain("workflow builder")
+                .contains(WORKFLOW_ID.toString())
+                .contains("fires the pinned version only")
+                .contains("workflow(action='pin', workflow_id='" + WORKFLOW_ID + "', version=N)")
+                .contains("workflow(action='execute', id='" + WORKFLOW_ID + "', version=N)");
+            verifyNoInteractions(triggerService);
+        }
+
+        @Test
+        @DisplayName("Standalone schedule with no workflow linked → says so instead of blaming a missing run")
+        void executeNowStandaloneScheduleNamesTheRealCause() {
+            ScheduledExecutionDto schedule = createSchedule();
+            schedule.setWorkflowId(null);
+
+            TriggerExecutionResult result = service.executeNow(schedule);
+
+            assertThat(result.success()).isFalse();
+            assertThat(result.message())
+                .contains("standalone")
+                .doesNotContain("workflow builder");
             verifyNoInteractions(triggerService);
         }
 

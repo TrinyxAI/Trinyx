@@ -25,6 +25,7 @@ import com.apimarketplace.publication.domain.WorkflowPublicationEntity.Publicati
 import com.apimarketplace.publication.repository.PublicationReceiptRepository;
 import com.apimarketplace.publication.repository.WorkflowPublicationRepository;
 import com.apimarketplace.publication.service.resource.DataSourceFileCloneService;
+import com.apimarketplace.publication.utils.CeExclusiveFeatureDetector;
 import com.apimarketplace.common.scope.ScopeGuard;
 import com.apimarketplace.common.web.TenantResolver;
 import com.fasterxml.jackson.core.type.TypeReference;
@@ -100,6 +101,14 @@ public class AgentPublicationService {
 
     @org.springframework.beans.factory.annotation.Autowired(required = false)
     private PublicationAcquisitionHelper acquisitionHelper;
+
+    /**
+     * Edition gate for CE-exclusive publications. Field-injected and optional
+     * like the helper above (null in unit constructions), so the acquire path
+     * applies the same rule as the workflow and resource services.
+     */
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private CeExclusiveAcquisitionGuard ceExclusiveGuard;
 
     public AgentPublicationService(WorkflowPublicationRepository publicationRepository,
                                     PublicationReceiptRepository receiptRepository,
@@ -355,6 +364,12 @@ public class AgentPublicationService {
         publication.setDatasourceCount(datasourceCount);
         publication.setWorkflowCount(workflowCount);
 
+        // CE-exclusive label, derived from the snapshot set above: an agent
+        // bound to a local-CLI provider (or any sub-agent / embedded workflow
+        // that is) cannot run on managed cloud, so the marketplace badges it
+        // and refuses the cloud install.
+        CeExclusiveFeatureDetector.applyTo(publication);
+
         WorkflowPublicationEntity saved = publicationRepository.save(publication);
 
         // Snapshot data input files from workflow plans (requires publicationId from save).
@@ -432,6 +447,12 @@ public class AgentPublicationService {
         agentData.put("systemPrompt", agent.getSystemPrompt());
         agentData.put("modelProvider", agent.getModelProvider());
         agentData.put("modelName", agent.getModelName());
+        // NOTE: the COLD-summariser override (compactionModelProvider) is NOT
+        // captured here, unlike the workflow path's _snapshot_agent_compaction*.
+        // The CE-exclusive detector reads the key when present, so it needs no
+        // change if that ever starts travelling - but today an agent publication
+        // whose ONLY bridge binding is its summariser is not flagged, and the
+        // clone does not carry the setting either, so the clone stays runnable.
         agentData.put("temperature", agent.getTemperature() != null ? agent.getTemperature().doubleValue() : null);
         agentData.put("maxTokens", agent.getMaxTokens());
         agentData.put("maxIterations", agent.getMaxIterations());
@@ -1135,6 +1156,14 @@ public class AgentPublicationService {
         // Reassign-then-rebind to a final to keep lambda captures happy below.
         organizationId = resolveAcquirerOrg(tenantId, organizationId, publicationId);
         final String orgScope = organizationId;
+
+        // Edition gate: managed cloud cannot run a CE-exclusive publication.
+        // Applied here as well as inside PublicationAcquisitionHelper so the
+        // legacy no-helper branch below is covered by the same rule, matching
+        // WorkflowPublicationService and ResourcePublicationService.
+        if (ceExclusiveGuard != null) {
+            ceExclusiveGuard.check(publication);
+        }
 
         if (acquisitionHelper != null) {
             acquisitionHelper.validateNotOwnPublication(publication, tenantId, orgScope);

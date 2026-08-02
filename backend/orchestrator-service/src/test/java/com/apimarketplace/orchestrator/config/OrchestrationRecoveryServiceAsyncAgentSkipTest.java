@@ -54,6 +54,9 @@ class OrchestrationRecoveryServiceAsyncAgentSkipTest {
     @Mock
     private PendingAgentRegistry pendingAgentRegistry;
 
+    @Mock
+    private com.apimarketplace.orchestrator.execution.v2.async.RedisInFlightStore agentInFlightStore;
+
     private OrchestrationRecoveryService service;
 
     @BeforeEach
@@ -61,6 +64,63 @@ class OrchestrationRecoveryServiceAsyncAgentSkipTest {
         Clock fixedClock = Clock.fixed(NOW, ZoneId.of("UTC"));
         service = new OrchestrationRecoveryService(runRepository, signalWaitRepository, fixedClock);
         service.setPendingAgentRegistry(pendingAgentRegistry);
+        service.setAgentInFlightStore(agentInFlightStore);
+    }
+
+    @Test
+    @DisplayName("Run whose agent was consumed but not yet delivered is not killed by zombie watchdog")
+    void runWithConsumedButUndeliveredAgentIsNotKilled() {
+        // The registry is EMPTY for the whole of a delivery: onAgentResult consumes the pending
+        // entry on its first line and dispatches successors last. Reading only the registry made
+        // this live run look idle, and the watchdog failed it mid-delivery. Fails on pre-fix code.
+        WorkflowRunEntity run = createRunningRun("run-mid-delivery",
+                NOW.minus(Duration.ofMinutes(6)));
+        when(runRepository.findByStatusAndUpdatedAtBefore(any(), any()))
+                .thenReturn(List.of(run));
+        when(signalWaitRepository.hasBlockingSignals("run-mid-delivery")).thenReturn(false);
+        when(pendingAgentRegistry.hasAnyPendingForRun("run-mid-delivery")).thenReturn(false);
+        when(agentInFlightStore.hasAnyInFlightForRun("run-mid-delivery")).thenReturn(true);
+
+        service.recoverZombieRuns();
+
+        assertThat(run.getStatus()).isEqualTo(RunStatus.RUNNING);
+        assertThat(run.getEndedAt()).isNull();
+        verify(runRepository, never()).saveAll(any());
+    }
+
+    @Test
+    @DisplayName("A true zombie is still failed when BOTH the registry and the in-flight store are empty")
+    void failsRunWhenNeitherStoreHasTheRun() {
+        // The other half of the contract: the new check must not turn the watchdog off.
+        WorkflowRunEntity run = createRunningRun("run-true-zombie-2",
+                NOW.minus(Duration.ofMinutes(10)));
+        when(runRepository.findByStatusAndUpdatedAtBefore(any(), any()))
+                .thenReturn(List.of(run));
+        when(signalWaitRepository.hasBlockingSignals("run-true-zombie-2")).thenReturn(false);
+        when(pendingAgentRegistry.hasAnyPendingForRun("run-true-zombie-2")).thenReturn(false);
+        when(agentInFlightStore.hasAnyInFlightForRun("run-true-zombie-2")).thenReturn(false);
+
+        service.recoverZombieRuns();
+
+        assertThat(run.getStatus()).isEqualTo(RunStatus.FAILED);
+    }
+
+    @Test
+    @DisplayName("The in-flight store is not consulted when the registry already says the run is busy")
+    void inFlightStoreNotConsultedWhenRegistryAnswers() {
+        WorkflowRunEntity run = createRunningRun("run-registry-busy",
+                NOW.minus(Duration.ofMinutes(6)));
+        when(runRepository.findByStatusAndUpdatedAtBefore(any(), any()))
+                .thenReturn(List.of(run));
+        when(signalWaitRepository.hasBlockingSignals("run-registry-busy")).thenReturn(false);
+        when(pendingAgentRegistry.hasAnyPendingForRun("run-registry-busy")).thenReturn(true);
+
+        service.recoverZombieRuns();
+
+        // The registry is in-heap with a Redis fallback; the store read is a Redis round trip.
+        // No reason to pay for it once the answer is known.
+        verify(agentInFlightStore, never()).hasAnyInFlightForRun(any());
+        assertThat(run.getStatus()).isEqualTo(RunStatus.RUNNING);
     }
 
     @Test

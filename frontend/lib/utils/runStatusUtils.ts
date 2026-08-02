@@ -91,6 +91,10 @@ const TRANSLATABLE_RUN_STATUSES = new Set([
   'running', 'completed', 'failed', 'cancelled', 'pending',
   'paused', 'waiting_trigger', 'skipped', 'timeout',
   'partial_success', 'success', 'starting',
+  // A run blocked on an approval / timer / webhook, plus the legacy wire value
+  // for a user-stopped run. Both fell through to the raw key, so the badge read
+  // "awaiting_signal" right next to a history row saying "Awaiting signal".
+  'awaiting_signal', 'stopped',
 ]);
 
 /**
@@ -127,7 +131,13 @@ export function getStatusClasses(status: string): string {
     case 'partial_success':
       return 'bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-300';
     case 'CANCELLED':
+    case 'STOPPED':
       return 'bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-400';
+    // Alive and blocked on someone: violet, so it does not read as the idle
+    // yellow of a run that has not started.
+    case 'AWAITING_SIGNAL':
+    case 'awaiting_signal':
+      return 'bg-violet-100 dark:bg-violet-900/30 text-violet-700 dark:text-violet-300';
     default:
       return 'bg-yellow-100 dark:bg-yellow-900/30 text-yellow-700 dark:text-yellow-300';
   }

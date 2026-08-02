@@ -30,7 +30,7 @@ class WorkflowRunSummaryTest {
         WorkflowRunSummary summary = new WorkflowRunSummary(
             id, "run-123", "tenant-1", RunStatus.COMPLETED,
             "automatic", startedAt, endedAt, 5000L, 3,
-            payload, metadata, plan, 2, 5, lastFireAt);
+            payload, metadata, plan, 2, 5, lastFireAt, 7000L);
 
         assertThat(summary.id()).isEqualTo(id);
         assertThat(summary.runId()).isEqualTo("run-123");
@@ -47,6 +47,7 @@ class WorkflowRunSummaryTest {
         assertThat(summary.planVersion()).isEqualTo(2);
         assertThat(summary.currentEpoch()).isEqualTo(5);
         assertThat(summary.lastFireAt()).isEqualTo(lastFireAt);
+        assertThat(summary.lastEpochDurationMs()).isEqualTo(7000L);
     }
 
     @Test
@@ -55,7 +56,7 @@ class WorkflowRunSummaryTest {
         WorkflowRunSummary summary = new WorkflowRunSummary(
             null, "run-456", "tenant-2", RunStatus.RUNNING,
             null, Instant.now(), null, null, null,
-            null, null, null, null, null, null);
+            null, null, null, null, null, null, null);
 
         assertThat(summary.id()).isNull();
         assertThat(summary.endedAt()).isNull();

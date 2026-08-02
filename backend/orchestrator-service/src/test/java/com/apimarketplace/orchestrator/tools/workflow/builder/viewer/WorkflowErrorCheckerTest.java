@@ -1727,4 +1727,99 @@ class WorkflowErrorCheckerTest {
             assertThat(messagesOf(result)).noneMatch(m -> m.contains("requires messageUid"));
         }
     }
+
+    // ==================== Loop stop rule ====================
+
+    /**
+     * Found 2026-07-31 while probing a prod loop fix: this checker demanded {@code loopCondition}
+     * outright, so {@code workflow(action='validate')} rejected a COUNT-ONLY loop
+     * (no condition, {@code maxIterations} set) - a pattern the node docs advertise and that runs
+     * fine ({@code LoopNode.evaluateCondition} returns true for a null/blank condition, so the body
+     * runs exactly {@code maxIterations} times). {@code CoreValidator} had always accepted either.
+     * The two validators must stay in lockstep, otherwise a documented, working workflow cannot be
+     * saved through the builder.
+     */
+    @Nested
+    @DisplayName("Loop stop rule - loopCondition OR maxIterations")
+    class LoopStopRule {
+
+        private void stubSessionWithCores(List<Map<String, Object>> cores) {
+            lenient().when(session.getTriggers()).thenReturn(List.of(Map.of("type", "manual", "label", "Start")));
+            lenient().when(session.getMcps()).thenReturn(List.of());
+            lenient().when(session.getCores()).thenReturn(cores);
+            lenient().when(session.getInterfaces()).thenReturn(List.of());
+            lenient().when(session.getTables()).thenReturn(List.of());
+            lenient().when(session.findOrphanNodes()).thenReturn(List.of());
+            lenient().when(session.findDeadEndNodes()).thenReturn(List.of());
+            lenient().when(toolSchemaFetcher.fetchToolInputSchema(anyString())).thenReturn(Optional.empty());
+        }
+
+        private Map<String, Object> loopCore(String loopCondition, Integer maxIterations) {
+            Map<String, Object> c = new LinkedHashMap<>();
+            c.put("type", "loop");
+            c.put("label", "Boucle");
+            if (loopCondition != null) c.put("loopCondition", loopCondition);
+            if (maxIterations != null) c.put("maxIterations", maxIterations);
+            return c;
+        }
+
+        private List<String> loopErrors(WorkflowErrorChecker.CheckResult result) {
+            return result.errors().stream()
+                    .map(e -> String.valueOf(e.get("message")))
+                    .filter(m -> m.contains("Boucle"))
+                    .toList();
+        }
+
+        @Test
+        @DisplayName("regression: a count-only loop (maxIterations, no condition) is accepted")
+        void countOnlyLoopIsAccepted() {
+            stubSessionWithCores(List.of(loopCore(null, 5)));
+
+            WorkflowErrorChecker.CheckResult result = checker.checkForErrors(session);
+
+            assertThat(loopErrors(result))
+                    .as("max_iterations alone is a complete stop rule - rejecting it blocked a "
+                        + "documented pattern that executes correctly")
+                    .isEmpty();
+        }
+
+        @Test
+        @DisplayName("A condition-only loop is accepted")
+        void conditionOnlyLoopIsAccepted() {
+            stubSessionWithCores(List.of(loopCore("{{mcp:api.output.has_more}} == true", null)));
+
+            assertThat(loopErrors(checker.checkForErrors(session))).isEmpty();
+        }
+
+        @Test
+        @DisplayName("A loop with both is accepted")
+        void bothIsAccepted() {
+            stubSessionWithCores(List.of(loopCore("{{mcp:api.output.has_more}} == true", 10)));
+
+            assertThat(loopErrors(checker.checkForErrors(session))).isEmpty();
+        }
+
+        @Test
+        @DisplayName("A loop with NEITHER is still rejected, and says which action fixes it")
+        void neitherIsRejected() {
+            stubSessionWithCores(List.of(loopCore(null, null)));
+
+            List<String> errors = loopErrors(checker.checkForErrors(session));
+
+            assertThat(errors)
+                    .as("a loop with no stop rule at all must still fail - that one would spin")
+                    .hasSize(1);
+            assertThat(errors.get(0)).contains("loopCondition or maxIterations");
+        }
+
+        @Test
+        @DisplayName("A blank condition does not count as a stop rule")
+        void blankConditionIsNotAStopRule() {
+            stubSessionWithCores(List.of(loopCore("   ", null)));
+
+            assertThat(loopErrors(checker.checkForErrors(session)))
+                    .as("a whitespace-only condition is treated as absent at runtime too")
+                    .hasSize(1);
+        }
+    }
 }

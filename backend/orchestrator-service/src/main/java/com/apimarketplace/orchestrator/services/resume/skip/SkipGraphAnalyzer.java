@@ -45,6 +45,11 @@ public class SkipGraphAnalyzer {
         }
 
         for (Edge edge : plan.getEdges()) {
+            // A loop-back is a re-entry, not a forward dependency: skip propagation must not
+            // follow it, or a skipped node would mark the loop's own entry point unreachable.
+            if (WorkflowPlan.isBackEdge(edge)) {
+                continue;
+            }
             if (edge.from() == null || edge.to() == null) {
                 continue;
             }
@@ -92,6 +97,11 @@ public class SkipGraphAnalyzer {
         }
 
         for (Edge edge : plan.getEdges()) {
+            // A loop-back is a re-entry, not a forward dependency: skip propagation must not
+            // follow it, or a skipped node would mark the loop's own entry point unreachable.
+            if (WorkflowPlan.isBackEdge(edge)) {
+                continue;
+            }
             if (edge.to() == null || edge.from() == null) {
                 continue;
             }
@@ -142,6 +152,11 @@ public class SkipGraphAnalyzer {
         int incomingEdgeCount = 0;
 
         for (Edge edge : plan.getEdges()) {
+            // A loop-back is a re-entry, not a forward dependency: skip propagation must not
+            // follow it, or a skipped node would mark the loop's own entry point unreachable.
+            if (WorkflowPlan.isBackEdge(edge)) {
+                continue;
+            }
             if (edge.to() == null) {
                 continue;
             }
@@ -186,6 +201,11 @@ public class SkipGraphAnalyzer {
         String normalizedNodeId = normalizeNodeId(nodeId);
 
         for (Edge edge : plan.getEdges()) {
+            // A loop-back is a re-entry, not a forward dependency: skip propagation must not
+            // follow it, or a skipped node would mark the loop's own entry point unreachable.
+            if (WorkflowPlan.isBackEdge(edge)) {
+                continue;
+            }
             if (edge.from() == null || edge.to() == null) {
                 continue;
             }

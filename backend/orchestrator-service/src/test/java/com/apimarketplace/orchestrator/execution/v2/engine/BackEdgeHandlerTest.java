@@ -18,6 +18,7 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.InOrder;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
@@ -1117,6 +1118,346 @@ class BackEdgeHandlerTest {
 
             Map<String, Object> inner = (Map<String, Object>) stepOutput.get("output");
             assertFalse(inner.containsKey("reason"));
+        }
+    }
+
+    // ========================================================================
+    // Cross-replica loop progress (prod overrun 2026-07-30)
+    // ========================================================================
+
+    @Nested
+    @DisplayName("cross-replica loop progress")
+    class CrossReplicaProgressTests {
+
+        @Mock
+        private V2ExecutionEventService eventService;
+
+        @Mock
+        private WorkflowExecution execution;
+
+        @Mock
+        private com.apimarketplace.orchestrator.execution.v2.state.RedisLoopIterationStore loopIterationStore;
+
+        private BackEdgeHandler sharedHandler;
+
+        @BeforeEach
+        void setUpSharedHandler() {
+            sharedHandler = new BackEdgeHandler(templateEngine, edgeStatusService, eventPublisher, null, loopIterationStore);
+        }
+
+        /**
+         * Prod bug 2026-07-30: a {@code maxIterations=60} loop whose body contains a 15s Wait
+         * ran 73+ iterations. Every iteration resumes from a WAIT_TIMER signal, resumes are
+         * dispatched cross-instance, and the iteration counter lived in a per-JVM cache - so
+         * each of the 2 replicas enforced maxIterations against its OWN count only.
+         *
+         * <p>Here the LOCAL state says "iteration 5 of 60" (plenty of room) while the shared
+         * store reports 59 - the last admissible body iteration. The handler must terminate.
+         */
+        @Test
+        @DisplayName("regression: terminates at maxIterations using another replica's iteration count")
+        void terminatesOnSharedIterationEvenWhenLocalStateIsBehind() {
+            ExecutionNode sourceNode = mock(ExecutionNode.class);
+            Edge iterateEdge = createIterateEdge("mcp:body_last", "core:my_loop:iterate");
+            Core loopCore = createLoopCore("my_loop", "true", 60);
+            BackEdgeState staleLocal = new BackEdgeState(iterateEdge.getEdgeId(), 5, 60, "true", false);
+
+            WorkflowPlan plan = mock(WorkflowPlan.class);
+            when(plan.getIterateEdgesForSource("mcp:body_last")).thenReturn(List.of(iterateEdge));
+            when(plan.findLoopCoreForIterateEdge(iterateEdge)).thenReturn(Optional.of(loopCore));
+            when(plan.findLoopBodyTarget("core:my_loop")).thenReturn("mcp:body_first");
+            when(plan.findLoopExitTarget("core:my_loop")).thenReturn("mcp:after_loop");
+
+            ExecutionContext ctx = ExecutionContext.create(
+                    "run-shared-progress", "wfr-shared", "tenant", "0", 0, Map.of(), plan)
+                .withGlobalData("back_edge_state:" + iterateEdge.getEdgeId(), staleLocal);
+
+            when(execution.getRunId()).thenReturn("run-shared-progress");
+            when(loopIterationStore.readProgress("run-shared-progress", ctx.epoch(), iterateEdge.getEdgeId()))
+                .thenReturn(new com.apimarketplace.orchestrator.execution.v2.state.RedisLoopIterationStore
+                    .LoopProgress(59, false));
+
+            StepByStepExecutionResult result = sharedHandler.executeBackEdgeIteration(
+                sourceNode, "mcp:body_last", NodeExecutionResult.success("mcp:body_last", Map.of()),
+                ctx, execution, eventService, mock(TriggerItem.class), 0, Map.of()
+            );
+
+            assertTrue(result.readyNodes().contains("mcp:after_loop"),
+                "iteration 59 is the last admissible body run of a maxIterations=60 loop, so the "
+                + "back-edge must activate the exit path instead of a 61st body run");
+            assertFalse(result.readyNodes().contains("mcp:body_first"),
+                "the body must NOT be requeued once the shared iteration count reached the ceiling");
+            verify(loopIterationStore).markTerminated("run-shared-progress", ctx.epoch(), iterateEdge.getEdgeId(), 59);
+            verify(templateEngine, never()).evaluateConditionWithDetailsWithMap(anyString(), anyMap());
+        }
+
+        @Test
+        @DisplayName("regression: a termination published by another replica stops this replica immediately")
+        void adoptsTerminationPublishedByAnotherReplica() {
+            ExecutionNode sourceNode = mock(ExecutionNode.class);
+            Edge iterateEdge = createIterateEdge("mcp:body_last", "core:my_loop:iterate");
+            Core loopCore = createLoopCore("my_loop", "true", 60);
+
+            WorkflowPlan plan = mock(WorkflowPlan.class);
+            when(plan.getIterateEdgesForSource("mcp:body_last")).thenReturn(List.of(iterateEdge));
+            when(plan.findLoopCoreForIterateEdge(iterateEdge)).thenReturn(Optional.of(loopCore));
+            when(plan.findLoopBodyTarget("core:my_loop")).thenReturn("mcp:body_first");
+            // Stubbed on purpose: pre-fix this path terminated locally and DID queue the exit,
+            // so leaving it null would make the "no ready nodes" assertion pass either way.
+            lenient().when(plan.findLoopExitTarget("core:my_loop")).thenReturn("mcp:after_loop");
+
+            ExecutionContext ctx = ExecutionContext.create(
+                    "run-shared-terminated", "wfr-shared", "tenant", "0", 0, Map.of(), plan);
+
+            when(execution.getRunId()).thenReturn("run-shared-terminated");
+            when(loopIterationStore.readProgress("run-shared-terminated", ctx.epoch(), iterateEdge.getEdgeId()))
+                .thenReturn(new com.apimarketplace.orchestrator.execution.v2.state.RedisLoopIterationStore
+                    .LoopProgress(12, true));
+
+            StepByStepExecutionResult result = sharedHandler.executeBackEdgeIteration(
+                sourceNode, "mcp:body_last", NodeExecutionResult.success("mcp:body_last", Map.of()),
+                ctx, execution, eventService, mock(TriggerItem.class), 0, Map.of()
+            );
+
+            assertTrue(result.readyNodes().isEmpty(),
+                "a loop already terminated by another replica must not re-enter the body NOR "
+                + "re-activate the exit path - the terminating replica queued it before publishing "
+                + "the flag (pre-fix this replica re-ran the whole termination and re-queued "
+                + "mcp:after_loop)");
+            verify(loopIterationStore, never()).recordIteration(anyString(), anyInt(), anyString(), anyInt());
+            verify(loopIterationStore, never()).markTerminated(anyString(), anyInt(), anyString(), anyInt());
+            verifyNoInteractions(eventService);
+        }
+
+        @Test
+        @DisplayName("termination is published only AFTER the exit target is queued")
+        void publishesTerminationAfterQueueingTheExit() {
+            // Ordering matters: the flag short-circuits every other replica, so a crash between
+            // "flag set" and "exit queued" would strand the run until the 24h TTL.
+            ExecutionNode sourceNode = mock(ExecutionNode.class);
+            Edge iterateEdge = createIterateEdge("mcp:body_last", "core:my_loop:iterate");
+            Core loopCore = createLoopCore("my_loop", "true", 60);
+
+            WorkflowPlan plan = mock(WorkflowPlan.class);
+            when(plan.getIterateEdgesForSource("mcp:body_last")).thenReturn(List.of(iterateEdge));
+            when(plan.findLoopCoreForIterateEdge(iterateEdge)).thenReturn(Optional.of(loopCore));
+            when(plan.findLoopBodyTarget("core:my_loop")).thenReturn("mcp:body_first");
+            when(plan.findLoopExitTarget("core:my_loop")).thenReturn("mcp:after_loop");
+
+            ExecutionContext ctx = ExecutionContext.create(
+                    "run-order", "wfr-order", "tenant", "0", 0, Map.of(), plan);
+
+            when(execution.getRunId()).thenReturn("run-order");
+            when(loopIterationStore.readProgress("run-order", ctx.epoch(), iterateEdge.getEdgeId()))
+                .thenReturn(new com.apimarketplace.orchestrator.execution.v2.state.RedisLoopIterationStore
+                    .LoopProgress(59, false));
+
+            StepByStepExecutionResult result = sharedHandler.executeBackEdgeIteration(
+                sourceNode, "mcp:body_last", NodeExecutionResult.success("mcp:body_last", Map.of()),
+                ctx, execution, eventService, mock(TriggerItem.class), 0,
+                Map.of("core:my_loop", mock(ExecutionNode.class))
+            );
+
+            assertTrue(result.readyNodes().contains("mcp:after_loop"));
+            InOrder order = inOrder(eventService, loopIterationStore);
+            order.verify(eventService).rePublishNodeOutput(any(), any(), any(), any(), anyInt(), any(), anyInt());
+            order.verify(loopIterationStore).markTerminated("run-order", ctx.epoch(), iterateEdge.getEdgeId(), 59);
+        }
+
+        @Test
+        @DisplayName("A shared count BEHIND the local one never rewinds this replica")
+        void neverRewindsToAStaleSharedCount() {
+            ExecutionNode sourceNode = mock(ExecutionNode.class);
+            Edge iterateEdge = createIterateEdge("mcp:body_last", "core:my_loop:iterate");
+            Core loopCore = createLoopCore("my_loop", "true", 60);
+            BackEdgeState localAhead = new BackEdgeState(iterateEdge.getEdgeId(), 30, 60, "true", false);
+
+            WorkflowPlan plan = mock(WorkflowPlan.class);
+            when(plan.getIterateEdgesForSource("mcp:body_last")).thenReturn(List.of(iterateEdge));
+            when(plan.findLoopCoreForIterateEdge(iterateEdge)).thenReturn(Optional.of(loopCore));
+            when(plan.findLoopBodyTarget("core:my_loop")).thenReturn("mcp:body_first");
+            lenient().when(plan.findLoopExitTarget("core:my_loop")).thenReturn("mcp:after_loop");
+            lenient().when(plan.getEdges()).thenReturn(List.of(createEdge("mcp:body_first", "mcp:body_last")));
+
+            ExecutionContext ctx = ExecutionContext.create(
+                    "run-stale-shared", "wfr-stale", "tenant", "0", 0, Map.of(), plan)
+                .withGlobalData("back_edge_state:" + iterateEdge.getEdgeId(), localAhead);
+
+            when(execution.getRunId()).thenReturn("run-stale-shared");
+            when(loopIterationStore.readProgress("run-stale-shared", ctx.epoch(), iterateEdge.getEdgeId()))
+                .thenReturn(new com.apimarketplace.orchestrator.execution.v2.state.RedisLoopIterationStore
+                    .LoopProgress(4, false));
+            when(templateEngine.evaluateConditionWithDetailsWithMap(eq("true"), anyMap()))
+                .thenReturn(new TemplateEngine.ConditionEvaluationResult("true", "true", true, null));
+
+            sharedHandler.executeBackEdgeIteration(
+                sourceNode, "mcp:body_last", NodeExecutionResult.success("mcp:body_last", Map.of()),
+                ctx, execution, eventService, mock(TriggerItem.class), 0, Map.of()
+            );
+
+            verify(loopIterationStore).recordIteration("run-stale-shared", ctx.epoch(), iterateEdge.getEdgeId(), 31);
+        }
+
+        @Test
+        @DisplayName("AUTO path: also enforces maxIterations against another replica's count")
+        void autoPathTerminatesOnSharedIteration() {
+            ExecutionNode sourceNode = mock(ExecutionNode.class);
+            when(sourceNode.getNodeId()).thenReturn("mcp:body_last");
+            Edge iterateEdge = createIterateEdge("mcp:body_last", "core:my_loop:iterate");
+            Core loopCore = createLoopCore("my_loop", "true", 60);
+            BackEdgeState staleLocal = new BackEdgeState(iterateEdge.getEdgeId(), 2, 60, "true", false);
+
+            WorkflowPlan plan = mock(WorkflowPlan.class);
+            when(plan.getIterateEdgesForSource("mcp:body_last")).thenReturn(List.of(iterateEdge));
+            when(plan.findLoopCoreForIterateEdge(iterateEdge)).thenReturn(Optional.of(loopCore));
+            when(plan.findLoopBodyTarget("core:my_loop")).thenReturn("mcp:body_first");
+            when(plan.findLoopExitTarget("core:my_loop")).thenReturn("mcp:after_loop");
+            lenient().when(plan.getEdges()).thenReturn(List.of(createEdge("mcp:body_first", "mcp:body_last")));
+
+            ExecutionContext ctx = ExecutionContext.create(
+                    "run-auto-shared", "wfr-auto", "tenant", "0", 0, Map.of(), plan)
+                .withGlobalData("back_edge_state:" + iterateEdge.getEdgeId(), staleLocal);
+
+            when(execution.getRunId()).thenReturn("run-auto-shared");
+            when(loopIterationStore.tryClaim(eq("run-auto-shared"), anyInt(), anyString(), anyInt()))
+                .thenReturn(true);
+            when(loopIterationStore.readProgress("run-auto-shared", ctx.epoch(), iterateEdge.getEdgeId()))
+                .thenReturn(new com.apimarketplace.orchestrator.execution.v2.state.RedisLoopIterationStore
+                    .LoopProgress(59, false));
+
+            ExecutionNode bodyFirst = mock(ExecutionNode.class);
+            ExecutionNode exitTarget = mock(ExecutionNode.class);
+            java.util.function.Function<String, ExecutionNode> nodeFinder = id -> {
+                if ("mcp:body_first".equals(id)) return bodyFirst;
+                if ("mcp:after_loop".equals(id)) return exitTarget;
+                return null;
+            };
+            List<String> traversed = new ArrayList<>();
+            TreeTraverser traverser = (n, c, e, es, i) -> {
+                if (n == bodyFirst) traversed.add("body");
+                if (n == exitTarget) traversed.add("exit");
+                return c;
+            };
+
+            sharedHandler.handleBackEdge(sourceNode, ctx, execution, eventService,
+                mock(TriggerItem.class), nodeFinder, traverser);
+
+            assertFalse(traversed.contains("body"),
+                "the AUTO path must honour the ceiling reached by another replica");
+            assertTrue(traversed.contains("exit"));
+            verify(templateEngine, never()).evaluateConditionWithDetailsWithMap(anyString(), anyMap());
+        }
+
+        @Test
+        @DisplayName("AUTO path: a claim lost to another replica makes this one a no-op")
+        void autoPathSkipsWhenClaimIsLost() {
+            ExecutionNode sourceNode = mock(ExecutionNode.class);
+            when(sourceNode.getNodeId()).thenReturn("mcp:body_last");
+            Edge iterateEdge = createIterateEdge("mcp:body_last", "core:my_loop:iterate");
+            Core loopCore = createLoopCore("my_loop", "true", 60);
+
+            WorkflowPlan plan = mock(WorkflowPlan.class);
+            when(plan.getIterateEdgesForSource("mcp:body_last")).thenReturn(List.of(iterateEdge));
+            when(plan.findLoopCoreForIterateEdge(iterateEdge)).thenReturn(Optional.of(loopCore));
+            when(plan.findLoopBodyTarget("core:my_loop")).thenReturn("mcp:body_first");
+
+            ExecutionContext ctx = ExecutionContext.create(
+                    "run-claim-lost", "wfr-claim", "tenant", "0", 0, Map.of(), plan);
+
+            when(execution.getRunId()).thenReturn("run-claim-lost");
+            when(loopIterationStore.readProgress(anyString(), anyInt(), anyString())).thenReturn(null);
+            when(loopIterationStore.tryClaim("run-claim-lost", ctx.epoch(), iterateEdge.getEdgeId(), 0))
+                .thenReturn(false);
+
+            List<String> traversed = new ArrayList<>();
+            sharedHandler.handleBackEdge(sourceNode, ctx, execution, eventService,
+                mock(TriggerItem.class), id -> mock(ExecutionNode.class),
+                (n, c, e, es, i) -> { traversed.add("traversed"); return c; });
+
+            assertTrue(traversed.isEmpty(),
+                "a split sibling / replica that lost the claim must not advance the loop");
+            verify(loopIterationStore, never()).recordIteration(anyString(), anyInt(), anyString(), anyInt());
+        }
+
+        @Test
+        @DisplayName("publishes each started iteration so the next replica keeps counting")
+        void publishesIterationBeforeRunningTheBody() {
+            ExecutionNode sourceNode = mock(ExecutionNode.class);
+            Edge iterateEdge = createIterateEdge("mcp:body_last", "core:my_loop:iterate");
+            Core loopCore = createLoopCore("my_loop", "true", 60);
+
+            WorkflowPlan plan = mock(WorkflowPlan.class);
+            when(plan.getIterateEdgesForSource("mcp:body_last")).thenReturn(List.of(iterateEdge));
+            when(plan.findLoopCoreForIterateEdge(iterateEdge)).thenReturn(Optional.of(loopCore));
+            when(plan.findLoopBodyTarget("core:my_loop")).thenReturn("mcp:body_first");
+            lenient().when(plan.findLoopExitTarget("core:my_loop")).thenReturn("mcp:after_loop");
+            lenient().when(plan.getEdges()).thenReturn(List.of(createEdge("mcp:body_first", "mcp:body_last")));
+
+            ExecutionContext ctx = ExecutionContext.create(
+                    "run-publish", "wfr-publish", "tenant", "0", 0, Map.of(), plan);
+
+            when(execution.getRunId()).thenReturn("run-publish");
+            when(loopIterationStore.readProgress("run-publish", ctx.epoch(), iterateEdge.getEdgeId()))
+                .thenReturn(new com.apimarketplace.orchestrator.execution.v2.state.RedisLoopIterationStore
+                    .LoopProgress(7, false));
+            when(templateEngine.evaluateConditionWithDetailsWithMap(eq("true"), anyMap()))
+                .thenReturn(new TemplateEngine.ConditionEvaluationResult("true", "true", true, null));
+
+            StepByStepExecutionResult result = sharedHandler.executeBackEdgeIteration(
+                sourceNode, "mcp:body_last", NodeExecutionResult.success("mcp:body_last", Map.of()),
+                ctx, execution, eventService, mock(TriggerItem.class), 0, Map.of()
+            );
+
+            assertTrue(result.readyNodes().contains("mcp:body_first"));
+            verify(loopIterationStore).recordIteration("run-publish", ctx.epoch(), iterateEdge.getEdgeId(), 8);
+        }
+
+        @Test
+        @DisplayName("No shared opinion (nothing recorded, or Redis erroring): keeps local state")
+        void fallsBackToLocalStateWhenSharedProgressUnavailable() {
+            ExecutionNode sourceNode = mock(ExecutionNode.class);
+            Edge iterateEdge = createIterateEdge("mcp:body_last", "core:my_loop:iterate");
+            Core loopCore = createLoopCore("my_loop", "true", 60);
+
+            WorkflowPlan plan = mock(WorkflowPlan.class);
+            when(plan.getIterateEdgesForSource("mcp:body_last")).thenReturn(List.of(iterateEdge));
+            when(plan.findLoopCoreForIterateEdge(iterateEdge)).thenReturn(Optional.of(loopCore));
+            when(plan.findLoopBodyTarget("core:my_loop")).thenReturn("mcp:body_first");
+            lenient().when(plan.findLoopExitTarget("core:my_loop")).thenReturn("mcp:after_loop");
+            lenient().when(plan.getEdges()).thenReturn(List.of(createEdge("mcp:body_first", "mcp:body_last")));
+
+            ExecutionContext ctx = ExecutionContext.create(
+                    "run-no-redis", "wfr-no-redis", "tenant", "0", 0, Map.of(), plan);
+
+            when(execution.getRunId()).thenReturn("run-no-redis");
+            when(loopIterationStore.readProgress(anyString(), anyInt(), anyString())).thenReturn(null);
+            when(templateEngine.evaluateConditionWithDetailsWithMap(eq("true"), anyMap()))
+                .thenReturn(new TemplateEngine.ConditionEvaluationResult("true", "true", true, null));
+
+            StepByStepExecutionResult result = sharedHandler.executeBackEdgeIteration(
+                sourceNode, "mcp:body_last", NodeExecutionResult.success("mcp:body_last", Map.of()),
+                ctx, execution, eventService, mock(TriggerItem.class), 0, Map.of()
+            );
+
+            assertTrue(result.readyNodes().contains("mcp:body_first"),
+                "with no shared opinion the handler keeps the pre-fix single-instance behavior");
+            verify(loopIterationStore).recordIteration("run-no-redis", ctx.epoch(), iterateEdge.getEdgeId(), 1);
+        }
+
+        /**
+         * cleanupRun is reached from WorkflowResumeService.clearCachedStateForRerun, whose
+         * callers include ReusableTriggerService on a refire - while a PREVIOUS epoch's loop may
+         * still be mid-Wait. Wiping shared counters there would restart that live loop at 0 and
+         * reproduce the overrun. A refire opens a new EPOCH, so it lands on a fresh key anyway;
+         * the ONE action that genuinely reuses the epoch (a step rerun) clears its own back-edges
+         * explicitly from {@code StepRerunService} - see
+         * {@code StepRerunServiceTest.rerunClearsSharedLoopCountersOfResetBackEdges}.
+         */
+        @Test
+        @DisplayName("cleanupRun must NOT wipe shared loop counters (a refire can hit a live epoch)")
+        void cleanupRunLeavesSharedProgressAlone() {
+            sharedHandler.cleanupRun("run-to-clean");
+            verifyNoInteractions(loopIterationStore);
         }
     }
 }

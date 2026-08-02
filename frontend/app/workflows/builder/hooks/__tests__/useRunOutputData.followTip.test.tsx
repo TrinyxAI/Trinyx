@@ -100,11 +100,14 @@ describe('useRunOutputData - follow the tip on re-run (2026-05-30 staleness regr
     rows = [13, 12, 11, 10];
     client.invalidateQueries({ queryKey: ['run-output-data'] });
 
-    await waitFor(() => expect(result.current.items.length).toBe(4));
-
-    // The displayed item now follows the new tip - content is fresh, no manual
-    // ◄ ► needed.
-    expect(result.current.currentItem?.id).toBe(13);
+    // Wait for the state being asserted, not for the row count that precedes it: following the
+    // tip happens in an effect that runs AFTER the items update, so waiting on items.length
+    // alone can observe the intermediate render on a loaded machine.
+    await waitFor(() => {
+      expect(result.current.items.length).toBe(4);
+      // The displayed item now follows the new tip - content is fresh, no manual ◄ ► needed.
+      expect(result.current.currentItem?.id).toBe(13);
+    });
     expect(result.current.currentIndex).toBe(3);
   });
 
@@ -165,8 +168,10 @@ describe('useRunOutputData - follow the tip on re-run (2026-05-30 staleness regr
     // Another re-run now advances them automatically again.
     rows = [14, 13, 12, 11, 10];
     client.invalidateQueries({ queryKey: ['run-output-data'] });
-    await waitFor(() => expect(result.current.items.length).toBe(5));
-    expect(result.current.currentItem?.id).toBe(14);
+    await waitFor(() => {
+      expect(result.current.items.length).toBe(5);
+      expect(result.current.currentItem?.id).toBe(14);
+    });
     expect(result.current.currentIndex).toBe(4);
   });
 });

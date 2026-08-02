@@ -1,13 +1,17 @@
 package com.apimarketplace.orchestrator.execution.v2.engine;
 
+import com.apimarketplace.orchestrator.domain.workflow.BackEdgeSpec;
+import com.apimarketplace.orchestrator.domain.workflow.BackEdgeSpecs;
 import com.apimarketplace.orchestrator.domain.workflow.Core;
 import com.apimarketplace.orchestrator.domain.workflow.Edge;
+import com.apimarketplace.orchestrator.domain.workflow.LoopIterationLimits;
 import com.apimarketplace.orchestrator.domain.workflow.WorkflowExecution;
 import com.apimarketplace.orchestrator.domain.workflow.WorkflowPlan;
 import com.apimarketplace.orchestrator.execution.v2.nodes.ExecutionNode;
 import com.apimarketplace.orchestrator.execution.v2.nodes.NodeExecutionResult;
 import com.apimarketplace.orchestrator.execution.v2.services.V2ExecutionEventService;
 import com.apimarketplace.orchestrator.execution.v2.state.BackEdgeState;
+import com.apimarketplace.orchestrator.execution.v2.state.RedisLoopIterationStore;
 import com.apimarketplace.orchestrator.services.TemplateEngine;
 import com.apimarketplace.orchestrator.services.cache.RunScopedCache;
 import com.apimarketplace.orchestrator.services.context.StepOutputsWriter;
@@ -15,7 +19,6 @@ import com.apimarketplace.orchestrator.services.epoch.WorkflowEpochService;
 import com.apimarketplace.orchestrator.services.streaming.EdgeStatusService;
 import com.apimarketplace.orchestrator.services.streaming.bus.WorkflowEventPublisher;
 import com.apimarketplace.orchestrator.services.streaming.events.LoopEventType;
-import com.apimarketplace.orchestrator.utils.EdgeRefParser;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
@@ -24,21 +27,25 @@ import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 
 /**
- * Handler for loop iteration logic using iterate-port edges.
+ * Drives every loop, whichever way it was authored.
  *
- * A loop is defined by a Core with type="loop" which has:
- * - loopCondition: SpEL expression evaluated each iteration
- * - maxIterations: safety limit
+ * <p><b>Two shapes, one path.</b> A loop is either driven by a hub - a Core with
+ * {@code type="loop"} carrying the condition and cap, entered through its {@code :body} port, left
+ * through {@code :exit}, closed by an edge into its {@code :iterate} port - or declared directly on
+ * an edge that points back at a node which already ran (a Decision's {@code else} returning to an
+ * earlier step, with no loop node at all). {@code BackEdgeSpecs} resolves both into one
+ * {@code BackEdgeSpec}; everything below consumes only that, and hub-only work is guarded on
+ * {@link BackEdgeSpec#hasHub()}.
  *
- * Loop edges use ports:
- * - "core:label:body" → first body node (forward)
- * - "core:label:exit" → node after loop (forward)
- * - "mcp:last_step" → "core:label:iterate" (loop-back)
+ * <p><b>How an iteration runs.</b> When a node completes with no wired successor and owns a
+ * loop-back, this handler evaluates the loop's condition and either resets the span
+ * ({@link BackEdgeSpanResolver}) and re-traverses from the re-entry point, or terminates. The
+ * loop-back is never wired as a graph edge, so the executed node graph stays acyclic - see
+ * {@code WorkflowPlan.isBackEdge}.
  *
- * When the last body node completes and has an iterate edge,
- * BackEdgeHandler evaluates the loop condition and either:
- * - Resets the body subgraph and re-traverses from the body entry
- * - Terminates and lets normal successors (exit path) proceed
+ * <p><b>How it ends.</b> {@code condition_false} and {@code iterations_exhausted} are successes.
+ * {@code max_iterations_reached} - the cap firing while the loop still wanted to run - fails the
+ * run and refuses the exit path, because the loop never reached its own stopping condition.
  */
 @Component
 public class BackEdgeHandler implements RunScopedCache {
@@ -46,6 +53,24 @@ public class BackEdgeHandler implements RunScopedCache {
     private static final Logger logger = LoggerFactory.getLogger(BackEdgeHandler.class);
 
     private static final String BACK_EDGE_STATE_PREFIX = "back_edge_state:";
+
+    /** The author's condition said stop. Normal termination, run stays green. */
+    static final String CONDITION_FALSE_REASON = "condition_false";
+
+    /**
+     * The cap WAS the declared way out ("repeat N times": a loop hub with no condition).
+     * The contract was fulfilled, so the run stays green and takes the exit path.
+     */
+    static final String ITERATIONS_EXHAUSTED_REASON = "iterations_exhausted";
+
+    /**
+     * The cap fired while there was still a reason to iterate. The workflow's intent was NOT
+     * satisfied, so the run fails rather than stopping silently mid-graph.
+     */
+    static final String BACK_EDGE_OVERFLOW_REASON = "max_iterations_reached";
+
+    /** GlobalData key prefix recording an overflow, for diagnostics. */
+    static final String BACK_EDGE_OVERFLOW_KEY = "back_edge_overflow:";
 
     /**
      * Global-data key carrying the loop's current iteration into the body, read by
@@ -75,19 +100,103 @@ public class BackEdgeHandler implements RunScopedCache {
     private final WorkflowEpochService workflowEpochService;
 
     /**
+     * Optional so the 4-arg construction used by unit tests keeps working. Present at runtime,
+     * where it un-completes the reset span in AUTO mode (see {@link #applySnapshotReset}).
+     */
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private com.apimarketplace.orchestrator.services.state.StateSnapshotService stateSnapshotService;
+
+    /**
+     * Source of the global iteration budget ({@code workflow.execution.default-max-iterations}
+     * and {@code .max-allowed-iterations}). Optional for the same reason as above; absent falls
+     * back to the historical defaults.
+     */
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private com.apimarketplace.orchestrator.config.WorkflowExecutionConfig executionConfig;
+
+    /**
+     * Cross-replica loop progress. Null in unit tests and whenever no Redis template is
+     * present, in which case the handler falls back to the per-JVM state below.
+     * See {@link RedisLoopIterationStore} for why the per-JVM state alone is not enough.
+     */
+    private final RedisLoopIterationStore loopIterationStore;
+
+    /**
      * Tracks which back-edge iterations have been claimed for processing.
      * When a forEach (split) is inside a loop body, multiple split items reach
      * the same back-edge. Only the first one should process it; the rest are no-ops.
      * Key format: "runId:edgeId:iteration"
+     *
+     * <p>Per-JVM fallback only: {@link RedisLoopIterationStore#tryClaim} is the
+     * cross-replica claim. Kept so a Redis-less deployment (and the unit tests) keep
+     * the previous single-instance semantics.
      */
     private final Set<String> claimedBackEdgeCalls = ConcurrentHashMap.newKeySet();
 
+    /** Test/back-compat constructor - no cross-replica store, per-JVM semantics only. */
     public BackEdgeHandler(TemplateEngine templateEngine, EdgeStatusService edgeStatusService,
                            WorkflowEventPublisher eventPublisher, WorkflowEpochService workflowEpochService) {
+        this(templateEngine, edgeStatusService, eventPublisher, workflowEpochService, null);
+    }
+
+    @org.springframework.beans.factory.annotation.Autowired
+    public BackEdgeHandler(TemplateEngine templateEngine, EdgeStatusService edgeStatusService,
+                           WorkflowEventPublisher eventPublisher, WorkflowEpochService workflowEpochService,
+                           @org.springframework.beans.factory.annotation.Autowired(required = false)
+                           RedisLoopIterationStore loopIterationStore) {
         this.templateEngine = templateEngine;
         this.edgeStatusService = edgeStatusService;
         this.eventPublisher = eventPublisher;
         this.workflowEpochService = workflowEpochService;
+        this.loopIterationStore = loopIterationStore;
+    }
+
+    /**
+     * Merge the cross-replica progress into the locally-known {@link BackEdgeState}.
+     *
+     * <p>The local state comes from {@code V2StepByStepContextManager}'s per-JVM globalData
+     * cache, so on a replica that has never advanced THIS loop it reads 0 (or a stale, lower
+     * value) - which is exactly how a {@code maxIterations=60} loop ran 73 body iterations in
+     * prod (see {@link RedisLoopIterationStore}). Redis holds what every replica has done, so
+     * the shared iteration wins whenever it is ahead, and a termination published by any
+     * replica is adopted immediately.
+     */
+    private BackEdgeState reconcileWithSharedProgress(BackEdgeState local, String runId, int epoch, String edgeId) {
+        if (loopIterationStore == null || local == null) {
+            return local;
+        }
+        RedisLoopIterationStore.LoopProgress shared = loopIterationStore.readProgress(runId, epoch, edgeId);
+        if (shared == null) {
+            return local;
+        }
+        BackEdgeState merged = local;
+        if (shared.iteration() > merged.iteration()) {
+            merged = new BackEdgeState(merged.edgeId(), shared.iteration(),
+                merged.maxIterations(), merged.condition(), merged.terminated());
+            logger.info("[BackEdge] Adopted shared iteration from another replica: edgeId={}, local={}, shared={}",
+                edgeId, local.iteration(), shared.iteration());
+        }
+        if (shared.terminated() && !merged.terminated()) {
+            merged = merged.terminate();
+            logger.info("[BackEdge] Adopted termination published by another replica: edgeId={}, iteration={}",
+                edgeId, merged.iteration());
+        }
+        return merged;
+    }
+
+    /**
+     * Cross-replica claim for one back-edge advance, falling back to the per-JVM set when no
+     * shared store is wired. Both layers are consulted so a Redis outage degrades to the old
+     * single-instance behavior instead of double-processing within a JVM.
+     */
+    private boolean claimBackEdgeAdvance(String runId, int epoch, String edgeId, int completedIteration) {
+        if (!claimedBackEdgeCalls.add(runId + ":" + edgeId + ":" + completedIteration)) {
+            return false;
+        }
+        if (loopIterationStore == null) {
+            return true;
+        }
+        return loopIterationStore.tryClaim(runId, epoch, edgeId, completedIteration);
     }
 
     /**
@@ -102,6 +211,12 @@ public class BackEdgeHandler implements RunScopedCache {
         if (removed > 0) {
             logger.info("[BackEdge] Cleaned up {} claimed entries for runId={}", removed, runId);
         }
+        // Deliberately NOT clearing RedisLoopIterationStore here. Its keys are EPOCH-scoped, so
+        // a refire naturally starts from a fresh key, and this method is reached from
+        // WorkflowResumeService.clearCachedStateForRerun - whose callers include
+        // ReusableTriggerService on a refire while a PREVIOUS epoch's loop may still be mid-Wait.
+        // A run-wide wipe there would reset that live epoch's counter to 0 and reproduce the
+        // overrun this store exists to prevent. Abandoned keys die on their TTL.
     }
 
     @Override
@@ -120,54 +235,123 @@ public class BackEdgeHandler implements RunScopedCache {
     }
 
     /**
-     * Check if the completed node is the source of any iterate (loop-back) edge.
+     * Check if the completed node is the source of any loop-back (loop hub or declared back-edge).
      */
     public boolean hasBackEdge(ExecutionNode node, WorkflowPlan plan) {
         if (node == null || plan == null) return false;
         String nodeId = node.getNodeId();
-        return !plan.getIterateEdgesForSource(nodeId).isEmpty();
+        return !BackEdgeSpecs.forSource(plan, nodeId).isEmpty();
     }
 
     /**
-     * Check if the loop should continue iterating.
+     * Would this loop admit one more iteration?
+     *
+     * <p>A read-only probe: it evaluates the condition and the cap without touching state. The
+     * decision that actually drives execution is taken inside {@link #handleBackEdge} and
+     * {@link #executeBackEdgeIteration}, which also record it.
      */
     public boolean shouldContinue(ExecutionNode node, ExecutionContext context, WorkflowPlan plan) {
         if (node == null || context == null || plan == null) return false;
-        String nodeId = node.getNodeId();
-        List<Edge> iterateEdges = plan.getIterateEdgesForSource(nodeId);
-        if (iterateEdges.isEmpty()) return false;
+        List<BackEdgeSpec> specs = BackEdgeSpecs.forSource(plan, node.getNodeId());
+        if (specs.isEmpty()) return false;
 
-        for (Edge iterateEdge : iterateEdges) {
-            String stateKey = BACK_EDGE_STATE_PREFIX + iterateEdge.getEdgeId();
-            BackEdgeState state = (BackEdgeState) context.getGlobalData(stateKey).orElse(null);
+        for (BackEdgeSpec spec : specs) {
+            if (!portMatches(spec, node, context)) continue;
+
+            BackEdgeState state = (BackEdgeState) context.getGlobalData(stateKey(spec)).orElse(null);
+
+            int maxIterations = resolveMaxIterations(spec);
+
+            // Reconcile with what OTHER replicas have already run before answering, so this
+            // predicate can never report "room left" on the sole basis of local progress.
+            if (state == null) {
+                state = BackEdgeState.create(spec.edgeId(), maxIterations, spec.condition());
+            }
+            state = reconcileWithSharedProgress(state, context.runId(), context.epoch(), spec.edgeId());
+
             // Only skip if truly terminated (terminated flag set)
-            if (state != null && state.terminated()) continue;
-
-            // Get condition from the loop Core
-            Optional<Core> loopCore = plan.findLoopCoreForIterateEdge(iterateEdge);
-            String condition = loopCore.map(Core::loopCondition).orElse(null);
-            int maxIterations = loopCore.map(Core::maxIterations).orElse(10);
+            if (state.terminated()) continue;
 
             // Check if iterations exhausted.
             // state.iteration() is the body iteration that just completed.
-            // When state is null, no back-edge has fired yet - the LoopNode initial
-            // body iter=0 is the only one done, so effective iteration = 0.
+            // When no back-edge has fired yet, the initial body entry iter=0 is the only
+            // one done, so effective iteration = 0.
             // The next body run would be at iteration+1, which must satisfy
             // (iteration + 1) < maxIterations to fit. Equivalently, skip when
             // (iteration + 1) >= maxIterations.
-            int effectiveIteration = (state != null) ? state.iteration() : 0;
+            int effectiveIteration = state.iteration();
             if ((effectiveIteration + 1) >= maxIterations) {
                 continue;
             }
 
-            String loopCoreKey = EdgeRefParser.getNodeKey(iterateEdge.to());
             boolean conditionResult = evaluateCondition(
-                condition, context, iterateEdge.getEdgeId(), loopCoreKey, effectiveIteration + 1, maxIterations);
+                spec.condition(), context, spec.edgeId(), spec.hubKey(), effectiveIteration + 1, maxIterations);
             if (conditionResult) {
                 return true;
             }
         }
         return false;
+    }
+
+    private static String stateKey(BackEdgeSpec spec) {
+        return BACK_EDGE_STATE_PREFIX + spec.edgeId();
+    }
+
+    /**
+     * Resolve the cap for this loop-back: declared value, else the run's budget, then clamped.
+     *
+     * <p>This is the single place the four historical hardcoded {@code orElse(10)} defaults
+     * collapsed into.
+     *
+     */
+    private int resolveMaxIterations(BackEdgeSpec spec) {
+        LoopIterationLimits limits = executionConfig != null
+            ? executionConfig.resolveLoopIterationLimits(null)
+            : LoopIterationLimits.FALLBACK;
+        return limits.resolve(spec.maxIterationsOverride());
+    }
+
+    /**
+     * Is this loop-back the one the source node actually routed to on this pass?
+     *
+     * <p>A back-edge hanging off a specific port (a Decision's {@code else}, an approval's
+     * {@code rejected}) must only fire when THAT port was selected. Without this check the loop
+     * fires whenever the source produced no wired successors for ANY reason - including when a
+     * different port was chosen, or when no branch matched at all - and the workflow silently
+     * iterates on a branch its condition did not select.
+     *
+     * <p>An unported back-edge (the {@code core:loop} hub shape) always matches.
+     */
+    private boolean portMatches(BackEdgeSpec spec, ExecutionNode sourceNode, ExecutionContext context) {
+        String edgePort = spec.sourcePort();
+        if (edgePort == null || edgePort.isBlank()) return true;
+        if (sourceNode == null || !sourceNode.isBranchingNode()) return true;
+
+        String selectedPort = sourceNode.getSelectedPort(resultFromContext(sourceNode.getNodeId(), context));
+        boolean matches = edgePort.equals(selectedPort);
+        if (!matches) {
+            logger.info("[BackEdge] Skipping back-edge {}: edge port '{}' was not selected (selected='{}')",
+                spec.edgeId(), edgePort, selectedPort);
+        }
+        return matches;
+    }
+
+    /**
+     * Rebuild the source node's result from the context so branching nodes can report their
+     * selected port. The engine stores the result under the node id before dispatching here.
+     */
+    private NodeExecutionResult resultFromContext(String nodeId, ExecutionContext context) {
+        if (context == null) return NodeExecutionResult.success(nodeId, Map.of());
+        Object stored = context.getStepOutput(nodeId).orElse(null);
+        if (stored instanceof NodeExecutionResult ner) {
+            return ner;
+        }
+        if (stored instanceof Map<?, ?> map) {
+            @SuppressWarnings("unchecked")
+            Map<String, Object> typed = (Map<String, Object>) map;
+            return NodeExecutionResult.success(nodeId, OutputUnwrapper.unwrapOutputWithBranchDetection(typed));
+        }
+        return NodeExecutionResult.success(nodeId, Map.of());
     }
 
     /**
@@ -187,57 +371,56 @@ public class BackEdgeHandler implements RunScopedCache {
 
         String sourceId = sourceNode.getNodeId();
         WorkflowPlan plan = context.plan();
-        List<Edge> iterateEdges = plan.getIterateEdgesForSource(sourceId);
+        List<BackEdgeSpec> specs = BackEdgeSpecs.forSource(plan, sourceId);
 
-        if (iterateEdges.isEmpty()) {
-            logger.warn("[BackEdge] No iterate edges found for source: {}", sourceId);
+        if (specs.isEmpty()) {
+            logger.warn("[BackEdge] No back-edges found for source: {}", sourceId);
             return context;
         }
 
         ExecutionContext currentContext = context;
 
-        for (Edge iterateEdge : iterateEdges) {
-            String edgeId = iterateEdge.getEdgeId();
-            String stateKey = BACK_EDGE_STATE_PREFIX + edgeId;
-            String loopCoreKey = EdgeRefParser.getNodeKey(iterateEdge.to());
+        for (BackEdgeSpec spec : specs) {
+            String edgeId = spec.edgeId();
+            String stateKey = stateKey(spec);
+            String loopCoreKey = spec.hubKey();
+            String bodyTargetKey = spec.bodyEntryKey();
+            String condition = spec.condition();
+            int maxIterations = resolveMaxIterations(spec);
+            String loopLabel = loopLabel(plan, spec);
 
-            if (loopCoreKey == null) {
-                logger.warn("[BackEdge] Could not parse loop core key from: {}", iterateEdge.to());
+            if (bodyTargetKey == null) {
+                logger.warn("[BackEdge] No body entry resolved for loop-back: {}", edgeId);
                 continue;
             }
 
-            // Find the loop Core to get condition and maxIterations
-            Optional<Core> loopCore = plan.findLoopCoreForIterateEdge(iterateEdge);
-            String condition = loopCore.map(Core::loopCondition).orElse(null);
-            int maxIterations = loopCore.map(Core::maxIterations).orElse(10);
-            String loopLabel = loopCore.map(Core::label).orElse("");
-
-            // Find the body entry target (first node inside the loop body)
-            String bodyTargetKey = plan.findLoopBodyTarget(loopCoreKey);
-            if (bodyTargetKey == null) {
-                logger.warn("[BackEdge] No body target found for loop core: {}", loopCoreKey);
+            // Only iterate when the source actually routed to THIS back-edge's port.
+            if (!portMatches(spec, sourceNode, currentContext)) {
                 continue;
             }
 
             // Get or create state.
             // state.iteration() = body iteration that just completed.
-            // create() returns iteration=0 because the LoopNode initial body entry
-            // is iter=0; subsequent re-entries iterate at 1, 2, … via increment.
+            // create() returns iteration=0 because the initial body entry is iter=0;
+            // subsequent re-entries iterate at 1, 2, … via increment.
             BackEdgeState state = (BackEdgeState) currentContext.getGlobalData(stateKey).orElse(null);
             if (state == null) {
                 state = BackEdgeState.create(edgeId, maxIterations, condition);
             }
+            // Adopt progress/termination published by any other replica BEFORE deciding.
+            state = reconcileWithSharedProgress(state, execution.getRunId(), currentContext.epoch(), edgeId);
 
             if (state.terminated()) {
                 logger.info("[BackEdge] Already terminated: edgeId={}, iteration={}/{}",
                     edgeId, state.iteration(), state.maxIterations());
+                currentContext = currentContext.withGlobalData(stateKey, state);
                 continue;
             }
 
             // Dedup: when a forEach (split) is inside a loop body, multiple split items
             // reach the same back-edge. Only the first should process; others are no-ops.
-            String claimKey = execution.getRunId() + ":" + edgeId + ":" + state.iteration();
-            if (!claimedBackEdgeCalls.add(claimKey)) {
+            // Claimed across replicas, not just within this JVM.
+            if (!claimBackEdgeAdvance(execution.getRunId(), currentContext.epoch(), edgeId, state.iteration())) {
                 logger.info("[BackEdge] Already claimed by split sibling: edgeId={}, iteration={}",
                     edgeId, state.iteration());
                 continue;
@@ -254,10 +437,23 @@ public class BackEdgeHandler implements RunScopedCache {
             if (conditionResult) {
                 // Continue: increment iteration, reset subgraph, re-traverse
                 currentContext = currentContext.withGlobalData(stateKey, nextState);
+                // Publish BEFORE running the body: the body may yield (Wait/approval) and the
+                // resume can land on another replica, which must see this iteration.
+                if (loopIterationStore != null) {
+                    loopIterationStore.recordIteration(execution.getRunId(), currentContext.epoch(), edgeId, nextState.iteration());
+                }
 
-                // Update loop node step output with current iteration
-                currentContext = updateLoopStepOutput(currentContext, loopCoreKey,
-                    nextState.iteration(), nextState.maxIterations(), false, null);
+                // Update loop node step output with current iteration (hub-driven loops only -
+                // a hub-less back-edge has no controller node to carry the counter)
+                if (spec.hasHub()) {
+                    currentContext = updateLoopStepOutput(currentContext, loopCoreKey,
+                        nextState.iteration(), nextState.maxIterations(), false, null);
+                }
+
+                // Expose the current iteration so a node executing in the body can stamp it onto
+                // its work (AgentNode.extractCurrentIteration reads this on the async path).
+                currentContext = currentContext.withGlobalData(
+                    CURRENT_LOOP_ITERATION_KEY, nextState.iteration());
 
                 logger.info("[BackEdge] Iteration starting: edgeId={}, iteration={}/{}, bodyTarget={}",
                     edgeId, nextState.iteration(), nextState.maxIterations(), bodyTargetKey);
@@ -266,29 +462,37 @@ public class BackEdgeHandler implements RunScopedCache {
                 int itemIndex = currentContext.itemIndex();
                 int iteration = nextState.iteration();
                 final ExecutionContext ctx = currentContext;
-                recordLoopEdgesInEpoch(execution, ctx, () -> {
-                    // Loop-back edge: body-last-node -> loop-core (iterate)
-                    edgeStatusService.markEdgeCompleted(execution, sourceId, loopCoreKey, itemIndex, iteration);
-                    // Body re-entry edge: loop-core -> body-entry-node
-                    edgeStatusService.markEdgeCompleted(execution, loopCoreKey, bodyTargetKey, itemIndex, iteration);
-                });
-                logger.info("[BackEdge] Emitted edge events: {} -> {} and {} -> {}, iteration={}",
-                    sourceId, loopCoreKey, loopCoreKey, bodyTargetKey, iteration);
+                recordLoopEdgesInEpoch(execution, ctx, () -> emitIterationEdges(
+                    execution, spec, sourceId, bodyTargetKey, itemIndex, iteration));
 
                 // Emit iteration streaming event
                 emitBackEdgeEvent(execution.getRunId(), edgeId, LoopEventType.ITERATION_COMPLETED,
                     nextState.iteration(), nextState.maxIterations(), null, loopCoreKey, loopLabel);
 
-                // Compute subgraph between body entry and source using plan edges
-                Set<String> subgraphNodes = computeSubgraphBetween(bodyTargetKey, sourceId, plan);
-                // Also include ported branch targets of the source node (e.g., decision→stop).
-                // computeSubgraphBetween stops at sourceNode, missing branch targets like stop
-                // nodes that are inside the loop body via decision/fork ports.
-                addPortedBranchDescendants(subgraphNodes, sourceId, plan);
+                // Nodes that re-execute this iteration - the SAME span the iteration stamp uses,
+                // so a reset node always gets a distinct workflow_step_data row.
+                Set<String> subgraphNodes = BackEdgeSpanResolver.resolveSpan(plan, spec);
                 logger.info("[BackEdge] Resetting {} subgraph nodes: {}", subgraphNodes.size(), subgraphNodes);
 
                 // Reset execution state for subgraph nodes
                 currentContext = currentContext.withoutNodes(subgraphNodes);
+
+                // globalData survives withoutNodes by design, so nested loop-backs inside the span
+                // would keep terminated=true and run their body exactly once per outer iteration.
+                currentContext = clearNestedBackEdgeState(currentContext, plan, spec, subgraphNodes, execution);
+
+                // Publish the reset set so the caller can un-complete those nodes in the
+                // StateSnapshot. Without it a body that yields AWAITING_SIGNAL resumes against a
+                // snapshot that still says the body is done.
+                currentContext = currentContext.withGlobalData(
+                    BACK_EDGE_RESET_NODES_KEY, new HashSet<>(subgraphNodes));
+
+                // AUTO mode re-traverses synchronously right below, so the snapshot must be
+                // un-completed HERE - after the caller regains control it is already too late,
+                // and a body that yields AWAITING_SIGNAL would resume against a snapshot saying
+                // the body is done. (Step-by-step applies it in V2StepByStepService instead,
+                // because there the caller does regain control before the next node runs.)
+                applySnapshotReset(currentContext, subgraphNodes);
 
                 // Re-traverse from body entry node
                 ExecutionNode targetNode = nodeFinder.apply(bodyTargetKey);
@@ -298,14 +502,16 @@ public class BackEdgeHandler implements RunScopedCache {
                     logger.error("[BackEdge] Body entry node not found: {}", bodyTargetKey);
                 }
             } else {
-                // Terminate: condition false or max iterations reached
-                String reason = hasNextIterationRoom ? "condition_false" : "max_iterations_reached";
+                // Terminate: condition false, or the iteration cap bit.
+                String reason = terminationReason(spec, hasNextIterationRoom, currentContext, state, maxIterations);
                 BackEdgeState terminatedState = state.terminate();
                 currentContext = currentContext.withGlobalData(stateKey, terminatedState);
 
-                // Update loop node step output with termination info
-                currentContext = updateLoopStepOutput(currentContext, loopCoreKey,
-                    terminatedState.iteration(), terminatedState.maxIterations(), true, reason);
+                // Update loop node step output with termination info (hub-driven loops only)
+                if (spec.hasHub()) {
+                    currentContext = updateLoopStepOutput(currentContext, loopCoreKey,
+                        terminatedState.iteration(), terminatedState.maxIterations(), true, reason);
+                }
 
                 logger.info("[BackEdge] Terminated: edgeId={}, iteration={}/{}, reason={}",
                     edgeId, terminatedState.iteration(), terminatedState.maxIterations(), reason);
@@ -313,23 +519,10 @@ public class BackEdgeHandler implements RunScopedCache {
                 // Emit edge events for final loop-back and exit (batched for epoch recording)
                 int itemIndex = currentContext.itemIndex();
                 int iteration = terminatedState.iteration();
-                String exitTargetKeyForEdge = plan.findLoopExitTarget(loopCoreKey);
+                String exitTargetKeyForEdge = spec.exitTargetKey();
                 final ExecutionContext ctx2 = currentContext;
-                recordLoopEdgesInEpoch(execution, ctx2, () -> {
-                    // Final loop-back edge: body-last-node -> loop-core
-                    edgeStatusService.markEdgeCompleted(execution, sourceId, loopCoreKey, itemIndex, iteration);
-                    // Exit edge: loop-core -> exit-target
-                    if (exitTargetKeyForEdge != null) {
-                        edgeStatusService.markEdgeCompleted(execution, loopCoreKey, exitTargetKeyForEdge, itemIndex, iteration);
-                    }
-                });
-                if (exitTargetKeyForEdge != null) {
-                    logger.info("[BackEdge] Emitted termination edge events: {} -> {} and {} -> {}, iteration={}",
-                        sourceId, loopCoreKey, loopCoreKey, exitTargetKeyForEdge, iteration);
-                } else {
-                    logger.info("[BackEdge] Emitted loop-back edge event: {} -> {}, iteration={}",
-                        sourceId, loopCoreKey, iteration);
-                }
+                recordLoopEdgesInEpoch(execution, ctx2, () -> emitTerminationEdges(
+                    execution, spec, sourceId, exitTargetKeyForEdge, itemIndex, iteration));
 
                 // Emit termination streaming event
                 emitBackEdgeEvent(execution.getRunId(), edgeId, LoopEventType.COMPLETED,
@@ -347,7 +540,7 @@ public class BackEdgeHandler implements RunScopedCache {
                 // The initial persist (when LoopNode first executed) has terminated=false.
                 // Using the final iteration number creates a NEW DB row (different unique key),
                 // and StepStateBuilder.processCores() picks the last entity which has terminated=true.
-                ExecutionNode loopCoreNode = nodeFinder.apply(loopCoreKey);
+                ExecutionNode loopCoreNode = spec.hasHub() ? nodeFinder.apply(loopCoreKey) : null;
                 if (loopCoreNode != null) {
                     Map<String, Object> terminationOutput = new LinkedHashMap<>();
                     terminationOutput.put("node_type", "LOOP");
@@ -355,8 +548,13 @@ public class BackEdgeHandler implements RunScopedCache {
                     terminationOutput.put("iteration", terminatedState.iteration());
                     terminationOutput.put("maxIterations", terminatedState.maxIterations());
                     terminationOutput.put("terminated", true);
+                    // On overflow the loop did NOT reach its own stopping condition, so the exit
+                    // path must not be re-armed. Step-by-step rebuilds routing from this row, so
+                    // leaving selected_path="exit" here would let the workflow carry on past a
+                    // failure the AUTO path refuses to continue past.
+                    boolean overflowed = BACK_EDGE_OVERFLOW_REASON.equals(reason);
                     terminationOutput.put("reason", reason);
-                    terminationOutput.put("selected_path", "exit");
+                    terminationOutput.put("selected_path", overflowed ? "failed" : "exit");
 
                     NodeExecutionResult terminationResult = NodeExecutionResult.success(loopCoreKey, terminationOutput);
                     if (eventService != null) {
@@ -369,8 +567,21 @@ public class BackEdgeHandler implements RunScopedCache {
                     }
                 }
 
-                // Activate exit path: find and traverse the exit target node
-                String exitTargetKey = plan.findLoopExitTarget(loopCoreKey);
+                // Budget overflow with the loop still wanting to run: the workflow's intent was
+                // NOT satisfied, so the run must not finish green. The exit path is deliberately
+                // NOT taken - continuing would contradict the failure, and for a hub-less
+                // back-edge auto-taking the source's other port would fabricate a branch the
+                // condition never selected and run downstream side effects on wrong data.
+                if (BACK_EDGE_OVERFLOW_REASON.equals(reason)) {
+                    currentContext = failOnIterationOverflow(
+                        sourceNode, spec, terminatedState, currentContext, execution, eventService, item);
+                    continue;
+                }
+
+                // Activate exit path: find and traverse the exit target node.
+                // A hub-less back-edge has none: the source node's other port already routed
+                // on this pass, so there is nothing left stranded.
+                String exitTargetKey = spec.exitTargetKey();
                 if (exitTargetKey != null) {
                     ExecutionNode exitNode = nodeFinder.apply(exitTargetKey);
                     if (exitNode != null) {
@@ -380,7 +591,15 @@ public class BackEdgeHandler implements RunScopedCache {
                         logger.warn("[BackEdge] Exit target node not found: {}", exitTargetKey);
                     }
                 } else {
-                    logger.debug("[BackEdge] No exit target defined for loop: {}", loopCoreKey);
+                    logger.debug("[BackEdge] No exit target for back-edge: {}", edgeId);
+                }
+
+                // Publish the termination LAST: it makes every other replica skip this back-edge,
+                // so a crash between the flag and the exit activation would strand the run. Dying
+                // BEFORE this point simply leaves another replica to re-derive and terminate again.
+                if (loopIterationStore != null) {
+                    loopIterationStore.markTerminated(execution.getRunId(), currentContext.epoch(), edgeId,
+                        terminatedState.iteration());
                 }
             }
         }
@@ -403,49 +622,67 @@ public class BackEdgeHandler implements RunScopedCache {
             Map<String, ExecutionNode> nodeMap) {
 
         WorkflowPlan plan = context.plan();
-        List<Edge> iterateEdges = plan.getIterateEdgesForSource(nodeId);
+        List<BackEdgeSpec> specs = BackEdgeSpecs.forSource(plan, nodeId);
 
-        if (iterateEdges.isEmpty()) {
+        if (specs.isEmpty()) {
             return StepByStepExecutionResult.success(context, result, Set.of());
         }
 
         ExecutionContext currentContext = context;
         Set<String> readyNodes = new HashSet<>();
 
-        for (Edge iterateEdge : iterateEdges) {
-            String edgeId = iterateEdge.getEdgeId();
-            String stateKey = BACK_EDGE_STATE_PREFIX + edgeId;
-            String loopCoreKey = EdgeRefParser.getNodeKey(iterateEdge.to());
+        for (BackEdgeSpec spec : specs) {
+            String edgeId = spec.edgeId();
+            String stateKey = stateKey(spec);
+            String loopCoreKey = spec.hubKey();
+            String bodyTargetKey = spec.bodyEntryKey();
+            String condition = spec.condition();
+            int maxIterations = resolveMaxIterations(spec);
+            String loopLabel = loopLabel(plan, spec);
 
-            if (loopCoreKey == null) continue;
-
-            // Get condition/maxIterations from Core
-            Optional<Core> loopCore = plan.findLoopCoreForIterateEdge(iterateEdge);
-            String condition = loopCore.map(Core::loopCondition).orElse(null);
-            int maxIterations = loopCore.map(Core::maxIterations).orElse(10);
-            String loopLabel = loopCore.map(Core::label).orElse("");
-
-            // Find the body entry target
-            String bodyTargetKey = plan.findLoopBodyTarget(loopCoreKey);
             if (bodyTargetKey == null) continue;
 
+            // Only iterate when the source actually routed to THIS back-edge's port. SBS passes
+            // the fresh result, which is more reliable than the rehydrated context.
+            if (!portMatches(spec, sourceNode, result)) {
+                continue;
+            }
+
             // state.iteration() = body iter that just completed. create() returns
-            // iteration=0 (the LoopNode initial body entry).
+            // iteration=0 (the initial body entry).
             BackEdgeState state = (BackEdgeState) currentContext.getGlobalData(stateKey).orElse(null);
             if (state == null) {
                 state = BackEdgeState.create(edgeId, maxIterations, condition);
             }
+            // THE fix for the prod overrun: this path runs on every WAIT_TIMER / signal resume,
+            // and resumes are dispatched cross-instance. Without reconciling here, each replica
+            // counted only its own iterations and enforced maxIterations per-replica.
+            state = reconcileWithSharedProgress(state, execution.getRunId(), currentContext.epoch(), edgeId);
 
             if (state.terminated()) {
+                currentContext = currentContext.withGlobalData(stateKey, state);
                 continue;
             }
+
+            // NOTE: deliberately NO claim here, unlike the AUTO path (where split siblings all
+            // reach the same back-edge within one pass). A claim marker is sticky, so a resume
+            // that fails after claiming would leave the loop permanently stalled - worse than
+            // the race it would close.
+            //
+            // Callers differ in how well they are already serialized:
+            //  - SignalResumeService.advanceBackEdgeAfterSignalResolution holds a per-run Redis
+            //    mutex, so it IS single-winner across replicas.
+            //  - advanceLoopBackEdgeForAsyncCompletedNode (async agent tail of a loop body) holds
+            //    only a JVM-local lock, so two replicas can read the same iteration and both
+            //    advance. That costs a duplicate body run, but it can NOT inflate the ceiling:
+            //    RedisLoopIterationStore's writes are monotonic, so both land on the same value.
 
             // In SBS mode, context is freshly loaded from DB each call. The loop core's
             // step output in DB still has iteration=1 from the initial LoopNode execution.
             // Update the in-memory context with the current iteration from BackEdgeState
             // so that condition evaluation (e.g., "{{core:loop.iteration}} < 3") sees the
             // correct iteration number, not the stale DB value.
-            if (state.iteration() > 0) {
+            if (spec.hasHub() && state.iteration() > 0) {
                 currentContext = updateLoopStepOutput(currentContext, loopCoreKey,
                     state.iteration(), state.maxIterations(), false, null);
             }
@@ -457,6 +694,11 @@ public class BackEdgeHandler implements RunScopedCache {
 
             if (conditionResult) {
                 currentContext = currentContext.withGlobalData(stateKey, nextState);
+                // Publish before the body runs: the body yields on Wait/approval and the next
+                // resume may land on a different replica, which reads this to keep counting.
+                if (loopIterationStore != null) {
+                    loopIterationStore.recordIteration(execution.getRunId(), currentContext.epoch(), edgeId, nextState.iteration());
+                }
 
                 // Expose the current loop iteration so a node executing in the body can stamp it
                 // onto its work. The async agent path reads this (AgentNode.extractCurrentIteration)
@@ -465,25 +707,22 @@ public class BackEdgeHandler implements RunScopedCache {
                 // overwrites, under-counting executions. The key was previously read but never set.
                 currentContext = currentContext.withGlobalData(CURRENT_LOOP_ITERATION_KEY, nextState.iteration());
 
-                // Update loop node step output with current iteration
-                currentContext = updateLoopStepOutput(currentContext, loopCoreKey,
-                    nextState.iteration(), nextState.maxIterations(), false, null);
+                // Update loop node step output with current iteration (hub-driven loops only)
+                if (spec.hasHub()) {
+                    currentContext = updateLoopStepOutput(currentContext, loopCoreKey,
+                        nextState.iteration(), nextState.maxIterations(), false, null);
+                }
 
                 // Emit edge events for loop-back and body re-entry (batched for epoch recording)
                 int iteration = nextState.iteration();
                 final ExecutionContext sbsCtx = currentContext;
-                recordLoopEdgesInEpoch(execution, sbsCtx, () -> {
-                    edgeStatusService.markEdgeCompleted(execution, nodeId, loopCoreKey, itemIndex, iteration);
-                    edgeStatusService.markEdgeCompleted(execution, loopCoreKey, bodyTargetKey, itemIndex, iteration);
-                });
+                recordLoopEdgesInEpoch(execution, sbsCtx, () -> emitIterationEdges(
+                    execution, spec, nodeId, bodyTargetKey, itemIndex, iteration));
 
-                // Compute and reset subgraph from body entry to source
-                // Use plan-based overload (not nodeMap-based) because DecisionNode/OptionNode
-                // branches are not in getSuccessors() - only the plan edges capture all connections.
-                Set<String> subgraphNodes = computeSubgraphBetween(bodyTargetKey, nodeId, plan);
-                // Also include ported branch targets of the source node (e.g., decision→stop)
-                addPortedBranchDescendants(subgraphNodes, nodeId, plan);
+                // Nodes that re-execute this iteration - the SAME span the iteration stamp uses.
+                Set<String> subgraphNodes = BackEdgeSpanResolver.resolveSpan(plan, spec);
                 currentContext = currentContext.withoutNodes(subgraphNodes);
+                currentContext = clearNestedBackEdgeState(currentContext, plan, spec, subgraphNodes, execution);
 
                 // Store reset node IDs in globalData so V2StepByStepService can reset
                 // the StateSnapshot accordingly. Without this, the StateSnapshot still
@@ -507,24 +746,22 @@ public class BackEdgeHandler implements RunScopedCache {
                 logger.info("[BackEdge] Step-by-step iteration: edgeId={}, iteration={}/{}, bodyTarget={}, resetNodes={}",
                     edgeId, nextState.iteration(), nextState.maxIterations(), bodyTargetKey, subgraphNodes.size());
             } else {
-                String reason = hasNextIterationRoom ? "condition_false" : "max_iterations_reached";
+                String reason = terminationReason(spec, hasNextIterationRoom, currentContext, state, maxIterations);
                 BackEdgeState terminatedState = state.terminate();
                 currentContext = currentContext.withGlobalData(stateKey, terminatedState);
 
-                // Update loop node step output with termination info
-                currentContext = updateLoopStepOutput(currentContext, loopCoreKey,
-                    terminatedState.iteration(), terminatedState.maxIterations(), true, reason);
+                // Update loop node step output with termination info (hub-driven loops only)
+                if (spec.hasHub()) {
+                    currentContext = updateLoopStepOutput(currentContext, loopCoreKey,
+                        terminatedState.iteration(), terminatedState.maxIterations(), true, reason);
+                }
 
                 // Emit edge events for final loop-back and exit (batched for epoch recording)
                 int iteration = terminatedState.iteration();
-                String exitTargetKey = plan.findLoopExitTarget(loopCoreKey);
+                String exitTargetKey = spec.exitTargetKey();
                 final ExecutionContext sbsCtx2 = currentContext;
-                recordLoopEdgesInEpoch(execution, sbsCtx2, () -> {
-                    edgeStatusService.markEdgeCompleted(execution, nodeId, loopCoreKey, itemIndex, iteration);
-                    if (exitTargetKey != null) {
-                        edgeStatusService.markEdgeCompleted(execution, loopCoreKey, exitTargetKey, itemIndex, iteration);
-                    }
-                });
+                recordLoopEdgesInEpoch(execution, sbsCtx2, () -> emitTerminationEdges(
+                    execution, spec, nodeId, exitTargetKey, itemIndex, iteration));
 
                 // Emit termination streaming event
                 emitBackEdgeEvent(execution.getRunId(), edgeId, LoopEventType.COMPLETED,
@@ -539,7 +776,7 @@ public class BackEdgeHandler implements RunScopedCache {
                 // terminated=false) from when LoopNode first executed. When getReadyNodes()
                 // reconstructs context from DB, ReadyNodeCalculator would route to body
                 // targets instead of exit targets, preventing the exit path from executing.
-                ExecutionNode loopCoreNode = nodeMap.get(loopCoreKey);
+                ExecutionNode loopCoreNode = spec.hasHub() ? nodeMap.get(loopCoreKey) : null;
                 if (loopCoreNode != null && eventService != null) {
                     Map<String, Object> terminationOutput = new LinkedHashMap<>();
                     terminationOutput.put("node_type", "LOOP");
@@ -547,8 +784,13 @@ public class BackEdgeHandler implements RunScopedCache {
                     terminationOutput.put("iteration", terminatedState.iteration());
                     terminationOutput.put("maxIterations", terminatedState.maxIterations());
                     terminationOutput.put("terminated", true);
+                    // On overflow the loop did NOT reach its own stopping condition, so the exit
+                    // path must not be re-armed. Step-by-step rebuilds routing from this row, so
+                    // leaving selected_path="exit" here would let the workflow carry on past a
+                    // failure the AUTO path refuses to continue past.
+                    boolean overflowed = BACK_EDGE_OVERFLOW_REASON.equals(reason);
                     terminationOutput.put("enter_body", false);
-                    terminationOutput.put("selected_path", "exit");
+                    terminationOutput.put("selected_path", overflowed ? "failed" : "exit");
                     terminationOutput.put("reason", reason);
 
                     NodeExecutionResult terminationResult = NodeExecutionResult.success(loopCoreKey, terminationOutput);
@@ -559,10 +801,25 @@ public class BackEdgeHandler implements RunScopedCache {
                     logger.info("[BackEdge] SBS: Re-persisted loop termination: loopCore={}, iteration={}", loopCoreKey, persistenceIteration);
                 }
 
+                // Budget overflow with the loop still wanting to run: fail rather than finish
+                // green, and do NOT arm the exit path (continuing would contradict the failure).
+                if (BACK_EDGE_OVERFLOW_REASON.equals(reason)) {
+                    currentContext = failOnIterationOverflow(
+                        sourceNode, spec, terminatedState, currentContext, execution, eventService, item);
+                    continue;
+                }
+
                 // Add exit target to ready nodes
                 if (exitTargetKey != null) {
                     readyNodes.add(exitTargetKey);
                     logger.info("[BackEdge] Step-by-step: exit target ready: {}", exitTargetKey);
+                }
+
+                // Publish LAST - see the AUTO path: the flag short-circuits every other replica,
+                // so it must never outlive a half-finished termination.
+                if (loopIterationStore != null) {
+                    loopIterationStore.markTerminated(execution.getRunId(), currentContext.epoch(), edgeId,
+                        terminatedState.iteration());
                 }
 
                 logger.info("[BackEdge] Step-by-step terminated: edgeId={}, reason={}", edgeId, reason);
@@ -574,140 +831,216 @@ public class BackEdgeHandler implements RunScopedCache {
 
     /**
      * Compute the set of node IDs in the subgraph between targetNode and sourceNode.
-     * BFS from target following forward edges (from plan), collecting all nodes until reaching source (inclusive).
      *
-     * Uses plan edges instead of ExecutionNode tree to avoid needing the full node map.
+     * @deprecated call {@link BackEdgeSpanResolver#resolveSpan} with the spec instead - it also
+     *             applies the ported-branch pass, so the two callers cannot drift.
      */
+    @Deprecated
     public Set<String> computeSubgraphBetween(String targetNodeId, String sourceNodeId, WorkflowPlan plan) {
-        // Build adjacency list from plan edges (excluding iterate/loop-back edges)
-        Map<String, Set<String>> successors = new HashMap<>();
-        for (Edge edge : plan.getEdges()) {
-            // Skip iterate-port edges (loop-back connections)
-            if (edge.to() != null && "iterate".equals(EdgeRefParser.getPort(edge.to()))) continue;
-            String fromKey = EdgeRefParser.getNodeKey(edge.from());
-            String toKey = EdgeRefParser.getNodeKey(edge.to());
-            if (fromKey != null && toKey != null) {
-                successors.computeIfAbsent(fromKey, k -> new HashSet<>()).add(toKey);
-            }
-        }
-
-        Set<String> subgraph = new LinkedHashSet<>();
-        Queue<String> queue = new LinkedList<>();
-        Set<String> visited = new HashSet<>();
-
-        queue.add(targetNodeId);
-        visited.add(targetNodeId);
-        subgraph.add(targetNodeId);
-
-        while (!queue.isEmpty()) {
-            String currentId = queue.poll();
-
-            // Don't traverse beyond source node (boundary of loop body)
-            if (currentId.equals(sourceNodeId)) {
-                subgraph.add(currentId);
-                continue;
-            }
-
-            Set<String> succs = successors.getOrDefault(currentId, Set.of());
-            for (String successorId : succs) {
-                if (!visited.contains(successorId)) {
-                    visited.add(successorId);
-                    subgraph.add(successorId);
-                    queue.add(successorId);
-                }
-            }
-        }
-
-        return subgraph;
+        return BackEdgeSpanResolver.computeSubgraphBetween(targetNodeId, sourceNodeId, plan);
     }
 
     /**
      * Overload that uses an ExecutionNode map for subgraph computation.
-     * Used when a node map is already available.
+     *
+     * @deprecated see {@link #computeSubgraphBetween(String, String, WorkflowPlan)}.
      */
+    @Deprecated
     public Set<String> computeSubgraphBetween(String targetNodeId, String sourceNodeId, Map<String, ExecutionNode> nodeMap) {
-        Set<String> subgraph = new LinkedHashSet<>();
-        Queue<String> queue = new LinkedList<>();
-        Set<String> visited = new HashSet<>();
-
-        queue.add(targetNodeId);
-        visited.add(targetNodeId);
-        subgraph.add(targetNodeId);
-
-        while (!queue.isEmpty()) {
-            String currentId = queue.poll();
-
-            if (currentId.equals(sourceNodeId)) {
-                subgraph.add(currentId);
-                continue;
-            }
-
-            ExecutionNode currentNode = nodeMap.get(currentId);
-            if (currentNode == null) continue;
-
-            for (ExecutionNode successor : currentNode.getSuccessors()) {
-                String successorId = successor.getNodeId();
-                if (!visited.contains(successorId)) {
-                    visited.add(successorId);
-                    subgraph.add(successorId);
-                    queue.add(successorId);
-                }
-            }
-        }
-
-        return subgraph;
+        return BackEdgeSpanResolver.computeSubgraphBetween(targetNodeId, sourceNodeId, nodeMap);
     }
 
     /**
-     * Add ported branch descendants of sourceNode to the subgraph.
-     * When sourceNode is a decision/fork, its ported branch targets (e.g., decision:if → stop)
-     * are inside the loop body but not reached by computeSubgraphBetween (which stops at source).
-     * Only includes targets reachable via ported edges (with a port on the from-side),
-     * not simple forward edges (which typically go outside the loop).
+     * Un-complete the reset span in the StateSnapshot (AUTO mode).
+     *
+     * <p>DAG-scoped {@code removeNodesFromDag}, never the all-DAGs {@code resetDagSnapshot}:
+     * reactivating unrelated DAGs would stop the run from reaching WAITING_TRIGGER.
+     *
+     * <p>Optional injection so existing constructions of this handler keep working; when absent
+     * the behaviour is the historical one (in-memory reset only).
      */
-    private void addPortedBranchDescendants(Set<String> subgraph, String sourceId, WorkflowPlan plan) {
-        // Build adjacency list (excluding iterate edges)
-        Map<String, Set<String>> successors = new HashMap<>();
-        for (Edge edge : plan.getEdges()) {
-            if (edge.to() != null && "iterate".equals(EdgeRefParser.getPort(edge.to()))) continue;
-            String fromKey = EdgeRefParser.getNodeKey(edge.from());
-            String toKey = EdgeRefParser.getNodeKey(edge.to());
-            if (fromKey != null && toKey != null) {
-                successors.computeIfAbsent(fromKey, k -> new HashSet<>()).add(toKey);
+    private void applySnapshotReset(ExecutionContext context, Set<String> resetNodeIds) {
+        if (stateSnapshotService == null || resetNodeIds == null || resetNodeIds.isEmpty()) {
+            return;
+        }
+        String triggerId = context.triggerId();
+        if (triggerId == null) {
+            logger.debug("[BackEdge] No triggerId on context, skipping AUTO snapshot reset");
+            return;
+        }
+        try {
+            stateSnapshotService.removeNodesFromDag(context.runId(), triggerId, resetNodeIds);
+            logger.info("[BackEdge] AUTO: reset {} body nodes in StateSnapshot: runId={}, triggerId={}",
+                resetNodeIds.size(), context.runId(), triggerId);
+        } catch (Exception e) {
+            logger.warn("[BackEdge] AUTO snapshot reset failed: runId={}, error={}",
+                context.runId(), e.getMessage());
+        }
+    }
+
+    /** Human-readable label of the loop hub, empty for a hub-less back-edge. */
+    private String loopLabel(WorkflowPlan plan, BackEdgeSpec spec) {
+        if (!spec.hasHub()) return "";
+        return plan.getCores().stream()
+            .filter(Core::isLoop)
+            .filter(c -> spec.hubKey().equals(c.getNormalizedKey()))
+            .map(Core::label)
+            .findFirst()
+            .orElse("");
+    }
+
+    /**
+     * Mark the edges traversed by one iteration.
+     *
+     * <p>A hub-driven loop shows two hops (body-last -> loop core, loop core -> body entry)
+     * because the controller node sits between them. A declared back-edge is a single hop from
+     * its source straight to its target, which is exactly what the builder draws.
+     */
+    private void emitIterationEdges(WorkflowExecution execution, BackEdgeSpec spec, String sourceId,
+                                    String bodyTargetKey, int itemIndex, int iteration) {
+        if (spec.hasHub()) {
+            edgeStatusService.markEdgeCompleted(execution, sourceId, spec.hubKey(), itemIndex, iteration);
+            edgeStatusService.markEdgeCompleted(execution, spec.hubKey(), bodyTargetKey, itemIndex, iteration);
+        } else {
+            edgeStatusService.markEdgeCompleted(execution, sourceId, bodyTargetKey, itemIndex, iteration);
+        }
+    }
+
+    /** Mark the final loop-back hop and, for a hub-driven loop, its exit hop. */
+    private void emitTerminationEdges(WorkflowExecution execution, BackEdgeSpec spec, String sourceId,
+                                      String exitTargetKey, int itemIndex, int iteration) {
+        if (spec.hasHub()) {
+            edgeStatusService.markEdgeCompleted(execution, sourceId, spec.hubKey(), itemIndex, iteration);
+            if (exitTargetKey != null) {
+                edgeStatusService.markEdgeCompleted(execution, spec.hubKey(), exitTargetKey, itemIndex, iteration);
             }
         }
+        // A hub-less back-edge emits nothing on termination: its edge was not traversed this pass
+        // (the source routed to its other port), so marking it completed would be a lie.
+    }
 
-        // Find ported edges FROM sourceId (decision/fork branches)
-        Set<String> portedTargets = new HashSet<>();
-        for (Edge edge : plan.getEdges()) {
-            String fromKey = EdgeRefParser.getNodeKey(edge.from());
-            String fromPort = EdgeRefParser.getPort(edge.from());
-            if (sourceId.equals(fromKey) && fromPort != null && !fromPort.isEmpty()) {
-                String toKey = EdgeRefParser.getNodeKey(edge.to());
-                String toPort = EdgeRefParser.getPort(edge.to());
-                // Skip iterate edges
-                if ("iterate".equals(toPort)) continue;
-                if (toKey != null && !subgraph.contains(toKey)) {
-                    portedTargets.add(toKey);
-                }
+    /**
+     * Why the loop stopped.
+     *
+     * <ul>
+     *   <li>{@code condition_false} - the author's condition said stop. Normal, run stays green.</li>
+     *   <li>{@code iterations_exhausted} - the cap WAS the declared way out ("repeat N times":
+     *       a loop hub with no condition). The contract was fulfilled, run stays green.</li>
+     *   <li>{@code max_iterations_reached} - the cap fired while there was still a reason to
+     *       iterate. The workflow's intent was not satisfied, so the run must fail.</li>
+     * </ul>
+     */
+    private String terminationReason(BackEdgeSpec spec, boolean hasNextIterationRoom,
+                                     ExecutionContext context, BackEdgeState state, int maxIterations) {
+        if (hasNextIterationRoom) {
+            // Room was available and the condition still said stop.
+            return CONDITION_FALSE_REASON;
+        }
+        if (spec.capIsDeclaredTerminator()) {
+            return ITERATIONS_EXHAUSTED_REASON;
+        }
+        // Out of room on a loop with a live condition. Whether that is an overflow depends on
+        // whether the loop still WANTED to run: the condition is not evaluated on the out-of-room
+        // path, so evaluate it here rather than failing a run that would have exited cleanly on
+        // its own condition anyway.
+        //
+        // Caveat, deliberate: the out-of-room decision can be taken from progress published by
+        // ANOTHER replica (RedisLoopIterationStore), and this replica's context is then behind -
+        // it may hold the outputs of iteration 5 of a loop the cluster has run 59 times. The
+        // condition is evaluated against that view, so it can answer about a stale iteration.
+        // The failure mode is the lenient one (green instead of failed) and it only affects the
+        // REASON, never the decision to stop, which is taken from the reconciled counter above.
+        boolean stillWantsToIterate = evaluateCondition(
+            spec.condition(), context, spec.edgeId(), spec.hubKey(), state.iteration() + 1, maxIterations);
+        return stillWantsToIterate ? BACK_EDGE_OVERFLOW_REASON : CONDITION_FALSE_REASON;
+    }
+
+    /**
+     * Clear iteration state of loop-backs nested INSIDE the span being reset.
+     *
+     * <p>{@code withoutNodes} deliberately keeps globalData, so without this an inner loop that
+     * terminated during outer iteration 1 keeps {@code terminated=true} and its body runs exactly
+     * once for every later outer iteration - silently, with no error.
+     */
+    private ExecutionContext clearNestedBackEdgeState(ExecutionContext context, WorkflowPlan plan,
+                                                      BackEdgeSpec current, Set<String> span,
+                                                      WorkflowExecution execution) {
+        ExecutionContext updated = context;
+        for (String key : new HashSet<>(context.getGlobalDataKeys())) {
+            if (!key.startsWith(BACK_EDGE_STATE_PREFIX)) continue;
+            String edgeId = key.substring(BACK_EDGE_STATE_PREFIX.length());
+            if (edgeId.equals(current.edgeId())) continue;
+
+            boolean nested = BackEdgeSpecs.all(plan).stream()
+                .filter(s -> s.edgeId().equals(edgeId))
+                .anyMatch(s -> span.contains(s.sourceKey()));
+            if (!nested) continue;
+
+            updated = updated.withGlobalData(key, null);
+            if (execution != null) {
+                String prefix = execution.getRunId() + ":" + edgeId + ":";
+                claimedBackEdgeCalls.removeIf(claim -> claim.startsWith(prefix));
             }
+            logger.info("[BackEdge] Cleared nested back-edge state inside reset span: {}", edgeId);
+        }
+        return updated;
+    }
+
+    /**
+     * The iteration cap fired while the loop still had a reason to run.
+     *
+     * <p>Re-publishes the back-edge SOURCE as FAILED so the run lands FAILED/PARTIAL_SUCCESS
+     * instead of finishing green in the middle of the graph. The source's other port is NOT
+     * auto-taken: that would fabricate a branch the condition never selected and run downstream
+     * side effects on wrong data.
+     */
+    private ExecutionContext failOnIterationOverflow(ExecutionNode sourceNode, BackEdgeSpec spec,
+                                                     BackEdgeState state, ExecutionContext context,
+                                                     WorkflowExecution execution,
+                                                     V2ExecutionEventService eventService,
+                                                     TriggerItem item) {
+        String message = String.format(
+            "Loop-back %s stopped after %d iterations (limit %d) while its condition was still true",
+            spec.edgeId(), state.iteration() + 1, state.maxIterations());
+        logger.error("[BackEdge] {}", message);
+
+        if (eventService == null || sourceNode == null) {
+            return context;
         }
 
-        // BFS from ported targets to include all their descendants
-        Queue<String> queue = new LinkedList<>(portedTargets);
-        Set<String> visited = new HashSet<>(portedTargets);
-        subgraph.addAll(portedTargets);
+        Map<String, Object> output = new LinkedHashMap<>();
+        output.put("back_edge_terminated", true);
+        output.put("back_edge_id", spec.edgeId());
+        output.put("reason", BACK_EDGE_OVERFLOW_REASON);
+        output.put("iteration", state.iteration());
+        output.put("maxIterations", state.maxIterations());
 
-        while (!queue.isEmpty()) {
-            String current = queue.poll();
-            for (String succ : successors.getOrDefault(current, Set.of())) {
-                if (!visited.contains(succ) && !subgraph.contains(succ)) {
-                    visited.add(succ);
-                    subgraph.add(succ);
-                    queue.add(succ);
-                }
-            }
+        NodeExecutionResult failure = NodeExecutionResult.failureWithOutput(
+            sourceNode.getNodeId(), message, output, 0L);
+
+        // One past the last completed body iteration: the source already owns a row at
+        // state.iteration(), and a colliding row would be dropped by ON CONFLICT DO NOTHING.
+        int persistenceIteration = state.iteration() + 1;
+        TriggerItem triggerItem = item != null ? item : TriggerItem.create("0", context.itemIndex(), Map.of());
+        eventService.rePublishNodeOutput(execution, sourceNode, failure, triggerItem,
+            context.itemIndex(), context, persistenceIteration);
+
+        return context.withGlobalData(BACK_EDGE_OVERFLOW_KEY + spec.edgeId(), message);
+    }
+
+    /** Port match against an explicit result (step-by-step path, which has the fresh result). */
+    private boolean portMatches(BackEdgeSpec spec, ExecutionNode sourceNode, NodeExecutionResult result) {
+        String edgePort = spec.sourcePort();
+        if (edgePort == null || edgePort.isBlank()) return true;
+        if (sourceNode == null || !sourceNode.isBranchingNode()) return true;
+
+        String selectedPort = sourceNode.getSelectedPort(result);
+        boolean matches = edgePort.equals(selectedPort);
+        if (!matches) {
+            logger.info("[BackEdge] Skipping back-edge {}: edge port '{}' was not selected (selected='{}')",
+                spec.edgeId(), edgePort, selectedPort);
         }
+        return matches;
     }
 
     /**
@@ -766,8 +1099,11 @@ public class BackEdgeHandler implements RunScopedCache {
             payload.put("exitReason", exitReason);
         }
 
-        // Use loopCoreKey as the loopId for direct frontend matching
-        eventPublisher.emitLoopEvent(runId, loopCoreKey, eventType, payload);
+        // Use loopCoreKey as the loopId for direct frontend matching. A hub-less back-edge has
+        // no controller node, so it identifies itself by its edge id - LoopEvent REQUIRES a
+        // non-null loopId and throws otherwise, which would abort the whole iteration.
+        String loopId = loopCoreKey != null ? loopCoreKey : edgeId;
+        eventPublisher.emitLoopEvent(runId, loopId, eventType, payload);
     }
 
     /**
@@ -852,14 +1188,12 @@ public class BackEdgeHandler implements RunScopedCache {
     /**
      * Evaluate the loop condition using TemplateEngine.
      *
-     * @param condition SpEL expression from Core.loopCondition
-     * @param context   execution context with step outputs
-     * @param edgeId    edge identifier for state lookup
+     * @param condition            expression from the loop Core or the back-edge marker
+     * @param context              execution context with step outputs
+     * @param edgeId               edge identifier for state lookup
+     * @param loopCoreKey          loop hub key, or null for a hub-less back-edge
+     * @param prospectiveIteration the iteration the condition is being asked about
      */
-    private boolean evaluateCondition(String condition, ExecutionContext context, String edgeId) {
-        return evaluateCondition(condition, context, edgeId, null, null, null);
-    }
-
     private boolean evaluateCondition(
             String condition,
             ExecutionContext context,

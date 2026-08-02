@@ -90,9 +90,14 @@ describe('useRunData - follow the tip on re-run (2026-05-30 staleness regression
     rows = [13, 12, 11, 10];
     client.invalidateQueries({ queryKey: ['run-step-data'] });
 
-    await waitFor(() => expect(result.current.items.length).toBe(4));
+    // Wait for the state being asserted, not for the row count that precedes it: following the
+    // tip happens in an effect that runs AFTER the items update, so waiting on items.length
+    // alone can observe the intermediate render on a loaded machine.
+    await waitFor(() => {
+      expect(result.current.items.length).toBe(4);
+      expect(result.current.currentItem?.id).toBe(13);
+    });
 
-    expect(result.current.currentItem?.id).toBe(13);
     expect(result.current.currentIndex).toBe(3);
   });
 
@@ -146,8 +151,10 @@ describe('useRunData - follow the tip on re-run (2026-05-30 staleness regression
     await waitFor(() => expect(result.current.currentItem?.id).toBe(13));
     rows = [14, 13, 12, 11, 10];
     client.invalidateQueries({ queryKey: ['run-step-data'] });
-    await waitFor(() => expect(result.current.items.length).toBe(5));
-    expect(result.current.currentItem?.id).toBe(14);
+    await waitFor(() => {
+      expect(result.current.items.length).toBe(5);
+      expect(result.current.currentItem?.id).toBe(14);
+    });
     expect(result.current.currentIndex).toBe(4);
   });
 
@@ -173,8 +180,11 @@ describe('useRunData - follow the tip on re-run (2026-05-30 staleness regression
     mode.viewingEpoch = 2;
     rerender();
 
-    await waitFor(() => expect(result.current.items.length).toBe(2));
-    expect(result.current.currentItem?.id).toBe(22); // newest of epoch 2, not anchored to old id 10
+    await waitFor(() => {
+      expect(result.current.items.length).toBe(2);
+      // newest of epoch 2, not anchored to old id 10
+      expect(result.current.currentItem?.id).toBe(22);
+    });
     expect(result.current.currentIndex).toBe(1);
   });
 });

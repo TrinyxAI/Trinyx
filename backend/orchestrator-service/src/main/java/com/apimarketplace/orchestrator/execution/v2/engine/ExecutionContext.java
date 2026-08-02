@@ -50,7 +50,11 @@ public record ExecutionContext(
 
     // PR15 - workspace identity (org context). Sourced from
     // WorkflowRunEntity.organization_id / .organization_role at context boot
-    // and threaded through every with*() mutator. null/null = personal scope.
+    // and threaded through every with*() mutator. Since V263 made
+    // workflow_runs.organization_id NOT NULL, a null organizationId here does NOT mean
+    // "personal scope": it means the org could not be resolved (a degraded lookup or a
+    // legacy run). Consumers that gate on scope must treat it as degraded, not as a
+    // workspace of its own - see SubWorkflowNode.isSameWorkspace.
     //
     // Strict-isolation downstream contract: nodes that resolve credentials,
     // storage, agent dispatch, etc. MUST consult these fields rather than

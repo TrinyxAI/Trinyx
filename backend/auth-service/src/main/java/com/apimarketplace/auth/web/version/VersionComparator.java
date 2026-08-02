@@ -17,6 +17,27 @@ public final class VersionComparator {
 
     private VersionComparator() {}
 
+    /**
+     * The canonical form of a version, or {@code null} when it is not usable.
+     *
+     * <p>One helper for every site that has to decide "is this a version?": the feed, the announce
+     * pin guard and the config bootstrap. They drifted before - the feed stripped a leading
+     * {@code v} and THEN called {@link #parseCore} (which strips one itself), so {@code vv0.2.7}
+     * was an active pin for the feed and no pin at all for the announce guard, letting a write
+     * through that the feed would never serve.
+     */
+    public static String canonicalOrNull(String version) {
+        if (version == null) {
+            return null;
+        }
+        String trimmed = version.trim();
+        int[] core = parseCore(trimmed);
+        if (core == null) {
+            return null;
+        }
+        return core[0] + "." + core[1] + "." + core[2];
+    }
+
     /** True iff both parse and {@code latest}'s core is strictly newer than {@code running}'s. */
     public static boolean isUpdateAvailable(String running, String latest) {
         int[] r = parseCore(running);

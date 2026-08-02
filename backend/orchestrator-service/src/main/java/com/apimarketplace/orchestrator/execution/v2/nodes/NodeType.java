@@ -41,7 +41,7 @@ public enum NodeType {
     CONVERT_TO_FILE,  // ConvertToFile - export JSON data to CSV, XLSX, JSON, TXT files
     EXTRACT_FROM_FILE,  // ExtractFromFile - import CSV, XLSX, JSON files to JSON items
     COMPARE_DATASETS,  // CompareDatasets - compare two datasets (in both, only in A, only in B)
-    SUB_WORKFLOW,  // SubWorkflow - execute another workflow as a function (pass data in, receive results)
+    SUB_WORKFLOW,  // SubWorkflow - fire a trigger on another workflow's existing run (pass data in, receive results)
     RESPOND_TO_WEBHOOK,  // RespondToWebhook - control HTTP response returned to webhook caller
     SEND_EMAIL,  // SendEmail - send emails via SMTP with user-provided credentials
     EMAIL_INBOX,  // EmailInbox - read messages and act on a mailbox via IMAP with user-provided credentials

@@ -95,6 +95,37 @@ class StepRerunServiceTest {
         return WorkflowPlan.fromMap(data);
     }
 
+    /**
+     * A real while-loop shape, mirroring the prod workflow that surfaced the 2026-07-30 overrun:
+     * trigger:start → mcp:before → core:wait_render (loop, maxIterations=60)
+     *   body: → mcp:poll → mcp:check → back to core:wait_render (iterate)
+     *   exit: → mcp:after
+     * The back-edge SOURCE is mcp:check, several hops downstream of the loop controller.
+     */
+    private WorkflowPlan buildMultiHopLoopPlan() {
+        Map<String, Object> data = new HashMap<>();
+        data.put("id", "test-plan");
+        data.put("tenant_id", "test-tenant");
+        data.put("triggers", List.of(
+            Map.of("id", "t1", "label", "start", "type", "manual", "strategy", "single")));
+        data.put("mcps", List.of(
+            Map.of("id", "s0", "label", "before", "type", "mcp"),
+            Map.of("id", "s1", "label", "poll", "type", "mcp"),
+            Map.of("id", "s2", "label", "check", "type", "mcp"),
+            Map.of("id", "s3", "label", "after", "type", "mcp")));
+        data.put("cores", List.of(
+            Map.of("id", "core:wait_render", "label", "wait_render", "type", "loop",
+                   "loopCondition", "true", "maxIterations", 60)));
+        data.put("edges", List.of(
+            Map.of("from", "trigger:start", "to", "mcp:before"),
+            Map.of("from", "mcp:before", "to", "core:wait_render"),
+            Map.of("from", "core:wait_render:body", "to", "mcp:poll"),
+            Map.of("from", "mcp:poll", "to", "mcp:check"),
+            Map.of("from", "mcp:check", "to", "core:wait_render:iterate"),
+            Map.of("from", "core:wait_render:exit", "to", "mcp:after")));
+        return WorkflowPlan.fromMap(data);
+    }
+
     /** trigger:start → mcp:step_a → {mcp:step_b, mcp:step_c} */
     private WorkflowPlan buildBranchingPlan() {
         Map<String, Object> data = new HashMap<>();
@@ -637,6 +668,68 @@ class StepRerunServiceTest {
             setupRerunMocks(plan, runEntity, snapshot);
 
             // Should not throw NPE even though step is awaiting signal
+            assertDoesNotThrow(() -> service.rerunFromStep("run-1", "mcp:step_a"));
+        }
+
+        /**
+         * Prod fix 2026-07-30: while-loop iteration counts are shared across replicas in Redis,
+         * keyed on (runId, EPOCH, edgeId) - epoch because it is the only coordinate persisted on
+         * the signal and therefore stable under a live loop. A rerun deliberately keeps that epoch
+         * (it increments the SPAWN instead), so the counter it must restart is the very one it
+         * would otherwise read back: with terminated=1 from the previous attempt, the reset loop
+         * would exit after zero iterations until the 24h TTL.
+         */
+        @Test
+        @DisplayName("regression: rerun clears the shared loop counters of the back-edges it resets")
+        void rerunClearsSharedLoopCountersOfResetBackEdges() throws Exception {
+            var loopStore = mock(
+                com.apimarketplace.orchestrator.execution.v2.state.RedisLoopIterationStore.class);
+            setField("loopIterationStore", loopStore);
+
+            // REAL loop topology, no spy: the guarantee under test is that the downstream walk
+            // reaches the body TAIL (the node that owns the iterate edge) from an UPSTREAM rerun
+            // target. That works because the graph builder adds the iterate edge as an ordinary
+            // successor edge - not because of WorkflowNode.loopBody(), which nothing populates.
+            WorkflowPlan plan = buildMultiHopLoopPlan();
+            WorkflowRunEntity runEntity = createRunEntity(RunStatus.COMPLETED);
+            StateSnapshot snapshot = snapshotWithCompleted(
+                "trigger:start", "mcp:before", "core:wait_render", "mcp:poll", "mcp:check");
+            setupRerunMocks(plan, runEntity, snapshot);
+
+            service.rerunFromStep("run-1", "mcp:before");
+
+            // maxIterations comes from the plan's loop core (60), not from a Redis read.
+            verify(loopStore).clearBackEdge("run-1", 0, "mcp:check->core:wait_render:iterate", 60);
+        }
+
+        @Test
+        @DisplayName("rerun does not touch loops it is not resetting")
+        void rerunLeavesUnrelatedLoopsAlone() throws Exception {
+            var loopStore = mock(
+                com.apimarketplace.orchestrator.execution.v2.state.RedisLoopIterationStore.class);
+            setField("loopIterationStore", loopStore);
+
+            WorkflowPlan plan = buildMultiHopLoopPlan();
+            WorkflowRunEntity runEntity = createRunEntity(RunStatus.COMPLETED);
+            StateSnapshot snapshot = snapshotWithCompleted(
+                "trigger:start", "mcp:before", "core:wait_render", "mcp:poll", "mcp:check", "mcp:after");
+            setupRerunMocks(plan, runEntity, snapshot);
+
+            // mcp:after is downstream of the loop exit - the loop itself is NOT reset.
+            service.rerunFromStep("run-1", "mcp:after");
+
+            verify(loopStore, never()).clearBackEdge(anyString(), anyInt(), anyString(), anyInt());
+        }
+
+        @Test
+        @DisplayName("should handle a missing loop store gracefully (no Redis wired)")
+        void shouldHandleNullLoopStore() {
+            WorkflowPlan plan = buildLinearPlan();
+            WorkflowRunEntity runEntity = createRunEntity(RunStatus.COMPLETED);
+            StateSnapshot snapshot = snapshotWithCompleted("trigger:start", "mcp:step_a");
+            setupRerunMocks(plan, runEntity, snapshot);
+
+            // loopIterationStore is never injected in this fixture - the rerun must still work.
             assertDoesNotThrow(() -> service.rerunFromStep("run-1", "mcp:step_a"));
         }
     }

@@ -33,7 +33,12 @@ public record PublicHighlightItem(
         Integer interfaceCount,
         Integer datasourceCount,
         Double averageRating,
-        Integer reviewCount
+        Integer reviewCount,
+        // V420 - the "CE exclusive" label. Curated highlights are the most-seen
+        // surface (anonymous Home / chat row), so omitting it here would leave the
+        // one place a self-hosted-only app is NOT marked.
+        Boolean ceExclusive,
+        List<String> ceExclusiveFeatures
 ) {
     public static PublicHighlightItem from(WorkflowPublicationEntity p) {
         DisplayMode mode = p.getDisplayMode();
@@ -55,7 +60,9 @@ public record PublicHighlightItem(
                 p.getInterfaceCount(),
                 p.getDatasourceCount(),
                 p.getAverageRating(),
-                p.getReviewCount()
+                p.getReviewCount(),
+                p.isCeExclusive(),
+                p.getCeExclusiveFeatures()
         );
     }
 }

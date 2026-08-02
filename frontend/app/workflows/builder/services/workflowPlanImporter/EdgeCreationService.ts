@@ -170,8 +170,21 @@ export class EdgeCreationService {
       toRef.port
     );
 
-    // Detect back-edges: edges targeting a while node's loop-back handle
-    const isBackEdge = targetHandle?.endsWith('-loop-back') || planEdge.params?.backEdge === true;
+    // Detect DECLARED back-edges. `params.backEdge` is the legacy shape written by older builder
+    // releases - still read so existing workflows keep their loop, but never written back there
+    // (it would be injected into the target node's params by updateNodeParamExpressions below).
+    //
+    // A While node's own `-loop-back` handle is deliberately NOT marked: that loop is modelled by
+    // the handle and its iterate port, its condition lives on the node, and flagging it as a
+    // declared back-edge makes the back-edge validation rule complain about a loop that is
+    // perfectly well formed.
+    const legacyMarker = planEdge.params?.backEdge === true;
+    const marker = planEdge.backEdge;
+    const isBackEdge = !targetHandle?.endsWith('-loop-back') && (!!marker || legacyMarker);
+
+    const condition = marker?.condition ?? (legacyMarker ? planEdge.params?.condition : undefined);
+    const maxIterations =
+      marker?.maxIterations ?? (legacyMarker ? planEdge.params?.maxIterations : undefined);
 
     // Create the edge
     const edge: Edge = {
@@ -185,12 +198,25 @@ export class EdgeCreationService {
       data: {
         connectionType: 'bezier',
         ...(isBackEdge && { isBackEdge: true }),
+        ...(condition ? { backEdgeCondition: condition } : {}),
+        ...(typeof maxIterations === 'number' ? { backEdgeMaxIterations: maxIterations } : {}),
       },
     };
 
-    // Update paramExpressions for target node if params exists
+    // Update paramExpressions for target node if params exists.
+    // The legacy back-edge keys are excluded: they describe the EDGE, not the target node, and
+    // writing them into paramExpressions corrupts that node's configuration.
     if (planEdge.params && targetNodeId) {
-      this.updateNodeParamExpressions(targetNodeId, planEdge.params, nodeUpdates);
+      const params = legacyMarker
+        ? Object.fromEntries(
+            Object.entries(planEdge.params).filter(
+              ([key]) => !['backEdge', 'condition', 'maxIterations'].includes(key),
+            ),
+          )
+        : planEdge.params;
+      if (Object.keys(params).length > 0) {
+        this.updateNodeParamExpressions(targetNodeId, params, nodeUpdates);
+      }
     }
 
     return edge;

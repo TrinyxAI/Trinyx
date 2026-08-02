@@ -492,6 +492,7 @@
     "noItems": "Nenhum item disponível",
     "errorLoading": "Falha ao carregar itens",
     "aiChat": "Chat IA",
+    "runTab": "Execução",
     "welcomeTitle": "Como posso ajudar você?",
     "agent": "Agente",
     "workflowPanel": "Painel de Workflow",
@@ -1023,6 +1024,7 @@
     "viewingEpoch": "Visualizando Época {epoch}",
     "runSteps": {
       "noStepsYet": "Nenhum passo ainda",
+      "notRunYet": "ainda não executado",
       "filterAll": "Todos",
       "listView": "Vista de lista",
       "gaugeView": "Vista cronológica",
@@ -1136,6 +1138,7 @@
       "epochCost": "Época {epoch}",
       "budgetBlockedTitle": "Orçamento atingido",
       "budgetBlockedMessage": "Gasto {spent} de {budget}. Nenhuma nova execução foi iniciada.",
+      "openInPanel": "Abrir os detalhes da execução no painel",
       "cost": "Custo",
       "scopeAll": "todas as épocas",
       "scopeEpoch": "época {epoch}"
@@ -1265,7 +1268,9 @@
     "skipped": "Pulado",
     "cancelled": "Cancelado",
     "timeout": "Tempo Esgotado",
-    "partial_success": "Sucesso Parcial"
+    "partial_success": "Sucesso Parcial",
+    "awaiting_signal": "Aguardando sinal",
+    "stopped": "Parado"
   },
   "errors": {
     "retry": "Tentar Novamente",
@@ -1284,6 +1289,7 @@
     "never": "Nunca",
     "title": "Execucoes",
     "noRuns": "Sem execucoes ainda",
+    "loading": "Carregando a execução...",
     "runWorkflow": "Execute seu workflow para ver o historico de execucao",
     "justNow": "Agora mesmo",
     "minutesAgo": "ha {count}m",
@@ -1301,7 +1307,8 @@
     "version": "v{version}",
     "loadError": "Falha ao carregar as execuções",
     "stepByStepMode": "Modo passo a passo",
-    "scrollToLoadMore": "Role para carregar mais..."
+    "scrollToLoadMore": "Role para carregar mais...",
+    "lastFireDuration": "Duração da última execução"
   },
   "table": {
     "addRow": "Adicionar Linha",
@@ -1616,6 +1623,12 @@
       "comingSoon": "Mercado de fontes de dados em breve."
     },
     "acquire": "Instalar",
+    "ceExclusiveBadge": "Exclusivo do CE",
+    "ceExclusiveTooltip": "Funciona apenas numa instalação auto-hospedada (Community Edition)",
+    "ceExclusiveTitle": "Instalação auto-hospedada necessária",
+    "ceExclusiveDescription": "Esta app usa recursos que só funcionam numa instalação auto-hospedada, por isso não pode ser instalada aqui. Instale-a a partir de uma implantação auto-hospedada para a utilizar.",
+    "ceExclusiveFeatureCliAgent": "Agentes CLI locais (Claude Code, Codex, Gemini CLI, Mistral Vibe)",
+    "ceExclusiveFeatureVectorSearch": "Pesquisa vetorial (embeddings)",
     "acquiring": "Instalando...",
     "open": "Abrir",
     "emptyAgents": "Ainda não há agentes compartilhados",
@@ -6565,7 +6578,7 @@
     "subWorkflowNode": {
       "title": "Sub-Workflow",
       "infoTitle": "Nó Sub-Workflow",
-      "infoDescription": "Executar outro workflow como uma sub-rotina, passando entradas e recebendo saídas.",
+      "infoDescription": "Aciona outro workflow, passando entradas e recebendo saídas. O destino já deve ter uma execução ativa: este nó nunca cria uma.",
       "workflowId": "ID do Workflow",
       "workflowIdPlaceholder": "UUID do workflow a executar",
       "inputMapping": "Mapeamento de entrada",
@@ -6713,8 +6726,9 @@
       "autoLayout": "Layout automático (reorganizar nós)",
       "disableInteractivity": "Desativar interatividade",
       "enableInteractivity": "Ativar interatividade",
-      "disableBoxSelection": "Desativar seleção por caixa",
-      "enableBoxSelection": "Ativar seleção por caixa",
+      "cursorMode": "Modo do cursor",
+      "cursorModePan": "Mão (mover)",
+      "cursorModeSelection": "Caixa de seleção",
       "settings": "Configurações",
       "openConversation": "Abrir o painel de conversa",
       "emptyTitle": "Como posso ajudar você?",
@@ -6777,6 +6791,8 @@
       "previousVariablePage": "Página anterior de dados resolvidos",
       "runAuto": "Executar (automático)",
       "runStepByStep": "Passo a passo (depuração)",
+      "runWithTrigger": "Executar com um gatilho",
+      "triggerNotReady": "Este gatilho não pode ser disparado neste momento",
       "runWorkflow": "Executar fluxo de trabalho",
       "simulateTableTrigger": "Simular um evento de linha de tabela",
       "variablePageSource": "Fonte de dados resolvidos",
@@ -8307,7 +8323,8 @@
     "title": "Aresta de Loop",
     "condition": "Condição (SpEL)",
     "conditionPlaceholder": "ex.: '{{mcp:passo.output.count}}' > 0",
-    "maxIterations": "Máx. de iterações"
+    "maxIterations": "Máx. de iterações",
+    "maxIterationsInherited": "Herdado"
   },
   "storageExplorer": {
     "searchPlaceholder": "Buscar arquivos...",

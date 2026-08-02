@@ -27,10 +27,13 @@ import static com.apimarketplace.agent.catalog.sync.FeedParsingUtils.*;
  *   gemini     → google        (PREFERRED - direct API path)
  *   mistral    → mistral
  *   deepseek   → deepseek
- *   xai        → xai
+ *   xai        → xai            (the whole grok line)
  *   perplexity → perplexity
  *   cohere     → cohere
  *   cohere_chat→ cohere         (alias)
+ *   moonshot   → moonshot       (kimi)
+ *   dashscope  → qwen           (Alibaba's API brand, not the model family)
+ *   zai        → zai            (glm)
  * </pre>
  *
  * <p>Entries whose {@code litellm_provider} is {@code vertex_ai-language-models},
@@ -45,7 +48,7 @@ import static com.apimarketplace.agent.catalog.sync.FeedParsingUtils.*;
  *       fine-tuning pricing templates under this prefix; they're not
  *       callable until a tenant fine-tunes the base. Admins add their
  *       real fine-tune id via the is_custom=true UI path.</li>
- *   <li>{@code litellm_provider} must be in the 8-native mapping above.</li>
+ *   <li>{@code litellm_provider} must be in the native mapping above.</li>
  *   <li>{@code mode == "chat"} - skip embeddings, image, audio-only models.</li>
  *   <li>{@code supports_function_calling == true} - the agent platform
  *       requires tool-calling on every model it exposes.</li>
@@ -77,7 +80,30 @@ import static com.apimarketplace.agent.catalog.sync.FeedParsingUtils.*;
 @RequiredArgsConstructor
 public class LiteLlmFeedParser {
 
-    /** 8 native providers we accept from LiteLLM. zai is NOT in the feed. */
+    /**
+     * LiteLLM provider key -> our native provider name. MUST cover every
+     * non-bridge provider the platform can execute directly, i.e. every entry
+     * of {@code CloudRelaySupport.supportedProviders()} except
+     * {@code openrouter} (that aggregator has its own feed + parser). A
+     * provider missing here is dropped at the {@code rejectedProvider} branch
+     * below, which silently freezes its model list on whatever
+     * {@code application.yml} hardcodes - the failure mode that kept Kimi,
+     * Qwen and GLM stuck for months. {@code LiteLlmProviderCoverageTest}
+     * enforces the invariant.
+     *
+     * <p>Note the key is LiteLLM's, not ours: Google is {@code gemini},
+     * Qwen is {@code dashscope} (Alibaba's API brand), and Cohere ships under
+     * two keys.
+     *
+     * <p>Known imprecision on {@code dashscope}: it is the platform, not the
+     * model family, so Alibaba also serves third-party weights there. Any such
+     * chat+tools+priced row lands under {@code provider="qwen"} with a foreign
+     * model id. Accepted rather than filtered by name pattern: those rows are
+     * genuinely callable through the DashScope-compatible endpoint we configure
+     * for {@code qwen}, and feed inserts are review-gated
+     * ({@code honorEnabledOnInsert=false}) so nothing reaches the picker
+     * without an admin enabling it.
+     */
     static final Map<String, String> PROVIDER_MAP = Map.ofEntries(
             Map.entry("anthropic",   "anthropic"),
             Map.entry("openai",      "openai"),
@@ -87,7 +113,10 @@ public class LiteLlmFeedParser {
             Map.entry("xai",         "xai"),
             Map.entry("perplexity",  "perplexity"),
             Map.entry("cohere",      "cohere"),
-            Map.entry("cohere_chat", "cohere")
+            Map.entry("cohere_chat", "cohere"),
+            Map.entry("moonshot",    "moonshot"),
+            Map.entry("dashscope",   "qwen"),
+            Map.entry("zai",         "zai")
     );
 
     private static final TypeReference<Map<String, Map<String, Object>>> FEED_TYPE =
@@ -325,11 +354,6 @@ public class LiteLlmFeedParser {
         out.put("feedMetadata", feedMeta);
 
         return out;
-    }
-
-    private static String humanDisplayName(String provider, String modelId) {
-        String p = provider.substring(0, 1).toUpperCase(Locale.ROOT) + provider.substring(1);
-        return p + ": " + modelId;
     }
 
     private static String strOf(Object v) { return v == null ? null : v.toString(); }

@@ -247,4 +247,153 @@ class EdgeStateBuilderTest {
             }
         }
     }
+
+    @Nested
+    @DisplayName("buildEdgeStates() - untraversed port-qualified branches")
+    class UntraversedPortedBranches {
+
+        /**
+         * Prod bug 2026-07-30: a while loop's `core:loop:exit -> next` edge rendered BLUE
+         * (RUNNING) in the builder for the whole run while the loop was still cycling in its
+         * body. The loop CONTROLLER node completes once on entry, and
+         * {@code determineEdgeStatus} answers RUNNING for "source completed, target not yet" -
+         * a heuristic that is only sound for an unconditional edge. The exit was never taken,
+         * so it must read PENDING.
+         */
+        @Test
+        @DisplayName("regression: untraversed loop exit edge is PENDING, not RUNNING, while the body iterates")
+        void untraversedLoopExitEdgeStaysPending() {
+            Edge bodyEdge = new Edge("core:wait_render:body", "core:pause");
+            Edge exitEdge = new Edge("core:wait_render:exit", "core:step_result");
+            when(plan.getEdges()).thenReturn(List.of(bodyEdge, exitEdge));
+
+            // Only the body edge was ever traversed (74 body iterations recorded un-ported).
+            StateSnapshot snapshot = mock(StateSnapshot.class);
+            StateSnapshot.EdgeCounts bodyCounts = new StateSnapshot.EdgeCounts(0, 74, 0);
+            when(snapshot.getEdges()).thenReturn(Map.of("core:wait_render->core:pause", bodyCounts));
+            // The builder probes the port-qualified key first, then falls back to the un-ported
+            // one that BackEdgeHandler actually records under.
+            lenient().when(snapshot.getEdgeCounts(anyString(), anyString())).thenReturn(null);
+            lenient().when(snapshot.getEdgeCounts("core:wait_render", "core:pause")).thenReturn(bodyCounts);
+            when(stateSnapshotService.getSnapshot(RUN_ID)).thenReturn(snapshot);
+            // The loop controller node IS completed -> the old heuristic returned RUNNING.
+            when(helper.determineEdgeStatus(eq("core:wait_render"), eq("core:step_result"), any(), any(), any()))
+                .thenReturn(RunStatus.RUNNING);
+
+            List<WorkflowRunState.EdgeState> result = builder.buildEdgeStates(
+                RUN_ID, plan, Set.of("core:wait_render"), Set.of(), Set.of(), new HashMap<>()
+            );
+
+            WorkflowRunState.EdgeState exitState = result.stream()
+                .filter(es -> "core:wait_render:exit".equals(es.from()))
+                .findFirst()
+                .orElseThrow();
+            assertEquals(RunStatus.PENDING, exitState.status(),
+                "the loop exit branch was never taken - reporting RUNNING paints the edge blue "
+                + "in the builder for the whole run");
+            assertEquals(0, exitState.totalCount());
+        }
+
+        @Test
+        @DisplayName("regression: an untaken decision branch is PENDING, not RUNNING")
+        void untraversedDecisionBranchStaysPending() {
+            Edge elseEdge = new Edge("core:check:else", "mcp:fallback");
+            when(plan.getEdges()).thenReturn(List.of(elseEdge));
+            when(stateSnapshotService.getSnapshot(RUN_ID)).thenReturn(null);
+            when(helper.determineEdgeStatus(eq("core:check"), eq("mcp:fallback"), any(), any(), any()))
+                .thenReturn(RunStatus.RUNNING);
+
+            List<WorkflowRunState.EdgeState> result = builder.buildEdgeStates(
+                RUN_ID, plan, Set.of("core:check"), Set.of(), Set.of(), new HashMap<>()
+            );
+
+            assertEquals(RunStatus.PENDING, result.get(0).status(),
+                "a port IS the branch condition: zero counts means the branch was not taken");
+        }
+
+        @Test
+        @DisplayName("An unconditional edge keeps the RUNNING hand-off status")
+        void unportedEdgeKeepsRunningHandoff() {
+            Edge plainEdge = new Edge("mcp:fetch", "mcp:transform");
+            when(plan.getEdges()).thenReturn(List.of(plainEdge));
+            when(stateSnapshotService.getSnapshot(RUN_ID)).thenReturn(null);
+            when(helper.determineEdgeStatus(eq("mcp:fetch"), eq("mcp:transform"), any(), any(), any()))
+                .thenReturn(RunStatus.RUNNING);
+
+            List<WorkflowRunState.EdgeState> result = builder.buildEdgeStates(
+                RUN_ID, plan, Set.of("mcp:fetch"), Set.of(), Set.of(), new HashMap<>()
+            );
+
+            assertEquals(RunStatus.RUNNING, result.get(0).status(),
+                "the source-completed hand-off is still meaningful on an edge with no branch port");
+        }
+
+        @Test
+        @DisplayName("A ported branch that WAS traversed still reports its recorded status")
+        void traversedPortedBranchKeepsSnapshotStatus() {
+            Edge ifEdge = new Edge("core:check:if", "mcp:happy");
+            when(plan.getEdges()).thenReturn(List.of(ifEdge));
+
+            StateSnapshot snapshot = mock(StateSnapshot.class);
+            StateSnapshot.EdgeCounts counts = new StateSnapshot.EdgeCounts(0, 1, 0);
+            when(snapshot.getEdges()).thenReturn(Map.of("core:check:if->mcp:happy", counts));
+            when(snapshot.getEdgeCounts("core:check:if", "mcp:happy")).thenReturn(counts);
+            when(stateSnapshotService.getSnapshot(RUN_ID)).thenReturn(snapshot);
+
+            List<WorkflowRunState.EdgeState> result = builder.buildEdgeStates(
+                RUN_ID, plan, Set.of("core:check"), Set.of(), Set.of(), new HashMap<>()
+            );
+
+            assertEquals(RunStatus.COMPLETED, result.get(0).status(),
+                "the PENDING downgrade must only apply to branches with NO recorded counts");
+            assertEquals(1, result.get(0).completedCount());
+        }
+
+        @Test
+        @DisplayName("A fork branch recorded UN-ported still resolves through the existing fallback")
+        void forkBranchResolvesThroughUnportedFallback() {
+            // Fork takes ALL branches, and EdgeStatusEmitter records them under the un-ported
+            // source key - the same shape as the loop body edge. This is the family most at risk
+            // of being wrongly downgraded to PENDING, so pin it.
+            Edge branchEdge = new Edge("core:fanout:branch_0", "mcp:worker");
+            when(plan.getEdges()).thenReturn(List.of(branchEdge));
+
+            StateSnapshot snapshot = mock(StateSnapshot.class);
+            StateSnapshot.EdgeCounts counts = new StateSnapshot.EdgeCounts(0, 5, 0);
+            when(snapshot.getEdges()).thenReturn(Map.of("core:fanout->mcp:worker", counts));
+            lenient().when(snapshot.getEdgeCounts(anyString(), anyString())).thenReturn(null);
+            lenient().when(snapshot.getEdgeCounts("core:fanout", "mcp:worker")).thenReturn(counts);
+            when(stateSnapshotService.getSnapshot(RUN_ID)).thenReturn(snapshot);
+
+            List<WorkflowRunState.EdgeState> result = builder.buildEdgeStates(
+                RUN_ID, plan, Set.of("core:fanout"), Set.of(), Set.of(), new HashMap<>()
+            );
+
+            assertEquals(RunStatus.COMPLETED, result.get(0).status(),
+                "a traversed fork branch must keep its recorded status - the downgrade only "
+                + "applies when NO counts exist under any key variant");
+            assertEquals(5, result.get(0).completedCount());
+        }
+
+        @Test
+        @DisplayName("Only RUNNING is downgraded: SKIPPED/FAILED/COMPLETED pass through untouched")
+        void onlyRunningIsDowngraded() {
+            for (RunStatus fallback : List.of(RunStatus.SKIPPED, RunStatus.FAILED, RunStatus.COMPLETED)) {
+                reset(plan, helper, stateSnapshotService);
+                Edge elseEdge = new Edge("core:check:else", "mcp:fallback");
+                when(plan.getEdges()).thenReturn(List.of(elseEdge));
+                when(stateSnapshotService.getSnapshot(RUN_ID)).thenReturn(null);
+                when(helper.determineEdgeStatus(eq("core:check"), eq("mcp:fallback"), any(), any(), any()))
+                    .thenReturn(fallback);
+
+                List<WorkflowRunState.EdgeState> result = builder.buildEdgeStates(
+                    RUN_ID, plan, Set.of(), Set.of(), Set.of(), new HashMap<>()
+                );
+
+                assertEquals(fallback, result.get(0).status(),
+                    fallback + " carries real information (skip cascade, failure) and must not be "
+                    + "rewritten by the branch-not-taken downgrade");
+            }
+        }
+    }
 }

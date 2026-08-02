@@ -17,6 +17,7 @@ import com.apimarketplace.orchestrator.services.WorkflowExecutionService;
 import com.apimarketplace.orchestrator.services.events.WorkflowEpochFailedEvent;
 import com.apimarketplace.orchestrator.services.WorkflowStreamingService;
 import com.apimarketplace.orchestrator.services.cache.RunScopedCache;
+import com.apimarketplace.orchestrator.services.resume.AgentRunStopService;
 import com.apimarketplace.orchestrator.services.resume.StepByStepExecutor;
 import com.apimarketplace.orchestrator.services.resume.WorkflowResumeService;
 import com.apimarketplace.orchestrator.services.resume.WorkflowRunState;
@@ -193,6 +194,31 @@ public class ReusableTriggerService {
      */
     @Autowired(required = false)
     private com.apimarketplace.orchestrator.execution.v2.async.PendingAgentRegistry pendingAgentRegistry;
+
+    /**
+     * The second half of "is an async agent still in flight for this epoch?".
+     *
+     * <p>{@code PendingAgentRegistry} alone cannot answer it. {@code AgentAsyncCompletionService
+     * .onAgentResult} GETDELs the pending entry via {@code registry.consume(...)} at the very
+     * top, then spends the rest of the delivery (state reconstruction, persistence, and finally
+     * {@code executeReadyNodesLoop}) with the registry already empty. A reset that reads the
+     * registry inside that window sees "drained", closes the epoch, and the successor traversal
+     * that runs moments later finds no epoch state left to walk: the node downstream of the
+     * agent is never dispatched, never marked SKIPPED, and gets no step row. Nothing above INFO
+     * is logged.
+     *
+     * <p>Consumed-but-not-yet-delivered agents ARE recorded in this store (staged at consume,
+     * cleared in a finally after delivery), so consulting it closes the window.
+     * {@code AgentAsyncCompletionService.triggerDeferredResetIfDrained} already does exactly
+     * this for the OTHER reader of the same question; this is the same fix applied to the reader
+     * it was never applied to. Treat the two as one concept: a third reader added without it
+     * re-opens the same race.
+     *
+     * <p>Optional, like the registry above: absent in unit tests and in the in-memory scaling
+     * mode, where a null simply falls back to the registry-only check.
+     */
+    @Autowired(required = false)
+    private com.apimarketplace.orchestrator.execution.v2.async.RedisInFlightStore agentInFlightStore;
 
     /**
      * Plan v4 §1.6 - advisory-lock helper. Optional; null → row-lock-only
@@ -525,6 +551,12 @@ public class ReusableTriggerService {
             // (e.g., epoch increment) made on the managed copy, causing epoch=0 on every cycle.
             run.setStatus(RunStatus.RUNNING);
             run.setUpdatedAt(Instant.now());
+            // A previous stop no longer describes this run: it is executing again.
+            // Leaving the stop cause behind makes every later report of THIS fire
+            // (execute / get_run / wait_run) carry the old stop_reason next to a
+            // fresh COMPLETED status, which reads as "the new run was stopped".
+            // Cleared here, at the same point as the stale cancel signal below.
+            AgentRunStopService.clearStopMetadata(run);
             run = runRepository.save(run);
 
             // 1b. Clear any previous cancel signal (from a prior stop/cancel) so the new execution isn't immediately killed
@@ -1668,6 +1700,33 @@ public class ReusableTriggerService {
     public int resetForNextCycle(WorkflowRunEntity run, WorkflowExecution execution,
                                   WorkflowPlan plan, String runId, TriggerType triggerType,
                                   String triggerId, boolean hasFailures, int explicitEpoch) {
+        // Direct call, NOT through `self`: this overload already carries @Transactional and the
+        // advisory-lock marker, so the proxy pass has happened by the time we get here and a
+        // second one would add nothing. Going through `self` would also NPE in every unit test
+        // that constructs this service directly instead of getting it from the context.
+        return resetForNextCycle(run, execution, plan, runId, triggerType, triggerId,
+            hasFailures, explicitEpoch, null);
+    }
+
+    /**
+     * Same, for the one caller that is itself an agent delivery: the deferred reset requested by
+     * {@code AgentAsyncCompletionService.triggerDeferredResetIfDrained} once it believes it is
+     * the last agent of the epoch.
+     *
+     * @param excludeInFlightCorrelationId that delivery's own correlationId. It cleared its
+     *        in-flight entry just before asking, but {@code RedisInFlightStore.clear} swallows a
+     *        Redis error, so without the exemption a failed DEL would make the delivery's own
+     *        stale entry block the very reset it requested - and nothing would retry it, leaving
+     *        the run RUNNING until the zombie scanner fails it. Every other caller passes null
+     *        through the 8-arg overload above, where exempting anything would re-open the race
+     *        by one agent.
+     */
+    @Transactional
+    @com.apimarketplace.orchestrator.services.state.patch.AdvisoryLockHolding
+    public int resetForNextCycle(WorkflowRunEntity run, WorkflowExecution execution,
+                                  WorkflowPlan plan, String runId, TriggerType triggerType,
+                                  String triggerId, boolean hasFailures, int explicitEpoch,
+                                  String excludeInFlightCorrelationId) {
         logger.info("[ReusableTrigger] Resetting run {} for next cycle, triggerId={}", runId, triggerId);
 
         // Plan v4 §1.6 - advisory lock serializes against concurrent CAS writers
@@ -1710,7 +1769,7 @@ public class ReusableTriggerService {
         // Check for active signals OR in-flight async agents under the transactional lock
         // (epoch-scoped for parallel epochs). hasActiveSignalsForTrigger checks both
         // SignalWait.blocking=true rows AND the PendingAgentRegistry.
-        if (hasActiveSignalsForTrigger(runId, triggerId, currentEpoch)) {
+        if (hasActiveSignalsForTrigger(runId, triggerId, currentEpoch, excludeInFlightCorrelationId)) {
             logger.info("[ReusableTrigger] Signals or async agents still pending under lock for epoch {}, skip reset: runId={}, triggerId={}",
                 currentEpoch, runId, triggerId);
             return currentEpoch;
@@ -1985,6 +2044,17 @@ public class ReusableTriggerService {
      * @return true if there are any blocking signals or in-flight async agents
      */
     private boolean hasActiveSignalsForTrigger(String runId, String triggerId, int epoch) {
+        return hasActiveSignalsForTrigger(runId, triggerId, epoch, null);
+    }
+
+    /**
+     * @param excludeInFlightCorrelationId the delivery that ASKED for this reset, when there is
+     *        one - exempted from the in-flight check because it has already cleared its own entry
+     *        and that clear is best-effort. Null for every caller that is not itself an agent
+     *        completion; exempting anything there would re-open the race by one agent.
+     */
+    private boolean hasActiveSignalsForTrigger(String runId, String triggerId, int epoch,
+                                               String excludeInFlightCorrelationId) {
         // (1) Blocking-signal check (legacy SignalWait table).
         if (unifiedSignalService != null) {
             boolean signals;
@@ -2005,19 +2075,47 @@ public class ReusableTriggerService {
                 return true;
             }
         }
-        // (2) Async agent check.
-        if (pendingAgentRegistry != null) {
+        // (2) Async agent check. TWO stores answer it, and BOTH must be consulted:
+        // the registry holds an agent from dispatch until consume(), the in-flight
+        // store holds it from consume() until the end of delivery. Reading only the
+        // registry leaves the whole delivery uncovered - see agentInFlightStore.
+        if (pendingAgentRegistry != null || agentInFlightStore != null) {
             // Epoch-scoped path: precise check when both (triggerId, epoch) are provided.
             // Walks the local ConcurrentHashMap then falls back to Redis (cross-replica)
             // - see PendingAgentRegistry.hasPendingFor.
             if (triggerId != null && epoch >= 0) {
-                return pendingAgentRegistry.hasPendingFor(runId, triggerId, epoch);
+                if (pendingAgentRegistry != null
+                        && pendingAgentRegistry.hasPendingFor(runId, triggerId, epoch)) {
+                    return true;
+                }
+                if (agentInFlightStore != null
+                        && agentInFlightStore.hasOtherInFlightForEpoch(
+                                runId, triggerId, epoch, excludeInFlightCorrelationId)) {
+                    logger.info("[ReusableTrigger] Async agent consumed but not yet delivered for epoch {}, skip reset: runId={}, triggerId={}",
+                        epoch, runId, triggerId);
+                    return true;
+                }
+                return false;
             }
             // Run-wide fallback (used by the 4-arg resetForNextCycle overload that
             // passes triggerId=null). Without this, the legacy code path silently
             // skipped the async-pending check and could close epochs while async
             // agents were still in flight on another replica.
-            return pendingAgentRegistry.hasAnyPendingForRun(runId);
+            //
+            // excludeInFlightCorrelationId is deliberately NOT honoured here, and it never needs
+            // to be: the only caller that supplies one is the deferred reset, which returns early
+            // when dagTriggerId is null (AgentAsyncCompletionService.triggerDeferredResetIfDrained)
+            // and always carries a real epoch, so it cannot reach this branch. If that ever
+            // changes, this branch must take the exclusion too, or a delivery will be blocked by
+            // its own entry exactly as it was before that exemption was added.
+            if (pendingAgentRegistry != null && pendingAgentRegistry.hasAnyPendingForRun(runId)) {
+                return true;
+            }
+            if (agentInFlightStore != null && agentInFlightStore.hasAnyInFlightForRun(runId)) {
+                logger.info("[ReusableTrigger] Async agent consumed but not yet delivered, skip reset: runId={}", runId);
+                return true;
+            }
+            return false;
         }
         return false;
     }

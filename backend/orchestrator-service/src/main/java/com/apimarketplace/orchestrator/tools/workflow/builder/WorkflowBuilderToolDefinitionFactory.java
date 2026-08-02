@@ -31,8 +31,9 @@ public class WorkflowBuilderToolDefinitionFactory {
      */
     public AgentToolDefinition buildToolDefinition() {
         List<ToolParameter> params = List.of(
-            stringParam("action", "Action: init, load, save, finish, add_node, connect, disconnect, modify, remove, undo, describe, validate, search, execute, get, list, delete, runs, get_run, wait_run, get_node_output, get_plan, set_plan, pin, unpin, publish, unpublish, resolve_approval, continue_interface, mock_suggest, help. " +
+            stringParam("action", "Action: init, load, save, finish, add_node, connect, disconnect, modify, remove, undo, describe, validate, search, execute, stop_run, get, list, delete, runs, get_run, wait_run, get_node_output, get_plan, set_plan, pin, unpin, publish, unpublish, resolve_approval, continue_interface, mock_suggest, help. " +
                 "'wait_run' blocks until the run leaves the running state (or timeout_seconds elapses) and returns the same report as get_run - after an execute, prefer ONE wait_run over a get_run poll loop. " +
+                "'stop_run' is the counterpart of execute: it ends a run that is still going (run_id + optional reason + mode), cancelling the nodes still in flight including any browser-agent session. Use it as soon as you can tell the run went wrong instead of waiting for it to finish. An agent running INSIDE a workflow can omit run_id to stop its own run. " +
                 "'finish' finalizes and saves the draft and CLOSES the build session - do NOT call any further workflow actions after a successful finish ('create' is a back-compat alias). " +
                 "'pin' promotes a version to production (workflow_id + version; the version needs a successful run); 'unpin' clears it (production triggers stop firing until re-pinned). " +
                 "'publish' lists the workflow on the marketplace (workflow_id + title; optional interface_id, visibility, credits_per_use - full rules incl. application auto-promotion in workflow(action='help')); 'unpublish' deactivates the listing (acquirers keep their copies). " +
@@ -57,7 +58,9 @@ public class WorkflowBuilderToolDefinitionFactory {
             arrayParam("interface_ids", "Interface UUIDs (for: add_node type='interface')", false),
             objectParam("plan", "Complete workflow plan JSON (for: set_plan)", false),
             stringParam("workflow_id", "Workflow UUID (for: get, delete, runs)", false),
-            stringParam("run_id", "Run ID (for: get_run, wait_run, get_node_output)", false),
+            stringParam("run_id", "Run ID (for: get_run, wait_run, stop_run, get_node_output). On stop_run, omit ONLY when you are an agent running inside a workflow and want to stop your own run.", false),
+            stringParam("reason", "(for: stop_run) Why you are stopping the run, in one sentence. Recorded on the run and returned by get_run as stop_reason, so the user and any agent reading the run later see the cause instead of a bare CANCELLED.", false),
+            stringParam("mode", "(for: stop_run) 'cancel' (default) ends the run for good AND suspends the schedules of the workflow it belongs to, so a scheduled workflow stops firing until it is reactivated. 'graceful' only closes the epoch that is running and returns the run to WAITING_TRIGGER, leaving the schedules alone: prefer it when you only want to end THIS execution. 'graceful' is refused when the run is PENDING or WAITING_TRIGGER (nothing is executing yet).", false),
             intParam("timeout_seconds", "(for: wait_run) Max seconds to block waiting for the run. Default 120, max 240. On timeout the response has timed_out=true and the run keeps going - call wait_run again to keep waiting.", false, null),
             intParam("epoch", "Epoch number (for: get_run detail, get_node_output). Omit for macro overview in get_run.", false, null),
             stringParam("node_id", "Node ID to inspect (for: get_node_output). Use the node_id from get_run epoch detail.", false),

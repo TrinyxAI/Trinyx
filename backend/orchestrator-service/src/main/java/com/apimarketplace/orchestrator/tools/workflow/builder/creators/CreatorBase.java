@@ -56,7 +56,7 @@ public abstract class CreatorBase {
         CONVERT_TO_FILE("core", "add_convert_to_file"),    // Export JSON data to CSV, XLSX, JSON, TXT
         EXTRACT_FROM_FILE("core", "add_extract_from_file"), // Import files: structured (CSV/XLSX/JSON) or text mode (PDF/HTML/DOCX/TXT) with chunking
         COMPARE_DATASETS("core", "add_compare_datasets"),  // Compare two datasets (matched/only-A/only-B)
-        SUB_WORKFLOW("core", "add_sub_workflow"),              // Execute another workflow as a function
+        SUB_WORKFLOW("core", "add_sub_workflow"),              // Trigger another workflow that already has a live run
         RESPOND_TO_WEBHOOK("core", "add_respond_to_webhook"), // Control HTTP response to webhook caller
         SEND_EMAIL("core", "add_send_email"),                  // Send emails via SMTP
         EMAIL_INBOX("core", "add_email_inbox"),                // Read messages and act on a mailbox via IMAP
@@ -137,6 +137,28 @@ public abstract class CreatorBase {
     }
 
     // ==================== String Conversion Helpers ====================
+
+    /**
+     * First non-blank value among {@code keys}, read through {@link #safeString}.
+     *
+     * <p>Use this for any param that {@code NodeParamsValidator.PARAM_ALIASES} declares aliases
+     * for: the two lists MUST agree. An alias the validator accepts but the creator does not read
+     * is worse than a rejected one - the param sails through validation and is silently dropped
+     * (the agent-node prompt did exactly that until 2026-07-31, producing agent nodes with no
+     * prompt and no error anywhere).
+     */
+    protected static String firstNonBlank(Map<String, Object> parameters, String... keys) {
+        if (parameters == null) {
+            return null;
+        }
+        for (String key : keys) {
+            String value = safeString(parameters.get(key));
+            if (value != null && !value.isBlank()) {
+                return value;
+            }
+        }
+        return null;
+    }
 
     /**
      * Safely convert a value to String.

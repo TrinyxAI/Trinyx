@@ -136,7 +136,7 @@ public final class DefaultSystemPrompts {
 
     public static final PromptModule WORKFLOW = new PromptModule(
         "workflow",
-        "\n        - workflow - Multi-step automation builder (stateful: init/load before add_node). Also inspect and execute runs.\n",
+        "\n        - workflow - Multi-step automation builder (stateful: init/load before add_node). Also inspect, execute and stop runs: when an execution goes wrong, workflow(action='stop_run', run_id=…, reason='…') ends it instead of letting it run on (same action on application).\n",
         Set.of("workflow")
     );
 
@@ -151,7 +151,7 @@ public final class DefaultSystemPrompts {
      */
     public static final PromptModule APPLICATION = new PromptModule(
         "application",
-        "\n        - application - Marketplace = your toolbox: published apps add capabilities you don't have built-in (download, API search, a rich interface). On a domain task (e.g. \"fais une recherche airbnb\", \"find me a flight\") or any tool you're missing, check here first - application(action='my'), then application(action='search') + acquire (clone) - before reaching for web_search, catalog or workflow(action='init'). You may fall back once nothing matches. Also publishes apps. application(action='help') if unsure.\n",
+        "\n        - application - Marketplace = your toolbox: published apps add capabilities you don't have built-in (download, API search, a rich interface). On a domain task (e.g. \"fais une recherche airbnb\", \"find me a flight\") or any tool you're missing, check here first - application(action='my'), then application(action='search') + acquire (clone) - before reaching for web_search, catalog or workflow(action='init'). You may fall back once nothing matches. Also publishes apps, and stops a run that went wrong with application(action='stop_run', run_id=…, reason='…'). application(action='help') if unsure.\n",
         Set.of("application")
     );
 

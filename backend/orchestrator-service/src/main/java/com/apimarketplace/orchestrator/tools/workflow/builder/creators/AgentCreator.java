@@ -87,7 +87,12 @@ public class AgentCreator extends CreatorBase {
         }
 
         // 4. Extract optional params
-        String prompt = safeString(parameters.get("prompt"));
+        // Read every spelling NodeParamsValidator.PARAM_ALIASES accepts for the prompt.
+        // Until 2026-07-31 this read "prompt" alone while the validator waved through
+        // instruction / message / task / input - and because the prompt is OPTIONAL here, an
+        // agent following the help got a node created SUCCESSFULLY with no prompt at all. No
+        // error, no warning, nowhere. The alias list and this list must be read together.
+        String prompt = firstNonBlank(parameters, "prompt", "instruction", "message", "task", "input");
         Object withMemoryObj = parameters.get("withMemory");
         if (withMemoryObj == null) withMemoryObj = parameters.get("with_memory");
         boolean withMemory = withMemoryObj == null || Boolean.parseBoolean(withMemoryObj.toString());

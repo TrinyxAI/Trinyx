@@ -49,9 +49,10 @@ public class MergeNodeAnalyzer {
                 continue;
             }
 
-            // Skip iterate edges - these are loop back-edges, not forward dependencies
-            String toPort = com.apimarketplace.orchestrator.utils.EdgeRefParser.getPort(edge.to());
-            if ("iterate".equals(toPort)) {
+            // Skip back-edges (:iterate port or declared marker) - a loop-back is NOT a forward
+            // dependency. Counting one here would make its target an implicit merge waiting on a
+            // node that only runs after it: a silent deadlock.
+            if (WorkflowPlan.isBackEdge(edge)) {
                 continue;
             }
 
@@ -99,9 +100,10 @@ public class MergeNodeAnalyzer {
                 continue;
             }
 
-            // Skip iterate edges - these are loop back-edges, not forward dependencies
-            String toPort = com.apimarketplace.orchestrator.utils.EdgeRefParser.getPort(edge.to());
-            if ("iterate".equals(toPort)) {
+            // Skip back-edges (:iterate port or declared marker) - a loop-back is NOT a forward
+            // dependency. Counting one here would make its target an implicit merge waiting on a
+            // node that only runs after it: a silent deadlock.
+            if (WorkflowPlan.isBackEdge(edge)) {
                 continue;
             }
 
@@ -234,9 +236,8 @@ public class MergeNodeAnalyzer {
                 continue;
             }
 
-            // Skip iterate edges - these are loop back-edges, not entry edges
-            String toPort = com.apimarketplace.orchestrator.utils.EdgeRefParser.getPort(edge.to());
-            if ("iterate".equals(toPort)) {
+            // Skip back-edges - a loop-back is a re-entry, not an entry edge
+            if (WorkflowPlan.isBackEdge(edge)) {
                 continue;
             }
 
@@ -292,9 +293,8 @@ public class MergeNodeAnalyzer {
                     continue;
                 }
 
-                // Skip iterate edges - these are loop back-edges, not forward dependencies
-                String toPort = com.apimarketplace.orchestrator.utils.EdgeRefParser.getPort(edge.to());
-                if ("iterate".equals(toPort)) {
+                // Skip back-edges - a loop-back is not a forward dependency
+                if (WorkflowPlan.isBackEdge(edge)) {
                     continue;
                 }
 

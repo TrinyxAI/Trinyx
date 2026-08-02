@@ -1424,7 +1424,7 @@ public class CoreNodeBuilder {
 
     /**
      * Creates sub-workflow nodes from Core definitions.
-     * SubWorkflow nodes execute another workflow as a function.
+     * SubWorkflow nodes fire a trigger on another workflow's existing run.
      */
     public void createSubWorkflowNodes(Map<String, ExecutionNode> nodeMap, WorkflowPlan plan) {
         if (plan.getCores() == null) return;

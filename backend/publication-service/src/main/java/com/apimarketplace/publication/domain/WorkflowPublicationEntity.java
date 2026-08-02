@@ -6,6 +6,7 @@ import org.hibernate.annotations.JdbcTypeCode;
 import org.hibernate.type.SqlTypes;
 
 import java.time.Instant;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -117,6 +118,21 @@ public class WorkflowPublicationEntity {
     @JdbcTypeCode(SqlTypes.JSON)
     @Column(name = "node_icons", columnDefinition = "jsonb")
     private List<Map<String, Object>> nodeIcons;
+
+    /**
+     * True when the snapshot uses a feature that only exists on a self-hosted
+     * install (local-CLI agents, vector/embedding columns). Recomputed from the
+     * snapshot on every publish and update by
+     * {@code CeExclusiveFeatureDetector} - never set by the publisher - and
+     * enforced at acquisition time on managed cloud.
+     */
+    @Column(name = "ce_exclusive", nullable = false)
+    private Boolean ceExclusive = false;
+
+    /** Detected feature codes backing {@link #ceExclusive} (drives the badge tooltip). */
+    @JdbcTypeCode(SqlTypes.JSON)
+    @Column(name = "ce_exclusive_features", columnDefinition = "jsonb")
+    private List<String> ceExclusiveFeatures = new ArrayList<>();
 
     @Column(name = "credits_per_use", nullable = false)
     private Integer creditsPerUse = 0;
@@ -567,6 +583,23 @@ public class WorkflowPublicationEntity {
 
     public void setPublicSlug(String publicSlug) {
         this.publicSlug = publicSlug;
+    }
+
+    /** Never null for callers: a legacy row read before the backfill reads as false. */
+    public boolean isCeExclusive() {
+        return Boolean.TRUE.equals(ceExclusive);
+    }
+
+    public void setCeExclusive(boolean ceExclusive) {
+        this.ceExclusive = ceExclusive;
+    }
+
+    public List<String> getCeExclusiveFeatures() {
+        return ceExclusiveFeatures == null ? List.of() : ceExclusiveFeatures;
+    }
+
+    public void setCeExclusiveFeatures(List<String> ceExclusiveFeatures) {
+        this.ceExclusiveFeatures = ceExclusiveFeatures == null ? new ArrayList<>() : new ArrayList<>(ceExclusiveFeatures);
     }
 
     public UUID getProjectId() {

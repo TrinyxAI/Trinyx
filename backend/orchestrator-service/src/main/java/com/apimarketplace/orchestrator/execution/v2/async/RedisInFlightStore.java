@@ -101,7 +101,25 @@ public class RedisInFlightStore {
         if (pending == null || result == null) return;
         try {
             String json = objectMapper.writeValueAsString(toInFlightMap(pending, result));
+            // Index BEFORE value, same ordering rationale as RedisPendingAgentStore: a crash
+            // between the two leaves an index member with no value, which every reader
+            // tolerates (and prunes), whereas a value with no index would be invisible to the
+            // per-run lookups below - the failure mode that actually matters.
+            boolean indexed = indexAdd(pending.runId(), pending.correlationId());
             redisTemplate.opsForValue().set(KEY_PREFIX + pending.correlationId(), json, ttl.toMillis(), TimeUnit.MILLISECONDS);
+            if (!indexed) {
+                // The value IS written even so: AgentRecoveryService.replayInFlightEntries scans
+                // the value namespace directly, so it still recovers this delivery after a crash.
+                // What is lost is the per-run guards - they read the index, so this agent is
+                // invisible to them and its epoch can be reset mid-delivery. That is precisely
+                // the bug the index exists to prevent, so it is reported at ERROR rather than
+                // swallowed: a silent WARN here would make this class quietly stop protecting
+                // the very thing it was added for.
+                logger.error("[InFlightStore] STAGED WITHOUT INDEX for correlationId={} runId={} - "
+                        + "the per-run in-flight guards cannot see this agent, so its epoch may be "
+                        + "reset while the delivery is still running",
+                    pending.correlationId(), pending.runId());
+            }
         } catch (Exception e) {
             // Best-effort: a Redis hiccup on staging degrades to the prior (unprotected)
             // behavior. We log loud but do NOT throw - the worker result is already in
@@ -127,6 +145,74 @@ public class RedisInFlightStore {
         } catch (Exception e) {
             logger.warn("[InFlightStore] clear failed for correlationId={}: {}", correlationId, e.getMessage());
         }
+        // The per-run index member is deliberately NOT removed here. Deleting the value is what
+        // makes the entry stop counting; the leftover member is pruned lazily by
+        // {@link #listForRun} the next time anyone looks, and expires with the index TTL
+        // regardless. Keeping clear() single-argument means every existing call site (and the
+        // recovery paths that hold no runId) stays correct without threading one through.
+    }
+
+    /** Per-run reverse index, so the guards below never scan the keyspace. */
+    static final String RUN_INDEX_PREFIX = "agent:in-flight-run-index:";
+
+    /**
+     * @return true when the member is indexed and therefore visible to the per-run guards.
+     *         One retry, because the caller cannot come back later: by the time the guards look,
+     *         the delivery is already running and an unindexed entry has already lost its
+     *         protection.
+     */
+    private boolean indexAdd(String runId, String correlationId) {
+        if (runId == null || correlationId == null) return false;
+        String indexKey = RUN_INDEX_PREFIX + runId;
+        for (int attempt = 1; attempt <= 2; attempt++) {
+            try {
+                redisTemplate.opsForSet().add(indexKey, correlationId);
+                // Same TTL as the entries it points at, so an index abandoned by a crash cannot
+                // outlive them and keep a run's resets deferred forever.
+                redisTemplate.expire(indexKey, ttl.toMillis(), TimeUnit.MILLISECONDS);
+                return true;
+            } catch (Exception e) {
+                logger.warn("[InFlightStore] index add attempt {}/2 failed for correlationId={} runId={}: {}",
+                    attempt, correlationId, runId, e.getMessage());
+            }
+        }
+        return false;
+    }
+
+    /**
+     * Staged entries for ONE run, read through the per-run index.
+     *
+     * <p>Members whose value no longer resolves (TTL expiry, or a delete whose index cleanup
+     * failed) are skipped AND pruned, so a stale member can never keep a run's epoch from
+     * resetting. Fails OPEN on a Redis error - an empty list restores the pre-index behaviour
+     * rather than freezing the cycle, which is the same policy {@link #listAll} already uses.
+     */
+    List<InFlightEntry> listForRun(String runId) {
+        List<InFlightEntry> entries = new ArrayList<>();
+        if (runId == null) return entries;
+        java.util.Set<String> members;
+        try {
+            members = redisTemplate.opsForSet().members(RUN_INDEX_PREFIX + runId);
+        } catch (Exception e) {
+            logger.warn("[InFlightStore] index read failed for runId={}: {}", runId, e.getMessage());
+            return entries;
+        }
+        if (members == null || members.isEmpty()) return entries;
+        for (String correlationId : members) {
+            try {
+                String json = redisTemplate.opsForValue().get(KEY_PREFIX + correlationId);
+                if (json == null) {
+                    redisTemplate.opsForSet().remove(RUN_INDEX_PREFIX + runId, correlationId);
+                    continue;
+                }
+                Map<String, Object> map = objectMapper.readValue(json, new TypeReference<>() {});
+                InFlightEntry entry = fromInFlightMap(map);
+                if (entry != null) entries.add(entry);
+            } catch (Exception e) {
+                logger.warn("[InFlightStore] failed to resolve in-flight {}: {}", correlationId, e.getMessage());
+            }
+        }
+        return entries;
     }
 
     /**
@@ -179,15 +265,19 @@ public class RedisInFlightStore {
      * check see them and defer the reset until the genuinely-last delivery. Cross-replica safe:
      * the store is Redis-backed, unlike the per-JVM {@code runLockStripes}.
      *
-     * <p>Bounded cost: the store only ever holds agents mid-delivery (cleared in a finally after
-     * each delivery), so the {@link #listAll()} SCAN it runs is over a small key set.
+     * <p>Bounded cost: read through the per-run index ({@link #RUN_INDEX_PREFIX}), so this costs
+     * one {@code SMEMBERS} plus one {@code GET} per agent currently mid-delivery FOR THIS RUN.
+     * It deliberately does not use {@link #listAll()}: that runs {@code SCAN} over the whole
+     * keyspace, whose cost is a function of the keyspace rather than of the match set, and this
+     * predicate is now on the epoch-close path of every reusable trigger - including workflows
+     * with no agents at all - inside a transaction holding an advisory lock and a row lock.
      */
     public boolean hasOtherInFlightForEpoch(String runId, String dagTriggerId, int epoch,
                                             String excludeCorrelationId) {
         if (runId == null) {
             return false;
         }
-        for (InFlightEntry entry : listAll()) {
+        for (InFlightEntry entry : listForRun(runId)) {
             PendingAgent p = entry.pending();
             if (p == null) {
                 continue;
@@ -207,6 +297,21 @@ public class RedisInFlightStore {
             return true;
         }
         return false;
+    }
+
+    /**
+     * True when ANY staged in-flight entry exists for the run, whatever its trigger
+     * or epoch.
+     *
+     * <p>The run-wide counterpart of {@link #hasOtherInFlightForEpoch}, for callers
+     * that hold no epoch to scope by - the legacy {@code resetForNextCycle} overload
+     * that passes {@code triggerId=null} is the one that matters. It mirrors
+     * {@link PendingAgentRegistry#hasAnyPendingForRun} and answers the same question
+     * for the window that registry cannot see: between {@code consume()} and the end
+     * of delivery.
+     */
+    public boolean hasAnyInFlightForRun(String runId) {
+        return !listForRun(runId).isEmpty();
     }
 
     /** Key prefix for the startup-replay claim markers ({@link #tryClaimReplay}). */

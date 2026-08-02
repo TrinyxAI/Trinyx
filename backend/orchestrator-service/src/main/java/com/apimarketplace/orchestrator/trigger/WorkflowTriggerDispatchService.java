@@ -28,8 +28,12 @@ import java.util.UUID;
  * Architecture:
  * - Triggered from V2WorkflowFinalizer after workflow completion
  * - Finds downstream workflows via WorkflowTriggerLookupService
- * - Uses accumulation pattern: reuses existing WAITING_TRIGGER run, cancels stale runs
- * - Only creates a new run if no WAITING_TRIGGER run exists
+ * - Uses accumulation pattern: reuses the downstream workflow's production run,
+ *   resolved through {@link ProductionRunResolver} (pin required)
+ * - NEVER creates a run and NEVER cancels stale runs. Both were claimed by an
+ *   earlier version of this comment and neither is implemented: when no production
+ *   run satisfies the policy the dispatch is refused, and the two bulk-cancel
+ *   repository queries have no caller at all.
  * - Delegates execution to ReusableTriggerService
  *
  * @see ReusableTriggerService
@@ -130,8 +134,15 @@ public class WorkflowTriggerDispatchService {
             //   - both NULL-org and same tenantId (personal scope).
             // A cross-workspace fan-out would silently fire a workflow in
             // another tenant's workspace from a public-trigger pulse.
-            String parentOrg = parentWorkflow.getOrganizationId();
-            String parentTenant = parentWorkflow.getTenantId();
+            //
+            // Read the workspace off the RUN, not off parentWorkflow: that is the lazy
+            // @ManyToOne proxy from runEntity.getWorkflow(), this method is @Async and
+            // open-in-view is off, so every accessor but getId() throws
+            // "Could not initialize proxy - no session" and the outer catch swallows the
+            // whole dispatch. Same defect as ErrorTriggerDispatchService (same 2026-05-17
+            // audit round). workflow_runs carries both columns (NOT NULL since V263).
+            String parentOrg = runEntity.getOrganizationId();
+            String parentTenant = runEntity.getTenantId();
             for (WorkflowEntity downstream : downstreamWorkflows) {
                 String dsOrg = downstream.getOrganizationId();
                 String dsTenant = downstream.getTenantId();
@@ -164,7 +175,8 @@ public class WorkflowTriggerDispatchService {
     /**
      * Trigger a single downstream workflow with the given payload.
      *
-     * Uses accumulation pattern (like webhook/schedule): reuses the latest WAITING_TRIGGER run.
+     * Uses accumulation pattern (like webhook/schedule): reuses the downstream
+     * workflow's pinned production run.
      * Never creates a new run - user must start one from the UI.
      *
      * @param workflow The downstream workflow to trigger
@@ -352,8 +364,10 @@ public class WorkflowTriggerDispatchService {
             // Audit 2026-05-17 round-5 - same cross-workspace guard as
             // dispatchWorkflowCompletion (R4). Reusable-trigger epoch
             // completion was missed in round-4; closing it here.
-            String parentOrg = parentWorkflow.getOrganizationId();
-            String parentTenant = parentWorkflow.getTenantId();
+            // Workspace read off the RUN - see dispatchWorkflowCompletion for why the
+            // parentWorkflow proxy cannot be touched on this @Async thread.
+            String parentOrg = runEntity.getOrganizationId();
+            String parentTenant = runEntity.getTenantId();
             for (WorkflowEntity downstream : downstreamWorkflows) {
                 String dsOrg = downstream.getOrganizationId();
                 String dsTenant = downstream.getTenantId();

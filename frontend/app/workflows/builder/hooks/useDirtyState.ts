@@ -88,6 +88,10 @@ export function useDirtyState({
       target: e.target,
       sourceHandle: e.sourceHandle,
       targetHandle: e.targetHandle,
+      // Loop-back settings live on the edge. Without them, editing a back-edge's condition or
+      // iteration cap left the workflow "clean" and the change was lost on navigate-away.
+      backEdgeCondition: (e.data as Record<string, unknown> | undefined)?.backEdgeCondition,
+      backEdgeMaxIterations: (e.data as Record<string, unknown> | undefined)?.backEdgeMaxIterations,
     }));
     return JSON.stringify({ nodes: nodesData, edges: edgesData });
   }, []);

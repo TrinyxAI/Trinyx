@@ -572,11 +572,24 @@ public class WorkflowErrorChecker {
                         "fix", "Add conditions to the decision node"));
             }
 
-            // Loop: condition required
-            if ("loop".equals(type) && cn.get("loopCondition") == null) {
-                errors.add(Map.of("type", "MISSING_CONFIG", "node", ref,
-                    "message", "Loop '" + label + "' must have a loopCondition",
-                    "fix", "workflow(action='modify', node='" + label + "', params={loopCondition: '...'})"));
+            // Loop: needs a stop rule - EITHER a loopCondition OR maxIterations.
+            // A count-only loop (no condition, maxIterations set) is a documented, working
+            // pattern: LoopNode.evaluateCondition returns true for a null/blank condition, so
+            // the body runs exactly maxIterations times. Demanding loopCondition here contradicted
+            // both the node docs and CoreValidator (which has always accepted either), and blocked
+            // that pattern at action='validate' even though it executes fine - keep the two
+            // validators in lockstep.
+            if ("loop".equals(type)) {
+                Object loopCond = cn.get("loopCondition");
+                boolean hasLoopCondition = loopCond != null
+                        && !(loopCond instanceof String s && s.isBlank());
+                boolean hasMaxIterations = cn.get("maxIterations") != null;
+                if (!hasLoopCondition && !hasMaxIterations) {
+                    errors.add(Map.of("type", "MISSING_CONFIG", "node", ref,
+                        "message", "Loop '" + label + "' must have a loopCondition or maxIterations",
+                        "fix", "workflow(action='modify', node='" + label + "', params={maxIterations: 10})"
+                            + " for a fixed number of passes, or params={loopCondition: '...'} to stop on a value."));
+                }
             }
 
             // Switch: expression required

@@ -242,9 +242,60 @@ class GraphValidationTest {
         }
 
         @Test
-        @DisplayName("Should not flag core node cycles as errors")
-        void shouldNotFlagCoreNodeCyclesAsErrors() {
-            // Cycles involving core: nodes (like loop body -> loop) are allowed
+        @DisplayName("Should not flag a loop closed on the iterate port")
+        void shouldNotFlagDeclaredLoopAsCycle() {
+            // A loop declared the supported way: the body's last node re-enters through the
+            // loop node's iterate port, which the engine drives instead of treating as a
+            // dependency.
+            stubSession(
+                    List.of(Map.of("label", "Start")),
+                    List.of(Map.of("label", "Body Step")),
+                    List.of(Map.of("label", "Process", "type", "loop")),
+                    List.of(
+                            Map.of("from", "trigger:start", "to", "core:process"),
+                            Map.of("from", "core:process:body", "to", "mcp:body_step"),
+                            Map.of("from", "mcp:body_step", "to", "core:process:iterate")
+                    )
+            );
+
+            ValidationResult result = ValidationResult.builder().build();
+            validator.validate(session, result);
+
+            assertThat(result.getErrors()).noneMatch(e ->
+                    e.code().equals("CYCLE_DETECTED"));
+        }
+
+        @Test
+        @DisplayName("Should not flag a cycle closed by a declared back-edge")
+        void shouldNotFlagDeclaredBackEdgeAsCycle() {
+            // No loop node at all: the closing connection carries the back-edge marker, which is
+            // what tells the engine to re-enter rather than wait for its own descendant.
+            stubSession(
+                    List.of(Map.of("label", "Start")),
+                    List.of(Map.of("label", "A"), Map.of("label", "B")),
+                    List.of(),
+                    List.of(
+                            Map.of("from", "trigger:start", "to", "mcp:a"),
+                            Map.of("from", "mcp:a", "to", "mcp:b"),
+                            Map.of("from", "mcp:b", "to", "mcp:a",
+                                   "backEdge", Map.of("maxIterations", 5))
+                    )
+            );
+
+            ValidationResult result = ValidationResult.builder().build();
+            validator.validate(session, result);
+
+            assertThat(result.getErrors()).noneMatch(e ->
+                    e.code().equals("CYCLE_DETECTED"));
+        }
+
+        @Test
+        @DisplayName("Should flag a loop that re-enters a loop node WITHOUT the iterate port")
+        void shouldFlagUndeclaredLoopIntoLoopNode() {
+            // Same shape as a real loop but the closing edge targets the loop node itself rather
+            // than its iterate port. Nothing declares it as a re-entry, so at run time the loop
+            // node would wait for a node that only runs after it. The old rule accepted this
+            // purely because the printed cycle mentioned a "core:" node.
             stubSession(
                     List.of(Map.of("label", "Start")),
                     List.of(Map.of("label", "Body Step")),
@@ -259,8 +310,7 @@ class GraphValidationTest {
             ValidationResult result = ValidationResult.builder().build();
             validator.validate(session, result);
 
-            // Cycle contains "core:" so it should not be flagged
-            assertThat(result.getErrors()).noneMatch(e ->
+            assertThat(result.getErrors()).anyMatch(e ->
                     e.code().equals("CYCLE_DETECTED"));
         }
 

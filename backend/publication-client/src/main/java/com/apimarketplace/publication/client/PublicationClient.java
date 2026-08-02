@@ -480,6 +480,13 @@ public class PublicationClient {
             if (lex != null) throw lex;
             log.error("Failed to acquire publication={}: {}", publicationId, e.getMessage());
             throw new RuntimeException("Failed to acquire publication: " + e.getMessage(), e);
+        } catch (HttpClientErrorException.Forbidden e) {
+            // CE-exclusive: the deployment cannot run this publication. Typed so the
+            // caller reports the constraint instead of a generic acquire failure.
+            CeExclusiveAcquisitionException cex = parseCeExclusive(e);
+            if (cex != null) throw cex;
+            log.error("Failed to acquire publication={}: {}", publicationId, e.getMessage());
+            throw new RuntimeException("Failed to acquire publication: " + e.getMessage(), e);
         } catch (Exception e) {
             log.error("Failed to acquire publication={}: {}", publicationId, e.getMessage());
             throw new RuntimeException("Failed to acquire publication: " + e.getMessage(), e);
@@ -487,6 +494,31 @@ public class PublicationClient {
     }
 
     private static final ObjectMapper LIMIT_MAPPER = new ObjectMapper();
+
+    /**
+     * Recognise publication-service's CE-exclusive refusal
+     * ({@code {"error":..., "code":"CE_EXCLUSIVE", "features":[...]}}). Returns
+     * null for any OTHER 403 (a genuine authorization failure), which then keeps
+     * its existing generic handling.
+     */
+    @SuppressWarnings("unchecked")
+    private CeExclusiveAcquisitionException parseCeExclusive(HttpClientErrorException e) {
+        try {
+            Map<String, Object> body = LIMIT_MAPPER.readValue(e.getResponseBodyAsByteArray(), Map.class);
+            if (!"CE_EXCLUSIVE".equals(body.get("code"))) {
+                return null;
+            }
+            Object error = body.get("error");
+            List<String> features = body.get("features") instanceof List<?> raw
+                    ? raw.stream().filter(String.class::isInstance).map(String.class::cast).toList()
+                    : List.of();
+            return new CeExclusiveAcquisitionException(
+                    error instanceof String text ? text : "This app requires a self-hosted install.",
+                    features);
+        } catch (Exception ignored) {
+            return null;
+        }
+    }
 
     private LimitExceededException parseLimitExceeded(HttpClientErrorException e) {
         try {
@@ -654,6 +686,14 @@ public class PublicationClient {
             ResponseEntity<Map<String, Object>> response = restTemplate.exchange(
                     url, HttpMethod.POST, entity, new ParameterizedTypeReference<>() {});
             return response.getBody();
+        } catch (HttpClientErrorException.Forbidden e) {
+            // Same CE-exclusive refusal the workflow path recognises - the
+            // internal controller emits the identical 403 body on all three
+            // acquire endpoints, so all three must decode it.
+            CeExclusiveAcquisitionException cex = parseCeExclusive(e);
+            if (cex != null) throw cex;
+            log.error("Failed to acquire agent publication {}: {}", publicationId, e.getMessage());
+            throw new RuntimeException("Failed to acquire agent publication: " + e.getMessage(), e);
         } catch (Exception e) {
             log.error("Failed to acquire agent publication {}: {}", publicationId, e.getMessage());
             throw new RuntimeException("Failed to acquire agent publication: " + e.getMessage(), e);
@@ -755,6 +795,13 @@ public class PublicationClient {
             ResponseEntity<Map<String, Object>> response = restTemplate.exchange(
                     url, HttpMethod.POST, entity, new ParameterizedTypeReference<>() {});
             return response.getBody();
+        } catch (HttpClientErrorException.Forbidden e) {
+            // See acquireAgentPublication: all three internal acquire endpoints
+            // emit the same CE-exclusive 403 body.
+            CeExclusiveAcquisitionException cex = parseCeExclusive(e);
+            if (cex != null) throw cex;
+            log.error("Failed to acquire resource publication {}: {}", publicationId, e.getMessage());
+            throw new RuntimeException("Failed to acquire resource publication: " + e.getMessage(), e);
         } catch (Exception e) {
             log.error("Failed to acquire resource publication {}: {}", publicationId, e.getMessage());
             throw new RuntimeException("Failed to acquire resource publication: " + e.getMessage(), e);

@@ -33,6 +33,13 @@ public class LoopNode extends BaseNode {
 
     private static final Logger logger = LoggerFactory.getLogger(LoopNode.class);
 
+    /**
+     * Termination reason meaning the iteration cap fired while the loop still wanted to run.
+     * Mirrors {@code BackEdgeHandler.BACK_EDGE_OVERFLOW_REASON}, which produces it; kept as a
+     * literal here because the node package must not depend on the engine package.
+     */
+    private static final String OVERFLOW_REASON = "max_iterations_reached";
+
     private final String loopCondition;
     private final int maxIterations;
     private final TemplateEngine templateEngine;
@@ -96,9 +103,17 @@ public class LoopNode extends BaseNode {
             return List.of();
         }
 
-        // If the loop has been terminated (by BackEdgeHandler), always route to exit
+        // If the loop has been terminated (by BackEdgeHandler), route to exit - UNLESS it ran out
+        // of iterations while it still wanted to continue. That is a failure, not an exit: the
+        // loop never reached its own stopping condition, so the work after it would run on
+        // unfinished data. Step-by-step rebuilds routing from the persisted row and would
+        // otherwise re-arm the exit that the automatic path deliberately refuses to take.
         Object terminated = result.output().get("terminated");
         if (Boolean.TRUE.equals(terminated)) {
+            if (OVERFLOW_REASON.equals(result.output().get("reason"))) {
+                logger.info("Loop '{}' hit its iteration limit while still running - not routing to exit", nodeId);
+                return List.of();
+            }
             logger.debug("Loop '{}' terminated, routing to exit targets: {}", nodeId, exitTargets.size());
             return new ArrayList<>(exitTargets);
         }

@@ -93,6 +93,18 @@ class OrgScopePredicateInvariantTest {
             // V291 Redis execution queue: factory snapshots the run's tenant + org + role
             // into the queued message for later rehydration. Pure copy, no comparison.
             "QueuedExecutionMessage#fromRun",
+            // 2026-07-31, surfaced by widening isCandidateClass to `.execution.`: the
+            // engine copies the tree's tenant + org into the ExecutionContext and re-binds
+            // the org scope on the ForkJoinPool worker. Pure propagation of the run's own
+            // scope, no owner-vs-org comparison - same category as the entries above.
+            "UnifiedExecutionEngine#executeItem",
+            // Share-link chat send (1aa452f7f): reads the endpoint's org only to key the
+            // per-share invocation rate limiter, and its tenant only to persist messages
+            // and set X-User-ID. No owner-vs-org comparison happens here - the actual
+            // workspace match for this path is ScopeGuard.crossResourceMatches in
+            // ChatDispatchService#dispatchToWorkflow. Same documented false-positive
+            // category as the endpoint auto-create entries above.
+            "ChatDispatchService#sendMessage",
 
             // Runtime dispatch: reads run scope to re-bind worker ThreadLocals,
             // label metrics, and enforce production-run metadata; upstream callers
@@ -165,7 +177,11 @@ class OrgScopePredicateInvariantTest {
                 || pkg.contains(".tools")    // .tools and .tools.*
                 || pkg.contains(".schedule")
                 || pkg.contains(".trigger")
-                || pkg.contains(".webhook");   // 2026-05-18 audit: webhook dispatch services
+                || pkg.contains(".webhook")    // 2026-05-18 audit: webhook dispatch services
+                // 2026-07-31: execution nodes reach other tenants' rows too. SubWorkflowNode
+                // resolves its target workflowId through the template adapter, so it is a
+                // cross-workspace dispatch surface exactly like the trigger services.
+                || pkg.contains(".execution.");
     }
 
     private boolean touchesBothScopeGetters(JavaMethod m) {

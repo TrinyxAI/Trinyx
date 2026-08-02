@@ -12,9 +12,15 @@ import { BuilderCanvas } from './BuilderCanvas';
 import { InspectorPanel } from './InspectorPanel';
 import { nodeRegistry } from '../registry/nodeRegistry';
 import { useOAuthCredentialCallback } from '../hooks/useOAuthCredentialCallback';
-import { NodeCreatorPanel, getPaletteItemDataFromId } from './NodeCreatorPanel';
+import { getPaletteItemDataFromId } from './NodeCreatorPanel';
 import { useApprovalReviewSelection } from '../hooks/useApprovalReviewSelection';
-import { WorkflowRunsHistoryPanel } from '@/components/workflow/WorkflowRunsHistoryPanel';
+import {
+  NODE_CREATOR_VISIBILITY_EVENT,
+  requestRevealNode,
+  type NodeCreatorVisibilityDetail,
+} from '@/lib/workflow/nodeCreatorBus';
+import { useCreateNodeRequests } from '@/lib/workflow/useCreateNodeRequests';
+import { openNodeCreatorPanel } from '@/components/workflow/run-panel/runPanelBus';
 import type { ConnectionType } from './ConnectionTypeSelector';
 import { generateWorkflowPlan } from '../utils/workflowPlanGenerator';
 import { resolveInsertedTargetHandle } from '../utils/hoverConnectHandles';
@@ -45,7 +51,8 @@ import { useWorkflowStreaming } from '../hooks/execution';
 import { orchestratorApi, webhookSettingsService, chatEndpointSettingsService, formEndpointSettingsService } from '@/lib/api';
 import { StepByStepProvider } from '../contexts/StepByStepContext';
 import { ValidationProvider } from '../contexts/ValidationContext';
-import { setCanvasNodes } from '../services/canvasNodesStore';
+import { withDerivedBackEdges } from '../utils/backEdgeDetection';
+import { setCanvasNodes, clearCanvasNodes } from '../services/canvasNodesStore';
 import { useWorkflowRunContext } from '@/contexts/WorkflowRunContext';
 import { calculateNodePosition } from '../utils/nodePositioning';
 import { useWorkflowLayoutDirectionSafe } from '@/contexts/WorkflowLayoutDirectionContext';
@@ -101,9 +108,6 @@ interface WorkflowBuilderProps {
   applicationActionRef?: React.MutableRefObject<((triggerRef: string, data: Record<string, unknown>) => Promise<void>) | null>;
   saveRef?: React.MutableRefObject<(() => Promise<void>) | null>;
   nodesRef?: React.MutableRefObject<Node<BuilderNodeData>[]>;
-  isRunsHistoryOpen?: boolean;
-  onOpenRunsHistory?: () => void;
-  onCloseRunsHistory?: () => void;
   onSettingsOpenChange?: (isOpen: boolean) => void;
 }
 
@@ -123,9 +127,6 @@ export function WorkflowBuilder({
   applicationActionRef,
   saveRef,
   nodesRef: externalNodesRef,
-  isRunsHistoryOpen,
-  onOpenRunsHistory,
-  onCloseRunsHistory,
   onSettingsOpenChange,
 }: WorkflowBuilderProps = {}) {
   const router = useRouter();
@@ -1419,6 +1420,10 @@ export function WorkflowBuilder({
 
   const { undo, redo, canUndo, canRedo } = useHistory(nodes, edges, setNodes, setEdges);
 
+  // Loop-back classification for validation: the same derivation the canvas renders and the
+  // save path serializes, so all three agree on which edges close a loop.
+  const validationEdges = React.useMemo(() => withDerivedBackEdges(edges), [edges]);
+
   const { preparedNodes, preparedEdges, selectedNode } = usePreparedGraph(
     nodes,
     edges,
@@ -1440,9 +1445,18 @@ export function WorkflowBuilder({
   // already syncs `nodesRef.current = nodes` (raw nodes) on every nodes change. Writing
   // `preparedNodes` here would race with that effect and leak runtime callbacks (added by
   // usePreparedGraph) into consumers that expect the raw plan shape.
+  // Published under this canvas's workflow id so a reader (the run panel's step
+  // rows) resolves icons against the RIGHT canvas when several are mounted at
+  // once (page canvas + a sub-workflow tab in the side panel). Dropped on
+  // unmount so the map does not accumulate every workflow visited in a session.
   React.useEffect(() => {
-    setCanvasNodes(preparedNodes);
-  }, [preparedNodes]);
+    setCanvasNodes(preparedNodes, workflowId);
+  }, [preparedNodes, workflowId]);
+
+  React.useEffect(() => {
+    if (!workflowId) return;
+    return () => clearCanvasNodes(workflowId);
+  }, [workflowId]);
 
   // UI handlers
   const handleNodeDoubleClick = React.useCallback((nodeId: string) => {
@@ -1456,14 +1470,21 @@ export function WorkflowBuilder({
     setIsFullscreenMode(false);
   }, []);
 
-  // Close node creator when in advanced/fullscreen mode
+  // The palette now lives in the side panel's "Add Node" tab, which tells us
+  // when it is on screen. On mobile that panel is a full-screen overlay, so
+  // useSelection still needs to know (it drops the node selection there).
   React.useEffect(() => {
-    if (isAdvancedMode || isFullscreenMode) {
-      setIsNodeCreatorOpen(false);
-    }
-  }, [isAdvancedMode, isFullscreenMode]);
+    const handler = (event: Event) => {
+      const detail = (event as CustomEvent<NodeCreatorVisibilityDetail>).detail;
+      if (!detail) return;
+      if (detail.workflowId && workflowId && detail.workflowId !== workflowId) return;
+      setIsNodeCreatorOpen(detail.open);
+    };
+    window.addEventListener(NODE_CREATOR_VISIBILITY_EVENT, handler);
+    return () => window.removeEventListener(NODE_CREATOR_VISIBILITY_EVENT, handler);
+  }, [workflowId]);
 
-  // Handle node selection from NodeCreatorPanel
+  // Handle node selection from the palette (side-panel "Add Node" tab)
   const handleNodeCreatorSelect = React.useCallback((nodeIdOrData: any) => {
     const itemData = typeof nodeIdOrData === 'object' && nodeIdOrData !== null
       ? nodeIdOrData
@@ -1478,8 +1499,18 @@ export function WorkflowBuilder({
       layoutDirection,
     );
 
-    handleCreateNode(itemData, targetPosition);
+    const createdNodeId = handleCreateNode(itemData, targetPosition);
     nodeCreationCounterRef.current += 1;
+
+    // Pan onto it. The palette is a side-panel tab now, so it takes canvas width
+    // and the grid position above can fall outside the visible viewport; with
+    // `onlyRenderVisibleElements` the node is then not even in the DOM and the
+    // click looks like it did nothing. Not needed for the hover-"+" path below,
+    // which places the node next to what the user is already looking at (and
+    // re-tidies the graph afterwards).
+    if (!currentPendingConnection && createdNodeId) {
+      requestRevealNode(createdNodeId);
+    }
 
     // If there was a pending connection, create the edge
     if (currentPendingConnection) {
@@ -1529,6 +1560,10 @@ export function WorkflowBuilder({
     window.dispatchEvent(new CustomEvent('workflowNodeCreated'));
   }, [handleCreateNode, handleConnect, nodesRef]);
 
+  // The palette lives in another React tree (side panel), so a pick arrives as an
+  // event. The hook owns the two guards: right canvas, and never a read-only one.
+  useCreateNodeRequests({ workflowId, isPreviewOnly, onCreate: handleNodeCreatorSelect });
+
   return (
     <StepByStepProvider
       isEnabled={pauseResumeState.mode === 'step_by_step'}
@@ -1552,7 +1587,11 @@ export function WorkflowBuilder({
       pendingSignals={pauseResumeState.pendingSignals}
       activeEpochs={pauseResumeState.activeEpochs}
     >
-      <ValidationProvider nodes={nodes} edges={edges} backendErrors={backendValidationErrors}>
+      {/* Validation sees the SAME loop-back classification as the canvas and the saved plan.
+          Passing the raw store edges here let the three disagree inside one session: a loop
+          drawn before its forward path rendered orange and saved as a loop, yet was reported
+          as a cycle error. */}
+      <ValidationProvider nodes={nodes} edges={validationEdges} backendErrors={backendValidationErrors}>
         <div className="h-full w-full relative">
           {/* Syncing indicator */}
           {isSyncingPlan && (
@@ -1580,8 +1619,7 @@ export function WorkflowBuilder({
             hoveredEdgeId={hoveredEdgeId}
             onHoverEdge={setHoveredEdgeId}
             onDeleteEdge={handleDeleteEdge}
-            onOpenNodeCreator={() => setIsNodeCreatorOpen(true)}
-            isNodeCreatorOpen={isNodeCreatorOpen}
+            onOpenNodeCreator={() => openNodeCreatorPanel({ workflowId })}
             hasSelectedNodes={selectedNodeIds.length > 0}
             isFullscreen={isFullscreenMode}
             isAdvancedMode={isAdvancedMode}
@@ -1643,23 +1681,8 @@ export function WorkflowBuilder({
               />
             )}
           >
-            {!isFullscreenMode && !isPreviewOnly && (
-              <NodeCreatorPanel
-                isOpen={isNodeCreatorOpen}
-                onClose={() => setIsNodeCreatorOpen(false)}
-                onSelectNode={handleNodeCreatorSelect}
-                currentWorkflowId={workflowId}
-              />
-            )}
-
-            {!isFullscreenMode && isRunMode && (
-              <WorkflowRunsHistoryPanel
-                isOpen={isRunsHistoryOpen || false}
-                onClose={onCloseRunsHistory || (() => {})}
-                workflowId={workflowId}
-                currentRunId={effectiveRunId}
-              />
-            )}
+            {/* The node palette and the run history are side-panel tabs now -
+                nothing floats over the ReactFlow canvas any more. */}
           </BuilderCanvas>
 
           {/* Execution error toasts */}

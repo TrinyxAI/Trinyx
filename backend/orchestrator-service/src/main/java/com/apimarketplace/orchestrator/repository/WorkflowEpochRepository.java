@@ -340,6 +340,52 @@ public class WorkflowEpochRepository {
     }
 
     /**
+     * Batch-fetch the DURATION of the most recent closed epoch per run ID.
+     *
+     * <p>This is the figure the run history shows for a run that has not
+     * terminated. A reusable run never ends - it rests in WAITING_TRIGGER between
+     * fires - so its own {@code duration_ms} is null and the span between its
+     * {@code startedAt} and any {@code endedAt} measures the run's LIFETIME (days,
+     * once {@code cancelStaleRuns} stamps an end on it), not how long the workflow
+     * takes to execute.
+     *
+     * <p>Read from the epoch row rather than reconstructed by the caller: the
+     * engine supports CONCURRENT epochs across trigger DAGs, so pairing a global
+     * MAX(started_at) with a "last cycle closed at" from elsewhere can subtract two
+     * different epochs and produce a confident, wrong number. One row, one epoch,
+     * one duration.
+     *
+     * <p>Only CLOSED epochs are considered ({@code duration_ms} is written when the
+     * epoch closes): a run whose only epoch is still executing has no settled
+     * figure and is absent from the map.
+     */
+    public Map<String, Long> getLatestEpochDurationByRunIds(List<String> runIds) {
+        if (runIds == null || runIds.isEmpty()) return Map.of();
+        String placeholders = runIds.stream().map(id -> "?").collect(java.util.stream.Collectors.joining(", "));
+        // EVERY ordered-on column is in the select list. Postgres tolerates ordering
+        // on a column it does not project when using DISTINCT ON; H2 rejects it
+        // (90068), and the H2-backed repository is @Primary in all three test
+        // profiles - so omitting one turns the build red while prod stays fine.
+        //
+        // NULLS LAST because `started_at` is nullable and Postgres sorts DESC with
+        // NULLS FIRST: an unstamped header would otherwise outrank the genuinely
+        // latest epoch. `epoch DESC` breaks the tie when two trigger DAGs stamp the
+        // same instant.
+        String sql = "SELECT DISTINCT ON (run_id) run_id, duration_ms, started_at, epoch FROM workflow_epochs " +
+                "WHERE run_id IN (" + placeholders + ") AND entry_type = 'EPOCH_HEADER' " +
+                "AND duration_ms IS NOT NULL " +
+                "ORDER BY run_id, started_at DESC NULLS LAST, epoch DESC";
+        Map<String, Long> result = new java.util.HashMap<>();
+        jdbcTemplate.query(sql, rs -> {
+            Object duration = rs.getObject("duration_ms");
+            if (duration != null) {
+                result.put(rs.getString("run_id"), rs.getLong("duration_ms"));
+            }
+        }, runIds.toArray());
+        return result;
+    }
+
+    /**
      * Batch-fetch the most recent epoch start time per run ID from EPOCH_HEADER rows.
      *
      * <p>For reusable trigger runs (schedule, webhook, datasource, chat, manual)

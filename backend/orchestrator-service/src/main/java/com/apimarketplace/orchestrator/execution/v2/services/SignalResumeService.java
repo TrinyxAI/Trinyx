@@ -159,6 +159,15 @@ public class SignalResumeService {
     @Autowired(required = false)
     private PendingAgentRegistry pendingAgentRegistry;
 
+    /**
+     * The other half of "is an async agent still working on this run?". The registry covers
+     * dispatch until {@code consume()}; this store covers {@code consume()} until the end of
+     * delivery. Reading only the registry leaves the whole delivery uncovered - see the
+     * refinalize check below for what that costs.
+     */
+    @Autowired(required = false)
+    private com.apimarketplace.orchestrator.execution.v2.async.RedisInFlightStore agentInFlightStore;
+
     @Autowired(required = false)
     private ErrorTriggerDispatchService errorTriggerDispatchService;
 
@@ -1530,15 +1539,31 @@ public class SignalResumeService {
             // run COMPLETED/FAILED while a worker is still computing, dropping its result
             // on a terminal run when it eventually arrives. Mirrors hasAnyPendingForRun's
             // local-then-Redis lookup so cross-replica coverage is preserved.
-            if (pendingAgentRegistry != null) {
+            if (pendingAgentRegistry != null || agentInFlightStore != null) {
                 try {
-                    if (pendingAgentRegistry.hasAnyPendingForRun(runId)) {
+                    if (pendingAgentRegistry != null && pendingAgentRegistry.hasAnyPendingForRun(runId)) {
                         logger.info("[SignalResume] Async agent in flight during interface resume, staying RUNNING: runId={}", runId);
+                        return;
+                    }
+                    // The registry is EMPTY for the whole of a delivery: onAgentResult consumes
+                    // the pending entry on its first line and only dispatches successors at the
+                    // end. Re-finalizing inside that window sets the run terminal, and the
+                    // delivery then sees a terminal run and abandons the successor traversal -
+                    // the agent's result is dropped on a run that is already COMPLETED. The
+                    // in-flight store is what covers that window.
+                    if (agentInFlightStore != null && agentInFlightStore.hasAnyInFlightForRun(runId)) {
+                        logger.info("[SignalResume] Async agent consumed but not yet delivered during interface resume, staying RUNNING: runId={}", runId);
                         return;
                     }
                 } catch (Exception e) {
                     // Fail-safe (same policy as the watchdog): a registry/Redis hiccup must
                     // never re-finalize a run we cannot prove is idle.
+                    //
+                    // NOTE the two halves differ, deliberately. PendingAgentRegistry PROPAGATES a
+                    // Redis error, so this catch fires and we stay RUNNING. RedisInFlightStore
+                    // fails OPEN (listForRun swallows and returns empty), so a Redis outage
+                    // silently re-exposes the consume-to-delivery window rather than freezing
+                    // every run on the deployment. Only the registry half is fail-closed.
                     logger.warn("[SignalResume] Pending-agent check failed during interface resume for runId={}, staying RUNNING: {}",
                             runId, e.getMessage());
                     return;
@@ -1572,6 +1597,18 @@ public class SignalResumeService {
      * funnel into the same single reset entry point.</p>
      */
     public void performDeferredReset(String runId, String dagTriggerId, int epoch) {
+        performDeferredReset(runId, dagTriggerId, epoch, null);
+    }
+
+    /**
+     * Same, for a caller that is itself an agent delivery.
+     *
+     * @param excludeInFlightCorrelationId the requesting delivery's correlationId, exempted from
+     *        the reset guard's in-flight check because it has already cleared its own entry and
+     *        that clear is best-effort. Null for every non-agent caller.
+     */
+    public void performDeferredReset(String runId, String dagTriggerId, int epoch,
+                                     String excludeInFlightCorrelationId) {
         try {
             WorkflowRunEntity run = runRepository.findByRunIdPublic(runId).orElse(null);
             if (run == null || run.getStatus() == RunStatus.WAITING_TRIGGER) {
@@ -1616,7 +1653,7 @@ public class SignalResumeService {
 
             execution.setStatus(hasFailures ? RunStatus.FAILED : RunStatus.COMPLETED);
 
-            reusableTriggerService.resetForNextCycle(run, execution, plan, runId, triggerType, dagTriggerId, hasFailures, epoch);
+            reusableTriggerService.resetForNextCycle(run, execution, plan, runId, triggerType, dagTriggerId, hasFailures, epoch, excludeInFlightCorrelationId);
 
             // Dispatch error-trigger workflows when the epoch had failures.
             // The synchronous path (executeCycleInternal) calls this after resetForNextCycle;
@@ -1935,13 +1972,17 @@ public class SignalResumeService {
             ? resolveSelectedPort(resolvedSignal.getResolution())
             : null;
 
-        return plan.getIterateEdgesForSource(nodeId).stream().anyMatch(edge -> {
-            String fromPort = EdgeRefParser.getPort(edge.from());
-            if (signalNode.isBranchingNode()) {
-                return selectedPort != null && Objects.equals(selectedPort, fromPort);
-            }
-            return fromPort == null || fromPort.isBlank();
-        });
+        // Every loop-back shape, not just the loop node's iterate port: an approval whose
+        // "rejected" port carries a declared back-edge must resume into the loop too, and
+        // approvals inside a loop are explicitly allowed.
+        return com.apimarketplace.orchestrator.domain.workflow.BackEdgeSpecs.forSource(plan, nodeId)
+            .stream().anyMatch(spec -> {
+                String fromPort = spec.sourcePort();
+                if (signalNode.isBranchingNode()) {
+                    return selectedPort != null && Objects.equals(selectedPort, fromPort);
+                }
+                return fromPort == null || fromPort.isBlank();
+            });
     }
 
     private Set<String> findResolvedSignalSuccessors(

@@ -66,6 +66,37 @@ public class ProductionRunResolver {
         RunStatus.AWAITING_SIGNAL
     );
 
+    /**
+     * Statuses the {@code core:sub_workflow} node accepts, preserved exactly as the
+     * node defined them before it adopted this resolver. Deliberately narrower than
+     * {@link #NON_TERMINAL_STATUSES}: a sub-workflow call blocks its parent waiting
+     * for the child epoch, so handing it a run parked on an approval or a wait timer
+     * would just burn the parent's timeout.
+     */
+    public static final List<RunStatus> SUB_WORKFLOW_ACTIVE_STATUSES = List.of(
+        RunStatus.WAITING_TRIGGER,
+        RunStatus.RUNNING,
+        RunStatus.PAUSED
+    );
+
+    /**
+     * Every status that is not terminal. This is the set the error-trigger lane
+     * accepted before it adopted this resolver (it selected the newest run of any
+     * status and then rejected {@code isTerminal()}), so using it keeps that lane's
+     * behaviour unchanged. {@code AWAITING_SIGNAL} and {@code PENDING} matter here:
+     * an error handler parked on an approval is still a live handler, and
+     * {@code WorkflowPinService.rearm} treats {@code AWAITING_SIGNAL} as electable
+     * for the same reason.
+     *
+     * <p><b>Derived, not hand-listed.</b> A new {@code RunStatus} would otherwise be
+     * silently excluded from the error lane, which is the same class of silent
+     * shadowing bug this method exists to fix.
+     */
+    public static final List<RunStatus> NON_TERMINAL_STATUSES =
+        java.util.Arrays.stream(RunStatus.values())
+            .filter(s -> !s.isTerminal())
+            .toList();
+
     private final WorkflowRepository workflowRepository;
     private final WorkflowRunRepository runRepository;
 
@@ -200,6 +231,105 @@ public class ProductionRunResolver {
             return new Resolution(Optional.empty(), Outcome.NO_PRODUCTION_RUN, workflow.getName());
         }
 
+        return new Resolution(runOpt, Outcome.FOUND, workflow.getName());
+    }
+
+    /**
+     * Resolve the run that should receive an INTERNAL, workflow-to-workflow fire:
+     * the {@code core:sub_workflow} node and error-trigger dispatch.
+     *
+     * <p>Both callers previously hand-rolled a raw repository lookup and inherited
+     * none of this class's protections. This method gives them the protections
+     * <b>without changing which runs are acceptable</b>, which is why it does not
+     * simply reuse the {@code LATEST_*} policies:
+     * <ul>
+     *   <li><b>No pin required.</b> A sub-workflow call and an error handler are
+     *       authored inside the workspace and are not publicly exposed, so
+     *       {@link Outcome#NOT_PINNED} is never returned. Unpinned targets keep
+     *       working exactly as before.</li>
+     *   <li><b>Showcase exclusion.</b> A frozen marketplace clone shares
+     *       workflow_id + plan_version + status with the real run and never
+     *       progresses, so the plain "latest by started_at" queries these callers
+     *       used could hand the fire to an inert row that silently does nothing.</li>
+     *   <li><b>A real status filter, applied IN the query.</b> The error lane had no
+     *       status predicate and rejected terminal runs only afterwards, so a newer
+     *       CANCELLED run permanently shadowed a healthy {@code WAITING_TRIGGER}
+     *       one, killing the handler with nothing but a WARN. That is the same
+     *       shadowing bug this class was created to fix for schedules.</li>
+     *   <li><b>Version scoping when pinned</b>, unchanged from what both callers
+     *       already did.</li>
+     * </ul>
+     *
+     * <p><b>Deliberately NOT FK-first.</b> {@link #resolveFkFirst} makes
+     * {@code workflow.production_run_id} decide, which is right for a public trigger
+     * but wrong here, in two independent ways:
+     * <ol>
+     *   <li>It returns EMPTY when the FK run is live but fails the policy's status
+     *       filter - for the schedule policy that includes a COMPLETED production
+     *       run, which means "the user stopped production on purpose". (Under
+     *       {@code LATEST_TRUSTED} / {@code BY_PRODUCTION_RUN_ID} a COMPLETED run is
+     *       inside the trusted set and IS returned; the refusal is policy-dependent.)
+     *       These lanes never had that contract: a stopped production run
+     *       simply meant the scan picked the next live run. Adopting it would turn
+     *       that into a permanent dead-end - "Start the workflow first" on a workflow
+     *       that already HAS a healthy WAITING_TRIGGER run, and no user action clears
+     *       it, because starting a run does not move the FK.</li>
+     *   <li>It would route a MOCKED parent's sub-workflow call onto the child's
+     *       PRODUCTION run, and {@code MockRunGate} force-disables mocks for the
+     *       production run ("production fires never mock"). A dry-run of the parent
+     *       would then execute the child for real: real side effects, real
+     *       notifications, a real epoch on production history. Selecting by
+     *       {@code started_at} does not guarantee parent and child stay in the same
+     *       lane, but it does not systematically steer the call onto production the
+     *       way an FK preference would, and it is the pre-existing behaviour.</li>
+     * </ol>
+     *
+     * <p>Consequence, stated plainly: a child's editor run can still win over its
+     * production run here, exactly as before. That is a known property of these two
+     * internal lanes, not something this method regressed.
+     *
+     * <p><b>No writes</b>: unlike {@link #resolve}, this method never calls
+     * {@code WorkflowPinService.rearm}, so the transactional caution documented on
+     * {@code resolve} does not apply to its call sites.
+     *
+     * <p>Callers must still apply their own authorization: this resolver answers
+     * "which run", never "may you fire it".
+     *
+     * <p>Takes the already-loaded {@link WorkflowEntity} rather than an id: both call
+     * sites hold it (they had to load it to authorize the call), so re-reading it here
+     * would be a second identical SELECT on every sub-workflow call and every error
+     * dispatch.
+     *
+     * @param workflow            workflow whose fireable run we want
+     * @param acceptableStatuses  statuses this caller can fire, e.g.
+     *                            {@link #SUB_WORKFLOW_ACTIVE_STATUSES} or
+     *                            {@link #NON_TERMINAL_STATUSES}; null or empty
+     *                            defaults to {@link #NON_TERMINAL_STATUSES}
+     * @return a {@link Resolution}; {@link Outcome#NOT_PINNED} is never returned
+     */
+    public Resolution resolveActiveRun(WorkflowEntity workflow, List<RunStatus> acceptableStatuses) {
+        if (workflow == null || workflow.getId() == null) {
+            return new Resolution(Optional.empty(), Outcome.WORKFLOW_MISSING, null);
+        }
+        List<RunStatus> statuses = (acceptableStatuses == null || acceptableStatuses.isEmpty())
+            ? NON_TERMINAL_STATUSES
+            : acceptableStatuses;
+
+        UUID workflowId = workflow.getId();
+        Integer pinned = workflow.getPinnedVersion();
+        Optional<WorkflowRunEntity> runOpt = pinned != null
+            ? runRepository.findFirstProductionRunByWorkflowIdAndPlanVersionAndStatusIn(
+                workflowId, pinned, statuses)
+            : runRepository.findFirstProductionRunByWorkflowIdAndStatusIn(workflowId, statuses);
+
+        if (runOpt.isEmpty()) {
+            // DEBUG, not WARN: an authoring mistake (calling a sub-workflow that was never
+            // run) lands here on every execution, and the caller already surfaces it as a
+            // node failure / a dispatch skip. Same reasoning as resolve() above.
+            logger.debug("[ProductionRunResolver] Workflow {} (pin={}) has no run in {} to fire",
+                workflowId, pinned, statuses);
+            return new Resolution(Optional.empty(), Outcome.NO_PRODUCTION_RUN, workflow.getName());
+        }
         return new Resolution(runOpt, Outcome.FOUND, workflow.getName());
     }
 
@@ -421,7 +551,13 @@ public class ProductionRunResolver {
         return resolveFkFirst(fresh, pinned, statusFilter, scan);
     }
 
-    private static boolean isShowcaseRun(WorkflowRunEntity run) {
+    /**
+     * A frozen marketplace clone: shares workflow_id, plan_version and status with the
+     * run it was cloned from, but never progresses. Public so callers that read a run by
+     * FK (rather than through one of the showcase-excluding queries) can apply the same
+     * rule instead of re-deriving it.
+     */
+    public static boolean isShowcaseRun(WorkflowRunEntity run) {
         if ("showcase".equals(run.getSource())) return true;
         String publicId = run.getRunIdPublic();
         return publicId != null && publicId.startsWith("showcase_");

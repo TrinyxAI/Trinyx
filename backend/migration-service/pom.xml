@@ -164,7 +164,7 @@
                         <version>3.3.1</version>
                         <executions>
                             <execution>
-                                <id>ce-neutralize-tool-response-migrations</id>
+                                <id>ce-neutralize-migrations</id>
                                 <phase>process-resources</phase>
                                 <goals>
                                     <goal>copy-resources</goal>

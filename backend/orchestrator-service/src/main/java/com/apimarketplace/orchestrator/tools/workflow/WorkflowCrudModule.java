@@ -67,6 +67,7 @@ public class WorkflowCrudModule implements ToolModule {
     private final com.apimarketplace.orchestrator.repository.WorkflowRepository workflowRepository;
     private final ApplicationShowcaseResolver showcaseResolver;
     private final AgentCancellationProbe cancellationProbe;
+    private final com.apimarketplace.orchestrator.tools.common.RunStopToolHandler runStopToolHandler;
 
     /** wait_run bounds. The max (default 240s) must stay under the tightest hop that
      *  tolerates a silent in-flight tool call: the bridge kills a CLI session after
@@ -86,7 +87,7 @@ public class WorkflowCrudModule implements ToolModule {
     long waitRunSliceMs = 250L;
 
     private static final Set<String> HANDLED_ACTIONS = Set.of(
-        "get", "list", "delete", "runs", "get_run", "wait_run", "get_node_output", "pin", "unpin",
+        "get", "list", "delete", "runs", "get_run", "wait_run", "stop_run", "get_node_output", "pin", "unpin",
         "publish", "unpublish"
     );
 
@@ -117,6 +118,7 @@ public class WorkflowCrudModule implements ToolModule {
             case "runs" -> executeRuns(parameters, tenantId, context);
             case "get_run" -> executeGetRun(parameters, tenantId, context);
             case "wait_run" -> executeWaitRun(parameters, tenantId, context);
+            case "stop_run" -> executeStopRun(parameters, tenantId, context);
             case "get_node_output" -> executeGetNodeOutput(parameters, tenantId, context);
             case "pin" -> executePin(parameters, tenantId, context);
             case "unpin" -> executeUnpin(parameters, tenantId, context);
@@ -970,6 +972,62 @@ public class WorkflowCrudModule implements ToolModule {
         } catch (Exception e) {
             log.error("Failed to wait for run {}: {}", runId, e.getMessage(), e);
             return ToolExecutionResult.failure(ToolErrorCode.EXECUTION_FAILED, "Failed to wait for run: " + e.getMessage());
+        }
+    }
+
+    // ==================== Stop Run ====================
+
+    /**
+     * End a run that is still going: the counterpart of {@code execute}.
+     *
+     * <p>Resolution and authorization mirror {@code get_run} exactly (same run
+     * lookup, same scope check, same workflow allow-list), so an agent can stop
+     * precisely the runs it can already read. The stop itself is shared with the
+     * application tool through {@code RunStopToolHandler}.
+     *
+     * <p>Omitting {@code run_id} is the self-abort case: an agent running inside a
+     * workflow stops its own run, which also ends its own agent loop.
+     */
+    private ToolExecutionResult executeStopRun(Map<String, Object> parameters, String tenantId,
+                                                ToolExecutionContext context) {
+        String runId = runStopToolHandler.resolveTargetRunId(parameters, context);
+        if (com.apimarketplace.orchestrator.tools.common.RunStopToolHandler.BAD_RUN_ID.equals(runId)) {
+            return ToolExecutionResult.failure(ToolErrorCode.INVALID_PARAMETER_VALUE,
+                    runStopToolHandler.badRunIdMessage(parameters));
+        }
+        if (runId == null) {
+            return ToolExecutionResult.failure(ToolErrorCode.MISSING_PARAMETER,
+                    runStopToolHandler.noTargetMessage("workflow"));
+        }
+
+        try {
+            Optional<WorkflowRunEntity> runOpt = workflowRunRepository.findByRunIdPublic(runId);
+            if (runOpt.isEmpty()) {
+                return ToolExecutionResult.failure(ToolErrorCode.RESOURCE_NOT_FOUND, "Run not found: " + runId);
+            }
+
+            WorkflowRunEntity run = runOpt.get();
+            String orgId = TenantResolver.currentRequestOrganizationId();
+            if (!ScopeGuard.isInStrictScope(tenantId, orgId, run.getTenantId(), run.getOrganizationId())) {
+                return ToolExecutionResult.failure(ToolErrorCode.RESOURCE_NOT_FOUND, "Run not found: " + runId);
+            }
+
+            WorkflowEntity workflow = run.getWorkflow();
+            // Allow-list: a restricted agent must not stop a run of a workflow outside its
+            // list - EXCEPT its own run. An agent executing inside a workflow is by
+            // definition authorized to be there, and every help text promises it can abort
+            // itself; applying the list here would deny exactly that.
+            if (!runStopToolHandler.isCallerOwnRun(run, context)) {
+                var workflowDenied = denyIfWorkflowNotAllowed(context,
+                        workflow != null && workflow.getId() != null ? workflow.getId().toString() : null);
+                if (workflowDenied.isPresent()) return workflowDenied.get();
+            }
+
+            return runStopToolHandler.stop(run, parameters, context, "workflow");
+        } catch (Exception e) {
+            log.error("Failed to stop run {}: {}", runId, e.getMessage(), e);
+            return ToolExecutionResult.failure(ToolErrorCode.EXECUTION_FAILED,
+                    "Failed to stop run: " + e.getMessage());
         }
     }
 

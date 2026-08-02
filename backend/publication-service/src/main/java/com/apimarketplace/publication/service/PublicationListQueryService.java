@@ -62,7 +62,8 @@ public class PublicationListQueryService {
             p.agent_snapshot->'agent'->>'modelProvider',
             p.agent_snapshot->'agent'->>'modelName',
             p.resource_id,
-            p.public_slug, p.publisher_handle
+            p.public_slug, p.publisher_handle,
+            p.ce_exclusive, CAST(p.ce_exclusive_features AS TEXT)
             """;
 
     private static final String FROM_CLAUSE = """
@@ -664,7 +665,9 @@ public class PublicationListQueryService {
                 toStr(row[i++]),           // agentModelName
                 toStr(row[i++]),           // resourceId
                 toStr(row[i++]),           // publicSlug
-                toStr(row[i++])            // publisherHandle
+                toStr(row[i++]),           // publisherHandle
+                toBool(row[i++]),          // ceExclusive
+                toStr(row[i++])            // ceExclusiveFeatures (CAST to TEXT)
         );
     }
 
@@ -681,6 +684,24 @@ public class PublicationListQueryService {
 
     private static String toStr(Object val) {
         return val != null ? val.toString() : null;
+    }
+
+    /**
+     * Normalises whatever the driver hands back for a boolean column. Postgres
+     * returns a {@code Boolean}, which is the only shape reachable today; the
+     * other branches exist because this mapper reads POSITIONAL native-query
+     * results, where a driver or engine change is invisible at compile time. The
+     * textual branch accepts Postgres' own spellings ({@code t}/{@code f},
+     * {@code 1}/{@code 0}) because {@code Boolean.parseBoolean("t")} is FALSE and
+     * would silently un-flag the row, putting the Install button back on an app
+     * that cannot run here.
+     */
+    private static Boolean toBool(Object val) {
+        if (val == null) return null;
+        if (val instanceof Boolean bool) return bool;
+        if (val instanceof Number num) return num.intValue() != 0;
+        String text = val.toString().trim();
+        return "t".equalsIgnoreCase(text) || "1".equals(text) || Boolean.parseBoolean(text);
     }
 
     private static Integer toInt(Object val) {

@@ -298,6 +298,7 @@ public class WorkflowBuilderProvider implements ToolsProvider {
             case "runs" -> delegateCrud("runs", params, tenantId, ctx);
             case "get_run" -> delegateCrud("get_run", params, tenantId, ctx);
             case "wait_run" -> delegateCrud("wait_run", params, tenantId, ctx);
+            case "stop_run" -> delegateCrud("stop_run", params, tenantId, ctx);
             case "get_node_output" -> delegateCrud("get_node_output", params, tenantId, ctx);
             case "resolve_approval" -> executeResolveApproval(params, tenantId, ctx);
             case "continue_interface" -> executeContinueInterface(params, tenantId, ctx);
@@ -809,10 +810,52 @@ public class WorkflowBuilderProvider implements ToolsProvider {
                     }
                     var prodResolution = productionRunResolver.resolve(workflowId, com.apimarketplace.orchestrator.trigger.ProductionRunResolver.RunSelectionPolicy.LATEST_TRUSTED);
                     if (!prodResolution.isFound()) {
+                        // The production run may exist but be blocked on a signal. Telling the
+                        // agent to mint a run and re-pin would move production AWAY from the run
+                        // holding that signal, so that case gets its own remedy.
+                        //
+                        // Ask the FK directly rather than "newest AWAITING_SIGNAL at the pin":
+                        // an editor run at the pin can be newer than production and would win a
+                        // sorted lookup, making this branch fire about a run that is NOT
+                        // production - and then forbid create-and-pin, the one remedy that
+                        // works. Re-read the workflow because resolve() above may have rearmed
+                        // the FK (healCorruptFk runs REQUIRES_NEW), leaving our copy stale.
+                        //
+                        // Reading by FK skips the showcase / version predicates the Production*
+                        // queries carry, so re-apply them here: a heal that did not land leaves
+                        // the FK on a frozen clone or a stale version, and neither is "the
+                        // production run at v<pinned>" the message would claim.
+                        // PENDING is deliberately NOT matched - a queued run is not
+                        // signal-blocked, and "resolve it" would not be an actionable remedy.
+                        var freshWorkflow = workflowService.getWorkflow(workflowId).orElse(workflow);
+                        var blockedRun = freshWorkflow.getProductionRunId() == null
+                            ? java.util.Optional.<com.apimarketplace.orchestrator.domain.WorkflowRunEntity>empty()
+                            : workflowRunRepository.findById(freshWorkflow.getProductionRunId());
+                        boolean blockedIsProduction = blockedRun.isPresent()
+                            && blockedRun.get().getStatus() == com.apimarketplace.orchestrator.domain.workflow.RunStatus.AWAITING_SIGNAL
+                            && !com.apimarketplace.orchestrator.trigger.ProductionRunResolver.isShowcaseRun(blockedRun.get())
+                            && pinned.equals(blockedRun.get().getPlanVersion());
+                        if (blockedIsProduction) {
+                            String blockedId = blockedRun.get().getRunIdPublic();
+                            return ToolExecutionResult.failure(ToolErrorCode.EXECUTION_FAILED,
+                                "The production run " + blockedId + " at pinned v" + pinned
+                                + " is waiting on a signal, so it cannot take a production fire right now. "
+                                + "See which signal with workflow(action='get_run', run_id='" + blockedId + "'), then: "
+                                + "a pending approval clears with workflow(action='resolve_approval', run_id='"
+                                + blockedId + "', decision='approved'); an interface waiting to advance clears with "
+                                + "workflow(action='continue_interface', run_id='" + blockedId + "'); "
+                                + "a wait timer or an inbound webhook clears on its own. "
+                                + "Then retry with version='pinned'. "
+                                + "Do NOT create and pin a new run: that would point production away from the run "
+                                + "holding the pending signal.");
+                        }
                         return ToolExecutionResult.failure(ToolErrorCode.EXECUTION_FAILED, "No production run found for workflow at pinned v" + pinned +
                             " (outcome=" + prodResolution.outcome() + "). " +
-                            "The pinned version must have an existing WAITING_TRIGGER run to accumulate " +
-                            "production fires - same bootstrap pattern as webhook/schedule triggers.");
+                            "The pinned version needs a run in COMPLETED, WAITING_TRIGGER, RUNNING or PAUSED to " +
+                            "accumulate production fires - same bootstrap pattern as webhook/schedule triggers. " +
+                            "Create one with workflow(action='execute', id='" + workflowIdStr + "', version=" + pinned + "), " +
+                            "then workflow(action='pin', id='" + workflowIdStr + "', version=" + pinned + ") to point production at it, " +
+                            "then retry with version='pinned'.");
                     }
                     // Load the pinned plan (from the version history - source of truth for prod)
                     var pinnedVersionOpt = planVersionService.getVersion(workflowId, pinned);

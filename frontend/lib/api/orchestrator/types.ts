@@ -208,6 +208,13 @@ export interface WorkflowRun {
    */
   lastFireAt?: string;
   /**
+   * Duration of the most recently CLOSED epoch, in ms. What the run history
+   * shows for a run that has not terminated: a reusable run never ends, so its
+   * own duration stays null, and the span to any `endedAt` measures that run's
+   * LIFETIME rather than how long the workflow takes to execute.
+   */
+  lastEpochDurationMs?: number;
+  /**
    * Total accumulated cost of this run across ALL epochs, in CREDITS (1 credit
    * = $0.001). Agent executions are the only cost source. Live-updated by the
    * `runCost` WS event; seeded from the run-state payload. Rendered as dollars
@@ -612,6 +619,12 @@ export interface WorkflowPublication {
   agentSnapshot?: AgentPublicationSnapshot;
   planVersion?: number;
   creditsPerUse: number;
+  /** V420 - the snapshot uses a self-hosted-only feature, so managed cloud refuses the install
+   *  (HTTP 403 `code: 'CE_EXCLUSIVE'`). Drives the "self-hosted only" badge. Always sent by the
+   *  backend; optional here for the synthesized publications built client-side. */
+  ceExclusive?: boolean;
+  /** Feature codes behind `ceExclusive` (`CLI_AGENT`, `VECTOR_SEARCH`) - used for the badge tooltip. */
+  ceExclusiveFeatures?: string[];
   publisherId: string;
   publisherName?: string;
   publisherEmail?: string;

@@ -145,7 +145,7 @@ export const CORE_LOGIC_TYPES = [
   {
     id: 'sub-workflow',
     name: 'Sub-Workflow',
-    description: 'Execute another workflow as a function',
+    description: 'Trigger another workflow that already has a live run',
     icon: Workflow,
   },
   {

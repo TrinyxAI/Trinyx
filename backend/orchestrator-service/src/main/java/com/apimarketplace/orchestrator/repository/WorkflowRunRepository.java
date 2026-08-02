@@ -507,6 +507,16 @@ public interface WorkflowRunRepository extends JpaRepository<WorkflowRunEntity, 
      *
      * <p>See {@link #findFirstByWorkflowIdAndStatusOrderByStartedAtDesc} for the
      * deterministic-sort rationale.
+     *
+     * <p><b>NO PRODUCTION CALLERS - do not adopt it for a new dispatch path.</b> It
+     * does NOT exclude showcase clones (inert frozen marketplace copies that share
+     * workflow_id and status with the real run), so it can hand a fire to a row that
+     * never progresses. Use {@link #findFirstProductionRunByWorkflowIdAndStatusIn}
+     * instead, which is identical plus that exclusion. (Neither consults
+     * {@code workflow.production_run_id}: the internal lanes deliberately select by
+     * {@code started_at}, see {@code ProductionRunResolver.resolveActiveRun}.)
+     * Kept rather than deleted because parallel worktrees may still reference it, and
+     * because the migrated call sites assert it is never invoked.
      */
     @Query(value = """
         SELECT * FROM orchestrator.workflow_runs wr
@@ -514,6 +524,7 @@ public interface WorkflowRunRepository extends JpaRepository<WorkflowRunEntity, 
         ORDER BY wr.started_at DESC, wr.created_at DESC, wr.id DESC
         LIMIT 1
         """, nativeQuery = true)
+    @Deprecated
     Optional<WorkflowRunEntity> findFirstByWorkflowIdAndStatusInOrderByStartedAtDesc(
         @Param("workflowId") UUID workflowId, @Param("statuses") Collection<RunStatus> statuses);
 
@@ -557,6 +568,12 @@ public interface WorkflowRunRepository extends JpaRepository<WorkflowRunEntity, 
      *
      * <p>See {@link #findFirstByWorkflowIdAndStatusOrderByStartedAtDesc} for the
      * deterministic-sort rationale.
+     *
+     * <p><b>Not showcase-safe</b>, exactly like its unpinned twin above: it can return a
+     * frozen marketplace clone. Its two remaining callers
+     * ({@code WorkflowRunPersistenceService}, {@code ReusableTriggerService}) are not
+     * dispatch-selection paths, which is why it is not deprecated - but a NEW dispatch
+     * path must use {@link #findFirstProductionRunByWorkflowIdAndPlanVersionAndStatusIn}.
      */
     @Query(value = """
         SELECT * FROM orchestrator.workflow_runs wr
@@ -640,6 +657,29 @@ public interface WorkflowRunRepository extends JpaRepository<WorkflowRunEntity, 
         @Param("workflowId") UUID workflowId,
         @Param("planVersion") Integer planVersion,
         @Param("status") RunStatus status);
+
+    /**
+     * Production-run lookup across ALL plan versions, excluding showcase clones.
+     * Used by {@code ProductionRunResolver.resolveActiveRun} when the workflow has
+     * no pin, where "the run to fire" cannot be keyed on a pinned version.
+     *
+     * <p>This is the showcase-safe replacement for
+     * {@link #findFirstByWorkflowIdAndStatusInOrderByStartedAtDesc}: the plain
+     * derived query can return a frozen marketplace clone (same workflow_id and
+     * status as the original), which is inert and never progresses.
+     */
+    @Query(value = """
+        SELECT * FROM orchestrator.workflow_runs wr
+        WHERE wr.workflow_id = :workflowId
+          AND wr.status IN (:#{#statuses.![name()]})
+          AND (wr.source IS NULL OR wr.source <> 'showcase')
+          AND wr.run_id_public NOT LIKE 'showcase\\_%' ESCAPE '\\'
+        ORDER BY wr.started_at DESC, wr.created_at DESC, wr.id DESC
+        LIMIT 1
+        """, nativeQuery = true)
+    Optional<WorkflowRunEntity> findFirstProductionRunByWorkflowIdAndStatusIn(
+        @Param("workflowId") UUID workflowId,
+        @Param("statuses") Collection<RunStatus> statuses);
 
     /**
      * Find the most recent run for a workflow regardless of status or version.

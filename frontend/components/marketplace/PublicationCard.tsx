@@ -11,6 +11,8 @@ import { publicationService } from '@/lib/api/orchestrator/publication.service';
 import { ShowcasePreview } from '@/components/marketplace/ShowcasePreview';
 import { InterfacePreview, type InterfaceSnapshotLike } from '@/components/marketplace/InterfacePreview';
 import { PublisherAvatar } from '@/components/marketplace/PublisherAvatar';
+import { CeExclusiveBadge } from '@/components/marketplace/CeExclusiveBadge';
+import { isCeExclusiveBlocked } from '@/lib/marketplace/ceExclusive';
 import { UserActionMenu } from '@/components/profile/UserActionMenu';
 import { WorkflowNodeIcons } from '@/components/WorkflowNodeIcons';
 import { AvatarDisplay } from '@/components/agents';
@@ -252,7 +254,10 @@ export const PublicationCard = memo(function PublicationCard({ publication, curr
   const isFree = !publication.creditsPerUse || publication.creditsPerUse === 0;
   const isInstalling = installProgress != null;
   const clampedProgress = isInstalling ? Math.min(100, Math.max(0, installProgress)) : 0;
-  const canAcquire = !isOwn && !isAcquired && !!onAcquire && !isInstalling;
+  // CE-exclusive on managed cloud: the acquire endpoint would 403, so the card
+  // shows the badge instead of an Install button that cannot succeed.
+  const ceExclusiveBlocked = isCeExclusiveBlocked(publication);
+  const canAcquire = !isOwn && !isAcquired && !!onAcquire && !isInstalling && !ceExclusiveBlocked;
   const showOpen = !!openHref && !isInstalling;
 
   // Preview destination: agents open the dedicated agent-preview page; every other
@@ -368,6 +373,13 @@ export const PublicationCard = memo(function PublicationCard({ publication, curr
             <h3 className="text-sm font-medium text-theme-primary truncate">{publication.title}</h3>
             {/* My Shared: public / private indicator for the viewer's own publication. */}
             {mine && <VisibilityBadge visibility={publication.visibility} />}
+            {/* Self-hosted-only marker. Lives in the ALWAYS-VISIBLE footer, not in
+                the hover-only overlay above: on cloud it is the explanation for
+                the missing Install button, and a touch user never hovers, so a
+                hover-gated badge would leave them with a card that has no action
+                and no reason. Renders on both editions (on a self-hosted install
+                it advertises an app the user can actually run). */}
+            <CeExclusiveBadge publication={publication} variant="inline" />
             {/* Average rating sits right next to the name (social proof at a glance). */}
             {(publication.reviewCount ?? 0) > 0 && (
               <span className="inline-flex items-center gap-1 text-xs text-theme-muted shrink-0">

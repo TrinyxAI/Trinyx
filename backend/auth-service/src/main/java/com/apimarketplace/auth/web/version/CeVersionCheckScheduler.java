@@ -61,7 +61,11 @@ public class CeVersionCheckScheduler {
         String current = VersionInfo.resolveVersion(gitProperties);
         try {
             LatestRelease body = feedClient.fetchLatest(current);
-            if (body == null) {
+            // A 200 carrying no version counts as "no release", exactly like a null body.
+            // Storing it would overwrite a good status with nulls and blank the update
+            // banner, and an install cannot tell that apart from "you are up to date".
+            // Any feed hiccup that answers 200-with-null must therefore be inert here.
+            if (body == null || body.latestVersion() == null || body.latestVersion().isBlank()) {
                 log.debug("CE version check: feed advertised no release (running={})", current);
                 return;
             }

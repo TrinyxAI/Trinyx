@@ -18,6 +18,17 @@ Then open **http://localhost:3000** and create the first account (it becomes the
 admin). On the first run the CLI fetches the current model catalog so a fresh,
 never-cloud-linked install ships with up-to-date models.
 
+## Optional add-ons need the repository, not npx
+
+Two heavy features are opt-in: interface screenshots/PDFs (`renderer`) and the
+browser agent with web search (`browser-agent`). Each is enabled by an env file
+that turns on a Docker profile and the matching app setting together. Those env
+files ship with the git repository and this CLI passes no `--env-file`, so
+**neither add-on can be enabled through `npx`**. To use them, clone
+[the repository](https://github.com/livecontext-ai/livecontext-ce) and run
+`docker compose --env-file docker/.env.ce.renderer up -d` directly. Everything
+else works identically either way.
+
 ## Requirements
 
 - Docker Engine 24+ with Compose v2 (or Docker Desktop 4.x and later)

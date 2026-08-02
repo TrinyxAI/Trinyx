@@ -1,5 +1,7 @@
 package com.apimarketplace.agent.bridge;
 
+import com.apimarketplace.agent.domain.BridgeProviders;
+
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -56,9 +58,14 @@ public final class BridgeAllowlist {
 
     private BridgeAllowlist() {}
 
-    /** The four bridges wired in the platform. Order = UI {@code display_order}. */
-    public static final Set<String> BRIDGE_PROVIDERS =
-            Set.of("claude-code", "codex", "gemini-cli", "mistral-vibe");
+    /**
+     * The four bridges wired in the platform. Order = UI {@code display_order}.
+     *
+     * <p>Re-exported from {@link BridgeProviders#NAMES} in {@code agent-common}
+     * so modules outside the agent runtime (the marketplace's CE-exclusive
+     * detector, for one) read the same list without depending on this jar.
+     */
+    public static final Set<String> BRIDGE_PROVIDERS = BridgeProviders.NAMES;
 
     /**
      * Per-bridge model allowlist. {@code (provider, modelId)} pairs

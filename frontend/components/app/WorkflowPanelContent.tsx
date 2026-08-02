@@ -12,7 +12,7 @@
  */
 
 import React, { useState, useRef, useEffect, useCallback, useMemo } from 'react';
-import { Sparkles, MessageSquare, FileText, AppWindow, Workflow } from 'lucide-react';
+import { Sparkles, MessageSquare, FileText, AppWindow, Workflow, Play, Plus } from 'lucide-react';
 import { usePathname } from '@/i18n/navigation';
 import { ChatCore } from '@/components/chat/ChatCore';
 import { WelcomeTitle } from '@/app/shared/components';
@@ -23,6 +23,7 @@ import { type ApplicationConfig } from '@/components/chat/ApplicationTabContent'
 import { ApplicationCarousel } from '@/components/chat/ApplicationCarousel';
 import { useInterfacePaginationStore } from '@/lib/stores/interface-pagination-store';
 import { cn } from '@/lib/utils';
+import { panelTabClass } from '@/components/ui/panel-tab';
 import { useTranslations } from 'next-intl';
 import { useWorkflowChat } from '@/hooks/useWorkflowChat';
 import { useVisibleModels, AIModel, SelectedModel, EMPTY_SELECTED_MODEL, modelMatches, selectedModelFromAIModel, selectedModelEquals, getEffectiveDefaultSelectedModel } from '@/hooks/useModels';
@@ -33,12 +34,31 @@ import type { TriggerPanelConfig } from '@/app/workflows/builder/components/Trig
 import { normalizeLabel } from '@/app/workflows/builder/utils/labelNormalizer';
 import { TERMINAL_STATUSES } from '@/contexts/workflow-run/RunStateStore';
 import { useCurrentOrgStore } from '@/lib/stores/current-org-store';
+import { OPEN_TRIGGER_TAB_EVENT, findTriggerTabConfig, type OpenTriggerTabDetail } from '@/lib/workflow/triggerTabEvent';
+import { NodeCreatorPanelContent } from '@/components/app/NodeCreatorPanelContent';
+import { RunPanelContent, type RunPanelView } from '@/components/workflow/run-panel/RunPanelContent';
+import { resetEpochSelectionState } from '@/components/workflow/run-panel/useDefaultEpochSelection';
+import {
+  clearRunPanelCache,
+  consumeRunPanelViewRequest,
+  getCachedRunPanelData,
+  getRunPanelViewRequest,
+  subscribeRunPanelData,
+  OPEN_NODE_CREATOR_EVENT,
+  OPEN_RUN_PANEL_EVENT,
+  type OpenRunPanelDetail,
+  type RunPanelData,
+} from '@/components/workflow/run-panel/runPanelBus';
 
 // ── Constants ──
 
 const CHAT_TAB_ID = '__chat_ia__';
 const APP_TAB_ID = '__application__';
 export const WORKFLOW_TAB_ID = '__workflow__';
+/** Run history + epochs + steps of the current run (run mode). */
+export const RUN_TAB_ID = '__run__';
+/** Node palette (edit mode) - the former floating "Add node" panel. */
+export const NODE_CREATOR_TAB_ID = '__add_node__';
 
 // ── Per-workflow cache for data that survives unmount/remount ──
 // When the SidePanel closes, WorkflowPanelContent unmounts.
@@ -128,6 +148,10 @@ if (typeof window !== 'undefined') {
       () => {
         cacheByWorkflow.clear();
         pendingActivateTabByWorkflow.clear();
+        clearRunPanelCache();
+        // The "user picked this run's epoch" flags are keyed by run id and would
+        // otherwise survive the switch (and grow unbounded across a long session).
+        resetEpochSelectionState();
       },
     );
   }).catch(() => {});
@@ -238,6 +262,33 @@ function WorkflowPanelInner({ workflowId, runId: runIdProp, workflowCanvasSlot, 
   const [triggerStepByStep, setTriggerStepByStep] = useState(() => myCache.triggerStepByStep);
   const [applicationConfigs, setApplicationConfigs] = useState<ApplicationConfig[]>(() => myCache.applicationConfigs);
 
+  // ── Run identity (drives the Run sub-tab and the edit/run split) ──
+  // Published by WorkflowRunCanvas through the run-panel bus, with a cache so a
+  // panel that mounts after the run started still gets the current state.
+  //
+  // Only the three PRIMITIVES this component actually reads are kept in state.
+  // The snapshot itself changes identity on every streamed step batch (several
+  // times a second on a live run); storing it whole re-rendered the entire panel
+  // tree - chat included - on each tick. The Run tab subscribes separately for
+  // the full snapshot, and only while it is mounted.
+  const [runData, setRunData] = useState(() => {
+    const cached = getCachedRunPanelData(workflowId);
+    return { runId: cached.runId, hasRunInfo: !!cached.runInfo, isPreviewOnly: cached.isPreviewOnly };
+  });
+  useEffect(() => {
+    const adopt = (data: RunPanelData) => {
+      setRunData(prev => (
+        prev.runId === data.runId
+          && prev.hasRunInfo === !!data.runInfo
+          && prev.isPreviewOnly === data.isPreviewOnly
+          ? prev
+          : { runId: data.runId, hasRunInfo: !!data.runInfo, isPreviewOnly: data.isPreviewOnly }
+      ));
+    };
+    adopt(getCachedRunPanelData(workflowId));
+    return subscribeRunPanelData(workflowId, adopt);
+  }, [workflowId]);
+
   // ── Reload chat messages when steps complete (SBS + AUTO) ──
   // The reloadConversation() call in TriggerTabContent fires right after trigger
   // execution - before response nodes have run. We watch readySteps/runStatus
@@ -330,8 +381,35 @@ function WorkflowPanelInner({ workflowId, runId: runIdProp, workflowCanvasSlot, 
     setIsAppTabDismissed(hideAppTabByDefault);
   }, [currentOrgId, hideAppTabByDefault]);
   const showAppTab = applicationConfigs.length > 0 && !isAppTabDismissed;
-  const hasExtraTabs = visibleTriggerConfigs.length > 0 || showAppTab || hasWorkflowSlot;
+
+  // ── Run / Add Node sub-tabs ──
+  // A run is bound (URL run, in-place run, sub-workflow run, frozen preview run)
+  // → the Run tab holds the run history, the epochs and the steps. No run → we
+  // are editing, so the node palette takes that slot instead. They are mutually
+  // exclusive because the canvas is in exactly one of the two modes.
+  const hasRun = runData.hasRunInfo || !!runData.runId;
+  const showRunTab = hasRun;
+  const showNodeCreatorTab = !hasRun && !isPreviewOnly;
+  // Run history is a navigation between runs of the SAME workflow, which only
+  // the standalone workflow page can perform (it moves the /run/<id> route). An
+  // embedded canvas - application panel, marketplace preview, sub-workflow tab -
+  // is bound to the run its host opened, so it stays on the run detail.
+  const allowRunHistory = !hasWorkflowSlot && !isPreviewOnly;
+
+  const hasExtraTabs = visibleTriggerConfigs.length > 0 || showAppTab || hasWorkflowSlot || showRunTab || showNodeCreatorTab;
   const [activeTabId, setActiveTabId] = useState(hasWorkflowSlot ? WORKFLOW_TAB_ID : CHAT_TAB_ID);
+  /** Which level the Run tab should show (history vs run detail). */
+  const [runViewRequest, setRunViewRequest] = useState<{ view: RunPanelView; seq: number } | null>(
+    () => {
+      const pending = getRunPanelViewRequest(workflowId);
+      return pending ? { view: pending.view, seq: pending.seq } : null;
+    },
+  );
+  // Adopted at mount above; drop it from the bus so a remount much later does not
+  // replay a level the user asked for one navigation ago.
+  useEffect(() => {
+    consumeRunPanelViewRequest(workflowId);
+  }, [workflowId]);
 
   // Auto-select active trigger tab when activeTriggerId changes
   // Skip when hasWorkflowSlot (application mode) - keep Workflow tab focused
@@ -366,17 +444,24 @@ function WorkflowPanelInner({ workflowId, runId: runIdProp, workflowCanvasSlot, 
     prevAppConfigCount.current = applicationConfigs.length;
   }, [applicationConfigs.length, hideAppTabByDefault, hasWorkflowSlot]);
 
-  // Reset to chat tab when all extra tabs disappear
+  // Fall back to a still-available sub-tab when the active one disappears - a
+  // trigger that vanished, an interface that is gone, the run that ended (Run
+  // tab) or the run that started (Add Node tab). Without this the panel renders
+  // an empty body. The Application tab only falls back when its CONFIGS are
+  // gone: a user-dismissed app tab keeps showing its content.
   useEffect(() => {
-    if (triggerConfigs.length === 0 && applicationConfigs.length === 0 && !hasWorkflowSlot && activeTabId !== CHAT_TAB_ID) {
-      setActiveTabId(CHAT_TAB_ID);
-    }
-    // Reset application tab if configs are gone - fall back to Workflow tab if
-    // a workflow slot is present, otherwise back to chat.
-    if (applicationConfigs.length === 0 && activeTabId === APP_TAB_ID) {
+    const isTriggerTab = triggerConfigs.some(c => c.triggerId === activeTabId);
+    const isActiveTabAvailable =
+      activeTabId === CHAT_TAB_ID ||
+      isTriggerTab ||
+      (activeTabId === WORKFLOW_TAB_ID && hasWorkflowSlot) ||
+      (activeTabId === APP_TAB_ID && applicationConfigs.length > 0) ||
+      (activeTabId === RUN_TAB_ID && showRunTab) ||
+      (activeTabId === NODE_CREATOR_TAB_ID && showNodeCreatorTab);
+    if (!isActiveTabAvailable) {
       setActiveTabId(hasWorkflowSlot ? WORKFLOW_TAB_ID : CHAT_TAB_ID);
     }
-  }, [triggerConfigs.length, applicationConfigs.length, activeTabId, hasWorkflowSlot]);
+  }, [triggerConfigs, applicationConfigs.length, activeTabId, hasWorkflowSlot, showRunTab, showNodeCreatorTab]);
 
   // Consume pending tab activation (set before panel was opened)
   useEffect(() => {
@@ -399,12 +484,12 @@ function WorkflowPanelInner({ workflowId, runId: runIdProp, workflowCanvasSlot, 
 
   // Listen for trigger tab open requests from node shimmer buttons
   useEffect(() => {
-    const handleOpenTriggerTab = (event: CustomEvent<{ nodeId: string; triggerType: 'chat' | 'form' | 'webhook' }>) => {
-      const match = triggerConfigs.find(c => c.type === event.detail.triggerType);
+    const handleOpenTriggerTab = (event: CustomEvent<OpenTriggerTabDetail>) => {
+      const match = findTriggerTabConfig(triggerConfigs, event.detail);
       if (match) setActiveTabId(match.triggerId);
     };
-    window.addEventListener('workflowOpenTriggerTab', handleOpenTriggerTab as EventListener);
-    return () => window.removeEventListener('workflowOpenTriggerTab', handleOpenTriggerTab as EventListener);
+    window.addEventListener(OPEN_TRIGGER_TAB_EVENT, handleOpenTriggerTab as EventListener);
+    return () => window.removeEventListener(OPEN_TRIGGER_TAB_EVENT, handleOpenTriggerTab as EventListener);
   }, [triggerConfigs]);
 
   // Listen for application tab open requests from node clicks → open Application tab + navigate carousel.
@@ -433,6 +518,39 @@ function WorkflowPanelInner({ workflowId, runId: runIdProp, workflowCanvasSlot, 
     window.addEventListener('workflowPanelActivateTab', handler as EventListener);
     return () => window.removeEventListener('workflowPanelActivateTab', handler as EventListener);
   }, [workflowId]);
+
+  // Listen for "open the Run tab" requests (canvas history button, version chip).
+  // Scoped by workflowId so a sub-workflow tab and the main panel never steal
+  // each other's request - each shows ITS OWN run.
+  useEffect(() => {
+    const handler = (event: Event) => {
+      const detail = (event as CustomEvent<OpenRunPanelDetail>).detail ?? {};
+      if (detail.workflowId && detail.workflowId !== workflowId) return;
+      setRunViewRequest(prev => ({ view: detail.view ?? 'run', seq: (prev?.seq ?? 0) + 1 }));
+      setActiveTabId(RUN_TAB_ID);
+      // Handled live, so drop it from the bus too: the mount-time consume never
+      // runs for a panel that is ALREADY mounted, and a request left behind is
+      // replayed on the next remount - the level the user asked for one
+      // navigation ago, applied to whatever they are looking at now.
+      consumeRunPanelViewRequest(workflowId);
+    };
+    window.addEventListener(OPEN_RUN_PANEL_EVENT, handler);
+    return () => window.removeEventListener(OPEN_RUN_PANEL_EVENT, handler);
+  }, [workflowId]);
+
+  // Same for the canvas "+" - and it needs its own listener for the same reason
+  // the Run tab does: when the panel is ALREADY open on this tab, the page-level
+  // handler's setActiveTab is a no-op and nothing would react to the click.
+  useEffect(() => {
+    const handler = (event: Event) => {
+      const detail = (event as CustomEvent<{ workflowId?: string }>).detail ?? {};
+      if (detail.workflowId && detail.workflowId !== workflowId) return;
+      setActiveTabId(NODE_CREATOR_TAB_ID);
+    };
+    window.addEventListener(OPEN_NODE_CREATOR_EVENT, handler);
+    return () => window.removeEventListener(OPEN_NODE_CREATOR_EVENT, handler);
+  }, [workflowId]);
+
 
   // ── Terminal run status check ──
   const isRunTerminal = useMemo(() => {
@@ -554,49 +672,56 @@ function WorkflowPanelInner({ workflowId, runId: runIdProp, workflowCanvasSlot, 
     return () => window.removeEventListener('workflowCanvasSendMessage', handleCanvasMessage as EventListener);
   }, []);
 
-  // ── Run ID from pathname (fallback to prop for application mode and marketplace preview) ──
-  // URL /run/<id> first (explicit run page), then the prop, then the in-place run
-  // id reported by the canvas via triggerData (agent-launched overlay has no /run/
-  // URL - without this the Application/interface has no run and shows "not available").
-  const currentRunId = pathname?.match(/\/workflow\/[^\/]+\/run\/([^\/]+)/)?.[1] || runIdProp || triggerRunId || null;
+  // ── Run ID the sub-tabs render against ──
+  // The CANVAS's own run wins: it is the run actually bound, whether it came from
+  // the /run/<id> URL, from an agent-launched overlay, or from the user picking a
+  // run in the panel's history (bound in place, so the URL still names the run the
+  // page was opened with). Reading the URL first left the Application carousel and
+  // the Trigger tabs on the PREVIOUS run after such a switch.
+  // Falls back to the URL, then to the prop (application mode / marketplace preview).
+  const runIdFromPath = pathname?.match(/\/workflow\/[^\/]+\/run\/([^\/]+)/)?.[1] || null;
+  const currentRunId = runData.runId || triggerRunId || runIdFromPath || runIdProp || null;
 
   // ── Tab count & position ──
   const tabCount = 1 /* AI Chat */ + visibleTriggerConfigs.length
     + (hasWorkflowSlot ? 1 : 0)
-    + (showAppTab ? 1 : 0);
+    + (showAppTab ? 1 : 0)
+    + (showRunTab ? 1 : 0)
+    + (showNodeCreatorTab ? 1 : 0);
+  // `hasExtraTabs` implies at least one extra tab, so tabCount is always >= 2 here:
+  // tabsAtBottom is currently equivalent to hasExtraTabs, and renderTabBar() is only
+  // reached under it. The top-position branch below is therefore unreachable today,
+  // kept as the wiring for a future top-docked variant.
   const tabsAtBottom = hasExtraTabs && tabCount >= 2;
-  // When only 2 tabs (AI Chat + 1), no need for active border indicator
-  const showTopActiveBorder = tabCount > 2;
+
+  /**
+   * Shared class recipe for a sub-tab button.
+   *
+   * Delegates to `panelTabClass` so every sub-tab - including the Run and Add
+   * Node tabs this file adds - inherits the Button-derived shape, height,
+   * transitions and focus ring from one place, instead of each tab bar carrying
+   * its own copy of the active/inactive pattern.
+   */
+  const subTabClass = (isActive: boolean) => cn(
+    panelTabClass(isActive, 'sm'),
+    "flex-shrink-0",
+  );
 
   // ── Tab bar rendering (shared between top and bottom positions) ──
   const renderTabBar = () => (
     <div className={cn(
-      "flex-shrink-0",
-      tabsAtBottom
-        ? "border-t border-theme bg-theme-secondary"
-        : "border-b border-theme"
+      "flex-shrink-0 bg-theme-primary",
+      tabsAtBottom ? "border-t border-theme" : "border-b border-theme"
     )}>
-      <div className={cn(
-        "flex overflow-x-auto overflow-y-hidden",
-        tabsAtBottom ? "" : "items-center gap-1 px-3 pt-2 pb-0"
-      )}>
+      <div className="flex items-center gap-1 px-2 py-1.5 overflow-x-auto overflow-y-hidden">
         {/* AI Chat tab */}
         <button
           type="button"
+          aria-pressed={activeTabId === CHAT_TAB_ID}
+          data-testid="panel-sub-tab"
+          data-active={activeTabId === CHAT_TAB_ID ? 'true' : undefined}
           onClick={() => setActiveTabId(CHAT_TAB_ID)}
-          className={cn(
-            "flex items-center gap-2 text-sm whitespace-nowrap transition-colors",
-            tabsAtBottom
-              ? "px-4 py-2.5"
-              : cn("px-3 py-2 rounded-t-lg", showTopActiveBorder && "border-b-2"),
-            activeTabId === CHAT_TAB_ID
-              ? (tabsAtBottom
-                  ? "bg-theme-primary text-theme-primary font-medium"
-                  : cn("text-theme-primary font-medium bg-theme-secondary/50", showTopActiveBorder && "border-primary"))
-              : (tabsAtBottom
-                  ? "text-theme-muted hover:bg-theme-tertiary"
-                  : cn("text-theme-secondary hover:text-theme-primary hover:bg-theme-secondary/30", showTopActiveBorder && "border-transparent"))
-          )}
+          className={subTabClass(activeTabId === CHAT_TAB_ID)}
         >
           <Sparkles className="w-3.5 h-3.5 shrink-0" />
           {t('sidePanel.aiChat')}
@@ -606,23 +731,46 @@ function WorkflowPanelInner({ workflowId, runId: runIdProp, workflowCanvasSlot, 
         {hasWorkflowSlot && (
           <button
             type="button"
+            aria-pressed={activeTabId === WORKFLOW_TAB_ID}
+            data-testid="panel-sub-tab"
+            data-active={activeTabId === WORKFLOW_TAB_ID ? 'true' : undefined}
             onClick={() => setActiveTabId(WORKFLOW_TAB_ID)}
-            className={cn(
-              "flex items-center gap-2 text-sm whitespace-nowrap transition-colors",
-              tabsAtBottom
-                ? "px-4 py-2.5"
-                : cn("px-3 py-2 rounded-t-lg", showTopActiveBorder && "border-b-2"),
-              activeTabId === WORKFLOW_TAB_ID
-                ? (tabsAtBottom
-                    ? "bg-theme-primary text-theme-primary font-medium"
-                    : cn("text-theme-primary font-medium bg-theme-secondary/50", showTopActiveBorder && "border-primary"))
-                : (tabsAtBottom
-                    ? "text-theme-muted hover:bg-theme-tertiary"
-                    : cn("text-theme-secondary hover:text-theme-primary hover:bg-theme-secondary/30", showTopActiveBorder && "border-transparent"))
-            )}
+            className={subTabClass(activeTabId === WORKFLOW_TAB_ID)}
           >
             <Workflow className="w-3.5 h-3.5 shrink-0" />
             {t('common.workflow')}
+          </button>
+        )}
+
+        {/* Run tab - run history, epochs and steps of the bound run */}
+        {showRunTab && (
+          <button
+            type="button"
+            data-run-tab-button
+            aria-pressed={activeTabId === RUN_TAB_ID}
+            data-testid="panel-sub-tab"
+            data-active={activeTabId === RUN_TAB_ID ? 'true' : undefined}
+            onClick={() => setActiveTabId(RUN_TAB_ID)}
+            className={subTabClass(activeTabId === RUN_TAB_ID)}
+          >
+            <Play className="w-3.5 h-3.5 shrink-0" />
+            {t('sidePanel.runTab')}
+          </button>
+        )}
+
+        {/* Add Node tab - the node palette (edit mode) */}
+        {showNodeCreatorTab && (
+          <button
+            type="button"
+            data-node-creator-tab-button
+            aria-pressed={activeTabId === NODE_CREATOR_TAB_ID}
+            data-testid="panel-sub-tab"
+            data-active={activeTabId === NODE_CREATOR_TAB_ID ? 'true' : undefined}
+            onClick={() => setActiveTabId(NODE_CREATOR_TAB_ID)}
+            className={subTabClass(activeTabId === NODE_CREATOR_TAB_ID)}
+          >
+            <Plus className="w-3.5 h-3.5 shrink-0" />
+            {t('workflowBuilder.canvas.addNode')}
           </button>
         )}
 
@@ -634,19 +782,13 @@ function WorkflowPanelInner({ workflowId, runId: runIdProp, workflowCanvasSlot, 
             <button
               key={`${config.triggerId}-${index}`}
               type="button"
+              aria-pressed={isActive}
+              data-testid="panel-sub-tab"
+              data-active={isActive ? 'true' : undefined}
               onClick={() => setActiveTabId(config.triggerId)}
               className={cn(
-                "relative flex items-center gap-2 text-sm whitespace-nowrap transition-colors",
-                tabsAtBottom
-                  ? "px-4 py-2.5"
-                  : cn("px-3 py-2 rounded-t-lg", showTopActiveBorder && "border-b-2"),
-                isActive
-                  ? (tabsAtBottom
-                      ? "bg-theme-primary text-theme-primary font-medium"
-                      : cn("text-theme-primary font-medium bg-theme-secondary/50", showTopActiveBorder && "border-primary"))
-                  : (tabsAtBottom
-                      ? "text-theme-muted hover:bg-theme-tertiary"
-                      : cn("text-theme-secondary hover:text-theme-primary hover:bg-theme-secondary/30", showTopActiveBorder && "border-transparent"))
+                panelTabClass(isActive, 'sm'),
+                "flex-shrink-0"
               )}
             >
               <span className="relative shrink-0">
@@ -682,20 +824,11 @@ function WorkflowPanelInner({ workflowId, runId: runIdProp, workflowCanvasSlot, 
         {showAppTab && (
           <button
             type="button"
+            aria-pressed={activeTabId === APP_TAB_ID}
+            data-testid="panel-sub-tab"
+            data-active={activeTabId === APP_TAB_ID ? 'true' : undefined}
             onClick={() => setActiveTabId(APP_TAB_ID)}
-            className={cn(
-              "flex items-center gap-1 text-sm whitespace-nowrap transition-colors",
-              tabsAtBottom
-                ? "px-4 py-2.5"
-                : cn("px-3 py-2 rounded-t-lg", showTopActiveBorder && "border-b-2"),
-              activeTabId === APP_TAB_ID
-                ? (tabsAtBottom
-                    ? "bg-theme-primary text-theme-primary font-medium"
-                    : cn("text-theme-primary font-medium bg-theme-secondary/50", showTopActiveBorder && "border-primary"))
-                : (tabsAtBottom
-                    ? "text-theme-muted hover:bg-theme-tertiary"
-                    : cn("text-theme-secondary hover:text-theme-primary hover:bg-theme-secondary/30", showTopActiveBorder && "border-transparent"))
-            )}
+            className={subTabClass(activeTabId === APP_TAB_ID)}
           >
             <AppWindow className="w-3.5 h-3.5 shrink-0" />
             <span className="flex items-center gap-2">{t('common.application')}</span>
@@ -733,6 +866,14 @@ function WorkflowPanelInner({ workflowId, runId: runIdProp, workflowCanvasSlot, 
           workflowId={workflowId}
           onAction={handleApplicationAction}
         />
+      ) : activeTabId === RUN_TAB_ID ? (
+        <RunPanelContent
+          workflowId={workflowId}
+          allowHistory={allowRunHistory}
+          viewRequest={runViewRequest ?? undefined}
+        />
+      ) : activeTabId === NODE_CREATOR_TAB_ID ? (
+        <NodeCreatorPanelContent workflowId={workflowId} />
       ) : activeTabId === WORKFLOW_TAB_ID ? (
         null /* Workflow canvas rendered separately (always mounted) */
       ) : (

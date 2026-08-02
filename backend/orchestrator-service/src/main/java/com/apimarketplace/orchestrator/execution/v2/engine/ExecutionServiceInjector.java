@@ -147,6 +147,10 @@ public class ExecutionServiceInjector {
     private ReusableTriggerService reusableTriggerService;
 
     @Autowired(required = false)
+    @org.springframework.context.annotation.Lazy
+    private com.apimarketplace.orchestrator.trigger.ProductionRunResolver productionRunResolver;
+
+    @Autowired(required = false)
     private StepOutputService stepOutputService;
 
     @Autowired(required = false)
@@ -258,6 +262,7 @@ public class ExecutionServiceInjector {
             .workflowExecutionService(workflowExecutionService)
             .workflowExecutionServiceV2(workflowExecutionServiceV2)
             .reusableTriggerService(reusableTriggerService)
+            .productionRunResolver(productionRunResolver)
             .stepOutputService(stepOutputService)
             .workflowStepDataRepository(workflowStepDataRepository)
             .triggerUserResolver(triggerUserResolver)

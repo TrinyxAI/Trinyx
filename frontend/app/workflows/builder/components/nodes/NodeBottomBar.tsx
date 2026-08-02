@@ -51,6 +51,8 @@ interface PlayButtonConfig {
     isSkipped: boolean;
     isCompleted: boolean;
     canRerun: boolean;
+    /** Backend step id - names the exact trigger in the open-tab event. */
+    stepId?: string;
     executeStep: () => void;
     rerunStep: () => void;
   };
@@ -195,6 +197,7 @@ export function NodeBottomBar({ borderColor, isRunning, buttons, playButton, ext
             onExecute={() => playButton.stepByStepStatus.executeStep()}
             onRerun={!playButton.isTriggerNode && playButton.stepByStepStatus.canRerun ? () => playButton.stepByStepStatus.rerunStep() : undefined}
             variant={playButton.variant}
+            triggerId={playButton.stepByStepStatus.stepId}
             isAutoMode={playButton.isAutoMode}
             position="bottom-center"
             borderColor={borderColor}

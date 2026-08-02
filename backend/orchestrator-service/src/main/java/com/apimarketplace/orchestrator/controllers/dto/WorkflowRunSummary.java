@@ -31,5 +31,16 @@ public record WorkflowRunSummary(
     Map<String, Object> plan,
     Integer planVersion,
     Integer currentEpoch,
-    Instant lastFireAt
+    Instant lastFireAt,
+    /**
+     * Duration of the most recently CLOSED epoch, in milliseconds; null when no
+     * epoch has closed yet.
+     *
+     * <p>This is what the run history shows for a run that has not terminated.
+     * {@code durationMs} above measures the whole run and stays null for a
+     * reusable run (which never ends), while the span from {@code startedAt} to a
+     * stamped {@code endedAt} measures that run's LIFETIME - days once
+     * {@code cancelStaleRuns} closes it - not how long the workflow takes.
+     */
+    Long lastEpochDurationMs
 ) {}

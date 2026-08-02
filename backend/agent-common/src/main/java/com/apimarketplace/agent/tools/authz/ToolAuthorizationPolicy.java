@@ -50,6 +50,20 @@ public final class ToolAuthorizationPolicy {
             // run a saved workflow by id - was UNGATED (bug); plus advancing a paused run
             // (continue an interface / resolve a user approval) mutates run state + can
             // unblock downstream side-effects, so it is gated the same way in chat.
+            // stop_run is deliberately NOT here, and the trade-off is NOT free - read this
+            // before extending the reasoning to anything else.
+            // Every other entry gates something that STARTS work or lets it continue.
+            // stop_run ends work, which is why waiting for a user card would defeat it: an
+            // agent that cannot stop a runaway execution until a human clicks is not a
+            // safety valve. The user's own Stop button is the same operation, ungated.
+            // BUT its default mode does reach beyond the single run: mode='cancel' also
+            // suspends the workflow's schedule rows, so an agent can leave a scheduled
+            // workflow disarmed until someone reactivates it. That is mitigated by
+            // disclosure only (tool help, mode param, and the stop response all say it,
+            // and point at mode='graceful' for "end this execution only").
+            // If agents are observed disarming workflows users wanted running, the fix is
+            // to gate 'cancel' specifically or make 'graceful' the default - not to gate
+            // the whole action, which would take the safety valve away.
             "workflow",    Set.of("execute", "continue_interface", "resolve_approval"),
             "agent",       Set.of("execute"),
             "catalog",     Set.of("execute", "call")   // "call" is an alias of "execute"

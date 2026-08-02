@@ -480,7 +480,15 @@ public final class ConceptsHelpProvider {
                 "workflow(action='add_node', type='<tool-uuid>', label='Done', params={...}, connect_after='Retry:exit')  // After loop"
             ),
             "variables", "{{core:label.output.iteration}} (loop), {{core:label.output.current_item}} (split body - runtime), {{core:label.output.items}} (split persisted list)",
-            "self_reference", "Loop condition CAN reference its own output ({{core:label.output.iteration}}) - the engine initializes iteration=0 before first evaluation. This is the ONLY node type where self-reference is valid.",
+            "self_reference", "A loop condition CAN reference its own output ({{core:label.output.iteration}}) - the engine initializes iteration=0 before first evaluation. Other nodes cannot reference themselves; to repeat WITHOUT a loop node, connect back to an earlier node instead (see loop_back).",
+            "loop_back", Map.of(
+                "what", "Connect any node back to a node that already ran, and that part of the workflow repeats. No loop node needed.",
+                "how", "workflow(action='connect', from='Check:else', to='Fetch Page') - because 'Fetch Page' already ran before 'Check', the connection is recognised as a loop-back and re-enters it instead of waiting for it.",
+                "from_a_branch", "Connect from a specific port to loop only on that branch: from='Check:else' repeats while the else branch is taken, and the 'if' branch continues forward. That branch selection IS the loop condition. A loop from a node that ALSO continues forward never runs (the workflow always takes the forward path) - validate reports it.",
+                "stopping", "Every loop-back has an iteration limit. Set your own with max_iterations on connect, and optionally loop_condition to stop earlier; without either, the limit is the only thing that ends the loop.",
+                "when_the_limit_is_hit", "If the limit is reached while the loop still wants to run, the run FAILS with reason 'max_iterations_reached' on the node the loop came from - the workflow did not reach its own stopping condition. Make the branch stop selecting itself (or raise max_iterations).",
+                "not_allowed_inside", "A trigger, an interface, a fork/merge, a split or stop_on_error cannot sit inside the repeated part: they hold state for one pass only. validate reports them as errors, with the node named."
+            ),
             "add_node_vs_plan", "add_node params use 'condition' key. set_plan JSON uses 'loopCondition'.",
             "find_rows_pattern", "find_rows returns items[] array. To iterate per-row: FindRows → Split (list={{table:label.output.items}}) → ProcessStep"
         );

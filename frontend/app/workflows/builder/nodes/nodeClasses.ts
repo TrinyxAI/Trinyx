@@ -616,7 +616,7 @@ export const NODE_CLASSES: BuilderNodeClass[] = [
   new BuilderNodeClass({
     id: 'sub_workflow',
     label: 'Sub-Workflow',
-    description: 'Execute another workflow as a sub-workflow',
+    description: 'Trigger another workflow that already has a live run',
     kind: 'action',
     nodeType: 'flowNode',
     family: 'core',

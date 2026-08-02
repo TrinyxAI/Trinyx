@@ -1,6 +1,7 @@
 import type { Node, Edge, Connection } from 'reactflow';
 import type { BuilderNodeData } from '../types';
 import { nodeRegistry } from '../registry/nodeRegistry';
+import { isAncestor } from './backEdgeDetection';
 
 interface NodeData extends BuilderNodeData {
   dataSourceData?: any;
@@ -136,13 +137,21 @@ export function validateConnection(
     }
   }
 
-  // Prevent multiple entries to a decision/switch/classify/option node - only one entry is allowed
-  // Use nodeRegistry for decision-like node detection
+  // Prevent multiple entries to a decision/switch/classify/option node - only one entry is allowed.
+  // Use nodeRegistry for decision-like node detection.
+  //
+  // A loop-back is exempt: it is a RE-entry, not a second entry. Looping back into a Decision is
+  // the canonical shape ("keep retrying until this test passes"), and the engine never wires a
+  // back-edge as an incoming dependency, so the single-entry invariant still holds at runtime.
   if (targetNode && nodeRegistry.requiresSingleEntry(targetNode as Node<BuilderNodeData>)) {
+    const isLoopBack =
+      !!connection.source &&
+      !!connection.target &&
+      isAncestor(connection.target, connection.source, edges.filter((e) => !e.data?.isBackEdge));
     const existingEntryEdge = edges.find(
       (edge) => edge.target === connection.target
     );
-    if (existingEntryEdge) {
+    if (existingEntryEdge && !isLoopBack) {
       return false;
     }
   }

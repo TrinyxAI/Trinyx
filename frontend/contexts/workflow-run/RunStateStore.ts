@@ -21,7 +21,12 @@ import type { PendingSignal } from '@/lib/websocket/ws-types';
 // TYPES
 // ============================================================================
 
-export type RunStatus = 'pending' | 'waiting_trigger' | 'running' | 'paused' | 'completed' | 'failed' | 'partial_success' | 'cancelled' | 'timeout' | 'stopped';
+// Mirrors the backend RunStatus enum (11 values), plus `stopped`, which the enum
+// does not have but the streaming layer still emits for a user-stopped run.
+// `skipped` and `awaiting_signal` were missing: a run in either state fell through
+// every status check as if it were unknown.
+export type RunStatus = 'pending' | 'waiting_trigger' | 'running' | 'paused' | 'awaiting_signal'
+  | 'completed' | 'failed' | 'partial_success' | 'skipped' | 'cancelled' | 'timeout' | 'stopped';
 export type TriggerType = 'manual' | 'chat' | 'form' | 'webhook' | 'datasource' | 'schedule' | 'workflow' | null;
 export type ExecutionMode = 'automatic' | 'step_by_step';
 
@@ -160,7 +165,12 @@ export interface InitializeFromApiPayload {
 // partial_success IS terminal (a run that completed with some failed steps) - omitting
 // it would let a partial_success run skip terminal reconciliation (e.g. a node stuck
 // "running"/Thinking would never be cleared by the view-layer guard).
-export const TERMINAL_STATUSES: ReadonlySet<RunStatus> = new Set(['completed', 'failed', 'partial_success', 'stopped', 'cancelled', 'timeout']);
+// `skipped` is terminal on the backend too; leaving it out made a skipped run read as
+// still active, which offers a Reactivate the dispatcher then refuses.
+// `stopped` is NOT a backend status: it is the legacy wire value the streaming layer
+// still emits for a user-stopped run (normalized to `cancelled` elsewhere), kept so
+// such a run does not read as running forever.
+export const TERMINAL_STATUSES: ReadonlySet<RunStatus> = new Set(['completed', 'failed', 'partial_success', 'skipped', 'stopped', 'cancelled', 'timeout']);
 
 // ============================================================================
 // HELPERS

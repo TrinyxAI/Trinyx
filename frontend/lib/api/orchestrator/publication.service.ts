@@ -51,6 +51,9 @@ export interface PublicHighlightedPublication {
   datasourceCount?: number;
   averageRating?: number;
   reviewCount?: number;
+  /** V420 - the app only runs on a self-hosted install; drives the "CE exclusive" badge. */
+  ceExclusive?: boolean;
+  ceExclusiveFeatures?: string[];
 }
 
 export interface HighlightedPublicationItem {

@@ -133,6 +133,203 @@ class WorkflowPlanVersionServiceTest {
             verify(versionRepository, never()).save(any());
         }
 
+        // ---------------------------------------------------------------------
+        // Layout-only drift (regression: "two runs for a workflow nobody edited")
+        //
+        // The builder stamps node coordinates into the plan, so a nudge - or an
+        // auto-layout pass re-centring the graph - made this method mint a NEW
+        // version. The next execution keyed its run on that new number and created
+        // a SECOND run instead of accumulating an epoch into the live one. These
+        // pin the fix: no new version, the row refreshed in place so the saved
+        // coordinates survive, and a REAL edit still versions.
+        // ---------------------------------------------------------------------
+
+        @Test
+        @DisplayName("Should NOT create a version when only node coordinates moved")
+        void shouldNotVersionLayoutOnlyChange() {
+            Map<String, Object> stored = planAt(290, 0, "Aggregate");
+            Map<String, Object> moved = planAt(288, -29, "Aggregate");
+
+            WorkflowPlanVersionEntity v1 = new WorkflowPlanVersionEntity(WORKFLOW_ID, 1, stored, USER_ID);
+            when(versionRepository.getMaxVersion(WORKFLOW_ID)).thenReturn(Optional.of(1));
+            when(versionRepository.findByWorkflowIdAndVersion(WORKFLOW_ID, 1)).thenReturn(Optional.of(v1));
+
+            int version = service.createVersion(WORKFLOW_ID, moved, USER_ID);
+
+            assertThat(version).isEqualTo(1);
+            // The row is refreshed IN PLACE (still v1) - never a v2.
+            ArgumentCaptor<WorkflowPlanVersionEntity> captor = ArgumentCaptor.forClass(WorkflowPlanVersionEntity.class);
+            verify(versionRepository).save(captor.capture());
+            assertThat(captor.getValue().getVersion()).isEqualTo(1);
+        }
+
+        @Test
+        @DisplayName("Should keep the moved coordinates in the refreshed version row")
+        void shouldRefreshStoredPlanOnLayoutOnlyChange() {
+            Map<String, Object> stored = planAt(290, 0, "Aggregate");
+            Map<String, Object> moved = planAt(288, -29, "Aggregate");
+
+            WorkflowPlanVersionEntity v1 = new WorkflowPlanVersionEntity(WORKFLOW_ID, 1, stored, USER_ID);
+            when(versionRepository.getMaxVersion(WORKFLOW_ID)).thenReturn(Optional.of(1));
+            when(versionRepository.findByWorkflowIdAndVersion(WORKFLOW_ID, 1)).thenReturn(Optional.of(v1));
+
+            service.createVersion(WORKFLOW_ID, moved, USER_ID);
+
+            ArgumentCaptor<WorkflowPlanVersionEntity> captor = ArgumentCaptor.forClass(WorkflowPlanVersionEntity.class);
+            verify(versionRepository).save(captor.capture());
+            assertThat(captor.getValue().getPlan()).isEqualTo(moved);
+        }
+
+        @Test
+        @DisplayName("Layout-only refresh NAMES an unnamed row, since this write is the only one it gets")
+        void shouldNameAnUnnamedRowOnLayoutOnlyRefresh() {
+            Map<String, Object> stored = planAt(290, 0, "Aggregate");
+            Map<String, Object> moved = planAt(288, -29, "Aggregate");
+
+            WorkflowPlanVersionEntity v1 = new WorkflowPlanVersionEntity(WORKFLOW_ID, 1, stored, USER_ID);
+            when(versionRepository.getMaxVersion(WORKFLOW_ID)).thenReturn(Optional.of(1));
+            when(versionRepository.findByWorkflowIdAndVersion(WORKFLOW_ID, 1)).thenReturn(Optional.of(v1));
+
+            service.createVersion(WORKFLOW_ID, moved, USER_ID, "Agent session");
+
+            ArgumentCaptor<WorkflowPlanVersionEntity> captor = ArgumentCaptor.forClass(WorkflowPlanVersionEntity.class);
+            verify(versionRepository).save(captor.capture());
+            assertThat(captor.getValue().getLabel()).isEqualTo("Agent session");
+        }
+
+        @Test
+        @DisplayName("Layout-only refresh NEVER renames a row the user already named")
+        void shouldNotRenameANamedRowOnLayoutOnlyRefresh() {
+            // A background auto-layout pass reaches this path. Overwriting the label
+            // there rewrites user-authored history metadata for moving a node.
+            Map<String, Object> stored = planAt(290, 0, "Aggregate");
+            Map<String, Object> moved = planAt(288, -29, "Aggregate");
+
+            WorkflowPlanVersionEntity v1 = new WorkflowPlanVersionEntity(WORKFLOW_ID, 1, stored, USER_ID);
+            v1.setLabel("Before the big refactor");
+            when(versionRepository.getMaxVersion(WORKFLOW_ID)).thenReturn(Optional.of(1));
+            when(versionRepository.findByWorkflowIdAndVersion(WORKFLOW_ID, 1)).thenReturn(Optional.of(v1));
+
+            service.createVersion(WORKFLOW_ID, moved, USER_ID, "Agent session");
+
+            ArgumentCaptor<WorkflowPlanVersionEntity> captor = ArgumentCaptor.forClass(WorkflowPlanVersionEntity.class);
+            verify(versionRepository).save(captor.capture());
+            assertThat(captor.getValue().getLabel()).isEqualTo("Before the big refactor");
+            assertThat(captor.getValue().getPlan()).isEqualTo(moved);
+        }
+
+        @Test
+        @DisplayName("A layout-only save with NO label leaves the row's existing label alone")
+        void shouldNotWipeTheLabelWhenNoneIsSupplied() {
+            Map<String, Object> stored = planAt(290, 0, "Aggregate");
+            Map<String, Object> moved = planAt(288, -29, "Aggregate");
+
+            WorkflowPlanVersionEntity v1 = new WorkflowPlanVersionEntity(WORKFLOW_ID, 1, stored, USER_ID);
+            v1.setLabel("Manual save");
+            when(versionRepository.getMaxVersion(WORKFLOW_ID)).thenReturn(Optional.of(1));
+            when(versionRepository.findByWorkflowIdAndVersion(WORKFLOW_ID, 1)).thenReturn(Optional.of(v1));
+
+            service.createVersion(WORKFLOW_ID, moved, USER_ID);
+
+            ArgumentCaptor<WorkflowPlanVersionEntity> captor = ArgumentCaptor.forClass(WorkflowPlanVersionEntity.class);
+            verify(versionRepository).save(captor.capture());
+            assertThat(captor.getValue().getLabel()).isEqualTo("Manual save");
+        }
+
+        @Test
+        @DisplayName("Should still create a version when the plan changed for real")
+        void shouldStillVersionRealEdits() {
+            Map<String, Object> stored = planAt(290, 0, "Aggregate");
+            Map<String, Object> renamed = planAt(290, 0, "Aggregate renamed");
+
+            WorkflowPlanVersionEntity v1 = new WorkflowPlanVersionEntity(WORKFLOW_ID, 1, stored, USER_ID);
+            when(versionRepository.getMaxVersion(WORKFLOW_ID)).thenReturn(Optional.of(1));
+            when(versionRepository.findByWorkflowIdAndVersion(WORKFLOW_ID, 1)).thenReturn(Optional.of(v1));
+            when(versionRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+
+            int version = service.createVersion(WORKFLOW_ID, renamed, USER_ID);
+
+            assertThat(version).isEqualTo(2);
+        }
+
+        @Test
+        @DisplayName("Should NOT touch the PINNED row on layout drift - it mints a draft instead")
+        void shouldNotOverwriteThePinnedRowOnLayoutDrift() {
+            Map<String, Object> stored = planAt(290, 0, "Aggregate");
+            Map<String, Object> moved = planAt(288, -29, "Aggregate");
+
+            WorkflowPlanVersionEntity v1 = new WorkflowPlanVersionEntity(WORKFLOW_ID, 1, stored, USER_ID);
+            WorkflowEntity pinnedWorkflow = new WorkflowEntity();
+            pinnedWorkflow.setPinnedVersion(1);
+
+            when(versionRepository.getMaxVersion(WORKFLOW_ID)).thenReturn(Optional.of(1));
+            when(versionRepository.findByWorkflowIdAndVersion(WORKFLOW_ID, 1)).thenReturn(Optional.of(v1));
+            when(workflowRepository.findById(WORKFLOW_ID)).thenReturn(Optional.of(pinnedWorkflow));
+            when(versionRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+
+            int version = service.createVersion(WORKFLOW_ID, moved, USER_ID);
+
+            // A pin is a contract that v1's content stays reproducible, and a run
+            // stamped with the pinned number can shadow the production run.
+            assertThat(version).isEqualTo(2);
+            assertThat(v1.getPlan()).isEqualTo(stored);
+            ArgumentCaptor<WorkflowPlanVersionEntity> captor = ArgumentCaptor.forClass(WorkflowPlanVersionEntity.class);
+            verify(versionRepository).save(captor.capture());
+            assertThat(captor.getValue().getVersion()).isEqualTo(2);
+        }
+
+        @Test
+        @DisplayName("A tool parameter named 'position' is a REAL edit and still versions")
+        void shouldVersionToolParameterNamedPosition() {
+            Map<String, Object> stored = planWithToolParam(3);
+            Map<String, Object> edited = planWithToolParam(7);
+
+            WorkflowPlanVersionEntity v1 = new WorkflowPlanVersionEntity(WORKFLOW_ID, 1, stored, USER_ID);
+            when(versionRepository.getMaxVersion(WORKFLOW_ID)).thenReturn(Optional.of(1));
+            when(versionRepository.findByWorkflowIdAndVersion(WORKFLOW_ID, 1)).thenReturn(Optional.of(v1));
+            when(versionRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+
+            int version = service.createVersion(WORKFLOW_ID, edited, USER_ID);
+
+            // Would silently overwrite v1 if the layout strip were key-name based.
+            assertThat(version).isEqualTo(2);
+            assertThat(v1.getPlan()).isEqualTo(stored);
+        }
+
+        /** An mcp node whose PARAMS carry a tool-level "position" (ClickUp, Notion, ...). */
+        private Map<String, Object> planWithToolParam(int toolPosition) {
+            Map<String, Object> node = new HashMap<>();
+            node.put("id", "mcp:clickup_update_task");
+            node.put("position", new HashMap<>(Map.of("x", 10, "y", 20)));
+            node.put("params", new HashMap<>(Map.of("task_id", "abc", "position", toolPosition)));
+            Map<String, Object> plan = new HashMap<>();
+            plan.put("name", "WF");
+            plan.put("mcps", List.of(node));
+            return plan;
+        }
+
+        @Test
+        @DisplayName("plansAreSemanticallyEqual ignores coordinates, plansAreEqual still does not")
+        void semanticEqualityContract() {
+            assertThat(service.plansAreSemanticallyEqual(planAt(1, 2, "A"), planAt(9, 9, "A"))).isTrue();
+            assertThat(service.plansAreSemanticallyEqual(planAt(1, 2, "A"), planAt(1, 2, "B"))).isFalse();
+            // Strict equality is unchanged - it is still what "must I persist this?" asks
+            // (the pre-run auto-save relies on it to keep the moved layout).
+            assertThat(service.plansAreEqual(planAt(1, 2, "A"), planAt(9, 9, "A"))).isFalse();
+        }
+
+        /** A one-node plan carrying canvas coordinates. */
+        private Map<String, Object> planAt(int x, int y, String label) {
+            Map<String, Object> node = new HashMap<>();
+            node.put("id", "aggregate-1");
+            node.put("label", label);
+            node.put("position", new HashMap<>(Map.of("x", x, "y", y)));
+            Map<String, Object> plan = new HashMap<>();
+            plan.put("name", "WF");
+            plan.put("cores", List.of(node));
+            return plan;
+        }
+
         @Test
         @DisplayName("Should ignore tenant_id difference when comparing plans")
         void shouldIgnoreTenantIdDifference() {
@@ -643,6 +840,67 @@ class WorkflowPlanVersionServiceTest {
         }
 
         @Test
+        @DisplayName("An editor run on the draft is not stamped with the pin when only NODE COORDINATES differ")
+        void editorRunOnDraftIsNotStampedWithThePinWhenOnlyCoordinatesDiffer() {
+            // Layout twin of the trigger-ref case above, and reachable through this
+            // feature: the pinned lane mints a draft that differs from the pin by
+            // nothing but coordinates, and a layout-blind pin match ahead of the
+            // exact-draft check would stamp the editor run with the PIN. A run at the
+            // pinned version can then shadow the live production run.
+            Map<String, Object> pinnedV17 = Map.of("name", "WF", "cores",
+                    List.of(new HashMap<>(Map.of("id", "c1", "label", "Aggregate",
+                            "position", new HashMap<>(Map.of("x", 10, "y", 20))))));
+            Map<String, Object> draftV18 = Map.of("name", "WF", "cores",
+                    List.of(new HashMap<>(Map.of("id", "c1", "label", "Aggregate",
+                            "position", new HashMap<>(Map.of("x", 12, "y", -8))))));
+            WorkflowPlanVersionEntity pinnedRow = new WorkflowPlanVersionEntity(WORKFLOW_ID, 17, new HashMap<>(pinnedV17), USER_ID);
+            WorkflowPlanVersionEntity draftRow = new WorkflowPlanVersionEntity(WORKFLOW_ID, 18, new HashMap<>(draftV18), USER_ID);
+
+            WorkflowEntity workflow = unpinnedWorkflow();
+            workflow.setPinnedVersion(17);
+
+            when(versionRepository.getMaxVersion(WORKFLOW_ID)).thenReturn(Optional.of(18));
+            when(versionRepository.findByWorkflowIdAndVersion(WORKFLOW_ID, 18)).thenReturn(Optional.of(draftRow));
+            when(versionRepository.findByWorkflowIdAndVersion(WORKFLOW_ID, 17)).thenReturn(Optional.of(pinnedRow));
+            when(workflowRepository.findPinnedVersionById(WORKFLOW_ID)).thenReturn(Optional.ofNullable(workflow.getPinnedVersion()));
+
+            // The editor canvas IS the draft, byte for byte.
+            int version = service.resolveContentVersionForExecution(WORKFLOW_ID, draftV18, USER_ID);
+
+            assertThat(version)
+                    .as("exact match on the draft beats a layout-normalized match on the pin")
+                    .isEqualTo(18);
+            verify(versionRepository, never()).save(any());
+        }
+
+        @Test
+        @DisplayName("A production fire whose coordinates drifted still resolves to the PINNED version")
+        void productionFireWithDriftedCoordinatesStillMatchesThePin() {
+            // The other half of the rule: the canvas is NOT the draft, it is the pinned
+            // content with moved nodes. Stamping that run with the draft number gets it
+            // refused at ProductionRunResolver.isAllowedForProduction.
+            Map<String, Object> pinnedV17 = Map.of("name", "WF", "cores",
+                    List.of(new HashMap<>(Map.of("id", "c1", "label", "Aggregate",
+                            "position", new HashMap<>(Map.of("x", 10, "y", 20))))));
+            Map<String, Object> draftV18 = Map.of("name", "WF", "cores",
+                    List.of(new HashMap<>(Map.of("id", "c1", "label", "Renamed",
+                            "position", new HashMap<>(Map.of("x", 10, "y", 20))))));
+            Map<String, Object> firing = Map.of("name", "WF", "cores",
+                    List.of(new HashMap<>(Map.of("id", "c1", "label", "Aggregate",
+                            "position", new HashMap<>(Map.of("x", 44, "y", 44))))));
+            WorkflowPlanVersionEntity pinnedRow = new WorkflowPlanVersionEntity(WORKFLOW_ID, 17, new HashMap<>(pinnedV17), USER_ID);
+            WorkflowPlanVersionEntity draftRow = new WorkflowPlanVersionEntity(WORKFLOW_ID, 18, new HashMap<>(draftV18), USER_ID);
+
+            when(versionRepository.getMaxVersion(WORKFLOW_ID)).thenReturn(Optional.of(18));
+            when(versionRepository.findByWorkflowIdAndVersion(WORKFLOW_ID, 18)).thenReturn(Optional.of(draftRow));
+            when(versionRepository.findByWorkflowIdAndVersion(WORKFLOW_ID, 17)).thenReturn(Optional.of(pinnedRow));
+            when(workflowRepository.findPinnedVersionById(WORKFLOW_ID)).thenReturn(Optional.of(17));
+
+            assertThat(service.resolveContentVersionForExecution(WORKFLOW_ID, firing, USER_ID)).isEqualTo(17);
+            verify(versionRepository, never()).save(any());
+        }
+
+        @Test
         @DisplayName("History scan failure degrades to the legacy lane instead of breaking the fire")
         void historyScanFailureDegradesToTheLegacyLane() {
             // The scan runs on every drifted resolve, i.e. inside trigger fires. A
@@ -830,6 +1088,40 @@ class WorkflowPlanVersionServiceTest {
             int version = service.resolveContentVersionForExecution(WORKFLOW_ID, rearmedLive, USER_ID);
 
             assertThat(version).isEqualTo(17);
+            assertThat(draftRow.getPlan()).isEqualTo(draftContent);
+            verify(versionRepository, never()).save(any());
+        }
+
+        @Test
+        @DisplayName("Re-armed schedule AND moved nodes at once still match the pin (one normalization, not two predicates)")
+        void combinedTriggerRearmAndLayoutDriftStillMatchesThePin() {
+            // Trigger refs and canvas layout drift independently and both are everyday
+            // events; testing them as separate predicates OR'd together matched each
+            // one alone and MISSED the plan carrying both. Such a production fire got
+            // stamped with the draft number, which ProductionRunResolver then refuses -
+            // the schedule silently stops running.
+            Map<String, Object> pinnedStored = Map.of("name", "WF",
+                    "triggers", List.of(new HashMap<>(Map.of("label", "Daily", "params",
+                            new HashMap<>(Map.of("cron", "0 8 * * *", "scheduleId", "sched-OLD"))))),
+                    "cores", List.of(new HashMap<>(Map.of("id", "c1", "label", "Aggregate",
+                            "position", new HashMap<>(Map.of("x", 10, "y", 20))))));
+            // Same logic: schedule re-armed AND the node dragged.
+            Map<String, Object> firing = Map.of("name", "WF",
+                    "triggers", List.of(new HashMap<>(Map.of("label", "Daily", "params",
+                            new HashMap<>(Map.of("cron", "0 8 * * *", "scheduleId", "sched-NEW"))))),
+                    "cores", List.of(new HashMap<>(Map.of("id", "c1", "label", "Aggregate",
+                            "position", new HashMap<>(Map.of("x", 512, "y", -60))))));
+            Map<String, Object> draftContent = Map.of("name", "WF", "triggers", List.of(),
+                    "cores", List.of(Map.of("label", "draft")));
+            WorkflowPlanVersionEntity pinnedRow = new WorkflowPlanVersionEntity(WORKFLOW_ID, 17, new HashMap<>(pinnedStored), USER_ID);
+            WorkflowPlanVersionEntity draftRow = new WorkflowPlanVersionEntity(WORKFLOW_ID, 18, new HashMap<>(draftContent), USER_ID);
+
+            when(versionRepository.getMaxVersion(WORKFLOW_ID)).thenReturn(Optional.of(18));
+            when(versionRepository.findByWorkflowIdAndVersion(WORKFLOW_ID, 18)).thenReturn(Optional.of(draftRow));
+            when(versionRepository.findByWorkflowIdAndVersion(WORKFLOW_ID, 17)).thenReturn(Optional.of(pinnedRow));
+            when(workflowRepository.findPinnedVersionById(WORKFLOW_ID)).thenReturn(Optional.of(17));
+
+            assertThat(service.resolveContentVersionForExecution(WORKFLOW_ID, firing, USER_ID)).isEqualTo(17);
             assertThat(draftRow.getPlan()).isEqualTo(draftContent);
             verify(versionRepository, never()).save(any());
         }
@@ -1236,6 +1528,85 @@ class WorkflowPlanVersionServiceTest {
 
         @Test
         @DisplayName("Latest version has same sessionId → overwrites plan in-place")
+        void differentSession_layoutOnlyDrift_refreshesInPlace() {
+            // Same workflow, moved nodes. Returning the number without writing keeps
+            // the version stable but leaves stale coordinates behind, so restoring it
+            // drags the canvas back to a layout the user already moved away from.
+            Map<String, Object> stored = sessionPlanAt(290, 0);
+            Map<String, Object> moved = sessionPlanAt(288, -29);
+            WorkflowPlanVersionEntity row = new WorkflowPlanVersionEntity(WORKFLOW_ID, 1, new HashMap<>(stored), USER_ID);
+            row.setLabel(SESSION_A);
+
+            when(versionRepository.getMaxVersion(WORKFLOW_ID)).thenReturn(Optional.of(1));
+            when(versionRepository.findByWorkflowIdAndVersion(WORKFLOW_ID, 1)).thenReturn(Optional.of(row));
+
+            int version = service.createOrUpdateSessionVersion(WORKFLOW_ID, moved, USER_ID, SESSION_B);
+
+            assertThat(version).isEqualTo(1);
+            ArgumentCaptor<WorkflowPlanVersionEntity> captor = ArgumentCaptor.forClass(WorkflowPlanVersionEntity.class);
+            verify(versionRepository).save(captor.capture());
+            assertThat(captor.getValue().getVersion()).isEqualTo(1);
+            assertThat(captor.getValue().getPlan()).isEqualTo(moved);
+            // Another session named this row; a layout refresh must not rename it.
+            assertThat(captor.getValue().getLabel()).isEqualTo(SESSION_A);
+        }
+
+        @Test
+        @DisplayName("Different session, layout drift on a PINNED row: mints a draft instead of rewriting the pin")
+        void differentSession_layoutOnlyDrift_neverTouchesThePinnedRow() {
+            // The pin is a contract that this exact content stays reproducible.
+            // An agent session's background auto-layout reaches this path, and
+            // refreshing in place would silently rewrite what the user pinned -
+            // createVersion refuses for the same reason, so this must too.
+            Map<String, Object> pinned = sessionPlanAt(290, 0);
+            Map<String, Object> moved = sessionPlanAt(288, -29);
+            WorkflowPlanVersionEntity pinnedRow = new WorkflowPlanVersionEntity(WORKFLOW_ID, 5, new HashMap<>(pinned), USER_ID);
+            pinnedRow.setLabel(SESSION_A);
+
+            WorkflowEntity workflow = new WorkflowEntity();
+            workflow.setId(WORKFLOW_ID);
+            workflow.setTenantId(USER_ID);
+            workflow.setName("WF");
+            workflow.setPinnedVersion(5);
+
+            when(versionRepository.getMaxVersion(WORKFLOW_ID)).thenReturn(Optional.of(5));
+            when(versionRepository.findByWorkflowIdAndVersion(WORKFLOW_ID, 5)).thenReturn(Optional.of(pinnedRow));
+            when(workflowRepository.findById(WORKFLOW_ID)).thenReturn(Optional.of(workflow));
+            when(versionRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+
+            int version = service.createOrUpdateSessionVersion(WORKFLOW_ID, moved, USER_ID, SESSION_B);
+
+            assertThat(version).isEqualTo(6);
+            assertThat(pinnedRow.getPlan()).isEqualTo(pinned);
+        }
+
+        @Test
+        @DisplayName("Different session, byte-identical plan: no write at all")
+        void differentSession_identicalPlan_doesNotWrite() {
+            Map<String, Object> stored = sessionPlanAt(290, 0);
+            WorkflowPlanVersionEntity row = new WorkflowPlanVersionEntity(WORKFLOW_ID, 1, new HashMap<>(stored), USER_ID);
+            row.setLabel(SESSION_A);
+
+            when(versionRepository.getMaxVersion(WORKFLOW_ID)).thenReturn(Optional.of(1));
+            when(versionRepository.findByWorkflowIdAndVersion(WORKFLOW_ID, 1)).thenReturn(Optional.of(row));
+
+            assertThat(service.createOrUpdateSessionVersion(WORKFLOW_ID, stored, USER_ID, SESSION_B)).isEqualTo(1);
+            verify(versionRepository, never()).save(any());
+        }
+
+        private Map<String, Object> sessionPlanAt(int x, int y) {
+            Map<String, Object> node = new HashMap<>();
+            node.put("id", "aggregate-1");
+            node.put("label", "Aggregate");
+            node.put("position", new HashMap<>(Map.of("x", x, "y", y)));
+            Map<String, Object> plan = new HashMap<>();
+            plan.put("name", "WF");
+            plan.put("cores", List.of(node));
+            return plan;
+        }
+
+        @Test
+        @DisplayName("Latest version has same sessionId: overwrites plan in-place")
         void sameSession_overwritesInPlace() {
             Map<String, Object> oldPlan = Map.of("name", "Old");
             Map<String, Object> newPlan = Map.of("name", "New");

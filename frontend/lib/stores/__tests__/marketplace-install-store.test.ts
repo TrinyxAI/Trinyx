@@ -157,6 +157,24 @@ describe('marketplace-install store - state machine', () => {
     expect(trackMock).toHaveBeenCalledWith('app_install_failed', expect.objectContaining({ outcome: 'error' }));
   });
 
+  it('403 CE_EXCLUSIVE → ce-exclusive (not the generic error), tracked as its own outcome', async () => {
+    // Same status as CLOUD_ACCOUNT_NOT_LINKED, different code: the two must not
+    // collapse into one state or the user gets "link your cloud account" for a
+    // publication that simply needs a self-hosted install.
+    svc.acquirePublication.mockRejectedValue(
+      Object.assign(new Error('self-hosted only'), { status: 403, code: 'CE_EXCLUSIVE' }),
+    );
+    store().startInstall(pub());
+    await vi.advanceTimersByTimeAsync(10);
+
+    expect(store().active!.status).toBe('ce-exclusive');
+    expect(store().active!.error).toBe('self-hosted only');
+    expect(trackMock).toHaveBeenCalledWith(
+      'app_install_failed',
+      expect.objectContaining({ outcome: 'ce_exclusive', error_code: 'CE_EXCLUSIVE' }),
+    );
+  });
+
   it('is single-flight: a second startInstall while installing returns false and does nothing', () => {
     svc.acquirePublication.mockReturnValue(new Promise(() => {}));
     expect(store().startInstall(pub())).toBe(true);

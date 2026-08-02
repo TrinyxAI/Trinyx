@@ -57,9 +57,19 @@ import java.util.*;
 @RequiredArgsConstructor
 public class ModelCatalogSyncService {
 
-    /** Providers we NEVER touch from the sync. Bridges + zai (not in LiteLLM). */
+    /**
+     * Providers we NEVER touch from the sync: the 4 CLI bridges. Their rows are
+     * DERIVED from the cloud entries by {@link BridgeModelDeriver} (after this
+     * filter runs), so letting a feed write them directly would fight the
+     * deriver.
+     *
+     * <p>{@code zai} used to sit here on the assumption it was absent from
+     * LiteLLM. It is not: the feed carries the full GLM line (glm-4.5 through
+     * glm-5.1), so excluding it froze Z.AI on the three ids hardcoded in
+     * {@code application.yml}.
+     */
     static final Set<String> EXCLUDED_PROVIDERS = Set.of(
-            "claude-code", "codex", "gemini-cli", "mistral-vibe", "zai");
+            "claude-code", "codex", "gemini-cli", "mistral-vibe");
 
     /** Guard names operators can pass in {@code overrideGuards=}. */
     public static final String GUARD_COUNT_FLOOR  = "count-floor";
@@ -178,7 +188,7 @@ public class ModelCatalogSyncService {
         if (litellm != null) allFeedModels.addAll(litellm.models());
         if (orouter != null) allFeedModels.addAll(orouter.models());
 
-        // Safety: remove any row under an excluded provider (bridges + zai).
+        // Safety: remove any row under an excluded provider (the CLI bridges).
         // Parsers already filter, but this is belt-and-braces.
         allFeedModels.removeIf(m -> isExcludedProvider(strOf(m.get("provider"))));
 
@@ -509,11 +519,43 @@ public class ModelCatalogSyncService {
      * <p>Fields NOT compared: {@code userModifiedFields}, {@code source},
      * {@code providerKind}, {@code bundleVersion}, {@code lastSyncedAt},
      * {@code feedMetadata}. These are bookkeeping, never authoritative diffs.
-     * {@code displayName} is compared because the first insert stamps it, but
-     * subsequent syncs preserve it through user_modified_fields semantics.
+     *
+     * <p>Also excluded, and the reason matters: {@code enabled},
+     * {@code ranking}, {@code recommended}, {@code canonicalId},
+     * {@code rateLimitTpmPerTenant}/{@code RpmPerTenant} and {@code modalities}
+     * are local/admin state that NO feed carries. Comparing them would report a
+     * permanent phantom "updated" on every row an admin has ever touched. The
+     * honest caveat: because {@code MergeOptions.forSync} uses
+     * {@code partialUpdate=false}, {@code applyFields} still nulls those on an
+     * UNPROTECTED row, and this method hides that. In practice the admin UI
+     * marks exactly these as {@code user_modified_fields} when it writes them,
+     * which is what actually protects them - not this exclusion list.
+     *
+     * <p>{@code displayName} IS compared, because {@code applyFields} writes it
+     * and OpenRouter's value is feed-controlled: the parser takes the feed's
+     * {@code name} verbatim ("Anthropic: Claude Sonnet 4"), so a provider-side
+     * rebrand changes it with every other field stable. Leaving it out let that
+     * rename report "unchanged" in the dry-run while the apply performed it,
+     * exactly what the paragraph above forbids. (LiteLLM carries no name, so its
+     * rows stamp the raw model id and are stable by construction.)
+     *
+     * <p>Consequence worth knowing: a row whose human name is protected by
+     * {@code user_modified_fields} - the curated Kimi/Qwen rows V416 backfills -
+     * has a DB name that permanently differs from the feed's, so it reports
+     * "updated" on every dry-run even though the apply preserves the name. That
+     * is honest (the row does go through the update path) and preferable to a
+     * silent rename.
      */
     private static boolean rowEquals(ModelConfigOverrideEntity row, Map<String, Object> m) {
-        return Objects.equals(row.getPriceInput(),         bigDec(m.get("priceInput")))
+        return Objects.equals(row.getDisplayName(),        strOf(m.get("displayName")))
+            && Objects.equals(row.getDescription(),        strOf(m.get("description")))
+            && Objects.equals(strList(row.getSupportedEndpoints()),
+                              strList(m.get("supportedEndpoints")))
+            && Objects.equals(strList(row.getSupportedModalities()),
+                              strList(m.get("supportedModalities")))
+            && Objects.equals(strList(row.getSupportedOutputModalities()),
+                              strList(m.get("supportedOutputModalities")))
+            && Objects.equals(row.getPriceInput(),         bigDec(m.get("priceInput")))
             && Objects.equals(row.getPriceOutput(),        bigDec(m.get("priceOutput")))
             && Objects.equals(row.getPriceInputBatch(),    bigDec(m.get("priceInputBatch")))
             && Objects.equals(row.getPriceOutputBatch(),   bigDec(m.get("priceOutputBatch")))
@@ -538,6 +580,29 @@ public class ModelCatalogSyncService {
                               strOf(m.get("releaseDate")))
             && Objects.equals(row.getRateLimitTpm(),       intOf(m.get("rateLimitTpm")))
             && Objects.equals(row.getRateLimitRpm(),       intOf(m.get("rateLimitRpm")));
+    }
+
+    /**
+     * Normalise the two shapes the endpoint/modality fields take so they can be
+     * compared: the entity stores {@code String[]} (whose {@code equals} is
+     * identity, hence useless to {@code Objects.equals}) while a feed map
+     * carries the raw JSON collection.
+     *
+     * <p>MUST mirror {@code CatalogMergeService.stringArrayOf}, which is what
+     * actually lands in the column: same {@code Collection} (not just
+     * {@code List}) acceptance and the same null-element filtering. Diverge and
+     * the row reports "updated" forever, because the value written on apply
+     * would never compare equal to the value read back. LiteLLM passes
+     * {@code supported_endpoints} / {@code supported_modalities} through raw
+     * from Jackson, so a JSON {@code null} inside the array really can reach
+     * here.
+     */
+    private static List<String> strList(Object v) {
+        if (v instanceof String[] arr) return Arrays.asList(arr);
+        if (v instanceof Collection<?> col) {
+            return col.stream().filter(Objects::nonNull).map(Object::toString).toList();
+        }
+        return null;
     }
 
     // ── Log writer ──────────────────────────────────────────────────────────

@@ -977,7 +977,7 @@ export const ChatHeader: React.FC<ChatHeaderProps> = ({
                   )}
                 </>
               )}
-              {/* History button removed - use WorkflowRunsHistoryPanel from toggle instead */}
+              {/* History button removed - the run history is a tab of the side panel now (RunPanelContent) */}
             </>
           )}
           {/* Files focused-viewer actions (Desktop) - Back next to the bell. */}
@@ -1272,7 +1272,7 @@ export const ChatHeader: React.FC<ChatHeaderProps> = ({
                   )}
                 </>
               )}
-              {/* History button removed - use WorkflowRunsHistoryPanel from toggle instead */}
+              {/* History button removed - the run history is a tab of the side panel now (RunPanelContent) */}
             </>
           )}
           {/* Files focused-viewer actions (Mobile) - icon-only. */}

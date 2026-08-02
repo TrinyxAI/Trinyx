@@ -1,7 +1,15 @@
 # Base images are ARG-overridable so CI can substitute the GHCR mirror
 # (ghcr.io/<repo>/base/*) and dodge Docker Hub anonymous pull rate limits;
 # the Docker Hub defaults keep local/CE builds working unauthenticated.
-ARG NODE_IMAGE=node:20-alpine
+#
+# PINNED to a patch tag on purpose. The floating `node:20-alpine` moved to Node
+# 20.19 upstream, where `npm ci` dies on this lockfile with the (uninformative)
+# "npm error Exit handler never called!" after ~80s - reproducible in a bare
+# container with nothing but package.json + package-lock.json, and gone on
+# 20.18. That broke every local and e2e-slot image build while CI kept working
+# off its older GHCR mirror, which is the worst shape a base-image regression
+# can take. Bump this tag deliberately, after checking `npm ci` on it.
+ARG NODE_IMAGE=node:20.18-alpine
 # Deliberately NOT pinned to $BUILDPLATFORM (unlike the monolith's Maven stage, which
 # emits an architecture-independent jar). `next build` resolves and traces NATIVE
 # node_modules into .next/standalone - @next/swc-linux-<arch>-musl and friends - so a

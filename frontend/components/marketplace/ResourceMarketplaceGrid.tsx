@@ -10,6 +10,8 @@ import { useAuth } from '@/lib/providers/smart-providers';
 import { InterfacePreview, type InterfaceSnapshotLike } from '@/components/marketplace/InterfacePreview';
 import { PublisherAvatar } from '@/components/marketplace/PublisherAvatar';
 import AcquirePublicationModal from '@/components/marketplace/AcquirePublicationModal';
+import { CeExclusiveBadge } from '@/components/marketplace/CeExclusiveBadge';
+import { isCeExclusiveBlocked } from '@/lib/marketplace/ceExclusive';
 import { useOrgScopedReset } from '@/lib/hooks/useOrgScopedReset';
 
 type ResourceType = 'TABLE' | 'INTERFACE' | 'SKILL' | 'WORKFLOW';
@@ -68,7 +70,10 @@ function PublicationCard({
   // Org-aware ownership computed server-side (active workspace owns it); falls back to the
   // publisher-id check only if the backend didn't supply the flag.
   const isOwn = publication.ownedByMe ?? (!!currentUserId && publication.publisherId === currentUserId);
-  const canAcquire = !isOwn && !isAcquired;
+  // Managed cloud cannot install a CE-exclusive resource (a table with a vector
+  // column): hide the Install button and show the badge instead of offering a
+  // click the backend refuses.
+  const canAcquire = !isOwn && !isAcquired && !isCeExclusiveBlocked(publication);
   const isFree = !publication.creditsPerUse || publication.creditsPerUse === 0;
 
   return (
@@ -102,9 +107,10 @@ function PublicationCard({
           )}
         </div>
 
-        {/* Top-left: price chip */}
-        <span className="absolute top-3 left-3 z-20">
+        {/* Top-left: price chip, then the self-hosted-only marker when set */}
+        <span className="absolute top-3 left-3 z-20 flex flex-col items-start gap-1">
           <PricePill publication={publication} isFree={isFree} t={t} />
+          <CeExclusiveBadge publication={publication} />
         </span>
 
         {/* Top-right: installed badge */}

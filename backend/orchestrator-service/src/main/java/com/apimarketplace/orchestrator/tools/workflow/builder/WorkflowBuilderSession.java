@@ -223,6 +223,12 @@ public class WorkflowBuilderSession {
         getEdgeManager().addConnection(fromNodeId, toNodeId, condition);
     }
 
+    /** @see com.apimarketplace.orchestrator.tools.workflow.builder.session.SessionEdgeManager#addConnection(String, String, String, java.util.Map) */
+    public void addConnection(String fromNodeId, String toNodeId, String condition,
+                              java.util.Map<String, Object> backEdge) {
+        getEdgeManager().addConnection(fromNodeId, toNodeId, condition, backEdge);
+    }
+
     public boolean removeConnection(String fromNodeId, String toNodeId) {
         return getEdgeManager().removeConnection(fromNodeId, toNodeId);
     }

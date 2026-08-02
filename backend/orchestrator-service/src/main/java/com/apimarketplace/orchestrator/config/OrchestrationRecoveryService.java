@@ -86,6 +86,14 @@ public class OrchestrationRecoveryService {
     @Autowired(required = false)
     private PendingAgentRegistry pendingAgentRegistry;
 
+    /**
+     * Covers the window the registry cannot: an agent between {@code consume()} and the end of
+     * its delivery is absent from the registry but present here, and a run in that state is very
+     * much alive. Optional for the same reason as the registry above.
+     */
+    @Autowired(required = false)
+    private com.apimarketplace.orchestrator.execution.v2.async.RedisInFlightStore agentInFlightStore;
+
     @Autowired(required = false)
     private EpochConcurrencyLimiter epochConcurrencyLimiter;
 
@@ -155,6 +163,11 @@ public class OrchestrationRecoveryService {
 
     void setPendingAgentRegistry(PendingAgentRegistry pendingAgentRegistry) {
         this.pendingAgentRegistry = pendingAgentRegistry;
+    }
+
+    void setAgentInFlightStore(
+            com.apimarketplace.orchestrator.execution.v2.async.RedisInFlightStore agentInFlightStore) {
+        this.agentInFlightStore = agentInFlightStore;
     }
 
     void setEpochConcurrencyLimiter(EpochConcurrencyLimiter epochConcurrencyLimiter) {
@@ -256,15 +269,29 @@ public class OrchestrationRecoveryService {
                 continue;
             }
 
-            if (pendingAgentRegistry != null) {
+            if (pendingAgentRegistry != null || agentInFlightStore != null) {
                 try {
-                    if (pendingAgentRegistry.hasAnyPendingForRun(runId)) {
+                    if (pendingAgentRegistry != null && pendingAgentRegistry.hasAnyPendingForRun(runId)) {
                         logger.debug("[Recovery] Skipping run {} - async agent execution in flight", runId);
+                        continue;
+                    }
+                    // The registry is empty for the whole of a delivery (consume() runs first,
+                    // successors are dispatched last), so a run whose agent is mid-delivery
+                    // looks idle here and gets killed as a zombie. The in-flight store covers
+                    // that window - it is the same blind spot this store was introduced for.
+                    if (agentInFlightStore != null && agentInFlightStore.hasAnyInFlightForRun(runId)) {
+                        logger.debug("[Recovery] Skipping run {} - async agent consumed but not yet delivered", runId);
                         continue;
                     }
                 } catch (Exception e) {
                     // Same fail-safe policy as the signal check: a registry hiccup must never
                     // produce a false-positive zombie kill of a live run.
+                    //
+                    // NOTE only the registry half is fail-closed: it propagates a Redis error so
+                    // this catch fires. RedisInFlightStore fails OPEN by design (listForRun
+                    // swallows and returns empty), so during a Redis outage a run whose agent is
+                    // mid-delivery can still be zombie-killed. Freezing the scanner for every run
+                    // instead was judged the worse trade.
                     logger.warn("[Recovery] Pending-agent check failed for run {}, skipping - {}", runId, e.getMessage());
                     continue;
                 }

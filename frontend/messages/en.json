@@ -492,6 +492,7 @@
     "noItems": "No items available",
     "errorLoading": "Failed to load items",
     "aiChat": "AI Chat",
+    "runTab": "Run",
     "welcomeTitle": "How can I help you?",
     "agent": "Agent",
     "workflowPanel": "Workflow Panel",
@@ -1042,6 +1043,7 @@
     "viewingEpoch": "Viewing Epoch {epoch}",
     "runSteps": {
       "noStepsYet": "No steps yet",
+      "notRunYet": "not run yet",
       "filterAll": "All",
       "listView": "List view",
       "gaugeView": "Timeline view",
@@ -1141,6 +1143,7 @@
       "epochCost": "Epoch {epoch}",
       "budgetBlockedTitle": "Budget reached",
       "budgetBlockedMessage": "Spent {spent} of {budget}. No new run was started.",
+      "openInPanel": "Open run details in the panel",
       "cost": "Cost",
       "scopeAll": "all epochs",
       "scopeEpoch": "epoch {epoch}"
@@ -1336,7 +1339,9 @@
     "skipped": "Skipped",
     "cancelled": "Cancelled",
     "timeout": "Timeout",
-    "partial_success": "Partial Success"
+    "partial_success": "Partial Success",
+    "awaiting_signal": "Awaiting signal",
+    "stopped": "Stopped"
   },
   "errors": {
     "retry": "Retry",
@@ -1355,6 +1360,7 @@
     "never": "Never",
     "title": "Runs",
     "noRuns": "No runs yet",
+    "loading": "Loading the run...",
     "runWorkflow": "Run your workflow to see execution history",
     "justNow": "Just now",
     "minutesAgo": "{count}m ago",
@@ -1372,7 +1378,8 @@
     "version": "v{version}",
     "loadError": "Failed to load runs",
     "stepByStepMode": "Step by step mode",
-    "scrollToLoadMore": "Scroll to load more..."
+    "scrollToLoadMore": "Scroll to load more...",
+    "lastFireDuration": "Last execution duration"
   },
   "table": {
     "addRow": "Add Row",
@@ -1671,6 +1678,12 @@
     "continueItemRemaining": "Continue this item ({count} pending)",
     "own": "Your publication",
     "acquire": "Install",
+    "ceExclusiveBadge": "CE exclusive",
+    "ceExclusiveTooltip": "Runs on a self-hosted install only (Community Edition)",
+    "ceExclusiveTitle": "Self-hosted install required",
+    "ceExclusiveDescription": "This app uses features that only run on a self-hosted install, so it cannot be installed here. Install it from a self-hosted deployment to use it.",
+    "ceExclusiveFeatureCliAgent": "Local CLI agents (Claude Code, Codex, Gemini CLI, Mistral Vibe)",
+    "ceExclusiveFeatureVectorSearch": "Vector search (embeddings)",
     "acquiring": "Installing...",
     "open": "Open",
     "noLandingPreview": "No preview available",
@@ -6787,7 +6800,7 @@
     "subWorkflowNode": {
       "title": "Sub-Workflow",
       "infoTitle": "Sub-Workflow Node",
-      "infoDescription": "Execute another workflow as a sub-routine, passing inputs and receiving outputs.",
+      "infoDescription": "Trigger another workflow, passing inputs and receiving outputs. The target must already have a live run: this node never creates one.",
       "workflowId": "Workflow ID",
       "workflowIdPlaceholder": "UUID of the workflow to execute",
       "inputMapping": "Input mapping",
@@ -6935,8 +6948,9 @@
       "autoLayout": "Auto-layout (reorganize nodes)",
       "disableInteractivity": "Disable interactivity",
       "enableInteractivity": "Enable interactivity",
-      "disableBoxSelection": "Disable box selection",
-      "enableBoxSelection": "Enable box selection",
+      "cursorMode": "Cursor mode",
+      "cursorModePan": "Hand (pan)",
+      "cursorModeSelection": "Selection box",
       "settings": "Settings",
       "openConversation": "Open conversation panel",
       "emptyTitle": "How can I help you?",
@@ -6953,6 +6967,8 @@
       "runWorkflow": "Run workflow",
       "runAuto": "Run (auto)",
       "runStepByStep": "Step-by-step (debug)",
+      "runWithTrigger": "Run with trigger",
+      "triggerNotReady": "This trigger cannot be fired right now",
       "runsHistory": "Runs history",
       "backToHome": "Back to home",
       "searchPlaceholder": "Search {context}...",
@@ -8555,7 +8571,8 @@
     "title": "Loop Edge",
     "condition": "Condition (SpEL)",
     "conditionPlaceholder": "e.g. '{{mcp:step.output.count}}' > 0",
-    "maxIterations": "Max iterations"
+    "maxIterations": "Max iterations",
+    "maxIterationsInherited": "Inherited"
   },
   "storageExplorer": {
     "searchPlaceholder": "Search files...",

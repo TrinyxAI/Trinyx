@@ -19,8 +19,8 @@ import com.apimarketplace.agent.tools.ToolErrorCode;
  * Exposes ONE tool "application" with action parameter for all operations.
  *
  * Delegates to specialized modules:
- * - ApplicationCrudModule: create, search, my, get, acquire, visualize
- * - ApplicationExecuteModule: execute
+ * - ApplicationCrudModule: create, search, my, get, acquire, visualize, runs, get_run, get_node_output
+ * - ApplicationExecuteModule: execute, stop_run
  * - ApplicationHelpModule: help
  */
 @Slf4j
@@ -33,7 +33,7 @@ public class ApplicationToolsProvider implements ToolsProvider {
     private final ApplicationHelpModule helpModule;
 
     private static final List<String> VALID_ACTIONS = List.of(
-        "create", "search", "my", "get", "acquire", "uninstall", "execute",
+        "create", "search", "my", "get", "acquire", "uninstall", "execute", "stop_run",
         "runs", "get_run", "get_node_output",
         "visualize", "help"
     );
@@ -105,7 +105,9 @@ public class ApplicationToolsProvider implements ToolsProvider {
             stringParam("description", "Description override (for: create)", false),
             objectParam("data_inputs", "Input data for execution (for: execute). Format depends on trigger type.", false),
             stringParam("trigger_id", "Trigger ID to fire (for: execute). Optional - defaults to first fireable trigger.", false),
-            stringParam("run_id", "Run ID (for: get_run, get_node_output; and create to pin the showcase run). Returned by execute. On create, omit to auto-pick the latest successful automatic run (COMPLETED/PARTIAL_SUCCESS/WAITING_TRIGGER).", false),
+            stringParam("run_id", "Run ID (for: get_run, get_node_output, stop_run; and create to pin the showcase run). Returned by execute. On create, omit to auto-pick the latest successful automatic run (COMPLETED/PARTIAL_SUCCESS/WAITING_TRIGGER). On stop_run, omit ONLY when you are an agent running inside a workflow and want to stop your own run.", false),
+            stringParam("reason", "(for: stop_run) Why you are stopping the run, in one sentence. Recorded on the run and returned by get_run as stop_reason, so the user and any agent reading the run later see the cause instead of a bare CANCELLED.", false),
+            stringParam("mode", "(for: stop_run) 'cancel' (default) ends the run for good AND suspends the schedules of the app's workflow, so a scheduled app stops firing until it is reactivated. 'graceful' only closes the epoch that is running and returns the run to WAITING_TRIGGER, leaving the schedules alone: prefer it when you only want to end THIS execution. 'graceful' is refused when the run is PENDING or WAITING_TRIGGER (nothing is executing yet).", false),
             intParam("epoch", "Epoch number (for: get_run detail, get_node_output; and create to pin the showcase epoch). On create, omit to leave unpinned - the app then renders the latest epoch.", false, null),
             stringParam("node_id", "Node ID (for: get_node_output). From get_run epoch detail.", false),
             intParam("item_index", "Split item index (for: get_node_output). Optional targeting filter.", false, null),
@@ -132,6 +134,7 @@ public class ApplicationToolsProvider implements ToolsProvider {
                 - acquire: Clone someone else's app as your own workflow (application_id required)
                 - uninstall: Remove an app you acquired - deletes the local clone + its runs; the marketplace listing stays and you can acquire it again (application_id required)
                 - execute: Run an app (application_id required, optional data_inputs/trigger_id)
+                - stop_run: End a run that is still going (run_id + optional reason + mode; an agent running inside a workflow can omit run_id to stop its own run). Use it when the execution went wrong instead of letting it finish: it cancels the nodes still in flight, including any browser-agent session. Same action, same parameters on workflow(action='stop_run').
                 - runs: List execution history (application_id required)
                 - get_run: Inspect a run - macro overview, or epoch detail with epoch=N (run_id required)
                 - get_node_output: Full output/error for one node (run_id + epoch + node_id required). A TEXT field >128 KB returns a truncated preview + NEXT pointer; follow it (field=<dot-path> + offset) to page the full value.

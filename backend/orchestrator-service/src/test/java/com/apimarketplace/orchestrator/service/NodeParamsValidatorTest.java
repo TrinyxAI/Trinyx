@@ -8,6 +8,8 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
@@ -376,5 +378,67 @@ class NodeParamsValidatorTest {
         ValidationResult result = validator.validate("merge", Map.of("anything", "here"));
 
         assertThat(result.valid()).isTrue();
+    }
+
+    /**
+     * Found 2026-07-31 building a loop through the MCP builder: add_node rejected
+     * {@code loopCondition} with "Unknown parameter", while the node help promises
+     * "loopCondition and maxIterations (camelCase) and snake_case condition / loop_condition /
+     * max_iterations are accepted" and workflow(action='modify') accepted it. The alias map only
+     * had {@code maxIterations}, so of the six spellings
+     * {@code UtilityNodeCreator.createLoop} actually reads, four were rejected by the validator.
+     *
+     * <p>The reverse gap mattered more: {@code loopCondition} now passes validation only because
+     * the creator was ALSO taught to read it - accepting a param the creator ignores would take
+     * the condition and silently drop it, which is worse than rejecting it outright.
+     */
+    @Nested
+    @DisplayName("Loop param aliases - validator must mirror UtilityNodeCreator.createLoop")
+    class LoopParamAliases {
+
+        private void stubLoopSchema() {
+            NodeTypeDocumentationEntity doc = new NodeTypeDocumentationEntity();
+            doc.setType("loop");
+            doc.setParameters(Map.of(
+                "condition", Map.of("type", "string", "required", false),
+                "max_iterations", Map.of("type", "integer", "required", false)
+            ));
+            when(nodeLibraryService.findByType("loop")).thenReturn(Optional.of(doc));
+        }
+
+        @ParameterizedTest(name = "condition spelling ''{0}'' is accepted")
+        @ValueSource(strings = {"condition", "loopCondition", "loop_condition", "expression", "while"})
+        @DisplayName("regression: every condition spelling the creator reads passes validation")
+        void everyConditionSpellingIsAccepted(String spelling) {
+            stubLoopSchema();
+
+            ValidationResult result = validator.validate("loop", Map.of(spelling, "1 == 1"));
+
+            assertThat(result.valid())
+                .as("%s is read by UtilityNodeCreator.createLoop - rejecting it here blocks a "
+                    + "spelling the node help tells agents to use", spelling)
+                .isTrue();
+        }
+
+        @ParameterizedTest(name = "max-iterations spelling ''{0}'' is accepted")
+        @ValueSource(strings = {"max_iterations", "maxIterations", "limit"})
+        @DisplayName("every max-iterations spelling the creator reads passes validation")
+        void everyMaxIterationsSpellingIsAccepted(String spelling) {
+            stubLoopSchema();
+
+            assertThat(validator.validate("loop", Map.of(spelling, 5)).valid()).isTrue();
+        }
+
+        @Test
+        @DisplayName("A genuinely unknown loop param is still rejected")
+        void unknownLoopParamStillRejected() {
+            stubLoopSchema();
+
+            ValidationResult result = validator.validate("loop", Map.of("iterations", 5));
+
+            assertThat(result.valid())
+                .as("widening the aliases must not turn the validator into a no-op")
+                .isFalse();
+        }
     }
 }

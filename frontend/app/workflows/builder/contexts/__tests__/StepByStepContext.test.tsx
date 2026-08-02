@@ -298,3 +298,54 @@ describe('useNodeExecutionStatus().resolveApproval epoch plumbing', () => {
     expect(onResolveApproval).toHaveBeenCalledWith('core:my_approval', 'REJECTED', undefined, '0');
   });
 });
+
+// ---------------------------------------------------------------------------
+// Tests: stepId - the backend step id surfaced to cross-component events
+// ---------------------------------------------------------------------------
+
+describe('useNodeExecutionStatus - stepId', () => {
+  it('resolves a trigger node to its backend step id', () => {
+    // This id is what names THIS trigger in the open-tab event: several triggers
+    // can share a type, and matching on type alone opens the first tab of the
+    // family instead of the one the user picked.
+    const { result } = renderHook(
+      () => useNodeExecutionStatus('chat-trigger-2', { label: 'Sales Chat', kind: 'entry' }),
+      { wrapper: createWrapper() },
+    );
+
+    expect(result.current.stepId).toBe('trigger:sales_chat');
+  });
+
+  it('prefers the backend-provided node-to-step mapping over the computed id', () => {
+    function MappedWrapper({ children }: { children: React.ReactNode }) {
+      return (
+        <StepByStepProvider
+          isEnabled
+          isPaused={false}
+          readySteps={new Set<string>()}
+          completedSteps={new Set<string>()}
+          failedSteps={new Set<string>()}
+          nodeIdToStepId={new Map([['chat-trigger-2', 'trigger:renamed_by_backend']])}
+          onExecuteStep={vi.fn()}
+        >
+          {children}
+        </StepByStepProvider>
+      );
+    }
+
+    const { result } = renderHook(
+      () => useNodeExecutionStatus('chat-trigger-2', { label: 'Sales Chat', kind: 'entry' }),
+      { wrapper: MappedWrapper },
+    );
+
+    expect(result.current.stepId).toBe('trigger:renamed_by_backend');
+  });
+
+  it('exposes no step id outside a run, rather than a misleading node id', () => {
+    // No provider: a React Flow node id here would be a lie that silently travels
+    // into the open-tab event and never matches any panel tab.
+    const { result } = renderHook(() => useNodeExecutionStatus('chat-trigger-2'));
+
+    expect(result.current.stepId).toBeUndefined();
+  });
+});

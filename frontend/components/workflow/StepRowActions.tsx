@@ -99,6 +99,10 @@ export function StepRowActions({ step, matchedNode, workflowId, isStepByStep, is
           canExecute
           onExecute={fireTrigger}
           variant={flags.triggerVariant}
+          // Names THIS trigger in the open-tab event a chat/form/webhook play
+          // dispatches: several triggers can share a type, and matching on type
+          // alone would activate the first tab of the family instead.
+          triggerId={step.alias}
           isAutoMode={!isStepByStep}
           position="bottom-center"
         />

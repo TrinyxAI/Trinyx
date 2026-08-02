@@ -421,12 +421,19 @@ function processEdge(edge: Edge, ctx: PlanGeneratorContext): void {
     to,
   };
 
-  // Serialize back-edge metadata if present
+  // Serialize the loop-back marker at the TOP LEVEL, never in params: the backend exposes an
+  // edge's params as the target step's params, so a marker in there lands in the target node's
+  // configuration (and the condition/maxIterations were lost on every reload).
+  //
+  // maxIterations is emitted ONLY when the user set one. Omitting it lets the backend resolve
+  // the cap from the workflow, then from the global default - hardcoding a number here would
+  // make those settings unreachable for every edge drawn in the builder.
   if (edge.data?.isBackEdge) {
-    planEdge.params = {
-      backEdge: true,
-      condition: edge.data.backEdgeCondition || '',
-      maxIterations: edge.data.backEdgeMaxIterations || 10,
+    const condition = edge.data.backEdgeCondition;
+    const maxIterations = edge.data.backEdgeMaxIterations;
+    planEdge.backEdge = {
+      ...(condition ? { condition } : {}),
+      ...(typeof maxIterations === 'number' ? { maxIterations } : {}),
     };
   }
 

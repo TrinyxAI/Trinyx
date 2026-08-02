@@ -93,6 +93,90 @@ describe('edition resolver - precedence', () => {
     });
 });
 
+/**
+ * IS_MANAGED_CLOUD mirrors the backend's AppEditionProvider.isManagedCloud(),
+ * which is NOT the complement of IS_CE: a self-hosted-enterprise deployment runs
+ * keycloak auth, so the binary EDITION resolves to 'cloud' while the deployment
+ * is self-hosted. Any UI gate copied from a backend isManagedCloud() rule must
+ * read this constant, or it hides a capability from self-hosted-enterprise
+ * customers whose own API allows it.
+ */
+describe('IS_MANAGED_CLOUD', () => {
+    let warnSpy: ReturnType<typeof vi.spyOn>;
+
+    beforeEach(() => {
+        vi.resetModules();
+        warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    });
+
+    afterEach(() => {
+        vi.unstubAllEnvs();
+        warnSpy.mockRestore();
+    });
+
+    it('APP_EDITION=cloud → managed cloud', async () => {
+        vi.stubEnv('NEXT_PUBLIC_APP_EDITION', 'cloud');
+        vi.stubEnv('NEXT_PUBLIC_AUTH_MODE', 'oidc');
+        const { IS_MANAGED_CLOUD } = await importEdition();
+        expect(IS_MANAGED_CLOUD).toBe(true);
+    });
+
+    it('APP_EDITION=dedicated-cloud → managed cloud (the backend treats it the same)', async () => {
+        vi.stubEnv('NEXT_PUBLIC_APP_EDITION', 'dedicated-cloud');
+        vi.stubEnv('NEXT_PUBLIC_AUTH_MODE', 'oidc');
+        const { IS_MANAGED_CLOUD } = await importEdition();
+        expect(IS_MANAGED_CLOUD).toBe(true);
+    });
+
+    it('APP_EDITION=ce → NOT managed cloud', async () => {
+        vi.stubEnv('NEXT_PUBLIC_APP_EDITION', 'ce');
+        vi.stubEnv('NEXT_PUBLIC_AUTH_MODE', '');
+        const { IS_MANAGED_CLOUD } = await importEdition();
+        expect(IS_MANAGED_CLOUD).toBe(false);
+    });
+
+    it('APP_EDITION=self-hosted-enterprise → NOT managed cloud, even though IS_CLOUD is true', async () => {
+        vi.stubEnv('NEXT_PUBLIC_APP_EDITION', 'self-hosted-enterprise');
+        vi.stubEnv('NEXT_PUBLIC_AUTH_MODE', 'oidc');
+        const { IS_MANAGED_CLOUD, IS_CLOUD } = await importEdition();
+        expect(IS_MANAGED_CLOUD).toBe(false);
+        // The binary EDITION cannot express this deployment, hence the separate constant.
+        expect(IS_CLOUD).toBe(true);
+    });
+
+    it('accepts the same aliases as the backend AppEdition.fromConfig, including underscores', async () => {
+        vi.stubEnv('NEXT_PUBLIC_APP_EDITION', 'SELF_HOSTED');
+        vi.stubEnv('NEXT_PUBLIC_AUTH_MODE', 'oidc');
+        const { IS_MANAGED_CLOUD } = await importEdition();
+        expect(IS_MANAGED_CLOUD).toBe(false);
+    });
+
+    it('APP_EDITION=cloud + AUTH_MODE=embedded → NOT managed cloud (auth path wins, as in resolve())', async () => {
+        // A misconfigured self-hosted install reads as CE everywhere else; this
+        // constant must not be the one place that still calls it cloud and hides
+        // capabilities its own backend allows.
+        vi.stubEnv('NEXT_PUBLIC_APP_EDITION', 'cloud');
+        vi.stubEnv('NEXT_PUBLIC_AUTH_MODE', 'embedded');
+        const { IS_MANAGED_CLOUD, IS_CE } = await importEdition();
+        expect(IS_MANAGED_CLOUD).toBe(false);
+        expect(IS_CE).toBe(true);
+    });
+
+    it('unset APP_EDITION falls back to AUTH_MODE: embedded → not managed cloud', async () => {
+        vi.stubEnv('NEXT_PUBLIC_APP_EDITION', '');
+        vi.stubEnv('NEXT_PUBLIC_AUTH_MODE', 'embedded');
+        const { IS_MANAGED_CLOUD } = await importEdition();
+        expect(IS_MANAGED_CLOUD).toBe(false);
+    });
+
+    it('unset APP_EDITION falls back to AUTH_MODE: oidc → managed cloud', async () => {
+        vi.stubEnv('NEXT_PUBLIC_APP_EDITION', '');
+        vi.stubEnv('NEXT_PUBLIC_AUTH_MODE', 'oidc');
+        const { IS_MANAGED_CLOUD } = await importEdition();
+        expect(IS_MANAGED_CLOUD).toBe(true);
+    });
+});
+
 describe('useEdition hook', () => {
     beforeEach(() => {
         vi.resetModules();

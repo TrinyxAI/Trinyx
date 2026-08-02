@@ -791,6 +791,28 @@ public class ScheduleExecutorService {
      * not by the dispatch hot path. {@code triggerClient.disableSchedule(...)} calls
      * have been removed accordingly.
      */
+    /**
+     * Explains why {@link #prepareScheduleExecution} found nothing to fire.
+     *
+     * <p>The previous text was "No active run found. Start a run from the workflow builder first.",
+     * which was wrong twice over: it collapsed three distinct causes into one, and it told an agent
+     * to use a UI it cannot reach. The causes are enumerated here instead of guessed, because
+     * prepareScheduleExecution deliberately returns a bare null and re-deriving the resolver outcome
+     * would cost a second lookup on a failure path.
+     */
+    private String describeUnfireableSchedule(ScheduledExecutionDto schedule) {
+        java.util.UUID workflowId = schedule.getWorkflowId();
+        if (workflowId == null) {
+            return "This schedule is standalone: it is not linked to a workflow, so there is nothing"
+                + " to fire. Attach it to a workflow trigger before running it.";
+        }
+        return "No run of workflow " + workflowId + " is eligible for a scheduled fire. A schedule"
+            + " fires the pinned version only, so both must hold: the workflow is pinned"
+            + " (workflow(action='pin', workflow_id='" + workflowId + "', version=N)), and a run of"
+            + " that pinned version is waiting for its trigger"
+            + " (workflow(action='execute', id='" + workflowId + "', version=N)).";
+    }
+
     private ScheduleRunInfo prepareScheduleExecution(ScheduledExecutionDto schedule) {
         String triggerId = schedule.getTriggerId();
         java.util.UUID workflowId = schedule.getWorkflowId();
@@ -993,7 +1015,7 @@ public class ScheduleExecutorService {
         ScheduleRunInfo info = prepareScheduleExecution(schedule);
         if (info == null) {
             return TriggerExecutionResult.failure(null, null, TriggerType.SCHEDULE,
-                    "No active run found. Start a run from the workflow builder first.");
+                    describeUnfireableSchedule(schedule));
         }
 
         if (!isExecutionQueueReadyForSchedule(schedule.getId())) {

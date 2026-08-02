@@ -64,7 +64,7 @@ class WorkflowRunControllerStopTest {
             when(workflowRunRepository.findByRunIdPublic(RUN_ID))
                     .thenReturn(Optional.of(pendingRun));
             doThrow(new IllegalStateException("Cannot stop workflow in status: PENDING. Must be RUNNING or PAUSED."))
-                    .when(resumeService).stopWorkflow(RUN_ID);
+                    .when(resumeService).stopWorkflow(eq(RUN_ID), any());
 
             ResponseEntity<?> response = controller.stopWorkflow(RUN_ID, TENANT, null);
 
@@ -89,7 +89,7 @@ class WorkflowRunControllerStopTest {
             ResponseEntity<?> response = controller.stopWorkflow(RUN_ID, TENANT, null);
 
             assertThat(response.getStatusCode()).isEqualTo(HttpStatus.NOT_FOUND);
-            verify(resumeService, never()).stopWorkflow(RUN_ID);
+            verify(resumeService, never()).stopWorkflow(any(), any());
         }
     }
 
@@ -104,7 +104,7 @@ class WorkflowRunControllerStopTest {
             when(workflowRunRepository.findByRunIdPublic(RUN_ID))
                     .thenReturn(Optional.of(waitingRun));
             // resumeService.stopWorkflow succeeds (no throw)
-            doNothing().when(resumeService).stopWorkflow(RUN_ID);
+            doNothing().when(resumeService).stopWorkflow(eq(RUN_ID), any());
 
             ResponseEntity<?> response = controller.stopWorkflow(RUN_ID, TENANT, null);
 
@@ -123,7 +123,7 @@ class WorkflowRunControllerStopTest {
             when(workflowRunRepository.findByRunIdPublic(RUN_ID))
                     .thenReturn(Optional.of(failedRun));
             // Idempotent: service does cleanup, doesn't throw, run stays FAILED
-            doNothing().when(resumeService).stopWorkflow(RUN_ID);
+            doNothing().when(resumeService).stopWorkflow(eq(RUN_ID), any());
 
             ResponseEntity<?> response = controller.stopWorkflow(RUN_ID, TENANT, null);
 
@@ -133,6 +133,53 @@ class WorkflowRunControllerStopTest {
             assertThat(body.get("success")).isEqualTo(true);
             // Critical: report the actual current status, not a fake waiting_trigger
             assertThat(body.get("status")).isEqualTo("failed");
+        }
+
+        /**
+         * The run records WHO stopped it. Without this the agent-facing report cannot
+         * tell "the user pressed Stop" from "it crashed" - which is the whole point of
+         * the stopped_by field that stop_run writes on the agent side.
+         */
+        @Test
+        @DisplayName("A user stop attributes itself on the run (stopped_by=user)")
+        void userStopRecordsAttribution() {
+            WorkflowRunEntity waitingRun = runEntityWith(RunStatus.WAITING_TRIGGER);
+            when(workflowRunRepository.findByRunIdPublic(RUN_ID)).thenReturn(Optional.of(waitingRun));
+
+            controller.stopWorkflow(RUN_ID, TENANT, null);
+
+            @SuppressWarnings("unchecked")
+            org.mockito.ArgumentCaptor<Map<String, Object>> metadata =
+                    org.mockito.ArgumentCaptor.forClass(Map.class);
+            verify(resumeService).stopWorkflow(eq(RUN_ID), metadata.capture());
+            assertThat(metadata.getValue())
+                    .containsEntry(com.apimarketplace.orchestrator.services.resume
+                            .AgentRunStopService.META_STOPPED_BY, "user")
+                    .containsKey(com.apimarketplace.orchestrator.services.resume
+                            .AgentRunStopService.META_STOPPED_AT);
+        }
+
+        /**
+         * Cancel is the more consequential button (terminal + suspends the workflow's
+         * schedules), so its attribution matters at least as much as stop's.
+         */
+        @Test
+        @DisplayName("A user cancel attributes itself on the run (stopped_by=user)")
+        void userCancelRecordsAttribution() {
+            WorkflowRunEntity runningRun = runEntityWith(RunStatus.RUNNING);
+            when(workflowRunRepository.findByRunIdPublic(RUN_ID)).thenReturn(Optional.of(runningRun));
+
+            controller.cancelWorkflow(RUN_ID, TENANT, null);
+
+            @SuppressWarnings("unchecked")
+            org.mockito.ArgumentCaptor<Map<String, Object>> metadata =
+                    org.mockito.ArgumentCaptor.forClass(Map.class);
+            verify(resumeService).cancelWorkflow(eq(RUN_ID), metadata.capture());
+            assertThat(metadata.getValue())
+                    .containsEntry(com.apimarketplace.orchestrator.services.resume
+                            .AgentRunStopService.META_STOPPED_BY, "user")
+                    .containsKey(com.apimarketplace.orchestrator.services.resume
+                            .AgentRunStopService.META_STOPPED_AT);
         }
     }
 
@@ -148,7 +195,7 @@ class WorkflowRunControllerStopTest {
             WorkflowRunEntity inScope = runEntityWith(RunStatus.RUNNING);
             when(workflowRunRepository.findByRunIdPublic(RUN_ID)).thenReturn(Optional.of(inScope));
             doThrow(new IllegalArgumentException("Run not found: " + RUN_ID))
-                    .when(resumeService).stopWorkflow(RUN_ID);
+                    .when(resumeService).stopWorkflow(eq(RUN_ID), any());
 
             ResponseEntity<?> response = controller.stopWorkflow(RUN_ID, TENANT, null);
 
@@ -161,7 +208,7 @@ class WorkflowRunControllerStopTest {
             WorkflowRunEntity inScope = runEntityWith(RunStatus.RUNNING);
             when(workflowRunRepository.findByRunIdPublic(RUN_ID)).thenReturn(Optional.of(inScope));
             doThrow(new RuntimeException("DB connection lost"))
-                    .when(resumeService).stopWorkflow(RUN_ID);
+                    .when(resumeService).stopWorkflow(eq(RUN_ID), any());
 
             ResponseEntity<?> response = controller.stopWorkflow(RUN_ID, TENANT, null);
 

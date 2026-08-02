@@ -13,17 +13,19 @@ import java.util.Set;
  *
  * Rules enforced:
  * - All nodes must be reachable from triggers
- * - No cycles (except for loop nodes)
+ * - No UNDECLARED cycles: a loop must be declared (a loop node's iterate port, or a back-edge
+ *   marker), otherwise the engine treats every edge in it as a dependency and it deadlocks
+ * - Nothing unsafe to re-run inside a declared loop ({@link BackEdgeSafetyValidator})
  */
 @Slf4j
 @Component
 public class GraphValidation implements WorkflowValidator {
 
+    private final BackEdgeSafetyValidator backEdgeSafetyValidator = new BackEdgeSafetyValidator();
+
     @Override
     public void validate(WorkflowBuilderSession session, ValidationResult result) {
-        ValidationGraphAnalyzer graph = new ValidationGraphAnalyzer(session);
-        validateReachability(session, graph, result);
-        validateCycles(session, graph, result);
+        validate(session, new ValidationGraphAnalyzer(session), result);
     }
 
     /**
@@ -32,7 +34,9 @@ public class GraphValidation implements WorkflowValidator {
     public void validate(WorkflowBuilderSession session, ValidationGraphAnalyzer graph, ValidationResult result) {
         validateReachability(session, graph, result);
         validateCycles(session, graph, result);
+        backEdgeSafetyValidator.validate(session, graph, result);
     }
+
 
     private void validateReachability(WorkflowBuilderSession session, ValidationGraphAnalyzer graph, ValidationResult result) {
         Set<String> reachable = graph.getReachableFromTriggers();
@@ -50,15 +54,26 @@ public class GraphValidation implements WorkflowValidator {
         }
     }
 
+    /**
+     * A loop must be DECLARED, never inferred.
+     *
+     * <p>Declared loop-backs (a loop node's {@code iterate} port, or an edge carrying the
+     * {@code backEdge} marker) are excluded from the graph, so anything the detector still finds
+     * is a cycle nobody asked for: it would deadlock at run time, because the engine treats every
+     * remaining edge as a dependency and each node in the cycle would wait for the next one.
+     *
+     * <p>The previous rule accepted any cycle whose printed path merely mentioned a "core:" node,
+     * which let an accidental cycle through any control node through, while rejecting a
+     * deliberate loop between two tool nodes.
+     */
     private void validateCycles(WorkflowBuilderSession session, ValidationGraphAnalyzer graph, ValidationResult result) {
         List<String> cycles = graph.detectCycles();
 
         for (String cycle : cycles) {
-            // Cycles are only allowed for loops (body back to loop)
-            if (!cycle.contains("core:")) {
-                result.addError("CYCLE_DETECTED", null,
-                        "Cycle detected: " + cycle + ". Cycles are only allowed in loops.");
-            }
+            result.addError("CYCLE_DETECTED", null,
+                    "Cycle detected: " + cycle + ". A loop must be declared: connect the last node "
+                    + "of the loop back to a loop node's iterate port, or mark the closing "
+                    + "connection as a loop-back so it re-enters instead of waiting for itself.");
         }
     }
 }

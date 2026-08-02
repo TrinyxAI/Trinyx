@@ -27,7 +27,14 @@ vi.mock('@/app/workflows/builder/hooks/state', () => ({
     showModal: false, handleSave: vi.fn(), handleDiscard: vi.fn(), handleCancel: vi.fn(), isSaving: false,
   }),
 }));
-vi.mock('@/components/app/WorkflowPanelContent', () => ({ setPendingActivateTab: vi.fn() }));
+// The tab ids are read by the canvas entry points (version chip / panel button /
+// "+"), which any test in this file can trip through the run-panel bus; a mock
+// missing them throws asynchronously, outside the failing test.
+vi.mock('@/components/app/WorkflowPanelContent', () => ({
+  setPendingActivateTab: vi.fn(),
+  RUN_TAB_ID: '__run__',
+  NODE_CREATOR_TAB_ID: '__add_node__',
+}));
 vi.mock('@/lib/api', () => ({ orchestratorApi: { getPinnedWorkflowRun: vi.fn() } }));
 vi.mock('@/lib/hooks/useOrgScopedReset', () => ({ useOrgScopedReset: () => undefined }));
 vi.mock('../hooks', () => ({ useAutoCollapseSidebar: () => undefined }));

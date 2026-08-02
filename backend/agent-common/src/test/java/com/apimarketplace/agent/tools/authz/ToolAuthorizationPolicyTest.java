@@ -39,6 +39,12 @@ class ToolAuthorizationPolicyTest {
             "workflow,get_run",     // inspecting a run is read-only
             "workflow,modify",      // editing a draft does not advance a run
             "workflow,validate",
+            // Deliberate: every gated action STARTS work or lets it continue; stop_run only
+            // ends work already running, and the user's own Stop button is ungated. Making
+            // an agent wait for an approval card before it can stop a runaway execution
+            // would defeat the action. Pinned so the decision is explicit, not an oversight.
+            "workflow,stop_run",
+            "application,stop_run",
     })
     @DisplayName("Benign actions and non-sensitive tools do not require authorization")
     void benignPairsDoNotRequireAuthorization(String tool, String action) {

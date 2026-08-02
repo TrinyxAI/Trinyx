@@ -70,7 +70,7 @@ vi.mock('../../hooks/useInspectorDrag', () => ({
 vi.mock('../../hooks/useBoxSelection', () => ({
   useBoxSelection: () => ({
     isBoxSelectionEnabled: false, isSelecting: false, selectionStart: null, selectionEnd: null,
-    handleToggleBoxSelection: vi.fn(), handleSelectionChange: vi.fn(),
+    cursorMode: 'pan', setCursorMode: vi.fn(), handleSelectionChange: vi.fn(),
     containerRef: { current: null }, selectionJustEndedRef: { current: false },
   }),
 }));

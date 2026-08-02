@@ -17,6 +17,14 @@ import {
 } from '@/contexts/WorkflowLayoutDirectionContext';
 
 /** The reading direction a dagre rankdir corresponds to. */
+/**
+ * An edge that closes a loop: a While node's dedicated loop-back handle, or any edge the
+ * builder classified as a back-edge. Layout must ignore both.
+ */
+function isLoopBackEdge(edge: Edge): boolean {
+  return edge.targetHandle?.endsWith('-loop-back') === true || edge.data?.isBackEdge === true;
+}
+
 function directionOf(rankdir: string): WorkflowLayoutDirection {
   return rankdir === 'TB' || rankdir === 'BT' ? 'vertical' : 'horizontal';
 }
@@ -269,6 +277,9 @@ export function centerOnCrossAxis(
   const parents = new Map<string, string[]>();
   for (const e of edges) {
     if (!byId.has(e.source) || !byId.has(e.target) || e.source === e.target) continue;
+    // Same reason as the dagre pass: a loop-back is not a parent/child relation, and treating
+    // it as one drags the loop's target back onto its own body's cross-axis centre.
+    if (isLoopBackEdge(e)) continue;
     (children.get(e.source) ?? children.set(e.source, []).get(e.source)!).push(e.target);
     (parents.get(e.target) ?? parents.set(e.target, []).get(e.target)!).push(e.source);
   }
@@ -360,10 +371,12 @@ function layoutConnectedGraph(
     dagreGraph.setNode(node.id, { width, height });
   });
 
-  const loopBackEdges = edges.filter((e) => e.targetHandle?.endsWith('-loop-back'));
+  const loopBackEdges = edges.filter((e) => isLoopBackEdge(e));
 
   edges.forEach((edge) => {
-    if (edge.targetHandle?.endsWith('-loop-back')) return;
+    // Loop-backs never reach dagre: it would reverse them to break the cycle and rank the
+    // loop's target AFTER its own successors, visibly re-ordering the graph on Auto-layout.
+    if (isLoopBackEdge(edge)) return;
 
     if (edge.sourceHandle?.endsWith('-exit')) {
       const whileNode = nodes.find((n) => n.id === edge.source && nodeRegistry.isWhileGroupNode(n));

@@ -1114,7 +1114,11 @@ public class AgentAsyncCompletionService {
         try {
             logger.info("[AgentAsyncCompletion] Last async agent delivered - performing deferred cycle reset: runId={}, triggerId={}, epoch={}",
                 runId, dagTriggerId, epoch);
-            signalResumeService.performDeferredReset(runId, dagTriggerId, epoch);
+            // Exempt this delivery's own in-flight entry: it was cleared just above, but that
+            // clear is best-effort, and a swallowed Redis error would otherwise make this
+            // delivery's stale entry block the very reset it is requesting - with no later
+            // delivery left to retry it.
+            signalResumeService.performDeferredReset(runId, dagTriggerId, epoch, correlationId);
         } catch (Exception e) {
             logger.error("[AgentAsyncCompletion] Deferred reset failed: runId={}, triggerId={}, epoch={}, error={}",
                 runId, dagTriggerId, epoch, e.getMessage(), e);

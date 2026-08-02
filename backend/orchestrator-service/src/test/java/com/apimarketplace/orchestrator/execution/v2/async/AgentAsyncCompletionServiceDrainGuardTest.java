@@ -137,7 +137,7 @@ class AgentAsyncCompletionServiceDrainGuardTest {
         service.onAgentResult(successResult("corr-first"));
 
         // Pre-fix: the empty registry made this the "last" agent and it closed the epoch. It MUST NOT.
-        verify(signalResumeService, never()).performDeferredReset(anyString(), anyString(), anyInt());
+        verify(signalResumeService, never()).performDeferredReset(anyString(), anyString(), anyInt(), any());
     }
 
     @Test
@@ -150,7 +150,7 @@ class AgentAsyncCompletionServiceDrainGuardTest {
 
         service.onAgentResult(successResult("corr-last"));
 
-        verify(signalResumeService).performDeferredReset("run-1", "trigger:ask", 1);
+        verify(signalResumeService).performDeferredReset(eq("run-1"), eq("trigger:ask"), eq(1), eq("corr-last"));
     }
 
     @Test
@@ -210,6 +210,6 @@ class AgentAsyncCompletionServiceDrainGuardTest {
 
         service.onAgentResult(successResult("corr-early"));
 
-        verify(signalResumeService, never()).performDeferredReset(anyString(), anyString(), anyInt());
+        verify(signalResumeService, never()).performDeferredReset(anyString(), anyString(), anyInt(), any());
     }
 }

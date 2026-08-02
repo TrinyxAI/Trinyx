@@ -644,6 +644,160 @@ class WorkflowRunRepositoryIntegrationTest {
             assertThat(result).isPresent();
             assertThat(result.get().getRunIdPublic()).isEqualTo("newer");
         }
+
+        // ── findFirstProductionRunByWorkflowIdAndStatusIn (native, version-agnostic) ──
+        // Used by ProductionRunResolver.resolveActiveRun for UNPINNED targets: the
+        // sub-workflow node and error-trigger dispatch.
+
+        private static final List<RunStatus> ACTIVE =
+            List.of(RunStatus.WAITING_TRIGGER, RunStatus.RUNNING, RunStatus.PAUSED);
+
+        @Test
+        @DisplayName("REGRESSION: a newer CANCELLED run no longer shadows an older WAITING_TRIGGER one")
+        void cancelledRunDoesNotShadowWaitingTrigger() {
+            // This is the bug the error-trigger lane shipped with: it selected the newest
+            // run by started_at with NO status predicate and only then rejected terminal
+            // statuses, so one cancelled editor test permanently killed the handler with
+            // nothing but a WARN. Filtering inside the query is the fix.
+            WorkflowRunEntity healthy = createRun(workflowA, "healthy", RunStatus.WAITING_TRIGGER);
+            healthy.setStartedAt(Instant.now().minus(2, ChronoUnit.HOURS));
+            entityManager.persist(healthy);
+
+            WorkflowRunEntity cancelled = createRun(workflowA, "cancelled-newer", RunStatus.CANCELLED);
+            cancelled.setStartedAt(Instant.now());
+            entityManager.persist(cancelled);
+
+            entityManager.flush();
+            entityManager.clear();
+
+            Optional<WorkflowRunEntity> result = runRepository
+                .findFirstProductionRunByWorkflowIdAndStatusIn(workflowA.getId(), ACTIVE);
+
+            assertThat(result).isPresent();
+            assertThat(result.get().getRunIdPublic()).isEqualTo("healthy");
+        }
+
+        @Test
+        @DisplayName("Excludes a clone stamped ONLY via source='showcase'")
+        void excludesShowcaseCloneBySourceAlone() {
+            // RunCloneService stamps both fields; each clause is tested alone so neither
+            // can rot behind the other.
+            WorkflowRunEntity clone = createRun(workflowA, "innocent-looking-name", RunStatus.WAITING_TRIGGER);
+            clone.setSource("showcase");
+            clone.setStartedAt(Instant.now());
+            entityManager.persist(clone);
+
+            WorkflowRunEntity real = createRun(workflowA, "real-run", RunStatus.WAITING_TRIGGER);
+            real.setStartedAt(Instant.now().minus(1, ChronoUnit.HOURS));
+            entityManager.persist(real);
+            entityManager.flush();
+            entityManager.clear();
+
+            assertThat(runRepository.findFirstProductionRunByWorkflowIdAndStatusIn(
+                workflowA.getId(), ACTIVE))
+                .get().extracting(WorkflowRunEntity::getRunIdPublic).isEqualTo("real-run");
+        }
+
+        @Test
+        @DisplayName("Excludes a clone stamped ONLY via the showcase_ run_id_public prefix")
+        void excludesShowcaseCloneByRunIdPrefixAlone() {
+            WorkflowRunEntity clone = createRun(workflowA, "showcase_clone-1", RunStatus.WAITING_TRIGGER);
+            clone.setStartedAt(Instant.now());
+            entityManager.persist(clone);
+
+            WorkflowRunEntity real = createRun(workflowA, "real-run", RunStatus.WAITING_TRIGGER);
+            real.setStartedAt(Instant.now().minus(1, ChronoUnit.HOURS));
+            entityManager.persist(real);
+            entityManager.flush();
+            entityManager.clear();
+
+            assertThat(runRepository.findFirstProductionRunByWorkflowIdAndStatusIn(
+                workflowA.getId(), ACTIVE))
+                .get().extracting(WorkflowRunEntity::getRunIdPublic).isEqualTo("real-run");
+        }
+
+        @Test
+        @DisplayName("ESCAPE clause: the underscore is literal - 'showcaseX...' is NOT excluded")
+        void underscoreIsLiteralNotAWildcard() {
+            // Without ESCAPE '\', the '_' in 'showcase\_%' is a single-char wildcard and
+            // this run would be silently swallowed.
+            WorkflowRunEntity legit = createRun(workflowA, "showcaseXreport", RunStatus.WAITING_TRIGGER);
+            legit.setStartedAt(Instant.now());
+            entityManager.persist(legit);
+            entityManager.flush();
+            entityManager.clear();
+
+            assertThat(runRepository.findFirstProductionRunByWorkflowIdAndStatusIn(
+                workflowA.getId(), ACTIVE))
+                .get().extracting(WorkflowRunEntity::getRunIdPublic).isEqualTo("showcaseXreport");
+        }
+
+        @Test
+        @DisplayName("Spans ALL plan versions - an unpinned workflow has no version to scope to")
+        void spansAllPlanVersions() {
+            WorkflowRunEntity v3 = createRun(workflowA, "v3-run", RunStatus.WAITING_TRIGGER);
+            v3.setPlanVersion(3);
+            v3.setStartedAt(Instant.now());
+            entityManager.persist(v3);
+            entityManager.flush();
+            entityManager.clear();
+
+            Optional<WorkflowRunEntity> result = runRepository
+                .findFirstProductionRunByWorkflowIdAndStatusIn(workflowA.getId(), ACTIVE);
+
+            assertThat(result).isPresent();
+            assertThat(result.get().getRunIdPublic()).isEqualTo("v3-run");
+        }
+
+        @Test
+        @DisplayName("Only terminal runs exist → empty, never a terminal run")
+        void onlyTerminalRunsYieldEmpty() {
+            entityManager.persist(createRun(workflowA, "done", RunStatus.COMPLETED));
+            entityManager.persist(createRun(workflowA, "failed", RunStatus.FAILED));
+            entityManager.flush();
+            entityManager.clear();
+
+            Optional<WorkflowRunEntity> result = runRepository
+                .findFirstProductionRunByWorkflowIdAndStatusIn(workflowA.getId(), ACTIVE);
+
+            assertThat(result).isEmpty();
+        }
+
+        @Test
+        @DisplayName("Honours the caller's status list - the wider non-terminal set admits AWAITING_SIGNAL")
+        void honoursCallerStatusList() {
+            WorkflowRunEntity parked = createRun(workflowA, "parked-on-approval", RunStatus.AWAITING_SIGNAL);
+            parked.setStartedAt(Instant.now());
+            entityManager.persist(parked);
+            entityManager.flush();
+            entityManager.clear();
+
+            // Sub-workflow lane: blocking call, refuses a run parked on a signal.
+            assertThat(runRepository.findFirstProductionRunByWorkflowIdAndStatusIn(
+                workflowA.getId(), ACTIVE)).isEmpty();
+
+            // Error lane: an error handler awaiting an approval is still live.
+            Optional<WorkflowRunEntity> forErrorLane = runRepository
+                .findFirstProductionRunByWorkflowIdAndStatusIn(
+                    workflowA.getId(),
+                    List.of(RunStatus.WAITING_TRIGGER, RunStatus.RUNNING, RunStatus.PAUSED,
+                            RunStatus.AWAITING_SIGNAL, RunStatus.PENDING));
+            assertThat(forErrorLane).isPresent();
+            assertThat(forErrorLane.get().getRunIdPublic()).isEqualTo("parked-on-approval");
+        }
+
+        @Test
+        @DisplayName("Scoped to the workflow - another workflow's live run is never returned")
+        void scopedToWorkflow() {
+            WorkflowRunEntity otherWorkflowRun = createRun(workflowB, "other-wf-run", RunStatus.WAITING_TRIGGER);
+            otherWorkflowRun.setStartedAt(Instant.now());
+            entityManager.persist(otherWorkflowRun);
+            entityManager.flush();
+            entityManager.clear();
+
+            assertThat(runRepository.findFirstProductionRunByWorkflowIdAndStatusIn(
+                workflowA.getId(), ACTIVE)).isEmpty();
+        }
     }
 
     @Nested

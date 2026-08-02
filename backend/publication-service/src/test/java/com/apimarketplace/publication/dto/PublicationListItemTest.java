@@ -36,7 +36,8 @@ class PublicationListItemTest {
                 0, 0, 2, 1, 0, 4.2, 12, PUBLISHED_AT, UPDATED_AT,
                 CATEGORY_ID, "automation", "Automation", "zap", "#8b5cf6",
                 PROJECT_ID, null, null, null, null, null,
-                "test-title", "john-doe"
+                "test-title", "john-doe",
+                true, "[\"CLI_AGENT\",\"VECTOR_SEARCH\"]"
         );
     }
 
@@ -56,6 +57,7 @@ class PublicationListItemTest {
                 publishedAt, updatedAt,
                 null, null, null, null, null,
                 null, null, null, null, null, null,
+                null, null,
                 null, null
         );
     }
@@ -237,7 +239,8 @@ class PublicationListItemTest {
                     PUBLISHED_AT, UPDATED_AT,
                     null, null, null, null, null,
                     null, null, "preset:robot", "anthropic", "claude-sonnet", null,
-                    null, null
+                    null, null,
+                    false, null
             );
             Map<String, Object> response = item.toResponseMap();
             assertThat(response).containsEntry("agentAvatarUrl", "preset:robot");
@@ -259,11 +262,39 @@ class PublicationListItemTest {
                     PUBLISHED_AT, UPDATED_AT,
                     null, null, null, null, null,
                     null, null, null, null, null, "datasource-42",
-                    null, null
+                    null, null,
+                    false, null
             );
             Map<String, Object> response = item.toResponseMap();
             assertThat(response).containsEntry("resourceId", "datasource-42");
             assertThat(response).containsEntry("publicationType", "TABLE");
+        }
+
+        @Test
+        @DisplayName("should expose the CE-exclusive flag and parse its feature list")
+        void ceExclusiveFieldsExposed() {
+            Map<String, Object> response = createFullItem().toResponseMap();
+
+            assertThat(response).containsEntry("ceExclusive", true);
+            assertThat(response).containsEntry("ceExclusiveFeatures", List.of("CLI_AGENT", "VECTOR_SEARCH"));
+        }
+
+        @Test
+        @DisplayName("malformed ceExclusiveFeatures JSON degrades to an empty list, never an exception")
+        void ceExclusiveFeaturesMalformedJson() {
+            PublicationListItem item = new PublicationListItem(
+                    PUB_ID, "WORKFLOW", WORKFLOW_ID, null, "T", "D",
+                    null, null, "WORKFLOW", 0, "pub-1", null, null, null,
+                    "ACTIVE", "PUBLIC", "USER", "pub-1", 0, 0, null, null,
+                    0, 0, 0, 0, 0, null, 0, PUBLISHED_AT, UPDATED_AT,
+                    null, null, null, null, null, null, null, null, null, null, null,
+                    null, null,
+                    true, "{not json");
+
+            Map<String, Object> response = item.toResponseMap();
+
+            assertThat(response).containsEntry("ceExclusive", true);
+            assertThat(response).containsEntry("ceExclusiveFeatures", List.of());
         }
 
         @Test

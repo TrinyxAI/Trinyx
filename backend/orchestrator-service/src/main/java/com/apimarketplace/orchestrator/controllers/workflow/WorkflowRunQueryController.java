@@ -105,18 +105,21 @@ public class WorkflowRunQueryController {
             pageResult.getTotalPages()
         );
 
-        // Batch-fetch max epoch + latest epoch start time per run (two single SQL queries)
+        // Batch-fetch max epoch + latest epoch start + latest epoch duration per run
         List<String> runIds = projections.stream()
             .map(WorkflowRunSummaryProjection::getRunIdPublic)
             .collect(Collectors.toList());
         Map<String, Integer> epochMap = workflowEpochRepository.getMaxEpochByRunIds(runIds);
         Map<String, Instant> lastFireMap =
             workflowEpochRepository.getLatestEpochStartedAtByRunIds(runIds);
+        Map<String, Long> lastEpochDurationMap =
+            workflowEpochRepository.getLatestEpochDurationByRunIds(runIds);
 
         List<WorkflowRunSummary> response = projections.stream()
             .map(p -> mapRunFromProjection(p,
                     epochMap.get(p.getRunIdPublic()),
-                    lastFireMap.get(p.getRunIdPublic())))
+                    lastFireMap.get(p.getRunIdPublic()),
+                    lastEpochDurationMap.get(p.getRunIdPublic())))
             .collect(Collectors.toList());
 
         return ResponseEntity.ok(response);
@@ -142,9 +145,12 @@ public class WorkflowRunQueryController {
         Map<String, Integer> epochMap = workflowEpochRepository.getMaxEpochByRunIds(singleRun);
         Map<String, Instant> lastFireMap =
             workflowEpochRepository.getLatestEpochStartedAtByRunIds(singleRun);
+        Map<String, Long> lastEpochDurationMap =
+            workflowEpochRepository.getLatestEpochDurationByRunIds(singleRun);
         WorkflowRunSummary latestRun = mapRunFromProjection(p,
                 epochMap.get(p.getRunIdPublic()),
-                lastFireMap.get(p.getRunIdPublic()));
+                lastFireMap.get(p.getRunIdPublic()),
+                lastEpochDurationMap.get(p.getRunIdPublic()));
         return ResponseEntity.ok(latestRun);
     }
 
@@ -635,7 +641,8 @@ public class WorkflowRunQueryController {
         return ref.isBlank() ? null : ref;
     }
 
-    private WorkflowRunSummary mapRun(WorkflowRunEntity entity, Integer currentEpoch, Instant lastFireAt) {
+    private WorkflowRunSummary mapRun(WorkflowRunEntity entity, Integer currentEpoch, Instant lastFireAt,
+                                      Long lastEpochDurationMs) {
         return new WorkflowRunSummary(
             entity.getId(),
             entity.getRunIdPublic(),
@@ -651,7 +658,8 @@ public class WorkflowRunQueryController {
             entity.getPlan(),
             entity.getPlanVersion(),
             currentEpoch,
-            lastFireAt
+            lastFireAt,
+            lastEpochDurationMs
         );
     }
 
@@ -660,14 +668,18 @@ public class WorkflowRunQueryController {
         Map<String, Integer> epochMap = workflowEpochRepository.getMaxEpochByRunIds(singleRun);
         Map<String, Instant> lastFireMap =
             workflowEpochRepository.getLatestEpochStartedAtByRunIds(singleRun);
+        Map<String, Long> lastEpochDurationMap =
+            workflowEpochRepository.getLatestEpochDurationByRunIds(singleRun);
         return mapRun(entity,
                 epochMap.get(entity.getRunIdPublic()),
-                lastFireMap.get(entity.getRunIdPublic()));
+                lastFireMap.get(entity.getRunIdPublic()),
+                lastEpochDurationMap.get(entity.getRunIdPublic()));
     }
 
     private WorkflowRunSummary mapRunFromProjection(WorkflowRunSummaryProjection projection,
                                                     Integer currentEpoch,
-                                                    Instant lastFireAt) {
+                                                    Instant lastFireAt,
+                                                    Long lastEpochDurationMs) {
         return new WorkflowRunSummary(
             projection.getId(),
             projection.getRunIdPublic(),
@@ -683,7 +695,8 @@ public class WorkflowRunQueryController {
             null,
             projection.getPlanVersion(),
             currentEpoch,
-            lastFireAt
+            lastFireAt,
+            lastEpochDurationMs
         );
     }
 

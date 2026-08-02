@@ -17,7 +17,7 @@ public class SubWorkflowNodeSpec implements NodeSpec {
             .label("Sub-Workflow")
             .category("core")
             .variablePrefix("core")
-            .description("Executes another workflow as a sub-workflow")
+            .description("Triggers another workflow that already has a live run; never creates one")
             .outputs(List.of(
                 OutputFieldDef.builder()
                     .key("result")

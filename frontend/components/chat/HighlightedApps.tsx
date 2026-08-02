@@ -9,6 +9,7 @@ import type { WorkflowPublication, AcquiredApplication } from '@/lib/api/orchest
 import { favoriteService } from '@/lib/api/orchestrator/favorite.service';
 import { useAuthGuard } from '@/hooks/useAuthGuard';
 import { PublisherAvatar } from '@/components/marketplace/PublisherAvatar';
+import { CeExclusiveBadge } from '@/components/marketplace/CeExclusiveBadge';
 import { ShowcasePreview } from '@/components/marketplace/ShowcasePreview';
 import { InterfacePreview, type InterfaceSnapshotLike } from '@/components/marketplace/InterfacePreview';
 import { publicationService } from '@/lib/api/orchestrator/publication.service';
@@ -187,7 +188,13 @@ function HighlightCard({ pub, remote, target = 'marketplace' }: { pub: DisplayPu
 
       {/* Footer - always visible below the thumbnail (mirrors /app/interface card layout) */}
       <div className="px-1 pt-2 pb-1 space-y-1">
-        <h3 className="text-sm font-medium text-theme-primary truncate">{pub.title}</h3>
+        <div className="flex items-center gap-1.5 min-w-0">
+          <h3 className="text-sm font-medium text-theme-primary truncate">{pub.title}</h3>
+          {/* Highlights are the most-seen surface (anonymous Home / chat row), so a
+              self-hosted-only app must be marked here too - otherwise this is the
+              one place it looks like any other installable app. */}
+          <CeExclusiveBadge publication={pub.real} variant="inline" />
+        </div>
         {pub.description && (
           <p className="text-xs text-theme-muted line-clamp-2 leading-snug">{pub.description}</p>
         )}

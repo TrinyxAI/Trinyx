@@ -3,16 +3,24 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { useRouter } from 'next/navigation';
-import { CheckCircle, X, Gift, Coins, AlertTriangle, AppWindow, Monitor, Workflow, PackagePlus, Table2, Link2, Bot, Zap, Network, Download } from 'lucide-react';
+import { CheckCircle, X, Gift, Coins, AlertTriangle, AppWindow, Monitor, Workflow, PackagePlus, Table2, Link2, Bot, Zap, Network, Download, Server } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { useTranslations } from 'next-intl';
 import type { WorkflowPublication } from '@/lib/api/orchestrator/types';
 import { isCeMode } from '@/lib/format-cost';
+import { ceExclusiveFeatureKeys, isCeExclusiveBlocked } from '@/lib/marketplace/ceExclusive';
 import { PublisherAvatar } from '@/components/marketplace/PublisherAvatar';
 import { track } from '@/lib/analytics/analytics';
 import { useMarketplaceInstallStore } from '@/lib/stores/marketplace-install-store';
 
-type ModalState = 'confirm' | 'processing' | 'success' | 'error' | 'link-required' | 'insufficient-credits';
+type ModalState =
+  | 'confirm'
+  | 'processing'
+  | 'success'
+  | 'error'
+  | 'ce-exclusive'
+  | 'link-required'
+  | 'insufficient-credits';
 
 interface AcquirePublicationModalProps {
   isOpen: boolean;
@@ -50,6 +58,9 @@ export default function AcquirePublicationModal({
   onInstallStarted,
 }: AcquirePublicationModalProps) {
   const t = useTranslations('modals.acquire');
+  // CE-exclusive copy lives in the `marketplace` namespace so the badge, the
+  // card and this modal all read the same strings.
+  const tMarketplace = useTranslations('marketplace');
   const router = useRouter();
   const [mounted, setMounted] = useState(false);
 
@@ -136,7 +147,12 @@ export default function AcquirePublicationModal({
   // confirming would be silently dropped - disable the CTA instead of lying.
   const otherInstallRunning = !isMyInstall && active?.status === 'installing';
 
+  // Managed cloud cannot run a CE-exclusive publication: show the explanation
+  // instead of a CTA that the backend would refuse with 403 CE_EXCLUSIVE.
+  const ceExclusiveBlocked = isCeExclusiveBlocked(publication);
+
   const handleConfirm = () => {
+    if (ceExclusiveBlocked) return;
     const fromConfirm = state === 'confirm';
     const started = startInstall(publication, { ceMode, inline: Boolean(inlineProgress) });
     if (!started) return; // another install is running - keep the modal as-is
@@ -320,6 +336,52 @@ export default function AcquirePublicationModal({
                 {t('retry')}
               </Button>
             </div>
+          </div>
+        </div>
+      </div>,
+      document.body
+    );
+  }
+
+  // CE-exclusive state. Reached two ways: pre-emptively on managed cloud (the
+  // publication is flagged, so the confirm screen is never shown), or after a
+  // backend 403 CE_EXCLUSIVE. No retry button - retrying cannot succeed on this
+  // deployment; the only resolution is a self-hosted install.
+  if (ceExclusiveBlocked || state === 'ce-exclusive') {
+    const featureLabels = ceExclusiveFeatureKeys(publication).map((key) => tMarketplace(key));
+    return createPortal(
+      <div
+        className="fixed inset-0 bg-black/20 backdrop-blur-sm z-[9999] flex items-center justify-center p-4"
+        onClick={handleClose}
+      >
+        <div
+          className="max-w-md w-full bg-theme-primary rounded-2xl shadow-[0_16px_48px_rgba(0,0,0,0.16)] p-6 animate-in fade-in-0 zoom-in-95 duration-200 border border-theme max-h-[90vh] overflow-y-auto"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="acquire-publication-ce-exclusive-title"
+          data-testid="acquire-modal-ce-exclusive"
+          onClick={(e) => e.stopPropagation()}
+        >
+          <div className="text-center">
+            <div className="w-16 h-16 bg-theme-secondary rounded-full flex items-center justify-center mx-auto mb-5">
+              <Server className="h-8 w-8 text-theme-primary" />
+            </div>
+            <h2 id="acquire-publication-ce-exclusive-title" className="text-xl font-semibold text-theme-primary mb-2">
+              {tMarketplace('ceExclusiveTitle')}
+            </h2>
+            <p className="text-sm text-theme-secondary mb-4">
+              {tMarketplace('ceExclusiveDescription')}
+            </p>
+            {featureLabels.length > 0 && (
+              <ul className="text-sm text-theme-secondary mb-6 space-y-1">
+                {featureLabels.map((label) => (
+                  <li key={label}>{label}</li>
+                ))}
+              </ul>
+            )}
+            <Button onClick={handleClose} variant="outline" className="w-full">
+              {t('close')}
+            </Button>
           </div>
         </div>
       </div>,

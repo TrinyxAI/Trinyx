@@ -65,7 +65,8 @@ class WorkflowCrudModuleWaitRunTest {
         module = new WorkflowCrudModule(workflowService, workflowRunRepository,
                 agentWorkflowFireService, planVersionService, pinService, publicationClient,
                 credentialClient, workflowRepository, new ApplicationShowcaseResolver(workflowRunRepository),
-                cancellationProbe);
+                cancellationProbe,
+                mock(com.apimarketplace.orchestrator.tools.common.RunStopToolHandler.class));
         // @Value fields are not injected outside Spring: mirror the production defaults.
         module.waitRunDefaultTimeoutSeconds = 120;
         module.waitRunMaxTimeoutSeconds = 240;

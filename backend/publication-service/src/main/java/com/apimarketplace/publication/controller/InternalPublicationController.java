@@ -4,6 +4,7 @@ import com.apimarketplace.publication.config.OrchestratorInternalClient;
 import com.apimarketplace.publication.domain.WorkflowPublicationEntity;
 import com.apimarketplace.publication.repository.WorkflowPublicationRepository;
 import com.apimarketplace.publication.service.AgentPublicationService;
+import com.apimarketplace.publication.service.CeExclusivePublicationException;
 import com.apimarketplace.publication.service.PublicationPendingReviewException;
 import com.apimarketplace.publication.service.PublicationValidationException;
 import com.apimarketplace.publication.service.RemoteMarketplaceService;
@@ -287,9 +288,27 @@ public class InternalPublicationController {
         try {
             Map<String, Object> result = agentPublicationService.acquireAgentPublication(publicationId, tenantId, organizationId);
             return ResponseEntity.ok(result);
+        } catch (CeExclusivePublicationException e) {
+            return ceExclusiveResponse(e);
         } catch (IllegalArgumentException e) {
             return ResponseEntity.badRequest().body(Map.of("error", e.getMessage()));
         }
+    }
+
+    /**
+     * Uniform refusal for a CE-exclusive publication on managed cloud, mirroring
+     * the public controller byte for byte (403 + {@code code=CE_EXCLUSIVE} +
+     * {@code features}) so {@code PublicationClient} can recognise it whichever
+     * endpoint the caller used. Without this the RuntimeException escaped as an
+     * opaque 500 and the agent-facing tool could only report a generic failure.
+     */
+    private static ResponseEntity<?> ceExclusiveResponse(CeExclusivePublicationException e) {
+        log.info("Internal acquire refused - CE-exclusive publication on managed cloud (features={})", e.getFeatures());
+        return ResponseEntity.status(HttpStatus.FORBIDDEN).body(Map.of(
+                "error", e.getMessage(),
+                "code", "CE_EXCLUSIVE",
+                "features", e.getFeatures()
+        ));
     }
 
     @GetMapping("/is-agent-published/{agentConfigId}")
@@ -359,6 +378,8 @@ public class InternalPublicationController {
         try {
             Map<String, Object> result = resourcePublicationService.acquireResource(publicationId, tenantId, organizationId);
             return ResponseEntity.ok(result);
+        } catch (CeExclusivePublicationException e) {
+            return ceExclusiveResponse(e);
         } catch (IllegalArgumentException e) {
             return ResponseEntity.badRequest().body(Map.of("error", e.getMessage()));
         } catch (Exception e) {
@@ -706,6 +727,8 @@ public class InternalPublicationController {
         try {
             Map<String, Object> result = publicationService.acquirePublication(publicationId, tenantId, organizationId);
             return ResponseEntity.ok(result);
+        } catch (CeExclusivePublicationException e) {
+            return ceExclusiveResponse(e);
         } catch (IllegalArgumentException e) {
             return ResponseEntity.badRequest().body(Map.of("error", e.getMessage()));
         } catch (Exception e) {
@@ -807,6 +830,14 @@ public class InternalPublicationController {
         map.put("publisherAvatarUrl", pub.getPublisherAvatarUrl());
         map.put("planVersion", pub.getPlanVersion());
         map.put("useCount", pub.getUseCount());
+        // CE-exclusive label, emitted ONLY when set (absent = installable), so the
+        // agent-facing application tool can warn before an acquire that would be
+        // refused. Without it here the tool's `ce_exclusive` branch is dead code
+        // and its help ("ABSENT means installable here") becomes a lie on cloud.
+        if (pub.isCeExclusive()) {
+            map.put("ceExclusive", true);
+            map.put("ceExclusiveFeatures", pub.getCeExclusiveFeatures());
+        }
         if (pub.getCategoryId() != null) {
             Map<String, Object> categoryData = orchestratorClient.getCategoryById(pub.getCategoryId());
             if (categoryData != null) {

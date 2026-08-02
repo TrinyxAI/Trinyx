@@ -492,6 +492,7 @@
     "noItems": "No hay elementos disponibles",
     "errorLoading": "Error al cargar los elementos",
     "aiChat": "Chat IA",
+    "runTab": "Ejecución",
     "welcomeTitle": "¿En qué puedo ayudarte?",
     "agent": "Agente",
     "workflowPanel": "Panel de Workflow",
@@ -1023,6 +1024,7 @@
     "viewingEpoch": "Viendo Época {epoch}",
     "runSteps": {
       "noStepsYet": "Sin pasos aún",
+      "notRunYet": "aún no ejecutado",
       "filterAll": "Todos",
       "listView": "Vista de lista",
       "gaugeView": "Vista cronológica",
@@ -1136,6 +1138,7 @@
       "epochCost": "Época {epoch}",
       "budgetBlockedTitle": "Presupuesto alcanzado",
       "budgetBlockedMessage": "Gastado {spent} de {budget}. No se inició ninguna ejecución nueva.",
+      "openInPanel": "Abrir los detalles de la ejecución en el panel",
       "cost": "Coste",
       "scopeAll": "todas las épocas",
       "scopeEpoch": "época {epoch}"
@@ -1265,7 +1268,9 @@
     "skipped": "Omitido",
     "cancelled": "Cancelado",
     "timeout": "Tiempo agotado",
-    "partial_success": "Éxito Parcial"
+    "partial_success": "Éxito Parcial",
+    "awaiting_signal": "Esperando señal",
+    "stopped": "Detenido"
   },
   "errors": {
     "retry": "Reintentar",
@@ -1284,6 +1289,7 @@
     "never": "Nunca",
     "title": "Ejecuciones",
     "noRuns": "Sin ejecuciones aun",
+    "loading": "Cargando la ejecución...",
     "runWorkflow": "Ejecuta tu workflow para ver el historial de ejecuciones",
     "justNow": "Ahora mismo",
     "minutesAgo": "Hace {count}m",
@@ -1301,7 +1307,8 @@
     "version": "v{version}",
     "loadError": "Error al cargar las ejecuciones",
     "stepByStepMode": "Modo paso a paso",
-    "scrollToLoadMore": "Desplázate para cargar más..."
+    "scrollToLoadMore": "Desplázate para cargar más...",
+    "lastFireDuration": "Duración de la última ejecución"
   },
   "table": {
     "addRow": "Agregar fila",
@@ -1616,6 +1623,12 @@
       "comingSoon": "Mercado de fuentes de datos próximamente."
     },
     "acquire": "Instalar",
+    "ceExclusiveBadge": "Exclusivo de CE",
+    "ceExclusiveTooltip": "Solo funciona en una instalación autoalojada (Community Edition)",
+    "ceExclusiveTitle": "Se requiere una instalación autoalojada",
+    "ceExclusiveDescription": "Esta app usa funciones que solo funcionan en una instalación autoalojada, por lo que no se puede instalar aquí. Instálala desde un despliegue autoalojado para usarla.",
+    "ceExclusiveFeatureCliAgent": "Agentes CLI locales (Claude Code, Codex, Gemini CLI, Mistral Vibe)",
+    "ceExclusiveFeatureVectorSearch": "Búsqueda vectorial (embeddings)",
     "acquiring": "Instalando...",
     "open": "Abrir",
     "emptyAgents": "Aún no hay agentes compartidos",
@@ -6565,7 +6578,7 @@
     "subWorkflowNode": {
       "title": "Sub-Workflow",
       "infoTitle": "Nodo Sub-Workflow",
-      "infoDescription": "Ejecuta otro workflow como subrutina, pasando entradas y recibiendo salidas.",
+      "infoDescription": "Activa otro workflow, pasando entradas y recibiendo salidas. El destino ya debe tener una ejecución activa: este nodo nunca crea una.",
       "workflowId": "ID del Workflow",
       "workflowIdPlaceholder": "UUID del workflow a ejecutar",
       "inputMapping": "Mapeo de entrada",
@@ -6713,8 +6726,9 @@
       "autoLayout": "Diseño automático (reorganizar nodos)",
       "disableInteractivity": "Desactivar interactividad",
       "enableInteractivity": "Activar interactividad",
-      "disableBoxSelection": "Desactivar selección por recuadro",
-      "enableBoxSelection": "Activar selección por recuadro",
+      "cursorMode": "Modo de cursor",
+      "cursorModePan": "Mano (desplazar)",
+      "cursorModeSelection": "Cuadro de selección",
       "settings": "Configuración",
       "openConversation": "Abrir el panel de conversación",
       "emptyTitle": "¿En qué puedo ayudarte?",
@@ -6777,6 +6791,8 @@
       "previousVariablePage": "Página anterior de datos resueltos",
       "runAuto": "Ejecutar (automático)",
       "runStepByStep": "Paso a paso (depuración)",
+      "runWithTrigger": "Ejecutar con un disparador",
+      "triggerNotReady": "Este disparador no se puede lanzar en este momento",
       "runWorkflow": "Ejecutar flujo de trabajo",
       "simulateTableTrigger": "Simular un evento de fila de tabla",
       "variablePageSource": "Fuente de datos resueltos",
@@ -8307,7 +8323,8 @@
     "title": "Arista de Bucle",
     "condition": "Condición (SpEL)",
     "conditionPlaceholder": "ej. '{{mcp:paso.salida.recuento}}' > 0",
-    "maxIterations": "Iteraciones máximas"
+    "maxIterations": "Iteraciones máximas",
+    "maxIterationsInherited": "Heredado"
   },
   "storageExplorer": {
     "searchPlaceholder": "Buscar archivos...",

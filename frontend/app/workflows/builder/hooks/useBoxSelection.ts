@@ -8,14 +8,52 @@ interface UseBoxSelectionProps {
   onSelectionChange: (selectedIds: string[]) => void;
   onForceNodesUpdate?: (nodes: Node<BuilderNodeData>[]) => void;
   onNodesChange: OnNodesChange;
+  /**
+   * Whether the canvas offers box selection at all. The stored cursor mode is a
+   * GLOBAL preference, but only the editor exposes the select that changes it -
+   * so run mode and the read-only preview must ignore a persisted `selection`
+   * mode, or a user who armed it in the editor would land there with left-drag
+   * panning dead and no control to restore it.
+   */
+  allowBoxSelection?: boolean;
 }
+
+/**
+ * How a left-drag on the canvas behaves.
+ * - `pan`: drag moves the viewport (the historical default).
+ * - `selection`: drag draws a selection box over the nodes.
+ */
+export type CanvasCursorMode = 'pan' | 'selection';
+
+/**
+ * The mode is a user preference, not per-graph state, so every workflow opens
+ * with the last choice. Read at mount: two canvases mounted at the same time
+ * (the main builder plus a sub-workflow side panel) each keep the value they
+ * started with until remount, and cross-tab is not live either.
+ */
+export const CANVAS_CURSOR_MODE_STORAGE_KEY = 'workflow:cursorMode';
+
+/** Reads the stored mode, falling back to `pan` when absent or unreadable. */
+export function readStoredCursorMode(): CanvasCursorMode {
+  if (typeof window === 'undefined') return 'pan';
+  try {
+    return window.localStorage.getItem(CANVAS_CURSOR_MODE_STORAGE_KEY) === 'selection'
+      ? 'selection'
+      : 'pan';
+  } catch {
+    // Private mode / disabled storage - behave like a fresh user.
+    return 'pan';
+  }
+}
+
 
 interface UseBoxSelectionResult {
   isBoxSelectionEnabled: boolean;
+  cursorMode: CanvasCursorMode;
+  setCursorMode: (mode: CanvasCursorMode) => void;
   isSelecting: boolean;
   selectionStart: XYPosition | null;
   selectionEnd: XYPosition | null;
-  handleToggleBoxSelection: () => void;
   handleSelectionChange: (selection: { nodes?: Array<{ id: string }> }) => void;
   containerRef: React.RefObject<HTMLDivElement | null>;
   selectionJustEndedRef: React.RefObject<boolean>;
@@ -27,8 +65,13 @@ export function useBoxSelection({
   onSelectionChange,
   onForceNodesUpdate,
   onNodesChange,
+  allowBoxSelection = true,
 }: UseBoxSelectionProps): UseBoxSelectionResult {
-  const [isBoxSelectionEnabled, setIsBoxSelectionEnabled] = React.useState(false);
+  // Seeded to the SSR-safe default and hydrated from localStorage in an effect:
+  // reading storage in the initializer would render a different tree on the
+  // server than on the client (hydration mismatch).
+  const [cursorMode, setCursorModeState] = React.useState<CanvasCursorMode>('pan');
+  const isBoxSelectionEnabled = allowBoxSelection && cursorMode === 'selection';
   const [selectionStart, setSelectionStart] = React.useState<XYPosition | null>(null);
   const [selectionEnd, setSelectionEnd] = React.useState<XYPosition | null>(null);
   const [isSelecting, setIsSelecting] = React.useState(false);
@@ -63,14 +106,25 @@ export function useBoxSelection({
     selectionEndRef.current = selectionEnd;
   }, [selectionEnd]);
 
-  const handleToggleBoxSelection = React.useCallback(() => {
-    setIsBoxSelectionEnabled((prev) => !prev);
-    if (isBoxSelectionEnabled) {
+  // Restore the persisted preference once mounted (see the state seed above).
+  React.useEffect(() => {
+    setCursorModeState(readStoredCursorMode());
+  }, []);
+
+  const setCursorMode = React.useCallback((mode: CanvasCursorMode) => {
+    setCursorModeState(mode);
+    try {
+      window.localStorage.setItem(CANVAS_CURSOR_MODE_STORAGE_KEY, mode);
+    } catch {
+      // Storage unavailable - the mode still applies for this session.
+    }
+    if (mode === 'pan') {
+      // Leaving selection mode mid-drag would otherwise leave a ghost rectangle.
       setSelectionStart(null);
       setSelectionEnd(null);
       setIsSelecting(false);
     }
-  }, [isBoxSelectionEnabled]);
+  }, []);
 
   const handleSelectionMove = React.useCallback(
     (event: MouseEvent) => {
@@ -169,6 +223,10 @@ export function useBoxSelection({
 
     const handleMouseDown = (event: MouseEvent) => {
       if (!instance) return;
+      // Left button only: middle/right drag is what still PANS the canvas while
+      // selection mode is armed (panOnDrag={[1, 2]}), so arming a selection here
+      // would swallow the only escape hatch and clear the current selection.
+      if (event.button !== 0) return;
       const target = event.target as HTMLElement;
       if (target.closest('.react-flow__node')) return;
       if (target.closest('button') || target.closest('[role="button"]')) return;
@@ -205,10 +263,11 @@ export function useBoxSelection({
 
   return {
     isBoxSelectionEnabled,
+    cursorMode,
+    setCursorMode,
     isSelecting,
     selectionStart,
     selectionEnd,
-    handleToggleBoxSelection,
     handleSelectionChange,
     containerRef,
     selectionJustEndedRef,

@@ -1,0 +1,327 @@
+'use client';
+
+import { memo, useEffect, useMemo, useState } from 'react';
+import { List as VirtualList, useListRef, type RowComponentProps } from 'react-window';
+import { Calendar } from 'lucide-react';
+import { useTranslations } from 'next-intl';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
+import { formatUtcTime, formatUtcDateTime, parseUtcAware } from '@/lib/utils/dateFormatters';
+import { formatCompactDuration, type EpochTimestamp } from './runFormatting';
+
+interface EpochSelectorProps {
+  epochTimestamps: EpochTimestamp[];
+  selectedEpoch: number | null;
+  onSelectEpoch: (epoch: number | null) => void;
+  viewMode: 'list' | 'waterfall';
+}
+
+function formatTime(isoString: string): string {
+  return formatUtcTime(isoString, { withSeconds: true });
+}
+
+// Row height kept fixed so the virtual list can virtualize without measuring.
+// 40px = py-2.5 (10 + 10) + text-sm line-height (20). Matches the run-history row
+// scale; the selected state's border is on the left edge and adds no height.
+const EPOCH_ROW_HEIGHT = 40;
+// Derived, not a literal: a hardcoded cap stops being a whole number of rows the
+// moment the row height changes, and the list then ends mid-row - which reads as
+// a rendering glitch rather than as "there is more below".
+const EPOCH_LIST_VISIBLE_ROWS = 4;
+const EPOCH_LIST_MAX_HEIGHT = EPOCH_ROW_HEIGHT * EPOCH_LIST_VISIBLE_ROWS;
+
+interface EpochRowProps {
+  entries: EpochTimestamp[];
+  durations: number[];
+  maxDuration: number;
+  selectedEpoch: number | null;
+  onSelectEpoch: (epoch: number | null) => void;
+  viewMode: 'list' | 'waterfall';
+}
+
+// Row component defined at module scope so its identity is stable across renders
+// (List re-renders rows when rowProps changes). All per-row data flows via
+// `rowProps`, never closure capture, so re-renders only fire when rowProps changes.
+function EpochRow({ index, style, entries, durations, maxDuration, selectedEpoch, onSelectEpoch, viewMode }: RowComponentProps<EpochRowProps>) {
+  const t = useTranslations();
+  const entry = entries[index];
+  const isSelected = selectedEpoch === entry.epoch;
+  const isRunning = entry.startedAt != null && entry.endedAt == null;
+  const duration = durations[index];
+  const barPct = maxDuration > 0 ? Math.max(5, (duration / maxDuration) * 100) : 5;
+
+  const epochButton = (
+    <button
+      type="button"
+      style={style}
+      onClick={(e) => { e.stopPropagation(); onSelectEpoch(entry.epoch); }}
+      className={`w-full flex items-center gap-1.5 px-3 py-2.5 text-sm transition-colors ${
+        isSelected
+          ? 'border-l-2 border-gray-900 dark:border-gray-100 bg-gray-50 dark:bg-white/[0.04] font-semibold text-gray-900 dark:text-gray-100'
+          : 'border-l-2 border-transparent hover:bg-gray-50/80 dark:hover:bg-white/[0.03]'
+      }`}
+    >
+      <div className={`w-6 shrink-0 text-center tabular-nums ${
+        isSelected ? 'font-bold text-gray-900 dark:text-gray-100' : 'font-medium text-gray-500 dark:text-gray-400'
+      }`}>
+        {entry.epoch}
+      </div>
+      {/* Running indicator - slot is always reserved (same width + gap whether or
+          not the epoch is running) so the gauge / "HH:mm → HH:mm" / duration to
+          the right never shift horizontally as a run transitions to completed. */}
+      <span className="relative flex h-1.5 w-1.5 shrink-0">
+        {isRunning && (
+          <>
+            <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-blue-400 opacity-75" />
+            <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-blue-500" />
+          </>
+        )}
+      </span>
+
+      {viewMode === 'waterfall' ? (
+        <>
+          <span className="w-[96px] min-w-[96px] shrink-0" />
+          <div className="flex-1 h-[3px] rounded-full bg-gray-100 dark:bg-white/[0.06] overflow-hidden min-w-0">
+            <div
+              className={`h-full rounded-full transition-all ${
+                isRunning ? 'bg-blue-500 animate-pulse' : isSelected ? 'bg-emerald-500' : 'bg-emerald-500/70'
+              }`}
+              style={{ width: `${barPct}%` }}
+            />
+          </div>
+          <span className={`min-w-[40px] text-right text-xs tabular-nums shrink-0 ${
+            isRunning ? 'text-blue-500 dark:text-blue-400' : 'text-gray-500 dark:text-gray-400'
+          }`}>
+            {entry.startedAt ? formatCompactDuration(duration) : ''}
+          </span>
+        </>
+      ) : (
+        <>
+          {/* Three fixed-width slots (start | → | end) inside a flex-1 centered
+              wrapper. The end-time slot keeps its width when it renders "..."
+              so the live "HH:mm:ss → ..." → "HH:mm:ss → HH:mm:ss" transition
+              never shifts the block, and the whole group stays visually
+              centered within the row. */}
+          <span className={`flex-1 inline-flex items-center justify-center gap-1 text-xs tabular-nums whitespace-nowrap ${
+            isRunning ? 'text-blue-500 dark:text-blue-400' : 'text-gray-500 dark:text-gray-400'
+          }`}>
+            {entry.startedAt ? (
+              <>
+                <span className="w-[88px] text-right">{formatTime(entry.startedAt)}</span>
+                <span aria-hidden="true">→</span>
+                <span className="w-[88px] text-left">{entry.endedAt ? formatTime(entry.endedAt) : '...'}</span>
+              </>
+            ) : (
+              <span>-</span>
+            )}
+          </span>
+          {/* Fixed width (48px) sized for the worst case "59m59s" / "99h59m"
+              so the ticking duration on a running epoch doesn't expand the
+              column and squeeze the flex-1 timestamps span to its left. */}
+          <span className={`w-14 text-right text-xs tabular-nums font-medium shrink-0 ${
+            isRunning ? 'text-blue-500 dark:text-blue-400' : 'text-gray-500 dark:text-gray-400'
+          }`}>
+            {entry.startedAt ? formatCompactDuration(duration) : ''}
+          </span>
+        </>
+      )}
+    </button>
+  );
+
+  return (
+    <Tooltip delayDuration={150}>
+      <TooltipTrigger asChild>{epochButton}</TooltipTrigger>
+      <TooltipContent
+        side="left"
+        sideOffset={8}
+        align="center"
+        className="px-3 py-2.5 min-w-[240px]"
+      >
+        <div className="flex flex-col gap-2 text-xs">
+          {/* Header: epoch number + status */}
+          <div className="flex items-center justify-between gap-3 border-b border-gray-100 dark:border-gray-700 pb-1.5">
+            <span className="font-semibold text-gray-900 dark:text-gray-100 tabular-nums">
+              {t('workflow.runSteps.epochTooltip.epoch', { epoch: entry.epoch })}
+            </span>
+            <span className="inline-flex items-center gap-1">
+              {isRunning ? (
+                <>
+                  <span className="relative flex h-1.5 w-1.5">
+                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-blue-400 opacity-75" />
+                    <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-blue-500" />
+                  </span>
+                  <span className="font-medium text-blue-500 dark:text-blue-400">
+                    {t('workflow.runSteps.epochTooltip.running')}
+                  </span>
+                </>
+              ) : entry.endedAt ? (
+                <span className="font-medium text-emerald-600 dark:text-emerald-400">
+                  {t('workflow.runSteps.epochTooltip.completed')}
+                </span>
+              ) : (
+                <span className="font-medium text-gray-500 dark:text-gray-400">
+                  {t('workflow.runSteps.epochTooltip.pending')}
+                </span>
+              )}
+            </span>
+          </div>
+
+          {/* Started */}
+          <div className="flex items-center justify-between gap-3">
+            <span className="text-gray-500 dark:text-gray-400">
+              {t('workflow.runSteps.epochTooltip.started')}
+            </span>
+            <span className="font-medium text-gray-900 dark:text-gray-100 tabular-nums">
+              {entry.startedAt
+                ? formatUtcDateTime(entry.startedAt, { withSeconds: true })
+                : '-'}
+            </span>
+          </div>
+
+          {/* Ended */}
+          <div className="flex items-center justify-between gap-3">
+            <span className="text-gray-500 dark:text-gray-400">
+              {t('workflow.runSteps.epochTooltip.ended')}
+            </span>
+            <span
+              className={`font-medium tabular-nums ${
+                isRunning
+                  ? 'text-blue-500 dark:text-blue-400'
+                  : 'text-gray-900 dark:text-gray-100'
+              }`}
+            >
+              {entry.endedAt
+                ? formatUtcDateTime(entry.endedAt, { withSeconds: true })
+                : isRunning
+                  ? t('workflow.runSteps.epochTooltip.stillRunning')
+                  : '-'}
+            </span>
+          </div>
+
+          {/* Duration */}
+          <div className="flex items-center justify-between gap-3 border-t border-gray-100 dark:border-gray-700 pt-1.5">
+            <span className="text-gray-500 dark:text-gray-400">
+              {t('workflow.runSteps.epochTooltip.duration')}
+            </span>
+            <span
+              className={`font-medium tabular-nums ${
+                isRunning
+                  ? 'text-blue-500 dark:text-blue-400'
+                  : 'text-gray-900 dark:text-gray-100'
+              }`}
+            >
+              {entry.startedAt ? formatCompactDuration(duration) : '-'}
+            </span>
+          </div>
+        </div>
+      </TooltipContent>
+    </Tooltip>
+  );
+}
+
+export const EpochSelector = memo(function EpochSelector({ epochTimestamps, selectedEpoch, onSelectEpoch, viewMode }: EpochSelectorProps) {
+  const t = useTranslations();
+
+  // Sort once per epochTimestamps reference change. Show all epochs regardless of
+  // status filter - the filter already applies to the step list. Hiding epochs
+  // based on active/ended was too aggressive: an active epoch can contain
+  // completed nodes, and a finished epoch can be relevant when filtering by any status.
+  const sorted = useMemo(
+    () => [...epochTimestamps].sort((a, b) => b.epoch - a.epoch),
+    [epochTimestamps]
+  );
+
+  // Conditional 1s ticker: only runs when at least one epoch is still in-flight.
+  // Closed-only timelines pay zero wake-up cost, and the heavy WS-event re-render
+  // cadence stops driving duration recomputation (the previous code re-derived
+  // every duration on every parent render because `Date.now()` was read inline).
+  const hasRunningEpoch = useMemo(
+    () => sorted.some(e => e.startedAt != null && e.endedAt == null),
+    [sorted]
+  );
+  const [tick, setTick] = useState(0);
+  useEffect(() => {
+    if (!hasRunningEpoch) return;
+    const id = setInterval(() => setTick(prev => prev + 1), 1000);
+    return () => clearInterval(id);
+  }, [hasRunningEpoch]);
+
+  const durations = useMemo(() => {
+    return sorted.map((entry) => {
+      if (!entry.startedAt) return 0;
+      const start = parseUtcAware(entry.startedAt).getTime();
+      if (isNaN(start)) return 0;
+      const end = entry.endedAt ? parseUtcAware(entry.endedAt).getTime() : Date.now();
+      return isNaN(end) ? 0 : Math.max(0, end - start);
+    });
+    // `tick` is a deliberate dep: forces recompute every second when a running
+    // epoch exists, so the bar / label tick forward without leaning on SSE cadence.
+  }, [sorted, tick]);
+
+  const maxDuration = useMemo(
+    () => durations.reduce((m, d) => (d > m ? d : m), 1),
+    [durations]
+  );
+
+  // Stable rowProps reference - List re-renders rows when this object's identity
+  // changes; memoizing means SSE pushes that don't actually alter epoch data are no-ops.
+  const rowProps = useMemo<EpochRowProps>(() => ({
+    entries: sorted,
+    durations,
+    maxDuration,
+    selectedEpoch,
+    onSelectEpoch,
+    viewMode,
+  }), [sorted, durations, maxDuration, selectedEpoch, onSelectEpoch, viewMode]);
+
+  // Auto-scroll to the selected epoch when selection changes. Sorted newest-first,
+  // so the index lines up with position in `sorted`.
+  const listRef = useListRef(null);
+  useEffect(() => {
+    if (selectedEpoch == null) return;
+    const idx = sorted.findIndex(e => e.epoch === selectedEpoch);
+    if (idx >= 0) listRef.current?.scrollToRow({ index: idx, align: 'smart' });
+  }, [selectedEpoch, sorted]);
+
+  // Height shrinks to fit when there are fewer epochs than the cap - matches
+  // the original `max-h-[120px]` visual behaviour for small lists.
+  const listHeight = Math.min(sorted.length * EPOCH_ROW_HEIGHT, EPOCH_LIST_MAX_HEIGHT);
+
+  return (
+    <div className="pt-1.5 pb-1.5">
+      {/* "All epochs" button */}
+      <button
+        type="button"
+        onClick={(e) => { e.stopPropagation(); onSelectEpoch(null); }}
+        className={`w-full flex items-center gap-1.5 px-3 py-2.5 text-sm transition-colors ${
+          selectedEpoch === null
+            ? 'border-l-2 border-gray-900 dark:border-gray-100 bg-gray-50 dark:bg-white/[0.04] font-semibold text-gray-900 dark:text-gray-100'
+            : 'border-l-2 border-transparent text-gray-500 dark:text-gray-400 hover:bg-gray-50/80 dark:hover:bg-white/[0.03]'
+        }`}
+      >
+        <div className="w-6 shrink-0 flex items-center justify-center">
+          <Calendar className="w-4 h-4" />
+        </div>
+        <span className="w-[96px] min-w-[96px] shrink-0 truncate text-left">{t('workflow.runSteps.allEpochs')}</span>
+      </button>
+
+      {/* Virtualized epoch rows */}
+      {sorted.length > 0 && (
+        <div className="mt-1">
+          <VirtualList
+            listRef={listRef}
+            rowCount={sorted.length}
+            rowHeight={EPOCH_ROW_HEIGHT}
+            rowComponent={EpochRow}
+            rowProps={rowProps}
+            overscanCount={5}
+            style={{ height: listHeight }}
+            className="scrollbar-thin"
+          />
+        </div>
+      )}
+
+      {/* Separator */}
+      <div className="border-t border-slate-200 dark:border-slate-700 mt-2 mx-3" />
+    </div>
+  );
+});

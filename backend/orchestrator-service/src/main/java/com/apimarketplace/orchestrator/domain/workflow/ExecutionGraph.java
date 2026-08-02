@@ -81,8 +81,10 @@ public class ExecutionGraph {
                 continue;
             }
 
-            // Skip iterate-port edges (loop-back connections don't create DAG dependencies)
-            if ("iterate".equals(EdgeRefParser.getPort(to))) {
+            // Skip back-edges (:iterate port or declared marker) - a loop-back does not create
+            // a DAG dependency; it is what makes the plan's edge list cyclic while the executed
+            // graph stays acyclic.
+            if (WorkflowPlan.isBackEdge(edge)) {
                 continue;
             }
 
@@ -175,6 +177,11 @@ public class ExecutionGraph {
                                                  Map<String, Set<String>> dependents,
                                                  Set<String> allNodeIds) {
         for (Edge edge : plan.getEdges()) {
+            // The structural pass above already excluded loop-backs; taking a dependency from
+            // this edge's params would put the cycle straight back into the graph.
+            if (WorkflowPlan.isBackEdge(edge)) {
+                continue;
+            }
             String to = edge.to();
             if (to == null) {
                 continue;

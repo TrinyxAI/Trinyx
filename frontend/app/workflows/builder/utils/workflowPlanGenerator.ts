@@ -2,6 +2,7 @@ import type { Node, Edge } from 'reactflow';
 import type { BuilderNodeData } from '../types';
 import type { WorkflowPlan } from './workflowPlanTypes';
 import { createPlanGeneratorContext } from './planGeneratorContext';
+import { withDerivedBackEdges } from './backEdgeDetection';
 import { processTriggers } from './triggerProcessor';
 import { processSteps, processCrudNodes, processTransformAndWaitNodes } from './stepProcessor';
 import { processAgents } from './agentProcessor';
@@ -38,7 +39,12 @@ export function generateWorkflowPlan(
   edges: Edge[],
   layoutDirection?: 'horizontal' | 'vertical',
 ): WorkflowPlan {
-  const ctx = createPlanGeneratorContext(nodes, edges);
+  // Which edges close a loop is decided HERE, from the graph being saved - not read from a flag
+  // stamped when the user drew the connection. A stamp goes stale in both directions once the
+  // graph changes around it, and getting it wrong is not cosmetic: an unmarked loop-back is
+  // wired as a dependency, so its target waits for a node that only runs after it (a deadlock
+  // with no error), while a wrongly-marked forward edge is dropped from the graph entirely.
+  const ctx = createPlanGeneratorContext(nodes, withDerivedBackEdges(edges));
   // Stamp the workflow's reading direction into the plan (its DB identity). Only
   // written when a direction is passed (the builder's active direction on save);
   // omitted otherwise so callers that don't care never introduce the key.

@@ -22,6 +22,13 @@ interface TriggerNodePinButtonProps {
   nodeId?: string;
   /** Border color synced with node status - applied as 2px border to match NodeBottomBar buttons */
   borderColor?: string;
+  /**
+   * Where the button is rendered. `node` (default) is the round badge attached
+   * under a trigger node and answers the context menu's pin request; `toolbar`
+   * is the flat variant living in the canvas toolbar, which stays silent on
+   * that event so a menu-triggered flow never opens two confirmations at once.
+   */
+  variant?: 'node' | 'toolbar';
 }
 
 type ModalKind = 'pin-fresh' | 'pin-replace' | 'pin-save-then' | 'unpin';
@@ -32,7 +39,7 @@ type ModalKind = 'pin-fresh' | 'pin-replace' | 'pin-save-then' | 'unpin';
  * WorkflowModeContext so every trigger button shares it and the state
  * survives node remounts when a restored version has different node ids.
  */
-export const TriggerNodePinButton: React.FC<TriggerNodePinButtonProps> = ({ workflowId, nodeId, borderColor }) => {
+export const TriggerNodePinButton: React.FC<TriggerNodePinButtonProps> = ({ workflowId, nodeId, borderColor, variant = 'node' }) => {
   const t = useTranslations();
   const router = useRouter();
   const {
@@ -103,6 +110,9 @@ export const TriggerNodePinButton: React.FC<TriggerNodePinButtonProps> = ({ work
   // TRIGGER_PIN_REQUEST_EVENT and this always-mounted button - matched by nodeId
   // so siblings stay silent - opens the same flow.
   useEffect(() => {
+    // The toolbar copy is not attached to any node, so it must not answer a
+    // node-scoped pin request (it would stack a second modal on the node's).
+    if (variant !== 'node') return;
     const onRequest = (e: Event) => {
       const detail = (e as CustomEvent).detail;
       if (detail?.workflowId !== workflowId) return;
@@ -111,7 +121,7 @@ export const TriggerNodePinButton: React.FC<TriggerNodePinButtonProps> = ({ work
     };
     window.addEventListener(TRIGGER_PIN_REQUEST_EVENT, onRequest);
     return () => window.removeEventListener(TRIGGER_PIN_REQUEST_EVENT, onRequest);
-  }, [workflowId, nodeId]);
+  }, [workflowId, nodeId, variant]);
 
   // Resolves to { ok: true } on a successful save, or { ok: false, message } on
   // failure (or 15s timeout). The detail.error from BuilderCanvas/WorkflowBuilder
@@ -297,6 +307,7 @@ export const TriggerNodePinButton: React.FC<TriggerNodePinButtonProps> = ({ work
   const statusBorderStyle = borderColor
     ? { borderWidth: 2, borderStyle: 'solid' as const, borderColor }
     : undefined;
+  const iconClass = variant === 'toolbar' ? 'w-4 h-4' : 'w-3.5 h-3.5';
 
   return (
     <>
@@ -310,17 +321,25 @@ export const TriggerNodePinButton: React.FC<TriggerNodePinButtonProps> = ({ work
           onMouseDown={(e) => e.stopPropagation()}
           disabled={pinning}
           title={buttonTitle}
-          style={statusBorderStyle}
-          className={`nodrag nopan relative h-7 w-7 rounded-full flex items-center justify-center shadow-md transition-all duration-200 hover:scale-110 bg-white dark:bg-gray-800 text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700 ${
-            borderColor ? '' : 'border border-slate-200 dark:border-slate-700'
-          }`}
+          style={variant === 'toolbar' ? undefined : statusBorderStyle}
+          data-testid={variant === 'toolbar' ? 'canvas-toolbar-pin-button' : undefined}
+          className={
+            variant === 'toolbar'
+              // Flat ghost button matching the other canvas toolbar controls.
+              ? 'relative h-8 w-8 rounded-full flex items-center justify-center text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-theme-tertiary disabled:opacity-50'
+              : `nodrag nopan relative h-7 w-7 rounded-full flex items-center justify-center shadow-md transition-all duration-200 hover:scale-110 bg-white dark:bg-gray-800 text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700 ${
+                  borderColor ? '' : 'border border-slate-200 dark:border-slate-700'
+                }`
+          }
         >
+          {/* Unpin only ever shows in edit mode: run mode gates the affordance
+              out entirely once the viewed version IS the pinned one. */}
           {pinning ? (
             <LoadingSpinner size="xs" />
           ) : isAlreadyPinned ? (
-            <PinOff className="w-3.5 h-3.5" />
+            <PinOff className={iconClass} />
           ) : (
-            <Pin className="w-3.5 h-3.5" />
+            <Pin className={iconClass} />
           )}
         </button>
       )}

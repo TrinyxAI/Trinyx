@@ -14,6 +14,7 @@ import org.springframework.test.util.ReflectionTestUtils;
 
 import java.util.Set;
 
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
@@ -92,7 +93,7 @@ class AgentAsyncCompletionServiceForkMergeRaceTest {
 
         service.triggerDeferredResetIfDrained(RUN_ID, TRIGGER_ID, EPOCH, DELIVERING_CID);
 
-        verify(signalResumeService, never()).performDeferredReset(anyString(), anyString(), anyInt());
+        verify(signalResumeService, never()).performDeferredReset(anyString(), anyString(), anyInt(), any());
     }
 
     @Test
@@ -104,7 +105,7 @@ class AgentAsyncCompletionServiceForkMergeRaceTest {
 
         service.triggerDeferredResetIfDrained(RUN_ID, TRIGGER_ID, EPOCH, DELIVERING_CID);
 
-        verify(signalResumeService).performDeferredReset(RUN_ID, TRIGGER_ID, EPOCH);
+        verify(signalResumeService).performDeferredReset(eq(RUN_ID), eq(TRIGGER_ID), eq(EPOCH), eq(DELIVERING_CID));
     }
 
     @Test
@@ -133,7 +134,7 @@ class AgentAsyncCompletionServiceForkMergeRaceTest {
 
         service.triggerDeferredResetIfDrained(RUN_ID, TRIGGER_ID, EPOCH, DELIVERING_CID);
 
-        verify(signalResumeService, never()).performDeferredReset(anyString(), anyString(), anyInt());
+        verify(signalResumeService, never()).performDeferredReset(anyString(), anyString(), anyInt(), any());
         // Own entry is still cleared up-front (idempotent with the outer finally),
         // but the sibling consult is never reached.
         verify(inFlightStore).clear(DELIVERING_CID);
@@ -164,7 +165,7 @@ class AgentAsyncCompletionServiceForkMergeRaceTest {
 
         service.triggerDeferredResetIfDrained(RUN_ID, TRIGGER_ID, EPOCH, DELIVERING_CID);
 
-        verify(signalResumeService).performDeferredReset(RUN_ID, TRIGGER_ID, EPOCH);
+        verify(signalResumeService).performDeferredReset(eq(RUN_ID), eq(TRIGGER_ID), eq(EPOCH), eq(DELIVERING_CID));
     }
 
     @Test
@@ -190,7 +191,7 @@ class AgentAsyncCompletionServiceForkMergeRaceTest {
             java.time.Instant.now()));
 
         verify(inFlightStore).clear(DELIVERING_CID);
-        verify(signalResumeService, never()).performDeferredReset(anyString(), anyString(), anyInt());
+        verify(signalResumeService, never()).performDeferredReset(anyString(), anyString(), anyInt(), any());
     }
 
     private static PendingAgent pendingAgent() {

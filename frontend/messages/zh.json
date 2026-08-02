@@ -492,6 +492,7 @@
     "noItems": "暂无可用项目",
     "errorLoading": "加载项目失败",
     "aiChat": "AI 聊天",
+    "runTab": "运行",
     "welcomeTitle": "我能帮您做什么？",
     "agent": "代理",
     "workflowPanel": "工作流面板",
@@ -1023,6 +1024,7 @@
     "viewingEpoch": "查看第 {epoch} 轮",
     "runSteps": {
       "noStepsYet": "暂无步骤",
+      "notRunYet": "尚未执行",
       "filterAll": "全部",
       "listView": "列表视图",
       "gaugeView": "时间线视图",
@@ -1136,6 +1138,7 @@
       "epochCost": "轮次 {epoch}",
       "budgetBlockedTitle": "已达预算",
       "budgetBlockedMessage": "已花费 {spent}/{budget}。未启动新的运行。",
+      "openInPanel": "在侧边面板中打开运行详情",
       "cost": "成本",
       "scopeAll": "所有轮次",
       "scopeEpoch": "轮次 {epoch}"
@@ -1265,7 +1268,9 @@
     "skipped": "已跳过",
     "cancelled": "已取消",
     "timeout": "超时",
-    "partial_success": "部分成功"
+    "partial_success": "部分成功",
+    "awaiting_signal": "等待信号",
+    "stopped": "已停止"
   },
   "errors": {
     "retry": "重试",
@@ -1284,6 +1289,7 @@
     "never": "从不",
     "title": "运行记录",
     "noRuns": "暂无运行记录",
+    "loading": "正在加载运行...",
     "runWorkflow": "运行您的工作流以查看执行历史",
     "justNow": "刚刚",
     "minutesAgo": "{count}分钟前",
@@ -1301,7 +1307,8 @@
     "version": "v{version}",
     "loadError": "加载运行记录失败",
     "stepByStepMode": "分步模式",
-    "scrollToLoadMore": "滚动以加载更多..."
+    "scrollToLoadMore": "滚动以加载更多...",
+    "lastFireDuration": "上次执行时长"
   },
   "table": {
     "addRow": "添加行",
@@ -1616,6 +1623,12 @@
       "comingSoon": "数据源市场即将推出。"
     },
     "acquire": "安装",
+    "ceExclusiveBadge": "CE 专属",
+    "ceExclusiveTooltip": "仅可在自托管安装（社区版）上运行",
+    "ceExclusiveTitle": "需要自托管安装",
+    "ceExclusiveDescription": "此应用使用的功能仅能在自托管安装上运行，因此无法在此安装。请从自托管部署中安装以使用它。",
+    "ceExclusiveFeatureCliAgent": "本地 CLI 代理（Claude Code、Codex、Gemini CLI、Mistral Vibe）",
+    "ceExclusiveFeatureVectorSearch": "向量搜索（嵌入）",
     "acquiring": "正在安装……",
     "open": "打开",
     "emptyAgents": "尚无已分享的代理",
@@ -6565,7 +6578,7 @@
     "subWorkflowNode": {
       "title": "子工作流",
       "infoTitle": "子工作流节点",
-      "infoDescription": "将另一个工作流作为子程序执行，传入输入并接收输出。",
+      "infoDescription": "触发另一个工作流，传入输入并接收输出。目标工作流必须已有正在运行的实例：此节点不会创建。",
       "workflowId": "工作流 ID",
       "workflowIdPlaceholder": "待执行工作流的 UUID",
       "inputMapping": "输入映射",
@@ -6713,8 +6726,9 @@
       "autoLayout": "自动布局（重新排列节点）",
       "disableInteractivity": "禁用交互",
       "enableInteractivity": "启用交互",
-      "disableBoxSelection": "禁用框选",
-      "enableBoxSelection": "启用框选",
+      "cursorMode": "光标模式",
+      "cursorModePan": "抓手（平移）",
+      "cursorModeSelection": "框选",
       "settings": "设置",
       "openConversation": "打开对话面板",
       "emptyTitle": "我能帮您做什么？",
@@ -6777,6 +6791,8 @@
       "previousVariablePage": "上一个已解析数据页",
       "runAuto": "运行（自动）",
       "runStepByStep": "逐步（调试）",
+      "runWithTrigger": "选择触发器运行",
+      "triggerNotReady": "此触发器当前无法触发",
       "runWorkflow": "运行工作流",
       "simulateTableTrigger": "模拟表格行事件",
       "variablePageSource": "已解析数据源",
@@ -8307,7 +8323,8 @@
     "title": "循环边",
     "condition": "条件（SpEL）",
     "conditionPlaceholder": "例如：'{{mcp:step.output.count}}' > 0",
-    "maxIterations": "最大迭代次数"
+    "maxIterations": "最大迭代次数",
+    "maxIterationsInherited": "继承"
   },
   "storageExplorer": {
     "searchPlaceholder": "搜索文件...",

@@ -20,6 +20,7 @@ public class ValidationGraphAnalyzer {
     private final Map<String, List<String>> outgoing = new HashMap<>();
     private final Map<String, List<String>> incoming = new HashMap<>();
     private final Set<String> allNodes = new HashSet<>();
+    private final List<String[]> backEdges = new ArrayList<>();
 
     public ValidationGraphAnalyzer(WorkflowBuilderSession session) {
         this.session = session;
@@ -63,14 +64,94 @@ public class ValidationGraphAnalyzer {
             String from = (String) edge.get("from");
             String to = edge.get("to") instanceof String ? (String) edge.get("to") : null;
 
-            if (from != null && to != null) {
-                // V2: Extract base node from port-based 'from' field
-                String baseFromNode = extractBaseNodeId(from);
+            if (from == null || to == null) {
+                continue;
+            }
 
-                outgoing.computeIfAbsent(baseFromNode, k -> new ArrayList<>()).add(to);
-                incoming.computeIfAbsent(to, k -> new ArrayList<>()).add(baseFromNode);
+            // V2: both sides are keyed port-stripped. Storing the RAW `to` used to leave a
+            // ported target ("core:check:if") under a key nothing else uses, so a cycle through
+            // a branch port never closed in the detector and never counted as an incoming edge.
+            String baseFromNode = extractBaseNodeId(from);
+            String baseToNode = extractBaseNodeId(to);
+
+            if (isBackEdge(edge, to)) {
+                // A loop-back is a re-entry, not a dependency: it must not make its target
+                // reachable, must not count as an incoming edge (which would make every
+                // loop-back into a Decision a "multiple incoming" error), and must not close a
+                // cycle in the detector (declaring it is precisely how the author legalises it).
+                //
+                // Only DECLARED back-edges are reported to the span checks. An :iterate edge
+                // belongs to a loop node, a construct that already shipped: its span cannot be
+                // derived here anyway (the loop node's body and exit ports are indistinguishable
+                // once the port is stripped, so the walk would run down the exit path and flag
+                // everything AFTER the loop), and applying new restrictions to it would reject
+                // workflows that run correctly today.
+                if (edge.get("backEdge") != null) {
+                    // The source PORT is kept: a loop-back hanging off a branch behaves very
+                    // differently from one on a plain node, and the difference decides whether
+                    // the loop can ever run.
+                    backEdges.add(new String[] { baseFromNode, baseToNode, EdgeRefParser.getPort(from) });
+                }
+                continue;
+            }
+
+            outgoing.computeIfAbsent(baseFromNode, k -> new ArrayList<>()).add(baseToNode);
+            incoming.computeIfAbsent(baseToNode, k -> new ArrayList<>()).add(baseFromNode);
+        }
+    }
+
+    /**
+     * A session edge that closes a loop: an edge into a loop node's {@code :iterate} port, or one
+     * carrying the declared {@code backEdge} marker.
+     */
+    private static boolean isBackEdge(Map<String, Object> edge, String to) {
+        if (edge.get("backEdge") != null) return true;
+        return "iterate".equals(EdgeRefParser.getPort(to));
+    }
+
+    /**
+     * DECLARED loop-backs as {sourceKey, targetKey} pairs, port-stripped.
+     *
+     * <p>Excludes loop-node {@code :iterate} edges - see the note in {@link #buildGraph()}.
+     */
+    public List<String[]> getBackEdges() {
+        return backEdges;
+    }
+
+    /**
+     * Forward successors of a node (loop-backs excluded), port-stripped.
+     */
+    public List<String> getOutgoingNodeIds(String nodeKey) {
+        return outgoing.getOrDefault(nodeKey, List.of());
+    }
+
+    /**
+     * Nodes reachable forward from {@code fromKey}, walled at {@code untilKey} (inclusive).
+     *
+     * <p>This is the set that re-executes on each iteration of a loop-back going from
+     * {@code untilKey} back to {@code fromKey}. Loop-backs are already absent from the
+     * adjacency, so the walk terminates.
+     */
+    public Set<String> collectForwardSpan(String fromKey, String untilKey) {
+        Set<String> span = new LinkedHashSet<>();
+        if (fromKey == null) return span;
+
+        Deque<String> queue = new ArrayDeque<>();
+        queue.add(fromKey);
+        span.add(fromKey);
+
+        while (!queue.isEmpty()) {
+            String current = queue.poll();
+            if (current.equals(untilKey)) {
+                continue;
+            }
+            for (String next : outgoing.getOrDefault(current, List.of())) {
+                if (span.add(next)) {
+                    queue.add(next);
+                }
             }
         }
+        return span;
     }
 
     /**

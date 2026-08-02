@@ -226,6 +226,13 @@ public final class WorkflowGraphBuilder {
             return;
         }
 
+        // Back-edges are re-entries driven by BackEdgeHandler, not graph dependencies. Adding one
+        // here would give its target a second incoming edge and turn it into an implicit merge
+        // waiting on a node that only runs after it.
+        if (WorkflowPlan.isBackEdge(edge)) {
+            return;
+        }
+
         // Parse the from and to references
         com.apimarketplace.orchestrator.utils.EdgeRefParser.EdgeRef fromRef =
             com.apimarketplace.orchestrator.utils.EdgeRefParser.parse(edge.from());

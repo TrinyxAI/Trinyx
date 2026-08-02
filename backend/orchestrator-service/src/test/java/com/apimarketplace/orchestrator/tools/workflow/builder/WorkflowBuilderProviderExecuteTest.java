@@ -652,7 +652,232 @@ class WorkflowBuilderProviderExecuteTest {
 
         assertThat(result.success()).isFalse();
         assertThat(result.error()).contains("No production run").contains("NOT_PINNED");
+        // No run is parked on a signal here, so the generic bootstrap remedy applies.
+        assertThat(result.error()).contains("workflow(action='pin'");
     }
+
+    @Test
+    @DisplayName("version='pinned' with a run AWAITING_SIGNAL → says resolve the signal, NOT create-and-repin")
+    void version_pinned_runAwaitingSignal_advisesResolvingTheSignal() {
+        WorkflowEntity entity = manualTriggerWorkflow();
+        entity.setPinnedVersion(4);
+        when(workflowService.getWorkflow(UUID.fromString(WF_ID))).thenReturn(Optional.of(entity));
+        when(productionRunResolver.resolve(UUID.fromString(WF_ID),
+                        com.apimarketplace.orchestrator.trigger.ProductionRunResolver.RunSelectionPolicy.LATEST_TRUSTED))
+                .thenReturn(new com.apimarketplace.orchestrator.trigger.ProductionRunResolver.Resolution(
+                        Optional.empty(),
+                        com.apimarketplace.orchestrator.trigger.ProductionRunResolver.Outcome.NO_PRODUCTION_RUN,
+                        "Test WF"));
+        UUID parkedId = UUID.randomUUID();
+        entity.setProductionRunId(parkedId);
+        WorkflowRunEntity parked = mock(WorkflowRunEntity.class);
+        lenient().when(parked.getId()).thenReturn(parkedId);
+        when(parked.getRunIdPublic()).thenReturn("run_parked_1");
+        when(parked.getStatus())
+                .thenReturn(com.apimarketplace.orchestrator.domain.workflow.RunStatus.AWAITING_SIGNAL);
+        when(parked.getPlanVersion()).thenReturn(4);
+        when(workflowRunRepository.findById(parkedId)).thenReturn(Optional.of(parked));
+
+        Map<String, Object> p = params();
+        p.put("version", "pinned");
+        ToolExecutionResult result = provider.execute("workflow", p, CTX);
+
+        assertThat(result.success()).isFalse();
+        assertThat(result.error()).contains("run_parked_1").contains("waiting on a signal");
+        // Creating and pinning a new run would point production AWAY from the run holding
+        // the pending approval, so that remedy must NOT be offered here.
+        assertThat(result.error()).doesNotContain("workflow(action='pin'");
+        // The remedy must name an action the agent can actually invoke.
+        assertThat(result.error()).contains("resolve_approval").contains("get_run");
+    }
+
+    @Test
+    @DisplayName("A parked run that is NOT the production run falls through to the create-and-pin remedy")
+    void version_pinned_parkedRunNotProduction_usesBootstrapRemedy() {
+        WorkflowEntity entity = manualTriggerWorkflow();
+        entity.setPinnedVersion(4);
+        // production_run_id points elsewhere (or was cleared by a rearm): the parked run
+        // below is just an editor run that happens to sit at the pin. Forbidding
+        // create-and-pin here would deny the only remedy that works.
+        entity.setProductionRunId(UUID.randomUUID());
+        when(workflowService.getWorkflow(UUID.fromString(WF_ID))).thenReturn(Optional.of(entity));
+        when(productionRunResolver.resolve(any(), any()))
+                .thenReturn(new com.apimarketplace.orchestrator.trigger.ProductionRunResolver.Resolution(
+                        Optional.empty(),
+                        com.apimarketplace.orchestrator.trigger.ProductionRunResolver.Outcome.NO_PRODUCTION_RUN,
+                        "Test WF"));
+        // A NEWER editor run at the pin is also parked on a signal. A "newest
+        // AWAITING_SIGNAL at the pin" probe would return THIS one and suppress the
+        // create-and-pin remedy over a run that is not production at all.
+        WorkflowRunEntity someEditorRun = mock(WorkflowRunEntity.class);
+        lenient().when(someEditorRun.getId()).thenReturn(UUID.randomUUID());
+        lenient().when(someEditorRun.getRunIdPublic()).thenReturn("run_editor_parked");
+        lenient().when(someEditorRun.getStatus())
+                .thenReturn(com.apimarketplace.orchestrator.domain.workflow.RunStatus.AWAITING_SIGNAL);
+        lenient().when(workflowRunRepository.findFirstProductionRunByWorkflowIdAndPlanVersionAndStatusIn(
+                        any(), any(), any()))
+                .thenReturn(Optional.of(someEditorRun));
+        // The FK production run is COMPLETED, i.e. not signal-blocked.
+        WorkflowRunEntity completedProd = mock(WorkflowRunEntity.class);
+        lenient().when(completedProd.getStatus())
+                .thenReturn(com.apimarketplace.orchestrator.domain.workflow.RunStatus.COMPLETED);
+        lenient().when(workflowRunRepository.findById(any())).thenReturn(Optional.of(completedProd));
+
+        Map<String, Object> p = params();
+        p.put("version", "pinned");
+        ToolExecutionResult result = provider.execute("workflow", p, CTX);
+
+        assertThat(result.success()).isFalse();
+        assertThat(result.error()).contains("No production run");
+        assertThat(result.error()).contains("workflow(action='pin'");
+        assertThat(result.error()).doesNotContain("run_editor_parked");
+    }
+
+    @Test
+    @DisplayName("No production_run_id at all → bootstrap remedy, and the FK is never read")
+    void version_pinned_noFk_usesBootstrapRemedy() {
+        WorkflowEntity entity = manualTriggerWorkflow();
+        entity.setPinnedVersion(4);
+        entity.setProductionRunId(null);
+        when(workflowService.getWorkflow(UUID.fromString(WF_ID))).thenReturn(Optional.of(entity));
+        when(productionRunResolver.resolve(any(), any()))
+                .thenReturn(new com.apimarketplace.orchestrator.trigger.ProductionRunResolver.Resolution(
+                        Optional.empty(),
+                        com.apimarketplace.orchestrator.trigger.ProductionRunResolver.Outcome.NO_PRODUCTION_RUN,
+                        "Test WF"));
+
+        Map<String, Object> p = params();
+        p.put("version", "pinned");
+        ToolExecutionResult result = provider.execute("workflow", p, CTX);
+
+        assertThat(result.error()).contains("No production run");
+        assertThat(result.error()).contains("workflow(action='pin'");
+        verify(workflowRunRepository, never()).findById(any());
+    }
+
+    @Test
+    @DisplayName("A production run that is merely PENDING is not 'waiting on a signal'")
+    void version_pinned_pendingProductionRun_usesBootstrapRemedy() {
+        WorkflowEntity entity = manualTriggerWorkflow();
+        entity.setPinnedVersion(4);
+        UUID prodId = UUID.randomUUID();
+        entity.setProductionRunId(prodId);
+        when(workflowService.getWorkflow(UUID.fromString(WF_ID))).thenReturn(Optional.of(entity));
+        when(productionRunResolver.resolve(any(), any()))
+                .thenReturn(new com.apimarketplace.orchestrator.trigger.ProductionRunResolver.Resolution(
+                        Optional.empty(),
+                        com.apimarketplace.orchestrator.trigger.ProductionRunResolver.Outcome.NO_PRODUCTION_RUN,
+                        "Test WF"));
+        WorkflowRunEntity pending = mock(WorkflowRunEntity.class);
+        lenient().when(pending.getRunIdPublic()).thenReturn("run_pending_1");
+        when(pending.getStatus())
+                .thenReturn(com.apimarketplace.orchestrator.domain.workflow.RunStatus.PENDING);
+        lenient().when(pending.getPlanVersion()).thenReturn(4);
+        when(workflowRunRepository.findById(prodId)).thenReturn(Optional.of(pending));
+
+        Map<String, Object> p = params();
+        p.put("version", "pinned");
+        ToolExecutionResult result = provider.execute("workflow", p, CTX);
+
+        // A queued run is not signal-blocked, so "resolve the signal" would be advice the
+        // agent cannot act on; it gets the bootstrap remedy instead.
+        assertThat(result.error()).contains("No production run");
+        assertThat(result.error()).doesNotContain("waiting on a signal");
+    }
+
+    @Test
+    @DisplayName("A parked FK run at a STALE plan_version is not 'the production run at v<pinned>'")
+    void version_pinned_parkedFkAtStaleVersion_usesBootstrapRemedy() {
+        WorkflowEntity entity = manualTriggerWorkflow();
+        entity.setPinnedVersion(4);
+        UUID staleId = UUID.randomUUID();
+        entity.setProductionRunId(staleId);
+        when(workflowService.getWorkflow(UUID.fromString(WF_ID))).thenReturn(Optional.of(entity));
+        when(productionRunResolver.resolve(any(), any()))
+                .thenReturn(new com.apimarketplace.orchestrator.trigger.ProductionRunResolver.Resolution(
+                        Optional.empty(),
+                        com.apimarketplace.orchestrator.trigger.ProductionRunResolver.Outcome.NO_PRODUCTION_RUN,
+                        "Test WF"));
+        // Reading by FK skips the version predicate the Production* queries carry, so a
+        // heal that did not land leaves a run from an older version behind the pointer.
+        WorkflowRunEntity staleVersionRun = mock(WorkflowRunEntity.class);
+        lenient().when(staleVersionRun.getRunIdPublic()).thenReturn("run_stale_version");
+        when(staleVersionRun.getStatus())
+                .thenReturn(com.apimarketplace.orchestrator.domain.workflow.RunStatus.AWAITING_SIGNAL);
+        when(staleVersionRun.getPlanVersion()).thenReturn(3);
+        when(workflowRunRepository.findById(staleId)).thenReturn(Optional.of(staleVersionRun));
+
+        Map<String, Object> p = params();
+        p.put("version", "pinned");
+        ToolExecutionResult result = provider.execute("workflow", p, CTX);
+
+        assertThat(result.error()).contains("No production run");
+        assertThat(result.error()).contains("workflow(action='pin'");
+        assertThat(result.error()).doesNotContain("run_stale_version");
+    }
+
+    @Test
+    @DisplayName("A parked FK run that is a showcase clone is not 'the production run' either")
+    void version_pinned_parkedFkIsShowcaseClone_usesBootstrapRemedy() {
+        WorkflowEntity entity = manualTriggerWorkflow();
+        entity.setPinnedVersion(4);
+        UUID cloneId = UUID.randomUUID();
+        entity.setProductionRunId(cloneId);
+        when(workflowService.getWorkflow(UUID.fromString(WF_ID))).thenReturn(Optional.of(entity));
+        when(productionRunResolver.resolve(any(), any()))
+                .thenReturn(new com.apimarketplace.orchestrator.trigger.ProductionRunResolver.Resolution(
+                        Optional.empty(),
+                        com.apimarketplace.orchestrator.trigger.ProductionRunResolver.Outcome.NO_PRODUCTION_RUN,
+                        "Test WF"));
+        WorkflowRunEntity clone = mock(WorkflowRunEntity.class);
+        lenient().when(clone.getRunIdPublic()).thenReturn("showcase_frozen_1");
+        when(clone.getStatus())
+                .thenReturn(com.apimarketplace.orchestrator.domain.workflow.RunStatus.AWAITING_SIGNAL);
+        lenient().when(clone.getPlanVersion()).thenReturn(4);
+        lenient().when(clone.getSource()).thenReturn("showcase");
+        when(workflowRunRepository.findById(cloneId)).thenReturn(Optional.of(clone));
+
+        Map<String, Object> p = params();
+        p.put("version", "pinned");
+        ToolExecutionResult result = provider.execute("workflow", p, CTX);
+
+        // A frozen marketplace clone never progresses, so "resolve its signal" would be
+        // advice the agent can never satisfy.
+        assertThat(result.error()).contains("No production run");
+        assertThat(result.error()).contains("workflow(action='pin'");
+        assertThat(result.error()).doesNotContain("showcase_frozen_1");
+    }
+
+    @Test
+    @DisplayName("The parked-signal remedy names every clearable signal action, not just approvals")
+    void version_pinned_parkedRemedyNamesAllSignalActions() {
+        WorkflowEntity entity = manualTriggerWorkflow();
+        entity.setPinnedVersion(4);
+        UUID parkedId = UUID.randomUUID();
+        entity.setProductionRunId(parkedId);
+        when(workflowService.getWorkflow(UUID.fromString(WF_ID))).thenReturn(Optional.of(entity));
+        when(productionRunResolver.resolve(any(), any()))
+                .thenReturn(new com.apimarketplace.orchestrator.trigger.ProductionRunResolver.Resolution(
+                        Optional.empty(),
+                        com.apimarketplace.orchestrator.trigger.ProductionRunResolver.Outcome.NO_PRODUCTION_RUN,
+                        "Test WF"));
+        WorkflowRunEntity parked = mock(WorkflowRunEntity.class);
+        when(parked.getRunIdPublic()).thenReturn("run_parked_2");
+        when(parked.getStatus())
+                .thenReturn(com.apimarketplace.orchestrator.domain.workflow.RunStatus.AWAITING_SIGNAL);
+        when(parked.getPlanVersion()).thenReturn(4);
+        when(workflowRunRepository.findById(parkedId)).thenReturn(Optional.of(parked));
+
+        Map<String, Object> p = params();
+        p.put("version", "pinned");
+        ToolExecutionResult result = provider.execute("workflow", p, CTX);
+
+        // AWAITING_SIGNAL covers USER_APPROVAL, INTERFACE_SIGNAL, WAIT_TIMER and
+        // WEBHOOK_WAIT. An interface parked on __continue never elapses on its own, so
+        // naming only the approval action would strand the agent.
+        assertThat(result.error()).contains("resolve_approval").contains("continue_interface");
+    }
+
 
     @Test
     @DisplayName("version='pinned' happy path → fires prod run via ProductionRunResolver, no editor run created")

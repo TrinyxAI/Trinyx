@@ -1,5 +1,6 @@
 package com.apimarketplace.orchestrator.services;
 
+import com.apimarketplace.common.plan.PlanLayoutNormalizer;
 import com.apimarketplace.common.plan.PlanStripUtils;
 import com.apimarketplace.common.storage.service.StorageBreakdownService;
 import com.apimarketplace.orchestrator.domain.WorkflowEntity;
@@ -66,15 +67,54 @@ public class WorkflowPlanVersionService {
      * @return the version number assigned (or existing max if plan unchanged)
      */
     public int createVersion(UUID workflowId, Map<String, Object> plan, String userId, String label) {
-        // Check if the plan actually changed compared to the latest version
+        // Check if the plan actually changed compared to the latest version.
+        // "Changed" means the WORKFLOW changed, not the canvas layout: a moved node
+        // must not mint a version, or the next execution keys on that new version
+        // and starts a second run instead of accumulating an epoch into the live one.
         int currentMax = versionRepository.getMaxVersion(workflowId).orElse(0);
         if (currentMax > 0) {
             Optional<WorkflowPlanVersionEntity> latestVersion =
                     versionRepository.findByWorkflowIdAndVersion(workflowId, currentMax);
-            if (latestVersion.isPresent() && plansAreEqual(plan, latestVersion.get().getPlan())) {
-                logger.debug("Plan unchanged for workflow {}, skipping version creation (current: v{})",
-                        workflowId, currentMax);
-                return currentMax;
+            if (latestVersion.isPresent() && plansAreSemanticallyEqual(plan, latestVersion.get().getPlan())) {
+                WorkflowPlanVersionEntity latest = latestVersion.get();
+                boolean layoutOnlyDrift = !plansAreEqual(plan, latest.getPlan());
+                if (!layoutOnlyDrift) {
+                    logger.debug("Plan unchanged for workflow {}, skipping version creation (current: v{})",
+                            workflowId, currentMax);
+                    return currentMax;
+                }
+
+                // A PINNED row is immutable: the pin is a contract that this exact
+                // content stays reproducible, and a run stamped with the pinned number
+                // can shadow the real production run (see EditorRunResolver's
+                // production-run guard). Never refresh it in place, and never report
+                // the pin as this save's version - fall through and mint a draft, which
+                // is what the pinned lane of resolveContentVersionForExecution expects
+                // from this method.
+                Integer pinnedVersion = workflowRepository.findById(workflowId)
+                        .map(WorkflowEntity::getPinnedVersion)
+                        .orElse(null);
+                if (pinnedVersion != null && pinnedVersion.intValue() == currentMax) {
+                    logger.debug("Layout-only change for workflow {} but v{} is PINNED - minting a draft instead of "
+                            + "touching the pinned row", workflowId, currentMax);
+                } else {
+                    // Layout-only drift refreshes the stored row IN PLACE (same number)
+                    // so the version history keeps the coordinates a restore would put
+                    // back on the canvas. A label supplied by this save fills an EMPTY
+                    // one (the row would otherwise stay nameless forever, since this
+                    // path is the only write it gets) but never overwrites a name that
+                    // is already there - a background auto-layout must not silently
+                    // relabel a version the user named.
+                    latest.setPlan(new HashMap<>(plan));
+                    if (label != null && !label.isBlank()
+                            && (latest.getLabel() == null || latest.getLabel().isBlank())) {
+                        latest.setLabel(label);
+                    }
+                    versionRepository.save(latest);
+                    logger.debug("Layout-only change for workflow {}: refreshed v{} in place, no new version",
+                            workflowId, currentMax);
+                    return currentMax;
+                }
             }
         }
 
@@ -225,12 +265,24 @@ public class WorkflowPlanVersionService {
                 if (plansAreEqual(plan, pinnedOpt.get().getPlan())) {
                     return pinnedVersion;
                 }
-                // A NORMALIZED match only counts when the plan is not exactly the
-                // draft. Otherwise an editor run on the current draft of a pinned
-                // workflow whose draft differs from the pin by nothing but a re-armed
-                // trigger ref would be stamped with the PIN - which then lets that
-                // editor run adopt the live production run (see EditorRunResolver).
-                // Exact beats normalized: the draft is what this run executes.
+                // A NORMALIZED match - trigger refs re-armed, or canvas coordinates
+                // drifted - only counts when the plan is not exactly the draft.
+                //
+                // Layout is normalized here for the same reason trigger refs are: a
+                // production fire whose node coordinates drifted executes the pinned
+                // LOGIC, and stamping it with the draft number gets it refused at
+                // ProductionRunResolver.isAllowedForProduction.
+                //
+                // But it must stay behind `!matchesLatestExactly`. Otherwise an editor
+                // run on the CURRENT DRAFT of a pinned workflow - where the draft
+                // differs from the pin by nothing but a re-armed trigger ref or a moved
+                // node - would be stamped with the PIN, and a fresh editor run at the
+                // pinned version can shadow the real production run on the next fire
+                // (see EditorRunResolver's CREATED hazard). Exact beats normalized: the
+                // draft is what this run executes.
+                // ONE normalization that drops BOTH, not two predicates OR'd together:
+                // a re-armed schedule and a moved node are independent, everyday events,
+                // and a plan carrying both matched neither half.
                 if (!matchesLatestExactly
                         && plansMatchAllowingTriggerRebinding(plan, pinnedOpt.get().getPlan())) {
                     return pinnedVersion;
@@ -358,8 +410,36 @@ public class WorkflowPlanVersionService {
                     return currentMax;
                 }
 
-                // Different label but plan unchanged → skip
-                if (plansAreEqual(plan, latest.getPlan())) {
+                // Different label but plan unchanged → skip. Layout-only drift counts
+                // as unchanged here too (same reason as createVersion): a moved node
+                // must not fork the version history and, with it, the live run.
+                if (plansAreSemanticallyEqual(plan, latest.getPlan())) {
+                    if (!plansAreEqual(plan, latest.getPlan())) {
+                        // Same workflow, moved nodes: refresh the row in place, exactly
+                        // as createVersion does. Skipping the write keeps the number
+                        // stable but leaves stale coordinates behind, so restoring this
+                        // version would drag the canvas back to a layout the user has
+                        // already moved away from.
+                        //
+                        // A PINNED row is immutable, for the same reason it is in
+                        // createVersion: the pin is a contract that this exact content
+                        // stays reproducible, and an agent session's background
+                        // auto-layout must not rewrite what the user pinned. Fall
+                        // through to mint a draft instead.
+                        Integer pinnedVersion = workflowRepository.findById(workflowId)
+                                .map(WorkflowEntity::getPinnedVersion)
+                                .orElse(null);
+                        if (pinnedVersion == null || pinnedVersion.intValue() != currentMax) {
+                            latest.setPlan(new HashMap<>(plan));
+                            versionRepository.save(latest);
+                            logger.debug("Layout-only change for workflow {} (session={}): refreshed v{} in place",
+                                    workflowId, sessionId, currentMax);
+                            return currentMax;
+                        }
+                        logger.debug("Layout-only change for workflow {} (session={}) but v{} is PINNED - "
+                                + "minting a draft instead of touching the pinned row", workflowId, sessionId, currentMax);
+                        return createVersion(workflowId, plan, userId, sessionId);
+                    }
                     logger.debug("Plan unchanged for workflow {}, skipping version creation (current: v{})",
                             workflowId, currentMax);
                     return currentMax;
@@ -441,6 +521,14 @@ public class WorkflowPlanVersionService {
      * The normalized half of {@link #plansMatchAllowingTriggerRebinding}, callable on its own when
      * the plain equality check has already been performed and failed (the
      * {@code pinned == latest} lane, where {@code latest} IS the pinned row).
+     *
+     * <p>Drops BOTH kinds of noise in ONE pass: standalone trigger refs (re-armed
+     * schedule, re-issued webhook, a restore that stripped them) and canvas layout
+     * (see {@link PlanLayoutNormalizer}). Testing them as two separate predicates
+     * missed the plan that had drifted on both at once - a workflow whose schedule
+     * was re-armed AND whose nodes were nudged is neither exotic nor rare, and it
+     * got stamped with the draft number, which
+     * {@code ProductionRunResolver.isAllowedForProduction} then refuses.
      */
     private boolean plansMatchIgnoringStandaloneRefs(Map<String, Object> plan, Map<String, Object> pinnedPlan) {
         if (plan == null || pinnedPlan == null) {
@@ -448,8 +536,8 @@ public class WorkflowPlanVersionService {
         }
         try {
             return plansAreEqual(
-                    PlanStripUtils.deepCopyAndStrip(plan, objectMapper),
-                    PlanStripUtils.deepCopyAndStrip(pinnedPlan, objectMapper));
+                    PlanStripUtils.deepCopyAndStrip(PlanLayoutNormalizer.withoutLayout(plan), objectMapper),
+                    PlanStripUtils.deepCopyAndStrip(PlanLayoutNormalizer.withoutLayout(pinnedPlan), objectMapper));
         } catch (Exception e) {
             // Never let a normalization failure decide the pin question - fall back
             // to "not the pinned plan", i.e. the pre-existing behaviour.
@@ -462,6 +550,36 @@ public class WorkflowPlanVersionService {
      * Compare two plans for equality, ignoring transient fields (tenant_id, timestamps).
      * Uses Jackson for normalized deep comparison.
      */
+    /**
+     * Same as {@link #plansAreEqual} but blind to canvas LAYOUT (node coordinates).
+     *
+     * <p>This is the predicate for "is this a different PLAN?", as opposed to
+     * {@link #plansAreEqual}, which answers "are these bytes identical?" and stays
+     * the right question for "do I need to persist this?".
+     *
+     * <p>The distinction is load-bearing. A node nudged by two pixels - or an
+     * auto-layout pass re-centring the graph - made the save path mint a NEW
+     * VERSION; the next execution keyed its run on that new version, so it created
+     * a SECOND run instead of accumulating an epoch into the live one. Two runs of
+     * an unedited workflow, neither accumulating the other's epochs. Layout still
+     * gets saved (see {@link PlanLayoutNormalizer}); it just stops forking history.
+     */
+    public boolean plansAreSemanticallyEqual(Map<String, Object> plan1, Map<String, Object> plan2) {
+        if (plan1 == plan2) return true;
+        if (plan1 == null || plan2 == null) return false;
+        try {
+            return plansAreEqual(
+                    PlanLayoutNormalizer.withoutLayout(plan1),
+                    PlanLayoutNormalizer.withoutLayout(plan2));
+        } catch (Exception e) {
+            // A normalization failure must never silently merge two different plans:
+            // fall back to the strict comparison (the pre-existing behaviour).
+            logger.warn("Could not normalize plan layout for comparison, falling back to strict equality: {}",
+                    e.getMessage());
+            return plansAreEqual(plan1, plan2);
+        }
+    }
+
     public boolean plansAreEqual(Map<String, Object> plan1, Map<String, Object> plan2) {
         if (plan1 == plan2) return true;
         if (plan1 == null || plan2 == null) return false;

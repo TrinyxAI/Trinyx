@@ -79,13 +79,33 @@ class WorkflowTriggerDispatchServiceTest {
     }
 
     private WorkflowRunEntity createParentRunEntity() {
+        return createParentRunEntity(true);
+    }
+
+    /**
+     * @param workflowFieldsUsable when false the workflow proxy throws on every accessor
+     *                             but getId(), which is what an uninitialised Hibernate
+     *                             proxy does on these {@code @Async} dispatch threads
+     *                             (open-in-view is off). The workspace must therefore be
+     *                             read from the RUN, which carries both columns.
+     */
+    private WorkflowRunEntity createParentRunEntity(boolean workflowFieldsUsable) {
         WorkflowRunEntity runEntity = mock(WorkflowRunEntity.class);
         WorkflowEntity parentWorkflow = mock(WorkflowEntity.class);
         when(parentWorkflow.getId()).thenReturn(PARENT_WORKFLOW_ID);
-        when(parentWorkflow.getTenantId()).thenReturn(TENANT_ID);
-        when(parentWorkflow.getOrganizationId()).thenReturn(null);
+        if (workflowFieldsUsable) {
+            lenient().when(parentWorkflow.getTenantId()).thenReturn(TENANT_ID);
+            lenient().when(parentWorkflow.getOrganizationId()).thenReturn(null);
+        } else {
+            lenient().when(parentWorkflow.getTenantId()).thenThrow(
+                new org.hibernate.LazyInitializationException("could not initialize proxy - no Session"));
+            lenient().when(parentWorkflow.getOrganizationId()).thenThrow(
+                new org.hibernate.LazyInitializationException("could not initialize proxy - no Session"));
+        }
         when(runEntity.getWorkflow()).thenReturn(parentWorkflow);
         when(runEntity.getPlan()).thenReturn(buildPlanWithTrigger("manual", "start"));
+        lenient().when(runEntity.getTenantId()).thenReturn(TENANT_ID);
+        lenient().when(runEntity.getOrganizationId()).thenReturn(null);
         return runEntity;
     }
 
@@ -128,6 +148,32 @@ class WorkflowTriggerDispatchServiceTest {
     @Nested
     @DisplayName("Version-Aware Dispatch")
     class VersionAwareTests {
+
+        @Test
+        @DisplayName("REGRESSION: completion dispatch survives an uninitialised parent-workflow proxy")
+        void completionDispatchSurvivesLazyProxy() {
+            // Both dispatch methods here read the parent's workspace, and both run @Async
+            // with open-in-view off, so runEntity.getWorkflow() is a proxy that throws on
+            // every field but the id. Reading the workspace off it killed the whole
+            // dispatch inside the outer catch - the same defect that left error handlers
+            // dead since 2026-05-17. Chained workflow triggers were hit identically.
+            WorkflowExecution execution = createCompletedExecution();
+            WorkflowRunEntity parentRun = createParentRunEntity(false);
+            when(runRepository.findById(PARENT_WORKFLOW_RUN_ID)).thenReturn(Optional.of(parentRun));
+
+            WorkflowEntity downstream = createDownstreamWorkflow(3);
+            when(triggerLookupService.findByWorkflowTrigger(PARENT_WORKFLOW_ID.toString()))
+                    .thenReturn(List.of(downstream));
+            when(runRepository.countByWorkflowIdAndStatus(DOWNSTREAM_WORKFLOW_ID, RunStatus.RUNNING)).thenReturn(0L);
+            stubLatestTrustedResolution(emptyResolution(ProductionRunResolver.Outcome.NOT_PINNED));
+
+            service.dispatchWorkflowCompletion(execution);
+
+            // Reaching the resolver at all proves the guard no longer aborts the dispatch.
+            verify(productionRunResolver).resolve(
+                    eq(DOWNSTREAM_WORKFLOW_ID),
+                    eq(ProductionRunResolver.RunSelectionPolicy.LATEST_TRUSTED));
+        }
 
         @Test
         @DisplayName("Unpinned downstream: should refuse production dispatch")

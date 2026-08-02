@@ -380,6 +380,11 @@ public class AgentWorkflowFireService {
         String status = resolveStatus(run, triggerResult);
         result.put("status", status);
 
+        // Why it stopped, when someone stopped it (stop_run). Without this a run
+        // killed mid-flight reports a bare CANCELLED and the agent cannot tell an
+        // explicit stop from a crash.
+        addStopInfo(result, run);
+
         // Duration from metadata lastCycleAt vs run startedAt - use stateSnapshot totalDurationMs
         addDuration(result, run);
 
@@ -503,6 +508,7 @@ public class AgentWorkflowFireService {
         result.put("status", run.getStatus().name());
         result.put("plan_version", run.getPlanVersion());
         result.put("execution_mode", run.getExecutionMode() != null ? run.getExecutionMode().name() : null);
+        addStopInfo(result, run);
         result.put("started_at", run.getStartedAt() != null ? run.getStartedAt().toString() : null);
         result.put("ended_at", run.getEndedAt() != null ? run.getEndedAt().toString() : null);
         addDuration(result, run);
@@ -541,6 +547,10 @@ public class AgentWorkflowFireService {
         result.put("run_id", run.getRunIdPublic());
         result.put("epoch", epoch);
         result.put("status", run.getStatus().name());
+        // The epoch drill-down is the natural next call after a stop, so it must carry the
+        // cause too: the help promises get_run reports it, and that promise covers both
+        // shapes of get_run.
+        addStopInfo(result, run);
 
         // Try persistent header first
         EpochState epochState = loadEpochState(run, epoch);
@@ -1176,6 +1186,37 @@ public class AgentWorkflowFireService {
         return run.getStatus().name();
     }
 
+    /**
+     * Surface WHY a run was stopped, when it was stopped on purpose.
+     *
+     * <p>{@code stop_run} records the caller's reason on the run
+     * ({@link com.apimarketplace.orchestrator.services.resume.AgentRunStopService#META_STOP_REASON}).
+     * Reading it back here is what turns a bare {@code CANCELLED} into an actionable
+     * report for the agent that was waiting on the run (or inspecting it later).
+     * Emits nothing at all for a run nobody stopped, so normal reports stay identical.
+     */
+    private void addStopInfo(Map<String, Object> result, WorkflowRunEntity run) {
+        Map<String, Object> meta = run.getMetadata();
+        if (meta == null || meta.isEmpty()) {
+            return;
+        }
+        Object reason = meta.get(
+                com.apimarketplace.orchestrator.services.resume.AgentRunStopService.META_STOP_REASON);
+        Object stoppedBy = meta.get(
+                com.apimarketplace.orchestrator.services.resume.AgentRunStopService.META_STOPPED_BY);
+        Object stoppedAt = meta.get(
+                com.apimarketplace.orchestrator.services.resume.AgentRunStopService.META_STOPPED_AT);
+        if (reason instanceof String s && !s.isBlank()) {
+            result.put("stop_reason", s);
+        }
+        if (stoppedBy instanceof String s && !s.isBlank()) {
+            result.put("stopped_by", s);
+        }
+        if (stoppedAt instanceof String s && !s.isBlank()) {
+            result.put("stopped_at", s);
+        }
+    }
+
     private void addDuration(Map<String, Object> result, WorkflowRunEntity run) {
         try {
             String snapshotJson = run.getStateSnapshot();
@@ -1695,7 +1736,10 @@ public class AgentWorkflowFireService {
         if (plan.getEdges() == null) return Set.of();
 
         // All node IDs with at least one outgoing edge (strip port suffix e.g. "core:check:if" → "core:check")
+        // Back-edges excluded: the last node of a loop body only "has a successor" through its
+        // loop-back, so counting it would hide it from the agent's outputs entirely.
         Set<String> nodesWithSuccessors = plan.getEdges().stream()
+                .filter(e -> !WorkflowPlan.isBackEdge(e))
                 .map(e -> stripPort(e.from()))
                 .collect(Collectors.toSet());
 

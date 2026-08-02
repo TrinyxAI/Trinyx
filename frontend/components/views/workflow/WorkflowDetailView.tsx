@@ -14,7 +14,20 @@ import { WorkflowRunCanvas, type RunInfoChangeData } from '@/components/workflow
 import { useUnsavedChanges } from '@/app/workflows/builder/hooks/state';
 import { markRunAsJustExecuted } from '@/app/workflows/builder/hooks/useWorkflowLoader';
 import { useSidePanelSafe } from '@/contexts/SidePanelContext';
-import { setPendingActivateTab } from '@/components/app/WorkflowPanelContent';
+import {
+  setPendingActivateTab,
+  NODE_CREATOR_TAB_ID,
+  RUN_TAB_ID,
+} from '@/components/app/WorkflowPanelContent';
+import { WORKFLOW_PANEL_TAB_ID } from '@/lib/sidePanel/workflowPanelTab';
+import {
+  BIND_RUN_EVENT,
+  OPEN_NODE_CREATOR_EVENT,
+  OPEN_RUN_PANEL_EVENT,
+  openRunPanel,
+  type BindRunDetail,
+  type OpenRunPanelDetail,
+} from '@/components/workflow/run-panel/runPanelBus';
 import { Table, Bot, Workflow } from 'lucide-react';
 import { orchestratorApi } from '@/lib/api';
 import { useOrgScopedReset } from '@/lib/hooks/useOrgScopedReset';
@@ -22,6 +35,7 @@ import { useOrgScopedReset } from '@/lib/hooks/useOrgScopedReset';
 import { WorkflowLoadingState } from './WorkflowLoadingState';
 import { WorkflowUnauthorizedState } from './WorkflowUnauthorizedState';
 import { useAutoCollapseSidebar } from './hooks';
+import { OPEN_TRIGGER_TAB_EVENT, findTriggerTabConfig, type OpenTriggerTabDetail } from '@/lib/workflow/triggerTabEvent';
 
 // ============================================
 // Types
@@ -62,9 +76,6 @@ export function WorkflowDetailView({ workflowId, runId: runIdProp, autoOpenApp }
   // Workflow info state
   const [workflowName, setWorkflowName] = useState<string | undefined>(undefined);
 
-  // Runs history panel state
-  const [isRunsHistoryOpen, setIsRunsHistoryOpen] = useState(false);
-
   // Trigger data from WorkflowBuilder (dispatched to WorkflowPanelContent via events)
   const [triggerData, setTriggerData] = useState<TriggerDataForPanel | null>(null);
 
@@ -92,8 +103,85 @@ export function WorkflowDetailView({ workflowId, runId: runIdProp, autoOpenApp }
     setTriggerData(null);
     setWorkflowName(undefined);
     setHasChatFormTrigger(false);
-    setIsRunsHistoryOpen(false);
   });
+
+  // ── Open the workflow panel on the Run / Add Node tab ──
+  // The canvas entry points (version chip, run-panel button, "+") dispatch these.
+  // They are handled HERE, not inside WorkflowPanelContent, because the panel
+  // body is unmounted while the side panel is closed - the very case these
+  // buttons must handle. `setPendingActivateTab` carries the target sub-tab
+  // across that mount. The panel keeps whatever width it already had: these tabs
+  // never resize it.
+  const openWorkflowPanelOnTab = useCallback((subTabId: string) => {
+    // The workflow panel tab is NOT keepMounted, so its body only exists while it
+    // is the ACTIVE tab. "Panel open" is therefore not enough: open on a
+    // sub-workflow / application / files tab means the body is unmounted and no
+    // in-panel listener exists yet.
+    const isWorkflowPanelShowing = !!sidePanel?.isOpen
+      && sidePanel.activeTabId === WORKFLOW_PANEL_TAB_ID;
+
+    if (isWorkflowPanelShowing) {
+      // Mounted: it switches its own sub-tab from the open event. A pending tab
+      // here would sit unconsumed until an unrelated re-render picks it up and
+      // yanks the panel long after the click.
+      sidePanel!.setActiveTab(WORKFLOW_PANEL_TAB_ID);
+      return;
+    }
+    // Body unmounted (panel closed, or showing another tab): the target sub-tab
+    // has to survive the mount. That is what setPendingActivateTab is for.
+    setPendingActivateTab(subTabId, workflowId);
+    if (sidePanel?.isOpen) {
+      sidePanel.setActiveTab(WORKFLOW_PANEL_TAB_ID);
+    } else {
+      window.dispatchEvent(new CustomEvent('workflowViewToggleMessagesPanel', {
+        detail: { isOpen: true },
+      }));
+    }
+  }, [sidePanel, workflowId]);
+
+  useEffect(() => {
+    const handleOpenRun = (event: Event) => {
+      const detail = (event as CustomEvent<OpenRunPanelDetail>).detail ?? {};
+      if (detail.workflowId && detail.workflowId !== workflowId) return;
+      openWorkflowPanelOnTab(RUN_TAB_ID);
+    };
+    const handleOpenNodeCreator = (event: Event) => {
+      const detail = (event as CustomEvent<{ workflowId?: string }>).detail ?? {};
+      if (detail.workflowId && detail.workflowId !== workflowId) return;
+      openWorkflowPanelOnTab(NODE_CREATOR_TAB_ID);
+    };
+    window.addEventListener(OPEN_RUN_PANEL_EVENT, handleOpenRun);
+    window.addEventListener(OPEN_NODE_CREATOR_EVENT, handleOpenNodeCreator);
+    return () => {
+      window.removeEventListener(OPEN_RUN_PANEL_EVENT, handleOpenRun);
+      window.removeEventListener(OPEN_NODE_CREATOR_EVENT, handleOpenNodeCreator);
+    };
+  }, [workflowId, openWorkflowPanelOnTab]);
+
+  // ── Switch the canvas to another run of this workflow, IN PLACE ──
+  // Picking a run in the panel's history used to `router.push` the run route,
+  // which remounts everything and reads as a full-page refresh. Binding the run
+  // through the context is the same mechanism an agent-launched run already uses
+  // (see the sidePanelAutoOpen handler below), so the canvas swaps its run
+  // without tearing the page down.
+  //
+  // The URL is deliberately left alone. Rewriting it with history.replaceState
+  // desynchronises the App Router (it still owns /run/<original>) and the router
+  // re-asserts its own URL on the next render, snapping the canvas back to the
+  // previous run; going through the router instead is the very remount we are
+  // avoiding. The run being viewed is stated by the panel and the run bar, and
+  // the URL stays the entry point the page was opened with.
+  useEffect(() => {
+    const handler = (event: Event) => {
+      const detail = (event as CustomEvent<BindRunDetail>).detail;
+      if (!detail?.runId) return;
+      if (detail.workflowId && detail.workflowId !== workflowId) return;
+      if (detail.runId === effectiveRunId) return;
+      setRunId(detail.runId);
+    };
+    window.addEventListener(BIND_RUN_EVENT, handler);
+    return () => window.removeEventListener(BIND_RUN_EVENT, handler);
+  }, [workflowId, effectiveRunId, setRunId]);
 
   // Handle workflow loaded - store name for chat panel
   const handleWorkflowLoaded = useCallback((info: { name?: string; id?: string }) => {
@@ -172,15 +260,16 @@ export function WorkflowDetailView({ workflowId, runId: runIdProp, autoOpenApp }
 
   // ── Intercept trigger/application tab open events to ensure SidePanel is open ──
   useEffect(() => {
-    const handleOpenTriggerTab = (event: CustomEvent<{ nodeId: string; triggerType: 'chat' | 'form' | 'webhook' }>) => {
+    const handleOpenTriggerTab = (event: CustomEvent<OpenTriggerTabDetail>) => {
       if (sidePanel?.isOpen) {
         // Panel already open (e.g. showing agent tab) - switch to workflow-panel,
         // then let WorkflowPanelContent's own listener handle the internal trigger tab switch
         sidePanel.setActiveTab('workflow-panel');
       } else {
         // Set pending tab and open via the AppHeader's Sparkles handler
-        const match = (effectiveRunId ? triggerData?.configs : [])?.find(
-          c => c.type === event.detail.triggerType
+        const match = findTriggerTabConfig(
+          effectiveRunId ? triggerData?.configs : [],
+          event.detail,
         );
         if (match) {
           setPendingActivateTab(match.triggerId, workflowId);
@@ -209,10 +298,10 @@ export function WorkflowDetailView({ workflowId, runId: runIdProp, autoOpenApp }
       }
     };
 
-    window.addEventListener('workflowOpenTriggerTab', handleOpenTriggerTab as EventListener);
+    window.addEventListener(OPEN_TRIGGER_TAB_EVENT, handleOpenTriggerTab as EventListener);
     window.addEventListener('workflowOpenApplicationTab', handleOpenApplicationTab as EventListener);
     return () => {
-      window.removeEventListener('workflowOpenTriggerTab', handleOpenTriggerTab as EventListener);
+      window.removeEventListener(OPEN_TRIGGER_TAB_EVENT, handleOpenTriggerTab as EventListener);
       window.removeEventListener('workflowOpenApplicationTab', handleOpenApplicationTab as EventListener);
     };
   }, [sidePanel?.isOpen, triggerData, applicationConfigs, effectiveRunId]);
@@ -355,13 +444,40 @@ export function WorkflowDetailView({ workflowId, runId: runIdProp, autoOpenApp }
   }, [applicationConfigs, sidePanel]);
 
   // ── Auto-open SidePanel when entering run mode ──
-  // Priority: 1) Application (interface) tab  2) Trigger tab (chat/form)
+  // Priority: 0) Run tab (the run that was just launched)  1) Application
+  // (interface) tab  2) Trigger tab (chat/form). Effect 0 claims the run id, so
+  // for a given run only ONE of the three fires: pressing Run shows the run, and
+  // the Application / Trigger tabs stay one click away in the tab bar.
   // Only auto-opens once per runId to avoid re-opening after user closes the panel.
   // Only opens when run is active (RUNNING, WAITING_TRIGGER, PAUSED) - not for terminal runs.
   const hasAutoOpenedForRunRef = useRef<string | null>(null);
   const ACTIVE_RUN_STATUSES = ['RUNNING', 'WAITING_TRIGGER', 'PAUSED'];
   const currentRunStatus = triggerData?.runStatus;
   const isActiveRun = !!currentRunStatus && ACTIVE_RUN_STATUSES.includes(currentRunStatus);
+
+  // 0) A run just started (or was bound in place): show it. The Run tab comes
+  //    FIRST - the user pressed Run, so what they want to see is the run itself
+  //    (status, epochs, steps). Claiming `hasAutoOpenedForRunRef` here also stops
+  //    the application/trigger auto-opens below from stealing the focus for this
+  //    run; both remain one click away in the tab bar.
+  //
+  //    Unlike those two, this one does NOT skip when the panel is already open:
+  //    launching a run is an explicit action whose result belongs on screen, so it
+  //    focuses the Run tab even if another panel tab was showing. That is
+  //    deliberate, not an oversight.
+  useEffect(() => {
+    if (!effectiveRunId || isPreviewOnly) return;
+    // Same gate as the two auto-opens below: only a LIVE run pops the panel.
+    // Opening a terminal run's URL must not force the panel open - the user is
+    // reading history, not launching anything.
+    if (!isActiveRun) return;
+    if (hasAutoOpenedForRunRef.current === effectiveRunId) return;
+    hasAutoOpenedForRunRef.current = effectiveRunId;
+    // Explicitly ask for the RUN level: the tab would otherwise reuse whatever
+    // level was last requested (a stale "history" from an earlier click), and
+    // what the user wants right after pressing Run is the run itself.
+    openRunPanel({ workflowId, view: 'run' });
+  }, [effectiveRunId, isPreviewOnly, isActiveRun, workflowId]);
 
   // 1) Auto-open for applications (interfaces)
   useEffect(() => {
@@ -427,9 +543,6 @@ export function WorkflowDetailView({ workflowId, runId: runIdProp, autoOpenApp }
           onAgentConfigsChange={setAgentConfigs}
           onHasChatFormTrigger={setHasChatFormTrigger}
           nodesRef={canvasNodesRef}
-          isRunsHistoryOpen={isRunsHistoryOpen}
-          onOpenRunsHistory={() => setIsRunsHistoryOpen(true)}
-          onCloseRunsHistory={() => setIsRunsHistoryOpen(false)}
         />
       </div>
 

@@ -129,6 +129,10 @@ public class MergeIntegrationService implements RunScopedCache {
         // Also check edges for implicit merge points (multiple edges to same target)
         Map<String, Set<String>> incomingEdges = new HashMap<>();
         for (var edge : plan.getEdges()) {
+            // A loop-back does not make its target an implicit merge point.
+            if (com.apimarketplace.orchestrator.domain.workflow.WorkflowPlan.isBackEdge(edge)) {
+                continue;
+            }
             String to = edge.to();
             String from = edge.from();
             if (to != null && from != null) {

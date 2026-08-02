@@ -1166,7 +1166,7 @@ class SignalResumeServiceTest {
             verify(mockSignalService, atLeastOnce()).clearSignalResumePending(signal);
             verify(mockSignalService).hasBlockingSignalsForDagAndEpoch(runId, triggerId, 0);
             verify(mockReusableTriggerService).resetForNextCycle(
-                eq(run), any(), any(), eq(runId), any(), eq(triggerId), eq(false), eq(0));
+                eq(run), any(), any(), eq(runId), any(), eq(triggerId), eq(false), eq(0), any());
         }
 
         @Test
@@ -1192,7 +1192,7 @@ class SignalResumeServiceTest {
             // Should check for blocking signals but NOT trigger deferred reset
             verify(mockSignalService).hasBlockingSignalsForDagAndEpoch(runId, triggerId, 0);
             verify(mockReusableTriggerService, never()).resetForNextCycle(
-                any(), any(), any(), any(), any(), any(), anyBoolean(), anyInt());
+                any(), any(), any(), any(), any(), any(), anyBoolean(), anyInt(), any());
         }
 
         @Test
@@ -1222,7 +1222,7 @@ class SignalResumeServiceTest {
 
             // Trigger nodes filtered out → empty ready set → deferred reset
             verify(mockReusableTriggerService).resetForNextCycle(
-                eq(run), any(), any(), eq(runId), any(), eq(triggerId), eq(false), eq(0));
+                eq(run), any(), any(), eq(runId), any(), eq(triggerId), eq(false), eq(0), any());
         }
 
         @Test
@@ -1248,7 +1248,7 @@ class SignalResumeServiceTest {
 
             // Reopened from terminal → refinalizeAfterInterfaceResume, NOT deferred reset
             verify(mockReusableTriggerService, never()).resetForNextCycle(
-                any(), any(), any(), any(), any(), any(), anyBoolean(), anyInt());
+                any(), any(), any(), any(), any(), any(), anyBoolean(), anyInt(), any());
             // Should re-save the original terminal status
             verify(mockRunRepository, atLeastOnce()).save(run);
         }
@@ -1282,7 +1282,7 @@ class SignalResumeServiceTest {
             // Verify deferred reset is called with correct epoch
             verify(mockSignalService).hasBlockingSignalsForDagAndEpoch(runId, triggerId, epoch);
             verify(mockReusableTriggerService).resetForNextCycle(
-                eq(run), any(), any(), eq(runId), any(), eq(triggerId), eq(false), eq(epoch));
+                eq(run), any(), any(), eq(runId), any(), eq(triggerId), eq(false), eq(epoch), any());
         }
 
         @Test
@@ -1314,7 +1314,7 @@ class SignalResumeServiceTest {
             resumeService.resumeAfterSignal(signal);
 
             verify(mockReusableTriggerService).resetForNextCycle(
-                eq(run), any(), any(), eq(runId), any(), eq(triggerId), eq(true), eq(epoch));
+                eq(run), any(), any(), eq(runId), any(), eq(triggerId), eq(true), eq(epoch), any());
             verify(mockErrorTriggerDispatchService).dispatchEpochFailure(any());
         }
 
@@ -1344,7 +1344,7 @@ class SignalResumeServiceTest {
 
             // Fail-safe: defaults to true so bell notification fires even if snapshot unreadable
             verify(mockReusableTriggerService).resetForNextCycle(
-                eq(run), any(), any(), eq(runId), any(), eq(triggerId), eq(true), eq(epoch));
+                eq(run), any(), any(), eq(runId), any(), eq(triggerId), eq(true), eq(epoch), any());
             verify(mockErrorTriggerDispatchService).dispatchEpochFailure(any());
         }
 
@@ -1377,7 +1377,7 @@ class SignalResumeServiceTest {
             resumeService.resumeAfterSignal(signal);
 
             verify(mockReusableTriggerService).resetForNextCycle(
-                eq(run), any(), any(), eq(runId), any(), eq(triggerId), eq(false), eq(epoch));
+                eq(run), any(), any(), eq(runId), any(), eq(triggerId), eq(false), eq(epoch), any());
             verify(mockErrorTriggerDispatchService, never()).dispatchEpochFailure(any());
         }
     }
@@ -2993,7 +2993,7 @@ class SignalResumeServiceTest {
 
             // Pre-fix: hasBlockingSignals=false was the only gate → premature reset here.
             verify(mockReusableTriggerService, never()).resetForNextCycle(
-                any(), any(), any(), any(), any(), any(), anyBoolean(), anyInt());
+                any(), any(), any(), any(), any(), any(), anyBoolean(), anyInt(), any());
         }
 
         @Test
@@ -3016,7 +3016,7 @@ class SignalResumeServiceTest {
             order.verify(mockSignalService).clearSignalResumePending(signal);
             order.verify(mockSignalService).hasPendingSignalResumesForDagAndEpoch(runId, "trigger:start", 1);
             order.verify(mockReusableTriggerService).resetForNextCycle(
-                any(), any(), any(), eq(runId), any(), eq("trigger:start"), eq(false), eq(1));
+                any(), any(), any(), eq(runId), any(), eq("trigger:start"), eq(false), eq(1), any());
         }
 
         @Test
@@ -3041,7 +3041,7 @@ class SignalResumeServiceTest {
             resumeService.resumeAfterSignal(gateB);
 
             verify(mockReusableTriggerService, times(1)).resetForNextCycle(
-                any(), any(), any(), eq(runId), any(), eq("trigger:start"), eq(false), eq(1));
+                any(), any(), any(), eq(runId), any(), eq("trigger:start"), eq(false), eq(1), any());
         }
 
         @Test

@@ -54,6 +54,34 @@ class WorkflowBuilderToolDefinitionFactoryTest {
         assertThat(d).contains("unpublish, resolve_approval, continue_interface, mock_suggest, help");
     }
 
+    /**
+     * The tool definition is the ONLY place a fresh agent learns an action exists: if
+     * stop_run or its parameters fall out of the schema, the action becomes unreachable
+     * in practice however well the help documents it. The application tool pins the mirror
+     * image of these assertions.
+     */
+    @Test
+    @DisplayName("stop_run is enumerated with its own parameters and its two load-bearing warnings")
+    void stopRunIsAdvertisedWithItsParameters() {
+        AgentToolDefinition tool = factory.buildToolDefinition();
+        assertThat(tool.parameters().stream().map(ToolParameter::name))
+                .contains("run_id", "reason", "mode");
+
+        String action = actionParam().description();
+        assertThat(action)
+                .contains("stop_run")
+                .contains("counterpart of execute")
+                // the two facts an agent cannot discover by trying
+                .contains("can omit run_id to stop its own run");
+
+        String mode = tool.parameters().stream()
+                .filter(p -> "mode".equals(p.name()))
+                .findFirst().orElseThrow().description();
+        assertThat(mode)
+                .contains("suspends the schedules")
+                .contains("PENDING or WAITING_TRIGGER");
+    }
+
     @Test
     @DisplayName("action param keeps the load-bearing one-liners: finish closes the session, pin needs a successful run, both run-control verbs are gated")
     void actionParamKeepsLoadBearingRules() {

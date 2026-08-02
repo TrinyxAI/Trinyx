@@ -114,9 +114,16 @@ class RedisInFlightStoreTest {
         return new RedisInFlightStore.InFlightEntry(p, r);
     }
 
+    /**
+     * Both guards read through the per-run index rather than {@code listAll()}: a keyspace SCAN
+     * on the epoch-close path of every reusable trigger, inside a transaction holding an advisory
+     * lock and a row lock, is not acceptable. Stubbing {@code listForRun} keeps these cases about
+     * the FILTER (epoch / trigger / exclude) they exist to pin; the index read itself, including
+     * stale-member pruning, is covered separately below.
+     */
     private static RedisInFlightStore storeReturning(List<RedisInFlightStore.InFlightEntry> staged) {
         RedisInFlightStore store = spy(new RedisInFlightStore(mock(StringRedisTemplate.class), new ObjectMapper()));
-        doReturn(staged).when(store).listAll();
+        doReturn(staged).when(store).listForRun(org.mockito.ArgumentMatchers.anyString());
         return store;
     }
 
@@ -179,6 +186,247 @@ class RedisInFlightStoreTest {
 
         assertThat(store.tryClaimReplay("cid-1")).isTrue();
         assertThat(store.tryClaimReplay("cid-1")).isFalse();
+    }
+
+    // ── hasAnyInFlightForRun: the run-wide counterpart, for the reset guard ──
+    // ReusableTriggerService.hasActiveSignalsForTrigger has a legacy path that holds no
+    // (triggerId, epoch) to scope by, and the registry it used to consult alone is empty for
+    // the whole of a delivery. Without this lookup that path resets the epoch mid-delivery and
+    // the node downstream of the agent is never dispatched.
+
+    @Test
+    @DisplayName("hasAnyInFlightForRunSeesAnEntryWhateverItsTriggerOrEpoch: the run-wide guard is not scoped by epoch")
+    void hasAnyInFlightForRunIgnoresTriggerAndEpoch() {
+        RedisInFlightStore store = storeReturning(List.of(
+            entry("cid-other-epoch", "run-1", "trigger:ask", 7)));
+
+        assertThat(store.hasAnyInFlightForRun("run-1"))
+            .as("the caller has no epoch to compare, so ANY in-flight agent for the run blocks the reset")
+            .isTrue();
+    }
+
+    // ── listForRun: the index read itself, against a stubbed Redis ──
+    // This is where run-scoping and stale-member pruning actually live now, so they are pinned
+    // against the real code path rather than through a stub.
+
+    private static RedisInFlightStore storeOverIndex(
+            java.util.Map<String, java.util.Set<String>> index,
+            java.util.Map<String, String> values) {
+        StringRedisTemplate template = mock(StringRedisTemplate.class);
+        @SuppressWarnings("unchecked")
+        org.springframework.data.redis.core.SetOperations<String, String> setOps =
+            mock(org.springframework.data.redis.core.SetOperations.class);
+        @SuppressWarnings("unchecked")
+        org.springframework.data.redis.core.ValueOperations<String, String> valueOps =
+            mock(org.springframework.data.redis.core.ValueOperations.class);
+        org.mockito.Mockito.when(template.opsForSet()).thenReturn(setOps);
+        org.mockito.Mockito.when(template.opsForValue()).thenReturn(valueOps);
+        org.mockito.Mockito.when(setOps.members(org.mockito.ArgumentMatchers.anyString()))
+            .thenAnswer(inv -> index.get(inv.<String>getArgument(0)));
+        org.mockito.Mockito.when(valueOps.get(org.mockito.ArgumentMatchers.anyString()))
+            .thenAnswer(inv -> values.get(inv.<String>getArgument(0)));
+        return new RedisInFlightStore(template, new ObjectMapper());
+    }
+
+    private static String stagedJson(String correlationId, String runId, String dagTriggerId, int epoch)
+            throws Exception {
+        RedisInFlightStore.InFlightEntry e = entry(correlationId, runId, dagTriggerId, epoch);
+        return new ObjectMapper().writeValueAsString(
+            RedisInFlightStore.toInFlightMap(e.pending(), e.result()));
+    }
+
+    @Test
+    @DisplayName("listForRunReadsOnlyThisRunsIndex: a concurrent run's agent must not freeze this run's cycle")
+    void listForRunIsScopedToTheRun() throws Exception {
+        RedisInFlightStore store = storeOverIndex(
+            java.util.Map.of(RedisInFlightStore.RUN_INDEX_PREFIX + "run-2", java.util.Set.of("cid-elsewhere")),
+            java.util.Map.of(RedisInFlightStore.KEY_PREFIX + "cid-elsewhere",
+                stagedJson("cid-elsewhere", "run-2", "trigger:ask", 1)));
+
+        assertThat(store.hasAnyInFlightForRun("run-1"))
+            .as("run-1's index is empty, so run-2's in-flight agent is invisible here")
+            .isFalse();
+        assertThat(store.hasAnyInFlightForRun("run-2")).isTrue();
+    }
+
+    @Test
+    @DisplayName("listForRunPrunesAMemberWhoseValueIsGone: a stale index entry must never freeze a run forever")
+    void listForRunPrunesStaleMembers() {
+        // The value was deleted (or expired) but the index member survived - e.g. clear()
+        // succeeded and nothing removed the member. If the guard trusted membership alone, this
+        // run's epoch could never reset again.
+        StringRedisTemplate template = mock(StringRedisTemplate.class);
+        @SuppressWarnings("unchecked")
+        org.springframework.data.redis.core.SetOperations<String, String> setOps =
+            mock(org.springframework.data.redis.core.SetOperations.class);
+        @SuppressWarnings("unchecked")
+        org.springframework.data.redis.core.ValueOperations<String, String> valueOps =
+            mock(org.springframework.data.redis.core.ValueOperations.class);
+        org.mockito.Mockito.when(template.opsForSet()).thenReturn(setOps);
+        org.mockito.Mockito.when(template.opsForValue()).thenReturn(valueOps);
+        org.mockito.Mockito.when(setOps.members(RedisInFlightStore.RUN_INDEX_PREFIX + "run-1"))
+            .thenReturn(java.util.Set.of("cid-stale"));
+        org.mockito.Mockito.when(valueOps.get(RedisInFlightStore.KEY_PREFIX + "cid-stale")).thenReturn(null);
+
+        RedisInFlightStore store = new RedisInFlightStore(template, new ObjectMapper());
+
+        assertThat(store.hasAnyInFlightForRun("run-1"))
+            .as("a member that resolves to nothing is not an in-flight agent")
+            .isFalse();
+        // Verified on the mock rather than through an Answer: SetOperations.remove is varargs,
+        // and a single-value matcher does not bind the vararg array reliably.
+        org.mockito.Mockito.verify(setOps)
+            .remove(RedisInFlightStore.RUN_INDEX_PREFIX + "run-1", "cid-stale");
+    }
+
+    // ── stage(): the WRITE half of the index, which every per-run guard depends on ──
+    // A typo here (wrong key, wrong member, no index at all) leaves the readers permanently
+    // blind while every read-side test stays green, so the write is pinned explicitly.
+
+    @Test
+    @DisplayName("stageIndexesTheEntryUnderItsRunBeforeWritingTheValue: index first, so a value is never queryable without being findable")
+    void stageWritesIndexBeforeValue() {
+        StringRedisTemplate template = mock(StringRedisTemplate.class);
+        @SuppressWarnings("unchecked")
+        org.springframework.data.redis.core.SetOperations<String, String> setOps =
+            mock(org.springframework.data.redis.core.SetOperations.class);
+        @SuppressWarnings("unchecked")
+        org.springframework.data.redis.core.ValueOperations<String, String> valueOps =
+            mock(org.springframework.data.redis.core.ValueOperations.class);
+        org.mockito.Mockito.when(template.opsForSet()).thenReturn(setOps);
+        org.mockito.Mockito.when(template.opsForValue()).thenReturn(valueOps);
+
+        RedisInFlightStore.InFlightEntry e = entry("cid-w", "run-w", "trigger:ask", 3);
+        new RedisInFlightStore(template, new ObjectMapper()).stage(e.pending(), e.result());
+
+        org.mockito.InOrder order = org.mockito.Mockito.inOrder(setOps, valueOps);
+        order.verify(setOps).add(RedisInFlightStore.RUN_INDEX_PREFIX + "run-w", "cid-w");
+        order.verify(valueOps).set(
+            org.mockito.ArgumentMatchers.eq(RedisInFlightStore.KEY_PREFIX + "cid-w"),
+            org.mockito.ArgumentMatchers.anyString(),
+            org.mockito.ArgumentMatchers.anyLong(),
+            org.mockito.ArgumentMatchers.any());
+        // The index must expire with the entries it points at; an index outliving them would
+        // keep a run's epoch resets deferred long after every agent finished.
+        org.mockito.Mockito.verify(template).expire(
+            org.mockito.ArgumentMatchers.eq(RedisInFlightStore.RUN_INDEX_PREFIX + "run-w"),
+            org.mockito.ArgumentMatchers.eq(RedisInFlightStore.DEFAULT_TTL.toMillis()),
+            org.mockito.ArgumentMatchers.eq(java.util.concurrent.TimeUnit.MILLISECONDS));
+    }
+
+    @Test
+    @DisplayName("stageStillWritesTheValueWhenTheIndexWriteFails: recovery keeps working, but the guards are told they went blind")
+    void stageWritesValueEvenIfIndexFails() {
+        StringRedisTemplate template = mock(StringRedisTemplate.class);
+        @SuppressWarnings("unchecked")
+        org.springframework.data.redis.core.SetOperations<String, String> setOps =
+            mock(org.springframework.data.redis.core.SetOperations.class);
+        @SuppressWarnings("unchecked")
+        org.springframework.data.redis.core.ValueOperations<String, String> valueOps =
+            mock(org.springframework.data.redis.core.ValueOperations.class);
+        org.mockito.Mockito.when(template.opsForSet()).thenReturn(setOps);
+        org.mockito.Mockito.when(template.opsForValue()).thenReturn(valueOps);
+        org.mockito.Mockito.when(setOps.add(org.mockito.ArgumentMatchers.anyString(),
+                org.mockito.ArgumentMatchers.<String>any()))
+            .thenThrow(new org.springframework.data.redis.RedisConnectionFailureException("down"));
+
+        RedisInFlightStore.InFlightEntry e = entry("cid-noidx", "run-noidx", "trigger:ask", 1);
+        new RedisInFlightStore(template, new ObjectMapper()).stage(e.pending(), e.result());
+
+        // The value is still written: AgentRecoveryService.replayInFlightEntries scans the value
+        // namespace directly, so crash recovery must not be sacrificed for the guards.
+        org.mockito.Mockito.verify(valueOps).set(
+            org.mockito.ArgumentMatchers.eq(RedisInFlightStore.KEY_PREFIX + "cid-noidx"),
+            org.mockito.ArgumentMatchers.anyString(),
+            org.mockito.ArgumentMatchers.anyLong(),
+            org.mockito.ArgumentMatchers.any());
+        // Retried once before giving up - the caller cannot come back later.
+        org.mockito.Mockito.verify(setOps, org.mockito.Mockito.times(2))
+            .add(RedisInFlightStore.RUN_INDEX_PREFIX + "run-noidx", "cid-noidx");
+    }
+
+    @Test
+    @DisplayName("stageThenLookUpRoundTrip: a staged entry is visible to the guard that reads the index")
+    void stageThenGuardSeesIt() {
+        java.util.Map<String, java.util.Set<String>> index = new java.util.HashMap<>();
+        java.util.Map<String, String> values = new java.util.HashMap<>();
+        StringRedisTemplate template = mock(StringRedisTemplate.class);
+        @SuppressWarnings("unchecked")
+        org.springframework.data.redis.core.SetOperations<String, String> setOps =
+            mock(org.springframework.data.redis.core.SetOperations.class);
+        @SuppressWarnings("unchecked")
+        org.springframework.data.redis.core.ValueOperations<String, String> valueOps =
+            mock(org.springframework.data.redis.core.ValueOperations.class);
+        org.mockito.Mockito.when(template.opsForSet()).thenReturn(setOps);
+        org.mockito.Mockito.when(template.opsForValue()).thenReturn(valueOps);
+        org.mockito.Mockito.when(setOps.add(org.mockito.ArgumentMatchers.anyString(),
+                org.mockito.ArgumentMatchers.<String>any()))
+            .thenAnswer(inv -> {
+                index.computeIfAbsent(inv.getArgument(0), k -> new java.util.HashSet<>())
+                     .add(inv.getArgument(1));
+                return 1L;
+            });
+        org.mockito.Mockito.doAnswer(inv -> { values.put(inv.getArgument(0), inv.getArgument(1)); return null; })
+            .when(valueOps).set(org.mockito.ArgumentMatchers.anyString(),
+                org.mockito.ArgumentMatchers.anyString(),
+                org.mockito.ArgumentMatchers.anyLong(),
+                org.mockito.ArgumentMatchers.any());
+        org.mockito.Mockito.when(setOps.members(org.mockito.ArgumentMatchers.anyString()))
+            .thenAnswer(inv -> index.get(inv.<String>getArgument(0)));
+        org.mockito.Mockito.when(valueOps.get(org.mockito.ArgumentMatchers.anyString()))
+            .thenAnswer(inv -> values.get(inv.<String>getArgument(0)));
+
+        RedisInFlightStore store = new RedisInFlightStore(template, new ObjectMapper());
+        RedisInFlightStore.InFlightEntry e = entry("cid-rt", "run-rt", "trigger:ask", 2);
+        store.stage(e.pending(), e.result());
+
+        assertThat(store.hasOtherInFlightForEpoch("run-rt", "trigger:ask", 2, null))
+            .as("what stage() writes must be what the reset guard reads - the whole fix depends on it")
+            .isTrue();
+        assertThat(store.hasAnyInFlightForRun("run-rt")).isTrue();
+        assertThat(store.hasOtherInFlightForEpoch("run-rt", "trigger:ask", 2, "cid-rt"))
+            .as("and the entry must be exemptable by its own delivery")
+            .isFalse();
+    }
+
+    @Test
+    @DisplayName("indexPrefixCannotCollideWithTheValueNamespace: listAll's SCAN would WRONGTYPE on a set key")
+    void indexPrefixDoesNotCollideWithValuePrefix() {
+        // listAll() runs SCAN MATCH KEY_PREFIX + "*" and GETs every hit. If the index prefix ever
+        // matched that pattern, every recovery tick would hit WRONGTYPE on a set key.
+        assertThat(RedisInFlightStore.RUN_INDEX_PREFIX).doesNotStartWith(RedisInFlightStore.KEY_PREFIX);
+        assertThat(RedisInFlightStore.KEY_PREFIX).doesNotStartWith(RedisInFlightStore.RUN_INDEX_PREFIX);
+    }
+
+    @Test
+    @DisplayName("listForRunFailsOpenWhenRedisIsDown: a hiccup restores the prior behaviour instead of freezing the cycle")
+    void listForRunFailsOpen() {
+        StringRedisTemplate template = mock(StringRedisTemplate.class);
+        org.mockito.Mockito.when(template.opsForSet())
+            .thenThrow(new org.springframework.data.redis.RedisConnectionFailureException("down"));
+        RedisInFlightStore store = new RedisInFlightStore(template, new ObjectMapper());
+
+        // Deliberate asymmetry, and it is the safer of the two: an unreachable Redis re-exposes
+        // the original race for the duration of the outage, whereas failing closed would defer
+        // every epoch reset on the deployment for as long as Redis is down.
+        assertThat(store.hasAnyInFlightForRun("run-1")).isFalse();
+    }
+
+    @Test
+    @DisplayName("hasAnyInFlightForRunIsFalseWhenNothingIsStaged")
+    void hasAnyInFlightForRunEmpty() {
+        RedisInFlightStore store = storeReturning(List.of());
+
+        assertThat(store.hasAnyInFlightForRun("run-1")).isFalse();
+    }
+
+    @Test
+    @DisplayName("hasAnyInFlightForRunTreatsANullRunIdAsNothingInFlight")
+    void hasAnyInFlightForRunNullRunId() {
+        RedisInFlightStore store = storeReturning(List.of(
+            entry("cid-1", "run-1", "trigger:ask", 1)));
+
+        assertThat(store.hasAnyInFlightForRun(null)).isFalse();
     }
 
     @Test

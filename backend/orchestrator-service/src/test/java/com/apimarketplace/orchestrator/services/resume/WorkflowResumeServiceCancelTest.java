@@ -32,6 +32,7 @@ import java.lang.reflect.Field;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.*;
@@ -87,6 +88,46 @@ class WorkflowResumeServiceCancelTest {
         lenient().when(entity.getMetadata()).thenReturn(new HashMap<>());
         lenient().when(entity.getTenantId()).thenReturn(TENANT_ID);
         return entity;
+    }
+
+    @Nested
+    @DisplayName("Caller-supplied stop metadata")
+    class ExtraMetadata {
+
+        /**
+         * The agent-facing stop passes its reason here rather than saving the run
+         * itself: this method already holds the run under a pessimistic lock with a
+         * fresh entity, so the reason lands in the same write as the status change.
+         */
+        @Test
+        @DisplayName("extra metadata is merged into the run alongside the cancel bookkeeping")
+        void extraMetadataIsMergedWithCancelInfo() {
+            WorkflowRunEntity runEntity = createRunEntity(RunStatus.RUNNING);
+            when(runEntity.getMetadata()).thenReturn(new HashMap<>(Map.of("__editorRun__", true)));
+            when(runRepository.findByRunIdPublicForUpdate(RUN_ID)).thenReturn(Optional.of(runEntity));
+
+            service.cancelWorkflow(RUN_ID, Map.of("__stopReason__", "the browser agent was stuck"));
+
+            ArgumentCaptor<Map<String, Object>> metadataCaptor = ArgumentCaptor.forClass(Map.class);
+            verify(runEntity).setMetadata(metadataCaptor.capture());
+            Map<String, Object> metadata = metadataCaptor.getValue();
+            assertEquals("the browser agent was stuck", metadata.get("__stopReason__"));
+            assertEquals(true, metadata.get("__editorRun__"));
+            assertNotNull(metadata.get("cancelledAt"));
+        }
+
+        @Test
+        @DisplayName("no extra metadata leaves the cancel bookkeeping byte-identical")
+        void nullExtraMetadataChangesNothing() {
+            WorkflowRunEntity runEntity = createRunEntity(RunStatus.RUNNING);
+            when(runRepository.findByRunIdPublicForUpdate(RUN_ID)).thenReturn(Optional.of(runEntity));
+
+            service.cancelWorkflow(RUN_ID, null);
+
+            ArgumentCaptor<Map<String, Object>> metadataCaptor = ArgumentCaptor.forClass(Map.class);
+            verify(runEntity).setMetadata(metadataCaptor.capture());
+            assertEquals(Set.of("cancelledAt", "cancelledFromStatus"), metadataCaptor.getValue().keySet());
+        }
     }
 
     @Nested

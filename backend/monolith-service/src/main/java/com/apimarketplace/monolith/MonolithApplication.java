@@ -81,7 +81,20 @@ import java.util.Set;
             pattern = "com\\.apimarketplace\\.storage\\.config\\.SecurityConfig"),
         // Exclude auth-service SecurityConfig (MonolithSecurityConfig handles all security)
         @ComponentScan.Filter(type = FilterType.REGEX,
-            pattern = "com\\.apimarketplace\\.auth\\.config\\.SecurityConfig")
+            pattern = "com\\.apimarketplace\\.auth\\.config\\.SecurityConfig"),
+        // Exclude the live catalog-sync REST surface. The LiteLLM/OpenRouter
+        // sync is a CLOUD operation (its own javadoc says "never exposed to
+        // CE"); CE receives the resulting catalog through the signed-bundle
+        // and seed flows instead. Left mounted, a CE admin could POST
+        // ?mode=apply and have the feeds rewrite the local catalog - including
+        // renaming the curated seed names ("Kimi K2.6" -> "kimi-k2.6"), which
+        // V416 only protects for rows that existed when it ran, not for the
+        // ones a fresh CE inserts from the seed afterwards. Only the controller
+        // is filtered: the rest of the package holds plain @Component beans
+        // that are inert without it, and a package-wide regex would be a
+        // broader change than the exposure warrants.
+        @ComponentScan.Filter(type = FilterType.REGEX,
+            pattern = "com\\.apimarketplace\\.agent\\.catalog\\.sync\\.ModelCatalogSyncController")
     },
     nameGenerator = MonolithApplication.FullyQualifiedBeanNameGenerator.class
 )
@@ -129,8 +142,16 @@ public class MonolithApplication {
      * which changes the file's checksum. Flyway refuses to start on a checksum mismatch, so
      * without this an install created by an earlier image would stop booting after a routine
      * {@code docker compose pull}, with nothing telling the operator why.
+     *
+     * <p>V328/V346 are the same story for a cloud-only launch promo: V328 seeded an uncapped
+     * 20k-credit code and V346 retired it, both of which shipped readable inside the image
+     * even though the public repo has never carried the seed. The CE build now substitutes
+     * the scrubbed copies, so installs from an earlier image hit the same mismatch. V346 is
+     * neutralised to a no-op rather than dropped: ignore-missing-migrations would tolerate its
+     * removal, but keeping the version leaves the image and the public repo describing the same
+     * history, and it is the neutralised body that strips the promo name from the image.
      */
-    private static final Set<String> CE_NEUTRALIZED_VERSIONS = Set.of("44");
+    private static final Set<String> CE_NEUTRALIZED_VERSIONS = Set.of("44", "328", "346");
 
     public static void main(String[] args) {
         System.setProperty("spring.profiles.active", "ce");

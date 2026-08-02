@@ -28,17 +28,27 @@ public class InterfaceClient {
 
     private static final Logger log = LoggerFactory.getLogger(InterfaceClient.class);
 
+    /**
+     * Connect timeout for the default template. Interface-service is an in-cluster peer, so a
+     * connect that has not completed in this long is not going to.
+     */
+    private static final Duration DEFAULT_CONNECT_TIMEOUT = Duration.ofSeconds(5);
+
+    /**
+     * Read timeout for the default template. Every call it serves is an internal CRUD or snapshot
+     * operation, none of which does heavy work, so this is generous rather than tight: the point is
+     * to have a ceiling at all, not to be aggressive.
+     */
+    private static final Duration DEFAULT_READ_TIMEOUT = Duration.ofSeconds(30);
+
     private final RestTemplate restTemplate;
-    // Dedicated bounded-timeout template used ONLY by
-    // {@link #getRecentActivity} - keeps the existing call paths' open-ended
-    // timeouts untouched while preventing the recent-activity branch from
-    // parking an aggregator thread on a slow / hung interface-service
-    // (auditor B v5 fix: bare new RestTemplate() has infinite read timeout).
+    // Dedicated tighter template used ONLY by {@link #getRecentActivity}: that path runs inside a
+    // 3s CompletableFuture budget, so it cannot afford the default read timeout below.
     private final RestTemplate recentActivityRestTemplate;
     private final String baseUrl;
 
     public InterfaceClient(String interfaceServiceUrl) {
-        this.restTemplate = new RestTemplate();
+        this.restTemplate = createDefaultRestTemplate();
         this.recentActivityRestTemplate = createRecentActivityRestTemplate();
         this.baseUrl = interfaceServiceUrl;
     }
@@ -57,6 +67,28 @@ public class InterfaceClient {
      * {@code AgentClient#executionRestTemplate} pattern (AgentClient.java:55-59)
      * but tighter (3s vs 65 min) - read path, not execution path.
      */
+    /**
+     * The default template, bounded.
+     *
+     * <p>It used to be a bare {@code new RestTemplate()}, which has an INFINITE read timeout. That
+     * is not merely untidy: {@code refreshSnapshotsFromLive} is called synchronously on the trigger
+     * fire path, after the epoch is opened and before the workflow's first node runs, inside a
+     * {@code catch (Exception)} whose comment promises it can "never block the trigger pipeline".
+     * A hang is not an exception, so that guard bought nothing, and a single unresponsive
+     * interface-service would park the fire indefinitely with the workflow having executed no node
+     * at all. Bounding the template is what actually delivers the promise that comment makes.
+     *
+     * <p>Every one of this client's calls is an internal CRUD or snapshot operation; none is
+     * long-running, so a ceiling costs nothing and a timeout here surfaces as a normal exception on
+     * paths that already handle one.
+     */
+    private static RestTemplate createDefaultRestTemplate() {
+        SimpleClientHttpRequestFactory factory = new SimpleClientHttpRequestFactory();
+        factory.setConnectTimeout(DEFAULT_CONNECT_TIMEOUT);
+        factory.setReadTimeout(DEFAULT_READ_TIMEOUT);
+        return new RestTemplate(factory);
+    }
+
     private static RestTemplate createRecentActivityRestTemplate() {
         SimpleClientHttpRequestFactory factory = new SimpleClientHttpRequestFactory();
         factory.setConnectTimeout(Duration.ofSeconds(2));

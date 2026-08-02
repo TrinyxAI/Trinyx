@@ -29,6 +29,43 @@ class WorkflowBuilderActionConfigTest {
                 .containsAll(WorkflowBuilderActionConfig.ACTION_ALIASES.keySet());
     }
 
+    // ===== stop_run - the counterpart of execute =====
+
+    @Test
+    @DisplayName("stop_run is a PRIMARY action, so the LLM sees it next to execute")
+    void stopRun_isPrimary() {
+        assertThat(WorkflowBuilderActionConfig.PRIMARY_ACTIONS).contains("stop_run");
+        assertThat(WorkflowBuilderActionConfig.isValidAction("stop_run")).isTrue();
+    }
+
+    @Test
+    @DisplayName("the unambiguous phrasings of 'end this run' resolve to stop_run")
+    void stopRun_aliasesResolve() {
+        assertThat(WorkflowBuilderActionConfig.resolveAlias("stop")).isEqualTo("stop_run");
+        assertThat(WorkflowBuilderActionConfig.resolveAlias("cancel_run")).isEqualTo("stop_run");
+        assertThat(WorkflowBuilderActionConfig.resolveAlias("stop_run")).isEqualTo("stop_run");
+    }
+
+    /**
+     * In THIS tool "cancel" is just as plausibly "abandon the draft I am building" (the
+     * real action is `discard`), and stop_run without a run_id self-aborts the caller's
+     * run. Aliasing it would turn that slip into a terminal stop plus suspended schedules,
+     * so the agent gets an "unknown action" it can recover from instead.
+     */
+    @Test
+    @DisplayName("bare 'cancel' is deliberately NOT an alias for stop_run")
+    void bareCancelIsNotAStopAlias() {
+        assertThat(WorkflowBuilderActionConfig.ACTION_ALIASES).doesNotContainKey("cancel");
+        assertThat(WorkflowBuilderActionConfig.isValidAction("cancel")).isFalse();
+    }
+
+    @Test
+    @DisplayName("stop_run does not mutate the plan, so it is neither auto-saved nor blocked on an application")
+    void stopRun_isNotAPlanMutation() {
+        assertThat(WorkflowBuilderActionConfig.MODIFYING_ACTIONS).doesNotContain("stop_run");
+        assertThat(WorkflowBuilderActionConfig.PLAN_MUTATING_ACTIONS).doesNotContain("stop_run");
+    }
+
     // ===== READ_ONLY_ACTIONS - side-panel focus suppression =====
 
     @Test

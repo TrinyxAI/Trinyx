@@ -25,6 +25,7 @@ import com.apimarketplace.publication.repository.PublicationReceiptRepository;
 import com.apimarketplace.publication.repository.PublicationReviewRepository;
 import com.apimarketplace.publication.repository.PublicationSnapshotVersionRepository;
 import com.apimarketplace.publication.repository.WorkflowPublicationRepository;
+import com.apimarketplace.publication.utils.CeExclusiveFeatureDetector;
 import com.apimarketplace.publication.utils.CredentialKeyDetector;
 import com.apimarketplace.publication.utils.WorkflowIconExtractor;
 import com.fasterxml.jackson.core.type.TypeReference;
@@ -94,6 +95,15 @@ public class WorkflowPublicationService {
 
     @org.springframework.beans.factory.annotation.Autowired(required = false)
     private PublicationAcquisitionHelper acquisitionHelper;
+
+    /**
+     * Edition gate for CE-exclusive publications. Field-injected like the helper
+     * above (null in the many unit constructions); checked here as well as in
+     * {@link PublicationAcquisitionHelper} so the legacy no-helper branch of
+     * {@code acquirePublication} is covered by the same rule.
+     */
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private CeExclusiveAcquisitionGuard ceExclusiveGuard;
 
     /**
      * V274 audit-gap closer - for publishes that DON'T go through the
@@ -1124,6 +1134,13 @@ public class WorkflowPublicationService {
         organizationId = resolveAcquirerOrg(tenantId, organizationId, publicationId);
         final String orgScope = organizationId;
 
+        // Edition gate: managed cloud cannot run a CE-exclusive publication.
+        // Runs before every other check so the user gets the real reason rather
+        // than a downstream quota / visibility error.
+        if (ceExclusiveGuard != null) {
+            ceExclusiveGuard.check(publication);
+        }
+
         if (acquisitionHelper != null) {
             acquisitionHelper.validateNotOwnPublication(publication, tenantId, orgScope);
         } else if (isOwnPublication(publication, tenantId, orgScope)) {
@@ -1666,6 +1683,13 @@ public class WorkflowPublicationService {
         }
         publication.setInterfaceCount(ifaceCount);
         publication.setDatasourceCount(dsCount);
+
+        // CE-exclusive label: re-derived from the snapshot just set above, so it
+        // is recomputed on every publish AND every update (this helper runs on
+        // both paths). A plan that gained a local-CLI agent or a vector column
+        // becomes cloud-uninstallable here; one that dropped its last such
+        // feature loses the badge in the same pass.
+        CeExclusiveFeatureDetector.applyTo(publication);
 
         // Build denormalized search index. Title / description / category /
         // publisher are populated on the entity by callers BEFORE this helper

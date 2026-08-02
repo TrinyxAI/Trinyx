@@ -80,6 +80,17 @@ public class ApplicationCrudModule implements ToolModule {
         this.applicationLifecycleService = applicationLifecycleService;
     }
 
+    /**
+     * Edition of THIS deployment. The CE-exclusive marker is only meaningful
+     * where the install would actually be refused: a self-hosted install reads
+     * the SAME cloud marketplace listing (proxied), and telling its agent that a
+     * CE-exclusive app cannot be installed would be exactly backwards - that is
+     * the deployment the app is built for. Optional so the many unit
+     * constructions of this module keep working; absent = do not annotate.
+     */
+    @Autowired(required = false)
+    private com.apimarketplace.common.web.AppEditionProvider appEditionProvider;
+
     @Autowired
     @Lazy
     public void setVisualizationToolsProvider(VisualizationToolsProvider visualizationToolsProvider) {
@@ -391,6 +402,18 @@ public class ApplicationCrudModule implements ToolModule {
         // Keep category - it enables the agent to refine via
         // application(action='search', category='<slug>') for similar apps.
         if (pub.get("category") != null) out.put("category", pub.get("category"));
+        // Self-hosted-only apps: surfaced ONLY when the app is CE-exclusive AND
+        // this deployment is the one that would refuse it, so the agent learns
+        // the constraint while browsing instead of on a refused acquire.
+        // Absent means installable HERE - which is why the edition check matters:
+        // a self-hosted install browses the same (proxied) cloud listing and can
+        // install these apps, so annotating them there would make its agent
+        // decline an install that works.
+        if (Boolean.TRUE.equals(pub.get("ceExclusive"))
+                && appEditionProvider != null && appEditionProvider.isManagedCloud()) {
+            out.put("ce_exclusive", true);
+            out.put("ce_exclusive_features", pub.get("ceExclusiveFeatures"));
+        }
 
         if (id == null || tenantId == null) return out;
 
@@ -621,6 +644,11 @@ public class ApplicationCrudModule implements ToolModule {
             return ToolExecutionResult.success(result);
         } catch (com.apimarketplace.auth.client.entitlement.LimitExceededException e) {
             return ToolExecutionResult.failure(ToolErrorCode.QUOTA_EXCEEDED, e.getMessage());
+        } catch (com.apimarketplace.publication.client.CeExclusiveAcquisitionException e) {
+            // The app only runs on a self-hosted install. Terminal for this
+            // deployment: no retry can succeed, so say so plainly rather than
+            // returning a generic execution failure the agent would retry.
+            return ToolExecutionResult.failure(ToolErrorCode.PERMISSION_DENIED, e.getMessage());
         } catch (IllegalArgumentException e) {
             String msg = e.getMessage();
             if (msg != null && msg.contains("not found")) {

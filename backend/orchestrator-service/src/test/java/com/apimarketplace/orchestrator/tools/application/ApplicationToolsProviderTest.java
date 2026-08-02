@@ -85,7 +85,7 @@ class ApplicationToolsProviderTest {
 
             assertThat(paramNames).containsExactlyInAnyOrder(
                 "action", "workflow_id", "application_id", "query", "category", "title", "description",
-                "data_inputs", "trigger_id", "run_id", "epoch", "node_id",
+                "data_inputs", "trigger_id", "run_id", "reason", "mode", "epoch", "node_id",
                 "item_index", "iteration", "spawn", "field", "max_bytes", "limit", "offset", "topics"
             );
         }
@@ -126,7 +126,7 @@ class ApplicationToolsProviderTest {
                 .orElseThrow();
 
             assertThat(actionParam.enumValues()).containsExactlyInAnyOrder(
-                "create", "search", "my", "get", "acquire", "uninstall", "execute",
+                "create", "search", "my", "get", "acquire", "uninstall", "execute", "stop_run",
                 "runs", "get_run", "get_node_output",
                 "visualize", "help"
             );

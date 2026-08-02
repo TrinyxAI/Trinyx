@@ -3,6 +3,7 @@
 import * as React from 'react';
 import { useTranslations } from 'next-intl';
 import { usePathname } from 'next/navigation';
+import { REVEAL_NODE_EVENT } from '@/lib/workflow/nodeCreatorBus';
 import { createPortal } from 'react-dom';
 import ReactFlow, {
   Background,
@@ -85,7 +86,6 @@ interface BuilderCanvasProps {
   onHoverEdge: (edgeId: string | null) => void;
   onDeleteEdge: (edgeId: string) => void;
   onOpenNodeCreator?: () => void;
-  isNodeCreatorOpen?: boolean;
   hasSelectedNodes?: boolean;
   isFullscreen?: boolean;
   isAdvancedMode?: boolean;
@@ -310,7 +310,6 @@ export function BuilderCanvas({
   onHoverEdge,
   onDeleteEdge,
   onOpenNodeCreator,
-  isNodeCreatorOpen,
   hasSelectedNodes = false,
   isFullscreen = false,
   isAdvancedMode = false,
@@ -436,10 +435,11 @@ export function BuilderCanvas({
 
   const {
     isBoxSelectionEnabled,
+    cursorMode,
+    setCursorMode,
     isSelecting,
     selectionStart,
     selectionEnd,
-    handleToggleBoxSelection,
     handleSelectionChange,
     containerRef,
     selectionJustEndedRef,
@@ -449,6 +449,12 @@ export function BuilderCanvas({
     onSelectionChange,
     onForceNodesUpdate,
     onNodesChange,
+    // Act on a persisted `selection` mode ONLY where the select that undoes it
+    // is on screen. That means the editor (run mode and the read-only preview
+    // render no cursor control) AND a non-empty canvas, since the whole toolbar
+    // is hidden while there are no nodes - an empty workflow would otherwise
+    // open with a dead left-drag and nothing to click to restore panning.
+    allowBoxSelection: !isLocked && nodes.length > 0,
   });
 
   const {
@@ -868,6 +874,37 @@ export function BuilderCanvas({
     return () => window.removeEventListener('hoverPlusNodeInserted', onInserted);
   }, []);
 
+  // Bring a node added from the palette into view.
+  //
+  // The palette is a side-panel TAB now: it takes width from the canvas instead
+  // of floating over it, so a click-add lands on a fixed grid the narrower
+  // viewport may no longer cover. With `onlyRenderVisibleElements`, an off-screen
+  // node is not even in the DOM - the user clicks a palette row and NOTHING
+  // appears, while the node really exists and saves correctly. Panning to it is
+  // also simply the right behaviour: you look at what you just added.
+  const revealNodeRef = React.useRef<(nodeId: string) => void>(() => undefined);
+  revealNodeRef.current = (nodeId: string) => {
+    if (!instance) return;
+    const node = nodes.find((n) => n.id === nodeId);
+    if (!node) return;
+    const width = (node as { width?: number }).width ?? 240;
+    const height = (node as { height?: number }).height ?? 80;
+    instance.setCenter(node.position.x + width / 2, node.position.y + height / 2, {
+      zoom: instance.getZoom(),
+      duration: 300,
+    });
+  };
+  React.useEffect(() => {
+    const onReveal = (event: Event) => {
+      const nodeId = (event as CustomEvent<{ nodeId?: string }>).detail?.nodeId;
+      if (!nodeId) return;
+      // Let the node reach state before reading its position.
+      window.setTimeout(() => revealNodeRef.current(nodeId), 60);
+    };
+    window.addEventListener(REVEAL_NODE_EVENT, onReveal);
+    return () => window.removeEventListener(REVEAL_NODE_EVENT, onReveal);
+  }, []);
+
   // --- Right-click context menu -------------------------------------------
   const handleNodeContextMenu = React.useCallback<NodeMouseHandler>((event, node) => {
     event.preventDefault();
@@ -927,7 +964,7 @@ export function BuilderCanvas({
   return (
     <div
       ref={containerRef}
-      className={`relative h-full w-full bg-gradient-to-br from-slate-50 to-white dark:from-gray-900 dark:to-gray-800 ${isBoxSelectionEnabled ? 'cursor-crosshair' : ''}`}
+      className={`relative h-full w-full bg-gradient-to-br from-slate-50 to-white dark:from-gray-900 dark:to-gray-800 ${isBoxSelectionEnabled ? 'lc-selection-mode' : ''}`}
       onMouseEnter={() => { isPointerOverCanvasRef.current = true; }}
       onMouseLeave={() => { isPointerOverCanvasRef.current = false; }}
       onMouseMove={(e) => { lastPointerScreenRef.current = { x: e.clientX, y: e.clientY }; }}
@@ -962,8 +999,10 @@ export function BuilderCanvas({
         </div>
       )}
 
-      {/* Add node button + validation indicator (edit mode only) */}
-      {onOpenNodeCreator && !isNodeCreatorOpen && !isSettingsOpen && (!hasSelectedNodes || !isMobileOrTablet) && !isFullscreen && !isLocked && (
+      {/* Add node button + validation indicator (edit mode only). The button stays
+          visible while the palette is open: the palette is a side-panel TAB now,
+          so the button re-focuses that tab instead of toggling a canvas overlay. */}
+      {onOpenNodeCreator && !isSettingsOpen && (!hasSelectedNodes || !isMobileOrTablet) && !isFullscreen && !isLocked && (
         <div className="absolute top-4 right-4 z-[60] flex items-center gap-2">
           <ValidationIndicator nodes={nodes} onFocusNode={(nodeId) => {
             const node = nodes.find(n => n.id === nodeId);
@@ -1209,8 +1248,11 @@ export function BuilderCanvas({
                 canRedo={canRedo}
                 isInteractive={isInteractive}
                 isLockFocused={isLockFocused}
-                isBoxSelectionEnabled={isBoxSelectionEnabled}
+                cursorMode={cursorMode}
                 isSettingsOpen={isSettingsOpen}
+                nodes={nodes}
+                showRunControls={isRunMode && !isPreviewOnly}
+                workflowId={workflowId}
                 onUndo={onUndo}
                 onRedo={onRedo}
                 onZoomIn={handleZoomIn}
@@ -1218,7 +1260,7 @@ export function BuilderCanvas({
                 onFitView={handleFitView}
                 onAutoLayout={handleAutoLayout}
                 onToggleInteractivity={handleToggleInteractivity}
-                onToggleBoxSelection={handleToggleBoxSelection}
+                onCursorModeChange={setCursorMode}
                 onToggleSettings={() => setIsSettingsOpen(!isSettingsOpen)}
               />
             )}
@@ -1299,6 +1341,13 @@ const CANVAS_STYLES = `
   .react-flow__node.dragging { transition: none !important; }
   .react-flow__node:not(.react-flow__node-dragging) { transition: border-color 0.15s ease !important; }
   @keyframes dash-flow { 0% { stroke-dashoffset: 0; } 100% { stroke-dashoffset: -12; } }
+  /* Selection mode: the crosshair has to be set on the PANE. React Flow ships
+     its own '.react-flow__pane { cursor: grab }', which beats a cursor
+     inherited from our container - so the canvas kept showing the pan hand
+     while only the chrome around it (toolbar card, panels) turned crosshair,
+     i.e. exactly backwards. Scoped to the pane so buttons and panels keep
+     their own pointer. */
+  .lc-selection-mode .react-flow__pane { cursor: crosshair !important; }
   `;
 
 // Arrow marker definitions (uses CSS vars via style={{ fill }} - no isDark needed)

@@ -26,6 +26,8 @@ export type MarketplaceInstallStatus =
   | 'installing'
   | 'success'
   | 'error'
+  /** Managed cloud cannot install a CE-exclusive publication (backend 403 CE_EXCLUSIVE). */
+  | 'ce-exclusive'
   | 'link-required'
   | 'insufficient-credits';
 
@@ -197,6 +199,12 @@ export const useMarketplaceInstallStore = create<MarketplaceInstallState>((set, 
         if (err?.status === 403 && err?.code === 'CLOUD_ACCOUNT_NOT_LINKED') {
           status = 'link-required';
           outcome = 'link_required';
+        } else if (err?.status === 403 && err?.code === 'CE_EXCLUSIVE') {
+          // Defense in depth: the UI already hides Install for these on cloud,
+          // so reaching here means a stale card or a direct call. Surface the
+          // real reason instead of a generic failure.
+          status = 'ce-exclusive';
+          outcome = 'ce_exclusive';
         } else if (err?.status === 402) {
           status = 'insufficient-credits';
           outcome = 'insufficient_credits';

@@ -335,6 +335,9 @@ export function useNodeExecutionStatus(nodeId: string, nodeData?: { label?: stri
       isExecuting: false,
       isCore: false,
       isEvaluated: false,
+      // Outside a run there is no backend step id to give - a React Flow node id
+      // here would be a lie that silently reaches cross-component events.
+      stepId: undefined as string | undefined,
       executeStep: async () => {},
       fireFromAnyEpoch: async () => {},
       executeCore: async () => null,
@@ -382,6 +385,10 @@ export function useNodeExecutionStatus(nodeId: string, nodeData?: { label?: stri
     isExecuting: isInteractive && ctx.isExecutingStep === normalizedId,
     isCore: isControl,
     isEvaluated: ctx.evaluatedCores.has(normalizedId),
+    // Backend step id (`trigger:<label>` for a trigger). Surfaced so callers can
+    // name THIS node in cross-component events instead of letting the receiver
+    // guess from the node type - several triggers can share one type.
+    stepId: normalizedId,
     executeStep: () => ctx.executeStep(normalizedId, viewingEpoch ?? undefined),
     // Fire this step against ALL-epochs (epoch=undefined) regardless of the
     // currently-viewed epoch - used by the focus-epoch trigger play after it

@@ -201,7 +201,7 @@ export const WorkflowSaveWithVersions: React.FC<WorkflowSaveWithVersionsProps> =
         // schedule/webhook/chat triggers start firing on it server-side and the
         // pinned plan is read-only at runtime. Land the user on the production
         // run so they can observe live execution - same router.push pattern as
-        // WorkflowRunsHistoryPanel.handleRunClick. The pinned plan is independent
+        // RunHistoryList / RunPanelContent.handleSelectRun. The pinned plan is independent
         // of any local draft edits the user may have on a newer version, so no
         // dirty-state confirmation is needed (consistent with handleRunClick).
         // The runId comes from the pin response (single round-trip, no extra

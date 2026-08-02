@@ -8,6 +8,7 @@ import {
   EdgeLabelRenderer,
   EdgeProps,
   useStore,
+  useReactFlow,
   type ReactFlowState,
   getBezierPath,
   getStraightPath,
@@ -15,6 +16,7 @@ import {
 } from 'reactflow';
 
 import { useEdgeActions } from './EdgeActionsContext';
+import { BackEdgeConfigPanel } from './BackEdgeConfigPanel';
 import type { ConnectionType } from './ConnectionTypeSelector';
 import type { DerivedNodeStatus } from '../types';
 import { EdgeStatusLabel } from './EdgeStatusLabel';
@@ -73,7 +75,12 @@ export function BuilderEdge({
   const isBackEdge = data?.isBackEdge === true;
   const isWhileBodyEdge = data?.isWhileBodyEdge === true;
   const isLoopBackEdge = data?.isLoopBackEdge === true;
-  const isWhileEdge = isWhileBodyEdge || isLoopBackEdge;
+  // One visual language for looping: a While node's loop-back and a hand-drawn back-edge are
+  // the same thing to the engine, so they must not read as two different features.
+  const isWhileEdge = isWhileBodyEdge || isLoopBackEdge || isBackEdge;
+  // A self-loop has no room for the U rail (its two vertical legs would cross), so it keeps
+  // the ordinary path.
+  const isSelfLoop = source === target;
   const baseConnectionType: ConnectionType = data?.connectionType || 'bezier';
 
   // Use smoothstep when a connection goes "backwards" (against the flow) for better
@@ -100,12 +107,17 @@ export function BuilderEdge({
   let labelX: number;
   let labelY: number;
 
-  // Special U-shaped path for while-body backward edges (loop-back):
-  // Routes below the main flow to avoid crossing forward edges.
+  // Special U-shaped path for loop-back edges (a While node's loop-back handle, or any
+  // hand-drawn back-edge): routes below the main flow to avoid crossing forward edges.
   //   source ──→ ╮
   //              │  (below the nodes)
   //   target ←── ╯
-  if (isLoopBackEdge) {
+  //
+  // A generic back-edge only earns the rail when it actually points against the reading
+  // direction. Otherwise its endpoints do not straddle the rail and the U would double back
+  // over itself, so it keeps the ordinary smoothstep path.
+  const usesLoopRail = isLoopBackEdge || (isBackEdge && isBackwardConnection && !isSelfLoop);
+  if (usesLoopRail) {
     const r = 16;
     const pad = 28;
     const clearance = 50;
@@ -239,24 +251,44 @@ export function BuilderEdge({
 
   // Get stroke color based on status or selection
   const statusStrokeColor = getStatusStrokeColor(data?.status as DerivedNodeStatus | undefined);
-  const backEdgeColor = '#f59e0b'; // amber-500
+  // ONE orange for looping. The old second shade (amber #f59e0b) collided with the
+  // partial_success status colour, so an idle back-edge was indistinguishable from a
+  // partially-failed one.
   const whileBodyColor = '#f97316'; // orange-500
+  // Loop identity only while the edge has no run status of its own. Once it does, the status
+  // wins: a FAILED loop edge painted orange is indistinguishable from an idle one, which is
+  // exactly when the colour matters most.
+  const keepsLoopColor = isWhileEdge && (!data?.status || data?.status === 'pending');
   const stroke = selected ? 'var(--accent-primary)'
-    : isWhileEdge && (!data?.status || data?.status === 'pending') ? whileBodyColor
-    : isBackEdge && (!data?.status || data?.status === 'pending') ? backEdgeColor
+    : keepsLoopColor ? whileBodyColor
     : statusStrokeColor;
   const isSkipped = data?.status === 'skipped';
 
 
-  // Select the appropriate arrow marker based on status/selection
+  // Select the appropriate arrow marker based on status/selection.
+  // The `markerEnd` prop is deliberately ignored: this is the single place the arrowhead is
+  // decided, so a caller-supplied colour cannot drift from the stroke (which is how back-edges
+  // ended up orange with a grey arrowhead).
   const getMarkerEnd = () => {
     if (selected) return 'url(#arrow-selected)';
-    if (isWhileEdge && (!data?.status || data?.status === 'pending')) return 'url(#arrow-while-body)';
+    if (keepsLoopColor) return 'url(#arrow-while-body)';
     const status = data?.status as DerivedNodeStatus | undefined;
     if (!status || status === 'pending') return 'url(#arrow-default)';
     return `url(#arrow-${status})`;
   };
   const markerEndUrl = getMarkerEnd();
+
+  // Loop-back settings are stored on the edge itself, so they are written straight into the
+  // graph store rather than threaded back up through the canvas as yet another callback.
+  const { setEdges } = useReactFlow();
+  const updateBackEdgeData = React.useCallback(
+    (patch: Record<string, unknown>) => {
+      setEdges((eds) =>
+        eds.map((e) => (e.id === id ? { ...e, data: { ...e.data, ...patch } } : e)),
+      );
+    },
+    [setEdges, id],
+  );
 
   // Gérer l'opacité avec un délai avant de disparaître
   const [showButton, setShowButton] = React.useState(false);
@@ -341,6 +373,19 @@ export function BuilderEdge({
             </div>
           )}
 
+
+          {/* Loop-back settings - only while editing, on the selected back-edge */}
+          {isBackEdge && selected && !isRunMode && !isPreviewOnly && (
+            <BackEdgeConfigPanel
+              edgeId={id}
+              condition={(data?.backEdgeCondition as string) ?? ''}
+              maxIterations={data?.backEdgeMaxIterations as number | undefined}
+              onConditionChange={(condition) => updateBackEdgeData({ backEdgeCondition: condition })}
+              onMaxIterationsChange={(maxIterations) =>
+                updateBackEdgeData({ backEdgeMaxIterations: maxIterations })
+              }
+            />
+          )}
 
           {/* Delete Button - Hidden in run mode and readonly */}
           {!isRunMode && !isPreviewOnly && (

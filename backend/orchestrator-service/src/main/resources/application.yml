@@ -250,6 +250,14 @@ workflow:
     # 130-min recovery hard timeout), else the scan fails HEALTHY long sync runs mid-flight.
     max-execution-minutes: 125
     step-timeout-ms: 60000
+    # Iteration budget for EVERY loop-back: a While/loop node and a hand-drawn back-edge alike.
+    # A loop-back that declares its own cap wins; otherwise default-max-iterations applies.
+    # max-allowed-iterations is a hard ceiling on top of any declared cap - it defaults to the
+    # builder's own authoring ceiling, so it is a no-op until an operator lowers it.
+    # Reaching the cap while the loop still wants to run FAILS the run rather than stopping
+    # silently mid-graph.
+    default-max-iterations: ${WORKFLOW_DEFAULT_MAX_ITERATIONS:10}
+    max-allowed-iterations: ${WORKFLOW_MAX_ALLOWED_ITERATIONS:10000}
 
 # OAuth2 settings (platform credentials are managed in DB via Settings UI)
 oauth2:

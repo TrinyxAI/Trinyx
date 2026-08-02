@@ -64,6 +64,15 @@ public class DecisionNodeCreator extends CreatorBase {
         if (conditions == null) {
             conditions = (List<Map<String, Object>>) parameters.get("decisionConditions");
         }
+        // 'branches' / 'rules' are accepted by NodeParamsValidator.PARAM_ALIASES for this node,
+        // so they validated and then died here on "'conditions' array is required".
+        for (String alias : new String[] {"branches", "rules"}) {
+            if (conditions != null) break;
+            Object v = parameters.get(alias);
+            if (v instanceof List<?> list && !list.isEmpty()) {
+                conditions = (List<Map<String, Object>>) v;
+            }
+        }
         if (conditions == null || conditions.isEmpty()) {
             return ToolExecutionResult.failure(ToolErrorCode.MISSING_PARAMETER, "DECISION: 'conditions' array is required.\n\n" +
                 "FORMAT:\n" +

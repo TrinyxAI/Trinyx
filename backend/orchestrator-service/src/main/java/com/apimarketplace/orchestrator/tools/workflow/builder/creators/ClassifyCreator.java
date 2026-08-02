@@ -57,7 +57,11 @@ public class ClassifyCreator extends CreatorBase {
         // 3. Validate required fields: prompt, categories
         // prompt contains EVERYTHING: classification instruction + data references via {{...}}
         // (matches frontend ClassifyParametersForm which has only a prompt field, no separate input)
-        String prompt = safeString(parameters.get("prompt"));
+        // Every spelling NodeParamsValidator.PARAM_ALIASES accepts for classify's prompt - they
+        // passed validation and then hit "'prompt' is required" here, naming a param the caller
+        // never used.
+        String prompt = firstNonBlank(parameters,
+            "prompt", "instruction", "system_prompt", "content", "input", "text", "data");
         if (prompt == null || prompt.isBlank()) {
             return ToolExecutionResult.failure(ToolErrorCode.EXECUTION_FAILED, "'prompt' is required - classification instruction INCLUDING data references. " +
                 "Use {{type:label.output.field}} to include data. Example: " + EXAMPLE);

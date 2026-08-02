@@ -65,7 +65,13 @@ vi.mock('@/lib/providers/smart-providers', () => ({
 
 // The point of this file: the COMMUNITY edition (mutable so the non-remote
 // cloud-edition regression test can flip it off).
-const editionState = vi.hoisted(() => ({ IS_CE: true }));
+const editionState = vi.hoisted(() => ({
+  IS_CE: true,
+  // Mirrors of IS_CE. IS_MANAGED_CLOUD is what the marketplace card reads to
+  // decide whether a CE-exclusive publication is installable here.
+  get IS_CLOUD() { return !this.IS_CE; },
+  get IS_MANAGED_CLOUD() { return !this.IS_CE; },
+}));
 
 vi.mock('@/lib/edition', () => editionState);
 

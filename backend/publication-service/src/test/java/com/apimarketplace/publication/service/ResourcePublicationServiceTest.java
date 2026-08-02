@@ -106,6 +106,90 @@ class ResourcePublicationServiceTest {
     }
 
     @Test
+    @DisplayName("publishResource STAMPS the CE-exclusive label on the persisted row for a vector table")
+    void publishResourceStampsCeExclusiveForVectorTable() {
+        // End-to-end for the resource publish path: the detector is wired into
+        // publishResource, so a table carrying an embedding column is persisted
+        // already flagged. Deleting the applyTo call here would leave the row
+        // ce_exclusive=false and installable on cloud, where the clone silently
+        // drops the very column the table exists for.
+        String tableId = "42";
+        Map<String, Object> resourceSnapshot = new LinkedHashMap<>(Map.of(
+                "name", "Docs",
+                "sourceType", "INLINE",
+                // The REAL serialized column type: ColumnType.VECTOR is @JsonValue "vector".
+                "mappingSpec", Map.of("embedding", Map.of("path", "embedding", "type", "vector"))));
+
+        ResourcePublicationService service = newTableService();
+        when(publicationRepository.findByPublicationTypeAndResourceId(PublicationType.TABLE, tableId))
+                .thenReturn(Optional.empty());
+        when(strategy.fetchOwnedResource(tableId, TENANT_ID))
+                .thenReturn(new ResourceMetadata("Docs", "Docs table"));
+        when(workflowPublicationService.isCallerInOwnerScope(
+                any(WorkflowPublicationEntity.class), eq(TENANT_ID), eq(ORGANIZATION_ID)))
+                .thenReturn(true);
+        when(strategy.buildSnapshot(tableId, TENANT_ID)).thenReturn(resourceSnapshot);
+        when(publicationRepository.save(any(WorkflowPublicationEntity.class)))
+                .thenAnswer(invocation -> invocation.getArgument(0));
+        // A TABLE publish requires a landing interface (presentation only).
+        UUID landingInterfaceId = UUID.randomUUID();
+        when(landingInterfaceSnapshotter.parseInterfaceId(landingInterfaceId.toString()))
+                .thenReturn(landingInterfaceId);
+        when(landingInterfaceSnapshotter.buildSnapshot(landingInterfaceId, TENANT_ID, ORGANIZATION_ID))
+                .thenReturn(Map.of("interfaceId", landingInterfaceId.toString()));
+
+        Map<String, Object> request = new LinkedHashMap<>();
+        request.put("interfaceId", landingInterfaceId.toString());
+        request.put("type", "TABLE");
+        request.put("resourceId", tableId);
+        request.put("title", "Docs");
+
+        WorkflowPublicationEntity published = service.publishResource(request, TENANT_ID, ORGANIZATION_ID);
+
+        assertThat(published.isCeExclusive()).isTrue();
+        assertThat(published.getCeExclusiveFeatures()).containsExactly("VECTOR_SEARCH");
+    }
+
+    @Test
+    @DisplayName("publishResource leaves a plain table installable everywhere (no false positive)")
+    void publishResourceLeavesPlainTableInstallable() {
+        String tableId = "43";
+        Map<String, Object> resourceSnapshot = new LinkedHashMap<>(Map.of(
+                "name", "Contacts",
+                "sourceType", "INLINE",
+                "mappingSpec", Map.of("email", Map.of("path", "email", "type", "email"))));
+
+        ResourcePublicationService service = newTableService();
+        when(publicationRepository.findByPublicationTypeAndResourceId(PublicationType.TABLE, tableId))
+                .thenReturn(Optional.empty());
+        when(strategy.fetchOwnedResource(tableId, TENANT_ID))
+                .thenReturn(new ResourceMetadata("Contacts", "Contacts table"));
+        when(workflowPublicationService.isCallerInOwnerScope(
+                any(WorkflowPublicationEntity.class), eq(TENANT_ID), eq(ORGANIZATION_ID)))
+                .thenReturn(true);
+        when(strategy.buildSnapshot(tableId, TENANT_ID)).thenReturn(resourceSnapshot);
+        when(publicationRepository.save(any(WorkflowPublicationEntity.class)))
+                .thenAnswer(invocation -> invocation.getArgument(0));
+        // A TABLE publish requires a landing interface (presentation only).
+        UUID landingInterfaceId = UUID.randomUUID();
+        when(landingInterfaceSnapshotter.parseInterfaceId(landingInterfaceId.toString()))
+                .thenReturn(landingInterfaceId);
+        when(landingInterfaceSnapshotter.buildSnapshot(landingInterfaceId, TENANT_ID, ORGANIZATION_ID))
+                .thenReturn(Map.of("interfaceId", landingInterfaceId.toString()));
+
+        Map<String, Object> request = new LinkedHashMap<>();
+        request.put("interfaceId", landingInterfaceId.toString());
+        request.put("type", "TABLE");
+        request.put("resourceId", tableId);
+        request.put("title", "Contacts");
+
+        WorkflowPublicationEntity published = service.publishResource(request, TENANT_ID, ORGANIZATION_ID);
+
+        assertThat(published.isCeExclusive()).isFalse();
+        assertThat(published.getCeExclusiveFeatures()).isEmpty();
+    }
+
+    @Test
     @DisplayName("unpublishResource throws IllegalStateException (→409 at the controller) for a pending-review resource")
     void unpublishResourcePendingReviewThrowsIllegalState() {
         String skillId = UUID.randomUUID().toString();
@@ -241,9 +325,20 @@ class ResourcePublicationServiceTest {
         return pub;
     }
 
+    /** Same wiring as {@link #newService()} but registered for TABLE (vector schemas live there). */
+    private ResourcePublicationService newTableService() {
+        when(strategy.getPublicationType()).thenReturn(PublicationType.TABLE);
+        lenient().when(strategy.getDisplayMode()).thenReturn(DisplayMode.TABLE);
+        return buildService();
+    }
+
     private ResourcePublicationService newService() {
         when(strategy.getPublicationType()).thenReturn(PublicationType.SKILL);
         lenient().when(strategy.getDisplayMode()).thenReturn(DisplayMode.SKILL);
+        return buildService();
+    }
+
+    private ResourcePublicationService buildService() {
         // publishResource → applyPublisherInfo → AuthClient.getPublisherProfile.
         // Lenient because the constructor itself never triggers this call.
         lenient().when(authClient.getPublisherProfile(any()))

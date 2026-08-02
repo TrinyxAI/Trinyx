@@ -86,6 +86,17 @@ public class StepRerunService {
     @Lazy
     private SignalResumeService signalResumeService;
 
+    /**
+     * Cross-replica loop counters. A rerun deliberately keeps the EPOCH (it only increments the
+     * spawn), and that epoch is what keys the shared counter - so without an explicit clear here,
+     * rerunning a loop node would read back the previous attempt's {@code terminated=1} and exit
+     * with zero iterations until the 24h TTL. Optional + lazy like the fields above so unit
+     * fixtures that construct this service directly stay unaffected.
+     */
+    @Autowired(required = false)
+    @Lazy
+    private com.apimarketplace.orchestrator.execution.v2.state.RedisLoopIterationStore loopIterationStore;
+
     public StepRerunService(
             WorkflowRunRepository runRepository,
             WorkflowStepDataRepository stepDataRepository,
@@ -230,6 +241,40 @@ public class StepRerunService {
             }
         }
 
+        // 5d. Drop the SHARED loop counters of every back-edge being reset.
+        // RedisLoopIterationStore keys on (runId, epoch, edgeId) - epoch, because it is the only
+        // coordinate persisted on the signal and therefore stable under a live loop. A rerun keeps
+        // that epoch (step 5 increments the spawn, NOT the epoch), so the previous attempt's
+        // counter - very possibly carrying terminated=1 - would otherwise be read back and the
+        // reset loop would exit after zero iterations until the 24h TTL.
+        //
+        // Scoped exactly like the signal cancel above: only the back-edges whose source node this
+        // rerun is resetting. A broader wipe would let a trigger REFIRE clear a different,
+        // still-running epoch's counter and reproduce the overrun the store exists to prevent.
+        //
+        // Runs AFTER the signal cancel on purpose: cancelling first stops a pending WAIT_TIMER
+        // from resolving and re-writing the key we are about to delete. Note the delete is Redis,
+        // so it is NOT part of this @Transactional method - a rollback leaves it applied (harmless:
+        // the loop simply restarts its count) and a concurrent cross-replica resume could in
+        // principle re-create the key before commit. Narrow, and strictly better than the stale
+        // terminated=1 it replaces.
+        if (loopIterationStore != null) {
+            for (String resetStepId : stepsToReset) {
+                for (var iterateEdge : plan.getIterateEdgesForSource(resetStepId)) {
+                    // The loop's own ceiling bounds how many claim markers exist. Passing it (rather
+                    // than letting the store re-read the counter, which fails open) guarantees the
+                    // clear cannot under-delete and strand a stale claim that would block the AUTO
+                    // path's next advance.
+                    int maxIterations = plan.findLoopCoreForIterateEdge(iterateEdge)
+                            .map(com.apimarketplace.orchestrator.domain.workflow.Core::maxIterations)
+                            .orElse(10);
+                    loopIterationStore.clearBackEdge(runId, currentEpoch, iterateEdge.getEdgeId(), maxIterations);
+                    logger.info("[RerunService] Cleared shared loop counter for reset back-edge: runId={}, epoch={}, edgeId={}, maxIterations={}",
+                            runId, currentEpoch, iterateEdge.getEdgeId(), maxIterations);
+                }
+            }
+        }
+
         // 6. Update the run entity with rerun metadata
         // Re-load after incrementSpawn which saved its own locked copy
         runEntity = runRepository.findByRunIdPublic(runId)
@@ -263,6 +308,9 @@ public class StepRerunService {
         runEntity.setMetadata(metadata);
         runEntity.setStatus(RunStatus.RUNNING);
         runEntity.setUpdatedAt(Instant.now());
+        // A rerun revives the run: a cause recorded by an earlier stop no longer describes
+        // it, and would otherwise be reported next to this fresh execution.
+        AgentRunStopService.clearStopMetadata(runEntity);
         runRepository.save(runEntity);
 
         // 7. Clear cached state before reconstructing. Exclude STREAMING domain:
@@ -319,7 +367,15 @@ public class StepRerunService {
     /**
      * Finds all downstream steps (successors) from a given node.
      * Uses BFS to traverse the graph and collect all reachable nodes.
-     * Also includes loop body steps when a loop node is encountered.
+     *
+     * <p><b>Loop bodies are covered by the plain successor walk</b>, not by the
+     * {@code loopBody()} calls below: {@code WorkflowGraphBuilder} adds every edge as an ordinary
+     * successor edge including the iterate (loop-back) one, so the BFS follows the body chain and
+     * reaches the body TAIL - the node that owns the iterate edge - whether the rerun target is
+     * the loop controller, a mid-body node, or an upstream node. That matters beyond node reset:
+     * the loop counter clear in {@code rerunFromStep} keys off the back-edge SOURCE being present
+     * in this set. No production builder currently populates {@code WorkflowNode.loopBody()}, so
+     * those calls are inert belt-and-braces; do not rely on them.
      *
      * @param graph      The workflow graph
      * @param startNodeId The starting node ID

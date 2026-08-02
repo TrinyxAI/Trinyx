@@ -1,5 +1,7 @@
 package com.apimarketplace.orchestrator.execution.v2.services;
 
+import com.apimarketplace.orchestrator.domain.workflow.BackEdgeSpec;
+import com.apimarketplace.orchestrator.domain.workflow.BackEdgeSpecs;
 import com.apimarketplace.orchestrator.domain.workflow.WorkflowExecution;
 import com.apimarketplace.orchestrator.domain.workflow.Edge;
 import com.apimarketplace.orchestrator.domain.workflow.StepExecutionResult;
@@ -8,6 +10,7 @@ import com.apimarketplace.orchestrator.domain.execution.NodeStatus;
 import com.apimarketplace.orchestrator.execution.v2.nodes.ExecutionNode;
 import com.apimarketplace.orchestrator.execution.v2.nodes.NodeExecutionResult;
 import com.apimarketplace.orchestrator.execution.v2.nodes.NodeType;
+import com.apimarketplace.orchestrator.execution.v2.engine.BackEdgeSpanResolver;
 import com.apimarketplace.orchestrator.execution.v2.engine.ExecutionContext;
 import com.apimarketplace.orchestrator.execution.v2.engine.TriggerItem;
 import com.apimarketplace.orchestrator.execution.v2.state.BackEdgeState;
@@ -699,18 +702,21 @@ public class NodeCompletionService {
         if (plan != null) {
             String nodeId = node.getNodeId();
 
-            // Fast path for the final loop-body node, which owns the iterate edge.
-            for (Edge iterateEdge : plan.getIterateEdgesForSource(nodeId)) {
-                BackEdgeState state = activeStatesByEdgeId.get(iterateEdge.getEdgeId());
+            // Fast path for the final loop-body node, which owns the loop-back edge.
+            for (BackEdgeSpec spec : BackEdgeSpecs.forSource(plan, nodeId)) {
+                BackEdgeState state = activeStatesByEdgeId.get(spec.edgeId());
                 if (state != null) {
                     return state.iteration();
                 }
             }
 
-            // Body nodes before the final iterate source still need the same loop stamp.
-            for (Edge iterateEdge : plan.getIterateEdges()) {
-                BackEdgeState state = activeStatesByEdgeId.get(iterateEdge.getEdgeId());
-                if (state != null && isNodeInsideLoopBody(plan, iterateEdge, nodeId)) {
+            // Body nodes before the loop-back source still need the same loop stamp.
+            // Uses the SAME span the reset uses (BackEdgeSpanResolver), so a node that was
+            // reset always gets a distinct iteration - and therefore a distinct
+            // workflow_step_data row instead of being dropped by ON CONFLICT DO NOTHING.
+            for (BackEdgeSpec spec : BackEdgeSpecs.all(plan)) {
+                BackEdgeState state = activeStatesByEdgeId.get(spec.edgeId());
+                if (state != null && BackEdgeSpanResolver.isInSpan(plan, spec, nodeId)) {
                     return state.iteration();
                 }
             }
@@ -727,56 +733,5 @@ public class NodeCompletionService {
         logger.debug("Multiple active loop states found but none matched node {}; leaving iteration unset",
             node.getNodeId());
         return null;
-    }
-
-    private boolean isNodeInsideLoopBody(WorkflowPlan plan, Edge iterateEdge, String nodeId) {
-        if (plan == null || iterateEdge == null || nodeId == null) {
-            return false;
-        }
-
-        String sourceKey = EdgeRefParser.getNodeKey(iterateEdge.from());
-        String loopCoreKey = EdgeRefParser.getNodeKey(iterateEdge.to());
-        String bodyTargetKey = plan.findLoopBodyTarget(loopCoreKey);
-        if (sourceKey == null || bodyTargetKey == null) {
-            return false;
-        }
-
-        Map<String, Set<String>> successors = buildNonIterateSuccessors(plan);
-        Queue<String> queue = new ArrayDeque<>();
-        Set<String> visited = new HashSet<>();
-        queue.add(bodyTargetKey);
-        visited.add(bodyTargetKey);
-
-        while (!queue.isEmpty()) {
-            String current = queue.poll();
-            if (nodeId.equals(current)) {
-                return true;
-            }
-            if (sourceKey.equals(current)) {
-                continue;
-            }
-            for (String successor : successors.getOrDefault(current, Set.of())) {
-                if (visited.add(successor)) {
-                    queue.add(successor);
-                }
-            }
-        }
-
-        return false;
-    }
-
-    private Map<String, Set<String>> buildNonIterateSuccessors(WorkflowPlan plan) {
-        Map<String, Set<String>> successors = new HashMap<>();
-        for (Edge edge : plan.getEdges()) {
-            if ("iterate".equals(EdgeRefParser.getPort(edge.to()))) {
-                continue;
-            }
-            String fromKey = EdgeRefParser.getNodeKey(edge.from());
-            String toKey = EdgeRefParser.getNodeKey(edge.to());
-            if (fromKey != null && toKey != null) {
-                successors.computeIfAbsent(fromKey, ignored -> new HashSet<>()).add(toKey);
-            }
-        }
-        return successors;
     }
 }

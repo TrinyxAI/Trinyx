@@ -13,6 +13,7 @@ import com.apimarketplace.orchestrator.repository.WorkflowRunRepository;
 import com.apimarketplace.orchestrator.services.StepAggregationService;
 import com.apimarketplace.orchestrator.services.WorkflowManagementService;
 import com.apimarketplace.orchestrator.services.epoch.WorkflowEpochService;
+import com.apimarketplace.orchestrator.services.resume.AgentRunStopService;
 import com.apimarketplace.orchestrator.services.resume.StepRerunService;
 import com.apimarketplace.orchestrator.services.resume.WorkflowResumeService;
 import com.apimarketplace.orchestrator.services.resume.WorkflowRunState;
@@ -531,6 +532,15 @@ public class WorkflowRunController {
     }
 
     /**
+     * Attribution written on a run stopped from the UI. Built by the service that owns the
+     * convention (three keys written as a set, null reason clearing a previous stopper's
+     * sentence) rather than assembled here: attribution policy is not controller business.
+     */
+    private static Map<String, Object> userStopMetadata() {
+        return AgentRunStopService.stopMetadata("user");
+    }
+
+    /**
      * Hard-cancels a workflow run (terminal stop).
      * Accepts RUNNING, PAUSED, or WAITING_TRIGGER. Sets status to CANCELLED.
      */
@@ -546,7 +556,9 @@ public class WorkflowRunController {
                 return ResponseEntity.notFound().build();
             }
             logger.info("Cancelling workflow: {}", runId);
-            resumeService.cancelWorkflow(runId);
+            // Record WHO stopped it, same keys the agent-facing stop_run writes, so a
+            // later get_run can tell "the user stopped this" from "it crashed".
+            resumeService.cancelWorkflow(runId, userStopMetadata());
 
             return ResponseEntity.ok(Map.of(
                 "success", true,
@@ -585,7 +597,8 @@ public class WorkflowRunController {
                 return ResponseEntity.notFound().build();
             }
             logger.info("Stopping workflow: {}", runId);
-            resumeService.stopWorkflow(runId);
+            // Same attribution as cancel: the run reports who stopped it.
+            resumeService.stopWorkflow(runId, userStopMetadata());
 
             // Read back the post-stop status: terminal runs stay terminal,
             // RUNNING/PAUSED transition to WAITING_TRIGGER.

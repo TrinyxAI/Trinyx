@@ -118,6 +118,16 @@ public class RunCloneService {
         if (cloneMetadata != null) {
             cloneMetadata.remove(
                     com.apimarketplace.orchestrator.execution.v2.engine.MockRunGate.MOCK_MODE_METADATA_KEY);
+            // Same reasoning for the stop cause: it describes a stop of the SOURCE run.
+            // A showcase clone was never stopped, so carrying "stopped by the agent
+            // because X" onto it would make every report of the clone say something
+            // that never happened to it.
+            cloneMetadata.remove(
+                    com.apimarketplace.orchestrator.services.resume.AgentRunStopService.META_STOP_REASON);
+            cloneMetadata.remove(
+                    com.apimarketplace.orchestrator.services.resume.AgentRunStopService.META_STOPPED_BY);
+            cloneMetadata.remove(
+                    com.apimarketplace.orchestrator.services.resume.AgentRunStopService.META_STOPPED_AT);
         }
         clone.setMetadata(cloneMetadata);
         clone.setPlan(sourceRun.getPlan());

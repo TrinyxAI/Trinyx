@@ -15,6 +15,7 @@ import org.springframework.test.util.ReflectionTestUtils;
 import java.util.HashMap;
 import java.util.Map;
 
+import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.mockito.Mockito.*;
 
 /**
@@ -188,5 +189,31 @@ class ExecutionServiceInjectorTest {
 
     private void setupCatalogGateway() {
         ReflectionTestUtils.setField(injector, "catalogToolsGateway", catalogToolsGateway);
+    }
+
+    @Nested
+    @DisplayName("Registry wiring")
+    class RegistryWiringTests {
+
+        /**
+         * SubWorkflowNode fails hard with "ProductionRunResolver not injected" when this
+         * service is missing, and the field is {@code @Autowired(required=false)}. Without
+         * this test, dropping the one builder line would break every sub_workflow node in
+         * production while the whole suite stayed green.
+         */
+        @Test
+        @DisplayName("Forwards ProductionRunResolver into the registry handed to nodes")
+        void forwardsProductionRunResolver() {
+            setupMockGateway(true);
+            var resolver = mock(com.apimarketplace.orchestrator.trigger.ProductionRunResolver.class);
+            ReflectionTestUtils.setField(injector, "productionRunResolver", resolver);
+
+            ExecutionNode node = mock(ExecutionNode.class);
+            injector.injectServices(Map.of("core:sub_workflow", node));
+
+            var captor = org.mockito.ArgumentCaptor.forClass(ServiceRegistry.class);
+            verify(node).acceptServices(captor.capture());
+            assertSame(resolver, captor.getValue().getProductionRunResolver());
+        }
     }
 }

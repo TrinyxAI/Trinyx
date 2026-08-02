@@ -11,6 +11,8 @@ import { publicationService } from '@/lib/api/orchestrator/publication.service';
 import { isCeMode } from '@/lib/format-cost';
 import { useCeCloudLinkStatus } from '@/hooks/useCeCloudLinkStatus';
 import { IS_CE } from '@/lib/edition';
+import { CeExclusiveBadge } from '@/components/marketplace/CeExclusiveBadge';
+import { isCeExclusiveBlocked } from '@/lib/marketplace/ceExclusive';
 import type { WorkflowPublication } from '@/lib/api/orchestrator/types';
 
 interface MarketplaceHeaderActionsProps {
@@ -57,6 +59,13 @@ export function MarketplaceHeaderActions({ publicationId, compact = false }: Mar
   // mode only. Agents, tables, interfaces, skills and bare workflows keep the
   // classic full-modal progress + success screen.
   const inlineInstall = (publication.displayMode || 'WORKFLOW') === 'APPLICATION' && !isAgent;
+
+  // Managed cloud cannot install a CE-exclusive publication: the price/Install
+  // button is replaced by the "self-hosted only" badge, whose tooltip names the
+  // features behind it. The modal keeps its own guard for any other entry point.
+  if (isCeExclusiveBlocked(publication)) {
+    return <CeExclusiveBadge publication={publication} variant="inline" />;
+  }
 
   return (
     <>

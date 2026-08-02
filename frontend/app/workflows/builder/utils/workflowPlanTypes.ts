@@ -27,10 +27,25 @@ import type { BuilderNodeData, NodeMock, NodePolicy } from '../types';
  * - loop: :body (first body step), :exit (when condition is false), :iterate (input, loop back)
  * - fork: :branch_0, :branch_1, ...
  */
+/**
+ * Loop-back marker of a declared back-edge (an edge pointing to an ancestor node).
+ *
+ * Lives at the top level of the edge, NEVER inside `params`: the backend exposes an edge's
+ * `params` as the TARGET STEP's params, so a marker stored there is injected into the target
+ * node's configuration.
+ */
+export interface BackEdgeV2 {
+  /** Optional expression re-evaluated before each re-entry. Blank = iterate whenever traversed. */
+  condition?: string;
+  /** Optional per-edge cap. Omitted = the global default applies. */
+  maxIterations?: number;
+}
+
 export interface EdgeV2 {
   from: string;
   to: string;
   params?: Record<string, any>;
+  backEdge?: BackEdgeV2;
 }
 
 /**

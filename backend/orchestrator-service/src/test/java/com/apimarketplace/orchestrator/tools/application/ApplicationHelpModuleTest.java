@@ -135,11 +135,22 @@ class ApplicationHelpModuleTest {
                 Map<String, String> typed = (Map<String, String>) group;
                 allActionKeys.addAll(typed.keySet());
             }
+            // Derived from the tool's own action list, not a hand-copied one: a literal
+            // list silently stops covering "all supported actions" the day an action is
+            // added (it had already drifted, missing uninstall and stop_run).
             // Refactor 2026-05-10: marketplace browse renamed `list` → `search`
-            // (matches the actual MCP action name; the module exposes `search`,
-            // not `list`). All other action names are unchanged.
-            assertThat(allActionKeys).contains("create", "search", "my", "get", "acquire", "execute",
-                    "runs", "get_run", "get_node_output", "visualize", "help");
+            // (matches the actual MCP action name; the module exposes `search`, not `list`).
+            assertThat(allActionKeys).containsAll(supportedActions());
+        }
+
+        /** The actions the application tool advertises, read from the tool definition itself. */
+        private Set<String> supportedActions() {
+            var provider = new ApplicationToolsProvider(null, null, helpModule);
+            var actionParam = provider.getTools().get(0).parameters().stream()
+                    .filter(p -> "action".equals(p.name()))
+                    .findFirst()
+                    .orElseThrow();
+            return new java.util.HashSet<>(actionParam.enumValues());
         }
 
         @Test
@@ -194,7 +205,10 @@ class ApplicationHelpModuleTest {
             Map<String, Object> params = (Map<String, Object>) data.get("parameters");
 
             assertThat(params).containsKeys("action", "workflow_id", "application_id",
-                "title", "description", "query", "category", "limit", "offset");
+                "title", "description", "query", "category", "limit", "offset",
+                // stop_run's own parameters: without them an agent reading the help has no
+                // way to learn it can give a reason or choose how hard to stop.
+                "reason", "mode");
         }
 
         @Test

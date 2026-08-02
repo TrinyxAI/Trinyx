@@ -29,7 +29,9 @@ import java.util.UUID;
  * Architecture:
  * - Triggered from V2WorkflowFinalizer after workflow failure
  * - Finds downstream error handler workflows via WorkflowTriggerLookupService
- * - Uses accumulation pattern: reuses existing WAITING_TRIGGER run
+ * - Uses accumulation pattern: reuses the handler's existing non-terminal run,
+ *   resolved through {@link ProductionRunResolver#resolveActiveRun}. Never creates
+ *   a run, and a pin is NOT required on the handler.
  * - Delegates execution to ReusableTriggerService
  * - Anti-loop protection: error handler workflows that fail do NOT trigger other error handlers
  *
@@ -50,14 +52,17 @@ public class ErrorTriggerDispatchService {
 
     private final WorkflowTriggerLookupService triggerLookupService;
     private final WorkflowRunRepository runRepository;
+    private final ProductionRunResolver productionRunResolver;
     private final ReusableTriggerService triggerService;
 
     public ErrorTriggerDispatchService(
             WorkflowTriggerLookupService triggerLookupService,
             WorkflowRunRepository runRepository,
+            ProductionRunResolver productionRunResolver,
             ReusableTriggerService triggerService) {
         this.triggerLookupService = triggerLookupService;
         this.runRepository = runRepository;
+        this.productionRunResolver = productionRunResolver;
         this.triggerService = triggerService;
     }
 
@@ -158,8 +163,17 @@ public class ErrorTriggerDispatchService {
             // workflow in org A must not leak its failure payload (step
             // outputs, error message, stack) into an error-handler workflow
             // in org B. Same shape as WorkflowTriggerDispatchService R4 fix.
-            String parentOrg = parentWorkflow.getOrganizationId();
-            String parentTenant = parentWorkflow.getTenantId();
+            // Read the parent's workspace off the RUN, not off parentWorkflow.
+            // parentWorkflow is the lazy @ManyToOne proxy from runEntity.getWorkflow();
+            // dispatchEpochFailure is @Async and open-in-view is off, so there is no
+            // session on this thread and touching any field other than the id throws
+            // "Could not initialize proxy - no session". The outer catch turned that into
+            // a single ERROR line and returned, so no error handler ever fired.
+            // workflow_runs carries both columns (NOT NULL since V263) and
+            // a run cannot belong to a different workspace than its workflow, so this is
+            // the same value without the proxy hit or an extra query.
+            String parentOrg = runEntity.getOrganizationId();
+            String parentTenant = runEntity.getTenantId();
             for (WorkflowEntity downstream : downstreamWorkflows) {
                 String dsOrg = downstream.getOrganizationId();
                 String dsTenant = downstream.getTenantId();
@@ -190,7 +204,8 @@ public class ErrorTriggerDispatchService {
     /**
      * Trigger a single downstream error handler workflow with the given payload.
      *
-     * Uses accumulation pattern (like webhook/schedule): reuses the latest WAITING_TRIGGER run.
+     * Uses accumulation pattern (like webhook/schedule): reuses the handler's active
+     * run, resolved through {@link ProductionRunResolver#resolveActiveRun}.
      * Never creates a new run - user must start one from the UI.
      *
      * @param workflow The downstream error handler workflow to trigger
@@ -212,30 +227,26 @@ public class ErrorTriggerDispatchService {
             return;
         }
 
-        // Version-aware run lookup
-        Optional<WorkflowRunEntity> waitingRunOpt;
-        if (workflow.getPinnedVersion() != null) {
-            waitingRunOpt = runRepository.findFirstByWorkflowIdAndPlanVersionOrderByStartedAtDesc(
-                    workflowId, workflow.getPinnedVersion());
-        } else {
-            waitingRunOpt = runRepository.findFirstByWorkflowIdOrderByStartedAtDesc(workflowId);
-        }
-
-        if (waitingRunOpt.isEmpty()) {
-            logger.warn("[ErrorTrigger] No active run for workflow {}, skipping dispatch from parent {}",
-                workflowId, parentRunId);
+        // Centralized run lookup. This used to be a raw "newest run by started_at"
+        // query with NO status predicate, followed by a terminal-status bail-out -
+        // byte for byte the shadowing bug ProductionRunResolver was created to fix
+        // for schedules: one cancelled editor test on the handler produced a newer
+        // CANCELLED row that permanently masked the healthy WAITING_TRIGGER run, and
+        // the only signal was a WARN line. resolveActiveRun keeps the pin OPTIONAL
+        // (error handlers are internal, demanding a pin would remove behaviour) and
+        // still selects the newest by started_at; what it adds is the status filter
+        // inside the query plus showcase-clone exclusion. It does NOT consult
+        // production_run_id. Net behaviour change on this lane: a newer terminal run
+        // no longer causes a skip, the newest non-terminal run is fired instead.
+        ProductionRunResolver.Resolution resolution = productionRunResolver.resolveActiveRun(
+            workflow, ProductionRunResolver.NON_TERMINAL_STATUSES);
+        if (!resolution.isFound()) {
+            logger.warn("[ErrorTrigger] No active run for workflow {} (outcome={}), skipping dispatch from parent {}",
+                workflowId, resolution.outcome(), parentRunId);
             return;
         }
 
-        WorkflowRunEntity runEntity = waitingRunOpt.get();
-
-        // Reject terminal runs
-        RunStatus runEntityStatus = runEntity.getStatus();
-        if (runEntityStatus.isTerminal()) {
-            logger.warn("[ErrorTrigger] Latest run {} for workflow {} is terminal ({}), skipping dispatch",
-                    runEntity.getRunIdPublic(), workflowId, runEntityStatus);
-            return;
-        }
+        WorkflowRunEntity runEntity = resolution.run().orElseThrow();
         logger.info("[ErrorTrigger] Reusing existing run {} for workflow {}",
             runEntity.getRunIdPublic(), workflowId);
 

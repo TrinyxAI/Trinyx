@@ -1,5 +1,6 @@
 package com.apimarketplace.conversation.service.ai;
 
+import com.apimarketplace.agent.domain.BridgeProviders;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -46,9 +47,12 @@ public class BridgeAccessEnforcer {
 
     private static final Logger log = LoggerFactory.getLogger(BridgeAccessEnforcer.class);
 
-    /** Provider names that go through a shared CLI subscription and must be gated. */
-    private static final Set<String> BRIDGE_PROVIDERS = Set.of(
-            "claude-code", "codex", "gemini-cli", "mistral-vibe");
+    /**
+     * Provider names that go through a shared CLI subscription and must be
+     * gated. Shared list - see {@code BridgeProviders} in agent-common (the
+     * single source, also read by the marketplace's CE-exclusive detector).
+     */
+    private static final Set<String> BRIDGE_PROVIDERS = BridgeProviders.NAMES;
 
     private static final String DEFAULT_USER_ROLES = "USER";
 

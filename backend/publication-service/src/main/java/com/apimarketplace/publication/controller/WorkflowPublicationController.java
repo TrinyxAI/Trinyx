@@ -10,6 +10,7 @@ import com.apimarketplace.publication.domain.WorkflowPublicationEntity.Publicati
 import com.apimarketplace.publication.domain.PublicationSnapshotVersionEntity;
 import com.apimarketplace.publication.config.OrchestratorInternalClient;
 import com.apimarketplace.publication.service.AgentPublicationService;
+import com.apimarketplace.publication.service.CeExclusivePublicationException;
 import com.apimarketplace.publication.service.LandingInterfaceSnapshotter;
 import com.apimarketplace.publication.service.OnboardingCategoryMapper;
 import com.apimarketplace.publication.service.PublicationListQueryService;
@@ -1373,6 +1374,8 @@ public class WorkflowPublicationController {
                     "publicationId", publicationId,
                     "title", result.get("title")
             ));
+        } catch (CeExclusivePublicationException e) {
+            return ceExclusiveResponse(e);
         } catch (IllegalArgumentException e) {
             logger.warn("Bad request acquiring publication: {}", e.getMessage());
             return ResponseEntity.badRequest().body(Map.of("error", e.getMessage()));
@@ -1665,6 +1668,12 @@ public class WorkflowPublicationController {
 
         response.put("publishedAt", pub.getPublishedAt() != null ? pub.getPublishedAt().toString() : null);
         response.put("updatedAt", pub.getUpdatedAt() != null ? pub.getUpdatedAt().toString() : null);
+
+        // CE-exclusive label (same keys as the list projection, so a card and a
+        // detail page render the badge from one shape).
+        response.put("ceExclusive", pub.isCeExclusive());
+        response.put("ceExclusiveFeatures", pub.getCeExclusiveFeatures());
+
         // Don't include planSnapshot in responses by default -- detail endpoints add it explicitly
         return response;
     }
@@ -1725,6 +1734,8 @@ public class WorkflowPublicationController {
             UUID pubId = UUID.fromString(publicationId);
             Map<String, Object> result = agentPublicationService.acquireAgentPublication(pubId, tenantId, organizationId);
             return ResponseEntity.ok(result);
+        } catch (CeExclusivePublicationException e) {
+            return ceExclusiveResponse(e);
         } catch (IllegalArgumentException e) {
             logger.warn("Bad request acquiring agent: {}", e.getMessage());
             return ResponseEntity.badRequest().body(Map.of("error", e.getMessage()));
@@ -1962,6 +1973,8 @@ public class WorkflowPublicationController {
             UUID pubId = UUID.fromString(publicationId);
             Map<String, Object> result = resourcePublicationService.acquireResource(pubId, tenantId, organizationId);
             return ResponseEntity.ok(result);
+        } catch (CeExclusivePublicationException e) {
+            return ceExclusiveResponse(e);
         } catch (IllegalArgumentException e) {
             return ResponseEntity.badRequest().body(Map.of("error", e.getMessage()));
         } catch (Exception e) {
@@ -2409,6 +2422,22 @@ public class WorkflowPublicationController {
 
     private static boolean isViewerRole(String organizationRole) {
         return organizationRole != null && "VIEWER".equalsIgnoreCase(organizationRole.trim());
+    }
+
+    /**
+     * Uniform refusal for a CE-exclusive publication on managed cloud, shared by
+     * the three acquire endpoints. 403 (not 400): the request is well-formed and
+     * the caller is legitimate, the deployment edition is the blocker. The
+     * {@code code} lets the marketplace UI render its "self-hosted only" state
+     * instead of a generic error, and {@code features} names what forces it.
+     */
+    private static ResponseEntity<?> ceExclusiveResponse(CeExclusivePublicationException e) {
+        logger.info("Acquire refused - CE-exclusive publication on managed cloud (features={})", e.getFeatures());
+        return ResponseEntity.status(HttpStatus.FORBIDDEN).body(Map.of(
+                "error", e.getMessage(),
+                "code", "CE_EXCLUSIVE",
+                "features", e.getFeatures()
+        ));
     }
 
     /**

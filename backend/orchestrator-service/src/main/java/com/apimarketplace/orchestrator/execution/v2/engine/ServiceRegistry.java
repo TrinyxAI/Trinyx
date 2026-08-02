@@ -69,6 +69,7 @@ public class ServiceRegistry {
     private final WorkflowExecutionService workflowExecutionService;
     private final WorkflowExecutionServiceV2 workflowExecutionServiceV2;
     private final ReusableTriggerService reusableTriggerService;
+    private final com.apimarketplace.orchestrator.trigger.ProductionRunResolver productionRunResolver;
     private final StepOutputService stepOutputService;
     private final WorkflowStepDataRepository workflowStepDataRepository;
     private final com.apimarketplace.orchestrator.services.triggers.TriggerUserResolver triggerUserResolver;
@@ -108,6 +109,7 @@ public class ServiceRegistry {
         this.workflowExecutionService = builder.workflowExecutionService;
         this.workflowExecutionServiceV2 = builder.workflowExecutionServiceV2;
         this.reusableTriggerService = builder.reusableTriggerService;
+        this.productionRunResolver = builder.productionRunResolver;
         this.stepOutputService = builder.stepOutputService;
         this.workflowStepDataRepository = builder.workflowStepDataRepository;
         this.triggerUserResolver = builder.triggerUserResolver;
@@ -234,6 +236,10 @@ public class ServiceRegistry {
         return reusableTriggerService;
     }
 
+    public com.apimarketplace.orchestrator.trigger.ProductionRunResolver getProductionRunResolver() {
+        return productionRunResolver;
+    }
+
     public StepOutputService getStepOutputService() {
         return stepOutputService;
     }
@@ -323,6 +329,7 @@ public class ServiceRegistry {
         private WorkflowExecutionService workflowExecutionService;
         private WorkflowExecutionServiceV2 workflowExecutionServiceV2;
         private ReusableTriggerService reusableTriggerService;
+        private com.apimarketplace.orchestrator.trigger.ProductionRunResolver productionRunResolver;
         private StepOutputService stepOutputService;
         private WorkflowStepDataRepository workflowStepDataRepository;
         private com.apimarketplace.orchestrator.services.triggers.TriggerUserResolver triggerUserResolver;
@@ -466,6 +473,12 @@ public class ServiceRegistry {
 
         public Builder reusableTriggerService(ReusableTriggerService service) {
             this.reusableTriggerService = service;
+            return this;
+        }
+
+        public Builder productionRunResolver(
+                com.apimarketplace.orchestrator.trigger.ProductionRunResolver resolver) {
+            this.productionRunResolver = resolver;
             return this;
         }
 

@@ -104,6 +104,8 @@ public class WorkflowExecution {
     public String getDisplayName() { return displayName; }
     public void setDisplayName(String displayName) { this.displayName = displayName; }
     public WorkflowPlan getPlan() { return plan; }
+
+
     public Map<String, Object> getInitialInputs() { return new HashMap<>(initialInputs); }
     public Instant getStartTime() { return startTime; }
     public RunStatus getStatus() { return status; }

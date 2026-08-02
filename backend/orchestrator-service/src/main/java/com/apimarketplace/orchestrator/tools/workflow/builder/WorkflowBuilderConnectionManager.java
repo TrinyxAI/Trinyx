@@ -63,6 +63,69 @@ public class WorkflowBuilderConnectionManager {
     private final WorkflowBuilderSessionStore sessionStore;
 
     /**
+     * Decide whether this connection closes a loop, and with what budget.
+     *
+     * <p>A connection whose target already ran (it is an ancestor of the source) re-enters that
+     * node rather than depending on it. Marking it is what stops the engine from having the
+     * target wait for a node that only runs afterwards, so it is detected from the graph instead
+     * of relying on the caller to declare it. An explicit {@code loop_back=false} opts out; a
+     * {@code max_iterations} caps this loop specifically.
+     *
+     * @return the marker to store, or null when this is an ordinary forward connection
+     */
+    private Map<String, Object> resolveBackEdge(WorkflowBuilderSession session, String fromNodeId,
+                                                String toNodeId, Map<String, Object> parameters) {
+        Object explicit = parameters.get("loop_back");
+        if (Boolean.FALSE.equals(explicit)) {
+            return null;
+        }
+
+        boolean isLoopBack = Boolean.TRUE.equals(explicit)
+            || new com.apimarketplace.orchestrator.tools.workflow.builder.validation.ValidationGraphAnalyzer(session)
+                .collectForwardSpan(EdgeRefParser.splitPort(toNodeId)[0], null)
+                .contains(EdgeRefParser.splitPort(fromNodeId)[0]);
+
+        if (!isLoopBack) {
+            return null;
+        }
+
+        Map<String, Object> backEdge = new LinkedHashMap<>();
+        Object maxIterations = parameters.get("max_iterations");
+        if (maxIterations == null) {
+            maxIterations = parameters.get("maxIterations");
+        }
+        Integer cap = asPositiveInt(maxIterations);
+        if (cap != null) {
+            backEdge.put("maxIterations", cap);
+        }
+        Object loopCondition = parameters.get("loop_condition");
+        if (loopCondition instanceof String s && !s.isBlank()) {
+            backEdge.put("condition", s);
+        }
+        return backEdge;
+    }
+
+    /**
+     * A cap the caller may have quoted. An LLM routinely sends {@code "5"} instead of {@code 5};
+     * rejecting that silently would apply the default cap and the loop would run a different
+     * number of times than the agent asked for.
+     */
+    private Integer asPositiveInt(Object value) {
+        if (value instanceof Number number) {
+            return number.intValue() > 0 ? number.intValue() : null;
+        }
+        if (value instanceof String s && !s.isBlank()) {
+            try {
+                int parsed = Integer.parseInt(s.trim());
+                return parsed > 0 ? parsed : null;
+            } catch (NumberFormatException ignored) {
+                return null;
+            }
+        }
+        return null;
+    }
+
+    /**
      * Connect two nodes.
      * Accepts node labels (e.g., "My Step") or full nodeIds.
      * Accepts both from/to and source/target parameter names.
@@ -198,14 +261,20 @@ public class WorkflowBuilderConnectionManager {
             return ToolExecutionResult.failure(ToolErrorCode.RESOURCE_ALREADY_EXISTS, "Connection already exists: " + fromRef + " → " + toRef);
         }
 
+        // A connection back to a node that already ran is a LOOP-BACK, not a dependency.
+        // Detected from the graph rather than requiring a flag, so the agent cannot create a
+        // cycle that deadlocks by forgetting to declare it - same rule the builder canvas uses.
+        Map<String, Object> backEdge = resolveBackEdge(session, fromNodeId, toNodeId, parameters);
+
         // Create connection
-        session.addConnection(fromNodeId, toNodeId, condition);
+        session.addConnection(fromNodeId, toNodeId, condition, backEdge);
 
         // Record action for undo
         Map<String, Object> edgeData = new LinkedHashMap<>();
         edgeData.put("from", fromNodeId);
         edgeData.put("to", toNodeId);
         if (condition != null) edgeData.put("condition", condition);
+        if (backEdge != null) edgeData.put("backEdge", backEdge);
         session.recordAction("connect", null, "edge", edgeData);
         session.clearRedoStack();
 
@@ -218,6 +287,16 @@ public class WorkflowBuilderConnectionManager {
 
         if (condition != null) {
             result.put("condition", condition);
+        }
+
+        if (backEdge != null) {
+            Object cap = backEdge.get("maxIterations");
+            result.put("loop_back", "This connection re-enters '" + formatNodeRef(session, toNodeId)
+                + "', so that part of the workflow repeats"
+                + (cap != null
+                    ? " at most " + cap + " times."
+                    : " until its branch stops selecting it, up to the workspace iteration limit.")
+                + " Reaching the limit while the loop still wants to run FAILS the run.");
         }
 
         // Show current connections from source

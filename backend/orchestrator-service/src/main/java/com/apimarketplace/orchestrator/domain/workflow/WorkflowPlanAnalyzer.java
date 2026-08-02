@@ -29,6 +29,10 @@ public final class WorkflowPlanAnalyzer {
 
         for (Edge edge : edges) {
             if (edge.from() == null || edge.to() == null) continue;
+            // A loop-back is a re-entry, not an incoming dependency. Counting it here would make
+            // the loop's own entry point look like a merge waiting on the node that closes the
+            // loop - i.e. on its own descendant.
+            if (WorkflowPlan.isBackEdge(edge)) continue;
 
             String toKey = EdgeRefParser.getNodeKey(edge.to());
             String fromKey = EdgeRefParser.getNodeKey(edge.from());
@@ -191,6 +195,8 @@ public final class WorkflowPlanAnalyzer {
         String normalizedId = WorkflowPlanParser.normalizeStepId(stepId);
 
         long distinctSources = edges.stream()
+            // Same reason as detectMergeNodes: a loop-back is not an incoming dependency.
+            .filter(edge -> !WorkflowPlan.isBackEdge(edge))
             .filter(edge -> {
                 if (edge.to() == null) return false;
                 String toKey = EdgeRefParser.getNodeKey(edge.to());

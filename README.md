@@ -149,6 +149,10 @@ app setting in one shot):
 Run both by passing both env files (repeat `--env-file`). See [docker/README-CE.md](docker/README-CE.md)
 for details and tuning.
 
+Both add-ons need this repository: the env files above are not part of the `livecontext` npm
+package and `npx livecontext` passes no `--env-file`, so **neither can be enabled through npx**.
+Clone the repo and use `docker compose` directly to turn them on.
+
 ## What's in the box
 
 - **Workflow engine.** Visual builder and execution engine with parallel branches, loops, signals,

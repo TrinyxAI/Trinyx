@@ -11,6 +11,7 @@ import com.apimarketplace.orchestrator.persistence.WorkflowStepDataRepository;
 import com.apimarketplace.orchestrator.repository.WorkflowRepository;
 import com.apimarketplace.orchestrator.repository.WorkflowRunRepository;
 import com.apimarketplace.orchestrator.services.StepOutputService;
+import com.apimarketplace.orchestrator.trigger.ProductionRunResolver;
 import com.apimarketplace.orchestrator.trigger.ReusableTriggerService;
 import com.apimarketplace.orchestrator.trigger.TriggerExecutionResult;
 import com.apimarketplace.orchestrator.trigger.TriggerType;
@@ -25,7 +26,11 @@ import org.mockito.junit.jupiter.MockitoExtension;
 
 import java.util.*;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -58,6 +63,9 @@ class SubWorkflowNodeTest {
     private ReusableTriggerService reusableTriggerService;
 
     @Mock
+    private ProductionRunResolver productionRunResolver;
+
+    @Mock
     private StepOutputService stepOutputService;
 
     @Mock
@@ -86,9 +94,26 @@ class SubWorkflowNodeTest {
         node.setWorkflowRepository(workflowRepository);
         node.setWorkflowRunRepository(workflowRunRepository);
         node.setReusableTriggerService(reusableTriggerService);
+        // The resolver is REQUIRED in production (ExecutionServiceInjector always wires
+        // it), so every test drives the shipped path through it rather than a bypass.
+        node.setProductionRunResolver(productionRunResolver);
         node.setStepOutputService(stepOutputService);
         node.setWorkflowStepDataRepository(workflowStepDataRepository);
         return node;
+    }
+
+    /** The target workflow has a fireable run. */
+    private void stubActiveRun(WorkflowRunEntity run) {
+        when(productionRunResolver.resolveActiveRun(any(WorkflowEntity.class), anyList()))
+            .thenReturn(new ProductionRunResolver.Resolution(
+                Optional.of(run), ProductionRunResolver.Outcome.FOUND, "Test Sub Workflow"));
+    }
+
+    /** The target workflow has no fireable run. */
+    private void stubNoActiveRun() {
+        when(productionRunResolver.resolveActiveRun(any(WorkflowEntity.class), anyList()))
+            .thenReturn(new ProductionRunResolver.Resolution(
+                Optional.empty(), ProductionRunResolver.Outcome.NO_PRODUCTION_RUN, "Test Sub Workflow"));
     }
 
     private WorkflowEntity createMockEntity() {
@@ -96,6 +121,16 @@ class SubWorkflowNodeTest {
     }
 
     private WorkflowEntity createMockEntity(Integer pinnedVersion) {
+        return createMockEntity(pinnedVersion, TENANT_ID, null);
+    }
+
+    /**
+     * @param entityTenantId owner of the target workflow. Defaults to the caller's tenant
+     *                       so the cross-workspace guard passes; production rows always
+     *                       carry a tenant ({@code workflows.tenant_id} is NOT NULL).
+     * @param entityOrgId    organization tag of the target workflow, null for personal scope
+     */
+    private WorkflowEntity createMockEntity(Integer pinnedVersion, String entityTenantId, String entityOrgId) {
         WorkflowEntity entity = mock(WorkflowEntity.class);
         Map<String, Object> planMap = new HashMap<>();
         planMap.put("id", WORKFLOW_ID);
@@ -103,8 +138,21 @@ class SubWorkflowNodeTest {
         planMap.put("triggers", List.of(Map.of("id", "t1", "type", "manual", "label", "Start")));
         planMap.put("steps", List.of());
         planMap.put("edges", List.of());
-        when(entity.getPlan()).thenReturn(planMap);
+        lenient().when(entity.getPlan()).thenReturn(planMap);
         lenient().when(entity.getPinnedVersion()).thenReturn(pinnedVersion);
+        lenient().when(entity.getTenantId()).thenReturn(entityTenantId);
+        lenient().when(entity.getOrganizationId()).thenReturn(entityOrgId);
+        return entity;
+    }
+
+    /**
+     * Puts an inline-mocked target workflow in the caller's workspace so it clears the
+     * cross-workspace guard. Real rows always carry a tenant; an unstubbed mock returns
+     * null, which the guard correctly treats as "not mine".
+     */
+    private WorkflowEntity inCallerWorkspace(WorkflowEntity entity) {
+        lenient().when(entity.getTenantId()).thenReturn(TENANT_ID);
+        lenient().when(entity.getOrganizationId()).thenReturn(null);
         return entity;
     }
 
@@ -236,8 +284,7 @@ class SubWorkflowNodeTest {
             when(workflowRepository.findById(UUID.fromString(WORKFLOW_ID))).thenReturn(Optional.of(entity));
 
             WorkflowRunEntity run = createMockRun(RunStatus.WAITING_TRIGGER);
-            when(workflowRunRepository.findFirstByWorkflowIdAndStatusInOrderByStartedAtDesc(
-                eq(UUID.fromString(WORKFLOW_ID)), anyCollection())).thenReturn(Optional.of(run));
+            stubActiveRun(run);
 
             TriggerExecutionResult triggerResult = createSuccessTriggerResult(1);
             when(reusableTriggerService.executeTriggerInternal(
@@ -265,8 +312,7 @@ class SubWorkflowNodeTest {
             when(workflowRepository.findById(UUID.fromString(WORKFLOW_ID))).thenReturn(Optional.of(entity));
 
             WorkflowRunEntity run = createMockRun(RunStatus.WAITING_TRIGGER);
-            when(workflowRunRepository.findFirstByWorkflowIdAndStatusInOrderByStartedAtDesc(
-                eq(UUID.fromString(WORKFLOW_ID)), anyCollection())).thenReturn(Optional.of(run));
+            stubActiveRun(run);
 
             when(reusableTriggerService.executeTriggerInternal(
                 eq(run), anyString(), any(), any(), eq(true), anyMap()))
@@ -295,8 +341,7 @@ class SubWorkflowNodeTest {
             when(workflowRepository.findById(UUID.fromString(WORKFLOW_ID))).thenReturn(Optional.of(entity));
 
             WorkflowRunEntity run = createMockRun(RunStatus.WAITING_TRIGGER);
-            when(workflowRunRepository.findFirstByWorkflowIdAndStatusInOrderByStartedAtDesc(
-                eq(UUID.fromString(WORKFLOW_ID)), anyCollection())).thenReturn(Optional.of(run));
+            stubActiveRun(run);
 
             when(reusableTriggerService.executeTriggerInternal(
                 eq(run), anyString(), any(), any(), eq(true), anyMap()))
@@ -337,8 +382,7 @@ class SubWorkflowNodeTest {
             when(workflowRepository.findById(UUID.fromString(WORKFLOW_ID))).thenReturn(Optional.of(entity));
 
             WorkflowRunEntity run = createMockRun(RunStatus.WAITING_TRIGGER, 3);
-            when(workflowRunRepository.findFirstByWorkflowIdAndPlanVersionAndStatusInOrderByStartedAtDesc(
-                eq(UUID.fromString(WORKFLOW_ID)), eq(3), anyCollection())).thenReturn(Optional.of(run));
+            stubActiveRun(run);
 
             when(reusableTriggerService.executeTriggerInternal(
                 eq(run), anyString(), any(), any(), eq(true), anyMap()))
@@ -350,39 +394,38 @@ class SubWorkflowNodeTest {
             NodeExecutionResult execResult = node.execute(context);
 
             assertTrue(execResult.isSuccess());
-            // Verify we used pinned version lookup
-            verify(workflowRunRepository).findFirstByWorkflowIdAndPlanVersionAndStatusInOrderByStartedAtDesc(
-                eq(UUID.fromString(WORKFLOW_ID)), eq(3), anyCollection());
-            // Should NOT use unpinned lookup
+            // Pin-vs-no-pin scoping now lives in the resolver (covered by
+            // ProductionRunResolverTest.ResolveActiveRunTests). What this node owns is
+            // asking the resolver and never touching the raw queries again.
+            verify(productionRunResolver).resolveActiveRun(eq(entity), eq(SubWorkflowNode.ACTIVE_STATUSES));
+            verify(workflowRunRepository, never()).findFirstByWorkflowIdAndPlanVersionAndStatusInOrderByStartedAtDesc(
+                any(), any(), anyCollection());
             verify(workflowRunRepository, never()).findFirstByWorkflowIdAndStatusInOrderByStartedAtDesc(
                 any(), anyCollection());
         }
 
         @Test
-        @DisplayName("Should use latest run when workflow is not pinned")
-        void shouldUseLatestRunWhenNotPinned() {
-            Core.SubWorkflowConfig config = new Core.SubWorkflowConfig(WORKFLOW_ID, null, 60, 5);
-            SubWorkflowNode node = createNode(config);
-
-            WorkflowEntity entity = createMockEntity(null); // not pinned
+        @DisplayName("Asks for exactly WAITING_TRIGGER + RUNNING + PAUSED - never the wider non-terminal set")
+        void requestsItsOwnNarrowStatusSet() {
+            SubWorkflowNode node = createNode(new Core.SubWorkflowConfig(WORKFLOW_ID, null, 60, 5));
+            // Build the entity BEFORE opening when(): createMockEntity() stubs internally,
+            // and nesting that inside an unfinished when() trips Mockito.
+            WorkflowEntity entity = createMockEntity();
             when(workflowRepository.findById(UUID.fromString(WORKFLOW_ID))).thenReturn(Optional.of(entity));
+            stubNoActiveRun();
 
-            WorkflowRunEntity run = createMockRun(RunStatus.WAITING_TRIGGER);
-            when(workflowRunRepository.findFirstByWorkflowIdAndStatusInOrderByStartedAtDesc(
-                eq(UUID.fromString(WORKFLOW_ID)), anyCollection())).thenReturn(Optional.of(run));
+            node.execute(context);
 
-            when(reusableTriggerService.executeTriggerInternal(
-                eq(run), anyString(), any(), any(), eq(true), anyMap()))
-                .thenReturn(createSuccessTriggerResult(1));
-
-            when(workflowStepDataRepository.findCompletedOutputRefsByRunIdAndEpoch(RUN_ID_PUBLIC, 1))
-                .thenReturn(List.of());
-
-            NodeExecutionResult execResult = node.execute(context);
-
-            assertTrue(execResult.isSuccess());
-            verify(workflowRunRepository).findFirstByWorkflowIdAndStatusInOrderByStartedAtDesc(
-                eq(UUID.fromString(WORKFLOW_ID)), anyCollection());
+            // Asserts the PRODUCTION constant, not a copy of it in the test: a widening
+            // of SubWorkflowNode.ACTIVE_STATUSES fails here.
+            assertEquals(List.of(RunStatus.WAITING_TRIGGER, RunStatus.RUNNING, RunStatus.PAUSED),
+                SubWorkflowNode.ACTIVE_STATUSES);
+            verify(productionRunResolver).resolveActiveRun(eq(entity), eq(List.of(RunStatus.WAITING_TRIGGER, RunStatus.RUNNING, RunStatus.PAUSED)));
+            // A blocking call must not be handed a run parked on an approval or a wait
+            // timer: it would only burn the parent's timeout. That is why this lane is
+            // narrower than the error lane's NON_TERMINAL_STATUSES.
+            assertFalse(SubWorkflowNode.ACTIVE_STATUSES.contains(RunStatus.AWAITING_SIGNAL));
+            assertFalse(SubWorkflowNode.ACTIVE_STATUSES.contains(RunStatus.COMPLETED));
         }
     }
 
@@ -403,31 +446,213 @@ class SubWorkflowNodeTest {
             WorkflowEntity entity = createMockEntity();
             when(workflowRepository.findById(UUID.fromString(WORKFLOW_ID))).thenReturn(Optional.of(entity));
 
-            when(workflowRunRepository.findFirstByWorkflowIdAndStatusInOrderByStartedAtDesc(
+            stubNoActiveRun();
+
+            NodeExecutionResult execResult = node.execute(context);
+
+            assertTrue(execResult.isFailure());
+            String msg = execResult.errorMessage().orElse("");
+            // With genuinely nothing alive, the plain "start it first" guidance is right.
+            // The richer per-cause explanations (parked on a signal, transient status,
+            // version mismatch) are covered by the describeMissingActiveRun tests below.
+            assertTrue(msg.contains("No active run found"), msg);
+            assertTrue(msg.contains("Start the workflow first"), msg);
+        }
+
+        @Test
+        @DisplayName("Should name both versions when the pinned lookup misses but an active run exists at another version")
+        void shouldNameBothVersionsWhenPinnedLookupMissesButActiveRunExists() {
+            Core.SubWorkflowConfig config = new Core.SubWorkflowConfig(WORKFLOW_ID, null, 60, 5);
+            SubWorkflowNode node = createNode(config);
+
+            WorkflowEntity entity = createMockEntity(5); // workflow pinned to v5
+            when(workflowRepository.findById(UUID.fromString(WORKFLOW_ID))).thenReturn(Optional.of(entity));
+
+            // The pinned lookup misses: no active run stamped at v5 ...
+            stubNoActiveRun();
+            // ... but a perfectly live WAITING_TRIGGER run exists at v4.
+            WorkflowRunEntity mismatched = createMockRun(RunStatus.WAITING_TRIGGER, 4);
+            when(workflowRunRepository.findFirstProductionRunByWorkflowIdAndStatusIn(
+                eq(UUID.fromString(WORKFLOW_ID)), anyCollection())).thenReturn(Optional.of(mismatched));
+
+            NodeExecutionResult execResult = node.execute(context);
+
+            assertTrue(execResult.isFailure());
+            String message = execResult.errorMessage().orElse("");
+            // Pre-fix this said "Start the workflow first." even though the run was already started,
+            // which sent the caller chasing a run that existed all along.
+            assertFalse(message.contains("Start the workflow first"),
+                "Should not tell the caller to start a run that already exists. Actual message: " + message);
+            assertTrue(message.contains("pinned to version 5"), "Should name the pinned version: " + message);
+            assertTrue(message.contains("plan version 4"), "Should name the run's version: " + message);
+            assertTrue(message.contains(RUN_ID_PUBLIC), "Should name the run that is active: " + message);
+            // The remedy is the part the agent acts on, so pin it explicitly: exact callable syntax,
+            // guarded by the condition that makes re-pinning the right move, and stating the
+            // consequence (it redirects every production trigger).
+            assertTrue(message.contains("workflow(action='execute', id='" + WORKFLOW_ID + "', version=5)"),
+                "Should give the callable way to get a run at the pinned version: " + message);
+            assertTrue(message.contains("workflow(action='pin', workflow_id='" + WORKFLOW_ID + "', version=4)"),
+                "Should give the exact pin call: " + message);
+            assertTrue(message.contains("only if that version is the one you want in production"),
+                "Should gate the destructive remedy on intent: " + message);
+            assertTrue(message.contains("clones cannot be pinned"),
+                "Should warn that the pin remedy dead-ends on a cloned run: " + message);
+            assertTrue(message.contains("redirects every production trigger"),
+                "Should state the consequence of re-pinning: " + message);
+        }
+
+        @Test
+        @DisplayName("Should explain a run parked on a blocking node instead of claiming none exists")
+        void shouldExplainRunParkedOnBlockingNode() {
+            Core.SubWorkflowConfig config = new Core.SubWorkflowConfig(WORKFLOW_ID, null, 60, 5);
+            SubWorkflowNode node = createNode(config);
+
+            WorkflowEntity entity = createMockEntity();
+            when(workflowRepository.findById(UUID.fromString(WORKFLOW_ID))).thenReturn(Optional.of(entity));
+
+            // AWAITING_SIGNAL is non-terminal but is NOT in the node's ACTIVE_STATUSES, so the
+            // lookup misses a perfectly alive child parked on an approval/interface/wait node.
+            //
+            // Match on the STATUS SET rather than on invocation order: the property under test is
+            // precisely that the diagnostic probe queries a wider set than the lookup. An
+            // order-coupled stub would keep passing if a future change made findActiveRun
+            // short-circuit, i.e. it would pass for the wrong reason.
+            WorkflowRunEntity parked = createMockRun(RunStatus.AWAITING_SIGNAL, 3);
+            stubNoActiveRun();
+            when(workflowRunRepository.findFirstProductionRunByWorkflowIdAndStatusIn(
+            eq(UUID.fromString(WORKFLOW_ID)), anyList()))
+                .thenReturn(Optional.of(parked));
+
+            NodeExecutionResult execResult = node.execute(context);
+
+            assertTrue(execResult.isFailure());
+            String message = execResult.errorMessage().orElse("");
+            assertFalse(message.contains("Start the workflow first"),
+                "A run parked on a signal exists; telling the caller to start one is wrong: " + message);
+            assertTrue(message.contains("parked on a blocking node"),
+                "Should explain why the live run is ineligible: " + message);
+            // The remedy must name callable actions, not describe the intent in prose.
+            assertTrue(message.contains("resolve_approval") && message.contains("continue_interface"),
+                "Should name the actions that unblock the run: " + message);
+        }
+
+        @Test
+        @DisplayName("Diagnostic probe should query every non-terminal status, derived from RunStatus")
+        void probeShouldQueryEveryNonTerminalStatus() {
+            Core.SubWorkflowConfig config = new Core.SubWorkflowConfig(WORKFLOW_ID, null, 60, 5);
+            SubWorkflowNode node = createNode(config);
+
+            WorkflowEntity entity = createMockEntity();
+            when(workflowRepository.findById(UUID.fromString(WORKFLOW_ID))).thenReturn(Optional.of(entity));
+            // Selection misses (that is what makes the node reach the diagnostic probe)...
+            stubNoActiveRun();
+            // ...and the probe itself finds nothing either.
+            when(workflowRunRepository.findFirstProductionRunByWorkflowIdAndStatusIn(
+                eq(UUID.fromString(WORKFLOW_ID)), anyCollection())).thenReturn(Optional.empty());
+
+            node.execute(context);
+
+            // The probe's status set is derived from RunStatus.isTerminal() so that adding a status
+            // to the enum cannot silently leave it out. Pin that contract against the enum itself:
+            // a hardcoded list here would drift in exactly the way the derivation exists to prevent.
+            ArgumentCaptor<Collection<RunStatus>> statuses = ArgumentCaptor.forClass(Collection.class);
+            verify(workflowRunRepository, atLeastOnce())
+                .findFirstProductionRunByWorkflowIdAndStatusIn(
+                    eq(UUID.fromString(WORKFLOW_ID)), statuses.capture());
+
+            Set<RunStatus> expected = Arrays.stream(RunStatus.values())
+                .filter(status -> !status.isTerminal())
+                .collect(java.util.stream.Collectors.toSet());
+            assertTrue(statuses.getAllValues().stream().anyMatch(captured -> Set.copyOf(captured).equals(expected)),
+                "One lookup should use exactly the non-terminal statuses " + expected
+                    + ", captured: " + statuses.getAllValues());
+        }
+
+        @Test
+        @DisplayName("Should treat a not-yet-started run as transient rather than as a blocking node")
+        void shouldTreatPendingRunAsTransient() {
+            Core.SubWorkflowConfig config = new Core.SubWorkflowConfig(WORKFLOW_ID, null, 60, 5);
+            SubWorkflowNode node = createNode(config);
+
+            WorkflowEntity entity = createMockEntity();
+            when(workflowRepository.findById(UUID.fromString(WORKFLOW_ID))).thenReturn(Optional.of(entity));
+
+            // PENDING is the entity's default status, so this is a run created moments ago that has
+            // not started yet. It is ALSO absent from ACTIVE_STATUSES, and it must not be described
+            // as parked on a blocking node: there is no signal to resolve, only a state to leave.
+            WorkflowRunEntity starting = createMockRun(RunStatus.PENDING, 2);
+            stubNoActiveRun();
+            when(workflowRunRepository.findFirstProductionRunByWorkflowIdAndStatusIn(
+            eq(UUID.fromString(WORKFLOW_ID)), anyList()))
+                .thenReturn(Optional.of(starting));
+
+            NodeExecutionResult execResult = node.execute(context);
+
+            assertTrue(execResult.isFailure());
+            String message = execResult.errorMessage().orElse("");
+            assertFalse(message.contains("parked on a blocking node"),
+                "A PENDING run has no blocking node to resolve: " + message);
+            assertFalse(message.contains("Start the workflow first"),
+                "The run exists, telling the caller to start one is wrong: " + message);
+            assertTrue(message.contains("transient state"),
+                "Should describe PENDING as transient: " + message);
+        }
+
+        @Test
+        @DisplayName("Should explain a run with no plan version instead of claiming none exists")
+        void shouldExplainRunWithNoPlanVersion() {
+            Core.SubWorkflowConfig config = new Core.SubWorkflowConfig(WORKFLOW_ID, null, 60, 5);
+            SubWorkflowNode node = createNode(config);
+
+            WorkflowEntity entity = createMockEntity(5); // pinned to v5
+            when(workflowRepository.findById(UUID.fromString(WORKFLOW_ID))).thenReturn(Optional.of(entity));
+            stubNoActiveRun();
+
+            // getPlanVersion() must be stubbed to null EXPLICITLY: createMockRun skips the stub for a
+            // null version, and Mockito's default answer returns 0 (not null) for an Integer, which
+            // would silently exercise the version-mismatch branch instead of this one.
+            WorkflowRunEntity unstamped = createMockRun(RunStatus.WAITING_TRIGGER, null);
+            lenient().when(unstamped.getPlanVersion()).thenReturn(null);
+            when(workflowRunRepository.findFirstProductionRunByWorkflowIdAndStatusIn(
+                eq(UUID.fromString(WORKFLOW_ID)), anyCollection())).thenReturn(Optional.of(unstamped));
+
+            NodeExecutionResult execResult = node.execute(context);
+
+            assertTrue(execResult.isFailure());
+            String message = execResult.errorMessage().orElse("");
+            assertFalse(message.contains("version null"),
+                "Must never render a null plan version into the message: " + message);
+            assertTrue(message.contains("carries no plan version"),
+                "Should explain the run is unstamped: " + message);
+            assertTrue(message.contains("pinned version 5"), "Should still name the pin: " + message);
+        }
+
+        /**
+         * Guard, not a regression test: this branch produced the same text before the change.
+         *
+         * <p>It pins that widening the diagnostic probe did NOT change the genuinely-no-run case:
+         * when nothing non-terminal exists, the caller must still be told to start the workflow,
+         * because here that advice is correct. The other new branches all assert the absence of
+         * that sentence, so without this test nothing pins its presence where it belongs.
+         */
+        @Test
+        @DisplayName("Should keep the plain message when the workflow is pinned and no run is active at all")
+        void shouldKeepPlainMessageWhenPinnedAndNoRunActiveAtAll() {
+            Core.SubWorkflowConfig config = new Core.SubWorkflowConfig(WORKFLOW_ID, null, 60, 5);
+            SubWorkflowNode node = createNode(config);
+
+            WorkflowEntity entity = createMockEntity(5);
+            when(workflowRepository.findById(UUID.fromString(WORKFLOW_ID))).thenReturn(Optional.of(entity));
+
+            stubNoActiveRun();
+            when(workflowRunRepository.findFirstProductionRunByWorkflowIdAndStatusIn(
                 eq(UUID.fromString(WORKFLOW_ID)), anyCollection())).thenReturn(Optional.empty());
 
             NodeExecutionResult execResult = node.execute(context);
 
             assertTrue(execResult.isFailure());
-            assertTrue(execResult.errorMessage().orElse("").contains("No active run found"));
-        }
-
-        @Test
-        @DisplayName("Should fail when pinned run not found")
-        void shouldFailWhenPinnedRunNotFound() {
-            Core.SubWorkflowConfig config = new Core.SubWorkflowConfig(WORKFLOW_ID, null, 60, 5);
-            SubWorkflowNode node = createNode(config);
-
-            WorkflowEntity entity = createMockEntity(5); // pinned to version 5
-            when(workflowRepository.findById(UUID.fromString(WORKFLOW_ID))).thenReturn(Optional.of(entity));
-
-            when(workflowRunRepository.findFirstByWorkflowIdAndPlanVersionAndStatusInOrderByStartedAtDesc(
-                eq(UUID.fromString(WORKFLOW_ID)), eq(5), anyCollection())).thenReturn(Optional.empty());
-
-            NodeExecutionResult execResult = node.execute(context);
-
-            assertTrue(execResult.isFailure());
-            assertTrue(execResult.errorMessage().orElse("").contains("No active run found"));
+            assertTrue(execResult.errorMessage().orElse("").contains("Start the workflow first"),
+                "With genuinely no active run the original guidance is still the right one");
         }
     }
 
@@ -450,8 +675,7 @@ class SubWorkflowNodeTest {
             when(workflowRepository.findById(UUID.fromString(WORKFLOW_ID))).thenReturn(Optional.of(entity));
 
             WorkflowRunEntity run = createMockRun(RunStatus.WAITING_TRIGGER);
-            when(workflowRunRepository.findFirstByWorkflowIdAndStatusInOrderByStartedAtDesc(
-                eq(UUID.fromString(WORKFLOW_ID)), anyCollection())).thenReturn(Optional.of(run));
+            stubActiveRun(run);
 
             when(reusableTriggerService.executeTriggerInternal(
                 eq(run), eq("trigger:custom"), any(), any(), eq(true), anyMap()))
@@ -474,7 +698,7 @@ class SubWorkflowNodeTest {
             SubWorkflowNode node = createNode(config);
 
             // Create entity with only unfireable triggers
-            WorkflowEntity entity = mock(WorkflowEntity.class);
+            WorkflowEntity entity = inCallerWorkspace(mock(WorkflowEntity.class));
             Map<String, Object> planMap = new HashMap<>();
             planMap.put("id", WORKFLOW_ID);
             planMap.put("name", "Test");
@@ -482,12 +706,11 @@ class SubWorkflowNodeTest {
             planMap.put("steps", List.of());
             planMap.put("edges", List.of());
             when(entity.getPlan()).thenReturn(planMap);
-            when(entity.getPinnedVersion()).thenReturn(null);
+            // No getPinnedVersion() stub: the node no longer reads the pin, the resolver does.
             when(workflowRepository.findById(UUID.fromString(WORKFLOW_ID))).thenReturn(Optional.of(entity));
 
             WorkflowRunEntity run = createMockRun(RunStatus.WAITING_TRIGGER);
-            when(workflowRunRepository.findFirstByWorkflowIdAndStatusInOrderByStartedAtDesc(
-                eq(UUID.fromString(WORKFLOW_ID)), anyCollection())).thenReturn(Optional.of(run));
+            stubActiveRun(run);
 
             NodeExecutionResult execResult = node.execute(context);
 
@@ -514,8 +737,7 @@ class SubWorkflowNodeTest {
             when(workflowRepository.findById(UUID.fromString(WORKFLOW_ID))).thenReturn(Optional.of(entity));
 
             WorkflowRunEntity run = createMockRun(RunStatus.WAITING_TRIGGER);
-            when(workflowRunRepository.findFirstByWorkflowIdAndStatusInOrderByStartedAtDesc(
-                eq(UUID.fromString(WORKFLOW_ID)), anyCollection())).thenReturn(Optional.of(run));
+            stubActiveRun(run);
 
             when(reusableTriggerService.executeTriggerInternal(
                 eq(run), anyString(), any(), any(), eq(true), anyMap()))
@@ -537,8 +759,7 @@ class SubWorkflowNodeTest {
             when(workflowRepository.findById(UUID.fromString(WORKFLOW_ID))).thenReturn(Optional.of(entity));
 
             WorkflowRunEntity run = createMockRun(RunStatus.WAITING_TRIGGER);
-            when(workflowRunRepository.findFirstByWorkflowIdAndStatusInOrderByStartedAtDesc(
-                eq(UUID.fromString(WORKFLOW_ID)), anyCollection())).thenReturn(Optional.of(run));
+            stubActiveRun(run);
 
             when(reusableTriggerService.executeTriggerInternal(
                 eq(run), anyString(), any(), any(), eq(true), anyMap()))
@@ -586,8 +807,7 @@ class SubWorkflowNodeTest {
             when(workflowRepository.findById(UUID.fromString(WORKFLOW_ID))).thenReturn(Optional.of(entity));
 
             WorkflowRunEntity run = createMockRun(RunStatus.WAITING_TRIGGER);
-            when(workflowRunRepository.findFirstByWorkflowIdAndStatusInOrderByStartedAtDesc(
-                eq(UUID.fromString(WORKFLOW_ID)), anyCollection())).thenReturn(Optional.of(run));
+            stubActiveRun(run);
 
             when(reusableTriggerService.executeTriggerInternal(
                 eq(run), anyString(), any(), any(), eq(true), anyMap()))
@@ -618,8 +838,7 @@ class SubWorkflowNodeTest {
             when(workflowRepository.findById(UUID.fromString(WORKFLOW_ID))).thenReturn(Optional.of(entity));
 
             WorkflowRunEntity run = createMockRun(RunStatus.WAITING_TRIGGER);
-            when(workflowRunRepository.findFirstByWorkflowIdAndStatusInOrderByStartedAtDesc(
-                eq(UUID.fromString(WORKFLOW_ID)), anyCollection())).thenReturn(Optional.of(run));
+            stubActiveRun(run);
 
             when(reusableTriggerService.executeTriggerInternal(
                 eq(run), anyString(), any(), any(), eq(true), anyMap()))
@@ -763,13 +982,13 @@ class SubWorkflowNodeTest {
             SubWorkflowNode node = new SubWorkflowNode(NODE_ID, config);
             node.setWorkflowRepository(workflowRepository);
             node.setWorkflowRunRepository(workflowRunRepository);
+            node.setProductionRunResolver(productionRunResolver);
 
             WorkflowEntity entity = createMockEntity();
             when(workflowRepository.findById(UUID.fromString(WORKFLOW_ID))).thenReturn(Optional.of(entity));
 
             WorkflowRunEntity run = createMockRun(RunStatus.WAITING_TRIGGER);
-            when(workflowRunRepository.findFirstByWorkflowIdAndStatusInOrderByStartedAtDesc(
-                eq(UUID.fromString(WORKFLOW_ID)), anyCollection())).thenReturn(Optional.of(run));
+            stubActiveRun(run);
 
             NodeExecutionResult execResult = node.execute(context);
 
@@ -783,7 +1002,7 @@ class SubWorkflowNodeTest {
             Core.SubWorkflowConfig config = new Core.SubWorkflowConfig(WORKFLOW_ID, null, 60, 5);
             SubWorkflowNode node = createNode(config);
 
-            WorkflowEntity entity = mock(WorkflowEntity.class);
+            WorkflowEntity entity = inCallerWorkspace(mock(WorkflowEntity.class));
             when(entity.getPlan()).thenReturn(null);
             when(workflowRepository.findById(UUID.fromString(WORKFLOW_ID))).thenReturn(Optional.of(entity));
 
@@ -823,8 +1042,7 @@ class SubWorkflowNodeTest {
             when(workflowRepository.findById(UUID.fromString(WORKFLOW_ID))).thenReturn(Optional.of(entity));
 
             WorkflowRunEntity run = createMockRun(RunStatus.WAITING_TRIGGER);
-            when(workflowRunRepository.findFirstByWorkflowIdAndStatusInOrderByStartedAtDesc(
-                eq(UUID.fromString(WORKFLOW_ID)), anyCollection())).thenReturn(Optional.of(run));
+            stubActiveRun(run);
 
             when(reusableTriggerService.executeTriggerInternal(
                 any(), anyString(), any(), any(), eq(true), anyMap()))
@@ -859,8 +1077,7 @@ class SubWorkflowNodeTest {
             when(workflowRepository.findById(UUID.fromString(WORKFLOW_ID))).thenReturn(Optional.of(entity));
 
             WorkflowRunEntity run = createMockRun(RunStatus.RUNNING);
-            when(workflowRunRepository.findFirstByWorkflowIdAndStatusInOrderByStartedAtDesc(
-                eq(UUID.fromString(WORKFLOW_ID)), anyCollection())).thenReturn(Optional.of(run));
+            stubActiveRun(run);
 
             when(reusableTriggerService.executeTriggerInternal(
                 eq(run), anyString(), any(), any(), eq(true), anyMap()))
@@ -882,8 +1099,7 @@ class SubWorkflowNodeTest {
             when(workflowRepository.findById(UUID.fromString(WORKFLOW_ID))).thenReturn(Optional.of(entity));
 
             WorkflowRunEntity run = createMockRun(RunStatus.PAUSED);
-            when(workflowRunRepository.findFirstByWorkflowIdAndStatusInOrderByStartedAtDesc(
-                eq(UUID.fromString(WORKFLOW_ID)), anyCollection())).thenReturn(Optional.of(run));
+            stubActiveRun(run);
 
             when(reusableTriggerService.executeTriggerInternal(
                 eq(run), anyString(), any(), any(), eq(true), anyMap()))
@@ -911,7 +1127,7 @@ class SubWorkflowNodeTest {
             SubWorkflowNode node = createNode(config);
 
             // First trigger is "workflow" (unfireable), second is "manual" (fireable)
-            WorkflowEntity entity = mock(WorkflowEntity.class);
+            WorkflowEntity entity = inCallerWorkspace(mock(WorkflowEntity.class));
             Map<String, Object> planMap = new HashMap<>();
             planMap.put("id", WORKFLOW_ID);
             planMap.put("name", "Test");
@@ -927,8 +1143,7 @@ class SubWorkflowNodeTest {
             when(workflowRepository.findById(UUID.fromString(WORKFLOW_ID))).thenReturn(Optional.of(entity));
 
             WorkflowRunEntity run = createMockRun(RunStatus.WAITING_TRIGGER);
-            when(workflowRunRepository.findFirstByWorkflowIdAndStatusInOrderByStartedAtDesc(
-                eq(UUID.fromString(WORKFLOW_ID)), anyCollection())).thenReturn(Optional.of(run));
+            stubActiveRun(run);
 
             when(reusableTriggerService.executeTriggerInternal(
                 eq(run), eq("trigger:manual_start"), any(), any(), eq(true), anyMap()))
@@ -949,7 +1164,7 @@ class SubWorkflowNodeTest {
             Core.SubWorkflowConfig config = new Core.SubWorkflowConfig(WORKFLOW_ID, null, 60, 5);
             SubWorkflowNode node = createNode(config);
 
-            WorkflowEntity entity = mock(WorkflowEntity.class);
+            WorkflowEntity entity = inCallerWorkspace(mock(WorkflowEntity.class));
             Map<String, Object> planMap = new HashMap<>();
             planMap.put("id", WORKFLOW_ID);
             planMap.put("name", "Test");
@@ -961,8 +1176,7 @@ class SubWorkflowNodeTest {
             when(workflowRepository.findById(UUID.fromString(WORKFLOW_ID))).thenReturn(Optional.of(entity));
 
             WorkflowRunEntity run = createMockRun(RunStatus.WAITING_TRIGGER);
-            when(workflowRunRepository.findFirstByWorkflowIdAndStatusInOrderByStartedAtDesc(
-                eq(UUID.fromString(WORKFLOW_ID)), anyCollection())).thenReturn(Optional.of(run));
+            stubActiveRun(run);
 
             NodeExecutionResult execResult = node.execute(context);
 
@@ -976,7 +1190,7 @@ class SubWorkflowNodeTest {
             Core.SubWorkflowConfig config = new Core.SubWorkflowConfig(WORKFLOW_ID, null, 60, 5);
             SubWorkflowNode node = createNode(config);
 
-            WorkflowEntity entity = mock(WorkflowEntity.class);
+            WorkflowEntity entity = inCallerWorkspace(mock(WorkflowEntity.class));
             Map<String, Object> planMap = new HashMap<>();
             planMap.put("id", WORKFLOW_ID);
             planMap.put("name", "Test");
@@ -988,8 +1202,7 @@ class SubWorkflowNodeTest {
             when(workflowRepository.findById(UUID.fromString(WORKFLOW_ID))).thenReturn(Optional.of(entity));
 
             WorkflowRunEntity run = createMockRun(RunStatus.WAITING_TRIGGER);
-            when(workflowRunRepository.findFirstByWorkflowIdAndStatusInOrderByStartedAtDesc(
-                eq(UUID.fromString(WORKFLOW_ID)), anyCollection())).thenReturn(Optional.of(run));
+            stubActiveRun(run);
 
             when(reusableTriggerService.executeTriggerInternal(
                 eq(run), eq("trigger:hook"), eq(TriggerType.WEBHOOK), any(), eq(true), anyMap()))
@@ -1015,8 +1228,7 @@ class SubWorkflowNodeTest {
             when(workflowRepository.findById(UUID.fromString(WORKFLOW_ID))).thenReturn(Optional.of(entity));
 
             WorkflowRunEntity run = createMockRun(RunStatus.WAITING_TRIGGER);
-            when(workflowRunRepository.findFirstByWorkflowIdAndStatusInOrderByStartedAtDesc(
-                eq(UUID.fromString(WORKFLOW_ID)), anyCollection())).thenReturn(Optional.of(run));
+            stubActiveRun(run);
 
             when(reusableTriggerService.executeTriggerInternal(
                 eq(run), eq("trigger:nonexistent"), eq(TriggerType.MANUAL), any(), eq(true), anyMap()))
@@ -1042,8 +1254,7 @@ class SubWorkflowNodeTest {
             when(workflowRepository.findById(UUID.fromString(WORKFLOW_ID))).thenReturn(Optional.of(entity));
 
             WorkflowRunEntity run = createMockRun(RunStatus.WAITING_TRIGGER);
-            when(workflowRunRepository.findFirstByWorkflowIdAndStatusInOrderByStartedAtDesc(
-                eq(UUID.fromString(WORKFLOW_ID)), anyCollection())).thenReturn(Optional.of(run));
+            stubActiveRun(run);
 
             when(reusableTriggerService.executeTriggerInternal(
                 eq(run), eq("trigger:start"), any(), any(), eq(true), anyMap()))
@@ -1064,6 +1275,80 @@ class SubWorkflowNodeTest {
     class ConcurrentSubRunDispatchTests {
 
         @Test
+        @DisplayName("Collects epoch outputs OUTSIDE the sub-run monitor, so a collect never blocks another fire")
+        void collectsEpochOutputsOutsideTheSubRunMonitor() throws Exception {
+            Core.SubWorkflowConfig config = new Core.SubWorkflowConfig(WORKFLOW_ID, null, 60, 5);
+            SubWorkflowNode node = createNode(config);
+
+            WorkflowEntity entity = createMockEntity();
+            when(workflowRepository.findById(UUID.fromString(WORKFLOW_ID))).thenReturn(Optional.of(entity));
+
+            WorkflowRunEntity run = createMockRun(RunStatus.WAITING_TRIGGER);
+            stubActiveRun(run);
+            when(workflowRunRepository.findByRunIdPublic(RUN_ID_PUBLIC)).thenReturn(Optional.of(run));
+
+            // Thread A parks inside collectEpochOutputs; thread B must still be able to enter the
+            // fire. Pre-change both lived in the same synchronized block, so B could not start
+            // until A finished collecting and firstCollectSawSecondFire stayed false forever
+            // (the latch below would time out).
+            CountDownLatch secondFireStarted = new CountDownLatch(1);
+            CountDownLatch firstCollectEntered = new CountDownLatch(1);
+            AtomicInteger fireCount = new AtomicInteger();
+            AtomicBoolean firstCollectSawSecondFire = new AtomicBoolean(false);
+
+            when(reusableTriggerService.executeTriggerInternal(
+                any(WorkflowRunEntity.class), anyString(), any(), any(), eq(true), anyMap()))
+                .thenAnswer(invocation -> {
+                    int fire = fireCount.incrementAndGet();
+                    if (fire == 2) {
+                        secondFireStarted.countDown();
+                    }
+                    return createSuccessTriggerResult(fire);
+                });
+
+            // Epoch isolation is the whole safety argument for reading outside the monitor, so
+            // record which epoch each collect actually asked for rather than accepting anyInt().
+            List<Integer> collectedEpochs = Collections.synchronizedList(new ArrayList<>());
+            when(workflowStepDataRepository.findCompletedOutputRefsByRunIdAndEpoch(eq(RUN_ID_PUBLIC), anyInt()))
+                .thenAnswer(invocation -> {
+                    collectedEpochs.add(invocation.getArgument(1));
+                    if (firstCollectEntered.getCount() > 0) {
+                        firstCollectEntered.countDown();
+                        // Park the FIRST collect and see whether the other fire can proceed.
+                        firstCollectSawSecondFire.set(secondFireStarted.await(5, TimeUnit.SECONDS));
+                    }
+                    return List.<WorkflowStepDataRepository.EpochOutputProjection>of();
+                });
+
+            // A dedicated 2-thread pool, NOT the common ForkJoinPool: thread A parks on a plain
+            // CountDownLatch inside the mock, which is not a ManagedBlocker, so FJP does not spawn a
+            // compensating worker. On a 2-core host commonPool parallelism is 1 and B would never
+            // get a thread, failing this test on correct code.
+            ExecutorService pool = Executors.newFixedThreadPool(2);
+            try {
+                CompletableFuture<NodeExecutionResult> first =
+                    CompletableFuture.supplyAsync(() -> node.execute(context), pool);
+                assertTrue(firstCollectEntered.await(5, TimeUnit.SECONDS),
+                    "First execution should reach the output-collection phase");
+                CompletableFuture<NodeExecutionResult> second =
+                    CompletableFuture.supplyAsync(() -> node.execute(context), pool);
+
+                assertTrue(first.get(10, TimeUnit.SECONDS).isSuccess());
+                assertTrue(second.get(10, TimeUnit.SECONDS).isSuccess());
+            } finally {
+                pool.shutdownNow();
+            }
+            assertTrue(firstCollectSawSecondFire.get(),
+                "A fire must be able to start while another execution is collecting its epoch outputs; "
+                    + "if this fails, collectEpochOutputs is back inside the sub-run monitor");
+            // Each execution must read the epoch ITS OWN fire returned. Without this, a bug making
+            // both collects read the same epoch would still pass the concurrency assertion above,
+            // while silently breaking the epoch-keyed isolation that makes the unlocked read safe.
+            assertEquals(List.of(1, 2), collectedEpochs.stream().sorted().toList(),
+                "Each execution should collect its own fire's epoch, got " + collectedEpochs);
+        }
+
+        @Test
         @DisplayName("Serializes same child run calls and reloads the run before firing")
         void serializesSameChildRunCallsAndReloadsRunBeforeFiring() throws Exception {
             Core.SubWorkflowConfig config = new Core.SubWorkflowConfig(WORKFLOW_ID, null, 60, 5);
@@ -1075,8 +1360,7 @@ class SubWorkflowNodeTest {
             WorkflowRunEntity staleRun = createMockRun(RunStatus.WAITING_TRIGGER);
             WorkflowRunEntity freshFirstRun = createMockRun(RunStatus.WAITING_TRIGGER);
             WorkflowRunEntity freshSecondRun = createMockRun(RunStatus.WAITING_TRIGGER);
-            when(workflowRunRepository.findFirstByWorkflowIdAndStatusInOrderByStartedAtDesc(
-                eq(UUID.fromString(WORKFLOW_ID)), anyCollection())).thenReturn(Optional.of(staleRun));
+            stubActiveRun(staleRun);
             when(workflowRunRepository.findByRunIdPublic(RUN_ID_PUBLIC))
                 .thenReturn(Optional.of(freshFirstRun), Optional.of(freshSecondRun));
 
@@ -1134,8 +1418,7 @@ class SubWorkflowNodeTest {
             when(workflowRepository.findById(UUID.fromString(WORKFLOW_ID))).thenReturn(Optional.of(entity));
 
             WorkflowRunEntity run = createMockRun(RunStatus.WAITING_TRIGGER);
-            when(workflowRunRepository.findFirstByWorkflowIdAndStatusInOrderByStartedAtDesc(
-                eq(UUID.fromString(WORKFLOW_ID)), anyCollection())).thenReturn(Optional.of(run));
+            stubActiveRun(run);
 
             when(reusableTriggerService.executeTriggerInternal(
                 eq(run), anyString(), any(), any(), eq(true), anyMap()))
@@ -1304,14 +1587,14 @@ class SubWorkflowNodeTest {
             node.setWorkflowRepository(workflowRepository);
             node.setWorkflowRunRepository(workflowRunRepository);
             node.setReusableTriggerService(reusableTriggerService);
+            node.setProductionRunResolver(productionRunResolver);
             // Do NOT set stepOutputService or workflowStepDataRepository
 
             WorkflowEntity entity = createMockEntity();
             when(workflowRepository.findById(UUID.fromString(WORKFLOW_ID))).thenReturn(Optional.of(entity));
 
             WorkflowRunEntity run = createMockRun(RunStatus.WAITING_TRIGGER);
-            when(workflowRunRepository.findFirstByWorkflowIdAndStatusInOrderByStartedAtDesc(
-                eq(UUID.fromString(WORKFLOW_ID)), anyCollection())).thenReturn(Optional.of(run));
+            stubActiveRun(run);
 
             when(reusableTriggerService.executeTriggerInternal(
                 eq(run), anyString(), any(), any(), eq(true), anyMap()))
@@ -1345,8 +1628,7 @@ class SubWorkflowNodeTest {
             when(workflowRepository.findById(UUID.fromString(WORKFLOW_ID))).thenReturn(Optional.of(entity));
 
             WorkflowRunEntity run = createMockRun(RunStatus.WAITING_TRIGGER);
-            when(workflowRunRepository.findFirstByWorkflowIdAndStatusInOrderByStartedAtDesc(
-                eq(UUID.fromString(WORKFLOW_ID)), anyCollection())).thenReturn(Optional.of(run));
+            stubActiveRun(run);
 
             // Simulate slow trigger execution
             when(reusableTriggerService.executeTriggerInternal(
@@ -1381,8 +1663,7 @@ class SubWorkflowNodeTest {
             when(workflowRepository.findById(UUID.fromString(WORKFLOW_ID))).thenReturn(Optional.of(entity));
 
             WorkflowRunEntity run = createMockRun(RunStatus.WAITING_TRIGGER);
-            when(workflowRunRepository.findFirstByWorkflowIdAndStatusInOrderByStartedAtDesc(
-                eq(UUID.fromString(WORKFLOW_ID)), anyCollection())).thenReturn(Optional.of(run));
+            stubActiveRun(run);
 
             // Create a failure result with null message
             TriggerExecutionResult nullMsgResult = new TriggerExecutionResult(
@@ -1409,8 +1690,7 @@ class SubWorkflowNodeTest {
             when(workflowRepository.findById(UUID.fromString(WORKFLOW_ID))).thenReturn(Optional.of(entity));
 
             WorkflowRunEntity run = createMockRun(RunStatus.WAITING_TRIGGER);
-            when(workflowRunRepository.findFirstByWorkflowIdAndStatusInOrderByStartedAtDesc(
-                eq(UUID.fromString(WORKFLOW_ID)), anyCollection())).thenReturn(Optional.of(run));
+            stubActiveRun(run);
 
             // Return epoch 7
             when(reusableTriggerService.executeTriggerInternal(
@@ -1568,6 +1848,7 @@ class SubWorkflowNodeTest {
                 .workflowRepository(workflowRepository)
                 .workflowRunRepository(workflowRunRepository)
                 .reusableTriggerService(reusableTriggerService)
+                .productionRunResolver(productionRunResolver)
                 .stepOutputService(stepOutputService)
                 .workflowStepDataRepository(workflowStepDataRepository)
                 .build();
@@ -1577,8 +1858,7 @@ class SubWorkflowNodeTest {
             when(workflowRepository.findById(UUID.fromString(WORKFLOW_ID))).thenReturn(Optional.of(entity));
 
             WorkflowRunEntity run = createMockRun(RunStatus.WAITING_TRIGGER);
-            when(workflowRunRepository.findFirstByWorkflowIdAndStatusInOrderByStartedAtDesc(
-                eq(UUID.fromString(WORKFLOW_ID)), anyCollection())).thenReturn(Optional.of(run));
+            stubActiveRun(run);
 
             when(reusableTriggerService.executeTriggerInternal(
                 eq(run), anyString(), any(), any(), eq(true), anyMap()))
@@ -1620,4 +1900,205 @@ class SubWorkflowNodeTest {
             }
         };
     }
+
+    // ===============================================================
+    // execute() - cross-workspace guard
+    // ===============================================================
+
+    /**
+     * The target workflow id is runtime-resolvable (it goes through the template adapter),
+     * so without a scope guard a crafted template could point this node at any workflow row
+     * in the database: it would fire that workflow's run and read its step outputs back into
+     * the caller's output. Same guard shape as the other parent-to-child dispatch services.
+     */
+    @Nested
+    @DisplayName("Cross-workspace guard")
+    class CrossWorkspaceGuardTests {
+
+        private ExecutionContext contextInOrg(String orgId) {
+            return context.withOrganization(orgId, "MEMBER");
+        }
+
+        private NodeExecutionResult executeAgainst(ExecutionContext ctx, WorkflowEntity target) {
+            SubWorkflowNode node = createNode(new Core.SubWorkflowConfig(WORKFLOW_ID, null, 60, 5));
+            when(workflowRepository.findById(UUID.fromString(WORKFLOW_ID))).thenReturn(Optional.of(target));
+            return node.execute(ctx);
+        }
+
+        @Test
+        @DisplayName("Resolver not injected → explicit failure, never a silent bypass")
+        void resolverNotInjectedFailsExplicitly() {
+            SubWorkflowNode node = new SubWorkflowNode(NODE_ID, new Core.SubWorkflowConfig(WORKFLOW_ID, null, 60, 5));
+            node.setWorkflowRepository(workflowRepository);
+            node.setWorkflowRunRepository(workflowRunRepository);
+            // deliberately NO setProductionRunResolver
+            WorkflowEntity entity = createMockEntity();
+            when(workflowRepository.findById(UUID.fromString(WORKFLOW_ID))).thenReturn(Optional.of(entity));
+
+            NodeExecutionResult execResult = node.execute(context);
+
+            assertTrue(execResult.isFailure());
+            assertTrue(execResult.errorMessage().orElse("").contains("ProductionRunResolver not injected"));
+            // The old code silently fell back to an unfiltered repository lookup here.
+            verifyNoInteractions(reusableTriggerService);
+        }
+
+        @Test
+        @DisplayName("Target owned by ANOTHER tenant (both personal) is refused and never fired")
+        void foreignTenantIsRefused() {
+            WorkflowEntity foreign = createMockEntity(null, "tenant-somebody-else", null);
+
+            NodeExecutionResult execResult = executeAgainst(context, foreign);
+
+            assertTrue(execResult.isFailure());
+            // Reported as not-found, not as forbidden: the caller must not learn that a
+            // workflow with this id exists in another workspace.
+            assertTrue(execResult.errorMessage().orElse("").contains("Workflow not found"));
+            verifyNoInteractions(reusableTriggerService);
+            // The strongest guarantee: the refusal happens BEFORE run resolution.
+            verifyNoInteractions(productionRunResolver);
+            verifyNoInteractions(workflowRunRepository);
+        }
+
+        // A caller with no org reaching an org-tagged target it OWNS is covered by
+        // degradedContextWithoutOrgFallsBackToTenantOwnership: that is allowed on
+        // purpose, because post-V263 a null caller org means a degraded context, not a
+        // genuine personal workspace, and refusing it would break working sub-workflow
+        // calls. Cross-TENANT is still refused, which is what this guard is for.
+
+        @Test
+        @DisplayName("Org-scope caller cannot reach ANOTHER TENANT's target in a different org")
+        void differentOrgAndDifferentTenantIsRefused() {
+            WorkflowEntity foreign = createMockEntity(null, "tenant-somebody-else", "org-99");
+
+            NodeExecutionResult execResult = executeAgainst(contextInOrg("org-42"), foreign);
+
+            assertTrue(execResult.isFailure());
+            assertTrue(execResult.errorMessage().orElse("").contains("Workflow not found"));
+            verifyNoInteractions(reusableTriggerService);
+            // The strongest guarantee: the refusal happens BEFORE run resolution.
+            verifyNoInteractions(productionRunResolver);
+        }
+
+        @Test
+        @DisplayName("DOCUMENTED TOLERANCE: same owner in a different org IS allowed")
+        void sameOwnerAcrossOwnOrgsIsRefusedWhenCallerOrgIsKnown() {
+            // The tolerance applies ONLY when the caller's org is unknown. With a known
+            // org the strict rule wins: a run executing in org-42 must not reach the
+            // caller's own workflow parked in org-99, which is exactly the isolation
+            // isInStrictScope exists to keep.
+            WorkflowEntity myOtherOrg = createMockEntity(null, TENANT_ID, "org-99");
+
+            NodeExecutionResult execResult = executeAgainst(contextInOrg("org-42"), myOtherOrg);
+
+            assertTrue(execResult.isFailure());
+            assertTrue(execResult.errorMessage().orElse("").contains("Workflow not found"));
+            verifyNoInteractions(productionRunResolver);
+        }
+
+        @Test
+        @DisplayName("...but with NO caller org, that same own-workflow target IS reachable")
+        void sameOwnerAcrossOwnOrgsIsAllowedWhenCallerOrgIsUnknown() {
+            WorkflowEntity myOtherOrg = createMockEntity(null, TENANT_ID, "org-99");
+            stubNoActiveRun();
+
+            // Degraded run: no org to match on, so ownership is the only rule left, and
+            // refusing here would break every sub-workflow call from that run.
+            NodeExecutionResult execResult = executeAgainst(context, myOtherOrg);
+
+            assertTrue(execResult.isFailure());
+            assertTrue(execResult.errorMessage().orElse("").contains("No active run found"),
+                "guard must let it through to run resolution");
+        }
+
+        @Test
+        @DisplayName("Same org → allowed, resolution proceeds past the guard")
+        void sameOrgIsAllowed() {
+            WorkflowEntity sameOrg = createMockEntity(null, "tenant-other-member", "org-42");
+            stubNoActiveRun();
+
+            NodeExecutionResult execResult = executeAgainst(contextInOrg("org-42"), sameOrg);
+
+            // Guard passed: it got as far as run resolution (a member of the same org may
+            // call it, even though a different member owns the row).
+            assertTrue(execResult.isFailure());
+            assertTrue(execResult.errorMessage().orElse("").contains("No active run found"));
+        }
+
+        @Test
+        @DisplayName("Caller context with NO org falls back to tenant ownership - same tenant is allowed")
+        void degradedContextWithoutOrgFallsBackToTenantOwnership() {
+            // workflows.organization_id is NOT NULL since V263, but the ExecutionContext
+            // org degrades to null on several lookup-failure paths. A strict org-vs-org
+            // compare would then refuse EVERY sub-workflow call from that run with a
+            // misleading "Workflow not found" - a call that worked before this guard.
+            WorkflowEntity orgTagged = createMockEntity(null, TENANT_ID, "org-42");
+            stubNoActiveRun();
+
+            NodeExecutionResult execResult = executeAgainst(context, orgTagged);
+
+            assertTrue(execResult.isFailure());
+            assertTrue(execResult.errorMessage().orElse("").contains("No active run found"),
+                "guard must let it through to run resolution, not refuse it");
+        }
+
+        @Test
+        @DisplayName("Caller context with NO org still refuses ANOTHER tenant - the property the guard exists for")
+        void degradedContextStillRefusesForeignTenant() {
+            WorkflowEntity foreign = createMockEntity(null, "tenant-somebody-else", "org-42");
+
+            NodeExecutionResult execResult = executeAgainst(context, foreign);
+
+            assertTrue(execResult.isFailure());
+            assertTrue(execResult.errorMessage().orElse("").contains("Workflow not found"));
+            verifyNoInteractions(reusableTriggerService);
+            // The strongest guarantee: the refusal happens BEFORE run resolution.
+            verifyNoInteractions(productionRunResolver);
+        }
+
+        @Test
+        @DisplayName("Blank-string caller org is treated as absent, not as an org that matches nothing")
+        void blankCallerOrgIsTreatedAsAbsent() {
+            // Target owned by SOMEONE ELSE in org-42. If a blank caller org were treated
+            // as a real org value, crossResourceMatches("  ", "org-42") would refuse it;
+            // if it were treated as absent-but-then-owner-matched, it would also refuse
+            // (different owner). Only "blank = absent, and absent means the org is
+            // unknown" can be told apart here - so assert the refusal AND that a same-
+            // owner target with the same blank org is allowed (next assertion block).
+            WorkflowEntity someoneElsesInOrg = createMockEntity(null, "tenant-other-member", "org-42");
+
+            NodeExecutionResult refused = executeAgainst(
+                context.withOrganization("  ", null), someoneElsesInOrg);
+
+            assertTrue(refused.isFailure());
+            assertTrue(refused.errorMessage().orElse("").contains("Workflow not found"));
+            verifyNoInteractions(productionRunResolver);
+        }
+
+        @Test
+        @DisplayName("Blank caller org still reaches the caller's OWN workflow (degraded, not dead)")
+        void blankCallerOrgStillReachesOwnWorkflow() {
+            WorkflowEntity mine = createMockEntity(null, TENANT_ID, "org-42");
+            stubNoActiveRun();
+
+            NodeExecutionResult execResult = executeAgainst(context.withOrganization("  ", null), mine);
+
+            assertTrue(execResult.isFailure());
+            assertTrue(execResult.errorMessage().orElse("").contains("No active run found"),
+                "guard must let an owned target through even with no usable caller org");
+        }
+
+        @Test
+        @DisplayName("Same personal workspace → allowed, resolution proceeds past the guard")
+        void samePersonalWorkspaceIsAllowed() {
+            WorkflowEntity mine = createMockEntity(null, TENANT_ID, null);
+            stubNoActiveRun();
+
+            NodeExecutionResult execResult = executeAgainst(context, mine);
+
+            assertTrue(execResult.isFailure());
+            assertTrue(execResult.errorMessage().orElse("").contains("No active run found"));
+        }
+    }
+
 }

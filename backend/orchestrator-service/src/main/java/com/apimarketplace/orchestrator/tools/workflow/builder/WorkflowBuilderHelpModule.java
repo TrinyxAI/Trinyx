@@ -113,7 +113,10 @@ public class WorkflowBuilderHelpModule implements ToolModule {
         sessionMgmt.put("finish", "Finalize and save the workflow as ACTIVE. Validates first, then persists. " +
             "CLOSES the build session - do not call any further workflow(action=...) after this. " +
             "Params: name (optional override). Note: 'create' is kept as a legacy alias.");
-        sessionMgmt.put("execute", "Run the saved workflow. Must finish/save first. Params: data_inputs (optional)");
+        sessionMgmt.put("execute", "Run the workflow's currently saved plan. You do NOT have to call finish first: "
+            + "every editing action (add_node, connect, modify, remove, ...) auto-saves the draft, so your edits "
+            + "are what runs. Params: data_inputs (optional). "
+            + "Counterpart: 'stop_run' ends a run that is still going - see actions.run_inspection.stop_run.");
         actions.put("session_management", sessionMgmt);
 
         Map<String, String> runInspection = new LinkedHashMap<>();
@@ -127,6 +130,29 @@ public class WorkflowBuilderHelpModule implements ToolModule {
             "again to keep waiting. After an execute, ONE wait_run replaces a get_run poll loop.");
         runInspection.put("get_node_output", "Full output/error of a single node in a run. Params: run_id, epoch, node_id " +
             "(+ optional item_index / iteration / spawn / field paging)");
+        runInspection.put("stop_run", "End a run that is still going - the counterpart of execute. " +
+            "Use it as soon as you can tell the execution went wrong (wrong input, a browser agent stuck on a login wall, " +
+            "a loop that will not converge) instead of waiting for it to finish or letting wait_run time out. " +
+            "Params: run_id (required, EXCEPT when aborting your own run - see SELF-ABORT below), " +
+            "reason (optional but recommended - one sentence, recorded on the run and returned by " +
+            "get_run as stop_reason), mode (optional). " +
+            "Nodes still in flight are cancelled, including any browser-agent session, and no further node starts. " +
+            "CHOOSING THE MODE: mode='cancel' (the default) is WORKFLOW-level, not just run-level - it ends the run for good " +
+            "AND SUSPENDS THE SCHEDULES of the workflow the run belongs to, so a scheduled workflow stops firing until someone " +
+            "reactivates it. mode='graceful' is run-level: it closes the epoch that is running, returns the run to " +
+            "WAITING_TRIGGER and leaves the workflow's schedules alone. Prefer 'graceful' when you only want to end THIS " +
+            "execution of a workflow that keeps running on a schedule or webhook; use 'cancel' when the workflow itself must " +
+            "stop. 'graceful' only accepts a run that is currently executing (RUNNING or PAUSED, which includes a run " +
+            "parked on an approval, an interface or a timer - those keep the run running): it is refused on a run that " +
+            "is PENDING or WAITING_TRIGGER, i.e. nothing is executing yet, and the error tells you to use 'cancel'. " +
+            "Response: run_id, status, previous_status, mode, stopped_by, reason; a run that had already ended comes back " +
+            "with already_terminal=true and nothing is changed; a run that has not started executing yet cannot be stopped " +
+            "at all. " +
+            "SELF-ABORT: an agent running INSIDE a workflow can omit run_id to stop the run it is executing inside. The " +
+            "response then carries self=true, and you must stop working and report the reason, because none of your further " +
+            "tool calls will run. As a sub-agent that means the WHOLE parent run, not just your own step. Passing a run_id " +
+            "that is not a run id string is refused, never taken as a self-abort. " +
+            "stop_run is a WRITE action: an agent granted read-only access to workflows cannot stop a run, not even its own.");
         actions.put("run_inspection", runInspection);
 
         actions.put("node_operations", Map.of(
@@ -137,7 +163,13 @@ public class WorkflowBuilderHelpModule implements ToolModule {
         ));
 
         actions.put("connection_operations", Map.of(
-            "connect", "Create an edge. Params: from (label), to (label). For ports: from='Decision:if'",
+            "connect", "Create an edge. Params: from (label), to (label). For ports: from='Decision:if'. "
+                + "Connecting BACK to a node that already ran makes that part repeat (a loop). Loop params: "
+                + "max_iterations (cap for this loop), loop_condition (expression re-checked before each "
+                + "repeat), loop_back=true (declare a loop the graph cannot infer yet, e.g. you wired the "
+                + "closing connection first), loop_back=false (refuse the loop, keep a plain connection). "
+                + "Put the loop-back on a BRANCH (from='Check:else'): a loop from a node that also continues "
+                + "forward never runs. Reaching the cap while the loop still wants to run fails the run.",
             "disconnect", "Remove an edge. Params: from (label), to (label)"
         ));
 
@@ -217,7 +249,10 @@ public class WorkflowBuilderHelpModule implements ToolModule {
         stepTypes.put("http_request", "Raw HTTP request to any URL");
         stepTypes.put("send_email", "Send email notification");
         stepTypes.put("email_inbox", "Read a mailbox and act on it (flag/move/delete a message, list or create folders) via IMAP");
-        stepTypes.put("sub_workflow", "Execute another workflow as a step");
+        stepTypes.put("sub_workflow", "Execute another workflow as a step. The target must already "
+            + "have a live run - this node never creates one. Run it once first with "
+            + "workflow(action='execute', id='<uuid>'), and if the target is pinned add "
+            + "version=<its pinned version>, because only runs at the pinned version are eligible");
         stepTypes.put("respond_to_webhook", "Return response to the webhook that triggered this workflow");
         // I/O
         stepTypes.put("interface", "Display output via HTML interface (requires interface_id)");

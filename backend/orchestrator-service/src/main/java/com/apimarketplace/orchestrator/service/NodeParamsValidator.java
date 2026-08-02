@@ -59,8 +59,18 @@ public class NodeParamsValidator {
             "fields", "mappings", "transformations", "mappings",
             "values", "mappings", "outputs", "mappings"
         )),
+        // Loop: mirror EXACTLY what UtilityNodeCreator.createLoop reads, or add_node rejects a
+        // param the creator would have honoured. The node help promises "loopCondition and
+        // maxIterations (camelCase) and snake_case condition / loop_condition / max_iterations
+        // are accepted", and workflow(action='modify') accepts them - add_node used to reject
+        // loopCondition outright while silently accepting maxIterations.
         Map.entry("loop", Map.of(
-            "maxIterations", "max_iterations"
+            "maxIterations", "max_iterations",
+            "limit", "max_iterations",
+            "loopCondition", "condition",
+            "loop_condition", "condition",
+            "expression", "condition",
+            "while", "condition"
         )),
         Map.entry("switch", Map.of(
             "switchExpression", "expression", "switchCases", "cases"
@@ -77,8 +87,11 @@ public class NodeParamsValidator {
             Map.entry("file_url", "url"), Map.entry("href", "url"), Map.entry("src", "url"),
             Map.entry("file_name", "filename"), Map.entry("output", "filename")
         )),
+        // "response" is read by UtilityNodeCreator too (message/text/content/body/response) -
+        // the validator used to reject the one spelling that matches the node's own name.
         Map.entry("response", Map.of(
-            "text", "message", "content", "message", "body", "message"
+            "text", "message", "content", "message", "body", "message",
+            "response", "message"
         )),
         Map.entry("http_request", Map.ofEntries(
             Map.entry("auth_type", "authType"), Map.entry("auth_config", "authConfig"),

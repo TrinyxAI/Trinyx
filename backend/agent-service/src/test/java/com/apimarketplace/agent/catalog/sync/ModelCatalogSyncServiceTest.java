@@ -9,6 +9,9 @@ import com.apimarketplace.agent.repository.ModelConfigOverrideRepository;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.Arguments;
+import org.junit.jupiter.params.provider.MethodSource;
 import org.mockito.ArgumentCaptor;
 import org.springframework.web.client.RestTemplate;
 
@@ -19,6 +22,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
+import java.util.stream.Stream;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
@@ -451,17 +455,59 @@ class ModelCatalogSyncServiceTest {
         assertThat(result.plan().added()).isEmpty();
     }
 
+    @ParameterizedTest(name = "a changed {0} reports \"updated\", not \"unchanged\"")
+    @MethodSource("feedOwnedTextFields")
+    @DisplayName("Regression: every feed-owned field applyFields writes is compared, so no silent rewrite")
+    void feedOwnedFieldChangeIsReportedAsUpdated(String field, Object changedValue) {
+        // rowEquals decides what the dry-run shows; the apply writes the row
+        // regardless. A field applyFields writes but rowEquals skips is
+        // therefore rewritten silently, which the method contract forbids.
+        // displayName was the reported case (OpenRouter renames a model); the
+        // others are the same defect in the same method - description in
+        // particular churns constantly on the OpenRouter feed.
+        ModelConfigOverrideEntity existing = fullyPopulatedEntity();
+        when(modelRepo.findAllByOrderByRankingAsc()).thenReturn(List.of(existing));
+
+        java.util.HashMap<String, Object> incoming = fullyPopulatedFeedRow();
+        incoming.put(field, changedValue);
+
+        when(liteLlmParser.parse(any(), any(), any())).thenReturn(
+                LiteLlmFeedParser.ParseResult.success(List.of(incoming), 0, 0, 0, 0, 0));
+        when(openRouterParser.parse(any(), any(), any())).thenReturn(
+                OpenRouterFeedParser.ParseResult.success(List.of(), 0, 0, 0, 0));
+
+        var result = syncService.sync(ModelCatalogSyncService.SyncRequest.dryRun("tester"));
+
+        assertThat(result.plan().unchanged())
+                .as("'%s' changed, so the row must NOT be reported unchanged", field)
+                .isZero();
+        assertThat(result.plan().updated()).hasSize(1);
+    }
+
+    static Stream<Arguments> feedOwnedTextFields() {
+        return Stream.of(
+                // The reported case: OpenRouter serves displayName from the
+                // feed's `name`, so a provider-side rebrand lands here.
+                Arguments.of("displayName", "Anthropic: Claude Opus 4.7"),
+                Arguments.of("description", "Rewritten marketing copy."),
+                Arguments.of("supportedEndpoints", List.of("/v1/chat/completions")),
+                Arguments.of("supportedModalities", List.of("text")),
+                Arguments.of("supportedOutputModalities", List.of("text", "image")));
+    }
+
     @Test
-    @DisplayName("Excluded providers (bridges + zai) are stripped from feed before diff")
+    @DisplayName("Excluded providers (the 4 CLI bridges) are stripped from feed before diff")
     void excludedProvidersAreFiltered() {
         // Parsers already exclude these in practice, but the service re-filters
         // as belt-and-braces. Test that branch by stubbing parsers to include
-        // an excluded provider directly.
+        // an excluded provider directly. Bridge rows are DERIVED from the cloud
+        // entries by BridgeModelDeriver after this filter, so a feed must never
+        // write them itself.
         when(liteLlmParser.parse(any(), any(), any())).thenReturn(
                 LiteLlmFeedParser.ParseResult.success(List.of(
                         feedRow("openai", "gpt-5.4", "2.5", "15.0"),
                         feedRow("claude-code", "claude-opus-4-7", "5.0", "25.0"),
-                        feedRow("zai", "glm-5-turbo", "0.1", "0.3")
+                        feedRow("mistral-vibe", "devstral-2", "0.4", "2.0")
                 ), 0, 0, 0, 0, 0));
         when(openRouterParser.parse(any(), any(), any())).thenReturn(
                 OpenRouterFeedParser.ParseResult.success(List.of(), 0, 0, 0, 0));
@@ -475,6 +521,86 @@ class ModelCatalogSyncServiceTest {
         verify(mergeService).merge(payload.capture(), any());
         assertThat(payload.getValue()).extracting(m -> m.get("provider"))
                 .containsExactly("openai");
+    }
+
+    @Test
+    @DisplayName("Regression: zai feed rows reach the merge - the GLM line used to be excluded outright")
+    void zaiRowsReachTheMerge() {
+        // zai sat in EXCLUDED_PROVIDERS on the assumption it was absent from
+        // LiteLLM. It is not (the feed carries glm-4.5 through glm-5.1), so the
+        // exclusion froze Z.AI on the ids hardcoded in application.yml.
+        when(liteLlmParser.parse(any(), any(), any())).thenReturn(
+                LiteLlmFeedParser.ParseResult.success(List.of(
+                        feedRow("zai", "glm-5.1", "1.4", "4.4"),
+                        feedRow("moonshot", "kimi-k2.6", "0.95", "4.0"),
+                        feedRow("qwen", "qwen-max", "1.6", "6.4")
+                ), 0, 0, 0, 0, 0));
+        when(openRouterParser.parse(any(), any(), any())).thenReturn(
+                OpenRouterFeedParser.ParseResult.success(List.of(), 0, 0, 0, 0));
+        when(mergeService.merge(any(), any()))
+                .thenReturn(new CatalogMergeService.MergeResult(3, 0, 0, 0, 0, 3));
+
+        syncService.sync(ModelCatalogSyncService.SyncRequest.apply("ops", Set.of()));
+
+        @SuppressWarnings("unchecked")
+        ArgumentCaptor<List<Map<String, Object>>> payload = ArgumentCaptor.forClass(List.class);
+        verify(mergeService).merge(payload.capture(), any());
+        assertThat(payload.getValue()).extracting(m -> m.get("provider"))
+                .containsExactlyInAnyOrder("zai", "moonshot", "qwen");
+    }
+
+    @Test
+    @DisplayName("Regression: existing zai DB rows now enter the diff baseline instead of re-appearing as 'added' every sync")
+    void existingZaiRowsEnterTheDiffBaseline() {
+        // Second EXCLUDED_PROVIDERS call site: loadExistingNonBridge(). While
+        // zai sat in that set, its seeded rows were skipped when building the
+        // baseline, so an incoming zai row could never match one - it would be
+        // classified "added" on every single run and the price-sanity guard,
+        // which only compares against baseline rows, could never protect it.
+        ModelConfigOverrideEntity seededGlm = entity("zai", "glm-5.1",
+                new BigDecimal("1.400000"), new BigDecimal("4.400000"));
+        when(modelRepo.findAllByOrderByRankingAsc()).thenReturn(List.of(seededGlm));
+
+        when(liteLlmParser.parse(any(), any(), any())).thenReturn(
+                LiteLlmFeedParser.ParseResult.success(List.of(
+                        feedRow("zai", "glm-5.1", "1.400000", "4.400000")
+                ), 0, 0, 0, 0, 0));
+        when(openRouterParser.parse(any(), any(), any())).thenReturn(
+                OpenRouterFeedParser.ParseResult.success(List.of(), 0, 0, 0, 0));
+
+        var result = syncService.sync(ModelCatalogSyncService.SyncRequest.dryRun("tester"));
+
+        // Same prices AND same display name on both sides -> the row matches
+        // the baseline. Pre-fix this was 0 unchanged / 0 added: zai was
+        // stripped from BOTH the feed (removeIf) and the baseline, so the sync
+        // was a complete no-op for the provider.
+        assertThat(result.plan().unchanged()).isEqualTo(1);
+        assertThat(result.plan().added()).isEmpty();
+        assertThat(result.plan().updated()).isEmpty();
+    }
+
+    @Test
+    @DisplayName("Regression: a zai price swing is caught by the price-sanity guard now that the baseline includes it")
+    void zaiPriceSwingIsFlaggedByTheSanityGuard() {
+        // The flip side of the baseline fix: with zai excluded there was no
+        // "old" price to compare against, so an absurd feed price would have
+        // been applied unchallenged. Now it is flagged and dropped from apply.
+        ModelConfigOverrideEntity seededGlm = entity("zai", "glm-5.1",
+                new BigDecimal("1.400000"), new BigDecimal("4.400000"));
+        when(modelRepo.findAllByOrderByRankingAsc()).thenReturn(List.of(seededGlm));
+
+        when(liteLlmParser.parse(any(), any(), any())).thenReturn(
+                LiteLlmFeedParser.ParseResult.success(List.of(
+                        feedRow("zai", "glm-5.1", "14.000000", "44.000000")   // 10x
+                ), 0, 0, 0, 0, 0));
+        when(openRouterParser.parse(any(), any(), any())).thenReturn(
+                OpenRouterFeedParser.ParseResult.success(List.of(), 0, 0, 0, 0));
+
+        var result = syncService.sync(ModelCatalogSyncService.SyncRequest.dryRun("tester"));
+
+        assertThat(result.plan().flagged())
+                .extracting(ModelCatalogSyncService.FlaggedRow::modelId)
+                .containsExactly("glm-5.1");
     }
 
     @Test
@@ -700,6 +826,11 @@ class ModelCatalogSyncServiceTest {
         java.util.HashMap<String, Object> m = new java.util.HashMap<>();
         m.put("provider", "anthropic");
         m.put("modelId", "claude-opus-4-7");
+        m.put("displayName", "claude-opus-4-7");
+        m.put("description", "Frontier reasoning model.");
+        m.put("supportedEndpoints", List.of("/v1/chat/completions", "/v1/batch"));
+        m.put("supportedModalities", List.of("text", "image"));
+        m.put("supportedOutputModalities", List.of("text"));
         m.put("priceInput", "5.000000");
         m.put("priceOutput", "25.000000");
         m.put("priceInputBatch", "2.500000");
@@ -731,6 +862,11 @@ class ModelCatalogSyncServiceTest {
         ModelConfigOverrideEntity e = new ModelConfigOverrideEntity();
         e.setProvider("anthropic");
         e.setModelId("claude-opus-4-7");
+        e.setDisplayName("claude-opus-4-7");
+        e.setDescription("Frontier reasoning model.");
+        e.setSupportedEndpoints(new String[]{"/v1/chat/completions", "/v1/batch"});
+        e.setSupportedModalities(new String[]{"text", "image"});
+        e.setSupportedOutputModalities(new String[]{"text"});
         e.setPriceInput(new BigDecimal("5.000000"));
         e.setPriceOutput(new BigDecimal("25.000000"));
         e.setPriceInputBatch(new BigDecimal("2.500000"));

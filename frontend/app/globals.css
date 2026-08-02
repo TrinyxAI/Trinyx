@@ -1343,36 +1343,6 @@ button:focus-visible,
   }
 }
 
-/* Browser-style active tab - bottom corner curves */
-.browser-tab-active {
-  position: relative;
-  border: 1px solid var(--border-color);
-  border-bottom: none;
-}
-.browser-tab-active::before,
-.browser-tab-active::after {
-  content: '';
-  position: absolute;
-  bottom: 0;
-  width: 8px;
-  height: 8px;
-  pointer-events: none;
-}
-.browser-tab-active::before {
-  left: -8px;
-  border-bottom-right-radius: 8px;
-  box-shadow: 2px 2px 0 0 var(--bg-primary);
-  border-right: 1px solid var(--border-color);
-  border-bottom: 1px solid var(--border-color);
-}
-.browser-tab-active::after {
-  right: -8px;
-  border-bottom-left-radius: 8px;
-  box-shadow: -2px 2px 0 0 var(--bg-primary);
-  border-left: 1px solid var(--border-color);
-  border-bottom: 1px solid var(--border-color);
-}
-
 /* Shimmer scan animation for workflow nodes - left to right like ChatGPT */
 @keyframes shimmer-scan {
   0% {

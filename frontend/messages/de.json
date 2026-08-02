@@ -492,6 +492,7 @@
     "noItems": "Keine Elemente verfügbar",
     "errorLoading": "Elemente konnten nicht geladen werden",
     "aiChat": "KI-Chat",
+    "runTab": "Ausführung",
     "welcomeTitle": "Wie kann ich Ihnen helfen?",
     "agent": "Agent",
     "workflowPanel": "Workflow-Bereich",
@@ -1023,6 +1024,7 @@
     "viewingEpoch": "Epoche {epoch} wird angezeigt",
     "runSteps": {
       "noStepsYet": "Noch keine Schritte",
+      "notRunYet": "noch nicht ausgeführt",
       "filterAll": "Alle",
       "listView": "Listenansicht",
       "gaugeView": "Zeitachsenansicht",
@@ -1136,6 +1138,7 @@
       "epochCost": "Epoche {epoch}",
       "budgetBlockedTitle": "Budget erreicht",
       "budgetBlockedMessage": "{spent} von {budget} ausgegeben. Es wurde keine neue Ausführung gestartet.",
+      "openInPanel": "Ausführungsdetails im Panel öffnen",
       "cost": "Kosten",
       "scopeAll": "alle Epochen",
       "scopeEpoch": "Epoche {epoch}"
@@ -1265,7 +1268,9 @@
     "skipped": "Übersprungen",
     "cancelled": "Abgebrochen",
     "timeout": "Zeitüberschreitung",
-    "partial_success": "Teilerfolg"
+    "partial_success": "Teilerfolg",
+    "awaiting_signal": "Wartet auf Signal",
+    "stopped": "Gestoppt"
   },
   "errors": {
     "retry": "Erneut versuchen",
@@ -1284,6 +1289,7 @@
     "never": "Nie",
     "title": "Ausführungen",
     "noRuns": "Noch keine Ausführungen",
+    "loading": "Ausführung wird geladen...",
     "runWorkflow": "Führen Sie Ihren Workflow aus, um den Ausführungsverlauf zu sehen",
     "justNow": "Gerade eben",
     "minutesAgo": "vor {count}m",
@@ -1301,7 +1307,8 @@
     "version": "v{version}",
     "loadError": "Ausführungen konnten nicht geladen werden",
     "stepByStepMode": "Schritt-für-Schritt-Modus",
-    "scrollToLoadMore": "Scrollen, um mehr zu laden..."
+    "scrollToLoadMore": "Scrollen, um mehr zu laden...",
+    "lastFireDuration": "Dauer der letzten Ausführung"
   },
   "table": {
     "addRow": "Zeile hinzufügen",
@@ -1616,6 +1623,12 @@
       "comingSoon": "Datenquellen-Marktplatz bald verfügbar."
     },
     "acquire": "Installieren",
+    "ceExclusiveBadge": "CE-exklusiv",
+    "ceExclusiveTooltip": "Läuft nur auf einer selbst gehosteten Installation (Community Edition)",
+    "ceExclusiveTitle": "Selbst gehostete Installation erforderlich",
+    "ceExclusiveDescription": "Diese App nutzt Funktionen, die nur auf einer selbst gehosteten Installation laufen, und kann daher hier nicht installiert werden. Installieren Sie sie von einer selbst gehosteten Bereitstellung aus.",
+    "ceExclusiveFeatureCliAgent": "Lokale CLI-Agenten (Claude Code, Codex, Gemini CLI, Mistral Vibe)",
+    "ceExclusiveFeatureVectorSearch": "Vektorsuche (Embeddings)",
     "acquiring": "Wird installiert...",
     "open": "Öffnen",
     "emptyAgents": "Noch keine geteilten Agenten",
@@ -6565,7 +6578,7 @@
     "subWorkflowNode": {
       "title": "Sub-Workflow",
       "infoTitle": "Sub-Workflow-Knoten",
-      "infoDescription": "Einen anderen Workflow als Subroutine ausführen, Eingaben übergeben und Ausgaben empfangen.",
+      "infoDescription": "Löst einen anderen Workflow aus, übergibt Eingaben und empfängt Ausgaben. Das Ziel muss bereits einen aktiven Lauf haben: dieser Knoten erstellt niemals einen.",
       "workflowId": "Workflow-ID",
       "workflowIdPlaceholder": "UUID des auszuführenden Workflows",
       "inputMapping": "Eingabe-Mapping",
@@ -6713,8 +6726,9 @@
       "autoLayout": "Auto-Layout (Knoten neu anordnen)",
       "disableInteractivity": "Interaktivität deaktivieren",
       "enableInteractivity": "Interaktivität aktivieren",
-      "disableBoxSelection": "Rahmenauswahl deaktivieren",
-      "enableBoxSelection": "Rahmenauswahl aktivieren",
+      "cursorMode": "Cursormodus",
+      "cursorModePan": "Hand (verschieben)",
+      "cursorModeSelection": "Auswahlrahmen",
       "settings": "Einstellungen",
       "openConversation": "Konversationspanel öffnen",
       "emptyTitle": "Wie kann ich Ihnen helfen?",
@@ -6777,6 +6791,8 @@
       "previousVariablePage": "Vorherige Seite aufgelöster Daten",
       "runAuto": "Ausführen (automatisch)",
       "runStepByStep": "Schritt für Schritt (Debug)",
+      "runWithTrigger": "Mit Trigger starten",
+      "triggerNotReady": "Dieser Trigger kann derzeit nicht ausgelöst werden",
       "runWorkflow": "Workflow ausführen",
       "simulateTableTrigger": "Ein Tabellenzeilen-Ereignis simulieren",
       "variablePageSource": "Quelle aufgelöster Daten",
@@ -8307,7 +8323,8 @@
     "title": "Schleifen-Kante",
     "condition": "Bedingung (SpEL)",
     "conditionPlaceholder": "z. B. '{{mcp:step.output.count}}' > 0",
-    "maxIterations": "Max. Iterationen"
+    "maxIterations": "Max. Iterationen",
+    "maxIterationsInherited": "Geerbt"
   },
   "storageExplorer": {
     "searchPlaceholder": "Dateien suchen...",

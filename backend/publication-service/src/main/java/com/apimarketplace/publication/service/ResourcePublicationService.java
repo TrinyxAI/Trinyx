@@ -13,6 +13,7 @@ import com.apimarketplace.publication.domain.WorkflowPublicationEntity.Publicati
 import com.apimarketplace.publication.repository.PublicationReceiptRepository;
 import com.apimarketplace.publication.repository.WorkflowPublicationRepository;
 import com.apimarketplace.publication.service.resource.ResourcePublicationStrategy;
+import com.apimarketplace.publication.utils.CeExclusiveFeatureDetector;
 import com.apimarketplace.publication.service.resource.ResourcePublicationStrategy.ResourceMetadata;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -59,6 +60,15 @@ public class ResourcePublicationService {
     private final WorkflowPublicationService workflowPublicationService;
     private final Map<PublicationType, ResourcePublicationStrategy> strategies;
     private final AuthClient authClient;
+
+    /**
+     * Edition gate for CE-exclusive publications. Field-injected and optional,
+     * matching {@code WorkflowPublicationService} / {@code
+     * PublicationAcquisitionHelper}, so the existing unit constructions of this
+     * service stay valid.
+     */
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private CeExclusiveAcquisitionGuard ceExclusiveGuard;
 
     public ResourcePublicationService(WorkflowPublicationRepository publicationRepository,
                                        PublicationReceiptRepository receiptRepository,
@@ -214,6 +224,12 @@ public class ResourcePublicationService {
         }
         publication.setPlanSnapshot(snapshot);
 
+        // CE-exclusive label: a standalone TABLE carrying a vector (embedding)
+        // column only works on a self-hosted install, so it gets the badge and
+        // is refused on managed cloud rather than cloned with the column
+        // silently stripped.
+        CeExclusiveFeatureDetector.applyTo(publication);
+
         // Build denormalized search index. title/description are local vars
         // resolved above (lines 130-131); type is the method parameter.
         publication.setSearchText(SearchTextBuilder.create()
@@ -256,6 +272,14 @@ public class ResourcePublicationService {
         // Reassign-then-rebind to a final to keep lambda captures happy below.
         organizationId = resolveAcquirerOrg(tenantId, organizationId, publicationId);
         final String orgScope = organizationId;
+
+        // Edition gate: a CE-exclusive resource (a table with a vector column)
+        // cannot be installed on managed cloud. Runs FIRST, like the workflow and
+        // agent paths, so the caller always gets the same reason for the same
+        // publication rather than a different message per publication type.
+        if (ceExclusiveGuard != null) {
+            ceExclusiveGuard.check(publication);
+        }
 
         if (isOwnPublication(publication, tenantId, orgScope)) {
             throw new IllegalArgumentException("Cannot acquire your own publication");

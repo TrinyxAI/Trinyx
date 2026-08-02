@@ -1207,4 +1207,225 @@ class ProductionRunResolverTest {
             assertThat(resolver.isAllowedForProduction(run(RunStatus.WAITING_TRIGGER), null)).isFalse();
         }
     }
+
+    // ============================================================
+    // resolveActiveRun - the internal, pin-optional lane used by the
+    // sub-workflow node and error-trigger dispatch.
+    // ============================================================
+
+    @Nested
+    @DisplayName("resolveActiveRun (sub-workflow node + error trigger)")
+    class ResolveActiveRunTests {
+
+        private final List<RunStatus> ACTIVE = ProductionRunResolver.SUB_WORKFLOW_ACTIVE_STATUSES;
+
+        @Test
+        @DisplayName("Null workflowId → WORKFLOW_MISSING")
+        void nullWorkflowId() {
+            ProductionRunResolver.Resolution res = resolver.resolveActiveRun(null, ACTIVE);
+
+            assertThat(res.outcome()).isEqualTo(ProductionRunResolver.Outcome.WORKFLOW_MISSING);
+            assertThat(res.run()).isEmpty();
+            verifyNoInteractions(runRepository);
+        }
+
+        @Test
+        @DisplayName("Workflow with no id → WORKFLOW_MISSING (defensive)")
+        void workflowWithoutId() {
+            WorkflowEntity noId = new WorkflowEntity();
+
+            ProductionRunResolver.Resolution res = resolver.resolveActiveRun(noId, ACTIVE);
+
+            assertThat(res.outcome()).isEqualTo(ProductionRunResolver.Outcome.WORKFLOW_MISSING);
+            verifyNoInteractions(runRepository);
+        }
+
+        @Test
+        @DisplayName("UNPINNED workflow is NOT refused - pin stays optional on this lane")
+        void unpinnedWorkflowIsServed() {
+            WorkflowRunEntity waiting = run(RunStatus.WAITING_TRIGGER);
+            when(runRepository.findFirstProductionRunByWorkflowIdAndStatusIn(WORKFLOW_ID, ACTIVE))
+                .thenReturn(Optional.of(waiting));
+
+            ProductionRunResolver.Resolution res = resolver.resolveActiveRun(unpinnedWorkflow(), ACTIVE);
+
+            assertThat(res.outcome()).isEqualTo(ProductionRunResolver.Outcome.FOUND);
+            assertThat(res.run()).contains(waiting);
+            // NOT_PINNED is the refusal the public trigger lanes use; this lane never emits it.
+            assertThat(res.isNotPinned()).isFalse();
+        }
+
+        @Test
+        @DisplayName("Unpinned lookup is showcase-excluded - never the plain derived query")
+        void unpinnedLookupExcludesShowcaseClones() {
+            when(runRepository.findFirstProductionRunByWorkflowIdAndStatusIn(WORKFLOW_ID, ACTIVE))
+                .thenReturn(Optional.of(run(RunStatus.RUNNING)));
+
+            resolver.resolveActiveRun(unpinnedWorkflow(), ACTIVE);
+
+            verify(runRepository).findFirstProductionRunByWorkflowIdAndStatusIn(WORKFLOW_ID, ACTIVE);
+            verify(runRepository, never()).findFirstByWorkflowIdAndStatusInOrderByStartedAtDesc(any(), any());
+            verify(runRepository, never()).findFirstByWorkflowIdOrderByStartedAtDesc(any());
+        }
+
+        @Test
+        @DisplayName("PINNED workflow, FK null → version-scoped, showcase-excluded scan")
+        void pinnedWithoutFkScansAtPinnedVersion() {
+            WorkflowRunEntity waiting = run(RunStatus.WAITING_TRIGGER);
+            when(runRepository.findFirstProductionRunByWorkflowIdAndPlanVersionAndStatusIn(
+                    WORKFLOW_ID, PINNED_VERSION, ACTIVE))
+                .thenReturn(Optional.of(waiting));
+
+            ProductionRunResolver.Resolution res = resolver.resolveActiveRun(pinnedWorkflow(), ACTIVE);
+
+            assertThat(res.outcome()).isEqualTo(ProductionRunResolver.Outcome.FOUND);
+            assertThat(res.run()).contains(waiting);
+            verify(runRepository, never()).findFirstProductionRunByWorkflowIdAndStatusIn(any(), any());
+        }
+
+        @Test
+        @DisplayName("No run in the requested statuses → NO_PRODUCTION_RUN, workflow name still reported")
+        void noActiveRun() {
+            when(runRepository.findFirstProductionRunByWorkflowIdAndPlanVersionAndStatusIn(
+                    WORKFLOW_ID, PINNED_VERSION, ACTIVE))
+                .thenReturn(Optional.empty());
+
+            ProductionRunResolver.Resolution res = resolver.resolveActiveRun(pinnedWorkflow(), ACTIVE);
+
+            assertThat(res.outcome()).isEqualTo(ProductionRunResolver.Outcome.NO_PRODUCTION_RUN);
+            assertThat(res.run()).isEmpty();
+            assertThat(res.workflowName()).isEqualTo("test-wf");
+        }
+
+        @Test
+        @DisplayName("The caller's status list is the one handed to the query - not a hardcoded set")
+        void callerStatusListIsForwardedToTheQuery() {
+            when(runRepository.findFirstProductionRunByWorkflowIdAndPlanVersionAndStatusIn(
+                    eq(WORKFLOW_ID), eq(PINNED_VERSION), any(Collection.class)))
+                .thenReturn(Optional.of(run(RunStatus.AWAITING_SIGNAL)));
+
+            resolver.resolveActiveRun(pinnedWorkflow(), ProductionRunResolver.NON_TERMINAL_STATUSES);
+
+            // The error lane passes NON_TERMINAL_STATUSES and must get AWAITING_SIGNAL and
+            // PENDING through; the sub-workflow lane passes the narrower set. Neither is
+            // hardcoded in the resolver.
+            verify(runRepository).findFirstProductionRunByWorkflowIdAndPlanVersionAndStatusIn(
+                WORKFLOW_ID, PINNED_VERSION, ProductionRunResolver.NON_TERMINAL_STATUSES);
+            assertThat(ProductionRunResolver.NON_TERMINAL_STATUSES)
+                .contains(RunStatus.AWAITING_SIGNAL, RunStatus.PENDING)
+                .doesNotContain(RunStatus.COMPLETED, RunStatus.CANCELLED, RunStatus.FAILED);
+            assertThat(ProductionRunResolver.SUB_WORKFLOW_ACTIVE_STATUSES)
+                .containsExactly(RunStatus.WAITING_TRIGGER, RunStatus.RUNNING, RunStatus.PAUSED);
+        }
+
+        @Test
+        @DisplayName("Pin v0 is a real pin, not 'unpinned' - scopes to version 0")
+        void pinnedVersionZeroIsScoped() {
+            WorkflowEntity wf = pinnedWorkflow();
+            wf.setPinnedVersion(0);
+            WorkflowRunEntity v0 = run(RunStatus.WAITING_TRIGGER);
+            when(runRepository.findFirstProductionRunByWorkflowIdAndPlanVersionAndStatusIn(
+                    WORKFLOW_ID, 0, ACTIVE))
+                .thenReturn(Optional.of(v0));
+
+            ProductionRunResolver.Resolution res = resolver.resolveActiveRun(wf, ACTIVE);
+
+            assertThat(res.run()).contains(v0);
+            // Guards the `pinned != null` test: a `pinned > 0` or truthiness check would
+            // silently treat v0 as unpinned and scan every version.
+            verify(runRepository, never()).findFirstProductionRunByWorkflowIdAndStatusIn(any(), any());
+        }
+
+        @Test
+        @DisplayName("Null/empty status list defaults to NON_TERMINAL_STATUSES")
+        void nullStatusListDefaults() {
+            when(runRepository.findFirstProductionRunByWorkflowIdAndPlanVersionAndStatusIn(
+                    eq(WORKFLOW_ID), eq(PINNED_VERSION), any(Collection.class)))
+                .thenReturn(Optional.of(run(RunStatus.WAITING_TRIGGER)));
+
+            resolver.resolveActiveRun(pinnedWorkflow(), null);
+
+            verify(runRepository).findFirstProductionRunByWorkflowIdAndPlanVersionAndStatusIn(
+                WORKFLOW_ID, PINNED_VERSION, ProductionRunResolver.NON_TERMINAL_STATUSES);
+        }
+
+        @Test
+        @DisplayName("EMPTY status list also defaults to NON_TERMINAL_STATUSES")
+        void emptyStatusListDefaults() {
+            when(runRepository.findFirstProductionRunByWorkflowIdAndPlanVersionAndStatusIn(
+                    eq(WORKFLOW_ID), eq(PINNED_VERSION), any(Collection.class)))
+                .thenReturn(Optional.of(run(RunStatus.WAITING_TRIGGER)));
+
+            resolver.resolveActiveRun(pinnedWorkflow(), List.of());
+
+            // An empty list handed straight to the IN clause would match nothing and
+            // silently report "no active run" for a perfectly healthy workflow.
+            verify(runRepository).findFirstProductionRunByWorkflowIdAndPlanVersionAndStatusIn(
+                WORKFLOW_ID, PINNED_VERSION, ProductionRunResolver.NON_TERMINAL_STATUSES);
+        }
+
+        @Test
+        @DisplayName("Takes the caller's already-loaded entity - never re-reads the workflow row")
+        void doesNotReReadTheWorkflowRow() {
+            when(runRepository.findFirstProductionRunByWorkflowIdAndPlanVersionAndStatusIn(
+                    WORKFLOW_ID, PINNED_VERSION, ACTIVE))
+                .thenReturn(Optional.of(run(RunStatus.WAITING_TRIGGER)));
+
+            resolver.resolveActiveRun(pinnedWorkflow(), ACTIVE);
+
+            // Both call sites already hold the entity (they loaded it to authorize the
+            // call), so re-reading would be a second identical SELECT per dispatch.
+            verifyNoInteractions(workflowRepository);
+        }
+
+        @Test
+        @DisplayName("NON_TERMINAL_STATUSES has exactly these five members")
+        void nonTerminalStatusesMembers() {
+            // Pins the MEMBERS, not the expression that computes them: recomputing
+            // `values().filter(!isTerminal)` here would pass even if isTerminal() itself
+            // changed, which is the drift this guards against.
+            assertThat(ProductionRunResolver.NON_TERMINAL_STATUSES)
+                .containsExactlyInAnyOrder(
+                    RunStatus.PENDING, RunStatus.RUNNING, RunStatus.PAUSED,
+                    RunStatus.WAITING_TRIGGER, RunStatus.AWAITING_SIGNAL);
+        }
+
+        @Test
+        @DisplayName("SUB_WORKFLOW_ACTIVE_STATUSES has exactly these three members")
+        void subWorkflowStatusesMembers() {
+            assertThat(ProductionRunResolver.SUB_WORKFLOW_ACTIVE_STATUSES)
+                .containsExactly(RunStatus.WAITING_TRIGGER, RunStatus.RUNNING, RunStatus.PAUSED);
+            // Narrower than the error lane on purpose: a sub-workflow call blocks its
+            // parent, so a run parked on a signal would only burn the parent's timeout.
+            assertThat(ProductionRunResolver.SUB_WORKFLOW_ACTIVE_STATUSES)
+                .doesNotContain(RunStatus.AWAITING_SIGNAL, RunStatus.PENDING);
+        }
+
+        @Test
+        @DisplayName("production_run_id is NEVER consulted - selection is by started_at, as before")
+        void productionRunIdIsNotConsulted() {
+            // Deliberate: making the FK decide here would (a) dead-end these lanes when
+            // production is COMPLETED and (b) route a MOCKED parent's call onto the
+            // child's production run, which MockRunGate force-unmocks - executing the
+            // child for real during a dry run.
+            UUID prodRunId = UUID.randomUUID();
+            WorkflowEntity wf = pinnedWorkflow();
+            wf.setProductionRunId(prodRunId);
+            resolver.setPinService(pinService);
+
+            WorkflowRunEntity newest = run(RunStatus.WAITING_TRIGGER);
+            newest.setRunIdPublic("run-newest-by-started-at");
+            when(runRepository.findFirstProductionRunByWorkflowIdAndPlanVersionAndStatusIn(
+                    WORKFLOW_ID, PINNED_VERSION, ACTIVE))
+                .thenReturn(Optional.of(newest));
+
+            ProductionRunResolver.Resolution res = resolver.resolveActiveRun(wf, ACTIVE);
+
+            assertThat(res.run()).contains(newest);
+            verify(runRepository, never()).findById(prodRunId);
+            // And no self-heal: this lane performs no writes, so the transactional
+            // caution documented on resolve() does not transfer to its call sites.
+            verifyNoInteractions(pinService);
+        }
+    }
 }

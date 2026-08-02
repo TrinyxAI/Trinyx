@@ -102,6 +102,13 @@ public class DAGIndependenceValidator {
         }
 
         for (Edge edge : plan.getEdges()) {
+            // Back-edges are re-entries, not forward dependencies. Following one would make a
+            // loop's whole cycle reachable from every node in it, merging independent trigger
+            // DAGs and reporting a false overlap.
+            if (WorkflowPlan.isBackEdge(edge)) {
+                continue;
+            }
+
             // Get the node key (without port) for both from and to
             String fromKey = EdgeRefParser.getNodeKey(edge.from());
             String toKey = EdgeRefParser.getNodeKey(edge.to());

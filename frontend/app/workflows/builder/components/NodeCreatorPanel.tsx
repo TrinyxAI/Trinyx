@@ -36,14 +36,22 @@ import { DraggableNodeItem, useBreadcrumbs, useLazyLoadObserver } from './palett
 
 type NodeCreatorPanelProps = {
   isOpen: boolean;
-  onClose: () => void;
+  /** Omitted when embedded in the side panel - the tab bar owns closing. */
+  onClose?: () => void;
   onSelectNode?: (nodeId: string | any) => void;
   currentWorkflowId?: string;
+  /**
+   * Render as a side-panel tab body instead of a floating card: fills its
+   * container, drops the rounded/translucent card chrome and the close button
+   * (the panel's own tab bar handles that). The palette content itself is
+   * unchanged - same rows, same breadcrumb, same search.
+   */
+  embedded?: boolean;
 };
 
 export { getPaletteItemDataFromId };
 
-export function NodeCreatorPanel({ isOpen, onClose, onSelectNode, currentWorkflowId }: NodeCreatorPanelProps) {
+export function NodeCreatorPanel({ isOpen, onClose, onSelectNode, currentWorkflowId, embedded = false }: NodeCreatorPanelProps) {
   const t = useTranslations('workflowBuilder.canvas');
   const { isRunMode } = useWorkflowMode();
   const queryClient = useQueryClient();
@@ -288,13 +296,23 @@ export function NodeCreatorPanel({ isOpen, onClose, onSelectNode, currentWorkflo
 
   return (
     <TooltipProvider delayDuration={1000}>
-      <div data-node-creator-panel className="w-[min(340px,calc(100vw-48px))] max-h-[90vh] rounded-[32px] bg-white/80 dark:bg-gray-800/80 backdrop-blur flex flex-col pointer-events-auto overflow-hidden relative z-[100]"
+      <div data-node-creator-panel className={clsx(
+          'flex flex-col overflow-hidden',
+          embedded
+            ? 'h-full w-full min-h-0'
+            : 'w-[min(340px,calc(100vw-48px))] max-h-[90vh] rounded-[32px] bg-white/80 dark:bg-gray-800/80 backdrop-blur pointer-events-auto relative z-[100]',
+        )}
         onDragOver={(e) => { e.preventDefault(); e.stopPropagation(); e.dataTransfer.dropEffect = 'none'; }}
         onDrop={(e) => { e.preventDefault(); e.stopPropagation(); }}>
 
         {/* Top bar: breadcrumb (left, when present) + a single in-flow close button
-            (right). One close for every screen size - no floating offset that clips. */}
-        <div className="flex items-center justify-between gap-2 px-5 pt-3 flex-shrink-0">
+            (right). One close for every screen size - no floating offset that clips.
+            Embedded in the side panel the tab bar owns closing, so the row only
+            renders when there is a breadcrumb to show. */}
+        <div className={clsx(
+          'flex items-center justify-between gap-2 px-5 flex-shrink-0',
+          embedded ? (hasBreadcrumb ? 'pt-2' : 'hidden') : 'pt-3',
+        )}>
           <nav className="flex min-w-0 flex-1 items-center gap-1.5 text-sm" aria-label="Breadcrumb">
             {hasBreadcrumb && breadcrumbItems.map((item, index) => {
               const isLast = index === breadcrumbItems.length - 1;
@@ -315,9 +333,11 @@ export function NodeCreatorPanel({ isOpen, onClose, onSelectNode, currentWorkflo
               );
             })}
           </nav>
-          <Button onClick={onClose} variant="ghost" size="icon" className="h-7 w-7 flex-shrink-0" title={t('close')}>
-            <X className="h-4 w-4" />
-          </Button>
+          {!embedded && onClose && (
+            <Button onClick={onClose} variant="ghost" size="icon" className="h-7 w-7 flex-shrink-0" title={t('close')}>
+              <X className="h-4 w-4" />
+            </Button>
+          )}
         </div>
 
         {/* Search */}

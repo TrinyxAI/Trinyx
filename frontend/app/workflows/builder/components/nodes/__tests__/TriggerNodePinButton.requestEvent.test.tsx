@@ -60,6 +60,15 @@ describe('TriggerNodePinButton - request-pin event bridge', () => {
     await waitFor(() => expect(mockListVersions).toHaveBeenCalledWith('wf1'));
   });
 
+  it('stays silent on the toolbar variant so a node request opens only one modal', async () => {
+    // The toolbar copy belongs to no node: answering a node-scoped request would
+    // stack a second confirmation on top of the node button's own.
+    render(<TriggerNodePinButton workflowId="wf1" variant="toolbar" />);
+    dispatchRequest({ workflowId: 'wf1', nodeId: 'n1' });
+    await new Promise((r) => setTimeout(r, 0));
+    expect(mockListVersions).not.toHaveBeenCalled();
+  });
+
   it('still opens the flow when the round button is hidden (not-loaded state)', async () => {
     // No version metadata yet: the button renders nothing, but its listener is
     // registered unconditionally so a menu-driven request still works.

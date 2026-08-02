@@ -121,9 +121,7 @@ export function FlowNode({ data, selected, id }: NodeProps<BuilderNodeData>) {
   // same button set with the same behavior from one source of truth.
   const ctxFlags = deriveNodeContextFlags(data, canonicalNodeId);
   const {
-    isSubWorkflowNode,
     isWorkflowsTriggerNode,
-    referencedWorkflowId,
     isWebhookTrigger,
     isScheduleTrigger,
     isManualTrigger,
@@ -443,10 +441,9 @@ export function FlowNode({ data, selected, id }: NodeProps<BuilderNodeData>) {
             avatarUrl={(data as any)?.agentAvatarUrl}
           />
 
-          {/* SubWorkflow: show referenced workflow name grayed out (only if distinct from node label) */}
-          {isSubWorkflowNode && referencedWorkflowId && (data as any)?.workflowData?.workflowName && (data as any).workflowData.workflowName !== data.label && (
-            <p className="text-xs text-slate-400 dark:text-slate-500 truncate mt-1 ml-14">{(data as any).workflowData.workflowName}</p>
-          )}
+          {/* SubWorkflow: the referenced workflow name is NOT rendered here - it made
+              the node taller than every other node. Only the label shows, like any
+              other node; the name stays reachable from the bottom-bar open button. */}
 
           {/* Fleet agent: ONE compact info line (resources + metrics) in the tight
               statuscount style - small icons + concise values, no pill backgrounds.

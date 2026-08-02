@@ -115,9 +115,10 @@ public class EdgeWiringOrchestrator {
         for (Edge edge : plan.getEdges()) {
             if (edge.from() == null) continue;
 
-            // Skip iterate-port edges - they are loop-back connections handled by BackEdgeHandler
-            EdgeRef toRefCheck = edge.to() != null ? EdgeRefParser.parse(edge.to()) : null;
-            if (toRefCheck != null && toRefCheck.hasPort() && "iterate".equals(toRefCheck.port())) {
+            // Skip back-edges (:iterate port or declared marker) - loop-back connections are
+            // driven by BackEdgeHandler. Wiring one here would make its target an implicit
+            // merge waiting on a node that runs after it, and make the node graph cyclic.
+            if (WorkflowPlan.isBackEdge(edge)) {
                 continue;
             }
 
@@ -299,9 +300,12 @@ public class EdgeWiringOrchestrator {
             return;
         }
 
-        // Skip iterate-port edges (loop-back connections handled by BackEdgeHandler)
-        if (toRef.hasPort() && "iterate".equals(toRef.port())) {
-            logger.debug("V2: Skipping iterate edge (loop-back): {} -> {}", edge.from(), edge.to());
+        // Skip back-edges (:iterate port or declared marker) - loop-backs are driven by
+        // BackEdgeHandler. This is what keeps the wired node graph ACYCLIC: the back-edge
+        // becomes neither a successor nor a predecessor, so its target never turns into an
+        // implicit merge and the tree traversal cannot recurse for ever.
+        if (WorkflowPlan.isBackEdge(edge)) {
+            logger.debug("V2: Skipping back-edge (loop-back): {} -> {}", edge.from(), edge.to());
             return;
         }
 

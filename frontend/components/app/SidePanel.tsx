@@ -6,6 +6,7 @@ import { X, GripVertical, Pin, MoreVertical, ExternalLink, Trash2, PanelRightOpe
 import { BulkDeleteModal } from '@/components/ui/BulkDeleteModal';
 import { useRouter } from 'next/navigation';
 import { Button } from '@/components/ui/button';
+import { panelTabClass, panelTabInnerHoverClass } from '@/components/ui/panel-tab';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { TooltipProvider } from '@/components/ui/tooltip';
 import { cn } from '@/lib/utils';
@@ -407,10 +408,10 @@ export function SidePanel() {
           <div className="h-full flex flex-col relative min-w-0 overflow-hidden">
             {/* Tab bar - only when panel is visible */}
             {isVisible && (
-              <div className="flex-shrink-0 border-b border-theme">
-                <div className="flex items-stretch h-14 pt-1.5">
+              <div className="flex-shrink-0 border-b border-theme bg-theme-primary">
+                <div className="flex items-center h-14 px-1.5">
                   {/* Scrollable tab area */}
-                  <div className="flex-1 min-w-0 flex items-stretch gap-0 pl-2 overflow-x-auto overflow-y-hidden">
+                  <div className="flex-1 min-w-0 flex items-center gap-1 overflow-x-auto overflow-y-hidden">
                     {tabs.map((tab, index) => {
                       const isActive = tab.id === activeTabId;
                       const isDragged = draggedIndex === index;
@@ -424,11 +425,18 @@ export function SidePanel() {
                           onDragOver={(e) => handleDragOver(e, index)}
                           onDrop={(e) => handleDrop(e, index)}
                           onDragEnd={handleDragEnd}
+                          aria-pressed={isActive}
+                          data-active={isActive ? 'true' : undefined}
+                          data-testid="side-panel-tab"
                           className={cn(
-                            'group relative min-w-0 max-w-[200px] flex items-center gap-1.5 pl-3 pr-6 text-sm transition-colors whitespace-nowrap flex-shrink-0',
-                            isActive
-                              ? 'text-theme-primary font-medium bg-theme-primary rounded-t-xl -mb-px z-10 shadow-[0_-1px_3px_rgba(0,0,0,0.06)] browser-tab-active'
-                              : 'text-theme-secondary hover:text-theme-primary rounded-t-lg mx-0.5 hover:bg-theme-secondary/40',
+                            panelTabClass(isActive),
+                            // Asymmetric padding: room on the right for the close/menu
+                            // control. twMerge only lets `px` override an earlier
+                            // `pl`/`pr`, never the reverse, so the inherited `px-4`
+                            // stays in the attribute; Tailwind emits the longhands
+                            // after the shorthand, so these still win.
+                            'min-w-0 max-w-[200px] flex-shrink-0 pl-3',
+                            tab.pinned ? 'pr-3' : 'pr-8',
                             isDragged && 'opacity-40',
                           )}
                           style={isDropTarget ? {
@@ -440,7 +448,7 @@ export function SidePanel() {
                           {/* Shimmer effect */}
                           {tab.shimmer && !isActive && (
                             <span
-                              className="absolute inset-0 rounded-t-lg pointer-events-none overflow-hidden"
+                              className="absolute inset-0 rounded-xl pointer-events-none overflow-hidden"
                               style={{
                                 backgroundImage: `linear-gradient(90deg, transparent 0%, ${
                                   tab.shimmerColor || 'rgba(59, 130, 246, 0.15)'
@@ -452,7 +460,7 @@ export function SidePanel() {
                           )}
                           {/* Drag handle - overlays on hover, takes no space */}
                           {tabs.length > 1 && (
-                            <GripVertical className="h-3 w-3 absolute left-1/2 -translate-x-1/2 top-0.5 rotate-90 opacity-0 group-hover:opacity-50 cursor-grab transition-opacity" />
+                            <GripVertical className="h-2.5 w-2.5 absolute left-1/2 -translate-x-1/2 top-0 rotate-90 opacity-0 group-hover:opacity-50 cursor-grab transition-opacity" />
                           )}
                           <span className="flex-shrink-0">{tab.icon}</span>
                           <span className="truncate">{tab.label}</span>
@@ -462,7 +470,7 @@ export function SidePanel() {
                             const showMenu = !tab.pinned && (hasNavUrl || deleteHandler);
 
                             if (tab.pinned) {
-                              return <Pin className="h-2.5 w-2.5 ml-0.5 text-slate-400 dark:text-slate-500 rotate-45 flex-shrink-0" />;
+                              return <Pin className="h-2.5 w-2.5 ml-0.5 text-current opacity-60 rotate-45 flex-shrink-0" />;
                             }
 
                             if (showMenu) {
@@ -473,7 +481,10 @@ export function SidePanel() {
                                       role="button"
                                       tabIndex={0}
                                       onClick={(e) => e.stopPropagation()}
-                                      className="absolute right-1 top-1/2 -translate-y-1/2 opacity-0 group-hover:opacity-100 focus:opacity-100 active:opacity-100 hover:bg-theme-secondary rounded p-1 transition-opacity z-20"
+                                      className={cn(
+                                        'absolute right-1.5 top-1/2 -translate-y-1/2 opacity-0 group-hover:opacity-100 focus:opacity-100 active:opacity-100 rounded-lg p-1 transition-opacity z-20',
+                                        panelTabInnerHoverClass(isActive),
+                                      )}
                                     >
                                       <MoreVertical className="h-3 w-3" />
                                     </span>
@@ -535,7 +546,10 @@ export function SidePanel() {
                                 tabIndex={0}
                                 onClick={(e) => { e.stopPropagation(); handleCloseTab(tab.id); }}
                                 onKeyDown={(e) => { if (e.key === 'Enter') { e.stopPropagation(); handleCloseTab(tab.id); } }}
-                                className="absolute right-1 top-1/2 -translate-y-1/2 opacity-0 group-hover:opacity-100 focus:opacity-100 active:opacity-100 hover:bg-theme-secondary rounded p-1 transition-opacity z-20"
+                                className={cn(
+                                  'absolute right-1.5 top-1/2 -translate-y-1/2 opacity-0 group-hover:opacity-100 focus:opacity-100 active:opacity-100 rounded-lg p-1 transition-opacity z-20',
+                                  panelTabInnerHoverClass(isActive),
+                                )}
                               >
                                 <X className="h-3 w-3" />
                               </span>
@@ -546,13 +560,13 @@ export function SidePanel() {
                     })}
                     {/* Add tab - sticky so it stays visible when tabs overflow (hidden in shared mode) */}
                     {!isSharedMode && (
-                      <div className="sticky right-0 flex items-center self-stretch flex-shrink-0 pl-0.5 bg-theme-primary z-20">
+                      <div className="sticky right-0 flex items-center self-stretch flex-shrink-0 bg-theme-primary z-20">
                         <AddTabPicker variant="tab-bar" />
                       </div>
                     )}
                   </div>
                   {/* Close panel button - always visible outside scroll area */}
-                  <div className="flex items-center flex-shrink-0 pr-1.5">
+                  <div className="flex items-center flex-shrink-0 pl-1">
                     <Button
                       variant="ghost"
                       size="icon"

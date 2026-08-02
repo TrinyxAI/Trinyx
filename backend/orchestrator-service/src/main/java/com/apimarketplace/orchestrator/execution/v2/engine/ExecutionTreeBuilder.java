@@ -54,8 +54,10 @@ public class ExecutionTreeBuilder {
      * Supports multiple triggers (multi-workflow mode).
      *
      * <p>Legacy entry point - defaults {@code organizationId} and
-     * {@code organizationRole} to {@code null} (personal scope). New callers
-     * should use the 6-arg overload which carries the workspace identity.</p>
+     * {@code organizationRole} to {@code null}. Since V263 made
+     * {@code workflow_runs.organization_id} NOT NULL, that null means "workspace
+     * identity unknown", NOT "personal scope" - see {@code ExecutionContext}. New
+     * callers should use the 6-arg overload which carries the workspace identity.</p>
      */
     public ExecutionTree build(
             String runId,
@@ -75,8 +77,8 @@ public class ExecutionTreeBuilder {
      * @param workflowRunId     The workflow run ID
      * @param tenantId          The tenant ID
      * @param plan              The workflow plan to build from
-     * @param organizationId    Active workspace org id (null = personal scope)
-     * @param organizationRole  Caller's role in the active org (null when personal)
+     * @param organizationId    Active workspace org id (null = unknown, not "personal")
+     * @param organizationRole  Caller's role in the active org (null when unknown)
      * @return The built execution tree
      */
     public ExecutionTree build(

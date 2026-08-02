@@ -1,6 +1,7 @@
 package com.apimarketplace.agent.service.execution;
 
 import com.apimarketplace.agent.client.dto.execution.AgentExecutionRequestDto;
+import com.apimarketplace.agent.domain.BridgeProviders;
 import com.apimarketplace.agent.client.dto.execution.AgentExecutionResponseDto;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.boot.web.client.RestTemplateBuilder;
@@ -24,9 +25,8 @@ import java.util.Set;
 @Slf4j
 public class SubAgentBridgeClient {
 
-    private static final Set<String> BRIDGE_PROVIDERS = Set.of(
-        "claude-code", "codex", "gemini-cli", "mistral-vibe"
-    );
+    /** Shared list - see {@code BridgeProviders} in agent-common (the single source). */
+    private static final Set<String> BRIDGE_PROVIDERS = BridgeProviders.NAMES;
 
     private final String bridgeUrl;
     private final RestTemplate restTemplate;

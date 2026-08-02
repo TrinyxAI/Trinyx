@@ -91,6 +91,11 @@ public class ControlNodeHandler {
         }
 
         for (Edge edge : plan.getEdges()) {
+            // A loop-back is a re-entry, not a graph relation: it is neither a successor of its
+            // source nor a predecessor of its target.
+            if (WorkflowPlan.isBackEdge(edge)) {
+                continue;
+            }
             if (edge.from() == null || edge.to() == null) {
                 continue;
             }
@@ -124,6 +129,11 @@ public class ControlNodeHandler {
         }
 
         for (Edge edge : plan.getEdges()) {
+            // A loop-back is a re-entry, not a graph relation: it is neither a successor of its
+            // source nor a predecessor of its target.
+            if (WorkflowPlan.isBackEdge(edge)) {
+                continue;
+            }
             if (edge.to() == null || edge.from() == null) {
                 continue;
             }

@@ -1,5 +1,8 @@
 package com.apimarketplace.orchestrator.domain.workflow;
 
+import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
+import com.fasterxml.jackson.annotation.JsonInclude;
+
 import java.util.Map;
 
 /**
@@ -17,21 +20,56 @@ import java.util.Map;
  * Ports for inputs:
  * - loop: :iterate (for loop-back connections)
  *
- * Loop-back connections use the :iterate port on the target:
- * { "from": "mcp:last_body_step", "to": "core:my_loop:iterate" }
- * Loop condition and maxIterations are stored in the Core (type="loop"), not in edges.
+ * <h2>Two ways to declare a loop-back</h2>
+ *
+ * <b>1. Loop hub (core:loop).</b> The edge targets the loop's :iterate port; condition and
+ * maxIterations live on the Core:
+ * <pre>{ "from": "mcp:last_body_step", "to": "core:my_loop:iterate" }</pre>
+ *
+ * <b>2. Declared back-edge (no hub).</b> Any edge may carry a {@link BackEdge} marker, which
+ * makes it a loop-back to an ancestor node without requiring a loop Core:
+ * <pre>{ "from": "core:check:else", "to": "mcp:fetch", "backEdge": { "maxIterations": 10 } }</pre>
+ * The edge's TARGET is the re-entry point. Condition and maxIterations live on the edge itself.
+ *
+ * Both forms are recognised by {@code WorkflowPlan.isBackEdge(Edge)} and resolved into the same
+ * {@code BackEdgeSpec}, so the execution engine keeps a single loop path.
+ *
+ * <p><b>The marker is a first-class component, deliberately NOT a {@code params} key:</b>
+ * {@code WorkflowPlan.getStepParams} exposes {@code edge.params} as the TARGET STEP's params, so
+ * a marker stored there would be injected into the target node's configuration.
  *
  * Conditions are stored in Cores, not in edges.
  * Edges only reference control nodes via ports in from/to strings.
  */
+@JsonIgnoreProperties(ignoreUnknown = true)
 public record Edge(
     String from,
     String to,
-    Map<String, Object> params
+    Map<String, Object> params,
+    @JsonInclude(JsonInclude.Include.NON_NULL) BackEdge backEdge
 ) {
 
+    /**
+     * Loop-back metadata carried by a declared back-edge.
+     *
+     * @param condition     optional expression re-evaluated before each re-entry. Blank means
+     *                      "iterate whenever this edge is traversed" - for a ported source
+     *                      (e.g. a Decision's else) the branch selection IS the condition.
+     * @param maxIterations optional per-edge cap. When null, the global
+     *                      {@code workflow.execution.default-max-iterations} applies.
+     */
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    public record BackEdge(
+        String condition,
+        Integer maxIterations
+    ) {}
+
     public Edge(String from, String to) {
-        this(from, to, null);
+        this(from, to, null, null);
+    }
+
+    public Edge(String from, String to, Map<String, Object> params) {
+        this(from, to, params, null);
     }
 
     /**

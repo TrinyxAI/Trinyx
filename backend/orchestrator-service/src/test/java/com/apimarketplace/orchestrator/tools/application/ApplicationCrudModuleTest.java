@@ -32,6 +32,7 @@ import java.util.concurrent.atomic.AtomicReference;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.mock;
@@ -115,6 +116,85 @@ class ApplicationCrudModuleTest {
     // ------------------------------------------------------------------
 
     @Nested
+    @DisplayName("search - CE-exclusive annotation is edition-aware")
+    class CeExclusiveAnnotation {
+
+        private Map<String, Object> searchPageWithCeExclusiveApp() {
+            Map<String, Object> pub = new HashMap<>();
+            pub.put("id", APP_PUB_ID.toString());
+            pub.put("title", "RAG App");
+            pub.put("ceExclusive", true);
+            pub.put("ceExclusiveFeatures", java.util.List.of("CLI_AGENT"));
+            return Map.of("content", java.util.List.of(pub), "totalElements", 1);
+        }
+
+        /** The envelope names its items list per Spec; find it rather than hardcode the key. */
+        @SuppressWarnings("unchecked")
+        private Map<String, Object> firstItem(ToolExecutionResult result) {
+            Map<String, Object> data = (Map<String, Object>) result.data();
+            return data.values().stream()
+                    .filter(java.util.List.class::isInstance)
+                    .map(v -> (java.util.List<Map<String, Object>>) v)
+                    .filter(list -> !list.isEmpty())
+                    .findFirst()
+                    .orElseThrow(() -> new AssertionError("no items in envelope: " + data))
+                    .get(0);
+        }
+
+        private void setEdition(String value) {
+            org.springframework.mock.env.MockEnvironment env = new org.springframework.mock.env.MockEnvironment();
+            env.setProperty("app.edition", value);
+            org.springframework.test.util.ReflectionTestUtils.setField(module, "appEditionProvider",
+                    new com.apimarketplace.common.web.AppEditionProvider(env));
+        }
+
+        @Test
+        @DisplayName("managed cloud: the app is annotated so the agent warns BEFORE a refused acquire")
+        void annotatedOnManagedCloud() {
+            setEdition("cloud");
+            when(publicationClient.getMarketplacePublications(anyInt(), anyInt()))
+                    .thenReturn(searchPageWithCeExclusiveApp());
+
+            ToolExecutionResult result = module.execute("search", Map.of(), TENANT_ID, contextWithOrg()).orElseThrow();
+
+            assertThat(firstItem(result))
+                    .containsEntry("ce_exclusive", true)
+                    .containsEntry("ce_exclusive_features", java.util.List.of("CLI_AGENT"));
+        }
+
+        @Test
+        @DisplayName("self-hosted: the SAME app is NOT annotated - this deployment can install it")
+        void notAnnotatedOnSelfHosted() {
+            // A self-hosted install browses the same (proxied) cloud catalogue.
+            // Annotating there would make its agent decline an install that works.
+            setEdition("ce");
+            when(publicationClient.getMarketplacePublications(anyInt(), anyInt()))
+                    .thenReturn(searchPageWithCeExclusiveApp());
+
+            ToolExecutionResult result = module.execute("search", Map.of(), TENANT_ID, contextWithOrg()).orElseThrow();
+
+            assertThat(firstItem(result))
+                    .doesNotContainKey("ce_exclusive")
+                    .doesNotContainKey("ce_exclusive_features");
+        }
+
+        @Test
+        @DisplayName("a normal app is never annotated, on either edition")
+        void normalAppNeverAnnotated() {
+            setEdition("cloud");
+            Map<String, Object> pub = new HashMap<>();
+            pub.put("id", APP_PUB_ID.toString());
+            pub.put("title", "Plain App");
+            when(publicationClient.getMarketplacePublications(anyInt(), anyInt()))
+                    .thenReturn(Map.of("content", java.util.List.of(pub), "totalElements", 1));
+
+            ToolExecutionResult result = module.execute("search", Map.of(), TENANT_ID, contextWithOrg()).orElseThrow();
+
+            assertThat(firstItem(result)).doesNotContainKey("ce_exclusive");
+        }
+    }
+
+    @Nested
     @DisplayName("acquire - propagates org context (round-2 regression)")
     class AcquireOrgPropagation {
 
@@ -138,6 +218,26 @@ class ApplicationCrudModuleTest {
             // org workspace switcher.
             verify(publicationClient).acquirePublication(
                     eq(APP_PUB_ID), eq(TENANT_ID), eq(CALLER_ORG_ID));
+        }
+
+        @Test
+        @DisplayName("A CE-exclusive refusal is reported as PERMISSION_DENIED with the real reason, not a generic failure")
+        void ceExclusiveRefusalIsPermissionDenied() {
+            // The deployment cannot run the app: terminal for the agent. A generic
+            // EXECUTION_FAILED would read as transient and get retried, and the
+            // user would never learn the app needs a self-hosted install.
+            when(publicationClient.acquirePublication(eq(APP_PUB_ID), eq(TENANT_ID), eq(CALLER_ORG_ID)))
+                    .thenThrow(new com.apimarketplace.publication.client.CeExclusiveAcquisitionException(
+                            "This app is Community Edition exclusive: it uses features that only run "
+                                    + "on a self-hosted install.", java.util.List.of("CLI_AGENT")));
+
+            ToolExecutionResult result = module.execute("acquire",
+                    Map.of("application_id", APP_PUB_ID.toString()),
+                    TENANT_ID, contextWithOrg()).orElseThrow();
+
+            assertThat(result.success()).isFalse();
+            assertThat(result.errorCode()).isEqualTo(ToolErrorCode.PERMISSION_DENIED);
+            assertThat(result.error()).contains("self-hosted");
         }
 
         @Test

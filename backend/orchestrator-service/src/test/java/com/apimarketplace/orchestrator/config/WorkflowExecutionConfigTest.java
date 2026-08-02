@@ -66,7 +66,30 @@ class WorkflowExecutionConfigTest {
         @DisplayName("Should have correct default loop iterations")
         void shouldHaveDefaultLoopIterations() {
             assertThat(config.getDefaultMaxIterations()).isEqualTo(10);
-            assertThat(config.getMaxAllowedIterations()).isEqualTo(100);
+            // The ceiling matches the builder's own authoring range (1..10000). It used to be
+            // 100, which was harmless while nothing read it - now that it actually clamps every
+            // loop-back, a lower ceiling would silently shorten any loop authored above it.
+            assertThat(config.getMaxAllowedIterations()).isEqualTo(10_000);
+        }
+
+        @Test
+        @DisplayName("The ceiling must not shorten a loop the builder allows the user to author")
+        void ceilingDoesNotShortenAuthorableLoops() {
+            assertThat(config.resolveLoopIterationLimits(null).resolve(10_000)).isEqualTo(10_000);
+        }
+
+        @Test
+        @DisplayName("A loop-back with no declared cap gets the configured default")
+        void undeclaredCapFallsBackToConfiguredDefault() {
+            config.setDefaultMaxIterations(25);
+            assertThat(config.resolveLoopIterationLimits(null).resolve(null)).isEqualTo(25);
+        }
+
+        @Test
+        @DisplayName("Lowering the ceiling clamps a declared cap")
+        void loweredCeilingClampsDeclaredCap() {
+            config.setMaxAllowedIterations(5);
+            assertThat(config.resolveLoopIterationLimits(null).resolve(999)).isEqualTo(5);
         }
 
         @Test

@@ -6,9 +6,10 @@ import { useTranslations } from 'next-intl';
 interface BackEdgeConfigPanelProps {
   edgeId: string;
   condition: string;
-  maxIterations: number;
+  /** Undefined means "inherit": the global default cap applies. */
+  maxIterations?: number;
   onConditionChange: (condition: string) => void;
-  onMaxIterationsChange: (maxIterations: number) => void;
+  onMaxIterationsChange: (maxIterations: number | undefined) => void;
 }
 
 /**
@@ -26,14 +27,15 @@ export function BackEdgeConfigPanel({
 
   return (
     <div
-      className="bg-white dark:bg-slate-800 border border-amber-300 dark:border-amber-600 rounded-lg shadow-lg p-3"
+      className="bg-white dark:bg-slate-800 border border-orange-300 dark:border-orange-600 rounded-lg shadow-lg p-3"
       style={{
         pointerEvents: 'all',
         minWidth: '240px',
       }}
       onClick={(e) => e.stopPropagation()}
+      data-testid={`back-edge-config-${edgeId}`}
     >
-      <div className="text-xs font-medium text-amber-600 dark:text-amber-400 mb-2">
+      <div className="text-xs font-medium text-orange-600 dark:text-orange-400 mb-2">
         {t('title')}
       </div>
 
@@ -47,22 +49,30 @@ export function BackEdgeConfigPanel({
           value={condition}
           onChange={(e) => onConditionChange(e.target.value)}
           placeholder={t('conditionPlaceholder')}
-          className="w-full text-xs px-2 py-1.5 rounded border border-slate-200 dark:border-slate-600 bg-white dark:bg-slate-700 text-slate-900 dark:text-slate-100 focus:outline-none focus:ring-1 focus:ring-amber-500"
+          className="w-full text-xs px-2 py-1.5 rounded border border-slate-200 dark:border-slate-600 bg-white dark:bg-slate-700 text-slate-900 dark:text-slate-100 focus:outline-none focus:ring-1 focus:ring-orange-500"
         />
       </div>
 
-      {/* Max Iterations */}
+      {/* Max Iterations - blank inherits the workflow / global setting */}
       <div>
         <label className="block text-xs text-slate-500 dark:text-slate-400 mb-1">
           {t('maxIterations')}
         </label>
         <input
           type="number"
-          value={maxIterations}
-          onChange={(e) => onMaxIterationsChange(Math.max(1, parseInt(e.target.value) || 1))}
+          value={maxIterations ?? ''}
+          onChange={(e) => {
+            const raw = e.target.value.trim();
+            if (raw === '') {
+              onMaxIterationsChange(undefined);
+              return;
+            }
+            onMaxIterationsChange(Math.max(1, parseInt(raw, 10) || 1));
+          }}
+          placeholder={t('maxIterationsInherited')}
           min={1}
-          max={1000}
-          className="w-full text-xs px-2 py-1.5 rounded border border-slate-200 dark:border-slate-600 bg-white dark:bg-slate-700 text-slate-900 dark:text-slate-100 focus:outline-none focus:ring-1 focus:ring-amber-500"
+          max={10000}
+          className="w-full text-xs px-2 py-1.5 rounded border border-slate-200 dark:border-slate-600 bg-white dark:bg-slate-700 text-slate-900 dark:text-slate-100 focus:outline-none focus:ring-1 focus:ring-orange-500"
         />
       </div>
     </div>

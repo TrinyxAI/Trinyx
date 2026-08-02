@@ -189,7 +189,7 @@ export const PALETTE_ITEMS: PaletteItem[] = [
   {
     id: 'sub_workflow',
     label: 'Sub-Workflow',
-    description: 'Execute another workflow as a function.',
+    description: 'Trigger another workflow that already has a live run.',
     kind: 'sub_workflow',
     nodeType: 'flowNode',
     group: 'Logic',

@@ -956,10 +956,70 @@ public final class WorkflowPlanParser {
                 String to = normalizeEdgeRef(safeString(data.get("to")));
                 @SuppressWarnings("unchecked")
                 Map<String, Object> params = (Map<String, Object>) data.getOrDefault("params", new HashMap<>());
-                return new Edge(from, to, params);
+                Edge.BackEdge backEdge = parseBackEdge(data, params);
+                return new Edge(from, to, stripLegacyBackEdgeKeys(params, backEdge), backEdge);
             })
             .filter(edge -> edge.from() != null)
             .collect(Collectors.toList());
+    }
+
+    /**
+     * Parse the loop-back marker of a declared back-edge.
+     *
+     * <p>Canonical shape is a top-level {@code backEdge} object:
+     * <pre>{ "from": "core:check:else", "to": "mcp:fetch", "backEdge": { "maxIterations": 10 } }</pre>
+     *
+     * <p>Legacy shape (builder releases that stored the marker inside {@code params}) is migrated
+     * on read, and {@link #stripLegacyBackEdgeKeys} then removes it from params. That strip is not
+     * cosmetic: {@link WorkflowPlan#getStepParams} exposes an edge's params as the TARGET STEP's
+     * params, so leaving {@code backEdge}/{@code condition}/{@code maxIterations} in there injects
+     * them into the target node's configuration.
+     *
+     * @param data   raw edge JSON
+     * @param params the edge's params map (read-only here)
+     * @return the marker, or null when this edge is not a declared back-edge
+     */
+    private static Edge.BackEdge parseBackEdge(Map<String, Object> data, Map<String, Object> params) {
+        Object raw = data.get("backEdge");
+        if (raw instanceof Map<?, ?> marker) {
+            return new Edge.BackEdge(
+                safeString(marker.get("condition")),
+                intOrNull(marker.get("maxIterations")));
+        }
+
+        // Legacy: marker stored inside params by an older builder.
+        if (isLegacyBackEdgeParams(params)) {
+            logger.info("Migrated legacy params-based back-edge marker: {} -> {}",
+                data.get("from"), data.get("to"));
+            return new Edge.BackEdge(
+                safeString(params.get("condition")),
+                intOrNull(params.get("maxIterations")));
+        }
+
+        return null;
+    }
+
+    private static boolean isLegacyBackEdgeParams(Map<String, Object> params) {
+        return params != null && Boolean.TRUE.equals(params.get("backEdge"));
+    }
+
+    /**
+     * Return params without the legacy back-edge keys. Copies rather than mutating: the incoming
+     * map may be immutable, and it is shared with the caller's raw JSON.
+     */
+    private static Map<String, Object> stripLegacyBackEdgeKeys(Map<String, Object> params, Edge.BackEdge backEdge) {
+        if (backEdge == null || !isLegacyBackEdgeParams(params)) {
+            return params;
+        }
+        Map<String, Object> cleaned = new LinkedHashMap<>(params);
+        cleaned.remove("backEdge");
+        cleaned.remove("condition");
+        cleaned.remove("maxIterations");
+        return cleaned;
+    }
+
+    private static Integer intOrNull(Object value) {
+        return value instanceof Number number ? number.intValue() : null;
     }
 
     // ===== CORE NODES =====

@@ -36,6 +36,10 @@ public class BridgeAvailabilityFilter {
     /**
      * Maps the bridge provider name returned by {@code LLMProviderFactory}
      * to the camelCase CLI id reported by {@code mcp/bridge/cli-detector.mjs}.
+     *
+     * <p>Its key set MUST equal {@code BridgeProviders.NAMES} (agent-common),
+     * the single source of the provider list; {@code BridgeProvidersConsistencyTest}
+     * pins that. A bridge missing here is never probed for availability.
      */
     public static final Map<String, String> BRIDGE_PROVIDER_TO_CLI_ID = Map.of(
             "claude-code",  "claudeCode",

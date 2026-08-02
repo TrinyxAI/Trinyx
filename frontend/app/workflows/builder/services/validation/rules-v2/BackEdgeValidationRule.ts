@@ -14,6 +14,7 @@ import type {
   ValidationIssue,
 } from '../core/types';
 import { BaseValidationRule } from './BaseValidationRule';
+import { isAncestor } from '../../../utils/backEdgeDetection';
 
 export class BackEdgeValidationRule extends BaseValidationRule {
   readonly ruleName: ValidationRuleName = 'BackEdge';
@@ -41,7 +42,8 @@ export class BackEdgeValidationRule extends BaseValidationRule {
       }
 
       // Verify target is an ancestor of source (validate it's actually a back-edge)
-      if (!this.isAncestor(edge.target, edge.source, context)) {
+      const forwardEdges = context.edges.filter((e) => !e.data?.isBackEdge);
+      if (!isAncestor(edge.target, edge.source, forwardEdges)) {
         issues.push(
           this.createError(
             edgeKey,
@@ -49,41 +51,25 @@ export class BackEdgeValidationRule extends BaseValidationRule {
             'Invalid back-edge: target must be an ancestor of source in the graph',
           )
         );
+        continue;
+      }
+
+      // A loop-back with neither a condition nor a branch port has nothing that can ever stop
+      // it, so it runs until the iteration cap - and reaching the cap fails the run. With a
+      // branch port the branch selection IS the stop signal, so that case is fine.
+      const condition = edge.data.backEdgeCondition;
+      const sourceHasPort = !!edge.sourceHandle;
+      if ((!condition || String(condition).trim() === '') && !sourceHasPort) {
+        issues.push(
+          this.createWarning(
+            edgeKey,
+            'edge' as any,
+            'This loop has no way to stop: it has no condition and starts from a node with no branches, so it will run until the iteration limit, which fails the run',
+          )
+        );
       }
     }
 
     return this.buildResult(issues);
-  }
-
-  /**
-   * Check if targetId is reachable from itself by following forward edges to sourceId.
-   */
-  private isAncestor(targetId: string, sourceId: string, context: ValidationContext): boolean {
-    const successors = new Map<string, Set<string>>();
-    for (const edge of context.edges) {
-      if (edge.data?.isBackEdge) continue;
-      const sources = successors.get(edge.source) || new Set<string>();
-      sources.add(edge.target);
-      successors.set(edge.source, sources);
-    }
-
-    const visited = new Set<string>();
-    const queue = [targetId];
-    visited.add(targetId);
-
-    while (queue.length > 0) {
-      const current = queue.shift()!;
-      if (current === sourceId) return true;
-      const succs = successors.get(current);
-      if (succs) {
-        for (const next of succs) {
-          if (!visited.has(next)) {
-            visited.add(next);
-            queue.push(next);
-          }
-        }
-      }
-    }
-    return false;
   }
 }

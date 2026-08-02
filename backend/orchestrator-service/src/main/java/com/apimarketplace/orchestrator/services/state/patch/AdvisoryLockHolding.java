@@ -25,13 +25,35 @@ import java.lang.annotation.Target;
  *       - the 3 @Transactional methods that take findByRunIdPublicForUpdate (lines 465, 679, 967).</li>
  *   <li>{@code SignalResumeService.resumeAfterSignal} (line 192) - signal resume after dedup.</li>
  *   <li>{@code TriggerEpochManager.incrementEpoch} (2 overloads at 333, 378).</li>
- *   <li>{@code ReusableTriggerService.resetForNextCycle} (2 overloads at 1253, 1278) +
+ *   <li>{@code ReusableTriggerService.resetForNextCycle} (3 overloads; only the widest one
+ *       takes the lock, the other two delegate into it) +
  *       {@code ReusableTriggerService.executeTriggerInternal} (line 334).</li>
  * </ul>
  *
  * <p>The lock namespace is the top byte {@code 0x01} (plan §26) - reserved for
  * state-snapshot coordination locks. Future advisory-lock features pick a
  * different top byte to avoid collisions.
+ *
+ * <h2>Known discrepancy - the annotation does not imply the lock is held</h2>
+ *
+ * <p>The "at the top of their {@code @Transactional} body" wording above is NOT
+ * true of every method in the carve-out list. {@code ReusableTriggerService
+ * .executeTriggerInternal} carries this marker but is not itself
+ * {@code @Transactional}, and its callers are not either: the queue services
+ * dispatch it directly, and {@code SubWorkflowNode} invokes it on a fresh worker
+ * thread, where no ambient transaction can propagate. Since
+ * {@code pg_advisory_xact_lock} is transaction-scoped, the lock it takes there is
+ * released at the end of that statement instead of being held for the body, so
+ * the serialization this marker documents does not actually happen on that path.
+ *
+ * <p>Do not "fix" this by adding {@code @Transactional} to that method: its body
+ * runs a whole child DAG, which can include an HTTP node, and holding a DB
+ * connection plus an advisory lock across a network round-trip is precisely what
+ * the no-HTTP-under-lock contract above exists to prevent. Treat the marker as
+ * "this method calls acquireForRun", and verify transactionality separately
+ * before relying on the lock. Recorded 2026-07-31 while chasing a sub-workflow
+ * stall, after the opposite claim (lock held across the whole child DAG) was
+ * asserted, propagated, and only then checked.
  */
 @Retention(RetentionPolicy.RUNTIME)
 @Target(ElementType.METHOD)

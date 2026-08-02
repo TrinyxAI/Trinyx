@@ -688,6 +688,25 @@ public class WorkflowResumeService {
     @Transactional
     @com.apimarketplace.orchestrator.services.state.patch.AdvisoryLockHolding
     public void cancelWorkflow(String runId) {
+        cancelWorkflow(runId, null);
+    }
+
+    /**
+     * Same hard-cancel, plus caller-supplied run metadata written in the SAME locked
+     * transaction as the status change.
+     *
+     * <p>Used by the agent-facing stop ({@code AgentRunStopService}) and by the user's
+     * Stop/Cancel buttons to record WHY, and by whom, the run was stopped. It goes through
+     * here rather than through a separate save because this method already holds the run
+     * under a pessimistic lock with a fresh entity: merging a metadata map read outside
+     * that lock, from another transaction, would clobber the entries written here.
+     *
+     * @param extraMetadata entries merged into the run metadata (null = none, and a null
+     *                      VALUE removes that key)
+     */
+    @Transactional
+    @com.apimarketplace.orchestrator.services.state.patch.AdvisoryLockHolding
+    public void cancelWorkflow(String runId, Map<String, Object> extraMetadata) {
         logger.info("[cancelWorkflow] Hard-cancelling workflow: {}", runId);
 
         // Plan v4 §1.6 - advisory lock serializes against any concurrent
@@ -772,6 +791,7 @@ public class WorkflowResumeService {
         metadata.remove("lastCycleAt");
         metadata.put("cancelledAt", now.toString());
         metadata.put("cancelledFromStatus", currentStatus.getValue());
+        mergeExtraMetadata(metadata, extraMetadata);
         lockedRun.setMetadata(metadata);
         runRepository.save(lockedRun);
 
@@ -1041,6 +1061,11 @@ public class WorkflowResumeService {
             ? new HashMap<>(lockedRun.getMetadata()) : new HashMap<>();
         metadata.remove("cancelledAt");
         metadata.remove("cancelledFromStatus");
+        // The stop cause belongs to the stop we are undoing: a reactivated run is alive
+        // again, so reports of it must not keep saying why it was once stopped.
+        metadata.remove(AgentRunStopService.META_STOP_REASON);
+        metadata.remove(AgentRunStopService.META_STOPPED_BY);
+        metadata.remove(AgentRunStopService.META_STOPPED_AT);
         metadata.put("reactivatedAt", now.toString());
         lockedRun.setMetadata(metadata);
         runRepository.save(lockedRun);
@@ -1274,6 +1299,44 @@ public class WorkflowResumeService {
     @Transactional
     @com.apimarketplace.orchestrator.services.state.patch.AdvisoryLockHolding
     public void stopWorkflow(String runId) {
+        stopWorkflow(runId, null);
+    }
+
+    /**
+     * Merge caller-supplied entries into a run's metadata, where a {@code null} VALUE means
+     * "remove this key".
+     *
+     * <p>Removal matters for the stop-cause keys: they describe ONE stop and are always
+     * written as a set, so a later stop with no reason must clear the previous reason
+     * instead of inheriting it and attributing it to the new stopper.
+     */
+    private static void mergeExtraMetadata(Map<String, Object> metadata, Map<String, Object> extra) {
+        if (extra == null) {
+            return;
+        }
+        extra.forEach((key, value) -> {
+            if (value == null) {
+                metadata.remove(key);
+            } else {
+                metadata.put(key, value);
+            }
+        });
+    }
+
+    /**
+     * Same graceful stop, plus caller-supplied run metadata written in the SAME locked
+     * transaction as the status change. See {@link #cancelWorkflow(String, Map)} for why
+     * the metadata is merged here instead of being saved separately.
+     *
+     * <p>The metadata is only applied on the happy path: a run that is already terminal
+     * takes the idempotent cleanup-only branch, which by design changes nothing on the row.
+     *
+     * @param extraMetadata entries merged into the run metadata (null = none, and a null
+     *                      VALUE removes that key)
+     */
+    @Transactional
+    @com.apimarketplace.orchestrator.services.state.patch.AdvisoryLockHolding
+    public void stopWorkflow(String runId, Map<String, Object> extraMetadata) {
         logger.info("[stopWorkflow] Stopping workflow run: {}", runId);
         // Plan v4 §1.6
         if (advisoryLockHelper != null) advisoryLockHelper.acquireForRun(runId);
@@ -1341,6 +1404,12 @@ public class WorkflowResumeService {
         Instant now = Instant.now();
         lockedRun.setStatus(RunStatus.WAITING_TRIGGER);
         lockedRun.setUpdatedAt(now);
+        if (extraMetadata != null) {
+            Map<String, Object> metadata = lockedRun.getMetadata() != null
+                ? new HashMap<>(lockedRun.getMetadata()) : new HashMap<>();
+            mergeExtraMetadata(metadata, extraMetadata);
+            lockedRun.setMetadata(metadata);
+        }
         runRepository.save(lockedRun);
 
         // 4. Send streaming event (light mode - SSE only needs counters, not step outputs)

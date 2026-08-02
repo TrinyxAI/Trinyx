@@ -13,12 +13,17 @@ import java.util.Map;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /**
- * Golden-fixture tests for the LiteLLM feed parser. The inline fixture covers
+ * Golden-fixture tests for the LiteLLM feed parser. The inline fixtures cover
  * every rejection branch (non-native provider, non-chat mode, no-tools,
- * slash id) plus a happy-path accept for each of the 8 native providers.
+ * slash id, zero price) plus a happy-path accept per native provider.
  *
- * <p>Field values mirror real LiteLLM shapes as of 2026-04-22 - sampled from
- * the live feed via {@code curl | python} and trimmed.
+ * <p>Field values mirror real LiteLLM shapes - the western providers sampled
+ * 2026-04-22, the Moonshot / Qwen / Z.AI rows 2026-07-30 - taken from the live
+ * feed and trimmed.
+ *
+ * <p>{@link LiteLlmProviderCoverageTest} guards the complementary invariant:
+ * that no executable provider is missing from {@code PROVIDER_MAP} in the
+ * first place.
  */
 @DisplayName("LiteLlmFeedParser - filters + normalisation")
 class LiteLlmFeedParserTest {
@@ -112,6 +117,146 @@ class LiteLlmFeedParserTest {
         // cohere_chat → cohere alias
         Map<String, Object> cohere = findByModelId(result.models(), "command-r-plus-08-2024");
         assertThat(cohere.get("provider")).isEqualTo("cohere");
+    }
+
+    @Test
+    @DisplayName("Regression: Kimi / Qwen / GLM are accepted - PROVIDER_MAP used to drop all three")
+    void acceptsMoonshotQwenAndZai() {
+        // Pre-fix, PROVIDER_MAP held only 8 western providers, so every row
+        // below hit the rejectedProvider branch: the sync reported OK with
+        // nothing added and Moonshot/Qwen/Z.AI stayed frozen on the ids
+        // hardcoded in application.yml. Shapes sampled from the live feed
+        // 2026-07-30; note LiteLLM keys Qwen under "dashscope".
+        String fixture = """
+            {
+              "moonshot/kimi-k2.6": {
+                "litellm_provider": "moonshot", "mode": "chat",
+                "max_input_tokens": 262144, "max_output_tokens": 32768,
+                "input_cost_per_token": 9.5e-07, "output_cost_per_token": 4e-06,
+                "supports_function_calling": true
+              },
+              "moonshot/kimi-k2-thinking": {
+                "litellm_provider": "moonshot", "mode": "chat",
+                "input_cost_per_token": 6e-07, "output_cost_per_token": 2.5e-06,
+                "supports_function_calling": true, "supports_reasoning": true
+              },
+              "dashscope/qwen-max": {
+                "litellm_provider": "dashscope", "mode": "chat",
+                "input_cost_per_token": 1.6e-06, "output_cost_per_token": 6.4e-06,
+                "supports_function_calling": true
+              },
+              "dashscope/qwen3-vl-32b-instruct": {
+                "litellm_provider": "dashscope", "mode": "chat",
+                "input_cost_per_token": 1.6e-07, "output_cost_per_token": 6.4e-07,
+                "supports_function_calling": true, "supports_vision": true
+              },
+              "zai/glm-5.1": {
+                "litellm_provider": "zai", "mode": "chat",
+                "input_cost_per_token": 1.4e-06, "output_cost_per_token": 4.4e-06,
+                "supports_function_calling": true
+              },
+              "minimax/MiniMax-M3": {
+                "litellm_provider": "minimax", "mode": "chat",
+                "input_cost_per_token": 3e-07, "output_cost_per_token": 1.2e-06,
+                "supports_function_calling": true
+              }
+            }
+            """;
+
+        LiteLlmFeedParser.ParseResult result = parser.parse(
+                fixture.getBytes(StandardCharsets.UTF_8), "sha", "t");
+
+        assertThat(result.isSuccess()).isTrue();
+        assertThat(result.models()).hasSize(5);
+        // minimax has no provider entry / relay support yet, so it stays out.
+        assertThat(result.rejectedProvider()).isEqualTo(1);
+
+        // The "moonshot/" prefix is stripped, so the native id matches the
+        // application.yml entry exactly and the merge updates rather than
+        // duplicating it.
+        Map<String, Object> kimi = findByModelId(result.models(), "kimi-k2.6");
+        assertThat(kimi.get("provider")).isEqualTo("moonshot");
+        assertThat((BigDecimal) kimi.get("priceInput"))
+                .isEqualByComparingTo(new BigDecimal("0.95"));
+        assertThat((BigDecimal) kimi.get("priceOutput"))
+                .isEqualByComparingTo(new BigDecimal("4.0"));
+
+        // dashscope is LiteLLM's key for Alibaba's API; our provider is "qwen".
+        Map<String, Object> qwen = findByModelId(result.models(), "qwen-max");
+        assertThat(qwen.get("provider")).isEqualTo("qwen");
+        assertThat((BigDecimal) qwen.get("priceInput"))
+                .isEqualByComparingTo(new BigDecimal("1.6"));
+
+        Map<String, Object> qwenVl = findByModelId(result.models(), "qwen3-vl-32b-instruct");
+        assertThat(qwenVl.get("provider")).isEqualTo("qwen");
+        assertThat(qwenVl.get("supportsVision")).isEqualTo(true);
+
+        Map<String, Object> glm = findByModelId(result.models(), "glm-5.1");
+        assertThat(glm.get("provider")).isEqualTo("zai");
+        assertThat((BigDecimal) glm.get("priceOutput"))
+                .isEqualByComparingTo(new BigDecimal("4.4"));
+    }
+
+    @Test
+    @DisplayName("stripProviderPrefix maps the new keys onto the ids application.yml already uses")
+    void stripsPrefixForNewProviderKeys() {
+        // The native id is the row identity: get this wrong and the merge
+        // inserts a SECOND row instead of updating the seeded one, so the
+        // picker shows "kimi-k2.6" twice with divergent prices.
+        assertThat(LiteLlmFeedParser.stripProviderPrefix("moonshot/kimi-k2.6", "moonshot"))
+                .isEqualTo("kimi-k2.6");
+        // dashscope is LiteLLM's key, "qwen" is ours - the strip must use the
+        // FEED key, not the mapped name, or the prefix survives.
+        assertThat(LiteLlmFeedParser.stripProviderPrefix("dashscope/qwen-max", "dashscope"))
+                .isEqualTo("qwen-max");
+        assertThat(LiteLlmFeedParser.stripProviderPrefix("zai/glm-5.1", "zai"))
+                .isEqualTo("glm-5.1");
+
+        // Some feed rows carry no prefix at all - they must pass through
+        // untouched rather than losing a leading segment.
+        assertThat(LiteLlmFeedParser.stripProviderPrefix("kimi-latest-8k", "moonshot"))
+                .isEqualTo("kimi-latest-8k");
+        // A model id that merely CONTAINS the provider name is not a prefix.
+        assertThat(LiteLlmFeedParser.stripProviderPrefix("glm-5-code", "zai"))
+                .isEqualTo("glm-5-code");
+    }
+
+    @Test
+    @DisplayName("Unpriced Qwen / GLM preview rows are still dropped by the zero-price gate")
+    void dropsUnpricedChineseRows() {
+        // A sizeable slice of the dashscope + zai lines ships with no pricing
+        // at all (qwen3-max, qwen-flash) or an explicit 0/0 free tier
+        // (glm-4.7-flash). Widening PROVIDER_MAP must not let those past the
+        // price gate - a zero-priced row slips through the CreditService and
+        // enables free LLM use.
+        String fixture = """
+            {
+              "dashscope/qwen3-max": {
+                "litellm_provider": "dashscope", "mode": "chat",
+                "supports_function_calling": true
+              },
+              "zai/glm-4.7-flash": {
+                "litellm_provider": "zai", "mode": "chat",
+                "input_cost_per_token": 0, "output_cost_per_token": 0,
+                "supports_function_calling": true
+              },
+              "zai/glm-5.1": {
+                "litellm_provider": "zai", "mode": "chat",
+                "input_cost_per_token": 1.4e-06, "output_cost_per_token": 4.4e-06,
+                "supports_function_calling": true
+              }
+            }
+            """;
+
+        LiteLlmFeedParser.ParseResult result = parser.parse(
+                fixture.getBytes(StandardCharsets.UTF_8), "sha", "t");
+
+        // zeroPrice is counted in the parse log but not carried on ParseResult,
+        // so assert on what survived: the two unpriced rows are gone and it is
+        // NOT the provider gate that dropped them.
+        assertThat(result.models()).hasSize(1);
+        assertThat(result.models().get(0).get("modelId")).isEqualTo("glm-5.1");
+        assertThat(result.rejectedProvider()).isZero();
     }
 
     @Test

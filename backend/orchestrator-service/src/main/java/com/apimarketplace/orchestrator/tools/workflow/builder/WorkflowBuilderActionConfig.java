@@ -26,6 +26,8 @@ public final class WorkflowBuilderActionConfig {
             // `create` is kept as a backward-compat alias and intentionally NOT
             // listed here so the LLM only sees the unambiguous name in help/errors.
             "init", "load", "save", "discard", "finish", "execute",
+            // Counterpart of execute: end a run that is still going (see stop_run docs)
+            "stop_run",
             // Node creation (unified)
             "add_node",
             // Visualization & validation
@@ -69,6 +71,13 @@ public final class WorkflowBuilderActionConfig {
             Map.entry("find", "find_rows"),
             Map.entry("search_rows", "find_rows"),
             Map.entry("query_rows", "find_rows"),
+            // Unambiguous ways an LLM asks to end a RUN land on the one action.
+            // Bare "cancel" is deliberately NOT aliased: in this tool it is also the
+            // natural phrasing for "abandon the draft I am building" (the real action
+            // is `discard`), and stop_run without a run_id self-aborts the caller's run.
+            // Turning that slip into a terminal stop is not worth the convenience.
+            Map.entry("stop", "stop_run"),
+            Map.entry("cancel_run", "stop_run"),
             Map.entry("list_nodes", "describe"),
             Map.entry("show", "describe"),
             Map.entry("status", "describe")

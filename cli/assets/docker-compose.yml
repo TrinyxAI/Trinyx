@@ -26,9 +26,16 @@
 #
 # Optional features (OPT-IN - a default `up` starts NEITHER, keeping the stack light):
 #   renderer       interface-node screenshot (PNG) + PDF rendering (~1 GB Playwright/Chromium)
-#                    docker compose --env-file docker/.env.ce.renderer up -d
 #   browser-agent  agent_browse + web_search (heavy Chromium + SearXNG, ~2 GB; model picked per AI provider)
-#                    docker compose --env-file docker/.env.ce.browser-agent up -d
+#
+# Each one is turned on by an env file (`docker/.env.ce.renderer`, `docker/.env.ce.browser-agent`)
+# that sets the Docker profile AND the matching app setting in one shot:
+#   docker compose --env-file docker/.env.ce.renderer up -d
+#
+# Those env files ship with the git repository, NOT with the npm package, and
+# `npx livecontext` passes no --env-file. So if you started this stack with npx,
+# clone the repo and use `docker compose` directly to enable either add-on:
+#   https://github.com/livecontext-ai/livecontext-ce
 # See README.md ("Optional features") and docker/README-CE.md for details.
 
 name: livecontext-ce

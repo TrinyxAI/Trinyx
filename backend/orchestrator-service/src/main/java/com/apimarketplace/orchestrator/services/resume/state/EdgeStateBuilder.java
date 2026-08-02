@@ -153,6 +153,21 @@ public class EdgeStateBuilder {
                     String fromNodeKey = fromRef.getNodeKey();
                     String toNodeKey = toRef.getNodeKey();
                     RunStatus fallbackStatus = helper.determineEdgeStatus(fromNodeKey, toNodeKey, completedStepIds, failedStepIds, skippedStepIds);
+                    // determineEdgeStatus answers RUNNING for "source completed, target not yet",
+                    // which is only sound for an UNCONDITIONAL edge. On a PORT-qualified edge
+                    // (loop :body/:exit, decision :if/:else, switch :case_N, fork :branch_N,
+                    // classify :category_N) the port IS the condition: zero recorded counts means
+                    // that branch was never taken, so it must stay PENDING.
+                    //
+                    // Regression this fixes: a while-loop's `core:loop:exit -> next` edge rendered
+                    // blue (RUNNING) for the whole run because the loop CONTROLLER node completes
+                    // once on entry while the body keeps iterating - the exit was never traversed.
+                    // The exit edge only gains counts when BackEdgeHandler terminates the loop
+                    // (recorded under the un-ported source key, matched by the fallback above), so
+                    // it correctly flips to COMPLETED then and only then.
+                    if (fallbackStatus == RunStatus.RUNNING && fromRef.hasPort()) {
+                        fallbackStatus = RunStatus.PENDING;
+                    }
                     edgeState = new WorkflowRunState.EdgeState(fromKey, toKey, fallbackStatus, 0, 0, 0);
                 }
 

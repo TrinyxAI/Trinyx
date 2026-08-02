@@ -20,7 +20,8 @@ import java.util.*;
 
 /**
  * Execute module for the application tool.
- * Handles action='execute': runs an already-acquired application.
+ * Handles action='execute' (runs an already-acquired application) and its
+ * counterpart action='stop_run' (ends a run that is still going).
  *
  * <p>Flow:
  * <ol>
@@ -40,8 +41,10 @@ public class ApplicationExecuteModule implements ToolModule {
     private final AgentWorkflowFireService agentWorkflowFireService;
     private final com.apimarketplace.orchestrator.services.agent.ConversationEventPublisher conversationEventPublisher;
     private final com.apimarketplace.orchestrator.services.ApplicationLifecycleService applicationLifecycleService;
+    private final com.apimarketplace.orchestrator.repository.WorkflowRunRepository workflowRunRepository;
+    private final com.apimarketplace.orchestrator.tools.common.RunStopToolHandler runStopToolHandler;
 
-    private static final Set<String> HANDLED_ACTIONS = Set.of("execute");
+    private static final Set<String> HANDLED_ACTIONS = Set.of("execute", "stop_run");
 
     @Override
     public List<AgentToolDefinition> getToolDefinitions() {
@@ -63,7 +66,77 @@ public class ApplicationExecuteModule implements ToolModule {
                 context != null ? context.credentials() : null, "application", action);
         if (accessDenied.isPresent()) return Optional.of(ToolExecutionResult.failure(ToolErrorCode.PERMISSION_DENIED, accessDenied.get()));
 
+        if ("stop_run".equals(action)) {
+            return Optional.of(stopRun(parameters, tenantId, context));
+        }
         return Optional.of(executeApplication(parameters, tenantId, context));
+    }
+
+    /**
+     * End an application run that is still going: the counterpart of {@code execute}.
+     *
+     * <p>Run resolution and tenant/org scoping mirror {@code application(action='get_run')},
+     * so an agent can stop exactly the runs it can already read. Authorization is then
+     * STRICTER than that read: when the agent is restricted to a list of applications, the
+     * run's application must be in that list, a check {@code get_run} does not perform. The
+     * stop itself is shared with the workflow tool, so both behave identically.
+     *
+     * <p>Omitting {@code run_id} stops the run the calling agent is executing inside.
+     */
+    private ToolExecutionResult stopRun(Map<String, Object> parameters, String tenantId,
+                                         ToolExecutionContext context) {
+        String runId = runStopToolHandler.resolveTargetRunId(parameters, context);
+        if (com.apimarketplace.orchestrator.tools.common.RunStopToolHandler.BAD_RUN_ID.equals(runId)) {
+            return ToolExecutionResult.failure(ToolErrorCode.INVALID_PARAMETER_VALUE,
+                runStopToolHandler.badRunIdMessage(parameters));
+        }
+        if (runId == null) {
+            return ToolExecutionResult.failure(ToolErrorCode.MISSING_PARAMETER,
+                runStopToolHandler.noTargetMessage("application"));
+        }
+
+        try {
+            Optional<WorkflowRunEntity> runOpt = workflowRunRepository.findByRunIdPublic(runId);
+            if (runOpt.isEmpty()) {
+                return ToolExecutionResult.failure(ToolErrorCode.RESOURCE_NOT_FOUND, "Run not found: " + runId);
+            }
+
+            WorkflowRunEntity run = runOpt.get();
+            String orgId = context != null ? context.orgId() : null;
+            if (!com.apimarketplace.common.scope.ScopeGuard.isInStrictScope(
+                    tenantId, orgId, run.getTenantId(), run.getOrganizationId())) {
+                return ToolExecutionResult.failure(ToolErrorCode.RESOURCE_NOT_FOUND, "Run not found: " + runId);
+            }
+
+            // Allow-list: a restricted agent must not stop a run belonging to an
+            // application outside its approved list - EXCEPT its own run. An agent
+            // executing inside a run is authorized to be there by construction, and
+            // the help promises it can abort itself; the list would deny exactly that
+            // (a plain workflow run has no source publication at all).
+            List<String> allowedAppIds = getAllowedApplicationIds(context);
+            if (allowedAppIds != null && !runStopToolHandler.isCallerOwnRun(run, context)) {
+                // Re-read the workflow instead of walking run.getWorkflow(): the association
+                // is LAZY and this path runs with open-in-view=false, so touching any field
+                // beyond the proxy's id would throw LazyInitializationException and turn a
+                // permission decision into a 500. Reading the id off the proxy is safe.
+                WorkflowEntity proxy = run.getWorkflow();
+                UUID pubId = proxy != null && proxy.getId() != null
+                        ? workflowRepository.findById(proxy.getId())
+                            .map(WorkflowEntity::getSourcePublicationId)
+                            .orElse(null)
+                        : null;
+                if (pubId == null || !allowedAppIds.contains(pubId.toString())) {
+                    return ToolExecutionResult.failure(ToolErrorCode.PERMISSION_DENIED,
+                        "This run does not belong to an application in your approved application list.");
+                }
+            }
+
+            return runStopToolHandler.stop(run, parameters, context, "application");
+        } catch (Exception e) {
+            log.error("Failed to stop run {}: {}", runId, e.getMessage(), e);
+            return ToolExecutionResult.failure(ToolErrorCode.EXECUTION_FAILED,
+                "Failed to stop run: " + e.getMessage());
+        }
     }
 
     @SuppressWarnings("unchecked")

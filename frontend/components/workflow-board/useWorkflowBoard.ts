@@ -212,7 +212,7 @@ export function useWorkflowBoard(source: WorkflowBoardSource = 'workflow'): UseW
       // refresh() if the pin succeeded but no production run was resolvable yet.
       if (result.productionRunIdPublic) {
         // Canonical route is /app/workflow/{id}/run/{runId} (singular `workflow`)
-        // - see WorkflowRunsHistoryPanel.handleRunClick / WorkflowBoardCard /
+        // - see RunPanelContent.handleSelectRun / WorkflowBoardCard /
         // WorkflowModeToggle for the same pattern. Plural /workflows/.../run/...
         // does NOT exist as a Next.js page and would 404.
         router.push(`/app/workflow/${workflowId}/run/${result.productionRunIdPublic}`);

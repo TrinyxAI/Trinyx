@@ -42,9 +42,14 @@ public class WorkflowExecutionConfig {
     private long retryDelayMs = 1000; // 1 seconde
     private double retryBackoffMultiplier = 2.0;
     
-    // Loop configuration
+    // Loop configuration.
+    // defaultMaxIterations applies to every loop-back (loop node or declared back-edge) that
+    // does not declare its own cap.
     private int defaultMaxIterations = 10;
-    private int maxAllowedIterations = 100;
+    // Hard ceiling applied on top of any declared cap. Defaults to the builder's own authoring
+    // ceiling (1..10000) so it is a no-op for existing workflows while still giving operators a
+    // real knob; lowering it below an authored value silently shortens that loop.
+    private int maxAllowedIterations = 10_000;
     private String defaultLoopStrategy = "continue-anyway";
     
     // Validation
@@ -135,6 +140,21 @@ public class WorkflowExecutionConfig {
 
     public int getItemWorkerPoolSize() { return itemWorkerPoolSize; }
     public void setItemWorkerPoolSize(int itemWorkerPoolSize) { this.itemWorkerPoolSize = itemWorkerPoolSize; }
+
+    /**
+     * Iteration budget for a run's loop-backs.
+     *
+     * @param workflowOverride seam for a future per-workflow cap. No such setting exists today,
+     *                         so every caller passes null and the global default applies.
+     */
+    public com.apimarketplace.orchestrator.domain.workflow.LoopIterationLimits
+            resolveLoopIterationLimits(Integer workflowOverride) {
+        int defaultMax = (workflowOverride != null && workflowOverride > 0)
+            ? workflowOverride
+            : defaultMaxIterations;
+        return new com.apimarketplace.orchestrator.domain.workflow.LoopIterationLimits(
+            defaultMax, maxAllowedIterations);
+    }
 
     /**
      * Retourne la duree maximale d'execution autorisee en millisecondes.

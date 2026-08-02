@@ -219,8 +219,10 @@ public class WorkflowPlan {
             return new HashMap<>(step.params());
         }
 
-        // Check edge params
+        // Check edge params. Back-edges are skipped: they point at an ancestor that already owns
+        // its own params, and their metadata describes the EDGE, not the target node.
         for (Edge edge : edges) {
+            if (isBackEdge(edge)) continue;
             String toKey = EdgeRefParser.getNodeKey(edge.to());
             if (normalized.equals(toKey) && edge.params() != null && !edge.params().isEmpty()) {
                 return new HashMap<>(edge.params());
@@ -301,7 +303,34 @@ public class WorkflowPlan {
     }
 
     /**
+     * THE predicate for "this edge closes a loop".
+     *
+     * <p>Two authored shapes, one meaning: an edge into a {@code core:loop}'s {@code :iterate}
+     * port, or any edge carrying a declared {@link Edge.BackEdge} marker.
+     *
+     * <p>Every caller that walks forward dependencies MUST exclude these. A back-edge is not a
+     * forward dependency: wiring it as one makes its target an implicit merge waiting on a node
+     * that runs after it (silent deadlock), turns the runtime node graph cyclic, and lets the
+     * tree traversal recurse without bound. Excluding it keeps the executed graph acyclic - the
+     * cycle exists only in the plan's edge list, where {@code BackEdgeHandler} drives it.
+     */
+    public static boolean isBackEdge(Edge edge) {
+        if (edge == null) return false;
+        return isIterateEdge(edge) || edge.backEdge() != null;
+    }
+
+    /**
+     * Get all back-edges (both {@code :iterate}-port and declared).
+     */
+    public List<Edge> getBackEdges() {
+        return edges.stream().filter(WorkflowPlan::isBackEdge).toList();
+    }
+
+    /**
      * Get all iterate edges (loop-back edges using :iterate port).
+     *
+     * <p>Hub-driven loops only. For every loop-back regardless of shape use
+     * {@link #getBackEdges()}, or {@code BackEdgeSpecs.all(plan)} for the resolved form.
      */
     public List<Edge> getIterateEdges() {
         return edges.stream().filter(WorkflowPlan::isIterateEdge).toList();
@@ -310,6 +339,9 @@ public class WorkflowPlan {
     /**
      * Get iterate edges originating from a specific source node.
      * An iterate edge has to="core:label:iterate".
+     *
+     * <p>Hub-driven loops only - {@code BackEdgeSpecs.forSource} additionally collects declared
+     * back-edges and is what the engine calls.
      */
     public List<Edge> getIterateEdgesForSource(String sourceNodeId) {
         if (sourceNodeId == null) return List.of();
@@ -324,7 +356,10 @@ public class WorkflowPlan {
 
     /**
      * Check if the plan has any iterate (loop-back) edges.
+     *
+     * @deprecated use {@code !getBackEdges().isEmpty()}.
      */
+    @Deprecated
     public boolean hasIterateEdges() {
         return edges.stream().anyMatch(WorkflowPlan::isIterateEdge);
     }
@@ -431,9 +466,12 @@ public class WorkflowPlan {
             return triggerSharingGroups;
         }
 
-        // Build adjacency list from edges
+        // Build adjacency list from FORWARD edges. Back-edges are excluded: a loop-back points
+        // at an ancestor, so following it would fold the whole cycle into every descendant set
+        // and merge two genuinely independent triggers into one DAG group.
         Map<String, Set<String>> adj = new HashMap<>();
         for (Edge edge : edges) {
+            if (isBackEdge(edge)) continue;
             String fromKey = com.apimarketplace.orchestrator.utils.EdgeRefParser.getNodeKey(edge.from());
             String toKey = com.apimarketplace.orchestrator.utils.EdgeRefParser.getNodeKey(edge.to());
             if (fromKey != null && toKey != null) {

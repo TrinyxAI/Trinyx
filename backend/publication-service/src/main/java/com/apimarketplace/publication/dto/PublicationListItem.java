@@ -67,7 +67,13 @@ public record PublicationListItem(
         // publisherHandle backs the author link /u/{handle}. Both may be null
         // (rows predating the backfill, publishers without a handle).
         String publicSlug,
-        String publisherHandle
+        String publisherHandle,
+        // V420 - CE-exclusive label. ceExclusive drives the marketplace badge and
+        // the disabled install button on managed cloud; ceExclusiveFeatures is the
+        // raw JSON array of detected feature codes (CLI_AGENT, VECTOR_SEARCH),
+        // read as TEXT here like nodeIcons and parsed in toResponseMap().
+        Boolean ceExclusive,
+        String ceExclusiveFeatures
 ) {
 
     public Map<String, Object> toResponseMap() {
@@ -109,6 +115,10 @@ public record PublicationListItem(
         // it is user-chosen and already public by design, unlike publisherId.
         response.put("publisherHandle", publisherHandle);
         response.put("publicSlug", publicSlug);
+        // CE-exclusive label. Always emitted (never omitted on false) so the UI
+        // can render "installable" without treating an absent key as unknown.
+        response.put("ceExclusive", Boolean.TRUE.equals(ceExclusive));
+        response.put("ceExclusiveFeatures", parseCeExclusiveFeatures());
         response.put("status", status);
         response.put("published", "ACTIVE".equals(status));
         response.put("visibility", visibility);
@@ -144,6 +154,20 @@ public record PublicationListItem(
     }
 
     private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper();
+
+    /**
+     * Detected CE-exclusive feature codes. Falls back to an EMPTY list (never
+     * null) so the badge tooltip has something to iterate even for a legacy row
+     * whose column predates the backfill or holds malformed JSON.
+     */
+    private List<?> parseCeExclusiveFeatures() {
+        if (ceExclusiveFeatures == null || ceExclusiveFeatures.isBlank()) return List.of();
+        try {
+            return OBJECT_MAPPER.readValue(ceExclusiveFeatures, List.class);
+        } catch (Exception e) {
+            return List.of();
+        }
+    }
 
     private Object parseNodeIcons() {
         if (nodeIcons == null || nodeIcons.isEmpty()) return null;

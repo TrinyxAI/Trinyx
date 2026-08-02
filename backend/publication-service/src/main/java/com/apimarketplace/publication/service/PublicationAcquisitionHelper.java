@@ -33,12 +33,26 @@ public class PublicationAcquisitionHelper {
     private final PublicationReceiptRepository receiptRepository;
     private final EntitlementGuard entitlementGuard;
 
+    /**
+     * Edition gate for CE-exclusive publications. Field-injected and optional so
+     * the many unit constructions of this helper keep working unchanged; when
+     * absent the check is skipped, which is the correct behaviour for a
+     * deployment that has no edition provider wired (tests).
+     */
+    @Autowired(required = false)
+    private CeExclusiveAcquisitionGuard ceExclusiveGuard;
+
     public PublicationAcquisitionHelper(WorkflowPublicationRepository publicationRepository,
                                          PublicationReceiptRepository receiptRepository,
                                          @Autowired(required = false) EntitlementGuard entitlementGuard) {
         this.publicationRepository = publicationRepository;
         this.receiptRepository = receiptRepository;
         this.entitlementGuard = entitlementGuard;
+    }
+
+    /** Test seam: inject the edition gate without a Spring context. */
+    void setCeExclusiveGuard(CeExclusiveAcquisitionGuard ceExclusiveGuard) {
+        this.ceExclusiveGuard = ceExclusiveGuard;
     }
 
     /**
@@ -67,6 +81,12 @@ public class PublicationAcquisitionHelper {
      * as long as its snapshot is preserved. REJECTED publications stay off.
      */
     public void validateAcquirable(WorkflowPublicationEntity publication, boolean alreadyPaid) {
+        // Edition gate FIRST, and regardless of alreadyPaid: on managed cloud a
+        // CE-exclusive publication cannot run, so re-installing one acquired
+        // before it carried the label is just as pointless as a fresh install.
+        if (ceExclusiveGuard != null) {
+            ceExclusiveGuard.check(publication);
+        }
         if (!alreadyPaid && publication.getVisibility() == PublicationVisibility.PRIVATE) {
             throw new IllegalArgumentException("Publication is private");
         }

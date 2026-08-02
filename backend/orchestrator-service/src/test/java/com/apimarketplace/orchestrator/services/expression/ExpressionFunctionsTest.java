@@ -10,6 +10,7 @@ import org.junit.jupiter.params.provider.ValueSource;
 
 import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.time.ZoneOffset;
 import java.util.*;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -1211,9 +1212,11 @@ class ExpressionFunctionsTest {
             // Should be a valid ISO datetime like "2026-03-04T15:30:45"
             assertTrue(result.matches("\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}"),
                     "now() should return ISO datetime format, got: " + result);
-            // Should contain today's date
-            assertTrue(result.startsWith(LocalDate.now().toString()),
-                    "now() should start with today's date");
+            // UTC, per the documented contract - NOT the machine's local date. Comparing against
+            // LocalDate.now() made this test fail on every machine whose offset puts it in a
+            // different calendar day from UTC, which for UTC+2 is every night from 00:00 to 02:00.
+            assertTrue(result.startsWith(LocalDate.now(ZoneOffset.UTC).toString()),
+                    "now() should start with today's UTC date");
         }
     }
 
@@ -1225,8 +1228,19 @@ class ExpressionFunctionsTest {
         @DisplayName("Should return today's date as ISO string")
         void shouldReturnTodaysDateAsIsoString() {
             String result = ExpressionFunctions.today();
-            String expected = LocalDate.now().toString();
+            String expected = LocalDate.now(ZoneOffset.UTC).toString();
             assertEquals(expected, result);
+        }
+
+        @Test
+        @DisplayName("Should follow the UTC calendar day, not the machine's timezone")
+        void shouldFollowTheUtcCalendarDayNotTheMachineTimezone() {
+            // Pins the contract the javadoc states. Without this, a machine east of UTC silently
+            // "passes" for most of the day and fails in the small hours - the two are only the
+            // same date part of the time.
+            assertEquals(LocalDate.now(ZoneOffset.UTC).toString(), ExpressionFunctions.today());
+            assertTrue(ExpressionFunctions.now().startsWith(ExpressionFunctions.today()),
+                    "now() and today() must agree on which day it is");
         }
     }
 }

@@ -48,6 +48,8 @@ class ApplicationExecuteModuleTest {
     @Mock private WorkflowRepository workflowRepository;
     @Mock private AgentWorkflowFireService agentWorkflowFireService;
     @Mock private com.apimarketplace.orchestrator.services.agent.ConversationEventPublisher conversationEventPublisher;
+    @Mock private com.apimarketplace.orchestrator.repository.WorkflowRunRepository workflowRunRepository;
+    @Mock private com.apimarketplace.orchestrator.tools.common.RunStopToolHandler runStopToolHandler;
 
     private ApplicationExecuteModule module;
 
@@ -59,7 +61,8 @@ class ApplicationExecuteModuleTest {
     @BeforeEach
     void setUp() {
         module = new ApplicationExecuteModule(workflowRepository, agentWorkflowFireService, conversationEventPublisher,
-                new com.apimarketplace.orchestrator.services.ApplicationLifecycleService(workflowRepository));
+                new com.apimarketplace.orchestrator.services.ApplicationLifecycleService(workflowRepository),
+                workflowRunRepository, runStopToolHandler);
     }
 
     // ------------------------------------------------------------------
@@ -71,13 +74,14 @@ class ApplicationExecuteModuleTest {
     class CanHandle {
 
         @Test
-        @DisplayName("Returns true for the execute action only")
+        @DisplayName("Returns true for the execution lifecycle actions: execute and its counterpart stop_run")
         void canHandleExecute() {
             assertThat(module.canHandle("execute")).isTrue();
+            assertThat(module.canHandle("stop_run")).isTrue();
         }
 
         @Test
-        @DisplayName("Returns false for non-execute actions (create / list / acquire / unknown)")
+        @DisplayName("Returns false for actions owned by other modules (create / list / acquire / unknown)")
         void rejectsOtherActions() {
             assertThat(module.canHandle("create")).isFalse();
             assertThat(module.canHandle("list")).isFalse();

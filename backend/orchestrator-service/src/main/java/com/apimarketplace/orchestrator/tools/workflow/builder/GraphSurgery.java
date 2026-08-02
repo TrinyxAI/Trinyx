@@ -129,9 +129,11 @@ public class GraphSurgery {
         // 7. V2: Create new edges: afterId → newNode
         newEdges.add(new Edge(afterNodeId, newNodeId, null));
 
-        // 8. V2: Create edges: newNode → successors
+        // 8. V2: Create edges: newNode → successors.
+        // The loop-back marker travels with the edge: dropping it would turn a loop-back into a
+        // forward edge, so its target would start waiting for its own descendant.
         for (Edge old : outgoingEdges) {
-            newEdges.add(new Edge(newNodeId, old.to(), old.params()));
+            newEdges.add(new Edge(newNodeId, old.to(), old.params(), old.backEdge()));
         }
 
         // 9. Add node to plan
@@ -232,9 +234,11 @@ public class GraphSurgery {
         newEdges.removeIf(e -> e.from().equals(nodeId) || e.to().equals(nodeId));
 
         // 5. V2: Reconnect: predecessors → successors
+        // Removing a node splices its predecessors onto its successors. The loop-back marker
+        // belongs to the outgoing side, so it must survive the splice.
         for (Edge incoming : incomingEdges) {
             for (Edge outgoing : outgoingEdges) {
-                newEdges.add(new Edge(incoming.from(), outgoing.to(), outgoing.params()));
+                newEdges.add(new Edge(incoming.from(), outgoing.to(), outgoing.params(), outgoing.backEdge()));
             }
         }
 

@@ -14,7 +14,11 @@ import type { WorkflowPublication } from '@/lib/api';
 import { WorkflowRunCanvas, type RunInfoChangeData } from '@/components/workflow/WorkflowRunCanvas';
 import { WorkflowModeProvider, useWorkflowMode } from '@/contexts/WorkflowModeContext';
 import { useSidePanelSafe } from '@/contexts/SidePanelContext';
-import { WorkflowPanelContent, setPendingActivateTab } from '@/components/app/WorkflowPanelContent';
+import {
+  WorkflowPanelContent,
+  setPendingActivateTab,
+} from '@/components/app/WorkflowPanelContent';
+import { OPEN_RUN_PANEL_EVENT, type OpenRunPanelDetail } from '@/components/workflow/run-panel/runPanelBus';
 import { useInterfacePaginationStore } from '@/lib/stores/interface-pagination-store';
 import { normalizeLabel } from '@/app/workflows/builder/utils/labelNormalizer';
 import { PublicationInfoPanel } from '@/components/marketplace/PublicationInfoPanel';
@@ -24,6 +28,7 @@ import { useOrgScopedReset } from '@/lib/hooks/useOrgScopedReset';
 import { WorkflowLoadingState } from '../workflow/WorkflowLoadingState';
 import { WorkflowUnauthorizedState } from '../workflow/WorkflowUnauthorizedState';
 import { useAutoCollapseSidebar } from '../workflow/hooks';
+import { OPEN_TRIGGER_TAB_EVENT, findTriggerTabConfig, type OpenTriggerTabDetail } from '@/lib/workflow/triggerTabEvent';
 
 // ============================================
 // Constants
@@ -432,8 +437,8 @@ export function ApplicationDetailView({ workflowId, runId, title, publisherName,
 
   // ── Intercept tab open events ──
   useEffect(() => {
-    const handleOpenTriggerTab = (event: CustomEvent<{ nodeId: string; triggerType: 'chat' | 'form' | 'webhook' }>) => {
-      const match = triggerData?.configs?.find(c => c.type === event.detail.triggerType);
+    const handleOpenTriggerTab = (event: CustomEvent<OpenTriggerTabDetail>) => {
+      const match = findTriggerTabConfig(triggerData?.configs, event.detail);
       if (match) setPendingActivateTab(match.triggerId, workflowId);
       // Switch to Application Panel tab and open SidePanel
       sidePanel?.setActiveTab(APPLICATION_PANEL_TAB_ID);
@@ -447,13 +452,35 @@ export function ApplicationDetailView({ workflowId, runId, title, publisherName,
       }
     };
 
-    window.addEventListener('workflowOpenTriggerTab', handleOpenTriggerTab as EventListener);
+    window.addEventListener(OPEN_TRIGGER_TAB_EVENT, handleOpenTriggerTab as EventListener);
     window.addEventListener('workflowOpenApplicationTab', handleOpenApplicationTab as EventListener);
     return () => {
-      window.removeEventListener('workflowOpenTriggerTab', handleOpenTriggerTab as EventListener);
+      window.removeEventListener(OPEN_TRIGGER_TAB_EVENT, handleOpenTriggerTab as EventListener);
       window.removeEventListener('workflowOpenApplicationTab', handleOpenApplicationTab as EventListener);
     };
   }, [sidePanel, triggerData, applicationConfigs]);
+
+  // ── Run tab requests from the embedded canvas (history button / version chip) ──
+  // The application panel is keepMounted, so its own WorkflowPanelContent handles
+  // the sub-tab switch; what it cannot do is bring the side panel itself forward.
+  // The application's run is frozen to the one this page opened, so the Run tab
+  // shows that run's epochs and steps (no history navigation - see allowHistory).
+  //
+  // Deliberately NO `setPendingActivateTab`, unlike the workflow page: this panel
+  // is keepMounted, so its body already exists and switches its own sub-tab. A
+  // pending value would never be consumed here (that effect only re-runs on an
+  // application-configs push) and would then yank the user back to the Run tab on
+  // the NEXT push - which, on a live run, is every epoch.
+  useEffect(() => {
+    const handler = (event: Event) => {
+      const detail = (event as CustomEvent<OpenRunPanelDetail>).detail ?? {};
+      if (detail.workflowId && detail.workflowId !== workflowId) return;
+      sidePanel?.setActiveTab(APPLICATION_PANEL_TAB_ID);
+      if (!sidePanel?.isOpen) sidePanel?.open();
+    };
+    window.addEventListener(OPEN_RUN_PANEL_EVENT, handler);
+    return () => window.removeEventListener(OPEN_RUN_PANEL_EVENT, handler);
+  }, [sidePanel, workflowId]);
 
   // ── Early returns ──
   if (isAuthChecking) return <WorkflowLoadingState />;

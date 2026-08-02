@@ -81,6 +81,41 @@ class CeVersionCheckSchedulerTest {
     }
 
     @Test
+    @DisplayName("a 200 carrying a null latestVersion leaves the previous status untouched")
+    void nullVersionInBodyKeepsPrevious() {
+        // Regression: the guard used to test only `body == null`, so a feed answering 200 with
+        // an empty payload overwrote a good status with nulls and blanked the update banner on
+        // every install. Shipped CE binaries cannot be patched, so the cloud must never answer
+        // 200-with-null - but the poller must be inert if it ever does.
+        VersionUpdateService svc = new VersionUpdateService();
+        svc.update(new UpdateStatus("0.2.0", "https://example.test/notes", true, null, java.time.Instant.now()));
+        FakeFeed feed = new FakeFeed();
+        feed.toReturn = new LatestRelease(null, null, false, null);
+
+        new CeVersionCheckScheduler(svc, feed, gitProviderWithVersion("0.1.0")).checkNow();
+
+        UpdateStatus stored = svc.current();
+        assertThat(stored.latestVersion()).isEqualTo("0.2.0");
+        assertThat(stored.releaseUrl()).isEqualTo("https://example.test/notes");
+        assertThat(stored.securityFix()).isTrue();
+        // The point of the guard: the install still knows an update exists.
+        assertThat(svc.resolve("0.1.0", true).updateAvailable()).isTrue();
+    }
+
+    @Test
+    @DisplayName("a 200 carrying a blank latestVersion leaves the previous status untouched")
+    void blankVersionInBodyKeepsPrevious() {
+        VersionUpdateService svc = new VersionUpdateService();
+        svc.update(new UpdateStatus("0.2.0", null, false, null, java.time.Instant.now()));
+        FakeFeed feed = new FakeFeed();
+        feed.toReturn = new LatestRelease("   ", null, false, null);
+
+        new CeVersionCheckScheduler(svc, feed, gitProviderWithVersion("0.1.0")).checkNow();
+
+        assertThat(svc.current().latestVersion()).isEqualTo("0.2.0");
+    }
+
+    @Test
     @DisplayName("a feed error is swallowed and leaves the previous status untouched")
     void errorKeepsPrevious() {
         VersionUpdateService svc = new VersionUpdateService();

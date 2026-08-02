@@ -492,6 +492,7 @@
     "noItems": "Aucun élément disponible",
     "errorLoading": "Échec du chargement",
     "aiChat": "Chat IA",
+    "runTab": "Exécution",
     "welcomeTitle": "Comment puis-je vous aider ?",
     "agent": "Agent",
     "workflowPanel": "Panneau Workflow",
@@ -1042,6 +1043,7 @@
     "viewingEpoch": "Visualisation Epoch {epoch}",
     "runSteps": {
       "noStepsYet": "Aucune étape pour le moment",
+      "notRunYet": "pas encore exécuté",
       "filterAll": "Tout",
       "listView": "Vue liste",
       "gaugeView": "Vue chronologique",
@@ -1141,6 +1143,7 @@
       "epochCost": "Époque {epoch}",
       "budgetBlockedTitle": "Budget atteint",
       "budgetBlockedMessage": "Dépensé {spent} sur {budget}. Aucune nouvelle exécution n'a démarré.",
+      "openInPanel": "Ouvrir le détail du run dans le panneau",
       "cost": "Coût",
       "scopeAll": "toutes les époques",
       "scopeEpoch": "époque {epoch}"
@@ -1336,7 +1339,9 @@
     "skipped": "Ignoré",
     "cancelled": "Annulé",
     "timeout": "Délai dépassé",
-    "partial_success": "Succès partiel"
+    "partial_success": "Succès partiel",
+    "awaiting_signal": "En attente de signal",
+    "stopped": "Arrêté"
   },
   "errors": {
     "retry": "Réessayer",
@@ -1355,6 +1360,7 @@
     "never": "Jamais",
     "title": "Exécutions",
     "noRuns": "Aucune exécution",
+    "loading": "Chargement du run...",
     "runWorkflow": "Exécutez votre workflow pour voir l'historique",
     "justNow": "À l'instant",
     "minutesAgo": "Il y a {count}m",
@@ -1372,7 +1378,8 @@
     "version": "v{version}",
     "loadError": "Échec du chargement des exécutions",
     "stepByStepMode": "Mode pas à pas",
-    "scrollToLoadMore": "Faites défiler pour charger plus..."
+    "scrollToLoadMore": "Faites défiler pour charger plus...",
+    "lastFireDuration": "Durée de la dernière exécution"
   },
   "table": {
     "addRow": "Ajouter une ligne",
@@ -1671,6 +1678,12 @@
     "continueItemRemaining": "Continuer cet élément ({count} en attente)",
     "own": "Votre partage",
     "acquire": "Installer",
+    "ceExclusiveBadge": "Exclusif CE",
+    "ceExclusiveTooltip": "Fonctionne uniquement sur une installation auto-hébergée (Community Edition)",
+    "ceExclusiveTitle": "Installation auto-hébergée requise",
+    "ceExclusiveDescription": "Cette app utilise des fonctionnalités qui ne fonctionnent que sur une installation auto-hébergée, elle ne peut donc pas être installée ici. Installez-la depuis un déploiement auto-hébergé pour l'utiliser.",
+    "ceExclusiveFeatureCliAgent": "Agents CLI locaux (Claude Code, Codex, Gemini CLI, Mistral Vibe)",
+    "ceExclusiveFeatureVectorSearch": "Recherche vectorielle (embeddings)",
     "acquiring": "Installation...",
     "open": "Ouvrir",
     "noLandingPreview": "Aucun aperçu disponible",
@@ -6787,7 +6800,7 @@
     "subWorkflowNode": {
       "title": "Sous-workflow",
       "infoTitle": "Nœud Sous-workflow",
-      "infoDescription": "Exécuter un autre workflow en tant que sous-routine, en transmettant des entrées et en recevant des sorties.",
+      "infoDescription": "Déclenche un autre workflow, en transmettant des entrées et en recevant des sorties. La cible doit déjà avoir une exécution active : ce nœud n’en crée jamais.",
       "workflowId": "Identifiant du workflow",
       "workflowIdPlaceholder": "UUID du workflow à exécuter",
       "inputMapping": "Mappage des entrées",
@@ -6935,8 +6948,9 @@
       "autoLayout": "Mise en page auto (réorganiser les nœuds)",
       "disableInteractivity": "Désactiver l'interactivité",
       "enableInteractivity": "Activer l'interactivité",
-      "disableBoxSelection": "Désactiver la sélection par zone",
-      "enableBoxSelection": "Activer la sélection par zone",
+      "cursorMode": "Mode du curseur",
+      "cursorModePan": "Main (déplacer)",
+      "cursorModeSelection": "Sélection rectangulaire",
       "settings": "Paramètres",
       "openConversation": "Ouvrir le panneau de conversation",
       "emptyTitle": "Comment puis-je vous aider ?",
@@ -6953,6 +6967,8 @@
       "runWorkflow": "Lancer le workflow",
       "runAuto": "Lancer (auto)",
       "runStepByStep": "Pas à pas (debug)",
+      "runWithTrigger": "Lancer avec un déclencheur",
+      "triggerNotReady": "Ce déclencheur ne peut pas être lancé pour le moment",
       "runsHistory": "Historique des exécutions",
       "backToHome": "Retour à l'accueil",
       "searchPlaceholder": "Rechercher {context}...",
@@ -8555,7 +8571,8 @@
     "title": "Boucle",
     "condition": "Condition (SpEL)",
     "conditionPlaceholder": "ex. '{{mcp:step.output.count}}' > 0",
-    "maxIterations": "Itérations max"
+    "maxIterations": "Itérations max",
+    "maxIterationsInherited": "Héritée"
   },
   "storageExplorer": {
     "searchPlaceholder": "Rechercher des fichiers...",

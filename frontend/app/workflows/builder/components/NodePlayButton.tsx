@@ -5,6 +5,7 @@ import { useTranslations } from 'next-intl';
 import { Play, Check, X, Clock, RotateCcw, Zap, MessageSquare, FileText, Webhook, CalendarClock, Workflow, Database, AlertTriangle } from 'lucide-react';
 import LoadingSpinner from '@/components/LoadingSpinner';
 import { cn } from '@/lib/utils';
+import { dispatchOpenTriggerTab, type TriggerPanelTab } from '@/lib/workflow/triggerTabEvent';
 
 export type NodeExecutionStatus =
   | 'pending'    // Not yet executed, waiting for dependencies
@@ -15,6 +16,21 @@ export type NodeExecutionStatus =
   | 'skipped';   // Skipped (e.g., condition not met)
 
 export type TriggerButtonVariant = 'play' | 'lightning' | 'message' | 'form' | 'webhook' | 'schedule' | 'workflow' | 'table' | 'error';
+
+/**
+ * Trigger variants that CANNOT be fired blind: the user types a message, fills a
+ * form or crafts a request first, so the play button opens that trigger's
+ * side-panel tab instead. Every other trigger variant fires immediately.
+ *
+ * <p>Single source of truth: the play button under a node and the run-mode
+ * toolbar trigger picker both read it, so a new payload trigger can never end up
+ * fired without its input on one surface only.
+ */
+export const PANEL_TAB_BY_TRIGGER_VARIANT: Partial<Record<TriggerButtonVariant, TriggerPanelTab>> = {
+  message: 'chat',
+  form: 'form',
+  webhook: 'webhook',
+};
 
 /**
  * Unified "runnable now" shimmer color. A subtle blue scan on every
@@ -35,6 +51,13 @@ interface NodePlayButtonProps {
   className?: string;
   /** Button variant: 'play' (default), 'lightning' (manual trigger), 'message' (chat trigger), 'webhook' (webhook trigger - non-clickable), 'schedule' (schedule trigger - non-clickable) */
   variant?: TriggerButtonVariant;
+  /**
+   * Backend step id of this trigger (`trigger:<label>`). Carried in the
+   * open-tab event so the side panel activates THIS trigger's tab: a workflow
+   * can hold several chat/form/webhook triggers, and matching on type alone
+   * always lands on the first one.
+   */
+  triggerId?: string;
   /** Custom title for the button */
   title?: string;
   /** Whether in automatic execution mode (hides pending state for non-triggers) */
@@ -58,6 +81,7 @@ export function NodePlayButton({
   onRerun,
   className,
   variant = 'play',
+  triggerId,
   title,
   isAutoMode = false,
   position = 'top-right',
@@ -128,9 +152,10 @@ export function NodePlayButton({
   const handleClick = React.useCallback((e: React.MouseEvent) => {
     e.stopPropagation();
     if (canExecute && !isLoading && status === 'ready') {
-      // Chat and form triggers open the side panel trigger tab via shimmer button
-      // (handled separately in their own render blocks)
-      if (variant === 'message' || variant === 'form') {
+      // Payload triggers open their side-panel tab instead (their own render
+      // block owns that); read the shared map rather than re-listing variants,
+      // which is how this guard drifted out of sync with `webhook`.
+      if (PANEL_TAB_BY_TRIGGER_VARIANT[variant]) {
         return;
       }
       onExecute(nodeId);
@@ -228,9 +253,8 @@ export function NodePlayButton({
     // error) fires immediately via onExecute. All share the single blue
     // "runnable" shimmer (RUNNABLE_SHIMMER) applied at the render site below.
     const triggerSimulate = (() => {
-      if (variant === 'webhook') return { tab: 'webhook' as const };
-      if (variant === 'message') return { tab: 'chat' as const };
-      if (variant === 'form') return { tab: 'form' as const };
+      const panelTab = PANEL_TAB_BY_TRIGGER_VARIANT[variant];
+      if (panelTab) return { tab: panelTab };
       // Manual (amber-icon), schedule, workflow, table and error triggers fire
       // their run immediately; the error trigger reuses this path as the manual
       // bootstrap of the failure-handling run.
@@ -243,7 +267,7 @@ export function NodePlayButton({
         ? triggerSimulate.onClick
         : (e: React.MouseEvent) => {
             e.stopPropagation();
-            window.dispatchEvent(new CustomEvent('workflowOpenTriggerTab', { detail: { nodeId, triggerType: triggerSimulate.tab } }));
+            dispatchOpenTriggerTab({ nodeId, triggerId, triggerType: triggerSimulate.tab });
           };
       const playIcon = <Play className={iconSize} strokeWidth={2} fill="currentColor" />;
       if (isBottom) {

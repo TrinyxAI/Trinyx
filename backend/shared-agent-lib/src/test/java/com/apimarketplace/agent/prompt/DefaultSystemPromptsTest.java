@@ -228,6 +228,20 @@ class DefaultSystemPromptsTest {
                 .contains("wait", "sleep", "wait_run");
     }
 
+    /**
+     * An agent only learns an action exists from the module line of the tools it was
+     * granted. stop_run is the counterpart of execute, so BOTH tools that can execute
+     * must advertise it: an agent granted only `application` never reads the workflow line.
+     */
+    @Test
+    @DisplayName("WORKFLOW and APPLICATION modules both advertise stop_run, the counterpart of execute")
+    void executeCapableModulesAdvertiseStopRun() {
+        assertThat(DefaultSystemPrompts.WORKFLOW.promptSection())
+                .contains("stop_run");
+        assertThat(DefaultSystemPrompts.APPLICATION.promptSection())
+                .contains("stop_run");
+    }
+
     @Test
     @DisplayName("getAllCoreToolNames returns all tool names")
     void getAllCoreToolNamesReturnsAllToolNames() {

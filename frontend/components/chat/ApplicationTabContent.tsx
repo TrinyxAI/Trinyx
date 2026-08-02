@@ -27,6 +27,7 @@ import { TriggerPanel, type TriggerPanelConfig } from '@/app/workflows/builder/c
 import { formatUtcTime } from '@/lib/utils/dateFormatters';
 import { RunningBorder } from './RunningBorder';
 import { VIEWING_EPOCH_EVENT, shouldAdoptEpochEvent, type EpochEventDetail } from '@/lib/workflow/epochEventScope';
+import { markEpochPickedByUser } from '@/components/workflow/run-panel/useDefaultEpochSelection';
 
 export interface ApplicationConfig {
   interfaceId: string;
@@ -285,6 +286,10 @@ export function ApplicationTabContent({ config, runId, workflowId, onAction, car
 
   // Epoch selector: set locally/parent AND broadcast to canvas so RunInfo stays in sync.
   // Scope the broadcast to THIS run so sibling app tabs (other runs) ignore it.
+  //
+  // Called BOTH programmatically (seed the latest epoch on mount, jump when a new
+  // one closes) and from the dropdown, so it must not record a user pick - see
+  // `handleEpochPickedByUser` below, which is wired to the click alone.
   const handleViewEpoch = React.useCallback((epoch: number | null) => {
     if (onViewingEpochChange) {
       onViewingEpochChange(epoch);
@@ -294,6 +299,20 @@ export function ApplicationTabContent({ config, runId, workflowId, onAction, car
     const detail: EpochEventDetail = { epoch, runId };
     window.dispatchEvent(new CustomEvent(VIEWING_EPOCH_EVENT, { detail }));
   }, [onViewingEpochChange, runId]);
+
+  /**
+   * The dropdown click, and ONLY that.
+   *
+   * A live run follows new epochs unless the user chose one, and that flag is
+   * module-global and shared across every surface of the run. Marking it from
+   * `handleViewEpoch` would let this tab's own mount-time seeding count as a
+   * choice, permanently freezing the canvas and the Run tab on whatever epoch
+   * happened to be latest when the application panel first rendered.
+   */
+  const handleEpochPickedByUser = React.useCallback((epoch: number | null) => {
+    markEpochPickedByUser(runId, epoch);
+    handleViewEpoch(epoch);
+  }, [handleViewEpoch, runId]);
   const [runState, runContext] = useRun(isRunMode ? runId || undefined : undefined);
 
   // Multi-trigger panel state: when there are chat/form/webhook triggers,
@@ -976,7 +995,7 @@ export function ApplicationTabContent({ config, runId, workflowId, onAction, car
                   key={entry.epoch}
                   type="button"
                   onClick={() => {
-                    handleViewEpoch(entry.epoch);
+                    handleEpochPickedByUser(entry.epoch);
                     setEpochDropdownOpen(false);
                   }}
                   data-testid={`application-epoch-option-${entry.epoch}`}
@@ -1128,7 +1147,7 @@ export function ApplicationTabContent({ config, runId, workflowId, onAction, car
 
     if (!variablePaginationControl && !launchButton && !epochSelector && !continueButton) return undefined;
     return <>{variablePaginationControl}{launchButton}{epochSelector}{continueButton}</>;
-  }, [totalEpochs, epochTimestamps, sortedEpochs, maxDuration, viewingEpoch, currentDisplayEpoch, epochDropdownOpen, handleViewEpoch, runId, isAwaitingSignal, config.nodeId, isContinuing, isCurrentItemPending, handleDefaultContinue, t, tRun, currentItemTriple, pendingSignalCount, launchable, hasPanelTriggers, hasAnyLaunchable, handleLaunchTrigger, isLaunching, tActions, previewMode, activeVariablePage, variablePaginationItems, handleVariablePrevious, handleVariableNext, tCanvas]);
+  }, [totalEpochs, epochTimestamps, sortedEpochs, maxDuration, viewingEpoch, currentDisplayEpoch, epochDropdownOpen, handleViewEpoch, handleEpochPickedByUser, runId, isAwaitingSignal, config.nodeId, isContinuing, isCurrentItemPending, handleDefaultContinue, t, tRun, currentItemTriple, pendingSignalCount, launchable, hasPanelTriggers, hasAnyLaunchable, handleLaunchTrigger, isLaunching, tActions, previewMode, activeVariablePage, variablePaginationItems, handleVariablePrevious, handleVariableNext, tCanvas]);
 
   // ── The interface's display format - scale-to-fit virtual viewport ──
   // When the INTERFACE declares a format (preset name or "WxH"), the iframe renders inside a

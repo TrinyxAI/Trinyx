@@ -6,6 +6,7 @@ import { AgentFleetPanelContent } from '@/components/agent-fleet/AgentFleetPanel
 import { AgentConversationPanelContent } from './AgentConversationPanelContent';
 import { ConversationPanelContent } from './ConversationPanelContent';
 import { cn } from '@/lib/utils';
+import { panelTabClass } from '@/components/ui/panel-tab';
 import { useTranslations } from 'next-intl';
 import { useSidePanelSafe } from '@/contexts/SidePanelContext';
 import { orchestratorApi } from '@/lib/api';
@@ -75,16 +76,17 @@ export function AgentPanelContent({ agentId, conversationId: directConversationI
       </div>
 
       {/* Sub-tabs at bottom */}
-      <div className="flex-shrink-0 border-t border-theme bg-theme-secondary">
-        <div className="flex overflow-x-auto overflow-y-hidden">
+      <div className="flex-shrink-0 border-t border-theme bg-theme-primary">
+        <div className="flex items-center gap-1 px-2 py-1.5 overflow-x-auto overflow-y-hidden">
           <button
             type="button"
+            aria-pressed={activeTab === AGENT_CONFIGURATION_TAB}
+            data-testid="panel-sub-tab"
+            data-active={activeTab === AGENT_CONFIGURATION_TAB ? 'true' : undefined}
             onClick={() => setActiveTab(AGENT_CONFIGURATION_TAB)}
             className={cn(
-              "flex items-center gap-2 text-sm whitespace-nowrap transition-colors px-4 py-2.5",
-              activeTab === AGENT_CONFIGURATION_TAB
-                ? "bg-theme-primary text-theme-primary font-medium"
-                : "text-theme-muted hover:bg-theme-tertiary"
+              panelTabClass(activeTab === AGENT_CONFIGURATION_TAB, 'sm'),
+              "flex-shrink-0"
             )}
           >
             <Settings className="w-3.5 h-3.5 shrink-0" />
@@ -92,12 +94,13 @@ export function AgentPanelContent({ agentId, conversationId: directConversationI
           </button>
           <button
             type="button"
+            aria-pressed={activeTab === AGENT_CONVERSATION_TAB}
+            data-testid="panel-sub-tab"
+            data-active={activeTab === AGENT_CONVERSATION_TAB ? 'true' : undefined}
             onClick={() => setActiveTab(AGENT_CONVERSATION_TAB)}
             className={cn(
-              "flex items-center gap-2 text-sm whitespace-nowrap transition-colors px-4 py-2.5",
-              activeTab === AGENT_CONVERSATION_TAB
-                ? "bg-theme-primary text-theme-primary font-medium"
-                : "text-theme-muted hover:bg-theme-tertiary"
+              panelTabClass(activeTab === AGENT_CONVERSATION_TAB, 'sm'),
+              "flex-shrink-0"
             )}
           >
             <MessageSquare className="w-3.5 h-3.5 shrink-0" />

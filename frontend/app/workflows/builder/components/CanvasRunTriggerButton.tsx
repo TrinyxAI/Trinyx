@@ -7,7 +7,7 @@ import { useTranslations } from 'next-intl';
 import {
   Play, Zap, MessageSquare, FileText, Webhook, CalendarClock, Workflow, Database, AlertTriangle,
 } from 'lucide-react';
-import { Button } from '@/components/ui/button';
+import { canvasChromeCompactButtonClass } from '@/components/ui/canvas-chrome';
 import { useWorkflowMode } from '@/contexts/WorkflowModeContext';
 import { dispatchOpenTriggerTab, type TriggerPanelTab } from '@/lib/workflow/triggerTabEvent';
 import { useStepByStep } from '../contexts/StepByStepContext';
@@ -112,19 +112,18 @@ export function CanvasRunTriggerButton({ nodes }: CanvasRunTriggerButtonProps) {
 
   return (
     <>
-      <Button
+      <button
+        type="button"
         ref={triggerRef}
         onClick={toggle}
-        variant={open ? 'default' : 'ghost'}
-        size="sm"
-        className="h-8 w-8 p-0 rounded-full shadow-none border-0 focus-visible:ring-2 focus-visible:ring-theme-tertiary"
+        className={canvasChromeCompactButtonClass(open)}
         title={t('runWorkflow')}
         aria-haspopup="menu"
         aria-expanded={open}
         data-testid="canvas-run-trigger-button"
       >
         <Play className="h-4 w-4" fill="currentColor" strokeWidth={2} />
-      </Button>
+      </button>
 
       {isVisible && createPortal(
         <div

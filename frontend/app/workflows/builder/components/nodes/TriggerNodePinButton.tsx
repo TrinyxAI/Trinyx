@@ -6,6 +6,7 @@ import { useRouter } from 'next/navigation';
 import { Pin, PinOff, Save, X } from 'lucide-react';
 import { useTranslations } from 'next-intl';
 import { Button } from '@/components/ui/button';
+import { canvasChromeCompactButtonClass } from '@/components/ui/canvas-chrome';
 import LoadingSpinner from '@/components/LoadingSpinner';
 import { orchestratorApi } from '@/lib/api';
 import { useWorkflowMode } from '@/contexts/WorkflowModeContext';
@@ -325,8 +326,9 @@ export const TriggerNodePinButton: React.FC<TriggerNodePinButtonProps> = ({ work
           data-testid={variant === 'toolbar' ? 'canvas-toolbar-pin-button' : undefined}
           className={
             variant === 'toolbar'
-              // Flat ghost button matching the other canvas toolbar controls.
-              ? 'relative h-8 w-8 rounded-full flex items-center justify-center text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-theme-tertiary disabled:opacity-50'
+              // Shared canvas-chrome control: same square Button shape, height,
+              // hover ladder and focus ring as every other toolbar button.
+              ? canvasChromeCompactButtonClass(false, 'relative')
               : `nodrag nopan relative h-7 w-7 rounded-full flex items-center justify-center shadow-md transition-all duration-200 hover:scale-110 bg-white dark:bg-gray-800 text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700 ${
                   borderColor ? '' : 'border border-slate-200 dark:border-slate-700'
                 }`

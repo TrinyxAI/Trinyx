@@ -1139,6 +1139,8 @@
       "budgetBlockedTitle": "Orçamento atingido",
       "budgetBlockedMessage": "Gasto {spent} de {budget}. Nenhuma nova execução foi iniciada.",
       "openInPanel": "Abrir os detalhes da execução no painel",
+      "scrollLeft": "Mostrar os detalhes anteriores",
+      "scrollRight": "Mostrar mais detalhes",
       "cost": "Custo",
       "scopeAll": "todas as épocas",
       "scopeEpoch": "época {epoch}"

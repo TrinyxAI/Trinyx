@@ -1139,6 +1139,8 @@
       "budgetBlockedTitle": "已达预算",
       "budgetBlockedMessage": "已花费 {spent}/{budget}。未启动新的运行。",
       "openInPanel": "在侧边面板中打开运行详情",
+      "scrollLeft": "显示上一批详情",
+      "scrollRight": "显示更多详情",
       "cost": "成本",
       "scopeAll": "所有轮次",
       "scopeEpoch": "轮次 {epoch}"

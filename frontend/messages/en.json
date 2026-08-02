@@ -1144,6 +1144,8 @@
       "budgetBlockedTitle": "Budget reached",
       "budgetBlockedMessage": "Spent {spent} of {budget}. No new run was started.",
       "openInPanel": "Open run details in the panel",
+      "scrollLeft": "Show previous details",
+      "scrollRight": "Show more details",
       "cost": "Cost",
       "scopeAll": "all epochs",
       "scopeEpoch": "epoch {epoch}"

@@ -1020,10 +1020,15 @@ export function BuilderCanvas({
           }} />
           <Button
             onClick={onOpenNodeCreator}
-            className="w-11 h-11 rounded-full p-0 shadow-none"
+            // Square like every other canvas control now: a lone round FAB was
+            // the one circle left once the toggle, the run bar and the toolbar
+            // moved to the Button shape. h-9 is also the height of the mode
+            // toggle and the run bar it shares the canvas top edge with, so the
+            // three read as one row instead of one oversized corner button.
+            className="w-9 h-9 rounded-xl p-0"
             title={t('addNode')}
           >
-            <Plus className="w-[22px] h-[22px]" />
+            <Plus className="w-5 h-5" />
           </Button>
         </div>
       )}

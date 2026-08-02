@@ -1,13 +1,14 @@
 'use client';
 
 import { useRef, useEffect, useState, useCallback } from 'react';
-import { Edit3, History, Play, Eye, PanelRight } from 'lucide-react';
+import { Edit3, History, Play, Eye } from 'lucide-react';
 import { formatCost } from '@/lib/format-cost';
 import { useTranslations } from 'next-intl';
 import { useRouter, usePathname } from 'next/navigation';
 import { orchestratorApi, type WorkflowRun } from '@/lib/api';
 import { useToast } from '@/components/Toast';
 import ToastContainer from '@/components/ToastContainer';
+import { canvasChromeButtonClass, canvasChromeSurfaceClass, canvasChromeCompactButtonClass } from '@/components/ui/canvas-chrome';
 import { useWorkflowMode } from '@/contexts/WorkflowModeContext';
 import { VIEWING_EPOCH_EVENT, shouldAdoptEpochEvent, type EpochEventDetail } from '@/lib/workflow/epochEventScope';
 import { isEmbeddedWorkflowCanvas } from '@/lib/workflow/canvasEmbedding';
@@ -52,12 +53,14 @@ interface WorkflowModeToggleProps {
  * Canvas chrome for a workflow: the edit/run toggle (centered) and the compact
  * run bar + history button (top right).
  *
- * The run bar is IDENTITY ONLY - stop/cancel · status · version · epoch · start
- * · step-by-step. Everything that used to expand out of it (epoch selector, step
- * list, cost) now lives in the side panel's Run tab, so nothing floats over the
- * ReactFlow canvas any more. The bar IS the entry point - there is no separate
- * history button next to it: the version chip opens the run HISTORY, the panel
- * button opens the CURRENT run.
+ * The run bar is IDENTITY ONLY - status · version · epoch · start ·
+ * step-by-step, with stop/cancel at the far right. Everything that used to
+ * expand out of it (epoch selector, step list, cost) now lives in the side
+ * panel's Run tab, so nothing floats over the ReactFlow canvas any more.
+ *
+ * The bar IS the entry point - there is no separate history button and no panel
+ * icon next to it: clicking the BAR opens the CURRENT run, clicking the version
+ * chip inside it opens the run HISTORY.
  */
 export function WorkflowModeToggle({
   mode,
@@ -107,7 +110,6 @@ export function WorkflowModeToggle({
   // Canvas run identity - used to scope the cross-tree viewingEpochChanged event
   // so side-panel tabs bound to OTHER runs don't move this canvas's epoch chip.
   const { setViewingEpoch, setRunId, runId: canvasRunId } = useWorkflowMode();
-  const [sliderStyle, setSliderStyle] = useState({ left: 0, width: 0, opacity: 0 });
   /** Epoch shown in the chip. Mirrors the panel's selection through the scoped event. */
   const [selectedEpoch, setSelectedEpoch] = useState<number | null>(null);
 
@@ -123,8 +125,6 @@ export function WorkflowModeToggle({
     return () => window.removeEventListener(VIEWING_EPOCH_EVENT, handler);
   }, [canvasRunId]);
 
-  const editButtonRef = useRef<HTMLButtonElement>(null);
-  const runButtonRef = useRef<HTMLButtonElement>(null);
   /** Invisible probe element to measure the real available container width
    *  (accounts for SidePanel, sidebar, etc. - not just window.innerWidth). */
   const probeRef = useRef<HTMLDivElement>(null);
@@ -135,14 +135,6 @@ export function WorkflowModeToggle({
 
   const isRunMode = mode === 'run';
   const showRunInfo = isRunMode && !!currentRunInfo;
-
-  useEffect(() => {
-    const activeButtonRef = mode === 'edit' ? editButtonRef : runButtonRef;
-    if (activeButtonRef.current) {
-      const { offsetLeft, offsetWidth } = activeButtonRef.current;
-      setSliderStyle({ left: offsetLeft, width: offsetWidth, opacity: 1 });
-    }
-  }, [mode]);
 
   // Measure the real available container width via ResizeObserver on the
   // invisible probe element. This correctly handles SidePanel open/close,
@@ -159,9 +151,15 @@ export function WorkflowModeToggle({
     return () => observer.disconnect();
   }, []);
 
-  // Derive isWideEnough from containerWidth - center the toggle only when
-  // there is enough room so it won't collide with the run bar.
-  const isWideEnough = containerWidth >= (showRunInfo ? 900 : 640);
+  // Derive isWideEnough from containerWidth - center the toggle only when there
+  // is enough room so it won't collide with the run bar. Without a run bar the
+  // only thing sharing the top edge is the add-node button in the corner, so a
+  // phone-width canvas can still centre the ~88px toggle: the old 640 floor
+  // pushed it into the left corner on every mobile EDIT canvas for no reason.
+  const isWideEnough = containerWidth >= (showRunInfo ? 900 : 420);
+  /** Centred when it fits, left-anchored otherwise (the run bar owns the right
+   *  edge). The tighter inset on a phone keeps it clear of the canvas border. */
+  const toggleAnchorClass = isWideEnough ? 'left-1/2 -translate-x-1/2' : 'left-2 sm:left-4';
 
   // Reset the epoch chip when toggling between edit/run so the view doesn't
   // carry over the previously pinned epoch.
@@ -236,56 +234,35 @@ export function WorkflowModeToggle({
           can measure the real available space (not window.innerWidth). */}
       <div ref={probeRef} className="absolute inset-x-0 top-0 h-0 pointer-events-none" aria-hidden />
 
-      {/* Mode Toggle - Centered (hidden in application/preview mode) */}
+      {/* Mode Toggle - Centered (hidden in application/preview mode). A segmented
+          pair of canvas-chrome controls: the active one wears the same resting
+          fill a selected panel tab does, which is why the old absolutely
+          positioned slider is gone - the state now lives on the button itself. */}
       {!hideToggle && !showReadOnlyBadge && (
-        <div className={`absolute top-4 z-[40] ${
-          isWideEnough ? 'left-1/2 -translate-x-1/2' : 'left-4'
-        }`}>
-          <div className="relative inline-flex items-center gap-0.5 p-1 bg-white dark:bg-gray-800 rounded-full">
-            {/* Animated background slider */}
-            <div
-              className="absolute top-1 bottom-1 rounded-full bg-theme-secondary transition-all duration-300 ease-out"
-              style={{
-                left: `${sliderStyle.left}px`,
-                width: `${sliderStyle.width}px`,
-                opacity: sliderStyle.opacity,
-              }}
-            />
-
+        <div className={`absolute top-4 z-[40] ${toggleAnchorClass}`}>
+          <div className={`inline-flex items-center gap-0.5 p-1 ${canvasChromeSurfaceClass}`}>
             {/* Edit Mode Button */}
             <button
-              ref={editButtonRef}
+              type="button"
+              aria-pressed={mode === 'edit'}
+              data-testid="workflow-mode-edit"
               onClick={() => handleModeClick('edit')}
               title={t('workflow.mode.edit')}
-              className={`
-                relative z-10 flex items-center justify-center w-7 h-7 rounded-full
-                transition-all duration-200 focus-visible:outline-none focus-visible:ring-2
-                focus-visible:ring-theme-tertiary outline-none
-                ${mode === 'edit'
-                  ? 'text-gray-900 dark:text-gray-100'
-                  : 'text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300 hover:bg-gray-100/50 dark:hover:bg-gray-700/50'
-                }
-              `}
+              className={canvasChromeCompactButtonClass(mode === 'edit')}
             >
-              <Edit3 className={`w-3.5 h-3.5 transition-colors duration-200 ${mode === 'edit' ? 'text-gray-900 dark:text-gray-100' : 'text-current'}`} />
+              <Edit3 className="w-3.5 h-3.5" />
             </button>
 
             {/* Run Mode Button */}
             <button
-              ref={runButtonRef}
+              type="button"
+              aria-pressed={mode === 'run'}
+              data-testid="workflow-mode-run"
               onClick={() => handleModeClick('run')}
               title={t('workflow.mode.run')}
-              className={`
-                relative z-10 flex items-center justify-center w-7 h-7 rounded-full
-                transition-all duration-200 focus-visible:outline-none focus-visible:ring-2
-                focus-visible:ring-theme-tertiary outline-none
-                ${mode === 'run'
-                  ? 'text-gray-900 dark:text-gray-100'
-                  : 'text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300 hover:bg-gray-100/50 dark:hover:bg-gray-700/50'
-                }
-              `}
+              className={canvasChromeCompactButtonClass(mode === 'run')}
             >
-              <Play className={`w-3.5 h-3.5 transition-colors duration-200 ${mode === 'run' ? 'text-gray-900 dark:text-gray-100' : 'text-current'}`} />
+              <Play className="w-3.5 h-3.5" />
             </button>
           </div>
         </div>
@@ -293,10 +270,8 @@ export function WorkflowModeToggle({
 
       {/* Read-only badge (shown in preview mode instead of the toggle) */}
       {showReadOnlyBadge && (
-        <div className={`absolute top-4 z-[40] ${
-          isWideEnough ? 'left-1/2 -translate-x-1/2' : 'left-4'
-        }`}>
-          <div className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-white dark:bg-gray-800 rounded-full text-sm font-medium text-gray-500 dark:text-gray-400">
+        <div className={`absolute top-4 z-[40] ${toggleAnchorClass}`}>
+          <div className={`inline-flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium text-[var(--text-secondary)] ${canvasChromeSurfaceClass}`}>
             <Eye className="w-4 h-4" />
             <span>{t('workflow.mode.readOnly')}</span>
           </div>
@@ -316,16 +291,44 @@ export function WorkflowModeToggle({
               data-run-history-fallback
               onClick={() => openPanel('history')}
               title={t('runs.title')}
-              className="pointer-events-auto flex items-center justify-center w-8 h-8 rounded-full bg-white dark:bg-gray-800 text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 transition-colors"
+              // A standalone floating control, so it carries the chrome surface
+              // itself instead of sitting on a card. Passed through the helper's
+              // className slot (not concatenated) so twMerge resolves the two
+              // background/border layers instead of leaving both in the class list.
+              className={canvasChromeButtonClass(false, 'pointer-events-auto border-[var(--border-color)] bg-[var(--bg-primary)]/95 backdrop-blur')}
             >
-              <History className="w-3.5 h-3.5" />
+              <History className="w-4 h-4" />
             </button>
           )}
-          {/* Compact run bar - identity only, the panel holds the detail */}
+          {/* Compact run bar - identity only, the panel holds the detail.
+              The WHOLE bar is the way into the run panel: a dedicated icon for
+              that was one more glyph competing with the chips for room in a pill
+              that already overflows on a narrow canvas. Its inner controls
+              (version chip -> history, stop/cancel/reactivate, scroll arrows)
+              stop the click, so they keep their own behaviour. */}
           {showRunInfo && (
             <div
               data-run-info-panel
-              className="pointer-events-auto bg-white dark:bg-gray-800 rounded-full w-fit max-w-full min-w-0"
+              data-run-open-panel
+              role="button"
+              tabIndex={0}
+              title={t('workflow.runInfo.openInPanel')}
+              onClick={() => openPanel('run')}
+              onKeyDown={(e) => {
+                // The bar ONLY - never a key pressed on a control inside it.
+                // The inner buttons stop the click, but a keydown has no such
+                // guard: Enter on the version chip would open the history AND
+                // this run level, and the preventDefault below would swallow
+                // Space on the stop button before the browser could activate it.
+                if (e.target !== e.currentTarget) return;
+                if (e.key !== 'Enter' && e.key !== ' ') return;
+                e.preventDefault();
+                openPanel('run');
+              }}
+              // The shared chrome surface, plus the affordances of a control:
+              // the whole bar is clickable. Hover and ring go through the theme
+              // tokens the rest of the chrome uses rather than a fixed gray.
+              className={`pointer-events-auto w-fit max-w-full min-w-0 cursor-pointer transition-colors hover:bg-[var(--bg-secondary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent-primary)] ${canvasChromeSurfaceClass}`}
             >
               <RunSummaryBar
                 currentRunInfo={currentRunInfo!}
@@ -338,19 +341,6 @@ export function WorkflowModeToggle({
                 onCancel={onCancel}
                 onReactivate={onReactivate}
                 onVersionClick={() => openPanel('history')}
-                responsiveChips
-                showStepByStepLabel={isWideEnough}
-                trailing={(
-                  <button
-                    type="button"
-                    data-run-open-panel
-                    onClick={(e) => { e.stopPropagation(); openPanel('run'); }}
-                    title={t('workflow.runInfo.openInPanel')}
-                    className="flex items-center justify-center w-5 h-5 rounded-full text-gray-400 dark:text-gray-500 hover:bg-gray-100 dark:hover:bg-gray-700 hover:text-gray-700 dark:hover:text-gray-200 transition-colors"
-                  >
-                    <PanelRight className="w-3.5 h-3.5" />
-                  </button>
-                )}
               />
             </div>
           )}

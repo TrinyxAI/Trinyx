@@ -1144,6 +1144,8 @@
       "budgetBlockedTitle": "Budget atteint",
       "budgetBlockedMessage": "Dépensé {spent} sur {budget}. Aucune nouvelle exécution n'a démarré.",
       "openInPanel": "Ouvrir le détail du run dans le panneau",
+      "scrollLeft": "Afficher les détails précédents",
+      "scrollRight": "Afficher plus de détails",
       "cost": "Coût",
       "scopeAll": "toutes les époques",
       "scopeEpoch": "époque {epoch}"

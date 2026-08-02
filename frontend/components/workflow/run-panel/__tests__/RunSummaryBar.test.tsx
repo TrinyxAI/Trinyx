@@ -20,6 +20,17 @@ vi.mock('next-intl', () => ({
   useLocale: () => 'en',
 }));
 
+import { canvasChromeChipRadiusClass } from '@/components/ui/canvas-chrome';
+
+// jsdom has neither ResizeObserver nor scroll metrics; the chip track watches
+// itself with one to decide whether an edge still hides a chip.
+class NoopResizeObserver {
+  observe() {}
+  unobserve() {}
+  disconnect() {}
+}
+(globalThis as unknown as { ResizeObserver: unknown }).ResizeObserver = NoopResizeObserver;
+
 import { RunSummaryBar } from '@/components/workflow/run-panel/RunSummaryBar';
 
 const NOOP = () => undefined;
@@ -107,5 +118,150 @@ describe('RunSummaryBar - reaching the run history', () => {
     renderBar('RUNNING');
     expect(document.querySelector('[data-run-version-chip]')).toBeNull();
     expect(screen.getByText('v3')).toBeTruthy();
+  });
+});
+
+describe('RunSummaryBar - the run info labels are square, like the rest of the chrome', () => {
+  it('shapes the status badge with the shared chip radius, and gives it a stable handle', () => {
+    // The badge used to be the only `div.rounded-full` on the canvas, which is
+    // what e2e keyed on. The shape is styling; the testid is the identity.
+    renderBar('RUNNING');
+    const badge = screen.getByTestId('run-status-badge');
+    expect(badge.className).toContain(canvasChromeChipRadiusClass);
+    expect(badge.className).not.toContain('rounded-full');
+  });
+
+  it('leaves nothing round in the bar itself, on either surface size', () => {
+    for (const size of ['compact', 'panel'] as const) {
+      cleanup();
+      // Every optional chip at once: action button, version, epoch, step-by-step.
+      const { container } = renderBar('RUNNING', {
+        size,
+        isStepByStep: true,
+        pinnedVersion: 3,
+        onVersionClick: () => undefined,
+      });
+      // The bar is the first child; the cancel modal (portalled, and only shown
+      // on confirm) keeps its own circular icon badge by design.
+      expect(container.innerHTML, `${size} bar still has a pill`).not.toContain('rounded-full');
+    }
+  });
+
+  it('squares the action button too - it sits inline with the labels', () => {
+    renderBar('RUNNING');
+    const stop = screen.getByTitle('workflow.mode.stopWorkflow');
+    expect(stop.className).toContain(canvasChromeChipRadiusClass);
+  });
+
+  it('squares the scroll arrows too - they sit in the same row as the chips', () => {
+    renderBar('RUNNING');
+    const track = document.querySelector('[data-run-summary-chips]') as HTMLElement;
+    Object.defineProperty(track, 'scrollWidth', { value: 500, configurable: true });
+    Object.defineProperty(track, 'clientWidth', { value: 200, configurable: true });
+    track.scrollLeft = 100;
+    fireEvent.scroll(track);
+    for (const side of ['left', 'right']) {
+      const arrow = document.querySelector(`[data-run-summary-scroll="${side}"]`) as HTMLElement;
+      expect(arrow.className, `${side} arrow`).toContain(canvasChromeChipRadiusClass);
+      expect(arrow.className, `${side} arrow`).not.toContain('rounded-full');
+    }
+  });
+});
+
+describe('RunSummaryBar - where the action button sits', () => {
+  /** The chip track and the action button are siblings; DOM order IS the layout. */
+  const trackThenAction = () => {
+    const track = document.querySelector('[data-run-summary-chips]')!;
+    const action = document.querySelector('[data-run-action]')!;
+    // Node.DOCUMENT_POSITION_FOLLOWING = the action comes AFTER the track.
+    return !!(track.compareDocumentPosition(action) & Node.DOCUMENT_POSITION_FOLLOWING);
+  };
+
+  it('puts stop at the far right, after every chip', () => {
+    // It used to be leftmost, where it was the first thing a click landed on and
+    // the first thing an overflowing bar pushed around.
+    renderBar('RUNNING');
+    expect(document.querySelector('[data-run-action]')?.getAttribute('data-run-action')).toBe('stop');
+    expect(trackThenAction(), 'stop must render after the chip track').toBe(true);
+  });
+
+  it('puts cancel at the far right too', () => {
+    renderBar('WAITING_TRIGGER');
+    expect(document.querySelector('[data-run-action]')?.getAttribute('data-run-action')).toBe('cancel');
+    expect(trackThenAction()).toBe(true);
+  });
+
+  it('puts reactivate at the far right too', () => {
+    renderBar('COMPLETED');
+    expect(document.querySelector('[data-run-action]')?.getAttribute('data-run-action')).toBe('reactivate');
+    expect(trackThenAction()).toBe(true);
+  });
+
+  it('keeps the action out of the scrolling track so it can never scroll away', () => {
+    renderBar('RUNNING');
+    const track = document.querySelector('[data-run-summary-chips]')!;
+    expect(track.querySelector('[data-run-action]')).toBeNull();
+  });
+});
+
+describe('RunSummaryBar - staying readable when there is no room', () => {
+  it('keeps every chip mounted instead of hiding them at breakpoints', () => {
+    // Chips used to be dropped below sm/md on the canvas pill. The version chip
+    // is the ONLY route into the run history, so hiding it stranded the user on
+    // a narrow canvas - with nothing on screen saying it existed. They scroll now.
+    renderBar('RUNNING', {
+      onVersionClick: NOOP,
+      isStepByStep: true,
+      currentRunInfo: { runId: 'run-1', status: 'RUNNING', planVersion: 3, startedAt: '2026-01-01T00:00:00Z' },
+    });
+    const track = document.querySelector('[data-run-summary-chips]') as HTMLElement;
+    expect(track).toBeTruthy();
+    expect(track.className).toContain('overflow-x-auto');
+    expect(track.querySelector('[data-run-version-chip]')).toBeTruthy();
+    expect(track.textContent).toContain('workflow.mode.stepByStep');
+    // No chip may carry a breakpoint-hiding class - that is the bug being fixed.
+    const hidden = Array.from(track.querySelectorAll('*'))
+      .filter(el => el.className && typeof el.className === 'string' && el.className.split(/\s+/).includes('hidden'));
+    expect(hidden, 'no chip may be hidden by a breakpoint').toEqual([]);
+  });
+
+  it('shows no scroll arrow while everything fits', () => {
+    // jsdom reports scrollWidth === clientWidth === 0, i.e. "nothing cut off".
+    renderBar('RUNNING');
+    expect(document.querySelector('[data-run-summary-scroll]')).toBeNull();
+  });
+
+  it('grows an arrow on the side that still hides a chip', () => {
+    renderBar('RUNNING');
+    const track = document.querySelector('[data-run-summary-chips]') as HTMLElement;
+    // Simulate an overflowing, mid-scrolled track: content cut off on BOTH sides.
+    Object.defineProperty(track, 'scrollWidth', { value: 500, configurable: true });
+    Object.defineProperty(track, 'clientWidth', { value: 200, configurable: true });
+    track.scrollLeft = 100;
+    fireEvent.scroll(track);
+
+    expect(document.querySelector('[data-run-summary-scroll="left"]')).toBeTruthy();
+    expect(document.querySelector('[data-run-summary-scroll="right"]')).toBeTruthy();
+  });
+
+  it('scrolls the track when an arrow is pressed, without bubbling the click', () => {
+    const onBarClick = vi.fn();
+    render(
+      <div onClick={onBarClick}>
+        <RunSummaryBar currentRunInfo={{ runId: 'run-1', status: 'RUNNING', planVersion: 3 } as never} />
+      </div>,
+    );
+    const track = document.querySelector('[data-run-summary-chips]') as HTMLElement;
+    Object.defineProperty(track, 'scrollWidth', { value: 500, configurable: true });
+    Object.defineProperty(track, 'clientWidth', { value: 200, configurable: true });
+    track.scrollBy = vi.fn();
+    track.scrollLeft = 100;
+    fireEvent.scroll(track);
+
+    fireEvent.click(document.querySelector('[data-run-summary-scroll="right"]') as HTMLElement);
+
+    expect(track.scrollBy).toHaveBeenCalledWith({ left: 120, behavior: 'smooth' });
+    // The bar around it opens the run panel: nudging the chips must not.
+    expect(onBarClick).not.toHaveBeenCalled();
   });
 });

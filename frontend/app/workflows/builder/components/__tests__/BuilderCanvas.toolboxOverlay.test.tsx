@@ -118,3 +118,27 @@ describe('BuilderCanvas - empty-canvas toolbox reachability', () => {
     expect(lifted!.querySelector('button')).toBeTruthy();
   });
 });
+
+describe('BuilderCanvas - the Add-node button belongs to the canvas chrome row', () => {
+  /** The floating Add-node button, found through its z-[60] container. */
+  const addNodeButton = (container: HTMLElement) =>
+    container.querySelector('.z-\\[60\\]')!.querySelector('button[title]') as HTMLElement;
+
+  it('is the same square size as the mode toggle and the run bar it sits beside', () => {
+    // All three share the canvas top edge. At w-11/h-11 (44px) the button was a
+    // head taller than the 36px chrome next to it and read as an outlier.
+    const { container } = render(<BuilderCanvas {...baseProps()} />);
+    const button = addNodeButton(container);
+    expect(button.className).toContain('h-9');
+    expect(button.className).toContain('w-9');
+    expect(button.className).not.toContain('h-11');
+    expect(button.className).not.toContain('w-11');
+  });
+
+  it('is square, not the round FAB it used to be', () => {
+    const { container } = render(<BuilderCanvas {...baseProps()} />);
+    const button = addNodeButton(container);
+    expect(button.className).toContain('rounded-xl');
+    expect(button.className).not.toContain('rounded-full');
+  });
+});

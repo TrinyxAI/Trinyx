@@ -105,6 +105,20 @@ export function NodeCreatorPanel({ isOpen, onClose, onSelectNode, currentWorkflo
     return walk(paletteTree);
   }, [paletteTree]);
 
+  /**
+   * Every navigation lands at the TOP of the list.
+   *
+   * Now that the whole palette scrolls as one, drilling into a category unmounts
+   * the Frequently Used block from inside the scroller: the content shrinks, the
+   * browser clamps the retained scrollTop, and the child list opens part-way down
+   * instead of at its first item. Unobservable before - the bottom-dock scroller
+   * had no scrollable content to retain a position in.
+   */
+  const scrollRef = React.useRef<HTMLDivElement>(null);
+  React.useEffect(() => {
+    if (scrollRef.current) scrollRef.current.scrollTop = 0;
+  }, [navigationLevel, selectedCategoryId, selectedApiId, selectedDataSourceId, selectedType, searchQuery]);
+
   // Breadcrumbs
   const breadcrumbItems = useBreadcrumbs({
     navigationLevel, selectedCategoryId, selectedApiId, selectedDataSourceId, selectedType,
@@ -349,45 +363,57 @@ export function NodeCreatorPanel({ isOpen, onClose, onSelectNode, currentWorkflo
           </div>
         </div>
 
-        {/* Frequently Used */}
-        {navigationLevel === 'categories' && !selectedCategoryId && (
-          <div className="px-2 pb-4 pt-2 flex-shrink-0 border-b border-gray-200 dark:border-gray-800">
-            <div className="space-y-2">
-              <div className="px-3 pt-3 text-sm text-gray-500 dark:text-gray-400 uppercase tracking-wide">{t('frequentlyUsed')}</div>
-              <div className="grid grid-cols-2 gap-2">
-                {featuredNodes.map((node) => {
-                  const isNavItem = node.isNav || node.id === 'ai-agent';
-                  const paletteData = isNavItem ? undefined : getPaletteItemDataFromId(node.id, node.label, node.description);
-                  return (
-                    <DraggableNodeItem
-                      key={node.id}
-                      id={node.id}
-                      label={node.label}
-                      description={node.description}
-                      onClick={() => {
-                        if (node.isNav) {
-                          handleItemClick({ id: node.id, name: node.label, description: node.description } as PaletteCategoryNode);
-                        } else {
-                          onSelectNode?.(node.id);
-                        }
-                      }}
-                      dragData={paletteData}
-                      disableDrag={isNavItem}
-                      showArrow={isNavItem}
-                      nodeId={node.id}
-                      nodeKind={node.kind}
-                      nodeFamily={node.family}
-                      iconSize="sm"
-                    />
-                  );
-                })}
+        {/* Content
+            Frequently Used scrolls WITH the categories rather than being pinned
+            above them. Pinned, it took a fixed slice of the height, and in the
+            bottom dock - where the panel is a few hundred pixels tall - that
+            slice was the whole panel: the categories were squeezed to nothing and
+            no scrollbar could reach them, because the only scrollable region was
+            the sliver underneath. The palette's content is one list; it scrolls as
+            one. The search and breadcrumb stay pinned - they are controls over the
+            list, not part of it. */}
+        <div ref={scrollRef} className="flex-1 overflow-y-auto min-h-0 pr-2">
+          {/* Frequently Used
+              `pr-0` cancels the scroller's gutter for this block only: it used to
+              be a direct child of the panel with symmetric padding, and inheriting
+              the gutter would leave the grid off-centre and its separator rule
+              stopping short of the right edge. */}
+          {navigationLevel === 'categories' && !selectedCategoryId && (
+            <div className="pl-2 pr-0 pb-4 pt-2 border-b border-gray-200 dark:border-gray-800">
+              <div className="space-y-2">
+                <div className="px-3 pt-3 text-sm text-gray-500 dark:text-gray-400 uppercase tracking-wide">{t('frequentlyUsed')}</div>
+                <div className="grid grid-cols-2 gap-2">
+                  {featuredNodes.map((node) => {
+                    const isNavItem = node.isNav || node.id === 'ai-agent';
+                    const paletteData = isNavItem ? undefined : getPaletteItemDataFromId(node.id, node.label, node.description);
+                    return (
+                      <DraggableNodeItem
+                        key={node.id}
+                        id={node.id}
+                        label={node.label}
+                        description={node.description}
+                        onClick={() => {
+                          if (node.isNav) {
+                            handleItemClick({ id: node.id, name: node.label, description: node.description } as PaletteCategoryNode);
+                          } else {
+                            onSelectNode?.(node.id);
+                          }
+                        }}
+                        dragData={paletteData}
+                        disableDrag={isNavItem}
+                        showArrow={isNavItem}
+                        nodeId={node.id}
+                        nodeKind={node.kind}
+                        nodeFamily={node.family}
+                        iconSize="sm"
+                      />
+                    );
+                  })}
+                </div>
               </div>
             </div>
-          </div>
-        )}
+          )}
 
-        {/* Content */}
-        <div className="flex-1 overflow-y-auto min-h-0 pr-2">
           {/* Categories */}
           {navigationLevel === 'categories' && (
             <div className="py-2 pl-3 pr-3 space-y-1">

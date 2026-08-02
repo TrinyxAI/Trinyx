@@ -4,7 +4,7 @@ import * as React from 'react';
 import { useTranslations } from 'next-intl';
 import { Panel, type Node } from 'reactflow';
 import { ZoomIn, ZoomOut, Focus, Lock, Unlock, SquareDashedMousePointer, Hand, Undo2, Redo2, Settings, Wand2, Sparkles } from 'lucide-react';
-import { Button } from '@/components/ui/button';
+import { canvasChromeCompactButtonClass, canvasChromeSurfaceClass } from '@/components/ui/canvas-chrome';
 import {
   Select,
   SelectTrigger,
@@ -67,8 +67,18 @@ export function CanvasToolbar({
   const t = useTranslations('workflowBuilder.canvas');
   const cursorModeLabel = cursorMode === 'selection' ? t('cursorModeSelection') : t('cursorModePan');
   return (
-    <Panel position="bottom-center" className="mb-6">
-      <div className="flex items-center gap-1 rounded-full bg-white/95 dark:bg-gray-800/95 px-2 sm:px-3 py-2 backdrop-blur border-0 max-w-[calc(100vw-32px)] overflow-x-auto" style={{ scrollbarWidth: 'none' }}>
+    // The bound is against the CANVAS (100% of the pane), not the viewport: with
+    // a side panel open the old `100vw` let the toolbar run wider than the canvas
+    // it belongs to. reactflow centers the `bottom-center` Panel itself, so a
+    // percentage bound keeps it centred AND inside its own pane at every width.
+    <Panel position="bottom-center" className="mb-4 sm:mb-6 max-w-[calc(100%-1rem)]">
+      <div
+        // p-1 around 28px controls = the same 36px height as the mode toggle and
+        // the run bar, so the whole canvas chrome reads as one size.
+        className={`flex items-center justify-start gap-0.5 p-1 max-w-full overflow-x-auto [&::-webkit-scrollbar]:hidden ${canvasChromeSurfaceClass}`}
+        // Firefox; the WebKit/Blink equivalent is the utility above.
+        style={{ scrollbarWidth: 'none' }}
+      >
         {/* Run controls - run mode only: fire a chosen trigger, and pin the
             viewed version as production while it is not the pinned one (the
             pin button hides itself once it is). */}
@@ -76,7 +86,7 @@ export function CanvasToolbar({
           // empty:hidden - both children gate themselves off (no fireable
           // trigger / already on the pinned run), and a bare separator with
           // padding would be left behind otherwise.
-          <div className="flex items-center gap-1 border-r border-slate-200 dark:border-slate-700 pr-1 empty:hidden" data-testid="canvas-toolbar-run-controls">
+          <div className="flex items-center gap-1 border-r border-[var(--border-color)] pr-1 empty:hidden" data-testid="canvas-toolbar-run-controls">
             <CanvasRunTriggerButton nodes={nodes} />
             {workflowId && <TriggerNodePinButton workflowId={workflowId} variant="toolbar" />}
           </div>
@@ -85,10 +95,16 @@ export function CanvasToolbar({
         {/* Cursor mode - only in edit mode. Persisted for every workflow, so the
             select reflects a user preference rather than per-graph state. */}
         {!isRunMode && (
-          <div className="flex items-center gap-1 border-r border-slate-200 dark:border-slate-700 pr-1">
+          <div className="flex items-center gap-1 border-r border-[var(--border-color)] pr-1">
             <Select value={cursorMode} onValueChange={(value) => onCursorModeChange(value as CanvasCursorMode)}>
               <SelectTrigger
-                className="h-8 min-h-8 w-auto gap-1 rounded-full border-0 bg-transparent px-2 py-0 shadow-none hover:bg-slate-100 dark:hover:bg-slate-700 focus:ring-0 focus-visible:ring-2 focus-visible:ring-theme-tertiary"
+                // Not `canvasChromeCompactButtonClass`: a Radix trigger brings its
+                // own border + surface, and only `border-0` reliably beats the
+                // `border-theme` utility in its base (twMerge does not know that
+                // custom class, so a `border-transparent` would just sit next to
+                // it). The tokens below are the helper's, restated for that one
+                // reason - shape, height, hover ladder and focus ring all match.
+                className="h-7 min-h-7 w-auto shrink-0 gap-1 rounded-xl border-0 bg-transparent px-1.5 py-0 shadow-none text-[var(--text-secondary)] hover:bg-[var(--bg-tertiary)] hover:text-[var(--text-primary)] focus:ring-0 focus-visible:ring-2 focus-visible:ring-[var(--accent-primary)] focus-visible:ring-offset-1 focus-visible:ring-offset-[var(--bg-primary)]"
                 // The trigger shows an icon only, so the accessible name has to
                 // carry the ACTIVE mode too - an aria-label overrides `title`.
                 aria-label={`${t('cursorMode')}: ${cursorModeLabel}`}
@@ -125,81 +141,74 @@ export function CanvasToolbar({
 
         {/* Undo/Redo - only in edit mode */}
         {!isRunMode && (
-          <div className="flex items-center gap-1 border-r border-slate-200 dark:border-slate-700 pr-1">
-            <Button
+          <div className="flex items-center gap-1 border-r border-[var(--border-color)] pr-1">
+            <button
+              type="button"
               onClick={onUndo}
               disabled={!canUndo}
-              variant="ghost"
-              size="sm"
-              className="h-8 w-8 p-0 rounded-full shadow-none border-0 focus-visible:ring-2 focus-visible:ring-theme-tertiary"
+              className={canvasChromeCompactButtonClass()}
               title={t('undoTooltip')}
             >
               <Undo2 className="h-4 w-4" />
-            </Button>
-            <Button
+            </button>
+            <button
+              type="button"
               onClick={onRedo}
               disabled={!canRedo}
-              variant="ghost"
-              size="sm"
-              className="h-8 w-8 p-0 rounded-full shadow-none border-0 focus-visible:ring-2 focus-visible:ring-theme-tertiary"
+              className={canvasChromeCompactButtonClass()}
               title={t('redoTooltip')}
             >
               <Redo2 className="h-4 w-4" />
-            </Button>
+            </button>
           </div>
         )}
 
         {/* Zoom controls */}
-        <div className="flex items-center gap-1 border-r border-slate-200 dark:border-slate-700 pr-1">
-          <Button
+        <div className="flex items-center gap-1 border-r border-[var(--border-color)] pr-1">
+          <button
+            type="button"
             onClick={onZoomIn}
-            variant="ghost"
-            size="sm"
-            className="h-8 w-8 p-0 rounded-full shadow-none border-0 focus-visible:ring-2 focus-visible:ring-theme-tertiary"
+            className={canvasChromeCompactButtonClass()}
             title={t('zoomIn')}
           >
             <ZoomIn className="h-4 w-4" />
-          </Button>
-          <Button
+          </button>
+          <button
+            type="button"
             onClick={onZoomOut}
-            variant="ghost"
-            size="sm"
-            className="h-8 w-8 p-0 rounded-full shadow-none border-0 focus-visible:ring-2 focus-visible:ring-theme-tertiary"
+            className={canvasChromeCompactButtonClass()}
             title={t('zoomOut')}
           >
             <ZoomOut className="h-4 w-4" />
-          </Button>
+          </button>
         </div>
 
         {/* View controls */}
-        <div className="flex items-center gap-1 border-r border-slate-200 dark:border-slate-700 pr-1">
-          <Button
+        <div className="flex items-center gap-1 border-r border-[var(--border-color)] pr-1">
+          <button
+            type="button"
             onClick={onFitView}
-            variant="ghost"
-            size="sm"
-            className="h-8 w-8 p-0 rounded-full shadow-none border-0 focus-visible:ring-2 focus-visible:ring-theme-tertiary"
+            className={canvasChromeCompactButtonClass()}
             title={t('fitView')}
           >
             <Focus className="h-4 w-4" />
-          </Button>
-          <Button
+          </button>
+          <button
+            type="button"
             onClick={onAutoLayout}
-            variant="ghost"
-            size="sm"
-            className="h-8 w-8 p-0 rounded-full shadow-none border-0 focus-visible:ring-2 focus-visible:ring-theme-tertiary"
+            className={canvasChromeCompactButtonClass()}
             title={t('autoLayout')}
           >
             <Wand2 className="h-4 w-4" />
-          </Button>
+          </button>
         </div>
 
         {/* Interactivity lock */}
-        <div className="flex items-center gap-1 border-r border-slate-200 dark:border-slate-700 pr-1">
-          <Button
+        <div className="flex items-center gap-1 border-r border-[var(--border-color)] pr-1">
+          <button
+            type="button"
             onClick={onToggleInteractivity}
-            variant={isLockFocused ? "default" : "ghost"}
-            size="sm"
-            className="h-8 w-8 p-0 rounded-full shadow-none border-0 focus-visible:ring-2 focus-visible:ring-theme-tertiary"
+            className={canvasChromeCompactButtonClass(isLockFocused)}
             title={isInteractive ? t('disableInteractivity') : t('enableInteractivity')}
           >
             {isInteractive ? (
@@ -207,37 +216,35 @@ export function CanvasToolbar({
             ) : (
               <Lock className="h-4 w-4" />
             )}
-          </Button>
+          </button>
         </div>
 
         {/* Settings */}
-        <div className="flex items-center gap-1 border-r border-slate-200 dark:border-slate-700 pr-1">
-          <Button
+        <div className="flex items-center gap-1 border-r border-[var(--border-color)] pr-1">
+          <button
+            type="button"
             onClick={onToggleSettings}
-            variant={isSettingsOpen ? "default" : "ghost"}
-            size="sm"
-            className="h-8 w-8 p-0 rounded-full shadow-none border-0 focus-visible:ring-2 focus-visible:ring-theme-tertiary"
+            className={canvasChromeCompactButtonClass(isSettingsOpen)}
             title={t('settings')}
           >
             <Settings className="h-4 w-4" />
-          </Button>
+          </button>
         </div>
 
         {/* AI Assistant */}
         <div className="flex items-center gap-1">
-          <Button
+          <button
+            type="button"
             onClick={() => {
               window.dispatchEvent(new CustomEvent('workflowViewToggleMessagesPanel', {
                 detail: { toggle: true, view: 'chat' }
               }));
             }}
-            variant="ghost"
-            size="sm"
-            className="h-8 w-8 p-0 rounded-full shadow-none border-0 focus-visible:ring-2 focus-visible:ring-theme-tertiary"
+            className={canvasChromeCompactButtonClass()}
             title={t('openConversation')}
           >
             <Sparkles className="h-4 w-4" />
-          </Button>
+          </button>
         </div>
       </div>
     </Panel>

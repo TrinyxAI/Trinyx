@@ -13,6 +13,7 @@ import type { OrganizationRole } from '@/lib/api';
 import { useAuth } from '@/lib/providers/smart-providers';
 import { IS_CE } from '@/lib/edition';
 import { useAppVersion } from '@/hooks/useAppVersion';
+import { useHorizontalScrollHint } from '@/hooks/useHorizontalScrollHint';
 
 /**
  * Vertical navigation menu for settings pages
@@ -26,34 +27,9 @@ export function SettingsNav() {
 
     // Mobile scroll affordance: the nav is a horizontal strip with a hidden
     // scrollbar, so without a cue users cannot tell more items exist off-screen.
-    const scrollRef = React.useRef<HTMLElement>(null);
-    const [scrollHint, setScrollHint] = React.useState({ left: false, right: false });
-
-    const updateScrollHint = React.useCallback(() => {
-        const el = scrollRef.current;
-        if (!el) return;
-        // 4px tolerance absorbs sub-pixel rounding on high-DPI screens.
-        const left = el.scrollLeft > 4;
-        const right = el.scrollLeft + el.clientWidth < el.scrollWidth - 4;
-        setScrollHint(prev => (prev.left === left && prev.right === right) ? prev : { left, right });
-    }, []);
-
-    React.useEffect(() => {
-        updateScrollHint();
-        const el = scrollRef.current;
-        if (!el || typeof ResizeObserver === 'undefined') return;
-        const observer = new ResizeObserver(updateScrollHint);
-        observer.observe(el);
-        // The strip widens after the admin-role fetch reveals more items.
-        if (el.firstElementChild) observer.observe(el.firstElementChild);
-        return () => observer.disconnect();
-    }, [updateScrollHint]);
-
-    const nudge = React.useCallback((direction: 1 | -1) => {
-        const el = scrollRef.current;
-        if (!el) return;
-        el.scrollBy({ left: direction * Math.round(el.clientWidth * 0.6), behavior: 'smooth' });
-    }, []);
+    // The strip also widens after the admin-role fetch reveals more items.
+    const { scrollRef, hint: scrollHint, onScroll: updateScrollHint, nudge } =
+        useHorizontalScrollHint<HTMLElement>();
 
     React.useEffect(() => {
         organizationApi.getOrganizations().then(orgs => {

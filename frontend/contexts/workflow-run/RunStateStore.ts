@@ -69,7 +69,17 @@ export interface RunState {
   totalDurationMs: number | null;
   totalNodes: number;
   currentEpoch: number;
-  epochTimestamps: Array<{ epoch: number; startedAt: string; endedAt: string | null }>;
+  epochTimestamps: Array<{
+    epoch: number;
+    startedAt: string;
+    endedAt: string | null;
+    /**
+     * How long the epoch spent executing, measured by the backend on its step rows.
+     * The only trustworthy duration: `endedAt - startedAt` is the epoch's lifetime,
+     * which counts the idle tail before its deferred close.
+     */
+    workDurationMs?: number | null;
+  }>;
   /** Monotonic counter from backend StateSnapshot. Bumps on every state change. */
   snapshotSeq: number;
   /** Sum of all per-node completed+failed+skipped counts from streaming statusCounts.
@@ -140,7 +150,7 @@ export interface InitializeFromApiPayload {
   edges?: any[];
   rawState?: any;
   currentEpoch?: number;
-  epochTimestamps?: Array<{ epoch: number; startedAt: string; endedAt: string | null }>;
+  epochTimestamps?: RunState['epochTimestamps'];
   totalDurationMs?: number;
   /** Total accumulated run cost across all epochs, in credits (1 credit = $0.001). */
   costCredits?: number | null;
@@ -178,21 +188,29 @@ export const TERMINAL_STATUSES: ReadonlySet<RunStatus> = new Set(['completed', '
 
 /**
  * Shallow content-equality for the epochTimestamps array. Length + per-index
- * tuple match (epoch + startedAt + endedAt). Used by {@link setEpochData} to
- * skip a state write when the WS-decoded array carries identical data to the
- * current state - preserves array identity downstream so React memoizations
- * can short-circuit.
+ * tuple match (epoch + startedAt + endedAt + workDurationMs). Used by
+ * {@link setEpochData} to skip a state write when the WS-decoded array carries
+ * identical data to the current state - preserves array identity downstream so
+ * React memoizations can short-circuit.
+ *
+ * `workDurationMs` MUST be compared: while an epoch executes it is the only field
+ * that moves (`startedAt` is fixed and `endedAt` stays null until the close), so
+ * omitting it makes every in-flight poll look like "no change" and freezes the
+ * duration the UI is showing.
  */
+type EpochTimestampEntry = RunState['epochTimestamps'][number];
+
 function isEpochTimestampsContentEqual(
-  a: Array<{ epoch: number; startedAt: string; endedAt: string | null }>,
-  b: Array<{ epoch: number; startedAt: string; endedAt: string | null }>,
+  a: EpochTimestampEntry[],
+  b: EpochTimestampEntry[],
 ): boolean {
   if (a === b) return true;
   if (a.length !== b.length) return false;
   for (let i = 0; i < a.length; i++) {
     const x = a[i];
     const y = b[i];
-    if (x.epoch !== y.epoch || x.startedAt !== y.startedAt || x.endedAt !== y.endedAt) {
+    if (x.epoch !== y.epoch || x.startedAt !== y.startedAt || x.endedAt !== y.endedAt
+        || (x.workDurationMs ?? null) !== (y.workDurationMs ?? null)) {
       return false;
     }
   }
@@ -594,7 +612,7 @@ export class RunStateStore {
    * chain in EpochSelector even when nothing changed - which made the
    * memoization theatre and re-rendered all visible virtualized rows.
    */
-  setEpochData(epoch: number, timestamps?: Array<{ epoch: number; startedAt: string; endedAt: string | null }>): void {
+  setEpochData(epoch: number, timestamps?: RunState['epochTimestamps']): void {
     const epochChanged = this.state.currentEpoch !== epoch;
     const timestampsChanged = timestamps != null
       && !isEpochTimestampsContentEqual(this.state.epochTimestamps, timestamps);

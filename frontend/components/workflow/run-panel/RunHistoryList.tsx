@@ -94,13 +94,14 @@ const RUN_STATUS_ICON: Record<RunRowStatus, { icon: React.ReactNode; className: 
  * formatter answers "-" when it cannot measure. Since runs aggregate rather than
  * fork, that is the state of MOST rows.
  *
- * With nothing to measure at all - no epoch has closed and the run has not
+ * With nothing to measure at all - nothing has executed and the run has not
  * finished - the cell is EMPTY: a blank reads as "not applicable", a dash reads
  * as a broken value.
  */
 const formatRunDuration = (run: WorkflowRun): { text: string; isLastEpoch: boolean } => {
-  // The LAST EXECUTION comes first, and it is read from the epoch row rather than
-  // reconstructed here. Two reasons the obvious alternatives are wrong:
+  // The LAST EXECUTION comes first. The backend measures it on the step rows of
+  // the latest epoch (first node start -> last node end), so it is the time the
+  // workflow spent WORKING. Three tempting alternatives are all wrong:
   //
   //  - the whole-run span is not a fallback, it is a trap. `cancelStaleRuns`
   //    stamps `endedAt` on every resting run whenever a new one is created, so a
@@ -109,7 +110,14 @@ const formatRunDuration = (run: WorkflowRun): { text: string; isLastEpoch: boole
   //  - `lastCycleAt` minus `lastFireAt` looks equivalent but is not: the engine
   //    runs concurrent epochs across trigger DAGs, so those two timestamps can
   //    belong to different epochs and even different triggers, and the difference
-  //    comes out positive and confidently wrong.
+  //    comes out positive and confidently wrong;
+  //  - the epoch's OWN duration, which this column used to show, is the same trap
+  //    one level down. An epoch closes only when it is reconciled (the next fire, a
+  //    resume, a restart recovery sweep), so it counts the idle tail: prod printed
+  //    32h42m and 6h01m for epochs whose nodes really ran for 5 to 35 seconds.
+  //
+  // A wait INSIDE the graph (an approval, a timer) is still counted, because the
+  // waiting node's own step spans it. That one is the truth, not an artefact.
   //
   // Every branch goes through formatCompactDuration: the column is fixed-width and
   // tabular, and mixing it with dateFormatters' spaced style ("1m 30s" next to
@@ -118,9 +126,11 @@ const formatRunDuration = (run: WorkflowRun): { text: string; isLastEpoch: boole
     return { text: formatCompactDuration(run.lastEpochDurationMs), isLastEpoch: true };
   }
 
-  // A run that finished WITHOUT ever opening an epoch - a single-shot
-  // step-by-step run, or one that ended before the first fire. There the whole
-  // run IS the single execution, so its span means what it says.
+  // Last resort: a run that finished WITHOUT ever opening an epoch AND without
+  // leaving a single step row - it ended before anything executed. There the whole
+  // run IS the execution, so its span means what it says. A single-shot
+  // step-by-step run does not land here any more: it writes step rows, so the
+  // measured window above wins, which is the better answer.
   //
   // Gated on having no epoch at all, which is what separates it from the trap
   // above: a stale-cancelled reusable run also carries `endedAt`, but it has

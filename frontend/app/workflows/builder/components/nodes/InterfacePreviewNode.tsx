@@ -509,7 +509,10 @@ export function InterfacePreviewNode({ data, selected, id }: InterfacePreviewNod
           />
         )}
 
-        {/* Pagination controls - below node (spawn items only, not epochs) */}
+        {/* Pagination controls - below node (spawn items only, not epochs).
+          Scoped to a focused epoch on purpose: across all epochs the items of
+          every fire are aggregated, so "item 2 of 5" would name nothing. Runs
+          open on all epochs, so this appears once an epoch is picked. */}
         {isRunMode && viewingEpoch != null && totalPages > 1 && (
           <div
             className="absolute nodrag nopan"
@@ -641,7 +644,10 @@ export function InterfacePreviewNode({ data, selected, id }: InterfacePreviewNod
         />
       )}
 
-      {/* Pagination controls - below node (spawn items only, not epochs) */}
+      {/* Pagination controls - below node (spawn items only, not epochs).
+          Scoped to a focused epoch on purpose: across all epochs the items of
+          every fire are aggregated, so "item 2 of 5" would name nothing. Runs
+          open on all epochs, so this appears once an epoch is picked. */}
       {isRunMode && viewingEpoch != null && totalPages > 1 && (
         <div
           className="absolute nodrag nopan z-20"

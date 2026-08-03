@@ -28,6 +28,13 @@ interface ApplicationCarouselProps {
    * {@code document.body} portal, so it works inside the preview shell).
    */
   previewMode?: boolean;
+  /**
+   * Open on the newest fire rather than on all epochs. Set where the
+   * application IS the product (a published app, a shared link): its visitors
+   * came for the latest result. On the workflow page it stays off, so the app
+   * shows the same cumulative view as the canvas and the Run panel.
+   */
+  openOnLatestEpoch?: boolean;
 }
 
 export function ApplicationCarousel({
@@ -38,6 +45,7 @@ export function ApplicationCarousel({
   targetInterfaceId,
   onTargetConsumed,
   previewMode = false,
+  openOnLatestEpoch = false,
 }: ApplicationCarouselProps) {
   const t = useTranslations('chat.carousel');
   const { isRunMode } = useWorkflowMode();
@@ -235,6 +243,7 @@ export function ApplicationCarousel({
             onToolbarOpenChange={setToolbarOpen}
             viewingEpoch={viewingEpoch}
             onViewingEpochChange={setViewingEpoch}
+            openOnLatestEpoch={openOnLatestEpoch}
             previewMode={previewMode}
           />
         </div>

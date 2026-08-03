@@ -5,8 +5,8 @@ import { List as VirtualList, useListRef, type RowComponentProps } from 'react-w
 import { Calendar } from 'lucide-react';
 import { useTranslations } from 'next-intl';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
-import { formatUtcTime, formatUtcDateTime, parseUtcAware } from '@/lib/utils/dateFormatters';
-import { formatCompactDuration, type EpochTimestamp } from './runFormatting';
+import { formatUtcTime, formatUtcDateTime } from '@/lib/utils/dateFormatters';
+import { formatCompactDuration, epochDisplayDurationMs, type EpochTimestamp } from './runFormatting';
 
 interface EpochSelectorProps {
   epochTimestamps: EpochTimestamp[];
@@ -31,7 +31,8 @@ const EPOCH_LIST_MAX_HEIGHT = EPOCH_ROW_HEIGHT * EPOCH_LIST_VISIBLE_ROWS;
 
 interface EpochRowProps {
   entries: EpochTimestamp[];
-  durations: number[];
+  /** null = the payload carried no measured window; render nothing, never a zero. */
+  durations: Array<number | null>;
   maxDuration: number;
   selectedEpoch: number | null;
   onSelectEpoch: (epoch: number | null) => void;
@@ -47,12 +48,15 @@ function EpochRow({ index, style, entries, durations, maxDuration, selectedEpoch
   const isSelected = selectedEpoch === entry.epoch;
   const isRunning = entry.startedAt != null && entry.endedAt == null;
   const duration = durations[index];
-  const barPct = maxDuration > 0 ? Math.max(5, (duration / maxDuration) * 100) : 5;
+  const barPct = maxDuration > 0 ? Math.max(5, ((duration ?? 0) / maxDuration) * 100) : 5;
 
   const epochButton = (
     <button
       type="button"
       style={style}
+      data-epoch-option={entry.epoch}
+      data-selected={isSelected || undefined}
+      aria-current={isSelected || undefined}
       onClick={(e) => { e.stopPropagation(); onSelectEpoch(entry.epoch); }}
       className={`w-full flex items-center gap-1.5 px-3 py-2.5 text-sm transition-colors ${
         isSelected
@@ -91,7 +95,7 @@ function EpochRow({ index, style, entries, durations, maxDuration, selectedEpoch
           <span className={`min-w-[40px] text-right text-xs tabular-nums shrink-0 ${
             isRunning ? 'text-blue-500 dark:text-blue-400' : 'text-gray-500 dark:text-gray-400'
           }`}>
-            {entry.startedAt ? formatCompactDuration(duration) : ''}
+            {duration != null ? formatCompactDuration(duration) : ''}
           </span>
         </>
       ) : (
@@ -120,7 +124,7 @@ function EpochRow({ index, style, entries, durations, maxDuration, selectedEpoch
           <span className={`w-14 text-right text-xs tabular-nums font-medium shrink-0 ${
             isRunning ? 'text-blue-500 dark:text-blue-400' : 'text-gray-500 dark:text-gray-400'
           }`}>
-            {entry.startedAt ? formatCompactDuration(duration) : ''}
+            {duration != null ? formatCompactDuration(duration) : ''}
           </span>
         </>
       )}
@@ -209,7 +213,7 @@ function EpochRow({ index, style, entries, durations, maxDuration, selectedEpoch
                   : 'text-gray-900 dark:text-gray-100'
               }`}
             >
-              {entry.startedAt ? formatCompactDuration(duration) : '-'}
+              {duration != null ? formatCompactDuration(duration) : '-'}
             </span>
           </div>
         </div>
@@ -246,19 +250,14 @@ export const EpochSelector = memo(function EpochSelector({ epochTimestamps, sele
   }, [hasRunningEpoch]);
 
   const durations = useMemo(() => {
-    return sorted.map((entry) => {
-      if (!entry.startedAt) return 0;
-      const start = parseUtcAware(entry.startedAt).getTime();
-      if (isNaN(start)) return 0;
-      const end = entry.endedAt ? parseUtcAware(entry.endedAt).getTime() : Date.now();
-      return isNaN(end) ? 0 : Math.max(0, end - start);
-    });
+    const now = Date.now();
+    return sorted.map((entry) => epochDisplayDurationMs(entry, now));
     // `tick` is a deliberate dep: forces recompute every second when a running
     // epoch exists, so the bar / label tick forward without leaning on SSE cadence.
   }, [sorted, tick]);
 
   const maxDuration = useMemo(
-    () => durations.reduce((m, d) => (d > m ? d : m), 1),
+    () => durations.reduce((m, d) => ((d ?? 0) > m ? (d ?? 0) : m), 1),
     [durations]
   );
 
@@ -291,6 +290,9 @@ export const EpochSelector = memo(function EpochSelector({ epochTimestamps, sele
       {/* "All epochs" button */}
       <button
         type="button"
+        data-epoch-option="all"
+        data-selected={selectedEpoch === null || undefined}
+        aria-current={selectedEpoch === null || undefined}
         onClick={(e) => { e.stopPropagation(); onSelectEpoch(null); }}
         className={`w-full flex items-center gap-1.5 px-3 py-2.5 text-sm transition-colors ${
           selectedEpoch === null

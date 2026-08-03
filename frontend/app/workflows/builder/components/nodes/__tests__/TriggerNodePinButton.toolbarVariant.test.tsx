@@ -25,6 +25,7 @@ vi.mock('@/lib/api', () => ({
 }));
 
 import { TriggerNodePinButton } from '../TriggerNodePinButton';
+import { canvasChromeCompactButtonClass } from '@/components/ui/canvas-chrome';
 
 const toolbarButton = () => screen.getByTestId('canvas-toolbar-pin-button');
 
@@ -42,7 +43,12 @@ describe('TriggerNodePinButton - toolbar variant', () => {
     // The node variant paints a 2px status border; the toolbar copy must not.
     expect(button.getAttribute('style')).toBeNull();
     expect(button.className).not.toContain('nodrag');
-    expect(button.className).toContain('h-8');
+    // The shared compact chrome, size included: a control nested in a chrome
+    // card must land on the same row as every other one. Asserted against the
+    // helper rather than a hardcoded height, so the two cannot drift.
+    for (const cls of canvasChromeCompactButtonClass().split(' ')) {
+      expect(button.className, `missing chrome class ${cls}`).toContain(cls);
+    }
   });
 
   it('keeps the node badge unchanged (no toolbar test id, status border applied)', () => {

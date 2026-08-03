@@ -12,6 +12,8 @@ import { NodeHeader, useHoverVisibility, getIconSlug, getIconUrl, getStatusBorde
 import { findNodeClassById } from '../../nodes/nodeClasses';
 import { NodeStatusBadge } from '../NodeStatusBadge';
 import { useWorkflowMode } from '@/contexts/WorkflowModeContext';
+import { selectAllEpochs } from '@/components/workflow/run-panel/useDefaultEpochSelection';
+import { boundRunId } from '@/components/workflow/run-panel/runPanelBus';
 import { InterfaceThumbnail } from '../interface/InterfaceThumbnail';
 import { resolveInterfaceFormat } from '@/lib/interfaces/interfaceFormats';
 import { parseUtcAware } from '@/lib/utils/dateFormatters';
@@ -538,7 +540,10 @@ export function FlowNode({ data, selected, id }: NodeProps<BuilderNodeData>) {
         </>
       )}
 
-      {/* Pagination controls - below node (spawn items only, not epochs) */}
+      {/* Pagination controls - below node (spawn items only, not epochs).
+          Scoped to a focused epoch on purpose: across all epochs the items of
+          every fire are aggregated, so "item 2 of 5" would name nothing. Runs
+          open on all epochs, so this appears once an epoch is picked. */}
       {isRunMode && isInterfaceNode && viewingEpoch != null && runModeTotalItems > 1 && (
         <div
           className="absolute nodrag nopan z-10"
@@ -669,7 +674,11 @@ export function FlowNode({ data, selected, id }: NodeProps<BuilderNodeData>) {
             icon: <Play className="h-3 w-3" fill="currentColor" strokeWidth={2} />,
             title: 'Run',
             onClick: () => {
-              setViewingEpoch(null);
+              // Keyed off the run the CANVAS is bound to: that is the id the
+              // epoch selection is read back under, and it is not always the
+              // provider's (a panel-mounted canvas resolves its run from run
+              // info, with no run id in its provider at all).
+              selectAllEpochs(boundRunId(workflowId, runId), setViewingEpoch);
               stepByStepStatus.fireFromAnyEpoch();
             },
           });

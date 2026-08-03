@@ -113,7 +113,7 @@ public class WorkflowRunQueryController {
         Map<String, Instant> lastFireMap =
             workflowEpochRepository.getLatestEpochStartedAtByRunIds(runIds);
         Map<String, Long> lastEpochDurationMap =
-            workflowEpochRepository.getLatestEpochDurationByRunIds(runIds);
+            workflowEpochService.getLatestEpochWorkDurationByRunIds(runIds);
 
         List<WorkflowRunSummary> response = projections.stream()
             .map(p -> mapRunFromProjection(p,
@@ -146,7 +146,7 @@ public class WorkflowRunQueryController {
         Map<String, Instant> lastFireMap =
             workflowEpochRepository.getLatestEpochStartedAtByRunIds(singleRun);
         Map<String, Long> lastEpochDurationMap =
-            workflowEpochRepository.getLatestEpochDurationByRunIds(singleRun);
+            workflowEpochService.getLatestEpochWorkDurationByRunIds(singleRun);
         WorkflowRunSummary latestRun = mapRunFromProjection(p,
                 epochMap.get(p.getRunIdPublic()),
                 lastFireMap.get(p.getRunIdPublic()),
@@ -669,7 +669,7 @@ public class WorkflowRunQueryController {
         Map<String, Instant> lastFireMap =
             workflowEpochRepository.getLatestEpochStartedAtByRunIds(singleRun);
         Map<String, Long> lastEpochDurationMap =
-            workflowEpochRepository.getLatestEpochDurationByRunIds(singleRun);
+            workflowEpochService.getLatestEpochWorkDurationByRunIds(singleRun);
         return mapRun(entity,
                 epochMap.get(entity.getRunIdPublic()),
                 lastFireMap.get(entity.getRunIdPublic()),

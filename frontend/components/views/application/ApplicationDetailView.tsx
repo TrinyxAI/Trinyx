@@ -571,6 +571,9 @@ export function ApplicationDetailView({ workflowId, runId, title, publisherName,
               workflowId={workflowId}
               onAction={handleApplicationAction}
               previewMode={publicPreviewMode}
+              // Here the application IS the page: its visitors want the latest
+              // result, not a pager spanning every fire the workflow ever had.
+              openOnLatestEpoch
             />
           );
         })()

@@ -84,6 +84,24 @@ export function getCachedRunPanelData(workflowId: string): RunPanelData {
   return cacheByWorkflow.get(workflowId) ?? makeEmptyRunPanelData(workflowId);
 }
 
+/**
+ * The run the canvas of this workflow is bound to.
+ *
+ * This is the id every run surface keys its per-run state off (the epoch the
+ * user picked, above all), and the canvas resolves it from more than the
+ * provider knows: the run info it fetched, then the URL run, then the in-place
+ * one. A component deep in the canvas that only has the provider's run id would
+ * key the SAME state under a different id - or under none at all where the
+ * provider was mounted without one - so it reads it back from here instead.
+ */
+export function boundRunId(
+  workflowId: string | null | undefined,
+  fallback?: string | null,
+): string | null {
+  if (!workflowId) return fallback ?? null;
+  return getCachedRunPanelData(workflowId).runId ?? fallback ?? null;
+}
+
 /** Publish a fresh snapshot (canvas → panel). Also fills the late-mount cache. */
 export function publishRunPanelData(data: RunPanelData): void {
   if (typeof window === 'undefined' || !data.workflowId) return;

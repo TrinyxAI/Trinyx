@@ -154,7 +154,7 @@ class WorkflowRunQueryControllerLastFireAtTest {
                 .thenReturn(Map.of(RUN_ID_PUBLIC, 12));
         when(workflowEpochRepository.getLatestEpochStartedAtByRunIds(anyList()))
                 .thenReturn(Map.of(RUN_ID_PUBLIC, lastFire));
-        when(workflowEpochRepository.getLatestEpochDurationByRunIds(anyList()))
+        when(workflowEpochService.getLatestEpochWorkDurationByRunIds(anyList()))
                 .thenReturn(Map.of(RUN_ID_PUBLIC, 7_000L));
 
         ResponseEntity<List<WorkflowRunSummary>> dresponse =
@@ -167,11 +167,11 @@ class WorkflowRunQueryControllerLastFireAtTest {
     }
 
     @Test
-    @DisplayName("listRuns leaves lastEpochDurationMs null when no epoch has closed yet")
+    @DisplayName("listRuns leaves lastEpochDurationMs null when nothing has executed yet")
     @SuppressWarnings("unchecked")
     void listRunsLeavesLastEpochDurationNullWhenNoneClosed() {
-        // An epoch still executing has no settled figure; null keeps the column
-        // blank instead of claiming the run took no time at all.
+        // A run with no step row has nothing to measure; null keeps the column blank
+        // instead of claiming the run took no time at all.
         WorkflowRunSummaryProjection np = projection(RUN_ID_PUBLIC, Instant.now().minusSeconds(60));
         Page<WorkflowRunSummaryProjection> npage = new PageImpl<>(List.of(np), Pageable.ofSize(15), 1);
 
@@ -180,7 +180,7 @@ class WorkflowRunQueryControllerLastFireAtTest {
                 .thenReturn(npage);
         when(workflowEpochRepository.getMaxEpochByRunIds(anyList())).thenReturn(Map.of());
         when(workflowEpochRepository.getLatestEpochStartedAtByRunIds(anyList())).thenReturn(Map.of());
-        when(workflowEpochRepository.getLatestEpochDurationByRunIds(anyList())).thenReturn(Map.of());
+        when(workflowEpochService.getLatestEpochWorkDurationByRunIds(anyList())).thenReturn(Map.of());
 
         ResponseEntity<List<WorkflowRunSummary>> nresponse =
                 (ResponseEntity<List<WorkflowRunSummary>>) (ResponseEntity<?>)

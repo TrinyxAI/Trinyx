@@ -211,7 +211,12 @@ describe('RunPanelContent - run actions', () => {
 });
 
 describe('RunPanelContent - picking a run', () => {
-  it('does not re-bind when the picked run is already the one being shown', () => {
+  it('still asks the page to align on the run already being shown', () => {
+    // An agent-launched run is bound in place on the EDIT url, and picking it
+    // here is how the user says "keep this one" - so the request goes out and
+    // the page decides whether there is an address bar left to align. Deciding
+    // here would need the panel to know the route, which it does not: it is
+    // also mounted on surfaces whose URL says nothing about a run.
     const bound: any[] = [];
     const onBind = (e: Event) => bound.push((e as CustomEvent).detail);
     window.addEventListener('workflowBindRun', onBind);
@@ -221,8 +226,7 @@ describe('RunPanelContent - picking a run', () => {
     } finally {
       window.removeEventListener('workflowBindRun', onBind);
     }
-    // Re-binding the current run would tear the canvas down for nothing.
-    expect(bound).toEqual([]);
+    expect(bound).toEqual([{ workflowId: 'wf-1', runId: 'run-1' }]);
     expect(screen.getByTestId('summary')).toBeTruthy();
   });
 
@@ -255,10 +259,10 @@ describe('RunPanelContent - epoch selection', () => {
     expect(setRunId).toHaveBeenCalledWith('run-1');
   });
 
-  it('waits for its provider to adopt the run before seeding an epoch', () => {
-    // setRunId is a state update: seeding in the same commit would broadcast the
-    // epoch with runId:null, which every other mounted provider adopts - the
-    // cross-talk the scoping exists to prevent, on the very first selection.
+  it('announces the run to its provider without touching the epoch', () => {
+    // setRunId is a state update: selecting an epoch in the same commit would
+    // broadcast it with runId:null, which every other mounted provider adopts -
+    // the cross-talk the scoping exists to prevent, on the very first selection.
     ctxRunId.value = null;
     ctxEpoch.value = null;
     render(<RunPanelContent workflowId="wf-1" allowHistory />);
@@ -266,14 +270,12 @@ describe('RunPanelContent - epoch selection', () => {
     expect(setViewingEpoch).not.toHaveBeenCalled();
   });
 
-  it('lands on an epoch by itself, instead of the cumulative "All epochs"', () => {
-    // The canvas seeds its own provider and broadcasts, but this panel does not
-    // exist while the side panel is closed - the normal case - so it never heard
-    // that broadcast and opened unselected, listing every epoch's steps while the
-    // canvas chip beside it read a number.
+  it('opens on "All epochs", never on an epoch picked for the user', () => {
+    // A run is its whole sequence of fires: landing on one epoch hid the others
+    // behind a selector nobody touched. Only an explicit pick shows a single one.
     ctxEpoch.value = null;
     render(<RunPanelContent workflowId="wf-1" allowHistory />);
-    expect(setViewingEpoch).toHaveBeenCalledWith(2);
+    expect(setViewingEpoch).not.toHaveBeenCalled();
   });
 
   it('does not re-announce a run the provider already knows', () => {
@@ -282,18 +284,29 @@ describe('RunPanelContent - epoch selection', () => {
     expect(setRunId).not.toHaveBeenCalled();
   });
 
-  it('records an explicit epoch pick so the live-follow stops fighting the user', async () => {
-    const { markEpochPickedByUser, isEpochAutoFollowing } = await import(
+  it('records an explicit epoch pick so the other surfaces show the same epoch', async () => {
+    const { getPickedEpoch } = await import(
       '@/components/workflow/run-panel/useDefaultEpochSelection'
     );
-    expect(isEpochAutoFollowing('run-1')).toBe(true);
+    expect(getPickedEpoch('run-1'), 'nothing picked before the click').toBeUndefined();
     render(<RunPanelContent workflowId="wf-1" allowHistory />);
 
     act(() => { stepsProps.current.onSelectEpoch(1); });
 
     expect(setViewingEpoch).toHaveBeenCalledWith(1);
-    expect(isEpochAutoFollowing('run-1')).toBe(false);
-    // Sanity: the helper the component uses is the one asserted above.
-    expect(typeof markEpochPickedByUser).toBe('function');
+    expect(getPickedEpoch('run-1')).toBe(1);
+  });
+
+  it('records a pick BACK to "All epochs" too, so nothing restores the old epoch', async () => {
+    const { getPickedEpoch } = await import(
+      '@/components/workflow/run-panel/useDefaultEpochSelection'
+    );
+    render(<RunPanelContent workflowId="wf-1" allowHistory />);
+
+    act(() => { stepsProps.current.onSelectEpoch(2); });
+    act(() => { stepsProps.current.onSelectEpoch(null); });
+
+    expect(setViewingEpoch).toHaveBeenLastCalledWith(null);
+    expect(getPickedEpoch('run-1')).toBeNull();
   });
 });

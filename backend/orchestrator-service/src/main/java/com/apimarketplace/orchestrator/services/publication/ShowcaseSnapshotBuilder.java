@@ -265,19 +265,16 @@ public class ShowcaseSnapshotBuilder {
             if (epochFilter != null) {
                 currentEpoch = RENUMBERED_EPOCH;
                 if (epochTimestamps != null && !epochTimestamps.isEmpty()) {
-                    List<Map<String, Object>> renumbered = new ArrayList<>();
-                    for (var t : epochTimestamps) {
-                        try {
-                            Object ep = t.getClass().getMethod("epoch").invoke(t);
-                            if (ep instanceof Number n && n.intValue() == epochFilter) {
-                                Map<String, Object> m = new LinkedHashMap<>();
-                                m.put("epoch", RENUMBERED_EPOCH);
-                                m.put("startedAt", t.getClass().getMethod("startedAt").invoke(t));
-                                m.put("endedAt", t.getClass().getMethod("endedAt").invoke(t));
-                                renumbered.add(m);
-                            }
-                        } catch (Exception ignored) {}
-                    }
+                    // Only the epoch NUMBER is rewritten; every other field goes through
+                    // the shared wire shape. The previous version rebuilt the map field
+                    // by field through reflection, inside a catch-all that dropped the
+                    // whole entry on any mismatch - which is how workDurationMs (the one
+                    // field saying how long the epoch executed) would have gone missing
+                    // here while the authenticated app showed it.
+                    List<Map<String, Object>> renumbered = epochTimestamps.stream()
+                            .filter(t -> t.epoch() == epochFilter)
+                            .map(t -> t.withEpoch(RENUMBERED_EPOCH).toWireMap())
+                            .toList();
                     response.put("epochTimestamps", renumbered);
                     response.put("currentEpoch", currentEpoch);
                 } else {

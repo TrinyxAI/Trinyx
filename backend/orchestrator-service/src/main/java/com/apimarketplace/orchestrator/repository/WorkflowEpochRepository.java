@@ -339,51 +339,15 @@ public class WorkflowEpochRepository {
         return result;
     }
 
-    /**
-     * Batch-fetch the DURATION of the most recent closed epoch per run ID.
-     *
-     * <p>This is the figure the run history shows for a run that has not
-     * terminated. A reusable run never ends - it rests in WAITING_TRIGGER between
-     * fires - so its own {@code duration_ms} is null and the span between its
-     * {@code startedAt} and any {@code endedAt} measures the run's LIFETIME (days,
-     * once {@code cancelStaleRuns} stamps an end on it), not how long the workflow
-     * takes to execute.
-     *
-     * <p>Read from the epoch row rather than reconstructed by the caller: the
-     * engine supports CONCURRENT epochs across trigger DAGs, so pairing a global
-     * MAX(started_at) with a "last cycle closed at" from elsewhere can subtract two
-     * different epochs and produce a confident, wrong number. One row, one epoch,
-     * one duration.
-     *
-     * <p>Only CLOSED epochs are considered ({@code duration_ms} is written when the
-     * epoch closes): a run whose only epoch is still executing has no settled
-     * figure and is absent from the map.
-     */
-    public Map<String, Long> getLatestEpochDurationByRunIds(List<String> runIds) {
-        if (runIds == null || runIds.isEmpty()) return Map.of();
-        String placeholders = runIds.stream().map(id -> "?").collect(java.util.stream.Collectors.joining(", "));
-        // EVERY ordered-on column is in the select list. Postgres tolerates ordering
-        // on a column it does not project when using DISTINCT ON; H2 rejects it
-        // (90068), and the H2-backed repository is @Primary in all three test
-        // profiles - so omitting one turns the build red while prod stays fine.
-        //
-        // NULLS LAST because `started_at` is nullable and Postgres sorts DESC with
-        // NULLS FIRST: an unstamped header would otherwise outrank the genuinely
-        // latest epoch. `epoch DESC` breaks the tie when two trigger DAGs stamp the
-        // same instant.
-        String sql = "SELECT DISTINCT ON (run_id) run_id, duration_ms, started_at, epoch FROM workflow_epochs " +
-                "WHERE run_id IN (" + placeholders + ") AND entry_type = 'EPOCH_HEADER' " +
-                "AND duration_ms IS NOT NULL " +
-                "ORDER BY run_id, started_at DESC NULLS LAST, epoch DESC";
-        Map<String, Long> result = new java.util.HashMap<>();
-        jdbcTemplate.query(sql, rs -> {
-            Object duration = rs.getObject("duration_ms");
-            if (duration != null) {
-                result.put(rs.getString("run_id"), rs.getLong("duration_ms"));
-            }
-        }, runIds.toArray());
-        return result;
-    }
+    // NOTE - "how long did the last execution take" is deliberately NOT answered from
+    // this table. `duration_ms` on the header is stamped at CLOSE time as
+    // (now - startedAt), and an epoch closes only when it is reconciled: the next
+    // fire's resetForNextCycle (skipped while a blocking signal or in-flight agent
+    // remains), a resume, or a restart recovery sweep. Any of those can land hours or
+    // days later, so the column measures the epoch's LIFETIME. Prod reported 6h01m
+    // and 32h42m for runs whose epochs really execute in 5 to 35 seconds. The work
+    // window comes from the step rows instead:
+    // WorkflowStepDataRepository#findEpochWorkWindows.
 
     /**
      * Batch-fetch the most recent epoch start time per run ID from EPOCH_HEADER rows.
@@ -443,9 +407,45 @@ public class WorkflowEpochRepository {
 
     /**
      * Lightweight projection for epoch timeline display.
-     * Fields match the frontend contract: {epoch, startedAt, endedAt}.
+     * Fields match the frontend contract: {epoch, startedAt, endedAt, workDurationMs}.
+     *
+     * <p>{@code startedAt}/{@code endedAt} are the header's own timestamps: they place
+     * the epoch on the timeline and {@code endedAt == null} is how the UI knows an
+     * epoch is still open. Their SPAN is not a duration - the close is deferred, so
+     * it counts the idle tail (see the note above {@code getLatestEpochStartedAtByRunIds}).
+     * {@code workDurationMs} is the executed window, filled in from the step rows by
+     * {@code WorkflowEpochService}; it is null for an epoch that has produced no step
+     * row yet.
      */
-    public record EpochTimestampRow(int epoch, String startedAt, String endedAt) {
+    public record EpochTimestampRow(int epoch, String startedAt, String endedAt, Long workDurationMs) {
+
+        /** Header-only row, before the step-derived work window is attached. */
+        public EpochTimestampRow(int epoch, String startedAt, String endedAt) {
+            this(epoch, startedAt, endedAt, null);
+        }
+
+        public EpochTimestampRow withWorkDurationMs(Long millis) {
+            return new EpochTimestampRow(epoch, startedAt, endedAt, millis);
+        }
+
+        public EpochTimestampRow withEpoch(int renumbered) {
+            return new EpochTimestampRow(renumbered, startedAt, endedAt, workDurationMs);
+        }
+
+        /**
+         * The wire shape consumed by the epoch timeline. Shared by every hand-built
+         * epoch payload (the public app, the showcase snapshot) so a new field cannot
+         * reach one client and be silently dropped by another - which is exactly how
+         * {@code workDurationMs} would have been lost.
+         */
+        public Map<String, Object> toWireMap() {
+            Map<String, Object> wire = new java.util.LinkedHashMap<>();
+            wire.put("epoch", epoch);
+            wire.put("startedAt", startedAt);
+            wire.put("endedAt", endedAt);
+            wire.put("workDurationMs", workDurationMs);
+            return wire;
+        }
     }
 
     /**

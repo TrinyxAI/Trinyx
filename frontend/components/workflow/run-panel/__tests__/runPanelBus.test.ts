@@ -11,6 +11,7 @@
  */
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
+  boundRunId,
   clearRunPanelCache,
   consumeRunPanelViewRequest,
   getCachedRunPanelData,
@@ -68,6 +69,31 @@ describe('run panel snapshots', () => {
     subscribeRunPanelData('wf-1', onData)();
     publishRunPanelData(snapshot('wf-1'));
     expect(onData).not.toHaveBeenCalled();
+  });
+});
+
+describe('the run a canvas is bound to', () => {
+  // Components deep inside the canvas key per-run state (the epoch the user
+  // picked) off this. Their provider does not always know it: a panel-mounted
+  // canvas resolves its run from run info with no run id in its provider, and
+  // keying the same state under two ids is how a cleared epoch came back.
+  it('is the run the canvas published, not the one the caller happens to hold', () => {
+    publishRunPanelData(snapshot('wf-1', { runId: 'run-from-canvas' }));
+    expect(boundRunId('wf-1', 'run-from-provider')).toBe('run-from-canvas');
+  });
+
+  it('falls back to the caller when the canvas has published nothing yet', () => {
+    expect(boundRunId('wf-1', 'run-from-provider')).toBe('run-from-provider');
+    publishRunPanelData(snapshot('wf-1', { runId: null }));
+    expect(boundRunId('wf-1', 'run-from-provider')).toBe('run-from-provider');
+  });
+
+  it('never mixes workflows, and answers null when there is nothing to answer', () => {
+    publishRunPanelData(snapshot('wf-1', { runId: 'run-from-canvas' }));
+    expect(boundRunId('wf-2', 'run-from-provider')).toBe('run-from-provider');
+    expect(boundRunId('wf-2')).toBeNull();
+    expect(boundRunId(null, 'run-from-provider')).toBe('run-from-provider');
+    expect(boundRunId(undefined)).toBeNull();
   });
 });
 

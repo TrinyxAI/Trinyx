@@ -8,6 +8,7 @@
  */
 
 import { TERMINAL_STATUSES } from '@/contexts/workflow-run/RunStateStore';
+import { parseUtcAware } from '@/lib/utils/dateFormatters';
 
 /**
  * Run statuses a trigger can no longer be fired into (the dispatcher rejects it).
@@ -28,6 +29,17 @@ export interface EpochTimestamp {
   epoch: number;
   startedAt: string;
   endedAt: string | null;
+  /**
+   * How long the epoch spent EXECUTING, from its first node starting to its last
+   * node finishing. Absent while nothing has run yet.
+   *
+   * `endedAt - startedAt` is NOT this figure: the close is stamped when the epoch is
+   * reconciled, which can be a resume or a restart recovery sweep long after the last
+   * node finished, so that span counts the idle tail and reported things like 32h42m
+   * for epochs that really execute in seconds. Use the timestamps to place the epoch
+   * on the timeline, this to say how long it took.
+   */
+  workDurationMs?: number | null;
 }
 
 export interface StepStatusCounts {
@@ -107,13 +119,43 @@ export function isRunStatusActive(status: string | null | undefined): boolean {
 }
 
 /**
- * The epoch that should be selected by default: the most recent one.
+ * How long to say an epoch took, in milliseconds.
  *
- * The run surfaces never show "no epoch" - a run is always read through one of
- * its epochs - so callers seed their selection with this and re-apply it as new
- * epochs open, until the user picks one explicitly.
+ * An epoch that is CLOSED reports the window its nodes executed, which the backend
+ * measures on the step rows. `endedAt - startedAt` must NOT be used: the close is
+ * stamped when the epoch is reconciled, which can be a resume or a restart recovery
+ * sweep hours or days after the last node finished. That span is where the run
+ * history's 32h42m came from, for epochs whose nodes ran for seconds.
+ *
+ * An epoch that is still OPEN reports elapsed-since-start, and it ticks. The normal
+ * close happens at the end of the cycle, so an open epoch is one that has not
+ * finished: either it is executing, or it is blocked on an approval or an in-flight
+ * agent, which is the one case that defers the close. Both are genuinely still in
+ * progress, and the row shows the pulsing "running" marker beside the figure, so a
+ * growing number reads correctly. The settled window would under-report them: an
+ * epoch three minutes into an approval is not a two-second epoch.
+ *
+ * Returns null for "unknown", which is NOT the same as 0. Zero is a measurement (an
+ * all-skipped epoch really does start and end at the same instant); null means the
+ * payload never carried a window, so callers must render nothing rather than assert
+ * the epoch was instantaneous.
  */
-export function latestEpoch(epochTimestamps: readonly EpochTimestamp[]): number | null {
-  if (!epochTimestamps || epochTimestamps.length === 0) return null;
-  return epochTimestamps.reduce((max, e) => (e.epoch > max ? e.epoch : max), epochTimestamps[0].epoch);
+export function epochDisplayDurationMs(
+  entry: Pick<EpochTimestamp, 'startedAt' | 'endedAt' | 'workDurationMs'>,
+  now: number,
+): number | null {
+  const measured = entry.workDurationMs != null ? Math.max(0, entry.workDurationMs) : null;
+  if (!entry.startedAt) return measured;
+  // Settled epoch: only the measured window can answer. Null means the payload never
+  // carried one - a showcase snapshot frozen before this field existed, or a
+  // frontend running ahead of its orchestrator mid-deploy. Callers render nothing.
+  // Returning 0 here would print "<1s", a confident claim that the epoch was
+  // instantaneous, on every epoch of every application published before this shipped.
+  if (entry.endedAt) return measured;
+  const start = parseUtcAware(entry.startedAt).getTime();
+  if (isNaN(start)) return measured;
+  // Open epoch: the larger of the two. Elapsed is the truth for the epoch as a
+  // whole, and the measured window guards against a start timestamp in the future
+  // (a client clock ahead of the server) collapsing a real duration to zero.
+  return Math.max(measured ?? 0, Math.max(0, now - start));
 }

@@ -34,7 +34,7 @@ export interface RunInfoChangeData {
   runInfo: any | null;
   isStepByStep: boolean;
   currentEpoch: number;
-  epochTimestamps: Array<{ epoch: number; startedAt: string; endedAt: string | null }>;
+  epochTimestamps: Array<{ epoch: number; startedAt: string; endedAt: string | null; workDurationMs?: number | null }>;
   streamedSteps?: any[];
 }
 
@@ -111,7 +111,7 @@ export function WorkflowRunCanvas({
   const [isStepByStep, setIsStepByStep] = useState(false);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [currentEpoch, setCurrentEpoch] = useState(0);
-  const [epochTimestamps, setEpochTimestamps] = useState<Array<{ epoch: number; startedAt: string; endedAt: string | null }>>([]);
+  const [epochTimestamps, setEpochTimestamps] = useState<Array<{ epoch: number; startedAt: string; endedAt: string | null; workDurationMs?: number | null }>>([]);
   const [streamedSteps, setStreamedSteps] = useState<any[] | undefined>(undefined);
   const [pinnedVersion, setPinnedVersion] = useState<number | null>(null);
 
@@ -262,17 +262,14 @@ export function WorkflowRunCanvas({
     return () => window.removeEventListener(RUN_PANEL_ACTION_EVENT, handler);
   }, [workflowId, isPreviewOnly, handleStopRun, handleCancelRun, handleReactivateRun]);
 
-  // ── A run is always read through an epoch: seed the selection with the newest
-  // one and keep following new epochs until the user picks one explicitly ──
+  // ── Entering run mode shows ALL epochs ──
   //
-  // This deliberately changes the canvas default from "all epochs" (aggregate)
-  // to "the latest epoch". Node badges therefore show that epoch's status rather
-  // than the cumulative counts, and the run panel reads its steps per epoch. That
-  // is the intent: a run is a sequence of fires, and "which fire am I looking at"
-  // should never be implicit. "All epochs" stays one click away in the selector.
+  // The canvas opens on the cumulative view: node badges carry the counts of the
+  // whole run, not of one fire picked for the user. A single epoch is shown only
+  // once it is chosen in the selector, and that choice is what this hook carries
+  // across a remount of either surface.
   useDefaultEpochSelection({
     runId: activeRunId,
-    epochTimestamps,
     selectedEpoch: viewingEpoch,
     onSelectEpoch: setViewingEpoch,
     enabled: workflowMode === 'run',
@@ -292,7 +289,6 @@ export function WorkflowRunCanvas({
         onCancel={isPreviewOnly || hideToggle ? undefined : handleCancelRun}
         onReactivate={isPreviewOnly ? undefined : handleReactivateRun}
         currentEpoch={currentEpoch}
-        epochTimestamps={epochTimestamps}
         pinnedVersion={pinnedVersion}
         isSettingsOpen={isSettingsOpen}
       />

@@ -8,13 +8,17 @@
  * `endedAt`, and the formatter answers a literal "-" when it cannot measure.
  * Since runs aggregate instead of forking, that is the state of MOST rows.
  *
- * The figure that answers "how slow is this workflow" is the duration of the last
- * CLOSED epoch, which the backend now returns per run. Two lookalikes are traps
- * and are pinned as such below:
+ * The figure that answers "how slow is this workflow" is how long the latest epoch
+ * spent EXECUTING, which the backend measures on that epoch's step rows. Three
+ * lookalikes are traps and are pinned as such below:
  *   - the whole-run span, because `cancelStaleRuns` stamps `endedAt` on resting
  *     runs, turning a week of daily fires into a "7d" duration;
  *   - `lastCycleAt - lastFireAt`, because concurrent epochs across trigger DAGs
- *     let those two timestamps describe different epochs.
+ *     let those two timestamps describe different epochs;
+ *   - the epoch's OWN duration, which this column shipped with first. An epoch
+ *     closes only when it is reconciled (the next fire, a resume, a restart recovery
+ *     sweep), so it counts idle time: prod printed 32h42m and 6h01m for epochs whose
+ *     nodes ran for seconds.
  */
 import React from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';

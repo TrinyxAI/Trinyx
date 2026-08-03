@@ -9,6 +9,7 @@ import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
 
 import java.time.Instant;
+import java.util.Collection;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
@@ -43,6 +44,34 @@ public interface WorkflowStepDataRepository extends JpaRepository<WorkflowStepDa
            "GROUP BY w.normalizedKey, w.epoch " +
            "HAVING COUNT(w) >= 2")
     List<SplitAggregateProjection> findSplitAggregateProjectionsByRunId(@Param("runId") String runId);
+
+    /**
+     * The window each epoch of the given runs spent EXECUTING: first node start to
+     * last node end, one row per (run, epoch). Feeds the run history's "last
+     * execution duration" column and the epoch timeline; callers narrow to the
+     * epoch they want (see {@code WorkflowEpochService}).
+     *
+     * <p>Deliberately ONE flat aggregate rather than a correlated
+     * {@code epoch = (SELECT MAX(epoch) …)}: Postgres does not memoize a scalar
+     * SubPlan, so the correlated form re-runs the inner query per candidate row of
+     * every listed run, and this table is large and unpruned. The flat form is a
+     * single index-ordered {@code GROUP BY} whose output is bounded by the epoch
+     * count, and picking the latest epoch in Java costs nothing.
+     *
+     * <p>The window is first-start to last-end, so any gap INSIDE it counts: a node
+     * waiting on an approval (its step row spans the wait) and a node re-run later in
+     * the same epoch both extend it. That is intended - the epoch really was
+     * executing across that span. What is excluded is the idle tail AFTER the last
+     * node finished, which is what made the epoch header unusable.
+     */
+    @Query("""
+           SELECT new com.apimarketplace.orchestrator.persistence.EpochWorkWindowProjection(
+                      w.runId, w.epoch, MIN(w.startTime), MAX(w.endTime))
+           FROM WorkflowStepDataEntity w
+           WHERE w.runId IN :runIds
+           GROUP BY w.runId, w.epoch
+           """)
+    List<EpochWorkWindowProjection> findEpochWorkWindows(@Param("runIds") Collection<String> runIds);
 
     /**
      * Projection of {@code output_storage_id} values for a workflow run - no JSONB columns

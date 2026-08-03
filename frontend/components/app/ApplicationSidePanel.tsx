@@ -246,6 +246,15 @@ function ApplicationPanelInner({ config, runId, workflowId }: { config: Applicat
   }, [runId, runContext]);
 
   return (
-    <ApplicationTabContent config={config} runId={runId} workflowId={workflowId} onAction={handleAction} />
+    <ApplicationTabContent
+      config={config}
+      runId={runId}
+      workflowId={workflowId}
+      onAction={handleAction}
+      // Opened by publication id (an agent's "here is the app" card, a project
+      // tab): the application IS what the user came for, so it shows the newest
+      // fire rather than a pager spanning every one of them.
+      openOnLatestEpoch
+    />
   );
 }

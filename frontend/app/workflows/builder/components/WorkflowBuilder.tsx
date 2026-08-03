@@ -66,7 +66,7 @@ export interface RunInfoData {
   runInfo: any | null;
   isStepByStep: boolean;
   currentEpoch: number;
-  epochTimestamps: Array<{ epoch: number; startedAt: string; endedAt: string | null }>;
+  epochTimestamps: Array<{ epoch: number; startedAt: string; endedAt: string | null; workDurationMs?: number | null }>;
   /** Aggregated steps derived from WebSocket batch-updates (includes timing). */
   streamedSteps?: Array<{
     alias: string;

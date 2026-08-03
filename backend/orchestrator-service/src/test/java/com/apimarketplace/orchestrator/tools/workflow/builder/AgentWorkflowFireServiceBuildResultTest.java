@@ -325,36 +325,60 @@ class AgentWorkflowFireServiceBuildResultTest {
     class DurationTests {
 
         @Test
-        @DisplayName("duration_ms extracted from stateSnapshot.totalDurationMs")
-        void duration_extractedFromSnapshot() throws Exception {
+        @DisplayName("duration_ms is THIS fire's epoch, not a run-wide total")
+        void duration_isTheFiredEpochOnly() {
+            // Everything else in this result is scoped to (run_id, trigger_id, epoch),
+            // so a cumulative figure here reads as "this fire took X". Epoch 0 is the
+            // one being reported; epoch 1 belongs to an earlier fire and must not leak in.
             WorkflowRunEntity run = runWith(RunStatus.WAITING_TRIGGER);
-            String snapshot = mapper.writeValueAsString(Map.of("totalDurationMs", 3500));
-            when(run.getStateSnapshot()).thenReturn(snapshot);
             when(runRepository.findByRunIdPublic(RUN_ID)).thenReturn(Optional.of(run));
+            when(epochService.getEpochWorkDurations(RUN_ID)).thenReturn(Map.of(0, 3_000L, 1, 500L));
 
             Map<String, Object> result = service.buildResult(run, successResult(0), workflow(null), emptyPlan());
 
-            assertThat(result.get("duration_ms")).isEqualTo(3500L);
+            assertThat(result.get("duration_ms")).isEqualTo(3_000L);
         }
 
         @Test
-        @DisplayName("duration_ms absent when stateSnapshot is null")
-        void duration_absent_whenSnapshotNull() {
+        @DisplayName("duration_ms ignores the snapshot's totalDurationMs, which accumulates idle time")
+        void duration_doesNotUseSnapshotTotal() throws Exception {
+            // totalDurationMs sums each epoch's LIFETIME (close time minus start), and an
+            // epoch closes only when it is reconciled - the next fire, a resume, a restart
+            // recovery sweep. On the run that surfaced this bug a single epoch reached
+            // 32h42m for seconds of real work, and the agent repeated it as fact.
             WorkflowRunEntity run = runWith(RunStatus.WAITING_TRIGGER);
+            String snapshot = mapper.writeValueAsString(Map.of("totalDurationMs", 117_754_299L));
+            lenient().when(run.getStateSnapshot()).thenReturn(snapshot);
             when(runRepository.findByRunIdPublic(RUN_ID)).thenReturn(Optional.of(run));
+            when(epochService.getEpochWorkDurations(RUN_ID)).thenReturn(Map.of(0, 12_000L));
 
             Map<String, Object> result = service.buildResult(run, successResult(0), workflow(null), emptyPlan());
 
-            assertThat(result).doesNotContainKey("duration_ms");
+            assertThat(result.get("duration_ms")).isEqualTo(12_000L);
         }
 
         @Test
-        @DisplayName("duration_ms absent when stateSnapshot has no totalDurationMs key")
-        void duration_absent_whenKeyMissing() throws Exception {
+        @DisplayName("the macro report's duration_ms is the run-wide sum, and it measures once")
+        void macroDuration_isTheRunWideSumMeasuredOnce() {
+            // The macro report describes the run, so here the sum IS the right scope -
+            // the opposite of buildResult above. Both it and the per-epoch list need the
+            // same figures, and each measurement aggregates the run's step rows, so the
+            // report must not pay for it twice.
             WorkflowRunEntity run = runWith(RunStatus.WAITING_TRIGGER);
-            String snapshot = mapper.writeValueAsString(Map.of("version", 3));
-            when(run.getStateSnapshot()).thenReturn(snapshot);
+            when(epochService.getEpochWorkDurations(RUN_ID)).thenReturn(Map.of(0, 3_000L, 1, 500L));
+
+            Map<String, Object> result = service.buildRunMacroReport(run, emptyPlan(), TENANT_ID);
+
+            assertThat(result.get("duration_ms")).isEqualTo(3_500L);
+            verify(epochService, times(1)).getEpochWorkDurations(RUN_ID);
+        }
+
+        @Test
+        @DisplayName("duration_ms absent when nothing has executed yet")
+        void duration_absent_whenNothingExecuted() {
+            WorkflowRunEntity run = runWith(RunStatus.WAITING_TRIGGER);
             when(runRepository.findByRunIdPublic(RUN_ID)).thenReturn(Optional.of(run));
+            when(epochService.getEpochWorkDurations(RUN_ID)).thenReturn(Map.of());
 
             Map<String, Object> result = service.buildResult(run, successResult(0), workflow(null), emptyPlan());
 
@@ -816,12 +840,16 @@ class AgentWorkflowFireServiceBuildResultTest {
                     "readyNodeIds", List.of(),
                     "awaitingSignalNodeIds", List.of()
             ));
+            // The header claims 5s of lifetime; the epoch's nodes really ran for 3s.
+            // Those two disagree whenever the close lands after the last node (a resume,
+            // a restart recovery sweep), and the agent must be told the executed window.
             var header0 = new EpochHeaderWithEpochRow(
                     0, epochStateJson, false,
                     java.time.Instant.parse("2026-03-20T10:00:00Z"),
                     java.time.Instant.parse("2026-03-20T10:00:05Z"),
                     "trigger:start", 5000L);
             when(epochService.listEpochHeaders(RUN_ID)).thenReturn(List.of(header0));
+            when(epochService.getEpochWorkDurations(RUN_ID)).thenReturn(Map.of(0, 3_000L));
 
             Map<String, Object> result = service.buildRunMacroReport(run, emptyPlan(), TENANT_ID);
 
@@ -832,11 +860,34 @@ class AgentWorkflowFireServiceBuildResultTest {
             assertThat(epochs.get(0).get("epoch")).isEqualTo(0);
             assertThat(epochs.get(0).get("trigger_id")).isEqualTo("trigger:start");
             assertThat(epochs.get(0).get("status")).isEqualTo("COMPLETED");
-            assertThat(epochs.get(0).get("duration_ms")).isEqualTo(5000L);
+            assertThat(epochs.get(0).get("duration_ms")).isEqualTo(3_000L);
+            assertThat(epochs.get(0).get("ended_at")).isEqualTo("2026-03-20T10:00:05Z");
             @SuppressWarnings("unchecked")
             var counts = (Map<String, Object>) epochs.get(0).get("node_counts");
             assertThat(counts.get("completed")).isEqualTo(2);
             assertThat(counts.get("failed")).isEqualTo(0);
+        }
+
+        @Test
+        @DisplayName("macro omits duration_ms for an epoch that executed no node")
+        void macro_omitsDurationWhenEpochHasNoStepRows() {
+            // The header exists but nothing ran under it, and it claims 32h42m of
+            // lifetime. Falling back to that is exactly the bug; reporting 0 would tell
+            // the agent the epoch was instant. Saying nothing is the only honest option.
+            WorkflowRunEntity run = runWith(RunStatus.WAITING_TRIGGER);
+            var header0 = new EpochHeaderWithEpochRow(
+                    0, null, false,
+                    java.time.Instant.parse("2026-03-20T10:00:00Z"),
+                    java.time.Instant.parse("2026-03-21T18:42:00Z"),
+                    "trigger:start", 117_754_299L);
+            when(epochService.listEpochHeaders(RUN_ID)).thenReturn(List.of(header0));
+            when(epochService.getEpochWorkDurations(RUN_ID)).thenReturn(Map.of());
+
+            Map<String, Object> result = service.buildRunMacroReport(run, emptyPlan(), TENANT_ID);
+
+            @SuppressWarnings("unchecked")
+            var epochs = (List<Map<String, Object>>) result.get("epochs");
+            assertThat(epochs.get(0)).doesNotContainKey("duration_ms");
         }
 
         @Test

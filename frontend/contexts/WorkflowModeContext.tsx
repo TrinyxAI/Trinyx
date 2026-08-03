@@ -6,6 +6,7 @@ import { orchestratorApi } from '@/lib/api';
 import { usePendingInterfacesStore } from '@/lib/stores/pending-interfaces-store';
 import { useInterfacePaginationStore } from '@/lib/stores/interface-pagination-store';
 import { VIEWING_EPOCH_EVENT, shouldAdoptEpochEvent, type EpochEventDetail } from '@/lib/workflow/epochEventScope';
+import { workflowIdFromPathname } from '@/lib/workflow/runRoutePath';
 
 /**
  * Mode du workflow : 'edit' (édition) ou 'run' (exécution)
@@ -22,7 +23,17 @@ interface WorkflowModeContextType {
   /** Workflow ID for the current workflow (optional, set by layout) */
   workflowId?: string;
   runId: string | null;
-  setRunId: (runId: string | null) => void;
+  /**
+   * Bind the canvas to a run.
+   *
+   * `urlSynced` says the caller has ALSO put that run in the address bar (the
+   * run-history pick does, through the native History API). The binding then
+   * stops being "programmatic": the URL keeps describing what is on screen, so
+   * the URL -> context effect below must stay in charge - otherwise the next
+   * real navigation (Edit toggle, browser Back) would be ignored for the rest
+   * of the session.
+   */
+  setRunId: (runId: string | null, options?: { urlSynced?: boolean }) => void;
   /** Epoch being viewed on canvas (null = live mode, shows all data) */
   viewingEpoch: number | null;
   setViewingEpoch: (epoch: number | null) => void;
@@ -204,6 +215,18 @@ export function WorkflowModeProvider({ children, workflowId, initialRunId, readO
         return;
       }
 
+      // The URL speaks for ONE workflow, and several providers are mounted at
+      // once (the page, a sub-workflow tab, an application tab). A provider that
+      // knows it is about another workflow reads NOTHING from the pathname (not
+      // the run, not the mode, not the application flag): picking a run on the
+      // page would otherwise inject it into the sub-workflow tab. A provider
+      // with no workflowId (or a URL that names no workflow) keeps the
+      // historical behaviour.
+      const urlWorkflowId = workflowIdFromPathname(pathname);
+      if (workflowId && urlWorkflowId && urlWorkflowId !== workflowId) {
+        return;
+      }
+
       setMode(isRunMode ? 'run' : 'edit');
       setIsApplicationMode(isAppMode);
 
@@ -222,7 +245,7 @@ export function WorkflowModeProvider({ children, workflowId, initialRunId, readO
     }
     // IMPORTANT: Ne pas inclure 'mode' dans les dépendances car il est mis à jour par cet effet
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [pathname, readOnly]);
+  }, [pathname, readOnly, workflowId]);
 
   // Clear interface-related stores when switching between different runs.
   // The local ref catches run switches within one mounted provider. The module
@@ -249,12 +272,15 @@ export function WorkflowModeProvider({ children, workflowId, initialRunId, readO
     }
   }, [runId]);
 
-  const setRunId = useCallback((id: string | null) => {
+  const setRunId = useCallback((id: string | null, options?: { urlSynced?: boolean }) => {
     // In preview mode (marketplace preview), don't allow clearing runId - mode is locked
     if (readOnly && !id) {
       return;
     }
-    isProgrammaticRef.current = !!id;
+    // A URL-synced binding is indistinguishable from a navigation for everything
+    // downstream, so it must NOT latch the programmatic flag (see the setRunId
+    // doc on the context type).
+    isProgrammaticRef.current = !!id && !options?.urlSynced;
     setRunIdState(id);
     if (id) {
       setMode('run');

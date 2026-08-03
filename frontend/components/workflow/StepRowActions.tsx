@@ -4,6 +4,8 @@ import * as React from 'react';
 import type { Node } from 'reactflow';
 import type { BuilderNodeData } from '@/app/workflows/builder/types';
 import { useWorkflowMode } from '@/contexts/WorkflowModeContext';
+import { selectAllEpochs } from '@/components/workflow/run-panel/useDefaultEpochSelection';
+import { boundRunId } from '@/components/workflow/run-panel/runPanelBus';
 import { findNodeClassById } from '@/app/workflows/builder/nodes/nodeClasses';
 import { deriveNodeContextFlags, useNodeContextualButtons } from '@/app/workflows/builder/hooks/useNodeContextualButtons';
 import { TriggerNodePinButton } from '@/app/workflows/builder/components/nodes/TriggerNodePinButton';
@@ -43,7 +45,7 @@ const SIDE_BTN_CLS =
  * handles via the canonical handleExecuteStep path.
  */
 export function StepRowActions({ step, matchedNode, workflowId, isStepByStep, isRunActive }: StepRowActionsProps) {
-  const { isRunMode, setViewingEpoch } = useWorkflowMode();
+  const { isRunMode, runId, setViewingEpoch } = useWorkflowMode();
   const data = matchedNode.data;
   const nodeClass = findNodeClassById(data.id || '');
   const flags = deriveNodeContextFlags(data, nodeClass?.id);
@@ -71,7 +73,7 @@ export function StepRowActions({ step, matchedNode, workflowId, isStepByStep, is
   // canonical handleExecuteStep path. epoch=undefined → fresh epoch. workflowId
   // scopes the event so a sub-workflow panel's WorkflowBuilder ignores it.
   const fireTrigger = () => {
-    setViewingEpoch(null);
+    selectAllEpochs(boundRunId(workflowId, runId), setViewingEpoch);
     window.dispatchEvent(new CustomEvent('workflowExecuteStep', { detail: { stepId: step.alias, workflowId } }));
   };
 

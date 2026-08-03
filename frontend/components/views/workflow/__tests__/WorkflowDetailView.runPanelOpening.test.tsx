@@ -80,6 +80,9 @@ afterEach(() => {
   panelState.current = { isOpen: false, activeTabId: null, setActiveTab, open: vi.fn(), openTab: vi.fn() };
   canvasProps.current = null;
   push.mockReset(); setRunId.mockReset(); setPendingActivateTab.mockReset(); setActiveTab.mockReset();
+  // Binding a run rewrites the jsdom URL: restore it, or the next test starts
+  // on a path it never set.
+  window.history.replaceState(null, '', '/');
   cleanup();
 });
 
@@ -182,12 +185,16 @@ describe('WorkflowDetailView - canvas entry points', () => {
 });
 
 describe('WorkflowDetailView - binding another run in place', () => {
-  it('rebinds the canvas without navigating', () => {
+  it('rebinds the canvas without navigating, and takes the URL along', () => {
+    window.history.replaceState(null, '', `/app/workflow/${WF}/run/run-1`);
     render(<WorkflowDetailView workflowId={WF} runId="run-1" />);
 
     act(() => requestBindRun({ workflowId: WF, runId: 'run-2' }));
 
-    expect(setRunId).toHaveBeenCalledWith('run-2');
+    expect(setRunId).toHaveBeenCalledWith('run-2', { urlSynced: true });
+    // The address bar follows so a reload lands on the picked run, but through
+    // the History API - no router navigation, so nothing remounts.
+    expect(window.location.pathname).toBe(`/app/workflow/${WF}/run/run-2`);
     expect(push).not.toHaveBeenCalled();
   });
 

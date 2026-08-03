@@ -1029,6 +1029,7 @@
       "listView": "Vista de lista",
       "gaugeView": "Vista cronológica",
       "allEpochs": "Todas las épocas",
+      "allEpochsCount": "Todas las épocas ({count})",
       "loadingMoreRows": "Cargando más filas…",
       "scrollForMoreRows": "Desplázate para cargar más",
       "epochTooltip": {
@@ -4980,6 +4981,7 @@
     }
   },
   "runMode": {
+    "allEpochs": "Todas las épocas",
     "epochBadge": "Época {number}",
     "itemBadge": "Elemento {number}",
     "itemOfTotal": "Elemento {number}/{total}",

@@ -15,7 +15,6 @@ import { isEmbeddedWorkflowCanvas } from '@/lib/workflow/canvasEmbedding';
 import { computeRunInfoPanelWidths } from '@/components/workflow/runInfoPanelWidth';
 import { RunSummaryBar } from '@/components/workflow/run-panel/RunSummaryBar';
 import { openRunPanel } from '@/components/workflow/run-panel/runPanelBus';
-import type { EpochTimestamp } from '@/components/workflow/run-panel/runFormatting';
 
 interface WorkflowModeToggleProps {
   mode: 'edit' | 'run';
@@ -41,8 +40,6 @@ interface WorkflowModeToggleProps {
   onReactivate?: () => void;
   /** Current epoch number (0 = no fire, 1+ = epoch count) */
   currentEpoch?: number;
-  /** Epoch timestamps - drives the epoch chip and the panel's epoch selector */
-  epochTimestamps?: EpochTimestamp[];
   /** Pinned (production) version of the workflow, null if unpinned */
   pinnedVersion?: number | null;
   /** When the settings panel is open, hide the run bar & history button */
@@ -74,7 +71,6 @@ export function WorkflowModeToggle({
   onCancel,
   onReactivate,
   currentEpoch = 0,
-  epochTimestamps = [],
   pinnedVersion,
   isSettingsOpen = false,
 }: WorkflowModeToggleProps) {
@@ -161,8 +157,10 @@ export function WorkflowModeToggle({
    *  edge). The tighter inset on a phone keeps it clear of the canvas border. */
   const toggleAnchorClass = isWideEnough ? 'left-1/2 -translate-x-1/2' : 'left-2 sm:left-4';
 
-  // Reset the epoch chip when toggling between edit/run so the view doesn't
-  // carry over the previously pinned epoch.
+  // Drop the epoch chip when the mode changes so the view never carries over
+  // the epoch of whatever was on screen before. This is NOT a user choice, so
+  // it must not be recorded as one (only a click may do that): a run the user
+  // had pinned to an epoch keeps that pick and restores it.
   useEffect(() => {
     setSelectedEpoch(null);
     setViewingEpoch(null);
@@ -203,11 +201,12 @@ export function WorkflowModeToggle({
         setRunId(null);
       } else {
         // ALWAYS clear the binding, then navigate if there is a /run/ URL to
-        // leave. Relying on the URL alone dead-ends: binding a run in place
-        // (an agent-launched run, or picking one in the panel's history) latches
-        // the provider's "programmatic" flag, which makes it ignore pathname
-        // changes from then on - so the push landed on the edit URL while the
-        // canvas stayed in run mode and the toggle snapped back to Run.
+        // leave. Relying on the URL alone dead-ends: an agent-launched run is
+        // bound in place and latches the provider's "programmatic" flag, which
+        // makes it ignore pathname changes from then on - so the push landed on
+        // the edit URL while the canvas stayed in run mode and the toggle
+        // snapped back to Run. (A run picked in the panel's history does NOT
+        // latch it: that binding carries the URL with it.)
         setRunId(null);
         if (pathname?.includes('/run/')) {
           router.push(`/app/workflow/${workflowId}`);
@@ -334,7 +333,6 @@ export function WorkflowModeToggle({
                 currentRunInfo={currentRunInfo!}
                 pinnedVersion={pinnedVersion}
                 currentEpoch={currentEpoch}
-                epochTimestamps={epochTimestamps}
                 selectedEpoch={selectedEpoch}
                 isStepByStep={isStepByStep}
                 onStop={onStop}

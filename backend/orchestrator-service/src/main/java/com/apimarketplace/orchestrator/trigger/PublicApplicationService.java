@@ -11,6 +11,7 @@ import com.apimarketplace.orchestrator.domain.workflow.InterfaceDef;
 import com.apimarketplace.orchestrator.domain.workflow.RunStatus;
 import com.apimarketplace.orchestrator.domain.workflow.WorkflowPlan;
 import com.apimarketplace.orchestrator.execution.v2.services.UnifiedSignalService;
+import com.apimarketplace.orchestrator.repository.WorkflowEpochRepository.EpochTimestampRow;
 import com.apimarketplace.orchestrator.repository.WorkflowRepository;
 import com.apimarketplace.orchestrator.repository.WorkflowRunRepository;
 import com.apimarketplace.orchestrator.services.InterfaceRenderService;
@@ -213,13 +214,12 @@ public class PublicApplicationService {
 
         // Use the same epoch source as the authenticated app (WorkflowEpochService)
         var epochs = epochService.listEpochTimestamps(runId);
-        List<Map<String, Object>> epochList = epochs.stream().map(row -> {
-            Map<String, Object> m = new LinkedHashMap<>();
-            m.put("epoch", row.epoch());
-            m.put("startedAt", row.startedAt() != null ? row.startedAt().toString() : null);
-            m.put("endedAt", row.endedAt() != null ? row.endedAt().toString() : null);
-            return m;
-        }).toList();
+        // Shared wire shape rather than a hand-built map: this used to omit
+        // workDurationMs, which is the only field saying how long the epoch executed,
+        // leaving the public app to fall back to the header span (32h42m on prod).
+        List<Map<String, Object>> epochList = epochs.stream()
+                .map(EpochTimestampRow::toWireMap)
+                .toList();
 
         Map<String, Object> result = new LinkedHashMap<>();
         result.put("epochTimestamps", epochList);

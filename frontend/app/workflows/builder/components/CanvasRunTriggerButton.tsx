@@ -9,6 +9,8 @@ import {
 } from 'lucide-react';
 import { canvasChromeCompactButtonClass } from '@/components/ui/canvas-chrome';
 import { useWorkflowMode } from '@/contexts/WorkflowModeContext';
+import { selectAllEpochs } from '@/components/workflow/run-panel/useDefaultEpochSelection';
+import { boundRunId } from '@/components/workflow/run-panel/runPanelBus';
 import { dispatchOpenTriggerTab, type TriggerPanelTab } from '@/lib/workflow/triggerTabEvent';
 import { useStepByStep } from '../contexts/StepByStepContext';
 import { deriveNodeContextFlags, isFireableTrigger } from '../hooks/useNodeContextualButtons';
@@ -60,7 +62,7 @@ interface CanvasRunTriggerButtonProps {
 export function CanvasRunTriggerButton({ nodes }: CanvasRunTriggerButtonProps) {
   const t = useTranslations('workflowBuilder.canvas');
   const ctx = useStepByStep();
-  const { setViewingEpoch } = useWorkflowMode();
+  const { workflowId, runId, setViewingEpoch } = useWorkflowMode();
   // Anchored ABOVE the button: the toolbar sits at the bottom of the canvas.
   const { open, isVisible, toggle, close, triggerRef, menuRef, menuStyle } = usePortalMenu('above');
 
@@ -97,17 +99,18 @@ export function CanvasRunTriggerButton({ nodes }: CanvasRunTriggerButtonProps) {
       return;
     }
     // Firing always targets the whole run, never the focused epoch - same as the
-    // trigger node's focus-epoch play button.
-    setViewingEpoch(null);
+    // trigger node's focus-epoch play button. Keyed off the run the CANVAS is
+    // bound to, which is the id the epoch selection is read back under.
+    selectAllEpochs(boundRunId(workflowId, runId), setViewingEpoch);
     void ctx?.executeStep(entry.stepId, undefined);
-  }, [ctx, setViewingEpoch, close]);
+  }, [ctx, workflowId, runId, setViewingEpoch, close]);
 
   // Nothing fireable (no trigger at all, or a terminal run where every trigger
   // is frozen) means no affordance: an enabled Play over an all-greyed menu is
   // a dead end, and the per-node plays are gone on a terminal run too. Read from
   // canExecuteStep rather than the node plays' interactive gate on purpose -
   // this button stays available while a single epoch is focused, because firing
-  // returns to the all-epochs view first (setViewingEpoch(null) above).
+  // returns to the all-epochs view first (selectAllEpochs above).
   if (!triggers.some((entry) => entry.canFire)) return null;
 
   return (

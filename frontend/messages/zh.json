@@ -1029,6 +1029,7 @@
       "listView": "列表视图",
       "gaugeView": "时间线视图",
       "allEpochs": "所有周期",
+      "allEpochsCount": "所有周期（{count}）",
       "loadingMoreRows": "正在加载更多行…",
       "scrollForMoreRows": "滚动以加载更多",
       "epochTooltip": {
@@ -4980,6 +4981,7 @@
     }
   },
   "runMode": {
+    "allEpochs": "所有轮次",
     "epochBadge": "轮次 {number}",
     "itemBadge": "项 {number}",
     "itemOfTotal": "项 {number}/{total}",

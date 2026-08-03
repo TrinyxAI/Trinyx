@@ -154,6 +154,306 @@ function renderApp(viewingEpoch: number | null) {
   );
 }
 
+describe('ApplicationTabContent - which epoch the tab opens on', () => {
+  beforeEach(() => {
+    runStateRef.current = {
+      runStatus: 'awaiting_signal',
+      executionTotal: 0,
+      pendingSignals: [],
+      // Three closed fires: the tab used to seed the newest one on mount.
+      epochTimestamps: [
+        { epoch: 1, startedAt: '2026-08-01T10:00:00Z', endedAt: '2026-08-01T10:01:00Z' },
+        { epoch: 2, startedAt: '2026-08-01T11:00:00Z', endedAt: '2026-08-01T11:01:00Z' },
+        { epoch: 3, startedAt: '2026-08-01T12:00:00Z', endedAt: null },
+      ],
+    };
+  });
+  afterEach(cleanup);
+
+  it('selects no epoch on mount, and tells no other surface to', async () => {
+    // The seeding was not just local: `handleViewEpoch` broadcasts the epoch to
+    // every surface of the run, so merely opening an application dragged the
+    // canvas and the Run tab off the cumulative view.
+    const onViewingEpochChange = vi.fn();
+    const broadcasts: unknown[] = [];
+    const listener = (e: Event) => broadcasts.push((e as CustomEvent).detail);
+    window.addEventListener('viewingEpochChanged', listener);
+
+    render(
+      <ApplicationTabContent
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        config={baseConfig as any}
+        runId="run_1"
+        workflowId="wf-1"
+        onAction={() => undefined}
+        viewingEpoch={null}
+        onViewingEpochChange={onViewingEpochChange}
+        toolbarOpen
+        onToolbarOpenChange={() => undefined}
+      />,
+    );
+    await flushEffects();
+
+    window.removeEventListener('viewingEpochChanged', listener);
+    expect(onViewingEpochChange, 'the tab must not pick an epoch for the user').not.toHaveBeenCalled();
+    expect(broadcasts, 'and must not push one onto the other surfaces').toEqual([]);
+  });
+
+  it('opens on the newest fire where the application IS the product', async () => {
+    // A published app or a shared link: its visitors came for the latest
+    // result, not a pager spanning every fire the workflow ever had.
+    const onViewingEpochChange = vi.fn();
+    const broadcasts: unknown[] = [];
+    const listener = (e: Event) => broadcasts.push((e as CustomEvent).detail);
+    window.addEventListener('viewingEpochChanged', listener);
+
+    render(
+      <ApplicationTabContent
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        config={baseConfig as any}
+        runId="run_1"
+        workflowId="wf-1"
+        onAction={() => undefined}
+        viewingEpoch={null}
+        onViewingEpochChange={onViewingEpochChange}
+        openOnLatestEpoch
+        toolbarOpen
+        onToolbarOpenChange={() => undefined}
+      />,
+    );
+    await flushEffects();
+
+    window.removeEventListener('viewingEpochChanged', listener);
+    expect(onViewingEpochChange).toHaveBeenCalledWith(3);
+    // Locally: the workflow surfaces of the same run stay on all epochs.
+    expect(broadcasts, 'the seeding must not reach the other surfaces').toEqual([]);
+  });
+
+  it('records no pick when it seeds, so the canvas keeps its own view', async () => {
+    const { getPickedEpoch, resetEpochSelectionState } = await import(
+      '@/components/workflow/run-panel/useDefaultEpochSelection'
+    );
+    resetEpochSelectionState();
+
+    render(
+      <ApplicationTabContent
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        config={baseConfig as any}
+        runId="run_1"
+        workflowId="wf-1"
+        onAction={() => undefined}
+        viewingEpoch={null}
+        onViewingEpochChange={() => undefined}
+        openOnLatestEpoch
+        toolbarOpen
+        onToolbarOpenChange={() => undefined}
+      />,
+    );
+    await flushEffects();
+
+    expect(getPickedEpoch('run_1'), 'a seed is not a choice').toBeUndefined();
+    resetEpochSelectionState();
+  });
+
+  it('offers a way back to All epochs, and says which view it is on', async () => {
+    // The reversibility half of the seeding: pinning a published app to its
+    // newest fire is only acceptable because the user can undo it here.
+    const { getPickedEpoch, resetEpochSelectionState } = await import(
+      '@/components/workflow/run-panel/useDefaultEpochSelection'
+    );
+    resetEpochSelectionState();
+    const onViewingEpochChange = vi.fn();
+
+    const { getByTestId } = render(
+      <ApplicationTabContent
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        config={baseConfig as any}
+        runId="run_1"
+        workflowId="wf-1"
+        onAction={() => undefined}
+        viewingEpoch={3}
+        onViewingEpochChange={onViewingEpochChange}
+        toolbarOpen
+        onToolbarOpenChange={() => undefined}
+      />,
+    );
+    await flushEffects();
+
+    const control = getByTestId('application-epoch-selector');
+    expect(control.getAttribute('data-all-epochs'), 'pinned to one fire').toBeNull();
+
+    act(() => { control.click(); });
+    act(() => { getByTestId('application-epoch-option-all').click(); });
+
+    expect(onViewingEpochChange).toHaveBeenCalledWith(null);
+    expect(getPickedEpoch('run_1'), 'and it is recorded, so nothing restores the epoch').toBeNull();
+    resetEpochSelectionState();
+  });
+
+  it('says "All epochs" in words when it is showing all of them', async () => {
+    const { resetEpochSelectionState } = await import(
+      '@/components/workflow/run-panel/useDefaultEpochSelection'
+    );
+    resetEpochSelectionState();
+
+    const { getByTestId } = render(
+      <ApplicationTabContent
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        config={baseConfig as any}
+        runId="run_1"
+        workflowId="wf-1"
+        onAction={() => undefined}
+        viewingEpoch={null}
+        onViewingEpochChange={() => undefined}
+        toolbarOpen
+        onToolbarOpenChange={() => undefined}
+      />,
+    );
+    await flushEffects();
+
+    const control = getByTestId('application-epoch-selector');
+    expect(control.getAttribute('data-all-epochs')).toBe('true');
+    // A bare number there could only be read as "you are on epoch N".
+    expect(control.textContent).toContain('allEpochs');
+    resetEpochSelectionState();
+  });
+
+  it('seeds its own state when no parent owns the epoch (the app side-panel tab)', async () => {
+    // ApplicationSidePanel renders the tab uncontrolled: the seed has to land
+    // on the local state, or a published app opened from a card shows the
+    // cumulative pager after all.
+    const { resetEpochSelectionState } = await import(
+      '@/components/workflow/run-panel/useDefaultEpochSelection'
+    );
+    resetEpochSelectionState();
+
+    const { getByTestId } = render(
+      <ApplicationTabContent
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        config={baseConfig as any}
+        runId="run_1"
+        workflowId="wf-1"
+        onAction={() => undefined}
+        openOnLatestEpoch
+        toolbarOpen
+        onToolbarOpenChange={() => undefined}
+      />,
+    );
+    await flushEffects();
+
+    const control = getByTestId('application-epoch-selector');
+    expect(control.getAttribute('data-all-epochs'), 'seeded to the newest fire').toBeNull();
+    expect(control.textContent).toContain('3');
+    resetEpochSelectionState();
+  });
+
+  it('carries a REAL pin to the new fire, and records the move', async () => {
+    // The other half of the attribution rule: a user who pinned epoch 3 is
+    // carried to 4, and the remembered pick moves with them - otherwise the
+    // next surface to mount empty restores the epoch they were carried off.
+    const { markEpochPickedByUser, getPickedEpoch, resetEpochSelectionState } = await import(
+      '@/components/workflow/run-panel/useDefaultEpochSelection'
+    );
+    resetEpochSelectionState();
+    markEpochPickedByUser('run_1', 3);
+
+    const { rerender } = render(
+      <ApplicationTabContent
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        config={baseConfig as any}
+        runId="run_1"
+        workflowId="wf-1"
+        onAction={() => undefined}
+        viewingEpoch={3}
+        onViewingEpochChange={() => undefined}
+        toolbarOpen
+        onToolbarOpenChange={() => undefined}
+      />,
+    );
+    await flushEffects();
+
+    runStateRef.current = {
+      ...runStateRef.current,
+      epochTimestamps: [
+        ...(runStateRef.current.epochTimestamps as unknown[]),
+        { epoch: 4, startedAt: '2026-08-01T13:00:00Z', endedAt: null },
+      ],
+    };
+    rerender(
+      <ApplicationTabContent
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        config={baseConfig as any}
+        runId="run_1"
+        workflowId="wf-1"
+        onAction={() => undefined}
+        viewingEpoch={3}
+        onViewingEpochChange={() => undefined}
+        toolbarOpen
+        onToolbarOpenChange={() => undefined}
+      />,
+    );
+    await flushEffects();
+
+    expect(getPickedEpoch('run_1'), 'the pin followed the user').toBe(4);
+    resetEpochSelectionState();
+  });
+
+  it('does not turn an explicit "All epochs" into a pin when the next fire lands', async () => {
+    // The user chose All epochs elsewhere (recorded as null), then opens the
+    // published app, which seeds the newest fire LOCALLY. When the next fire
+    // closes, that seed must not be promoted into a pick and broadcast: it
+    // would drag the canvas onto an epoch the user explicitly left.
+    const { markEpochPickedByUser, getPickedEpoch, resetEpochSelectionState } = await import(
+      '@/components/workflow/run-panel/useDefaultEpochSelection'
+    );
+    resetEpochSelectionState();
+    markEpochPickedByUser('run_1', null);
+
+    const { rerender } = render(
+      <ApplicationTabContent
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        config={baseConfig as any}
+        runId="run_1"
+        workflowId="wf-1"
+        onAction={() => undefined}
+        viewingEpoch={3}
+        onViewingEpochChange={() => undefined}
+        openOnLatestEpoch
+        toolbarOpen
+        onToolbarOpenChange={() => undefined}
+      />,
+    );
+    await flushEffects();
+
+    // A fourth fire closes.
+    runStateRef.current = {
+      ...runStateRef.current,
+      epochTimestamps: [
+        ...(runStateRef.current.epochTimestamps as unknown[]),
+        { epoch: 4, startedAt: '2026-08-01T13:00:00Z', endedAt: null },
+      ],
+    };
+    rerender(
+      <ApplicationTabContent
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        config={baseConfig as any}
+        runId="run_1"
+        workflowId="wf-1"
+        onAction={() => undefined}
+        viewingEpoch={3}
+        onViewingEpochChange={() => undefined}
+        openOnLatestEpoch
+        toolbarOpen
+        onToolbarOpenChange={() => undefined}
+      />,
+    );
+    await flushEffects();
+
+    expect(getPickedEpoch('run_1'), 'the All-epochs choice survives the new fire').toBeNull();
+    resetEpochSelectionState();
+  });
+});
+
 describe('ApplicationTabContent - run-context pagination semantics', () => {
   beforeEach(() => {
     runStateRef.current = { runStatus: 'awaiting_signal', executionTotal: 0, pendingSignals: [] };

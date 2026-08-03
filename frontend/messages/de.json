@@ -1029,6 +1029,7 @@
       "listView": "Listenansicht",
       "gaugeView": "Zeitachsenansicht",
       "allEpochs": "Alle Epochen",
+      "allEpochsCount": "Alle Epochen ({count})",
       "loadingMoreRows": "Weitere Zeilen werden geladen…",
       "scrollForMoreRows": "Scrollen für weitere Zeilen",
       "epochTooltip": {
@@ -4980,6 +4981,7 @@
     }
   },
   "runMode": {
+    "allEpochs": "Alle Epochen",
     "epochBadge": "Epoche {number}",
     "itemBadge": "Element {number}",
     "itemOfTotal": "Element {number}/{total}",

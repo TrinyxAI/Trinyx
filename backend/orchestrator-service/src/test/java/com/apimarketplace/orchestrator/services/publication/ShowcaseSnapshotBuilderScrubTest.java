@@ -8,6 +8,7 @@ import com.apimarketplace.orchestrator.domain.execution.StateSnapshot;
 import com.apimarketplace.orchestrator.domain.workflow.ExecutionMode;
 import com.apimarketplace.orchestrator.domain.workflow.RunStatus;
 import com.apimarketplace.orchestrator.repository.SignalWaitRepository;
+import com.apimarketplace.orchestrator.repository.WorkflowEpochRepository;
 import com.apimarketplace.orchestrator.repository.WorkflowRunRepository;
 import com.apimarketplace.orchestrator.services.InterfaceRenderService;
 import com.apimarketplace.orchestrator.services.StepAggregationService;
@@ -255,6 +256,77 @@ class ShowcaseSnapshotBuilderScrubTest {
         @SuppressWarnings("unchecked")
         Map<String, Integer> statusCounts = (Map<String, Integer>) steps.getFirst().get("statusCounts");
         assertThat(statusCounts).containsEntry("failed", 1);
+    }
+
+    @Test
+    @DisplayName("renumbering a showcase epoch keeps its measured execution window")
+    void renumberedEpochKeepsItsWorkDuration() {
+        // Publishing a single epoch renumbers it to 1. Only the NUMBER is meant to
+        // change: the previous version rebuilt the row field by field through
+        // reflection, so a field it did not know about (workDurationMs, the only one
+        // saying how long the epoch executed) vanished and the showcase fell back to
+        // the header span, which counts the epoch's idle tail (32h42m on prod).
+        UUID workflowRunUuid = UUID.randomUUID();
+        WorkflowRunEntity run = new WorkflowRunEntity();
+        ReflectionTestUtils.setField(run, "id", workflowRunUuid);
+        run.setRunIdPublic("run-renumber");
+        run.setTenantId("tenant-owner");
+        run.setOrganizationId("org-acme");
+        when(workflowRunRepository.findByRunIdPublic("run-renumber")).thenReturn(Optional.of(run));
+        when(workflowResumeService.reconstructStateForApi("run-renumber"))
+                .thenReturn(new WorkflowRunState(
+                        "run-renumber",
+                        "workflow-1",
+                        RunStatus.COMPLETED,
+                        ExecutionMode.AUTOMATIC,
+                        Instant.EPOCH,
+                        null,
+                        Map.of(),
+                        List.of(),
+                        List.of(),
+                        Set.of(),
+                        Set.of(),
+                        Set.of(),
+                        Set.of(),
+                        Map.of()));
+
+        DagState dag = new DagState(7, 0, 7, Map.of(7, EpochState.fresh()), Set.of());
+        when(stateSnapshotService.getSnapshot("run-renumber"))
+                .thenReturn(StateSnapshot.empty().withDagState("trigger:start", dag));
+        when(stepAggregationService.getAggregatedSteps("run-renumber", 7))
+                .thenReturn(Optional.of(List.of()));
+        when(workflowEpochService.listEpochTimestamps("run-renumber")).thenReturn(List.of(
+                new WorkflowEpochRepository.EpochTimestampRow(
+                        6, "2026-08-01T09:00:00Z", "2026-08-01T09:00:04Z", 4_000L),
+                new WorkflowEpochRepository.EpochTimestampRow(
+                        7, "2026-08-02T03:18:00Z", "2026-08-02T12:00:00Z", 12_000L)));
+        when(interfaceClient.getSnapshotsForRun(workflowRunUuid, "tenant-caller", "org-acme"))
+                .thenReturn(List.of());
+
+        ShowcaseSnapshotBuilder builder = new ShowcaseSnapshotBuilder(
+                workflowRunRepository,
+                workflowResumeService,
+                stateSnapshotService,
+                workflowEpochService,
+                stepAggregationService,
+                signalWaitRepository,
+                interfaceRenderService,
+                interfaceClient);
+
+        Optional<Map<String, Object>> snapshot = builder.capture("run-renumber", "tenant-caller", "org-acme", 7);
+
+        assertThat(snapshot).isPresent();
+        @SuppressWarnings("unchecked")
+        Map<String, Object> runState = (Map<String, Object>) snapshot.get().get("runState");
+        @SuppressWarnings("unchecked")
+        List<Map<String, Object>> epochs = (List<Map<String, Object>>) runState.get("epochTimestamps");
+        // Only the published epoch survives, renumbered, with its window intact. Its
+        // header span is 8h42m; the figure that must travel is the 12s of work.
+        assertThat(epochs).hasSize(1);
+        assertThat(epochs.getFirst()).containsEntry("epoch", 1);
+        assertThat(epochs.getFirst()).containsEntry("workDurationMs", 12_000L);
+        assertThat(epochs.getFirst()).containsEntry("startedAt", "2026-08-02T03:18:00Z");
+        assertThat(epochs.getFirst()).containsEntry("endedAt", "2026-08-02T12:00:00Z");
     }
 
     @Test

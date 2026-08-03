@@ -1251,6 +1251,35 @@ describe('RunStateStore', () => {
       expect(store.getState().epochTimestamps).toBe(b);
     });
 
+    it('writes a new array when only workDurationMs moved', () => {
+      // While an epoch executes, workDurationMs is the ONLY field that changes:
+      // startedAt is fixed and endedAt stays null until the close. If the equality
+      // check ignores it, every in-flight poll looks like "no change" and the
+      // duration the UI shows freezes at whatever the first poll happened to carry.
+      const a = [{ epoch: 1, startedAt: '2026-05-12T10:00:00Z', endedAt: null, workDurationMs: 2_000 }];
+      store.setEpochData(1, a);
+      const firstRef = store.getState().epochTimestamps;
+
+      const b = [{ epoch: 1, startedAt: '2026-05-12T10:00:00Z', endedAt: null, workDurationMs: 9_000 }];
+      store.setEpochData(1, b);
+
+      expect(store.getState().epochTimestamps).not.toBe(firstRef);
+      expect(store.getState().epochTimestamps[0].workDurationMs).toBe(9_000);
+    });
+
+    it('treats an absent workDurationMs and an explicit null as the same value', () => {
+      // The field is optional on the wire; a payload that omits it must not read as a
+      // change against one that sent null, or the short-circuit never fires again.
+      const a = [{ epoch: 1, startedAt: '2026-05-12T10:00:00Z', endedAt: null }];
+      store.setEpochData(1, a);
+      const firstRef = store.getState().epochTimestamps;
+
+      const b = [{ epoch: 1, startedAt: '2026-05-12T10:00:00Z', endedAt: null, workDurationMs: null }];
+      store.setEpochData(1, b);
+
+      expect(store.getState().epochTimestamps).toBe(firstRef);
+    });
+
     it('writes when length differs', () => {
       store.setEpochData(1, [
         { epoch: 1, startedAt: '2026-05-12T10:00:00Z', endedAt: null },

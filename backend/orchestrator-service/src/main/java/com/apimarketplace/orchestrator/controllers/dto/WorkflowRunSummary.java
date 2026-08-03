@@ -33,14 +33,22 @@ public record WorkflowRunSummary(
     Integer currentEpoch,
     Instant lastFireAt,
     /**
-     * Duration of the most recently CLOSED epoch, in milliseconds; null when no
-     * epoch has closed yet.
+     * How long the latest epoch spent EXECUTING, in milliseconds: from its first
+     * node starting to its last node finishing. Null when nothing has executed yet.
      *
      * <p>This is what the run history shows for a run that has not terminated.
-     * {@code durationMs} above measures the whole run and stays null for a
-     * reusable run (which never ends), while the span from {@code startedAt} to a
-     * stamped {@code endedAt} measures that run's LIFETIME - days once
+     * {@code durationMs} above measures the whole run and stays null for a reusable
+     * run (which never ends), while the span from {@code startedAt} to a stamped
+     * {@code endedAt} measures that run's LIFETIME - days once
      * {@code cancelStaleRuns} closes it - not how long the workflow takes.
+     *
+     * <p>Not the epoch's own {@code duration_ms} either: that is stamped at CLOSE
+     * time, and an epoch closes only when it is reconciled (the next fire, a resume,
+     * a restart recovery sweep), which can be hours or days after the last node
+     * finished. Prod reported 32h42m for epochs that really execute in seconds.
+     *
+     * <p>If the latest epoch is still in flight this is the window closed SO FAR,
+     * and it grows as the epoch progresses.
      */
     Long lastEpochDurationMs
 ) {}

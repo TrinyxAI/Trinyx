@@ -27,7 +27,8 @@ import { TriggerPanel, type TriggerPanelConfig } from '@/app/workflows/builder/c
 import { formatUtcTime } from '@/lib/utils/dateFormatters';
 import { RunningBorder } from './RunningBorder';
 import { VIEWING_EPOCH_EVENT, shouldAdoptEpochEvent, type EpochEventDetail } from '@/lib/workflow/epochEventScope';
-import { markEpochPickedByUser } from '@/components/workflow/run-panel/useDefaultEpochSelection';
+import { getPickedEpoch, markEpochPickedByUser } from '@/components/workflow/run-panel/useDefaultEpochSelection';
+import { epochDisplayDurationMs } from '@/components/workflow/run-panel/runFormatting';
 
 export interface ApplicationConfig {
   interfaceId: string;
@@ -55,6 +56,17 @@ interface ApplicationTabContentProps {
   /** Controlled viewingEpoch (lifted from parent carousel so it survives tab switches) */
   viewingEpoch?: number | null;
   onViewingEpochChange?: (epoch: number | null) => void;
+  /**
+   * Open on the newest fire instead of on all of them.
+   *
+   * Set where the application IS the product (a published app, a shared link):
+   * its visitors want the latest result, not a pager spanning every fire the
+   * workflow ever had. On the workflow page the app is one view of a run among
+   * others, so it opens on all epochs like the canvas and the Run panel, and
+   * this stays off. Purely local either way: the epoch is never broadcast from
+   * here, so no other surface is dragged along.
+   */
+  openOnLatestEpoch?: boolean;
   /**
    * Marketplace-preview mode. Anonymous visitors and authenticated browsing
    * users hitting `/app/marketplace/{publicationId}/preview` MUST NOT be
@@ -97,7 +109,7 @@ function isExplicitFalse(value: unknown): boolean {
   return value === false || value === 'false';
 }
 
-export function ApplicationTabContent({ config, runId, workflowId, onAction, carouselControls, isExpanded: controlledExpanded, onExpandedChange, toolbarOpen: controlledToolbarOpen, onToolbarOpenChange, viewingEpoch: controlledViewingEpoch, onViewingEpochChange, previewMode = false }: ApplicationTabContentProps) {
+export function ApplicationTabContent({ config, runId, workflowId, onAction, carouselControls, isExpanded: controlledExpanded, onExpandedChange, toolbarOpen: controlledToolbarOpen, onToolbarOpenChange, viewingEpoch: controlledViewingEpoch, onViewingEpochChange, openOnLatestEpoch = false, previewMode = false }: ApplicationTabContentProps) {
   const t = useTranslations('marketplace');
   const tActions = useTranslations('actions');
   const tCanvas = useTranslations('workflowBuilder.canvas');
@@ -287,9 +299,11 @@ export function ApplicationTabContent({ config, runId, workflowId, onAction, car
   // Epoch selector: set locally/parent AND broadcast to canvas so RunInfo stays in sync.
   // Scope the broadcast to THIS run so sibling app tabs (other runs) ignore it.
   //
-  // Called BOTH programmatically (seed the latest epoch on mount, jump when a new
-  // one closes) and from the dropdown, so it must not record a user pick - see
-  // `handleEpochPickedByUser` below, which is wired to the click alone.
+  // Shows an epoch WITHOUT claiming the user chose it. Used by the jump that
+  // follows a new fire for a tab pinned by its own seeding (a published app):
+  // recording that would hand a pick to the workflow surfaces of the same run,
+  // which nobody asked for. The dropdown goes through `handleEpochPickedByUser`
+  // below, which does record.
   const handleViewEpoch = React.useCallback((epoch: number | null) => {
     if (onViewingEpochChange) {
       onViewingEpochChange(epoch);
@@ -303,11 +317,10 @@ export function ApplicationTabContent({ config, runId, workflowId, onAction, car
   /**
    * The dropdown click, and ONLY that.
    *
-   * A live run follows new epochs unless the user chose one, and that flag is
-   * module-global and shared across every surface of the run. Marking it from
-   * `handleViewEpoch` would let this tab's own mount-time seeding count as a
-   * choice, permanently freezing the canvas and the Run tab on whatever epoch
-   * happened to be latest when the application panel first rendered.
+   * The epoch a user picked is remembered per run, module-globally, and shared
+   * with every surface of that run (the canvas, the Run tab). Marking it from
+   * `handleViewEpoch` would let this tab's own auto-jump count as a choice and
+   * drag the other surfaces onto whatever epoch it landed on.
    */
   const handleEpochPickedByUser = React.useCallback((epoch: number | null) => {
     markEpochPickedByUser(runId, epoch);
@@ -398,17 +411,28 @@ export function ApplicationTabContent({ config, runId, workflowId, onAction, car
   const epochTimestamps = runState?.epochTimestamps ?? [];
   const totalEpochs = epochTimestamps.length;
 
-  // Default to the latest epoch on first load (not "All").
-  const initializedRef = React.useRef(false);
+  // On the workflow page nothing is selected on first load: a run opens on ALL
+  // of its epochs, here as everywhere else. This tab used to seed the newest one
+  // unconditionally, and because `handleViewEpoch` broadcasts the choice to
+  // every surface of the run, merely opening the Application tab dragged the
+  // canvas and the Run tab onto that epoch - the cumulative view was
+  // unreachable for a workflow with an app.
+  //
+  // Where the application IS the product (`openOnLatestEpoch`), the newest fire
+  // is what its visitors came for, so it is selected LOCALLY - through the
+  // controlled prop, never the broadcasting handler.
+  const seededLatestRef = React.useRef(false);
   React.useEffect(() => {
-    if (initializedRef.current || totalEpochs === 0) return;
-    if (viewingEpoch != null) { initializedRef.current = true; return; }
-    const latest = Math.max(...epochTimestamps.map((e: any) => e.epoch ?? 0));
-    if (latest > 0) {
-      handleViewEpoch(latest);
-      initializedRef.current = true;
-    }
-  }, [totalEpochs, epochTimestamps, viewingEpoch, handleViewEpoch]);
+    if (!openOnLatestEpoch || seededLatestRef.current || totalEpochs === 0) return;
+    if (viewingEpoch != null) { seededLatestRef.current = true; return; }
+    const latest = Math.max(...epochTimestamps.map((e: { epoch?: number }) => e.epoch ?? 0));
+    // Latch only on a real seed, so a first snapshot that carries no usable
+    // epoch does not disable seeding for the life of this tab.
+    if (latest <= 0) return;
+    seededLatestRef.current = true;
+    if (onViewingEpochChange) onViewingEpochChange(latest);
+    else setLocalViewingEpoch(latest);
+  }, [openOnLatestEpoch, totalEpochs, epochTimestamps, viewingEpoch, onViewingEpochChange]);
 
   const { data: renderData, isLoading, isFetching, isPlaceholderData, refetch } = useInterfaceRender(
     config.interfaceId,
@@ -543,15 +567,25 @@ export function ApplicationTabContent({ config, runId, workflowId, onAction, car
     // Post-initial-sync: a new epoch closed. Auto-jump only when the user is
     // already pinned to a specific epoch (they were watching live epoch N -
     // carry them to N+1). If they chose "All", respect that choice.
+    //
+    // This MOVES a pin the user set, so it moves the remembered pick with it:
+    // leaving it on the epoch they were carried away from would have the next
+    // surface that mounts empty restore a stale one. When the pin came from
+    // this tab's own seeding (a published app), there is no pick to move and
+    // none is invented - the workflow surfaces stay on all epochs.
     const newEpochAppeared = totalEpochs > prevEpochCountRef.current;
     if (newEpochAppeared) {
       prevEpochCountRef.current = totalEpochs;
       if (viewingEpoch != null) {
         const latestEpoch = Math.max(...epochTimestamps.map((e: any) => e.epoch));
-        handleViewEpoch(latestEpoch);
+        // `!= null` on purpose: a recorded `null` IS the user asking for all
+        // epochs. Treating it as "they picked something" would turn their
+        // choice into a pin on the newest fire and broadcast it to the canvas.
+        if (getPickedEpoch(runId) != null) handleEpochPickedByUser(latestEpoch);
+        else handleViewEpoch(latestEpoch);
       }
     }
-  }, [runId, totalEpochs, epochTimestamps, viewingEpoch, handleViewEpoch]);
+  }, [runId, totalEpochs, epochTimestamps, viewingEpoch, handleEpochPickedByUser, handleViewEpoch]);
 
   // Pending interface signals for this node (split-aware: one signal per itemId).
   const interfacePendingSignals = React.useMemo(() => {
@@ -881,26 +915,34 @@ export function ApplicationTabContent({ config, runId, workflowId, onAction, car
     return () => document.removeEventListener('mousedown', handler);
   }, [epochDropdownOpen]);
 
-  // Current display epoch: viewingEpoch if set, otherwise latest epoch
+  // Current display epoch: viewingEpoch if set, otherwise latest epoch.
+  // `null` means all of them, and the control says so in words - a bare number
+  // there could only be read as "you are on epoch N".
   const currentDisplayEpoch = React.useMemo(() => {
     if (viewingEpoch != null) return viewingEpoch;
     if (epochTimestamps.length > 0) return Math.max(...epochTimestamps.map((e: any) => e.epoch ?? 1));
     return 1;
   }, [viewingEpoch, epochTimestamps]);
+  const showsAllEpochs = viewingEpoch == null;
 
   // Sorted epochs (newest first) + durations (same as RunInfo EpochSelector)
   const sortedEpochs = React.useMemo(() => {
     const sorted = [...epochTimestamps].sort((a: any, b: any) => b.epoch - a.epoch);
+    const now = Date.now();
     return sorted.map((entry: any) => {
       const startMs = entry.startedAt ? parseUtcAware(entry.startedAt).getTime() : 0;
-      const endMs = entry.endedAt ? parseUtcAware(entry.endedAt).getTime() : Date.now();
-      const duration = startMs ? Math.max(0, endMs - startMs) : 0;
+      // Shared with the RunInfo EpochSelector on purpose: this used to compute
+      // `endedAt - startedAt`, which is the epoch's LIFETIME. An epoch closes only
+      // when it is reconciled (the next fire, a resume, a restart recovery sweep),
+      // so that span counted idle time and printed 32h42m for epochs that ran for
+      // seconds.
+      const duration = epochDisplayDurationMs(entry, now);
       const isRunning = entry.startedAt != null && entry.endedAt == null;
       return { ...entry, duration, isRunning, startMs };
     });
   }, [epochTimestamps]);
 
-  const maxDuration = React.useMemo(() => Math.max(...sortedEpochs.map(e => e.duration), 1), [sortedEpochs]);
+  const maxDuration = React.useMemo(() => Math.max(...sortedEpochs.map(e => e.duration ?? 0), 1), [sortedEpochs]);
 
   // ── Shared toolbar extraControls (launch + epoch selector + continue) ──
   const toolbarExtraControls = React.useMemo(() => {
@@ -977,18 +1019,43 @@ export function ApplicationTabContent({ config, runId, workflowId, onAction, car
               : 'text-[var(--text-secondary)] hover:bg-gray-200 dark:hover:bg-gray-700 hover:text-gray-900 dark:hover:text-gray-100'
           }`}
           data-testid="application-epoch-selector"
-          title={`Epoch ${currentDisplayEpoch}`}
+          data-all-epochs={showsAllEpochs || undefined}
+          title={showsAllEpochs ? tRun('allEpochs') : tRun('epochBadge', { number: currentDisplayEpoch })}
         >
           <Calendar className="h-3 w-3" />
-          <span className="font-medium tabular-nums">{currentDisplayEpoch}</span>
+          <span className={`font-medium ${showsAllEpochs ? '' : 'tabular-nums'}`}>
+            {showsAllEpochs ? tRun('allEpochs') : currentDisplayEpoch}
+          </span>
         </button>
 
         {/* Epoch dropdown popup (same layout as RunInfo EpochSelector) */}
         {epochDropdownOpen && totalEpochs > 1 && (
           <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 z-50 rounded-xl bg-white/95 dark:bg-gray-800/95 backdrop-blur shadow-xl border border-slate-200 dark:border-slate-700 py-1.5 min-w-[260px] max-h-[240px] overflow-y-auto">
+            {/* Back to the cumulative view. Without it, picking one fire here
+                was a one-way door: nothing in this tab could undo it. */}
+            <button
+              type="button"
+              onClick={() => {
+                handleEpochPickedByUser(null);
+                setEpochDropdownOpen(false);
+              }}
+              data-testid="application-epoch-option-all"
+              data-selected={showsAllEpochs || undefined}
+              className={`w-full flex items-center gap-1.5 px-3 py-1.5 text-xs transition-colors ${
+                showsAllEpochs
+                  ? 'border-l-2 border-gray-900 dark:border-gray-100 bg-gray-50 dark:bg-white/[0.04] font-semibold text-gray-900 dark:text-gray-100'
+                  : 'border-l-2 border-transparent hover:bg-gray-50/80 dark:hover:bg-white/[0.03]'
+              }`}
+            >
+              <div className="w-5 shrink-0 flex items-center justify-center">
+                <Calendar className="h-3 w-3" />
+              </div>
+              <span className="flex-1 text-left">{tRun('allEpochs')}</span>
+            </button>
+
             {sortedEpochs.map((entry) => {
-              const isSelected = entry.epoch === currentDisplayEpoch;
-              const barPct = maxDuration > 0 ? Math.max(5, (entry.duration / maxDuration) * 100) : 5;
+              const isSelected = !showsAllEpochs && entry.epoch === currentDisplayEpoch;
+              const barPct = maxDuration > 0 ? Math.max(5, ((entry.duration ?? 0) / maxDuration) * 100) : 5;
 
               return (
                 <button
@@ -1036,7 +1103,7 @@ export function ApplicationTabContent({ config, runId, workflowId, onAction, car
                   <span className={`min-w-[32px] text-right text-[10px] tabular-nums font-medium shrink-0 ${
                     entry.isRunning ? 'text-blue-500 dark:text-blue-400' : 'text-gray-500 dark:text-gray-400'
                   }`}>
-                    {entry.startedAt ? formatEpochDuration(entry.duration) : ''}
+                    {entry.duration != null ? formatEpochDuration(entry.duration) : ''}
                   </span>
                 </button>
               );
@@ -1147,7 +1214,7 @@ export function ApplicationTabContent({ config, runId, workflowId, onAction, car
 
     if (!variablePaginationControl && !launchButton && !epochSelector && !continueButton) return undefined;
     return <>{variablePaginationControl}{launchButton}{epochSelector}{continueButton}</>;
-  }, [totalEpochs, epochTimestamps, sortedEpochs, maxDuration, viewingEpoch, currentDisplayEpoch, epochDropdownOpen, handleViewEpoch, handleEpochPickedByUser, runId, isAwaitingSignal, config.nodeId, isContinuing, isCurrentItemPending, handleDefaultContinue, t, tRun, currentItemTriple, pendingSignalCount, launchable, hasPanelTriggers, hasAnyLaunchable, handleLaunchTrigger, isLaunching, tActions, previewMode, activeVariablePage, variablePaginationItems, handleVariablePrevious, handleVariableNext, tCanvas]);
+  }, [totalEpochs, epochTimestamps, sortedEpochs, maxDuration, viewingEpoch, showsAllEpochs, currentDisplayEpoch, epochDropdownOpen, handleViewEpoch, handleEpochPickedByUser, runId, isAwaitingSignal, config.nodeId, isContinuing, isCurrentItemPending, handleDefaultContinue, t, tRun, currentItemTriple, pendingSignalCount, launchable, hasPanelTriggers, hasAnyLaunchable, handleLaunchTrigger, isLaunching, tActions, previewMode, activeVariablePage, variablePaginationItems, handleVariablePrevious, handleVariableNext, tCanvas]);
 
   // ── The interface's display format - scale-to-fit virtual viewport ──
   // When the INTERFACE declares a format (preset name or "WxH"), the iframe renders inside a

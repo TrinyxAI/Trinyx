@@ -9,7 +9,7 @@ import { canvasChromeChipRadiusClass } from '@/components/ui/canvas-chrome';
 import { formatRelativeDateI18n } from '@/lib/utils/dateFormatters';
 import { getRunDisplayStatus, getStatusClasses, getRunStatusLabel } from '@/lib/utils/runStatusUtils';
 import { useHorizontalScrollHint } from '@/hooks/useHorizontalScrollHint';
-import { TERMINAL_RUN_STATUSES, type EpochTimestamp } from './runFormatting';
+import { TERMINAL_RUN_STATUSES } from './runFormatting';
 
 export interface RunSummaryRunInfo {
   runId?: string;
@@ -26,7 +26,6 @@ export interface RunSummaryBarProps {
   pinnedVersion?: number | null;
   /** Current epoch number reported by the run (0 = never fired). */
   currentEpoch?: number;
-  epochTimestamps?: EpochTimestamp[];
   /** Epoch currently being viewed - shown in the epoch chip when set. */
   selectedEpoch?: number | null;
   isStepByStep?: boolean;
@@ -71,7 +70,6 @@ export function RunSummaryBar({
   currentRunInfo,
   pinnedVersion,
   currentEpoch = 0,
-  epochTimestamps = [],
   selectedEpoch = null,
   isStepByStep = false,
   onStop,
@@ -203,13 +201,24 @@ export function RunSummaryBar({
               </span>
             )}
 
-            {/* Epoch indicator - right after version */}
+            {/* Epoch indicator - right after version.
+                A bare number can only mean "epoch N": showing the epoch COUNT
+                the same way made the default view read as "you are on epoch 3"
+                while the panel next to it said "All epochs". The cumulative view
+                says so in words, and keeps the count that tells you how many
+                times the run fired. */}
             {currentEpoch > 0 && (
               <span className="flex items-center gap-0.5 flex-shrink-0">
                 <span className={`${textCls} text-gray-400 dark:text-gray-500`}>·</span>
-                <span className={`flex items-center gap-1 ${textCls} font-medium text-gray-600 dark:text-gray-300 tabular-nums whitespace-nowrap`}>
+                <span
+                  data-run-epoch-chip
+                  data-all-epochs={selectedEpoch == null || undefined}
+                  className={`flex items-center gap-1 ${textCls} font-medium text-gray-600 dark:text-gray-300 ${selectedEpoch != null ? 'tabular-nums' : ''} whitespace-nowrap`}
+                >
                   <Calendar className={iconCls} />
-                  {selectedEpoch != null ? selectedEpoch : (epochTimestamps.length > 0 ? epochTimestamps.length : currentEpoch)}
+                  {selectedEpoch != null
+                    ? selectedEpoch
+                    : t('workflow.runSteps.allEpochsCount', { count: currentEpoch })}
                 </span>
               </span>
             )}

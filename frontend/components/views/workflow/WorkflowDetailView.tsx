@@ -34,6 +34,7 @@ import { useOrgScopedReset } from '@/lib/hooks/useOrgScopedReset';
 
 import { WorkflowLoadingState } from './WorkflowLoadingState';
 import { WorkflowUnauthorizedState } from './WorkflowUnauthorizedState';
+import { runRoutePathFor } from '@/lib/workflow/runRoutePath';
 import { useAutoCollapseSidebar } from './hooks';
 import { OPEN_TRIGGER_TAB_EVENT, findTriggerTabConfig, type OpenTriggerTabDetail } from '@/lib/workflow/triggerTabEvent';
 
@@ -165,19 +166,48 @@ export function WorkflowDetailView({ workflowId, runId: runIdProp, autoOpenApp }
   // (see the sidePanelAutoOpen handler below), so the canvas swaps its run
   // without tearing the page down.
   //
-  // The URL is deliberately left alone. Rewriting it with history.replaceState
-  // desynchronises the App Router (it still owns /run/<original>) and the router
-  // re-asserts its own URL on the next render, snapping the canvas back to the
-  // previous run; going through the router instead is the very remount we are
-  // avoiding. The run being viewed is stated by the panel and the run bar, and
-  // the URL stays the entry point the page was opened with.
+  // The address bar is then brought along with the NATIVE History API, which
+  // Next supports precisely for this (it updates `usePathname` without fetching
+  // the route again, so nothing remounts). Leaving the URL on the previous run
+  // was silent until the user pressed F5: the reload restored the run named by
+  // the URL, i.e. the one they had just navigated away from. It also made the
+  // run they were looking at impossible to share or bookmark.
+  //
+  // Swapping one run for another REPLACES the entry: it is not a navigation,
+  // and one entry per pick would make Back walk through every run you glanced
+  // at. Coming from the edit page PUSHES instead, because that page is
+  // somewhere the user was and must be able to go back to.
+  //
+  // `urlSynced` tells the provider this binding IS the URL, so its URL-driven
+  // effect stays in charge. A latched "programmatic" flag would make the
+  // provider ignore the pathname for the rest of the session, so a later real
+  // navigation (the Edit toggle) would move the URL with nothing following it.
   useEffect(() => {
     const handler = (event: Event) => {
       const detail = (event as CustomEvent<BindRunDetail>).detail;
       if (!detail?.runId) return;
       if (detail.workflowId && detail.workflowId !== workflowId) return;
-      if (detail.runId === effectiveRunId) return;
-      setRunId(detail.runId);
+      const nextPath = runRoutePathFor(window.location.pathname, workflowId, detail.runId);
+      const urlAlreadyNamesIt = nextPath === window.location.pathname;
+      // Picking the run already on screen is not always a no-op: an
+      // agent-launched run is bound in place on the EDIT url, and picking it in
+      // the history is how a user says "keep this one" - so the address bar is
+      // still written, even though the binding does not change.
+      const wroteUrl = !!nextPath && !urlAlreadyNamesIt;
+      // Nothing to change: same run, and no address bar of ours to align.
+      if (detail.runId === effectiveRunId && !wroteUrl) return;
+      if (wroteUrl) {
+        const url = `${nextPath}${window.location.search}${window.location.hash}`;
+        const leavingEditPage = !window.location.pathname.includes('/run/');
+        if (leavingEditPage) window.history.pushState(null, '', url);
+        else window.history.replaceState(null, '', url);
+      }
+      // Re-bound even when the run does not change: writing the URL is what
+      // hands the binding back to the pathname, and the provider only learns
+      // that through `urlSynced`. Skipping it here left an agent-launched run
+      // latched, so the Back this push exists for changed the URL with nothing
+      // following it.
+      setRunId(detail.runId, { urlSynced: !!nextPath });
     };
     window.addEventListener(BIND_RUN_EVENT, handler);
     return () => window.removeEventListener(BIND_RUN_EVENT, handler);

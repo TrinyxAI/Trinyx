@@ -38,6 +38,9 @@ class WorkflowEpochServiceTest {
     @Mock
     private WorkflowEpochRepository repository;
 
+    @Mock
+    private com.apimarketplace.orchestrator.persistence.WorkflowStepDataRepository stepDataRepository;
+
     private final ObjectMapper objectMapper = new ObjectMapper()
             .registerModule(new JavaTimeModule());
 
@@ -48,7 +51,7 @@ class WorkflowEpochServiceTest {
 
     @BeforeEach
     void setUp() {
-        service = new WorkflowEpochService(repository, objectMapper);
+        service = new WorkflowEpochService(repository, objectMapper, stepDataRepository);
     }
 
     // ═══════════════════════════════════════════════════════════════════════════

@@ -127,31 +127,27 @@ export function RunPanelContent({ workflowId, allowHistory = false, viewRequest 
   }, [data.runId, contextRunId, setRunId]);
 
   const handleSelectEpoch = useCallback((epoch: number | null) => {
-    // An explicit pick stops the "follow the newest epoch" behaviour for this run.
+    // Remember the choice for this run so the other surface, and this panel
+    // after it is closed and reopened, show the same thing. `null` (All epochs)
+    // is a real choice, not an absence of one.
     markEpochPickedByUser(runId, epoch);
     setViewingEpoch(epoch);
   }, [runId, setViewingEpoch]);
 
   /**
-   * A run is read THROUGH an epoch here too: the panel must never open on "All
-   * epochs" while the canvas chip beside it reads a number.
-   *
-   * The canvas seeds its OWN provider and broadcasts that choice, but the panel
-   * body does not exist while the side panel is closed - which is exactly when
-   * the seed happens on the normal path - so the panel opened unselected and
-   * listed the cumulative aggregate. Seeding here too makes the two agree
-   * whenever the panel appears; the shared "explicitly picked" flag stops this
-   * from overriding a choice the user made on either surface.
+   * The panel opens on the same view as the canvas beside it: all epochs, unless
+   * the user picked one. Nothing is selected here either - this only restores a
+   * pick made on the other surface, since the panel body does not exist while
+   * the side panel is closed and `viewingEpoch` dies with its provider.
    *
    * Gated on the provider having ADOPTED this run (`contextRunId === runId`),
-   * not merely on knowing it: `setRunId` above is a state update, so seeding in
+   * not merely on knowing it: `setRunId` above is a state update, so restoring in
    * the same commit would broadcast the epoch with `runId: null`, which every
    * other mounted provider adopts - the cross-talk this panel's scoping exists
    * to prevent, on the very first selection.
    */
   useDefaultEpochSelection({
     runId,
-    epochTimestamps: data.epochTimestamps,
     selectedEpoch: viewingEpoch,
     onSelectEpoch: setViewingEpoch,
     enabled: hasRun && !!runId && contextRunId === runId,
@@ -168,11 +164,15 @@ export function RunPanelContent({ workflowId, allowHistory = false, viewRequest 
     setView('run');
     // ...then ask the page to rebind the canvas IN PLACE. No router.push: that
     // remounted the whole route and read as a full-page refresh just to look at
-    // another run.
-    if (nextRunId !== runId) {
-      requestBindRun({ workflowId, runId: nextRunId });
-    }
-  }, [workflowId, runId, setRunId]);
+    // another run. The page also realigns the address bar (it owns the route;
+    // this panel is mounted on surfaces whose URL says nothing about a run), so
+    // a reload comes back on the run that was picked here.
+    //
+    // Sent even for the run already on screen: an agent-launched run is bound
+    // in place on the edit URL, and picking it here is how a user says "keep
+    // this one". The page no-ops when there is nothing left to align.
+    requestBindRun({ workflowId, runId: nextRunId });
+  }, [workflowId, setRunId]);
 
   const runAction = useCallback((action: 'stop' | 'cancel' | 'reactivate') => {
     requestRunAction({ action, workflowId, runId });
@@ -226,7 +226,6 @@ export function RunPanelContent({ workflowId, allowHistory = false, viewRequest 
         currentRunInfo={data.runInfo}
         pinnedVersion={data.pinnedVersion}
         currentEpoch={data.currentEpoch}
-        epochTimestamps={data.epochTimestamps}
         selectedEpoch={viewingEpoch}
         isStepByStep={data.isStepByStep}
         onStop={data.isPreviewOnly ? undefined : () => runAction('stop')}

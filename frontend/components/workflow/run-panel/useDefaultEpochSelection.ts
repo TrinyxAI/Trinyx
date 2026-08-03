@@ -1,39 +1,36 @@
 'use client';
 
-import { useEffect, useRef } from 'react';
-import { latestEpoch, type EpochTimestamp } from './runFormatting';
+import { useEffect } from 'react';
 
 /**
- * A run is always read THROUGH an epoch: the run surfaces never sit on "nothing
- * selected". This hook seeds the selection with the most recent epoch and keeps
- * following new epochs as they open, until the user picks one explicitly.
+ * Opening a run shows ALL of its epochs.
  *
- * The "is this run still auto-following?" flag lives at module scope, keyed by
- * run id, because the two surfaces that can change the epoch (the canvas and the
- * side-panel Run tab) are in separate React trees. A component-local flag would
- * let one tree undo the other's explicit choice - most visibly when the user
- * picks "All epochs" (a null selection), which the other tree would immediately
- * overwrite with the latest epoch.
- */
-/**
- * The user's choice per run - the EPOCH, not just "they chose". A boolean was
- * not enough: `viewingEpoch` dies with its provider, so after the side panel is
- * closed and reopened the flag said "do not auto-follow" while the selection
- * itself was gone, leaving the panel on neither the pick nor the latest epoch.
- * `null` is a real value here ("All epochs").
+ * A run is a sequence of fires and the cumulative view is what "the run" means:
+ * landing on one specific epoch hid every other fire behind a selector the user
+ * never asked for. So the run surfaces (the canvas and the Run tab) select
+ * nothing on their own and follow nothing: `null` ("All epochs") is where every
+ * run opens, and a single epoch is only ever shown because the user picked it.
+ * (The application carousel still jumps to a new fire, but only for a user who
+ * had pinned an epoch - it never leaves the cumulative view on its own.)
+ *
+ * What remains is continuity: an explicit pick must survive the surface that
+ * made it. The choice lives at module scope, keyed by run id, because the two
+ * surfaces that can change the epoch (the canvas and the side-panel Run tab) are
+ * in separate React trees, and `viewingEpoch` dies with its provider - so a
+ * panel that is closed and reopened would otherwise drop the choice.
  */
 const pickedEpochByRun = new Map<string, number | null>();
 
 /**
- * Only recently-viewed runs matter: this exists to stop one React tree from
- * undoing the other's choice while both show the SAME run, a question that dies
- * with the navigation. Without a bound, a session browsing hundreds of runs keeps
- * every id for its whole lifetime. Map iteration is insertion-ordered, so the
- * first entry is the oldest.
+ * Only recently-viewed runs matter: this exists to carry a choice across a
+ * remount of the surface showing that run, a question that dies with the
+ * navigation. Without a bound, a session browsing hundreds of runs keeps every
+ * id for its whole lifetime. Map iteration is insertion-ordered, so the first
+ * entry is the oldest.
  */
 const MAX_TRACKED_RUNS = 50;
 
-/** Record the epoch the user picked for this run - stop auto-following it. */
+/** Record the epoch the user picked for this run. `null` means "All epochs". */
 export function markEpochPickedByUser(runId: string | null | undefined, epoch: number | null = null): void {
   if (!runId) return;
   // Delete first so a re-pick refreshes recency: otherwise the eviction below can
@@ -47,12 +44,31 @@ export function markEpochPickedByUser(runId: string | null | undefined, epoch: n
   }
 }
 
-/** True while the run's epoch selection still follows the newest epoch. */
-export function isEpochAutoFollowing(runId: string | null | undefined): boolean {
-  return !!runId && !pickedEpochByRun.has(runId);
+/**
+ * Go back to the default view, and REMEMBER that this is where the user wants
+ * to be.
+ *
+ * Clearing the selection alone is not enough: a surface reporting "nothing
+ * selected" is indistinguishable from one that just mounted, so the restore
+ * below would re-apply the epoch the user was on and snap them back. Every
+ * "fire from here" control goes through this (the trigger node's play, the
+ * canvas toolbar's, the run-info step row's), because leaving the focused epoch
+ * is part of what the user asked for. A reset that the user did NOT ask for
+ * (the edit/run toggle dropping the chip) must stay a plain clear: it is not a
+ * choice, and recording it would erase the pick the run actually has.
+ */
+export function selectAllEpochs(
+  runId: string | null | undefined,
+  onSelectEpoch: (epoch: number | null) => void,
+): void {
+  markEpochPickedByUser(runId, null);
+  onSelectEpoch(null);
 }
 
-/** The epoch the user picked for this run, or undefined if they never did. */
+/**
+ * The epoch the user picked for this run: a number, `null` for an explicit
+ * "All epochs", or undefined when they never picked one (still on the default).
+ */
 export function getPickedEpoch(runId: string | null | undefined): number | null | undefined {
   if (!runId) return undefined;
   return pickedEpochByRun.has(runId) ? pickedEpochByRun.get(runId) : undefined;
@@ -66,54 +82,32 @@ export function resetEpochSelectionState(runId?: string | null): void {
 
 export interface DefaultEpochSelectionOptions {
   runId: string | null | undefined;
-  epochTimestamps: readonly EpochTimestamp[];
   selectedEpoch: number | null;
   onSelectEpoch: (epoch: number | null) => void;
   /** Skip entirely (e.g. edit mode, no run bound). */
   enabled?: boolean;
 }
 
+/**
+ * Holds a run's epoch selection at its default ("All epochs") and restores an
+ * explicit pick on a surface that mounts with nothing selected. It never selects
+ * an epoch on its own.
+ */
 export function useDefaultEpochSelection({
   runId,
-  epochTimestamps,
   selectedEpoch,
   onSelectEpoch,
   enabled = true,
 }: DefaultEpochSelectionOptions): void {
-  const prevLatestRef = useRef<number | null>(null);
-  const prevRunIdRef = useRef<string | null | undefined>(runId);
-
   useEffect(() => {
-    // A different run starts over: it has its own epochs and its own choice.
-    if (prevRunIdRef.current !== runId) {
-      prevRunIdRef.current = runId;
-      prevLatestRef.current = null;
-    }
+    if (!enabled || !runId) return;
 
-    const latest = latestEpoch(epochTimestamps as EpochTimestamp[]);
-    const prevLatest = prevLatestRef.current;
-    prevLatestRef.current = latest;
-
-    if (!enabled || latest == null || !runId) return;
-
-    if (!isEpochAutoFollowing(runId)) {
-      // The user picked an epoch for this run. Restore it when this surface has
-      // no selection of its own (a freshly mounted panel), and otherwise leave
-      // the selection alone - that is what "explicitly picked" means.
-      const picked = getPickedEpoch(runId);
-      if (selectedEpoch == null && picked != null) onSelectEpoch(picked);
-      return;
-    }
-
-    // 1. Nothing selected yet → land on the most recent epoch.
-    if (selectedEpoch == null) {
-      onSelectEpoch(latest);
-      return;
-    }
-    // 2. Parked on what WAS the newest epoch and a newer one just opened →
-    //    follow it, so a live run keeps showing what is executing now.
-    if (prevLatest != null && selectedEpoch === prevLatest && latest !== prevLatest) {
-      onSelectEpoch(latest);
-    }
-  }, [enabled, runId, epochTimestamps, selectedEpoch, onSelectEpoch]);
+    // Restore the epoch the user picked for this run when this surface has no
+    // selection of its own (a freshly mounted panel). Each run carries its own
+    // choice, so another run is unaffected. A `null` pick IS the default view,
+    // so there is nothing to restore for it - which is what makes
+    // `selectAllEpochs` stick instead of bouncing back.
+    const picked = getPickedEpoch(runId);
+    if (selectedEpoch == null && picked != null) onSelectEpoch(picked);
+  }, [enabled, runId, selectedEpoch, onSelectEpoch]);
 }

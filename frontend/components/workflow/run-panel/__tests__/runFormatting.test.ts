@@ -3,7 +3,6 @@ import {
   deriveEffectiveStatus,
   formatCompactDuration,
   isRunStatusActive,
-  latestEpoch,
 } from '@/components/workflow/run-panel/runFormatting';
 
 describe('formatCompactDuration', () => {
@@ -73,20 +72,5 @@ describe('isRunStatusActive', () => {
   it('is false when the status is unknown', () => {
     expect(isRunStatusActive(null)).toBe(false);
     expect(isRunStatusActive('')).toBe(false);
-  });
-});
-
-describe('latestEpoch', () => {
-  it('returns null when the run has no epoch yet', () => {
-    expect(latestEpoch([])).toBeNull();
-  });
-
-  it('returns the highest epoch regardless of array order', () => {
-    const epochs = [
-      { epoch: 2, startedAt: '2026-07-31T10:00:00Z', endedAt: null },
-      { epoch: 5, startedAt: '2026-07-31T11:00:00Z', endedAt: null },
-      { epoch: 1, startedAt: '2026-07-31T09:00:00Z', endedAt: '2026-07-31T09:01:00Z' },
-    ];
-    expect(latestEpoch(epochs)).toBe(5);
   });
 });

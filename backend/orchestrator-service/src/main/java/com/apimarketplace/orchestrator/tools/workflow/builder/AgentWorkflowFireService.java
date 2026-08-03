@@ -385,8 +385,10 @@ public class AgentWorkflowFireService {
         // explicit stop from a crash.
         addStopInfo(result, run);
 
-        // Duration from metadata lastCycleAt vs run startedAt - use stateSnapshot totalDurationMs
-        addDuration(result, run);
+        // How long THIS fire's epoch executed. The rest of this result is scoped to
+        // (run_id, trigger_id, epoch), so a run-wide total here would be read as the
+        // duration of the fire that was just reported.
+        addEpochDuration(result, run, triggerResult.epoch());
 
         // All node statuses with output/error data
         Map<String, Object> nodeReport = buildAllNodeStatuses(
@@ -511,13 +513,16 @@ public class AgentWorkflowFireService {
         addStopInfo(result, run);
         result.put("started_at", run.getStartedAt() != null ? run.getStartedAt().toString() : null);
         result.put("ended_at", run.getEndedAt() != null ? run.getEndedAt().toString() : null);
-        addDuration(result, run);
+        // Measured once and shared: both the run total and the per-epoch list answer
+        // "how long did it execute", and each aggregate scans the run's step rows.
+        Map<Integer, Long> workDurations = readEpochWorkDurations(run);
+        addRunDuration(result, workDurations);
 
         // DAG summary from snapshot (currentEpoch, fireCount, currentSpawn survive pruning)
         result.put("dags", buildDagsSummary(run));
 
         // Epoch summaries from persistent data
-        List<Map<String, Object>> epochsList = buildEpochsMacroList(run.getRunIdPublic());
+        List<Map<String, Object>> epochsList = buildEpochsMacroList(run.getRunIdPublic(), workDurations);
         result.put("epochs", epochsList);
         result.put("total_epochs", epochsList.size());
 
@@ -740,7 +745,16 @@ public class AgentWorkflowFireService {
         return dags;
     }
 
-    private List<Map<String, Object>> buildEpochsMacroList(String runId) {
+    /**
+     * @param workDurations how long each epoch EXECUTED, passed in so the macro report
+     *        measures once instead of aggregating the run's step rows twice.
+     *        Deliberately not {@code header.durationMs()}: that is stamped at CLOSE
+     *        time, and an epoch closes only when it is reconciled (the next fire, a
+     *        resume, a restart recovery sweep), so it counts the idle tail. It reported
+     *        32h42m for epochs that really ran for seconds, a figure the agent would
+     *        then repeat as fact.
+     */
+    private List<Map<String, Object>> buildEpochsMacroList(String runId, Map<Integer, Long> workDurations) {
         List<Map<String, Object>> epochs = new ArrayList<>();
         try {
             List<EpochHeaderWithEpochRow> headers = epochService.listEpochHeaders(runId);
@@ -750,8 +764,9 @@ public class AgentWorkflowFireService {
                 epochInfo.put("trigger_id", header.triggerId());
                 epochInfo.put("started_at", header.startedAt() != null ? header.startedAt().toString() : null);
                 epochInfo.put("ended_at", header.closedAt() != null ? header.closedAt().toString() : null);
-                if (header.durationMs() != null) {
-                    epochInfo.put("duration_ms", header.durationMs());
+                Long workMs = workDurations.get(header.epoch());
+                if (workMs != null) {
+                    epochInfo.put("duration_ms", workMs);
                 }
 
                 // Derive node counts and epoch status from EpochState JSON
@@ -1217,19 +1232,49 @@ public class AgentWorkflowFireService {
         }
     }
 
-    private void addDuration(Map<String, Object> result, WorkflowRunEntity run) {
+    /**
+     * How long ONE epoch spent EXECUTING, for a result that describes that epoch.
+     *
+     * <p>Not the snapshot's {@code totalDurationMs}, which the previous version read:
+     * that accumulates each epoch's LIFETIME (close time minus start), and an epoch
+     * closes only when it is reconciled - the next fire, a resume, a restart recovery
+     * sweep. On a reusable run fired hourly for a fortnight the total is meaningless,
+     * and the agent reads whatever it is told as fact. On the run that surfaced this
+     * bug a single epoch's lifetime reached 32h42m for seconds of real work.
+     *
+     * <p>Absent when the epoch produced no step row: silence beats a fabricated zero.
+     */
+    private void addEpochDuration(Map<String, Object> result, WorkflowRunEntity run, Integer epoch) {
+        if (epoch == null) return;
+        Long millis = readEpochWorkDurations(run).get(epoch);
+        if (millis != null) result.put("duration_ms", millis);
+    }
+
+    /**
+     * Never throws: a duration is a nicety, and a run report the agent needs is worth
+     * more than a failed call because one aggregate could not be read.
+     */
+    private Map<Integer, Long> readEpochWorkDurations(WorkflowRunEntity run) {
         try {
-            String snapshotJson = run.getStateSnapshot();
-            if (snapshotJson != null && !snapshotJson.isBlank()) {
-                Map<?, ?> snap = objectMapper.readValue(snapshotJson, Map.class);
-                Object dur = snap.get("totalDurationMs");
-                if (dur instanceof Number) {
-                    result.put("duration_ms", ((Number) dur).longValue());
-                }
-            }
+            return epochService.getEpochWorkDurations(run.getRunIdPublic());
         } catch (Exception e) {
-            log.debug("[AgentFire] Could not read duration from stateSnapshot: {}", e.getMessage());
+            log.debug("[AgentFire] Could not measure epoch durations from step rows: {}", e.getMessage());
+            return Map.of();
         }
+    }
+
+    /**
+     * How long the whole run has spent EXECUTING: the sum of its epochs' work
+     * windows. For the macro report, which describes the run rather than one fire.
+     *
+     * <p>Same reasoning as {@link #addEpochDuration} on why the snapshot total is not
+     * used - there it is wrong per epoch, here it is wrong cumulatively.
+     */
+    private void addRunDuration(Map<String, Object> result, Map<Integer, Long> workDurations) {
+        if (workDurations.isEmpty()) return;
+        long total = 0L;
+        for (Long millis : workDurations.values()) total += millis;
+        result.put("duration_ms", total);
     }
 
     /**

@@ -16,7 +16,10 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 
 vi.mock('next-intl', () => ({
-  useTranslations: () => (key: string) => key,
+  // Echo the key, but interpolate the values: a chip whose whole point is the
+  // number it carries must be asserted with that number.
+  useTranslations: () => (key: string, values?: Record<string, unknown>) =>
+    values ? `${key}(${Object.values(values).join(',')})` : key,
   useLocale: () => 'en',
 }));
 
@@ -41,7 +44,6 @@ function renderBar(status: string, props: Record<string, unknown> = {}) {
       currentRunInfo={{ runId: 'run-1', status, planVersion: 3 } as never}
       pinnedVersion={null}
       currentEpoch={1}
-      epochTimestamps={[]}
       selectedEpoch={null}
       onStop={NOOP}
       onCancel={NOOP}
@@ -165,6 +167,31 @@ describe('RunSummaryBar - the run info labels are square, like the rest of the c
       expect(arrow.className, `${side} arrow`).toContain(canvasChromeChipRadiusClass);
       expect(arrow.className, `${side} arrow`).not.toContain('rounded-full');
     }
+  });
+});
+
+describe('RunSummaryBar - which epoch the bar says you are on', () => {
+  it('says "All epochs" in words, with the number of fires, when no epoch is picked', () => {
+    // A bare number can only be read as "epoch N": showing the epoch COUNT the
+    // same way made the default cumulative view look like a specific fire, and
+    // contradicted the panel next to it. The count still has to survive the
+    // rewording, it is the only place the bar says how often the run fired.
+    renderBar('COMPLETED', { currentEpoch: 3, selectedEpoch: null });
+    const chip = document.querySelector('[data-run-epoch-chip]') as HTMLElement;
+    expect(chip.getAttribute('data-all-epochs')).toBe('true');
+    expect(chip.textContent).toBe('workflow.runSteps.allEpochsCount(3)');
+  });
+
+  it('shows the epoch number once one is picked', () => {
+    renderBar('COMPLETED', { currentEpoch: 3, selectedEpoch: 2 });
+    const chip = document.querySelector('[data-run-epoch-chip]') as HTMLElement;
+    expect(chip.getAttribute('data-all-epochs')).toBeNull();
+    expect(chip.textContent).toContain('2');
+  });
+
+  it('shows no epoch chip at all before the run has ever fired', () => {
+    renderBar('WAITING_TRIGGER', { currentEpoch: 0, selectedEpoch: null });
+    expect(document.querySelector('[data-run-epoch-chip]')).toBeNull();
   });
 });
 

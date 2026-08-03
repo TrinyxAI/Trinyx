@@ -1464,7 +1464,13 @@ export interface WorkflowRunState {
   runningStepIds?: string[];
   awaitingSignalStepIds?: string[];
   currentEpoch?: number;
-  epochTimestamps?: Array<{ epoch: number; startedAt: string; endedAt: string | null }>;
+  epochTimestamps?: Array<{
+    epoch: number;
+    startedAt: string;
+    endedAt: string | null;
+    /** Executed window (first node start -> last node end). See `EpochTimestamp`. */
+    workDurationMs?: number | null;
+  }>;
   /** Total accumulated run cost across all epochs, in credits (1 credit = $0.001). */
   costCredits?: number | null;
   /** Per-epoch cost breakdown, epoch number (as string) -> credits. */

@@ -6,6 +6,8 @@ import com.apimarketplace.orchestrator.repository.WorkflowEpochRepository.EpochC
 import com.apimarketplace.orchestrator.repository.WorkflowEpochRepository.EpochHeaderRow;
 import com.apimarketplace.orchestrator.repository.WorkflowEpochRepository.EpochHeaderWithEpochRow;
 import com.apimarketplace.orchestrator.repository.WorkflowEpochRepository.EpochTimestampRow;
+import com.apimarketplace.orchestrator.persistence.EpochWorkWindowProjection;
+import com.apimarketplace.orchestrator.persistence.WorkflowStepDataRepository;
 import com.apimarketplace.orchestrator.services.streaming.state.RunningNodeTracker;
 import com.apimarketplace.orchestrator.utils.LabelNormalizer;
 import com.fasterxml.jackson.core.JsonProcessingException;
@@ -42,6 +44,7 @@ public class WorkflowEpochService {
 
     private final WorkflowEpochRepository repository;
     private final ObjectMapper objectMapper;
+    private final WorkflowStepDataRepository stepDataRepository;
 
     /**
      * Optional Redis overlay for active-epoch running state (P2.3 site 7).
@@ -54,9 +57,12 @@ public class WorkflowEpochService {
     @Autowired(required = false)
     private RunningNodeTracker runningNodeTracker;
 
-    public WorkflowEpochService(WorkflowEpochRepository repository, ObjectMapper objectMapper) {
+    public WorkflowEpochService(WorkflowEpochRepository repository,
+                                ObjectMapper objectMapper,
+                                WorkflowStepDataRepository stepDataRepository) {
         this.repository = repository;
         this.objectMapper = objectMapper;
+        this.stepDataRepository = stepDataRepository;
     }
 
     // ═══════════════════════════════════════════════════════════════════════════
@@ -312,9 +318,89 @@ public class WorkflowEpochService {
     /**
      * List epoch timestamps for timeline display.
      * Source of truth for epoch start/end - replaces the growing metadata.epochTimestamps array.
+     *
+     * <p>Each row is enriched with {@code workDurationMs}, the window the epoch spent
+     * EXECUTING, taken from its step rows. The header's own {@code startedAt}/{@code endedAt}
+     * span is NOT that duration: the close is stamped when the epoch is reconciled (end
+     * of cycle normally, but a resume or a restart recovery sweep when a blocking signal
+     * or an in-flight agent deferred it), so the span counts the idle tail - prod showed
+     * 32h42m for epochs that execute in seconds. The timeline still positions epochs by
+     * the header timestamps, and a null {@code endedAt} still marks an open epoch.
+     *
+     * <p>Cost: one aggregate over the run's step rows per call. Callers on hot paths (the
+     * SSE snapshot, the showcase builder) pay it every time - acceptable, because the
+     * grouped scan is bounded by the run's rows and returns one row per epoch, but it is
+     * not free and must not be called in a loop.
      */
     public List<EpochTimestampRow> listEpochTimestamps(String runId) {
-        return repository.listEpochTimestamps(runId);
+        List<EpochTimestampRow> rows = repository.listEpochTimestamps(runId);
+        if (rows.isEmpty()) return rows;
+        Map<Integer, Long> workByEpoch = getEpochWorkDurations(runId);
+        return rows.stream()
+                .map(row -> row.withWorkDurationMs(workByEpoch.get(row.epoch())))
+                .toList();
+    }
+
+    /**
+     * How long each epoch of a run spent EXECUTING, keyed by epoch number.
+     *
+     * <p>The single source for that question. Anything reporting an epoch duration
+     * reads it from here rather than from the header's {@code duration_ms}, which
+     * measures the epoch's lifetime: the close happens when the epoch is finally
+     * reconciled (the next fire, a resume, a restart recovery sweep), which can be
+     * hours or days after the last node finished.
+     *
+     * <p>Epochs that have produced no step row are absent.
+     */
+    public Map<Integer, Long> getEpochWorkDurations(String runId) {
+        Map<Integer, Long> workByEpoch = new HashMap<>();
+        for (EpochWorkWindowProjection window : stepDataRepository.findEpochWorkWindows(List.of(runId))) {
+            Long millis = window.durationMs();
+            if (window.epoch() != null && millis != null) workByEpoch.put(window.epoch(), millis);
+        }
+        return workByEpoch;
+    }
+
+    /**
+     * Batch-fetch how long each run's LATEST epoch spent executing, keyed by public
+     * run id. Feeds the "last execution duration" column of the run history.
+     *
+     * <p>Measured from the step rows, for the reason spelled out on
+     * {@link EpochWorkWindowProjection}: the epoch header's {@code duration_ms} is the
+     * epoch's lifetime, idle tail included.
+     *
+     * <p>Runs with no step rows at all (nothing has executed yet) are absent from the
+     * map, so the caller renders nothing rather than a zero. A run whose latest epoch
+     * is still in flight DOES get a figure: the window closed so far, which grows as
+     * the epoch progresses.
+     */
+    public Map<String, Long> getLatestEpochWorkDurationByRunIds(List<String> runIds) {
+        if (runIds == null || runIds.isEmpty()) return Map.of();
+        // The query returns every epoch of every run; keep the highest-numbered one
+        // per run. That IS the latest: TriggerEpochManager.incrementEpoch allocates a
+        // single monotonic counter for the whole run (newGlobal = previousGlobal + 1)
+        // under an advisory lock, so two trigger DAGs never share an epoch number and
+        // a later fire always outranks an earlier one.
+        //
+        // An unmeasurable latest epoch wins anyway and leaves the run absent, rather
+        // than falling back to the previous epoch: a stale figure presented as "the
+        // last execution" is worse than a blank cell, and the fallback would be
+        // invisible - the number looks perfectly plausible.
+        Map<String, Integer> latestEpoch = new HashMap<>();
+        Map<String, Long> durations = new HashMap<>();
+        for (EpochWorkWindowProjection window : stepDataRepository.findEpochWorkWindows(runIds)) {
+            if (window.runId() == null || window.epoch() == null) continue;
+            Integer seen = latestEpoch.get(window.runId());
+            if (seen != null && seen >= window.epoch()) continue;
+            latestEpoch.put(window.runId(), window.epoch());
+            Long millis = window.durationMs();
+            if (millis != null) {
+                durations.put(window.runId(), millis);
+            } else {
+                durations.remove(window.runId());
+            }
+        }
+        return durations;
     }
 
     /**
@@ -376,9 +462,16 @@ public class WorkflowEpochService {
             result.put("startedAt", header.startedAt());
             result.put("closedAt", header.closedAt());
             result.put("triggerId", header.triggerId());
-            if (header.durationMs() != null) {
-                result.put("durationMs", header.durationMs());
-            }
+            // No duration here, deliberately. The header's own duration_ms is the epoch's
+            // LIFETIME (stamped at close, which can land long after the last node), so
+            // exporting it is how the 32h42m reached the run panel. Measuring the real
+            // window instead would cost a full aggregate over the run's step rows on
+            // every call, and this method is called once per epoch in a loop by
+            // ShowcaseSnapshotBuilder.buildEpochStates. Nothing reads a duration off this
+            // diagnostic payload: the timeline takes it from
+            // epochTimestamps[].workDurationMs and the run history from
+            // getLatestEpochWorkDurationByRunIds. If a caller ever needs it here, fetch
+            // getEpochWorkDurations ONCE above the loop rather than reinstating it below.
             result.put("readyNodeIds", state.getReadyNodeIds());
             result.put("awaitingSignalNodeIds", state.getAwaitingSignalNodeIds());
             result.put("decisionBranches", state.getDecisionBranchesMap());

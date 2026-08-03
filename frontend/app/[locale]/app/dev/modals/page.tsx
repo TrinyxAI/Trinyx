@@ -131,7 +131,6 @@ export default function ModalShowcasePage() {
         { id: 'create-workflow', name: 'CreateWorkflowModal', file: 'components/chat/CreateWorkflowModal.tsx', type: 'Portal', icon: Workflow },
         { id: 'create-datasource', name: 'CreateDataSourceModal', file: 'components/chat/CreateDataSourceModal.tsx', type: 'Portal', icon: Database },
         { id: 'create-interface', name: 'CreateInterfaceModal', file: 'components/chat/CreateInterfaceModal.tsx', type: 'Portal', icon: Layout },
-        { id: 'create-datasource-table', name: 'CreateDataSourceModal (table)', file: 'components/data-table/modals/CreateDataSourceModal.tsx', type: 'Radix', icon: Table, description: 'Create datasource from table selection' },
       ],
     },
 

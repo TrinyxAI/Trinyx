@@ -11,6 +11,7 @@ import {
   SelectContent,
   SelectItem,
 } from '@/components/ui/select';
+import { CanvasFileStripToggleButton } from './CanvasFileStripToggleButton';
 import { CanvasRunTriggerButton } from './CanvasRunTriggerButton';
 import { TriggerNodePinButton } from './nodes/TriggerNodePinButton';
 import type { CanvasCursorMode } from '../hooks/useBoxSelection';
@@ -202,6 +203,11 @@ export function CanvasToolbar({
             <Wand2 className="h-4 w-4" />
           </button>
         </div>
+
+        {/* Expand / collapse every file preview - gates itself off the canvas
+            when no node carries a file strip (i.e. everywhere but a run that
+            produced files), so it needs no mode prop of its own. */}
+        <CanvasFileStripToggleButton />
 
         {/* Interactivity lock */}
         <div className="flex items-center gap-1 border-r border-[var(--border-color)] pr-1">

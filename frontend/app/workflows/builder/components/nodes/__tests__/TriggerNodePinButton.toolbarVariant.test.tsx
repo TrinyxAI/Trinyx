@@ -57,6 +57,20 @@ describe('TriggerNodePinButton - toolbar variant', () => {
     expect(container.querySelector('button')?.getAttribute('style')).toContain('rgb(255, 0, 0)');
   });
 
+  it('keeps a visible border when no node status colour is passed', () => {
+    // The run-step popover renders this variant with no borderColor, on a white
+    // tooltip. The button is white and flat (no drop shadow), so the hairline
+    // border is the ONLY thing separating it from that surface - and a class
+    // concatenated onto the shared one, rather than merged, silently loses to
+    // the `border-transparent` the Button base carries.
+    const { container } = render(<TriggerNodePinButton workflowId="wf1" nodeId="n1" />);
+    const classes = container.querySelector('button')!.className.split(/\s+/);
+    // Width AND colour: a colour token on a zero-width border is invisible.
+    expect(classes).toContain('border');
+    expect(classes).toContain('border-[var(--border-color)]');
+    expect(classes).not.toContain('border-transparent');
+  });
+
   it('opens the same pin confirmation on click and pins the run version', async () => {
     render(<TriggerNodePinButton workflowId="wf1" variant="toolbar" />);
     fireEvent.click(toolbarButton());

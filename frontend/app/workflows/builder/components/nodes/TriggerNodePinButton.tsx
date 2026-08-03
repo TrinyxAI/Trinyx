@@ -6,7 +6,8 @@ import { useRouter } from 'next/navigation';
 import { Pin, PinOff, Save, X } from 'lucide-react';
 import { useTranslations } from 'next-intl';
 import { Button } from '@/components/ui/button';
-import { canvasChromeCompactButtonClass } from '@/components/ui/canvas-chrome';
+import { cn } from '@/lib/utils';
+import { canvasChromeCompactButtonClass, canvasNodeButtonClass } from '@/components/ui/canvas-chrome';
 import LoadingSpinner from '@/components/LoadingSpinner';
 import { orchestratorApi } from '@/lib/api';
 import { useWorkflowMode } from '@/contexts/WorkflowModeContext';
@@ -24,7 +25,7 @@ interface TriggerNodePinButtonProps {
   /** Border color synced with node status - applied as 2px border to match NodeBottomBar buttons */
   borderColor?: string;
   /**
-   * Where the button is rendered. `node` (default) is the round badge attached
+   * Where the button is rendered. `node` (default) is the badge attached
    * under a trigger node and answers the context menu's pin request; `toolbar`
    * is the flat variant living in the canvas toolbar, which stays silent on
    * that event so a menu-triggered flow never opens two confirmations at once.
@@ -302,7 +303,7 @@ export const TriggerNodePinButton: React.FC<TriggerNodePinButtonProps> = ({ work
     );
   };
 
-  // Sober styling: same neutral white/slate look as every other bottom-bar
+  // Sober styling: the same theme-token surface as every other bottom-bar
   // button. Pin state is conveyed by the icon (Pin vs PinOff) and the title -
   // no amber accents in either edit or run mode.
   const statusBorderStyle = borderColor
@@ -312,7 +313,7 @@ export const TriggerNodePinButton: React.FC<TriggerNodePinButtonProps> = ({ work
 
   return (
     <>
-      {/* The round button is hidden when the affordance doesn't apply, but the
+      {/* The button is hidden when the affordance doesn't apply, but the
           modals below always render so a menu-triggered flow can still show its
           confirmation even if the button itself is gated out at that instant. */}
       {shouldRender && (
@@ -329,9 +330,11 @@ export const TriggerNodePinButton: React.FC<TriggerNodePinButtonProps> = ({ work
               // Shared canvas-chrome control: same square Button shape, height,
               // hover ladder and focus ring as every other toolbar button.
               ? canvasChromeCompactButtonClass(false, 'relative')
-              : `nodrag nopan relative h-7 w-7 rounded-full flex items-center justify-center shadow-md transition-all duration-200 hover:scale-110 bg-white dark:bg-gray-800 text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700 ${
-                  borderColor ? '' : 'border border-slate-200 dark:border-slate-700'
-                }`
+              // Under a node: the shared square node button. Same shape as the
+              // toolbar one above, opaque because nothing sits under it. Its
+              // hairline border shows through wherever no status border is passed
+              // (the run-step popover), so there is nothing to add here.
+              : cn(canvasNodeButtonClass, 'nodrag nopan')
           }
         >
           {/* Unpin only ever shows in edit mode: run mode gates the affordance

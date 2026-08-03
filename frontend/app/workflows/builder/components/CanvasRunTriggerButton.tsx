@@ -13,7 +13,8 @@ import { selectAllEpochs } from '@/components/workflow/run-panel/useDefaultEpoch
 import { boundRunId } from '@/components/workflow/run-panel/runPanelBus';
 import { dispatchOpenTriggerTab, type TriggerPanelTab } from '@/lib/workflow/triggerTabEvent';
 import { useStepByStep } from '../contexts/StepByStepContext';
-import { deriveNodeContextFlags, isFireableTrigger } from '../hooks/useNodeContextualButtons';
+import { deriveNodeContextFlags } from '../hooks/useNodeContextualButtons';
+import { isFireableTrigger } from '../hooks/fireableTrigger';
 import { usePortalMenu } from '../hooks/usePortalMenu';
 import { findNodeClassById } from '../nodes/nodeClasses';
 import { PANEL_TAB_BY_TRIGGER_VARIANT, type TriggerButtonVariant } from './NodePlayButton';
@@ -92,16 +93,21 @@ export function CanvasRunTriggerButton({ nodes }: CanvasRunTriggerButtonProps) {
 
   const fire = React.useCallback((entry: TriggerEntry) => {
     close();
+    // Firing always targets the whole run, never the focused epoch - same as the
+    // trigger node's focus-epoch play button. Keyed off the run the CANVAS is
+    // bound to, which is the id the epoch selection is read back under.
+    //
+    // Before BOTH paths: a payload trigger's run starts later, from the panel,
+    // which cannot return the canvas to all epochs. Leaving this below the early
+    // return meant a chat, form or webhook launched into whichever epoch the user
+    // had focused, and the new one stayed hidden behind the selector.
+    selectAllEpochs(boundRunId(workflowId, runId), setViewingEpoch);
     if (entry.panelTab) {
       // triggerId lets the panel select THIS trigger's tab; without it the
       // listeners fall back to the first trigger sharing the same type.
       dispatchOpenTriggerTab({ nodeId: entry.nodeId, triggerId: entry.stepId, triggerType: entry.panelTab });
       return;
     }
-    // Firing always targets the whole run, never the focused epoch - same as the
-    // trigger node's focus-epoch play button. Keyed off the run the CANVAS is
-    // bound to, which is the id the epoch selection is read back under.
-    selectAllEpochs(boundRunId(workflowId, runId), setViewingEpoch);
     void ctx?.executeStep(entry.stepId, undefined);
   }, [ctx, workflowId, runId, setViewingEpoch, close]);
 

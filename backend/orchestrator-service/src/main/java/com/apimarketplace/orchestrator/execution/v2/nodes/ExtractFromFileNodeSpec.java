@@ -54,6 +54,48 @@ public class ExtractFromFileNodeSpec implements NodeSpec {
                     .type("boolean")
                     .description("Whether extraction was successful")
                     .defaultValue(false)
+                    .build(),
+                // Text-mode fields. ExtractFromFileNode computes all of these, but until they
+                // were declared here GenericOutputSchemaMapper dropped them before persistence:
+                // the node emitted them, node_type_documentation advertised them (V78, V360),
+                // and a template against them resolved to an empty string (or null for a pure
+                // {{...}}), silently, with the run still reporting COMPLETED.
+                // Deliberately NO defaultValue: they are conditional, so the mapper omits the
+                // key entirely rather than storing a misleading zero on the structured path.
+                OutputFieldDef.builder()
+                    .key("mode")
+                    .type("string")
+                    .description("Extraction mode that ran: 'structured' (CSV/Excel/JSON rows) or 'text'")
+                    .build(),
+                OutputFieldDef.builder()
+                    .key("total_chunks")
+                    .type("number")
+                    .description("Text mode: number of chunks the extracted text was split into. Equals the length of items. Absent in structured mode")
+                    .build(),
+                OutputFieldDef.builder()
+                    .key("text_length")
+                    .type("number")
+                    .description("Text mode: character length of the extracted text before chunking. Absent in structured mode")
+                    .build(),
+                OutputFieldDef.builder()
+                    .key("chunking_strategy")
+                    .type("string")
+                    .description("Text mode with chunking enabled: the strategy used to split the text. Absent when chunking is off")
+                    .build(),
+                OutputFieldDef.builder()
+                    .key("chunk_size")
+                    .type("number")
+                    .description("Text mode with chunking enabled: configured chunk size, expressed in chunk_unit. Absent when chunking is off")
+                    .build(),
+                OutputFieldDef.builder()
+                    .key("overlap")
+                    .type("number")
+                    .description("Text mode with chunking enabled: overlap between consecutive chunks, expressed in chunk_unit. Absent when chunking is off")
+                    .build(),
+                OutputFieldDef.builder()
+                    .key("chunk_unit")
+                    .type("string")
+                    .description("Text mode with chunking enabled: unit chunk_size and overlap are counted in. Absent when chunking is off")
                     .build()
             ))
             .keywords(List.of("extract", "file", "csv", "excel", "import"))

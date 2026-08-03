@@ -27,16 +27,13 @@ Update the schema first, then regenerate code:
 
 ```bash
 # Validate schema
-npm run contracts:validate
+npm run contracts:validate:strict
 
-# Generate TypeScript interfaces
+# Run the semantic contract assertions
+npm run contracts:test
+
+# Regenerate the TypeScript view (local convenience, output untracked)
 npm run contracts:generate:ts
-
-# Generate Java records
-npm run contracts:generate:java
-
-# Generate documentation
-npm run contracts:generate:docs
 ```
 
 ### 3. CI/CD Validation
@@ -55,10 +52,9 @@ shared/contracts/
 ├── node-contracts.schema.json  # THE source of truth
 ├── README.md                   # This file
 └── scripts/
-    ├── validate.js             # Validates schema integrity
-    ├── generate-ts.js          # Generates TypeScript interfaces
-    ├── generate-java.js        # Generates Java records
-    └── generate-docs.js        # Generates documentation
+    ├── validate.js             # Validates schema integrity (--strict to fail)
+    ├── contract-tests.js       # 1645 semantic assertions
+    └── generate-ts.js          # TypeScript view, output untracked
 ```
 
 ## Schema Structure
@@ -127,9 +123,10 @@ Each node in the schema has:
 }
 ```
 
-2. **Regenerate**:
+2. **Check it**:
 ```bash
-npm run contracts:generate
+npm run contracts:validate:strict
+npm run contracts:test
 ```
 
 3. **Implement**:

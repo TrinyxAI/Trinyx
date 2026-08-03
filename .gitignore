@@ -103,6 +103,35 @@ backend/build-ca.pem
 # screenshots, prod backfill/e2e SQL, foreign-code backups. Regenerated locally,
 # never committed (removed wholesale in chore/repo-clutter-cleanup). Anchored to the
 # repo root so legitimate same-named files under scripts/ etc. stay tracked.
+#
+# The rules below are by CLASS, not by name. The per-name list that follows them
+# did not stop 126 new screenshots and Playwright dumps from landing at the root,
+# because every new session invents new filenames. Anchoring to "/" keeps
+# frontend/public/**, docs/** and every nested asset tracked as before.
+/*.png
+/*.jpg
+/*.jpeg
+/*.webp
+/*.gif
+/*.svg
+# Root markdown is scratch by default. The negations below are the project's actual root
+# docs. The public CE README is generated from deploy/ce-export/public-assets/README.public.md,
+# not from a root README.
+#
+# The four CE files are NOT optional: deploy/ce-export/public-root-manifest.txt names them
+# as expected roots of the published repo. GATE E (check-public-roots.sh) only flags
+# UNEXPECTED roots, never missing ones, so without these negations it reports OK while a
+# fresh clone or a repo re-seed publishes the public CE repo with no attribution, no
+# trademark notice and no security policy.
+/*.md
+!/AGENTS.md
+!/CLAUDE.md
+!/WORKTREE_CONVENTIONS.md
+!/README.md
+!/SECURITY.md
+!/CONTRIBUTING.md
+!/THIRD_PARTY_NOTICES.md
+!/TRADEMARKS.md
 /analyze_*.py
 /final_analysis.py
 /final_report.py
@@ -119,3 +148,9 @@ backend/build-ca.pem
 /e2e-epoch-refresh.sql
 /.claude_e2e_*.sql
 /audit/
+
+# Generated TypeScript view of node-contracts.schema.json (shared/contracts/scripts/
+# generate-ts.js). Write-only: nothing imports it, and CI gates the schema through
+# contracts:validate:strict + contracts:test instead. Ignored so a stray `git add -A`
+# in a worktree cannot re-commit it and recreate the illusion of a drift gate.
+frontend/app/workflows/builder/contracts/

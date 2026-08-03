@@ -121,10 +121,7 @@ vi.mock('@/hooks/useAuthGuard', () => ({
 
 vi.mock('../utils/authenticatedFetch', async () => {
   const actual: any = await vi.importActual('../utils/authenticatedFetch');
-  return {
-    ...actual,
-    setAuthTokenGetter: vi.fn(),
-  };
+  return { ...actual };
 });
 
 import { useDataTableController } from '../useDataTableController';

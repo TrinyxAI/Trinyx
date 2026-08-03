@@ -24,7 +24,8 @@ vi.mock('@/contexts/WorkflowModeContext', () => ({
 }));
 // Keep deriveNodeStatus real (the reveal logic depends on it); stub the heavy
 // button so we only exercise the bar's reveal decision.
-vi.mock('../../NodePlayButton', () => ({
+vi.mock('../../NodePlayButton', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../../NodePlayButton')>()),
   NodePlayButton: () => <div data-testid="play" />,
   deriveNodeStatus: (f: any) =>
     f.isRunning ? 'running'

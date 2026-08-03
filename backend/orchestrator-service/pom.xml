@@ -261,18 +261,6 @@
             <version>1.27.1</version>
         </dependency>
 
-        <!-- Resilience4j for Circuit Breaker -->
-        <dependency>
-            <groupId>io.github.resilience4j</groupId>
-            <artifactId>resilience4j-spring-boot3</artifactId>
-            <version>2.1.0</version>
-        </dependency>
-        <dependency>
-            <groupId>io.github.resilience4j</groupId>
-            <artifactId>resilience4j-circuitbreaker</artifactId>
-            <version>2.1.0</version>
-        </dependency>
-
         <!-- JWT validation for webhook authentication -->
         <dependency>
             <groupId>com.auth0</groupId>

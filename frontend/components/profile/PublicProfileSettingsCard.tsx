@@ -191,7 +191,8 @@ export function PublicProfileSettingsCard() {
   }, []);
 
   const handleDirty = handleInput.trim() !== (profile?.handle ?? '') && handleInput.trim() !== '';
-  // Date formatting follows the browser locale (never hardcoded).
+  // Date formatting follows the APP locale via getClientLocale() (never the browser
+  // language, never hardcoded) - see the i18n rule in AGENTS.md.
   const nextChangeLabel = handleNextChangeDate
     ? parseUtcAware(handleNextChangeDate).toLocaleDateString(
         getClientLocale(),

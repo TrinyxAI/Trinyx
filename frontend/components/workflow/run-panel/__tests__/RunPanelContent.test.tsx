@@ -137,6 +137,27 @@ describe('RunPanelContent - run history is the parent of the run detail', () => 
   });
 });
 
+describe('RunPanelContent - how many epochs the bar is told the run has', () => {
+  it('hands the bar the epochs that EXIST, not the engine cursor', () => {
+    // The engine moves its cursor to N+1 the moment an epoch closes, to prepare
+    // the next cycle - that epoch is dormant and has no row. Feeding the bar the
+    // cursor made a run fired ONCE announce "All epochs (2)" directly above a
+    // selector listing one. The count and the list must come from one source.
+    publish({ currentEpoch: 3, epochTimestamps: [{ epoch: 1, startedAt: 'x', endedAt: 'y' }] });
+    render(<RunPanelContent workflowId="wf-1" />);
+
+    expect(summaryProps.current.epochCount).toBe(1);
+    // Same array the selector below renders: they cannot disagree.
+    expect(stepsProps.current.epochTimestamps).toHaveLength(1);
+  });
+
+  it('says zero before the run has any epoch at all, whatever the cursor claims', () => {
+    publish({ currentEpoch: 1, epochTimestamps: [] });
+    render(<RunPanelContent workflowId="wf-1" />);
+    expect(summaryProps.current.epochCount).toBe(0);
+  });
+});
+
 describe('RunPanelContent - frozen-run surfaces', () => {
   it('locks the marketplace preview to the run detail, with no way back to the history', () => {
     publish({ isPreviewOnly: true });
@@ -226,8 +247,25 @@ describe('RunPanelContent - picking a run', () => {
     } finally {
       window.removeEventListener('workflowBindRun', onBind);
     }
-    expect(bound).toEqual([{ workflowId: 'wf-1', runId: 'run-1' }]);
+    expect(bound).toEqual([{ workflowId: 'wf-1', runId: 'run-1', surfaceId: undefined }]);
     expect(screen.getByTestId('summary')).toBeTruthy();
+  });
+
+  it('names the surface it belongs to, so the pick binds THAT canvas and no other', () => {
+    // Two surfaces can show the same workflow at once (the page and a side-panel
+    // workflow tab). Without the surface on the request, a pick made in the tab
+    // is delivered to the page instead: its address bar is rewritten and its
+    // canvas swaps behind the panel, while the tab's own canvas never moves.
+    const bound: any[] = [];
+    const onBind = (e: Event) => bound.push((e as CustomEvent).detail);
+    window.addEventListener('workflowBindRun', onBind);
+    try {
+      render(<RunPanelContent workflowId="wf-1" allowHistory surfaceId="tab-7" viewRequest={{ view: 'history', seq: 1 }} />);
+      act(() => { historyProps.current.onSelectRun({ runId: 'run-1', id: 'run-1' }); });
+    } finally {
+      window.removeEventListener('workflowBindRun', onBind);
+    }
+    expect(bound).toEqual([{ workflowId: 'wf-1', runId: 'run-1', surfaceId: 'tab-7' }]);
   });
 
   it('ignores a row with no usable id instead of binding to undefined', () => {

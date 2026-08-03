@@ -25,7 +25,7 @@ vi.mock('@/hooks/useModels', () => ({ getEffectiveDefaultProvider: () => 'openai
 vi.mock('@/lib/ai-providers/providerIcons', () => ({ getProviderIconSlug: () => 'openai' }));
 
 import { NodeActionButtons } from '../shared';
-import { BTN_CLS } from '../NodeBottomBar';
+import { canvasNodeButtonClass } from '@/components/ui/canvas-chrome';
 
 afterEach(() => cleanup());
 beforeEach(() => {
@@ -45,13 +45,16 @@ describe('NodeActionButtons placement (hover delete / duplicate moved BELOW the 
     expect(container.style.transform).not.toContain('-100%');
   });
 
-  it('styles the buttons exactly like the persistent bottom-bar buttons (BTN_CLS + 2px var(--border-color) border)', () => {
+  it('styles the buttons exactly like the persistent bottom-bar buttons (canvasNodeButtonClass + 2px var(--border-color) border)', () => {
     const { getByTitle } = render(
       <NodeActionButtons isVisible onDelete={vi.fn()} onDuplicate={vi.fn()} />,
     );
     for (const title of ['Delete node', 'Duplicate node']) {
       const btn = getByTitle(title);
-      BTN_CLS.split(/\s+/).forEach((cls) => expect(btn.className).toContain(cls));
+      // Whole-token membership, not substring: a call site that overrode one of
+      // the shared classes would still satisfy a substring check.
+      const rendered = btn.className.split(/\s+/);
+      canvasNodeButtonClass.split(/\s+/).forEach((cls) => expect(rendered).toContain(cls));
       expect(btn.style.borderWidth).toBe('2px');
       expect(btn.style.borderColor).toBe('var(--border-color)');
     }

@@ -21,13 +21,15 @@ import type { RenderMode } from '../../utils/interfaceHtmlUtils';
 import { Loader2, Play, Eye, Table, FileText, Zap, Workflow, Monitor, FolderOpen, Globe, ChevronRight, Wrench, Activity, Clock, Cpu, Coins, Trash2, Pencil } from 'lucide-react';
 import { type FilePanelTarget } from '@/lib/sidePanel/openFilesPanel';
 import { useInterfaceById, useInterfaceRender } from '../../hooks/useInterfaces';
-import { NodePlayButton, deriveNodeStatus } from '../NodePlayButton';
+import { NodePlayButton, deriveNodeStatus, PANEL_TAB_BY_TRIGGER_VARIANT } from '../NodePlayButton';
+import { dispatchOpenTriggerTab } from '@/lib/workflow/triggerTabEvent';
 import { NodeBottomBar } from './NodeBottomBar';
 import { FleetTriggerButtons } from './FleetTriggerButtons';
 import { TriggerNodePinButton } from './TriggerNodePinButton';
 import { TriggerEditLaunchButton } from './TriggerEditLaunchButton';
 import { useNodeExecutionStatus } from '../../contexts/StepByStepContext';
 import { deriveNodeContextFlags, useNodeContextualButtons } from '../../hooks/useNodeContextualButtons';
+import { isFireableTrigger } from '../../hooks/fireableTrigger';
 import { nodeRegistry } from '../../registry/nodeRegistry';
 import { ResizableNodeWrapper } from './ResizableNodeWrapper';
 import { useBrowserLiveView } from './shared/useBrowserLiveView';
@@ -96,6 +98,8 @@ export function FlowNode({ data, selected, id }: NodeProps<BuilderNodeData>) {
   const { hasLiveSession: hasBrowserLiveSession, openLiveView: openBrowserLiveView } =
     useBrowserLiveView(id, data);
   const tBrowserAgent = useTranslations('workflowBuilder.nodes.browserAgent');
+  // Canvas strings shared with the run-mode toolbar (the focus-epoch play tooltip).
+  const tCanvas = useTranslations('workflowBuilder.canvas');
 
   // Spawn item pagination - local to this node, resets when viewing epoch changes
   const [currentPage, setCurrentPage] = React.useState(0);
@@ -600,8 +604,10 @@ export function FlowNode({ data, selected, id }: NodeProps<BuilderNodeData>) {
         const onFleetDelete = (data as any)?.onFleetDelete as ((id: string) => void) | undefined;
         // Localized tooltips injected by AgentFleetCanvas (keeps this shared node i18n-agnostic).
         const labels = (data as any)?.fleetEditLabels as { edit?: string; remove?: string } | undefined;
-        // Neutral pill (no red) - kept for the fleet canvas top cluster.
-        const btnClass = 'flex h-6 w-6 items-center justify-center rounded-full bg-[var(--bg-primary)] text-[var(--text-primary)] shadow-sm hover:bg-[var(--text-primary)] hover:text-[var(--bg-primary)] transition-colors';
+        // Neutral button (no red) for the fleet canvas top cluster. Square like
+        // every other button hanging off a node, one radius step below them since
+        // it is smaller.
+        const btnClass = 'flex h-6 w-6 items-center justify-center rounded-lg border border-[var(--border-color)] bg-[var(--bg-primary)] text-[var(--text-primary)] hover:bg-[var(--text-primary)] hover:text-[var(--bg-primary)] transition-colors';
         return (
           <div
             className={`absolute top-0 left-1/2 z-20 flex flex-row gap-1 nodrag nopan transition-opacity duration-200 ${showActions ? 'opacity-100' : 'opacity-0 pointer-events-none'}`}
@@ -647,8 +653,10 @@ export function FlowNode({ data, selected, id }: NodeProps<BuilderNodeData>) {
           });
         }
 
-        // Play button config
-        const isTriggerForPlayButton = isManualTrigger || isChatTrigger || isFormTrigger || isWebhookTrigger || isScheduleTrigger || isWorkflowsTriggerNode || isTablesTrigger || isErrorTrigger;
+        // Play button config. The shared predicate, not a re-listing of the eight
+        // flags: every surface offering a play (this bar, the run-step popover,
+        // the run-mode toolbar) has to agree on what is runnable.
+        const isTriggerForPlayButton = isFireableTrigger(ctxFlags);
         const showPlay = !isPreviewOnly && !isInterfaceNode && isRunMode && (
           (isTriggerForPlayButton && (stepByStepStatus.isStepByStepMode || stepByStepStatus.isReady)) ||
           (!isTriggerForPlayButton && stepByStepStatus.isStepByStepMode)
@@ -661,24 +669,51 @@ export function FlowNode({ data, selected, id }: NodeProps<BuilderNodeData>) {
         const showEditLaunch = !isPreviewOnly && !isFleetMode && !isShowingHtml && !isRunMode && isTriggerNode;
         const pinWorkflowId = (isTriggerNode && !isPreviewOnly && !isFleetMode && !isShowingHtml) ? workflowId : null;
 
-        // Focus-epoch trigger play: in run mode the normal play is hidden while
-        // viewing a specific epoch (useNodeExecutionStatus gates controls to the
-        // all-epochs view). Re-expose it on triggers so the user can re-launch
-        // from a focused epoch - clicking returns to all-epochs AND fires THIS
-        // trigger (fireFromAnyEpoch targets epoch=undefined, so the clicked
-        // trigger is the one that runs, even with several triggers).
-        const focusTriggerFireable = isManualTrigger || isScheduleTrigger || isWorkflowsTriggerNode || isTablesTrigger || isErrorTrigger;
-        if (isRunMode && isTriggerNode && focusTriggerFireable && viewingEpoch != null && !isPreviewOnly && stepByStepStatus.isReadyRaw) {
+        // Focus-epoch trigger play: reading a PAST epoch is read-only, so
+        // useNodeExecutionStatus drops the normal play there. Re-expose it on
+        // triggers so the user can launch a NEW epoch from a focused one -
+        // clicking returns to all-epochs first, then does exactly what this
+        // trigger's normal play does.
+        //
+        // `!isReady` is what keeps the two apart. The focus gate lets the run's
+        // NEWEST epoch stay interactive, so the normal play is still up there;
+        // without this the node would carry two Play icons side by side, with
+        // different tooltips and different semantics.
+        //
+        // Every fireable trigger, not just the fire-and-forget ones: a chat, form
+        // or webhook trigger cannot be fired blind, but it can still START a run
+        // by opening its side-panel tab - which is what its own play does in the
+        // all-epochs view. Listing only the blind-fireable five left the three
+        // payload triggers with no play under the node in a focused epoch (the
+        // run-mode toolbar's trigger menu stayed available, so this was a missing
+        // affordance on the node, not a dead end).
+        //
+        // Gated on canExecuteRaw, never on raw readiness: a terminal run keeps its
+        // steps in readySteps, and firing into one is refused by the dispatcher.
+        const focusPanelTab = PANEL_TAB_BY_TRIGGER_VARIANT[triggerVariant];
+        if (isRunMode && isTriggerForPlayButton && viewingEpoch != null && !stepByStepStatus.isReady && stepByStepStatus.canExecuteRaw) {
           bottomButtons.push({
             key: 'focus-trigger-play',
             icon: <Play className="h-3 w-3" fill="currentColor" strokeWidth={2} />,
-            title: 'Run',
+            title: tCanvas('runWorkflow'),
             onClick: () => {
               // Keyed off the run the CANVAS is bound to: that is the id the
               // epoch selection is read back under, and it is not always the
               // provider's (a panel-mounted canvas resolves its run from run
               // info, with no run id in its provider at all).
+              //
+              // Done BEFORE either branch: the new epoch must be visible when it
+              // arrives, and a payload trigger's run starts later, from the panel,
+              // where nothing would return the canvas to all epochs.
               selectAllEpochs(boundRunId(workflowId, runId), setViewingEpoch);
+              if (focusPanelTab) {
+                // triggerId names THIS trigger: several triggers can share a
+                // type, and matching on type alone opens the first one's tab.
+                dispatchOpenTriggerTab({ nodeId: id, triggerId: stepByStepStatus.stepId, triggerType: focusPanelTab });
+                return;
+              }
+              // fireFromAnyEpoch targets epoch=undefined, so the clicked trigger
+              // is the one that runs even with several triggers on the canvas.
               stepByStepStatus.fireFromAnyEpoch();
             },
           });
@@ -793,7 +828,7 @@ export function FlowNode({ data, selected, id }: NodeProps<BuilderNodeData>) {
           the node - NOT below it. The bottom edge carries the model/tools/resources
           source handles + their downward edges, so the triggers live on the otherwise
           empty left side; a lone trigger then sits right beside the node (close, not
-          floating far below). Same round-button + amber shimmer style as the workflow
+          floating far below). Same square-button + amber shimmer style as the workflow
           node bottom buttons. Lives outside the !isPreviewOnly bottom-bar block because
           the fleet runs with readOnly (isPreviewOnly = true) yet must still surface the
           trigger affordance. */}

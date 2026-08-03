@@ -5,6 +5,7 @@ import { useTranslations } from 'next-intl';
 import { Play, Check, X, Clock, RotateCcw, Zap, MessageSquare, FileText, Webhook, CalendarClock, Workflow, Database, AlertTriangle } from 'lucide-react';
 import LoadingSpinner from '@/components/LoadingSpinner';
 import { cn } from '@/lib/utils';
+import { canvasNodeButtonClass, canvasNodeButtonShimmerRadiusClass } from '@/components/ui/canvas-chrome';
 import { dispatchOpenTriggerTab, type TriggerPanelTab } from '@/lib/workflow/triggerTabEvent';
 
 export type NodeExecutionStatus =
@@ -60,6 +61,18 @@ interface NodePlayButtonProps {
   triggerId?: string;
   /** Custom title for the button */
   title?: string;
+  /**
+   * Called right before the button launches, on BOTH paths - the immediate fire
+   * and the "open this trigger's side-panel tab" one.
+   *
+   * Exists because those two paths leave through different doors: `onExecute` for
+   * a blind-fireable trigger, an open-tab event for a payload trigger. A caller
+   * that has to do something before EITHER (the run-step popover leaves the
+   * focused epoch, so the epoch it launches is visible when it arrives) cannot
+   * hang it off `onExecute` alone - that hook never fires for chat, form or
+   * webhook, which is exactly where the need is.
+   */
+  onBeforeLaunch?: () => void;
   /** Whether in automatic execution mode (hides pending state for non-triggers) */
   isAutoMode?: boolean;
   /** Position style: 'top-right' (legacy corner badge) or 'bottom-center' (persistent below node) */
@@ -83,6 +96,7 @@ export function NodePlayButton({
   variant = 'play',
   triggerId,
   title,
+  onBeforeLaunch,
   isAutoMode = false,
   position = 'top-right',
   borderColor: borderColorProp,
@@ -97,8 +111,10 @@ export function NodePlayButton({
     ? 'relative'
     : 'absolute -top-3 -right-3 z-20';
 
-  // Base style for bottom-center: consistent with agent/subworkflow/interface persistent buttons
-  const bottomBaseCls = 'relative inline-flex items-center justify-center h-7 w-7 rounded-full bg-white dark:bg-gray-800 text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700 hover:scale-110 shadow-md transition-all duration-200 overflow-hidden';
+  // Base style for bottom-center: the shared square node button, so the play sits
+  // in the same row as the agent/sub-workflow/interface buttons without restating
+  // their look (the copy of this literal is exactly how the two used to drift).
+  const bottomBaseCls = canvasNodeButtonClass;
   const bottomBaseStyle = isBottom && borderColorProp ? { borderWidth: 2, borderStyle: 'solid' as const, borderColor: borderColorProp } : undefined;
   // Get icon based on variant
   const getIcon = () => {
@@ -158,9 +174,10 @@ export function NodePlayButton({
       if (PANEL_TAB_BY_TRIGGER_VARIANT[variant]) {
         return;
       }
+      onBeforeLaunch?.();
       onExecute(nodeId);
     }
-  }, [nodeId, canExecute, isLoading, status, onExecute, variant]);
+  }, [nodeId, canExecute, isLoading, status, onExecute, onBeforeLaunch, variant]);
 
   const handleRerun = React.useCallback((e: React.MouseEvent) => {
     e.stopPropagation();
@@ -172,7 +189,7 @@ export function NodePlayButton({
   // ── Helper: shimmer overlay for bottom-center buttons ──
   const shimmerOverlay = (color: string) => (
     <span
-      className="absolute inset-0 rounded-full pointer-events-none"
+      className={`absolute inset-0 ${canvasNodeButtonShimmerRadiusClass} pointer-events-none`}
       style={{
         background: `linear-gradient(90deg, transparent 0%, ${color} 50%, transparent 100%)`,
         backgroundSize: '200% 100%',
@@ -267,6 +284,10 @@ export function NodePlayButton({
         ? triggerSimulate.onClick
         : (e: React.MouseEvent) => {
             e.stopPropagation();
+            // Before the panel takes over: the run this opens starts later, from
+            // the panel, which cannot reach back to whatever the caller has to
+            // settle first.
+            onBeforeLaunch?.();
             dispatchOpenTriggerTab({ nodeId, triggerId, triggerType: triggerSimulate.tab });
           };
       const playIcon = <Play className={iconSize} strokeWidth={2} fill="currentColor" />;

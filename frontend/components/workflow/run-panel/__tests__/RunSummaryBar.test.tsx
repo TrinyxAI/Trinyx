@@ -43,7 +43,7 @@ function renderBar(status: string, props: Record<string, unknown> = {}) {
     <RunSummaryBar
       currentRunInfo={{ runId: 'run-1', status, planVersion: 3 } as never}
       pinnedVersion={null}
-      currentEpoch={1}
+      epochCount={1}
       selectedEpoch={null}
       onStop={NOOP}
       onCancel={NOOP}
@@ -176,23 +176,24 @@ describe('RunSummaryBar - which epoch the bar says you are on', () => {
     // same way made the default cumulative view look like a specific fire, and
     // contradicted the panel next to it. The count still has to survive the
     // rewording, it is the only place the bar says how often the run fired.
-    renderBar('COMPLETED', { currentEpoch: 3, selectedEpoch: null });
+    renderBar('COMPLETED', { epochCount: 3, selectedEpoch: null });
     const chip = document.querySelector('[data-run-epoch-chip]') as HTMLElement;
     expect(chip.getAttribute('data-all-epochs')).toBe('true');
     expect(chip.textContent).toBe('workflow.runSteps.allEpochsCount(3)');
   });
 
   it('shows the epoch number once one is picked', () => {
-    renderBar('COMPLETED', { currentEpoch: 3, selectedEpoch: 2 });
+    renderBar('COMPLETED', { epochCount: 3, selectedEpoch: 2 });
     const chip = document.querySelector('[data-run-epoch-chip]') as HTMLElement;
     expect(chip.getAttribute('data-all-epochs')).toBeNull();
     expect(chip.textContent).toContain('2');
   });
 
   it('shows no epoch chip at all before the run has ever fired', () => {
-    renderBar('WAITING_TRIGGER', { currentEpoch: 0, selectedEpoch: null });
+    renderBar('WAITING_TRIGGER', { epochCount: 0, selectedEpoch: null });
     expect(document.querySelector('[data-run-epoch-chip]')).toBeNull();
   });
+
 });
 
 describe('RunSummaryBar - where the action button sits', () => {

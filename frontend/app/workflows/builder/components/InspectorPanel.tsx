@@ -49,6 +49,7 @@ import { useApprovalReviewLayout } from './inspector/useApprovalReviewLayout';
 import { InspectorMobileContent } from './inspector/InspectorMobileContent';
 import { InspectorDesktopContent } from './inspector/InspectorDesktopContent';
 import { extractAliasFromNodeId, extractStepAliasFromNode } from '../services/idMatcherUtils';
+import { isReviewTargetForNode, useApprovalReviewTarget } from '../services/approvalReviewStore';
 import { normalizeLabel } from '../utils/labelNormalizer';
 import { InterfaceMappingsColumn } from './inspector/InterfaceMappingsColumn';
 import { PreviewColumn } from './inspector/PreviewColumn';
@@ -168,8 +169,17 @@ export function InspectorPanel({ node, selectedNodeIds = [], onUpdate, onClose, 
   const isInterfaceNodeEarly = node?.data?.kind === 'interface';
   // A node "has run data" when it carries non-empty statusCounts for the current run.
   // Nodes that never executed open the inspector in Configuration view, not Run data.
+  // An approval under review is the one case where "this node has no rows yet" must
+  // NOT fall back to Configuration: the node is parked on its signal, so it has no
+  // statusCounts of its own, and what the reviewer needs to read is the INPUT of the
+  // item being decided (the parent's rows, jumped to that epoch/itemIndex). Opening in
+  // Configuration hid the input navigator entirely, so the review flow showed the
+  // variable picker instead of the item's data.
+  const inspectorReviewTarget = useApprovalReviewTarget();
+  const isNodeUnderApprovalReview = isReviewTargetForNode(inspectorReviewTarget, node?.id);
   const nodeHasRunData =
-    !!node?.data?.statusCounts && Object.keys(node.data.statusCounts).length > 0;
+    (!!node?.data?.statusCounts && Object.keys(node.data.statusCounts).length > 0)
+    || isNodeUnderApprovalReview;
   const { viewMode, handleViewModeChange, showExecutionData, handleShowExecutionDataChange } = useInspectorViewMode({
     isRunMode,
     runId,

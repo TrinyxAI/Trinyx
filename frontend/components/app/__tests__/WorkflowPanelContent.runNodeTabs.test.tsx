@@ -167,7 +167,7 @@ describe('WorkflowPanelContent - Run / Add Node sub-tabs', () => {
     expect(screen.queryByTestId('run-panel')).toBeNull();
   });
 
-  it('allows run-history navigation on the standalone workflow page only', () => {
+  it('allows run-history navigation on the standalone workflow page by default', () => {
     publishRun();
     render(<WorkflowPanelContent workflowId="wf-1" />);
     act(() => openRunPanel({ workflowId: 'wf-1' }));
@@ -175,9 +175,42 @@ describe('WorkflowPanelContent - Run / Add Node sub-tabs', () => {
 
     cleanup();
 
-    // Embedded canvas (application panel / sub-workflow tab): the run is fixed
-    // by the host, so the Run tab stays on that run's detail.
+    // Embedded canvas whose host CHOSE the run for it (the application panel):
+    // the run is fixed, so the Run tab stays on that run's detail.
     render(<WorkflowPanelContent workflowId="wf-1" workflowCanvasSlot={<div />} />);
+    act(() => openRunPanel({ workflowId: 'wf-1' }));
+    expect(runPanelProps.current.allowHistory).toBe(false);
+  });
+
+  it('hands the Run tab the surface id its host gave it, so a pick binds that host', () => {
+    // The page passes none (it owns the route); a side-panel workflow tab passes
+    // its own. Losing this on the way down sends the tab's picks to the page.
+    publishRun();
+    render(<WorkflowPanelContent workflowId="wf-1" workflowCanvasSlot={<div />} allowRunHistory runSurfaceId="tab-7" />);
+    act(() => openRunPanel({ workflowId: 'wf-1' }));
+    expect(runPanelProps.current.surfaceId).toBe('tab-7');
+
+    cleanup();
+
+    render(<WorkflowPanelContent workflowId="wf-1" />);
+    act(() => openRunPanel({ workflowId: 'wf-1' }));
+    expect(runPanelProps.current.surfaceId).toBeUndefined();
+  });
+
+  it('lets an embedded host that can rebind its canvas opt back into the history', () => {
+    // The sub-workflow tab: it hosts the canvas AND follows the bind event, so
+    // its run detail must keep the back arrow into the list of runs. Without the
+    // override, `workflowCanvasSlot` alone denied it and the tab was a dead end.
+    publishRun();
+    render(<WorkflowPanelContent workflowId="wf-1" workflowCanvasSlot={<div />} allowRunHistory />);
+    act(() => openRunPanel({ workflowId: 'wf-1' }));
+    expect(runPanelProps.current.allowHistory).toBe(true);
+  });
+
+  it('never lets the opt-in unlock the history in marketplace preview', () => {
+    // Preview is frozen on a published version: no host may negotiate it.
+    publishRun({ isPreviewOnly: true });
+    render(<WorkflowPanelContent workflowId="wf-1" isPreviewOnly workflowCanvasSlot={<div />} allowRunHistory />);
     act(() => openRunPanel({ workflowId: 'wf-1' }));
     expect(runPanelProps.current.allowHistory).toBe(false);
   });

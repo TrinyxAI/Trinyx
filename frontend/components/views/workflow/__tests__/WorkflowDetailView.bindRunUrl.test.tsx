@@ -56,7 +56,7 @@ vi.mock('@/components/workflow/WorkflowRunCanvas', () => ({ WorkflowRunCanvas: (
 import { WorkflowDetailView } from '@/components/views/workflow/WorkflowDetailView';
 import { BIND_RUN_EVENT } from '@/components/workflow/run-panel/runPanelBus';
 
-function fireBindRun(detail: { workflowId?: string; runId?: string }) {
+function fireBindRun(detail: { workflowId?: string; runId?: string; surfaceId?: string }) {
   act(() => {
     window.dispatchEvent(new CustomEvent(BIND_RUN_EVENT, { detail }));
   });
@@ -187,6 +187,20 @@ describe('WorkflowDetailView - picking a run in the history writes it to the URL
     render(<WorkflowDetailView workflowId="wf-1" runId="run-old" />);
 
     fireBindRun({ workflowId: 'wf-other', runId: 'run-new' });
+
+    expect(setRunId).not.toHaveBeenCalled();
+    expect(window.location.pathname).toBe('/app/workflow/wf-1/run/run-old');
+  });
+
+  it('ignores a run picked in a side-panel tab showing THIS workflow', () => {
+    // A self-referencing sub-workflow node (or the tab picker) can open wf-1 in
+    // the side panel next to the page already showing it. A pick made in that
+    // tab carries its surface id; following it here would rewrite the address
+    // bar and move the page canvas behind the panel the user is working in.
+    goTo('/app/workflow/wf-1/run/run-old');
+    render(<WorkflowDetailView workflowId="wf-1" runId="run-old" />);
+
+    fireBindRun({ workflowId: 'wf-1', runId: 'run-new', surfaceId: 'side-panel-tab' });
 
     expect(setRunId).not.toHaveBeenCalled();
     expect(window.location.pathname).toBe('/app/workflow/wf-1/run/run-old');

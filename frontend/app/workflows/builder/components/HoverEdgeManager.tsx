@@ -158,7 +158,7 @@ function PendingConnectionOverlay({
 
             {/* Black button with white + at the pending point - same style as hover state in HoverEdgeOverlay */}
             <div
-                className="rounded-full bg-[var(--accent-primary)] border-[var(--accent-primary)] shadow-lg flex items-center justify-center"
+                className="bg-[var(--accent-primary)] border-[var(--accent-primary)] shadow-lg flex items-center justify-center"
                 style={{
                     position: 'fixed',
                     left: pendingPointPos.x,
@@ -170,6 +170,9 @@ function PendingConnectionOverlay({
                     height: 24 * zoom,
                     borderWidth: Math.max(1, 2 * zoom),
                     borderStyle: 'solid',
+                    // Same third-of-the-side radius as the hover + it stands in for, computed
+                    // for the same reason: this button is sized from the canvas zoom.
+                    borderRadius: (24 * zoom) / 3,
                 }}
             >
                 <Plus className="text-white dark:text-black" style={{ width: Math.max(8, 16 * zoom), height: Math.max(8, 16 * zoom) }} strokeWidth={2.5} />

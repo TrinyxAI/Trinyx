@@ -19,6 +19,8 @@ const panelProps = vi.hoisted(() => ({ current: null as any }));
 
 vi.mock('@/contexts/WorkflowModeContext', () => ({
   WorkflowModeProvider: ({ children }: { children: React.ReactNode }) => <>{children}</>,
+  // The canvas slot binds the tab's run into its own provider through this hook.
+  useWorkflowMode: () => ({ runId: null, setRunId: vi.fn() }),
 }));
 vi.mock('@/contexts/WorkflowRunContext', () => ({
   WorkflowRunProvider: ({ children }: { children: React.ReactNode }) => <>{children}</>,

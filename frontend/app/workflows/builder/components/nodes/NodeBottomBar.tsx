@@ -4,19 +4,16 @@ import * as React from 'react';
 import { useTranslations } from 'next-intl';
 import { Copy, Trash2 } from 'lucide-react';
 import { useWorkflowMode } from '@/contexts/WorkflowModeContext';
+import { canvasNodeButtonClass, canvasNodeButtonShimmerRadiusClass } from '@/components/ui/canvas-chrome';
 import { NodePlayButton, deriveNodeStatus, type TriggerButtonVariant } from '../NodePlayButton';
 
 import { useWorkflowLayoutDirectionSafe } from '@/contexts/WorkflowLayoutDirectionContext';
 import { getSideAttachment } from './handleGeometry';
-// Shared button style (same as agent/subworkflow/interface persistent buttons).
-// Exported so other persistent node buttons (e.g. the fleet trigger buttons) render
-// the EXACT same round button as the workflow node bottom bar.
-export const BTN_CLS = 'relative inline-flex items-center justify-center h-7 w-7 rounded-full bg-white dark:bg-gray-800 text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700 hover:scale-110 shadow-md transition-all duration-200 overflow-hidden';
 
 export function ShimmerOverlay({ color }: { color: string }) {
   return (
     <span
-      className="absolute inset-0 rounded-full pointer-events-none"
+      className={`absolute inset-0 ${canvasNodeButtonShimmerRadiusClass} pointer-events-none`}
       style={{
         background: `linear-gradient(90deg, transparent 0%, ${color} 50%, transparent 100%)`,
         backgroundSize: '200% 100%',
@@ -103,7 +100,7 @@ interface NodeBottomBarProps {
   hover?: BarHoverConfig;
   /**
    * Edit-mode delete / duplicate actions rendered at the end of the row with
-   * the same round-button style as the other buttons; hidden entirely in
+   * the same square-button style as the other buttons; hidden entirely in
    * run / preview-only mode. Revealed with the rest of the bar via `hover`.
    */
   hoverActions?: HoverActionsConfig;
@@ -177,7 +174,7 @@ export function NodeBottomBar({ borderColor, isRunning, buttons, playButton, ext
         <button
           key={key}
           onClick={(e) => { e.stopPropagation(); onClick(e); }}
-          className={`${BTN_CLS} ${interactiveCls}`}
+          className={`${canvasNodeButtonClass} ${interactiveCls}`}
           style={borderStyle}
           title={title}
         >
@@ -213,7 +210,7 @@ export function NodeBottomBar({ borderColor, isRunning, buttons, playButton, ext
           {hoverActions!.onDelete && (
             <button
               onClick={(e) => { e.stopPropagation(); hoverActions!.onDelete!(); }}
-              className={`${BTN_CLS} ${interactiveCls}`}
+              className={`${canvasNodeButtonClass} ${interactiveCls}`}
               style={borderStyle}
               title={t('deleteNode')}
             >
@@ -223,7 +220,7 @@ export function NodeBottomBar({ borderColor, isRunning, buttons, playButton, ext
           {hoverActions!.onDuplicate && (
             <button
               onClick={(e) => { e.stopPropagation(); hoverActions!.onDuplicate!(); }}
-              className={`${BTN_CLS} ${interactiveCls}`}
+              className={`${canvasNodeButtonClass} ${interactiveCls}`}
               style={borderStyle}
               title={t('duplicateNode')}
             >

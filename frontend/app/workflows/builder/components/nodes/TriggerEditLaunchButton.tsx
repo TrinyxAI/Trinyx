@@ -5,6 +5,7 @@ import { createPortal } from 'react-dom';
 import { Play, Bug } from 'lucide-react';
 import { useTranslations } from 'next-intl';
 import { cn } from '@/lib/utils';
+import { canvasNodeButtonClass } from '@/components/ui/canvas-chrome';
 import { useCanMutateInCurrentOrg } from '@/lib/stores/current-org-store';
 import { usePortalMenu } from '../../hooks/usePortalMenu';
 import type { TriggerButtonVariant } from '../NodePlayButton';
@@ -17,8 +18,6 @@ interface TriggerEditLaunchButtonProps {
   /** Border color synced with node status (same pattern as NodeBottomBar buttons) */
   borderColor: string;
 }
-
-const BTN_CLS = 'relative inline-flex items-center justify-center h-7 w-7 rounded-full bg-white dark:bg-gray-800 text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700 hover:scale-110 shadow-md transition-all duration-200 overflow-hidden';
 
 // Distinct shimmer color per trigger type - mirrors NodePlayButton's palette.
 const SHIMMER_BY_VARIANT: Record<TriggerButtonVariant, string> = {
@@ -84,7 +83,7 @@ export function TriggerEditLaunchButton({ nodeId, variant, borderColor }: Trigge
         type="button"
         onClick={toggle}
         onMouseDown={(e) => e.stopPropagation()}
-        className={cn(BTN_CLS, 'cursor-pointer nodrag nopan', open && 'ring-2 ring-[var(--accent-primary)] ring-offset-1')}
+        className={cn(canvasNodeButtonClass, 'cursor-pointer nodrag nopan', open && 'ring-2 ring-[var(--accent-primary)] ring-offset-1')}
         style={borderStyle}
         title={t('runWorkflow')}
         aria-haspopup="menu"

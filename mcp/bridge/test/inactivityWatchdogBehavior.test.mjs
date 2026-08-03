@@ -54,7 +54,11 @@ test('output re-arms the clock: a chatty-then-silent child survives the chatty p
     tripped = true;
     child.kill('SIGTERM');
   });
-  watchdog.reset();
+  // Armed by the FIRST line, not at spawn: arming at spawn would make this test race
+  // the interpreter's cold start (on a slow box `node -e` needs >400ms to reach its
+  // first console.log, so the watchdog trips before any output and the test measures
+  // process startup instead of the re-arm behavior). Spawn-time arming is pinned by
+  // the silent-child test above; here we only care that output pushes the deadline.
   createInterface({ input: child.stdout }).on('line', () => {
     lastLineAt = Date.now();
     watchdog.reset(); // any output means the CLI is alive - restart the inactivity clock

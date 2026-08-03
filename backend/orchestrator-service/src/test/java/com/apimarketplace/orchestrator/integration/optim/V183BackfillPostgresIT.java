@@ -39,7 +39,7 @@ import static org.assertj.core.api.Assertions.assertThat;
  *
  * <p>Skipped without Docker (Testcontainers).
  */
-@Testcontainers
+@Testcontainers(disabledWithoutDocker = true)
 @DisplayName("V183 jsonb-cast regression test (commit 84db3884f)")
 class V183BackfillPostgresIT {
 

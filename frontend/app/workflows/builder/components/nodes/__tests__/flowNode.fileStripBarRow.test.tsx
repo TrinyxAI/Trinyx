@@ -32,7 +32,7 @@ let publishedFile: Record<string, unknown> | null;
 const execStatus = (over: Record<string, any> = {}) => ({
   isStepByStepMode: false,
   isReady: false,
-  isReadyRaw: false,
+  canExecuteRaw: false,
   canExecute: false,
   isExecuting: false,
   isRerunning: false,
@@ -49,7 +49,6 @@ const execStatus = (over: Record<string, any> = {}) => ({
 
 const bottomBarProps: any[] = [];
 vi.mock('../NodeBottomBar', () => ({
-  BTN_CLS: 'btn-cls-stub',
   ShimmerOverlay: () => null,
   NodeBottomBar: (props: any) => {
     bottomBarProps.push(props);
@@ -79,7 +78,10 @@ vi.mock('../../../contexts/ValidationContext', () => ({
 }));
 vi.mock('../../../nodes/nodeClasses', () => ({ findNodeClassById: () => undefined }));
 vi.mock('../../NodeStatusBadge', () => ({ NodeStatusBadge: () => null }));
-vi.mock('../../NodePlayButton', () => ({
+// Spread the real module: only the component is heavy enough to stub, and a
+// literal factory silently drops every OTHER export FlowNode reads from it.
+vi.mock('../../NodePlayButton', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../../NodePlayButton')>()),
   NodePlayButton: () => null,
   deriveNodeStatus: () => undefined,
 }));
@@ -92,6 +94,7 @@ vi.mock('reactflow', () => ({
   Position: { Left: 'left', Right: 'right', Top: 'top', Bottom: 'bottom' },
   useNodes: () => [],
   useEdges: () => [],
+  useNodeId: () => null,
   useReactFlow: () => ({ getNodes: () => [], getEdges: () => [] }),
 }));
 vi.mock('next-intl', () => ({ useTranslations: () => (key: string) => key }));

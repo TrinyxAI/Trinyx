@@ -44,11 +44,16 @@ import static org.assertj.core.api.Assertions.assertThat;
  * (named-param NamedParameterJdbcTemplate, CAST in/out), reads the row back,
  * parses the JSON, and asserts the post-state.
  *
- * <p>Run requirements: Docker available locally and in CI. Skipped silently
- * (Testcontainers throws) on environments without Docker - the unit-test
- * suite still validates the same builders without DB.
+ * <p>Run requirements: Docker available locally and in CI. Without Docker the
+ * class is DISABLED (skipped, not failed) - that is what
+ * {@code disabledWithoutDocker = true} buys: the extension checks the daemon
+ * BEFORE it starts the {@code @Container} field. The {@code Assumptions} guard in
+ * {@code setUpClass} cannot do it alone: the Testcontainers extension's own
+ * beforeAll callback runs FIRST, so it throws "Could not find a valid Docker
+ * environment" before the assumption is ever evaluated. The unit-test suite
+ * still validates the same builders without DB.
  */
-@Testcontainers
+@Testcontainers(disabledWithoutDocker = true)
 class JsonbPatchPostgresIT {
 
     private static final String TRIGGER = "trigger:webhook";   // colon in trigger key - defensive coverage

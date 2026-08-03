@@ -21,7 +21,7 @@ let mockMode: any;
 const execStatus = (over: Record<string, any> = {}) => ({
   isStepByStepMode: false,
   isReady: false,
-  isReadyRaw: false,
+  canExecuteRaw: false,
   canExecute: false,
   isExecuting: false,
   isRerunning: false,
@@ -39,7 +39,6 @@ const execStatus = (over: Record<string, any> = {}) => ({
 // Captures every NodeBottomBar render's props, per test.
 const bottomBarProps: any[] = [];
 vi.mock('../NodeBottomBar', () => ({
-  BTN_CLS: 'btn-cls-stub',
   ShimmerOverlay: () => null,
   NodeBottomBar: (props: any) => {
     bottomBarProps.push(props);
@@ -60,7 +59,8 @@ vi.mock('../../../nodes/nodeClasses', () => ({
   findNodeClassById: () => undefined,
 }));
 vi.mock('../../NodeStatusBadge', () => ({ NodeStatusBadge: () => null }));
-vi.mock('../../NodePlayButton', () => ({
+vi.mock('../../NodePlayButton', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../../NodePlayButton')>()),
   NodePlayButton: () => null,
   deriveNodeStatus: () => undefined,
 }));
@@ -73,6 +73,7 @@ vi.mock('reactflow', () => ({
   Position: { Left: 'left', Right: 'right', Top: 'top', Bottom: 'bottom' },
   useNodes: () => [],
   useEdges: () => [],
+  useNodeId: () => null,
   useReactFlow: () => ({ getNodes: () => [], getEdges: () => [] }),
 }));
 vi.mock('@/contexts/SidePanelContext', () => ({

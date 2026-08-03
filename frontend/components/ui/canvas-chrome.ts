@@ -74,6 +74,48 @@ export function canvasChromeCompactButtonClass(active = false, className?: strin
 export const CANVAS_CHROME_CARD_PADDING_PX = 4
 
 /**
+ * A control attached to a NODE rather than to the canvas chrome: every button in
+ * the node bottom bar (agent, sub-workflow, files, play/rerun, delete, duplicate),
+ * the trigger pin and launch buttons, the fleet trigger buttons.
+ *
+ * These were the last round islands left once the chrome went square: `rounded-full`
+ * pills that grew on hover (`hover:scale-110`) and carried a drop shadow. They now
+ * take the same Button shape and the same 28px footprint as a control nested in a
+ * chrome card, so a button under a node and a button in the toolbar read as one
+ * system.
+ *
+ * Three things a node control cannot inherit from a chrome card, and keeps: an
+ * OPAQUE surface, because it floats directly over nodes and edges with no card
+ * beneath it; `overflow-hidden`, which clips the shimmer overlay a runnable button
+ * scans across itself; and a HAIRLINE BORDER, which is what separates it from
+ * whatever it floats on now that the drop shadow is gone. Most callers cover that
+ * border with the inline 2px status border that ties the button to its node (an
+ * inline style beats the class), but the ones that do not - the pin and play in a
+ * run-step popover - would otherwise be a white square on a white tooltip.
+ *
+ * A plain string, not a function: every call site interpolates it into its own
+ * template literal next to per-button state classes. A caller adding a class that
+ * CONFLICTS with one of these (another border, another background) must go through
+ * `cn` so tailwind-merge resolves it - concatenating leaves both in the class list
+ * and lets stylesheet order decide, which is how the border below went missing once
+ * already.
+ */
+export const canvasNodeButtonClass = cn(
+  buttonVariants({ variant: "ghost", size: "icon" }),
+  "relative shrink-0 h-7 w-7 overflow-hidden",
+  "border-[var(--border-color)]",
+  "bg-[var(--bg-primary)] text-[var(--text-secondary)] hover:bg-[var(--bg-tertiary)] hover:text-[var(--text-primary)]",
+)
+
+/**
+ * Radius of the shimmer overlay a node button scans across itself while its node is
+ * running or runnable. Kept beside the button class so the two cannot drift: an
+ * overlay still on `rounded-full` inside a square button leaves a visibly clipped
+ * scan at the corners.
+ */
+export const canvasNodeButtonShimmerRadiusClass = "rounded-xl"
+
+/**
  * Radius for the small non-interactive info labels carried by the run bar (status,
  * version, epoch, step-by-step). They are chips, not controls: too small for the
  * Button radius, so they take the step below it rather than staying circular.

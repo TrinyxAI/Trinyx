@@ -53,7 +53,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
  *
  * <p>Skipped without Docker.
  */
-@Testcontainers
+@Testcontainers(disabledWithoutDocker = true)
 @DisplayName("agent_executions.task_id FK resilience - insert-after-task-delete is guarded, not a violation")
 class AgentExecutionTaskFkResiliencePostgresIT {
 

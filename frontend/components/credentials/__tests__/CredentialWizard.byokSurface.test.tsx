@@ -58,6 +58,10 @@ const messages = {
   credentials: {
     wizard: {
       title: 'Connect',
+      // The wizard renders this on every step; without it each render floods stderr
+      // with a MISSING_MESSAGE that reads like an i18n regression but is only this
+      // mock being incomplete (next-intl falls back and the assertions still hold).
+      description: 'Connect your account',
       saving: 'Saving...',
       close: 'Close',
       done: 'Done',

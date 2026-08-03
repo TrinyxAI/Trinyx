@@ -1,6 +1,7 @@
 package com.apimarketplace.orchestrator.services.persistence.schema;
 
 import com.apimarketplace.agent.domain.NodeSpec;
+import com.apimarketplace.agent.domain.OutputFieldDef;
 import com.apimarketplace.orchestrator.execution.v2.nodes.*;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -216,6 +217,59 @@ class GenericOutputSchemaMapperTest {
             assertFalse(result.containsKey("skipped_cases"));
             assertFalse(result.containsKey("switch_value"));
             assertFalse(result.containsKey("matched_value"));
+        }
+
+        @Test
+        @DisplayName("selected_branches is a STRING, and the spec now says so")
+        void switchSelectedBranchesIsDeclaredAsAString() {
+            // The value above is a bare String, and always has been: SwitchNode never emits
+            // selected_branches, so the mapper resolves it through the aliases
+            // selected_case_label then selected_case, both strings. The NodeSpec nonetheless
+            // declared type("array"), and that declaration is what /api/node-definitions
+            // serves to the inspector and what the agent docs are generated from. An agent
+            // reading "array" writes [0] or size() and resolves nothing, with the run still
+            // reporting COMPLETED, so nothing surfaces.
+            //
+            // OPTION is the trap: it declares a key of the SAME NAME that genuinely is an
+            // array, because OptionNode puts a List there directly. Same name, two types,
+            // two node types. Pin the switch side so they cannot be "unified" by mistake.
+            OutputFieldDef selectedBranches = new SwitchNodeSpec().definition().outputs().stream()
+                .filter(f -> "selected_branches".equals(f.key()))
+                .findFirst()
+                .orElseThrow(() -> new AssertionError("SwitchNodeSpec no longer declares selected_branches"));
+
+            assertEquals("string", selectedBranches.type(),
+                "switch.selected_branches resolves through String aliases, so the spec must say string");
+
+            OutputFieldDef optionSelectedBranches = new OptionNodeSpec().definition().outputs().stream()
+                .filter(f -> "selected_branches".equals(f.key()))
+                .findFirst()
+                .orElseThrow(() -> new AssertionError("OptionNodeSpec no longer declares selected_branches"));
+
+            assertEquals("array", optionSelectedBranches.type(),
+                "option.selected_branches IS a real array (OptionNode puts a List); the two must not be unified");
+        }
+
+        @Test
+        @DisplayName("no match and no default case stores the declared type, not an empty array")
+        void switchWithoutAMatchStoresAnEmptyString() {
+            // Reachable, not theoretical: SwitchNode always PUTS selected_case, but its value
+            // is null when nothing matched and the plan declares no default case, and
+            // selected_case_label is only set when a case object was actually selected. Both
+            // aliases then resolve null and the mapper falls through to the spec default.
+            // That default used to be List.of(), so this row stored [] for a field the docs
+            // describe as a label.
+            Map<String, Object> input = new HashMap<>();
+            input.put("selected_case", null);
+            input.put("selected_case_index", -1);
+            input.put("skipped_cases", List.of("case_0", "case_1"));
+            input.put("evaluations", List.of(Map.of("result", false)));
+
+            Map<String, Object> result = genericMapper.transform("SWITCH", input);
+
+            assertEquals("", result.get("selected_branches"),
+                "an unmatched switch should store the empty string, not an empty array");
+            assertEquals(List.of("case_0", "case_1"), result.get("skipped_branches"));
         }
     }
 

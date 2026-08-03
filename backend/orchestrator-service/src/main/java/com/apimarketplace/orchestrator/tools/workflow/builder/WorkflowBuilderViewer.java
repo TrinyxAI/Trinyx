@@ -260,99 +260,6 @@ public class WorkflowBuilderViewer {
     }
 
     /**
-     * List all nodes in the workflow.
-     */
-    public ToolExecutionResult executeListNodes(WorkflowBuilderSession session) {
-        Map<String, Object> result = new LinkedHashMap<>();
-        result.put("status", "OK");
-        result.put("workflow", session.getWorkflowName());
-
-        List<Map<String, Object>> nodes = new ArrayList<>();
-
-        // Triggers
-        for (Map<String, Object> trigger : session.getTriggers()) {
-            String label = (String) trigger.get("label");
-            String nodeId = "trigger:" + WorkflowBuilderSession.normalizeLabel(label);
-            String logicalId = session.getLogicalIdOrFail(nodeId);
-
-            String triggerType = (String) trigger.getOrDefault("type", "datasource");
-            nodes.add(Map.of(
-                "ref", logicalId,
-                "type", "TRIGGER",
-                "label", label,
-                "trigger_type", "datasource".equals(triggerType) ? "table" : triggerType
-            ));
-        }
-
-        // Steps
-        for (Map<String, Object> step : session.getMcps()) {
-            String label = (String) step.get("label");
-            boolean isAgent = Boolean.TRUE.equals(step.get("isAgent"));
-            String prefix = isAgent ? "agent:" : "mcp:";
-            String nodeId = prefix + WorkflowBuilderSession.normalizeLabel(label);
-            String logicalId = session.getLogicalIdOrFail(nodeId);
-
-            Map<String, Object> nodeInfo = new LinkedHashMap<>();
-            nodeInfo.put("ref", logicalId);
-            nodeInfo.put("type", isAgent ? "AGENT" : "STEP");
-            nodeInfo.put("label", label);
-            if (step.containsKey("tool_id")) {
-                nodeInfo.put("tool_id", step.get("tool_id"));
-            }
-            nodes.add(nodeInfo);
-        }
-
-        // Control nodes
-        for (Map<String, Object> cn : session.getCores()) {
-            String label = (String) cn.get("label");
-            String type = (String) cn.get("type");
-            String nodeId = type + ":" + WorkflowBuilderSession.normalizeLabel(label);
-            String logicalId = session.getLogicalIdOrFail(nodeId);
-
-            nodes.add(Map.of(
-                "ref", logicalId,
-                "type", type.toUpperCase(),
-                "label", label
-            ));
-        }
-
-        result.put("nodes", nodes);
-        result.put("count", nodes.size());
-
-        return ToolExecutionResult.success(result);
-    }
-
-    /**
-     * List all linked interfaces.
-     */
-    public ToolExecutionResult executeListInterfaces(WorkflowBuilderSession session) {
-        Map<String, Object> result = new LinkedHashMap<>();
-        result.put("status", "OK");
-        result.put("workflow", session.getWorkflowName());
-
-        Map<String, List<String>> allLinked = session.getAllLinkedInterfaces();
-
-        if (allLinked.isEmpty()) {
-            result.put("message", "No interfaces linked to any nodes.");
-            result.put("linked_interfaces", Map.of());
-            return ToolExecutionResult.success(result);
-        }
-
-        // Format with logical references
-        Map<String, Object> formatted = new LinkedHashMap<>();
-        for (Map.Entry<String, List<String>> entry : allLinked.entrySet()) {
-            String nodeId = entry.getKey();
-            String ref = formatNodeRef(session, nodeId);
-            formatted.put(ref, entry.getValue());
-        }
-
-        result.put("linked_interfaces", formatted);
-        result.put("total_interfaces", allLinked.values().stream().mapToInt(List::size).sum());
-
-        return ToolExecutionResult.success(result);
-    }
-
-    /**
      * Get workflow errors and warnings. Runs the unified validator chain
      * (sub-validators + legacy WorkflowErrorChecker) so {@code validate},
      * {@code finish}, and {@code save} all produce the same verdict.
@@ -476,7 +383,17 @@ public class WorkflowBuilderViewer {
                     outputs.put("current_item", "{{core:" + normalizedLabel + ".output.current_item}}");
                     outputs.put("current_index", "{{core:" + normalizedLabel + ".output.current_index}}");
                 } else if ("switch".equals(nodeType)) {
-                    outputs.put("selected_case", "{{core:" + normalizedLabel + ".output.selected_case}}");
+                    // selected_case is an alias, never a stored key (see WorkflowBuilderLoader).
+                    outputs.put("selected_branches", "{{core:" + normalizedLabel + ".output.selected_branches}}");
+                    outputs.put("selected_case_index", "{{core:" + normalizedLabel + ".output.selected_case_index}}");
+                } else if ("option".equals(nodeType)) {
+                    outputs.put("selected_choice", "{{core:" + normalizedLabel + ".output.selected_choice}}");
+                    outputs.put("selected_label", "{{core:" + normalizedLabel + ".output.selected_label}}");
+                } else if ("transform".equals(nodeType)) {
+                    outputs.put("transformed", "{{core:" + normalizedLabel + ".output.transformed}}");
+                } else if ("wait".equals(nodeType)) {
+                    outputs.put("status", "{{core:" + normalizedLabel + ".output.status}}");
+                    outputs.put("waited_ms", "{{core:" + normalizedLabel + ".output.waited_ms}}");
                 }
             }
         } else if (nodeId.startsWith("agent:")) {

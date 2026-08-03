@@ -57,11 +57,7 @@ class ToolExecutionManagerTest {
     void setUp() {
         objectMapper = new ObjectMapper();
         toolExecutionOrchestrator = new com.apimarketplace.catalog.service.execution.ToolExecutionOrchestrator(
-            new com.apimarketplace.catalog.service.execution.OutputProjector(objectMapper),
-            new com.apimarketplace.catalog.service.execution.BinaryResponseHandler(objectMapper),
-            new com.apimarketplace.catalog.service.execution.MultipartBodyEncoder(objectMapper),
-            new com.apimarketplace.catalog.service.execution.AsyncPollExecutor(new org.springframework.web.client.RestTemplate(), objectMapper),
-            objectMapper);
+            new com.apimarketplace.catalog.service.execution.OutputProjector(objectMapper));
         com.apimarketplace.catalog.service.execution.BinaryResponseHandler binaryResponseHandler =
             new com.apimarketplace.catalog.service.execution.BinaryResponseHandler(objectMapper);
         executionManager = new ToolExecutionManager(toolContextService, apiService, objectMapper, responseShaper, nextActionBuilder, responseCache, toolNextHintRepository, toolResponseService, toolExecutionOrchestrator, binaryResponseHandler,

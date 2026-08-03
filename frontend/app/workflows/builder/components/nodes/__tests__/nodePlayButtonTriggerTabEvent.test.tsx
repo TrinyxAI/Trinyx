@@ -88,6 +88,68 @@ describe('NodePlayButton - open trigger tab event', () => {
     },
   );
 
+  describe('onBeforeLaunch - the hook that must catch BOTH exits', () => {
+    /**
+     * A caller with something to settle before the run starts (the run-step
+     * popover leaves the focused epoch) cannot hang it off `onExecute`: that
+     * hook never fires for a payload trigger, whose play opens a side-panel tab
+     * and lets the run start from there. So the callback has to run on both
+     * paths, exactly once, and never on a button that does nothing.
+     */
+    const renderPlay = (props: Record<string, unknown>) => {
+      const onBeforeLaunch = vi.fn();
+      const onExecute = vi.fn();
+      window.addEventListener('workflowOpenTriggerTab', listener);
+      try {
+        render(
+          <NodePlayButton
+            nodeId="n1"
+            status="ready"
+            canExecute
+            onExecute={onExecute}
+            onBeforeLaunch={onBeforeLaunch}
+            position="bottom-center"
+            borderColor="#000"
+            {...props}
+          />,
+        );
+        const button = screen.queryByRole('button');
+        if (button) fireEvent.click(button);
+      } finally {
+        window.removeEventListener('workflowOpenTriggerTab', listener);
+      }
+      return { onBeforeLaunch, onExecute };
+    };
+
+    it.each(['message', 'form', 'webhook'])('runs once BEFORE the tab opens for a %s trigger', (variant) => {
+      const { onBeforeLaunch, onExecute } = renderPlay({ variant });
+      expect(onBeforeLaunch).toHaveBeenCalledTimes(1);
+      // The tab did open, so the callback did not replace the action.
+      expect(captured).toHaveLength(1);
+      // ...and the payload trigger was still not fired blind.
+      expect(onExecute).not.toHaveBeenCalled();
+    });
+
+    it('runs once before firing a blind-fireable trigger', () => {
+      const { onBeforeLaunch, onExecute } = renderPlay({ variant: 'lightning' });
+      expect(onBeforeLaunch).toHaveBeenCalledTimes(1);
+      expect(onExecute).toHaveBeenCalledWith('n1');
+    });
+
+    it.each([
+      ['a pending trigger', { variant: 'lightning', status: 'pending' }],
+      ['a trigger that cannot execute', { variant: 'lightning', canExecute: false }],
+      ['a button mid-flight', { variant: 'lightning', isLoading: true }],
+    ])('never runs on %s', (_label, props) => {
+      // An inert button must not tell its caller a run is starting: the popover
+      // would leave the focused epoch for a run that never happens.
+      const { onBeforeLaunch, onExecute } = renderPlay(props);
+      expect(onBeforeLaunch).not.toHaveBeenCalled();
+      expect(onExecute).not.toHaveBeenCalled();
+      expect(captured).toEqual([]);
+    });
+  });
+
   it('resolves to the picked tab, not the first one sharing the type', () => {
     // End-to-end with the panel-side resolver: this is the bug the id fixes.
     const configs = [

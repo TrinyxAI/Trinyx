@@ -25,7 +25,7 @@ import java.sql.Statement;
  *   <li>Discover the max id once (cheap with the PK index).</li>
  *   <li>Iterate {@code id} ranges in 50K-row chunks; per range:
  *       {@code UPDATE … SET scope_id = run_id WHERE id BETWEEN :lo AND :hi AND scope_id IS NULL}.
- *       The predicate is idempotent - re-running the migration after a crash
+ *       The predicate is idempotent: re-running the migration after a crash
  *       resumes from where it left off.</li>
  *   <li>After all batches: {@code ALTER COLUMN scope_id SET NOT NULL}. PG validates
  *       existing rows under AccessExclusive; on a fully-backfilled table that's
@@ -37,7 +37,7 @@ import java.sql.Statement;
  *   mvn -pl backend/migration-service flyway:repair
  * </pre>
  * then restart migration-service. The {@code WHERE scope_id IS NULL} predicate
- * makes the resume idempotent - no duplicate work.
+ * makes the resume idempotent (no duplicate work).
  *
  * <p>Documented in {@code OPERATOR_RUNBOOK.md §v148-v151-deploy}.
  */
@@ -50,7 +50,7 @@ public class V151__backfill_scope_id extends BaseJavaMigration {
     public void migrate(Context context) throws Exception {
         Connection cx = context.getConnection();
         // Flyway typically wraps the connection in a transaction. We need our own
-        // commit cadence per batch - set autoCommit on this connection so each
+        // commit cadence per batch: set autoCommit on this connection so each
         // executeUpdate commits independently. Restored at the end via finally.
         boolean priorAutoCommit = cx.getAutoCommit();
         try {
@@ -90,7 +90,7 @@ public class V151__backfill_scope_id extends BaseJavaMigration {
 
             // Final: enforce NOT NULL. On a fully-backfilled table the validation scan
             // is fast (post-batch every row has scope_id set). If it fails, a NULL slipped
-            // through (concurrent INSERT during migration without scope_id default) - fix
+            // through (concurrent INSERT during migration without scope_id default), fix
             // and rerun.
             try (Statement st = cx.createStatement()) {
                 st.execute("ALTER TABLE auth.workflow_run_pricing_pin "

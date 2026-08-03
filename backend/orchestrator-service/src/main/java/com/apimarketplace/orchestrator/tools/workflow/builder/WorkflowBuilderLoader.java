@@ -910,9 +910,18 @@ public class WorkflowBuilderLoader {
         Map<String, String> refs = new LinkedHashMap<>();
 
         switch (type) {
-            case "decision", "option" -> {
+            case "decision" -> {
                 outputs.put("selected_branch", "string");
                 refs.put("selected_branch", "{{core:" + normalizedLabel + ".output.selected_branch}}");
+            }
+            case "option" -> {
+                // Split out of the decision arm: OptionNodeSpec declares no selected_branch.
+                outputs.put("selected_choice", "string");
+                outputs.put("selected_label", "string");
+                outputs.put("selected_choice_index", "number");
+                refs.put("selected_choice", "{{core:" + normalizedLabel + ".output.selected_choice}}");
+                refs.put("selected_label", "{{core:" + normalizedLabel + ".output.selected_label}}");
+                refs.put("selected_choice_index", "{{core:" + normalizedLabel + ".output.selected_choice_index}}");
             }
             case "loop", "while" -> {
                 outputs.put("iteration", "number");
@@ -937,16 +946,27 @@ public class WorkflowBuilderLoader {
                 refs.put("terminated", "{{core:" + normalizedLabel + ".output.terminated}}");
             }
             case "switch" -> {
-                outputs.put("selected_case", "string");
-                refs.put("selected_case", "{{core:" + normalizedLabel + ".output.selected_case}}");
+                // selected_case is an .aliases() entry, never a stored key: it resolves an
+                // INPUT and is not what GenericOutputSchemaMapper writes. Note the plural
+                // name hides a single string; skipped_branches is the real array.
+                outputs.put("selected_branches", "string (label of the case that matched)");
+                outputs.put("selected_case_index", "number (0-based index of the matched case)");
+                refs.put("selected_branches", "{{core:" + normalizedLabel + ".output.selected_branches}}");
+                refs.put("selected_case_index", "{{core:" + normalizedLabel + ".output.selected_case_index}}");
             }
             case "transform" -> {
-                outputs.put("result", "object");
-                refs.put("result", "{{core:" + normalizedLabel + ".output.result}}");
+                // The mapped fields live UNDER transformed, so drill into it:
+                // {{core:<label>.output.transformed.<field>}}. There is no "result" key.
+                outputs.put("transformed", "object (the mapped fields)");
+                refs.put("transformed", "{{core:" + normalizedLabel + ".output.transformed}}");
             }
             case "wait" -> {
-                outputs.put("completed", "boolean");
-                refs.put("completed", "{{core:" + normalizedLabel + ".output.completed}}");
+                outputs.put("status", "string");
+                outputs.put("waited_ms", "number");
+                outputs.put("completed_at", "string");
+                refs.put("status", "{{core:" + normalizedLabel + ".output.status}}");
+                refs.put("waited_ms", "{{core:" + normalizedLabel + ".output.waited_ms}}");
+                refs.put("completed_at", "{{core:" + normalizedLabel + ".output.completed_at}}");
             }
             case "http_request" -> {
                 outputs.put("success", "boolean");

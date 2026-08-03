@@ -8,6 +8,8 @@ import { selectAllEpochs } from '@/components/workflow/run-panel/useDefaultEpoch
 import { boundRunId } from '@/components/workflow/run-panel/runPanelBus';
 import { findNodeClassById } from '@/app/workflows/builder/nodes/nodeClasses';
 import { deriveNodeContextFlags, useNodeContextualButtons } from '@/app/workflows/builder/hooks/useNodeContextualButtons';
+import { isFireableTrigger } from '@/app/workflows/builder/hooks/fireableTrigger';
+import { canvasNodeButtonClass } from '@/components/ui/canvas-chrome';
 import { TriggerNodePinButton } from '@/app/workflows/builder/components/nodes/TriggerNodePinButton';
 import { NodePlayButton } from '@/app/workflows/builder/components/NodePlayButton';
 
@@ -27,8 +29,6 @@ interface StepRowActionsProps {
   isRunActive: boolean;
 }
 
-const SIDE_BTN_CLS =
-  'relative inline-flex items-center justify-center h-7 w-7 rounded-full bg-white dark:bg-gray-800 text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700 hover:scale-110 shadow-md transition-all duration-200 border border-slate-200 dark:border-slate-700';
 
 /**
  * Contextual action buttons for a run-info step row, shown inside the hover
@@ -59,21 +59,26 @@ export function StepRowActions({ step, matchedNode, workflowId, isStepByStep, is
   // Same trigger set the node bottom bar exposes a play for. chat/form/webhook
   // open the trigger tab from inside NodePlayButton; the rest fire the trigger.
   // Gated on an active (non-terminal) run, mirroring the canvas.
-  const isFireableTrigger =
-    flags.isManualTrigger || flags.isChatTrigger || flags.isFormTrigger ||
-    flags.isWebhookTrigger || flags.isScheduleTrigger || flags.isWorkflowsTriggerNode ||
-    flags.isTablesTrigger || flags.isErrorTrigger;
-  const showPlay = isFireableTrigger && isRunActive;
+  const showPlay = isFireableTrigger(flags) && isRunActive;
   const showPin = flags.isTriggerNode && !!workflowId;
 
   if (sideButtons.length === 0 && !showPlay && !showPin) return null;
 
-  // Fire THIS trigger from the run-info popover: return to all-epochs (same as
-  // the focus-epoch node play) then dispatch to WorkflowBuilder, which calls the
-  // canonical handleExecuteStep path. epoch=undefined → fresh epoch. workflowId
-  // scopes the event so a sub-workflow panel's WorkflowBuilder ignores it.
+  /**
+   * Leave the focused epoch, so the epoch this launches is visible when it
+   * arrives. Passed as `onBeforeLaunch` rather than folded into `fireTrigger`:
+   * a chat, form or webhook trigger never reaches `fireTrigger` - its play opens
+   * a side-panel tab and the run starts from there - so hanging this off the fire
+   * path alone left the popover's payload triggers launching into a view the user
+   * had focused elsewhere.
+   */
+  const returnToAllEpochs = () => selectAllEpochs(boundRunId(workflowId, runId), setViewingEpoch);
+
+  // Fire THIS trigger from the run-info popover: dispatch to WorkflowBuilder,
+  // which calls the canonical handleExecuteStep path. epoch=undefined → fresh
+  // epoch. workflowId scopes the event so a sub-workflow panel's WorkflowBuilder
+  // ignores it.
   const fireTrigger = () => {
-    selectAllEpochs(boundRunId(workflowId, runId), setViewingEpoch);
     window.dispatchEvent(new CustomEvent('workflowExecuteStep', { detail: { stepId: step.alias, workflowId } }));
   };
 
@@ -89,7 +94,7 @@ export function StepRowActions({ step, matchedNode, workflowId, isStepByStep, is
           type="button"
           onClick={(e) => { e.stopPropagation(); onClick(e); }}
           title={title}
-          className={SIDE_BTN_CLS}
+          className={canvasNodeButtonClass}
         >
           {icon}
         </button>
@@ -100,6 +105,7 @@ export function StepRowActions({ step, matchedNode, workflowId, isStepByStep, is
           status="ready"
           canExecute
           onExecute={fireTrigger}
+          onBeforeLaunch={returnToAllEpochs}
           variant={flags.triggerVariant}
           // Names THIS trigger in the open-tab event a chat/form/webhook play
           // dispatches: several triggers can share a type, and matching on type

@@ -262,12 +262,12 @@ public class NamespaceResolver {
      * Expected format: {{core:label.output.field}}
      * Examples:
      * - {{core:decision.output.selected_branch}} - Decision selected branch
-     * - {{core:switch.output.selected_case}} - Switch selected case
+     * - {{core:switch.output.selected_branches}} - Switch matched case label (a string)
      * - {{core:loop.output.iteration}} - Loop iteration counter (1-based)
      * - {{core:split.output.current_item}} - Split current item
      * - {{core:split.output.current_index}} - Split current index (0-based)
-     * - {{core:merge.output.merged_data}} - Merge merged data
-     * - {{core:fork.output.branches_count}} - Fork branches count
+     * - {{core:merge.output.merged_branches}} - Merge merged branches
+     * - {{core:fork.output.branch_count}} - Fork branch count
      *
      * Note: For backwards compatibility, also supports {{core:label.field}} (without .output.)
      * but the recommended pattern is with .output. for consistency.

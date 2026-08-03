@@ -53,6 +53,13 @@ export interface StepByStepContextValue {
 
   // Epoch data for parallel SBS support
   activeEpochs: number[];
+
+  /**
+   * The run's newest epoch. Used to tell "reading the live state through its
+   * epoch" apart from "reading a historical epoch" - only the latter is
+   * read-only. See the `isInteractive` note in {@link useNodeExecutionStatus}.
+   */
+  currentEpoch: number;
 }
 
 const StepByStepContext = React.createContext<StepByStepContextValue | null>(null);
@@ -83,6 +90,8 @@ interface StepByStepProviderProps {
   pendingSignals?: PendingSignal[];
   // Epoch data for parallel SBS support
   activeEpochs?: number[];
+  /** The run's newest epoch (0 when the run has not fired yet). */
+  currentEpoch?: number;
 }
 
 export function StepByStepProvider({
@@ -107,6 +116,7 @@ export function StepByStepProvider({
   onResolveApproval,
   pendingSignals = [],
   activeEpochs = [],
+  currentEpoch = 0,
 }: StepByStepProviderProps) {
   const [executingStep, setExecutingStep] = React.useState<string | null>(null);
 
@@ -266,6 +276,7 @@ export function StepByStepProvider({
     isExecutingStep: executingStep,
     lastDecisionResult,
     activeEpochs,
+    currentEpoch,
   }), [
     isEnabled,
     isRunTerminal,
@@ -294,6 +305,7 @@ export function StepByStepProvider({
     executingStep,
     lastDecisionResult,
     activeEpochs,
+    currentEpoch,
   ]);
 
   return (
@@ -316,17 +328,29 @@ export function useNodeExecutionStatus(nodeId: string, nodeData?: { label?: stri
   const ctx = useStepByStep();
   const { viewingEpoch } = useWorkflowMode();
 
-  // Interactive ONLY in "All epochs" view (viewingEpoch == null).
-  // When viewing any specific epoch (active or historical), all buttons are hidden -
-  // users must return to "All" view to interact (fire triggers, rerun, play steps).
-  const isInteractive = viewingEpoch == null;
+  // Interactive in the "All epochs" view (viewingEpoch == null) AND while reading
+  // the run's NEWEST epoch - only a HISTORICAL epoch is read-only.
+  //
+  // This used to require "All epochs" alone, which was correct while a run opened
+  // unselected. Since the run history moved into the side panel, every run surface
+  // seeds a default epoch on the shared provider (useDefaultEpochSelection: "a run
+  // is always read THROUGH an epoch"), so the canvas is never on "All" by default.
+  // With the old rule that silently hid EVERY play and rerun button on non-trigger
+  // nodes, which made a step-by-step run impossible to step from the canvas - the
+  // one surface that drives it. (Triggers looked fine only because FlowNode already
+  // re-exposes a focus-epoch play button.)
+  //
+  // Reading the live state through its own epoch is not history, so it stays
+  // interactive; an older epoch is a record of what happened and stays read-only.
+  const isInteractive = viewingEpoch == null
+    || (ctx != null && ctx.currentEpoch > 0 && viewingEpoch === ctx.currentEpoch);
 
   if (!ctx) {
     return {
       isStepByStepMode: false,
       canExecute: false,
       isReady: false,
-      isReadyRaw: false,
+      canExecuteRaw: false,
       isCompleted: false,
       isFailed: false,
       isSkipped: false,
@@ -373,10 +397,17 @@ export function useNodeExecutionStatus(nodeId: string, nodeData?: { label?: stri
     isStepByStepMode: ctx.isStepByStepMode && isInteractive,
     canExecute: isInteractive && (isControl ? ctx.canExecuteCore(normalizedId) : ctx.canExecuteStep(normalizedId)),
     isReady: isInteractive && isReady,
-    // Raw readiness, ignoring the focus-epoch interactive gate. Lets the focus
-    // view show a trigger's play button (which returns to all-epochs + fires
-    // that trigger on click) even though normal controls are hidden in focus.
-    isReadyRaw: isReady,
+    /**
+     * Executability ignoring the focus-epoch interactive gate - but NOT the run's
+     * own state: `canExecuteStep` still returns false on a terminal run, which the
+     * backend dispatcher would refuse anyway.
+     *
+     * Lets the focus view offer a trigger's play button (which returns to
+     * all-epochs and fires that trigger) while normal controls stay hidden. Read
+     * this, never a bare readiness flag: a terminal run keeps its steps in
+     * `readySteps`, so readiness alone promises a run that cannot happen.
+     */
+    canExecuteRaw: isControl ? ctx.canExecuteCore(normalizedId) : ctx.canExecuteStep(normalizedId),
     isCompleted,
     isFailed,
     isSkipped,

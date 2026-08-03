@@ -14,7 +14,7 @@ import java.util.Set;
  *
  * <p><b>Thread-safety contract:</b> All mutations ({@link #withEntry}, {@link #withExpectedCount})
  * MUST be called under the per-{@code MergeKey} lock held by {@link ItemMergeCollector}.
- * Lock-free readers (e.g. {@link ItemAwareMergeStrategy}) call only query methods, which
+ * Lock-free readers call only query methods, which
  * return defensive copies or compute values on-the-fly from the internal collections.
  *
  * <p>This class was originally immutable (copy-on-write), but for a 539-item split the

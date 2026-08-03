@@ -35,7 +35,7 @@ import static org.assertj.core.api.Assertions.assertThat;
  * The unqualified pre-fix SQL deterministically fails here; the
  * schema-qualified fix passes.
  */
-@Testcontainers
+@Testcontainers(disabledWithoutDocker = true)
 @DisplayName("V381 catalog-bundle payload migration - runs under the real migration-service search_path")
 class CatalogBundleV381MigrationPostgresIT {
 

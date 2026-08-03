@@ -56,8 +56,8 @@ When adding or changing workflow-node fields, update
 `shared/contracts/node-contracts.schema.json` and run:
 
 ```bash
-npm run contracts:validate
-npm run contracts:generate:ts
+npm run contracts:validate:strict
+npm run contracts:test
 ```
 
 ## Testing

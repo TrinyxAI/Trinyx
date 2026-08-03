@@ -11,7 +11,8 @@ import { orchestratorApi, type WorkflowRun } from '@/lib/api/orchestrator';
 import { getClientLocale } from '@/lib/utils/locale';
 import { formatRelativeDateI18n, formatUtcDateTime, parseUtcAware } from '@/lib/utils/dateFormatters';
 import { getRunDisplayStatus } from '@/lib/utils/runStatusUtils';
-import { formatCompactDuration } from './runFormatting';
+import { scrollToAndFlash } from '@/lib/utils/flashHighlight';
+import { formatCompactDuration, RUN_ROW_FLASH_CLASS } from './runFormatting';
 
 interface RunHistoryListProps {
   workflowId?: string;
@@ -72,8 +73,12 @@ const RUN_STATUS_ICON: Record<RunRowStatus, { icon: React.ReactNode; className: 
   failed: { icon: <XCircle className="w-3.5 h-3.5" />, className: 'text-red-500 dark:text-red-400' },
   cancelled: { icon: <XCircle className="w-3.5 h-3.5" />, className: 'text-gray-400 dark:text-gray-500' },
   running: { icon: <RefreshCw className="w-3.5 h-3.5 animate-spin" />, className: 'text-blue-500 dark:text-blue-400' },
-  // The resting state of a live reusable run, between two fires - not "pending".
-  waiting_trigger: { icon: <PlayCircle className="w-3.5 h-3.5" />, className: 'text-blue-500 dark:text-blue-400' },
+  // The resting state of a live reusable run, between two fires. It is neither
+  // "pending" (something already ran) nor "running" (nothing is executing right
+  // now), so it takes the same idle warm tone the run bar gives it (getStatusClasses
+  // falls through to yellow for WAITING_TRIGGER) - blue plus the running pulse
+  // made an idle run indistinguishable from an executing one.
+  waiting_trigger: { icon: <PlayCircle className="w-3.5 h-3.5" />, className: 'text-amber-500 dark:text-amber-400' },
   paused: { icon: <PauseCircle className="w-3.5 h-3.5" />, className: 'text-amber-500 dark:text-amber-400' },
   // Blocked on an approval / timer / webhook: the run is alive and waiting on
   // someone, which is not the same thing as "pending".
@@ -161,23 +166,54 @@ export function RunHistoryList({ workflowId, currentRunId, onSelectRun }: RunHis
   const [runs, setRuns] = useState<WorkflowRun[]>([]);
   const [loading, setLoading] = useState(false);
   const [loadingMore, setLoadingMore] = useState(false);
+  /** First page resolved (with rows or with an error). Anchors the focus flash. */
+  const [firstPageSettled, setFirstPageSettled] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [hasMore, setHasMore] = useState(true);
   const [pinnedVersion, setPinnedVersion] = useState<number | null>(null);
   const [pinnedRun, setPinnedRun] = useState<WorkflowRun | null>(null);
   const observerTarget = useRef<HTMLDivElement>(null);
   const offsetRef = useRef(0);
+  /** Generations of the two fetches, so a stale one cannot write this list. */
+  const resetGenerationRef = useRef(0);
+  const pinnedGenerationRef = useRef(0);
+  /**
+   * Workflow the rows currently on screen actually came from.
+   *
+   * This component is NOT remounted when `workflowId` changes (the pinned
+   * workflow-panel tab survives navigating from one workflow to another), so for
+   * one commit the props describe workflow B while the DOM, the refs and every
+   * settled flag still describe A.
+   */
+  const loadedWorkflowRef = useRef<string | undefined>(undefined);
+  /** The row of the run being shown, and the arming already played on it. */
+  const currentRowRef = useRef<HTMLButtonElement | null>(null);
+  const flashedKeyRef = useRef<string | null>(null);
+  /** Pinned (production) run resolved - it is prepended, so it can be the target. */
+  const [pinnedSettled, setPinnedSettled] = useState(false);
 
   // Pinned version + pinned (production) run - drives the pin badge and the
   // "production run first" ordering.
   useEffect(() => {
-    if (!workflowId) return;
+    if (!workflowId) { setPinnedSettled(true); return; }
+    setPinnedSettled(false);
+    // Same generation stamp as the runs fetch: this component is not remounted
+    // when `workflowId` changes, so a slow response for the PREVIOUS workflow
+    // would otherwise prepend a foreign run to this list and, worse, declare
+    // this list's pinned fetch settled while it is still in flight - which spends
+    // the focus cue on a run whose row has not arrived.
+    const myGeneration = ++pinnedGenerationRef.current;
+    const isStale = () => myGeneration !== pinnedGenerationRef.current;
     orchestratorApi.listVersions(workflowId)
-      .then((data) => setPinnedVersion(data.pinnedVersion ?? null))
+      .then((data) => { if (!isStale()) setPinnedVersion(data.pinnedVersion ?? null); })
       .catch(() => {});
     orchestratorApi.getPinnedWorkflowRun(workflowId)
-      .then((run) => setPinnedRun(run))
-      .catch(() => setPinnedRun(null));
+      .then((run) => { if (!isStale()) setPinnedRun(run); })
+      .catch(() => { if (!isStale()) setPinnedRun(null); })
+      // The pinned run is PREPENDED to the list, so it can be the flash target:
+      // giving up before this resolves would drop the cue on the very run a
+      // sub-workflow tab is most often opened on.
+      .finally(() => { if (!isStale()) setPinnedSettled(true); });
   }, [workflowId]);
 
   // Listen for pin/unpin changes
@@ -200,31 +236,52 @@ export function RunHistoryList({ workflowId, currentRunId, onSelectRun }: RunHis
   const fetchRuns = useCallback(async (reset: boolean = false) => {
     if (!workflowId) return;
     const currentOffset = reset ? 0 : offsetRef.current;
+    // Every fetch is stamped with the list generation it belongs to, and a reset
+    // opens a new one. Anything started before the latest reset - an older reset,
+    // or a load-more for the PREVIOUS list - is discarded when it lands: it would
+    // otherwise append one workflow's page 2 under another's header and rewind
+    // the paging offset with it.
+    const myGeneration = reset ? ++resetGenerationRef.current : resetGenerationRef.current;
+    const isStale = () => myGeneration !== resetGenerationRef.current;
     try {
       if (reset) {
         setLoading(true);
         setRuns([]);
         offsetRef.current = 0;
         setHasMore(true);
+        // A reset means a new list (another workflow, or a manual refresh): the
+        // previous settle must not anchor the flash of the one being loaded.
+        setFirstPageSettled(false);
       } else {
         setLoadingMore(true);
       }
       setError(null);
       const data = await orchestratorApi.getWorkflowRuns(workflowId, LIMIT, currentOffset);
+      if (isStale()) return;
+      loadedWorkflowRef.current = workflowId;
       setRuns(prev => (reset ? (data || []) : [...prev, ...(data || [])]));
       setHasMore(!!data && data.length === LIMIT);
       offsetRef.current = currentOffset + LIMIT;
     } catch (err) {
+      if (isStale()) return;
+      // An errored list belongs to this workflow too: without this, the focus cue
+      // would wait forever for rows that are never coming.
+      loadedWorkflowRef.current = workflowId;
       console.error('[RunHistoryList] Error fetching runs:', err);
       setError(t('runs.loadError'));
     } finally {
-      setLoading(false);
-      setLoadingMore(false);
+      if (!isStale()) {
+        setLoading(false);
+        setLoadingMore(false);
+        // Tells the focus cue the first page is in (see below). Set on failure
+        // too: an errored list has no row to highlight and must not stay armed.
+        if (reset) setFirstPageSettled(true);
+      }
     }
   }, [workflowId, t]);
 
   useEffect(() => {
-    if (workflowId) fetchRuns(true);
+    fetchRuns(true);
     // eslint-disable-next-line react-hooks/exhaustive-deps -- reset only when the workflow changes
   }, [workflowId]);
 
@@ -244,6 +301,47 @@ export function RunHistoryList({ workflowId, currentRunId, onSelectRun }: RunHis
 
   // Production run first, then the rest in the order the API returned them.
   const displayRuns = pinnedRun ? [pinnedRun, ...runs.filter(r => r.id !== pinnedRun.id)] : runs;
+
+  /**
+   * Coming back up from a run: scroll to its row and flash it, so the user sees
+   * WHICH run (and which version) they were on instead of scanning a list of
+   * near-identical rows for the one thin selected border.
+   *
+   * Driven imperatively through the shared `scrollToAndFlash` - the same helper
+   * the chat's "go to message" jump uses - because the cue is a one-shot event,
+   * not a state: the class restarts on a forced reflow and comes off on
+   * `animationend`, so nothing in React holds "is it flashing", nothing mirrors
+   * the CSS duration, and the row is never remounted under the user's caret.
+   *
+   * The arming is identified by list AND run: switching workflow is a new list
+   * and deserves its own cue, even when the run happens to carry the same id.
+   */
+  const flashKey = `${workflowId ?? ''}|${currentRunId ?? ''}`;
+
+  useEffect(() => {
+    if (flashedKeyRef.current === flashKey) return;
+    if (!currentRunId) { flashedKeyRef.current = flashKey; return; }
+    // Nothing on screen belongs to this list yet: neither the row under
+    // `currentRowRef` (it is the previous workflow's, and about to be replaced)
+    // nor the settled flags below, which still describe that list. Flashing here
+    // would cue a doomed row, and giving up here would spend the arming before
+    // this workflow's rows have even been requested.
+    if (loadedWorkflowRef.current !== workflowId) return;
+
+    const row = currentRowRef.current;
+    if (row) {
+      flashedKeyRef.current = flashKey;
+      scrollToAndFlash(row, RUN_ROW_FLASH_CLASS);
+      return;
+    }
+    // No row for it yet. The first page is a fetch away and the pinned run comes
+    // from a second one, so we wait for BOTH before giving up - then the arming
+    // is spent, because a row surfacing minutes later through infinite scroll
+    // would light up and drag the list under a user who is reading it.
+    if (firstPageSettled && pinnedSettled) flashedKeyRef.current = flashKey;
+    // Both real arrival paths flip one of those flags in the same commit that
+    // adds the row, so they are also what re-runs this effect when it appears.
+  }, [flashKey, workflowId, currentRunId, firstPageSettled, pinnedSettled, runs, pinnedRun]);
 
   return (
     // `data-runs-history-panel` is kept from the former floating panel: it is the
@@ -288,7 +386,10 @@ export function RunHistoryList({ workflowId, currentRunId, onSelectRun }: RunHis
             const isCurrentRun = !!currentRunId && (currentRunId === run.id || currentRunId === run.runId);
             const displayStatus = getRunDisplayStatus(run.status, run.metadata);
             const status = mapRunStatus(displayStatus);
-            const isRunning = status === 'running' || status === 'waiting_trigger';
+            // The pulse means "work is happening right now". A run resting in
+            // WAITING_TRIGGER is armed, not executing: pulsing it made every live
+            // reusable run read as running in its own history.
+            const isRunning = status === 'running';
             const duration = formatRunDuration(run);
             // Reusable triggers keep one run across many fires: `lastFireAt` is the
             // most recent epoch's start (what the user reads as "last execution"),
@@ -312,10 +413,17 @@ export function RunHistoryList({ workflowId, currentRunId, onSelectRun }: RunHis
             return (
               <button
                 key={run.id}
+                // The flash is applied to this element imperatively, so the row
+                // is never remounted (and never loses focus) when it ends.
+                ref={isCurrentRun ? currentRowRef : undefined}
                 type="button"
                 data-run-history-row
                 data-run-item
                 data-selected={isCurrentRun || undefined}
+                // The flash answers "which run was I on?" visually; aria-current
+                // answers it for a screen reader, which sees neither the ring nor
+                // the left border.
+                aria-current={isCurrentRun || undefined}
                 title={tooltipParts.filter(Boolean).join(' • ')}
                 onClick={() => onSelectRun(run)}
                 className={`w-full flex items-center gap-1.5 px-3 py-2.5 text-xs transition-colors ${
@@ -356,6 +464,18 @@ export function RunHistoryList({ workflowId, currentRunId, onSelectRun }: RunHis
                       )}
                     </span>
                   )}
+                  {/* This chip is NOT the one the run bar prints. It reads
+                      `currentEpoch` from the run list, which the backend fills
+                      with MAX(epoch) over the run's real epoch header rows - so
+                      it never showed the phantom count the bar did (the bar was
+                      fed the engine's cursor, which already points at the next,
+                      dormant epoch). It has a narrower divergence of its own:
+                      epochs are numbered PER TRIGGER, so on a multi-trigger run
+                      MAX(epoch) is lower than the number of epochs that exist.
+                      Aligning the two means serving the count instead
+                      (`WorkflowEpochRepository.getEpochCountByRunIds`, already
+                      used by the board), which is a backend change and belongs
+                      to its own commit with its own tests. */}
                   {run.currentEpoch != null && run.currentEpoch > 0 && (
                     <span className="inline-flex items-center gap-0.5 text-sm font-medium text-gray-500 dark:text-gray-400 tabular-nums shrink-0">
                       <Calendar className="w-3.5 h-3.5" />

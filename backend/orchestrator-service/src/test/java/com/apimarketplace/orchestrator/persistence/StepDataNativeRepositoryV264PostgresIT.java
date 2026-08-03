@@ -48,7 +48,7 @@ import static org.assertj.core.api.Assertions.assertThat;
  *
  * <p>Skipped without Docker.
  */
-@Testcontainers
+@Testcontainers(disabledWithoutDocker = true)
 @DisplayName("V264 regression - StepDataNativeRepository INSERT survives varchar organization_id")
 class StepDataNativeRepositoryV264PostgresIT {
 

@@ -21,11 +21,10 @@ import {
 } from '@/components/app/WorkflowPanelContent';
 import { WORKFLOW_PANEL_TAB_ID } from '@/lib/sidePanel/workflowPanelTab';
 import {
-  BIND_RUN_EVENT,
   OPEN_NODE_CREATOR_EVENT,
   OPEN_RUN_PANEL_EVENT,
   openRunPanel,
-  type BindRunDetail,
+  subscribeBindRun,
   type OpenRunPanelDetail,
 } from '@/components/workflow/run-panel/runPanelBus';
 import { Table, Bot, Workflow } from 'lucide-react';
@@ -183,11 +182,10 @@ export function WorkflowDetailView({ workflowId, runId: runIdProp, autoOpenApp }
   // provider ignore the pathname for the rest of the session, so a later real
   // navigation (the Edit toggle) would move the URL with nothing following it.
   useEffect(() => {
-    const handler = (event: Event) => {
-      const detail = (event as CustomEvent<BindRunDetail>).detail;
-      if (!detail?.runId) return;
-      if (detail.workflowId && detail.workflowId !== workflowId) return;
-      const nextPath = runRoutePathFor(window.location.pathname, workflowId, detail.runId);
+    // "Is this request for me?" is the shared rule (see subscribeBindRun) - every
+    // surface that can show this workflow hears the same event.
+    return subscribeBindRun(workflowId, (boundRunId) => {
+      const nextPath = runRoutePathFor(window.location.pathname, workflowId, boundRunId);
       const urlAlreadyNamesIt = nextPath === window.location.pathname;
       // Picking the run already on screen is not always a no-op: an
       // agent-launched run is bound in place on the EDIT url, and picking it in
@@ -195,7 +193,7 @@ export function WorkflowDetailView({ workflowId, runId: runIdProp, autoOpenApp }
       // still written, even though the binding does not change.
       const wroteUrl = !!nextPath && !urlAlreadyNamesIt;
       // Nothing to change: same run, and no address bar of ours to align.
-      if (detail.runId === effectiveRunId && !wroteUrl) return;
+      if (boundRunId === effectiveRunId && !wroteUrl) return;
       if (wroteUrl) {
         const url = `${nextPath}${window.location.search}${window.location.hash}`;
         const leavingEditPage = !window.location.pathname.includes('/run/');
@@ -207,10 +205,8 @@ export function WorkflowDetailView({ workflowId, runId: runIdProp, autoOpenApp }
       // that through `urlSynced`. Skipping it here left an agent-launched run
       // latched, so the Back this push exists for changed the URL with nothing
       // following it.
-      setRunId(detail.runId, { urlSynced: !!nextPath });
-    };
-    window.addEventListener(BIND_RUN_EVENT, handler);
-    return () => window.removeEventListener(BIND_RUN_EVENT, handler);
+      setRunId(boundRunId, { urlSynced: !!nextPath });
+    });
   }, [workflowId, effectiveRunId, setRunId]);
 
   // Handle workflow loaded - store name for chat panel

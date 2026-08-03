@@ -1574,28 +1574,6 @@ public class StateSnapshotService
         return s;
     }
 
-    /**
-     * Get edge counts in format suitable for pre-populating in-memory EdgeCounters.
-     */
-    public Map<String, Map<String, Integer>> getEdgeCountsForPrePopulation(String runId) {
-        StateSnapshot snapshot = getSnapshot(runId);
-        Map<String, Map<String, Integer>> result = new HashMap<>();
-
-        for (var entry : snapshot.getEdges().entrySet()) {
-            String edgeKey = entry.getKey();
-            StateSnapshot.EdgeCounts counts = entry.getValue();
-            if (counts.total() > 0) {
-                Map<String, Integer> countsMap = new HashMap<>();
-                countsMap.put("completed", counts.completed());
-                countsMap.put("skipped", counts.skipped());
-                countsMap.put("running", counts.running());
-                result.put(edgeKey, countsMap);
-            }
-        }
-
-        return result;
-    }
-
     // ========================================================================
     // READY NODES
     // ========================================================================

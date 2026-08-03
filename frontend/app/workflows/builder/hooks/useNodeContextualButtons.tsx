@@ -41,18 +41,8 @@ export interface NodeContextFlags {
   referencedWorkflowName: string;
 }
 
-/**
- * Trigger types a user can actually fire from the UI. Narrower than
- * {@link NodeContextFlags.isTriggerNode}, which also covers generic entry nodes
- * that carry no fireable trigger type. Shared by every surface offering a play
- * affordance (the node bottom bar, the run-info step row, the run-mode canvas
- * toolbar) so they never disagree about what is runnable.
- */
-export function isFireableTrigger(flags: NodeContextFlags): boolean {
-  return flags.isManualTrigger || flags.isChatTrigger || flags.isFormTrigger ||
-    flags.isWebhookTrigger || flags.isScheduleTrigger || flags.isWorkflowsTriggerNode ||
-    flags.isTablesTrigger || flags.isErrorTrigger;
-}
+// `isFireableTrigger` moved to ./fireableTrigger so a consumer can read the
+// predicate without importing this module's dependency chain (see that file).
 
 export function deriveNodeContextFlags(data: BuilderNodeData, nodeClassId?: string | null): NodeContextFlags {
   const nodeId = data.id || '';

@@ -24,8 +24,18 @@ export interface RunSummaryBarProps {
   currentRunInfo: RunSummaryRunInfo;
   /** Pinned (production) version of the workflow, null if unpinned. */
   pinnedVersion?: number | null;
-  /** Current epoch number reported by the run (0 = never fired). */
-  currentEpoch?: number;
+  /**
+   * How many epochs this run HAS - the length of the list the epoch selector
+   * shows, not the engine's epoch cursor.
+   *
+   * The two differ by one for most of a run's life, and the cursor is the wrong
+   * one to print: once an epoch finishes, the engine immediately PREPARES the
+   * next cycle (`prepareNextCycle`), which moves the cursor to N+1 while that
+   * epoch is dormant and has no row of its own. A run fired once therefore
+   * reports cursor 2, and the bar used to say "All epochs (2)" next to a selector
+   * listing one.
+   */
+  epochCount?: number;
   /** Epoch currently being viewed - shown in the epoch chip when set. */
   selectedEpoch?: number | null;
   isStepByStep?: boolean;
@@ -69,7 +79,7 @@ export interface RunSummaryBarProps {
 export function RunSummaryBar({
   currentRunInfo,
   pinnedVersion,
-  currentEpoch = 0,
+  epochCount = 0,
   selectedEpoch = null,
   isStepByStep = false,
   onStop,
@@ -207,7 +217,7 @@ export function RunSummaryBar({
                 while the panel next to it said "All epochs". The cumulative view
                 says so in words, and keeps the count that tells you how many
                 times the run fired. */}
-            {currentEpoch > 0 && (
+            {epochCount > 0 && (
               <span className="flex items-center gap-0.5 flex-shrink-0">
                 <span className={`${textCls} text-gray-400 dark:text-gray-500`}>·</span>
                 <span
@@ -218,7 +228,7 @@ export function RunSummaryBar({
                   <Calendar className={iconCls} />
                   {selectedEpoch != null
                     ? selectedEpoch
-                    : t('workflow.runSteps.allEpochsCount', { count: currentEpoch })}
+                    : t('workflow.runSteps.allEpochsCount', { count: epochCount })}
                 </span>
               </span>
             )}

@@ -51,7 +51,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
  * (via {@link NamedParameterJdbcTemplate}) and validate raw SQL invariants -
  * not Spring Data behaviour.
  */
-@Testcontainers
+@Testcontainers(disabledWithoutDocker = true)
 class OptimBundlePostgresIT {
 
     @Container

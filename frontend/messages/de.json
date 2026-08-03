@@ -639,11 +639,6 @@
     "maxIterationsOptional": "Optional",
     "maxIterationsPlaceholder": "10"
   },
-  "theme": {
-    "lightMode": "Heller Modus",
-    "darkMode": "Dunkler Modus",
-    "language": "Sprache"
-  },
   "chat": {
     "diff": {
       "files": "{count} Dateien",
@@ -1192,68 +1187,6 @@
       "webhookDesc": "Daten über Webhooks empfangen"
     }
   },
-  "models": {
-    "gpt5mini": {
-      "name": "ChatGPT-5 Mini",
-      "description": "Schnelles und effizientes Modell (Empfohlen)"
-    },
-    "gpt5nano": {
-      "name": "ChatGPT-5 Nano",
-      "description": "Ultraschnelles leichtgewichtiges Modell"
-    },
-    "gpt5": {
-      "name": "ChatGPT-5",
-      "description": "OpenAIs fortschrittlichstes Modell"
-    },
-    "gpt4": {
-      "name": "GPT-4 Turbo",
-      "description": "Schnelles und leistungsstarkes Modell"
-    },
-    "claudeSonnet": {
-      "name": "Claude Sonnet 4.1",
-      "description": "Fortschrittliches Konversationsmodell"
-    }
-  },
-  "tools": {
-    "codeInterpreter": "Code-Interpreter",
-    "codeInterpreterDesc": "Python-Code ausführen",
-    "webBrowser": "Webbrowser",
-    "webBrowserDesc": "Im Web surfen",
-    "fileManager": "Dateimanager",
-    "fileManagerDesc": "Dateien verwalten",
-    "webSearch": "Websuche",
-    "webSearchDesc": "Im Internet suchen",
-    "webFetch": "Seitenabruf",
-    "webFetchDesc": "Inhalte von Webseiten extrahieren",
-    "fetchScreenshot": "Screenshot {index}",
-    "screenshotError": "Screenshot nicht verfügbar",
-    "webSearchAndFetch": "Suche & Abruf",
-    "webSearchAndFetchDesc": "Im Internet suchen und Inhalte extrahieren"
-  },
-  "tutorials": {
-    "workflow": {
-      "webScraping": "Web-Scraping",
-      "webScrapingDesc": "Von Websites scrapen und extrahieren",
-      "documentProcessing": "Dokumentenverarbeitung",
-      "documentProcessingDesc": "Ein PDF mit KI verarbeiten",
-      "socialMediaListening": "Social Media Monitoring",
-      "socialMediaListeningDesc": "Social Media mit KI überwachen",
-      "contentGeneration": "Inhaltsgenerierung",
-      "contentGenerationDesc": "Blogbeitrag aus einem YouTube-Video generieren",
-      "seoMarketing": "SEO & Marketing",
-      "seoMarketingDesc": "Inhalte automatisch für SEO optimieren",
-      "sales": "Vertrieb",
-      "salesDesc": "Informationen für Outbound-Vertriebs-E-Mails sammeln"
-    },
-    "data": {
-      "databaseSetup": "Datenbank-Setup",
-      "databaseSetupDesc": "Datenbanken verbinden und verwalten",
-      "fileStorage": "Dateispeicher",
-      "fileStorageDesc": "Dateien organisieren und darauf zugreifen",
-      "apiIntegration": "API-Integration",
-      "apiIntegrationDesc": "Externe APIs und Dienste integrieren"
-    }
-  },
   "status": {
     "paused": "Pausiert",
     "waiting_trigger": "Warte auf Auslöser",
@@ -1312,14 +1245,6 @@
     "stepByStepMode": "Schritt-für-Schritt-Modus",
     "scrollToLoadMore": "Scrollen, um mehr zu laden...",
     "lastFireDuration": "Dauer der letzten Ausführung"
-  },
-  "table": {
-    "addRow": "Zeile hinzufügen",
-    "deleteRow": "Zeile löschen",
-    "editRow": "Zeile bearbeiten",
-    "noData": "Keine Daten verfügbar",
-    "loading": "Daten werden geladen...",
-    "error": "Fehler beim Laden der Daten"
   },
   "actions": {
     "running": "Läuft",
@@ -3358,7 +3283,6 @@
     "toasts": {
       "credentialCreated": "Anmeldedaten erstellt",
       "credentialConfigured": "Ihre Anmeldedaten wurden erfolgreich konfiguriert.",
-      "credentialConfiguredWithId": "Anmeldedaten #{id} wurden erfolgreich konfiguriert.",
       "connectionFailed": "Verbindung fehlgeschlagen",
       "credentialConfiguredResume": "Ich habe meine Anmeldedaten für {services} konfiguriert. Bitte fahren Sie fort.",
       "oauth2Error": "OAuth2-Fehler",
@@ -6728,6 +6652,8 @@
       "zoomOut": "Zoom out",
       "fitView": "Fit view",
       "autoLayout": "Auto-Layout (Knoten neu anordnen)",
+      "expandAllFiles": "Alle Dateivorschauen ausklappen",
+      "collapseAllFiles": "Alle Dateivorschauen einklappen",
       "disableInteractivity": "Interaktivität deaktivieren",
       "enableInteractivity": "Interaktivität aktivieren",
       "cursorMode": "Cursormodus",
@@ -8379,32 +8305,6 @@
     "partial_success": "Teilerfolg",
     "awaiting_signal": "Wartet auf Aktion",
     "budget_exhausted": "Durch unzureichende Credits gedrosselt"
-  },
-  "runStatus": {
-    "pending": "Ausstehend",
-    "waiting_trigger": "Wartet auf Trigger",
-    "running": "Wird ausgeführt",
-    "paused": "Pausiert",
-    "completed": "Abgeschlossen",
-    "failed": "Fehlgeschlagen",
-    "partial_success": "Teilerfolg",
-    "cancelled": "Abgebrochen",
-    "timeout": "Zeitüberschreitung",
-    "stopped": "Gestoppt"
-  },
-  "webSearch": {
-    "panelTitle": "Websuche",
-    "addressBar": "Adresse",
-    "pageContent": "Seiteninhalt",
-    "searchResults": "Suchergebnisse",
-    "fetchedPages": "Abgerufene Seiten",
-    "noResults": "Keine Ergebnisse verfügbar",
-    "pagesFetched": "Seiten abgerufen",
-    "results": "Ergebnisse",
-    "clickToClose": "Klicken zum Schließen",
-    "openInBrowser": "Im Browser öffnen",
-    "screenshotError": "Screenshot nicht verfügbar",
-    "screenshotLoading": "Screenshot wird geladen..."
   },
   "project": {
     "title": "Projekte",

@@ -151,7 +151,7 @@ export default function WorkflowsPage() {
               'Switch',
               'a matched value (switchExpression vs each case value)',
               'first matching case wins, else default',
-              <><code>selected_case</code>, <code>selected_case_index</code>, <code>skipped_cases</code>, <code>skipped_case_labels</code>, <code>switch_value</code>, <code>evaluations</code>, and (on a match) <code>matched_value</code>, <code>match_result</code>, <code>selected_case_label</code></>,
+              <><code>selected_branches</code> (a string, the matched label), <code>selected_case_index</code>, <code>skipped_branches</code>, <code>split_item_count</code>, <code>evaluations</code></>,
             ],
             [
               'Option',

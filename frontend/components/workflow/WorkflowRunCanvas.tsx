@@ -288,7 +288,7 @@ export function WorkflowRunCanvas({
         onStop={isPreviewOnly ? undefined : handleStopRun}
         onCancel={isPreviewOnly || hideToggle ? undefined : handleCancelRun}
         onReactivate={isPreviewOnly ? undefined : handleReactivateRun}
-        currentEpoch={currentEpoch}
+        epochCount={epochTimestamps.length}
         pinnedVersion={pinnedVersion}
         isSettingsOpen={isSettingsOpen}
       />

@@ -457,6 +457,14 @@ class SubWorkflowNodeTest {
             // version mismatch) are covered by the describeMissingActiveRun tests below.
             assertTrue(msg.contains("No active run found"), msg);
             assertTrue(msg.contains("Start the workflow first"), msg);
+            // REGRESSION (merge 223793a13 dropped this): the branch must name the action that
+            // creates a run and say this node never creates one. Without both, an agent reading
+            // "start the workflow first" has no way to know HOW, and the sibling branches
+            // (parked / transient / version mismatch) all name their remedy.
+            assertTrue(msg.contains("workflow(action='execute', id='" + WORKFLOW_ID + "')"), msg);
+            assertTrue(msg.contains("never creates a run"), msg);
+            // Unpinned: no version argument may be suggested, there is nothing to pin to.
+            assertFalse(msg.contains("version="), msg);
         }
 
         @Test
@@ -651,8 +659,14 @@ class SubWorkflowNodeTest {
             NodeExecutionResult execResult = node.execute(context);
 
             assertTrue(execResult.isFailure());
-            assertTrue(execResult.errorMessage().orElse("").contains("Start the workflow first"),
+            String msg = execResult.errorMessage().orElse("");
+            assertTrue(msg.contains("Start the workflow first"),
                 "With genuinely no active run the original guidance is still the right one");
+            // Pinned: the suggested execute call must carry the pinned version, otherwise the
+            // agent starts a run at the wrong version and the next call fails on the mismatch
+            // branch instead. Same idiom as startAtPin in the version-mismatch branch.
+            assertTrue(msg.contains("workflow(action='execute', id='" + WORKFLOW_ID + "', version=5)"), msg);
+            assertTrue(msg.contains("never creates a run"), msg);
         }
     }
 

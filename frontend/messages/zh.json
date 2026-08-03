@@ -639,11 +639,6 @@
     "maxIterationsOptional": "可选",
     "maxIterationsPlaceholder": "10"
   },
-  "theme": {
-    "lightMode": "浅色模式",
-    "darkMode": "深色模式",
-    "language": "语言"
-  },
   "chat": {
     "diff": {
       "files": "{count} 个文件",
@@ -1192,68 +1187,6 @@
       "webhookDesc": "通过webhook接收数据"
     }
   },
-  "models": {
-    "gpt5mini": {
-      "name": "ChatGPT-5 Mini",
-      "description": "快速高效的模型（推荐）"
-    },
-    "gpt5nano": {
-      "name": "ChatGPT-5 Nano",
-      "description": "超快轻量级模型"
-    },
-    "gpt5": {
-      "name": "ChatGPT-5",
-      "description": "OpenAI最先进的模型"
-    },
-    "gpt4": {
-      "name": "GPT-4 Turbo",
-      "description": "快速而强大的模型"
-    },
-    "claudeSonnet": {
-      "name": "Claude Sonnet 4.1",
-      "description": "高级对话模型"
-    }
-  },
-  "tools": {
-    "codeInterpreter": "代码解释器",
-    "codeInterpreterDesc": "执行Python代码",
-    "webBrowser": "网页浏览器",
-    "webBrowserDesc": "浏览网页",
-    "fileManager": "文件管理器",
-    "fileManagerDesc": "管理文件",
-    "webSearch": "网络搜索",
-    "webSearchDesc": "搜索网络",
-    "webFetch": "页面抓取",
-    "webFetchDesc": "从网页中提取内容",
-    "fetchScreenshot": "截图 {index}",
-    "screenshotError": "截图不可用",
-    "webSearchAndFetch": "搜索并抓取",
-    "webSearchAndFetchDesc": "搜索网络并提取内容"
-  },
-  "tutorials": {
-    "workflow": {
-      "webScraping": "网页抓取",
-      "webScrapingDesc": "从网站抓取和提取数据",
-      "documentProcessing": "文档处理",
-      "documentProcessingDesc": "使用AI处理PDF",
-      "socialMediaListening": "社交媒体监听",
-      "socialMediaListeningDesc": "使用AI监听社交媒体",
-      "contentGeneration": "内容生成",
-      "contentGenerationDesc": "从YouTube视频生成博客文章",
-      "seoMarketing": "SEO和营销",
-      "seoMarketingDesc": "自动优化您的SEO内容",
-      "sales": "销售",
-      "salesDesc": "收集外发销售邮件的信息"
-    },
-    "data": {
-      "databaseSetup": "数据库设置",
-      "databaseSetupDesc": "连接和管理您的数据库",
-      "fileStorage": "文件存储",
-      "fileStorageDesc": "组织和访问您的文件",
-      "apiIntegration": "API集成",
-      "apiIntegrationDesc": "集成外部API和服务"
-    }
-  },
   "status": {
     "paused": "已暂停",
     "waiting_trigger": "等待触发",
@@ -1312,14 +1245,6 @@
     "stepByStepMode": "分步模式",
     "scrollToLoadMore": "滚动以加载更多...",
     "lastFireDuration": "上次执行时长"
-  },
-  "table": {
-    "addRow": "添加行",
-    "deleteRow": "删除行",
-    "editRow": "编辑行",
-    "noData": "没有可用数据",
-    "loading": "正在加载数据...",
-    "error": "加载数据错误"
   },
   "actions": {
     "running": "运行中",
@@ -3358,7 +3283,6 @@
     "toasts": {
       "credentialCreated": "连接成功",
       "credentialConfigured": "您的账户已连接并可以使用。",
-      "credentialConfiguredWithId": "您的账户已连接并可以使用。",
       "connectionFailed": "连接失败",
       "credentialConfiguredResume": "我已配置 {services} 的凭据。请继续。",
       "oauth2Error": "OAuth2错误",
@@ -6728,6 +6652,8 @@
       "zoomOut": "Zoom out",
       "fitView": "Fit view",
       "autoLayout": "自动布局（重新排列节点）",
+      "expandAllFiles": "展开所有文件预览",
+      "collapseAllFiles": "收起所有文件预览",
       "disableInteractivity": "禁用交互",
       "enableInteractivity": "启用交互",
       "cursorMode": "光标模式",
@@ -8379,32 +8305,6 @@
     "partial_success": "部分成功",
     "awaiting_signal": "等待操作",
     "budget_exhausted": "因积分不足而受限"
-  },
-  "runStatus": {
-    "pending": "待处理",
-    "waiting_trigger": "等待触发",
-    "running": "运行中",
-    "paused": "已暂停",
-    "completed": "已完成",
-    "failed": "失败",
-    "partial_success": "部分成功",
-    "cancelled": "已取消",
-    "timeout": "已超时",
-    "stopped": "已停止"
-  },
-  "webSearch": {
-    "panelTitle": "网络搜索",
-    "addressBar": "地址",
-    "pageContent": "页面内容",
-    "searchResults": "搜索结果",
-    "fetchedPages": "已抓取的页面",
-    "noResults": "暂无可用结果",
-    "pagesFetched": "已抓取页面",
-    "results": "条结果",
-    "clickToClose": "点击关闭",
-    "openInBrowser": "在浏览器中打开",
-    "screenshotError": "截图不可用",
-    "screenshotLoading": "截图加载中..."
   },
   "project": {
     "title": "项目",

@@ -22,9 +22,22 @@ public class SwitchNodeSpec implements NodeSpec {
             .outputs(List.of(
                 OutputFieldDef.builder()
                     .key("selected_branches")
-                    .type("array")
-                    .description("Case labels that matched")
-                    .defaultValue(List.of())
+                    // A STRING, despite the plural name, and despite OPTION declaring a key of
+                    // the same name as a real array. SwitchNode never emits selected_branches,
+                    // so GenericOutputSchemaMapper resolves it through the aliases below, and
+                    // both selected_case_label and selected_case are strings. The checked-in
+                    // GenericOutputSchemaMapperTest.shouldPersistSwitchContractFields has
+                    // asserted assertEquals("Gold", ...) all along; only this declaration was
+                    // out of step, and it is what /api/node-definitions and the agent docs read.
+                    // Consequence of getting it wrong: an agent writes [0] or size() against it
+                    // and resolves nothing, with the run still reporting COMPLETED.
+                    .type("string")
+                    .description("Label of the case that matched, or the case type when it has no label. Singular despite the plural name; skipped_branches IS an array")
+                    // Reachable: SwitchNode always PUTS selected_case but its value is null when
+                    // nothing matched and no default case exists, and selected_case_label is only
+                    // set when a case object was selected. Both aliases then resolve null and this
+                    // default is stored. "" keeps that row the declared type; it used to store [].
+                    .defaultValue("")
                     .aliases(List.of("selected_case_label", "selected_case"))
                     .build(),
                 OutputFieldDef.builder()

@@ -25,7 +25,6 @@ import { renderHook, act } from '@testing-library/react';
 
 vi.mock('../../utils/authenticatedFetch', () => ({
   authenticatedFetch: vi.fn(),
-  setAuthTokenGetter: vi.fn(),
 }));
 
 import { useDataFetching } from '../useDataFetching';

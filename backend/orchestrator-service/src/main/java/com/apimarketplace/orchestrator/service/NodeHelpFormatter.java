@@ -47,23 +47,6 @@ public class NodeHelpFormatter {
     }
 
     /**
-     * Format multiple nodes grouped by category.
-     */
-    public Map<String, Object> formatCategoryHelp(String category, List<NodeTypeDocumentationEntity> nodes) {
-        Map<String, Object> result = new LinkedHashMap<>();
-        result.put("category", category);
-        result.put("node_count", nodes.size());
-
-        List<Map<String, Object>> nodeList = new ArrayList<>();
-        for (NodeTypeDocumentationEntity node : nodes) {
-            nodeList.add(formatNodeSummary(node));
-        }
-        result.put("nodes", nodeList);
-
-        return result;
-    }
-
-    /**
      * Format a brief summary of a node (type, description, key params).
      */
     public Map<String, Object> formatNodeSummary(NodeTypeDocumentationEntity node) {
@@ -84,55 +67,6 @@ public class NodeHelpFormatter {
             result.put("ports", node.getEdgePorts().get("ports"));
         }
 
-        return result;
-    }
-
-    /**
-     * Format a quick reference for all node types.
-     */
-    public Map<String, Object> formatQuickReference(List<NodeTypeDocumentationEntity> allNodes) {
-        Map<String, Object> result = new LinkedHashMap<>();
-        result.put("title", "Node Quick Reference");
-
-        // Group by variable prefix
-        Map<String, List<String>> byPrefix = new LinkedHashMap<>();
-        for (NodeTypeDocumentationEntity node : allNodes) {
-            String prefix = node.getVariablePrefix() != null ? node.getVariablePrefix() : "other";
-            byPrefix.computeIfAbsent(prefix, k -> new ArrayList<>()).add(node.getType());
-        }
-
-        result.put("by_prefix", byPrefix);
-        result.put("variable_pattern", "{{prefix:label.output.field}}");
-
-        return result;
-    }
-
-    /**
-     * Format comparison table between two node types.
-     */
-    public Map<String, Object> formatComparison(NodeTypeDocumentationEntity node1, NodeTypeDocumentationEntity node2) {
-        Map<String, Object> result = new LinkedHashMap<>();
-        result.put("comparing", List.of(node1.getType(), node2.getType()));
-
-        Map<String, Object> comparison = new LinkedHashMap<>();
-        comparison.put(node1.getType(), Map.of(
-            "description", node1.getDescription(),
-            "prefix", node1.getVariablePrefix() != null ? node1.getVariablePrefix() : "n/a"
-        ));
-        comparison.put(node2.getType(), Map.of(
-            "description", node2.getDescription(),
-            "prefix", node2.getVariablePrefix() != null ? node2.getVariablePrefix() : "n/a"
-        ));
-
-        // Include node-specific comparisons if available
-        if (node1.getComparison() != null) {
-            String vsKey = "vs_" + node2.getType();
-            if (node1.getComparison().containsKey(vsKey)) {
-                comparison.put("key_difference", node1.getComparison().get(vsKey));
-            }
-        }
-
-        result.put("details", comparison);
         return result;
     }
 

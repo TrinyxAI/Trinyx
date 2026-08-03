@@ -43,7 +43,8 @@ vi.mock('../../../nodes/nodeClasses', () => ({
 }));
 vi.mock('../../NodeStatusBadge', () => ({ NodeStatusBadge: () => null }));
 vi.mock('../NodeBottomBar', () => ({ NodeBottomBar: () => null }));
-vi.mock('../../NodePlayButton', () => ({
+vi.mock('../../NodePlayButton', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../../NodePlayButton')>()),
   NodePlayButton: () => null,
   deriveNodeStatus: () => undefined,
 }));

@@ -32,6 +32,8 @@ vi.mock('@/contexts/WorkflowModeContext', () => ({
     providerCalls.push({ workflowId, initialRunId, readOnly });
     return <>{children}</>;
   },
+  // The canvas slot binds the tab's run into its own provider through this hook.
+  useWorkflowMode: () => ({ runId: null, setRunId: vi.fn() }),
 }));
 
 vi.mock('@/contexts/WorkflowRunContext', () => ({

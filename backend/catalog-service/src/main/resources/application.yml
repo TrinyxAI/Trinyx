@@ -132,11 +132,12 @@ management:
       slo:
         http.server.requests: 100ms, 500ms, 1s, 3s, 5s
 
-# Configuration AI pour mapping et descriptions
+# Configuration AI pour mapping et descriptions.
+# `enabled` / `provider` are gone with the AI mapping-generator subtree they gated.
+# The `deepinfra` block below is still live: RerankingService, QueryUnderstandingService
+# and DeepInfraDescriptionService read ai.mapping.deepinfra.* directly.
 ai:
   mapping:
-    enabled: true
-    provider: deepinfra  # Using DeepInfra for AI mapping
     deepinfra:
       token: ${DEEPINFRA_TOKEN:}  # Token d'API DeepInfra (defini via variable d'environnement)
       url: https://api.deepinfra.com/v1/openai/chat/completions

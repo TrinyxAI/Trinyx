@@ -44,6 +44,13 @@ public class GenericOutputSchemaMapper {
      * NodeSpec implementations that override {@link com.apimarketplace.agent.domain.NodeSpec#customTransform}
      * should remove these keys from their output to avoid leaking engine internals into the
      * persisted JSONB.
+     *
+     * <p><b>Deliberate exception: {@code node_type} for CLASSIFY, GUARDRAIL and BROWSER_AGENT.</b>
+     * Those three NodeSpecs keep {@code node_type} in their persisted output on purpose, because
+     * {@code ReadyNodeCalculator} reads it back (via {@code ExecutionMetadataKeys.getNodeType()})
+     * to route split contexts. Every other node treats it as engine metadata and strips it. The
+     * two conventions look accidental side by side, so: if you are adding a node, strip it; if you
+     * are touching one of those three, do NOT, or split-context routing loses the node's identity.
      */
     public static final java.util.Set<String> ENGINE_ENVELOPE_KEYS = java.util.Set.of(
         "node_type", "item_index", "itemIndex", "item_id", "resolved_params"

@@ -9,7 +9,8 @@
 import { describe, it, expect, vi, afterEach, beforeEach } from 'vitest';
 import React from 'react';
 import { render, cleanup, fireEvent } from '@testing-library/react';
-import { NodeBottomBar, BTN_CLS } from '../NodeBottomBar';
+import { NodeBottomBar } from '../NodeBottomBar';
+import { canvasNodeButtonClass, canvasNodeButtonShimmerRadiusClass } from '@/components/ui/canvas-chrome';
 
 vi.mock('next-intl', () => ({
   useTranslations: () => (key: string) => {
@@ -42,16 +43,34 @@ const actions = (overrides: Partial<{ onDelete: () => void; onDuplicate: () => v
 const tableButton = { key: 'table', icon: <span>T</span>, title: 'processed_emails', onClick: vi.fn() };
 
 describe('NodeBottomBar hover-to-reveal (all buttons share the same hover logic)', () => {
-  it('renders the delete and duplicate buttons in edit mode with the SAME round style as the other buttons (BTN_CLS + status border)', () => {
+  it('renders the delete and duplicate buttons in edit mode with the SAME square style as the other buttons (canvasNodeButtonClass + status border)', () => {
     const { getByTitle } = render(
       <NodeBottomBar borderColor="rgb(239, 68, 68)" isRunning={false} hover={{ isVisible: true }} hoverActions={actions()} />,
     );
     for (const title of ['Delete node', 'Duplicate node']) {
       const btn = getByTitle(title);
-      BTN_CLS.split(/\s+/).forEach((cls) => expect(btn.className).toContain(cls));
+      // Whole-token membership, not substring: a call site that overrode one of
+      // the shared classes would still satisfy a substring check.
+      const rendered = btn.className.split(/\s+/);
+      canvasNodeButtonClass.split(/\s+/).forEach((cls) => expect(rendered).toContain(cls));
       expect(btn.style.borderColor).toBe('rgb(239, 68, 68)');
       expect(btn.style.borderWidth).toBe('2px');
     }
+  });
+
+  it('scans its shimmer at the button radius, so the overlay is not clipped square-in-round', () => {
+    // The overlay is a sibling span at inset-0 inside an overflow-hidden button:
+    // at a different radius it leaves a visible notch in each corner.
+    const { container } = render(
+      <NodeBottomBar
+        borderColor="#10b981"
+        isRunning
+        hover={{ isVisible: true }}
+        buttons={[{ key: 'k', icon: <span>i</span>, title: 'Agent', onClick: () => {} }]}
+      />,
+    );
+    const overlay = container.querySelector('button > span[class*="absolute"]')!;
+    expect(overlay.className.split(/\s+/)).toContain(canvasNodeButtonShimmerRadiusClass);
   });
 
   it('renders the bar when ONLY delete/duplicate exist (no persistent buttons / play / slots)', () => {

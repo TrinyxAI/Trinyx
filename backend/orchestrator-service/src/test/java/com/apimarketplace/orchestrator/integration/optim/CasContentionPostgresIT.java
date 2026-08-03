@@ -40,7 +40,7 @@ import static org.assertj.core.api.Assertions.assertThat;
  *
  * <p>Skipped without Docker (Testcontainers).
  */
-@Testcontainers
+@Testcontainers(disabledWithoutDocker = true)
 @DisplayName("Plan v4 §1.6 + §2b - Real Postgres CAS contention parity")
 class CasContentionPostgresIT {
 

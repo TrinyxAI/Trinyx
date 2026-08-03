@@ -639,11 +639,6 @@
     "maxIterationsOptional": "Optional",
     "maxIterationsPlaceholder": "10"
   },
-  "theme": {
-    "lightMode": "Light Mode",
-    "darkMode": "Dark Mode",
-    "language": "Language"
-  },
   "chat": {
     "diff": {
       "files": "{count} files",
@@ -1197,28 +1192,6 @@
       "webhookDesc": "Receive data via webhooks"
     }
   },
-  "models": {
-    "gpt5mini": {
-      "name": "ChatGPT-5 Mini",
-      "description": "Fast and efficient model (Recommended)"
-    },
-    "gpt5nano": {
-      "name": "ChatGPT-5 Nano",
-      "description": "Ultra fast lightweight model"
-    },
-    "gpt5": {
-      "name": "ChatGPT-5",
-      "description": "OpenAI's most advanced model"
-    },
-    "gpt4": {
-      "name": "GPT-4 Turbo",
-      "description": "Fast and powerful model"
-    },
-    "claudeSonnet": {
-      "name": "Claude Sonnet 4.1",
-      "description": "Advanced conversational model"
-    }
-  },
   "modelInfo": {
     "tier": {
       "top": "Top tier",
@@ -1285,46 +1258,6 @@
     "recommended": "Recommended",
     "notSet": "-"
   },
-  "tools": {
-    "codeInterpreter": "Code Interpreter",
-    "codeInterpreterDesc": "Execute Python code",
-    "webBrowser": "Web Browser",
-    "webBrowserDesc": "Browse the web",
-    "fileManager": "File Manager",
-    "fileManagerDesc": "Manage files",
-    "webSearch": "Web Search",
-    "webSearchDesc": "Search the web",
-    "webFetch": "Page Fetch",
-    "webFetchDesc": "Extract content from web pages",
-    "fetchScreenshot": "Screenshot {index}",
-    "screenshotError": "Screenshot unavailable",
-    "webSearchAndFetch": "Search & Fetch",
-    "webSearchAndFetchDesc": "Search the web and extract content"
-  },
-  "tutorials": {
-    "workflow": {
-      "webScraping": "Web Scraping",
-      "webScrapingDesc": "Scrape and extract from websites",
-      "documentProcessing": "Document Processing",
-      "documentProcessingDesc": "Process a PDF with AI",
-      "socialMediaListening": "Social Media Listening",
-      "socialMediaListeningDesc": "Listen to social media with AI",
-      "contentGeneration": "Content Generation",
-      "contentGenerationDesc": "Generate a blog post from a Youtube video",
-      "seoMarketing": "SEO & Marketing",
-      "seoMarketingDesc": "Automatically optimize your content for SEO",
-      "sales": "Sales",
-      "salesDesc": "Gather info for outbound sales emails"
-    },
-    "data": {
-      "databaseSetup": "Database Setup",
-      "databaseSetupDesc": "Connect and manage your databases",
-      "fileStorage": "File Storage",
-      "fileStorageDesc": "Organize and access your files",
-      "apiIntegration": "API Integration",
-      "apiIntegrationDesc": "Integrate external APIs and services"
-    }
-  },
   "status": {
     "paused": "Paused",
     "waiting_trigger": "Waiting for trigger",
@@ -1383,14 +1316,6 @@
     "stepByStepMode": "Step by step mode",
     "scrollToLoadMore": "Scroll to load more...",
     "lastFireDuration": "Last execution duration"
-  },
-  "table": {
-    "addRow": "Add Row",
-    "deleteRow": "Delete Row",
-    "editRow": "Edit Row",
-    "noData": "No data available",
-    "loading": "Loading data...",
-    "error": "Error loading data"
   },
   "actions": {
     "running": "Running",
@@ -3579,7 +3504,6 @@
     "toasts": {
       "credentialCreated": "Connection successful",
       "credentialConfigured": "Your account has been connected and is ready to use.",
-      "credentialConfiguredWithId": "Your account has been connected and is ready to use.",
       "connectionFailed": "Connection failed",
       "credentialConfiguredResume": "I have configured my credentials for {services}. Please continue.",
       "oauth2Error": "OAuth2 Error",
@@ -6950,6 +6874,8 @@
       "zoomOut": "Zoom out",
       "fitView": "Fit view",
       "autoLayout": "Auto-layout (reorganize nodes)",
+      "expandAllFiles": "Expand all file previews",
+      "collapseAllFiles": "Collapse all file previews",
       "disableInteractivity": "Disable interactivity",
       "enableInteractivity": "Enable interactivity",
       "cursorMode": "Cursor mode",
@@ -8627,32 +8553,6 @@
     "partial_success": "Partial Success",
     "awaiting_signal": "Awaiting Action",
     "budget_exhausted": "Throttled by insufficient credits"
-  },
-  "runStatus": {
-    "pending": "Pending",
-    "waiting_trigger": "Waiting for Trigger",
-    "running": "Running",
-    "paused": "Paused",
-    "completed": "Completed",
-    "failed": "Failed",
-    "partial_success": "Partial Success",
-    "cancelled": "Cancelled",
-    "timeout": "Timed Out",
-    "stopped": "Stopped"
-  },
-  "webSearch": {
-    "panelTitle": "Web Search",
-    "addressBar": "Address",
-    "pageContent": "Page Content",
-    "searchResults": "Search Results",
-    "fetchedPages": "Fetched Pages",
-    "noResults": "No results available",
-    "pagesFetched": "pages fetched",
-    "results": "results",
-    "clickToClose": "Click to close",
-    "openInBrowser": "Open in browser",
-    "screenshotError": "Screenshot unavailable",
-    "screenshotLoading": "Loading screenshot..."
   },
   "agentBrowse": {
     "cardDefaultTitle": "Browser agent session",

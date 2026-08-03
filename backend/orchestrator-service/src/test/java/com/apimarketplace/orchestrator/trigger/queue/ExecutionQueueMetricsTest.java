@@ -218,6 +218,14 @@ class ExecutionQueueMetricsTest {
         Future<TriggerExecutionResult> f2 = exec.submit(() -> queueService.enqueueAndWait(
                 queued, "trigger:t", TriggerType.MANUAL, Map.of(), "FREE"));
 
+        // exec.submit() only SCHEDULES the call - it does not mean the item is in the
+        // queue yet. On a loaded machine the pool thread can start after the sleep below
+        // and after blockerCanFinish, so the item would enter an already-free queue and
+        // dwell ~0ms (observed: 49ms, assertion expects >=200ms). Wait for the enqueue to
+        // actually happen - recordEnqueued fires right after enqueuedAt is stamped and
+        // just before queue.offer - so the 250ms sleep below measures real dwell time.
+        awaitEnqueued("tenant-queued");
+
         Thread.sleep(250); // ensure queued item has dwelled measurably
         blockerCanFinish.countDown();
 
@@ -560,6 +568,22 @@ class ExecutionQueueMetricsTest {
                 .filter(m -> m instanceof Counter)
                 .map(m -> (Counter) m)
                 .collect(Collectors.toList());
+    }
+
+    /**
+     * Block until the given tenant's enqueue has actually been recorded, i.e. the item is
+     * in the queue with its {@code enqueuedAt} clock started. Needed because submitting the
+     * enqueue call to an executor only schedules it; without this, a loaded machine can run
+     * the whole "dwell" window before the item is ever enqueued, and the dwell assertion
+     * fails on timing rather than on behavior.
+     */
+    private void awaitEnqueued(String tenant) throws InterruptedException {
+        long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
+        while (System.nanoTime() < deadline) {
+            if (sumCounters(ExecutionQueueMetrics.ENQUEUED_TOTAL, "tenant", tenant) >= 1.0) return;
+            Thread.sleep(5);
+        }
+        fail("tenant " + tenant + " was never enqueued within 5s");
     }
 
     private Counter counterFor(String name, String tenant) {

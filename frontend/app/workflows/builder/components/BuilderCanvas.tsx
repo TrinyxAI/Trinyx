@@ -33,6 +33,7 @@ import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover
 import { useValidationOptional } from '../contexts/ValidationContext';
 import { useTheme } from '@/components/ThemeProvider';
 import { EdgeActionsProvider } from './EdgeActionsContext';
+import { FileStripExpansionProvider } from '@/contexts/FileStripExpansionContext';
 import { nodeTypes, edgeTypes } from '../constants/graphTypes';
 import type { BuilderNodeData, PaletteDragItem } from '../types';
 import type { ConnectionType } from './ConnectionTypeSelector';
@@ -1052,6 +1053,10 @@ export function BuilderCanvas({
 
       {/* Run info is now displayed inline with WorkflowModeToggle in WorkflowDetailView */}
 
+      {/* Wraps BOTH the nodes and the toolbar: the file strips live inside the
+          nodes and the toggle-all control inside the toolbar, and they only meet
+          through this provider. */}
+      <FileStripExpansionProvider>
       <EdgeActionsProvider value={React.useMemo(() => ({ hoveredEdgeId, onDeleteEdge: onDeleteEdgeRef.current, onUpdateEdgeData: () => {} }), [hoveredEdgeId])}>
         <ReactFlowProvider>
           <ReactFlow
@@ -1285,6 +1290,7 @@ export function BuilderCanvas({
           </ReactFlow>
         </ReactFlowProvider>
       </EdgeActionsProvider>
+      </FileStripExpansionProvider>
 
       {/* Right-click context menu (node + empty canvas), lazy-loaded on demand */}
       {contextMenu && contextMenuActions && (

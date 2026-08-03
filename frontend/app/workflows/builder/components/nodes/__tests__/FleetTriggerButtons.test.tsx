@@ -3,7 +3,7 @@ import { describe, it, expect, vi, afterEach } from 'vitest';
 import React from 'react';
 import { render, cleanup, fireEvent, waitFor, within } from '@testing-library/react';
 import { FleetTriggerButtons } from '../FleetTriggerButtons';
-import { BTN_CLS } from '../NodeBottomBar';
+import { canvasNodeButtonClass } from '@/components/ui/canvas-chrome';
 
 vi.mock('next-intl', () => ({
   useTranslations: (namespace?: string) => (key: string) => {
@@ -83,7 +83,7 @@ describe('FleetTriggerButtons', () => {
     expect(queryByTitle('Schedule')).toBeNull();
   });
 
-  it('styles the buttons EXACTLY like the workflow node bottom buttons (shared BTN_CLS) with the status border color', () => {
+  it('styles the buttons EXACTLY like the workflow node bottom buttons (shared canvasNodeButtonClass) with the status border color', () => {
     const { getByTitle } = render(
       <FleetTriggerButtons
         triggers={{ hasWebhook: true, hasSchedule: true, webhookUrl: WEBHOOK_URL, cronExpression: CRON }}
@@ -91,8 +91,12 @@ describe('FleetTriggerButtons', () => {
       />,
     );
     const webhookBtn = getByTitle('Webhook');
-    // Same round bottom-bar button class as NodeBottomBar (single source of truth).
-    BTN_CLS.split(/\s+/).forEach((cls) => expect(webhookBtn.className).toContain(cls));
+    // Same square bottom-bar button class as NodeBottomBar (single source of
+    // truth). Whole-token membership, not substring: `toContain('border')` is
+    // also satisfied by `border-transparent`, so a call site that overrode a
+    // shared class would still pass.
+    const rendered = webhookBtn.className.split(/\s+/);
+    canvasNodeButtonClass.split(/\s+/).forEach((cls) => expect(rendered).toContain(cls));
     // Status-synced border (2px solid borderColor), same pattern as NodeBottomBar buttons.
     expect(webhookBtn.style.borderColor).toBe('rgb(239, 68, 68)');
     expect(webhookBtn.style.borderWidth).toBe('2px');

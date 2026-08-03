@@ -402,21 +402,6 @@ public class RewardService {
     }
 
     /**
-     * Clawback the reward tied to a converting subscription on a full refund or a
-     * dispute. Locks the row and re-reads its status: a still-held reward is simply
-     * revoked (nothing was granted), an already-released reward is negated for both
-     * parties (the negative grant routes to the PAYG bucket). The cap slot is NOT
-     * freed (a refunded conversion permanently consumes it). Idempotent + serialized
-     * with the releaser via the row lock, so exactly one terminal transition wins.
-     */
-    @Transactional
-    public void clawbackBySubscriptionId(String providerSubscriptionId, String reason) {
-        if (providerSubscriptionId == null) return;
-        redemptionRepository.findByProviderSubscriptionId(providerSubscriptionId)
-                .ifPresent(found -> clawbackRedemption(found.getId(), reason));
-    }
-
-    /**
      * Clawback the referee's referral reward (resolved from the refunded/disputed
      * charge's customer). Keying on the referee avoids the wrong-subscription pitfall
      * after a churn-and-resubscribe.

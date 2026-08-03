@@ -38,7 +38,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
  * <p>Loads the actual migration file (so a drift in the SQL is caught here), and is skipped
  * without Docker or when the migration file is not locatable from the module cwd.
  */
-@Testcontainers
+@Testcontainers(disabledWithoutDocker = true)
 @DisplayName("V374 skill-bundle migration - constraints against real Postgres")
 class SkillBundleMigrationPostgresIT {
 

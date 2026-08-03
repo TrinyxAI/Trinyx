@@ -159,7 +159,7 @@ if (typeof window !== 'undefined') {
 
 // ── Inner content (rendered inside WorkflowModeProvider) ──
 
-function WorkflowPanelInner({ workflowId, runId: runIdProp, workflowCanvasSlot, isPreviewOnly = false }: { workflowId: string; runId?: string; workflowCanvasSlot?: React.ReactNode; isPreviewOnly?: boolean }) {
+function WorkflowPanelInner({ workflowId, runId: runIdProp, workflowCanvasSlot, isPreviewOnly = false, allowRunHistory: allowRunHistoryProp, runSurfaceId }: { workflowId: string; runId?: string; workflowCanvasSlot?: React.ReactNode; isPreviewOnly?: boolean; allowRunHistory?: boolean; runSurfaceId?: string }) {
   const t = useTranslations();
   const pathname = usePathname();
 
@@ -390,11 +390,13 @@ function WorkflowPanelInner({ workflowId, runId: runIdProp, workflowCanvasSlot, 
   const hasRun = runData.hasRunInfo || !!runData.runId;
   const showRunTab = hasRun;
   const showNodeCreatorTab = !hasRun && !isPreviewOnly;
-  // Run history is a navigation between runs of the SAME workflow, which only
-  // the standalone workflow page can perform (it moves the /run/<id> route). An
-  // embedded canvas - application panel, marketplace preview, sub-workflow tab -
-  // is bound to the run its host opened, so it stays on the run detail.
-  const allowRunHistory = !hasWorkflowSlot && !isPreviewOnly;
+  // Run history is a navigation between runs of the SAME workflow. The default
+  // is "only the standalone workflow page", because an embedded canvas whose host
+  // CHOSE the run for it - the application panel, the marketplace preview - must
+  // stay on that run. A host that can rebind its own canvas overrides it: the
+  // sub-workflow tab does, and without the override its run detail had no way
+  // back up to the list of runs it came from. Preview is never negotiable.
+  const allowRunHistory = (allowRunHistoryProp ?? !hasWorkflowSlot) && !isPreviewOnly;
 
   const hasExtraTabs = visibleTriggerConfigs.length > 0 || showAppTab || hasWorkflowSlot || showRunTab || showNodeCreatorTab;
   const [activeTabId, setActiveTabId] = useState(hasWorkflowSlot ? WORKFLOW_TAB_ID : CHAT_TAB_ID);
@@ -871,6 +873,7 @@ function WorkflowPanelInner({ workflowId, runId: runIdProp, workflowCanvasSlot, 
           workflowId={workflowId}
           allowHistory={allowRunHistory}
           viewRequest={runViewRequest ?? undefined}
+          surfaceId={runSurfaceId}
         />
       ) : activeTabId === NODE_CREATOR_TAB_ID ? (
         <NodeCreatorPanelContent workflowId={workflowId} />
@@ -941,9 +944,24 @@ interface WorkflowPanelContentProps {
   isPreviewOnly?: boolean;
   /** Workflow canvas ReactNode - rendered as an always-mounted sub-tab (replaces Application carousel tab) */
   workflowCanvasSlot?: React.ReactNode;
+  /**
+   * Let the Run tab walk back up to the run history of this workflow.
+   *
+   * Defaults to "only the standalone workflow page", because a canvas embedded in
+   * a host that CHOSE the run for it (the application panel, the marketplace
+   * preview) must stay on that run. A host that can rebind its canvas - the
+   * sub-workflow tab does, through the run-panel bind event - opts back in here.
+   */
+  allowRunHistory?: boolean;
+  /**
+   * Identifies the surface hosting this panel, so a run picked in its history
+   * binds THIS surface's canvas. Omitted on the workflow page (which owns the
+   * route); a side-panel workflow tab passes its own id.
+   */
+  runSurfaceId?: string;
 }
 
-export function WorkflowPanelContent({ workflowId, runId, isPreviewOnly: isPreviewOnlyProp, workflowCanvasSlot }: WorkflowPanelContentProps) {
+export function WorkflowPanelContent({ workflowId, runId, isPreviewOnly: isPreviewOnlyProp, workflowCanvasSlot, allowRunHistory, runSurfaceId }: WorkflowPanelContentProps) {
   // Try parent context first, then fall back to explicit prop.
   // SidePanel lives in AppLayout (outside WorkflowModeProvider), so the prop is needed for marketplace preview.
   const { isPreviewOnly: isPreviewFromContext, workflowId: parentWorkflowId } = useWorkflowMode();
@@ -953,12 +971,12 @@ export function WorkflowPanelContent({ workflowId, runId, isPreviewOnly: isPrevi
   // reuse it so viewingEpoch and other state are shared with the canvas/RunInfo.
   // Only create a new provider when rendered outside (e.g. SidePanel in AppLayout).
   if (parentWorkflowId) {
-    return <WorkflowPanelInner workflowId={workflowId} runId={runId} workflowCanvasSlot={workflowCanvasSlot} isPreviewOnly={isPreview} />;
+    return <WorkflowPanelInner workflowId={workflowId} runId={runId} workflowCanvasSlot={workflowCanvasSlot} isPreviewOnly={isPreview} allowRunHistory={allowRunHistory} runSurfaceId={runSurfaceId} />;
   }
 
   return (
     <WorkflowModeProvider workflowId={workflowId} initialRunId={runId} readOnly={isPreview}>
-      <WorkflowPanelInner workflowId={workflowId} runId={runId} workflowCanvasSlot={workflowCanvasSlot} isPreviewOnly={isPreview} />
+      <WorkflowPanelInner workflowId={workflowId} runId={runId} workflowCanvasSlot={workflowCanvasSlot} isPreviewOnly={isPreview} allowRunHistory={allowRunHistory} runSurfaceId={runSurfaceId} />
     </WorkflowModeProvider>
   );
 }

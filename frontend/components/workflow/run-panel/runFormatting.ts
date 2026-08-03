@@ -1,14 +1,25 @@
 /**
- * Pure formatting / status helpers shared by every run surface:
- * the compact canvas run bar, the side-panel Run tab (summary + steps +
- * epochs) and the run history list.
+ * Pure formatting / status constants and helpers shared by every run surface:
+ * the compact canvas run bar, the side-panel Run tab (summary + steps + epochs)
+ * and the run history list.
  *
  * Dependency-free on purpose so they stay trivially unit-testable and can be
- * imported from a server-rendered module without pulling in React.
+ * imported from a server-rendered module - or from a plain node test - without
+ * pulling in React.
  */
 
 import { TERMINAL_STATUSES } from '@/contexts/workflow-run/RunStateStore';
 import { parseUtcAware } from '@/lib/utils/dateFormatters';
+
+/**
+ * Class that plays the "this is the run you came back from" cue on a history row.
+ *
+ * Applied and removed imperatively by `scrollToAndFlash`, so its whole lifetime
+ * lives in the stylesheet: the animation defined for it in globals.css MUST end
+ * (an `animation: none` under `prefers-reduced-motion` would never fire
+ * `animationend` and the ring would stay on screen for good).
+ */
+export const RUN_ROW_FLASH_CLASS = 'run-row-focus-flash';
 
 /**
  * Run statuses a trigger can no longer be fired into (the dispatcher rejects it).

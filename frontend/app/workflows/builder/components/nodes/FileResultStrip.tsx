@@ -2,11 +2,13 @@
 
 import * as React from 'react';
 import { useTranslations } from 'next-intl';
+import { useNodeId } from 'reactflow';
 import { ChevronDown, ChevronUp, File, FileText, FileType2, Film, Image, Music, PanelRight } from 'lucide-react';
 import { fileRefToUrl, fileService } from '@/lib/api/orchestrator/file.service';
 import { useAuthedObjectUrl } from '@/hooks/useAuthedObjectUrl';
 import { detectPreviewKind, resolveMediaMimeType } from '@/lib/files/filePreview';
 import { useSidePanelSafe } from '@/contexts/SidePanelContext';
+import { useFileStripExpansionSafe } from '@/contexts/FileStripExpansionContext';
 import { openFilesPanel } from '@/lib/sidePanel/openFilesPanel';
 
 import { useWorkflowLayoutDirectionSafe } from '@/contexts/WorkflowLayoutDirectionContext';
@@ -234,8 +236,43 @@ export function FileResultStrip({ file }: { file: FileStripFile }) {
   // Node attachments hang off the edge the flow does not use.
   const { direction: layoutDirection } = useWorkflowLayoutDirectionSafe();
 
-  const [expanded, setExpanded] = React.useState(false);
   const sidePanel = useSidePanelSafe();
+
+  // Expanded state lives on the CANVAS when a coordinator is present, so the
+  // toolbar's toggle-all can flip every strip at once (and know how many there
+  // are). Outside the provider - the marketplace preview, an isolated render -
+  // the strip falls back to this local state and behaves exactly as before.
+  const expansion = useFileStripExpansionSafe();
+  // The host ReactFlow node id is the strip's identity across a re-render; it is
+  // null when the strip is mounted outside a node, where useId gives a stable
+  // per-instance fallback so the two paths share one code shape.
+  const nodeId = useNodeId();
+  const fallbackStripId = React.useId();
+  const stripId = nodeId ?? fallbackStripId;
+
+  const [localExpanded, setLocalExpanded] = React.useState(false);
+
+  // Depend on the CALLBACKS, never on `expansion` itself: the context value gets
+  // a new identity every time any strip expands, and re-running this effect on
+  // that would unregister the strip - which also clears its expanded flag - and
+  // immediately fold the preview the user just opened.
+  const registerStrip = expansion?.registerStrip;
+  const unregisterStrip = expansion?.unregisterStrip;
+  React.useEffect(() => {
+    if (!registerStrip || !unregisterStrip) return;
+    registerStrip(stripId);
+    return () => unregisterStrip(stripId);
+  }, [registerStrip, unregisterStrip, stripId]);
+
+  const setSharedExpanded = expansion?.setExpanded;
+  const expanded = expansion ? expansion.isExpanded(stripId) : localExpanded;
+  const setExpanded = React.useCallback(
+    (next: boolean) => {
+      if (setSharedExpanded) setSharedExpanded(stripId, next);
+      else setLocalExpanded(next);
+    },
+    [setSharedExpanded, stripId],
+  );
 
   // Same opener as the bottom-bar "Files" button (useNodeContextualButtons):
   // opens the side-panel Files tab focused on THIS file.

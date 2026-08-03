@@ -14,7 +14,7 @@
     "contracts:validate:strict": "node ../shared/contracts/scripts/validate.js --strict",
     "contracts:generate:ts": "node ../shared/contracts/scripts/generate-ts.js",
     "contracts:generate": "npm run contracts:generate:ts",
-    "contracts:check": "npm run contracts:validate && npm run contracts:generate:ts",
+    "contracts:check": "npm run contracts:validate:strict && npm run contracts:test",
     "contracts:test": "node ../shared/contracts/scripts/contract-tests.js",
     "test": "vitest run",
     "test:watch": "vitest",

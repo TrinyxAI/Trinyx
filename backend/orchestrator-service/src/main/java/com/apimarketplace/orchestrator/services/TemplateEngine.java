@@ -35,13 +35,14 @@ import com.apimarketplace.orchestrator.utils.ConcurrentLruCache;
  * | agent:     | {{agent:label.output.field}}   | {{agent:assistant.output.response}}         |
  * | core:      | {{core:label.output.field}}    | {{core:decision.output.selected_branch}}    |
  *
- * Core Node Specific Outputs:
+ * Core Node Specific Outputs (these are the keys the mappers actually persist; an
+ * .aliases() entry resolves an INPUT and is never a valid output reference):
  * - Decision: {{core:check.output.selected_branch}}, {{core:check.output.evaluations}}
- * - Switch: {{core:router.output.switch_value}}, {{core:router.output.selected_case}}
- * - Loop: {{core:process.output.iteration}}, {{core:process.output.max_iterations}}
+ * - Switch: {{core:router.output.selected_branches}}, {{core:router.output.selected_case_index}}
+ * - Loop: {{core:process.output.iteration}}, {{core:process.output.maxIterations}}
  * - Split: {{core:batch.output.current_item}}, {{core:batch.output.current_index}}
- * - Merge: {{core:wait_all.output.merged_data}}
- * - Fork: {{core:parallel.output.branches_count}}
+ * - Merge: {{core:wait_all.output.merged_branches}}, {{core:wait_all.output.strategy}}
+ * - Fork: {{core:parallel.output.branch_count}}
  *
  * Supports SpEL operations for conditions and complex evaluations:
  * - Arithmetic: +, -, *, /, %

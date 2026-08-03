@@ -36,9 +36,7 @@ class ToolExecutionOrchestratorTypedTest {
     void setUp() {
         objectMapper = new ObjectMapper();
         outputProjector = new OutputProjector(objectMapper);
-        // The other helpers are not exercised in this test class - pass nulls.
-        orchestrator = new ToolExecutionOrchestrator(
-                outputProjector, null, null, null, objectMapper);
+        orchestrator = new ToolExecutionOrchestrator(outputProjector);
     }
 
     @Test

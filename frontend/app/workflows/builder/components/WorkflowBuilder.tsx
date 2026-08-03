@@ -1586,6 +1586,7 @@ export function WorkflowBuilder({
       isRerunning={pauseResumeState.isRerunning}
       pendingSignals={pauseResumeState.pendingSignals}
       activeEpochs={pauseResumeState.activeEpochs}
+      currentEpoch={pauseResumeState.currentEpoch}
     >
       {/* Validation sees the SAME loop-back classification as the canvas and the saved plan.
           Passing the raw store edges here let the three disagree inside one session: a loop

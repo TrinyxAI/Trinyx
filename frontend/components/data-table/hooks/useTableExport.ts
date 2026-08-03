@@ -2,37 +2,8 @@
 
 import { useCallback, useState } from 'react';
 import type { ColumnDefinition, DataSourceItemRow, PaginationState } from '../types';
-import { apiClient } from '@/lib/api';
 import { formatUtcDateTime } from '@/lib/utils/dateFormatters';
-
-// Helper function to make authenticated fetch calls
-// Uses apiClient's token provider to get the auth token
-async function authenticatedFetch(url: string, options: RequestInit = {}): Promise<Response> {
-  const tokenProvider = apiClient.getTokenProvider();
-  let token: string | null = null;
-
-  if (tokenProvider) {
-    try {
-      token = await tokenProvider();
-    } catch (e) {
-      console.warn('[authenticatedFetch] Failed to get token:', e);
-    }
-  }
-
-  const headers: HeadersInit = {
-    'Content-Type': 'application/json',
-    ...(options.headers || {}),
-  };
-
-  if (token) {
-    (headers as Record<string, string>)['Authorization'] = `Bearer ${token}`;
-  }
-
-  return fetch(url, {
-    ...options,
-    headers,
-  });
-}
+import { authenticatedFetch } from '../utils/authenticatedFetch';
 
 export interface UseTableExportParams {
   dataSourceId?: number;

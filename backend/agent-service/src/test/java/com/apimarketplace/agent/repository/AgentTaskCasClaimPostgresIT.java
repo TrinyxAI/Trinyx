@@ -35,7 +35,7 @@ import static org.assertj.core.api.Assertions.assertThat;
  *
  * <p>Skipped without Docker.
  */
-@Testcontainers
+@Testcontainers(disabledWithoutDocker = true)
 @DisplayName("Task-system CAS claims - one winner per slot on real Postgres")
 class AgentTaskCasClaimPostgresIT {
 

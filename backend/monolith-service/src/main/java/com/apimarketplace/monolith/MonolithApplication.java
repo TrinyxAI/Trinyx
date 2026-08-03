@@ -143,15 +143,23 @@ public class MonolithApplication {
      * without this an install created by an earlier image would stop booting after a routine
      * {@code docker compose pull}, with nothing telling the operator why.
      *
-     * <p>V328/V346 are the same story for a cloud-only launch promo: V328 seeded an uncapped
-     * 20k-credit code and V346 retired it, both of which shipped readable inside the image
-     * even though the public repo has never carried the seed. The CE build now substitutes
-     * the scrubbed copies, so installs from an earlier image hit the same mismatch. V346 is
-     * neutralised to a no-op rather than dropped: ignore-missing-migrations would tolerate its
-     * removal, but keeping the version leaves the image and the public repo describing the same
-     * history, and it is the neutralised body that strips the promo name from the image.
+     * <p>V328/V346/V366/V367 are the same story for a cloud-only launch promo: V328 seeded an
+     * uncapped 20k-credit code, V346 retired it, and V366/V367 reworked then retired the reward
+     * codes that carried its name. All four shipped readable inside the image even though the
+     * public repo has never carried the seed. The CE build now substitutes the scrubbed copies,
+     * so installs from an earlier image hit the same mismatch. They are neutralised to no-ops
+     * rather than dropped: ignore-missing-migrations would tolerate their removal, but keeping
+     * the versions leaves the image and the public repo describing the same history, and it is
+     * the neutralised body that strips the promo name from the image.
+     *
+     * <p>This set MUST list every version under
+     * {@code migration-service/src/main/ce-overrides/db/migration}. Adding an override without
+     * adding its version here is silent: the repair bean never fires, and every install created
+     * by an earlier image refuses to boot on the changed checksum after a routine
+     * {@code docker compose pull}. {@code deploy/ce-export/migration-parity.test.sh} derives its
+     * assertion from that directory listing so the two cannot drift apart again.
      */
-    private static final Set<String> CE_NEUTRALIZED_VERSIONS = Set.of("44", "328", "346");
+    private static final Set<String> CE_NEUTRALIZED_VERSIONS = Set.of("44", "328", "346", "366", "367");
 
     public static void main(String[] args) {
         System.setProperty("spring.profiles.active", "ce");

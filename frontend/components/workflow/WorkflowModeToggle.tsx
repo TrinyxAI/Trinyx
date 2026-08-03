@@ -38,8 +38,8 @@ interface WorkflowModeToggleProps {
   onStop?: () => void;
   onCancel?: () => void;
   onReactivate?: () => void;
-  /** Current epoch number (0 = no fire, 1+ = epoch count) */
-  currentEpoch?: number;
+  /** How many epochs the run has, i.e. how many rows its epoch selector lists. */
+  epochCount?: number;
   /** Pinned (production) version of the workflow, null if unpinned */
   pinnedVersion?: number | null;
   /** When the settings panel is open, hide the run bar & history button */
@@ -70,7 +70,7 @@ export function WorkflowModeToggle({
   onStop,
   onCancel,
   onReactivate,
-  currentEpoch = 0,
+  epochCount = 0,
   pinnedVersion,
   isSettingsOpen = false,
 }: WorkflowModeToggleProps) {
@@ -332,7 +332,7 @@ export function WorkflowModeToggle({
               <RunSummaryBar
                 currentRunInfo={currentRunInfo!}
                 pinnedVersion={pinnedVersion}
-                currentEpoch={currentEpoch}
+                epochCount={epochCount}
                 selectedEpoch={selectedEpoch}
                 isStepByStep={isStepByStep}
                 onStop={onStop}

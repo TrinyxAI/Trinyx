@@ -33,6 +33,12 @@ export interface RunPanelData {
   runId: string | null;
   runInfo: any | null;
   isStepByStep: boolean;
+  /**
+   * The engine's epoch CURSOR, not a count. It moves to N+1 as soon as an epoch
+   * closes, to prepare the next cycle - that epoch is dormant and has no row.
+   * To say how many epochs a run has, count `epochTimestamps`; printing this
+   * made a run fired once announce two.
+   */
   currentEpoch: number;
   epochTimestamps: EpochTimestamp[];
   /** undefined = steps not streamed yet (loading), [] = streamed and empty. */
@@ -149,7 +155,14 @@ export function openRunPanel(detail: OpenRunPanelDetail = {}): void {
   window.dispatchEvent(new CustomEvent<OpenRunPanelDetail>(OPEN_RUN_PANEL_EVENT, { detail }));
 }
 
-/** The pending level request for a workflow, or null when it targets another one. */
+/**
+ * The pending level request for a workflow, or null when it targets another one.
+ *
+ * An UNADDRESSED level request applies to whichever panel asks - deliberately,
+ * and unlike {@link subscribeBindRun}. The asymmetry is the stake: a level says
+ * "show the history rather than the run detail", which is right on any panel; a
+ * bind names a RUN, and a run belongs to exactly one workflow.
+ */
 export function getRunPanelViewRequest(workflowId: string): RunPanelViewRequest | null {
   if (!lastViewRequest) return null;
   if (lastViewRequest.workflowId && lastViewRequest.workflowId !== workflowId) return null;
@@ -172,8 +185,21 @@ export function openNodeCreatorPanel(detail: { workflowId?: string } = {}): void
 }
 
 export interface BindRunDetail {
-  workflowId?: string;
+  /**
+   * Required: several surfaces showing DIFFERENT workflows listen at once (the
+   * page plus every keepMounted workflow tab), and an unaddressed request would
+   * bind a foreign run id into all of them.
+   */
+  workflowId: string;
   runId: string;
+  /**
+   * Which SURFACE asked. The workflow alone is not enough to route this: the
+   * page and a side-panel tab can show the SAME workflow at once (a
+   * self-referencing sub-workflow node, or opening the current workflow from the
+   * tab picker), and then a pick made in the tab would rewrite the page's URL
+   * and move the canvas behind it. Absent means the page, which owns the route.
+   */
+  surfaceId?: string;
 }
 
 /**
@@ -189,6 +215,36 @@ export interface BindRunDetail {
 export function requestBindRun(detail: BindRunDetail): void {
   if (typeof window === 'undefined') return;
   window.dispatchEvent(new CustomEvent<BindRunDetail>(BIND_RUN_EVENT, { detail }));
+}
+
+/**
+ * Listen for bind requests this surface may follow. Returns the unsubscribe fn.
+ *
+ * Several surfaces are mounted at once (the page, a sub-workflow tab, an
+ * application tab) and they all hear the same window event, so the "is this for
+ * me?" rule has to be ONE rule, not one per listener. A request must name BOTH
+ * the workflow and the surface: the workflow alone routes a pick made in a
+ * side-panel tab to the page whenever the two show the same workflow, and an
+ * unaddressed one would bind a foreign run id into every mounted surface.
+ *
+ * `surfaceId` is omitted for the page, which owns the route.
+ */
+export function subscribeBindRun(
+  workflowId: string | undefined,
+  onBind: (runId: string) => void,
+  surfaceId?: string,
+): () => void {
+  if (typeof window === 'undefined') return () => {};
+  const handler = (event: Event) => {
+    const detail = (event as CustomEvent<BindRunDetail>).detail;
+    if (!detail?.runId) return;
+    // An unaddressed request matches nothing: every subscriber names a workflow.
+    if (detail.workflowId !== workflowId) return;
+    if ((detail.surfaceId ?? null) !== (surfaceId ?? null)) return;
+    onBind(detail.runId);
+  };
+  window.addEventListener(BIND_RUN_EVENT, handler);
+  return () => window.removeEventListener(BIND_RUN_EVENT, handler);
 }
 
 /**

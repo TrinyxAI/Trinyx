@@ -266,7 +266,7 @@ export function HoverEdgeOverlay({
                             onMouseEnter={onMouseEnter}
                             onMouseLeave={onMouseLeave}
                             className={clsx(
-                                'flex items-center justify-center rounded-full',
+                                'flex items-center justify-center',
                                 'bg-white dark:bg-slate-700 border-2 border-slate-300 dark:border-slate-600 shadow-lg',
                                 'hover:bg-[var(--text-primary)] hover:border-[var(--text-primary)] hover:text-[var(--bg-primary)]',
                                 'transition-all duration-200',
@@ -280,6 +280,12 @@ export function HoverEdgeOverlay({
                                 height: scaledButtonSize,
                                 pointerEvents: 'all',
                                 borderWidth: Math.max(1, 2 * zoom),
+                                // Square-rounded like every other button, but the radius has to be
+                                // computed: this button is sized in pixels from the canvas zoom, so a
+                                // fixed Tailwind radius would read as a circle when zoomed out and as
+                                // a barely-rounded box when zoomed in. A third of the side is the
+                                // ratio the Button system uses (rounded-xl on a 36px control).
+                                borderRadius: scaledButtonSize / 3,
                                 zIndex: 10,
                             }}
                             title={t('addNode')}

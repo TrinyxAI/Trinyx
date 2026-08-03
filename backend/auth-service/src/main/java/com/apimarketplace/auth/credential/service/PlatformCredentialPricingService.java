@@ -175,11 +175,6 @@ public class PlatformCredentialPricingService {
         return publishNextVersion(credentialId, defaultMarkup, perToolOverrides, createdBy);
     }
 
-    public Optional<PlatformCredentialPricingVersion> findByCredentialAndVersion(Long credentialId,
-                                                                                  Integer version) {
-        return versionRepo.findByPlatformCredentialIdAndVersion(credentialId, version);
-    }
-
     public List<PlatformCredentialPricingVersion> findAllVersions(Long credentialId) {
         return versionRepo.findByPlatformCredentialIdOrderByVersionDesc(credentialId);
     }
@@ -252,13 +247,6 @@ public class PlatformCredentialPricingService {
         // range, so we fold it together with credentialId into one bigint key.
         long key = ADVISORY_LOCK_NAMESPACE ^ Long.rotateLeft(credentialId, 17);
         jdbc.execute("SELECT pg_advisory_xact_lock(" + key + ")");
-    }
-
-    /**
-     * Convenience check used by callers that want to refuse markup on oauth2 up-front.
-     */
-    public boolean canCarryMarkup(AuthType authType) {
-        return authType != AuthType.OAUTH2;
     }
 
     /**

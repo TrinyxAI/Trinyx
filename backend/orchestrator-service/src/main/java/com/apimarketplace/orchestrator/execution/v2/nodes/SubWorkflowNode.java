@@ -566,7 +566,16 @@ public class SubWorkflowNode extends BaseNode {
         Optional<WorkflowRunEntity> probe = workflowRunRepository
             .findFirstProductionRunByWorkflowIdAndStatusIn(workflowId, NON_TERMINAL_STATUSES);
         if (probe.isEmpty()) {
-            return "No active run found for workflow " + workflowId + ". Start the workflow first.";
+            // The workflow has no run at all. Naming the action that creates one is the whole
+            // point of this branch: this node fires a trigger on an EXISTING run and never
+            // creates one, so "start the workflow first" alone leaves the caller guessing how.
+            // Pinned workflows get the version too, matching the startAtPin idiom below.
+            Integer pinned = entity.getPinnedVersion();
+            String start = "workflow(action='execute', id='" + workflowId + "'"
+                + (pinned != null ? ", version=" + pinned : "") + ")";
+            return "No active run found for workflow " + workflowId + ". Start the workflow first with "
+                + start + "; this node never creates a run, it only fires a trigger on one that"
+                + " already exists.";
         }
 
         WorkflowRunEntity live = probe.get();

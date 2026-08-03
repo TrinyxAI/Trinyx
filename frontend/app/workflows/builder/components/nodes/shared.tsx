@@ -15,7 +15,7 @@ import { useTheme } from '@/components/ThemeProvider';
 import { AvatarDisplay } from '@/components/agents';
 import { useAuthedObjectUrl } from '@/hooks/useAuthedObjectUrl';
 
-import { BTN_CLS } from './NodeBottomBar';
+import { canvasNodeButtonClass } from '@/components/ui/canvas-chrome';
 import { deriveStatusFromCounts } from '../../utils/statusCounts';
 import type { NodeVisuals, BuilderNodeData, LoopChildDescriptor, BuilderNodeKind, DerivedNodeStatus } from '../../types';
 import { resolveNodeIcon, NODE_ICON_REGISTRY } from '../../data/nodeVisuals';
@@ -545,7 +545,7 @@ interface NodeActionButtonsProps {
 
 /**
  * Hover-only action buttons rendered below the node (delete / duplicate / preview / view),
- * with the same round-button style as the persistent {@link NodeBottomBar} buttons.
+ * with the same square-button style as the persistent {@link NodeBottomBar} buttons.
  *
  * <p>Nodes that render an edit-mode {@link NodeBottomBar} (FlowNode, WorkflowNode,
  * BrowserAgentNode) pass `hoverActions` to the bar instead, so the hover buttons
@@ -589,8 +589,8 @@ export function NodeActionButtons({
   const finalOpacity = isVisible ? 1 : 0;
   const finalPointerEvents = isVisible ? 'all' : 'none';
 
-  // Same round-button look as the persistent NodeBottomBar buttons.
-  const btnCls = `${BTN_CLS} nodrag nopan`;
+  // Same square button as the persistent NodeBottomBar buttons.
+  const btnCls = `${canvasNodeButtonClass} nodrag nopan`;
   const btnStyle = { borderWidth: 2, borderStyle: 'solid' as const, borderColor: 'var(--border-color)' };
 
   return (

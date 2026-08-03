@@ -9,6 +9,7 @@
 
 import type { Message } from '@/lib/api/conversation.types';
 import type { ToolActivity, ToolVisualization } from '@/contexts/StreamingContext';
+import { scrollToAndFlash } from '@/lib/utils/flashHighlight';
 
 /**
  * Visualization types that the right side panel (AppHeader `handleAutoOpen`) can
@@ -73,16 +74,11 @@ export function isSystemMarkerActivity(a: { toolName: string }): boolean {
 export function scrollToAndHighlightMessage(messageId: string, doc: Document = document): void {
   const row = doc.getElementById(`message-${messageId}`);
   if (!row) return;
-  row.scrollIntoView({ behavior: 'smooth', block: 'center' });
   const target = (row.querySelector('[class*="rounded-[18px]"]') as HTMLElement | null) ?? row;
-  target.classList.remove('message-jump-highlight');
-  void target.offsetWidth; // force reflow so re-adding restarts the animation
-  target.classList.add('message-jump-highlight');
-  target.addEventListener(
-    'animationend',
-    () => target.classList.remove('message-jump-highlight'),
-    { once: true },
-  );
+  // The bubble is highlighted, but the ROW is what gets scrolled to (the bubble
+  // can be narrower than the message and centring it reads as off).
+  row.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  scrollToAndFlash(target, 'message-jump-highlight', { scroll: false });
 }
 
 export interface ParsedMessageActivities {

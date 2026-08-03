@@ -14,15 +14,15 @@
 // ─── Constants ──────────────────────────────────────────────────────────
 // Centralised tunables. Source of truth for rates: auth-service DB via
 // /api/internal/auth/pricing/snapshot. The fallback defaults below match
-// auth-service ModelPricingService (0.1 / 0.3 per 1K tokens) so that when
+// auth-service ModelPricingService (1.0 / 4.0 per 1K tokens) so that when
 // the snapshot is unavailable the budget guard errs on the expensive side
 // rather than silently under-counting costs.
 export const PRICING_DEFAULTS = Object.freeze({
   /** Refresh TTL for the cached pricing snapshot. */
   REFRESH_MS: 5 * 60 * 1000,
-  /** Fallback input rate (USD per 1M tokens) - matches auth-service DEFAULT_INPUT_RATE. */
+  /** Fallback input rate (USD per 1K tokens) - matches auth-service DEFAULT_INPUT_RATE. */
   INPUT_RATE_PER_1K: Number(process.env.BRIDGE_DEFAULT_INPUT_RATE_PER_1K || '1.0'),
-  /** Fallback output rate (USD per 1M tokens) - matches auth-service DEFAULT_OUTPUT_RATE. */
+  /** Fallback output rate (USD per 1K tokens) - matches auth-service DEFAULT_OUTPUT_RATE. */
   OUTPUT_RATE_PER_1K: Number(process.env.BRIDGE_DEFAULT_OUTPUT_RATE_PER_1K || '4.0'),
   /** Decimal precision used by both Java and JS cost rounding. */
   ROUND_DECIMALS: 6,

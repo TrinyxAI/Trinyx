@@ -68,32 +68,51 @@ class NodeOutputSchemaCoherenceContractTest {
     );
 
     /**
-     * Current backlog where the agent documentation and NodeSpec have known
-     * historical drift. Keep this list explicit so any new drift fails loudly,
-     * and remove entries as docs/specs are aligned.
+     * Node types whose agent documentation is allowed to disagree with their NodeSpec.
+     *
+     * <p>It used to hold twelve types (AGENT, APPROVAL, CLASSIFY, DECISION, EXTRACT_FROM_FILE,
+     * GUARDRAIL, INTERFACE, MERGE, OPTION, STOP_ON_ERROR, SUMMARIZE, SWITCH), which is to say
+     * this guard was suppressing the exact problem it exists to catch. V422 realigned nine of
+     * them with an explicit UPDATE, and OPTION needed none: dropping it from this set and
+     * watching this test stay green is the proof its docs already matched its spec.
+     * The two that remain are here for a structural reason, not as a backlog: see below.
+     *
+     * <p>Adding an entry for any OTHER reason does not defer a cosmetic mismatch, it ships a
+     * real defect: the
+     * agent writes a template against a documented field the engine never persists, and the
+     * parameter silently loses its content. Mixed text resolves the expression to an EMPTY
+     * STRING (TemplateEngine.resolveExpressions, plus a WARN nobody reads); a pure
+     * {@code {{...}}} resolves to NULL. The run still reports COMPLETED, and an empty value is
+     * indistinguishable from a legitimately empty one. Fix the documentation (or the spec).
      */
     private static final Set<String> KNOWN_SCHEMA_DRIFT_NODE_TYPES = Set.of(
-        "AGENT",
+        // Signal-yielding nodes. For these the NodeSpec is the WRONG source of truth, so this
+        // test's premise (docs == NodeSpec) does not hold and enforcing it produces the very
+        // defect the test exists to prevent.
+        //
+        // When a node yields AWAITING_SIGNAL its output is NOT persisted (SignalResumeService
+        // :899 says so verbatim). What an agent can actually read is written later by
+        // SignalResumeService on resume: signal_type, resolution, resolved_at, resolved_by
+        // (:1283-1287). ApprovalNodeSpec's approver_roles / required_approvals / expires_at are
+        // yield-time only and never reach storage.
+        //
+        // An earlier revision of V422 "aligned" approval to the NodeSpec: it documented the three
+        // fields no template can ever read and deleted the four that work. Those UPDATEs were
+        // removed. Re-enabling this check for these two types requires teaching it to read the
+        // resume path, not just the spec.
         "APPROVAL",
-        "CLASSIFY",
-        "DECISION",
-        "EXTRACT_FROM_FILE",
-        "GUARDRAIL",
-        "INTERFACE",
-        "MERGE",
-        "OPTION",
-        "STOP_ON_ERROR",
-        "SUMMARIZE",
-        "SWITCH"
+        "INTERFACE"
     );
 
     /**
-     * Existing agent docs that do not use the standard
+     * Agent docs that do not use the standard
      * {"field": {"type": "...", "description": "..."}} shape.
+     *
+     * <p>interface stays here: V422 no longer rewrites its docs (its outputs sit on the
+     * signal-yield path, see KNOWN_SCHEMA_DRIFT_NODE_TYPES above), so its historic
+     * non-standard shape is unchanged.
      */
-    private static final Set<String> KNOWN_NON_STANDARD_AGENT_DOC_TYPES = Set.of(
-        "interface"
-    );
+    private static final Set<String> KNOWN_NON_STANDARD_AGENT_DOC_TYPES = Set.of("interface");
 
     private static final Pattern WHERE_TYPE_PATTERN =
         Pattern.compile("(?is)\\bWHERE\\s+type\\s*=\\s*'([^']+)'");

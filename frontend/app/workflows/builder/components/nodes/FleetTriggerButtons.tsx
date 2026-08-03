@@ -4,7 +4,8 @@ import * as React from 'react';
 import clsx from 'clsx';
 import { Webhook, CalendarClock, Copy, Check } from 'lucide-react';
 import { useTranslations } from 'next-intl';
-import { BTN_CLS, ShimmerOverlay } from './NodeBottomBar';
+import { canvasNodeButtonClass } from '@/components/ui/canvas-chrome';
+import { ShimmerOverlay } from './NodeBottomBar';
 
 export interface FleetTriggers {
   hasWebhook: boolean;
@@ -21,8 +22,8 @@ const FLEET_TRIGGER_SHIMMER = 'rgba(245, 158, 11, 0.3)';
  * Fleet trigger bottom buttons (webhook / schedule).
  *
  * Rendered inside the agent node's NodeBottomBar (below the agent), using the exact
- * same round button + shimmer as the workflow node bottom buttons / trigger launcher
- * (BTN_CLS + ShimmerOverlay). Each button reveals an upward hover tooltip with the
+ * same square button + shimmer as the workflow node bottom buttons / trigger launcher
+ * (canvasNodeButtonClass + ShimmerOverlay). Each button reveals an upward hover tooltip with the
  * webhook URL (copyable) or the cron schedule, preserving the old corner-badge
  * functionality while matching the workflow node bottom-button look.
  */
@@ -68,7 +69,7 @@ export function FleetTriggerButtons({ triggers, borderColor }: {
             onMouseDown={(e) => e.stopPropagation()}
             onFocus={() => setWebhookOpen(true)}
             onBlur={() => setWebhookOpen(false)}
-            className={clsx(BTN_CLS, 'cursor-pointer nodrag nopan')}
+            className={clsx(canvasNodeButtonClass, 'cursor-pointer nodrag nopan')}
             style={borderStyle}
             title={webhookLabel}
             aria-label={webhookLabel}
@@ -114,7 +115,7 @@ export function FleetTriggerButtons({ triggers, borderColor }: {
             onMouseDown={(e) => e.stopPropagation()}
             onFocus={() => setScheduleOpen(true)}
             onBlur={() => setScheduleOpen(false)}
-            className={clsx(BTN_CLS, 'cursor-default nodrag nopan')}
+            className={clsx(canvasNodeButtonClass, 'cursor-default nodrag nopan')}
             title={scheduleLabel}
             aria-label={scheduleLabel}
             style={borderStyle}

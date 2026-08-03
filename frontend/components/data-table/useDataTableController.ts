@@ -18,7 +18,6 @@ import {
   useDataSourceCreation,
   useCellEditing,
 } from './hooks';
-import { setAuthTokenGetter } from './utils/authenticatedFetch';
 
 export type UseDataTableControllerParams = Pick<DataTableProps, 'dataSourceId' | 'jsonPath' | 'workflowContext' | 'showIdColumn' | 'readOnly' | 'snapshotData' | 'serverFilters'>;
 
@@ -28,13 +27,11 @@ export function useDataTableController({ dataSourceId, jsonPath, workflowContext
   const isSnapshot = !!snapshotData;
   const { toasts, addToast, removeToast } = useToast();
 
-  // Get token getter for authenticated API calls
-  const { getAccessTokenSilently, isLoading: isAuthLoading } = useAuthGuard();
-
-  // Set up auth token getter for all hooks to use
-  useEffect(() => {
-    setAuthTokenGetter(getAccessTokenSilently);
-  }, [getAccessTokenSilently]);
+  // Wait for auth before firing requests. The token itself comes from apiClient's
+  // single provider (installed once in smart-providers.tsx): this hook no longer
+  // installs a module-global getter of its own, which AGENTS.md forbids and which
+  // outlived every component that set it.
+  const { isLoading: isAuthLoading } = useAuthGuard();
 
   // Create view config - updates when jsonPath changes for nested navigation
   const viewConfig = useMemo(

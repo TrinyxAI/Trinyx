@@ -40,7 +40,7 @@ import static org.assertj.core.api.Assertions.assertThat;
  * <p>Skipped silently when Docker is unavailable (mirrors
  * {@code OptimBundlePostgresIT}); CI runners with Docker exercise the full suite.
  */
-@Testcontainers
+@Testcontainers(disabledWithoutDocker = true)
 @DisplayName("TenantStorageBreakdownRepository.incrementUsage - Postgres clamp E2E")
 class TenantStorageBreakdownClampPostgresIT {
 

@@ -2,6 +2,7 @@ import * as React from 'react';
 import type { Node } from 'reactflow';
 import type { BuilderNodeData } from '../../types';
 import { matchNodeClass, type NodeFamily, type BuilderNodeClass } from '../../nodes/nodeClasses';
+import { nodeRegistry } from '../../registry/nodeRegistry';
 
 interface InspectorNodeMeta {
   nodeClass: BuilderNodeClass | null;
@@ -141,8 +142,12 @@ export function useInspectorNodeMeta(node: Node<BuilderNodeData> | null): Inspec
     const isUserApproval = nodeIdForCore === 'user-approval' || nodeIdForCore.startsWith('user-approval-');
     const isWhile = nodeIdForCore === 'while' || nodeIdForCore.startsWith('while-');
     const isTransform = nodeIdForCore === 'transform' || nodeIdForCore.startsWith('transform-');
-    const isMerge = nodeIdForCore === 'merge' || nodeIdForCore.startsWith('merge-') || node?.type === 'mergeNode';
-    const isWait = nodeIdForCore === 'wait' || nodeIdForCore.startsWith('wait-') || (node?.type === 'flowNode' && nodeKind === 'wait');
+    // nodeRegistry owns node-type detection (AGENTS.md); these used to hardcode
+    // `node?.type === 'mergeNode'` / `'flowNode'`. The registry predicates read the same
+    // node.data.id this function calls nodeIdForCore, and additionally match on
+    // node.data.kind, which is the detection the registry intends.
+    const isMerge = !!node && nodeRegistry.isMergeNode(node);
+    const isWait = !!node && nodeRegistry.isWaitNode(node);
     const isCoreNode =
       (isCoreGenericNode || isLogicSubcategory) && !isIfElse && !isSwitch && !isUserApproval && !isWhile && !isTransform && !isMerge && !isWait && !isHttpRequest && !isWebhook;
     

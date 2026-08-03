@@ -133,29 +133,6 @@ public class NodeLibraryService {
     }
 
     /**
-     * Search nodes by query string using full-text search.
-     *
-     * @param query Search query
-     * @param limit Max results
-     * @return List of matching nodes
-     */
-    public List<NodeTypeDocumentationEntity> searchNodes(String query, int limit) {
-        if (query == null || query.isBlank()) {
-            return List.of();
-        }
-
-        // Try full-text search first (only enabled nodes)
-        List<NodeTypeDocumentationEntity> results = repository.searchByQueryEnabled(query, limit);
-
-        // Fallback to pattern matching if no results (only enabled nodes)
-        if (results.isEmpty()) {
-            results = repository.searchByPatternEnabled("%" + query + "%", limit);
-        }
-
-        return results;
-    }
-
-    /**
      * Get all nodes from all categories.
      *
      * @return Map with all nodes organized by variable prefix category

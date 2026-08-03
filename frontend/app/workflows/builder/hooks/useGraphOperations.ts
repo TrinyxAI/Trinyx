@@ -273,9 +273,11 @@ export function useGraphOperations(
       } else if (item.kind === 'data_input') {
         nodeStyle = { width: 220 };
       } else if (item.nodeType === 'interfaceNode') {
-        // Virtual viewport renders the interface at 1280×800 - without an explicit
+        // Virtual viewport renders the interface at 1280x800 - without an explicit
         // node size, the layout box grows to fit that (CSS transform only scales
-        // the visual rendering, not the layout). Match useInterfacePreviewSize defaults.
+        // the visual rendering, not the layout). 400x250 is the preview default;
+        // it used to be stated as "match useInterfacePreviewSize defaults", but that
+        // hook had no importers and was deleted, so the numbers live here now.
         nodeStyle = { width: 400, height: 250 };
       }
 

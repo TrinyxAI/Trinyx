@@ -11,8 +11,7 @@ import java.lang.annotation.Target;
  * path knows which composition rules apply.
  *
  * <p>{@code opKind} is the union of the kinds of operations the builder emits
- * across all its {@code @PatchTarget} methods. Combined with the per-method
- * {@link PatchTarget} annotation, the {@link RunCoalescingService} can decide
+ * across all its patch methods. From it, the {@link RunCoalescingService} can decide
  * whether two same-path patches can be merged (DELTA+DELTA on COMMUTATIVE_DELTA)
  * or must force-flush (DELTA+ASSIGN, ASSIGN+ASSIGN - plan §3 force-flush rule).
  *

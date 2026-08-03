@@ -7,6 +7,16 @@
  *
  * Usage:
  *   node generate-ts.js [--output <path>]
+ *
+ * ITS OUTPUT IS DELIBERATELY UNTRACKED AND GATES NOTHING. DEFAULT_OUTPUT below is
+ * .gitignored, nothing in the app imports it, and CI no longer diffs it: a
+ * `git diff --exit-code` on an untracked path cannot fail, so that gate reported
+ * green no matter what the generator produced. This script is a local convenience
+ * for reading the schema as TypeScript, nothing more.
+ *
+ * What actually gates the schema is `npm run contracts:validate:strict` (real exit
+ * code, unlike the non-strict script) and `npm run contracts:test` (contract-tests.js,
+ * 1645 semantic assertions). Both run in CI. Add checks there, not here.
  */
 
 const fs = require('fs');

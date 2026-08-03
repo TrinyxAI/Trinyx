@@ -100,7 +100,8 @@ vi.mock('next-intl', () => ({
 vi.mock('../../../contexts/StepByStepContext', () => ({
   useNodeExecutionStatus: () => execStatus(),
 }));
-vi.mock('../../NodePlayButton', () => ({
+vi.mock('../../NodePlayButton', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../../NodePlayButton')>()),
   NodePlayButton: () => null,
   deriveNodeStatus: () => undefined,
 }));

@@ -569,6 +569,46 @@ body {
   border-radius: 18px;
 }
 
+/* Walking back up from a run to the run history: the row of the run you were
+   looking at beats twice, then settles into its plain selected state, so "which
+   run (and which version) was that?" is answered without hunting the list. Same
+   intent, and the same blue-400, as the files explorer's back-from-detail
+   highlight (`ring-blue-400/60`), which has only a static ring.
+
+   Two deliberate choices: only the INSET ring is animated, so the row keeps its
+   own selected background and nothing jumps when the animation ends; and the
+   colour is a literal, not `--accent-primary` - that token is near-black in
+   light and near-white in dark, i.e. the two themes would flash different hues
+   and neither would read as a highlight.
+
+   The class is applied and removed imperatively (`scrollToAndFlash`), and comes
+   off on `animationend` - so this animation OWNS the cue's lifetime and must end
+   at a transparent ring, or it would snap off instead of fading. */
+@keyframes run-row-focus-flash {
+  0% { box-shadow: inset 0 0 0 0 rgba(96, 165, 250, 0); }
+  15% { box-shadow: inset 0 0 0 2px rgba(96, 165, 250, 0.9); }
+  45% { box-shadow: inset 0 0 0 2px rgba(96, 165, 250, 0.3); }
+  70% { box-shadow: inset 0 0 0 2px rgba(96, 165, 250, 0.9); }
+  100% { box-shadow: inset 0 0 0 0 rgba(96, 165, 250, 0); }
+}
+.run-row-focus-flash {
+  animation: run-row-focus-flash 1.6s ease-out;
+}
+/* No beating for a user who asked for less motion: `step-end` holds a plain ring
+   for the window then drops it in one step, so there is no oscillation and no
+   fade. It stays an ANIMATION rather than `animation: none` on purpose - the
+   class is removed on `animationend`, and a suppressed animation would never
+   fire it, leaving the ring on the row for the rest of the session. */
+@keyframes run-row-focus-hold {
+  0% { box-shadow: inset 0 0 0 2px rgba(96, 165, 250, 0.7); }
+  100% { box-shadow: inset 0 0 0 0 rgba(96, 165, 250, 0); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .run-row-focus-flash {
+    animation: run-row-focus-hold 1.6s step-end;
+  }
+}
+
 @keyframes float {
   0%, 100% { transform: translateY(0px); }
   50% { transform: translateY(-20px); }

@@ -156,28 +156,6 @@ public class WorkflowBuilderModifier {
     }
 
     /**
-     * Remove the last added node.
-     */
-    public ToolExecutionResult executeRemoveLast(WorkflowBuilderSession session, Map<String, Object> parameters) {
-        Optional<WorkflowBuilderSession.SessionAction> lastActionOpt = session.getLastAction();
-        if (lastActionOpt.isEmpty()) {
-            return ToolExecutionResult.failure(ToolErrorCode.EXECUTION_FAILED, "No actions in history. Nothing to remove.");
-        }
-
-        WorkflowBuilderSession.SessionAction lastAction = lastActionOpt.get();
-        String nodeId = lastAction.getNodeId();
-
-        if (nodeId == null) {
-            return ToolExecutionResult.failure(ToolErrorCode.EXECUTION_FAILED, "Last action '" + lastAction.getActionType() + "' did not create a node. Use workflow(action='undo') instead.");
-        }
-
-        // Delegate to remove with the node reference
-        Map<String, Object> removeParams = new LinkedHashMap<>(parameters);
-        removeParams.put("node", nodeId);
-        return executeRemove(session, removeParams);
-    }
-
-    /**
      * Modify a specific node.
      *
      * HARMONIZED SYNTAX: Same as ADD - uses params={} with same keys.
@@ -494,25 +472,6 @@ public class WorkflowBuilderModifier {
         result.put("tip", "Use workflow(action='undo') to revert this change.");
 
         return ToolExecutionResult.success(result);
-    }
-
-    /**
-     * Modify the last added node.
-     */
-    public ToolExecutionResult executeModifyLast(WorkflowBuilderSession session, Map<String, Object> parameters) {
-        Optional<WorkflowBuilderSession.SessionAction> lastActionOpt = session.getLastAction();
-        if (lastActionOpt.isEmpty()) {
-            return ToolExecutionResult.failure(ToolErrorCode.EXECUTION_FAILED, "No actions in history. Add a node first.");
-        }
-
-        String nodeId = lastActionOpt.get().getNodeId();
-        if (nodeId == null) {
-            return ToolExecutionResult.failure(ToolErrorCode.EXECUTION_FAILED, "Last action did not create a node. Use modify_node with explicit node reference.");
-        }
-
-        Map<String, Object> modifyParams = new LinkedHashMap<>(parameters);
-        modifyParams.put("node", nodeId);
-        return executeModifyNode(session, modifyParams);
     }
 
     /**

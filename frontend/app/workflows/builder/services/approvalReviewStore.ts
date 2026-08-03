@@ -64,6 +64,18 @@ export function subscribeApprovalReview(listener: () => void): () => void {
   };
 }
 
+/**
+ * Is THIS node the one under review? The target is global (one review at a
+ * time), so every consumer must re-check the node it renders for - an approval
+ * node keeps its review layout only while it owns the target.
+ */
+export function isReviewTargetForNode(
+  target: ApprovalReviewTarget | null,
+  rfNodeId: string | null | undefined,
+): boolean {
+  return !!target && !!rfNodeId && target.rfNodeId === rfNodeId;
+}
+
 /** React binding - re-renders the consumer whenever the target changes. */
 export function useApprovalReviewTarget(): ApprovalReviewTarget | null {
   return useSyncExternalStore(

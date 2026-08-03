@@ -59,7 +59,7 @@ function renderToggle(run: unknown = RUN) {
       workflowId="wf-1"
       mode="run"
       currentRunInfo={run as never}
-      currentEpoch={1}
+      epochCount={1}
       onStop={onStop}
     />,
   );

@@ -37,6 +37,13 @@ export interface RunPanelContentProps {
    * still applies. Must be a stable object identity per request.
    */
   viewRequest?: { view: RunPanelView; seq: number };
+  /**
+   * Which surface this panel belongs to, so the run it binds reaches that
+   * surface's canvas and no other. Omitted on the workflow page, which owns the
+   * route; a side-panel workflow tab passes its own id, otherwise a pick made
+   * there would rewrite the page's URL whenever both show the same workflow.
+   */
+  surfaceId?: string;
 }
 
 /**
@@ -48,7 +55,7 @@ export interface RunPanelContentProps {
  * the canvas pill uses - so the user never loses track of which run the epochs
  * and steps below belong to, and can walk back up with one click.
  */
-export function RunPanelContent({ workflowId, allowHistory = false, viewRequest }: RunPanelContentProps) {
+export function RunPanelContent({ workflowId, allowHistory = false, viewRequest, surfaceId }: RunPanelContentProps) {
   const t = useTranslations();
   const { runId: contextRunId, setRunId, viewingEpoch, setViewingEpoch } = useWorkflowMode();
 
@@ -171,8 +178,8 @@ export function RunPanelContent({ workflowId, allowHistory = false, viewRequest 
     // Sent even for the run already on screen: an agent-launched run is bound
     // in place on the edit URL, and picking it here is how a user says "keep
     // this one". The page no-ops when there is nothing left to align.
-    requestBindRun({ workflowId, runId: nextRunId });
-  }, [workflowId, setRunId]);
+    requestBindRun({ workflowId, runId: nextRunId, surfaceId });
+  }, [workflowId, setRunId, surfaceId]);
 
   const runAction = useCallback((action: 'stop' | 'cancel' | 'reactivate') => {
     requestRunAction({ action, workflowId, runId });
@@ -225,7 +232,10 @@ export function RunPanelContent({ workflowId, allowHistory = false, viewRequest 
       <RunSummaryBar
         currentRunInfo={data.runInfo}
         pinnedVersion={data.pinnedVersion}
-        currentEpoch={data.currentEpoch}
+        /* The epochs the run HAS - the same list the selector below renders -
+           never the engine's cursor, which already points at the next, dormant
+           epoch as soon as one finishes. */
+        epochCount={data.epochTimestamps?.length ?? 0}
         selectedEpoch={viewingEpoch}
         isStepByStep={data.isStepByStep}
         onStop={data.isPreviewOnly ? undefined : () => runAction('stop')}

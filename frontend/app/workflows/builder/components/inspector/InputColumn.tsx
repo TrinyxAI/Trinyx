@@ -15,7 +15,7 @@ import { useWorkflowMode } from '@/contexts/WorkflowModeContext';
 import { nodeRegistry } from '../../registry/nodeRegistry';
 import { ParentNodesDataPreview } from './outputs/ParentNodesDataPreview';
 import { useStepByStep } from '../../contexts/StepByStepContext';
-import { useApprovalReviewTarget } from '../../services/approvalReviewStore';
+import { isReviewTargetForNode, useApprovalReviewTarget } from '../../services/approvalReviewStore';
 import { useWorkflowVariables } from '@/lib/hooks/useWorkflowVariables';
 
 interface InputColumnProps {
@@ -61,8 +61,7 @@ export const InputColumn = ({
   // collapsed Grandparents/Great-grandparents groups (distance >= 2) so their
   // navigators mount and land on the same (epoch, item) the review target sets.
   const reviewTarget = useApprovalReviewTarget();
-  const ancestorReviewTarget =
-    reviewTarget && node && reviewTarget.rfNodeId === node.id ? reviewTarget : null;
+  const ancestorReviewTarget = isReviewTargetForNode(reviewTarget, node?.id) ? reviewTarget : null;
 
   // Check if we're editing a loop child
   const isLoopChild = !!selectedLoopChild && node?.id === selectedLoopChild.childId;

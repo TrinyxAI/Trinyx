@@ -15,14 +15,11 @@ let mockMode: Record<string, unknown>;
 
 vi.mock('next-intl', () => ({ useTranslations: () => (k: string) => k }));
 vi.mock('@/contexts/WorkflowModeContext', () => ({ useWorkflowMode: () => mockMode }));
-vi.mock('@/app/workflows/builder/components/NodePlayButton', () => ({
-  NodePlayButton: (props: Record<string, unknown>) => {
-    playProps.push(props);
-    return <div data-testid="play" />;
-  },
-  deriveNodeStatus: () => 'ready',
-}));
-vi.mock('../../NodePlayButton', () => ({
+// ONE mock for this module, not two. The alias specifier and the relative one
+// resolve to the same file, so a second registration only made which factory
+// wins depend on resolution order - and the two had drifted apart.
+vi.mock('../../NodePlayButton', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../../NodePlayButton')>()),
   NodePlayButton: (props: Record<string, unknown>) => {
     playProps.push(props);
     return <div data-testid="play" />;
@@ -35,6 +32,9 @@ vi.mock('@/app/workflows/builder/nodes/nodeClasses', () => ({ findNodeClassById:
 vi.mock('@/app/workflows/builder/components/nodes/TriggerNodePinButton', () => ({
   TriggerNodePinButton: () => null,
 }));
+// Replaced wholesale, NOT spread from the original: this module's side-panel
+// payloads reach next-intl's navigation entry, which vitest cannot resolve.
+// That is why the fireable-trigger predicate lives in its own leaf module.
 vi.mock('@/app/workflows/builder/hooks/useNodeContextualButtons', () => ({
   deriveNodeContextFlags: () => ({
     isTriggerNode: true, isChatTrigger: true, isManualTrigger: false, isFormTrigger: false,

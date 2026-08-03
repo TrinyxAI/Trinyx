@@ -20,6 +20,8 @@ import {
   canvasChromeChipRadiusClass,
   canvasChromeSurfaceClass,
   canvasChromeCompactButtonClass,
+  canvasNodeButtonClass,
+  canvasNodeButtonShimmerRadiusClass,
 } from '@/components/ui/canvas-chrome';
 
 /** Classes twMerge is expected to drop when the ghost hover is overridden. */
@@ -201,5 +203,79 @@ describe('canvasChromeCompactButtonClass', () => {
 describe('canvasChromeChipRadiusClass', () => {
   it('is neither a pill nor the control radius - the info chips are smaller than a button', () => {
     expect(canvasChromeChipRadiusClass).toBe('rounded-md');
+  });
+});
+
+describe('canvasNodeButtonClass', () => {
+  it('is square, like the chrome it now sits next to', () => {
+    const t = tokens(canvasNodeButtonClass);
+    expect(t).toContain('rounded-xl');
+    expect(t).not.toContain('rounded-full');
+  });
+
+  it('dropped the two things that made it a pill: it neither grows nor floats on hover', () => {
+    // hover:scale-110 + shadow-md is exactly what the round buttons under a node
+    // carried, and what made them read as bubbles beside the flat chrome.
+    expect(canvasNodeButtonClass).not.toContain('scale-110');
+    // Asserted as a token: `shadow-none` (inherited, and what we want) also
+    // satisfies a substring check for "shadow".
+    const t = tokens(canvasNodeButtonClass);
+    expect(t.filter((c) => c.startsWith('shadow'))).toEqual(['shadow-none']);
+    // Colour-only transition, inherited from Button - not `transition-all`.
+    expect(tokens(canvasNodeButtonClass)).toContain('transition-colors');
+    expect(tokens(canvasNodeButtonClass)).not.toContain('transition-all');
+  });
+
+  it('is the compact chrome footprint, so a node button and a toolbar button are the same size', () => {
+    const node = tokens(canvasNodeButtonClass);
+    const compact = tokens(canvasChromeCompactButtonClass(false));
+    expect(node).toContain('h-7');
+    expect(node).toContain('w-7');
+    expect(compact).toContain('h-7');
+    expect(compact).toContain('w-7');
+  });
+
+  it('inherits the Button base tokens instead of restating them', () => {
+    for (const token of ['rounded-xl', 'transition-colors', 'duration-150', 'focus-visible:ring-2']) {
+      expect(buttonVariants(), `Button lost ${token} - the node button inherits it`).toContain(token);
+      expect(canvasNodeButtonClass).toContain(token);
+    }
+  });
+
+  it('carries a hairline border, the only thing separating it from a surface it has no card on', () => {
+    // Load-bearing since the drop shadow went: the pin, play and side buttons in
+    // a run-step popover pass no status border and render on a white tooltip.
+    // Both tokens are asserted - the colour alone at zero width is invisible.
+    const t = tokens(canvasNodeButtonClass);
+    expect(t).toContain('border');
+    expect(t).toContain('border-[var(--border-color)]');
+    // The Button base ships `border-transparent`; twMerge must resolve it away,
+    // or stylesheet order decides and the border silently disappears.
+    expect(t).not.toContain('border-transparent');
+  });
+
+  it('paints an OPAQUE surface: it floats over nodes and edges with no card beneath it', () => {
+    const t = tokens(canvasNodeButtonClass);
+    expect(t).toContain('bg-[var(--bg-primary)]');
+    // Transparent would let a node body or an edge show through the button.
+    expect(t).not.toContain('bg-transparent');
+    // Theme tokens, not the hardcoded white/gray-800 pair it replaced.
+    expect(canvasNodeButtonClass).not.toContain('bg-white');
+    expect(canvasNodeButtonClass).not.toContain('dark:bg-gray-800');
+  });
+
+  it('replaces the ghost variant inverted hover, like every other chrome control', () => {
+    for (const token of GHOST_INVERTED_HOVER) {
+      expect(canvasNodeButtonClass).not.toContain(token);
+    }
+    expect(canvasNodeButtonClass).toContain('hover:bg-[var(--bg-tertiary)]');
+  });
+
+  it('clips the shimmer, and clips it at the button radius', () => {
+    // The overlay is a sibling span at inset-0: without overflow-hidden it paints
+    // over the corners, and at a different radius it leaves a visible notch.
+    expect(tokens(canvasNodeButtonClass)).toContain('overflow-hidden');
+    expect(canvasNodeButtonShimmerRadiusClass).toBe('rounded-xl');
+    expect(tokens(canvasNodeButtonClass)).toContain(canvasNodeButtonShimmerRadiusClass);
   });
 });

@@ -24,7 +24,7 @@
  */
 import React from 'react';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, fireEvent } from '@testing-library/react';
+import { render, fireEvent, act } from '@testing-library/react';
 
 let mockObjectUrl: { url: string | null; loading: boolean; error: boolean };
 const useAuthedObjectUrlMock = vi.fn(
@@ -42,6 +42,10 @@ vi.mock('next-intl', () => ({
   useTranslations: () => (key: string, params?: Record<string, unknown>) =>
     params ? `${key}(${Object.values(params).join(',')})` : key,
 }));
+// The strip asks ReactFlow for its host node id. Null here (no ReactFlow around
+// a standalone render), which exercises the useId fallback that keeps each strip
+// instance distinct - exactly the path the canvas-coordination suite below needs.
+vi.mock('reactflow', () => ({ useNodeId: () => null }));
 const sidePanelStub = { openTab: vi.fn() };
 vi.mock('@/contexts/SidePanelContext', () => ({
   useSidePanelSafe: () => sidePanelStub,
@@ -53,6 +57,11 @@ vi.mock('@/lib/sidePanel/openFilesPanel', () => ({
 
 import { File, FileText, FileType2, Film, Image, Music } from 'lucide-react';
 import { FileResultStrip, getFileKindIcon } from '../FileResultStrip';
+import {
+  FileStripExpansionProvider,
+  useFileStripExpansionSafe,
+  type FileStripExpansionContextValue,
+} from '@/contexts/FileStripExpansionContext';
 
 const makeFile = (over: Partial<{ path: string; name: string; mimeType: string; size: number; id: string }> = {}) => ({
   path: '1/general/catalog-binary/sfx.mp3',
@@ -308,6 +317,95 @@ describe('FileResultStrip v2 - z-order while expanded', () => {
     expect(host.style.zIndex).toBe('3');
 
     document.body.removeChild(host);
+  });
+});
+
+describe('FileResultStrip v4 - canvas-wide expand/collapse (toolbar toggle-all)', () => {
+  /** Captures the live registry so a test can fire the toolbar's bulk actions. */
+  function Probe({ sink }: { sink: { current: FileStripExpansionContextValue | null } }) {
+    sink.current = useFileStripExpansionSafe();
+    return null;
+  }
+
+  const renderCanvas = (files: ReturnType<typeof makeFile>[]) => {
+    const sink: { current: FileStripExpansionContextValue | null } = { current: null };
+    const view = render(
+      <FileStripExpansionProvider>
+        <Probe sink={sink} />
+        {files.map((f) => <FileResultStrip key={f.id} file={f} />)}
+      </FileStripExpansionProvider>,
+    );
+    return { ...view, sink };
+  };
+
+  it('registers with the canvas so the toolbar knows a file preview is on screen', () => {
+    const { sink } = renderCanvas([imageFile, videoFile]);
+    expect(sink.current?.stripCount).toBe(2);
+    expect(sink.current?.expandedCount).toBe(0);
+  });
+
+  it('unregisters when it leaves the canvas so the toolbar control disappears with the last strip', () => {
+    const sink: { current: FileStripExpansionContextValue | null } = { current: null };
+    const tree = (files: ReturnType<typeof makeFile>[]) => (
+      <FileStripExpansionProvider>
+        <Probe sink={sink} />
+        {files.map((f) => <FileResultStrip key={f.id} file={f} />)}
+      </FileStripExpansionProvider>
+    );
+    const { rerender } = render(tree([imageFile, videoFile]));
+    expect(sink.current?.stripCount).toBe(2);
+
+    // A rerun puts the nodes back to "running": their strips unmount.
+    rerender(tree([]));
+
+    expect(sink.current?.stripCount).toBe(0);
+  });
+
+  it('expandAll unfolds EVERY strip into a real preview card in one go', () => {
+    const { sink, container, getAllByTestId } = renderCanvas([imageFile, videoFile]);
+    expect(container.querySelectorAll('[data-testid="file-preview-card"]').length).toBe(0);
+
+    act(() => { sink.current?.expandAll(); });
+
+    expect(getAllByTestId('file-preview-card').length).toBe(2);
+    expect(container.querySelector('img')).not.toBeNull();
+    expect(container.querySelector('video')).not.toBeNull();
+  });
+
+  it('collapseAll folds every strip back to its pill', () => {
+    const { sink, container, getAllByTestId } = renderCanvas([imageFile, videoFile]);
+    act(() => { sink.current?.expandAll(); });
+
+    act(() => { sink.current?.collapseAll(); });
+
+    expect(container.querySelectorAll('[data-testid="file-preview-card"]').length).toBe(0);
+    expect(getAllByTestId('file-ref-pill').length).toBe(2);
+  });
+
+  it('a strip expanded by hand STAYS expanded - the shared registry must not fold it back on the next render', () => {
+    const c = renderCanvas([imageFile, videoFile]);
+    // Expanding one strip gives the context value a new identity, which
+    // re-renders every strip; a registration effect keyed on that value would
+    // unregister this strip and collapse it on the spot.
+    fireEvent.click(c.getAllByLabelText('expand')[0]);
+
+    expect(c.getAllByTestId('file-preview-card').length).toBe(1);
+    expect(c.sink.current?.stripCount).toBe(2);
+    expect(c.sink.current?.expandedCount).toBe(1);
+  });
+
+  it('expanding one strip leaves its neighbours collapsed', () => {
+    const c = renderCanvas([imageFile, videoFile]);
+    fireEvent.click(c.getAllByLabelText('expand')[0]);
+    expect(c.getAllByTestId('file-ref-pill').length).toBe(1);
+  });
+
+  it('without a provider the pill still toggles on its own local state (marketplace preview, isolated render)', () => {
+    const c = render(<FileResultStrip file={imageFile} />);
+    expand(c);
+    expect(c.getByTestId('file-preview-card')).not.toBeNull();
+    fireEvent.click(c.getByLabelText('collapse'));
+    expect(c.queryByTestId('file-preview-card')).toBeNull();
   });
 });
 

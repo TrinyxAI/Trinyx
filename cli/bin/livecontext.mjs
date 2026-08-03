@@ -123,7 +123,7 @@ async function up() {
   const info = checkDocker();
   log(`${c.green('✓')} Docker ${c.dim(info.docker)} · Compose ${c.dim(info.compose)}`);
   const compose = ensureWorkdir();
-  log(`${c.b('LiveContext')} ${c.dim('v' + VERSION)} - starting the stack in ${c.cyan(HOME)}`);
+  log(`${c.b('LiveContext')} ${c.dim('v' + VERSION)} : starting the stack in ${c.cyan(HOME)}`);
   await fetchSeed();
   log(c.dim('Pulling images and starting containers (first run downloads a few GB)...\n'));
   const code = await run('docker', composeArgs(compose, ['up', '-d', '--remove-orphans']));
@@ -170,7 +170,7 @@ async function update() {
 }
 function help() {
   log(`
-${c.b('LiveContext')} ${c.dim('v' + VERSION)} - self-hosted AI automation, one command.
+${c.b('LiveContext')} ${c.dim('v' + VERSION)} : self-hosted AI automation, one command.
 
   ${c.b('npx livecontext')} ${c.dim('[command]')}
 
@@ -183,7 +183,7 @@ ${c.b('LiveContext')} ${c.dim('v' + VERSION)} - self-hosted AI automation, one c
   ${c.dim('--version')}  Print the CLI version.
 
   ${c.dim('Docker is required (it is the runtime). This CLI only orchestrates it.')}
-  ${c.dim('Data lives in ' + HOME + ' - remove it to reset.')}
+  ${c.dim('Data lives in ' + HOME + ' (remove it to reset).')}
 `);
 }
 

@@ -299,22 +299,6 @@ class StateSnapshotServiceTest {
     }
 
     @Nested
-    @DisplayName("getEdgeCountsForPrePopulation()")
-    class GetEdgeCountsTests {
-
-        @Test
-        @DisplayName("Should return empty map when no snapshot")
-        void shouldReturnEmptyMapWhenNoSnapshot() {
-            when(runRepository.findStateSnapshotByRunIdPublic("run-1")).thenReturn(Optional.empty());
-
-            var result = service.getEdgeCountsForPrePopulation("run-1");
-
-            assertNotNull(result);
-            assertTrue(result.isEmpty());
-        }
-    }
-
-    @Nested
     @DisplayName("Convenience getter methods")
     class ConvenienceGetterTests {
 

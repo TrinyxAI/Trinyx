@@ -119,6 +119,10 @@ describe('CanvasRunTriggerButton', () => {
     ]);
     // A chat trigger needs a message: it must NOT be fired blind.
     expect(mockExecuteStep).not.toHaveBeenCalled();
+    // ...and it still leaves the focused epoch. The run it opens starts later,
+    // from the panel, which cannot move the canvas back - so a chat launched
+    // from a focused epoch used to hide its own new epoch behind the selector.
+    expect(mockSetViewingEpoch).toHaveBeenCalledWith(null);
   });
 
   it.each([

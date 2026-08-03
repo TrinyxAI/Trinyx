@@ -639,11 +639,6 @@
     "maxIterationsOptional": "Opcional",
     "maxIterationsPlaceholder": "10"
   },
-  "theme": {
-    "lightMode": "Modo Claro",
-    "darkMode": "Modo Escuro",
-    "language": "Idioma"
-  },
   "chat": {
     "diff": {
       "files": "{count} arquivos",
@@ -1192,68 +1187,6 @@
       "webhookDesc": "Receber dados via webhooks"
     }
   },
-  "models": {
-    "gpt5mini": {
-      "name": "ChatGPT-5 Mini",
-      "description": "Modelo rapido e eficiente (Recomendado)"
-    },
-    "gpt5nano": {
-      "name": "ChatGPT-5 Nano",
-      "description": "Modelo leve ultra rapido"
-    },
-    "gpt5": {
-      "name": "ChatGPT-5",
-      "description": "Modelo mais avancado da OpenAI"
-    },
-    "gpt4": {
-      "name": "GPT-4 Turbo",
-      "description": "Modelo rapido e poderoso"
-    },
-    "claudeSonnet": {
-      "name": "Claude Sonnet 4.1",
-      "description": "Modelo de conversacao avancado"
-    }
-  },
-  "tools": {
-    "codeInterpreter": "Interpretador de Codigo",
-    "codeInterpreterDesc": "Executar codigo Python",
-    "webBrowser": "Navegador Web",
-    "webBrowserDesc": "Navegar na web",
-    "fileManager": "Gerenciador de Arquivos",
-    "fileManagerDesc": "Gerenciar arquivos",
-    "webSearch": "Busca na Web",
-    "webSearchDesc": "Buscar na web",
-    "webFetch": "Busca de Página",
-    "webFetchDesc": "Extrair conteúdo de páginas web",
-    "fetchScreenshot": "Captura de tela {index}",
-    "screenshotError": "Captura de tela indisponível",
-    "webSearchAndFetch": "Buscar e Extrair",
-    "webSearchAndFetchDesc": "Buscar na web e extrair conteúdo"
-  },
-  "tutorials": {
-    "workflow": {
-      "webScraping": "Web Scraping",
-      "webScrapingDesc": "Extrair dados de websites",
-      "documentProcessing": "Processamento de Documentos",
-      "documentProcessingDesc": "Processar um PDF com IA",
-      "socialMediaListening": "Monitoramento de Redes Sociais",
-      "socialMediaListeningDesc": "Monitorar redes sociais com IA",
-      "contentGeneration": "Geracao de Conteudo",
-      "contentGenerationDesc": "Gerar um post de blog a partir de um video do YouTube",
-      "seoMarketing": "SEO e Marketing",
-      "seoMarketingDesc": "Otimizar automaticamente seu conteudo para SEO",
-      "sales": "Vendas",
-      "salesDesc": "Coletar informacoes para emails de vendas outbound"
-    },
-    "data": {
-      "databaseSetup": "Configuracao de Banco de Dados",
-      "databaseSetupDesc": "Conectar e gerenciar seus bancos de dados",
-      "fileStorage": "Armazenamento de Arquivos",
-      "fileStorageDesc": "Organizar e acessar seus arquivos",
-      "apiIntegration": "Integracao de API",
-      "apiIntegrationDesc": "Integrar APIs e servicos externos"
-    }
-  },
   "status": {
     "paused": "Pausado",
     "waiting_trigger": "Aguardando gatilho",
@@ -1312,14 +1245,6 @@
     "stepByStepMode": "Modo passo a passo",
     "scrollToLoadMore": "Role para carregar mais...",
     "lastFireDuration": "Duração da última execução"
-  },
-  "table": {
-    "addRow": "Adicionar Linha",
-    "deleteRow": "Excluir Linha",
-    "editRow": "Editar Linha",
-    "noData": "Sem dados disponiveis",
-    "loading": "Carregando dados...",
-    "error": "Erro ao carregar dados"
   },
   "actions": {
     "running": "Em execução",
@@ -3358,7 +3283,6 @@
     "toasts": {
       "credentialCreated": "Conexao bem-sucedida",
       "credentialConfigured": "Sua conta foi conectada e esta pronta para uso.",
-      "credentialConfiguredWithId": "Sua conta foi conectada e esta pronta para uso.",
       "connectionFailed": "Conexao falhou",
       "credentialConfiguredResume": "Configurei minhas credenciais para {services}. Por favor, continue.",
       "oauth2Error": "Erro OAuth2",
@@ -6728,6 +6652,8 @@
       "zoomOut": "Zoom out",
       "fitView": "Fit view",
       "autoLayout": "Layout automático (reorganizar nós)",
+      "expandAllFiles": "Expandir todas as pré-visualizações de arquivos",
+      "collapseAllFiles": "Recolher todas as pré-visualizações de arquivos",
       "disableInteractivity": "Desativar interatividade",
       "enableInteractivity": "Ativar interatividade",
       "cursorMode": "Modo do cursor",
@@ -8379,32 +8305,6 @@
     "partial_success": "Sucesso Parcial",
     "awaiting_signal": "Aguardando Ação",
     "budget_exhausted": "Limitado por créditos insuficientes"
-  },
-  "runStatus": {
-    "pending": "Pendente",
-    "waiting_trigger": "Aguardando Gatilho",
-    "running": "Em execução",
-    "paused": "Pausado",
-    "completed": "Concluído",
-    "failed": "Falhou",
-    "partial_success": "Sucesso Parcial",
-    "cancelled": "Cancelado",
-    "timeout": "Tempo Esgotado",
-    "stopped": "Parado"
-  },
-  "webSearch": {
-    "panelTitle": "Busca na Web",
-    "addressBar": "Endereço",
-    "pageContent": "Conteúdo da Página",
-    "searchResults": "Resultados da Busca",
-    "fetchedPages": "Páginas Obtidas",
-    "noResults": "Nenhum resultado disponível",
-    "pagesFetched": "páginas obtidas",
-    "results": "resultados",
-    "clickToClose": "Clique para fechar",
-    "openInBrowser": "Abrir no navegador",
-    "screenshotError": "Captura de tela indisponível",
-    "screenshotLoading": "Carregando captura de tela..."
   },
   "project": {
     "title": "Projetos",

@@ -44,7 +44,7 @@ import static org.assertj.core.api.Assertions.assertThat;
  *
  * <p>Skipped without Docker.
  */
-@Testcontainers
+@Testcontainers(disabledWithoutDocker = true)
 @DisplayName("V264 regression - AgentTaskRepository.cascadingCancelInOrganization survives varchar organization_id")
 class AgentTaskRepositoryV264PostgresIT {
 

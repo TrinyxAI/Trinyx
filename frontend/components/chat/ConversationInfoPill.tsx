@@ -8,7 +8,7 @@ import { formatRelativeDateI18n } from '@/lib/utils/dateFormatters';
 /**
  * Hover popover for a conversation sidebar row.
  *
- * Mirrors the {@link RunInfoBadge} pill on the workflow run canvas (rounded-full
+ * Mirrors the run-info pill styling used on the workflow run canvas (rounded-full
  * white/dark pill, dot-separated chips) so the visual vocabulary stays
  * consistent between the run header and the sidebar quick-info.
  *

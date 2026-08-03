@@ -21,6 +21,7 @@ import {
   publishRunPanelData,
   requestBindRun,
   requestRunAction,
+  subscribeBindRun,
   subscribeRunPanelData,
   BIND_RUN_EVENT,
   OPEN_RUN_PANEL_EVENT,
@@ -148,6 +149,80 @@ describe('run binding', () => {
       window.removeEventListener(BIND_RUN_EVENT, handler);
     }
     expect(seen).toEqual([{ workflowId: 'wf-1', runId: 'run-9' }]);
+  });
+
+  it('delivers a request to the surface showing that workflow', () => {
+    const seen: string[] = [];
+    const off = subscribeBindRun('wf-1', (runId) => seen.push(runId));
+    try {
+      requestBindRun({ workflowId: 'wf-1', runId: 'run-9' });
+      // A repeat is a real user action (picking the run again after the canvas
+      // moved on its own), not a duplicate to swallow.
+      requestBindRun({ workflowId: 'wf-1', runId: 'run-9' });
+    } finally {
+      off();
+    }
+    expect(seen).toEqual(['run-9', 'run-9']);
+  });
+
+  it('never delivers a run picked in another workflow', () => {
+    const seen: string[] = [];
+    const off = subscribeBindRun('wf-1', (runId) => seen.push(runId));
+    try {
+      requestBindRun({ workflowId: 'wf-2', runId: 'run-9' });
+    } finally {
+      off();
+    }
+    expect(seen).toEqual([]);
+  });
+
+  it('never delivers a surface-addressed pick to the page', () => {
+    // The page subscribes with NO surfaceId because it owns the route. When a
+    // side-panel tab shows the same workflow, its pick must not reach the page:
+    // that rewrote the address bar and moved the canvas behind the panel.
+    const seen: string[] = [];
+    const off = subscribeBindRun('wf-1', (runId) => seen.push(runId));
+    try {
+      requestBindRun({ workflowId: 'wf-1', runId: 'run-9', surfaceId: 'tab-1' });
+    } finally {
+      off();
+    }
+    expect(seen).toEqual([]);
+  });
+
+  it('never delivers the page pick to a surface, nor one surface pick to another', () => {
+    const tabSeen: string[] = [];
+    const off = subscribeBindRun('wf-1', (runId) => tabSeen.push(runId), 'tab-1');
+    try {
+      requestBindRun({ workflowId: 'wf-1', runId: 'from-page' });
+      requestBindRun({ workflowId: 'wf-1', runId: 'from-sibling', surfaceId: 'tab-2' });
+      requestBindRun({ workflowId: 'wf-1', runId: 'mine', surfaceId: 'tab-1' });
+    } finally {
+      off();
+    }
+    expect(tabSeen).toEqual(['mine']);
+  });
+
+  it('ignores an unaddressed request, unlike the level request', () => {
+    // Unlike `openRunPanel`, whose level applies to whichever panel asks, a bind
+    // names a RUN: several surfaces showing different workflows listen at once,
+    // and an unaddressed one would bind a foreign run into all of them.
+    const seen: string[] = [];
+    const off = subscribeBindRun('wf-1', (runId) => seen.push(runId));
+    try {
+      window.dispatchEvent(new CustomEvent(BIND_RUN_EVENT, { detail: { runId: 'run-9' } }));
+    } finally {
+      off();
+    }
+    expect(seen).toEqual([]);
+  });
+
+  it('stops delivering after unsubscribe', () => {
+    const seen: string[] = [];
+    const off = subscribeBindRun('wf-1', (runId) => seen.push(runId));
+    off();
+    requestBindRun({ workflowId: 'wf-1', runId: 'run-9' });
+    expect(seen).toEqual([]);
   });
 });
 

@@ -54,8 +54,12 @@ public class CatalogV1Controller {
                                          @RequestHeader(value = "X-Request-Id", required = false) String requestId,
                                          @RequestHeader(value = "X-Lc-Billing-Scope-Kind", required = false) String billingScopeKind,
                                          @RequestHeader(value = "X-Lc-Billing-Scope-Id", required = false) String billingScopeId,
-                                         @RequestHeader(value = "X-Lc-Billing-Step-Id", required = false) String billingStepId) {
-        applyBillingHeaders(request, billingScopeKind, billingScopeId, billingStepId);
+                                         @RequestHeader(value = "X-Lc-Billing-Step-Id", required = false) String billingStepId,
+                                         @RequestHeader(value = "X-Lc-Generation-Model", required = false) String generationModelId,
+                                         @RequestHeader(value = "X-Lc-Generation-Quantity", required = false) java.math.BigDecimal generationQuantity,
+                                         @RequestHeader(value = "X-Lc-Generation-Unit", required = false) String generationQuantityUnit) {
+        applyBillingHeaders(request, billingScopeKind, billingScopeId, billingStepId,
+                generationModelId, generationQuantity, generationQuantityUnit);
         return executeToolInternal(toolId, request, userId, orgId, requestId);
     }
 
@@ -73,8 +77,12 @@ public class CatalogV1Controller {
                                                     @RequestHeader(value = "X-Request-Id", required = false) String requestId,
                                                     @RequestHeader(value = "X-Lc-Billing-Scope-Kind", required = false) String billingScopeKind,
                                                     @RequestHeader(value = "X-Lc-Billing-Scope-Id", required = false) String billingScopeId,
-                                                    @RequestHeader(value = "X-Lc-Billing-Step-Id", required = false) String billingStepId) {
-        applyBillingHeaders(request, billingScopeKind, billingScopeId, billingStepId);
+                                                    @RequestHeader(value = "X-Lc-Billing-Step-Id", required = false) String billingStepId,
+                                                    @RequestHeader(value = "X-Lc-Generation-Model", required = false) String generationModelId,
+                                                    @RequestHeader(value = "X-Lc-Generation-Quantity", required = false) java.math.BigDecimal generationQuantity,
+                                         @RequestHeader(value = "X-Lc-Generation-Unit", required = false) String generationQuantityUnit) {
+        applyBillingHeaders(request, billingScopeKind, billingScopeId, billingStepId,
+                generationModelId, generationQuantity, generationQuantityUnit);
         // Combine apiSlug/toolSlug - service handles this format
         String toolId = apiSlug + "/" + toolSlug;
         return executeToolInternal(toolId, request, userId, orgId, requestId);
@@ -135,7 +143,10 @@ public class CatalogV1Controller {
     private static void applyBillingHeaders(ToolExecutionRequest request,
                                               String scopeKind,
                                               String scopeId,
-                                              String stepId) {
+                                              String stepId,
+                                              String generationModelId,
+                                              java.math.BigDecimal generationQuantity,
+                                              String generationQuantityUnit) {
         if (request == null) return;
         if (request.getBillingScopeKind() == null && scopeKind != null && !scopeKind.isBlank()) {
             request.setBillingScopeKind(scopeKind);
@@ -145,6 +156,32 @@ public class CatalogV1Controller {
         }
         if (request.getBillingStepId() == null && stepId != null && !stepId.isBlank()) {
             request.setBillingStepId(stepId);
+        }
+        // Every field below is @JsonIgnore on the DTO, so the null check is
+        // never anything but true on an inbound request: it exists for the
+        // in-process caller that already set the value on a request object it
+        // built itself.
+        //
+        // It read "a body value wins over the header so a caller that already
+        // knows its model is not overridden by a proxy", which described a
+        // behaviour that cannot happen and invited someone to make it possible
+        // by lifting the seal. These values decide what is charged, and the
+        // gateway strips their headers for exactly that reason.
+        if (request.getGenerationModelId() == null && generationModelId != null
+                && !generationModelId.isBlank()) {
+            request.setGenerationModelId(generationModelId);
+        }
+        if (request.getGenerationQuantity() == null && generationQuantity != null
+                && generationQuantity.signum() >= 0) {
+            request.setGenerationQuantity(generationQuantity);
+        }
+        // The unit the quantity above is counted in. It travels with the number
+        // because the number alone cannot be checked against the published
+        // rate: a row priced per image and a call measured in seconds both
+        // arrive as a bare 10.
+        if (request.getGenerationQuantityUnit() == null && generationQuantityUnit != null
+                && !generationQuantityUnit.isBlank()) {
+            request.setGenerationQuantityUnit(generationQuantityUnit);
         }
     }
 
@@ -171,6 +208,20 @@ public class CatalogV1Controller {
 
             ToolExecutionResponse response = catalogV1Service.executeTool(toolId, safeRequest, userId, orgId, resolvedRequestId);
             return ResponseEntity.ok(response);
+        } catch (com.apimarketplace.catalog.service.exception.InsufficientCreditsException e) {
+            // Pre-flight reservation refused: the tool was NOT executed, so this
+            // is a 402 rather than a 200 envelope with success=false. Same body
+            // shape as the CE relay's insufficient-credits refusal, so a caller
+            // handles one shape for both.
+            log.info("Tool {} refused - insufficient credits (delinquent={})", toolId, e.isDelinquent());
+            return ResponseEntity.status(HttpStatus.PAYMENT_REQUIRED)
+                    .body(Map.of(
+                            "success", false,
+                            "error", com.apimarketplace.catalog.service.exception.InsufficientCreditsException.ERROR_CODE,
+                            "message", e.getMessage(),
+                            "delinquent", e.isDelinquent(),
+                            "toolId", toolId
+                    ));
         } catch (ApiAuthenticationException e) {
             // Return proper HTTP status (401/403) for auth errors - don't wrap in 200!
             log.warn("Authentication error executing tool {}: {} (status={})", toolId, e.getMessage(), e.getStatus());

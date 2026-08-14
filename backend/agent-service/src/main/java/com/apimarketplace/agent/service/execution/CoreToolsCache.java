@@ -1,5 +1,6 @@
 package com.apimarketplace.agent.service.execution;
 
+import com.apimarketplace.agent.config.AgentModuleResolver;
 import com.apimarketplace.agent.domain.ToolDefinition;
 import com.apimarketplace.agent.domain.ToolParameter;
 import com.apimarketplace.agent.prompt.DefaultSystemPrompts;
@@ -31,6 +32,16 @@ public class CoreToolsCache {
     /** Core tool names - derived from DefaultSystemPrompts (single source of truth). */
     private static final Set<String> BASE_CORE_TOOL_NAMES = DefaultSystemPrompts.getAllCoreToolNames();
 
+    /**
+     * Tool names for a caller that resolved no module set at all. Derived from
+     * {@link AgentModuleResolver#NO_CONFIG_MODULES} through the same
+     * {@link DefaultSystemPrompts#build} every scoped caller uses, so "no config" resolves
+     * to everything EXCEPT the credit-spending opt-in ({@code generation})
+     * rather than to the full cache.
+     */
+    static final Set<String> NO_CONFIG_CORE_TOOL_NAMES =
+        DefaultSystemPrompts.build(AgentModuleResolver.NO_CONFIG_MODULES, false).coreToolNames();
+
     private static final int MAX_RETRY_ATTEMPTS = 20;
     private static final long INITIAL_RETRY_DELAY_MS = 3000;
     private static final long MAX_RETRY_DELAY_MS = 30000;
@@ -43,7 +54,13 @@ public class CoreToolsCache {
     private final String interfaceServiceUrl;
     private final String catalogServiceUrl;
     private final boolean webSearchEnabled;
-    private final boolean imageGenerationEnabled;
+    /**
+     * Install-level gate for the credit-spending {@code generation} tool. Off ⇒
+     * catalog-service never registers the provider, so the tool must be dropped from
+     * the expected set too, otherwise the cache retries forever chasing a tool nobody
+     * serves.
+     */
+    private final boolean generationEnabled;
     /**
      * CE→cloud web-search relay gate. When the local engine is disabled
      * (websearch.enabled=false) but the install can relay searches to a linked
@@ -71,7 +88,7 @@ public class CoreToolsCache {
                           @Value("${services.interface-url:http://127.0.0.1:8089}") String interfaceServiceUrl,
                           @Value("${services.catalog-url:http://127.0.0.1:8081}") String catalogServiceUrl,
                           @Value("${websearch.enabled:true}") boolean webSearchEnabled,
-                          @Value("${image-generation.enabled:true}") boolean imageGenerationEnabled,
+                          @Value("${generation.enabled:true}") boolean generationEnabled,
                           @org.springframework.beans.factory.annotation.Autowired(required = false)
                           com.apimarketplace.agent.cloud.CeWebSearchRelayGate webSearchRelayGate) {
         this.restTemplate = restTemplate;
@@ -82,7 +99,7 @@ public class CoreToolsCache {
         this.interfaceServiceUrl = interfaceServiceUrl;
         this.catalogServiceUrl = catalogServiceUrl;
         this.webSearchEnabled = webSearchEnabled;
-        this.imageGenerationEnabled = imageGenerationEnabled;
+        this.generationEnabled = generationEnabled;
         this.webSearchRelayGate = webSearchRelayGate;
     }
 
@@ -107,7 +124,7 @@ public class CoreToolsCache {
      * incident (2026-05-02): orchestrator boot loop lasted 7 min during a
      * coordinated restart; agent-service exhausted its retries before
      * orchestrator stabilised, leaving {@code workflow}, {@code application},
-     * {@code web_search} and {@code image_generation} permanently absent
+     * {@code web_search} and {@code files} permanently absent
      * until an agent-service restart.
      * <p>
      * This task is a no-op when nothing is missing (cheap enough). When tools
@@ -147,9 +164,9 @@ public class CoreToolsCache {
      */
     private void refreshMissingFromSources(Set<String> missing) {
         // Tools owned by orchestrator: workflow, application, web_search,
-        // image_generation, files, wait, get_connected_services, store_file, download_file
+        // files, wait, get_connected_services, store_file, download_file
         if (missing.stream().anyMatch(t -> t.equals("workflow") || t.equals("application")
-                || t.equals("web_search") || t.equals("image_generation") || t.equals("files")
+                || t.equals("web_search") || t.equals("files")
                 || t.equals("wait"))) {
             fetchToolsFrom(orchestratorUrl + "/api/agent-tools", "orchestrator");
         }
@@ -162,7 +179,8 @@ public class CoreToolsCache {
         if (missing.contains("interface")) {
             fetchToolsFrom(interfaceServiceUrl + "/api/agent-tools", "interface-service");
         }
-        if (missing.contains("catalog")) {
+        // catalog-service owns both `catalog` and the credit-spending `generation`
+        if (missing.contains("catalog") || missing.contains("generation")) {
             fetchToolsFrom(catalogServiceUrl + "/api/agent-tools", "catalog-service");
         }
     }
@@ -184,14 +202,23 @@ public class CoreToolsCache {
         if (!webSearchExposable) {
             active.remove("web_search");
         }
-        if (!imageGenerationEnabled) {
-            active.remove("image_generation");
+        if (!generationEnabled) {
+            active.remove("generation");
         }
         return Collections.unmodifiableSet(active);
     }
 
     /**
-     * Get all cached core tool definitions.
+     * Get ALL cached core tool definitions, unfiltered.
+     *
+     * <p><b>Not an execution path.</b> The returned list includes the credit-spending
+     * {@code generation} tool, so handing it to an agent grants
+     * spending authority nobody opted into. Every execution surface must scope its tools by
+     * the agent's module set: resolve with {@code AgentModuleResolver.resolveEnabledModules}
+     * (which already maps a {@code null} toolsConfig to
+     * {@link com.apimarketplace.agent.config.AgentModuleResolver#NO_CONFIG_MODULES}), turn it
+     * into names with {@code DefaultSystemPrompts.build(...).coreToolNames()}, then call
+     * {@link #getCoreTools(Set)}. This accessor is for diagnostics and cache inspection only.
      */
     public List<ToolDefinition> getCoreTools() {
         if (!initialized) {
@@ -204,7 +231,11 @@ public class CoreToolsCache {
     /**
      * Get core tools filtered by enabled tool names (from agent's toolsConfig).
      *
-     * @param enabledToolNames set of tool names to include (null = all)
+     * @param enabledToolNames set of tool names to include. {@code null} = the caller
+     *                         resolved nothing, which falls back to
+     *                         {@link #NO_CONFIG_CORE_TOOL_NAMES} (everything except the
+     *                         credit-spending opt-ins), NOT to every cached tool. An empty
+     *                         set means no tools at all (mode=off).
      */
     public List<ToolDefinition> getCoreTools(Set<String> enabledToolNames) {
         if (!initialized) {
@@ -212,7 +243,7 @@ public class CoreToolsCache {
             return List.of();
         }
         if (enabledToolNames == null) {
-            return getCoreTools();
+            return getCoreTools(NO_CONFIG_CORE_TOOL_NAMES);
         }
         return cache.values().stream()
             .filter(td -> enabledToolNames.contains(td.name()))
@@ -248,7 +279,7 @@ public class CoreToolsCache {
         // Fetch from interface-service (interface)
         fetchToolsFrom(interfaceServiceUrl + "/api/agent-tools", "interface-service");
 
-        // Fetch from catalog-service (catalog)
+        // Fetch from catalog-service (catalog, generation)
         fetchToolsFrom(catalogServiceUrl + "/api/agent-tools", "catalog-service");
 
         initialized = true;

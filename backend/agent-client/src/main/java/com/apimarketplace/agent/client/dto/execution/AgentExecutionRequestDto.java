@@ -110,18 +110,23 @@ public record AgentExecutionRequestDto(
 
     /**
      * Canonical enabled MODULE keys (AgentModuleResolver vocabulary: catalog, table,
-     * interface, agent, skill, workflow, application, web_search, files, image_generation),
-     * derived from the agent's {@code toolsConfig} by the PRODUCER (workflow
-     * {@code AgentNode} / chat {@code ConversationAgentService}). Drives core tool-SCHEMA
-     * scoping on BOTH execution surfaces so the workflow path matches chat:
+     * interface, agent, skill, workflow, application, web_search, files, wait,
+     * generation), derived from the agent's {@code toolsConfig} by the
+     * PRODUCER (workflow {@code AgentNode} / chat {@code ConversationAgentService}). Drives
+     * core tool-SCHEMA scoping on BOTH execution surfaces so the workflow path matches chat:
      * <ul>
      *   <li>direct loop - {@code AgentRemoteExecutionService} rebuilds the filtered core
      *       tool name set and calls {@code CoreToolsCache.getCoreTools(Set)};</li>
      *   <li>bridge - forwarded to the CLI session as {@code enabledModules} so
      *       {@code CliAgentService.resolveModules} scopes the MCP tools.</li>
      * </ul>
-     * {@code null} ⇒ unrestricted (all core tools), preserving legacy behaviour for callers
-     * that don't set it (e.g. classify/guardrail which already send no tools).
+     * Producers SHOULD always set it: {@code AgentModuleResolver.resolveEnabledModules} already
+     * maps a {@code null} toolsConfig to the right set, so there is nothing to omit.
+     * {@code null} means "the producer decided nothing", and BOTH consumers then fall back to
+     * {@link com.apimarketplace.agent.config.AgentModuleResolver#NO_CONFIG_MODULES} - NOT to
+     * every core tool. That fallback is what keeps the credit-spending opt-ins
+     * ({@code generation}) out of the hands of a caller that was
+     * granted neither; an empty list still means "no modules, no tools" (mode=off).
      */
     List<String> enabledModules
 ) {

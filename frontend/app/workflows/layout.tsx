@@ -5,6 +5,7 @@ import { resolveRequestLocale } from '@/i18n/resolveRequestLocale';
 import CeCloudCreditModal from '@/components/billing/CeCloudCreditModal';
 import ModelNotManagedModal from '@/components/billing/ModelNotManagedModal';
 import AgentErrorModal from '@/components/billing/AgentErrorModal';
+import AccountRestoreModal from '@/components/auth/AccountRestoreModal';
 import { WorkflowLayoutDirectionProvider } from '@/contexts/WorkflowLayoutDirectionContext';
 
 export default async function WorkflowsLayout({
@@ -29,6 +30,10 @@ export default async function WorkflowsLayout({
         <CeCloudCreditModal />
         <ModelNotManagedModal />
         <AgentErrorModal />
+        {/* Same reason: a deactivated person who opens a bookmarked builder URL gets every call
+            refused here too, and without this listener the restore interstitial never appears,
+            leaving them in an app where nothing loads and no path leads anywhere. */}
+        <AccountRestoreModal />
       </WorkflowLayoutDirectionProvider>
     </NextIntlClientProvider>
   );

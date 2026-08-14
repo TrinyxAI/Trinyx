@@ -44,6 +44,7 @@ import {
 import {
   cloudLinkService,
   CLOUD_NO_SUBSCRIPTION,
+  cloudSubscriptionPays,
   type CloudLinkStatus,
 } from '@/lib/api/cloud-link.service';
 import { ceLinkService, type CeLinkSummary } from '@/lib/api/ce-link.service';
@@ -206,7 +207,7 @@ function ThisInstallSection() {
     <>
       <div className="rounded-xl border border-theme p-6">
         <div className="flex items-start gap-4">
-          <div className="w-10 h-10 rounded-full bg-theme-secondary flex items-center justify-center shrink-0">
+          <div className="w-10 h-10 rounded-xl bg-theme-secondary flex items-center justify-center shrink-0">
             <Link2 className="h-5 w-5 text-theme-primary" />
           </div>
           <div className="flex-1 min-w-0">
@@ -268,8 +269,16 @@ function ThisInstallSection() {
               aria-label={tCatalog('label')}
             />
           </div>
-          {status?.catalogSource === 'CLOUD'
-            && (!status?.cloudPlanCode || status.cloudPlanCode === CLOUD_NO_SUBSCRIPTION) && (
+          {status?.catalogSource === 'CLOUD' && (
+            <p className="mt-2 text-sm text-theme-secondary max-w-md">
+              {tCatalog('cloudCovers')}
+            </p>
+          )}
+          {/* Asked through the one helper that mirrors the server's rule. The
+              condition used to test only the no-subscription sentinel, so an
+              install linked to a FREE cloud account was told nothing and then
+              had every relayed call refused. */}
+          {status?.catalogSource === 'CLOUD' && !cloudSubscriptionPays(status?.cloudPlanCode) && (
             <p className="mt-2 text-sm text-amber-600 dark:text-amber-400 max-w-md">
               {tCatalog('subscriptionRequired')}{' '}
               <Link
@@ -451,7 +460,7 @@ export function LinkedInstallsSection() {
                   key={link.installId}
                   className="rounded-xl border border-theme p-4 flex items-start gap-4"
                 >
-                  <div className="w-10 h-10 rounded-full bg-theme-secondary flex items-center justify-center shrink-0">
+                  <div className="w-10 h-10 rounded-xl bg-theme-secondary flex items-center justify-center shrink-0">
                     <Cloud className="h-5 w-5 text-theme-primary" />
                   </div>
                   <div className="flex-1 min-w-0">

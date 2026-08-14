@@ -435,4 +435,49 @@ class ConceptsHelpProviderTest {
             assertThat(to).startsWith("mcp:");
         }
     }
+
+    // ==================== Mocking Help Tests ====================
+
+    @Nested
+    @DisplayName("Mocking Help")
+    class MockingHelp {
+
+        @SuppressWarnings("unchecked")
+        private Map<String, Object> rules() {
+            return (Map<String, Object>) ConceptsHelpProvider.getMockingHelp().get("RULES");
+        }
+
+        @Test
+        @DisplayName("Mocking help should carry the sections an agent needs to set, run and bound a mock")
+        void mockingHelpContainsRequiredSections() {
+            Map<String, Object> help = ConceptsHelpProvider.getMockingHelp();
+
+            assertThat(help).containsKeys("title", "description", "SET_AND_CLEAR", "PROPOSED_OUTPUT", "RUN_AND_VERIFY", "RULES", "TYPICAL_FLOW");
+        }
+
+        @Test
+        @DisplayName("Mocking rules must tell the agent a mocked FileRef needs its id, not just a url")
+        void rulesDemandAnIdOnAMockedFileRef() {
+            // A hand-written mock that copies only the url renders as
+            // "no inline preview" under the node and hands a downstream file
+            // param nothing to fetch - the rule exists to stop that.
+            String fileOutputs = (String) rules().get("file_outputs");
+
+            assertThat(fileOutputs).isNotNull();
+            assertThat(fileOutputs).contains("id");
+            assertThat(fileOutputs).contains("_type:'file'");
+            assertThat(fileOutputs).contains("/files/by-id/");
+        }
+
+        @Test
+        @DisplayName("Mocking rules stay agent-facing: they name MCP actions, never REST paths or UI steps")
+        void rulesReferenceMcpActionsOnly() {
+            String fileOutputs = (String) rules().get("file_outputs");
+
+            assertThat(fileOutputs).contains("workflow(action='get_node_output'");
+            // The help is read by an agent that only sees the MCP interface.
+            assertThat(fileOutputs).doesNotContain("POST ");
+            assertThat(fileOutputs).doesNotContain("curl");
+        }
+    }
 }

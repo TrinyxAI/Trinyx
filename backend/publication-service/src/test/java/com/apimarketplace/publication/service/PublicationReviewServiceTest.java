@@ -1,5 +1,6 @@
 package com.apimarketplace.publication.service;
 
+import com.apimarketplace.common.auth.UserSummaryDto;
 import com.apimarketplace.publication.domain.PublicationReviewEntity;
 import com.apimarketplace.publication.domain.WorkflowPublicationEntity;
 import com.apimarketplace.publication.repository.PublicationReviewRepository;
@@ -34,6 +35,9 @@ class PublicationReviewServiceTest {
     @Mock
     private WorkflowPublicationRepository publicationRepository;
 
+    @Mock
+    private ReviewerIdentityResolver reviewerIdentityResolver;
+
     private PublicationReviewService service;
 
     private static final UUID PUB_ID = UUID.randomUUID();
@@ -45,7 +49,7 @@ class PublicationReviewServiceTest {
 
     @BeforeEach
     void setUp() {
-        service = new PublicationReviewService(reviewRepository, publicationRepository);
+        service = new PublicationReviewService(reviewRepository, publicationRepository, reviewerIdentityResolver);
 
         publication = new WorkflowPublicationEntity();
         publication.setId(PUB_ID);
@@ -69,15 +73,19 @@ class PublicationReviewServiceTest {
             when(reviewRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
             when(reviewRepository.countTopLevelByPublicationId(PUB_ID)).thenReturn(1);
             when(reviewRepository.computeAverageRating(PUB_ID)).thenReturn(4.0);
+            when(reviewerIdentityResolver.resolve(REVIEWER_ID))
+                    .thenReturn(new UserSummaryDto(REVIEWER_ID, "John", "https://cdn/john.png"));
 
             PublicationReviewEntity result = service.submitReview(
-                    PUB_ID, REVIEWER_ID, "John", null, Short.valueOf((short) 4), "Great!");
+                    PUB_ID, REVIEWER_ID, Short.valueOf((short) 4), "Great!");
 
             assertThat(result.getPublicationId()).isEqualTo(PUB_ID);
             assertThat(result.getReviewerId()).isEqualTo(REVIEWER_ID);
             assertThat(result.getRating()).isEqualTo((short) 4);
             assertThat(result.getComment()).isEqualTo("Great!");
             assertThat(result.getReviewerName()).isEqualTo("John");
+            assertThat(result.getReviewerAvatarUrl()).isEqualTo("https://cdn/john.png");
+            assertThat(result.getReviewerAvatarUrl()).isEqualTo("https://cdn/john.png");
             assertThat(result.getParentId()).isNull();
 
             verify(reviewRepository).save(any(PublicationReviewEntity.class));
@@ -100,9 +108,11 @@ class PublicationReviewServiceTest {
             when(reviewRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
             when(reviewRepository.countTopLevelByPublicationId(PUB_ID)).thenReturn(1);
             when(reviewRepository.computeAverageRating(PUB_ID)).thenReturn(5.0);
+            when(reviewerIdentityResolver.resolve(REVIEWER_ID))
+                    .thenReturn(new UserSummaryDto(REVIEWER_ID, "John Updated", null));
 
             PublicationReviewEntity result = service.submitReview(
-                    PUB_ID, REVIEWER_ID, "John Updated", null, Short.valueOf((short) 5), "Amazing!");
+                    PUB_ID, REVIEWER_ID, Short.valueOf((short) 5), "Amazing!");
 
             assertThat(result.getId()).isEqualTo(existing.getId());
             assertThat(result.getRating()).isEqualTo((short) 5);
@@ -118,7 +128,8 @@ class PublicationReviewServiceTest {
             when(publicationRepository.findById(PUB_ID)).thenReturn(Optional.of(publication));
 
             assertThatThrownBy(() ->
-                    service.submitReview(PUB_ID, PUBLISHER_ID, "Publisher", null, (short) 5, "Great!"))
+                    service.submitReview(
+                    PUB_ID, PUBLISHER_ID, (short) 5, "Great!"))
                     .isInstanceOf(IllegalArgumentException.class)
                     .hasMessageContaining("Cannot review your own publication");
 
@@ -131,7 +142,8 @@ class PublicationReviewServiceTest {
             when(publicationRepository.findById(PUB_ID)).thenReturn(Optional.of(publication));
 
             assertThatThrownBy(() ->
-                    service.submitReview(PUB_ID, REVIEWER_ID, "John", null, Short.valueOf((short) 0), null))
+                    service.submitReview(
+                    PUB_ID, REVIEWER_ID, Short.valueOf((short) 0), null))
                     .isInstanceOf(IllegalArgumentException.class)
                     .hasMessageContaining("Rating must be between 1 and 5");
         }
@@ -142,7 +154,8 @@ class PublicationReviewServiceTest {
             when(publicationRepository.findById(PUB_ID)).thenReturn(Optional.of(publication));
 
             assertThatThrownBy(() ->
-                    service.submitReview(PUB_ID, REVIEWER_ID, "John", null, Short.valueOf((short) 6), null))
+                    service.submitReview(
+                    PUB_ID, REVIEWER_ID, Short.valueOf((short) 6), null))
                     .isInstanceOf(IllegalArgumentException.class)
                     .hasMessageContaining("Rating must be between 1 and 5");
         }
@@ -153,7 +166,8 @@ class PublicationReviewServiceTest {
             when(publicationRepository.findById(PUB_ID)).thenReturn(Optional.empty());
 
             assertThatThrownBy(() ->
-                    service.submitReview(PUB_ID, REVIEWER_ID, "John", null, Short.valueOf((short) 4), null))
+                    service.submitReview(
+                    PUB_ID, REVIEWER_ID, Short.valueOf((short) 4), null))
                     .isInstanceOf(IllegalArgumentException.class)
                     .hasMessageContaining("Publication not found");
         }
@@ -169,7 +183,7 @@ class PublicationReviewServiceTest {
             when(reviewRepository.computeAverageRating(PUB_ID)).thenReturn(3.0);
 
             PublicationReviewEntity result = service.submitReview(
-                    PUB_ID, REVIEWER_ID, "John", null, Short.valueOf((short) 3), null);
+                    PUB_ID, REVIEWER_ID, Short.valueOf((short) 3), null);
 
             assertThat(result.getRating()).isEqualTo((short) 3);
             assertThat(result.getComment()).isNull();
@@ -185,7 +199,7 @@ class PublicationReviewServiceTest {
             when(reviewRepository.countTopLevelByPublicationId(PUB_ID)).thenReturn(0);
 
             PublicationReviewEntity result = service.submitReview(
-                    PUB_ID, REVIEWER_ID, "John", null, null, "Just a comment");
+                    PUB_ID, REVIEWER_ID, null, "Just a comment");
 
             assertThat(result.getRating()).isNull();
             assertThat(result.getComment()).isEqualTo("Just a comment");
@@ -204,7 +218,7 @@ class PublicationReviewServiceTest {
             when(reviewRepository.computeAverageRating(PUB_ID)).thenReturn(4.0);
 
             PublicationReviewEntity result = service.submitReview(
-                    PUB_ID, REVIEWER_ID, "John", null, Short.valueOf((short) 4), longComment);
+                    PUB_ID, REVIEWER_ID, Short.valueOf((short) 4), longComment);
 
             assertThat(result.getComment()).hasSize(2000);
         }
@@ -567,7 +581,8 @@ class PublicationReviewServiceTest {
             when(reviewRepository.countTopLevelByPublicationId(PUB_ID)).thenReturn(3);
             when(reviewRepository.computeAverageRating(PUB_ID)).thenReturn(3.67);
 
-            service.submitReview(PUB_ID, REVIEWER_ID, "John", null, Short.valueOf((short) 4), null);
+            service.submitReview(
+                    PUB_ID, REVIEWER_ID, Short.valueOf((short) 4), null);
 
             verify(publicationRepository).updateReviewStats(PUB_ID, 3.67, 3);
         }
@@ -600,7 +615,8 @@ class PublicationReviewServiceTest {
             when(reviewRepository.countTopLevelByPublicationId(PUB_ID)).thenReturn(2);
             when(reviewRepository.computeAverageRating(PUB_ID)).thenReturn(4.5);
 
-            service.submitReview(PUB_ID, REVIEWER_ID, "John", null, Short.valueOf((short) 5), null);
+            service.submitReview(
+                    PUB_ID, REVIEWER_ID, Short.valueOf((short) 5), null);
 
             // Verify it uses countTopLevelByPublicationId, not countByPublicationId
             verify(reviewRepository).countTopLevelByPublicationId(PUB_ID);
@@ -631,7 +647,7 @@ class PublicationReviewServiceTest {
             when(reviewRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
 
             PublicationReviewEntity result = service.submitReply(
-                    reviewId, OTHER_REVIEWER, "Jane", null, "Thanks!");
+                    reviewId, OTHER_REVIEWER, "Thanks!");
 
             assertThat(result.getParentId()).isEqualTo(reviewId);
             assertThat(result.getRating()).isNull();
@@ -655,7 +671,8 @@ class PublicationReviewServiceTest {
             when(reviewRepository.findById(replyId)).thenReturn(Optional.of(existingReply));
 
             assertThatThrownBy(() ->
-                    service.submitReply(replyId, OTHER_REVIEWER, "Jane", null, "Nested!"))
+                    service.submitReply(
+                    replyId, OTHER_REVIEWER, "Nested!"))
                     .isInstanceOf(IllegalArgumentException.class)
                     .hasMessageContaining("Cannot reply to a reply");
 
@@ -673,7 +690,8 @@ class PublicationReviewServiceTest {
             when(reviewRepository.findById(reviewId)).thenReturn(Optional.of(parentReview));
 
             assertThatThrownBy(() ->
-                    service.submitReply(reviewId, OTHER_REVIEWER, "Jane", null, ""))
+                    service.submitReply(
+                    reviewId, OTHER_REVIEWER, ""))
                     .isInstanceOf(IllegalArgumentException.class)
                     .hasMessageContaining("Reply comment cannot be empty");
 
@@ -856,6 +874,97 @@ class PublicationReviewServiceTest {
             assertThat(result).hasSize(2);
             assertThat(result.get(0).getComment()).isEqualTo("First");
             assertThat(result.get(1).getComment()).isEqualTo("Second");
+        }
+    }
+// ========================================================================
+    // Reviewer identity - regression cover for reviews rendering as "Anonymous"
+    // ========================================================================
+
+    @Nested
+    @DisplayName("reviewer identity")
+    class ReviewerIdentity {
+
+        @Test
+        @DisplayName("stamps the name and avatar resolved from the reviewer id, not from the request")
+        void stampsResolvedIdentity() {
+            when(publicationRepository.findById(PUB_ID)).thenReturn(Optional.of(publication));
+            when(reviewRepository.findTopLevelByPublicationIdAndReviewerId(PUB_ID, REVIEWER_ID))
+                    .thenReturn(Optional.empty());
+            when(reviewRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+            when(reviewRepository.countTopLevelByPublicationId(PUB_ID)).thenReturn(1);
+            when(reviewRepository.computeAverageRating(PUB_ID)).thenReturn(4.0);
+            when(reviewerIdentityResolver.resolve(REVIEWER_ID))
+                    .thenReturn(new UserSummaryDto(REVIEWER_ID, "Sophie Mercier", "https://cdn/sophie.png"));
+
+            PublicationReviewEntity result = service.submitReview(
+                    PUB_ID, REVIEWER_ID, Short.valueOf((short) 4), "Solid.");
+
+            assertThat(result.getReviewerName()).isEqualTo("Sophie Mercier");
+            assertThat(result.getReviewerAvatarUrl()).isEqualTo("https://cdn/sophie.png");
+        }
+
+        @Test
+        @DisplayName("leaves the name null when auth-service cannot resolve the author, instead of failing the review")
+        void toleratesUnresolvableAuthor() {
+            when(publicationRepository.findById(PUB_ID)).thenReturn(Optional.of(publication));
+            when(reviewRepository.findTopLevelByPublicationIdAndReviewerId(PUB_ID, REVIEWER_ID))
+                    .thenReturn(Optional.empty());
+            when(reviewRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+            when(reviewRepository.countTopLevelByPublicationId(PUB_ID)).thenReturn(1);
+            when(reviewRepository.computeAverageRating(PUB_ID)).thenReturn(4.0);
+            when(reviewerIdentityResolver.resolve(REVIEWER_ID)).thenReturn(null);
+
+            PublicationReviewEntity result = service.submitReview(
+                    PUB_ID, REVIEWER_ID, Short.valueOf((short) 4), "Solid.");
+
+            assertThat(result.getReviewerName()).isNull();
+            assertThat(result.getComment()).isEqualTo("Solid.");
+        }
+
+        @Test
+        @DisplayName("keeps the stored name when a later edit cannot resolve the author")
+        void keepsStoredNameOnTransientResolveFailure() {
+            PublicationReviewEntity existing = new PublicationReviewEntity();
+            existing.setId(UUID.randomUUID());
+            existing.setPublicationId(PUB_ID);
+            existing.setReviewerId(REVIEWER_ID);
+            existing.setReviewerName("Sophie Mercier");
+            existing.setReviewerAvatarUrl("https://cdn/sophie.png");
+            existing.setRating((short) 4);
+
+            when(publicationRepository.findById(PUB_ID)).thenReturn(Optional.of(publication));
+            when(reviewRepository.findTopLevelByPublicationIdAndReviewerId(PUB_ID, REVIEWER_ID))
+                    .thenReturn(Optional.of(existing));
+            when(reviewRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+            when(reviewRepository.countTopLevelByPublicationId(PUB_ID)).thenReturn(1);
+            when(reviewRepository.computeAverageRating(PUB_ID)).thenReturn(5.0);
+            when(reviewerIdentityResolver.resolve(REVIEWER_ID)).thenReturn(null);
+
+            PublicationReviewEntity result = service.submitReview(
+                    PUB_ID, REVIEWER_ID, Short.valueOf((short) 5), "Even better now.");
+
+            assertThat(result.getReviewerName()).isEqualTo("Sophie Mercier");
+            assertThat(result.getReviewerAvatarUrl()).isEqualTo("https://cdn/sophie.png");
+        }
+
+        @Test
+        @DisplayName("stamps the resolved identity on a reply too")
+        void stampsResolvedIdentityOnReply() {
+            UUID reviewId = UUID.randomUUID();
+            PublicationReviewEntity parentReview = new PublicationReviewEntity();
+            parentReview.setId(reviewId);
+            parentReview.setPublicationId(PUB_ID);
+            parentReview.setReviewerId(REVIEWER_ID);
+
+            when(reviewRepository.findById(reviewId)).thenReturn(Optional.of(parentReview));
+            when(reviewRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+            when(reviewerIdentityResolver.resolve(OTHER_REVIEWER))
+                    .thenReturn(new UserSummaryDto(OTHER_REVIEWER, "Nora Ahmadi", "https://cdn/nora.png"));
+
+            PublicationReviewEntity reply = service.submitReply(reviewId, OTHER_REVIEWER, "Fixed in the next version.");
+
+            assertThat(reply.getReviewerName()).isEqualTo("Nora Ahmadi");
+            assertThat(reply.getReviewerAvatarUrl()).isEqualTo("https://cdn/nora.png");
         }
     }
 }

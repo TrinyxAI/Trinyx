@@ -197,6 +197,14 @@ piston:
 websearch:
   enabled: false
 
+# Generation tool (image / video / audio / voice / music) disabled in CE by default:
+# every create spends credits against the platform's own provider keys, so a
+# self-hosted install opts in explicitly with GENERATION_ENABLED=true. Stated here
+# rather than left to the packaged default so the flag the tool caches read and the
+# flag the provider is gated on always agree in this build.
+generation:
+  enabled: ${GENERATION_ENABLED:false}
+
 # Marketplace: remote mode fetches publications from cloud, clones locally
 marketplace:
   mode: ${MARKETPLACE_MODE:remote}
@@ -417,6 +425,19 @@ catalog:
     enabled: ${CATALOG_SEED_ENABLED:true}
     path: ${CATALOG_SEED_PATH:./catalog-seeds}
     owner-id: ${CATALOG_SEED_OWNER_ID:SYSTEM}
+  # Generation SEED (boot-time, CE-only): GenerationSeedBootstrap writes the
+  # generation descriptors shipped in the catalog-service classpath resource
+  # catalog-seeds/generation-seed.json into catalog.api_tools.generation_spec,
+  # and offers the starting price each descriptor declares to auth-service.
+  # Without it a fresh self-hosted install has NO generation models: the SQL
+  # dump it boots from carries no generation_spec, and the price bootstrap lives
+  # in catalog-service-import, which is not part of this image. Runs only while
+  # no signed API-catalog bundle has been applied here; once one has, the cloud
+  # owns the generation catalog and the seed stands down. The cloud never runs
+  # this (property absent there) - the importer is its authoritative path.
+  generation:
+    seed:
+      enabled: ${CATALOG_GENERATION_SEED_ENABLED:true}
   # Shared Ed25519 trust root for ALL signed bundles fetched from the cloud
   # (LLM model bundle AND API catalog bundle). Format: keyId=base64X509;...
   # The cloud's PUBLIC key is baked as the default so a fresh CE / git clone

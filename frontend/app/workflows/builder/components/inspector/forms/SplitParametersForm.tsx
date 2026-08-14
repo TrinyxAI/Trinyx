@@ -75,7 +75,7 @@ export function SplitParametersForm({
             <span className="text-sm font-semibold text-slate-500 dark:text-slate-400">{t('split.items')}</span>
             <Popover>
               <PopoverTrigger asChild>
-                <button type="button" className="inline-flex items-center justify-center rounded-full hover:bg-slate-200 dark:hover:bg-slate-700 p-0.5">
+                <button type="button" className="inline-flex items-center justify-center rounded-md hover:bg-slate-200 dark:hover:bg-slate-700 p-0.5">
                   <Info className="h-3 w-3 text-slate-400" />
                 </button>
               </PopoverTrigger>
@@ -116,7 +116,7 @@ export function SplitParametersForm({
               <span className="text-sm font-semibold text-slate-500 dark:text-slate-400">{t('split.maxItems')}</span>
               <Popover>
                 <PopoverTrigger asChild>
-                  <button type="button" className="inline-flex items-center justify-center rounded-full hover:bg-slate-200 dark:hover:bg-slate-700 p-0.5">
+                  <button type="button" className="inline-flex items-center justify-center rounded-md hover:bg-slate-200 dark:hover:bg-slate-700 p-0.5">
                     <Info className="h-3 w-3 text-slate-400" />
                   </button>
                 </PopoverTrigger>

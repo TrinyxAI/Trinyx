@@ -131,6 +131,7 @@ public record Core(
     // Valid core types
     private static final Set<String> VALID_TYPES = Set.of(
         "decision", "switch", "loop", "split", "merge", "fork", "transform", "wait", "download_file", "public_link", "media",
+        "generate",
         "exit", "end", "response", "option", "aggregate", "http_request", "approval", "data_input",
         "filter", "sort", "limit", "remove_duplicates",
         "summarize", "date_time", "crypto_jwt",

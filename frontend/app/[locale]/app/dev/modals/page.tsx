@@ -579,8 +579,8 @@ export default function ModalShowcasePage() {
                 <h3 className="font-medium">Icon Container</h3>
                 <div className="text-sm space-y-1 text-muted-foreground">
                   <div className="flex justify-between"><span>w-12 h-12 rounded-xl</span><span className="text-red-500">ConfirmDelete</span></div>
-                  <div className="flex justify-between"><span>w-16 h-16 rounded-full</span><span className="text-green-500">Checkout, Upgrade, Unsaved</span></div>
-                  <div className="flex justify-between"><span>p-2 rounded-full</span><span className="text-red-500">BillingCycle, Downgrade</span></div>
+                  <div className="flex justify-between"><span>w-16 h-16 rounded-2xl</span><span className="text-green-500">Checkout, Upgrade, Unsaved</span></div>
+                  <div className="flex justify-between"><span>p-2 rounded-md</span><span className="text-red-500">BillingCycle, Downgrade</span></div>
                 </div>
               </div>
 
@@ -605,7 +605,7 @@ export default function ModalShowcasePage() {
                 'Overlay: bg-black/60 backdrop-blur-sm',
                 'Container: rounded-xl shadow-2xl',
                 'Z-index: z-50 (standard)',
-                'Icon: w-16 h-16 rounded-full',
+                'Icon: w-16 h-16 rounded-2xl',
                 'Header: icon + title + close button',
                 'Footer: Cancel (outline) | Primary',
                 'Couleurs: red=danger, amber=warning, green=success',

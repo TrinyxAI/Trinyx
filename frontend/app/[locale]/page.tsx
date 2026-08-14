@@ -59,7 +59,7 @@ const LANDING_FAQ = [
   {
     question: 'What is LiveContext?',
     answer:
-      'LiveContext is an AI automation platform. You describe a job in chat, the workflow builds itself in front of you, AI agents run it with scoped tool access and hard credit budgets, and the result ships as an app your team or customers can use. It includes 600+ API integrations, built-in data tables, a browser-use agent and a marketplace of forkable automations.',
+      'LiveContext is an AI automation platform. You describe a job in chat, the workflow builds itself in front of you, AI agents run it with scoped tool access and hard credit budgets, and the result ships as an app your team or customers can use. It includes 700+ API integrations, built-in data tables, a browser-use agent and a marketplace of forkable automations.',
   },
   {
     question: 'Do I need to know how to code?',
@@ -117,7 +117,7 @@ const LANDING_JSON_LD = [
     operatingSystem: 'Web',
     url: SITE_URL,
     description:
-      'AI automation platform: build workflows by chat, run them with budgeted AI agents, and ship them as apps. 600+ integrations, built-in tables, marketplace, cloud or self-hosted.',
+      'AI automation platform: build workflows by chat, run them with budgeted AI agents, and ship them as apps. 700+ integrations, built-in tables, marketplace, cloud or self-hosted.',
     offers: {
       '@type': 'Offer',
       price: '0',
@@ -226,7 +226,7 @@ function Hero() {
             A working automation <span className="underline underline-offset-8">out</span>.
           </h1>
           <p className="mt-6 text-lg max-w-2xl mx-auto leading-relaxed" style={{ color: 'var(--text-secondary)' }}>
-            600+ integrations and every major LLM, cloud or self-hosted. Build, deploy, and run
+            700+ integrations and every major LLM, cloud or self-hosted. Build, deploy, and run
             your agents visually, in chat, or with code, and add a human in the loop wherever you want.
           </p>
           <div className="mt-7 flex flex-wrap justify-center gap-3">

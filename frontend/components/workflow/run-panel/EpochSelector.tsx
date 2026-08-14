@@ -6,13 +6,23 @@ import { Calendar } from 'lucide-react';
 import { useTranslations } from 'next-intl';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { formatUtcTime, formatUtcDateTime } from '@/lib/utils/dateFormatters';
-import { formatCompactDuration, epochDisplayDurationMs, type EpochTimestamp } from './runFormatting';
+import { getRunStatusLabel, getStatusClasses } from '@/lib/utils/runStatusUtils';
+import { EpochStatusIcon } from '@/components/workflow/EpochStatusIcon';
+import {
+  formatCompactDuration,
+  epochDisplayDurationMs,
+  isEpochLive,
+  resolveEpochBadgeStatus,
+  type EpochTimestamp,
+} from './runFormatting';
 
 interface EpochSelectorProps {
   epochTimestamps: EpochTimestamp[];
   selectedEpoch: number | null;
   onSelectEpoch: (epoch: number | null) => void;
   viewMode: 'list' | 'waterfall';
+  /** Raw run status - decides whether an OPEN epoch is executing or merely unclosed. */
+  runStatus?: string | null;
 }
 
 function formatTime(isoString: string): string {
@@ -37,16 +47,22 @@ interface EpochRowProps {
   selectedEpoch: number | null;
   onSelectEpoch: (epoch: number | null) => void;
   viewMode: 'list' | 'waterfall';
+  runStatus?: string | null;
 }
 
 // Row component defined at module scope so its identity is stable across renders
 // (List re-renders rows when rowProps changes). All per-row data flows via
 // `rowProps`, never closure capture, so re-renders only fire when rowProps changes.
-function EpochRow({ index, style, entries, durations, maxDuration, selectedEpoch, onSelectEpoch, viewMode }: RowComponentProps<EpochRowProps>) {
+function EpochRow({ index, style, entries, durations, maxDuration, selectedEpoch, onSelectEpoch, viewMode, runStatus }: RowComponentProps<EpochRowProps>) {
   const t = useTranslations();
   const entry = entries[index];
   const isSelected = selectedEpoch === entry.epoch;
-  const isRunning = entry.startedAt != null && entry.endedAt == null;
+  // What this epoch is DOING (drives the blue live styling), vs what it ACHIEVED
+  // (the badge). An unclosed epoch is not necessarily running: a stopped or cancelled
+  // run abandons it, and it would otherwise keep a blue pulse for good.
+  const badgeStatus = resolveEpochBadgeStatus(entry, runStatus);
+  const isRunning = badgeStatus === 'RUNNING';
+  const statusLabel = badgeStatus ? getRunStatusLabel(badgeStatus, (k) => t(k)) : null;
   const duration = durations[index];
   const barPct = maxDuration > 0 ? Math.max(5, ((duration ?? 0) / maxDuration) * 100) : 5;
 
@@ -69,25 +85,30 @@ function EpochRow({ index, style, entries, durations, maxDuration, selectedEpoch
       }`}>
         {entry.epoch}
       </div>
-      {/* Running indicator - slot is always reserved (same width + gap whether or
-          not the epoch is running) so the gauge / "HH:mm → HH:mm" / duration to
-          the right never shift horizontally as a run transitions to completed. */}
-      <span className="relative flex h-1.5 w-1.5 shrink-0">
-        {isRunning && (
-          <>
-            <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-blue-400 opacity-75" />
-            <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-blue-500" />
-          </>
-        )}
-      </span>
+      {/* Per-epoch status badge (green check / red cross / live pulse). The slot is
+          always reserved (same width + gap whatever the status, none included) so the
+          gauge / "HH:mm → HH:mm" / duration to the right never shift horizontally as
+          an epoch transitions from running to its outcome. The status WORD is in the
+          row tooltip - a text pill would not fit the 240px-wide side panel. */}
+      <EpochStatusIcon status={badgeStatus} size="sm" />
+      {/* The badge is a colour + a shape; the WORD has to reach a screen reader too,
+          and the tooltip is hover-only. */}
+      {statusLabel && <span className="sr-only" data-epoch-status={badgeStatus}>{statusLabel}</span>}
 
       {viewMode === 'waterfall' ? (
         <>
           <span className="w-[96px] min-w-[96px] shrink-0" />
           <div className="flex-1 h-[3px] rounded-full bg-gray-100 dark:bg-white/[0.06] overflow-hidden min-w-0">
+            {/* The gauge follows the epoch's outcome too: an all-emerald bar under a
+                red badge reads as a contradiction, and the gauge view is the one
+                where the badge is furthest from the eye. */}
             <div
               className={`h-full rounded-full transition-all ${
-                isRunning ? 'bg-blue-500 animate-pulse' : isSelected ? 'bg-emerald-500' : 'bg-emerald-500/70'
+                isRunning ? 'bg-blue-500 animate-pulse'
+                  : badgeStatus === 'FAILED' ? (isSelected ? 'bg-red-500' : 'bg-red-500/70')
+                  : badgeStatus === 'CANCELLED' || badgeStatus === 'STOPPED' || badgeStatus === 'TIMEOUT'
+                    ? (isSelected ? 'bg-gray-400' : 'bg-gray-400/70')
+                  : isSelected ? 'bg-emerald-500' : 'bg-emerald-500/70'
               }`}
               style={{ width: `${barPct}%` }}
             />
@@ -146,26 +167,20 @@ function EpochRow({ index, style, entries, durations, maxDuration, selectedEpoch
             <span className="font-semibold text-gray-900 dark:text-gray-100 tabular-nums">
               {t('workflow.runSteps.epochTooltip.epoch', { epoch: entry.epoch })}
             </span>
-            <span className="inline-flex items-center gap-1">
-              {isRunning ? (
-                <>
-                  <span className="relative flex h-1.5 w-1.5">
-                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-blue-400 opacity-75" />
-                    <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-blue-500" />
-                  </span>
-                  <span className="font-medium text-blue-500 dark:text-blue-400">
-                    {t('workflow.runSteps.epochTooltip.running')}
-                  </span>
-                </>
-              ) : entry.endedAt ? (
-                <span className="font-medium text-emerald-600 dark:text-emerald-400">
-                  {t('workflow.runSteps.epochTooltip.completed')}
-                </span>
-              ) : (
-                <span className="font-medium text-gray-500 dark:text-gray-400">
-                  {t('workflow.runSteps.epochTooltip.pending')}
-                </span>
-              )}
+            {/* The epoch's OWN outcome. This used to read "completed" for any epoch
+                carrying an end timestamp, so a failed epoch announced success - the
+                end timestamp says the epoch was closed, not that it worked. */}
+            <span className="inline-flex items-center gap-1.5">
+              <EpochStatusIcon status={badgeStatus} size="sm" />
+              {/* No status = the payload carries none (an epoch that ran nothing but its
+                  trigger, or a showcase snapshot frozen before the field existed). Render
+                  a dash, never a word: "Pending" would be a confident claim about an
+                  epoch that has long since finished. */}
+              <span className={`font-medium px-1.5 py-0.5 rounded ${
+                badgeStatus ? getStatusClasses(badgeStatus) : 'text-gray-500 dark:text-gray-400'
+              }`}>
+                {statusLabel ?? '-'}
+              </span>
             </span>
           </div>
 
@@ -222,7 +237,7 @@ function EpochRow({ index, style, entries, durations, maxDuration, selectedEpoch
   );
 }
 
-export const EpochSelector = memo(function EpochSelector({ epochTimestamps, selectedEpoch, onSelectEpoch, viewMode }: EpochSelectorProps) {
+export const EpochSelector = memo(function EpochSelector({ epochTimestamps, selectedEpoch, onSelectEpoch, viewMode, runStatus }: EpochSelectorProps) {
   const t = useTranslations();
 
   // Sort once per epochTimestamps reference change. Show all epochs regardless of
@@ -238,9 +253,12 @@ export const EpochSelector = memo(function EpochSelector({ epochTimestamps, sele
   // Closed-only timelines pay zero wake-up cost, and the heavy WS-event re-render
   // cadence stops driving duration recomputation (the previous code re-derived
   // every duration on every parent render because `Date.now()` was read inline).
+  // Keyed off the same "is it live" answer as the durations: an epoch left unclosed by
+  // a run that has stopped is NOT live, so the ticker stops instead of re-rendering the
+  // whole list every second behind a figure that no longer moves.
   const hasRunningEpoch = useMemo(
-    () => sorted.some(e => e.startedAt != null && e.endedAt == null),
-    [sorted]
+    () => sorted.some(e => isEpochLive(e, runStatus)),
+    [sorted, runStatus]
   );
   const [tick, setTick] = useState(0);
   useEffect(() => {
@@ -251,10 +269,10 @@ export const EpochSelector = memo(function EpochSelector({ epochTimestamps, sele
 
   const durations = useMemo(() => {
     const now = Date.now();
-    return sorted.map((entry) => epochDisplayDurationMs(entry, now));
+    return sorted.map((entry) => epochDisplayDurationMs(entry, now, isEpochLive(entry, runStatus)));
     // `tick` is a deliberate dep: forces recompute every second when a running
     // epoch exists, so the bar / label tick forward without leaning on SSE cadence.
-  }, [sorted, tick]);
+  }, [sorted, tick, runStatus]);
 
   const maxDuration = useMemo(
     () => durations.reduce((m, d) => ((d ?? 0) > m ? (d ?? 0) : m), 1),
@@ -270,7 +288,8 @@ export const EpochSelector = memo(function EpochSelector({ epochTimestamps, sele
     selectedEpoch,
     onSelectEpoch,
     viewMode,
-  }), [sorted, durations, maxDuration, selectedEpoch, onSelectEpoch, viewMode]);
+    runStatus,
+  }), [sorted, durations, maxDuration, selectedEpoch, onSelectEpoch, viewMode, runStatus]);
 
   // Auto-scroll to the selected epoch when selection changes. Sorted newest-first,
   // so the index lines up with position in `sorted`.

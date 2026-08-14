@@ -20,6 +20,8 @@ import org.mockito.junit.jupiter.MockitoExtension;
 
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
+import java.time.ZoneOffset;
+import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.*;
@@ -96,8 +98,42 @@ class CreditAttributionServiceTest {
         sub.setCreditQuantity(creditQuantity);
         sub.setRemainingCredits(remainingCredits);
         sub.setCurrentPeriodStart(PERIOD_START);
+        sub.setCurrentPeriodEnd(PERIOD_START.plusMonths(1));
         sub.setProvider(provider);
+        // The internal renewal re-validates status under the lock (a Stripe upgrade cancels the
+        // internal sibling), so the fixture must carry a realistic one.
+        sub.setStatus("active");
+        lastSubscription = sub;
         return sub;
+    }
+
+    /** Set by {@link #createSubscription} so {@link #mockManagedRow()} can hand the same
+     *  instance back as the "live row" the service re-reads under lock. */
+    private Subscription lastSubscription;
+
+    /**
+     * Stub the lock-and-reload the service performs before touching a subscription.
+     * In a unit test the live row IS the instance the test built, so the observable
+     * behaviour matches what these tests asserted before that reload existed - while now
+     * failing loudly if the reload is ever dropped (an unresolvable row aborts the renewal).
+     */
+    private void mockManagedRow() {
+        // anyLong(), not SUB_ID: a future test using another id would otherwise get an unstubbed
+        // null and NPE inside the service instead of failing on its own assertion.
+        lenient().when(subscriptionRepository.findByIdForUpdate(anyLong()))
+                .thenAnswer(inv -> Optional.ofNullable(lastSubscription));
+    }
+
+    /**
+     * Class-level, NOT per nested class: leaving it out anywhere silently routes those tests
+     * down the unresolvable-row branch, where the service aborts. They would still be green
+     * (nothing is asserted about the grant in some of them) while covering none of the code the
+     * renewal actually runs. A test that stops exercising its subject without failing is worse
+     * than no test.
+     */
+    @BeforeEach
+    void stubRowResolution() {
+        mockManagedRow();
     }
 
     private void mockNoExistingLedger() {
@@ -412,6 +448,250 @@ class CreditAttributionServiceTest {
             verify(creditService).grantCredits(eq(USER_ID), eq(new BigDecimal("1000")),
                     eq("PURCHASE"), eq("plan_sub_1_" + PERIOD_KEY), anyString());
         }
+
+        @Test
+        @DisplayName("resolves the row under lock instead of trusting the caller's entity")
+        void resolvesTheRowUnderLock() {
+            Plan free = createPlan("FREE", 1000L, 1000L);
+            Subscription sub = createSubscription(free, 0, BigDecimal.ZERO, "internal");
+
+            attributionService.attributeOnRenewal(USER_ID, sub);
+
+            verify(subscriptionRepository).findByIdForUpdate(SUB_ID);
+        }
+
+        @Test
+        @DisplayName("an unresolvable row aborts the Stripe path too, instead of writing through a detached copy")
+        void unresolvableRowAbortsEvenWithoutAdvancingThePeriod() {
+            Plan free = createPlan("FREE", 1000L, 1000L);
+            Subscription sub = createSubscription(free, 0, new BigDecimal("500"), "internal");
+            lastSubscription = null; // row not addressable
+
+            attributionService.attributeOnRenewal(USER_ID, sub);
+
+            // This path still WRITES: resetBalance zeroes the balance and saves. Continuing on
+            // the caller's copy would merge every stale column back over the row - and if the
+            // row is really gone, re-insert it as a brand-new subscription.
+            verify(subscriptionRepository, never()).save(any(Subscription.class));
+            verify(ledgerRepository, never()).save(any(CreditLedgerEntry.class));
+            verify(creditService, never()).grantCredits(anyLong(), any(), anyString(), anyString(), anyString());
+            assertThat(sub.getRemainingCredits()).isEqualByComparingTo(new BigDecimal("500"));
+        }
+
+        @Test
+        @DisplayName("a null subscription is refused loudly instead of throwing deep in the call chain")
+        void nullSubscriptionIsRefused() {
+            attributionService.attributeOnRenewal(USER_ID, null);
+
+            verify(creditService, never()).grantCredits(anyLong(), any(), anyString(), anyString(), anyString());
+            verify(ledgerRepository, never()).save(any(CreditLedgerEntry.class));
+        }
+
+        @Test
+        @DisplayName("aborts without granting when the row cannot be resolved for update")
+        void abortsWhenRowUnresolvable() {
+            Plan free = createPlan("FREE", 1000L, 1000L);
+            Subscription sub = createSubscription(free, 0, new BigDecimal("500"), "internal");
+            // The row vanished (or was never persisted) between selection and lock. Continuing
+            // on the caller's detached copy would write nothing and re-grant on every pass.
+            lastSubscription = null;
+
+            attributionService.attributeOnRenewal(USER_ID, sub, LocalDateTime.now());
+
+            verify(creditService, never()).grantCredits(anyLong(), any(), anyString(), anyString(), anyString());
+            verify(ledgerRepository, never()).save(any(CreditLedgerEntry.class));
+            assertThat(sub.getCurrentPeriodStart()).isEqualTo(PERIOD_START);
+        }
+    }
+
+    // ===== attributeOnRenewal(.., newPeriodStart) - the internal scheduler contract =====
+
+    @Nested
+    @DisplayName("attributeOnRenewal with a new period start")
+    class AttributeOnRenewalAdvancingThePeriod {
+
+        private static final LocalDateTime NEW_PERIOD_START = LocalDateTime.of(2025, 3, 1, 13, 0, 0);
+        private static final String NEW_PERIOD_KEY =
+                String.valueOf(NEW_PERIOD_START.toEpochSecond(ZoneOffset.UTC));
+
+        @BeforeEach
+        void setUp() {
+            mockNoExistingLedger();
+            mockGrantSuccess();
+        }
+
+        @Test
+        @DisplayName("advances the period by one month on the resolved row")
+        void advancesThePeriod() {
+            Plan free = createPlan("FREE", 1000L, 1000L);
+            Subscription sub = createSubscription(free, 0, BigDecimal.ZERO, "internal");
+
+            attributionService.attributeOnRenewal(USER_ID, sub, NEW_PERIOD_START);
+
+            assertThat(sub.getCurrentPeriodStart()).isEqualTo(NEW_PERIOD_START);
+            assertThat(sub.getCurrentPeriodEnd()).isEqualTo(NEW_PERIOD_START.plusMonths(1));
+        }
+
+        @Test
+        @DisplayName("keys the grant on the NEW period, never on the consumed previous one")
+        void keysTheGrantOnTheNewPeriod() {
+            Plan free = createPlan("FREE", 1000L, 1000L);
+            Subscription sub = createSubscription(free, 0, new BigDecimal("500"), "internal");
+
+            attributionService.attributeOnRenewal(USER_ID, sub, NEW_PERIOD_START);
+
+            // The defect: deriving the key from the OLD period re-mints an id an admin plan
+            // grant already consumed, so existsBySourceId skips and the user gets nothing.
+            verify(creditService).grantCredits(eq(USER_ID), eq(new BigDecimal("1000")),
+                    eq("PURCHASE"), eq("plan_sub_1_" + NEW_PERIOD_KEY), anyString());
+            verify(creditService, never()).grantCredits(anyLong(), any(), anyString(),
+                    eq("plan_sub_1_" + PERIOD_KEY), anyString());
+
+            verify(ledgerRepository).save(ledgerEntryCaptor.capture());
+            assertThat(ledgerEntryCaptor.getValue().getSourceId())
+                    .isEqualTo("reset_sub_1_" + NEW_PERIOD_KEY);
+        }
+
+        @Test
+        @DisplayName("skips a row a concurrent actor already renewed, instead of granting twice")
+        void skipsARowAlreadyRenewedUnderTheLock() {
+            Plan free = createPlan("FREE", 1000L, 1000L);
+            Subscription sub = createSubscription(free, 0, new BigDecimal("1000"), "internal");
+            // Selected as expired by an unlocked read, but by the time we hold the lock an
+            // admin grant (or an overlapping pass) has already moved the period forward.
+            sub.setCurrentPeriodStart(NEW_PERIOD_START.plusDays(1));
+            sub.setCurrentPeriodEnd(NEW_PERIOD_START.plusMonths(1).plusDays(1));
+
+            attributionService.attributeOnRenewal(USER_ID, sub, NEW_PERIOD_START);
+
+            verify(creditService, never()).grantCredits(anyLong(), any(), anyString(), anyString(), anyString());
+            verify(ledgerRepository, never()).save(any(CreditLedgerEntry.class));
+            // The winner's period is left exactly as it found it.
+            assertThat(sub.getCurrentPeriodStart()).isEqualTo(NEW_PERIOD_START.plusDays(1));
+            assertThat(sub.getRemainingCredits()).isEqualByComparingTo(new BigDecimal("1000"));
+        }
+
+        @Test
+        @DisplayName("leaves the period untouched when null - the Stripe and admin callers own it")
+        void nullPeriodStartLeavesTheCycleAlone() {
+            Plan free = createPlan("FREE", 1000L, 1000L);
+            Subscription sub = createSubscription(free, 0, BigDecimal.ZERO, "internal");
+
+            attributionService.attributeOnRenewal(USER_ID, sub, null);
+
+            // Stripe owns the cycle of a paid subscription; advancing it here would desync
+            // the local row from Stripe's own billing period.
+            assertThat(sub.getCurrentPeriodStart()).isEqualTo(PERIOD_START);
+            assertThat(sub.getCurrentPeriodEnd()).isEqualTo(PERIOD_START.plusMonths(1));
+            verify(creditService).grantCredits(eq(USER_ID), any(), anyString(),
+                    eq("plan_sub_1_" + PERIOD_KEY), anyString());
+        }
+
+        @Test
+        @DisplayName("writes the LIVE row, not the caller's stale copy")
+        void writesTheResolvedRowNotTheCallersCopy() {
+            Plan free = createPlan("FREE", 1000L, 1000L);
+            // What the caller loaded a while ago: 200 credits, old cycle.
+            Subscription stale = createSubscription(free, 0, new BigDecimal("200"), "internal");
+            // What the row actually holds now. A DISTINCT instance, so an implementation that
+            // keeps using the caller's object is caught instead of passing by aliasing.
+            Subscription live = new Subscription();
+            live.setId(SUB_ID);
+            live.setPlan(free);
+            live.setCreditQuantity(0);
+            live.setProvider("internal");
+            live.setStatus("active");
+            live.setRemainingCredits(new BigDecimal("640"));
+            live.setCurrentPeriodStart(PERIOD_START);
+            live.setCurrentPeriodEnd(PERIOD_START.plusMonths(1));
+            lastSubscription = live;
+
+            attributionService.attributeOnRenewal(USER_ID, stale, NEW_PERIOD_START);
+
+            assertThat(live.getCurrentPeriodStart()).isEqualTo(NEW_PERIOD_START);
+            // Zeroed by resetBalance. creditService is a mock, so this says nothing about the
+            // grant; the load-bearing assertion is the -640 ledger amount below.
+            assertThat(live.getRemainingCredits()).isEqualByComparingTo(BigDecimal.ZERO);
+            // The caller's object must be left completely alone - mutating it is what let the
+            // scheduler merge a pre-grant copy back over the row.
+            assertThat(stale.getCurrentPeriodStart()).isEqualTo(PERIOD_START);
+            assertThat(stale.getRemainingCredits()).isEqualByComparingTo(new BigDecimal("200"));
+            // And the audit amount is the live balance, not the caller's snapshot.
+            verify(ledgerRepository).save(ledgerEntryCaptor.capture());
+            assertThat(ledgerEntryCaptor.getValue().getAmount()).isEqualByComparingTo(new BigDecimal("-640"));
+        }
+
+        @Test
+        @DisplayName("skips a row a Stripe upgrade has meanwhile cancelled, instead of granting onto the paid wallet")
+        void skipsARowNoLongerEligible() {
+            Plan starter = createPlan("STARTER", 25000L);
+            Subscription sub = createSubscription(starter, 0, BigDecimal.ZERO, "internal");
+            // A Stripe upgrade cancels the internal sibling between the unlocked selection and
+            // the lock. grantCredits resolves the wallet by user, which is now the PAID row.
+            sub.setStatus("canceled");
+
+            attributionService.attributeOnRenewal(USER_ID, sub, NEW_PERIOD_START);
+
+            verify(creditService, never()).grantCredits(anyLong(), any(), anyString(), anyString(), anyString());
+            assertThat(sub.getCurrentPeriodStart()).isEqualTo(PERIOD_START);
+        }
+
+        @Test
+        @DisplayName("still advances the period when the plan is missing, so the row leaves the expired window")
+        void advancesEvenWhenPlanIsMissing() {
+            Subscription sub = createSubscription(null, 0, BigDecimal.ZERO, "internal");
+            sub.setPlan(null);
+
+            attributionService.attributeOnRenewal(USER_ID, sub, NEW_PERIOD_START);
+
+            // Otherwise every hourly pass re-picks the same broken row forever.
+            assertThat(sub.getCurrentPeriodStart()).isEqualTo(NEW_PERIOD_START);
+            verify(creditService, never()).grantCredits(anyLong(), any(), anyString(), anyString(), anyString());
+        }
+
+        @Test
+        @DisplayName("reports RENEWED when the cycle was actually attributed")
+        void reportsRenewed() {
+            Plan free = createPlan("FREE", 1000L, 1000L);
+            Subscription sub = createSubscription(free, 0, BigDecimal.ZERO, "internal");
+
+            assertThat(attributionService.attributeOnRenewal(USER_ID, sub, NEW_PERIOD_START))
+                    .isEqualTo(CreditAttributionService.RenewalOutcome.RENEWED);
+        }
+
+        @Test
+        @DisplayName("reports ALREADY_RENEWED when a concurrent actor got there first")
+        void reportsAlreadyRenewed() {
+            Plan free = createPlan("FREE", 1000L, 1000L);
+            Subscription sub = createSubscription(free, 0, BigDecimal.ZERO, "internal");
+            sub.setCurrentPeriodEnd(NEW_PERIOD_START.plusMonths(1));
+
+            assertThat(attributionService.attributeOnRenewal(USER_ID, sub, NEW_PERIOD_START))
+                    .isEqualTo(CreditAttributionService.RenewalOutcome.ALREADY_RENEWED);
+        }
+
+        @Test
+        @DisplayName("reports SKIPPED when the row is no longer eligible")
+        void reportsSkipped() {
+            Plan free = createPlan("FREE", 1000L, 1000L);
+            Subscription sub = createSubscription(free, 0, BigDecimal.ZERO, "internal");
+            sub.setStatus("canceled");
+
+            assertThat(attributionService.attributeOnRenewal(USER_ID, sub, NEW_PERIOD_START))
+                    .isEqualTo(CreditAttributionService.RenewalOutcome.SKIPPED);
+        }
+
+        @Test
+        @DisplayName("skips a row that is no longer provider=internal - a paid row is Stripe's to renew")
+        void skipsARowThatIsNoLongerInternal() {
+            Plan starter = createPlan("STARTER", 25000L);
+            Subscription sub = createSubscription(starter, 0, BigDecimal.ZERO, "stripe");
+
+            attributionService.attributeOnRenewal(USER_ID, sub, NEW_PERIOD_START);
+
+            verify(creditService, never()).grantCredits(anyLong(), any(), anyString(), anyString(), anyString());
+            assertThat(sub.getCurrentPeriodStart()).isEqualTo(PERIOD_START);
+        }
     }
 
     // ===== handleCreditPackChange =====
@@ -441,6 +721,56 @@ class CreditAttributionServiceTest {
             verify(subscriptionRepository, never()).findActiveByUserIdForUpdate(anyLong());
             verify(subscriptionRepository, never()).save(any(Subscription.class));
             verify(ledgerRepository, never()).save(any(CreditLedgerEntry.class));
+        }
+
+        @Test
+        @DisplayName("an unresolvable row still grants - this path never writes through the entity")
+        void unresolvableRowStillGrants() {
+            Plan starter = createPlan("STARTER", 25000L);
+            Subscription sub = createSubscription(starter, 10, BigDecimal.ZERO);
+            lastSubscription = null;
+
+            attributionService.handleCreditPackChange(USER_ID, sub, 10, 22);
+
+            // Aborting here would drop a grant Stripe has already charged for. That is only
+            // safe because nothing is written through the entity - assert that too, so a
+            // future refactor adding a write breaks here instead of in production.
+            verify(creditService).grantCredits(eq(USER_ID), eq(new BigDecimal("25000")),
+                    eq("PURCHASE"), eq("pack_sub_1_upgrade_" + PERIOD_KEY), anyString());
+            verify(subscriptionRepository, never()).save(any(Subscription.class));
+            assertThat(sub.getRemainingCredits()).isEqualByComparingTo(BigDecimal.ZERO);
+        }
+
+        @Test
+        @DisplayName("refuses to grant when the subscription has no plan, instead of throwing")
+        void refusesWhenPlanIsMissing() {
+            Subscription sub = createSubscription(null, 10, BigDecimal.ZERO);
+            sub.setPlan(null);
+
+            attributionService.handleCreditPackChange(USER_ID, sub, 10, 22);
+
+            verify(creditService, never()).grantCredits(anyLong(), any(), anyString(), anyString(), anyString());
+        }
+
+        @Test
+        @DisplayName("keys the upgrade on the LIVE period, not the webhook entity's stale copy")
+        void keysTheUpgradeOnTheLivePeriod() {
+            Plan starter = createPlan("STARTER", 25000L);
+            Subscription stale = createSubscription(starter, 10, BigDecimal.ZERO);
+
+            // The Stripe webhook loads its entity with @Lock(NONE) outside any transaction, so
+            // by the time we grant, customer.subscription.updated may already have re-anchored
+            // the cycle. Keying on the stale period re-mints an id that cycle already consumed.
+            LocalDateTime liveStart = PERIOD_START.plusMonths(1);
+            Subscription live = createSubscription(starter, 10, BigDecimal.ZERO);
+            live.setCurrentPeriodStart(liveStart);
+            lastSubscription = live;
+
+            attributionService.handleCreditPackChange(USER_ID, stale, 10, 22);
+
+            verify(subscriptionRepository).findByIdForUpdate(SUB_ID);
+            verify(creditService).grantCredits(eq(USER_ID), eq(new BigDecimal("25000")), eq("PURCHASE"),
+                    eq("pack_sub_1_upgrade_" + liveStart.toEpochSecond(ZoneOffset.UTC)), anyString());
         }
 
         @Test

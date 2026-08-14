@@ -109,10 +109,23 @@ export interface StatusCountsResponse {
 /**
  * Derives node status from status counts.
  */
+/*
+ * DEAD CODE, kept aligned rather than deleted in this pass: the only consumer,
+ * `applyStatusCountsToReactFlow` below, has no call site anywhere in the repo. It is a private
+ * duplicate of `utils/statusCounts.ts#deriveStatusFromCounts` and should be REMOVED - an aligned
+ * copy still re-arms the drift that this whole change exists to stop. Deleting it is ~120 lines
+ * unrelated to the status rule, so it belongs in its own change.
+ */
 function deriveStatusFromCounts(counts: Record<string, number>): DerivedNodeStatus | undefined {
-  // Priority: running > failed > skipped > completed
+  // Priority: running > partial > failed > skipped > completed.
+  // A tally holding BOTH is partial, not failed: the node's badge shows those two numbers side by
+  // side, so answering "failed" puts a red border next to a green count. This copy answered
+  // "failed" long after every other derivation had stopped - it is the drift the shared rule
+  // exists to prevent, and it only stayed invisible because the caller has no live entry point.
+  const failed = (counts.failed || 0) + (counts.error || 0);
   if (counts.running > 0) return 'running';
-  if (counts.failed > 0 || counts.error > 0) return 'failed';
+  if (failed > 0 && counts.completed > 0) return 'partial_success';
+  if (failed > 0) return 'failed';
   if (counts.skipped > 0 && !counts.completed) return 'skipped';
   if (counts.completed > 0) return 'completed';
   return undefined;

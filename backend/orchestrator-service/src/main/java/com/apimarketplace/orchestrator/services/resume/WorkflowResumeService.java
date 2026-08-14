@@ -648,9 +648,11 @@ public class WorkflowResumeService {
         contextManager.executeReadySteps(execution, state.readySteps());
 
         WorkflowRunState newState = reconstructStateForApi(runId);
-        if (newState.readySteps().isEmpty() &&
-            newState.completedStepIds().size() + newState.failedStepIds().size() + newState.skippedStepIds().size()
-                >= contextManager.getAllStepIds(execution.getPlan()).size()) {
+        // Third copy of the same completion test, inlined. Also a WRITE path:
+        // completeWorkflow stamps workflow_runs.status. See RunCompletionPredicate.
+        if (newState.readySteps().isEmpty()
+            && RunCompletionPredicate.allPlanNodesSettled(execution.getPlan(),
+                newState.completedStepIds(), newState.failedStepIds(), newState.skippedStepIds())) {
             contextManager.completeWorkflow(execution, newState);
         }
 

@@ -72,7 +72,8 @@ export default function MarketplacePage() {
         <Callout variant="info">
           The showcase run must be a <strong>completed automatic run</strong>: a paused,
           step-by-step run can&apos;t be used, and the run&apos;s final status has to be completed
-          or partially successful, a failed, cancelled, or timed-out run is rejected. If the
+          (older runs recorded as partially successful are still accepted), a failed, cancelled, or
+          timed-out run is rejected. If the
           publication&apos;s display mode is Interface or Application, it additionally needs a
           showcase interface selected, since there&apos;s nothing to preview otherwise.
         </Callout>

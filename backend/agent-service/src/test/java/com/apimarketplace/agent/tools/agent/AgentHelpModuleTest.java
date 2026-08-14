@@ -217,6 +217,29 @@ class AgentHelpModuleTest {
                 "parameters", "response_shape", "examples", "tips");
     }
 
+    @Test
+    @DisplayName("help documents the generation grant, and names the tool the agent then calls")
+    @SuppressWarnings("unchecked")
+    void helpDocumentsTheGenerationGrant() {
+        // The tool schema and this payload are read by the same agent in the
+        // same turn, and they have to agree. A parameter present in one and
+        // absent from the other is how a capability becomes undiscoverable
+        // without anything looking broken.
+        Optional<ToolExecutionResult> result = module.execute("help", Map.of(), "tenant-x", null);
+
+        assertThat(result).isPresent();
+        Map<String, Object> data = (Map<String, Object>) result.get().data();
+        Map<String, Object> params = (Map<String, Object>) data.get("parameters");
+
+        assertThat(params).containsKey("generation");
+        String generation = String.valueOf(params.get("generation"));
+        // What it costs, and the one action that turns the grant into something
+        // the agent can act on. Naming the tool matters: an agent given the
+        // grant still cannot guess a model id, and models are not guessable.
+        assertThat(generation).contains("credits");
+        assertThat(generation).contains("generation(action='models')");
+    }
+
     /**
      * Regression guard - the help's {@code actions} map is the LLM's table of
      * contents. Every action advertised by {@link AgentToolsProvider#VALID_ACTIONS}

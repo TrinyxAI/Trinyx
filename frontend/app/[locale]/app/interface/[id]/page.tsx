@@ -280,7 +280,7 @@ export default function InterfaceDetailPage({ params }: { params: Promise<{ id: 
             <button
               onClick={handleOlder}
               disabled={currentPage >= totalPages - 1}
-              className={`p-1.5 rounded-full hover:bg-slate-100 dark:hover:bg-slate-700 transition-colors ${currentPage >= totalPages - 1 ? 'opacity-30 cursor-not-allowed' : ''}`}
+              className={`p-1.5 rounded-md hover:bg-slate-100 dark:hover:bg-slate-700 transition-colors ${currentPage >= totalPages - 1 ? 'opacity-30 cursor-not-allowed' : ''}`}
             >
               <ChevronLeft className="w-4 h-4" />
             </button>
@@ -290,7 +290,7 @@ export default function InterfaceDetailPage({ params }: { params: Promise<{ id: 
             <button
               onClick={handleNewer}
               disabled={currentPage === 0}
-              className={`p-1.5 rounded-full hover:bg-slate-100 dark:hover:bg-slate-700 transition-colors ${currentPage === 0 ? 'opacity-30 cursor-not-allowed' : ''}`}
+              className={`p-1.5 rounded-md hover:bg-slate-100 dark:hover:bg-slate-700 transition-colors ${currentPage === 0 ? 'opacity-30 cursor-not-allowed' : ''}`}
             >
               <ChevronRight className="w-4 h-4" />
             </button>

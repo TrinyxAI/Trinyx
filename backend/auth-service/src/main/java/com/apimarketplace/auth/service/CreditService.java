@@ -212,9 +212,18 @@ public class CreditService {
      * top-up; the referral reward and its clawback must BOTH route here, or a
      * clawback would debit the wrong bucket (user keeps the reward, loses unrelated
      * sub credits).
+     *
+     * <p>{@code MANUAL_ADJUSTMENT} (the admin grant) joined them by product decision.
+     * It used to land on the sub bucket, which renewal wipes wholesale, so a grant
+     * silently evaporated at the account's next cycle: production destroyed 453,494
+     * credits on one account on 2026-08-08 and 482,142 on another on 2026-08-01, both
+     * exactly as designed and neither intended. An admin grant is a deliberate,
+     * out-of-cycle gift; it has no reason to expire with a billing period. On the FREE
+     * plan it also becomes more useful there, since the monthly bucket may only fund
+     * workflow nodes while PAYG funds everything.
      */
     private static final java.util.Set<String> PAYG_BUCKET_SOURCE_TYPES =
-            java.util.Set.of("PAYG_TOPUP", "REWARD_REFERRAL", "REWARD_CLAWBACK");
+            java.util.Set.of("PAYG_TOPUP", "REWARD_REFERRAL", "REWARD_CLAWBACK", "MANUAL_ADJUSTMENT");
 
     /** Plan code whose monthly (sub) bucket is restricted to workflow orchestration. */
     private static final String WORKFLOW_CREDITS_ONLY_PLAN_CODE = "FREE";
@@ -487,18 +496,18 @@ public class CreditService {
      * requested when per-image content moderation rejects a subset; billing
      * the requested count would over-charge the user.
      *
-     * <p><b>Pseudo-model billing key</b> &mdash; {@code model} here is the
-     * billing pseudo-model (e.g. {@code gpt-image-1-low}), not the real
-     * provider model name. See
-     * {@code shared-agent-lib/.../imagegen/ImageProviderCatalog} for the
-     * mapping from provider quality flags to billing keys.
+     * <p><b>The legacy image-generation TOOL no longer calls this.</b> It was
+     * retired with its billing strategy, and every catalog tool call now bills
+     * through the V148 reservation lifecycle. The one remaining producer of the
+     * {@code IMAGE_GENERATION} source type is publication screening, which posts
+     * {@code (stability-ai, stability-core, 1)} after storing a replacement image.
+     * Keep this method for as long as that path exists: dropping it would leave a
+     * generated image stored and unbilled, which the screening controller can only
+     * report as a BILLING DEFECT after the fact.
      *
      * <p>Pre-flight {@link ModelPricingService#hasPricing} guard prevents the
      * default-rate fallback from masking a missing-pricing deployment bug.
-     * Idempotent via {@code sourceId} from
-     * {@link com.apimarketplace.common.credit.SourceIdBuilder#imageGenerationDebitChat}
-     * or
-     * {@link com.apimarketplace.common.credit.SourceIdBuilder#imageGenerationDebitWorkflow}.
+     * Idempotent via {@code sourceId}, which the caller builds.
      */
     @Transactional
     public CreditConsumeResult consumeForImageGeneration(Long userId, String sourceId,
@@ -508,7 +517,7 @@ public class CreditService {
             return CreditConsumeResult.success(BigDecimal.ZERO, getBalance(userId));
         }
         if (!pricingService.hasPricing(provider, model)) {
-            log.warn("No pricing row for ({}, {}) - refusing image-generation debit. Check V141 / ImageProviderCatalog.",
+            log.warn("No pricing row for ({}, {}) - refusing image-generation debit. Check the V141 seed.",
                     provider, model);
             return CreditConsumeResult.noPricing(provider, model);
         }
@@ -521,62 +530,6 @@ public class CreditService {
                 userId, debitUserId);
         return deductCredits(debitUserId, cost, "IMAGE_GENERATION", sourceId,
                 provider, model, actualImageCount, null, desc, userId);
-    }
-
-    /**
-     * BYOK trace for image generation - the user supplied their own upstream
-     * API key, so the platform does NOT deduct credits (the user pays the
-     * provider directly). We still write a 0-amount ledger row to keep the
-     * audit trail complete: who generated how many images via which model,
-     * with which credential source.
-     *
-     * <p>BYOK does NOT route through {@code resolvePayer}: the workspace owner
-     * has nothing to do with a member's own-key generation, so the trace row
-     * stays attributed to the executor on every column ({@code user_id ==
-     * executor_user_id}) and {@code balance_after} reads the executor's own
-     * wallet. Keeps the {@code user_id} ↔ {@code balance_after} invariant
-     * intact even though no credits are debited.
-     *
-     * <p>Bypasses {@link #deductCredits} (which has no zero-amount-audit
-     * branch when {@code cost==0}) and writes the ledger row directly.
-     * Idempotent via {@code sourceId}; zero-image responses skip even the
-     * trace (consistent with {@link #consumeForImageGeneration}).
-     *
-     * <p>Used by {@code CatalogBillingDispatcher} when the catalog runtime
-     * resolves a {@code USER} credential source for a billable tool call.
-     */
-    @Transactional
-    public CreditConsumeResult consumeForImageGenerationByok(Long userId, String sourceId,
-                                                              String provider, String model,
-                                                              int actualImageCount) {
-        if (actualImageCount <= 0) {
-            return CreditConsumeResult.success(BigDecimal.ZERO, getBalanceForSelf(userId));
-        }
-        if (sourceId != null && ledgerRepository.existsBySourceId(sourceId)) {
-            log.debug("BYOK trace already recorded for sourceId={}, skipping duplicate", sourceId);
-            return CreditConsumeResult.success(BigDecimal.ZERO, getBalanceForSelf(userId));
-        }
-
-        BigDecimal balance = getBalanceForSelf(userId);
-        CreditLedgerEntry entry = new CreditLedgerEntry();
-        entry.setUserId(userId);
-        entry.setExecutorUserId(userId);
-        entry.setOrganizationId(currentLedgerOrgId());  // V366 - workspace reporting tag
-        entry.setAmount(BigDecimal.ZERO);
-        entry.setBalanceAfter(balance);
-        entry.setSourceType("IMAGE_GENERATION_BYOK");
-        entry.setSourceId(sourceId);
-        entry.setProvider(provider);
-        entry.setModel(model);
-        entry.setPromptTokens(actualImageCount);
-        entry.setCompletionTokens(null);
-        entry.setDescription(String.format(
-                "Image generation %s/%s: %d image(s) [BYOK - user-key passthrough]",
-                provider, model, actualImageCount));
-        ledgerRepository.save(entry);
-        log.debug("BYOK trace recorded for user {} {}/{} ({} images, sourceId={})",
-                userId, provider, model, actualImageCount, sourceId);
-        return CreditConsumeResult.success(BigDecimal.ZERO, balance);
     }
 
     /**
@@ -837,28 +790,44 @@ public class CreditService {
     @Transactional(readOnly = true)
     public BalanceBreakdown getBalanceBreakdown(Long userId) {
         if (unlimited) {
-            return new BalanceBreakdown(UNLIMITED_BALANCE, UNLIMITED_BALANCE, UNLIMITED_BALANCE, false);
+            return new BalanceBreakdown(UNLIMITED_BALANCE, UNLIMITED_BALANCE, UNLIMITED_BALANCE, false, false);
         }
         Long payerUserId = resolvePayer(userId);
         Subscription sub = resolveActiveSubscription(payerUserId);
         if (sub == null) {
-            return new BalanceBreakdown(BigDecimal.ZERO, BigDecimal.ZERO, BigDecimal.ZERO, false);
+            return new BalanceBreakdown(BigDecimal.ZERO, BigDecimal.ZERO, BigDecimal.ZERO, false, false);
         }
         BigDecimal subBal = sub.getRemainingCredits();
         BigDecimal paygBal = sub.getPaygRemainingCredits();
-        return new BalanceBreakdown(subBal.add(paygBal), subBal, paygBal, Boolean.TRUE.equals(sub.getDelinquent()));
+        return new BalanceBreakdown(subBal.add(paygBal), subBal, paygBal,
+                Boolean.TRUE.equals(sub.getDelinquent()),
+                // The ANSWER, not the facts it is derived from. A surface that
+                // read the two balances and inferred the rule would be a second
+                // opinion about it, and it would be wrong for the ordinary paid
+                // account: a monthly balance with no top-up is the NORMAL state
+                // of a PRO subscriber, whose monthly credits pay for everything.
+                // Only the Free plan's grant is workflow-scoped, and only this
+                // class knows that.
+                isWorkflowCreditsOnlyPlan(sub));
     }
 
     /**
      * V250 - DTO returned by {@link #getBalanceBreakdown(Long)}.
      * {@code balance} is always {@code subBalance + paygBalance} - kept on the
      * DTO so callers don't recompute.
+     *
+     * @param monthlyCreditsAreWorkflowOnly true when this account's monthly
+     *        grant may fund workflow-node orchestration and nothing else, so a
+     *        platform-key call (a generation, a chat, a web search) has to draw
+     *        the top-up bucket. False for every paid plan and for CE, where the
+     *        monthly balance pays for everything.
      */
     public record BalanceBreakdown(
             BigDecimal balance,
             BigDecimal subBalance,
             BigDecimal paygBalance,
-            boolean delinquent) {}
+            boolean delinquent,
+            boolean monthlyCreditsAreWorkflowOnly) {}
 
     /**
      * Resolve the user's most-recent active subscription. Owner-pays-aware:
@@ -1671,6 +1640,17 @@ public class CreditService {
         if (availableBalance.subtract(projected).signum() < 0) {
             log.info("Insufficient balance for reserve payer={} executor={} sourceId={} available={} projected={} subEligible={}",
                     payerUserId, executorUserId, sourceId, availableBalance, projected, subEligible);
+            // Two different refusals wear the same shape here, and only one of
+            // them is about how much the account holds. When the total WOULD
+            // have covered it and only the bucket routing stopped it, the
+            // account is not short of credits, it is holding the kind that this
+            // call may not draw on. Saying "balance=0" to a user whose screen
+            // shows several hundred credits is how a correct rule reads as a
+            // bug.
+            if (!subEligible && currentBalance.subtract(projected).signum() >= 0) {
+                return CreditConsumeResult.monthlyCreditsNotEligible(
+                        availableBalance, projected, currentBalance);
+            }
             return CreditConsumeResult.insufficientCredits(availableBalance, projected);
         }
 
@@ -2147,6 +2127,32 @@ public class CreditService {
         }
         public static CreditConsumeResult insufficientCredits(BigDecimal balance, BigDecimal required) {
             return new CreditConsumeResult(false, "Insufficient credits: balance=" + balance + ", required=" + required, BigDecimal.ZERO, balance, false);
+        }
+
+        /**
+         * Refused because of WHICH credits the account holds, not how many.
+         *
+         * <p>The monthly grant on the Free plan funds workflow-node
+         * orchestration and nothing else, so a platform-key call (generation,
+         * chat, agent, web search) has to draw the PAYG top-up bucket. An
+         * account holding only the monthly grant is therefore refused even
+         * though it has a balance, and telling it "Insufficient credits:
+         * balance=0" is worse than saying nothing: the app shows that user a
+         * balance of several hundred credits at the same moment. This states
+         * what is actually true and what actually resolves it.
+         *
+         * @param payg    the bucket that could have funded it, and did not
+         * @param total   what the account holds in both buckets, which is the
+         *                number the user can see on screen
+         */
+        public static CreditConsumeResult monthlyCreditsNotEligible(BigDecimal payg, BigDecimal required,
+                                                                     BigDecimal total) {
+            return new CreditConsumeResult(false,
+                    "PLAN_EXCLUDES_THIS: your monthly Free credits fund workflow runs only, so they cannot pay "
+                            + "for this. It costs " + required + " credits and your top-up balance is " + payg
+                            + " (of " + total + " total). An active subscription or a credit top-up pays for it. "
+                            + "A provider key you configured yourself is never charged by the platform.",
+                    BigDecimal.ZERO, payg, false);
         }
         public static CreditConsumeResult noSubscription() {
             return new CreditConsumeResult(false, "No active subscription", BigDecimal.ZERO, BigDecimal.ZERO, false);

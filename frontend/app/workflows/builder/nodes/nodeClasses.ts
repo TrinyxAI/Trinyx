@@ -53,6 +53,7 @@ export type InspectorTemplate =
   | 'download_file'
   | 'public_link'
   | 'media'
+  | 'generate'
   | 'http_request'
   | 'data_input'
   | 'while-group'
@@ -493,6 +494,17 @@ export const NODE_CLASSES: BuilderNodeClass[] = [
     aliases: ['audio', 'mux'],
     palette: { category: 'core', quickGroup: 'Data', quickBg: QUICK_COLOR.data },
     inspector: 'media',
+  }),
+  new BuilderNodeClass({
+    id: 'generate',
+    label: 'Generate',
+    description: 'Generate an image, video, audio, voice or music clip from a prompt',
+    kind: 'generate',
+    nodeType: 'flowNode',
+    family: 'core',
+    aliases: ['generation', 'image', 'text-to-image', 'text-to-video', 'text-to-speech'],
+    palette: { category: 'core', quickGroup: 'Data', quickBg: QUICK_COLOR.data },
+    inspector: 'generate',
   }),
   new BuilderNodeClass({
     id: 'http-request',

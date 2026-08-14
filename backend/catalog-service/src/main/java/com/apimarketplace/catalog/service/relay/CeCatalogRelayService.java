@@ -8,6 +8,7 @@ import com.apimarketplace.catalog.domain.dto.ToolExecutionResponse;
 import com.apimarketplace.catalog.repository.ApiRepository;
 import com.apimarketplace.catalog.repository.ApiToolRepository;
 import com.apimarketplace.catalog.service.CatalogV1Service;
+import com.apimarketplace.catalog.service.generation.RelayedGenerationMeasurement;
 import com.apimarketplace.catalog.service.http.CredentialModeContext;
 import com.apimarketplace.common.credit.CreditConsumptionClient;
 import com.apimarketplace.common.credit.SourceIdBuilder;
@@ -171,7 +172,12 @@ public class CeCatalogRelayService {
         }
         Long platformCredentialId = credential.get().getId();
 
-        Optional<BigDecimal> markupOpt = resolveMarkup(platformCredentialId, tool.getId());
+        // The body is passed so a generation can be MEASURED here rather than
+        // priced as an unmeasurable one and refused. It is the same body that
+        // is about to be executed, so the size that is billed is the size that
+        // runs.
+        Optional<BigDecimal> markupOpt =
+                resolveMarkup(platformCredentialId, tool.getId(), request.getParameters());
         if (markupOpt.isEmpty()) {
             // MANDATORY pricing: no published positive markup → refuse (no free ride).
             return RelayResult.of(RelayResult.Status.PLATFORM_NOT_AVAILABLE);
@@ -245,6 +251,28 @@ public class CeCatalogRelayService {
      * an error.
      */
     public PlatformInfo platformInfo(String integrationName, UUID apiToolId) {
+        return platformInfo(integrationName, apiToolId, null, null);
+    }
+
+    /**
+     * V428: the same probe, told which generation model is being asked about
+     * and how big the call would be.
+     *
+     * <p>Without those two the probe can only resolve an ENDPOINT-wide price,
+     * and every seeded generation is priced per MODEL, so it answered "nothing
+     * published" for a model the relay then executed and charged at its real
+     * per-second rate. A self-hosted install therefore showed "not sold on the
+     * platform key" beside a button that billed the customer. The execution
+     * path measures the call itself and always did; this makes the ANSWER
+     * agree with it, which is the whole reason both halves share resolveMarkup.
+     *
+     * @param modelId  generation model the surface is quoting, or null for an
+     *                 ordinary endpoint
+     * @param quantity PLATFORM measurement of the call being quoted, or null
+     *                 when the surface does not know it yet
+     */
+    public PlatformInfo platformInfo(String integrationName, UUID apiToolId,
+                                      String modelId, BigDecimal quantity) {
         Optional<ApiEntity> apiOpt = apiRepository.findByPlatformCredentialName(integrationName)
                 .filter(api -> Boolean.TRUE.equals(api.getIsActive()));
         boolean relayEligible = apiOpt.isPresent()
@@ -259,7 +287,7 @@ public class CeCatalogRelayService {
         Long platformCredentialId = credential.get().getId();
 
         BigDecimal markup = apiToolId != null
-                ? resolveMarkup(platformCredentialId, apiToolId).orElse(null)
+                ? resolveMarkup(platformCredentialId, apiToolId, modelId, quantity).orElse(null)
                 : credentialClient.getLatestPricingVersion(platformCredentialId)
                         .map(PricingVersionDto::getDefaultMarkupCredits)
                         .filter(m -> m.signum() > 0)
@@ -287,13 +315,170 @@ public class CeCatalogRelayService {
      * The strictly positive per-call markup frozen in the credential's latest
      * published pricing version. Empty when no pricing version exists, the
      * tool has no resolvable rate, or the rate is not positive.
+     *
+     * <p><b>A generation is measured here, from the body, before it is priced.</b>
+     * A relayed call carries the provider's own parameters, and the cloud owns
+     * the descriptor that produced them, so it can read back which model was
+     * selected and how big the call is and hand both to the published row. That
+     * is what lets a per-model, per-second price apply to a relayed call at
+     * all: without it the only resolvable row was the endpoint-wide one, and a
+     * seeded generation (priced per model) had none, so every relayed
+     * generation was refused.
+     *
+     * <p>The measurement is taken here rather than accepted from the install,
+     * because an install that declared its own size could declare a ten second
+     * video as one second. An ordinary endpoint measures nothing and is priced
+     * exactly as before. A generation the cloud cannot measure falls back to
+     * the quantity-less rate, which still refuses a per-unit row rather than
+     * charging one unit for a whole call.
+     *
+     * <p>Both callers share this method on purpose. One executes the call and
+     * one only advertises whether the tool is sold, and a discovery answer that
+     * quotes a price execution would refuse is worse than either behaviour on
+     * its own, because nothing downstream would ever reveal the disagreement.
      */
     private Optional<BigDecimal> resolveMarkup(Long platformCredentialId, UUID apiToolId) {
+        return resolveMarkup(platformCredentialId, apiToolId, null);
+    }
+
+    private Optional<BigDecimal> resolveMarkup(Long platformCredentialId, UUID apiToolId,
+                                                Map<String, Object> upstreamParams) {
+        // Only generations are held to the stricter rule, so only look the tool
+        // up when the answer can change something.
+        boolean generation = isGeneration(apiToolId);
+        // What this call IS and how big it is, measured here from the body the
+        // install sent, never declared by it. See RelayedGenerationMeasurement:
+        // a caller that stated its own size could state a ten second video as
+        // one second. Empty for every ordinary endpoint and for the discovery
+        // caller, which has no body, and both then behave exactly as before.
+        RelayedGenerationMeasurement.Measured measured = generation
+                ? RelayedGenerationMeasurement.measure(generationSpecOf(apiToolId), upstreamParams)
+                : RelayedGenerationMeasurement.Measured.NOTHING;
+        return priceFor(platformCredentialId, apiToolId, generation, measured);
+    }
+
+    /**
+     * Price for a call whose model and size are already known.
+     *
+     * <p>Used by the read-only probe, where there is no request body to measure
+     * and the surface states what it is asking about. Nothing here is trusted
+     * for EXECUTION: the executing path never comes through this door, it
+     * measures the body it is about to send. A probe that lies about its own
+     * quantity misquotes a price to itself and changes nothing that is charged.
+     */
+    private Optional<BigDecimal> resolveMarkup(Long platformCredentialId, UUID apiToolId,
+                                                String modelId, BigDecimal quantity) {
+        boolean generation = isGeneration(apiToolId);
+        // The unit is DERIVED from the model rather than taken from the caller,
+        // exactly as the executing path derives it from the body. The probe
+        // does not know it, and a quote that skipped it would answer with an
+        // amount the biller refuses: a disagreement that shows up on neither
+        // end, since both look like ordinary successes.
+        String quantityUnit = generation
+                ? RelayedGenerationMeasurement.platformUnitFor(generationSpecOf(apiToolId), modelId)
+                : null;
+        return priceFor(platformCredentialId, apiToolId, generation,
+                new RelayedGenerationMeasurement.Measured(modelId, quantity, quantityUnit));
+    }
+
+    private Optional<BigDecimal> priceFor(Long platformCredentialId, UUID apiToolId,
+                                           boolean generation,
+                                           RelayedGenerationMeasurement.Measured measured) {
         return credentialClient.getLatestPricingVersion(platformCredentialId)
                 .map(PricingVersionDto::getPricingVersionId)
-                .flatMap(versionId -> credentialClient.resolveFrozenMarkup(versionId, apiToolId))
+                .flatMap(versionId -> credentialClient.resolveFrozenMarkup(
+                        versionId, apiToolId, measured.modelId(), measured.quantity()))
+                // A per-unit row resolved without a quantity is an amount for ONE
+                // unit. Charging it would sell a ten second video for the price
+                // of one second, so refuse instead: an amount nobody could
+                // measure is not a price. The administrator has a real remedy,
+                // publish a flat endpoint price, or let the generation surface
+                // measure the call.
+                .filter(frozen -> {
+                    if (frozen.isPricedPerUnitWithoutQuantity()) {
+                        log.warn("Refusing relayed tool {}: its published price is per {} and this path "
+                                        + "carries no quantity, so the amount would cover one unit rather "
+                                        + "than the call.", apiToolId, frozen.getPriceUnit());
+                        return false;
+                    }
+                    // A credential-wide default is a price for the ordinary
+                    // endpoints of an API, where one call costs about what the
+                    // next one does. A generation on the same key can cost the
+                    // owner dollars per call, so letting it inherit the
+                    // catch-all sells it at the price of a lookup, silently and
+                    // positively. Refuse for the same reason an unpriced one is
+                    // refused: nobody decided this amount for this endpoint.
+                    if (generation && frozen.isKnownToBeVersionDefault()) {
+                        log.warn("Refusing relayed generation {}: its amount is the credential-wide "
+                                        + "default rather than a price published for this endpoint.",
+                                apiToolId);
+                        return false;
+                    }
+                    // A positive amount is not proof the price and the call are
+                    // talking about the same thing. The publish-time guard only
+                    // arms on a RE-publish, so a first "per image" row on a
+                    // model measured in seconds reaches here unchallenged and
+                    // would bill a ten second clip ten times the per-image
+                    // rate. The direct path refuses this same pair; without the
+                    // check here the two paths disagree, and since the CE quote
+                    // reads this very resolver, both ends would report the same
+                    // wrong number with nothing to reveal it.
+                    if (!frozen.canPriceMeasurementIn(measured.quantityUnit())) {
+                        log.warn("Refusing relayed tool {}: published per {} but this call is measured "
+                                        + "in {}, so the two cannot be multiplied.",
+                                apiToolId, frozen.getPriceUnit(), measured.quantityUnit());
+                        return false;
+                    }
+                    return true;
+                })
                 .map(FrozenMarkupDto::getEffectiveMarkup)
                 .filter(markup -> markup.signum() > 0);
+    }
+
+    /**
+     * Whether this endpoint produces a generated asset. A tool that cannot be
+     * loaded is treated as ordinary: this decides how STRICTLY to price, and a
+     * lookup failure is not evidence of anything, so it must not become a
+     * refusal of traffic that was fine a moment earlier.
+     */
+    /** The generation descriptor on the target endpoint, or null when unreadable. */
+    private com.apimarketplace.catalog.service.generation.GenerationSpec generationSpecOf(UUID apiToolId) {
+        if (apiToolId == null) return null;
+        try {
+            return apiToolRepository.findById(apiToolId)
+                    .map(ApiToolEntity::getGenerationSpec)
+                    .filter(json -> json != null && !json.isBlank())
+                    .flatMap(json -> {
+                        try {
+                            return com.apimarketplace.catalog.service.generation.GenerationSpec.parse(
+                                    objectMapper.readTree(json), "relay tool " + apiToolId);
+                        } catch (Exception parseFailure) {
+                            return Optional.empty();
+                        }
+                    })
+                    .orElse(null);
+        } catch (Exception e) {
+            // Unmeasurable, not free: the caller then prices it the
+            // conservative way, which refuses a per-unit row.
+            log.warn("Could not read the generation descriptor for relayed tool {}: {}",
+                    apiToolId, e.getMessage());
+            return null;
+        }
+    }
+
+    private boolean isGeneration(UUID apiToolId) {
+        if (apiToolId == null) {
+            return false;
+        }
+        try {
+            return apiToolRepository.findById(apiToolId)
+                    .map(ApiToolEntity::isGeneration)
+                    .orElse(false);
+        } catch (Exception e) {
+            log.warn("Could not determine whether relayed tool {} is a generation: {} - pricing it "
+                    + "as an ordinary endpoint", apiToolId, e.getMessage());
+            return false;
+        }
     }
 
     private static ToolExecutionRequest buildExecutionRequest(CeCatalogRelayRequest request,
@@ -306,9 +491,18 @@ public class CeCatalogRelayService {
                 // Server-resolved, authoritative: never taken from CE input.
                 .credentialSource("platform")
                 .platformCredentialId(platformCredentialId)
-                // NO billingScope fields: ToolExecutionManager's internal billing
-                // hook no-ops on missing scope, so the reserve/commit lifecycle in
-                // this service is the ONLY billing path (no double billing).
+                // NO billingScope fields, and an explicit statement of why: the
+                // reserve/commit lifecycle in THIS service is the only billing
+                // path for a relayed call (no double billing).
+                //
+                // Saying it explicitly rather than leaving it to be inferred from
+                // the absent scope is the whole point. "No scope" reads as
+                // "nobody bills this", which for a resold generation is a reason
+                // to refuse, and refusing here would reject a call this service
+                // has already reserved and is about to commit. The flag is
+                // wire-sealed on the DTO, so only an in-process caller that runs
+                // its own reserve/commit can set it.
+                .billingOwnedByCaller(true)
                 .build();
     }
 

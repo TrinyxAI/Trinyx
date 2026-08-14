@@ -120,8 +120,8 @@ public class ModelConfigController {
      *
      * <p>Optional {@code ?category=<key>} (V156) targets the per-category sidecar
      * instead of the global ranking column - used by the admin UI when an
-     * admin re-orders models inside a category-specific tab (chat /
-     * browser_agent / image_generation / future categories).
+     * admin re-orders models inside a category-specific tab (chat,
+     * browser_agent, or a future category).
      */
     @PutMapping("/overrides/rankings")
     public ResponseEntity<?> bulkUpdateRankings(

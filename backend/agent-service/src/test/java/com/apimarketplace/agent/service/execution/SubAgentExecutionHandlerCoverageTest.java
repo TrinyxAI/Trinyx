@@ -42,6 +42,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyBoolean;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyLong;
+import static org.mockito.ArgumentMatchers.anySet;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.mock;
@@ -122,7 +123,7 @@ class SubAgentExecutionHandlerCoverageTest {
     private void stubExecutablePath() {
         when(agentService.getAgent(AGENT_ID, TENANT_ID)).thenReturn(Optional.of(createAgent()));
         when(conversationServiceClient.findOrCreateAgentConversation(any(), any(), any(), any())).thenReturn("conv-1");
-        when(coreToolsCache.getCoreTools()).thenReturn(List.of());
+        when(coreToolsCache.getCoreTools(anySet())).thenReturn(List.of());
         var mockCallback = mock(ConversationRedisStreamingCallback.ConversationCallback.class);
         when(conversationRedisStreamingCallback.forExecution(any(), any(), any(), any(), any(), any(), any(), any()))
             .thenReturn(mockCallback);
@@ -240,7 +241,7 @@ class SubAgentExecutionHandlerCoverageTest {
             entity.setExecutionTimeout(entityTimeout);
             when(agentService.getAgent(AGENT_ID, TENANT_ID)).thenReturn(Optional.of(entity));
             when(conversationServiceClient.findOrCreateAgentConversation(any(), any(), any(), any())).thenReturn("conv-1");
-            when(coreToolsCache.getCoreTools()).thenReturn(List.of());
+            when(coreToolsCache.getCoreTools(anySet())).thenReturn(List.of());
             var mockCallback = mock(ConversationRedisStreamingCallback.ConversationCallback.class);
             when(conversationRedisStreamingCallback.forExecution(any(), any(), any(), any(), any(), any(), any(), any()))
                 .thenReturn(mockCallback);
@@ -291,7 +292,7 @@ class SubAgentExecutionHandlerCoverageTest {
             entity.setInactivityTimeout(entityInactivity);
             when(agentService.getAgent(AGENT_ID, TENANT_ID)).thenReturn(Optional.of(entity));
             when(conversationServiceClient.findOrCreateAgentConversation(any(), any(), any(), any())).thenReturn("conv-1");
-            when(coreToolsCache.getCoreTools()).thenReturn(List.of());
+            when(coreToolsCache.getCoreTools(anySet())).thenReturn(List.of());
             var mockCallback = mock(ConversationRedisStreamingCallback.ConversationCallback.class);
             when(conversationRedisStreamingCallback.forExecution(any(), any(), any(), any(), any(), any(), any(), any()))
                 .thenReturn(mockCallback);

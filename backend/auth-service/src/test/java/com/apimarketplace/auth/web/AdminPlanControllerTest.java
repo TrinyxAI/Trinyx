@@ -40,6 +40,9 @@ class AdminPlanControllerTest {
     private UserRepository userRepository;
 
     @Mock
+    private com.apimarketplace.auth.repository.AdminPlanGrantAuditRepository adminPlanGrantAuditRepository;
+
+    @Mock
     private AuditLogger auditLogger;
 
     @Mock
@@ -55,7 +58,7 @@ class AdminPlanControllerTest {
 
     @BeforeEach
     void setUp() {
-        controller = new AdminPlanController(adminPlanService, userRepository, auditLogger, false);
+        controller = new AdminPlanController(adminPlanService, userRepository, auditLogger, adminPlanGrantAuditRepository, false);
     }
 
     private User mockUser(Long id, String email) {
@@ -93,6 +96,73 @@ class AdminPlanControllerTest {
         return new AdminPlanController.AdminAssignPlanRequest(null, email, planCode);
     }
 
+    // ─────────────────────── Durable audit trail ───────────────────────
+
+    @Nested
+    @DisplayName("durable audit trail")
+    class DurableAudit {
+
+        /**
+         * Admin CREDIT grants have always been traceable via credit_ledger.description. Admin
+         * PLAN grants left nothing in the database, only an SLF4J event, so once the 30-day log
+         * retention passed the actor of a tier change was unrecoverable. These pin the row.
+         */
+        @Test
+        @DisplayName("a successful grant records actor, target, plans and outcome in the database")
+        void successIsPersisted() {
+            stubAuditChain();
+            when(adminPlanService.assignPlan(eq(TARGET_USER_ID), eq("TEAM"), eq(ADMIN_USER_ID)))
+                    .thenReturn(new AdminPlanService.AssignPlanResult(true, null, "FREE", "TEAM"));
+
+            controller.assignPlan(ADMIN_ROLES, ADMIN_USER_ID, byId(TARGET_USER_ID, "TEAM"), mockRequest());
+
+            org.mockito.ArgumentCaptor<com.apimarketplace.auth.domain.AdminPlanGrantAudit> captor =
+                    org.mockito.ArgumentCaptor.forClass(com.apimarketplace.auth.domain.AdminPlanGrantAudit.class);
+            verify(adminPlanGrantAuditRepository).save(captor.capture());
+            com.apimarketplace.auth.domain.AdminPlanGrantAudit row = captor.getValue();
+            assertThat(row.getActorUserId()).isEqualTo(ADMIN_USER_ID);
+            assertThat(row.getTargetUserId()).isEqualTo(TARGET_USER_ID);
+            assertThat(row.getRequestedPlan()).isEqualTo("TEAM");
+            assertThat(row.getPreviousPlan()).isEqualTo("FREE");
+            assertThat(row.isSucceeded()).isTrue();
+            assertThat(row.getFailureReason()).isNull();
+            assertThat(row.getClientIp()).isEqualTo("127.0.0.1");
+        }
+
+        @Test
+        @DisplayName("a refused grant is recorded too, with its reason")
+        void failureIsPersisted() {
+            stubAuditChain();
+            when(adminPlanService.assignPlan(eq(TARGET_USER_ID), eq("PRO"), eq(ADMIN_USER_ID)))
+                    .thenReturn(new AdminPlanService.AssignPlanResult(false, "has_paid_subscription", null, null));
+
+            controller.assignPlan(ADMIN_ROLES, ADMIN_USER_ID, byId(TARGET_USER_ID, "PRO"), mockRequest());
+
+            org.mockito.ArgumentCaptor<com.apimarketplace.auth.domain.AdminPlanGrantAudit> captor =
+                    org.mockito.ArgumentCaptor.forClass(com.apimarketplace.auth.domain.AdminPlanGrantAudit.class);
+            verify(adminPlanGrantAuditRepository).save(captor.capture());
+            assertThat(captor.getValue().isSucceeded()).isFalse();
+            assertThat(captor.getValue().getFailureReason()).isEqualTo("has_paid_subscription");
+        }
+
+        @Test
+        @DisplayName("an audit-write failure never fails the grant itself")
+        void auditFailureDoesNotBreakTheGrant() {
+            stubAuditChain();
+            when(adminPlanService.assignPlan(eq(TARGET_USER_ID), eq("TEAM"), eq(ADMIN_USER_ID)))
+                    .thenReturn(new AdminPlanService.AssignPlanResult(true, null, "FREE", "TEAM"));
+            when(adminPlanGrantAuditRepository.save(any()))
+                    .thenThrow(new RuntimeException("audit table unavailable"));
+
+            // A 500 on a legitimate grant would be worse than a missing row; the SLF4J event
+            // still fires, and the failure is logged at ERROR.
+            ResponseEntity<Map<String, Object>> response = controller.assignPlan(
+                    ADMIN_ROLES, ADMIN_USER_ID, byId(TARGET_USER_ID, "TEAM"), mockRequest());
+
+            assertThat(response.getStatusCode()).isEqualTo(HttpStatus.OK);
+        }
+    }
+
     // ─────────────────────── Authorization ───────────────────────
 
     @Nested
@@ -125,7 +195,7 @@ class AdminPlanControllerTest {
         @DisplayName("returns 503 in CE - assignPlan not called, no audit")
         void ceReturns503() {
             AdminPlanController ceController = new AdminPlanController(
-                    adminPlanService, userRepository, auditLogger, true);
+                    adminPlanService, userRepository, auditLogger, adminPlanGrantAuditRepository, true);
 
             ResponseEntity<Map<String, Object>> response = ceController.assignPlan(
                     ADMIN_ROLES, ADMIN_USER_ID, byId(TARGET_USER_ID, "PRO"), mockRequest());

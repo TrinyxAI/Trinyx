@@ -101,7 +101,7 @@ export default function BridgeSetupPanel({ cli, t }: BridgeSetupPanelProps) {
         {steps.map((step, index) => (
           <div key={index} className="space-y-2">
             <div className="flex items-center gap-2">
-              <span className="flex-shrink-0 w-6 h-6 rounded-full bg-theme-tertiary flex items-center justify-center text-xs font-medium text-theme-primary">
+              <span className="flex-shrink-0 w-6 h-6 rounded-lg bg-theme-tertiary flex items-center justify-center text-xs font-medium text-theme-primary">
                 {index + 1}
               </span>
               <span className="text-sm font-medium text-theme-primary">{step.title}</span>
@@ -149,7 +149,7 @@ export default function BridgeSetupPanel({ cli, t }: BridgeSetupPanelProps) {
           return (
             <div
               className={cn(
-                "inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium max-w-[24rem] truncate",
+                "inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-medium max-w-[24rem] truncate",
                 tone === "ok"
                   ? "bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400"
                   : tone === "warn"

@@ -741,6 +741,19 @@ public class ApiSubmissionOrchestrator {
             tool.setOutputSchema(null);
         }
 
+        // V428: generation descriptor. Parsed (not just stored) so a malformed
+        // seed fails the import with the offending field named, instead of
+        // surfacing much later as an unexplained "unknown model" at call time.
+        // Always written, null included, so removing the block from the JSON and
+        // re-importing actually clears the descriptor off the row.
+        JsonNode generationSpecNode = toolData.path("generationSpec");
+        String toolLabel = toolData.path("name").asText("?");
+        com.apimarketplace.catalog.service.generation.GenerationSpec
+                .parse(generationSpecNode, toolLabel)
+                .ifPresentOrElse(
+                        spec -> tool.setGenerationSpec(generationSpecNode.toString()),
+                        () -> tool.setGenerationSpec(null));
+
         // V166: per-endpoint OAuth scope requirements. Always write (null when absent
         // or empty) so a re-import after a JSON edit clears stale data on the row.
         JsonNode requiredScopesNode = toolData.path("requiredScopes");

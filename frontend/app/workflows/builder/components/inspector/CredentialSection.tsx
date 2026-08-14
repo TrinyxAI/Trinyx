@@ -5,7 +5,12 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { ExternalLink, Plus, DollarSign, User } from 'lucide-react';
 import LoadingSpinner from '@/components/LoadingSpinner';
 import { Button } from '@/components/ui/button';
-import { orchestratorApi, type Credential, type CredentialTemplate } from '@/lib/api/orchestrator';
+import {
+  orchestratorApi,
+  type Credential,
+  type CredentialTemplate,
+  type PlatformCredentialPublicInfo,
+} from '@/lib/api/orchestrator';
 import { CredentialWizard, resolveByokConfig, resolveByokOnlyScopeList, resolvePlatformScopeList } from '@/components/credentials/CredentialWizard';
 import { Select, SelectContent, SelectItem, SelectSeparator, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { ToggleGroup } from '@/components/ui/toggle-group';
@@ -56,7 +61,64 @@ interface CredentialSectionProps {
    * persisted, or SMTP/SSH/DB nodes that never bind to a catalog tool).
    */
   apiToolId?: string | null;
+  /**
+   * Generation model id the node is bound to (`core:generate` only). One
+   * endpoint can back several models at different prices, so with it the rate
+   * shown is that MODEL's, not the endpoint's.
+   */
+  modelId?: string | null;
+  /**
+   * Size of the run the price is quoted for, in PLATFORM units (10 for a 10
+   * second video, the prompt's length for a voice model), the same measurement
+   * the billing path sends. A generation priced per unit costs more for a
+   * bigger request, so without this the note can only state a rate; with it, it
+   * states what THIS node will actually cost.
+   *
+   * <p>It is NOT converted here into the unit the price is charged per. The
+   * quote answers with the unit it priced in and the quantity it charged for
+   * (`priceUnit` + `quantity` on the response), and the note prints THOSE, so
+   * an estimate can never quote a rate per minute beside a count of seconds.
+   */
+  quantity?: number | null;
+  /**
+   * What `quantity` is COUNTED in (second, image, character, call), from the
+   * model's own `measuredUnit`.
+   *
+   * <p>Sent so the quote can refuse a published rate that cannot price this
+   * call at all. Omitted means "this surface cannot say", which leaves the
+   * question unasked and the answer exactly as it was before.
+   */
+  quantityUnit?: string | null;
+  /**
+   * True when the bound endpoint resells a generated asset (it carries a
+   * generation descriptor in the catalog).
+   *
+   * <p>It travels to the quote because a generation is never sold on the
+   * credential-wide default: execution refuses that exact call. A `core:generate`
+   * step says so implicitly by naming a model, but an `mcp:` step bound straight
+   * to a generation endpoint names none, so without this the catch-all default
+   * came back as a price and the platform toggle offered a step the server
+   * refuses to run.
+   */
+  isGeneration?: boolean;
   isRunMode?: boolean;
+  /**
+   * Whether this section also EXPLAINS the platform rate, or only offers the
+   * choice.
+   *
+   * <p>Default true, which is the inspector: there, this is the only place a
+   * price is stated, so the rate note and the "no personal setup" explanation
+   * are what make the platform option comprehensible.
+   *
+   * <p>A surface that already states the price of the thing being bought
+   * passes false. The generation dialog does: it prints each model's quoted
+   * amount ON the model options, so that a reader can compare before choosing,
+   * and repeating it here would put the same amount on screen twice, which
+   * reads as two prices rather than one. The wording is also written for a
+   * workflow ("this step", "the base node cost") and says the wrong thing to
+   * someone pressing a button in the app.
+   */
+  showPlatformPricingNotes?: boolean;
   onCredentialStatusChange?: (allRequiredConfigured: boolean) => void;
   /**
    * Read-only container (e.g., agent-fleet inspector) - disables the
@@ -91,6 +153,65 @@ interface CredentialStatus {
 
 type CredentialWizardMode = 'standard' | 'advanced';
 
+// The unit vocabulary and its label helper moved to lib/credentials/priceUnits
+// once a second surface needed them: importing them FROM here dragged this
+// whole component, wizard included, into that surface's bundle. Re-exported so
+// existing importers of this module keep working.
+import { priceUnitLabel } from '@/lib/credentials/priceUnits';
+
+/**
+ * Which sentence explains the platform rate, and with which values.
+ *
+ * <p>Pulled out of the JSX so the choice is testable on its own: the whole point
+ * of the generation work is that a user sees what a run will cost BEFORE running
+ * it, and "60 credits per second, 10 seconds = 600 credits" is a different
+ * statement from "600 credits are billed on each call". Which one is truthful
+ * depends on what the quote resolved, so getting the branch wrong quotes a price
+ * the customer is not charged.
+ */
+export function describePlatformRate(
+  info: PlatformCredentialPublicInfo | undefined,
+): { key: string; values?: Record<string, string> } {
+  // The amount only reached the credential-wide default, and a generation is
+  // never sold on a catch-all: execution REFUSES this call. So there is no rate
+  // to state, and stating the default would quote the price of an ordinary
+  // lookup for a video. Say what the step will actually do instead. Checked
+  // before the flat fallback below, which would otherwise reach for
+  // `defaultMarkupCredits` - the very number that is not applicable here.
+  if (info?.versionDefaultOnly) {
+    return { key: 'source.markupNoteNotSold' };
+  }
+  const unitCredits = info?.unitCredits;
+  const perUnit = unitCredits != null && Number(unitCredits) > 0;
+
+  if (perUnit && info?.priceUnit) {
+    const unit = info.priceUnit;
+    // A quantity means the surface knows the size of THIS run, so the note can
+    // state the total instead of only the rate.
+    if (info.quantity != null && info.markupCredits != null) {
+      return {
+        key: 'source.markupNoteWithUnitRateAndTotal',
+        values: {
+          unitRate: String(unitCredits),
+          unit,
+          quantity: String(info.quantity),
+          total: String(info.markupCredits),
+        },
+      };
+    }
+    return {
+      key: 'source.markupNoteWithUnitRate',
+      values: { unitRate: String(unitCredits), unit },
+    };
+  }
+
+  const flatRate = info?.markupCredits ?? info?.defaultMarkupCredits;
+  if (flatRate != null) {
+    return { key: 'source.markupNoteWithRate', values: { rate: String(flatRate) } };
+  }
+  return { key: 'source.markupNote' };
+}
+
 export function resolveConfigureModeForRequiredScopes(
   requiredScopes: string[] | undefined | null,
   template: CredentialTemplate | null | undefined,
@@ -113,7 +234,12 @@ export function CredentialSection({
   onCredentialSelect,
   integration,
   apiToolId,
+  modelId,
+  quantity,
+  quantityUnit,
+  isGeneration = false,
   isRunMode = false,
+  showPlatformPricingNotes = true,
   onCredentialStatusChange,
   isReadOnly = false,
   credentialSource = 'user',
@@ -159,9 +285,37 @@ export function CredentialSection({
   // endpoints can receive different answers (one priced, the other not).
   const normalizedIntegration = integration?.toLowerCase() || '';
   const normalizedApiToolId = apiToolId ?? null;
+  // A generation model is priced per model AND per request size, so both take
+  // part in the cache key: changing the duration must re-quote, not reuse the
+  // price of the previous one.
+  const normalizedModelId = modelId ?? null;
+  const normalizedQuantity = quantity ?? null;
   const { data: platformInfo } = useQuery({
-    queryKey: ['platform-credential-public-info', normalizedIntegration, normalizedApiToolId],
-    queryFn: () => orchestratorApi.getPlatformCredentialPublicInfo(normalizedIntegration, normalizedApiToolId),
+    queryKey: [
+      'platform-credential-public-info',
+      normalizedIntegration,
+      normalizedApiToolId,
+      normalizedModelId,
+      normalizedQuantity,
+      // Part of the key because it changes the ANSWER: the same endpoint quoted
+      // as a generation may not inherit the credential-wide default, so a
+      // cached "priced" answer must not be served once the node is known to be
+      // bound to a generation.
+      isGeneration,
+      // Also part of the key: it too can flip a "priced" answer to "not sold",
+      // so a cached amount must not outlive a change of model.
+      quantityUnit ?? null,
+    ],
+    queryFn: () => orchestratorApi.getPlatformCredentialPublicInfo(
+      normalizedIntegration,
+      normalizedApiToolId,
+      {
+        modelId: normalizedModelId,
+        quantity: normalizedQuantity,
+        generation: isGeneration,
+        quantityUnit,
+      },
+    ),
     staleTime: 5 * 60_000,
     refetchOnMount: false,
     refetchOnWindowFocus: false,
@@ -477,6 +631,11 @@ export function CredentialSection({
           </span>
           <ToggleGroup
             variant="pill"
+            // Hugs its two choices and sits in the middle. A block-level pill
+            // stretched the full width of the panel, so the track ran on far
+            // past the last option and read as an empty third slot.
+            className="w-fit mx-auto"
+            ariaLabel={t('source.label')}
             value={usingPlatform ? 'platform' : 'user'}
             onValueChange={(v) => {
               if (v === 'platform') handleSwitchToPlatform();
@@ -496,16 +655,18 @@ export function CredentialSection({
               },
             ]}
           />
-          {usingPlatform && (
+          {usingPlatform && showPlatformPricingNotes && (
             <div className="text-xs text-theme-secondary bg-theme-tertiary/40 border border-theme rounded-md px-2 py-1.5">
-              {/* Prefer the per-endpoint rate when the inspector resolved one,
-                  fall back to the version-wide default for the "no apiToolId"
-                  case. When both are absent, show the generic note. */}
+              {/* Prefer the per-unit rate (a generation model priced per second /
+                  character), then the per-endpoint or version-wide flat rate,
+                  then the generic note. */}
               {(() => {
-                const rate = platformInfo?.markupCredits ?? platformInfo?.defaultMarkupCredits;
-                return rate
-                  ? t('source.markupNoteWithRate', { rate })
-                  : t('source.markupNote');
+                const note = describePlatformRate(platformInfo);
+                if (!note.values) return t(note.key);
+                const values = note.values.unit
+                  ? { ...note.values, unit: priceUnitLabel(note.values.unit, t) }
+                  : note.values;
+                return t(note.key, values);
               })()}
             </div>
           )}
@@ -515,9 +676,11 @@ export function CredentialSection({
       {/* Content */}
       <div className="space-y-3">
         {usingPlatform ? (
-          <div className="text-xs text-theme-secondary">
-            {t('source.platformExplanation')}
-          </div>
+          showPlatformPricingNotes ? (
+            <div className="text-xs text-theme-secondary">
+              {t('source.platformExplanation')}
+            </div>
+          ) : null
         ) : isLoading ? (
           <div className="flex items-center justify-center py-8">
             <LoadingSpinner size="sm" />
@@ -667,6 +830,16 @@ export function CredentialSection({
         onCredentialAdded={handleCredentialAdded}
         onComplete={handleWizardComplete}
         initialMode={wizardInitialMode}
+        // The wizard offers the choice; this is where the answer is RECORDED.
+        // Choosing the platform's key creates no credential, it changes which
+        // pool this step runs on, and that lives on the node. Passed only when
+        // the node can actually carry the answer, so the wizard shows the
+        // action exactly where it does something.
+        onUsePlatformCredential={
+          onCredentialSourceChange && platformInfo?.platformCredentialId != null
+            ? () => onCredentialSourceChange('platform', platformInfo.platformCredentialId ?? null)
+            : undefined
+        }
       />
 
       {/* Toast notifications - same as /settings/credentials */}

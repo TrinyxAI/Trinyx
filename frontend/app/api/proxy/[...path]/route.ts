@@ -1,3 +1,28 @@
+/**
+ * REACHABLE FOR EXACTLY ONE PATH: `/api/proxy/external-proxy`.
+ *
+ * Despite the catch-all segment, these handlers do NOT serve general `/api/proxy/*` traffic.
+ * `proxy.ts` (the Next middleware) matches `/api/proxy/:path*` and `NextResponse.rewrite()`s
+ * every path straight to the gateway; the one exception is `external-proxy`, which it lets
+ * through with `NextResponse.next()` so the request lands here and is re-routed to the LOCAL
+ * `/api/external-proxy` route. That bypass is deliberate and pinned by
+ * `e2e/ce/ce-routing-middleware-ui.spec.ts` ("/api/proxy/external-proxy bypasses proxy
+ * rewriting").
+ *
+ * And `external-proxy` itself takes an early return that re-routes it to the local route before
+ * reaching the gateway-forwarding block. So everything after that early return (header
+ * filtering, `?token` promotion, binary handling) runs for NOTHING: it is dead. Two
+ * consequences, both of which have already cost real time:
+ *
+ * 1. **A proxy bug fixed HERE ships nothing.** The live copy is `proxy.ts`. The `?token`
+ *    stripping fix (`cec80f7d7`) had to be applied to both for that reason, and only the
+ *    `proxy.ts` half of it ever ran. Fix `proxy.ts`; there is no case where mirroring it into
+ *    the dead block below has an effect.
+ * 2. **This file cannot be instrumented to observe a stalled request.** Measured 2026-08-07 on
+ *    a CE container: a proxied request produced zero lines from here because the handler never
+ *    ran. Timing out or logging general proxy traffic has to happen in `proxy.ts`, and a
+ *    middleware rewrite exposes no hook for either.
+ */
 import { NextRequest, NextResponse } from 'next/server';
 import { isJwtShapedToken } from '@/lib/utils/jwtShape';
 

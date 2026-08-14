@@ -55,7 +55,7 @@ class StorageExplorerVirtualScopeTest {
         lenient().when(repo.countChildrenByParent(any(), any(), any())).thenReturn(Map.of());
         lenient().when(repo.findPreviewFilesByParent(any(), any(), any())).thenReturn(Map.of());
         lenient().when(repo.listVirtualLeafFiles(any(), any(), any(), any(), any(), any(), any(), any(), any(),
-                anyBoolean(), anyBoolean(), any(), any(), any(), any(), anyBoolean(), anyInt(), anyInt()))
+                anyBoolean(), anyBoolean(), any(), any(), any(), any(), anyBoolean(), any(), anyInt(), anyInt()))
                 .thenReturn(new SliceResult(List.of(), 0));
     }
 
@@ -94,7 +94,7 @@ class StorageExplorerVirtualScopeTest {
 
         verify(repo).listVirtualLeafFiles(eq(ORG), eq(WF), any(), eq(0), eq(0), eq(0),
                 any(), any(), any(), anyBoolean(), anyBoolean(), any(),
-                eq(from), eq(to), any(), eq(false), anyInt(), anyInt());
+                eq(from), eq(to), any(), eq(false), any(), anyInt(), anyInt());
     }
 
     @Test
@@ -105,7 +105,7 @@ class StorageExplorerVirtualScopeTest {
 
         verify(repo).listVirtualLeafFiles(eq(ORG), eq(WF), any(), eq(0), eq(0), eq(0),
                 any(), any(), any(), anyBoolean(), anyBoolean(), any(),
-                isNull(), isNull(), any(), eq(false), anyInt(), anyInt());
+                isNull(), isNull(), any(), eq(false), any(), anyInt(), anyInt());
     }
 
     // ============================ RUN level ============================
@@ -288,7 +288,7 @@ class StorageExplorerVirtualScopeTest {
                     .containsExactly("wf:" + WF + "/e0/s0", "wf:" + WF + "/e0/s1");
             // No leaf-file query at this level.
             verify(repo, never()).listVirtualLeafFiles(any(), any(), any(), any(), any(), any(), any(), any(), any(),
-                    anyBoolean(), anyBoolean(), any(), any(), any(), any(), anyBoolean(), anyInt(), anyInt());
+                    anyBoolean(), anyBoolean(), any(), any(), any(), any(), anyBoolean(), any(), anyInt(), anyInt());
         }
 
         @Test
@@ -311,7 +311,7 @@ class StorageExplorerVirtualScopeTest {
             // The iteration-folders branch ALSO fetches the spawn's NON-split (item_index IS NULL) files
             // - nullItemOnly=true - so a non-split file in the spawn is never orphaned. None here → just folders.
             verify(repo).listVirtualLeafFiles(eq(ORG), eq(WF), eq(null), eq(0), eq(0), eq(null), any(), any(), any(),
-                    anyBoolean(), anyBoolean(), any(), any(), any(), any(), eq(true), anyInt(), anyInt());
+                    anyBoolean(), anyBoolean(), any(), any(), any(), any(), eq(true), any(), anyInt(), anyInt());
         }
 
         @Test
@@ -324,7 +324,7 @@ class StorageExplorerVirtualScopeTest {
             when(repo.listVirtualGroups(eq(ORG), eq(Level.ITERATION), eq(WF), eq(null), eq(0), eq(0), any(), any()))
                     .thenReturn(List.of(group("0", 2), group("1", 3)));
             when(repo.listVirtualLeafFiles(eq(ORG), eq(WF), eq(null), eq(0), eq(0), eq(null), any(), any(), any(),
-                    anyBoolean(), anyBoolean(), any(), any(), any(), any(), eq(true), anyInt(), anyInt()))
+                    anyBoolean(), anyBoolean(), any(), any(), any(), any(), eq(true), any(), anyInt(), anyInt()))
                     .thenReturn(new SliceResult(List.of(fileRow(screenshot, "form_screenshot.png")), 1));
 
             Page<StorageExplorerDto> p = service.searchVirtualScope("1", ORG,
@@ -349,7 +349,7 @@ class StorageExplorerVirtualScopeTest {
             when(repo.listVirtualGroups(eq(ORG), eq(Level.ITERATION), eq(WF), eq(null), eq(0), eq(0), any(), any()))
                     .thenReturn(List.of(group("0", 4)));
             when(repo.listVirtualLeafFiles(eq(ORG), eq(WF), eq(null), eq(0), eq(0), eq(null), any(), any(), any(),
-                    anyBoolean(), anyBoolean(), any(), any(), any(), any(), anyBoolean(), anyInt(), anyInt()))
+                    anyBoolean(), anyBoolean(), any(), any(), any(), any(), anyBoolean(), any(), anyInt(), anyInt()))
                     .thenReturn(new SliceResult(List.of(fileRow(f1, "a.png")), 1));
 
             Page<StorageExplorerDto> p = service.searchVirtualScope("1", ORG,
@@ -361,7 +361,7 @@ class StorageExplorerVirtualScopeTest {
             assertThat(p.getContent().get(0).id()).isEqualTo(f1);
             assertThat(p.getTotalElements()).isEqualTo(1);
             verify(repo).listVirtualLeafFiles(eq(ORG), eq(WF), eq(null), eq(0), eq(0), eq(null), any(), any(), any(),
-                    anyBoolean(), anyBoolean(), any(), any(), any(), any(), anyBoolean(), anyInt(), anyInt());
+                    anyBoolean(), anyBoolean(), any(), any(), any(), any(), anyBoolean(), any(), anyInt(), anyInt());
         }
 
         @Test
@@ -404,7 +404,7 @@ class StorageExplorerVirtualScopeTest {
             when(repo.listVirtualGroups(eq(ORG), eq(Level.ITERATION), eq(WF), eq(null), eq(1), eq(2), any(), any()))
                     .thenReturn(List.of(group("0", 1)));
             when(repo.listVirtualLeafFiles(eq(ORG), eq(WF), eq(null), eq(1), eq(2), eq(null), any(), any(), any(),
-                    anyBoolean(), anyBoolean(), any(), any(), any(), any(), anyBoolean(), anyInt(), anyInt()))
+                    anyBoolean(), anyBoolean(), any(), any(), any(), any(), anyBoolean(), any(), anyInt(), anyInt()))
                     .thenReturn(new SliceResult(List.of(fileRow(f1, "b.png")), 1));
 
             Page<StorageExplorerDto> p = service.searchVirtualScope("1", ORG,
@@ -421,7 +421,7 @@ class StorageExplorerVirtualScopeTest {
     void iterationLevelListsLeafFiles() {
         UUID f1 = UUID.randomUUID();
         when(repo.listVirtualLeafFiles(eq(ORG), eq(WF), eq(null), eq(1), eq(2), eq(3), any(), any(), any(),
-                anyBoolean(), anyBoolean(), any(), any(), any(), any(), anyBoolean(), anyInt(), anyInt()))
+                anyBoolean(), anyBoolean(), any(), any(), any(), any(), anyBoolean(), any(), anyInt(), anyInt()))
                 .thenReturn(new SliceResult(List.of(fileRow(f1, "c.png")), 1));
 
         Page<StorageExplorerDto> p = service.searchVirtualScope("1", ORG,
@@ -450,7 +450,7 @@ class StorageExplorerVirtualScopeTest {
         // Epoch coordinate is the REAL stored epoch (matches the EpochSlider), oldest-first - raw 0,1.
         assertThat(p.getContent()).extracting(StorageExplorerDto::epoch).containsExactly(0, 1);
         verify(repo, never()).listVirtualLeafFiles(any(), any(), any(), any(), any(), any(), any(), any(), any(),
-                anyBoolean(), anyBoolean(), any(), any(), any(), any(), anyBoolean(), anyInt(), anyInt());
+                anyBoolean(), anyBoolean(), any(), any(), any(), any(), anyBoolean(), any(), anyInt(), anyInt());
     }
 
     @Test
@@ -492,7 +492,7 @@ class StorageExplorerVirtualScopeTest {
             when(repo.listVirtualGroups(eq(ORG), eq(Level.WORKFLOW), eq(null), eq(null), eq(null), eq(null), any(), any()))
                     .thenReturn(List.of(group(WF, 7)));
             when(repo.listVirtualLeafFiles(eq(ORG), eq(null), eq(null), eq(null), eq(null), eq(null), any(), any(), any(),
-                    anyBoolean(), anyBoolean(), any(), any(), any(), any(), anyBoolean(), anyInt(), anyInt()))
+                    anyBoolean(), anyBoolean(), any(), any(), any(), any(), anyBoolean(), any(), anyInt(), anyInt()))
                     .thenReturn(new SliceResult(List.of(fileRow(looseId, "loose.png")), 1));
 
             Page<StorageExplorerDto> p = service.searchVirtualScope("1", ORG,
@@ -548,7 +548,7 @@ class StorageExplorerVirtualScopeTest {
                     true, true, null, List.of(), page(0, 20));
 
             verify(repo).listVirtualLeafFiles(eq(ORG), eq(null), eq(null), eq(null), eq(null), eq(null), any(), any(), any(),
-                    anyBoolean(), anyBoolean(), any(), any(), any(), any(), anyBoolean(), anyInt(), anyInt());
+                    anyBoolean(), anyBoolean(), any(), any(), any(), any(), anyBoolean(), any(), anyInt(), anyInt());
         }
 
         @Test
@@ -565,7 +565,7 @@ class StorageExplorerVirtualScopeTest {
             verify(repo, never()).listVirtualGroups(eq(ORG), eq(Level.WORKFLOW), any(), any(), any(), any(), any(), any());
             verify(repo).listRootManualFolders(eq(ORG), eq("report"), any());
             verify(repo).listVirtualLeafFiles(eq(ORG), eq(null), any(), any(), any(), any(), eq("report"), any(), any(),
-                    anyBoolean(), anyBoolean(), any(), any(), any(), any(), anyBoolean(), anyInt(), anyInt());
+                    anyBoolean(), anyBoolean(), any(), any(), any(), any(), anyBoolean(), any(), anyInt(), anyInt());
             assertThat(p.getContent()).noneMatch(d -> "WORKFLOW".equals(d.virtualKind()));
         }
     }
@@ -589,7 +589,7 @@ class StorageExplorerVirtualScopeTest {
                             group("55555555-5555-5555-5555-555555555555", 1)));
             // No loose files.
             when(repo.listVirtualLeafFiles(eq(ORG), eq(null), any(), any(), any(), any(), any(), any(), any(),
-                    anyBoolean(), anyBoolean(), any(), any(), any(), any(), anyBoolean(), anyInt(), anyInt()))
+                    anyBoolean(), anyBoolean(), any(), any(), any(), any(), anyBoolean(), any(), anyInt(), anyInt()))
                     .thenReturn(new SliceResult(List.of(), 0));
 
             Page<StorageExplorerDto> p = service.searchVirtualScope("1", ORG,
@@ -610,7 +610,7 @@ class StorageExplorerVirtualScopeTest {
             UUID f2 = UUID.randomUUID();
             // The file query is page-aligned now: offset 0, limit = pageSize (3) - NOT a leftover slot.
             when(repo.listVirtualLeafFiles(eq(ORG), eq(null), any(), any(), any(), any(), any(), any(), any(),
-                    anyBoolean(), anyBoolean(), any(), any(), any(), any(), anyBoolean(), eq(3), eq(0)))
+                    anyBoolean(), anyBoolean(), any(), any(), any(), any(), anyBoolean(), any(), eq(3), eq(0)))
                     .thenReturn(new SliceResult(List.of(fileRow(f0, "f0.png"), fileRow(f1, "f1.png"), fileRow(f2, "f2.png")), 5));
 
             Page<StorageExplorerDto> p = service.searchVirtualScope("1", ORG,
@@ -623,7 +623,7 @@ class StorageExplorerVirtualScopeTest {
             assertThat(p.getContent().get(1).virtualKind()).isEqualTo("WORKFLOW");
             assertThat(p.getContent().subList(2, 5)).allMatch(d -> !d.isFolder());
             verify(repo).listVirtualLeafFiles(eq(ORG), eq(null), any(), any(), any(), any(), any(), any(), any(),
-                    anyBoolean(), anyBoolean(), any(), any(), any(), any(), anyBoolean(), eq(3), eq(0));
+                    anyBoolean(), anyBoolean(), any(), any(), any(), any(), anyBoolean(), any(), eq(3), eq(0));
         }
 
         @Test
@@ -636,7 +636,7 @@ class StorageExplorerVirtualScopeTest {
             // Page index 1 (0-based) → page-aligned file offset = 3 (NOT offset - folderCount = 1).
             // Files 3 & 4 of 5 land here (consistent with the slice total of 5).
             when(repo.listVirtualLeafFiles(eq(ORG), eq(null), any(), any(), any(), any(), any(), any(), any(),
-                    anyBoolean(), anyBoolean(), any(), any(), any(), any(), anyBoolean(), eq(3), eq(3)))
+                    anyBoolean(), anyBoolean(), any(), any(), any(), any(), anyBoolean(), any(), eq(3), eq(3)))
                     .thenReturn(new SliceResult(List.of(fileRow(f3, "f3.png"), fileRow(f4, "f4.png")), 5));
 
             Page<StorageExplorerDto> p = service.searchVirtualScope("1", ORG,
@@ -647,7 +647,7 @@ class StorageExplorerVirtualScopeTest {
             assertThat(p.getContent()).allMatch(d -> !d.isFolder());
             assertThat(p.getTotalElements()).isEqualTo(5);
             verify(repo).listVirtualLeafFiles(eq(ORG), eq(null), any(), any(), any(), any(), any(), any(), any(),
-                    anyBoolean(), anyBoolean(), any(), any(), any(), any(), anyBoolean(), eq(3), eq(3));
+                    anyBoolean(), anyBoolean(), any(), any(), any(), any(), anyBoolean(), any(), eq(3), eq(3));
         }
     }
 }

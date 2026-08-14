@@ -73,7 +73,7 @@ const PricingCard: React.FC<PricingCardProps> = ({
       {recommended && (
         <div className="absolute -top-3 left-1/2 transform -translate-x-1/2 z-10">
           <Badge 
-            className={`text-xs font-medium px-3 py-1 rounded-full shadow-lg ${
+            className={`text-xs font-medium px-3 py-1 rounded-md shadow-lg ${
               model === 'freemium'
                 ? 'bg-purple-500 text-white border-transparent'
                 : 'bg-theme-primary text-theme-secondary border-transparent'
@@ -127,7 +127,7 @@ const PricingCard: React.FC<PricingCardProps> = ({
               onSelect();
             }
           }}
-          className={`rounded-full w-5 h-5 ${
+          className={`rounded-lg w-5 h-5 ${
             model === 'freemium'
               ? 'border-purple-500 data-[state=checked]:bg-purple-500'
               : 'border-orange-500 data-[state=checked]:bg-orange-500'

@@ -150,7 +150,7 @@ export function CreateSkillModal({ onClose, onSkillCreated, skill, folderId }: C
           <div className="px-8 pt-8 pb-4">
             <div className="text-center mb-2">
               <div className="flex justify-center mb-4">
-                <div className="w-16 h-16 bg-theme-secondary rounded-full flex items-center justify-center">
+                <div className="w-16 h-16 bg-theme-secondary rounded-2xl flex items-center justify-center">
                   <Zap className="w-8 h-8 text-theme-primary" />
                 </div>
               </div>

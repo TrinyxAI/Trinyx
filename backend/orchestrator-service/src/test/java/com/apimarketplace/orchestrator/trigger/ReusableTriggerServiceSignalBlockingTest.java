@@ -72,7 +72,7 @@ class ReusableTriggerServiceSignalBlockingTest {
                 mock(com.apimarketplace.orchestrator.repository.WorkflowPlanVersionRepository.class),
                 epochManager, streamingService,
                 executionService, triggerResolverService, stateSnapshotService,
-                epochConcurrencyLimiter, executionQueueService, creditClient, creditBudgetService);
+                epochConcurrencyLimiter, executionQueueService, creditBudgetService);
 
         // Inject @Autowired fields via reflection
         ReflectionTestUtils.setField(service, "unifiedSignalService", unifiedSignalService);

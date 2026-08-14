@@ -65,7 +65,9 @@ class WorkflowCrudModuleStopRunTest {
         module = new WorkflowCrudModule(workflowService, workflowRunRepository,
                 agentWorkflowFireService, planVersionService, pinService, publicationClient,
                 credentialClient, workflowRepository, new ApplicationShowcaseResolver(workflowRunRepository),
-                cancellationProbe, runStopToolHandler);
+                cancellationProbe, runStopToolHandler,
+                org.mockito.Mockito.mock(com.apimarketplace.orchestrator.services.resume.StepRerunService.class),
+                org.mockito.Mockito.mock(com.apimarketplace.orchestrator.services.resume.AutoRestartExecutionService.class));
         workflowId = UUID.randomUUID();
     }
 

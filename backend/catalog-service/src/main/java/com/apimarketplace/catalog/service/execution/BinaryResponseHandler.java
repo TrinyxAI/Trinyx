@@ -111,6 +111,43 @@ public class BinaryResponseHandler {
      * from {@code id} on demand (no presigned-URL TTL to expire in the agent's
      * context, no s3 key / tenant id leaked).
      */
+    /**
+     * Store bytes and return the canonical FileRef map, without needing the
+     * caller to own an outputSchema or a response shape.
+     *
+     * <p>Extracted so the generation surface can persist an asset it fetched
+     * from a provider URL through exactly this path (same storage client, same
+     * tenant scoping, same FileRef shape) instead of growing a second uploader
+     * that would drift from this one.
+     *
+     * @return the FileRef map, or an empty map when storage is unavailable or
+     *         the upload failed. Never null, never a partial shape.
+     */
+    public Map<String, Object> storeBytes(String tenantId, String category, String fileName,
+                                           String mimeType, byte[] bytes) {
+        if (storageClient == null || bytes == null || bytes.length == 0) {
+            return Map.of();
+        }
+        String tenant = tenantId == null || tenantId.isBlank() ? "anonymous" : tenantId;
+        String mime = mimeType == null || mimeType.isBlank() ? "application/octet-stream" : mimeType;
+        try {
+            FileRefDto uploaded = storageClient.genericUpload(tenant, category, fileName, mime, bytes);
+            if (uploaded == null) {
+                log.error("BinaryResponseHandler.storeBytes: genericUpload returned null for {}", fileName);
+                return Map.of();
+            }
+            return buildFileRefMap(uploaded, tenant);
+        } catch (Exception e) {
+            log.error("BinaryResponseHandler.storeBytes: upload failed for {}: {}", fileName, e.getMessage());
+            return Map.of();
+        }
+    }
+
+    /** File extension for a mime type, shared with the generation asset path. */
+    public String extensionForMime(String mimeType) {
+        return extensionFromMime(mimeType);
+    }
+
     private Map<String, Object> buildFileRefMap(FileRefDto uploaded, String tenant) {
         // v3.1 - NO presigned `url` in the FileRef response tree. The URL has a
         // 60-min TTL and used to leak into the agent's tool-result context for
@@ -468,7 +505,7 @@ public class BinaryResponseHandler {
      * actually show up in inline-base64 catalog responses today (image-gen
      * APIs, audio APIs, PDF generators). Unknown → {@code application/octet-stream}.
      */
-    private static String sniffMime(byte[] bytes) {
+    public static String sniffMime(byte[] bytes) {
         if (bytes == null || bytes.length < 4) return "application/octet-stream";
         // PNG: 89 50 4E 47 0D 0A 1A 0A
         if (bytes[0] == (byte) 0x89 && bytes[1] == 'P' && bytes[2] == 'N' && bytes[3] == 'G') {

@@ -45,6 +45,7 @@ export type NodeKind =
   | 'download_file' // Download File
   | 'public_link' // Public Link (expiring signed URL for a stored file)
   | 'media'      // Media (probe/mux/mix/extract audio-video via ffmpeg sidecar)
+  | 'generate'   // Generate (one asset from a prompt: image/video/audio/voice/music)
   | 'http_request'  // HTTP Request
   | 'data_input'    // Data Input
   | 'filter'     // Filter
@@ -249,6 +250,16 @@ const NODE_DEFINITIONS: Record<string, NodeDefinition> = {
     singleEntry: false,
     terminal: false,
     label: 'Media',
+    category: 'utility',
+  },
+  generateNode: {
+    type: 'flowNode', // Generate uses flowNode with kind='generate'
+    prefix: 'core',
+    kind: 'generate',
+    hasPorts: false,
+    singleEntry: false,
+    terminal: false,
+    label: 'Generate',
     category: 'utility',
   },
   httpRequestNode: {
@@ -799,7 +810,7 @@ class NodeRegistry {
     if (controlTypes.includes(type)) return true;
 
     // Check by kind for flowNode-based control nodes
-    const controlKinds = ['transform', 'wait', 'download_file', 'public_link', 'media', 'http_request', 'data_input', 'filter', 'sort', 'limit', 'remove_duplicates', 'summarize', 'date_time', 'crypto_jwt', 'xml', 'compression', 'rss', 'convert_to_file', 'extract_from_file', 'compare_datasets', 'set', 'html_extract', 'sub_workflow', 'respond_to_webhook', 'send_email', 'email_inbox', 'code', 'task', 'stop_on_error', 'ssh', 'sftp', 'database', 'output', 'exit'];
+    const controlKinds = ['transform', 'wait', 'download_file', 'public_link', 'media', 'generate', 'http_request', 'data_input', 'filter', 'sort', 'limit', 'remove_duplicates', 'summarize', 'date_time', 'crypto_jwt', 'xml', 'compression', 'rss', 'convert_to_file', 'extract_from_file', 'compare_datasets', 'set', 'html_extract', 'sub_workflow', 'respond_to_webhook', 'send_email', 'email_inbox', 'code', 'task', 'stop_on_error', 'ssh', 'sftp', 'database', 'output', 'exit'];
     if (controlKinds.includes(kind)) return true;
 
     // Check by is*Node() for nodes created from palette with generic kind: 'action'
@@ -1068,6 +1079,16 @@ class NodeRegistry {
     return kind === 'media' ||
            nodeDataId === 'media' ||
            nodeDataId.startsWith('media-');
+  }
+
+  // Prefix-only match (never `.includes`) so an MCP tool id such as
+  // `generate_report-123` is never mistaken for the core generate node.
+  isGenerateNode(node: Node<BuilderNodeData>): boolean {
+    const nodeDataId = node.data?.id || '';
+    const kind = (node.data as any)?.kind;
+    return kind === 'generate' ||
+           nodeDataId === 'generate' ||
+           nodeDataId.startsWith('generate-');
   }
 
   isHttpRequestNode(node: Node<BuilderNodeData>): boolean {
@@ -1497,6 +1518,7 @@ export const {
   isDownloadFileNode,
   isPublicLinkNode,
   isMediaNode,
+  isGenerateNode,
   isHttpRequestNode,
   isDataInputNode,
   isExitNode,

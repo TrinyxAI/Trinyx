@@ -430,6 +430,43 @@ public class WorkflowErrorChecker {
                     "fix", "workflow(action='modify', node='" + label + "', params={file: '{{core:dl.output.file}}'})"));
             }
 
+            // Generate: a model is required. Which parameters that model accepts,
+            // and their limits, are checked by the generation catalog before the
+            // provider is called, so they are deliberately not re-checked here.
+            if ("generate".equals(type)) {
+                if (!hasConfigField(cn, "params", "model")) {
+                    errors.add(Map.of("type", "MISSING_INPUT", "node", ref,
+                        "message", "Generate '" + label + "' requires a model. The model decides the format "
+                            + "produced (image, video, audio, voice, music), the parameters accepted and the price",
+                        "fix", "generation(action='models') to list the model ids, then "
+                            + "workflow(action='modify', node='" + label + "', params={model: '<a-model-id>'})"));
+                }
+                String source = configString(cn, "params", "credential_source");
+                if (source != null && !source.isBlank()
+                        && !"user".equals(source) && !"platform".equals(source)) {
+                    errors.add(Map.of("type", "INVALID_VALUE", "node", ref,
+                        "message", "Generate '" + label + "' has credential_source '" + source
+                            + "'; it must be 'platform' or 'user'",
+                        "fix", "workflow(action='modify', node='" + label + "', params={credential_source: 'platform'})"));
+                }
+                // The pinned key, checked HERE and not only in set_plan: a node
+                // built with add_node reaches finish through this check and
+                // never through that one. An unusable value is read at run time
+                // as "no pin" and the node quietly runs on the owner's default
+                // key instead of the one the plan names, with nothing in the
+                // result saying so.
+                String pinnedKey = configString(cn, "params", "credential_id");
+                if (pinnedKey != null && !pinnedKey.isBlank() && !isPositiveWholeNumberId(pinnedKey)) {
+                    errors.add(Map.of("type", "INVALID_VALUE", "node", ref,
+                        "message", "Generate '" + label + "' has credential_id '" + pinnedKey
+                            + "'; it must be a positive whole number identifying one of the workflow "
+                            + "owner's own provider keys. You cannot look one up, so keep the value a "
+                            + "node already has, or leave it out and the node runs on the owner's "
+                            + "default key",
+                        "fix", "workflow(action='modify', node='" + label + "', params={credential_id: null})"));
+                }
+            }
+
             // Media: operation required (one of 4) + per-operation required file params
             if ("media".equals(type)) {
                 String mediaOp = configString(cn, "params", "operation");
@@ -753,6 +790,25 @@ public class WorkflowErrorChecker {
             return val != null;
         }
         return false;
+    }
+
+    /**
+     * A value that can be a database id: a whole number above zero. Kept in
+     * step with the same rule in {@code WorkflowBuilderPlanExporter}, so a
+     * plan refused by one path is refused by the other.
+     */
+    private static boolean isPositiveWholeNumberId(String value) {
+        try {
+            // Parsed as a decimal, not a long: this side sees the value
+            // already rendered as text, so Jackson's `5.0` arrives as "5.0"
+            // and a long parse would refuse a plan the other guard accepted.
+            // The two must agree in BOTH directions, or set_plan reports OK
+            // and finish then blocks on a field set_plan just took.
+            java.math.BigDecimal parsed = new java.math.BigDecimal(value.trim());
+            return parsed.signum() > 0 && parsed.stripTrailingZeros().scale() <= 0;
+        } catch (NumberFormatException e) {
+            return false;
+        }
     }
 
     private String configString(Map<String, Object> cn, String configKey, String field) {

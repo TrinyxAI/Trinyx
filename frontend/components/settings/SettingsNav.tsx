@@ -142,7 +142,7 @@ export function SettingsNav() {
                         type="button"
                         onClick={() => nudge(-1)}
                         aria-label={t('scrollLeft')}
-                        className="pointer-events-auto flex h-6 w-6 items-center justify-center rounded-full bg-theme-secondary text-theme-secondary shadow-sm"
+                        className="pointer-events-auto flex h-6 w-6 items-center justify-center rounded-lg bg-theme-secondary text-theme-secondary shadow-sm"
                     >
                         <ChevronLeft className="h-4 w-4" />
                     </button>
@@ -154,7 +154,7 @@ export function SettingsNav() {
                         type="button"
                         onClick={() => nudge(1)}
                         aria-label={t('scrollRight')}
-                        className="pointer-events-auto flex h-6 w-6 items-center justify-center rounded-full bg-theme-secondary text-theme-secondary shadow-sm"
+                        className="pointer-events-auto flex h-6 w-6 items-center justify-center rounded-lg bg-theme-secondary text-theme-secondary shadow-sm"
                     >
                         <ChevronRight className="h-4 w-4" />
                     </button>

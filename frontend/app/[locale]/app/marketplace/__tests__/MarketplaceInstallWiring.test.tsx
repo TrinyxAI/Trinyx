@@ -20,8 +20,21 @@
 import '@testing-library/jest-dom/vitest';
 import React from 'react';
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ActiveMarketplaceInstall } from '@/lib/stores/marketplace-install-store';
+
+// The type filter is a Radix Select; jsdom has none of what it reaches for.
+beforeAll(() => {
+  (window as unknown as { ResizeObserver: unknown }).ResizeObserver = class {
+    observe() {}
+    unobserve() {}
+    disconnect() {}
+  };
+  (Element.prototype as unknown as { scrollIntoView: () => void }).scrollIntoView = () => {};
+  (Element.prototype as unknown as { hasPointerCapture: () => boolean }).hasPointerCapture = () => false;
+  (Element.prototype as unknown as { setPointerCapture: () => void }).setPointerCapture = () => {};
+  (Element.prototype as unknown as { releasePointerCapture: () => void }).releasePointerCapture = () => {};
+});
 
 vi.mock('next-intl', () => ({
   useTranslations: () => (key: string) => key,
@@ -139,6 +152,12 @@ function activeInstall(overrides: Partial<ActiveMarketplaceInstall> = {}): Activ
     error: null,
     ...overrides,
   };
+}
+
+/** Picks a resource type through the Explore type select. */
+async function pickType(label: RegExp): Promise<void> {
+  fireEvent.click(screen.getByRole('combobox', { name: 'filterByType' }));
+  fireEvent.click(await screen.findByRole('option', { name: label }));
 }
 
 function card(pubId: string): HTMLElement {
@@ -499,7 +518,7 @@ describe('Marketplace - tab and type filter survive a round trip (query params)'
     render(<MarketplacePage />);
 
     // The agent shows, the application is filtered out - i.e. the deep link
-    // selected the Agents chip without any click.
+    // selected Agents in the type filter without any click.
     await screen.findByText('Wired Agent');
     expect(screen.queryByText('Wired App')).not.toBeInTheDocument();
   });
@@ -512,7 +531,7 @@ describe('Marketplace - tab and type filter survive a round trip (query params)'
     render(<MarketplacePage />);
     await screen.findByText('Wired App');
 
-    fireEvent.click(screen.getByRole('button', { name: /agents/i }));
+    await pickType(/agents/i);
 
     expect(routerMock.replace).toHaveBeenCalledWith(
       '/app/marketplace?type=agents',
@@ -577,7 +596,7 @@ describe('Marketplace - tab is query-param backed too', () => {
     render(<MarketplacePage />);
     await screen.findByText('Wired Agent');
 
-    fireEvent.click(screen.getByRole('button', { name: /applications/i }));
+    await pickType(/applications/i);
 
     expect(routerMock.replace).toHaveBeenCalledWith('/app/marketplace', { scroll: false });
   });

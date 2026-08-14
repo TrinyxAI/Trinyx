@@ -70,7 +70,7 @@ export default function VersionCard() {
   return (
     <div className="rounded-xl border border-theme p-6">
       <div className="flex items-center gap-3 mb-5">
-        <div className="w-10 h-10 bg-theme-secondary rounded-full flex items-center justify-center shrink-0">
+        <div className="w-10 h-10 bg-theme-secondary rounded-xl flex items-center justify-center shrink-0">
           <Package className="w-5 h-5 text-theme-primary" />
         </div>
         <div>
@@ -145,7 +145,7 @@ export default function VersionCard() {
                         <button
                           type="button"
                           onClick={() => setShowUpdate(true)}
-                          className="rounded-full bg-black px-3 py-1 text-xs font-medium text-white transition-colors hover:bg-black/90 dark:bg-white dark:text-black dark:hover:bg-white/90 cursor-pointer"
+                          className="rounded-md bg-black px-3 py-1 text-xs font-medium text-white transition-colors hover:bg-black/90 dark:bg-white dark:text-black dark:hover:bg-white/90 cursor-pointer"
                         >
                           {t('howToUpdate')}
                         </button>

@@ -761,7 +761,7 @@ export default function AgentDebugPage() {
             Visualize system prompts and test agent tools
           </p>
         </div>
-        <div className="hidden sm:flex items-center gap-2 px-3 py-1.5 rounded-full bg-amber-500/10 text-amber-700 dark:text-amber-400 text-xs font-medium">
+        <div className="hidden sm:flex items-center gap-2 px-3 py-1.5 rounded-md bg-amber-500/10 text-amber-700 dark:text-amber-400 text-xs font-medium">
           <Shield className="w-3.5 h-3.5" />
           Admin only
         </div>

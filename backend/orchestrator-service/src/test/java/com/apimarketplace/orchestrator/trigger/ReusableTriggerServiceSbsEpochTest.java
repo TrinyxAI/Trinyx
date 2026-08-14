@@ -70,7 +70,7 @@ class ReusableTriggerServiceSbsEpochTest {
                 mock(com.apimarketplace.orchestrator.repository.WorkflowPlanVersionRepository.class),
                 epochManager, streamingService,
                 executionService, triggerResolverService, stateSnapshotService,
-                epochConcurrencyLimiter, executionQueueService, creditClient, creditBudgetService);
+                epochConcurrencyLimiter, executionQueueService, creditBudgetService);
         ReflectionTestUtils.setField(service, "unifiedSignalService", unifiedSignalService);
         ReflectionTestUtils.setField(service, "snapshotService", snapshotService);
         ReflectionTestUtils.setField(service, "resumeService", resumeService);

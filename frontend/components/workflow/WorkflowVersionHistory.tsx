@@ -374,12 +374,12 @@ export const WorkflowSaveWithVersions: React.FC<WorkflowSaveWithVersionsProps> =
                             v{version.version}
                           </span>
                           {isCurrent && (
-                            <span className="text-xs bg-emerald-100 dark:bg-emerald-900/30 text-emerald-600 dark:text-emerald-400 px-1.5 py-0.5 rounded-full">
+                            <span className="text-xs bg-emerald-100 dark:bg-emerald-900/30 text-emerald-600 dark:text-emerald-400 px-1.5 py-0.5 rounded-md">
                               {t('versionHistory.current')}
                             </span>
                           )}
                           {pinnedVersion === version.version && (
-                            <span className="text-xs bg-amber-100 dark:bg-amber-900/30 text-amber-600 dark:text-amber-400 px-1.5 py-0.5 rounded-full flex items-center gap-0.5">
+                            <span className="text-xs bg-amber-100 dark:bg-amber-900/30 text-amber-600 dark:text-amber-400 px-1.5 py-0.5 rounded-md flex items-center gap-0.5">
                               <Pin className="w-2.5 h-2.5" />
                               {t('versionHistory.pinned')}
                             </span>
@@ -476,7 +476,7 @@ export const WorkflowSaveWithVersions: React.FC<WorkflowSaveWithVersionsProps> =
               /* ---- Pin modal: simple & clean ---- */
               <>
                 <div className="text-center mb-6">
-                  <div className="w-14 h-14 bg-amber-100 dark:bg-amber-900/30 rounded-full flex items-center justify-center mx-auto mb-4">
+                  <div className="w-14 h-14 bg-amber-100 dark:bg-amber-900/30 rounded-xl flex items-center justify-center mx-auto mb-4">
                     <Pin className="w-7 h-7 text-amber-600 dark:text-amber-400" />
                   </div>
                   <h3 className="text-lg font-semibold text-theme-primary">
@@ -499,7 +499,7 @@ export const WorkflowSaveWithVersions: React.FC<WorkflowSaveWithVersionsProps> =
               /* ---- Unpin modal: dissuasive ---- */
               <>
                 <div className="text-center mb-6">
-                  <div className="w-14 h-14 bg-red-100 dark:bg-red-900/30 rounded-full flex items-center justify-center mx-auto mb-4">
+                  <div className="w-14 h-14 bg-red-100 dark:bg-red-900/30 rounded-xl flex items-center justify-center mx-auto mb-4">
                     <PinOff className="w-7 h-7 text-red-600 dark:text-red-400" />
                   </div>
                   <h3 className="text-lg font-semibold text-theme-primary">

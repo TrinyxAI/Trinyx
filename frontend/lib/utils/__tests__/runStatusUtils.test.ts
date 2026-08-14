@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { deriveBadgeCycleResult, getRunDisplayStatus, getRunStatusLabel, getStatusClasses } from '../runStatusUtils';
+import { deriveBadgeCycleResult, getRunDisplayStatus, getRunStatusLabel, getStatusClasses, resolveBadgeCycleResult } from '../runStatusUtils';
 
 describe('runStatusUtils', () => {
   describe('getStatusClasses - partial success is amber/orange', () => {
@@ -38,9 +38,13 @@ describe('runStatusUtils', () => {
   });
 
   describe('deriveBadgeCycleResult - outcome for a WAITING_TRIGGER badge', () => {
-    it('mix of a failed node and a real (non-trigger) completed node -> partial_success', () => {
+    it('mix of a failed node and a completed node -> failed, NOT partial', () => {
+      // Rewritten with the rule, not adapted to it: this asserted 'partial_success' while the
+      // backend wrote 'failed' for the same cycle, so the canvas badge and the run-history row
+      // contradicted each other on one run. partial_success is a NODE verdict - a node
+      // accumulates items and can be half-done; a cycle either did the job or did not.
       expect(deriveBadgeCycleResult('WAITING_TRIGGER', ['trigger:scheduler', 'core:wait'], true))
-        .toBe('partial_success');
+        .toBe('failed');
     });
 
     it('only the trigger completed (everything else failed) -> failed, NOT partial', () => {
@@ -54,7 +58,7 @@ describe('runStatusUtils', () => {
     });
 
     it('lowercase run status is handled', () => {
-      expect(deriveBadgeCycleResult('waiting_trigger', ['core:wait'], true)).toBe('partial_success');
+      expect(deriveBadgeCycleResult('waiting_trigger', ['core:wait'], true)).toBe('failed');
     });
 
     it('not WAITING_TRIGGER (e.g. PAUSED mid-step) -> undefined (keep raw status)', () => {
@@ -94,17 +98,71 @@ describe('runStatusUtils', () => {
     });
   });
 
-  describe('end-to-end: a mixed cycle renders amber', () => {
-    it('WAITING_TRIGGER + partial_success cycle -> amber badge classes', () => {
+  describe('end-to-end: the badge chain', () => {
+    it('a stored partial_success still renders amber, for runs that finished before the rule', () => {
+      // Runs already in the database carry partial_success in their metadata. We stopped
+      // PRODUCING it; every reader must keep displaying it, or their history reads wrong.
       const display = getRunDisplayStatus('WAITING_TRIGGER', { lastCycleResult: 'partial_success' });
       expect(getStatusClasses(display)).toContain('amber');
     });
 
-    it('derive -> display -> color chain yields amber for a mixed WAITING_TRIGGER cycle', () => {
+    it('derive -> display -> colour chain yields RED for a mixed cycle', () => {
       const cycle = deriveBadgeCycleResult('WAITING_TRIGGER', ['trigger:scheduler', 'core:wait'], true);
       const display = getRunDisplayStatus('WAITING_TRIGGER', { lastCycleResult: cycle });
-      expect(display).toBe('PARTIAL_SUCCESS');
-      expect(getStatusClasses(display)).toContain('amber');
+      expect(display).toBe('FAILED');
+      expect(getStatusClasses(display)).toContain('red');
+    });
+
+    it('derive -> display -> colour chain yields GREEN for a clean cycle', () => {
+      const cycle = deriveBadgeCycleResult('WAITING_TRIGGER', ['trigger:scheduler', 'core:wait'], false);
+      const display = getRunDisplayStatus('WAITING_TRIGGER', { lastCycleResult: cycle });
+      expect(display).toBe('COMPLETED');
+      expect(getStatusClasses(display)).toContain('emerald');
+    });
+
+    it('a launched run whose trigger has not fired keeps the idle status', () => {
+      const cycle = deriveBadgeCycleResult('WAITING_TRIGGER', ['trigger:scheduler'], false);
+      expect(cycle).toBeUndefined();
+      expect(getRunDisplayStatus('WAITING_TRIGGER', cycle ? { lastCycleResult: cycle } : {}))
+        .toBe('WAITING_TRIGGER');
+    });
+  });
+
+  describe('resolveBadgeCycleResult', () => {
+    it('takes the backend verdict even when the local sets say the opposite', () => {
+      // The case no client-side derivation can get right: the node that failed in an earlier
+      // epoch is bucketed as completed (so it keeps its rerun button), so `hasFailed` is false
+      // here and the local rule would answer "completed" for a cycle the backend recorded as
+      // failed. Two badges on the same run, opposite colours.
+      expect(resolveBadgeCycleResult('failed', 'WAITING_TRIGGER', ['trigger:s', 'core:x'], false))
+        .toBe('failed');
+    });
+
+    it('takes the backend verdict when it says completed', () => {
+      expect(resolveBadgeCycleResult('completed', 'WAITING_TRIGGER', ['trigger:s', 'core:x'], true))
+        .toBe('completed');
+    });
+
+    it('falls back to the local derivation only when the backend said nothing', () => {
+      // Older run payloads predate the field. The fallback must still work for them.
+      expect(resolveBadgeCycleResult(undefined, 'WAITING_TRIGGER', ['trigger:s', 'core:x'], true))
+        .toBe('failed');
+      expect(resolveBadgeCycleResult(undefined, 'WAITING_TRIGGER', ['trigger:s', 'core:x'], false))
+        .toBe('completed');
+    });
+
+    it('leaves an armed-but-unfired run with no outcome to borrow', () => {
+      expect(resolveBadgeCycleResult(undefined, 'WAITING_TRIGGER', ['trigger:s'], false))
+        .toBeUndefined();
+    });
+
+    it('ignores a stale verdict on a run that is not resting between fires', () => {
+      // A RUNNING run still carries the PREVIOUS cycle's verdict in its metadata. Showing it would
+      // badge a live run with the last cycle's outcome instead of "running".
+      expect(resolveBadgeCycleResult('failed', 'RUNNING', ['trigger:s', 'core:x'], false))
+        .toBeUndefined();
+      expect(resolveBadgeCycleResult('completed', 'PAUSED', ['trigger:s', 'core:x'], false))
+        .toBeUndefined();
     });
   });
 });

@@ -3,6 +3,9 @@ package com.apimarketplace.auth.credential.service;
 import com.apimarketplace.auth.credential.domain.PlatformCredentialModels.AuthType;
 import com.apimarketplace.auth.credential.domain.PlatformCredentialModels.PlatformCredential;
 import com.apimarketplace.auth.credential.domain.PlatformCredentialPricingVersion;
+import com.apimarketplace.auth.credential.domain.PriceSource;
+import com.apimarketplace.auth.credential.domain.PriceSpec;
+import com.apimarketplace.auth.credential.domain.PriceUnit;
 import com.apimarketplace.auth.credential.domain.PricingVersionEntry;
 import com.apimarketplace.auth.credential.domain.WorkflowRunPricingPin;
 import com.apimarketplace.auth.credential.repository.PlatformCredentialPricingVersionRepository;
@@ -71,44 +74,98 @@ public class PlatformCredentialPricingService {
     }
 
     /**
+     * Publish a new pricing version whose rows are exactly {@code prices}.
+     *
+     * <p>Kept as the shape every existing caller speaks. The seeded v1 bootstrap
+     * uses it because there is nothing to carry forward; an admin republish uses
+     * the 5-arg overload so it cannot silently drop rows it did not mention.
+     */
+    @Transactional
+    public PlatformCredentialPricingVersion publishNextVersion(Long credentialId,
+                                                                BigDecimal defaultMarkup,
+                                                                List<PriceSpec> prices,
+                                                                String createdBy) {
+        return publishNextVersion(credentialId, defaultMarkup, prices, createdBy, false);
+    }
+
+    /**
      * Publish a new pricing version for the given credential.
      *
      * <p>Runs under an advisory lock so the read-max / insert-next sequence is
      * atomic against concurrent publishes. The lock is released when the
      * transaction commits.
      *
-     * @throws IllegalArgumentException if the credential does not exist or the
-     *                                  markup config violates policy.
+     * <p><b>V428 - why a list of {@link PriceSpec} and not a map.</b> A price is
+     * no longer one number per endpoint: it names a model, a unit, a fixed part,
+     * a variable part and two clamps. The old {@code Map<apiToolId, credits>}
+     * could carry exactly one of those six, which is why the starting prices
+     * declared in the catalog seed had nowhere to land. Every call site now
+     * speaks the same shape; a flat legacy price is {@link PriceSpec#flat} and
+     * bills the same amount it always did.
+     *
+     * <p><b>What "republish" means here.</b> A version is immutable, so editing a
+     * price is really publishing the NEXT version. That makes the row set of the
+     * new version a decision, not a detail:
+     * <ul>
+     *   <li>{@code carryForwardUnlistedPrices=true} (how the admin surface and any
+     *       older client publish): the new version STARTS as a copy of the latest
+     *       version's rows, and {@code prices} upserts onto it keyed by
+     *       (endpoint, model). A caller that can only express one flat amount per
+     *       endpoint therefore changes that endpoint's flat price and leaves every
+     *       per-model, per-unit row it cannot express intact. Without this, one
+     *       republish from a pre-V428 client collapses a per-second video price
+     *       into a flat one, and nothing in the response says so.</li>
+     *   <li>{@code carryForwardUnlistedPrices=false}: {@code prices} IS the row
+     *       set. This is how a surface that renders and edits every row publishes
+     *       (what you see is what gets published, deletions included), and how the
+     *       catalog seed bootstraps v1.</li>
+     * </ul>
+     * The version-wide default is NOT carried forward either way: it is a single
+     * scalar the caller always states explicitly, so honouring the value passed is
+     * the only reading that cannot surprise.
+     *
+     * @throws IllegalArgumentException if the credential does not exist, the
+     *                                  markup config violates policy, or two
+     *                                  prices claim the same (endpoint, model).
      */
     @Transactional
     public PlatformCredentialPricingVersion publishNextVersion(Long credentialId,
                                                                 BigDecimal defaultMarkup,
-                                                                Map<UUID, BigDecimal> perToolOverrides,
-                                                                String createdBy) {
+                                                                List<PriceSpec> prices,
+                                                                String createdBy,
+                                                                boolean carryForwardUnlistedPrices) {
         PlatformCredential credential = credentialRepo.findById(credentialId)
                 .orElseThrow(() -> new IllegalArgumentException("credential not found: " + credentialId));
 
         // Policy enforcement at the write boundary - DB CHECK is the backstop.
         policy.validateMarkupConfig(credential.authType(), defaultMarkup,
                 credential.maxCallsPerRun() != null ? credential.maxCallsPerRun() : 0);
-        if (perToolOverrides != null) {
-            for (var e : perToolOverrides.entrySet()) {
-                if (e.getValue() == null || e.getValue().signum() < 0) {
-                    throw new IllegalArgumentException(
-                            "per-tool markup must be >= 0 (toolId=" + e.getKey() + ")");
-                }
-            }
-        }
-        // A version with no default AND no overrides would bill zero for every
-        // tool, which is indistinguishable from "not priced". Refuse it so the
-        // version history stays meaningful and the inspector toggle stays honest.
-        if (defaultMarkup == null
-                && (perToolOverrides == null || perToolOverrides.isEmpty())) {
+        validatePrices(prices);
+
+        acquireAdvisoryLock(credentialId);
+
+        // Read the live rows INSIDE the lock: a concurrent publish would
+        // otherwise let us carry forward from a version that is no longer the
+        // latest (resurrecting prices the other admin had just removed) or
+        // validate against a unit that has already been replaced.
+        java.util.LinkedHashMap<String, PricingVersionEntry> live = latestEntriesByKey(credentialId);
+
+        // A unit may be re-expressed, never re-dimensioned: what measures the
+        // call was fixed when the row was first published, and the caller keeps
+        // reporting that same measurement whatever the admin types here.
+        validateUnitsAgainstLiveRows(prices, live);
+
+        List<PriceSpec> effective = carryForwardUnlistedPrices
+                ? mergeOntoLatest(live, prices)
+                : (prices == null ? List.of() : prices);
+
+        // A version with no default AND no per-tool price would bill zero for
+        // every tool, which is indistinguishable from "not priced". Refuse it so
+        // the version history stays meaningful and the inspector toggle stays honest.
+        if (defaultMarkup == null && effective.isEmpty()) {
             throw new IllegalArgumentException(
                     "pricing version needs either a default markup or at least one per-tool override");
         }
-
-        acquireAdvisoryLock(credentialId);
 
         Integer max = versionRepo.findMaxVersion(credentialId);
         int next = (max == null) ? 1 : max + 1;
@@ -120,22 +177,146 @@ public class PlatformCredentialPricingService {
         version.setCreatedBy(createdBy);
         PlatformCredentialPricingVersion saved = versionRepo.save(version);
 
-        if (perToolOverrides != null && !perToolOverrides.isEmpty()) {
-            List<PricingVersionEntry> entries = new ArrayList<>(perToolOverrides.size());
-            for (var e : perToolOverrides.entrySet()) {
-                PricingVersionEntry entry = new PricingVersionEntry();
-                entry.setPricingVersionId(saved.getId());
-                entry.setApiToolId(e.getKey());
-                entry.setMarkupCredits(e.getValue());
-                entries.add(entry);
+        if (!effective.isEmpty()) {
+            List<PricingVersionEntry> entries = new ArrayList<>(effective.size());
+            for (PriceSpec price : effective) {
+                entries.add(price.toEntry(saved.getId()));
             }
             entryRepo.saveAll(entries);
         }
 
-        log.info("Published pricing version v{} for credential {} (default={}, overrides={})",
+        log.info("Published pricing version v{} for credential {} (default={}, requested={}, published={}, carryForward={})",
                 next, credentialId, defaultMarkup,
-                perToolOverrides == null ? 0 : perToolOverrides.size());
+                prices == null ? 0 : prices.size(), effective.size(), carryForwardUnlistedPrices);
         return saved;
+    }
+
+    /**
+     * The rows of the latest published version, keyed by (endpoint, model).
+     * Empty when the credential has never been priced.
+     *
+     * <p>Read once per publish and used for both jobs that need it: carrying
+     * forward the rows a request does not mention, and checking that a row's
+     * unit is not being moved to something nothing measures.
+     */
+    private java.util.LinkedHashMap<String, PricingVersionEntry> latestEntriesByKey(Long credentialId) {
+        java.util.LinkedHashMap<String, PricingVersionEntry> byKey = new java.util.LinkedHashMap<>();
+        versionRepo.findLatest(credentialId).ifPresent(latest -> {
+            for (PricingVersionEntry e : entryRepo.findByPricingVersionId(latest.getId())) {
+                byKey.put(entryKey(e.getApiToolId(), e.getModelId()), e);
+            }
+        });
+        return byKey;
+    }
+
+    /**
+     * Reject a price whose unit does not measure the same thing as the unit the
+     * live row carries. See {@link MarkupPolicy#validateUnitChange}: the amount
+     * charged is a measurement taken by the caller multiplied by this rate, and
+     * only the caller knows what it measured, so the dimension is fixed by the
+     * row that already exists rather than by whoever republishes it.
+     *
+     * <p>A row the live version does not have is a new price with nothing to
+     * contradict, so it is published as asked.
+     */
+    private void validateUnitsAgainstLiveRows(List<PriceSpec> requested,
+                                               java.util.Map<String, PricingVersionEntry> live) {
+        if (requested == null || requested.isEmpty() || live.isEmpty()) {
+            return;
+        }
+        for (PriceSpec p : requested) {
+            PricingVersionEntry current = live.get(priceKey(p));
+            if (current == null) {
+                continue;
+            }
+            String where = "toolId=" + p.apiToolId()
+                    + (p.modelId() == null ? "" : ", modelId=" + p.modelId());
+            policy.validateUnitChange(current.unit(), PriceUnit.fromWire(p.priceUnit()), where);
+        }
+    }
+
+    /**
+     * The latest version's rows with {@code requested} upserted on top, keyed by
+     * (endpoint, model). Declaration order is "carried rows first, then rows the
+     * request introduced", which keeps a republish diff readable in the history.
+     */
+    private List<PriceSpec> mergeOntoLatest(java.util.Map<String, PricingVersionEntry> live,
+                                             List<PriceSpec> requested) {
+        java.util.LinkedHashMap<String, PriceSpec> byKey = new java.util.LinkedHashMap<>();
+        for (PricingVersionEntry e : live.values()) {
+            byKey.put(entryKey(e.getApiToolId(), e.getModelId()), carryForward(e));
+        }
+        if (requested != null) {
+            for (PriceSpec p : requested) {
+                byKey.put(priceKey(p), p);
+            }
+        }
+        return new ArrayList<>(byKey.values());
+    }
+
+    /**
+     * A published row re-expressed as the price to publish again, unchanged -
+     * including who decided it.
+     *
+     * <p>Carrying the source is not bookkeeping. A version is immutable, so
+     * every republish rewrites every row, and a carried row that lost its
+     * provenance would come back as {@link com.apimarketplace.auth.credential.domain.PriceSource#ADMIN}
+     * by default. One unrelated admin publish would then re-label the whole
+     * price list as locally decided and the install would stop receiving cloud
+     * price updates for models nobody ever touched.
+     */
+    private static PriceSpec carryForward(PricingVersionEntry e) {
+        return new PriceSpec(e.getApiToolId(), e.getModelId(), e.getPriceUnit(),
+                e.getMarkupCredits(), e.getUnitCredits(), e.getMinCredits(), e.getMaxCredits(),
+                e.origin());
+    }
+
+    /** {@link #priceKey} for a persisted row. */
+    private static String entryKey(UUID apiToolId, String modelId) {
+        return apiToolId + "|" + (modelId == null ? "" : modelId);
+    }
+
+    /** Identity of a price row: the (endpoint, model) pair {@code uk_pve_version_tool_model} keys on. */
+    private static String priceKey(PriceSpec price) {
+        return price.apiToolId() + "|" + (price.modelId() == null ? "" : price.modelId());
+    }
+
+    /**
+     * Reject a price list that the DB would refuse anyway, with a message that
+     * names the offending endpoint instead of an opaque constraint violation.
+     *
+     * <p>The duplicate check mirrors {@code uk_pve_version_tool_model}: a
+     * collision on (endpoint, model) is always an authoring mistake, and
+     * silently keeping one of the two would publish a price nobody chose.
+     */
+    private void validatePrices(List<PriceSpec> prices) {
+        if (prices == null || prices.isEmpty()) {
+            return;
+        }
+        Set<String> seen = new HashSet<>();
+        for (PriceSpec p : prices) {
+            if (p == null || p.apiToolId() == null) {
+                throw new IllegalArgumentException("per-tool price requires an apiToolId");
+            }
+            String where = "toolId=" + p.apiToolId()
+                    + (p.modelId() == null ? "" : ", modelId=" + p.modelId());
+            if (p.baseCredits().signum() < 0 || p.unitCredits().signum() < 0) {
+                throw new IllegalArgumentException("per-tool markup must be >= 0 (" + where + ")");
+            }
+            if (p.minCredits() != null && p.minCredits().signum() < 0) {
+                throw new IllegalArgumentException("minCredits must be >= 0 (" + where + ")");
+            }
+            if (p.maxCredits() != null && p.maxCredits().signum() < 0) {
+                throw new IllegalArgumentException("maxCredits must be >= 0 (" + where + ")");
+            }
+            if (p.minCredits() != null && p.maxCredits() != null
+                    && p.minCredits().compareTo(p.maxCredits()) > 0) {
+                throw new IllegalArgumentException("minCredits must be <= maxCredits (" + where + ")");
+            }
+            if (!seen.add(priceKey(p))) {
+                throw new IllegalArgumentException("duplicate price for " + where);
+            }
+        }
     }
 
     public Optional<PlatformCredentialPricingVersion> findLatest(Long credentialId) {
@@ -144,13 +325,21 @@ public class PlatformCredentialPricingService {
 
     /**
      * V148+ idempotent bootstrap: if the credential has NO pricing version yet,
-     * publish v1 with the supplied {@code defaultMarkup} + {@code perToolOverrides}.
+     * publish v1 with the supplied {@code defaultMarkup} + {@code prices}.
      * If a version already exists (any version), no-op and return the latest.
      *
      * <p>Called by catalog-service's {@code ApiMigrationImporter} after the
-     * api_tools seed is complete, so the markup overrides reference UUIDs that
-     * exist in {@code catalog.api_tools}. Migration-service can't do this
-     * because Flyway runs before catalog seed.
+     * api_tools seed is complete, so the prices reference UUIDs that exist in
+     * {@code catalog.api_tools}. Migration-service can't do this because Flyway
+     * runs before catalog seed.
+     *
+     * <p><b>Never overwrites a published price, by design.</b> The catalog seed
+     * only ever declares a STARTING price. Once ANY version exists the platform
+     * owner is presumed to own the pricing (either they published from the admin
+     * screens, or they accepted the seeded v1), so a re-import of the same
+     * catalog files must leave it alone. That is what makes running the importer
+     * again after tuning prices in the UI safe: this method reads the latest
+     * version first and returns it untouched.
      *
      * <p>Cutover safety net: without this, replacing the V141 hardcoded image-gen
      * pricing with admin-published versions would leave a window where new
@@ -162,7 +351,7 @@ public class PlatformCredentialPricingService {
     @Transactional
     public PlatformCredentialPricingVersion bootstrapV1IfAbsent(Long credentialId,
                                                                  BigDecimal defaultMarkup,
-                                                                 Map<UUID, BigDecimal> perToolOverrides,
+                                                                 List<PriceSpec> prices,
                                                                  String createdBy) {
         Optional<PlatformCredentialPricingVersion> existing = versionRepo.findLatest(credentialId);
         if (existing.isPresent()) {
@@ -170,23 +359,235 @@ public class PlatformCredentialPricingService {
                     credentialId, existing.get().getVersion());
             return existing.get();
         }
-        log.info("bootstrapV1IfAbsent: publishing v1 for credential {} (default={}, overrides={})",
-                credentialId, defaultMarkup, perToolOverrides == null ? 0 : perToolOverrides.size());
-        return publishNextVersion(credentialId, defaultMarkup, perToolOverrides, createdBy);
+        log.info("bootstrapV1IfAbsent: publishing v1 for credential {} (default={}, prices={})",
+                credentialId, defaultMarkup, prices == null ? 0 : prices.size());
+        return publishNextVersion(credentialId, defaultMarkup, prices, createdBy);
     }
 
     public List<PlatformCredentialPricingVersion> findAllVersions(Long credentialId) {
         return versionRepo.findByPlatformCredentialIdOrderByVersionDesc(credentialId);
     }
 
+    // ── V430: distributing published prices through the signed catalog bundle ──
+
     /**
-     * Overrides map for a pricing version, keyed by apiToolId. Empty map when
-     * the version has no per-tool overrides (i.e. every tool uses the default).
+     * Rows of the credential's LATEST published version that price one of
+     * {@code apiToolIds}, in a stable order.
+     *
+     * <p>This is the publisher half of carrying generation prices in the signed
+     * API-catalog bundle. It reads the LATEST version rather than a pinned one
+     * for the same reason {@link #quoteLatest} does: what is being distributed
+     * is what a new call would cost today, not what some in-flight run was
+     * bound to.
+     *
+     * <p>An empty id set returns nothing rather than everything. The caller is
+     * naming the generation endpoints it found; "I found none" must not turn
+     * into "publish the whole price list", which would ship the platform
+     * owner's rates for all 700 ordinary endpoints to every install.
+     */
+    @Transactional(readOnly = true)
+    public List<PricingVersionEntry> findLatestPublishedPrices(Long credentialId,
+                                                                Set<UUID> apiToolIds) {
+        if (credentialId == null || apiToolIds == null || apiToolIds.isEmpty()) {
+            return List.of();
+        }
+        Optional<PlatformCredentialPricingVersion> latest = versionRepo.findLatest(credentialId);
+        if (latest.isEmpty()) {
+            return List.of();
+        }
+        List<PricingVersionEntry> rows = new ArrayList<>();
+        for (PricingVersionEntry e : entryRepo.findByPricingVersionId(latest.get().getId())) {
+            if (apiToolIds.contains(e.getApiToolId())) {
+                rows.add(e);
+            }
+        }
+        rows.sort(java.util.Comparator
+                .comparing((PricingVersionEntry e) -> String.valueOf(e.getApiToolId()))
+                .thenComparing(e -> e.getModelId() == null ? "" : e.getModelId()));
+        return rows;
+    }
+
+    /**
+     * Apply the prices carried by a verified API-catalog bundle to one platform
+     * credential.
+     *
+     * <p><b>Why this is not {@link #bootstrapV1IfAbsent}.</b> The bootstrap
+     * answers "has this credential ever been priced", which is the right
+     * question for a seed that runs once. A bundle arrives every fifteen
+     * minutes for the life of the install, so that question freezes the price
+     * list at whatever the first tick published: a model added to the cloud
+     * catalog next month would never reach an install that already has a
+     * version. And it is not {@link #publishNextVersion} either, which would do
+     * the opposite and silently revert the administrator on every tick.
+     *
+     * <p><b>The rule, per ROW.</b> A row the bundle wrote before
+     * ({@link PriceSource#BUNDLE}) is replaced; a row a human here published
+     * ({@link PriceSource#ADMIN}, which is also every row predating V430) is
+     * preserved and the bundle's version of it is dropped. Rows the bundle does
+     * not mention are carried forward untouched: a bundle NEVER removes a price,
+     * because a partial or newly-empty price list would otherwise unprice
+     * endpoints that are live and being sold.
+     *
+     * <p><b>Publishes nothing when nothing changed.</b> A version is immutable,
+     * so an unconditional publish would mint a version per tick and bury the
+     * decisions the history exists to record. Re-applying the same bundle is
+     * therefore free, which is what lets the caller re-offer prices on every
+     * tick - the case that matters is the operator who pastes a provider key a
+     * week after the bundle that priced it landed.
+     *
+     * @param createdBy stamped on the published version so the history says
+     *                  which bundle wrote it
+     * @throws IllegalArgumentException if the credential does not exist, or a
+     *                                  bundle row would move a live price to a
+     *                                  unit nothing measures for it
+     *                                  ({@link MarkupPolicy#validateUnitChange})
+     */
+    @Transactional
+    public BundlePriceApplyResult applyBundlePrices(Long credentialId,
+                                                     List<PriceSpec> bundlePrices,
+                                                     String createdBy) {
+        if (credentialId == null || bundlePrices == null || bundlePrices.isEmpty()) {
+            return BundlePriceApplyResult.unchanged(0, 0);
+        }
+        // Locked BEFORE the live rows are read, and held to commit, so the
+        // decision "this row is the administrator's" cannot be taken against a
+        // version that a concurrent publish has already replaced.
+        // publishNextVersion re-acquires the same key below; a PostgreSQL
+        // advisory lock is re-entrant within one transaction, and this method
+        // calls it on itself so both run in the same one.
+        acquireAdvisoryLock(credentialId);
+
+        java.util.LinkedHashMap<String, PricingVersionEntry> live = latestEntriesByKey(credentialId);
+        java.util.LinkedHashMap<String, PriceSpec> effective = new java.util.LinkedHashMap<>();
+        for (PricingVersionEntry e : live.values()) {
+            effective.put(entryKey(e.getApiToolId(), e.getModelId()), carryForward(e));
+        }
+
+        int applied = 0;
+        int preserved = 0;
+        boolean changed = false;
+        for (PriceSpec incoming : bundlePrices) {
+            if (incoming == null || incoming.apiToolId() == null) {
+                continue;
+            }
+            PriceSpec row = asBundleRow(incoming);
+            String key = priceKey(row);
+            PricingVersionEntry current = live.get(key);
+            if (current != null && current.origin() == PriceSource.ADMIN) {
+                preserved++;
+                continue;
+            }
+            applied++;
+            if (!row.matches(current)) {
+                changed = true;
+            }
+            effective.put(key, row);
+        }
+
+        if (!changed) {
+            log.debug("Bundle prices for credential {}: nothing to publish ({} already current, {} locally tuned)",
+                    credentialId, applied, preserved);
+            return BundlePriceApplyResult.unchanged(applied, preserved);
+        }
+
+        // The version-wide default is the install's own decision about its
+        // ordinary calls and is not something a catalog bundle prices, so it is
+        // carried forward verbatim (null on a credential that has never been
+        // priced, which publishNextVersion accepts because the row set is not
+        // empty).
+        BigDecimal carriedDefault = versionRepo.findLatest(credentialId)
+                .map(PlatformCredentialPricingVersion::getDefaultMarkupCredits)
+                .orElse(null);
+        PlatformCredentialPricingVersion published = publishNextVersion(
+                credentialId, carriedDefault, new ArrayList<>(effective.values()), createdBy, false);
+        log.info("Bundle prices published for credential {}: v{} ({} applied, {} locally tuned and preserved)",
+                credentialId, published.getVersion(), applied, preserved);
+        return BundlePriceApplyResult.published(published, applied, preserved);
+    }
+
+    /**
+     * The same price, stated as bundle-owned.
+     *
+     * <p>Forced here rather than trusted from the caller: the provenance decides
+     * whether the NEXT bundle may replace the row, so a row that arrived through
+     * a bundle and got stored as {@code admin} would pin that price on the
+     * install forever with nobody having chosen it.
+     */
+    private static PriceSpec asBundleRow(PriceSpec incoming) {
+        return incoming.source() == PriceSource.BUNDLE
+                ? incoming
+                : new PriceSpec(incoming.apiToolId(), incoming.modelId(), incoming.priceUnit(),
+                        incoming.baseCredits(), incoming.unitCredits(), incoming.minCredits(),
+                        incoming.maxCredits(), PriceSource.BUNDLE);
+    }
+
+    /**
+     * Outcome of {@link #applyBundlePrices} for one credential.
+     *
+     * @param published whether a new pricing version was written
+     * @param version   the published version number, null when nothing changed
+     * @param applied   bundle rows this install accepted
+     * @param preserved bundle rows dropped because the local row is the
+     *                  administrator's
+     */
+    public record BundlePriceApplyResult(boolean published, Long pricingVersionId, Integer version,
+                                          int applied, int preserved) {
+
+        static BundlePriceApplyResult unchanged(int applied, int preserved) {
+            return new BundlePriceApplyResult(false, null, null, applied, preserved);
+        }
+
+        static BundlePriceApplyResult published(PlatformCredentialPricingVersion v,
+                                                 int applied, int preserved) {
+            return new BundlePriceApplyResult(true, v.getId(), v.getVersion(), applied, preserved);
+        }
+    }
+
+    /**
+     * Every published row of a pricing version, in a stable order (endpoint,
+     * then the endpoint-wide row before its per-model rows).
+     *
+     * <p>This is the read the admin surface needs: {@link #findOverrides} can only
+     * describe a row that is one flat number, which is a shrinking minority of
+     * what a version now holds.
+     */
+    public List<PricingVersionEntry> findPrices(Long pricingVersionId) {
+        List<PricingVersionEntry> entries =
+                new ArrayList<>(entryRepo.findByPricingVersionId(pricingVersionId));
+        entries.sort(java.util.Comparator
+                .comparing((PricingVersionEntry e) -> String.valueOf(e.getApiToolId()))
+                // NULL model = the endpoint-wide row, listed first so the row a
+                // per-model price overrides is always the one above it.
+                .thenComparing(e -> e.getModelId() == null ? "" : e.getModelId()));
+        return entries;
+    }
+
+    /**
+     * Flat per-endpoint prices of a version, keyed by apiToolId. Empty map when
+     * the version has none (i.e. every tool uses the default).
+     *
+     * <p><b>Only genuinely flat rows appear here, and that is the point.</b> The
+     * map can carry exactly one number per endpoint, so since V428 there are two
+     * kinds of row it cannot describe without lying:
+     * <ul>
+     *   <li>a per-model row - two models on one endpoint would collide on the key
+     *       and the last one read would silently win, reporting a price nobody
+     *       published;</li>
+     *   <li>a unit-priced row - its {@code markup_credits} is only the FIXED part,
+     *       so a "60 credits per second" price with no fixed part would read as 0,
+     *       i.e. as free.</li>
+     * </ul>
+     * Both are omitted here and reported in full by {@link #findPrices}. A caller
+     * that only knows this map therefore sees fewer prices than exist, never a
+     * wrong one.
      */
     public Map<UUID, BigDecimal> findOverrides(Long pricingVersionId) {
         List<PricingVersionEntry> entries = entryRepo.findByPricingVersionId(pricingVersionId);
         Map<UUID, BigDecimal> out = new java.util.LinkedHashMap<>();
         for (PricingVersionEntry e : entries) {
+            if (e.getModelId() != null) continue;
+            if (e.unit() != PriceUnit.CALL) continue;
+            if (e.getUnitCredits() != null && e.getUnitCredits().signum() != 0) continue;
             out.put(e.getApiToolId(), e.getMarkupCredits());
         }
         return out;
@@ -203,14 +604,82 @@ public class PlatformCredentialPricingService {
      */
     @Transactional(readOnly = true)
     public Optional<BigDecimal> resolveLatestMarkupForTool(Long credentialId, UUID apiToolId) {
+        return quoteLatest(credentialId, apiToolId, null, null).map(Quote::credits);
+    }
+
+    /**
+     * V428 quote: what the latest published price WOULD charge, without
+     * reserving anything or pinning a version.
+     *
+     * <p>This is what lets a price be shown before a call rather than
+     * discovered on the invoice. The builder inspector renders it next to the
+     * node, and the generation tool returns it so an agent can weigh cost
+     * before spending a customer's credits.
+     *
+     * <p>Deliberately reads the LATEST version, not a pinned one: a quote
+     * describes what a new call would cost, whereas a call already in flight
+     * keeps the version it was pinned to.
+     *
+     * @param modelId  generation model, or null for the endpoint price
+     * @param quantity PLATFORM measurement of the call (seconds, assets,
+     *                 characters), or null when the caller cannot measure it
+     *                 yet. Null quotes what the billing path would charge for
+     *                 an unmeasured call, which is ONE published unit, not a
+     *                 bare rate.
+     */
+    @Transactional(readOnly = true)
+    public Optional<Quote> quoteLatest(Long credentialId, UUID apiToolId,
+                                        String modelId, BigDecimal quantity) {
         Optional<PlatformCredentialPricingVersion> latest = versionRepo.findLatest(credentialId);
         if (latest.isEmpty()) {
             return Optional.empty();
         }
-        Optional<PricingVersionEntry> entry = entryRepo
-                .findByPricingVersionIdAndApiToolId(latest.get().getId(), apiToolId);
-        return Optional.of(policy.resolveEffectiveMarkup(latest.get(), entry));
+        Optional<PricingVersionEntry> entry = resolveEntry(latest.get().getId(), apiToolId, modelId);
+        // The null quantity is handed STRAIGHT to the policy, never replaced
+        // here. Substituting ONE looks harmless and is not: the policy reads a
+        // quantity as a PLATFORM measurement and converts it into the published
+        // unit, so a "1" injected here means one SECOND, and on a per-minute row
+        // it quotes base + rate/60 while the very same null on the billing path
+        // (MarkupPolicy.billableQuantity) charges base + rate x 1. A row
+        // published at 480 credits per minute quoted 8 and charged 480. The rule
+        // for a missing measurement is written once, in the policy, and this
+        // method's job is to not have a second opinion about it.
+        BigDecimal credits = policy.resolveEffectivePrice(latest.get(), entry, quantity);
+        // Report the quantity in the unit the quote is expressed in, not the one
+        // the caller measured: a surface that prints "480 credits per minute" next
+        // to a quantity of 60 seconds contradicts the number right beside it.
+        //
+        // A MISSING measurement stays null, and deliberately so. The credits
+        // above are what an unmeasured call would be charged, which is the whole
+        // point of the line before this one, but reporting a quantity of 1
+        // alongside them would be the same mistake this method was just fixed
+        // for, one layer up: the surfaces switch on this field, and a "1" they
+        // cannot distinguish from a measured one turns "60 credits per second"
+        // into "1 second = 60 credits for this run" for a node that is going to
+        // bill thirty. Null is the honest answer to "how big is this call", and
+        // the surface then quotes the rate alone.
+        //
+        // resolveScopeMarkup, the billing half of this file, answers null here
+        // for the same input. The two agree.
+        return Optional.of(new Quote(credits, latest.get().getId(), entry.orElse(null),
+                quantity == null ? null : policy.billableQuantity(entry, quantity)));
     }
+
+    /**
+     * A price shown before it is charged.
+     *
+     * @param credits          amount the call would cost
+     * @param pricingVersionId version the quote was read from
+     * @param entry            published row it came from, null when the
+     *                         version default applied
+     * @param quantity         quantity the price was reached with, expressed in
+     *                         the published unit, null when the caller measured
+     *                         nothing. A surface reads null as "the size of this
+     *                         call is not known yet" and quotes the rate alone,
+     *                         so it must never be filled in with an assumption.
+     */
+    public record Quote(BigDecimal credits, Long pricingVersionId,
+                         PricingVersionEntry entry, BigDecimal quantity) {}
 
     /**
      * True when the latest pricing version of {@code credentialId} has any
@@ -230,11 +699,21 @@ public class PlatformCredentialPricingService {
             return true;
         }
         for (PricingVersionEntry e : entryRepo.findByPricingVersionId(latest.get().getId())) {
-            if (e.getMarkupCredits() != null && e.getMarkupCredits().signum() > 0) {
+            // V428: a row can price entirely through its per-unit rate, leaving
+            // markup_credits (the FIXED part) at zero. Looking only at the base
+            // would report "no pricing" for exactly the integrations this
+            // feature adds, and the inspector would then hide the platform
+            // toggle on every generation endpoint.
+            if (isPositive(e.getMarkupCredits()) || isPositive(e.getUnitCredits())
+                    || isPositive(e.getMinCredits())) {
                 return true;
             }
         }
         return false;
+    }
+
+    private static boolean isPositive(BigDecimal value) {
+        return value != null && value.signum() > 0;
     }
 
     /**
@@ -375,6 +854,34 @@ public class PlatformCredentialPricingService {
     public Optional<ResolvedMarkup> resolveScopeMarkup(String scopeKind, String scopeId,
                                                         Long userId, Long credentialId,
                                                         UUID apiToolId) {
+        return resolveScopeMarkup(scopeKind, scopeId, userId, credentialId, apiToolId, null, null);
+    }
+
+    /**
+     * V428 model- and quantity-aware resolution.
+     *
+     * <p>Two things changed with generation pricing. An endpoint can back
+     * several models at different prices, so the price row is looked up for the
+     * model FIRST and only falls back to the endpoint-wide row; and a price can
+     * scale on a call dimension, so the caller supplies the quantity and gets
+     * back the amount to charge rather than the ingredients to charge it.
+     *
+     * <p>Passing null for both is exactly the pre-V428 behaviour, which is what
+     * the 5-arg overload does.
+     *
+     * @param modelId  generation model called, or null for the endpoint price
+     * @param quantity PLATFORM measurement of the call (seconds, assets,
+     *                 characters), or null when the caller has no notion of a
+     *                 size. It is converted into the published unit here, so a
+     *                 rate published per minute is never multiplied by a count
+     *                 of seconds.
+     */
+    @Transactional
+    public Optional<ResolvedMarkup> resolveScopeMarkup(String scopeKind, String scopeId,
+                                                        Long userId, Long credentialId,
+                                                        UUID apiToolId,
+                                                        String modelId,
+                                                        BigDecimal quantity) {
         Optional<PlatformCredentialPricingVersion> latest = versionRepo.findLatest(credentialId);
         if (latest.isEmpty()) {
             return Optional.empty();
@@ -389,14 +896,48 @@ public class PlatformCredentialPricingService {
         if (pinnedVersion.isEmpty()) {
             return Optional.empty();
         }
-        Optional<PricingVersionEntry> entry =
-                entryRepo.findByPricingVersionIdAndApiToolId(pinnedVersionId, apiToolId);
-        BigDecimal effective = policy.resolveEffectiveMarkup(pinnedVersion.get(), entry);
-        return Optional.of(new ResolvedMarkup(pin.getId(), pinnedVersionId, effective));
+        Optional<PricingVersionEntry> entry = resolveEntry(pinnedVersionId, apiToolId, modelId);
+        BigDecimal effective = policy.resolveEffectivePrice(pinnedVersion.get(), entry, quantity);
+        // Report what was actually billed on, in the published unit, so a caller
+        // logging or explaining the charge cannot restate the raw measurement as
+        // if it were the number of units charged.
+        return Optional.of(new ResolvedMarkup(pin.getId(), pinnedVersionId, effective,
+                entry.orElse(null),
+                quantity == null ? null : policy.billableQuantity(entry, quantity)));
     }
 
-    /** DTO returned by {@link #resolveScopeMarkup}. */
-    public record ResolvedMarkup(Long pinId, Long pricingVersionId, BigDecimal effectiveMarkup) {}
+    /**
+     * Price row for a call: the model's own row wins, then the endpoint-wide
+     * row. The fallback is what lets an admin price a whole endpoint in one
+     * gesture and override only the model that deserves a different rate.
+     */
+    private Optional<PricingVersionEntry> resolveEntry(Long pricingVersionId, UUID apiToolId, String modelId) {
+        if (modelId != null && !modelId.isBlank()) {
+            Optional<PricingVersionEntry> perModel =
+                    entryRepo.findByPricingVersionIdAndApiToolIdAndModelId(pricingVersionId, apiToolId, modelId);
+            if (perModel.isPresent()) return perModel;
+        }
+        return entryRepo.findByPricingVersionIdAndApiToolIdAndModelIdIsNull(pricingVersionId, apiToolId);
+    }
+
+    /**
+     * DTO returned by {@link #resolveScopeMarkup}.
+     *
+     * <p>{@code effectiveMarkup} is the amount to charge for THIS call, already
+     * resolved. The {@code entry} alongside it is the published row it came
+     * from, carried so a caller can EXPLAIN the price ("60 credits per second")
+     * instead of only stating it. It is null when the version default applied.
+     * {@code quantity} completes that explanation: how many of the row's own
+     * units were charged, never the raw measurement the caller sent.
+     */
+    public record ResolvedMarkup(Long pinId, Long pricingVersionId, BigDecimal effectiveMarkup,
+                                  PricingVersionEntry entry, BigDecimal quantity) {
+
+        /** Pre-V428 shape, kept so existing construction sites stay valid. */
+        public ResolvedMarkup(Long pinId, Long pricingVersionId, BigDecimal effectiveMarkup) {
+            this(pinId, pricingVersionId, effectiveMarkup, null, null);
+        }
+    }
 
     /**
      * Create a pin binding a run to a specific (credential, pricing version) pair.

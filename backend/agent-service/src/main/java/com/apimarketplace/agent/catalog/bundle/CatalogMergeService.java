@@ -291,7 +291,8 @@ public class CatalogMergeService {
             }
             // 4b. SEED-path backfill: a newly inserted model that carried no
             // categories sidecar gets mode-aware DEFAULT categories so it is
-            // selectable in the chat / browser_agent / image_generation pickers.
+            // assigned to the categories its mode is eligible for. Only
+            // chat and browser_agent have a reader; see ModelCategory.
             // Only fresh inserts are touched (never an update), so an admin who
             // deliberately unassigned a category on an existing model is never
             // overridden. Gated on the option so the bundle path (authoritative
@@ -324,6 +325,12 @@ public class CatalogMergeService {
      * category is left untouched (so a re-applied seed never resurrects a
      * category an admin later disabled on an existing row - this path only runs
      * for inserts anyway).
+     *
+     * <p>The {@code image_generation} row it writes for an image-mode model is
+     * inert: no screen reads that category any more (see {@link ModelCategory}).
+     * It is still written so the row stays consistent with the categories the
+     * API answers for, and so nothing has to be back-filled if one ever gets a
+     * reader again.
      */
     private void assignDefaultCategories(Long modelConfigId, String mode) {
         for (String category : ModelCategory.defaultKeys()) {
@@ -453,7 +460,8 @@ public class CatalogMergeService {
     // ── Field application ────────────────────────────────────────────────────
 
     /** Every field name applyFields can write - used to build the partial-update skip set. */
-    private static final Set<String> APPLIED_FIELD_NAMES = Set.of(
+    /** Package-private so the producer-parity test can assert against it directly. */
+    static final Set<String> APPLIED_FIELD_NAMES = Set.of(
             "displayName", "description", "tier", "ranking", "recommended", "enabled",
             "priceInput", "priceOutput", "rateLimitTpm", "rateLimitRpm",
             "rateLimitTpmPerTenant", "rateLimitRpmPerTenant", "contextWindow",

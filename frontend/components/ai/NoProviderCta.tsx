@@ -87,7 +87,7 @@ export function NoProviderCta({ variant = 'form', className }: NoProviderCtaProp
     >
       <div
         className={cn(
-          'rounded-full bg-[var(--accent-primary)]/10 flex items-center justify-center',
+          'rounded-md bg-[var(--accent-primary)]/10 flex items-center justify-center',
           compact ? 'w-9 h-9' : 'w-12 h-12',
         )}
       >

@@ -1,11 +1,11 @@
 package com.apimarketplace.orchestrator.controllers.workflow;
 
-import com.apimarketplace.common.credit.CreditConsumptionClient;
 import com.apimarketplace.orchestrator.domain.WorkflowRunEntity;
 import com.apimarketplace.orchestrator.execution.v2.scheduler.V2StepByStepScheduler;
 import com.apimarketplace.orchestrator.execution.v2.services.V2StepByStepService;
 import com.apimarketplace.orchestrator.repository.WorkflowRunRepository;
 import com.apimarketplace.orchestrator.services.resume.WorkflowResumeService;
+import com.apimarketplace.orchestrator.services.state.ClaimRefusalRegistry;
 import com.apimarketplace.orchestrator.services.state.StateSnapshotService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -42,9 +42,6 @@ class StepByStepControllerTest {
     private StateSnapshotService stateSnapshotService;
 
     @Mock
-    private CreditConsumptionClient creditClient;
-
-    @Mock
     private WorkflowRunRepository runRepository;
 
     @InjectMocks
@@ -55,7 +52,6 @@ class StepByStepControllerTest {
         WorkflowRunEntity run = new WorkflowRunEntity();
         run.setTenantId("user-1");
         when(runRepository.findByRunIdPublic("run-1")).thenReturn(Optional.of(run));
-        when(creditClient.checkCredits("user-1")).thenReturn(true);
     }
 
     @Test
@@ -84,5 +80,44 @@ class StepByStepControllerTest {
         verify(v2StepByStepService, never()).executeNode(anyString(), anyString(), anyString());
         verify(v2StepByStepService, never()).executeSplitItems(anyString(), anyString(), org.mockito.ArgumentMatchers.anySet());
         verify(resumeService, never()).executeSingleStepInStepByStepMode(anyString(), anyString(), org.mockito.ArgumentMatchers.any());
+    }
+
+    @Test
+    @DisplayName("The 409 carries the recorded diagnosis, not a sentence covering four causes")
+    void conflictBodyCarriesTheDiagnosis() {
+        // This is the deliverable: what a caller (or a failing spec) actually reads back.
+        when(stateSnapshotService.claimNodeForExecution("run-1", "core:downstream")).thenReturn(false);
+        when(stateSnapshotService.lastClaimRefusal("run-1", "core:downstream")).thenReturn(
+                Optional.of(new ClaimRefusalRegistry.ClaimRefusal(
+                        "core:downstream", "running", java.util.Set.of("mcp:other"))));
+
+        ResponseEntity<?> response = controller.executeSingleStepInStepByStepMode(
+                "run-1", "core:downstream", null, "user-1", null, Map.of());
+
+        @SuppressWarnings("unchecked")
+        Map<String, Object> body = (Map<String, Object>) response.getBody();
+        assertThat(body).containsEntry("nodeState", "running");
+        assertThat(body.get("readyNow")).asInstanceOf(
+                org.assertj.core.api.InstanceOfAssertFactories.iterable(String.class))
+                .containsExactly("mcp:other");
+        assertThat((String) body.get("message"))
+                .contains("core:downstream")
+                .contains("already executing")
+                .contains("mcp:other");
+    }
+
+    @Test
+    @DisplayName("With no recorded reason the 409 still names the node it refused")
+    void conflictBodyFallsBackToANamedMessage() {
+        when(stateSnapshotService.claimNodeForExecution("run-1", "core:downstream")).thenReturn(false);
+        when(stateSnapshotService.lastClaimRefusal("run-1", "core:downstream")).thenReturn(Optional.empty());
+
+        ResponseEntity<?> response = controller.executeSingleStepInStepByStepMode(
+                "run-1", "core:downstream", null, "user-1", null, Map.of());
+
+        @SuppressWarnings("unchecked")
+        Map<String, Object> body = (Map<String, Object>) response.getBody();
+        assertThat((String) body.get("message")).contains("core:downstream");
+        assertThat(body).doesNotContainKeys("nodeState", "readyNow");
     }
 }

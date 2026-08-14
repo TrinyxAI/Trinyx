@@ -302,6 +302,7 @@ public class ApiCatalogMergeService {
                 .addValue("executionMode", str(tool, "executionMode"))
                 .addValue("pagination", str(tool, "pagination"))
                 .addValue("requiredScopes", str(tool, "requiredScopes"))
+                .addValue("generationSpec", str(tool, "generationSpec"))
                 .addValue("nextHint", str(tool, "nextHint"))
                 .addValue("status", Objects.requireNonNullElse(str(tool, "status"), "ACTIVE"))
                 .addValue("testStatus", str(tool, "testStatus"))
@@ -312,13 +313,13 @@ public class ApiCatalogMergeService {
                 INSERT INTO catalog.api_tools (
                     id, api_id, tool_slug, description, tool_name_id, method, endpoint,
                     protocol, default_headers, runtime_metadata, execution_spec, output_schema,
-                    execution_mode, pagination, required_scopes, next_hint, status, test_status,
+                    execution_mode, pagination, required_scopes, generation_spec, next_hint, status, test_status,
                     is_active, version, deprecated_at, created_at, updated_at)
                 VALUES (
                     :id, :apiId, :toolSlug, :description, :toolNameId, :method, :endpoint,
                     :protocol, :defaultHeaders, :runtimeMetadata, :executionSpec::jsonb,
                     :outputSchema::jsonb, :executionMode, :pagination::jsonb,
-                    :requiredScopes::jsonb, :nextHint, :status, :testStatus,
+                    :requiredScopes::jsonb, :generationSpec::jsonb, :nextHint, :status, :testStatus,
                     :isActive, :version, NULL,
                     EXTRACT(EPOCH FROM NOW()) * 1000, EXTRACT(EPOCH FROM NOW()) * 1000)
                 ON CONFLICT (id) DO UPDATE SET
@@ -336,6 +337,7 @@ public class ApiCatalogMergeService {
                     execution_mode = EXCLUDED.execution_mode,
                     pagination = EXCLUDED.pagination,
                     required_scopes = EXCLUDED.required_scopes,
+                    generation_spec = EXCLUDED.generation_spec,
                     next_hint = EXCLUDED.next_hint,
                     status = EXCLUDED.status,
                     test_status = EXCLUDED.test_status,

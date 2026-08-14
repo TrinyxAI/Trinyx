@@ -768,7 +768,7 @@ export default function OnboardingPage() {
       <div className="min-h-screen flex items-center justify-center bg-theme-primary p-4">
         <Card className="max-w-sm w-full border-theme">
           <CardHeader className="text-center space-y-4">
-            <div className="mx-auto w-12 h-12 rounded-full bg-theme-secondary flex items-center justify-center">
+            <div className="mx-auto w-12 h-12 rounded-xl bg-theme-secondary flex items-center justify-center">
               <User className="h-6 w-6 text-theme-secondary" />
             </div>
             <div>
@@ -790,7 +790,7 @@ export default function OnboardingPage() {
       <div className="min-h-screen flex items-center justify-center bg-theme-primary p-4">
         <Card className="max-w-sm w-full border-theme">
           <CardHeader className="text-center space-y-4">
-            <div className="mx-auto w-12 h-12 rounded-full bg-red-100 dark:bg-red-900/30 flex items-center justify-center">
+            <div className="mx-auto w-12 h-12 rounded-xl bg-red-100 dark:bg-red-900/30 flex items-center justify-center">
               <AlertCircle className="h-6 w-6 text-red-600 dark:text-red-400" />
             </div>
             <div>
@@ -855,7 +855,7 @@ export default function OnboardingPage() {
           <Card className="border-theme animate-fade-in">
             <CardHeader className="pb-4">
               <div className="flex items-center gap-3">
-                <div className="w-10 h-10 rounded-full bg-theme-secondary flex items-center justify-center">
+                <div className="w-10 h-10 rounded-xl bg-theme-secondary flex items-center justify-center">
                   <Mail className="h-5 w-5 text-theme-secondary" />
                 </div>
                 <div>
@@ -869,7 +869,7 @@ export default function OnboardingPage() {
             <CardContent className="space-y-6">
               {emailVerificationSuccess ? (
                 <div className="flex flex-col items-center py-6 animate-fade-in">
-                  <div className="w-16 h-16 rounded-full bg-emerald-100 dark:bg-emerald-900/30 flex items-center justify-center mb-4">
+                  <div className="w-16 h-16 rounded-2xl bg-emerald-100 dark:bg-emerald-900/30 flex items-center justify-center mb-4">
                     <CheckCircle2 className="h-8 w-8 text-emerald-500" />
                   </div>
                   <p className="text-sm font-medium text-emerald-600 dark:text-emerald-400">
@@ -937,7 +937,7 @@ export default function OnboardingPage() {
           <Card className="border-theme animate-fade-in">
             <CardHeader className="pb-4">
               <div className="flex items-center gap-3">
-                <div className="w-10 h-10 rounded-full bg-theme-secondary flex items-center justify-center">
+                <div className="w-10 h-10 rounded-xl bg-theme-secondary flex items-center justify-center">
                   <User className="h-5 w-5 text-theme-secondary" />
                 </div>
                 <div>
@@ -1002,7 +1002,7 @@ export default function OnboardingPage() {
                           setCustomRole('');
                         }
                       }}
-                      className={`px-3 py-1.5 text-sm rounded-full border transition-colors ${
+                      className={`px-3 py-1.5 text-sm rounded-md border transition-colors ${
                         data.profession === role.value
                           ? 'bg-[var(--accent-primary)] text-[var(--accent-foreground)] border-transparent'
                           : 'border-theme hover:bg-theme-secondary text-theme-primary'
@@ -1040,7 +1040,7 @@ export default function OnboardingPage() {
                       key={size.value}
                       type="button"
                       onClick={() => setData(prev => ({ ...prev, companySize: size.value }))}
-                      className={`px-3 py-1.5 text-sm rounded-full border transition-colors ${
+                      className={`px-3 py-1.5 text-sm rounded-md border transition-colors ${
                         data.companySize === size.value
                           ? 'bg-[var(--accent-primary)] text-[var(--accent-foreground)] border-transparent'
                           : 'border-theme hover:bg-theme-secondary text-theme-primary'
@@ -1060,7 +1060,7 @@ export default function OnboardingPage() {
           <Card className="border-theme animate-fade-in">
             <CardHeader className="pb-4">
               <div className="flex items-center gap-3">
-                <div className="w-10 h-10 rounded-full bg-theme-secondary flex items-center justify-center">
+                <div className="w-10 h-10 rounded-xl bg-theme-secondary flex items-center justify-center">
                   <Sparkles className="h-5 w-5 text-theme-secondary" />
                 </div>
                 <div>
@@ -1082,7 +1082,7 @@ export default function OnboardingPage() {
                         setCustomInterest('');
                       }
                     }}
-                    className={`px-4 py-2 text-sm rounded-full border transition-colors ${
+                    className={`px-4 py-2 text-sm rounded-md border transition-colors ${
                       data.interests.includes(interest.value)
                         ? 'bg-[var(--accent-primary)] text-[var(--accent-foreground)] border-transparent'
                         : 'border-theme hover:bg-theme-secondary text-theme-primary'
@@ -1115,7 +1115,7 @@ export default function OnboardingPage() {
           <Card className="border-theme animate-fade-in">
             <CardHeader className="pb-4">
               <div className="flex items-center gap-3">
-                <div className="w-10 h-10 rounded-full bg-theme-secondary flex items-center justify-center">
+                <div className="w-10 h-10 rounded-xl bg-theme-secondary flex items-center justify-center">
                   <Target className="h-5 w-5 text-theme-secondary" />
                 </div>
                 <div>
@@ -1142,7 +1142,7 @@ export default function OnboardingPage() {
                           setCustomUseCase('');
                         }
                       }}
-                      className={`px-4 py-2 text-sm rounded-full border transition-colors ${
+                      className={`px-4 py-2 text-sm rounded-md border transition-colors ${
                         selectedGoalValues.includes(useCase.value)
                           ? 'bg-[var(--accent-primary)] text-[var(--accent-foreground)] border-transparent'
                           : 'border-theme hover:bg-theme-secondary text-theme-primary'

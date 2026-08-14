@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import {
+  isTerminalStepStatus,
   normalizeStatusCounts,
   metricsToStatusCounts,
   statusCountsToMetrics,
@@ -431,5 +432,34 @@ describe('deriveStatusFromCounts', () => {
       PROCESSED: 50,
       TOTAL: 50,
     })).toBe('failed');
+  });
+});
+
+/**
+ * Which statuses mean "this node has finished, refetch its data".
+ *
+ * The caller (useRunStateProcessing) gates the `stepExecutionCompleted` event on this. It used to
+ * inline `completed || failed`, which was harmless while partial_success was rare, and became a
+ * silent staleness bug the moment every node that had ever failed started reporting it on both
+ * channels, permanently: the inspector, step data and run outputs simply stopped refreshing for
+ * those nodes, with nothing to indicate why.
+ */
+describe('isTerminalStepStatus', () => {
+  it('counts partial_success as finished - the node ran and produced its output', () => {
+    expect(isTerminalStepStatus('partial_success')).toBe(true);
+    expect(isTerminalStepStatus('PARTIAL_SUCCESS')).toBe(true);
+  });
+
+  it('counts the plain terminal statuses', () => {
+    expect(isTerminalStepStatus('completed')).toBe(true);
+    expect(isTerminalStepStatus('failed')).toBe(true);
+  });
+
+  it('does not fire for a node that is still going or has not run', () => {
+    // Firing here would refetch data that does not exist yet, and would do it on every tick.
+    expect(isTerminalStepStatus('running')).toBe(false);
+    expect(isTerminalStepStatus('pending')).toBe(false);
+    expect(isTerminalStepStatus('awaiting_signal')).toBe(false);
+    expect(isTerminalStepStatus(undefined)).toBe(false);
   });
 });

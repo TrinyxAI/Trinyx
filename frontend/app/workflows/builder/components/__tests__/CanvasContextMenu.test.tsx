@@ -14,6 +14,11 @@ import type { BuilderNodeData } from '../../types';
 let mockExec: {
   canExecute: boolean;
   canRerun: boolean;
+  /** Folds terminality in: false on a FINISHED stepped run. */
+  isStepByStepMode: boolean;
+  /** The run's persisted mode, which is what the rerun label must read. */
+  isSteppedRun: boolean;
+  isRunning: boolean;
   pendingSignalCount: number;
   executeStep: ReturnType<typeof vi.fn>;
   rerunStep: ReturnType<typeof vi.fn>;
@@ -23,8 +28,12 @@ let mockContextualButtons: Array<{ key: string; icon: React.ReactNode; title: st
 
 vi.mock('next-intl', () => ({ useTranslations: () => (key: string) => key }));
 vi.mock('../../contexts/StepByStepContext', () => ({ useNodeExecutionStatus: () => mockExec }));
+// Settable, not a frozen {}: the run-action gates read flags.isTriggerNode /
+// flags.isInterfaceNode, and a constant empty object makes those branches untestable - both
+// could be deleted with the suite still green.
+let mockFlags: Record<string, boolean>;
 vi.mock('../../hooks/useNodeContextualButtons', () => ({
-  deriveNodeContextFlags: () => ({}),
+  deriveNodeContextFlags: () => mockFlags,
   useNodeContextualButtons: () => mockContextualButtons,
 }));
 vi.mock('../../nodes/nodeClasses', () => ({ findNodeClassById: () => null }));
@@ -55,12 +64,16 @@ beforeEach(() => {
   mockExec = {
     canExecute: false,
     canRerun: false,
+    isStepByStepMode: true,
+    isSteppedRun: true,
+    isRunning: false,
     pendingSignalCount: 0,
     executeStep: vi.fn(),
     rerunStep: vi.fn(),
     resolveApproval: vi.fn(),
   };
   mockContextualButtons = [];
+  mockFlags = {};
 });
 
 describe('NodeContextMenu - edit mode', () => {
@@ -113,7 +126,7 @@ describe('NodeContextMenu - edit mode', () => {
 });
 
 describe('NodeContextMenu - run mode', () => {
-  const renderRun = () => {
+  const renderRun = (overrides: Partial<React.ComponentProps<typeof NodeContextMenu>> = {}) => {
     const actions = nodeActions();
     const onClose = vi.fn();
     render(
@@ -127,6 +140,7 @@ describe('NodeContextMenu - run mode', () => {
         hasConnections
         actions={actions}
         onClose={onClose}
+        {...overrides}
       />,
     );
     return { actions, onClose };
@@ -149,10 +163,64 @@ describe('NodeContextMenu - run mode', () => {
     expect(mockExec.executeStep).toHaveBeenCalled();
   });
 
-  it('surfaces Re-run when the node can be re-run', () => {
+  it('surfaces Re-run when the node can be re-run, stepping the run itself', () => {
     mockExec.canRerun = true;
+    mockExec.isSteppedRun = true;
     renderRun();
     expect(screen.getByText('rerunStep')).toBeTruthy();
+  });
+
+  it('warns that the rest re-runs on its own when the run is automatic', () => {
+    // Automatic mode does not stop at the reran node: the whole downstream chain replays
+    // unattended, which can mean real (paid) calls. The label must not read the same as the
+    // step-by-step one, where the user advances node by node.
+    mockExec.canRerun = true;
+    mockExec.isSteppedRun = false;
+    renderRun();
+    expect(screen.getByText('rerunStepAuto')).toBeTruthy();
+    expect(screen.queryByText('rerunStep')).toBeNull();
+  });
+
+  it('keeps the step-by-step label on a FINISHED stepped run', () => {
+    // isStepByStepMode folds terminality in and is false here, so keying the label off it
+    // promised unattended re-execution on the one run where a rerun executes nothing.
+    mockExec.canRerun = true;
+    mockExec.isSteppedRun = true;
+    mockExec.isStepByStepMode = false;
+    renderRun();
+    expect(screen.getByText('rerunStep')).toBeTruthy();
+  });
+
+  it('hides Re-run on a read-only preview surface', () => {
+    // A rerun resets this node AND everything downstream; canRerun alone stopped being a
+    // sufficient gate once it was no longer restricted to step-by-step mode.
+    mockExec.canRerun = true;
+    renderRun({ isPreviewOnly: true });
+    expect(screen.queryByText('rerunStep')).toBeNull();
+    expect(screen.queryByText('rerunStepAuto')).toBeNull();
+  });
+
+  it('hides Re-run outside run mode', () => {
+    mockExec.canRerun = true;
+    renderRun({ isRunMode: false });
+    expect(screen.queryByText('rerunStep')).toBeNull();
+    expect(screen.queryByText('rerunStepAuto')).toBeNull();
+  });
+
+  it('hides Re-run on a trigger: "restart from here" there is the whole DAG', () => {
+    mockExec.canRerun = true;
+    mockFlags = { isTriggerNode: true };
+    renderRun();
+    expect(screen.queryByText('rerunStep')).toBeNull();
+    expect(screen.queryByText('rerunStepAuto')).toBeNull();
+  });
+
+  it('hides Re-run on an interface node', () => {
+    mockExec.canRerun = true;
+    mockFlags = { isInterfaceNode: true };
+    renderRun();
+    expect(screen.queryByText('rerunStep')).toBeNull();
+    expect(screen.queryByText('rerunStepAuto')).toBeNull();
   });
 
   it('surfaces Approve/Reject when a signal is pending', () => {

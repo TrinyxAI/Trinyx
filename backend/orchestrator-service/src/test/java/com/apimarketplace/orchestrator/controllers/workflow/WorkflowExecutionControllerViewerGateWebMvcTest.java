@@ -3,7 +3,6 @@ package com.apimarketplace.orchestrator.controllers.workflow;
 import com.apimarketplace.auth.client.AuthClient;
 import com.apimarketplace.auth.client.access.OrgAccessDeniedExceptionHandler;
 import com.apimarketplace.auth.client.access.OrgAccessGuardImpl;
-import com.apimarketplace.common.credit.CreditConsumptionClient;
 import com.apimarketplace.orchestrator.controllers.dto.WorkflowResponseFactory;
 import com.apimarketplace.orchestrator.domain.WorkflowEntity;
 import com.apimarketplace.orchestrator.domain.workflow.WorkflowPlan;
@@ -29,6 +28,7 @@ import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
@@ -52,7 +52,6 @@ class WorkflowExecutionControllerViewerGateWebMvcTest {
     @Mock private WorkflowRepository workflowRepository;
     @Mock private WorkflowResponseFactory responseFactory;
     @Mock private WorkflowControllerHelper helper;
-    @Mock private CreditConsumptionClient creditClient;
     @Mock private AuthClient authClient;
 
     private MockMvc mockMvc;
@@ -64,7 +63,6 @@ class WorkflowExecutionControllerViewerGateWebMvcTest {
         ReflectionTestUtils.setField(controller, "workflowRepository", workflowRepository);
         ReflectionTestUtils.setField(controller, "responseFactory", responseFactory);
         ReflectionTestUtils.setField(controller, "helper", helper);
-        ReflectionTestUtils.setField(controller, "creditClient", creditClient);
         // REAL guard: the deny must come from the central isRoleWriteBlocked
         // logic, not from a stubbed canWrite.
         ReflectionTestUtils.setField(controller, "orgAccessGuard", new OrgAccessGuardImpl(authClient));
@@ -108,23 +106,28 @@ class WorkflowExecutionControllerViewerGateWebMvcTest {
                 .andExpect(status().isForbidden());
         // The role gate fires without consulting the per-resource deny-list and
         // before the credit check: no AuthClient or credit interaction happened.
-        org.mockito.Mockito.verifyNoInteractions(authClient, creditClient);
+        org.mockito.Mockito.verifyNoInteractions(authClient);
     }
 
     @Test
-    @DisplayName("Positive control: MEMBER passes the org gate (reaches the credit check)")
+    @DisplayName("Positive control: MEMBER passes the org gate (403 is VIEWER-specific)")
     void memberPassesTheOrgGate() throws Exception {
         when(authClient.getWriteRestrictedResourceIds(ORG, CALLER, "workflow")).thenReturn(Set.of());
-        // Deny credits so the request stops right AFTER the org gate: a 402
-        // (not 403) proves the gate let the MEMBER through.
-        when(creditClient.checkCredits(CALLER)).thenReturn(false);
 
+        // This used to assert 402: the credit gate stopped the request one line
+        // after the org gate, which made "not 403" observable. That gate is gone
+        // (an out-of-credit run now fails on its trigger node so the user can see
+        // it), so the proof is the gate's own verdict instead: the per-resource
+        // deny-list WAS consulted for a MEMBER, and no 403 was raised.
         mockMvc.perform(post("/api/v2/workflows/dag/execute")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(body())
                         .header("X-User-ID", CALLER)
                         .header("X-Organization-ID", ORG)
                         .header("X-Organization-Role", "MEMBER"))
-                .andExpect(status().isPaymentRequired());
+                .andExpect(result -> org.assertj.core.api.Assertions
+                        .assertThat(result.getResponse().getStatus()).isNotEqualTo(403));
+
+        verify(authClient).getWriteRestrictedResourceIds(ORG, CALLER, "workflow");
     }
 }

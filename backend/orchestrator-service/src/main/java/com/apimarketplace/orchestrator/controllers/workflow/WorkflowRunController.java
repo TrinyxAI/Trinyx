@@ -1,12 +1,8 @@
 package com.apimarketplace.orchestrator.controllers.workflow;
 
 import com.apimarketplace.orchestrator.domain.WorkflowRunEntity;
-import com.apimarketplace.orchestrator.domain.workflow.ExecutionMode;
 import com.apimarketplace.orchestrator.domain.workflow.RunStatus;
 import com.apimarketplace.orchestrator.execution.v2.split.SplitContextManager;
-import com.apimarketplace.orchestrator.execution.v2.engine.StepByStepExecutionResult;
-import com.apimarketplace.orchestrator.execution.v2.scheduler.V2StepByStepScheduler;
-import com.apimarketplace.orchestrator.execution.v2.services.V2StepByStepService;
 import com.apimarketplace.orchestrator.domain.execution.SignalWaitEntity;
 import com.apimarketplace.orchestrator.repository.SignalWaitRepository;
 import com.apimarketplace.orchestrator.repository.WorkflowRunRepository;
@@ -14,6 +10,7 @@ import com.apimarketplace.orchestrator.services.StepAggregationService;
 import com.apimarketplace.orchestrator.services.WorkflowManagementService;
 import com.apimarketplace.orchestrator.services.epoch.WorkflowEpochService;
 import com.apimarketplace.orchestrator.services.resume.AgentRunStopService;
+import com.apimarketplace.orchestrator.services.resume.AutoRestartExecutionService;
 import com.apimarketplace.orchestrator.services.resume.StepRerunService;
 import com.apimarketplace.orchestrator.services.resume.WorkflowResumeService;
 import com.apimarketplace.orchestrator.services.resume.WorkflowRunState;
@@ -79,11 +76,8 @@ public class WorkflowRunController {
     @Autowired
     private WorkflowEpochService workflowEpochService;
 
-    @Autowired(required = false)
-    private V2StepByStepService v2StepByStepService;
-
-    @Autowired(required = false)
-    private V2StepByStepScheduler v2StepByStepScheduler;
+    @Autowired
+    private AutoRestartExecutionService autoRestartExecutionService;
 
     /**
      * 2026-05-04 hot-fix (audit TR-1): the REST `/state` payload's `seq` MUST
@@ -374,6 +368,17 @@ public class WorkflowRunController {
                     ? Math.max(wsEventSequencer.currentSeq(runId), dbSnapshot.getSeq())
                     : dbSnapshot.getSeq();
 
+            // Reuse the row the scope check already loaded: it feeds the ETag hash below and the
+            // response fields further down (planVersion / cost / budget / lastCycleResult). This
+            // endpoint is polled continuously, and it used to issue two more queries for the same
+            // row - one here and one at the response-building block.
+            var runEntity = ownerCheck;
+            String lastCycleResult = runEntity
+                    .map(com.apimarketplace.orchestrator.domain.WorkflowRunEntity::getMetadata)
+                    .map(meta -> meta.get("lastCycleResult"))
+                    .map(String::valueOf)
+                    .orElse(null);
+
             // Phase G (archi-refoundation 2026-05-04) - ETag composite seq + full + lightweight hash.
             // Includes the `full` flag in the suffix (audit B v6 N3): without this, a client
             // hitting `?full=false` would 304-match a server response cached for `?full=true`,
@@ -384,7 +389,13 @@ public class WorkflowRunController {
             for (DagState dag : dbSnapshot.getDags().values()) {
                 currentEpochForEtag = Math.max(currentEpochForEtag, dag.getCurrentEpoch());
             }
-            String hashInput = seq + "|" + state.status() + "|" + currentEpochForEtag;
+            // lastCycleResult is in the hash because it is written OUTSIDE the seq bump that
+            // carries the work: reconcileSbsRunStatus stamps run.metadata after the last node
+            // completion has already advanced seq. A client that polls in that window caches the
+            // response, and the verdict landing a moment later changes nothing the hash can see,
+            // so the next poll 304s and the badge keeps showing the PREVIOUS cycle's outcome.
+            String hashInput = seq + "|" + state.status() + "|" + currentEpochForEtag
+                    + "|" + (lastCycleResult != null ? lastCycleResult : "-");
             String etagBody;
             try {
                 java.security.MessageDigest md = java.security.MessageDigest.getInstance("MD5");
@@ -448,6 +459,18 @@ public class WorkflowRunController {
             response.put("interfaces", state.interfaces());
             response.put("seq", seq);
             response.put("currentEpoch", currentEpoch);
+
+            // The cycle outcome, as the backend computed it. Shipped ready to display so the
+            // client stops deriving its own: it can only see the CUMULATIVE completed/failed
+            // sets, while this is scoped to the epoch that actually closed. A node that failed
+            // in epoch 1 and succeeded in epoch 2 is PARTIAL_SUCCESS (accumulation, which is
+            // what its badge shows) yet epoch 2 closed clean - no client-side derivation can
+            // tell those apart, so the canvas badge and the run-history row disagreed on the
+            // same run. Absent until a cycle has closed, which is what keeps a launched run
+            // whose trigger has not fired reading "waiting for trigger".
+            if (lastCycleResult != null) {
+                response.put("lastCycleResult", lastCycleResult);
+            }
             if (!epochTimestamps.isEmpty()) {
                 response.put("epochTimestamps", epochTimestamps);
             }
@@ -471,7 +494,7 @@ public class WorkflowRunController {
             // workflow's cap (null = unlimited). Both in credits (1 credit =
             // $0.001); the frontend renders dollars in CE, credits in cloud. Live
             // deltas arrive via the runCost WS event; this seeds the initial view.
-            workflowRunRepository.findByRunIdPublic(runId).ifPresent(run -> {
+            runEntity.ifPresent(run -> {
                 response.put("planVersion", run.getPlanVersion());
                 response.put("costCredits", run.getCostCredits());
                 if (run.getCostByEpoch() != null) {
@@ -749,44 +772,35 @@ public class WorkflowRunController {
             logger.info("Re-running from step: {} for run: {} (planFromPayload={})", stepId, runId, planFromPayload);
             StepRerunService.RerunResult result = stepRerunService.rerunFromStep(runId, stepId, planFromPayload);
 
-            // After rerun transaction is committed, auto-execute ready steps if in AUTO mode.
-            // In STEP_BY_STEP mode, the user manually triggers each step via the UI
-            // and the status is set back to PAUSED.
-            if (!result.readySteps().isEmpty()) {
-                autoExecuteAfterRerun(runId, result.readySteps(), result.ownerTriggerId(), result.epoch());
-            } else {
-                // No ready steps - still need to set PAUSED for SBS mode
-                // (rerunFromStep sets RUNNING unconditionally)
-                workflowRunRepository.findByRunIdPublic(runId).ifPresent(run -> {
-                    if (run.getExecutionMode() == ExecutionMode.STEP_BY_STEP) {
-                        run.setStatus(RunStatus.PAUSED);
-                        workflowRunRepository.save(run);
-                        logger.info("[Rerun] No ready steps, setting SBS run back to PAUSED for runId={}", runId);
-                    } else {
-                        // AUTO mode with nothing to execute: the rerun still re-opened the
-                        // epoch, so close the cycle now or the run is stuck RUNNING forever.
-                        stepRerunService.closeCycleAfterAutoExecution(runId, result.ownerTriggerId(), result.epoch());
-                    }
-                });
-            }
+            // Once the rerun transaction is committed, advancing the run is execution policy:
+            // step-by-step waits for the user, automatic drives the wave loop and closes the
+            // cycle. Both live in AutoRestartExecutionService, including the "nothing ready"
+            // case that used to be a separate branch here.
+            AutoRestartExecutionService.Outcome outcome = autoRestartExecutionService
+                    .resumeAfterRerun(runId, result.readySteps(), result.ownerTriggerId(), result.epoch());
 
-            // Read actual status after autoExecuteAfterRerun (may have changed to PAUSED for SBS)
+            // Read actual status after the drive (step-by-step may have set PAUSED)
             String actualStatus = workflowRunRepository.findByRunIdPublic(runId)
                 .map(r -> r.getStatus().getValue())
                 .orElse(result.status());
 
-            return ResponseEntity.ok(Map.of(
-                "success", true,
-                "runId", result.runId(),
-                "stepId", result.stepId(),
-                "epoch", result.epoch(),
-                "spawn", result.spawn(),
-                "resetSteps", result.resetSteps(),
-                "readySteps", result.readySteps(),
-                "status", actualStatus,
-                "seq", result.seq(),
-                "message", "Re-run initiated from step: " + stepId
-            ));
+            // LinkedHashMap, not Map.of: that caps at 10 pairs and `outcome` is the 11th.
+            Map<String, Object> body = new java.util.LinkedHashMap<>();
+            body.put("success", true);
+            body.put("runId", result.runId());
+            body.put("stepId", result.stepId());
+            body.put("epoch", result.epoch());
+            body.put("spawn", result.spawn());
+            body.put("resetSteps", result.resetSteps());
+            body.put("readySteps", result.readySteps());
+            body.put("status", actualStatus);
+            body.put("seq", result.seq());
+            // What the post-rerun drive actually did. Without it, "nothing ran", "it yielded
+            // and something else will finish it" and "the wave cap truncated the work" are
+            // indistinguishable from a RUNNING status.
+            body.put("outcome", outcome.name());
+            body.put("message", "Re-run initiated from step: " + stepId);
+            return ResponseEntity.ok(body);
         } catch (IllegalStateException e) {
             // State validation failure (e.g., step not in terminal state for rerun)
             return ResponseEntity.status(409).body(Map.of(
@@ -895,160 +909,6 @@ public class WorkflowRunController {
             logger.error("Error getting step history for {}: {}", stepId, e.getMessage(), e);
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
                 .body(Map.of("error", "Failed to get step history: " + e.getMessage()));
-        }
-    }
-
-    // ===== AUTO-EXECUTION AFTER RERUN =====
-
-    /**
-     * Auto-executes ready steps after a rerun operation completes.
-     *
-     * <p>Only executes in AUTO mode (not step-by-step). In step-by-step mode,
-     * the user manually triggers each step via the UI.
-     *
-     * <p>Follows the same pattern as {@code SignalResumeService.resumeAutoMode()}
-     * and {@code ReusableTriggerService.executeReadySteps()}: iterate through
-     * ready nodes in a while-loop, executing each one and fetching new ready
-     * nodes until the workflow completes or the safety limit is reached.
-     *
-     * @param runId      The workflow run ID
-     * @param readySteps Initial set of ready steps from the rerun result
-     */
-    private void autoExecuteAfterRerun(String runId, Set<String> readySteps,
-                                       String ownerTriggerId, int rerunEpoch) {
-        if (v2StepByStepService == null) {
-            logger.warn("[Rerun] V2StepByStepService not available, skipping auto-execution for runId={}", runId);
-            return;
-        }
-
-        // Check execution mode - only auto-execute in AUTO mode
-        WorkflowRunEntity run = workflowRunRepository.findByRunIdPublic(runId).orElse(null);
-        if (run == null) {
-            logger.warn("[Rerun] Run not found for auto-execution: runId={}", runId);
-            return;
-        }
-
-        if (run.getExecutionMode() == ExecutionMode.STEP_BY_STEP) {
-            // SBS single-epoch policy: PAUSED if non-trigger nodes are ready (epoch in progress),
-            // WAITING_TRIGGER only when only triggers remain ready (epoch done, waiting for fire).
-            boolean hasNonTriggerReady = readySteps.stream().anyMatch(s -> !s.startsWith("trigger:"));
-            RunStatus sbsStatus = hasNonTriggerReady ? RunStatus.PAUSED
-                : (readySteps.stream().anyMatch(s -> s.startsWith("trigger:"))
-                    ? RunStatus.WAITING_TRIGGER : RunStatus.PAUSED);
-            logger.info("[Rerun] Step-by-step mode detected, setting status to {} for runId={}", sbsStatus, runId);
-            run.setStatus(sbsStatus);
-            workflowRunRepository.save(run);
-            return;
-        }
-
-        // Filter out trigger nodes (triggers must be explicitly fired, not auto-executed)
-        Set<String> currentReady = new HashSet<>();
-        for (String stepId : readySteps) {
-            if (!stepId.startsWith("trigger:")) {
-                currentReady.add(stepId);
-            }
-        }
-
-        if (currentReady.isEmpty()) {
-            logger.info("[Rerun] No non-trigger ready steps to auto-execute for runId={}", runId);
-            // The rerun still re-opened the epoch: close the cycle now or the run
-            // never re-arms (only triggers were ready, nothing will run this epoch).
-            stepRerunService.closeCycleAfterAutoExecution(runId, ownerTriggerId, rerunEpoch);
-            return;
-        }
-
-        logger.info("[Rerun] AUTO mode: auto-executing {} ready steps after rerun for runId={}", currentReady.size(), runId);
-
-        int maxIterations = 100;
-        int iteration = 0;
-        boolean awaitingSignal = false;
-
-        while (!currentReady.isEmpty() && iteration < maxIterations && !awaitingSignal) {
-            iteration++;
-
-            // Collect ready nodes from execution results for next iteration.
-            // After rerun, getReadyNodes() may fail because the trigger isn't visible
-            // as "completed" in the epoch-filtered context. Instead, use the readyNodes
-            // directly from each StepByStepExecutionResult, which are calculated by the
-            // engine with the correct in-memory execution state.
-            Set<String> nextReady = new HashSet<>();
-
-            for (String stepId : currentReady) {
-                try {
-                    // Check for pending Split items (same pattern as ReusableTriggerService)
-                    if (v2StepByStepScheduler != null) {
-                        Set<String> pendingItemIds = v2StepByStepScheduler.getPendingItemIdsForNode(runId, stepId);
-                        if (!pendingItemIds.isEmpty()) {
-                            logger.info("[Rerun] Found {} pending Split items for step {}: {}",
-                                pendingItemIds.size(), stepId, pendingItemIds);
-                            v2StepByStepService.executeSplitItems(runId, stepId, pendingItemIds);
-                            continue;
-                        }
-                    }
-
-                    StepByStepExecutionResult result = v2StepByStepService.executeNode(runId, stepId, "0");
-
-                    // Any non-terminal yield stops the auto-execution loop - the matching
-                    // resume path (SignalResumeService for AWAITING_SIGNAL, or
-                    // AgentAsyncCompletionService for asyncRunning worker-queue offloads)
-                    // will take over. Gating on isAwaitingSignal() alone used to miss
-                    // async-running yields and caused the same node to be re-fired on
-                    // every loop iteration.
-                    if (result.isPending()) {
-                        logger.info("[Rerun] Node {} yielded (pending), pausing auto-execution for runId={}", stepId, runId);
-                        awaitingSignal = true;
-                        break;
-                    }
-
-                    if (result.isFailed()) {
-                        logger.warn("[Rerun] Step {} failed during auto-execution: {}", stepId, result.getErrorMessage());
-                    }
-
-                    // Collect ready nodes from this execution result
-                    if (result.readyNodes() != null) {
-                        for (String id : result.readyNodes()) {
-                            if (!id.startsWith("trigger:")) {
-                                nextReady.add(id);
-                            }
-                        }
-                    }
-                } catch (Exception e) {
-                    logger.error("[Rerun] Error auto-executing step {} after rerun: {}", stepId, e.getMessage(), e);
-                }
-            }
-
-            currentReady = nextReady;
-
-            // Also check for pending Split items that need execution
-            if (currentReady.isEmpty() && v2StepByStepScheduler != null) {
-                Set<String> pendingNodeIds = v2StepByStepScheduler.getPendingNodeIds(runId);
-                if (!pendingNodeIds.isEmpty()) {
-                    for (String id : pendingNodeIds) {
-                        if (!id.startsWith("trigger:")) {
-                            currentReady.add(id);
-                        }
-                    }
-                }
-            }
-        }
-
-        if (iteration >= maxIterations) {
-            logger.warn("[Rerun] Reached max iterations ({}) during auto-execution for runId={}", maxIterations, runId);
-        }
-
-        logger.info("[Rerun] Auto-execution after rerun completed: {} iterations for runId={}", iteration, runId);
-
-        // The rerun executed OUTSIDE a trigger fire, so no fire-path cycle close covers
-        // the epoch it re-opened. When the auto-execution ran to quiescence synchronously
-        // (no ready work left - true even when quiescence lands exactly on the last
-        // allowed wave), close the cycle here; when it yielded (awaitingSignal covers
-        // both blocking signals and async-running agent offloads), the matching resume
-        // path (SignalResumeService / AgentAsyncCompletionService) performs the same
-        // deferred reset once the pending work resolves - do not double-close under it.
-        // An iteration-cap TRUNCATION (ready work remains) is not quiescence: leave the
-        // run visibly RUNNING instead of masking the truncation with a clean cycle end.
-        if (!awaitingSignal && currentReady.isEmpty()) {
-            stepRerunService.closeCycleAfterAutoExecution(runId, ownerTriggerId, rerunEpoch);
         }
     }
 

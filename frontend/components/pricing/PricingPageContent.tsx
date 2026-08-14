@@ -1017,7 +1017,7 @@ export default function PricingPage() {
                 >
                   {option.label}
                   {option.badge && (
-                    <span className={`ml-2 px-2 py-0.5 text-[10px] font-bold rounded-full transition-colors ${isActive ? 'bg-green-100 text-green-800' : 'bg-green-100/50 text-green-700/70'
+                    <span className={`ml-2 px-2 py-0.5 text-[10px] font-bold rounded-md transition-colors ${isActive ? 'bg-green-100 text-green-800' : 'bg-green-100/50 text-green-700/70'
                       }`}>
                       {option.badge}
                     </span>
@@ -1186,7 +1186,7 @@ export default function PricingPage() {
                       >
                         {isPopular && (
                           <div className="absolute -top-3 left-1/2 transform -translate-x-1/2">
-                            <span className="inline-flex items-center bg-black text-white dark:bg-white dark:text-black border border-transparent px-3 py-1 rounded-full text-xs font-semibold">
+                            <span className="inline-flex items-center bg-black text-white dark:bg-white dark:text-black border border-transparent px-3 py-1 rounded-md text-xs font-semibold">
                               {t('paygSection.popular')}
                             </span>
                           </div>
@@ -1265,7 +1265,7 @@ export default function PricingPage() {
             </h2>
             <div className="grid md:grid-cols-3 gap-8">
               <div className="p-6 border border-black/10 dark:border-white/20 rounded-2xl bg-transparent hover:bg-theme-tertiary/20 transition-colors">
-                <div className="w-14 h-14 bg-theme-secondary rounded-full flex items-center justify-center mx-auto mb-6">
+                <div className="w-14 h-14 bg-theme-secondary rounded-xl flex items-center justify-center mx-auto mb-6">
                   <Zap className="w-7 h-7 text-theme-primary" />
                 </div>
                 <h3 className="text-xl font-semibold text-theme-primary mb-4 transition-colors duration-300">
@@ -1277,7 +1277,7 @@ export default function PricingPage() {
               </div>
 
               <div className="p-6 border border-black/10 dark:border-white/20 rounded-2xl bg-transparent hover:bg-theme-tertiary/20 transition-colors">
-                <div className="w-14 h-14 bg-theme-secondary rounded-full flex items-center justify-center mx-auto mb-6">
+                <div className="w-14 h-14 bg-theme-secondary rounded-xl flex items-center justify-center mx-auto mb-6">
                   <Database className="w-7 h-7 text-theme-primary" />
                 </div>
                 <h3 className="text-xl font-semibold text-theme-primary mb-4 transition-colors duration-300">
@@ -1289,7 +1289,7 @@ export default function PricingPage() {
               </div>
 
               <div className="p-6 border border-black/10 dark:border-white/20 rounded-2xl bg-transparent hover:bg-theme-tertiary/20 transition-colors">
-                <div className="w-14 h-14 bg-theme-secondary rounded-full flex items-center justify-center mx-auto mb-6">
+                <div className="w-14 h-14 bg-theme-secondary rounded-xl flex items-center justify-center mx-auto mb-6">
                   <Clock className="w-7 h-7 text-theme-primary" />
                 </div>
                 <h3 className="text-xl font-semibold text-theme-primary mb-4 transition-colors duration-300">

@@ -1023,7 +1023,7 @@ export function BrowserLiveCdpPanel({
           <div className="absolute inset-x-0 bottom-0 flex items-end justify-center pb-6 pointer-events-none">
             <button
               onClick={handleConfirmTakeover}
-              className="pointer-events-auto inline-flex items-center gap-2 rounded-full bg-blue-600 hover:bg-blue-500 px-4 py-2 text-sm font-medium text-white shadow-lg transition-colors"
+              className="pointer-events-auto inline-flex items-center gap-2 rounded-md bg-blue-600 hover:bg-blue-500 px-4 py-2 text-sm font-medium text-white shadow-lg transition-colors"
             >
               <Hand className="h-4 w-4" />
               {t('panel.clickToTakeControl')}
@@ -1042,7 +1042,7 @@ export function BrowserLiveCdpPanel({
             <button
               onClick={handleResume}
               disabled={resuming}
-              className="inline-flex items-center gap-1.5 rounded-full bg-white/20 hover:bg-white/30 px-2.5 py-1 font-medium disabled:opacity-60 shrink-0"
+              className="inline-flex items-center gap-1.5 rounded-md bg-white/20 hover:bg-white/30 px-2.5 py-1 font-medium disabled:opacity-60 shrink-0"
             >
               <Play className="h-3.5 w-3.5" />
               {t('takeover.resume')}

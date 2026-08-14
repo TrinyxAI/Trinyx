@@ -38,6 +38,7 @@ import java.util.concurrent.atomic.AtomicReference;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.ArgumentMatchers.anyBoolean;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyLong;
@@ -46,6 +47,7 @@ import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
@@ -99,10 +101,18 @@ class CeCatalogRelayServiceTest {
     }
 
     private ApiToolEntity tool() {
+        return tool(null);
+    }
+
+    /** @param generationSpec a descriptor to make this endpoint a generation, or null for an ordinary tool. */
+    private ApiToolEntity tool(String generationSpec) {
         ApiToolEntity tool = new ApiToolEntity();
         tool.setId(TOOL_ID);
         tool.setToolSlug(TOOL_SLUG);
         tool.setIsActive(true);
+        if (generationSpec != null) {
+            tool.setGenerationSpec(generationSpec);
+        }
         return tool;
     }
 
@@ -124,11 +134,13 @@ class CeCatalogRelayServiceTest {
         return dto;
     }
 
+    /** A price the owner published FOR THIS ENDPOINT, which is the ordinary case. */
     private static FrozenMarkupDto frozenMarkup(BigDecimal markup) {
         FrozenMarkupDto dto = new FrozenMarkupDto();
         dto.setFound(true);
         dto.setPricingVersionId(PRICING_VERSION_ID);
         dto.setEffectiveMarkup(markup);
+        dto.setPricedByPublishedRow(true);
         return dto;
     }
 
@@ -139,9 +151,17 @@ class CeCatalogRelayServiceTest {
     }
 
     private void stubResolvedApiAndTool(String authType) {
+        stubResolvedApiAndTool(authType, null);
+    }
+
+    private void stubResolvedApiAndTool(String authType, String generationSpec) {
+        ApiToolEntity resolved = tool(generationSpec);
         when(apiRepository.findByApiSlug(API_SLUG)).thenReturn(Optional.of(api(authType)));
         when(apiToolRepository.findByApiIdAndToolSlug(API_ID, TOOL_SLUG))
-                .thenReturn(Optional.of(tool()));
+                .thenReturn(Optional.of(resolved));
+        // The price guard re-reads the tool by id to ask whether it is a
+        // generation, so both lookups must answer with the SAME endpoint.
+        lenient().when(apiToolRepository.findById(TOOL_ID)).thenReturn(Optional.of(resolved));
     }
 
     private void stubCredentialAndPricing() {
@@ -149,7 +169,7 @@ class CeCatalogRelayServiceTest {
                 .thenReturn(Optional.of(credential("cloud")));
         when(credentialClient.getLatestPricingVersion(CREDENTIAL_ID))
                 .thenReturn(Optional.of(pricingVersion(MARKUP)));
-        when(credentialClient.resolveFrozenMarkup(PRICING_VERSION_ID, TOOL_ID))
+        when(credentialClient.resolveFrozenMarkup(PRICING_VERSION_ID, TOOL_ID, null, null))
                 .thenReturn(Optional.of(frozenMarkup(MARKUP)));
     }
 
@@ -157,6 +177,160 @@ class CeCatalogRelayServiceTest {
         when(creditClient.scopeReserve(anyLong(), anyString(), anyString(), anyString(),
                 any(), isNull(), anyInt(), anyString(), anyString(), anyBoolean()))
                 .thenReturn(new ScopeReserveResult(true, null, false, BigDecimal.TEN));
+    }
+
+    /**
+     * A descriptor that actually PARSES, with a model, a price unit and a
+     * measuring parameter.
+     *
+     * <p>Every other generation fixture in this file is {@code {"kind":"video"}},
+     * which {@code GenerationSpec.parse} rejects (no assetPath, no models). A
+     * rejected descriptor makes the service measure NOTHING, so those fixtures
+     * exercise the unmeasured branch only, whatever they are named. The whole
+     * measured path, which is what decides the amount a self-hosted install is
+     * charged, needs a descriptor the parser accepts.
+     */
+    private static final String REAL_VIDEO_SPEC = """
+            {
+              "kind": "video",
+              "assetPath": "content.video_url",
+              "modelParam": "model",
+              "paramMap": {"prompt": "prompt", "duration_seconds": "duration"},
+              "models": [
+                {"id": "vid-fast", "upstream": "vendor-fast", "label": "Fast",
+                 "capabilities": ["prompt", "duration_seconds"], "required": ["prompt"],
+                 "price": {"unit": "second", "baseCredits": 0, "unitCredits": 60}}
+              ]
+            }
+            """;
+
+    /** A body a real install would relay: it names the model and its size. */
+    private static CeCatalogRelayRequest measurableRequest(int durationSeconds) {
+        return CeCatalogRelayRequest.builder()
+                .parameters(Map.of("model", "vendor-fast", "prompt", "a cat",
+                        "duration", durationSeconds))
+                .build();
+    }
+
+    @Nested
+    @DisplayName("a relayed generation is priced on what the CLOUD measures in the body")
+    class MeasuredGeneration {
+
+        @Test
+        @DisplayName("the model and the size read out of the body are what the price is resolved for")
+        void theMeasurementReachesThePriceResolver() {
+            // THE POINT OF THIS TEST. The install never declares its own size:
+            // if it could, a ten second video would be reported as one second
+            // and billed as one. The cloud reads both facts back out of the
+            // provider-shaped body using the same descriptor that produced it.
+            //
+            // Asserted on the ARGUMENTS the resolver receives, because that is
+            // the only place the measurement becomes money. Stubbing (null,
+            // null) here, as every neighbouring fixture does, would pass with
+            // the measurement deleted outright.
+            stubResolvedApiAndTool("api_key", REAL_VIDEO_SPEC);
+            when(credentialClient.findPlatformCredentialByName("openweather"))
+                    .thenReturn(Optional.of(credential("cloud")));
+            when(credentialClient.getLatestPricingVersion(CREDENTIAL_ID))
+                    .thenReturn(Optional.of(pricingVersion(MARKUP)));
+            FrozenMarkupDto perSecond = frozenMarkup(new BigDecimal("600"));
+            perSecond.setPriceUnit("second");
+            when(credentialClient.resolveFrozenMarkup(
+                    eq(PRICING_VERSION_ID), eq(TOOL_ID), eq("vid-fast"),
+                    argThat(q -> q != null && q.compareTo(BigDecimal.TEN) == 0)))
+                    .thenReturn(Optional.of(perSecond));
+            stubSuccessfulReserve();
+            when(catalogV1Service.executeTool(anyString(), any(), anyString(), isNull(), anyString()))
+                    .thenReturn(ToolExecutionResponse.builder().success(true).build());
+
+            RelayResult result = service.execute(
+                    CLOUD_USER_ID, INSTALL_ID, API_SLUG, TOOL_SLUG, measurableRequest(10));
+
+            assertThat(result.status()).isEqualTo(RelayResult.Status.OK);
+            verify(credentialClient).resolveFrozenMarkup(
+                    eq(PRICING_VERSION_ID), eq(TOOL_ID), eq("vid-fast"),
+                    argThat(q -> q != null && q.compareTo(BigDecimal.TEN) == 0));
+        }
+
+        @Test
+        @DisplayName("a size of ZERO is refused, not floored: the install never stated how big this is")
+        void aZeroSizeIsRefusedRatherThanClampedToTheFloor() {
+            // Read as a real measurement, a 0 makes the amount base + rate x 0,
+            // which the floor then lifts to minCredits: the install pays a
+            // floor for a size it never gave, while the provider bills the
+            // platform owner for whatever it auto-selected. The refusal comes
+            // from the per-unit filter, which can only fire when the quantity
+            // is absent.
+            stubResolvedApiAndTool("api_key", REAL_VIDEO_SPEC);
+            when(credentialClient.findPlatformCredentialByName("openweather"))
+                    .thenReturn(Optional.of(credential("cloud")));
+            when(credentialClient.getLatestPricingVersion(CREDENTIAL_ID))
+                    .thenReturn(Optional.of(pricingVersion(MARKUP)));
+            FrozenMarkupDto perUnitWithoutQuantity = frozenMarkup(new BigDecimal("60"));
+            perUnitWithoutQuantity.setPriceUnit("second");
+            perUnitWithoutQuantity.setUnitCredits(new BigDecimal("60"));
+            when(credentialClient.resolveFrozenMarkup(
+                    eq(PRICING_VERSION_ID), eq(TOOL_ID), eq("vid-fast"), isNull()))
+                    .thenReturn(Optional.of(perUnitWithoutQuantity));
+
+            RelayResult result = service.execute(
+                    CLOUD_USER_ID, INSTALL_ID, API_SLUG, TOOL_SLUG, measurableRequest(0));
+
+            assertThat(result.status()).isNotEqualTo(RelayResult.Status.OK);
+            verifyNoInteractions(catalogV1Service);
+        }
+
+        @Test
+        @DisplayName("a price published per IMAGE cannot bill a call measured in SECONDS")
+        void aRateOfTheWrongDimensionIsRefused() {
+            // Publishing arms its own guard only on a RE-publish, so a FIRST
+            // per-image row on a per-second model reaches here unchallenged.
+            // Both halves look ordinary alone: a rate, and a bare 10.
+            // Multiplied, a ten second clip costs ten times the per-image rate.
+            stubResolvedApiAndTool("api_key", REAL_VIDEO_SPEC);
+            when(credentialClient.findPlatformCredentialByName("openweather"))
+                    .thenReturn(Optional.of(credential("cloud")));
+            when(credentialClient.getLatestPricingVersion(CREDENTIAL_ID))
+                    .thenReturn(Optional.of(pricingVersion(MARKUP)));
+            FrozenMarkupDto perImage = frozenMarkup(new BigDecimal("600"));
+            perImage.setPriceUnit("image");
+            when(credentialClient.resolveFrozenMarkup(
+                    eq(PRICING_VERSION_ID), eq(TOOL_ID), eq("vid-fast"), any()))
+                    .thenReturn(Optional.of(perImage));
+
+            RelayResult result = service.execute(
+                    CLOUD_USER_ID, INSTALL_ID, API_SLUG, TOOL_SLUG, measurableRequest(10));
+
+            assertThat(result.status()).isNotEqualTo(RelayResult.Status.OK);
+            verifyNoInteractions(catalogV1Service);
+        }
+
+        @Test
+        @DisplayName("a rate of the SAME dimension still relays, so the guard is not anti-generation")
+        void aRateOfTheSameDimensionStillRelays() {
+            // The negative half. Without it, refusing everything would score as
+            // a pass on the three tests above.
+            stubResolvedApiAndTool("api_key", REAL_VIDEO_SPEC);
+            when(credentialClient.findPlatformCredentialByName("openweather"))
+                    .thenReturn(Optional.of(credential("cloud")));
+            when(credentialClient.getLatestPricingVersion(CREDENTIAL_ID))
+                    .thenReturn(Optional.of(pricingVersion(MARKUP)));
+            FrozenMarkupDto perMinute = frozenMarkup(new BigDecimal("100"));
+            // Published per MINUTE against a call measured in SECONDS: one
+            // dimension at two scales, which the published row converts.
+            perMinute.setPriceUnit("minute");
+            when(credentialClient.resolveFrozenMarkup(
+                    eq(PRICING_VERSION_ID), eq(TOOL_ID), eq("vid-fast"), any()))
+                    .thenReturn(Optional.of(perMinute));
+            stubSuccessfulReserve();
+            when(catalogV1Service.executeTool(anyString(), any(), anyString(), isNull(), anyString()))
+                    .thenReturn(ToolExecutionResponse.builder().success(true).build());
+
+            RelayResult result = service.execute(
+                    CLOUD_USER_ID, INSTALL_ID, API_SLUG, TOOL_SLUG, measurableRequest(10));
+
+            assertThat(result.status()).isEqualTo(RelayResult.Status.OK);
+        }
     }
 
     @Nested
@@ -242,6 +416,147 @@ class CeCatalogRelayServiceTest {
         }
 
         @Test
+        @DisplayName("a generation priced only by the credential-wide default is refused")
+        void generationOnTheVersionDefaultIsRefused() {
+            // Positive amount, flat shape, every other guard satisfied. What is
+            // missing is a decision: a catch-all authored for the ordinary
+            // endpoints of an API would sell a video for the price of a lookup.
+            stubResolvedApiAndTool("api_key", "{\"kind\":\"video\"}");
+            when(credentialClient.findPlatformCredentialByName("openweather"))
+                    .thenReturn(Optional.of(credential("cloud")));
+            when(credentialClient.getLatestPricingVersion(CREDENTIAL_ID))
+                    .thenReturn(Optional.of(pricingVersion(MARKUP)));
+            FrozenMarkupDto fromDefault = frozenMarkup(MARKUP);
+            fromDefault.setPricedByPublishedRow(false);
+            when(credentialClient.resolveFrozenMarkup(PRICING_VERSION_ID, TOOL_ID, null, null))
+                    .thenReturn(Optional.of(fromDefault));
+
+            RelayResult result = service.execute(CLOUD_USER_ID, INSTALL_ID, API_SLUG, TOOL_SLUG, relayRequest());
+
+            assertThat(result.status()).isEqualTo(RelayResult.Status.PLATFORM_NOT_AVAILABLE);
+            verifyNoInteractions(creditClient, catalogV1Service);
+        }
+
+        @Test
+        @DisplayName("an ORDINARY endpoint on that same default still relays, which is what a default is for")
+        void ordinaryToolOnTheVersionDefaultStillRelays() {
+            // The stricter rule applies to generations only. Catching every tool
+            // priced by the default would break the relayed traffic the default
+            // was published for.
+            stubResolvedApiAndTool("api_key");
+            when(credentialClient.findPlatformCredentialByName("openweather"))
+                    .thenReturn(Optional.of(credential("cloud")));
+            when(credentialClient.getLatestPricingVersion(CREDENTIAL_ID))
+                    .thenReturn(Optional.of(pricingVersion(MARKUP)));
+            FrozenMarkupDto fromDefault = frozenMarkup(MARKUP);
+            fromDefault.setPricedByPublishedRow(false);
+            when(credentialClient.resolveFrozenMarkup(PRICING_VERSION_ID, TOOL_ID, null, null))
+                    .thenReturn(Optional.of(fromDefault));
+            stubSuccessfulReserve();
+            when(catalogV1Service.executeTool(anyString(), any(), anyString(), isNull(), anyString()))
+                    .thenReturn(ToolExecutionResponse.builder().success(true).build());
+
+            RelayResult result = service.execute(CLOUD_USER_ID, INSTALL_ID, API_SLUG, TOOL_SLUG, relayRequest());
+
+            assertThat(result.status()).isEqualTo(RelayResult.Status.OK);
+        }
+
+        @Test
+        @DisplayName("a generation whose answer never mentions the flag still relays, so a rolling "
+                + "deploy does not become an outage")
+        void generationWithASilentAnswerStillRelays() {
+            stubResolvedApiAndTool("api_key", "{\"kind\":\"video\"}");
+            when(credentialClient.findPlatformCredentialByName("openweather"))
+                    .thenReturn(Optional.of(credential("cloud")));
+            when(credentialClient.getLatestPricingVersion(CREDENTIAL_ID))
+                    .thenReturn(Optional.of(pricingVersion(MARKUP)));
+            FrozenMarkupDto silent = frozenMarkup(MARKUP);
+            silent.setPricedByPublishedRow(null);
+            when(credentialClient.resolveFrozenMarkup(PRICING_VERSION_ID, TOOL_ID, null, null))
+                    .thenReturn(Optional.of(silent));
+            stubSuccessfulReserve();
+            when(catalogV1Service.executeTool(anyString(), any(), anyString(), isNull(), anyString()))
+                    .thenReturn(ToolExecutionResponse.builder().success(true).build());
+
+            RelayResult result = service.execute(CLOUD_USER_ID, INSTALL_ID, API_SLUG, TOOL_SLUG, relayRequest());
+
+            assertThat(result.status()).isEqualTo(RelayResult.Status.OK);
+        }
+
+        @Test
+        @DisplayName("a generation priced FOR ITS OWN endpoint relays, so the guard is not anti-generation")
+        void generationWithItsOwnPublishedPriceRelays() {
+            stubResolvedApiAndTool("api_key", "{\"kind\":\"video\"}");
+            when(credentialClient.findPlatformCredentialByName("openweather"))
+                    .thenReturn(Optional.of(credential("cloud")));
+            when(credentialClient.getLatestPricingVersion(CREDENTIAL_ID))
+                    .thenReturn(Optional.of(pricingVersion(MARKUP)));
+            FrozenMarkupDto published = frozenMarkup(MARKUP);
+            published.setPricedByPublishedRow(true);
+            when(credentialClient.resolveFrozenMarkup(PRICING_VERSION_ID, TOOL_ID, null, null))
+                    .thenReturn(Optional.of(published));
+            stubSuccessfulReserve();
+            when(catalogV1Service.executeTool(anyString(), any(), anyString(), isNull(), anyString()))
+                    .thenReturn(ToolExecutionResponse.builder().success(true).build());
+
+            RelayResult result = service.execute(CLOUD_USER_ID, INSTALL_ID, API_SLUG, TOOL_SLUG, relayRequest());
+
+            assertThat(result.status()).isEqualTo(RelayResult.Status.OK);
+            assertThat(result.billedCredits()).isEqualByComparingTo(MARKUP);
+        }
+
+        @Test
+        @DisplayName("a per-unit price refuses the call, because this path cannot measure it")
+        void perUnitPriceIsRejected() {
+            // This path carries no quantity, so a per-second row resolves to the
+            // price of ONE second. Charging it would sell a ten second video for
+            // a tenth of its price, silently. An amount nobody could measure is
+            // not a price, so refuse and let the owner publish a flat rate or
+            // route the model through the generation surface, which measures.
+            stubResolvedApiAndTool("api_key");
+            when(credentialClient.findPlatformCredentialByName("openweather"))
+                    .thenReturn(Optional.of(credential("cloud")));
+            when(credentialClient.getLatestPricingVersion(CREDENTIAL_ID))
+                    .thenReturn(Optional.of(pricingVersion(new BigDecimal("60"))));
+            FrozenMarkupDto perSecond = frozenMarkup(new BigDecimal("60"));
+            perSecond.setPriceUnit("second");
+            perSecond.setUnitCredits(new BigDecimal("60"));
+            when(credentialClient.resolveFrozenMarkup(PRICING_VERSION_ID, TOOL_ID, null, null))
+                    .thenReturn(Optional.of(perSecond));
+
+            RelayResult result = service.execute(CLOUD_USER_ID, INSTALL_ID, API_SLUG, TOOL_SLUG, relayRequest());
+
+            assertThat(result.status()).isEqualTo(RelayResult.Status.PLATFORM_NOT_AVAILABLE);
+            verifyNoInteractions(creditClient, catalogV1Service);
+        }
+
+        @Test
+        @DisplayName("a FLAT price still relays, so the refusal above is not a blanket block")
+        void flatPriceStillRelays() {
+            // The guard must fire on the SHAPE of the row, not on any row that
+            // carries a unit field. A flat price is the normal case; if it were
+            // caught too, every relayed call would break.
+            stubResolvedApiAndTool("api_key");
+            when(credentialClient.findPlatformCredentialByName("openweather"))
+                    .thenReturn(Optional.of(credential("cloud")));
+            when(credentialClient.getLatestPricingVersion(CREDENTIAL_ID))
+                    .thenReturn(Optional.of(pricingVersion(MARKUP)));
+            FrozenMarkupDto flat = frozenMarkup(MARKUP);
+            flat.setPriceUnit("call");
+            flat.setUnitCredits(BigDecimal.ZERO);
+            when(credentialClient.resolveFrozenMarkup(PRICING_VERSION_ID, TOOL_ID, null, null))
+                    .thenReturn(Optional.of(flat));
+            stubSuccessfulReserve();
+            when(catalogV1Service.executeTool(anyString(), any(), anyString(), isNull(), anyString()))
+                    .thenReturn(ToolExecutionResponse.builder().success(true).build());
+
+            RelayResult result = service.execute(CLOUD_USER_ID, INSTALL_ID, API_SLUG, TOOL_SLUG, relayRequest());
+
+            assertThat(result.status()).isEqualTo(RelayResult.Status.OK);
+            assertThat(result.billedCredits()).isEqualByComparingTo(MARKUP);
+        }
+
+        @Test
         @DisplayName("zero markup refuses the call - no free ride")
         void zeroMarkupIsRejected() {
             stubResolvedApiAndTool("api_key");
@@ -249,7 +564,7 @@ class CeCatalogRelayServiceTest {
                     .thenReturn(Optional.of(credential("cloud")));
             when(credentialClient.getLatestPricingVersion(CREDENTIAL_ID))
                     .thenReturn(Optional.of(pricingVersion(BigDecimal.ZERO)));
-            when(credentialClient.resolveFrozenMarkup(PRICING_VERSION_ID, TOOL_ID))
+            when(credentialClient.resolveFrozenMarkup(PRICING_VERSION_ID, TOOL_ID, null, null))
                     .thenReturn(Optional.of(frozenMarkup(BigDecimal.ZERO)));
 
             RelayResult result = service.execute(CLOUD_USER_ID, INSTALL_ID, API_SLUG, TOOL_SLUG, relayRequest());
@@ -393,6 +708,10 @@ class CeCatalogRelayServiceTest {
             assertThat(forwarded.getBillingScopeKind()).isNull();
             assertThat(forwarded.getBillingScopeId()).isNull();
             assertThat(forwarded.getBillingStepId()).isNull();
+            // ...and says so explicitly, rather than leaving the absent scope to
+            // be read as "nobody bills this call". Without it the execution layer
+            // refuses a resold generation this service has already reserved.
+            assertThat(forwarded.getBillingOwnedByCaller()).isTrue();
         }
 
         @Test
@@ -448,7 +767,7 @@ class CeCatalogRelayServiceTest {
                     .thenReturn(Optional.of(credential("cloud")));
             when(credentialClient.getLatestPricingVersion(CREDENTIAL_ID))
                     .thenReturn(Optional.of(pricingVersion(MARKUP)));
-            when(credentialClient.resolveFrozenMarkup(PRICING_VERSION_ID, TOOL_ID))
+            when(credentialClient.resolveFrozenMarkup(PRICING_VERSION_ID, TOOL_ID, null, null))
                     .thenReturn(Optional.of(frozenMarkup(new BigDecimal("0.50"))));
 
             PlatformInfo info = service.platformInfo("openweather", TOOL_ID);
@@ -458,6 +777,51 @@ class CeCatalogRelayServiceTest {
             assertThat(info.hasPricing()).isTrue();
             assertThat(info.markupCredits()).isEqualTo("0.50");
             assertThat(info.relayEligible()).isTrue();
+        }
+
+        @Test
+        @DisplayName("a generation is quoted for the MODEL asked about, not for an endpoint row it does not have")
+        void quotesThePerModelRow() {
+            // Every seeded generation is priced per model, so a probe that
+            // resolved only an endpoint-wide row answered "nothing published"
+            // for a model the relay then executed and charged at its real rate.
+            // A self-hosted install read "not sold on the platform key" beside
+            // a button that billed the customer.
+            when(apiRepository.findByPlatformCredentialName("seedance"))
+                    .thenReturn(Optional.of(api("api_key")));
+            when(credentialClient.findPlatformCredentialByName("seedance"))
+                    .thenReturn(Optional.of(credential("cloud")));
+            when(credentialClient.getLatestPricingVersion(CREDENTIAL_ID))
+                    .thenReturn(Optional.of(pricingVersion(MARKUP)));
+            // Resolvable ONLY when the model and the size travel with the lookup.
+            when(credentialClient.resolveFrozenMarkup(
+                    PRICING_VERSION_ID, TOOL_ID, "seedance-2.0", new BigDecimal("10")))
+                    .thenReturn(Optional.of(frozenMarkup(new BigDecimal("600"))));
+
+            PlatformInfo info = service.platformInfo(
+                    "seedance", TOOL_ID, "seedance-2.0", new BigDecimal("10"));
+
+            assertThat(info.hasPricing()).isTrue();
+            assertThat(info.markupCredits()).isEqualTo("600");
+        }
+
+        @Test
+        @DisplayName("an ordinary endpoint is still quoted with no model and no size, exactly as before")
+        void anOrdinaryEndpointIsUnchanged() {
+            // The two extra arguments are optional and must stay a no-op for
+            // the 600+ endpoints that carry no generation descriptor.
+            when(apiRepository.findByPlatformCredentialName("openweather"))
+                    .thenReturn(Optional.of(api("api_key")));
+            when(credentialClient.findPlatformCredentialByName("openweather"))
+                    .thenReturn(Optional.of(credential("cloud")));
+            when(credentialClient.getLatestPricingVersion(CREDENTIAL_ID))
+                    .thenReturn(Optional.of(pricingVersion(MARKUP)));
+            when(credentialClient.resolveFrozenMarkup(PRICING_VERSION_ID, TOOL_ID, null, null))
+                    .thenReturn(Optional.of(frozenMarkup(new BigDecimal("0.50"))));
+
+            PlatformInfo info = service.platformInfo("openweather", TOOL_ID);
+
+            assertThat(info.markupCredits()).isEqualTo("0.50");
         }
 
         @Test

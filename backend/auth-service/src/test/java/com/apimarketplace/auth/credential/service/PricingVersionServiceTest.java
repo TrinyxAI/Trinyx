@@ -51,7 +51,7 @@ class PricingVersionServiceTest {
         PlatformCredentialPricingVersion v = version(7L, 1, new BigDecimal("0.30"));
         when(versionRepo.findById(7L)).thenReturn(Optional.of(v));
         UUID tool = UUID.randomUUID();
-        when(entryRepo.findByPricingVersionIdAndApiToolId(7L, tool)).thenReturn(Optional.empty());
+        when(entryRepo.findByPricingVersionIdAndApiToolIdAndModelIdIsNull(7L, tool)).thenReturn(Optional.empty());
 
         Optional<BigDecimal> rate = service.resolveMarkup(7L, tool);
 
@@ -66,7 +66,7 @@ class PricingVersionServiceTest {
         UUID tool = UUID.randomUUID();
         PricingVersionEntry entry = new PricingVersionEntry();
         entry.setMarkupCredits(new BigDecimal("1.25"));
-        when(entryRepo.findByPricingVersionIdAndApiToolId(7L, tool)).thenReturn(Optional.of(entry));
+        when(entryRepo.findByPricingVersionIdAndApiToolIdAndModelIdIsNull(7L, tool)).thenReturn(Optional.of(entry));
 
         Optional<BigDecimal> rate = service.resolveMarkup(7L, tool);
 
@@ -80,7 +80,7 @@ class PricingVersionServiceTest {
         v.setPlatformCredentialId(123L);
         when(versionRepo.findById(9L)).thenReturn(Optional.of(v));
         UUID tool = UUID.randomUUID();
-        when(entryRepo.findByPricingVersionIdAndApiToolId(9L, tool)).thenReturn(Optional.empty());
+        when(entryRepo.findByPricingVersionIdAndApiToolIdAndModelIdIsNull(9L, tool)).thenReturn(Optional.empty());
 
         Optional<PricingVersionService.FrozenMarkup> frozen = service.resolveFrozenMarkup(9L, tool);
 

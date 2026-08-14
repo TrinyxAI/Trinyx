@@ -121,6 +121,54 @@ class PlanSecretRedactorTest {
     }
 
     @Test
+    @DisplayName("removes a generate node's pinned credential id, which lives in the GENERIC params map")
+    void redactsGenerateCredentialId() {
+        // Every other removal here targets a NAMED child (httpRequest, ssh,
+        // sendEmail). A generate node has none: its whole config sits in
+        // `params`, so the pinned key rode straight through to the share-link
+        // viewer, naming one of the author's own provider credentials.
+        Map<String, Object> params = new HashMap<>();
+        params.put("model", "seedance-2.0-fast");
+        params.put("prompt", "a paper boat");
+        params.put("credential_source", "user");
+        params.put("credential_id", 42);
+        Map<String, Object> generate = core("params", params);
+        generate.put("type", "generate");
+        Map<String, Object> plan = planWith(generate);
+
+        PlanSecretRedactor.redact(plan);
+
+        Map<String, Object> after = firstCoreChild(plan, "params");
+        assertThat(after).doesNotContainKey("credential_id");
+        // The pool is not a credential: it says whether the run buys on the
+        // platform's key or uses the reader's own, which the reader is entitled
+        // to see and which the node needs to keep working.
+        assertThat(after)
+                .containsEntry("credential_source", "user")
+                .containsEntry("model", "seedance-2.0-fast")
+                .containsEntry("prompt", "a paper boat");
+    }
+
+    @Test
+    @DisplayName("another node type keeps its params untouched: `params` is every core's config, not a secret bucket")
+    void leavesOtherCoreParamsAlone() {
+        // The removal is scoped to the node that actually pins a provider key.
+        // `params` is the generic map EVERY core keeps its config in, so an
+        // unconditional removal would silently delete a field of the same name
+        // from a future node that means something else by it.
+        Map<String, Object> params = new HashMap<>();
+        params.put("code", "return 1;");
+        params.put("credential_id", 42);
+        Map<String, Object> codeNode = core("params", params);
+        codeNode.put("type", "code");
+        Map<String, Object> plan = planWith(codeNode);
+
+        PlanSecretRedactor.redact(plan);
+
+        assertThat(firstCoreChild(plan, "params")).containsEntry("credential_id", 42);
+    }
+
+    @Test
     @DisplayName("null plan and plan without cores are handled without error")
     void handlesNullAndEmpty() {
         PlanSecretRedactor.redact(null);

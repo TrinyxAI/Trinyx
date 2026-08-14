@@ -8,7 +8,7 @@ import com.apimarketplace.orchestrator.domain.workflow.Trigger;
 import com.apimarketplace.orchestrator.domain.workflow.WorkflowPlan;
 import com.apimarketplace.orchestrator.repository.WorkflowRepository;
 import com.apimarketplace.orchestrator.repository.WorkflowRunRepository;
-import com.apimarketplace.common.credit.CreditConsumptionClient;
+import com.apimarketplace.orchestrator.services.credit.CreditExhaustion;
 import com.apimarketplace.orchestrator.trigger.ProductionRunResolver;
 import com.apimarketplace.orchestrator.trigger.ReusableTriggerService;
 import com.apimarketplace.orchestrator.trigger.TriggerExecutionResult;
@@ -47,7 +47,6 @@ public class WebhookDispatchService {
     private final WorkflowRunRepository runRepository;
     private final ReusableTriggerService triggerService;
     private final ProductionRunResolver productionRunResolver;
-    private final CreditConsumptionClient creditClient;
     private final WebhookResponseRegistry webhookResponseRegistry;
 
     public WebhookDispatchService(TriggerClient triggerClient,
@@ -55,14 +54,12 @@ public class WebhookDispatchService {
                                   WorkflowRunRepository runRepository,
                                   ReusableTriggerService triggerService,
                                   ProductionRunResolver productionRunResolver,
-                                  CreditConsumptionClient creditClient,
                                   WebhookResponseRegistry webhookResponseRegistry) {
         this.triggerClient = triggerClient;
         this.workflowRepository = workflowRepository;
         this.runRepository = runRepository;
         this.triggerService = triggerService;
         this.productionRunResolver = productionRunResolver;
-        this.creditClient = creditClient;
         this.webhookResponseRegistry = webhookResponseRegistry;
     }
 
@@ -159,12 +156,9 @@ public class WebhookDispatchService {
         }
         String runId = waitingRun.getRunIdPublic();
 
-        // 3. Credit check
-        if (!creditClient.checkCredits(waitingRun.getTenantId())) {
-            logger.warn("Insufficient credits for tenant {}, rejecting webhook trigger for run {}",
-                    waitingRun.getTenantId(), runId);
-            return WebhookResponse.insufficientCredits();
-        }
+        // 3. No credit gate here: an out-of-credit webhook fire must leave a trace the
+        //    owner can find. The fire proceeds and NodeCreditGate fails the trigger node
+        //    with the out-of-credit message, skipping the rest of the workflow.
 
         logger.info("Found waiting run {} for workflow {}, resolving trigger {}",
                    runId, workflowId, triggerId);
@@ -184,6 +178,13 @@ public class WebhookDispatchService {
                 return WebhookResponse.triggered(runId);
             } else {
                 webhookResponseRegistry.cancelExpectation(runId);
+                // The documented 402 for an out-of-credit webhook is preserved, but it
+                // is now derived from the trigger node's real failure instead of a
+                // pre-execution gate - so the caller still gets 402 AND the owner gets
+                // a failed trigger + skipped nodes to look at.
+                if (CreditExhaustion.isCreditExhausted(result.message())) {
+                    return WebhookResponse.insufficientCredits();
+                }
                 return WebhookResponse.error(result.message());
             }
         } catch (Exception e) {
@@ -284,11 +285,8 @@ public class WebhookDispatchService {
                             continue;
                         }
 
-                        if (!creditClient.checkCredits(waitingRun.getTenantId())) {
-                            logger.warn("Insufficient credits for tenant {}, skipping standalone webhook trigger",
-                                    waitingRun.getTenantId());
-                            continue;
-                        }
+                        // No credit gate - same reason as the pinned branch above: the
+                        // fire proceeds so the failure is visible on the trigger node.
 
                         try {
                             // Webhook bodies are untrusted external - strip the internal marker.

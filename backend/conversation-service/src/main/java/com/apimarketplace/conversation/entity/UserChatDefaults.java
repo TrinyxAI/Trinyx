@@ -22,7 +22,7 @@ import java.util.Objects;
  * <p>Self-service personal defaults: each user owns one row per workspace
  * ({@code user_id} + {@code organization_id}). The JSONB {@code config} mirrors the
  * frontend {@code ChatConfig} shape (temperature, systemPrompt, maxTokens,
- * maxIterations, executionTimeout, toolsMode, webSearch, imageGeneration,
+ * maxIterations, executionTimeout, toolsMode, webSearch, generation,
  * autoAuthorizeTools, defaultSkillIds, turnLimits). It seeds the message composer +
  * new conversations in that workspace.
  */

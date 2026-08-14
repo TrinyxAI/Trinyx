@@ -1003,6 +1003,27 @@ public class SnapshotCloneService {
                 if (database instanceof Map<?, ?> databaseMap) {
                     ((Map<String, Object>) databaseMap).remove("password");
                 }
+                // A generate node keeps its config in the GENERIC params map,
+                // so none of the named children above reach it. `credential_id`
+                // there names one of the PUBLISHER's own provider keys; left in
+                // the snapshot it survives into every acquirer's plan, where it
+                // is at best a dangling id and at worst - for an acquirer in the
+                // publisher's organization - a key they can resolve.
+                //
+                // Only the id goes. The `credential_source` beside it names a
+                // POOL, not a credential: it says whether this node runs on the
+                // acquirer's own key or buys on the platform's, which is part of
+                // how the published workflow was designed to work and is the
+                // acquirer's own arrangement once cloned.
+                //
+                // Scoped to the node type that has one: `params` is the generic
+                // map EVERY core keeps its config in, so an unconditional
+                // removal would silently delete a field of the same name from
+                // some future node that means something else by it.
+                Object params = coreMap.get("params");
+                if ("generate".equals(coreMap.get("type")) && params instanceof Map<?, ?> paramsMap) {
+                    ((Map<String, Object>) paramsMap).remove("credential_id");
+                }
             }
         }
 

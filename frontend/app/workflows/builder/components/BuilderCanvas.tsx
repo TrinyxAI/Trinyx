@@ -29,6 +29,7 @@ import 'reactflow/dist/style.css';
 
 import { Plus, Info, AlertTriangle } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import { canvasChromePrimaryButtonClass } from '@/components/ui/canvas-chrome';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { useValidationOptional } from '../contexts/ValidationContext';
 import { useTheme } from '@/components/ThemeProvider';
@@ -341,7 +342,7 @@ export function BuilderCanvas({
   selectedNodeIdsFromParent,
 }: BuilderCanvasProps) {
   const t = useTranslations('workflowBuilder.canvas');
-  const { isRunMode, isPreviewOnly } = useWorkflowMode();
+  const { isRunMode, isPreviewOnly, viewingEpoch } = useWorkflowMode();
   // Safe variant: the canvas also mounts on surfaces without the provider
   // (marketplace preview, snapshots), which must keep the horizontal default.
   const { direction: layoutDirection } = useWorkflowLayoutDirectionSafe();
@@ -1019,18 +1020,23 @@ export function BuilderCanvas({
               );
             }
           }} />
-          <Button
+          {/* Square like every other canvas control now: a lone round FAB was
+              the one circle left once the toggle, the run bar and the toolbar
+              moved to the Button shape. h-9 is also the height of the mode
+              toggle and the run bar it shares the canvas top edge with, so the
+              three read as one row instead of one oversized corner button.
+              A raw <button> carrying the chrome class, like every other canvas
+              control, so the shape lives in ONE place and is shared with the
+              fleet canvas' Edit button - the same corner control on the other
+              canvas. */}
+          <button
+            type="button"
             onClick={onOpenNodeCreator}
-            // Square like every other canvas control now: a lone round FAB was
-            // the one circle left once the toggle, the run bar and the toolbar
-            // moved to the Button shape. h-9 is also the height of the mode
-            // toggle and the run bar it shares the canvas top edge with, so the
-            // three read as one row instead of one oversized corner button.
-            className="w-9 h-9 rounded-xl p-0"
+            className={canvasChromePrimaryButtonClass()}
             title={t('addNode')}
           >
             <Plus className="w-5 h-5" />
-          </Button>
+          </button>
         </div>
       )}
 
@@ -1056,7 +1062,7 @@ export function BuilderCanvas({
       {/* Wraps BOTH the nodes and the toolbar: the file strips live inside the
           nodes and the toggle-all control inside the toolbar, and they only meet
           through this provider. */}
-      <FileStripExpansionProvider>
+      <FileStripExpansionProvider resetKey={`${isRunMode ? 'run' : 'edit'}:${runId ?? ''}:${viewingEpoch ?? ''}`}>
       <EdgeActionsProvider value={React.useMemo(() => ({ hoveredEdgeId, onDeleteEdge: onDeleteEdgeRef.current, onUpdateEdgeData: () => {} }), [hoveredEdgeId])}>
         <ReactFlowProvider>
           <ReactFlow
@@ -1185,7 +1191,12 @@ export function BuilderCanvas({
                 and this composer must not flash over it. */}
             {nodes.length === 0 && !isFullscreen && !isLoadingWorkflow && !isLocked && !isEmbedded && !isSidePanelOpen && (
               <>
-                <Panel position="top-center" className="relative z-[50] w-full hidden sm:block" style={{ pointerEvents: 'none' }}>
+                {/* React Flow gives every panel a 15px margin on all four sides.
+                    Combined with `w-full` that makes the box 30px WIDER than the
+                    canvas, so on a phone the composer's own edges fall outside
+                    it. The horizontal margins go; the vertical ones, which set
+                    the offset from the canvas edge, stay. */}
+                <Panel position="top-center" className="relative z-[50] w-full hidden sm:block" style={{ pointerEvents: 'none', marginLeft: 0, marginRight: 0 }}>
                   <EmptyCanvasChat
                     chatInput={chatInput}
                     onChatInputChange={handleChatInputChange}
@@ -1199,7 +1210,7 @@ export function BuilderCanvas({
                     onGetViewportCenter={onGetViewportCenter}
                   />
                 </Panel>
-                <Panel position="bottom-center" className="relative z-[50] w-full sm:hidden pb-4" style={{ pointerEvents: 'none' }}>
+                <Panel position="bottom-center" className="relative z-[50] w-full sm:hidden pb-4" style={{ pointerEvents: 'none', marginLeft: 0, marginRight: 0 }}>
                   <EmptyCanvasChat
                     chatInput={chatInput}
                     onChatInputChange={handleChatInputChange}

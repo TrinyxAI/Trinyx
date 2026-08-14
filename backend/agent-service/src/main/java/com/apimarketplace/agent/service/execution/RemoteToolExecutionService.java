@@ -1,5 +1,6 @@
 package com.apimarketplace.agent.service.execution;
 
+import com.apimarketplace.agent.config.AgentModuleResolver;
 import com.apimarketplace.agent.domain.ToolCall;
 import com.apimarketplace.agent.domain.ToolDefinition;
 import com.apimarketplace.agent.domain.ToolResult;
@@ -547,6 +548,12 @@ public class RemoteToolExecutionService implements ToolExecutionService {
         }
 
         copyCredential(request, credentials, "agentId", "__agentId__", "agentId");
+        // What that agent may DO, alongside who it is. This method copies an
+        // explicit list of keys, so a grant left out of it simply never leaves
+        // this service, and the tool at the other end sees a caller with no
+        // stated permissions: exactly the state that means "allowed".
+        copyCredential(request, credentials, "enabledModules",
+                AgentModuleResolver.ENABLED_MODULES_CREDENTIAL_KEY, "enabledModules");
         copyCredential(request, credentials, "allowedToolIds", "__allowedToolIds__", "allowedToolIds");
         copyCredential(request, credentials, "allowedWorkflowIds", "__allowedWorkflowIds__", "allowedWorkflowIds");
         copyCredential(request, credentials, "allowedApplicationIds", "__allowedApplicationIds__", "allowedApplicationIds");

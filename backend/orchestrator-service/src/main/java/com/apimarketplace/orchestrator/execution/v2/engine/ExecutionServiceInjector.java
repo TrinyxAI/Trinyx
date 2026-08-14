@@ -81,6 +81,9 @@ public class ExecutionServiceInjector {
     private com.apimarketplace.orchestrator.services.media.MediaRenderService mediaRenderService;
 
     @Autowired(required = false)
+    private com.apimarketplace.orchestrator.services.generation.GenerationExecutionService generationExecutionService;
+
+    @Autowired(required = false)
     private MimeTypeRegistry mimeTypeRegistry;
 
     @Autowired(required = false)
@@ -241,6 +244,7 @@ public class ExecutionServiceInjector {
             .fileDownloader(fileDownloader)
             .publicLinkService(publicLinkService)
             .mediaRenderService(mediaRenderService)
+            .generationExecutionService(generationExecutionService)
             .mimeTypeRegistry(mimeTypeRegistry)
             .eventPublisher(eventPublisher)
             .restTemplate(restTemplate)

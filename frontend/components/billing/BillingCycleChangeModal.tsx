@@ -100,7 +100,7 @@ export default function BillingCycleChangeModal({
                 {/* Header */}
                 <div className="p-6 pb-4">
                     <div className="flex items-center gap-3">
-                        <div className="p-2 rounded-full bg-theme-tertiary">
+                        <div className="p-2 rounded-md bg-theme-tertiary">
                             <RefreshCw className="h-5 w-5 text-theme-secondary" />
                         </div>
                         <h2 className="text-lg font-semibold text-theme-primary">
@@ -117,7 +117,7 @@ export default function BillingCycleChangeModal({
                     {success ? (
                         // Success state
                         <div className="text-center">
-                            <div className="w-16 h-16 bg-green-100 dark:bg-green-900/30 rounded-full flex items-center justify-center mx-auto mb-4">
+                            <div className="w-16 h-16 bg-green-100 dark:bg-green-900/30 rounded-2xl flex items-center justify-center mx-auto mb-4">
                                 <CheckCircle2 className="h-8 w-8 text-green-600 dark:text-green-400" />
                             </div>
                             <p className="text-theme-primary mb-4">

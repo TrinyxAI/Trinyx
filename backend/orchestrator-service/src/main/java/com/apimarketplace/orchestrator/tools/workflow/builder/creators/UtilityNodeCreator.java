@@ -28,6 +28,18 @@ import com.apimarketplace.agent.tools.ToolErrorCode;
 @RequiredArgsConstructor
 public class UtilityNodeCreator extends CreatorBase {
 
+    /**
+     * Which key a generate node runs on when nobody said.
+     *
+     * <p>The same value the builder inspector shows and quotes a price for. It
+     * is written out rather than left absent because absent is a DIFFERENT
+     * arrangement, not a missing one: the executor reads it as "try the
+     * author's own key first", so an unstated node would run on a provider
+     * account nobody chose here and the platform would bill nothing, after
+     * every surface had shown the platform price.
+     */
+    static final String DEFAULT_GENERATE_CREDENTIAL_SOURCE = "platform";
+
     private final WorkflowBuilderSessionStore sessionStore;
     private final ResponseOptimizer responseOptimizer;
     private final NodeLibraryService nodeLibraryService;
@@ -462,6 +474,112 @@ public class UtilityNodeCreator extends CreatorBase {
         MEDIA_OPERATIONS.forEach((op, description) ->
             sb.append("- ").append(op).append(": ").append(description).append('\n'));
         return sb.toString();
+    }
+
+    // ==================== Generate ====================
+
+    /**
+     * Builder keys that shape the node itself and are never generation parameters.
+     * Everything else is copied through verbatim: which parameters exist, and which
+     * of them a given model accepts, is decided by the generation catalog, so an
+     * allow-list here would silently drop a dimension the day a new model adds one.
+     * A name the model does not accept comes back as a refusal naming what it does
+     * accept, before anything is charged.
+     */
+    private static final Set<String> GENERATE_RESERVED_PARAMS = Set.of(
+        "label", "name", "connect_after", "connect_after_loop", "interface_id",
+        "type", "action", "session_id", "params", "parameters");
+
+    public ToolExecutionResult executeAddGenerate(WorkflowBuilderSession session, Map<String, Object> parameters) {
+        // 1. Validate
+        String label = getString(parameters, "label", "name");
+        var labelError = validateLabel(label, "generate");
+        if (labelError != null) return labelError;
+
+        if (session.getTriggers().isEmpty()) {
+            return triggerRequiredError("generate");
+        }
+
+        String model = getString(parameters, "model", "model_id");
+        if (model == null || model.isBlank()) {
+            return ToolExecutionResult.failure(ToolErrorCode.MISSING_PARAMETER, "GENERATE: 'model' is required.\n" +
+                "The model decides the format produced (image, video, audio, voice, music), the parameters "
+                + "it accepts and the price. Model ids cannot be guessed: call generation(action='models') "
+                + "to list them with what each accepts and what each costs.\n" +
+                "Example: params={model: 'seedance-2.0-fast', prompt: 'a paper boat in a rain gutter', "
+                + "duration_seconds: 5, aspect_ratio: '16:9'}");
+        }
+        model = model.trim().toLowerCase();
+
+        String credentialSource = getString(parameters, "credential_source");
+        if (credentialSource != null && !credentialSource.isBlank()) {
+            credentialSource = credentialSource.trim().toLowerCase();
+            if (!"user".equals(credentialSource) && !"platform".equals(credentialSource)) {
+                return ToolExecutionResult.failure(ToolErrorCode.INVALID_ENUM_VALUE,
+                    "GENERATE: 'credential_source' must be 'platform' (use the platform's key and be billed "
+                        + "the platform price) or 'user' (use your own key and be billed nothing by the "
+                        + "platform), got '" + credentialSource + "'.");
+            }
+        }
+
+        // 2. Build node
+        String normalizedLabel = WorkflowBuilderSession.normalizeLabel(label);
+        String nodeId = NodeType.GENERATE.buildNodeId(normalizedLabel);
+        var existsError = validateNodeNotExists(session, nodeId, label);
+        if (existsError != null) return existsError;
+
+        String connectAfter = resolveConnectAfter(parameters, session);
+        var connectError = validateConnectAfter(connectAfter, session);
+        if (connectError != null) return connectError;
+
+        Map<String, Object> generateParams = new LinkedHashMap<>();
+        generateParams.put("model", model);
+        // Always stated, never left absent. Absent is not "the same thing by
+        // default": it means "try the author's own key first", which is a
+        // different key, a different provider account and a different price
+        // from the one every surface quotes for this node. Writing it here is
+        // what stops the three producers of this node (this one, the plan
+        // exporter and the builder inspector) from disagreeing, and stops an
+        // editor that re-saves a plan from silently repricing a node it did not
+        // change.
+        generateParams.put("credential_source",
+                credentialSource != null && !credentialSource.isBlank()
+                        ? credentialSource
+                        : DEFAULT_GENERATE_CREDENTIAL_SOURCE);
+        for (Map.Entry<String, Object> entry : parameters.entrySet()) {
+            String key = entry.getKey();
+            if (GENERATE_RESERVED_PARAMS.contains(key) || "model".equals(key) || "model_id".equals(key)
+                    || "credential_source".equals(key) || entry.getValue() == null) {
+                continue;
+            }
+            generateParams.put(key, entry.getValue());
+        }
+
+        Map<String, Object> node = new LinkedHashMap<>();
+        node.put("id", nodeId);
+        node.put("label", label);
+        node.put("type", "generate");
+        node.put("position", calculatePosition(session, NodeType.GENERATE));
+        node.put("params", generateParams);
+
+        // 3. Add and finalize
+        session.getCores().add(LabelNormalizer.normalizeVariableReferencesDeep(node));
+        if (connectAfter != null) createSimpleEdge(session, connectAfter, nodeId);
+        finalizeNode(session, sessionStore, NodeType.GENERATE, nodeId, node, connectAfter);
+
+        return buildSuccessResponse("generate", nodeId, label, normalizedLabel, connectAfter,
+            Map.of("model", model,
+                   "access_pattern", "{{core:" + normalizedLabel + ".output.file}} (the generated asset, "
+                       + "a whole FileRef - map it into a downstream file param, never .path or a URL)",
+                   "cost", "Every run of this node is charged. A model priced per second or per character "
+                       + "costs more for a longer request: the node reports the size it billed on as "
+                       + "{{core:" + normalizedLabel + ".output.billed_quantity}} in "
+                       + "{{core:" + normalizedLabel + ".output.billed_unit}}. Call "
+                       + "generation(action='models') for each model's rate.",
+                   "usage", "Parameters are checked against the model BEFORE the provider is called, so a "
+                       + "rejected call costs nothing. Only the parameters listed in that model's 'accepts' "
+                       + "are allowed; anything else is refused with the accepted list."),
+            new LinkedHashMap<>(generateParams));
     }
 
     // ==================== Exit ====================

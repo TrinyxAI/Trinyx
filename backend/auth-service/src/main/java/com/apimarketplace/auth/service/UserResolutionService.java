@@ -57,6 +57,8 @@ public class UserResolutionService {
     private final PlanRepository planRepository;
     private final CreditAttributionService creditAttributionService;
     private final PlanStorageQuotaSyncer quotaSyncer;
+    /** Owns the transactional, per-user-locked creation of the bootstrap FREE subscription. */
+    private final FreeSubscriptionProvisioner freeSubscriptionProvisioner;
     // PR6 dual-write: pre-compute both billing-plan and active-org-tier
     // so the gateway / frontend can consume either field. PR7 cutover
     // flips which one is canonical for X-User-Plan / capabilities gating.
@@ -111,7 +113,9 @@ public class UserResolutionService {
                                   BillingCustomerRepository billingCustomerRepository,
                                   PlanRepository planRepository,
                                   CreditAttributionService creditAttributionService,
-                                  PlanStorageQuotaSyncer quotaSyncer) {
+                                  PlanStorageQuotaSyncer quotaSyncer,
+                                  FreeSubscriptionProvisioner freeSubscriptionProvisioner) {
+        this.freeSubscriptionProvisioner = freeSubscriptionProvisioner;
         this.userRepository = userRepository;
         this.creditService = creditService;
         this.usernameValidator = usernameValidator;
@@ -425,48 +429,14 @@ public class UserResolutionService {
      * Credits are attributed separately in attributeCreditsIfEligible() (requires email verification).
      * Idempotent: skips if an active subscription already exists.
      */
-    @Transactional
     private void ensureFreeSubscription(User user) {
-        try {
-            Optional<Subscription> existingSub = subscriptionRepository.findActiveByUserId(user.getId());
-            if (existingSub.isPresent()) {
-                return;
-            }
-
-            // Create BillingCustomer if needed
-            BillingCustomer billingCustomer = billingCustomerRepository.findByUserId(user.getId())
-                    .orElseGet(() -> {
-                        BillingCustomer bc = new BillingCustomer(user, "internal");
-                        return billingCustomerRepository.save(bc);
-                    });
-
-            // Get FREE plan
-            Optional<Plan> freePlanOpt = planRepository.findByCode("FREE");
-            if (freePlanOpt.isEmpty()) {
-                log.error("FREE plan not found in database");
-                return;
-            }
-            Plan freePlan = freePlanOpt.get();
-
-            // Create subscription (credits attributed later when email is verified)
-            Subscription sub = new Subscription();
-            sub.setBillingCustomer(billingCustomer);
-            sub.setPlan(freePlan);
-            sub.setCadence("monthly");
-            sub.setStatus("active");
-            sub.setProvider("internal");
-            sub.setCurrentPeriodStart(LocalDateTime.now());
-            sub.setCurrentPeriodEnd(LocalDateTime.now().plusMonths(1));
-            sub.setCancelAtPeriodEnd(false);
-            Subscription saved = subscriptionRepository.save(sub);
-
-            log.info("FREE subscription created for userId={} (subId={}). Credits pending email verification.", user.getId(), saved.getId());
-
-            // Email-verified signup path - sync storage quota to FREE allowance.
-            quotaSyncer.syncAfterCommit(user.getId(), freePlan);
-        } catch (Exception e) {
-            log.warn("Could not ensure free subscription for userId={}: {}", user.getId(), e.getMessage());
-        }
+        // Delegated to a separate bean ON PURPOSE. The check-and-insert has to be one
+        // transaction holding a per-user lock; inlined here it could never be, because
+        // resolveUser calls this from inside the same bean (self-invocation bypasses the
+        // proxy) and the method was private (which the proxy cannot advise at all). The two
+        // halves therefore ran unsynchronised, and concurrent first-login requests each
+        // created a subscription. See FreeSubscriptionProvisioner for the full story.
+        freeSubscriptionProvisioner.provisionIfMissing(user);
     }
 
     /**
@@ -474,11 +444,22 @@ public class UserResolutionService {
      * Called on every resolveUser() - idempotent via CreditAttributionService sourceId checks.
      * Also called immediately after email verification for instant credit grant.
      *
-     * IMPORTANT: Only applies to FREE plan (provider="internal") subscriptions.
-     * Paid plans (Stripe) receive their credits via webhook handlers
-     * (customer.subscription.created → CreditAttributionService.attributeOnSubscription).
-     * Applying this to paid plans would cause double credit grants because the sourceIds differ
-     * ("free_provision_{subId}" vs "plan_{stripeEventId}").
+     * IMPORTANT: Only applies to the FREE plan. Two different subscription shapes must be
+     * excluded, and for a while only the first one was:
+     * <ul>
+     *   <li>Paid (Stripe) subscriptions receive their credits via webhook handlers
+     *       ({@code customer.subscription.created} -> {@code attributeOnSubscription}); granting
+     *       here too would double-count because the sourceIds differ.</li>
+     *   <li>Admin-granted comp tiers keep {@code provider='internal'}, so a provider-only guard
+     *       let them through. The moment the plan flips FREE -> STARTER/PRO/TEAM,
+     *       {@code grantsBasePack} turns true and the never-used {@code pack_sub_N_init} key
+     *       fires, handing out the 5K base pack a SECOND time on top of the one
+     *       {@code AdminPlanService.assignPlan} already granted. Production shows exactly that:
+     *       {@code pack_sub_15_init} landed 5 seconds after the comp grant it duplicated, and
+     *       the same happened on subs 14, 20 and 21 (20,000 credits over-granted in total).</li>
+     * </ul>
+     * A comp tier's credits belong to {@code assignPlan} and its monthly renewal, never to this
+     * bootstrap path.
      */
     @Transactional
     public void attributeCreditsIfEligible(User user) {
@@ -501,6 +482,13 @@ public class UserResolutionService {
             // Only grant credits for FREE (internal) subscriptions.
             // Paid plans get credits via Stripe webhooks - granting here would double-count.
             if (!"internal".equalsIgnoreCase(subscription.getProvider())) {
+                return;
+            }
+            // ... and only while the plan is still FREE. An admin comp tier is also
+            // provider='internal', and its credits come from assignPlan; letting it reach
+            // attributeOnSubscription releases the unused pack_sub_N_init key for a duplicate
+            // 5K grant. See the javadoc for the four production accounts this hit.
+            if (!"FREE".equalsIgnoreCase(plan.getCode())) {
                 return;
             }
 

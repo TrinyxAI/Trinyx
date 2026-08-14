@@ -22,6 +22,9 @@ class ToolAuthorizationPolicyTest {
             "workflow,execute",
             "workflow,continue_interface",   // advancing a paused interface mutates run state
             "workflow,resolve_approval",     // resolving a user approval mutates run state
+            // run_node executes a node immediately with the user's credentials and real side
+            // effects (mail sent, SQL run), from a config the agent wrote in the call itself.
+            "workflow,run_node",
     })
     @DisplayName("Listed (tool, action) pairs require authorization")
     void listedPairsRequireAuthorization(String tool, String action) {

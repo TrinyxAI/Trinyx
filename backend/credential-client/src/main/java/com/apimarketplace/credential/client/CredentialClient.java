@@ -686,6 +686,102 @@ public class CredentialClient {
     }
 
     /**
+     * V430 PUBLISHER half: the prices the platform owner has published for the
+     * given generation endpoints, keyed by integration name so they can be
+     * carried in the signed API-catalog bundle and re-attached on the far side.
+     *
+     * <p>Both arguments are required to be non-empty and neither is defaulted:
+     * an empty request means "publish nothing", never "publish every price the
+     * owner has". Returns an empty list on any transport failure - a bundle
+     * built without prices is a bundle that carries no price update, which is
+     * the pre-V430 behaviour and is safe; a bundle built with a WRONG price list
+     * would be signed and distributed.
+     */
+    public List<BundleGenerationPriceDto> fetchPublishedGenerationPrices(
+            java.util.Collection<String> integrationNames,
+            java.util.Collection<String> apiToolIds) {
+        if (integrationNames == null || integrationNames.isEmpty()
+                || apiToolIds == null || apiToolIds.isEmpty()) {
+            return List.of();
+        }
+        String url = baseUrl + "/api/internal/credentials/pricing-versions/published-prices";
+        HttpHeaders headers = buildHeaders("SYSTEM");
+        headers.setContentType(MediaType.APPLICATION_JSON);
+        Map<String, Object> body = new java.util.LinkedHashMap<>();
+        body.put("integrationNames", List.copyOf(integrationNames));
+        body.put("apiToolIds", List.copyOf(apiToolIds));
+        try {
+            ResponseEntity<PublishedPricesResponse> resp = restTemplate.exchange(
+                    url, HttpMethod.POST, new HttpEntity<>(body, headers),
+                    PublishedPricesResponse.class);
+            PublishedPricesResponse rb = resp.getBody();
+            return rb == null || rb.prices() == null ? List.of() : rb.prices();
+        } catch (Exception e) {
+            log.warn("fetchPublishedGenerationPrices failed ({} integrations, {} endpoints): {}",
+                    integrationNames.size(), apiToolIds.size(), e.getMessage());
+            return List.of();
+        }
+    }
+
+    /** Wire shape of {@code /pricing-versions/published-prices}. */
+    public record PublishedPricesResponse(List<BundleGenerationPriceDto> prices) {
+    }
+
+    /**
+     * V430 CONSUMER half: apply the prices a VERIFIED API-catalog bundle
+     * carried. Only ever called after the bundle's Ed25519 signature has been
+     * checked against the pinned key - this client cannot tell an authentic
+     * price from an invented one and does not try.
+     *
+     * <p>Returns the auth-side summary, or empty on transport failure. Failing
+     * to price is never a reason to fail the catalog apply that carried it: the
+     * endpoints still land, and the next sync tick re-offers the same prices
+     * (auth publishes nothing when nothing changed).
+     */
+    public Optional<Map<String, Object>> applyCatalogBundlePrices(
+            Long bundleVersion, List<BundleGenerationPriceDto> prices) {
+        return applyCatalogBundlePrices(bundleVersion, prices, null);
+    }
+
+    /**
+     * The same apply, for the other producer of bundle-owned prices: the
+     * boot-time generation seed shipped inside the image, which an install that
+     * has never synced a bundle depends on.
+     *
+     * @param origin recorded as the author of the published pricing version.
+     *               Null means the signed bundle, which is the default label.
+     *               This does NOT change the row's {@code source}: a seeded
+     *               price is {@code bundle}-owned exactly like a carried one,
+     *               because both are prices this install did not decide. It only
+     *               keeps the pricing history from naming a bundle version that
+     *               never existed.
+     */
+    public Optional<Map<String, Object>> applyCatalogBundlePrices(
+            Long bundleVersion, List<BundleGenerationPriceDto> prices, String origin) {
+        if (prices == null || prices.isEmpty()) return Optional.empty();
+        String url = baseUrl + "/api/internal/credentials/pricing-versions/apply-catalog-bundle";
+        HttpHeaders headers = buildHeaders("SYSTEM");
+        headers.setContentType(MediaType.APPLICATION_JSON);
+        Map<String, Object> body = new java.util.LinkedHashMap<>();
+        body.put("bundleVersion", bundleVersion);
+        body.put("prices", prices);
+        if (origin != null && !origin.isBlank()) {
+            body.put("origin", origin);
+        }
+        try {
+            ResponseEntity<Map> resp = restTemplate.exchange(
+                    url, HttpMethod.POST, new HttpEntity<>(body, headers), Map.class);
+            @SuppressWarnings("unchecked")
+            Map<String, Object> rb = resp.getBody();
+            return Optional.ofNullable(rb);
+        } catch (Exception e) {
+            log.warn("applyCatalogBundlePrices failed for bundle v{} ({} price(s)): {}",
+                    bundleVersion, prices.size(), e.getMessage());
+            return Optional.empty();
+        }
+    }
+
+    /**
      * V148+ helper: resolve a platform credential id (and provider_kind) by
      * its catalog-side integration name (e.g. {@code "llm_openai"}). Catalog
      * stores credentials by name; the markup subsystem keys on numeric id.
@@ -728,15 +824,51 @@ public class CredentialClient {
     public Optional<ResolvedScopeMarkupDto> resolveScopeMarkupRate(String scopeKind, String scopeId,
                                                                      Long userId, Long platformCredentialId,
                                                                      UUID apiToolId) {
+        return resolveScopeMarkupRate(scopeKind, scopeId, userId, platformCredentialId, apiToolId, null, null);
+    }
+
+    /**
+     * V428 unit-pricing variant of {@link #resolveScopeMarkupRate(String, String, Long, Long, UUID)}.
+     *
+     * <p>An endpoint can back several generation models at different prices,
+     * and a generation's cost usually scales on a dimension of the call
+     * (seconds of video, characters of speech). Passing those two lets auth
+     * resolve the exact amount instead of the caller re-deriving pricing rules
+     * it should not own.
+     *
+     * <p>Both are optional. Omitting them resolves the tool-level flat price,
+     * which is what every pre-V428 caller gets through the 5-arg overload.
+     *
+     * @param modelId  generation model being called, or null for the
+     *                 tool-level price
+     * @param quantity size of the call in PLATFORM units (seconds, assets,
+     *                 characters), or null when the caller has no notion of a
+     *                 size. Never pre-converted into the price's unit: what the
+     *                 rate is charged per is a property of the published row,
+     *                 which auth reads, so auth is what converts. Converting
+     *                 here against a different unit is a silent mis-charge, not
+     *                 a rounding difference.
+     */
+    public Optional<ResolvedScopeMarkupDto> resolveScopeMarkupRate(String scopeKind, String scopeId,
+                                                                     Long userId, Long platformCredentialId,
+                                                                     UUID apiToolId,
+                                                                     String modelId,
+                                                                     java.math.BigDecimal quantity) {
         try {
-            String url = UriComponentsBuilder.fromHttpUrl(baseUrl)
+            UriComponentsBuilder builder = UriComponentsBuilder.fromHttpUrl(baseUrl)
                     .path("/api/internal/credentials/markup/scope-rate")
                     .queryParam("scopeKind", scopeKind)
                     .queryParam("scopeId", scopeId)
                     .queryParam("userId", userId)
                     .queryParam("platformCredentialId", platformCredentialId)
-                    .queryParam("apiToolId", apiToolId.toString())
-                    .toUriString();
+                    .queryParam("apiToolId", apiToolId.toString());
+            if (modelId != null && !modelId.isBlank()) {
+                builder.queryParam("modelId", modelId);
+            }
+            if (quantity != null) {
+                builder.queryParam("quantity", quantity.toPlainString());
+            }
+            String url = builder.toUriString();
             ResponseEntity<ResolvedScopeMarkupDto> resp = restTemplate.exchange(
                     url, HttpMethod.GET, new HttpEntity<>(buildHeaders("SYSTEM")),
                     ResolvedScopeMarkupDto.class);
@@ -843,12 +975,38 @@ public class CredentialClient {
      * pricing version id is unknown (callers must skip markup billing).
      */
     public Optional<FrozenMarkupDto> resolveFrozenMarkup(Long pricingVersionId, UUID apiToolId) {
+        return resolveFrozenMarkup(pricingVersionId, apiToolId, null, null);
+    }
+
+    /**
+     * V428 unit-pricing variant, mirroring
+     * {@link #resolveScopeMarkupRate(String, String, Long, Long, UUID, String, java.math.BigDecimal)}.
+     *
+     * <p>The two-argument form cannot price a generation: an endpoint can back
+     * several models at different rates, and a per-unit rate resolved without a
+     * size is the price of ONE unit, which is why every relayed generation from
+     * a cloud-linked self-hosted install was refused. Naming the model and the
+     * measured size lets the published row do the conversion, in the one place
+     * that owns it.
+     *
+     * @param modelId  generation model, or null for the endpoint-wide row
+     * @param quantity PLATFORM measurement (seconds, assets, characters), or
+     *                 null when the call could not be measured
+     */
+    public Optional<FrozenMarkupDto> resolveFrozenMarkup(Long pricingVersionId, UUID apiToolId,
+                                                          String modelId, java.math.BigDecimal quantity) {
         try {
-            String url = UriComponentsBuilder.fromHttpUrl(baseUrl)
+            UriComponentsBuilder builder = UriComponentsBuilder.fromHttpUrl(baseUrl)
                     .path("/api/internal/credentials/resolve-markup")
                     .queryParam("pricingVersionId", pricingVersionId)
-                    .queryParam("apiToolId", apiToolId.toString())
-                    .toUriString();
+                    .queryParam("apiToolId", apiToolId.toString());
+            if (modelId != null && !modelId.isBlank()) {
+                builder.queryParam("modelId", modelId);
+            }
+            if (quantity != null) {
+                builder.queryParam("quantity", quantity.toPlainString());
+            }
+            String url = builder.toUriString();
             ResponseEntity<FrozenMarkupDto> resp = restTemplate.exchange(
                     url, HttpMethod.GET, new HttpEntity<>(buildHeaders("SYSTEM")),
                     FrozenMarkupDto.class);

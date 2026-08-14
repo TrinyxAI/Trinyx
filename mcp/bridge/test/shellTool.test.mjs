@@ -104,6 +104,17 @@ test('non-secret env vars survive the scrub (PATH kept so commands resolve)', ()
   assert.equal(env.REDIS_URL, undefined);
 });
 
+test('BRIDGE_META_NONCE is scrubbed: a shell command must not be able to read it back', () => {
+  // Forging a trusted approval / authorization card only needs the nonce, and server.mjs
+  // injects it into the MCP subprocess env: before _NONCE was added to SECRET_ENV_RE,
+  // `shell(command='printenv BRIDGE_META_NONCE')` handed it over. This closes that route
+  // only - the nonce is still readable from the per-session MCP config on disk, so treat
+  // this as one door shut, not as the guarantee itself.
+  const env = scrubbedEnv({ BRIDGE_META_NONCE: 'feedfacefeedface', PATH: '/usr/bin' });
+  assert.equal(env.BRIDGE_META_NONCE, undefined, 'the bridge metadata nonce must never reach a shell command');
+  assert.equal(env.PATH, '/usr/bin', 'the scrub must stay targeted');
+});
+
 test('a command exceeding the timeout is killed and reported', async () => {
   const r = await handleShellTool({ command: `node -e "setTimeout(()=>{}, 5000)"`, timeout_ms: 500 });
   assert.ok(r.isError, txt(r));

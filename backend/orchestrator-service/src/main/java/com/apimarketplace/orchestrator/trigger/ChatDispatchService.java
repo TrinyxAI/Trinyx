@@ -11,7 +11,6 @@ import com.apimarketplace.orchestrator.repository.WorkflowRepository;
 import com.apimarketplace.orchestrator.repository.WorkflowRunRepository;
 import com.apimarketplace.orchestrator.services.context.RunContextService;
 import com.apimarketplace.orchestrator.utils.LabelNormalizer;
-import com.apimarketplace.common.credit.CreditConsumptionClient;
 import com.apimarketplace.common.web.OrgContextHeaderForwarder;
 import com.apimarketplace.trigger.client.TriggerClient;
 import com.apimarketplace.trigger.client.dto.StandaloneChatEndpointDto;
@@ -44,7 +43,6 @@ public class ChatDispatchService {
     private final WorkflowRunRepository runRepository;
     private final ReusableTriggerService triggerService;
     private final ProductionRunResolver productionRunResolver;
-    private final CreditConsumptionClient creditClient;
     private final ShareInvocationLimiter shareInvocationLimiter;
     private final AgentDefaultsConfig agentDefaults;
     private final AgentClient agentClient;
@@ -60,7 +58,6 @@ public class ChatDispatchService {
             WorkflowRunRepository runRepository,
             ReusableTriggerService triggerService,
             ProductionRunResolver productionRunResolver,
-            CreditConsumptionClient creditClient,
             ShareInvocationLimiter shareInvocationLimiter,
             AgentDefaultsConfig agentDefaults,
             AgentClient agentClient,
@@ -77,7 +74,6 @@ public class ChatDispatchService {
         this.runRepository = runRepository;
         this.triggerService = triggerService;
         this.productionRunResolver = productionRunResolver;
-        this.creditClient = creditClient;
         this.shareInvocationLimiter = shareInvocationLimiter;
         this.agentDefaults = agentDefaults;
         this.agentClient = agentClient;
@@ -397,11 +393,9 @@ public class ChatDispatchService {
             return Map.of("status", "run_terminated");
         }
 
-        // Credit check
-        if (!creditClient.checkCredits(run.getTenantId())) {
-            logger.warn("Insufficient credits for tenant {}, skipping chat dispatch", run.getTenantId());
-            return Map.of("status", "insufficient_credits");
-        }
+        // No credit gate here: the fire proceeds and NodeCreditGate fails the trigger
+        // node with the out-of-credit message, so the run shows what happened instead
+        // of the dispatch silently reporting "insufficient_credits" to nobody.
 
         // Use stored triggerId directly (same as webhook pattern)
         String matchedTriggerId = endpoint.getTriggerId();

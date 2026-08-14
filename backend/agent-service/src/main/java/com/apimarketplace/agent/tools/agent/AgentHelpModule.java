@@ -733,6 +733,10 @@ public class AgentHelpModule implements ToolModule {
         params.put("interfaces", "array - default=[] (none). ['uuid',...]=specific interface IDs. On update: REPLACES entire list");
         params.put("agents", "array - default=[] (none). ['uuid',...]=specific sub-agent IDs. On update: REPLACES entire list");
         params.put("web_search", "boolean, default=true - Enable web search capability");
+        params.put("generation", "boolean, default=FALSE - Let the agent produce images, video, audio, "
+                + "voice and music with the generation tool. Off unless you pass true, because every asset "
+                + "it produces spends the account's credits at the rate the chosen model sets. The agent "
+                + "then lists what it can make with generation(action='models').");
 
         // Per-resource access modes
         params.put("table_access_mode", "'write' (default, full CRUD) or 'read' (query_rows/get/list only, no create/update/delete)");

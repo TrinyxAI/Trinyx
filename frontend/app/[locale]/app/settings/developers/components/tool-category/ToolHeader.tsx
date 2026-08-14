@@ -44,7 +44,7 @@ const ToolHeader: React.FC<ToolHeaderProps> = ({
 
     return (
       <div className={`${isMobile ? 'w-full flex justify-center' : ''}`}>
-        <div className={`px-${isMobile ? '3' : '2'} py-${isMobile ? '2' : '1'} rounded-full text-${isMobile ? 'sm' : 'xs'} font-medium ${
+        <div className={`px-${isMobile ? '3' : '2'} py-${isMobile ? '2' : '1'} rounded-md text-${isMobile ? 'sm' : 'xs'} font-medium ${
           tool.testStatus === 'success'
             ? 'bg-green-100 text-green-800'
             : tool.testStatus === 'error'

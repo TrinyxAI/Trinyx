@@ -52,7 +52,8 @@ class WorkflowToolDetailDTOTest {
                 credentials,
                 "11111111-2222-3333-4444-555555555555",
                 null,
-                null
+                null,
+                false
             );
 
             assertEquals("get-weather", dto.slug());
@@ -72,7 +73,8 @@ class WorkflowToolDetailDTOTest {
             WorkflowToolDetailDTO dto = new WorkflowToolDetailDTO(
                 null, null, null, null, null, null, null, null, null, null, null,
                 null,
-                null
+                null,
+                false
             );
 
             assertNull(dto.slug());
@@ -103,7 +105,8 @@ class WorkflowToolDetailDTOTest {
                 List.of(),
                 null,
                 null,
-                null
+                null,
+                false
             );
 
             assertTrue(dto.parameters().isEmpty());
@@ -161,7 +164,8 @@ class WorkflowToolDetailDTOTest {
                 "api-slug", "icon", null, List.of(), List.of(), List.of(),
                 null,
                 null,
-                null
+                null,
+                false
             );
         }
     }
@@ -185,13 +189,15 @@ class WorkflowToolDetailDTOTest {
                 "slug", "Name", "Desc", "GET", "api", "icon", null, params, responses, credentials,
                 null,
                 null,
-                null
+                null,
+                false
             );
             WorkflowToolDetailDTO dto2 = new WorkflowToolDetailDTO(
                 "slug", "Name", "Desc", "GET", "api", "icon", null, params, responses, credentials,
                 null,
                 null,
-                null
+                null,
+                false
             );
 
             assertEquals(dto1, dto2);
@@ -206,14 +212,16 @@ class WorkflowToolDetailDTOTest {
                 List.of(), List.of(), List.of(),
                 null,
                 null,
-                null
+                null,
+                false
             );
             WorkflowToolDetailDTO dto2 = new WorkflowToolDetailDTO(
                 "slug2", "Name", "Desc", "GET", "api", "icon", null,
                 List.of(), List.of(), List.of(),
                 null,
                 null,
-                null
+                null,
+                false
             );
 
             assertNotEquals(dto1, dto2);
@@ -227,14 +235,16 @@ class WorkflowToolDetailDTOTest {
                 List.of(), List.of(), List.of(),
                 null,
                 null,
-                null
+                null,
+                false
             );
             WorkflowToolDetailDTO dto2 = new WorkflowToolDetailDTO(
                 "slug", "Name", "Desc", "POST", "api", "icon", null,
                 List.of(), List.of(), List.of(),
                 null,
                 null,
-                null
+                null,
+                false
             );
 
             assertNotEquals(dto1, dto2);
@@ -265,7 +275,8 @@ class WorkflowToolDetailDTOTest {
                 List.of(),
                 null,
                 null,
-                null
+                null,
+                false
             );
 
             String result = dto.toString();
@@ -293,7 +304,8 @@ class WorkflowToolDetailDTOTest {
                 List.of(), List.of(), List.of(),
                 null,
                 null,
-                null
+                null,
+                false
             );
 
             assertEquals("", dto.slug());
@@ -315,7 +327,8 @@ class WorkflowToolDetailDTOTest {
                 params, List.of(), List.of(),
                 null,
                 null,
-                null
+                null,
+                false
             );
 
             assertEquals(3, dto.parameters().size());
@@ -335,7 +348,8 @@ class WorkflowToolDetailDTOTest {
                 List.of(), responses, List.of(),
                 null,
                 null,
-                null
+                null,
+                false
             );
 
             assertEquals(3, dto.responses().size());
@@ -354,7 +368,8 @@ class WorkflowToolDetailDTOTest {
                 List.of(), List.of(), credentials,
                 null,
                 null,
-                null
+                null,
+                false
             );
 
             assertEquals(2, dto.credentials().size());

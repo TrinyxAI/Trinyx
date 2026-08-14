@@ -3,6 +3,8 @@ package com.apimarketplace.auth.web;
 import com.apimarketplace.auth.audit.AuditEventTypes;
 import com.apimarketplace.auth.audit.AuditLogger;
 import com.apimarketplace.auth.domain.User;
+import com.apimarketplace.auth.domain.AdminPlanGrantAudit;
+import com.apimarketplace.auth.repository.AdminPlanGrantAuditRepository;
 import com.apimarketplace.auth.repository.UserRepository;
 import com.apimarketplace.auth.service.AdminPlanService;
 import com.apimarketplace.auth.service.AdminPlanService.AssignPlanResult;
@@ -52,17 +54,20 @@ public class AdminPlanController {
     private final AdminPlanService adminPlanService;
     private final UserRepository userRepository;
     private final AuditLogger auditLogger;
+    private final AdminPlanGrantAuditRepository adminPlanGrantAuditRepository;
     private final boolean unlimited;
 
     public AdminPlanController(
             AdminPlanService adminPlanService,
             UserRepository userRepository,
             AuditLogger auditLogger,
+            AdminPlanGrantAuditRepository adminPlanGrantAuditRepository,
             @Value("${credit.unlimited:false}") boolean unlimited
     ) {
         this.adminPlanService = adminPlanService;
         this.userRepository = userRepository;
         this.auditLogger = auditLogger;
+        this.adminPlanGrantAuditRepository = adminPlanGrantAuditRepository;
         this.unlimited = unlimited;
     }
 
@@ -202,6 +207,11 @@ public class AdminPlanController {
             HttpServletRequest httpRequest
     ) {
         String requestedPlan = request.planCode().trim().toUpperCase();
+        // Durable record FIRST, before the log line that used to be the only trace. A plan grant
+        // moves money and privileges; "who did this?" must be answerable from the database, not
+        // from a log with 30 days of retention.
+        persistGrantAudit(result, adminUserId, resolvedUserId, resolvedEmail, requestedPlan,
+                extractClientIp(httpRequest));
         AuditLogger.Builder auditEvent = auditLogger.event(AuditEventTypes.PLAN_GRANTED)
                 .user(adminUserId)
                 .ip(extractClientIp(httpRequest))
@@ -243,6 +253,31 @@ public class AdminPlanController {
                 "error", reason,
                 "message", messageFor(reason)
         ));
+    }
+
+    /**
+     * Write the plan-grant audit row. Never fails the request: an audit write that 500s a
+     * legitimate grant would be a worse outcome than a missing row, and the SLF4J AUDIT event
+     * still fires either way. A failure here is logged at ERROR precisely because it means the
+     * durable trail has a hole.
+     */
+    private void persistGrantAudit(AssignPlanResult result, Long adminUserId, Long resolvedUserId,
+                                   String resolvedEmail, String requestedPlan, String clientIp) {
+        try {
+            AdminPlanGrantAudit row = new AdminPlanGrantAudit();
+            row.setActorUserId(adminUserId);
+            row.setTargetUserId(resolvedUserId);
+            row.setTargetEmail(resolvedEmail);
+            row.setRequestedPlan(requestedPlan);
+            row.setPreviousPlan(result.previousPlanCode());
+            row.setSucceeded(result.success());
+            row.setFailureReason(result.success() ? null : result.error());
+            row.setClientIp(clientIp);
+            adminPlanGrantAuditRepository.save(row);
+        } catch (Exception e) {
+            log.error("Could not persist plan-grant audit (actor={}, target={}, plan={}): {}",
+                    adminUserId, resolvedUserId, requestedPlan, e.getMessage(), e);
+        }
     }
 
     private static String messageFor(String reason) {

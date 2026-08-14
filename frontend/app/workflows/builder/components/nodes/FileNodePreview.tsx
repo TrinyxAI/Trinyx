@@ -39,9 +39,12 @@ export function FileNodePreview({
     [data.label]
   );
 
-  // Determine if node has completed execution
+  // Determine if node has completed execution. PARTIAL_SUCCESS counts: the node DID finish and
+  // produced its file, it merely carries a failure in its accumulated tally. Excluding it made a
+  // download/media node that failed once and was fixed lose its preview for good - the thumbnail
+  // silently disappeared on every later load.
   const effectiveStatus = data.status;
-  const isCompleted = effectiveStatus === 'completed';
+  const isCompleted = effectiveStatus === 'completed' || effectiveStatus === 'partial_success';
 
   // Spawn item pagination - local to this node, resets when viewing epoch changes
   const [currentPage, setCurrentPage] = React.useState(0);

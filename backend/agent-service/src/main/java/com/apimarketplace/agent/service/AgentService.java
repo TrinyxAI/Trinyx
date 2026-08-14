@@ -91,7 +91,7 @@ public class AgentService {
      *
      * <p>This list does NOT include {@code mode} (governs MCP/catalogue tools - may
      * default to {@code "all"}), {@code tools} (resolved from {@code mode}), or
-     * {@code webSearch}/{@code imageGeneration} (booleans, not lists).
+     * {@code webSearch}/{@code generation} (booleans, not lists).
      */
     private static final List<String> INTERNAL_RESOURCE_KEYS =
         List.of("workflows", "tables", "interfaces", "agents", "applications");

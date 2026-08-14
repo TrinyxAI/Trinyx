@@ -200,7 +200,7 @@ export function PinnedJsonPopover({
         {/* Merge Hint Overlay */}
         {dropTargetId && (
           <div className="absolute inset-x-0 -top-10 flex justify-center z-50 pointer-events-none">
-            <div className="bg-black text-white dark:bg-white dark:text-black px-3 py-1 rounded-full text-sm font-semibold shadow-md animate-bounce">
+            <div className="bg-black text-white dark:bg-white dark:text-black px-3 py-1 rounded-md text-sm font-semibold shadow-md animate-bounce">
               {t('releaseToMerge')}
             </div>
           </div>

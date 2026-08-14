@@ -1,0 +1,683 @@
+package com.apimarketplace.catalog.tools.generation;
+
+import com.apimarketplace.agent.registry.AgentToolDefinition;
+import com.apimarketplace.agent.tools.ToolErrorCode;
+import com.apimarketplace.agent.tools.ToolsProvider.ToolExecutionContext;
+import com.apimarketplace.agent.tools.ToolsProvider.ToolExecutionResult;
+import com.apimarketplace.agent.tools.common.ToolModule;
+import com.apimarketplace.agent.tools.common.ToolResultPersistEnricher;
+import com.apimarketplace.catalog.service.generation.GenerationAssetResolver;
+import com.apimarketplace.catalog.service.generation.GenerationInputResolver;
+import com.apimarketplace.catalog.service.ResponseShaper;
+import com.apimarketplace.catalog.service.generation.GenerationRegistry;
+import com.apimarketplace.catalog.service.generation.GenerationRequestBuilder;
+import com.apimarketplace.catalog.service.generation.GenerationSpec;
+import com.apimarketplace.catalog.tools.CatalogExecuteModule;
+import com.apimarketplace.interfaces.client.InterfaceClient;
+import com.apimarketplace.interfaces.client.dto.ImageGenerationInterfaceRequest;
+import com.apimarketplace.interfaces.client.dto.InterfaceDto;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.stereotype.Component;
+
+import java.math.BigDecimal;
+import java.util.ArrayList;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Locale;
+import java.util.Map;
+import java.util.Optional;
+import java.util.Set;
+import java.util.TreeSet;
+
+/**
+ * Runtime of the unified {@code generation} tool.
+ *
+ * <p>ONE tool covers every format. The caller names a model
+ * ({@code seedance-2.0-fast}, {@code eleven-v3}, {@code gpt-image-2}) and the
+ * registry resolves everything else: which endpoint runs it, which provider
+ * owns the credential, which parameters it accepts and what it costs. Onboarding
+ * a provider is a JSON descriptor plus an import, and no surface changes.
+ *
+ * <p><b>Execution reuses the catalog path.</b> Once the request is projected,
+ * the call is handed to {@link CatalogExecuteModule}, which already resolves
+ * platform-versus-user credentials, enforces tool restrictions and approvals,
+ * reserves and commits credits, and stores a returned binary as a file. A
+ * second execution path would be a second set of those guarantees to keep
+ * correct, so there is deliberately only one.
+ */
+@Slf4j
+@Component
+public class GenerationModule implements ToolModule {
+
+    static final Set<String> HANDLED_ACTIONS = Set.of("create", "models", "generate");
+
+    /**
+     * Type discriminator of the chat card, deliberately still the historical
+     * one. It is what the frontend's visualize renderer matches on and what
+     * interface-service stores rows under, and the card it draws is already
+     * format-neutral. Coining a new type here would need a frontend that knows
+     * it, and would leave every card written before that day unreadable.
+     */
+    static final String CARD_TYPE = "image_generation";
+
+    /** Card titles are a chat-list line, not a document: longer prompts are cut. */
+    private static final int CARD_NAME_MAX = 80;
+
+    private final GenerationRegistry registry;
+    private final CatalogExecuteModule executeModule;
+    private final GenerationAssetResolver assetResolver;
+    private final ResponseShaper responseShaper;
+    private final GenerationInputResolver inputResolver;
+    private final InterfaceClient interfaceClient;
+
+    public GenerationModule(GenerationRegistry registry,
+                             CatalogExecuteModule executeModule,
+                             GenerationAssetResolver assetResolver,
+                             ResponseShaper responseShaper,
+                             GenerationInputResolver inputResolver,
+                             InterfaceClient interfaceClient) {
+        this.registry = registry;
+        this.executeModule = executeModule;
+        this.assetResolver = assetResolver;
+        this.responseShaper = responseShaper;
+        this.inputResolver = inputResolver;
+        this.interfaceClient = interfaceClient;
+    }
+
+    @Override
+    public List<AgentToolDefinition> getToolDefinitions() {
+        return List.of(); // definitions live on GenerationToolsProvider
+    }
+
+    @Override
+    public boolean canHandle(String action) {
+        return HANDLED_ACTIONS.contains(action);
+    }
+
+    @Override
+    public Optional<ToolExecutionResult> execute(String action, Map<String, Object> parameters,
+                                                  String tenantId, ToolExecutionContext context) {
+        if ("models".equals(action)) {
+            return Optional.of(listModels(parameters));
+        }
+        // 'generate' is the legacy verb from the image-only tool. Same behaviour.
+        if ("create".equals(action) || "generate".equals(action)) {
+            return Optional.of(create(parameters, tenantId, context));
+        }
+        return Optional.empty();
+    }
+
+    // ── models ──────────────────────────────────────────────────────────────
+
+    /**
+     * Discovery. An agent cannot guess a model id, so this is what it calls
+     * first; every id, capability and starting price the platform offers is
+     * listed here rather than being spread across the tool description.
+     */
+    private ToolExecutionResult listModels(Map<String, Object> parameters) {
+        String kind = str(parameters, "kind");
+        List<GenerationRegistry.GenerationModel> models = registry.list(kind);
+
+        List<Map<String, Object>> rows = new ArrayList<>(models.size());
+        for (GenerationRegistry.GenerationModel m : models) {
+            Map<String, Object> row = new LinkedHashMap<>();
+            row.put("model", m.modelId());
+            row.put("kind", m.kind());
+            row.put("label", m.label());
+            row.put("provider", m.apiName());
+            row.put("accepts", new TreeSet<>(m.model().capabilities()));
+            row.put("required", new TreeSet<>(m.model().required()));
+            Map<String, Object> limits = new LinkedHashMap<>();
+            m.model().constraints().forEach((param, c) -> {
+                Map<String, Object> lim = new LinkedHashMap<>();
+                if (!c.allowed().isEmpty()) lim.put("allowed", c.allowed());
+                if (c.min() != null) lim.put("min", c.min());
+                if (c.max() != null) lim.put("max", c.max());
+                // A text cap is a limit like any other, and the one an agent
+                // trips by accident rather than by guessing: a prompt assembled
+                // over several turns grows past it with nothing to signal it.
+                if (c.maxLength() != null) lim.put("maxLength", c.maxLength());
+                // An empty map would say "this parameter is restricted" and name
+                // no restriction, which is worse than saying nothing: every
+                // model with a cap-only constraint published a bare {}.
+                if (!lim.isEmpty()) limits.put(param, lim);
+            });
+            if (!limits.isEmpty()) row.put("limits", limits);
+            // What each FILE this model takes actually IS, and how many of them.
+            // The slot name alone ("input_image") says an image goes here; it
+            // does not say whether the image comes back changed, becomes the
+            // first frame of a clip, or only lends its style. A surface cannot
+            // label the field without that, and labelling it wrong costs a paid
+            // call.
+            Map<String, Object> inputs = new LinkedHashMap<>();
+            m.model().capabilities().stream()
+                    .filter(GenerationSpec.ASSET_PARAMS::contains)
+                    .forEach(param -> {
+                        GenerationSpec.ParamBinding binding = m.spec().paramMap().get(param);
+                        if (binding == null || binding.role() == null) return;
+                        Map<String, Object> shape = new LinkedHashMap<>();
+                        shape.put("role", binding.role().wire());
+                        shape.put("maxItems", binding.maxItems());
+                        inputs.put(param, shape);
+                    });
+            if (!inputs.isEmpty()) row.put("inputs", inputs);
+
+            // What this model is billed ON, and what that value becomes when the
+            // parameter is left out. Without both, an agent cannot predict the
+            // price of the call it is about to make - and a model that defaults
+            // nothing refuses the call instead, which it can only avoid by
+            // knowing in advance.
+            String measuring = m.model().measuringParam();
+            if (measuring != null) {
+                row.put("billed_on", measuring);
+                BigDecimal fallback = m.model().defaultMeasurement();
+                if (fallback != null) {
+                    row.put("default_" + measuring, fallback);
+                }
+            }
+            row.put("price", describePrice(m.seedPrice()));
+            row.put("async", m.isAsync());
+            rows.add(row);
+        }
+
+        Map<String, Object> data = new LinkedHashMap<>();
+        data.put("models", rows);
+        data.put("count", rows.size());
+        data.put("kinds", registry.kinds());
+        data.put("size_billed_note", "billed_quantity is the size you ASKED FOR, not the size that came "
+                + "back. A provider that clamps a request to its own maximum still charges the length "
+                + "you sent, so ask for what you need rather than for the ceiling.");
+        data.put("price_note", "Prices are the platform's list rate in credits (1 credit = $0.001). "
+                + "A model priced per second or per character costs more for a longer request: "
+                + "action='create' reports the size it billed on as billed_quantity, counted in "
+                + "billed_unit, which is always the platform's own unit (seconds for duration, "
+                + "assets for a count, characters for text). A rate quoted per minute applies to "
+                + "that same size converted, so 60 seconds is charged as one minute. A model you "
+                + "supply your own key for is not billed by the platform at all.");
+        data.put("size_note", "billed_on names the parameter a model's price multiplies. Leave it "
+                + "out and one of two things happens, both shown in this list: the model has a "
+                + "default_<parameter>, which is used AND sent to the provider, so you get and pay "
+                + "for exactly that size; or the parameter is in its required list, and the call is "
+                + "refused naming it, at no cost. A per-character model is measured by its own "
+                + "prompt, so it never needs a size.");
+        if (rows.isEmpty()) {
+            data.put("hint", kind == null
+                    ? "No generation models are configured on this platform."
+                    : "No generation models of kind '" + kind + "'. Available kinds: " + registry.kinds());
+        }
+        return ToolExecutionResult.success(data);
+    }
+
+    /** Render a price so the agent can compare models without parsing a formula. */
+    /**
+     * The catalog path's "no credential is connected" payload, or null when
+     * this result is an ordinary one.
+     *
+     * <p>Recognised by the {@code status} field the pre-flight sets, not by the
+     * absence of an asset: plenty of real failures also have no asset, and they
+     * must keep their own words.
+     */
+    @SuppressWarnings("unchecked")
+    private static Map<String, Object> approvalNeededPayload(ToolExecutionResult result) {
+        if (!(result.data() instanceof Map<?, ?> map)) {
+            return null;
+        }
+        return "approval_needed".equals(map.get("status")) ? (Map<String, Object>) map : null;
+    }
+
+    private static Map<String, Object> describePrice(GenerationSpec.Price price) {
+        Map<String, Object> out = new LinkedHashMap<>();
+        if (price == null) {
+            out.put("credits", 0);
+            return out;
+        }
+        out.put("unit", price.unit());
+        if (price.base() != null && price.base().signum() > 0) {
+            out.put("base_credits", price.base());
+        }
+        if (price.perUnit() != null && price.perUnit().signum() > 0) {
+            out.put("credits_per_" + price.unit(), price.perUnit());
+        }
+        if (price.min() != null) out.put("min_credits", price.min());
+        if (price.max() != null) out.put("max_credits", price.max());
+        if (!out.containsKey("credits_per_" + price.unit())) {
+            out.put("credits", price.base() == null ? BigDecimal.ZERO : price.base());
+        }
+        return out;
+    }
+
+    // ── create ──────────────────────────────────────────────────────────────
+
+    private ToolExecutionResult create(Map<String, Object> parameters, String tenantId,
+                                        ToolExecutionContext context) {
+        String modelId = GenerationRequestBuilder.normalizeModelId(str(parameters, "model"));
+        if (modelId == null) {
+            return ToolExecutionResult.failure(ToolErrorCode.MISSING_PARAMETER,
+                    "Parameter 'model' is required. Call action='models' to list the available "
+                            + "model ids, their accepted parameters and their price.");
+        }
+
+        Optional<GenerationRegistry.GenerationModel> resolved = registry.resolve(modelId);
+        if (resolved.isEmpty()) {
+            List<String> known = registry.list(null).stream()
+                    .map(GenerationRegistry.GenerationModel::modelId).toList();
+            return ToolExecutionResult.failure(ToolErrorCode.INVALID_PARAMETER_VALUE,
+                    "Unknown generation model '" + modelId + "'. "
+                            + (known.isEmpty()
+                                ? "No generation models are configured on this platform."
+                                : "Available: " + String.join(", ", known)));
+        }
+        GenerationRegistry.GenerationModel target = resolved.get();
+
+        // Project the unified parameters onto this provider's request shape.
+        // Anything wrong is refused HERE, before the customer pays for a call
+        // that was never going to succeed.
+        Map<String, Object> unified = collectUnifiedParams(parameters);
+        GenerationRequestBuilder.Built built =
+                GenerationRequestBuilder.build(target.spec(), target.model(), unified);
+        if (!built.ok()) {
+            return ToolExecutionResult.failure(ToolErrorCode.INVALID_PARAMETER_VALUE,
+                    String.join("; ", built.errors()));
+        }
+
+        // An input file is a platform handle until here, where it becomes what
+        // THIS provider takes: a data URL, base64 beside a media type, a link it
+        // fetches, or a multipart part left alone for the encoder further down.
+        // Done before the reservation, so a file that cannot be read costs
+        // nothing rather than being charged for a call never dispatched.
+        GenerationInputResolver.Prepared inputs =
+                inputResolver.prepare(target.spec(), built.params(), tenantId);
+        if (!inputs.ok()) {
+            return ToolExecutionResult.failure(ToolErrorCode.INVALID_PARAMETER_VALUE,
+                    String.join("; ", inputs.errors()));
+        }
+
+        // Hand over to the single catalog execution path: credentials, billing,
+        // restrictions and binary storage all already live there.
+        //
+        // The pricing context travels as a TYPED argument, not inside the
+        // delegated parameter map. That map is caller-influenced, and these two
+        // values decide the amount charged: a caller-supplied quantity of zero
+        // would be a free generation.
+        Map<String, Object> delegated = new LinkedHashMap<>();
+        // THE ENDPOINT'S ID, not its `api/tool` slug, even though the execute
+        // route accepts both. The two pre-flight gates in front of that route do
+        // not: the agent restriction list holds the ids catalog search hands out
+        // (so a slug is never in it, and a restricted agent loses generation
+        // entirely, told to run a search that cannot return what it is asked
+        // for), and the credential pre-flight reads a single-segment
+        // /api/catalog/tools/{id}/info that 404s on a two-segment slug (so the
+        // structured "connect a key for X" prompt is swallowed into a warning).
+        // Both failures are invisible in the response: the call itself succeeds.
+        delegated.put("tool_id", target.apiToolId().toString());
+        delegated.put("params", built.params());
+
+        // KEEP THE ASSET READABLE THROUGH THE SHAPER.
+        //
+        // Every string leaf over 4 KB is clipped on the way out, and one that
+        // looks like base64 is replaced outright by "[BASE64_CONTENT: n KB]".
+        // That is right for an agent reading a tool result and fatal here: the
+        // asset IS a base64 leaf, and the resolver runs after the shaper. The
+        // asset came back as the marker text, failed to decode, and reported
+        // "not decodable base64" for a call the customer had already paid for.
+        //
+        // The dehydrator does NOT cover this on its own, and believing it did
+        // is what left the hole open once already: its threshold is 64 KB of
+        // DECODED bytes, while the shaper measures serialised text. The two are
+        // 4/3 apart, so an asset can be small enough to escape the dehydrator
+        // and large enough for the shaper to destroy. Asking for the subtree
+        // verbatim is what closes the gap at every size.
+        //
+        // The root segment rather than the full path: the shaper expands by
+        // prefix, and a descriptor may address the leaf through a wildcard the
+        // shaper's own canonical form does not spell the same way. The bytes do
+        // not reach the agent either way, because decorate() prunes them from
+        // provider_response once they are a stored file.
+        if (target.spec().isBase64Asset()) {
+            delegated.put("expand", List.of(assetRootOf(target.spec())));
+        }
+        // An omitted credential_source is forwarded as omitted, on purpose.
+        //
+        // It is tempting to default it to "platform" here, because that is what
+        // the node and the app modal send and it would make one sentence true
+        // everywhere. It would also take something away: an absent source means
+        // the catalog tries the caller's OWN key first and falls back to the
+        // platform, and the money is correct either way (a reservation whose
+        // call is answered by the user's own credential is RELEASED, not
+        // committed, in ToolExecutionManager.settleReservation). Pinning it to
+        // "platform" would instead refuse two agents who are fine today: one
+        // with its own key and no credits, and one on an install with no
+        // platform credential configured at all.
+        //
+        // So the fix for "the help said platform was the default" is to correct
+        // the help, not to change who pays. An agent that wants a guarantee
+        // states the source, and both values are honoured strictly.
+        Object credentialSource = parameters.get("credential_source");
+        if (credentialSource != null) {
+            delegated.put("credential_source", credentialSource);
+        }
+        // WHICH own key is deliberately NOT read from `parameters` here. It
+        // travels on the execution context, which only the app dialog and the
+        // workflow node populate (through GenerationController), so an agent
+        // calling this tool cannot pin a key it has no way to learn about. The
+        // context is already passed to executeGeneration below, untouched.
+
+        Optional<ToolExecutionResult> raw = executeModule.executeGeneration(
+                delegated, context,
+                new CatalogExecuteModule.GenerationBilling(
+                        target.modelId(), built.quantity(), built.quantityUnit()));
+        if (raw.isEmpty()) {
+            return ToolExecutionResult.failure(ToolErrorCode.EXECUTION_FAILED,
+                    "Generation dispatch failed for model '" + modelId + "'");
+        }
+        ToolExecutionResult result = raw.get();
+        if (!result.success()) {
+            return result;
+        }
+
+        // THE CREDENTIAL PRE-FLIGHT ANSWERS WITH A SUCCESS, and it means the
+        // opposite of one. When no key is connected for the provider, the
+        // catalog path stops before dispatching and returns an
+        // `approval_needed` payload; nothing ran, and nothing was charged.
+        //
+        // Read as an ordinary success it is a disaster of a message: there is
+        // no asset in it, so the resolver below reports "the provider produced
+        // nothing" and states that the call already cost money. Both halves are
+        // false, and they send the reader looking for a failed generation
+        // instead of connecting a key, which is the one thing that would fix it.
+        //
+        // (This path was unreachable while the generation surface delegated a
+        // slug the pre-flight could not resolve: the check 404'd, returned null,
+        // and the refusal came from further down. Making the identifier correct
+        // is what exposed it.)
+        Map<String, Object> approval = approvalNeededPayload(result);
+        if (approval != null) {
+            // NAME THE POOLS THAT WERE ACTUALLY EMPTY, from what the gate
+            // REPORTS rather than from an assumption about which branch reached
+            // here. Assuming it was always the own-key branch was wrong twice
+            // over: the gate also fires when no pool was pinned and NEITHER pool
+            // has a key, and telling that caller to buy on the platform key
+            // sends them to a second empty pool, where a different guard
+            // refuses them and points back at the first.
+            String service = String.valueOf(approval.getOrDefault("serviceName", target.apiName()));
+            boolean platformKeyAvailable = Boolean.TRUE.equals(approval.get("platformKeyAvailable"));
+            String remedy = platformKeyAvailable
+                    ? "Pass credential_source='platform' to buy it on the platform's key instead, "
+                            + "or connect your own key first."
+                    : "The platform does not sell this one either, so a key has to be connected "
+                            + "before any generation on it can run. Retrying unchanged will be "
+                            + "refused again.";
+            return ToolExecutionResult.failure(ToolErrorCode.EXECUTION_FAILED,
+                    CatalogExecuteModule.CREDENTIALS_REQUIRED_CODE + ": you have no " + service
+                            + " key of your own connected, so this generation was not started and "
+                            + "nothing was charged. " + remedy
+                            + " Connecting a key is the account owner's act, so report this rather "
+                            + "than retrying unchanged.");
+        }
+
+        // Make the asset durable. A provider either returned the bytes (already
+        // stored on the way through) or a URL that expires; either way the
+        // caller must end up with a file, not a link that 404s tomorrow on
+        // something they already paid for.
+        @SuppressWarnings("unchecked")
+        Map<String, Object> payload = result.data() instanceof Map
+                ? (Map<String, Object>) result.data() : Map.of();
+        GenerationAssetResolver.Resolved asset =
+                assetResolver.resolve(target.spec(), target.model(), payload,
+                        context == null ? tenantId : context.tenantId());
+        if (!asset.ok()) {
+            // The call already cost money, so this is reported as a failure the
+            // caller can act on rather than a success with nothing in it.
+            //
+            // "Act on" is the operative word, and it is why the failure carries
+            // DATA. Billing committed inside executeGeneration, before this
+            // line: the provider produced the asset and the customer has been
+            // charged for it. Everything that can fail here is transient in
+            // kind - a fetch timeout, a 5xx from the provider's CDN, a body
+            // over the storage cap - so the provider's own link is a live route
+            // to the thing that was paid for, and it expires in minutes.
+            // Reporting only a sentence made a paid asset unrecoverable for the
+            // sake of a hiccup. The raw provider response travels with it
+            // because a descriptor that pointed at the wrong path is the other
+            // way to get here, and then the URL is in that payload under a key
+            // this code did not expect.
+            log.error("generation: model={} completed upstream but no asset was produced: {}",
+                    target.modelId(), asset.error());
+            Map<String, Object> recovery = new LinkedHashMap<>();
+            if (asset.assetUrl() != null && !asset.assetUrl().isBlank()) {
+                recovery.put("asset_url", asset.assetUrl());
+            }
+            // Pruned here too. The asset path is asked to survive the shaper on
+            // a base64 model, so on THIS path the payload can still carry the
+            // whole inline blob, and it travels into a node output and from
+            // there into the run's stored state. Every failure that reaches
+            // here leaves those bytes useless anyway: the path was wrong and
+            // there is nothing at it, the leaf did not decode, it was over the
+            // storage cap, or storage itself refused. What the reader needs is
+            // the SHAPE of the response, which is exactly what is left.
+            recovery.put("provider_response", asDiagnosis(payload, target.spec()));
+            // Named in the MESSAGE too, not only in the data: an agent reads the
+            // failure text, and a URL it cannot see is a URL it cannot use.
+            String recoveryNote = recovery.containsKey("asset_url")
+                    ? " You have been charged for it. The provider's own link is returned as asset_url and "
+                      + "is usually valid for a short while, so fetch it now to keep what you paid for: "
+                      + asset.assetUrl()
+                    : " You have been charged for it. No asset URL was found where the model's descriptor "
+                      + "says it should be; the provider's whole answer is returned as provider_response, "
+                      + "so look for a link in there.";
+            return new ToolExecutionResult(false, recovery,
+                    "The generation ran but no asset could be retrieved: " + asset.error() + "."
+                            + recoveryNote,
+                    ToolErrorCode.EXECUTION_FAILED, Map.of());
+        }
+
+        return persistCard(
+                ToolExecutionResult.success(decorate(payload, asset.fileRef(), target, built)),
+                parameters, promptOf(unified), target.kind(), context);
+    }
+
+    /**
+     * Put the finished generation on the chat side panel, and hand back the
+     * result the caller sees.
+     *
+     * <p>A card is an Interface entity that the chat re-fetches by its id, so a
+     * result that is only in the conversation history has no card at all. The
+     * legacy image tool has persisted one since the beginning and is currently
+     * the only producer of any, which is the last thing keeping it alive.
+     *
+     * <p>Two rules, both inherited from that path rather than re-decided here.
+     * <b>No chat context, no card</b>: {@link ToolResultPersistEnricher} returns
+     * the result untouched unless the credentials carry both a conversation and
+     * a message id, which a workflow node and every other non-chat caller do
+     * not, and there is nothing to attach a card to. <b>A card is never worth
+     * the asset</b>: by this point the generation has run and been charged, so
+     * failing to draw a card must not turn a paid success into a failure. Both
+     * failure modes are already swallowed for us, which is the reason to go
+     * through this pair rather than call the endpoint directly: the client
+     * returns {@code null} on any transport or status error and logs it, and
+     * the enricher catches anything the persist function throws. Either way the
+     * caller still gets its file, only without the marker.
+     */
+    private ToolExecutionResult persistCard(ToolExecutionResult produced,
+                                             Map<String, Object> parameters,
+                                             String prompt,
+                                             String kind,
+                                             ToolExecutionContext context) {
+        ToolResultPersistEnricher.PersistFn persist = (ctx, params, originalData) -> {
+            if (!(originalData instanceof Map<?, ?> card)) return null;
+            Map<String, Object> creds = ctx.credentials();
+
+            ImageGenerationInterfaceRequest req = new ImageGenerationInterfaceRequest();
+            req.setName(cardName(prompt, kind));
+            req.setConversationId((String) creds.get("conversationId"));
+            req.setMessageId((String) creds.get("__messageId__"));
+            req.setAgentId((String) creds.get("__agentId__"));
+            // The tool result verbatim. interface-service reads the unified
+            // shape's `file` and the legacy shape's `images[]` on every call, so
+            // nothing is reshaped on the way out.
+            req.setData(ToolResultPersistEnricher.asStringKeyMap(card));
+            // The prompt is an INPUT, so it is not in the result and has to be
+            // carried beside it. This is the field the DTO gained for exactly
+            // this producer.
+            req.setPrompt(prompt);
+            // Without the org stamp the card reads as "Failed to load" for the
+            // author's org teammates, who can see the conversation.
+            req.setOrganizationId(ctx.orgId());
+
+            InterfaceDto persisted = interfaceClient.createOrUpdateImageGenerationInterface(req, ctx.tenantId());
+            if (persisted == null || persisted.getId() == null) return null;
+            return new ToolResultPersistEnricher.PersistedInterface(
+                    persisted.getId().toString(), persisted.getName());
+        };
+
+        // No strip hook: the enricher takes one to keep inline bytes out of the
+        // agent-visible result, and this result has none to remove. The asset is
+        // a FileRef by the time it reaches here, because the resolver stored it.
+        return ToolResultPersistEnricher.enrichAndPersist(
+                produced, parameters, context, CARD_TYPE, persist, /* postPersistHook */ null);
+    }
+
+    /** Card title: the prompt, cut to a list line, or the format when there is none. */
+    private static String cardName(String prompt, String kind) {
+        if (prompt == null) {
+            return "Generated " + (kind == null || kind.isBlank() ? "asset" : kind);
+        }
+        return prompt.length() > CARD_NAME_MAX
+                ? prompt.substring(0, CARD_NAME_MAX) + "…"
+                : prompt;
+    }
+
+    /**
+     * The prompt as the caller wrote it, read from the already-collected unified
+     * parameters so a prompt nested under {@code params} is found too. Reading
+     * the top level only would leave the card of every nested caller untitled,
+     * and this tool accepts both shapes on purpose.
+     */
+    private static String promptOf(Map<String, Object> unified) {
+        Object v = unified.get("prompt");
+        if (v == null) return null;
+        String s = String.valueOf(v).trim();
+        return s.isEmpty() ? null : s;
+    }
+
+    /**
+     * Stamp the generation context onto the catalog's result so the agent gets
+     * one stable shape whatever the provider did, and always learns what the
+     * call cost.
+     */
+    private static Map<String, Object> decorate(Map<String, Object> data,
+                                                 Map<String, Object> fileRef,
+                                                 GenerationRegistry.GenerationModel target,
+                                                 GenerationRequestBuilder.Built built) {
+        Map<String, Object> out = new LinkedHashMap<>();
+        out.put("model", target.modelId());
+        out.put("kind", target.kind());
+        out.put("provider", target.apiName());
+        out.put("file", fileRef);
+        if (built.quantity() != null && built.quantity().signum() > 0) {
+            // The unit REPORTED is the one the size was measured in, which is
+            // the platform's own (a model listed per minute is measured in
+            // seconds). Reporting the list price's unit next to this number
+            // would state a size the call does not have.
+            out.put("billed_quantity", built.quantity());
+            out.put("billed_unit", built.quantityUnit());
+        }
+        // Carry the provider payload through under its own key rather than
+        // merging it, so a provider field can never shadow `file` or `model`.
+        if (data != null && !data.isEmpty()) {
+            out.put("provider_response", withoutTheAssetItself(data, target.spec()));
+        }
+        return out;
+    }
+
+    /**
+     * First segment of a base64 asset path, which is what the shaper expands by.
+     * {@code data[0].b64_json} and {@code candidates[0]...data} give {@code data}
+     * and {@code candidates}.
+     */
+    /**
+     * The provider payload as a DIAGNOSIS, with no leaf big enough to matter.
+     *
+     * <p>For the failure branch only. Pruning by path is the right tool when the
+     * asset is where the descriptor said, but the commonest reason to be on this
+     * branch is that it is NOT there: the path is wrong, and pruning it removes
+     * nothing while the blob sits somewhere else entirely. The asset path is
+     * also asked to survive the response shaper on a base64 model, so that blob
+     * arrives here at full size and travels into a node output and the run's
+     * stored state.
+     *
+     * <p>Re-shaping in WORKFLOW mode caps every leaf without digesting arrays or
+     * moving anything, which leaves exactly what a reader needs to see WHERE the
+     * asset actually was.
+     */
+    private Map<String, Object> asDiagnosis(Map<String, Object> payload, GenerationSpec spec) {
+        if (payload == null || payload.isEmpty() || !spec.isBase64Asset()) return payload;
+        Object shaped = responseShaper
+                .shape(payload, null, null, ResponseShaper.Mode.WORKFLOW)
+                .data();
+        if (shaped instanceof Map<?, ?> map) {
+            @SuppressWarnings("unchecked")
+            Map<String, Object> reduced = (Map<String, Object>) map;
+            return reduced;
+        }
+        return payload;
+    }
+
+    static String assetRootOf(GenerationSpec spec) {
+        String path = spec.base64Path();
+        return path.split("\\.")[0].split("\\[")[0];
+    }
+
+    /**
+     * Drop the base64 payload the resolver has just turned into a stored file.
+     *
+     * <p>The agent is handed the file; handing it the bytes as well doubles a
+     * result it can already open, in a channel measured in tokens. Usually the
+     * catalog's dehydrator has already replaced the leaf with a FileRef and
+     * there is nothing to remove, which is exactly why this cannot be left to
+     * it: when dehydration is skipped or fails, the leaf stays inline and a
+     * multi-megabyte blob lands in the context window.
+     *
+     * <p>Only the path the descriptor NAMES is touched, and only for the base64
+     * camp: every other field the provider returned is the agent's to read.
+     */
+    private static Map<String, Object> withoutTheAssetItself(Map<String, Object> data,
+                                                              GenerationSpec spec) {
+        if (!spec.isBase64Asset()) return data;
+        return GenerationAssetResolver.withoutPath(data, spec.base64Path()).orElse(data);
+    }
+
+    /**
+     * Gather the unified parameters, whether the agent nested them under
+     * {@code params} or flattened them at the top level. Both shapes are common
+     * in practice and refusing one of them would be a needless failure.
+     */
+    private static Map<String, Object> collectUnifiedParams(Map<String, Object> parameters) {
+        Map<String, Object> out = new LinkedHashMap<>();
+        Object nested = parameters.get("params");
+        if (nested instanceof Map<?, ?> m) {
+            m.forEach((k, v) -> out.put(String.valueOf(k), v));
+        }
+        for (Map.Entry<String, Object> e : parameters.entrySet()) {
+            if (RESERVED.contains(e.getKey()) || e.getValue() == null) continue;
+            out.putIfAbsent(e.getKey(), e.getValue());
+        }
+        return out;
+    }
+
+    /** Control keys that are never generation parameters. */
+    private static final Set<String> RESERVED = Set.of(
+            "action", "model", "kind", "params", "credential_source", "tool_id",
+            // Names an account object, not a dimension of the asset. Left out of
+            // this set it would be projected onto the provider's request as an
+            // unknown parameter, and the model would refuse a call the caller
+            // configured correctly.
+            CatalogExecuteModule.CREDENTIAL_ID_KEY);
+
+    private static String str(Map<String, Object> params, String key) {
+        Object v = params == null ? null : params.get(key);
+        if (v == null) return null;
+        String s = String.valueOf(v).trim();
+        return s.isEmpty() ? null : s.toLowerCase(Locale.ROOT);
+    }
+}

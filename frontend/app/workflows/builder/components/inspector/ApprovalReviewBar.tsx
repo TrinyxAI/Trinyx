@@ -210,7 +210,7 @@ export function ApprovalReviewBar({
             title={tRun('approvalBar.prev')}
             onClick={() => navigateTo(prevEntry)}
             disabled={!prevEntry}
-            className="w-6 h-6 p-0 rounded-full inline-flex items-center justify-center text-amber-700 dark:text-amber-300 hover:bg-amber-100 dark:hover:bg-amber-500/20 disabled:opacity-30 disabled:cursor-not-allowed disabled:hover:bg-transparent transition-colors"
+            className="w-6 h-6 p-0 rounded-lg inline-flex items-center justify-center text-amber-700 dark:text-amber-300 hover:bg-amber-100 dark:hover:bg-amber-500/20 disabled:opacity-30 disabled:cursor-not-allowed disabled:hover:bg-transparent transition-colors"
           >
             <ChevronLeft className="h-3.5 w-3.5" />
           </button>
@@ -227,7 +227,7 @@ export function ApprovalReviewBar({
             title={tRun('approvalBar.next')}
             onClick={() => navigateTo(nextEntry)}
             disabled={!nextEntry}
-            className="w-6 h-6 p-0 rounded-full inline-flex items-center justify-center text-amber-700 dark:text-amber-300 hover:bg-amber-100 dark:hover:bg-amber-500/20 disabled:opacity-30 disabled:cursor-not-allowed disabled:hover:bg-transparent transition-colors"
+            className="w-6 h-6 p-0 rounded-lg inline-flex items-center justify-center text-amber-700 dark:text-amber-300 hover:bg-amber-100 dark:hover:bg-amber-500/20 disabled:opacity-30 disabled:cursor-not-allowed disabled:hover:bg-transparent transition-colors"
           >
             <ChevronRight className="h-3.5 w-3.5" />
           </button>
@@ -240,7 +240,7 @@ export function ApprovalReviewBar({
           </span>
         )}
         {current.epoch != null && (
-          <span className="text-xs px-1.5 rounded-full bg-amber-100 dark:bg-amber-500/20 text-amber-700 dark:text-amber-300 whitespace-nowrap">
+          <span className="text-xs px-1.5 rounded-md bg-amber-100 dark:bg-amber-500/20 text-amber-700 dark:text-amber-300 whitespace-nowrap">
             {tRun('epochBadge', { number: current.epoch })}
           </span>
         )}
@@ -270,7 +270,7 @@ export function ApprovalReviewBar({
         onClick={() => handleResolve('APPROVED')}
         disabled={resolving != null}
         className={clsx(
-          'flex items-center gap-1 px-3 py-1.5 rounded-full text-sm font-medium transition-colors shadow-sm',
+          'flex items-center gap-1 px-3 py-1.5 rounded-md text-sm font-medium transition-colors shadow-sm',
           'bg-emerald-100 text-emerald-700 hover:bg-emerald-200 dark:bg-emerald-500/20 dark:text-emerald-300 dark:hover:bg-emerald-500/30',
           resolving != null && 'opacity-50 cursor-not-allowed',
         )}
@@ -288,7 +288,7 @@ export function ApprovalReviewBar({
         onClick={() => handleResolve('REJECTED')}
         disabled={resolving != null}
         className={clsx(
-          'flex items-center gap-1 px-3 py-1.5 rounded-full text-sm font-medium transition-colors shadow-sm',
+          'flex items-center gap-1 px-3 py-1.5 rounded-md text-sm font-medium transition-colors shadow-sm',
           'bg-red-100 text-red-700 hover:bg-red-200 dark:bg-red-500/20 dark:text-red-300 dark:hover:bg-red-500/30',
           resolving != null && 'opacity-50 cursor-not-allowed',
         )}

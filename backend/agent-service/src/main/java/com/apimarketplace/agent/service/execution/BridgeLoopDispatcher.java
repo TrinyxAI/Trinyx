@@ -222,7 +222,9 @@ public class BridgeLoopDispatcher {
             null,   // executionId - classify/guardrail are sub-loops within an outer execution, no own id
             null,   // source
             context.reasoningEffort(),  // null for classify/guardrail - effort applies to MAIN turns
-            null    // enabledModules - classify/guardrail run with autoDiscoverTools=false (no tools), so module scoping is moot
+            null    // enabledModules - classify/guardrail run with autoDiscoverTools=false (no tools), so module
+                    // scoping is moot; if that ever changes, null resolves to AgentModuleResolver.NO_CONFIG_MODULES
+                    // (everything except the credit-spending opt-ins), never to the full core tool set
         );
     }
 

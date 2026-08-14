@@ -42,14 +42,33 @@ public final class PlanSecretRedactor {
                 // Raw inline secrets.
                 removeChildKeys(coreMap, "httpRequest", "authConfig");
                 removeChildKeys(coreMap, "cryptoJwt", "key", "secret", "token");
-                removeChildKeys(coreMap, "ssh", "password", "privateKey");
-                removeChildKeys(coreMap, "sftp", "password", "privateKey");
-                removeChildKeys(coreMap, "database", "password");
+                // The credentialId goes with the raw fallback in each of
+                // these, for the reason stated below: a reference to one of
+                // the author's credentials is not the viewer's to see, and
+                // the three connectors here were the only ones still handing
+                // theirs out.
+                removeChildKeys(coreMap, "ssh", "password", "privateKey", "credentialId");
+                removeChildKeys(coreMap, "sftp", "password", "privateKey", "credentialId");
+                removeChildKeys(coreMap, "database", "password", "credentialId");
                 // sendEmail carries an inline SMTP password RAW fallback (alongside credentialId).
                 removeChildKeys(coreMap, "sendEmail", "credentialId", "smtpPassword");
                 // Credential references (numeric ids, low value but not the viewer's to see).
                 removeChildKeys(coreMap, "emailInbox", "credentialId");
                 removeChildKeys(coreMap, "approvalDelegation", "credentialId");
+                // A generate node keeps its config in the GENERIC params map
+                // rather than in a named child, so the removals above cannot
+                // reach it. `credential_id` there names one of the AUTHOR's own
+                // provider keys: handed to a share-link visitor or baked into a
+                // marketplace snapshot, it tells an acquirer which key to pin,
+                // and an acquirer in the author's organization can resolve it.
+                //
+                // Scoped to the node type that has one. `params` is the generic
+                // map EVERY core keeps its config in, so removing a key from it
+                // unconditionally would silently delete a field of the same name
+                // from some future node that means something else by it.
+                if ("generate".equals(coreMap.get("type"))) {
+                    removeChildKeys(coreMap, "params", "credential_id");
+                }
             }
         }
         for (String stepBucket : List.of("mcps", "agents")) {

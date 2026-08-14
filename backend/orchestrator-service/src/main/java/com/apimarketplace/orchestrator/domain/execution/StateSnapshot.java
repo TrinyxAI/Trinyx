@@ -122,7 +122,9 @@ public final class StateSnapshot {
         if (dags != null && !dags.isEmpty()) {
             // V3: dags is primary, flat fields are LAZILY computed in getters.
             // No eager allocation here - saves 9 Set/Map per mutation.
-            this.dags = Map.copyOf(dags);
+            // Deserialization is also where runs born before the birth-write fix get
+            // their phantom sentinel DAG dropped - see dropPhantomSentinelDag.
+            this.dags = Map.copyOf(dropPhantomSentinelDag(dags));
             // (caches stay null - getters memoize on first access)
         } else {
             // V2 backward compat: flat fields are the input, migrate them into a
@@ -788,6 +790,35 @@ public final class StateSnapshot {
     }
 
     /**
+     * Reopen a closed epoch as the DAG's current, active epoch.
+     *
+     * <p>Used by step rerun when the run's execution cycle already closed. {@code currentEpoch}
+     * then points at the DORMANT epoch prepared for the next trigger fire, which carries no
+     * outputs, while every stored output belongs to {@code epoch}. Running the rerun against
+     * the dormant epoch resolves every upstream template to empty on a run that still reports
+     * success, so the executed epoch must become current again first.
+     *
+     * <p>The superseded dormant epoch is left in place. Once {@code epoch} is active, no reader
+     * reaches the dormant one anyway (flat views iterate the ACTIVE epochs, and the no-active
+     * fallback reads {@code currentEpochState()}, which is now {@code epoch}), so removing it
+     * would only add a way to be wrong. The next cycle close overwrites it via
+     * {@code prepareNextCycle}, and an SBS re-fire reuses it through {@code openEpoch}'s
+     * {@code putIfAbsent} - the same as the normal flow.
+     *
+     * @param triggerId the DAG owning the rerun target
+     * @param epoch     the epoch to make current and active again
+     */
+    public StateSnapshot reopenEpochForDag(String triggerId, int epoch) {
+        DagState ds = dags.get(triggerId);
+        if (ds == null || ds.getCurrentEpoch() == epoch) {
+            return this;
+        }
+        Map<String, DagState> newDags = new HashMap<>(dags);
+        newDags.put(triggerId, ds.reopenEpoch(epoch));
+        return fromDags(version, seq, newDags, nodes, edges);
+    }
+
+    /**
      * Close and prune a specific epoch for a DAG. Removes from activeEpochs AND
      * from the epochs map. The epoch's full state lives in workflow_epochs table.
      * This keeps StateSnapshot JSONB at constant size (only active epochs).
@@ -1223,10 +1254,10 @@ public final class StateSnapshot {
     /**
      * Flat union of {@link EpochState#getPartialFailedNodeIds()} across active epochs:
      * nodes that COMPLETED in the current pass but had per-item failures (split
-     * continue-anyway). State reconstruction uses this CURRENT-pass evidence to derive
-     * PARTIAL_SUCCESS instead of the accumulated NodeCounts - accumulated counts keep a
-     * stale {@code failed} entry after a rerun fixed a previously-FAILED node, and that
-     * history must not demote the fresh COMPLETED status. {@code @JsonIgnore}: derived
+     * continue-anyway). State reconstruction uses this CURRENT-pass evidence ALONGSIDE the
+     * accumulated NodeCounts: the counts demote a COMPLETED node as soon as they carry a
+     * failure, and this marker catches an item failure of the current pass that the counts
+     * have not recorded yet. {@code @JsonIgnore}: derived
      * view, must not widen the persisted JSONB payload. Not memoized (API path only).
      */
     @com.fasterxml.jackson.annotation.JsonIgnore
@@ -1491,6 +1522,74 @@ public final class StateSnapshot {
         return Map.copyOf(result);
     }
 
+    /**
+     * Drop a phantom {@code "trigger:default"} DAG left over from the birth write that
+     * predated {@code StateSnapshotService.initializeReadyTriggerDags}.
+     *
+     * <p>Those runs were armed through the FLAT ready-node write while {@code dags} was still
+     * empty, so {@link #getDefaultTriggerId()} returned the sentinel and the real trigger's
+     * ready marker was stored under {@code "trigger:default"}. The first fire then created
+     * the trigger's real DAG and the SAME node existed in two dags;
+     * {@link #findDagContaining(String)} returns whichever comes first while iterating
+     * {@code Map.copyOf}, i.e. {@code ImmutableCollections.MapN}, whose order is randomised
+     * per JVM by a {@code System.nanoTime()}-seeded salt. Behaviour was therefore bimodal per
+     * process and constant within it, which is what made this read as suite flakiness.
+     *
+     * <p>Runs on deserialization only (the {@code @JsonCreator} path), never on the mutation
+     * hot path, and it is idempotent: once dropped there is nothing left to match.
+     *
+     * <p><b>Deliberately narrow.</b> The sentinel is removed only when it provably carries no
+     * work of its own: a real trigger DAG exists, it never fired, and every one of its epochs
+     * is empty except for ready markers that name DAGs present in this very snapshot. So:
+     * <ul>
+     *   <li>a legacy V2-migrated run whose ONLY dag is the sentinel keeps everything (no real
+     *       DAG, so the guard never fires) - that is the case {@link #migrateFlatToDags} mints;
+     *   <li>a sentinel holding completed/failed/skipped/running/awaiting nodes, decision
+     *       branches, loops or splits is kept untouched, whatever put it there;
+     *   <li>a sentinel holding a ready node that does not name another DAG (a real core node
+     *       that leaked onto it) is kept, because dropping it would lose a ready marker;
+     *   <li>a workflow whose trigger is literally labelled "Default" is kept: it normalizes to
+     *       this same key ({@code LabelNormalizer.triggerKey("Default")}), so before its first
+     *       fire its own legitimate DAG is bit-for-bit the phantom signature - never fired,
+     *       one empty epoch, ready set holding just itself. {@code fireCount} does NOT tell
+     *       those apart, because the birth write runs precisely in the window before any fire.
+     *       What tells them apart is that a phantom's ready markers name OTHER dags, while
+     *       this one names itself.
+     * </ul>
+     * Anything not provably the phantom is left alone: the cost of keeping one is a stale
+     * marker, the cost of dropping a real one is lost execution state.
+     */
+    private static Map<String, DagState> dropPhantomSentinelDag(Map<String, DagState> dags) {
+        DagState sentinel = dags.get(DEFAULT_TRIGGER_SENTINEL);
+        if (sentinel == null || dags.size() < 2) {
+            return dags;
+        }
+        if (sentinel.getFireCount() != 0) {
+            return dags;
+        }
+        for (EpochState es : sentinel.getEpochs().values()) {
+            if (!es.getCompletedNodeIds().isEmpty() || !es.getFailedNodeIds().isEmpty()
+                    || !es.getPartialFailedNodeIds().isEmpty() || !es.getSkippedNodeIds().isEmpty()
+                    || !es.getRunningNodeIds().isEmpty() || !es.getAwaitingSignalNodeIds().isEmpty()
+                    || !es.getDecisionBranchesMap().isEmpty() || !es.getLoops().isEmpty()
+                    || !es.getSplits().isEmpty()) {
+                return dags;
+            }
+            for (String readyId : es.getReadyNodeIds()) {
+                // The marker must name ANOTHER dag. Excluding the sentinel key itself is not
+                // pedantry: a trigger labelled "Default" normalizes to trigger:default, so its
+                // own legitimate DAG holds readyNodeIds=[trigger:default] and would otherwise
+                // satisfy this test against its own key and be deleted.
+                if (DEFAULT_TRIGGER_SENTINEL.equals(readyId) || !dags.containsKey(readyId)) {
+                    return dags;
+                }
+            }
+        }
+        Map<String, DagState> cleaned = new HashMap<>(dags);
+        cleaned.remove(DEFAULT_TRIGGER_SENTINEL);
+        return cleaned;
+    }
+
     private static Map<String, DagState> migrateFlatToDags(
             Set<String> completed, Set<String> failed, Set<String> skipped,
             Set<String> running, Set<String> ready, Set<String> awaiting,
@@ -1543,6 +1642,36 @@ public final class StateSnapshot {
 
         public static NodeCounts zero() {
             return new NodeCounts(0, 0, 0, 0, 0L, 0L, 0L);
+        }
+
+        /**
+         * The status this node reports, read off its own accumulated tally.
+         *
+         * <p>A node holds items and runs many times, so it can genuinely be half-done: some
+         * completed AND some failed is {@code partial_success}, not {@code failed}. The node's
+         * badge renders these same counts next to the border, so answering "failed" here puts a
+         * red border beside a green count and the two contradict each other. This is a NODE-level
+         * verdict only: a run or a cycle is binary (see
+         * {@code StateSnapshotService.deriveCycleStatus}).
+         *
+         * <p>The rule lives on the counts because it had been written out by hand in each place
+         * that needed it, and those copies drifted: the streaming path kept saying "failed" for a
+         * mixed tally long after the REST path stopped, so the same node was red live and amber
+         * after a reload. Callers derive, they do not re-decide.
+         */
+        public String deriveStatus() {
+            if (running > 0) {
+                return "running";
+            } else if (failed > 0 && completed > 0) {
+                return "partial_success";
+            } else if (failed > 0) {
+                return "failed";
+            } else if (skipped > 0 && completed == 0) {
+                return "skipped";
+            } else if (completed > 0) {
+                return "completed";
+            }
+            return "pending";
         }
 
         public NodeCounts increment(String status) {

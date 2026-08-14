@@ -70,7 +70,7 @@ export default function WelcomeGiftModal() {
       <DialogContent className="max-w-md gap-0 overflow-hidden border-theme bg-theme-primary p-0">
         <div className="border-b border-theme p-6 pb-5 pr-14">
           <div className="flex items-center gap-3">
-            <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-theme-tertiary">
+            <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-theme-tertiary">
               <Gift className="h-5 w-5 text-theme-primary" />
             </div>
             <div className="min-w-0">
@@ -88,7 +88,7 @@ export default function WelcomeGiftModal() {
           <div className="rounded-lg border border-theme bg-theme-secondary p-4">
             <div className="flex items-center justify-between gap-4">
               <div className="flex items-center gap-3">
-                <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-theme-tertiary">
+                <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-theme-tertiary">
                   <Coins className="h-3.5 w-3.5 text-theme-secondary" />
                 </div>
                 <span className="text-sm font-medium text-theme-secondary">

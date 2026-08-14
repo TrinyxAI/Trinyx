@@ -126,7 +126,7 @@ export default function PublicForm({ token }: PublicFormProps) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-theme-primary px-4">
         <div className="text-center">
-          <div className="h-12 w-12 rounded-full bg-theme-secondary flex items-center justify-center mx-auto mb-4">
+          <div className="h-12 w-12 rounded-xl bg-theme-secondary flex items-center justify-center mx-auto mb-4">
             <svg className="h-5 w-5 text-theme-muted" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
               <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v3.75m9-.75a9 9 0 1 1-18 0 9 9 0 0 1 18 0Zm-9 3.75h.008v.008H12v-.008Z" />
             </svg>
@@ -142,7 +142,7 @@ export default function PublicForm({ token }: PublicFormProps) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-theme-primary px-4">
         <div className="bg-theme-secondary rounded-xl shadow-sm border border-theme p-8 max-w-md w-full text-center">
-          <div className="h-12 w-12 rounded-full bg-green-100 dark:bg-green-900/30 flex items-center justify-center mx-auto mb-4">
+          <div className="h-12 w-12 rounded-xl bg-green-100 dark:bg-green-900/30 flex items-center justify-center mx-auto mb-4">
             <CheckCircle className="h-6 w-6 text-green-600 dark:text-green-400" />
           </div>
           <h2 className="text-base font-semibold text-theme-primary mb-2">

@@ -20,7 +20,7 @@ const outfit = Outfit({
 })
 
 const SITE_TITLE = 'LiveContext: The AI automation platform. Chat, workflows, agents, apps.';
-const SITE_DESCRIPTION = 'Build AI agents, automate workflows and ship interactive apps without code. 600+ integrations, custom APIs, data tables, marketplace and AI chat in one platform.';
+const SITE_DESCRIPTION = 'Build AI agents, automate workflows and ship interactive apps without code. 700+ integrations, custom APIs, data tables, marketplace and AI chat in one platform.';
 const SITE_URL = 'https://livecontext.ai';
 
 export const metadata: Metadata = {

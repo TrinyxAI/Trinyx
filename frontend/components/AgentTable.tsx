@@ -383,7 +383,7 @@ export function AgentTable({ className = '' }: AgentTableProps) {
           stay reachable when the list is empty, which is when it helps most. */}
       <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
           <div className="flex items-center gap-3">
-            <div className="w-10 h-10 bg-theme-secondary rounded-full flex items-center justify-center">
+            <div className="w-10 h-10 bg-theme-secondary rounded-xl flex items-center justify-center">
               <Bot className="w-5 h-5 text-theme-primary" />
             </div>
             <div>
@@ -712,7 +712,7 @@ export function AgentTable({ className = '' }: AgentTableProps) {
             onClick={(e) => e.stopPropagation()}
           >
             <div className="text-center mb-6">
-              <div className="w-16 h-16 bg-red-100 dark:bg-red-950/40 rounded-full flex items-center justify-center mx-auto mb-4">
+              <div className="w-16 h-16 bg-red-100 dark:bg-red-950/40 rounded-2xl flex items-center justify-center mx-auto mb-4">
                 <Globe className="w-8 h-8 text-red-500" />
               </div>
               <h3 className="text-2xl font-semibold text-theme-primary">

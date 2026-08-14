@@ -74,6 +74,13 @@ export { NodeTypeSettingsService, nodeTypeSettingsService } from './node-type-se
 export type { NodeTypeSetting, ToggleResponse } from './node-type-settings.service';
 export { NodeDefinitionService, nodeDefinitionService } from './node-definitions.service';
 export type { NodeDefinitionDto, NodeDefinitionOutputField } from './node-definitions.service';
+export { GenerationService, generationService } from './generation.service';
+export type {
+  GenerationModel,
+  GenerationModelsResponse,
+  GenerationLimit,
+  GenerationPrice,
+} from './generation.service';
 export { customApiService } from './custom-api.service';
 export type {
   CustomApiSummary,
@@ -142,6 +149,7 @@ import { dataSourceService } from './datasource.service';
 import { interfaceService } from './interface.service';
 import { agentService } from './agent.service';
 import { credentialService } from './credential.service';
+import { generationService } from './generation.service';
 import { executionService } from './execution.service';
 import { publicationService } from './publication.service';
 import { versionService } from './version.service';
@@ -284,6 +292,11 @@ export const orchestratorApi = {
   deleteMyOAuthApp: credentialService.deleteMyOAuthApp.bind(credentialService),
   getPlatformCredentialPublicInfo: credentialService.getPlatformCredentialPublicInfo.bind(credentialService),
   refreshOAuth2Token: credentialService.refreshOAuth2Token.bind(credentialService),
+
+  // ========================================
+  // Generation Service
+  // ========================================
+  getGenerationModels: generationService.getModels.bind(generationService),
 
   // ========================================
   // Execution Service

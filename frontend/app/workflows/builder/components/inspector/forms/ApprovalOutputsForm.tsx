@@ -86,7 +86,7 @@ export function ApprovalOutputsForm({
               <PopoverTrigger asChild>
                 <button
                   type="button"
-                  className="inline-flex items-center justify-center rounded-full hover:bg-slate-200 dark:hover:bg-slate-700 p-0.5"
+                  className="inline-flex items-center justify-center rounded-md hover:bg-slate-200 dark:hover:bg-slate-700 p-0.5"
                 >
                   <Info className="h-3 w-3 text-slate-400 dark:text-slate-500" />
                 </button>
@@ -124,7 +124,7 @@ export function ApprovalOutputsForm({
               <PopoverTrigger asChild>
                 <button
                   type="button"
-                  className="inline-flex items-center justify-center rounded-full hover:bg-slate-200 dark:hover:bg-slate-700 p-0.5"
+                  className="inline-flex items-center justify-center rounded-md hover:bg-slate-200 dark:hover:bg-slate-700 p-0.5"
                 >
                   <Info className="h-3 w-3 text-slate-400 dark:text-slate-500" />
                 </button>
@@ -200,7 +200,7 @@ export function ApprovalOutputsForm({
             <PopoverTrigger asChild>
               <button
                 type="button"
-                className="inline-flex items-center justify-center rounded-full hover:bg-slate-200 dark:hover:bg-slate-700 p-0.5"
+                className="inline-flex items-center justify-center rounded-md hover:bg-slate-200 dark:hover:bg-slate-700 p-0.5"
               >
                 <Info className="h-3 w-3 text-slate-400 dark:text-slate-500" />
               </button>

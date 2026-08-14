@@ -362,6 +362,23 @@ public class AgentAsyncCompletionService {
         // is sub-millisecond (one Optional.get + one method call); the window from
         // here through deliverUnderLock is where the prod OOM hit (milliseconds to
         // seconds). The fix correctly protects that window.
+        // DIAG(async-guard): widen the consume -> stage window on demand. Between the GETDEL
+        // above and the stage below, NEITHER store knows about this delivery: the registry has
+        // already given it up and the in-flight store has not taken it yet. Any epoch-close
+        // guard landing here sees "nothing pending" and closes the epoch while the agent is
+        // still being delivered. The comment above calls that window sub-millisecond; it is
+        // not, because stage() serializes JSON and talks to Redis. Set
+        // -De2e.agent.prestage-delay-ms=<n> to hold it open and make the failure deterministic.
+        long preStageDelayMs = Long.getLong("e2e.agent.prestage-delay-ms", 0L);
+        if (preStageDelayMs > 0) {
+            logger.warn("[AgentAsyncCompletion][E2E] Holding the consume->stage window open for {} ms: correlationId={}, runId={}",
+                preStageDelayMs, result.correlationId(), pending.runId());
+            try {
+                Thread.sleep(preStageDelayMs);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+            }
+        }
         if (inFlightStore != null) {
             inFlightStore.stage(pending, result);
             delayAfterInFlightStageForE2e(pending, result);

@@ -591,7 +591,7 @@ export function TaskDetailPanel({ taskId, agents, people = [], statuses = [], la
             <HeaderMetaSummary task={task} labels={labels} activeBlockerCount={activeBlockerCount} t={t} />
           </div>
           <PriorityBadge priority={task.priority} />
-          <Button variant="ghost" size="icon" onClick={guardedClose} className="h-8 w-8 rounded-full -mt-1 -mr-2 flex-shrink-0">
+          <Button variant="ghost" size="icon" onClick={guardedClose} className="h-8 w-8 rounded-xl -mt-1 -mr-2 flex-shrink-0">
             <X className="h-4 w-4" />
           </Button>
         </div>
@@ -627,7 +627,7 @@ export function TaskDetailPanel({ taskId, agents, people = [], statuses = [], la
                   <Icon className="h-3.5 w-3.5" />
                   {tab.label}
                   {tab.count != null && tab.count > 0 && (
-                    <span className="text-xs bg-theme-tertiary text-theme-muted rounded-full px-1.5 py-0.5 min-w-[18px] text-center tabular-nums">
+                    <span className="text-xs bg-theme-tertiary text-theme-muted rounded-md px-1.5 py-0.5 min-w-[18px] text-center tabular-nums">
                       {tab.count}
                     </span>
                   )}
@@ -983,11 +983,11 @@ export function TaskDetailPanel({ taskId, agents, people = [], statuses = [], la
                 <AlertCircle className="h-3 w-3" />
                 {t('detail.unsavedChanges')}
               </p>
-              <div className="relative overflow-hidden rounded-full">
+              <div className="relative overflow-hidden rounded-xl">
                 {/* Shimmer overlay for pending-execute flow (agent assignee only) */}
                 {staged.stagedChanges.status === 'in_progress' && staged.assigneeIsAgent && !applying && (
                   <div
-                    className="absolute inset-0 pointer-events-none z-10 rounded-full"
+                    className="absolute inset-0 pointer-events-none z-10 rounded-xl"
                     style={{
                       background: 'linear-gradient(90deg, transparent 0%, var(--shimmer-color) 25%, var(--shimmer-color-strong) 50%, var(--shimmer-color) 75%, transparent 100%)',
                       backgroundSize: '200% 100%',
@@ -1052,10 +1052,10 @@ export function TaskDetailPanel({ taskId, agents, people = [], statuses = [], la
           {!staged.hasStagedChanges && task.status !== 'in_review' && !isTerminal && !hasActiveAssigneeExecution && !hasActiveReviewerExecution && (
             <div className="space-y-1.5">
               {actionError && <p className="text-xs text-red-500">{actionError}</p>}
-              <div className="relative overflow-hidden rounded-full">
+              <div className="relative overflow-hidden rounded-xl">
                 {task.status === 'pending' && task.assignedToAgentId && !applying && (
                   <div
-                    className="absolute inset-0 pointer-events-none z-10 rounded-full"
+                    className="absolute inset-0 pointer-events-none z-10 rounded-xl"
                     style={{
                       background: 'linear-gradient(90deg, transparent 0%, var(--shimmer-color) 25%, var(--shimmer-color-strong) 50%, var(--shimmer-color) 75%, transparent 100%)',
                       backgroundSize: '200% 100%',
@@ -1778,7 +1778,7 @@ function ToolCallList({ toolCalls }: { toolCalls: AgentExecutionToolCall[] }) {
               }
               <span className="text-sm font-medium text-theme-primary truncate flex-1">{tc.toolName}</span>
               {tc.isRepeat && (
-                <span className="text-xs bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-400 px-1.5 py-0.5 rounded-full">
+                <span className="text-xs bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-400 px-1.5 py-0.5 rounded-md">
                   x{tc.consecutiveCount}
                 </span>
               )}

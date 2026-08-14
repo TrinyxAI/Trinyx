@@ -143,7 +143,8 @@ class NodePolicyAttemptPersistenceIntegrationTest {
 
         stateSnapshotService = new StateSnapshotService(runRepository, mapper, workflowEpochService,
             eventPublisher, breakdownService, new TxScopedSnapshotCache(runRepository, meterRegistry),
-            workflowMetrics);
+            workflowMetrics,
+            org.mockito.Mockito.mock(com.apimarketplace.orchestrator.services.state.ClaimRefusalRegistry.class));
 
         // Persistence fake - REAL v6 dedup semantics, spawn pinned to 0:
         // UNIQUE (workflow_run_id, step_alias, trigger_id, iteration, item_index, epoch, spawn, status)

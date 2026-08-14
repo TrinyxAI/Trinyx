@@ -56,6 +56,7 @@ class UserResolutionServiceDualWriteTest {
     @Mock private SubscriptionRepository subscriptionRepository;
     @Mock private BillingCustomerRepository billingCustomerRepository;
     @Mock private PlanRepository planRepository;
+    @Mock private FreeSubscriptionProvisioner freeSubscriptionProvisioner;
     @Mock private CreditAttributionService creditAttributionService;
     @Mock private PlanResolutionService planResolutionService;
     @Mock private AuthEventRecorder authEventRecorder;
@@ -68,7 +69,7 @@ class UserResolutionServiceDualWriteTest {
                 userRepository, creditService, usernameValidator, ageValidator,
                 onboardingService, organizationService,
                 subscriptionRepository, billingCustomerRepository, planRepository,
-                creditAttributionService, new PlanStorageQuotaSyncer(null, null));
+                creditAttributionService, new PlanStorageQuotaSyncer(null, null), freeSubscriptionProvisioner);
         ReflectionTestUtils.setField(service, "self", service);
         // CRITICAL - set the @Autowired(required=false) field so the
         // dual-write branch in buildResolutionResponse fires.

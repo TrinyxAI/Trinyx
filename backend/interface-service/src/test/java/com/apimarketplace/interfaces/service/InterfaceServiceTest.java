@@ -973,6 +973,175 @@ class InterfaceServiceTest {
         }
     }
 
+    /**
+     * The persisted-generation path. It is fed by two producers with different
+     * result shapes and has to store ONE shape, because the stored row is what
+     * the chat card reads back. The unified generation tool returns a single
+     * {@code file}; the legacy image tool returns {@code images[]}. Both are
+     * exercised here, so retiring the legacy producer later cannot silently
+     * take the generation path with it.
+     */
+    @Nested
+    @DisplayName("createOrUpdateImageGenerationInterface - normalizes both producer shapes")
+    class GenerationInterface {
+
+        /** A generation tool result: one asset under `file`, plus its billing context. */
+        private Map<String, Object> generationResult() {
+            return new HashMap<>(Map.of(
+                    "model", "seedance-2.0-fast",
+                    "kind", "video",
+                    "provider", "seedance",
+                    "file", Map.of("_type", "file", "path", "tenant-1/gen/clip.mp4",
+                            "name", "clip.mp4", "mimeType", "video/mp4", "size", 812_344),
+                    "billed_quantity", new java.math.BigDecimal("5"),
+                    "billed_unit", "seconds"));
+        }
+
+        /** A legacy image tool result: a list under `images`, plus `billing_model` and `prompt`. */
+        private Map<String, Object> legacyResult() {
+            return new HashMap<>(Map.of(
+                    "images", new ArrayList<>(List.of(
+                            Map.of("_type", "file", "path", "tenant-1/img/a.png", "persisted", true),
+                            Map.of("_type", "file", "path", "tenant-1/img/b.png", "persisted", true))),
+                    "count", 2,
+                    "provider", "openai",
+                    "billing_model", "gpt-image-1.5-medium",
+                    "prompt", "a paper boat"));
+        }
+
+        private void expectFreshRow() {
+            when(interfaceRepository.findImageGenerationInterface(anyString(), anyString(), anyString(), anyString()))
+                    .thenReturn(Optional.empty());
+            when(interfaceRepository.save(any())).thenAnswer(inv -> {
+                InterfaceEntity e = inv.getArgument(0);
+                e.setId(UUID.randomUUID());
+                return e;
+            });
+        }
+
+        @SuppressWarnings("unchecked")
+        private List<Map<String, Object>> assetsOf(InterfaceEntity entity) {
+            return (List<Map<String, Object>>) entity.getData().get("images");
+        }
+
+        @Test
+        @DisplayName("Stores the generation tool's single 'file' as the asset the card renders")
+        void shouldStoreGenerationFileAsAsset() {
+            expectFreshRow();
+
+            InterfaceEntity result = interfaceService.createOrUpdateImageGenerationInterface(
+                    TENANT, "conv-1", "msg-1", "agent-1", "a paper boat",
+                    generationResult(), "a paper boat drifting down a rain gutter", null);
+
+            // The card reads data.images[].path - a FileRef left under `file`
+            // would store an empty list and render the empty state.
+            assertThat(assetsOf(result)).hasSize(1);
+            assertThat(assetsOf(result).get(0))
+                    .containsEntry("path", "tenant-1/gen/clip.mp4")
+                    .containsEntry("mimeType", "video/mp4")
+                    .containsEntry("size", 812_344);
+            assertThat(result.getInterfaceType()).isEqualTo("image_generation");
+        }
+
+        @Test
+        @DisplayName("Keeps the generation tool's provenance, naming the model under both the new and the stored key")
+        void shouldStoreGenerationProvenance() {
+            expectFreshRow();
+
+            InterfaceEntity result = interfaceService.createOrUpdateImageGenerationInterface(
+                    TENANT, "conv-1", "msg-1", "agent-1", "clip", generationResult(), null, null);
+
+            assertThat(result.getData())
+                    .containsEntry("provider", "seedance")
+                    .containsEntry("kind", "video")
+                    .containsEntry("billed_quantity", new java.math.BigDecimal("5"))
+                    .containsEntry("billed_unit", "seconds")
+                    .containsEntry("model", "seedance-2.0-fast")
+                    // Same id under the key already-stored rows use, so the card
+                    // names the model without the card changing.
+                    .containsEntry("billing_model", "seedance-2.0-fast");
+        }
+
+        @Test
+        @DisplayName("Takes the prompt from the request when the result does not carry one")
+        void shouldTakePromptFromRequestForGenerationShape() {
+            expectFreshRow();
+
+            InterfaceEntity result = interfaceService.createOrUpdateImageGenerationInterface(
+                    TENANT, "conv-1", "msg-1", "agent-1", "clip",
+                    generationResult(), "a paper boat drifting down a rain gutter", null);
+
+            // A generation result reports what came back, never the prompt that
+            // was sent, so without the request field the card has nothing to show.
+            assertThat(result.getData())
+                    .containsEntry("prompt", "a paper boat drifting down a rain gutter");
+        }
+
+        @Test
+        @DisplayName("Still stores the legacy image tool's images[] and its billing_model")
+        void shouldStoreLegacyImagesShape() {
+            expectFreshRow();
+
+            InterfaceEntity result = interfaceService.createOrUpdateImageGenerationInterface(
+                    TENANT, "conv-1", "msg-1", "agent-1", "a paper boat", legacyResult(), null, null);
+
+            assertThat(assetsOf(result)).hasSize(2);
+            assertThat(assetsOf(result).get(0)).containsEntry("path", "tenant-1/img/a.png");
+            assertThat(result.getData())
+                    .containsEntry("provider", "openai")
+                    .containsEntry("billing_model", "gpt-image-1.5-medium")
+                    // The legacy payload has no `model`, so the stored key is
+                    // filled from `billing_model`: one canonical name either way.
+                    .containsEntry("model", "gpt-image-1.5-medium")
+                    .containsEntry("prompt", "a paper boat");
+        }
+
+        @Test
+        @DisplayName("A payload that carries its own prompt outranks the request field")
+        void shouldPreferThePayloadsOwnPrompt() {
+            expectFreshRow();
+
+            InterfaceEntity result = interfaceService.createOrUpdateImageGenerationInterface(
+                    TENANT, "conv-1", "msg-1", "agent-1", "a paper boat",
+                    legacyResult(), "truncated by the caller", null);
+
+            assertThat(result.getData()).containsEntry("prompt", "a paper boat");
+        }
+
+        @Test
+        @DisplayName("Appends the generation tool's file to a row that already holds assets")
+        void shouldAccumulateGenerationFileIntoExistingRow() {
+            InterfaceEntity existing = createSavedEntity();
+            existing.setInterfaceType("image_generation");
+            existing.setName("a paper boat");
+            existing.setData(new HashMap<>(Map.of("images", new ArrayList<>(List.of(
+                    new HashMap<>(Map.of("path", "tenant-1/img/first.png")))))));
+            when(interfaceRepository.findImageGenerationInterface(anyString(), anyString(), anyString(), anyString()))
+                    .thenReturn(Optional.of(existing));
+            when(interfaceRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+
+            InterfaceEntity result = interfaceService.createOrUpdateImageGenerationInterface(
+                    TENANT, "conv-1", "msg-1", "agent-1", "clip", generationResult(), null, null);
+
+            assertThat(assetsOf(result)).hasSize(2);
+            assertThat(assetsOf(result).get(1)).containsEntry("path", "tenant-1/gen/clip.mp4");
+            assertThat(result.getName()).isEqualTo("a paper boat (2)");
+        }
+
+        @Test
+        @DisplayName("A result carrying neither key stores an empty asset list instead of failing")
+        void shouldStoreNoAssetsWhenTheResultCarriesNone() {
+            expectFreshRow();
+
+            InterfaceEntity result = interfaceService.createOrUpdateImageGenerationInterface(
+                    TENANT, "conv-1", "msg-1", "agent-1", "nothing",
+                    new HashMap<>(Map.of("provider", "seedance")), null, null);
+
+            assertThat(assetsOf(result)).isEmpty();
+            assertThat(result.getData()).containsEntry("provider", "seedance");
+        }
+    }
+
     @Nested
     class Slide {
         @Test

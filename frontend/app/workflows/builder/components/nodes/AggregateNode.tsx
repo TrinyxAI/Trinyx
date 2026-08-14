@@ -15,6 +15,7 @@ import { useWorkflowMode } from '@/contexts/WorkflowModeContext';
 import { NodePlayButton, deriveNodeStatus } from '../NodePlayButton';
 import { useNodeExecutionStatus } from '../../contexts/StepByStepContext';
 import { NodeBottomBar } from './NodeBottomBar';
+import { showsNodeRunActions } from './shared';
 
 
 import { useWorkflowLayoutDirectionSafe } from '@/contexts/WorkflowLayoutDirectionContext';
@@ -48,6 +49,11 @@ export function AggregateNode({ data, selected }: NodeProps<BuilderNodeData>) {
       if (stepByStepStatus.isRunning) return 'running';
       if (stepByStepStatus.isFailed) return 'failed';
       if (stepByStepStatus.isSkipped) return 'skipped';
+      // The backend's PARTIAL_SUCCESS must survive: the node IS in completedSteps (that is what
+      // opens its rerun gate), so testing isCompleted first would discard it and paint a node
+      // carrying a failure in its own tally the same green as a clean one. Border only - the
+      // rerun button reads deriveNodeStatus, which deliberately still sees 'completed'.
+      if (data.status === 'partial_success') return 'partial_success';
       if (stepByStepStatus.isCompleted) return 'completed';
       if (stepByStepStatus.isReady) return 'ready';
       return 'pending';
@@ -101,7 +107,7 @@ export function AggregateNode({ data, selected }: NodeProps<BuilderNodeData>) {
 
       {/* Display aggregation info if available */}
       {data.itemsProcessed !== undefined && (
-        <div className="flex items-center gap-1 bg-white dark:bg-gray-700 rounded-full px-2 py-1 self-start mt-3">
+        <div className="flex items-center gap-1 bg-white dark:bg-gray-700 rounded-md px-2 py-1 self-start mt-3">
           <FoldVertical className="h-3 w-3 text-black dark:text-white" />
           <span className="text-[10px] font-medium text-black dark:text-white">
             {data.itemsProcessed} items
@@ -117,7 +123,7 @@ export function AggregateNode({ data, selected }: NodeProps<BuilderNodeData>) {
       />
 
       {/* Step-by-step play button for aggregate node in run mode */}
-      {isRunMode && stepByStepStatus.isStepByStepMode && (
+      {isRunMode && showsNodeRunActions(stepByStepStatus) && (
         <NodeBottomBar
           hover={{ isVisible: showActions, onHover: show }}
           borderColor={borderColor}

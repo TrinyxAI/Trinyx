@@ -8,6 +8,7 @@ import { AlertTriangle, Calendar, Clock, Coins, Globe, MessageSquareQuote, Workf
 import { formatCostCompact } from '@/lib/format-cost';
 import { RunApprovalsDialog } from '@/components/approvals/RunApprovalsDialog';
 import { WorkflowNodeIcons } from '@/components/WorkflowNodeIcons';
+import { nodeIconBoxRadiusClass } from '@/app/workflows/builder/components/nodes/shared';
 import { ShowcasePreview } from '@/components/marketplace/ShowcasePreview';
 import { VisibilityBadge } from '@/components/ui/VisibilityBadge';
 import { formatRelativeDate } from '@/lib/utils/dateFormatters';
@@ -114,7 +115,10 @@ export function WorkflowBoardCard({ card, isDragging, onDragStart }: WorkflowBoa
           {card.nodeIcons && card.nodeIcons.length > 0 ? (
             <WorkflowNodeIcons nodeIcons={card.nodeIcons} totalNodeCount={nodeCount} compact />
           ) : (
-            <div className="w-7 h-7 bg-theme-secondary rounded-full flex items-center justify-center">
+            // Stand-in for the icon row when the plan has no nodes yet. Same box
+            // and same rung as a WorkflowNodeIcons compact bubble, so the card
+            // does not change shape the moment the first icon lands.
+            <div className={`w-7 h-7 ${nodeIconBoxRadiusClass(28)} bg-theme-secondary flex items-center justify-center`}>
               <WorkflowIcon className="w-3.5 h-3.5 text-theme-primary" />
             </div>
           )}

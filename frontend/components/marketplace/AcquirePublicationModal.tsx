@@ -231,7 +231,7 @@ export default function AcquirePublicationModal({
           onClick={(e) => e.stopPropagation()}
         >
           <div className="text-center">
-            <div className="w-16 h-16 bg-theme-secondary rounded-full flex items-center justify-center mx-auto mb-5">
+            <div className="w-16 h-16 bg-theme-secondary rounded-2xl flex items-center justify-center mx-auto mb-5">
               <Download className="h-7 w-7 text-theme-primary animate-pulse" />
             </div>
             <h2 className="text-xl font-semibold text-theme-primary mb-2">
@@ -285,7 +285,7 @@ export default function AcquirePublicationModal({
           onClick={(e) => e.stopPropagation()}
         >
           <div className="text-center">
-            <div className="w-16 h-16 bg-theme-secondary rounded-full flex items-center justify-center mx-auto mb-5">
+            <div className="w-16 h-16 bg-theme-secondary rounded-2xl flex items-center justify-center mx-auto mb-5">
               <CheckCircle className="h-8 w-8 text-theme-primary" />
             </div>
             <h2 id="acquire-publication-success-title" className="text-xl font-semibold text-theme-primary mb-2">
@@ -319,7 +319,7 @@ export default function AcquirePublicationModal({
           onClick={(e) => e.stopPropagation()}
         >
           <div className="text-center">
-            <div className="w-16 h-16 bg-theme-secondary rounded-full flex items-center justify-center mx-auto mb-5">
+            <div className="w-16 h-16 bg-theme-secondary rounded-2xl flex items-center justify-center mx-auto mb-5">
               <AlertTriangle className="h-8 w-8 text-theme-primary" />
             </div>
             <h2 className="text-xl font-semibold text-theme-primary mb-2">
@@ -363,7 +363,7 @@ export default function AcquirePublicationModal({
           onClick={(e) => e.stopPropagation()}
         >
           <div className="text-center">
-            <div className="w-16 h-16 bg-theme-secondary rounded-full flex items-center justify-center mx-auto mb-5">
+            <div className="w-16 h-16 bg-theme-secondary rounded-2xl flex items-center justify-center mx-auto mb-5">
               <Server className="h-8 w-8 text-theme-primary" />
             </div>
             <h2 id="acquire-publication-ce-exclusive-title" className="text-xl font-semibold text-theme-primary mb-2">
@@ -401,7 +401,7 @@ export default function AcquirePublicationModal({
           onClick={(e) => e.stopPropagation()}
         >
           <div className="text-center">
-            <div className="w-16 h-16 bg-theme-secondary rounded-full flex items-center justify-center mx-auto mb-5">
+            <div className="w-16 h-16 bg-theme-secondary rounded-2xl flex items-center justify-center mx-auto mb-5">
               <Link2 className="h-8 w-8 text-theme-primary" />
             </div>
             <h2 className="text-xl font-semibold text-theme-primary mb-2">
@@ -437,7 +437,7 @@ export default function AcquirePublicationModal({
           onClick={(e) => e.stopPropagation()}
         >
           <div className="text-center">
-            <div className="w-16 h-16 bg-theme-secondary rounded-full flex items-center justify-center mx-auto mb-5">
+            <div className="w-16 h-16 bg-theme-secondary rounded-2xl flex items-center justify-center mx-auto mb-5">
               <Coins className="h-8 w-8 text-theme-primary" />
             </div>
             <h2 className="text-xl font-semibold text-theme-primary mb-2">
@@ -471,7 +471,7 @@ export default function AcquirePublicationModal({
       >
         {/* Header: icon + title + publisher */}
         <div className="flex items-start gap-3 mb-5">
-          <div className="w-10 h-10 rounded-full bg-theme-secondary flex items-center justify-center shrink-0">
+          <div className="w-10 h-10 rounded-xl bg-theme-secondary flex items-center justify-center shrink-0">
             <PackagePlus className="h-5 w-5 text-theme-primary" />
           </div>
           <div className="min-w-0">

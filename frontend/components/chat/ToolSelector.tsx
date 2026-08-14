@@ -217,10 +217,10 @@ export const ToolSelector: React.FC<ToolSelectorProps> = ({
                     <h4 className="font-semibold text-sm text-theme-primary">{tool.name}</h4>
                     <p className="text-sm mt-1.5 text-theme-secondary">{tool.description}</p>
                     <div className="flex items-center gap-2 mt-2">
-                      <span className="text-xs px-2 py-1 rounded-full text-theme-secondary bg-theme-primary/10 border border-theme-primary/20">
+                      <span className="text-xs px-2 py-1 rounded-md text-theme-secondary bg-theme-primary/10 border border-theme-primary/20">
                         {tool.category}
                       </span>
-                      <span className={`text-xs px-2 py-1 rounded-full font-medium ${
+                      <span className={`text-xs px-2 py-1 rounded-md font-medium ${
                         tool.isRemote 
                           ? 'text-slate-600 bg-slate-100 border border-slate-200 dark:text-slate-400 dark:bg-slate-800/50 dark:border-slate-700' 
                           : 'text-slate-700 bg-slate-50 border border-slate-200 dark:text-slate-300 dark:bg-slate-800/30 dark:border-slate-600'

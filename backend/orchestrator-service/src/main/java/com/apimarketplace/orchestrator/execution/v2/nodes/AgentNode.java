@@ -845,12 +845,13 @@ public class AgentNode extends BaseNode {
             requestPayload.put("maxTools", agentConfig.maxTools());
             // Scope the remote core tool SCHEMAS to the agent's modules - parity with the inline
             // executeAgentRemotely path (which sets request.enabledModules via buildAgentRequest)
-            // and with chat. Without this the async worker deserialized enabledModules=null and
-            // fell back to the UNFILTERED full core tool set, billing every schema on every
-            // iteration regardless of toolsConfig.mode. null toolsConfig ⇒ omit ⇒ unrestricted.
-            if (asyncToolsConfig != null) {
-                requestPayload.put("enabledModules", new ArrayList<>(resolveEnabledModules(asyncToolsConfig)));
-            }
+            // and with chat. ALWAYS sent, including for a null toolsConfig: omitting it made the
+            // async worker deserialize enabledModules=null and fall back to the UNFILTERED core
+            // tool set, which both billed every schema on every iteration AND handed an agent
+            // that opted into nothing the credit-spending image_generation / generation tools.
+            // resolveEnabledModules(null) is AgentModuleResolver.NO_CONFIG_MODULES, which
+            // deliberately excludes exactly those two.
+            requestPayload.put("enabledModules", new ArrayList<>(resolveEnabledModules(asyncToolsConfig)));
             requestPayload.put("executionTimeout", runtimeOverrides.executionTimeout());
             requestPayload.put("loopIdenticalStop", runtimeOverrides.loopIdenticalStop());
             requestPayload.put("loopConsecutiveStop", runtimeOverrides.loopConsecutiveStop());
@@ -1680,11 +1681,13 @@ public class AgentNode extends BaseNode {
             .tools(null) // agent-service auto-discovers tools
             // Forward the canonical enabled-module set so agent-service scopes the
             // auto-discovered core tool SCHEMAS exactly like the chat path (parity with
-            // AgentContextBuilder). toolsConfig == null ⇒ unrestricted: leave null so
-            // agent-service keeps the legacy "all core tools" fallback (matches chat's
-            // buildAgentDefault for an agent with no toolsConfig). Without this the remote
-            // loop ignored toolsConfig.mode and billed every core schema on every iteration.
-            .enabledModules(toolsConfig != null ? List.copyOf(enabledModules) : null)
+            // AgentContextBuilder). ALWAYS sent - this is the SAME `enabledModules` the
+            // system prompt above was built from, so the routing table and the tool list
+            // cannot disagree. Sending null for a null toolsConfig used to make
+            // agent-service fall back to the UNFILTERED core tool set, which handed an
+            // agent that opted into nothing the credit-spending image_generation and
+            // generation tools (AgentModuleResolver.NO_CONFIG_MODULES leaves them out).
+            .enabledModules(List.copyOf(enabledModules))
             .conversationHistory(conversationHistory)
             .tenantId(tenantId)
             .runId(runId)
@@ -2795,7 +2798,10 @@ public class AgentNode extends BaseNode {
                 // agent-service applies the per-model default as a lower-precedence fallback.
                 runtimeOverrides.reasoningEffort(),
                 // Canonical enabled-module set (toolsConfig-derived) - scopes core tool
-                // schemas in the remote loop / bridge (parity with chat). Null ⇒ unrestricted.
+                // schemas in the remote loop / bridge (parity with chat). Always non-null:
+                // buildAgentRequest resolves it even for a null toolsConfig, so it can never
+                // degrade into "every core tool" (which would re-grant the credit-spending
+                // image_generation / generation).
                 request.enabledModules()
             );
 

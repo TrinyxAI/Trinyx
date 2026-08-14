@@ -538,7 +538,7 @@ class CreditControllerTest {
             // 4-tuple total/sub/payg/delinquent) instead of getBalance().
             BigDecimal balance = new BigDecimal("150.75");
             when(creditService.getBalanceBreakdown(USER_ID)).thenReturn(
-                new CreditService.BalanceBreakdown(balance, balance, BigDecimal.ZERO, false));
+                new CreditService.BalanceBreakdown(balance, balance, BigDecimal.ZERO, false, false));
 
             ResponseEntity<Map<String, Object>> response = controller.getBalance(USER_ID);
 
@@ -548,10 +548,40 @@ class CreditControllerTest {
         }
 
         @Test
+        @DisplayName("carries whether the monthly bucket is workflow-scoped, under the name the client reads")
+        void shouldCarryTheWorkflowScopedFlagUnderItsWireName() {
+            // A surface warns "your monthly credits cannot pay for this" before
+            // a purchase, and it asks rather than deriving, because deriving it
+            // from the two balances is right for Free and wrong for every paid
+            // subscriber. The whole fix hangs off this key: rename it and the
+            // warning silently stops appearing for the accounts that need it,
+            // with every other test still green.
+            when(creditService.getBalanceBreakdown(USER_ID)).thenReturn(
+                new CreditService.BalanceBreakdown(
+                    new BigDecimal("800"), new BigDecimal("800"), BigDecimal.ZERO, false, true));
+
+            ResponseEntity<Map<String, Object>> response = controller.getBalance(USER_ID);
+
+            assertThat(response.getBody()).containsEntry("monthlyCreditsAreWorkflowOnly", true);
+        }
+
+        @Test
+        @DisplayName("reports the flag as FALSE for an account whose monthly credits pay for everything")
+        void shouldReportFalseForAPaidAccount() {
+            when(creditService.getBalanceBreakdown(USER_ID)).thenReturn(
+                new CreditService.BalanceBreakdown(
+                    new BigDecimal("800"), new BigDecimal("800"), BigDecimal.ZERO, false, false));
+
+            ResponseEntity<Map<String, Object>> response = controller.getBalance(USER_ID);
+
+            assertThat(response.getBody()).containsEntry("monthlyCreditsAreWorkflowOnly", false);
+        }
+
+        @Test
         @DisplayName("should return zero balance")
         void shouldReturnZeroBalance() {
             when(creditService.getBalanceBreakdown(USER_ID)).thenReturn(
-                new CreditService.BalanceBreakdown(BigDecimal.ZERO, BigDecimal.ZERO, BigDecimal.ZERO, false));
+                new CreditService.BalanceBreakdown(BigDecimal.ZERO, BigDecimal.ZERO, BigDecimal.ZERO, false, false));
 
             ResponseEntity<Map<String, Object>> response = controller.getBalance(USER_ID);
 
@@ -1165,7 +1195,7 @@ class CreditControllerTest {
             // Step 2: check balance - should match the remaining credits returned by consume.
             // V250: controller now reads getBalanceBreakdown (4-tuple total/sub/payg/delinquent).
             when(creditService.getBalanceBreakdown(USER_ID)).thenReturn(
-                new CreditService.BalanceBreakdown(balanceAfterConsume, balanceAfterConsume, BigDecimal.ZERO, false));
+                new CreditService.BalanceBreakdown(balanceAfterConsume, balanceAfterConsume, BigDecimal.ZERO, false, false));
 
             ResponseEntity<Map<String, Object>> balanceResponse = controller.getBalance(USER_ID);
 

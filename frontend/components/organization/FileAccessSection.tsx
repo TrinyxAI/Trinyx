@@ -124,7 +124,7 @@ export default function FileAccessSection(props: FileAccessSectionProps) {
           <span className="text-xs text-theme-secondary">({total})</span>
         </div>
         {restrictedCount > 0 ? (
-          <span className="text-xs px-2 py-0.5 bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-400 rounded-full">
+          <span className="text-xs px-2 py-0.5 bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-400 rounded-md">
             {props.restrictionCountLabel(restrictedCount)}
           </span>
         ) : (

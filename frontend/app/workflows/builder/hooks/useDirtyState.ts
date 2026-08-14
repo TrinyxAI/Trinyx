@@ -3,6 +3,8 @@
 import * as React from 'react';
 import type { Node, Edge } from 'reactflow';
 
+import { computeGraphSignature } from './graphSignature';
+
 interface UseDirtyStateOptions {
   nodes: Node[];
   edges: Edge[];
@@ -15,41 +17,6 @@ interface UseDirtyStateOptions {
 interface UseDirtyStateReturn {
   isDirty: boolean;
   resetDirtyState: (nodes: Node[], edges: Edge[]) => void;
-}
-
-/**
- * Volatile/runtime keys in node data that should NOT trigger dirty state.
- * These change without user edits (streaming updates, mode transitions, UI state).
- */
-const VOLATILE_DATA_KEYS = new Set([
-  // Run-mode status (set by streaming / useRunStateProcessing)
-  'status', 'statusCounts', 'metrics',
-  // Loop iteration counters (set during execution)
-  'currentIteration', 'maxIterations', 'totalIterations', 'completedItems',
-  // Decision evaluation state
-  'selectedBranch',
-  // UI runtime state (set by usePreparedGraph)
-  'highlightState', 'selectedLoopChildId', 'isPreviewMode', 'validationIssues',
-  // Callback functions (already ignored by JSON.stringify, listed for clarity)
-  'onDeleteNode', 'onDuplicateNode', 'onTogglePreview', 'onNodeUpdate',
-  'onExtractLoopChild', 'onNoteUpdate', 'onLoopClick', 'onLoopChildClick',
-  'onCreateNode', 'onConnect',
-]);
-
-/** Strip volatile keys from a data object for stable hashing. */
-function stripVolatile(data: Record<string, any> | undefined): Record<string, any> {
-  if (!data) return {};
-  const clean: Record<string, any> = {};
-  for (const key of Object.keys(data)) {
-    if (VOLATILE_DATA_KEYS.has(key)) continue;
-    // For loopChildren, recursively strip volatile keys from each child
-    if (key === 'loopChildren' && Array.isArray(data[key])) {
-      clean[key] = data[key].map((child: Record<string, any>) => stripVolatile(child));
-    } else {
-      clean[key] = data[key];
-    }
-  }
-  return clean;
 }
 
 /**
@@ -72,29 +39,14 @@ export function useDirtyState({
   const settleCountRef = React.useRef(0);
   const isHandlingRefreshRef = React.useRef(false);
 
-  // Compute a simple hash of workflow state for dirty tracking.
-  // Volatile runtime properties (status, metrics, callbacks, etc.)
-  // are stripped so only real user changes trigger dirty state.
-  const computeStateHash = React.useCallback((nodesList: Node[], edgesList: Edge[]) => {
-    const nodesData = nodesList.map(n => ({
-      id: n.id,
-      type: n.type,
-      position: n.position,
-      data: stripVolatile(n.data as Record<string, any>),
-    }));
-    const edgesData = edgesList.map(e => ({
-      id: e.id,
-      source: e.source,
-      target: e.target,
-      sourceHandle: e.sourceHandle,
-      targetHandle: e.targetHandle,
-      // Loop-back settings live on the edge. Without them, editing a back-edge's condition or
-      // iteration cap left the workflow "clean" and the change was lost on navigate-away.
-      backEdgeCondition: (e.data as Record<string, unknown> | undefined)?.backEdgeCondition,
-      backEdgeMaxIterations: (e.data as Record<string, unknown> | undefined)?.backEdgeMaxIterations,
-    }));
-    return JSON.stringify({ nodes: nodesData, edges: edgesData });
-  }, []);
+  // Volatile runtime properties (status, metrics, callbacks, measured dimensions,
+  // selection) are stripped so only real user changes trigger dirty state. The
+  // signature lives in ./graphSignature because useHistory needs the same answer
+  // to "is this a user edit?" - see the note there.
+  const computeStateHash = React.useCallback(
+    (nodesList: Node[], edgesList: Edge[]) => computeGraphSignature(nodesList, edgesList),
+    []
+  );
 
   // Reset settle counter when workflowLoaded changes
   React.useEffect(() => {

@@ -211,6 +211,25 @@ public final class DagState {
     }
 
     /**
+     * Reopen a specific epoch that a cycle close already closed and pruned.
+     *
+     * <p>Unlike {@link #openEpoch(int)} this can move {@code currentEpoch} BACKWARD and
+     * leaves {@code fireCount} untouched: a rerun is not a trigger fire. Used by step rerun
+     * when the run's cycle already closed, where {@code currentEpoch} points at the dormant
+     * epoch {@link #prepareNextCycle} staged for the NEXT fire (it holds no outputs) while
+     * every stored output belongs to the epoch being reopened.
+     *
+     * @param epoch the epoch to make current and active again
+     */
+    public DagState reopenEpoch(int epoch) {
+        Map<Integer, EpochState> newEpochs = new HashMap<>(epochs);
+        newEpochs.putIfAbsent(epoch, EpochState.fresh());
+        Set<Integer> newActive = new HashSet<>(activeEpochs);
+        newActive.add(epoch);
+        return new DagState(epoch, currentSpawn, fireCount, newEpochs, newActive);
+    }
+
+    /**
      * Get the EpochStates for all active (non-closed) epochs.
      * JsonIgnore: computed helper - must not be serialized to avoid
      * Jackson deserialization crash on nested EpochState properties.

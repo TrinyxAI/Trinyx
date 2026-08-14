@@ -12,7 +12,7 @@ import { useOrgScopedReset } from '@/lib/hooks/useOrgScopedReset';
  *
  * - For agent conversations (agentId provided) the backing store is AgentEntity columns:
  *   temperature, systemPrompt, maxTokens, maxIterations, executionTimeout,
- *   toolsConfig.webSearch, and the V100 guard-override columns
+ *   toolsConfig.webSearch / .generation, and the V100 guard-override columns
  *   (maxPerResourcePerTurn, loopIdenticalStop, loopConsecutiveStop).
  *   `maxPerResourcePerTurn` is applied uniformly across all tracked resource types
  *   (agent / skill / sub_agent / interface / workflow / table).
@@ -24,22 +24,15 @@ import { useOrgScopedReset } from '@/lib/hooks/useOrgScopedReset';
  *   and feeds the resolved values into AgentLoopContext + tool-module credentials.
  */
 /**
- * Image-generation tool config block (opt-IN).
- * Mirrored on AgentEntity.toolsConfig.imageGeneration AND on
- * conversation chat_config. Backend resolution lives in
- * {@code AgentModuleResolver.isImageGenerationEnabled} which accepts both
- * {@code true} and {@code { enabled: true, ... }} shapes - the frontend
- * always emits the object shape for forward-compat with future fields
- * (per-conversation budget cap, default size, etc).
+ * Grant for the unified generation tool. Mirrors the backend's opt-in shape,
+ * which tolerates both {@code true} and {@code { enabled: true, ... }}; the
+ * frontend always emits the object form so a future default (preferred model,
+ * per-conversation cap) can be added without changing the wire type.
  */
-export interface ImageGenerationConfig {
+export interface GenerationConfig {
   enabled: boolean;
-  /** Default provider when the agent doesn't specify (e.g. 'openai' / 'google'). */
-  provider?: string;
-  /** Default model id (e.g. 'gpt-image-1.5' / 'gemini-2.5-flash-image'). */
+  /** Default model id when the agent does not name one (e.g. 'seedance-2.0-fast'). */
   model?: string;
-  /** Default quality tier for OpenAI models: 'low' | 'medium' | 'high'. */
-  quality?: string;
 }
 
 export interface ChatConfig {
@@ -53,8 +46,16 @@ export interface ChatConfig {
   /** 'all' | 'none' | 'custom' */
   toolsMode?: string;
   webSearch?: boolean;
-  /** Image generation toggle (opt-IN - default OFF). */
-  imageGeneration?: ImageGenerationConfig;
+  /**
+   * Unified generation toggle: image, video, audio, voice and music through one
+   * tool (opt-IN, default OFF).
+   *
+   * <p>The retired `imageGeneration` grant is never a fallback for it. That
+   * grant was given for images; a per-second video model spends an order of
+   * magnitude more per call, so inheriting it would silently widen what a chat
+   * is allowed to spend.
+   */
+  generation?: GenerationConfig;
   /**
    * Per-conversation blanket grant: run sensitive tool actions (install / execute /
    * agent / catalog) without showing the authorization card. Opt-IN - default OFF.
@@ -175,9 +176,9 @@ export function buildDraftChatConfigBody(
     'inactivityTimeout',
     'toolsMode',
     'webSearch',
-    // imageGeneration is editable as a workspace default AND accepted by the conversation
-    // patch - seed it too so an image-gen default actually reaches new conversations.
-    'imageGeneration',
+    // The unified generation grant is editable as a workspace default AND accepted
+    // by the conversation patch - seed it so the default reaches new conversations.
+    'generation',
     'autoAuthorizeTools',
     'defaultSkillIds',
   ];
@@ -322,26 +323,47 @@ export function stripUnsetCompactionModelPair(config: ChatConfig): ChatConfig {
 }
 
 /**
- * Reads {@code imageGeneration} from a {@code toolsConfig} JSONB blob.
- * Tolerates both shapes (boolean true OR {enabled, ...}); returns
- * {@code undefined} when absent so the UI falls back to the default
- * (disabled).
+ * Reads one opt-IN tool grant from a {@code toolsConfig} / {@code chatConfig}
+ * blob. Both grants share the wire contract the backend accepts
+ * ({@code AgentModuleResolver.isOptInEnabled}): a plain boolean OR an object
+ * carrying {@code enabled} plus optional defaults. Returns {@code undefined}
+ * when the key is absent so the UI falls back to the default (disabled), and
+ * the extra fields verbatim so each caller can type its own.
  */
-function extractImageGeneration(source: Record<string, unknown> | null | undefined): ImageGenerationConfig | undefined {
+function extractOptInGrant(
+  source: Record<string, unknown> | null | undefined,
+  key: string,
+): { enabled: boolean; fields: Record<string, unknown> } | undefined {
   if (!source) return undefined;
-  const raw = source.imageGeneration;
+  const raw = source[key];
   if (raw === undefined || raw === null) return undefined;
-  if (typeof raw === 'boolean') return { enabled: raw };
+  if (typeof raw === 'boolean') return { enabled: raw, fields: {} };
   if (typeof raw === 'object') {
     const obj = raw as Record<string, unknown>;
-    return {
-      enabled: obj.enabled === true,
-      provider: typeof obj.provider === 'string' ? (obj.provider as string) : undefined,
-      model: typeof obj.model === 'string' ? (obj.model as string) : undefined,
-      quality: typeof obj.quality === 'string' ? (obj.quality as string) : undefined,
-    };
+    return { enabled: obj.enabled === true, fields: obj };
   }
   return undefined;
+}
+
+/** Optional string field of a grant object; anything else reads as unset. */
+function optionalString(fields: Record<string, unknown>, key: string): string | undefined {
+  const v = fields[key];
+  return typeof v === 'string' ? v : undefined;
+}
+
+/**
+ * Reads {@code generation} (the unified image/video/audio/voice/music grant)
+ * from a {@code toolsConfig} / {@code chatConfig} blob. Same tolerated shapes
+ * as the other opt-in grants, read from its OWN key: the retired image grant
+ * never widens into video, which costs an order of magnitude more per call.
+ */
+function extractGeneration(source: Record<string, unknown> | null | undefined): GenerationConfig | undefined {
+  const grant = extractOptInGrant(source, 'generation');
+  if (!grant) return undefined;
+  return {
+    enabled: grant.enabled,
+    model: optionalString(grant.fields, 'model'),
+  };
 }
 
 export function configFromAgent(agent: Agent): ChatConfig {
@@ -364,7 +386,7 @@ export function configFromAgent(agent: Agent): ChatConfig {
     inactivityTimeout: typeof agent.inactivityTimeout === 'number' ? agent.inactivityTimeout : undefined,
     toolsMode: typeof toolsCfg.mode === 'string' ? (toolsCfg.mode as string) : undefined,
     webSearch: toolsCfg.webSearch === false ? false : true,
-    imageGeneration: extractImageGeneration(toolsCfg),
+    generation: extractGeneration(toolsCfg),
     compactionEnabled: typeof agent.compactionEnabled === 'boolean' ? agent.compactionEnabled : undefined,
     compactionAfterTurns: typeof agent.compactionAfterTurns === 'number' ? agent.compactionAfterTurns : undefined,
     ...extractTurnLimits(agent as unknown as Record<string, unknown>),
@@ -384,7 +406,7 @@ export function configFromConversation(raw: { chatConfig?: Record<string, unknow
     toolsMode: typeof cfg.toolsMode === 'string' ? (cfg.toolsMode as string) : undefined,
     webSearch: cfg.webSearch === false ? false : cfg.webSearch === true ? true : undefined,
     autoAuthorizeTools: cfg.autoAuthorizeTools === true ? true : cfg.autoAuthorizeTools === false ? false : undefined,
-    imageGeneration: extractImageGeneration(cfg),
+    generation: extractGeneration(cfg),
     defaultSkillIds: Array.isArray(cfg.defaultSkillIds)
       ? cfg.defaultSkillIds.filter((id): id is string => typeof id === 'string')
       : undefined,
@@ -419,13 +441,20 @@ export function buildAgentPatch(
   if (partial.executionTimeout !== undefined) patch.executionTimeout = partial.executionTimeout;
   if (partial.inactivityTimeout !== undefined) patch.inactivityTimeout = partial.inactivityTimeout;
 
-  if (partial.toolsMode !== undefined || partial.webSearch !== undefined || partial.imageGeneration !== undefined) {
+  if (
+    partial.toolsMode !== undefined
+    || partial.webSearch !== undefined
+    || partial.generation !== undefined
+  ) {
     const existingTools = (current.toolsConfig ?? {}) as Record<string, unknown>;
     patch.toolsConfig = {
       ...existingTools,
       ...(partial.toolsMode !== undefined ? { mode: partial.toolsMode } : {}),
       ...(partial.webSearch !== undefined ? { webSearch: partial.webSearch } : {}),
-      ...(partial.imageGeneration !== undefined ? { imageGeneration: partial.imageGeneration } : {}),
+      // Emitted as the object shape ({enabled:false} on revoke) so turning the
+      // grant OFF survives the backend's MERGE of toolsConfig - an omitted key
+      // would keep the stored grant.
+      ...(partial.generation !== undefined ? { generation: partial.generation } : {}),
     };
   }
 
@@ -476,7 +505,7 @@ export function buildConversationPatch(
     'inactivityTimeout',
     'toolsMode',
     'webSearch',
-    'imageGeneration',
+    'generation',
     'autoAuthorizeTools',
     'defaultSkillIds',
   ];

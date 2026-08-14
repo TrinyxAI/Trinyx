@@ -53,16 +53,31 @@ interface NavIconButtonProps {
   isActive?: boolean;
 }
 
-const NavIconButton = memo(function NavIconButton({ icon: Icon, title, onClick, isActive = false }: NavIconButtonProps) {
+/**
+ * One entry of the collapsed rail. It is the SAME navigation entry as the row
+ * the expanded panel shows (ConversationSidebar: Home, Marketplace, Board,
+ * Agents, ...), so it gets that row's icon treatment: `text-theme-secondary` at
+ * rest, `text-theme-primary` on hover and while it is the active view, over a
+ * discreet `bg-surface-hover`.
+ *
+ * It used to be a `ghostGray` Button, whose `[&_svg]:!text-current` forced the
+ * icon to the button's own `--text-primary` (full black in light theme) and
+ * whose hover INVERTED the tile (dark background, light icon). So the same
+ * entry read as two different things depending on whether the panel was open,
+ * which is the mismatch this fixes. Size is unchanged: a 32px box, a 16px icon.
+ */
+export const NavIconButton = memo(function NavIconButton({ icon: Icon, title, onClick, isActive = false }: NavIconButtonProps) {
   return (
     <Button
       onClick={onClick}
-      variant="ghostGray"
+      // `ghost`, not `ghostGray`: the gray variant pins every nested svg to the
+      // button's colour, which would win over the icon's own classes below.
+      variant="ghost"
       size="icon"
-      className={`w-8 h-8 ${isActive ? 'bg-surface-hover' : ''}`}
+      className={`group w-8 h-8 hover:bg-surface-hover hover:text-theme-primary ${isActive ? 'bg-surface-hover' : ''}`}
       title={title}
     >
-      <Icon className="w-4 h-4" />
+      <Icon className="w-4 h-4 text-theme-secondary transition-colors group-hover:text-theme-primary group-[.bg-surface-hover]:text-theme-primary" />
     </Button>
   );
 });
@@ -1136,7 +1151,7 @@ export const UserSection = memo(function UserSection({
                         <span
                           role="link"
                           onClick={(e) => { e.stopPropagation(); onNavigate('/app/settings/pricing'); }}
-                          className="text-xs px-2 py-0.5 rounded-full bg-black dark:bg-white text-white dark:text-black hover:bg-black/90 dark:hover:bg-white/90 font-medium transition-all cursor-pointer"
+                          className="text-xs px-2 py-0.5 rounded-md bg-black dark:bg-white text-white dark:text-black hover:bg-black/90 dark:hover:bg-white/90 font-medium transition-all cursor-pointer"
                         >
                           {t('upgrade')}
                         </span>
@@ -1187,7 +1202,7 @@ const SignInSection = memo(function SignInSection({ sidebarCollapsed, onLogin }:
         <Button
           onClick={onLogin}
           variant="contrast"
-          className="w-8 h-8 p-0 rounded-full flex items-center justify-center shadow-none hover:shadow-none"
+          className="w-8 h-8 p-0 rounded-xl flex items-center justify-center shadow-none hover:shadow-none"
           title={t('signIn')}
         >
           <User className="w-4 h-4" />

@@ -63,6 +63,15 @@ public class ApiToolEntity {
     @Column("execution_mode")
     private String executionMode;
 
+    /**
+     * Declarative generation descriptor (JSONB). NULL for an ordinary endpoint.
+     * Non-null means this endpoint backs one or more generation models reachable
+     * through the unified {@code generation} tool and the {@code core:generate}
+     * node. See V428 and scripts/api-migrations/SCHEMA.md.
+     */
+    @Column("generation_spec")
+    private JsonbString generationSpec;
+
     /** Pagination config as JSONB. See V83__extend_custom_api_fields.sql. */
     @Column("pagination")
     private JsonbString pagination;
@@ -243,6 +252,29 @@ public class ApiToolEntity {
 
     public void setExecutionMode(String executionMode) {
         this.executionMode = executionMode;
+    }
+
+    public String getGenerationSpec() {
+        return generationSpec == null ? null : generationSpec.value();
+    }
+
+    public void setGenerationSpec(String generationSpec) {
+        this.generationSpec = JsonbString.of(generationSpec);
+    }
+
+    /**
+     * Whether this endpoint produces a generated asset, which is what makes it
+     * expensive to give away.
+     *
+     * <p>Several billing guards turn on this question, and they must all answer
+     * it the same way: an endpoint that one guard treats as a generation and
+     * another does not is a hole in whichever one is looser. Carrying a
+     * descriptor IS the definition, so the definition lives here rather than
+     * being restated at each guard.
+     */
+    public boolean isGeneration() {
+        String spec = getGenerationSpec();
+        return spec != null && !spec.isBlank();
     }
 
     public String getPagination() {

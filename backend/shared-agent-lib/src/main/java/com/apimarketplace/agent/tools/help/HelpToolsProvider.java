@@ -67,7 +67,7 @@ public class HelpToolsProvider implements ToolsProvider {
     private AgentToolDefinition buildListAllToolsTool() {
         List<ToolParameter> params = List.of(
             enumParam("category", "Filter by category (optional)", false,
-                List.of("search", "workflow", "agent", "interface", "datasource", "visualization", "catalog", "help", "utility", "application", "websearch", "imagegeneration"))
+                List.of("search", "workflow", "agent", "interface", "datasource", "visualization", "catalog", "help", "utility", "application", "websearch", "generation"))
         );
 
         return AgentToolDefinition.builder()
@@ -107,7 +107,7 @@ public class HelpToolsProvider implements ToolsProvider {
                 - utility: File operations and data transformation
                 - application: Browse and acquire marketplace applications
                 - websearch: Web search and page content extraction
-                - imagegeneration: Generate images from text prompts
+                - generation: Produce an asset of any kind (image, video, audio, voice, music) from a prompt
                 """)
             .requiresAuth(false)
             .tags(List.of("discovery", "documentation"))

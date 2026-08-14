@@ -31,12 +31,13 @@ import java.util.List;
  * Statements are also type-safe: org-id columns are a UUID/VARCHAR mix across schemas, so
  * predicates cast {@code organization_id::text = ?}; the one UUID column uses {@code = ?::uuid}.
  *
- * <p>⚠️ <b>Storage:</b> deletes the {@code storage.storage} rows but NOT the underlying
- * S3/MinIO binary objects (they become orphans - inherited debt from the account-purge
- * path; a binary sweep is a follow-up).
+ * <p><b>Storage:</b> deletes the underlying S3/MinIO objects as well as the
+ * {@code storage.storage} rows. The objects go FIRST, because their keys live only in those
+ * rows. Object deletion is best-effort per key and never aborts the purge, but the failure
+ * count is logged: an erasure we could not complete has to be visible, not assumed.
  *
  * <p>⚠️ <b>Custom APIs:</b> {@code catalog.apis} (user-created custom APIs carry an
- * {@code organization_id}; the 600+ global third-party APIs are {@code organization_id
+ * {@code organization_id}; the 700+ global third-party APIs are {@code organization_id
  * NULL}) is intentionally NOT purged here - same as the account-purge path - because that
  * table is the global catalog and a mistyped predicate would be catastrophic. The org's
  * custom APIs become invisible orphans (org tombstoned). Tracked as a follow-up.
@@ -54,6 +55,13 @@ public class WorkspaceDataPurger {
 
     @PersistenceContext
     private EntityManager em;
+
+    /** Removes the stored bytes; the rows below only reference them. */
+    private final com.apimarketplace.storage.client.StorageClient storageClient;
+
+    public WorkspaceDataPurger(com.apimarketplace.storage.client.StorageClient storageClient) {
+        this.storageClient = storageClient;
+    }
 
     /**
      * Every {@code schema.table} this purger deletes org-scoped rows from. Kept in sync with
@@ -93,6 +101,61 @@ public class WorkspaceDataPurger {
             "auth.org_member_quota_limit",
             "auth.credentials"
     );
+
+    /**
+     * Removes the stored objects themselves (S3/MinIO), not just the rows that reference them.
+     *
+     * <p>Best-effort per object and never fatal: a bucket hiccup must not abort a purge that has
+     * already destroyed rows in a dozen schemas, and every object we fail to delete is
+     * unreachable anyway once its row is gone. The count is logged both ways so an incomplete
+     * erasure is visible rather than assumed - "we deleted your files" should be something the
+     * logs can back up.
+     *
+     * <p>Keys are read before the rows are deleted because they exist nowhere else.
+     */
+    private void deleteStorageObjects(String orgId) {
+        List<Object[]> objects;
+        try {
+            @SuppressWarnings("unchecked")
+            List<Object[]> rows = em.createNativeQuery(
+                    "SELECT s3_key, tenant_id FROM storage.storage "
+                            + "WHERE organization_id::text = ?1 AND s3_key IS NOT NULL")
+                    .setParameter(1, orgId)
+                    .getResultList();
+            objects = rows;
+        } catch (Exception e) {
+            logger.warn("Workspace purge: could not enumerate storage objects for org {}: {}", orgId, e.getMessage());
+            return;
+        }
+        if (objects.isEmpty()) {
+            return;
+        }
+        int deleted = 0;
+        int failed = 0;
+        for (Object[] row : objects) {
+            String key = row[0] == null ? null : row[0].toString();
+            String tenantId = row[1] == null ? null : row[1].toString();
+            if (key == null || key.isBlank()) continue;
+            try {
+                // Owner tenant, not the caller: internal storage refuses a key whose prefix does
+                // not match the X-User-ID it is given.
+                if (storageClient.delete(tenantId, key)) {
+                    deleted++;
+                } else {
+                    failed++;
+                }
+            } catch (Exception e) {
+                failed++;
+                logger.warn("Workspace purge: object delete failed for key {}: {}", key, e.getMessage());
+            }
+        }
+        if (failed > 0) {
+            logger.warn("Workspace purge: org {} - {} stored objects deleted, {} FAILED and remain in the bucket",
+                    orgId, deleted, failed);
+        } else {
+            logger.info("Workspace purge: org {} - {} stored objects deleted from the bucket", orgId, deleted);
+        }
+    }
 
     /**
      * Deletes all operational org-scoped rows for {@code orgId}. Idempotent. Does NOT touch
@@ -144,7 +207,13 @@ public class WorkspaceDataPurger {
         nativeExec("DELETE FROM trigger.webhook_tokens WHERE organization_id::text = ?", orgId);
         nativeExec("DELETE FROM trigger.datasource_trigger_subscriptions WHERE organization_id::text = ?", orgId);
 
-        // storage schema - S3 objects become orphans (inaccessible without DB ref)
+        // storage schema - the OBJECTS first, then the rows that point at them.
+        // Dropping only the rows left every uploaded byte sitting in the bucket forever:
+        // unreachable through the app, but neither deleted nor billed to anyone, and still very
+        // much the customer's data on our disks after we told them it was erased. The keys only
+        // exist in these rows, so they have to be read before the DELETE - afterwards there is
+        // nothing left to enumerate.
+        deleteStorageObjects(orgId);
         int storageRows = nativeExec("DELETE FROM storage.storage WHERE organization_id::text = ?", orgId);
         if (storageRows > 0) {
             logger.info("Workspace purge: deleted {} storage rows for org {}", storageRows, orgId);

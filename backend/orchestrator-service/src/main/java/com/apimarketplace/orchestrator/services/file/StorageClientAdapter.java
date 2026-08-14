@@ -78,6 +78,16 @@ public class StorageClientAdapter implements FileStorageService {
     }
 
     @Override
+    public int adoptRunContext(String tenantId, java.util.Collection<String> fileIds,
+                               String workflowId, String runId, String stepAlias,
+                               int epoch, int spawn, Integer itemIndex) {
+        // organizationId null: same as upload(), the StorageClient falls back to the
+        // request-context forwarder so the row stays in the caller's workspace.
+        return storageClient.adoptRunContext(tenantId, /* organizationId */ null, fileIds,
+                workflowId, runId, stepAlias, epoch, spawn, itemIndex);
+    }
+
+    @Override
     public String generateDownloadUrl(String key, Duration duration) {
         int minutes = (int) duration.toMinutes();
         String url = storageClient.generateDownloadUrl(null, key, minutes);

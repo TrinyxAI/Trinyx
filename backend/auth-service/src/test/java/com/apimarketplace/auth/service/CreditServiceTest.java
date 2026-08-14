@@ -2169,69 +2169,6 @@ class CreditServiceTest {
         }
     }
 
-    // ===== consumeForImageGenerationByok =====
-
-    @Nested
-    @DisplayName("consumeForImageGenerationByok (BYOK trace)")
-    class ConsumeForImageGenerationByok {
-
-        private static final String IG_SOURCE_ID = "image-generation:CHAT:s:t:0";
-        private static final String IG_PROVIDER = "openai";
-        private static final String IG_MODEL = "gpt-image-1.5-medium";
-
-        @Test
-        @DisplayName("BYOK: writes 0-amount ledger row with provider/model/imageCount, balance never deducted")
-        void byokWritesZeroTraceRow() {
-            mockActiveSubscription(INITIAL_BALANCE);
-
-            CreditConsumeResult result = creditService.consumeForImageGenerationByok(
-                    USER_ID, IG_SOURCE_ID, IG_PROVIDER, IG_MODEL, 3);
-
-            assertThat(result.success()).isTrue();
-            assertThat(result.creditsUsed()).isEqualByComparingTo(BigDecimal.ZERO);
-            assertThat(result.remainingCredits()).isEqualByComparingTo(INITIAL_BALANCE);
-
-            verify(ledgerRepository).save(ledgerCaptor.capture());
-            CreditLedgerEntry entry = ledgerCaptor.getValue();
-            assertThat(entry.getSourceType()).isEqualTo("IMAGE_GENERATION_BYOK");
-            assertThat(entry.getSourceId()).isEqualTo(IG_SOURCE_ID);
-            assertThat(entry.getProvider()).isEqualTo(IG_PROVIDER);
-            assertThat(entry.getModel()).isEqualTo(IG_MODEL);
-            assertThat(entry.getPromptTokens()).isEqualTo(3);
-            assertThat(entry.getAmount()).isEqualByComparingTo(BigDecimal.ZERO);
-            // BYOK never touches subscription
-            verify(subscriptionRepository, never()).findActiveByUserIdForUpdate(anyLong());
-            verify(subscriptionRepository, never()).save(any());
-            // pricingService never queried (BYOK path doesn't need pricing)
-            verifyNoInteractions(pricingService);
-        }
-
-        @Test
-        @DisplayName("zero images returned → no trace row written (consistent with platform path)")
-        void zeroImagesNoRow() {
-            CreditConsumeResult result = creditService.consumeForImageGenerationByok(
-                    USER_ID, IG_SOURCE_ID, IG_PROVIDER, IG_MODEL, 0);
-
-            assertThat(result.success()).isTrue();
-            verify(ledgerRepository, never()).save(any());
-        }
-
-        @Test
-        @DisplayName("idempotent: duplicate sourceId returns success without writing")
-        void idempotentDuplicate() {
-            when(ledgerRepository.existsBySourceId(IG_SOURCE_ID)).thenReturn(true);
-            when(subscriptionRepository.findActiveByUserId(USER_ID))
-                    .thenReturn(Optional.of(createSubscription(INITIAL_BALANCE)));
-
-            CreditConsumeResult result = creditService.consumeForImageGenerationByok(
-                    USER_ID, IG_SOURCE_ID, IG_PROVIDER, IG_MODEL, 1);
-
-            assertThat(result.success()).isTrue();
-            assertThat(result.creditsUsed()).isEqualByComparingTo(BigDecimal.ZERO);
-            verify(ledgerRepository, never()).save(any());
-        }
-    }
-
     // ===== truncateDescription edge cases =====
 
     @Nested

@@ -256,8 +256,8 @@ class ModelCatalogServiceCategoryOverlayTest {
     }
 
     @Test
-    @DisplayName("REGRESSION (user-reported): image_generation tab MUST NOT show chat models - only mode='image' rows leak through")
-    void imageGenerationTabFiltersOutChatModels() {
+    @DisplayName("REGRESSION (user-reported): the image_generation category MUST NOT admit chat models - only mode='image' rows pass")
+    void imageGenerationCategoryFiltersOutChatModels() {
         // 2 chat rows + 1 image row in the override list. The image_generation
         // tab must return ONLY the image row - even when the chat rows have
         // no sidecar entry for image_generation (which would otherwise let
@@ -298,7 +298,7 @@ class ModelCatalogServiceCategoryOverlayTest {
 
         Map<String, Object> result = service.getModelsForCategory("image_generation");
 
-        // image_generation tab returns ONLY the image-gen model. Empty
+        // image_generation returns ONLY the image-gen model. Empty
         // provider shells (anthropic with no image-gen rows) are PRESERVED
         // on purpose - they're needed by the downstream injection loop so
         // DB-only image-gen rows can land in their YAML provider bucket.
@@ -314,8 +314,8 @@ class ModelCatalogServiceCategoryOverlayTest {
     }
 
     @Test
-    @DisplayName("REGRESSION (user-reported 2026-06-16): admin Chat/Agent tab - getEffectiveModelList(null) - MUST NOT show image-gen models; mode='image' rows belong only to the Image Generation tab")
-    void chatAgentAdminTabExcludesImageGenModels() {
+    @DisplayName("REGRESSION (user-reported 2026-06-16): admin Chat/Agent tab - getEffectiveModelList(null) - MUST NOT show image-gen models; mode='image' rows are admitted only by an image_generation category, which no screen reads")
+    void chatAgentAdminViewExcludesImageGenModels() {
         // The Chat/Agent tab reads the legacy GLOBAL view (category=null) so its
         // drag/toggle writes keep landing on the global ranking/enabled columns.
         // Pre-fix, the null path skipped the mode-filter entirely, so V157-seeded

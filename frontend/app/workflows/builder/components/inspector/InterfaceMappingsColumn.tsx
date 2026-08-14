@@ -16,7 +16,8 @@ import { getDefaultForType } from '../../utils/interfaceHtmlUtils';
 import { clampVideoMaxDuration } from '../../utils/videoParams';
 import { useNodes, useEdges, type Node } from 'reactflow';
 import { nodeRegistry } from '../../registry/nodeRegistry';
-import { triggerKey } from '../../utils/labelNormalizer';
+import { triggerKey, interfaceKey, normalizeLabel } from '../../utils/labelNormalizer';
+import { navigateTargetLabel } from '../../utils/interfaceActionRefs';
 import { NodeSettingsSection } from './NodeSettingsSection';
 import { nodeSupportsPolicy } from '../../utils/nodePolicy';
 import { OptionalFeatureNotice } from './OptionalFeatureNotice';
@@ -38,6 +39,33 @@ interface InterfaceMappingsColumnProps {
   findUnknownVariables: (expressions: Record<string, string>) => string[];
   getEditorExpression: () => string;
   handleEditorExpressionChange: (value: string) => void;
+}
+
+/**
+ * The value to show as selected for a saved mapping.
+ *
+ * The dropdown now offers page switches as `interface:<label>:navigate`, but this very
+ * component emitted `trigger:<label>:navigate` until recently, so working plans carry
+ * that form. Radix matches a Select value against its items by STRING: without this,
+ * opening the inspector on such a plan shows every navigation row as "Select target",
+ * as if the mapping had been lost - while it keeps working at runtime. Resolve the
+ * saved ref to the offered target that means the same page instead. Nothing is
+ * rewritten: the stored value only changes if the user picks something.
+ */
+export function resolveSelectedTarget(
+  saved: string | undefined,
+  targets: Array<{ triggerRef: string }>,
+): string | undefined {
+  if (!saved) return undefined;
+  if (targets.some((t) => t.triggerRef === saved)) return saved;
+  const savedLabel = navigateTargetLabel(saved);
+  if (!savedLabel) return saved;
+  const normalized = normalizeLabel(savedLabel);
+  const match = targets.find((t) => {
+    const label = navigateTargetLabel(t.triggerRef);
+    return label != null && normalizeLabel(label) === normalized;
+  });
+  return match?.triggerRef ?? saved;
 }
 
 const HTML_TEMPLATE_EXAMPLE = `<!DOCTYPE html>
@@ -452,15 +480,23 @@ export const InterfaceMappingsColumn = ({
       .map((n) => {
         const id = n.data?.id || n.id || '';
         const label = n.data?.label || id;
-        const tKey = triggerKey(label);
+        // An interface target is a PAGE SWITCH, so it gets the interface key. This used
+        // to build every target with triggerKey(), emitting `trigger:<page>:navigate`
+        // for an interface - which the backend validator then reported as "trigger
+        // '<page>' not found" on a mapping that worked. Refs already saved in that shape
+        // keep working: both the frontend reader (isNavigateRef) and the validator
+        // resolve a `navigate` event against interfaces whatever the prefix says.
+        const isInterfaceTarget = nodeRegistry.isInterfaceNode(n);
+        const key = isInterfaceTarget ? interfaceKey(label) : triggerKey(label);
+        const fallbackPrefix = isInterfaceTarget ? 'interface' : 'trigger';
         let actionType = 'click';
         if (id.startsWith('form-trigger')) actionType = 'submit';
         else if (id.startsWith('chat-trigger')) actionType = 'message';
-        else if (nodeRegistry.isInterfaceNode(n)) actionType = 'navigate';
+        else if (isInterfaceTarget) actionType = 'navigate';
         return {
           nodeId: n.id,
           label,
-          triggerRef: tKey ? `${tKey}:${actionType}` : `trigger:${label}:${actionType}`,
+          triggerRef: key ? `${key}:${actionType}` : `${fallbackPrefix}:${label}:${actionType}`,
           actionType,
         };
       });
@@ -790,7 +826,7 @@ export const InterfaceMappingsColumn = ({
           <PopoverTrigger asChild>
             <button
               type="button"
-              className="inline-flex items-center justify-center rounded-full hover:bg-slate-200 dark:hover:bg-slate-700 p-0.5"
+              className="inline-flex items-center justify-center rounded-md hover:bg-slate-200 dark:hover:bg-slate-700 p-0.5"
             >
               <Info className="h-3 w-3 text-slate-500" />
             </button>
@@ -938,7 +974,7 @@ export const InterfaceMappingsColumn = ({
                 <span className="text-sm text-slate-600 dark:text-slate-300">{t('entryInterface')}</span>
                 <Popover>
                   <PopoverTrigger asChild>
-                    <button type="button" className="inline-flex items-center justify-center rounded-full hover:bg-slate-200 dark:hover:bg-slate-700 p-0.5">
+                    <button type="button" className="inline-flex items-center justify-center rounded-md hover:bg-slate-200 dark:hover:bg-slate-700 p-0.5">
                       <Info className="h-2.5 w-2.5 text-slate-400" />
                     </button>
                   </PopoverTrigger>
@@ -973,7 +1009,7 @@ export const InterfaceMappingsColumn = ({
                 <span className="text-sm text-slate-600 dark:text-slate-300">{t('generateScreenshot')}</span>
                 <Popover>
                   <PopoverTrigger asChild>
-                    <button type="button" className="inline-flex items-center justify-center rounded-full hover:bg-slate-200 dark:hover:bg-slate-700 p-0.5">
+                    <button type="button" className="inline-flex items-center justify-center rounded-md hover:bg-slate-200 dark:hover:bg-slate-700 p-0.5">
                       <Info className="h-2.5 w-2.5 text-slate-400" />
                     </button>
                   </PopoverTrigger>
@@ -1005,7 +1041,7 @@ export const InterfaceMappingsColumn = ({
                   <span className="text-sm text-slate-600 dark:text-slate-300">{t('generatePdf')}</span>
                   <Popover>
                     <PopoverTrigger asChild>
-                      <button type="button" className="inline-flex items-center justify-center rounded-full hover:bg-slate-200 dark:hover:bg-slate-700 p-0.5">
+                      <button type="button" className="inline-flex items-center justify-center rounded-md hover:bg-slate-200 dark:hover:bg-slate-700 p-0.5">
                         <Info className="h-2.5 w-2.5 text-slate-400" />
                       </button>
                     </PopoverTrigger>
@@ -1083,7 +1119,7 @@ export const InterfaceMappingsColumn = ({
                   <span className="text-sm text-slate-600 dark:text-slate-300">{t('generateVideo')}</span>
                   <Popover>
                     <PopoverTrigger asChild>
-                      <button type="button" className="inline-flex items-center justify-center rounded-full hover:bg-slate-200 dark:hover:bg-slate-700 p-0.5">
+                      <button type="button" className="inline-flex items-center justify-center rounded-md hover:bg-slate-200 dark:hover:bg-slate-700 p-0.5">
                         <Info className="h-2.5 w-2.5 text-slate-400" />
                       </button>
                     </PopoverTrigger>
@@ -1248,7 +1284,7 @@ export const InterfaceMappingsColumn = ({
                 <span className="text-sm text-slate-600 dark:text-slate-300">{t('exposeRenderedSource')}</span>
                 <Popover>
                   <PopoverTrigger asChild>
-                    <button type="button" className="inline-flex items-center justify-center rounded-full hover:bg-slate-200 dark:hover:bg-slate-700 p-0.5">
+                    <button type="button" className="inline-flex items-center justify-center rounded-md hover:bg-slate-200 dark:hover:bg-slate-700 p-0.5">
                       <Info className="h-2.5 w-2.5 text-slate-400" />
                     </button>
                   </PopoverTrigger>
@@ -1300,7 +1336,7 @@ export const InterfaceMappingsColumn = ({
                       <PopoverTrigger asChild>
                         <button
                           type="button"
-                          className="inline-flex items-center justify-center rounded-full hover:bg-slate-200 dark:hover:bg-slate-700 p-0.5"
+                          className="inline-flex items-center justify-center rounded-md hover:bg-slate-200 dark:hover:bg-slate-700 p-0.5"
                         >
                           <Info className="h-3 w-3 text-slate-400 dark:text-slate-500" />
                         </button>
@@ -1343,7 +1379,7 @@ export const InterfaceMappingsColumn = ({
                   {Object.entries(editedActionMapping).map(([selector, triggerRefValue], index) => (
                     <div key={index} className="flex items-start gap-2">
                       {/* Index circle */}
-                      <div className="w-6 h-6 rounded-full bg-indigo-100 dark:bg-indigo-900/30 flex items-center justify-center flex-shrink-0 mt-1">
+                      <div className="w-6 h-6 rounded-lg bg-indigo-100 dark:bg-indigo-900/30 flex items-center justify-center flex-shrink-0 mt-1">
                         <span className="text-xs font-medium text-indigo-600 dark:text-indigo-400">{index + 1}</span>
                       </div>
 
@@ -1355,7 +1391,7 @@ export const InterfaceMappingsColumn = ({
                             <span className="text-xs font-semibold text-slate-500 dark:text-slate-400">{t('actionName')}</span>
                             <Popover>
                               <PopoverTrigger asChild>
-                                <button type="button" className="inline-flex items-center justify-center rounded-full hover:bg-slate-200 dark:hover:bg-slate-700 p-0.5">
+                                <button type="button" className="inline-flex items-center justify-center rounded-md hover:bg-slate-200 dark:hover:bg-slate-700 p-0.5">
                                   <Info className="h-2.5 w-2.5 text-slate-400" />
                                 </button>
                               </PopoverTrigger>
@@ -1394,7 +1430,7 @@ export const InterfaceMappingsColumn = ({
                         <label className="flex flex-col gap-1">
                           <span className="text-xs font-semibold text-slate-500 dark:text-slate-400">{t('selectTarget')}</span>
                           <Select
-                            value={triggerRefValue || undefined}
+                            value={resolveSelectedTarget(triggerRefValue, eligibleTargets) || undefined}
                             onValueChange={(value) => {
                               const newMapping = { ...editedActionMapping, [selector]: value };
                               setEditedActionMapping(newMapping);
@@ -1742,7 +1778,7 @@ export const InterfaceMappingsColumn = ({
                     <PopoverTrigger asChild>
                       <button
                         type="button"
-                        className="inline-flex items-center justify-center rounded-full hover:bg-slate-200 dark:hover:bg-slate-700 p-0.5"
+                        className="inline-flex items-center justify-center rounded-md hover:bg-slate-200 dark:hover:bg-slate-700 p-0.5"
                       >
                         <Info className="h-3 w-3 text-slate-400 dark:text-slate-500" />
                       </button>

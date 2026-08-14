@@ -2,8 +2,11 @@ package com.apimarketplace.orchestrator.services.resume;
 
 import com.apimarketplace.orchestrator.domain.WorkflowRunEntity;
 import com.apimarketplace.orchestrator.domain.WorkflowStepDataEntity;
+import com.apimarketplace.orchestrator.domain.execution.DagState;
+import com.apimarketplace.orchestrator.domain.execution.EpochState;
 import com.apimarketplace.orchestrator.domain.execution.SignalWaitEntity;
 import com.apimarketplace.orchestrator.domain.execution.StateSnapshot;
+import com.apimarketplace.orchestrator.domain.workflow.ExecutionMode;
 import com.apimarketplace.orchestrator.domain.workflow.RunStatus;
 import com.apimarketplace.orchestrator.domain.workflow.WorkflowExecution;
 import com.apimarketplace.orchestrator.domain.workflow.WorkflowPlan;
@@ -920,12 +923,12 @@ class StepRerunServiceTest {
 
             service.rerunFromStep("run-1", "mcp:step_b");
 
-            // resetDagAndSetReady(runId, stepsToReset, targetStepId, ownerTriggerId)
+            // resetDagAndSetReady(runId, stepsToReset, targetStepId, ownerTriggerId, epoch)
             verify(mockStateSnapshotService).resetDagAndSetReady(
                 eq("run-1"),
                 argThat(set -> set.contains("mcp:step_b") && set.contains("mcp:step_c")),
                 eq("mcp:step_b"),
-                eq("trigger:start"));
+                eq("trigger:start"), anyInt());
         }
 
         @Test
@@ -943,10 +946,10 @@ class StepRerunServiceTest {
             service.rerunFromStep("run-1", "mcp:step_a");
 
             verify(mockStateSnapshotService).resetDagAndSetReady(
-                eq("run-1"), anySet(), eq("mcp:step_a"), eq("trigger:start"));
+                eq("run-1"), anySet(), eq("mcp:step_a"), eq("trigger:start"), anyInt());
             // The flat 3-arg variant must NOT be used when the owner trigger is known.
             verify(mockStateSnapshotService, never()).resetDagAndSetReady(
-                anyString(), anySet(), anyString());
+                    anyString(), anySet(), anyString());
         }
 
         @Test
@@ -1088,6 +1091,425 @@ class StepRerunServiceTest {
                 service.getStepHistory("run-1", "mcp:step_a");
 
             assertTrue(history.isEmpty());
+        }
+    }
+
+    // =========================================================================
+    // EPOCH RESOLUTION: rerun on a run whose execution cycle already closed
+    // =========================================================================
+
+    /**
+     * A rerun must execute in the epoch that HOLDS THE OUTPUTS.
+     *
+     * <p>After an AUTO cycle runs to quiescence, the executed epoch is closed and pruned and
+     * {@code prepareNextCycle} points {@code currentEpoch} at a dormant epoch staged for the
+     * next fire. Following that dormant epoch (the pre-fix behaviour) leaves every
+     * {@code {{upstream.output.x}}} resolving to empty while every node still reports success:
+     * a green run with no data. Reopening the executed epoch is what makes "restart from a
+     * node, reusing what already ran" actually reuse anything.
+     */
+    @Nested
+    @DisplayName("Epoch resolution on rerun")
+    class EpochResolutionTests {
+
+        private static final String TRIGGER = "trigger:start";
+        private static final int EXECUTED_EPOCH = 5;
+        private static final int DORMANT_EPOCH = 6;
+
+        @Mock private com.apimarketplace.orchestrator.services.epoch.WorkflowEpochService mockEpochService;
+
+        @BeforeEach
+        void injectEpochService() throws Exception {
+            setField("workflowEpochService", mockEpochService);
+        }
+
+        /** Cycle closed: executed epoch pruned, a dormant epoch staged with only the trigger ready. */
+        private StateSnapshot closedCycleSnapshot(String... completedNodes) {
+            DagState dag = new DagState(DORMANT_EPOCH, 0, 3,
+                Map.of(DORMANT_EPOCH, EpochState.fresh().addReadyNode(TRIGGER)), Set.of());
+            return dagSnapshot(dag, completedNodes);
+        }
+
+        /** Epoch still open (step-by-step, or an AUTO run mid-flight). */
+        private StateSnapshot activeEpochSnapshot(String... completedNodes) {
+            EpochState open = EpochState.fresh().markNodeCompleted(TRIGGER);
+            for (String node : completedNodes) {
+                open = open.markNodeCompleted(node);
+            }
+            DagState dag = new DagState(DORMANT_EPOCH, 0, 3,
+                Map.of(DORMANT_EPOCH, open), Set.of(DORMANT_EPOCH));
+            return dagSnapshot(dag, completedNodes);
+        }
+
+        /**
+         * NodeCounts accumulate across epochs and survive the prune, so they are what makes the
+         * rerun target read as terminal once its epoch is gone.
+         */
+        private StateSnapshot dagSnapshot(DagState dag, String... completedNodes) {
+            return dagSnapshot(TRIGGER, dag, completedNodes);
+        }
+
+        private StateSnapshot dagSnapshot(String dagKey, DagState dag, String... completedNodes) {
+            Map<String, StateSnapshot.NodeCounts> nodes = new HashMap<>();
+            for (String node : completedNodes) {
+                nodes.put(node, StateSnapshot.NodeCounts.zero().increment("COMPLETED"));
+            }
+            return new StateSnapshot(3, 5L, Map.of(dagKey, dag),
+                null, null, null, null, null,
+                nodes, new HashMap<>(),
+                null, null, null, null, null, null);
+        }
+
+        private void headerExistsForExecutedEpoch() {
+            when(mockEpochService.getFullEpochState("run-1", TRIGGER, EXECUTED_EPOCH))
+                .thenReturn(EpochState.fresh().markNodeCompleted(TRIGGER).markNodeCompleted("mcp:step_a"));
+        }
+
+        @Test
+        @DisplayName("Reopens the executed epoch when the cycle already closed")
+        void reopensExecutedEpochWhenCycleClosed() {
+            WorkflowRunEntity run = createRunEntity(RunStatus.COMPLETED);
+            setupRerunMocks(buildLinearPlan(), run, closedCycleSnapshot("mcp:step_b"));
+            when(mockTriggerEpochManager.getGlobalEpochForDag("run-1", TRIGGER)).thenReturn(EXECUTED_EPOCH);
+            headerExistsForExecutedEpoch();
+
+            StepRerunService.RerunResult result = service.rerunFromStep("run-1", "mcp:step_b");
+
+            assertEquals(EXECUTED_EPOCH, result.epoch(),
+                "the rerun must report the epoch that holds the outputs, not the staged one");
+            verify(mockStateSnapshotService).reopenEpochResetDagAndSetReady(
+                eq("run-1"), eq(TRIGGER), eq(EXECUTED_EPOCH),
+                argThat(state -> state.getCompletedNodeIds().contains("mcp:step_a")),
+                argThat(steps -> steps.contains("mcp:step_b") && steps.contains("mcp:step_c")),
+                eq("mcp:step_b"));
+            verify(mockStateSnapshotService, never())
+                .resetDagAndSetReady(anyString(), anySet(), anyString(), anyString(), anyInt());
+        }
+
+        @Test
+        @DisplayName("Scopes the signal cancel to the reopened epoch, not the dormant one")
+        void cancelsSignalsInTheReopenedEpoch() {
+            WorkflowRunEntity run = createRunEntity(RunStatus.COMPLETED);
+            setupRerunMocks(buildLinearPlan(), run, closedCycleSnapshot("mcp:step_b"));
+            when(mockTriggerEpochManager.getGlobalEpochForDag("run-1", TRIGGER)).thenReturn(EXECUTED_EPOCH);
+            headerExistsForExecutedEpoch();
+
+            service.rerunFromStep("run-1", "mcp:step_b");
+
+            verify(mockSignalService).cancelForNodes(eq("run-1"), anySet(), eq(EXECUTED_EPOCH));
+        }
+
+        @Test
+        @DisplayName("Persists the reopened epoch as the DAG's last epoch")
+        void writesReopenedEpochToMetadata() {
+            WorkflowRunEntity run = createRunEntity(RunStatus.COMPLETED);
+            setupRerunMocks(buildLinearPlan(), run, closedCycleSnapshot("mcp:step_b"));
+            when(mockTriggerEpochManager.getGlobalEpochForDag("run-1", TRIGGER)).thenReturn(EXECUTED_EPOCH);
+            headerExistsForExecutedEpoch();
+
+            service.rerunFromStep("run-1", "mcp:step_b");
+
+            @SuppressWarnings("unchecked")
+            Map<String, Object> dagLastEpoch = (Map<String, Object>) run.getMetadata().get("dagLastEpoch");
+            assertEquals(EXECUTED_EPOCH, dagLastEpoch.get(TRIGGER),
+                "context loading filters by this epoch - drifting it is what empties the templates");
+        }
+
+        @Test
+        @DisplayName("Falls back to the dormant epoch when no epoch header exists (legacy run)")
+        void fallsBackToDormantEpochWithoutHeader() {
+            WorkflowRunEntity run = createRunEntity(RunStatus.COMPLETED);
+            setupRerunMocks(buildLinearPlan(), run, closedCycleSnapshot("mcp:step_b"));
+            when(mockTriggerEpochManager.getGlobalEpochForDag("run-1", TRIGGER)).thenReturn(EXECUTED_EPOCH);
+            when(mockEpochService.getFullEpochState("run-1", TRIGGER, EXECUTED_EPOCH)).thenReturn(null);
+
+            StepRerunService.RerunResult result = service.rerunFromStep("run-1", "mcp:step_b");
+
+            assertEquals(DORMANT_EPOCH, result.epoch());
+            verify(mockStateSnapshotService)
+                .resetDagAndSetReady("run-1", Set.of("mcp:step_b", "mcp:step_c"), "mcp:step_b", TRIGGER, DORMANT_EPOCH);
+            verifyNoReopen();
+        }
+
+        @Test
+        @DisplayName("Falls back to the dormant epoch when the epoch service is not wired")
+        void fallsBackWhenEpochServiceUnwired() throws Exception {
+            setField("workflowEpochService", null);
+            WorkflowRunEntity run = createRunEntity(RunStatus.COMPLETED);
+            setupRerunMocks(buildLinearPlan(), run, closedCycleSnapshot("mcp:step_b"));
+            when(mockTriggerEpochManager.getGlobalEpochForDag("run-1", TRIGGER)).thenReturn(EXECUTED_EPOCH);
+
+            StepRerunService.RerunResult result = service.rerunFromStep("run-1", "mcp:step_b");
+
+            assertEquals(DORMANT_EPOCH, result.epoch());
+            verifyNoReopen();
+        }
+
+        @Test
+        @DisplayName("Sentinel DAG beside a real one: no reopen, but the epoch sync still applies")
+        void neverReopensUnderTheSentinelDagBesideARealOne() {
+            WorkflowRunEntity run = createRunEntity(RunStatus.COMPLETED);
+            Map<String, StateSnapshot.NodeCounts> nodes = Map.of(
+                "mcp:step_b", StateSnapshot.NodeCounts.zero().increment("COMPLETED"));
+            StateSnapshot snapshot = new StateSnapshot(3, 5L, Map.of(
+                    StateSnapshot.DEFAULT_TRIGGER_SENTINEL, new DagState(DORMANT_EPOCH, 0, 3,
+                        Map.of(DORMANT_EPOCH, EpochState.fresh().addReadyNode(TRIGGER)), Set.of()),
+                    TRIGGER, new DagState(DORMANT_EPOCH, 0, 3,
+                        Map.of(DORMANT_EPOCH, EpochState.fresh()), Set.of())),
+                null, null, null, null, null,
+                nodes, new HashMap<>(),
+                null, null, null, null, null, null);
+            WorkflowPlan plan = buildLinearPlan();
+            when(mockRunRepository.findByRunIdPublic("run-1")).thenReturn(Optional.of(run));
+            when(mockResumeService.refreshPlanFromWorkflowDefinition("run-1", false)).thenReturn(plan);
+            when(mockStateSnapshotService.getSnapshot("run-1")).thenReturn(snapshot);
+            when(mockDagValidator.findOwnerTrigger(eq(plan), anyString()))
+                .thenReturn(Optional.of(StateSnapshot.DEFAULT_TRIGGER_SENTINEL));
+            lenient().when(mockTriggerEpochManager.getGlobalEpochForDag("run-1", StateSnapshot.DEFAULT_TRIGGER_SENTINEL))
+                .thenReturn(EXECUTED_EPOCH);
+            WorkflowRunState state = mock(WorkflowRunState.class);
+            lenient().when(state.readySteps()).thenReturn(Set.of("mcp:step_b"));
+            lenient().when(state.status()).thenReturn(RunStatus.RUNNING);
+            lenient().when(mockResumeService.reconstructStateForApi("run-1")).thenReturn(state);
+            lenient().when(mockContextManager.rebuildExecutionContext(eq("run-1"), any())).thenReturn(mockExecution);
+
+            StepRerunService.RerunResult result = service.rerunFromStep("run-1", "mcp:step_b");
+
+            verifyNoReopen();
+            verify(mockEpochService, never()).getFullEpochState(anyString(), anyString(), anyInt());
+            // The sentinel guard must veto the REOPEN only. Suppressing the pre-existing sync
+            // as well would send V2 execution back to writing completions into an inactive epoch.
+            assertEquals(DORMANT_EPOCH, result.epoch(),
+                "the epoch sync must still apply under the sentinel");
+        }
+
+        @Test
+        @DisplayName("Sentinel-only run (no real DAG): reopening is still allowed")
+        void reopensOnASentinelOnlyRun() {
+            // resetDag only discards the sentinel's epochs when a REAL DAG coexists, so a
+            // sentinel-only run has nothing to lose and must not be locked out of the fix.
+            WorkflowRunEntity run = createRunEntity(RunStatus.COMPLETED);
+            StateSnapshot snapshot = dagSnapshot(
+                StateSnapshot.DEFAULT_TRIGGER_SENTINEL,
+                new DagState(DORMANT_EPOCH, 0, 3,
+                    Map.of(DORMANT_EPOCH, EpochState.fresh().addReadyNode(TRIGGER)), Set.of()),
+                "mcp:step_b");
+            WorkflowPlan plan = buildLinearPlan();
+            when(mockRunRepository.findByRunIdPublic("run-1")).thenReturn(Optional.of(run));
+            when(mockResumeService.refreshPlanFromWorkflowDefinition("run-1", false)).thenReturn(plan);
+            when(mockStateSnapshotService.getSnapshot("run-1")).thenReturn(snapshot);
+            when(mockDagValidator.findOwnerTrigger(eq(plan), anyString()))
+                .thenReturn(Optional.of(StateSnapshot.DEFAULT_TRIGGER_SENTINEL));
+            when(mockTriggerEpochManager.getGlobalEpochForDag("run-1", StateSnapshot.DEFAULT_TRIGGER_SENTINEL))
+                .thenReturn(EXECUTED_EPOCH);
+            when(mockEpochService.getFullEpochState("run-1", StateSnapshot.DEFAULT_TRIGGER_SENTINEL, EXECUTED_EPOCH))
+                .thenReturn(EpochState.fresh().markNodeCompleted("mcp:step_a"));
+            WorkflowRunState state = mock(WorkflowRunState.class);
+            lenient().when(state.readySteps()).thenReturn(Set.of("mcp:step_b"));
+            lenient().when(state.status()).thenReturn(RunStatus.RUNNING);
+            lenient().when(mockResumeService.reconstructStateForApi("run-1")).thenReturn(state);
+            lenient().when(mockContextManager.rebuildExecutionContext(eq("run-1"), any())).thenReturn(mockExecution);
+
+            StepRerunService.RerunResult result = service.rerunFromStep("run-1", "mcp:step_b");
+
+            assertEquals(EXECUTED_EPOCH, result.epoch());
+            verify(mockStateSnapshotService).reopenEpochResetDagAndSetReady(
+                eq("run-1"), eq(StateSnapshot.DEFAULT_TRIGGER_SENTINEL), eq(EXECUTED_EPOCH),
+                any(), anySet(), eq("mcp:step_b"));
+        }
+
+        @Test
+        @DisplayName("Takes the per-run advisory lock before deciding which epoch to use")
+        void takesTheAdvisoryLockBeforeDeciding() throws Exception {
+            var lockHelper = mock(com.apimarketplace.orchestrator.services.state.patch.AdvisoryLockHelper.class);
+            setField("advisoryLockHelper", lockHelper);
+            WorkflowRunEntity run = createRunEntity(RunStatus.COMPLETED);
+            setupRerunMocks(buildLinearPlan(), run, closedCycleSnapshot("mcp:step_b"));
+            when(mockTriggerEpochManager.getGlobalEpochForDag("run-1", TRIGGER)).thenReturn(EXECUTED_EPOCH);
+            headerExistsForExecutedEpoch();
+
+            service.rerunFromStep("run-1", "mcp:step_b");
+
+            // The whole read-decide-write window must sit inside the lock, not just the write:
+            // the run row and the plan refresh are read BEFORE the epoch is chosen, and the
+            // refresh itself writes run.plan through its own transaction.
+            InOrder order = inOrder(lockHelper, mockRunRepository, mockResumeService, mockStateSnapshotService);
+            order.verify(lockHelper).acquireForRun("run-1");
+            order.verify(mockRunRepository).findByRunIdPublic("run-1");
+            order.verify(mockResumeService).refreshPlanFromWorkflowDefinition("run-1", false);
+            order.verify(mockStateSnapshotService).getSnapshot("run-1");
+        }
+
+        @Test
+        @DisplayName("Without the lock helper the rerun still resolves the right epoch")
+        void degradesToTheRowLockWithoutTheHelper() {
+            // The helper is optional; degrading must lose the serialisation, never the fix.
+            WorkflowRunEntity run = createRunEntity(RunStatus.COMPLETED);
+            setupRerunMocks(buildLinearPlan(), run, closedCycleSnapshot("mcp:step_b"));
+            when(mockTriggerEpochManager.getGlobalEpochForDag("run-1", TRIGGER)).thenReturn(EXECUTED_EPOCH);
+            headerExistsForExecutedEpoch();
+
+            StepRerunService.RerunResult result = service.rerunFromStep("run-1", "mcp:step_b");
+
+            assertEquals(EXECUTED_EPOCH, result.epoch());
+            verify(mockStateSnapshotService).reopenEpochResetDagAndSetReady(
+                eq("run-1"), eq(TRIGGER), eq(EXECUTED_EPOCH), any(), anySet(), eq("mcp:step_b"));
+        }
+
+        @Test
+        @DisplayName("The reset closure is NOT symmetric around a loop, and the javadoc says so")
+        void closureFromInsideALoopBodyDoesNotWrapAround() {
+            // Pins the corrected javadoc on findAllDownstreamSteps. WorkflowGraphBuilder drops
+            // back edges, so a walk STARTED inside the body stops at the body, while a walk from
+            // the loop node covers it. The loop-counter clear keys off that set, so the day the
+            // builder starts keeping back edges this must fail rather than silently reset a loop.
+            WorkflowRunEntity run = createRunEntity(RunStatus.COMPLETED);
+            setupRerunMocks(buildLoopPlan(), run, closedCycleSnapshot("mcp:body_step"));
+            when(mockTriggerEpochManager.getGlobalEpochForDag("run-1", TRIGGER)).thenReturn(EXECUTED_EPOCH);
+            headerExistsForExecutedEpoch();
+
+            StepRerunService.RerunResult fromBody = service.rerunFromStep("run-1", "mcp:body_step");
+
+            assertEquals(Set.of("mcp:body_step"), fromBody.resetSteps(),
+                "a walk from inside the body must not wrap around through the iterate edge");
+        }
+
+        @Test
+        @DisplayName("The closure from the LOOP node itself does cover the body and the exit")
+        void closureFromTheLoopNodeCoversTheBody() {
+            WorkflowRunEntity run = createRunEntity(RunStatus.COMPLETED);
+            setupRerunMocks(buildLoopPlan(), run, closedCycleSnapshot("core:my_loop"));
+            when(mockTriggerEpochManager.getGlobalEpochForDag("run-1", TRIGGER)).thenReturn(EXECUTED_EPOCH);
+            headerExistsForExecutedEpoch();
+
+            StepRerunService.RerunResult fromLoop = service.rerunFromStep("run-1", "core:my_loop");
+
+            assertTrue(fromLoop.resetSteps().containsAll(Set.of("core:my_loop", "mcp:body_step", "mcp:after_loop")),
+                "restarting the loop must replay its body and whatever follows the exit: " + fromLoop.resetSteps());
+        }
+
+        @Test
+        @DisplayName("Refuses a run the user cancelled: reviving it is a re-trigger decision")
+        void refusesACancelledRun() {
+            // Enforced in the service, not the callers: the REST endpoint and the
+            // restart_from_node agent action both reach the rerun through here, and a guard
+            // that lives only in the React callback protects neither.
+            WorkflowRunEntity run = createRunEntity(RunStatus.CANCELLED);
+            setupRerunMocks(buildLinearPlan(), run, closedCycleSnapshot("mcp:step_b"));
+
+            IllegalStateException error = assertThrows(IllegalStateException.class,
+                () -> service.rerunFromStep("run-1", "mcp:step_b"));
+
+            assertTrue(error.getMessage().contains("cancelled"), error.getMessage());
+            verify(mockStateSnapshotService, never())
+                .resetDagAndSetReady(anyString(), anySet(), anyString(), anyString(), anyInt());
+            verifyNoReopen();
+        }
+
+        @Test
+        @DisplayName("Refuses a run that timed out")
+        void refusesATimedOutRun() {
+            WorkflowRunEntity run = createRunEntity(RunStatus.TIMEOUT);
+            setupRerunMocks(buildLinearPlan(), run, closedCycleSnapshot("mcp:step_b"));
+
+            assertThrows(IllegalStateException.class, () -> service.rerunFromStep("run-1", "mcp:step_b"));
+        }
+
+        @Test
+        @DisplayName("A run that merely FINISHED stays restartable: that is the common case")
+        void allowsAFinishedRun() {
+            WorkflowRunEntity run = createRunEntity(RunStatus.COMPLETED);
+            setupRerunMocks(buildLinearPlan(), run, closedCycleSnapshot("mcp:step_b"));
+            when(mockTriggerEpochManager.getGlobalEpochForDag("run-1", TRIGGER)).thenReturn(EXECUTED_EPOCH);
+            headerExistsForExecutedEpoch();
+
+            assertEquals(EXECUTED_EPOCH, service.rerunFromStep("run-1", "mcp:step_b").epoch());
+        }
+
+        @Test
+        @DisplayName("Refuses a node executing RIGHT NOW on an automatic run")
+        void refusesANodeRunningOnAnAutomaticRun() {
+            // The terminality check is satisfied by cumulative NodeCounts, which survive epoch
+            // close, so a node that completed in an EARLIER epoch and is running in this one
+            // reads as rerunnable. Resetting it races the in-flight execution, which still
+            // writes its own completion: double execution, lost write.
+            WorkflowRunEntity run = createRunEntity(RunStatus.RUNNING);
+            run.setExecutionMode(ExecutionMode.AUTOMATIC);
+            setupRerunMocks(buildLinearPlan(), run, runningNodeSnapshot("mcp:step_b"));
+
+            IllegalStateException error = assertThrows(IllegalStateException.class,
+                () -> service.rerunFromStep("run-1", "mcp:step_b"));
+
+            assertTrue(error.getMessage().contains("still executing"), error.getMessage());
+        }
+
+        @Test
+        @DisplayName("Keeps the RUNNING escape hatch when the user drives the run by hand")
+        void allowsANodeRunningOnASteppedRun() {
+            // A stuck while-loop or a long agent: in step-by-step the user IS the scheduler.
+            WorkflowRunEntity run = createRunEntity(RunStatus.RUNNING);
+            run.setExecutionMode(ExecutionMode.STEP_BY_STEP);
+            setupRerunMocks(buildLinearPlan(), run, runningNodeSnapshot("mcp:step_b"));
+
+            assertDoesNotThrow(() -> service.rerunFromStep("run-1", "mcp:step_b"));
+        }
+
+        /** A node that completed in an earlier epoch AND is running in the current one. */
+        private StateSnapshot runningNodeSnapshot(String nodeId) {
+            EpochState live = new EpochState(
+                Set.of(TRIGGER), Set.of(), Set.of(), Set.of(),
+                Set.of(nodeId),   // runningNodeIds
+                Set.of(), Set.of(), Map.of(), Map.of(), Map.of(), Instant.now());
+            DagState dag = new DagState(EXECUTED_EPOCH, 0, 3,
+                Map.of(EXECUTED_EPOCH, live), Set.of(EXECUTED_EPOCH));
+            // dagSnapshot seeds NodeCounts, which is what makes the node read as terminal
+            // despite running - exactly the shape the new guard exists for.
+            return dagSnapshot(dag, nodeId);
+        }
+
+        private void verifyNoReopen() {
+            verify(mockStateSnapshotService, never()).reopenEpochResetDagAndSetReady(
+                anyString(), anyString(), anyInt(), any(), anySet(), anyString());
+        }
+
+        @Test
+        @DisplayName("Keeps syncing to the snapshot epoch while it is still ACTIVE (step-by-step)")
+        void keepsSnapshotEpochWhileActive() {
+            WorkflowRunEntity run = createRunEntity(RunStatus.PAUSED);
+            setupRerunMocks(buildLinearPlan(), run, activeEpochSnapshot("mcp:step_b"));
+            when(mockTriggerEpochManager.getGlobalEpochForDag("run-1", TRIGGER)).thenReturn(EXECUTED_EPOCH);
+
+            StepRerunService.RerunResult result = service.rerunFromStep("run-1", "mcp:step_b");
+
+            assertEquals(DORMANT_EPOCH, result.epoch(),
+                "an active epoch is authoritative: syncing to it is the pre-existing behaviour");
+            verify(mockStateSnapshotService)
+                .resetDagAndSetReady("run-1", Set.of("mcp:step_b", "mcp:step_c"), "mcp:step_b", TRIGGER, DORMANT_EPOCH);
+            verify(mockEpochService, never()).getFullEpochState(anyString(), anyString(), anyInt());
+        }
+
+        @Test
+        @DisplayName("Hands the reopen the epoch's REAL state, not a count-derived reconstruction")
+        void passesTheDurableEpochStateDown() {
+            WorkflowRunEntity run = createRunEntity(RunStatus.COMPLETED);
+            setupRerunMocks(buildLinearPlan(), run, closedCycleSnapshot("mcp:step_b"));
+            when(mockTriggerEpochManager.getGlobalEpochForDag("run-1", TRIGGER)).thenReturn(EXECUTED_EPOCH);
+            EpochState durable = EpochState.fresh()
+                .markNodeCompleted(TRIGGER)
+                .markNodeCompleted("mcp:step_a")
+                .markNodeSkipped("mcp:step_c");
+            when(mockEpochService.getFullEpochState("run-1", TRIGGER, EXECUTED_EPOCH)).thenReturn(durable);
+
+            service.rerunFromStep("run-1", "mcp:step_b");
+
+            // SKIPPED marks are what let a downstream merge unblock; the cumulative NodeCounts
+            // fallback cannot carry them, so the durable state has to travel down unchanged.
+            verify(mockStateSnapshotService).reopenEpochResetDagAndSetReady(
+                anyString(), anyString(), anyInt(),
+                argThat(state -> state.getSkippedNodeIds().contains("mcp:step_c")),
+                anySet(), anyString());
+            verify(mockEpochService, times(1))
+                .getFullEpochState("run-1", TRIGGER, EXECUTED_EPOCH);
         }
     }
 }

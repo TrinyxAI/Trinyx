@@ -104,7 +104,7 @@ export default function TopUpModal({ isOpen, onClose, initialTier }: TopUpModalP
         {/* Header */}
         <div className="p-6 pb-4">
           <div className="flex items-center gap-3">
-            <div className="p-2 rounded-full bg-theme-tertiary">
+            <div className="p-2 rounded-md bg-theme-tertiary">
               <Coins className="h-5 w-5 text-theme-secondary" />
             </div>
             <div>
@@ -224,7 +224,7 @@ function TierCard({ tier, selected, onSelect, disabled }: TierCardProps) {
       ].join(' ')}
     >
       {selected && (
-        <div className="absolute top-3 right-3 w-5 h-5 rounded-full bg-[var(--text-primary)] flex items-center justify-center">
+        <div className="absolute top-3 right-3 w-5 h-5 rounded-lg bg-[var(--text-primary)] flex items-center justify-center">
           <Check className="h-3 w-3 text-[var(--bg-primary)]" />
         </div>
       )}

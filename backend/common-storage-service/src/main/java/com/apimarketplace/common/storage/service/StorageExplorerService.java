@@ -1,5 +1,7 @@
 package com.apimarketplace.common.storage.service;
 
+import com.apimarketplace.common.storage.dto.ExplorerSort;
+import com.apimarketplace.common.storage.dto.FolderCrumbDto;
 import com.apimarketplace.common.storage.dto.StorageExplorerDto;
 import com.apimarketplace.common.storage.dto.StorageExplorerProjection;
 import com.apimarketplace.common.storage.dto.StoragePreviewFile;
@@ -17,6 +19,7 @@ import org.springframework.transaction.annotation.Transactional;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Collection;
+import java.util.Collections;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
@@ -93,14 +96,35 @@ public class StorageExplorerService {
             String fileCategory,
             Collection<UUID> excludedIds,
             Pageable pageable) {
+        return search(tenantId, organizationId, search, sourceType, storageType, workflowId, runId,
+                dateFrom, dateTo, filesOnly, s3Only, fileCategory, excludedIds, ExplorerSort.DEFAULT, pageable);
+    }
+
+    /** {@link #search} with an explicit user-chosen ordering (see {@link ExplorerSort}). */
+    public Page<StorageExplorerDto> search(
+            String tenantId,
+            String organizationId,
+            String search,
+            String sourceType,
+            String storageType,
+            String workflowId,
+            String runId,
+            Instant dateFrom,
+            Instant dateTo,
+            boolean filesOnly,
+            boolean s3Only,
+            String fileCategory,
+            Collection<UUID> excludedIds,
+            ExplorerSort sort,
+            Pageable pageable) {
 
         logger.debug("Storage explorer search: tenantId={}, orgId={}, search={}, sourceType={}, "
-                + "storageType={}, workflowId={}, filesOnly={}, s3Only={}, fileCategory={}",
-                tenantId, organizationId, search, sourceType, storageType, workflowId, filesOnly, s3Only, fileCategory);
+                + "storageType={}, workflowId={}, filesOnly={}, s3Only={}, fileCategory={}, sort={}",
+                tenantId, organizationId, search, sourceType, storageType, workflowId, filesOnly, s3Only, fileCategory, sort);
 
         Page<StorageExplorerProjection> projections = explorerRepository.search(
                 organizationId, search, sourceType, storageType, workflowId, runId,
-                dateFrom, dateTo, filesOnly, s3Only, fileCategory, excludedIds, pageable);
+                dateFrom, dateTo, filesOnly, s3Only, fileCategory, excludedIds, sort, pageable);
 
         return projections.map(p -> StorageExplorerDto.from(p, null));
     }
@@ -135,10 +159,33 @@ public class StorageExplorerService {
             String fileCategory,
             Collection<UUID> excludedIds,
             Pageable pageable) {
+        return searchFolderScope(tenantId, organizationId, parentFolderId, search, sourceType, storageType,
+                workflowId, runId, dateFrom, dateTo, filesOnly, s3Only, fileCategory, excludedIds,
+                ExplorerSort.DEFAULT, pageable);
+    }
+
+    /** {@link #searchFolderScope} with an explicit user-chosen ordering (see {@link ExplorerSort}). */
+    public Page<StorageExplorerDto> searchFolderScope(
+            String tenantId,
+            String organizationId,
+            UUID parentFolderId,
+            String search,
+            String sourceType,
+            String storageType,
+            String workflowId,
+            String runId,
+            Instant dateFrom,
+            Instant dateTo,
+            boolean filesOnly,
+            boolean s3Only,
+            String fileCategory,
+            Collection<UUID> excludedIds,
+            ExplorerSort sort,
+            Pageable pageable) {
 
         StorageExplorerRepository.SliceResult slice = explorerRepository.listFolderScope(
                 organizationId, parentFolderId, search, sourceType, storageType, workflowId, runId,
-                dateFrom, dateTo, filesOnly, s3Only, fileCategory, excludedIds,
+                dateFrom, dateTo, filesOnly, s3Only, fileCategory, excludedIds, sort,
                 pageable.getPageSize(), (int) pageable.getOffset());
 
         List<StorageExplorerProjection> rows = slice.rows();
@@ -233,12 +280,40 @@ public class StorageExplorerService {
             Instant dateTo,
             Collection<UUID> excludedIds,
             Pageable pageable) {
+        return searchVirtualScope(tenantId, organizationId, address, search, sourceType, storageType,
+                filesOnly, s3Only, fileCategory, dateFrom, dateTo, excludedIds, ExplorerSort.DEFAULT, pageable);
+    }
+
+    /**
+     * {@link #searchVirtualScope} with an explicit user-chosen ordering (see {@link ExplorerSort}).
+     *
+     * <p>The sort applies to the FILE rows at every level. The virtual FOLDER rows keep their own
+     * semantic order - runs oldest-first (that IS the "Run 1, Run 2, …" numbering), epochs by their
+     * real epoch value, spawns/iterations by index - because those sequences are what the folder
+     * labels mean; re-ordering them by size or mime type would only scramble a numbered list. Manual
+     * folders at the root keep sorting by last activity for the same reason.</p>
+     */
+    public Page<StorageExplorerDto> searchVirtualScope(
+            String tenantId,
+            String organizationId,
+            VirtualFolderAddress address,
+            String search,
+            String sourceType,
+            String storageType,
+            boolean filesOnly,
+            boolean s3Only,
+            String fileCategory,
+            Instant dateFrom,
+            Instant dateTo,
+            Collection<UUID> excludedIds,
+            ExplorerSort sort,
+            Pageable pageable) {
 
         boolean hasSearch = search != null && !search.isBlank();
 
         if (address == null) {
             return virtualRoot(organizationId, search, hasSearch, sourceType, storageType,
-                    filesOnly, s3Only, fileCategory, dateFrom, dateTo, excludedIds, pageable);
+                    filesOnly, s3Only, fileCategory, dateFrom, dateTo, excludedIds, sort, pageable);
         }
 
         return switch (address.level()) {
@@ -249,16 +324,136 @@ public class StorageExplorerService {
                     new StorageExplorerRepository.VirtualFileFilter(filesOnly, s3Only, search, sourceType, storageType, fileCategory, dateFrom, dateTo),
                     pageable);
             case EPOCH -> virtualEpoch(organizationId, address, search, sourceType, storageType,
-                    filesOnly, s3Only, fileCategory, dateFrom, dateTo, excludedIds, pageable);
+                    filesOnly, s3Only, fileCategory, dateFrom, dateTo, excludedIds, sort, pageable);
             case SPAWN -> virtualSpawn(organizationId, address, search, sourceType, storageType,
-                    filesOnly, s3Only, fileCategory, dateFrom, dateTo, excludedIds, pageable);
+                    filesOnly, s3Only, fileCategory, dateFrom, dateTo, excludedIds, sort, pageable);
             case ITERATION -> {
                 StorageExplorerRepository.SliceResult slice = leafFiles(organizationId, address.workflowId(),
                         address.runId(), address.epoch(), address.spawn(), address.itemIndex(), search, sourceType,
-                        storageType, filesOnly, s3Only, fileCategory, dateFrom, dateTo, excludedIds, pageable);
+                        storageType, filesOnly, s3Only, fileCategory, dateFrom, dateTo, excludedIds, sort, pageable);
                 yield filesOnlyPage(slice, pageable);
             }
         };
+    }
+
+    /**
+     * Breadcrumb trail of a MANUAL folder, root-first and ending with the folder itself.
+     *
+     * <p>The Files page keeps only the current folder id in the URL, so after a refresh it asks for
+     * the path back. An unknown / cross-org / non-folder id yields an empty trail (the caller then
+     * shows the root) rather than an error - a stale bookmark must degrade, not break.</p>
+     *
+     * <p>{@code excludedIds} is the member restricted-id deny-list, and it is REQUIRED rather than
+     * optional: a restricted ancestor stops the walk, so the trail is the visible tail only. The
+     * breadcrumb must not name a folder the listing hides from this member - the name is itself the
+     * disclosure, which is why there is no convenience overload that lets a caller forget it.</p>
+     */
+    public List<FolderCrumbDto> manualFolderTrail(String organizationId, UUID folderId,
+                                                  Collection<UUID> excludedIds) {
+        List<StorageExplorerRepository.ManualCrumb> ancestry =
+                explorerRepository.manualFolderAncestry(organizationId, folderId, excludedIds);
+        List<FolderCrumbDto> crumbs = new ArrayList<>(ancestry.size());
+        for (StorageExplorerRepository.ManualCrumb c : ancestry) {
+            crumbs.add(FolderCrumbDto.manual(c.id().toString(), c.name()));
+        }
+        return crumbs;
+    }
+
+    /**
+     * Breadcrumb trail of a VIRTUAL workflow folder, root-first and ending with {@code address}.
+     *
+     * <p>Every level except the run is readable straight off the address. The RUN crumb is not: its
+     * label is a 1-based POSITION ("Run 12"), so it is recovered the way {@code virtualWorkflow}
+     * assigns it - list the workflow's runs oldest-first and take the run's index. A run that
+     * produced no visible file is not a folder and must not consume a number here either, or the
+     * trail would say "Run 11" for the folder the grid calls "Run 12" (see {@link #runNumber} for
+     * which filters take part).</p>
+     *
+     * <p>The WORKFLOW crumb comes back with a null {@code workflowName} - the workflows table is
+     * outside this boundary, exactly as for listings; the controller resolves it.</p>
+     *
+     * <p><b>Ownership gate.</b> The workflow id arrives straight off a request param, and the
+     * controller turns a WORKFLOW crumb into a workflow NAME. So this refuses any workflow that owns
+     * no visible storage in this org - the same predicate that decides whether a {@code wf:} folder
+     * exists at all. Without it, a caller who knows (or guesses) a workflow id from another tenant
+     * would get its name back: a folder trail must never disclose more than the folder listing does.
+     * An unowned address yields an EMPTY trail, exactly like an unknown manual folder.</p>
+     */
+    public List<FolderCrumbDto> virtualFolderTrail(String organizationId, VirtualFolderAddress address,
+                                                   boolean filesOnly, boolean s3Only,
+                                                   Collection<UUID> excludedIds) {
+        if (address == null) {
+            return List.of();
+        }
+        if (!orgOwnsWorkflowStorage(organizationId, address.workflowId(), filesOnly, s3Only, excludedIds)) {
+            return List.of();
+        }
+        // Walk up to the workflow, then emit root-first.
+        List<VirtualFolderAddress> chain = new ArrayList<>();
+        for (VirtualFolderAddress a = address; a != null; a = a.parent()) {
+            chain.add(a);
+        }
+        Collections.reverse(chain);
+
+        List<FolderCrumbDto> crumbs = new ArrayList<>(chain.size());
+        for (VirtualFolderAddress a : chain) {
+            crumbs.add(switch (a.level()) {
+                case WORKFLOW -> FolderCrumbDto.virtual(a.toToken(), "WORKFLOW", null, null, null);
+                case RUN -> FolderCrumbDto.virtual(a.toToken(), "RUN",
+                        runNumber(organizationId, a, filesOnly, s3Only, excludedIds), null, null);
+                case EPOCH -> FolderCrumbDto.virtual(a.toToken(), "EPOCH", a.epoch(), null, null);
+                case SPAWN -> FolderCrumbDto.virtual(a.toToken(), "SPAWN", a.epoch(), a.spawn(), null);
+                case ITERATION -> FolderCrumbDto.virtual(a.toToken(), "ITERATION", a.epoch(), a.spawn(), a.itemIndex());
+            });
+        }
+        return crumbs;
+    }
+
+    /**
+     * Whether this org has any visible storage under {@code workflowId} - i.e. whether a {@code wf:}
+     * folder for it exists in this workspace at all. This is the authorization gate for
+     * {@link #virtualFolderTrail}: the id is caller-supplied, so "the folder exists for you" has to
+     * be established before a crumb is built from it.
+     */
+    private boolean orgOwnsWorkflowStorage(String organizationId, String workflowId,
+                                           boolean filesOnly, boolean s3Only, Collection<UUID> excludedIds) {
+        if (workflowId == null || workflowId.isBlank()) {
+            return false;
+        }
+        StorageExplorerRepository.VirtualFileFilter filter = new StorageExplorerRepository.VirtualFileFilter(
+                filesOnly, s3Only, null, null, null, null, null, null);
+        // The ROOT-level grouping: one row per workflow that owns visible storage in this org.
+        return explorerRepository.listVirtualGroups(organizationId, VirtualFolderAddress.Level.WORKFLOW,
+                        null, null, null, null, excludedIds, filter)
+                .stream()
+                .anyMatch(g -> workflowId.equals(g.key()));
+    }
+
+    /**
+     * The 1-based position of {@code address}'s run among the workflow's runs, oldest-first - the
+     * number the RUN folder is labelled with. Falls back to 1 when the run no longer matches the
+     * filter (its files were deleted or filtered out), so the crumb still renders.
+     *
+     * <p>The numbering is computed WITHOUT the browser's search / file-type / date filters, because
+     * the trail is only ever fetched on a cold arrival (refresh, pasted link), where no filter is
+     * applied yet - filters are not carried in the URL. It therefore matches the unfiltered listing
+     * the page renders at that moment. A user who then narrows the listing can drop earlier runs out
+     * of the grid's numbering; the breadcrumb is not re-fetched at that point, so it keeps showing
+     * the crumb the user actually navigated through.</p>
+     */
+    private Integer runNumber(String organizationId, VirtualFolderAddress address,
+                              boolean filesOnly, boolean s3Only, Collection<UUID> excludedIds) {
+        StorageExplorerRepository.VirtualFileFilter filter = new StorageExplorerRepository.VirtualFileFilter(
+                filesOnly, s3Only, null, null, null, null, null, null);
+        List<StorageExplorerRepository.VirtualGroup> runs = explorerRepository.listVirtualGroups(
+                organizationId, VirtualFolderAddress.Level.RUN, address.workflowId(), null, null, null,
+                excludedIds, filter);
+        for (int i = 0; i < runs.size(); i++) {
+            if (runs.get(i).key().equals(address.runId())) {
+                return i + 1;
+            }
+        }
+        return 1;
     }
 
     /** ROOT: manual root folders ++ virtual workflow folders, then loose files (workflow_id IS NULL). */
@@ -266,7 +461,7 @@ public class StorageExplorerService {
                                                  String sourceType, String storageType, boolean filesOnly,
                                                  boolean s3Only, String fileCategory,
                                                  Instant dateFrom, Instant dateTo,
-                                                 Collection<UUID> excludedIds, Pageable pageable) {
+                                                 Collection<UUID> excludedIds, ExplorerSort sort, Pageable pageable) {
         List<StorageExplorerDto> folders = new ArrayList<>();
 
         // Manual root folders (real rows): childCount + 9-up preview, batched (no N+1). Each folder's
@@ -317,7 +512,7 @@ public class StorageExplorerService {
         StorageExplorerRepository.SliceResult looseSlice = explorerRepository.listVirtualLeafFiles(
                 organizationId, null, null, null, null, null, search, sourceType, storageType,
                 filesOnly, s3Only, fileCategory, dateFrom, dateTo,
-                excludedIds, /* nullItemOnly */ false, fileLimit, fileOffset);
+                excludedIds, /* nullItemOnly */ false, sort, fileLimit, fileOffset);
 
         return foldersOnFirstPage(folders, looseSlice, pageable);
     }
@@ -425,7 +620,7 @@ public class StorageExplorerService {
                                                   String search, String sourceType, String storageType,
                                                   boolean filesOnly, boolean s3Only, String fileCategory,
                                                   Instant dateFrom, Instant dateTo,
-                                                  Collection<UUID> excludedIds, Pageable pageable) {
+                                                  Collection<UUID> excludedIds, ExplorerSort sort, Pageable pageable) {
         String wf = address.workflowId();
         String runId = address.runId();
         int epoch = address.epoch();
@@ -456,7 +651,7 @@ public class StorageExplorerService {
         // Exactly one spawn value - descend a level: look at its iterations.
         int spawnValue = Integer.parseInt(spawns.get(0).key());
         return iterationsOrCollapse(organizationId, wf, runId, epoch, spawnValue, search, sourceType, storageType,
-                filesOnly, s3Only, fileCategory, dateFrom, dateTo, excludedIds, pageable);
+                filesOnly, s3Only, fileCategory, dateFrom, dateTo, excludedIds, sort, pageable);
     }
 
     /** SPAWN: iterations. &gt;1 item → iteration folders; ≤1 → COLLAPSE to the spawn's leaf files. */
@@ -464,9 +659,9 @@ public class StorageExplorerService {
                                                   String search, String sourceType, String storageType,
                                                   boolean filesOnly, boolean s3Only, String fileCategory,
                                                   Instant dateFrom, Instant dateTo,
-                                                  Collection<UUID> excludedIds, Pageable pageable) {
+                                                  Collection<UUID> excludedIds, ExplorerSort sort, Pageable pageable) {
         return iterationsOrCollapse(organizationId, address.workflowId(), address.runId(), address.epoch(), address.spawn(),
-                search, sourceType, storageType, filesOnly, s3Only, fileCategory, dateFrom, dateTo, excludedIds, pageable);
+                search, sourceType, storageType, filesOnly, s3Only, fileCategory, dateFrom, dateTo, excludedIds, sort, pageable);
     }
 
     /**
@@ -480,7 +675,8 @@ public class StorageExplorerService {
                                                           String search, String sourceType, String storageType,
                                                           boolean filesOnly, boolean s3Only, String fileCategory,
                                                           Instant dateFrom, Instant dateTo,
-                                                          Collection<UUID> excludedIds, Pageable pageable) {
+                                                          Collection<UUID> excludedIds, ExplorerSort sort,
+                                                          Pageable pageable) {
         String runSeg = runId != null ? "/r" + runId : "";
         StorageExplorerRepository.VirtualFileFilter filter =
                 new StorageExplorerRepository.VirtualFileFilter(filesOnly, s3Only, search, sourceType, storageType, fileCategory, dateFrom, dateTo);
@@ -507,13 +703,13 @@ public class StorageExplorerService {
             StorageExplorerRepository.SliceResult nullItemFiles = explorerRepository.listVirtualLeafFiles(
                     organizationId, wf, runId, epoch, spawn, /* itemIndex */ null, search, sourceType, storageType,
                     filesOnly, s3Only, fileCategory, dateFrom, dateTo, excludedIds,
-                    /* nullItemOnly */ true, fileLimit, fileOffset);
+                    /* nullItemOnly */ true, sort, fileLimit, fileOffset);
             return headerBody(folders, nullItemFiles, pageable);
         }
 
         // ≤1 iteration group → collapse: list the spawn's leaf files (itemIndex unconstrained).
         StorageExplorerRepository.SliceResult slice = leafFiles(organizationId, wf, runId, epoch, spawn, null,
-                search, sourceType, storageType, filesOnly, s3Only, fileCategory, dateFrom, dateTo, excludedIds, pageable);
+                search, sourceType, storageType, filesOnly, s3Only, fileCategory, dateFrom, dateTo, excludedIds, sort, pageable);
         return filesOnlyPage(slice, pageable);
     }
 
@@ -523,11 +719,12 @@ public class StorageExplorerService {
                                                             String sourceType, String storageType, boolean filesOnly,
                                                             boolean s3Only, String fileCategory,
                                                             Instant dateFrom, Instant dateTo,
-                                                            Collection<UUID> excludedIds, Pageable pageable) {
+                                                            Collection<UUID> excludedIds, ExplorerSort sort,
+                                                            Pageable pageable) {
         return explorerRepository.listVirtualLeafFiles(organizationId, wf, runId, epoch, spawn, itemIndex,
                 search, sourceType, storageType, filesOnly, s3Only, fileCategory,
                 dateFrom, dateTo, excludedIds,
-                /* nullItemOnly */ false, pageable.getPageSize(), (int) pageable.getOffset());
+                /* nullItemOnly */ false, sort, pageable.getPageSize(), (int) pageable.getOffset());
     }
 
     /** The preview files for one group key (empty when the group has no preview-able file). */

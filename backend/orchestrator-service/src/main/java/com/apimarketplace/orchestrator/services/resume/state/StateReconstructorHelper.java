@@ -5,6 +5,7 @@ import com.apimarketplace.orchestrator.domain.WorkflowRunEntity;
 import com.apimarketplace.orchestrator.domain.WorkflowStepDataEntity;
 import com.apimarketplace.orchestrator.domain.workflow.*;
 import com.apimarketplace.orchestrator.services.WorkflowRunStatusService;
+import com.apimarketplace.orchestrator.services.resume.RunCompletionPredicate;
 import com.apimarketplace.orchestrator.services.resume.cache.WorkflowCacheManager;
 import com.apimarketplace.orchestrator.services.streaming.state.RunStateStore;
 import com.apimarketplace.orchestrator.utils.LabelNormalizer;
@@ -103,11 +104,41 @@ public class StateReconstructorHelper {
 
     /**
      * Determines the overall workflow status.
+     *
+     * <p>The persisted {@code workflow_runs.status} is the authority (written by
+     * {@code V2WorkflowFinalizer} for AUTO runs and by
+     * {@code StepByStepExecutor.reconcileRunStatusWithReadyNodes} for step-by-step). The
+     * derived block at the bottom is only the fallback for the window BEFORE that row is
+     * stamped, and it must never out-run it: it may conclude "terminal" only from positive
+     * evidence that every node the plan can execute has settled.
+     *
+     * <p><b>Containment, not cardinality.</b> This used to compare
+     * {@code completed.size() + failed.size() >= getAllStepIds(plan).size()}, and the two
+     * sides came from different universes. The settled sets are the snapshot's flat views
+     * ({@code StateSnapshot.computeFlatSet}) and legitimately carry ids the plan set does
+     * not, notably {@code interface:}; the plan set omitted {@code core:}, {@code agent:}
+     * and {@code table:} nodes entirely. A one-trigger-one-core plan therefore had
+     * {@code allStepIds = {trigger:x}}, size 1, and was declared finished by its trigger
+     * alone while the core node had not run. Containment is one-directional, so foreign ids
+     * can no longer satisfy it.
+     *
+     * <p>Skipped nodes count as settled, or the derived verdict would become unreachable
+     * for every decision / switch / loop-exit / fork plan, whose untaken branches are
+     * skipped rather than completed.
+     *
+     * <p>A node parked on a blocking signal (approval, wait, interface) is in none of the
+     * three settled sets, so containment fails and the real {@code dbStatus} is returned.
+     * That is the user-visible half of this defect: such a run used to render COMPLETED.
+     *
+     * <p>{@code interface:} and {@code note:} nodes are deliberately NOT required:
+     * {@link WorkflowPlan#getAllStepIds()} omits them, interfaces enter the executable
+     * graph via edges only and notes never execute.
      */
     public RunStatus determineOverallStatus(
             WorkflowRunEntity runEntity,
             Set<String> completedStepIds,
             Set<String> failedStepIds,
+            Set<String> skippedStepIds,
             Set<String> readySteps,
             WorkflowPlan plan) {
 
@@ -134,11 +165,9 @@ public class StateReconstructorHelper {
             return RunStatus.RUNNING;
         }
 
-        // Check if all steps are done
-        Set<String> allStepIds = getAllStepIds(plan);
-        int totalProcessed = completedStepIds.size() + failedStepIds.size();
-
-        if (totalProcessed >= allStepIds.size()) {
+        // Check if all steps are done. Shared with the two WRITE paths that stamp
+        // workflow_runs.status, so the displayed verdict and the persisted one cannot drift.
+        if (RunCompletionPredicate.allPlanNodesSettled(plan, completedStepIds, failedStepIds, skippedStepIds)) {
             return failedStepIds.isEmpty() ? RunStatus.COMPLETED : RunStatus.FAILED;
         }
 
@@ -149,14 +178,11 @@ public class StateReconstructorHelper {
      * Gets all step IDs from a plan.
      */
     public Set<String> getAllStepIds(WorkflowPlan plan) {
-        Set<String> ids = new HashSet<>();
-        for (Step step : plan.getMcps()) {
-            ids.add(step.getNormalizedKey());
-        }
-        for (Trigger trigger : plan.getTriggers()) {
-            ids.add(trigger.getNormalizedKey());
-        }
-        return ids;
+        // Delegates rather than re-enumerating. The local copy counted only mcps + triggers
+        // and silently ignored core/agent/table nodes, which is what let a one-trigger-
+        // one-core plan be declared finished by its trigger alone. WorkflowPlan's own
+        // enumeration is the one the executable graph is built from (ExecutionGraph.build).
+        return plan.getAllStepIds();
     }
 
     /**

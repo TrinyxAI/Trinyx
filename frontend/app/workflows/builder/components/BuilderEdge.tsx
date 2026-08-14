@@ -411,7 +411,7 @@ export function BuilderEdge({
                 pointerEvents: showButton ? 'all' : 'none',
                 transition: 'opacity 0.2s ease',
               }}
-              className="inline-flex items-center justify-center gap-2 whitespace-nowrap border border-transparent font-medium tracking-wide transition-all duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent-primary)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--bg-primary)] disabled:pointer-events-none disabled:opacity-60 disabled:cursor-not-allowed hover:shadow-[0_12px_32px_var(--shadow-color)] text-sm h-6 w-6 p-0 rounded-full bg-[var(--bg-primary)] text-[var(--text-primary)] hover:bg-[var(--text-primary)] hover:text-[var(--bg-primary)] shadow-none"
+              className="inline-flex items-center justify-center gap-2 whitespace-nowrap border border-transparent font-medium tracking-wide transition-all duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent-primary)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--bg-primary)] disabled:pointer-events-none disabled:opacity-60 disabled:cursor-not-allowed hover:shadow-[0_12px_32px_var(--shadow-color)] text-sm h-6 w-6 p-0 rounded-lg bg-[var(--bg-primary)] text-[var(--text-primary)] hover:bg-[var(--text-primary)] hover:text-[var(--bg-primary)] shadow-none"
             >
               <Trash2 className="h-3 w-3" strokeWidth={2} />
             </button>

@@ -58,6 +58,10 @@ class UserResolutionServiceTest {
     @Mock
     private PlanRepository planRepository;
 
+
+    @Mock
+    private FreeSubscriptionProvisioner freeSubscriptionProvisioner;
+
     @Mock
     private CreditAttributionService creditAttributionService;
 
@@ -79,7 +83,8 @@ class UserResolutionServiceTest {
                 billingCustomerRepository,
                 planRepository,
                 creditAttributionService,
-                new PlanStorageQuotaSyncer(null, null)
+                new PlanStorageQuotaSyncer(null, null),
+                freeSubscriptionProvisioner
         );
         // Default stub for the atomic last-login update - most tests don't care
         // about the return value, they just need the call to not blow up. Tests

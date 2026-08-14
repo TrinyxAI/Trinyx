@@ -106,6 +106,53 @@ public class StorageClient {
     }
 
     /**
+     * Attach a workflow run context to files that were stored WITHOUT one.
+     *
+     * <p>A catalog API answering with binary is uploaded from catalog-service, which knows only the
+     * tenant, so its {@code storage.storage} row has no workflow and the Files browser shows it at
+     * the root rather than inside the run that produced it. The step that made the call knows the
+     * context, and adopts its files through here once the call returns.</p>
+     *
+     * <p>Best-effort by construction: a failure returns 0 and is logged, never thrown. Where a file
+     * is filed must not decide whether a workflow step succeeded, and the file itself is already
+     * safely stored and already reachable through the step's own output.</p>
+     *
+     * @return how many rows were adopted; 0 on any failure
+     */
+    public int adoptRunContext(String tenantId, String organizationId, java.util.Collection<String> fileIds,
+                               String workflowId, String runId, String stepKey,
+                               int epoch, int spawn, Integer itemIndex) {
+        if (fileIds == null || fileIds.isEmpty() || workflowId == null || workflowId.isBlank()) {
+            return 0;
+        }
+        String url = baseUrl + "/api/internal/storage/adopt-run-context";
+        try {
+            HttpHeaders headers = buildHeaders(tenantId, organizationId);
+            headers.setContentType(MediaType.APPLICATION_JSON);
+
+            // HashMap, not Map.of: runId / itemIndex are legitimately null.
+            java.util.Map<String, Object> body = new java.util.HashMap<>();
+            body.put(com.apimarketplace.common.storage.AdoptRunContextFields.IDS, new java.util.ArrayList<>(fileIds));
+            body.put(com.apimarketplace.common.storage.AdoptRunContextFields.WORKFLOW_ID, workflowId);
+            body.put(com.apimarketplace.common.storage.AdoptRunContextFields.RUN_ID, runId);
+            body.put(com.apimarketplace.common.storage.AdoptRunContextFields.STEP_KEY, stepKey);
+            body.put(com.apimarketplace.common.storage.AdoptRunContextFields.EPOCH, epoch);
+            body.put(com.apimarketplace.common.storage.AdoptRunContextFields.SPAWN, spawn);
+            body.put(com.apimarketplace.common.storage.AdoptRunContextFields.ITEM_INDEX, itemIndex);
+
+            ResponseEntity<java.util.Map> response = restTemplate.exchange(
+                url, HttpMethod.POST, new HttpEntity<>(body, headers), java.util.Map.class);
+            Object adopted = response.getBody() == null
+                ? null
+                : response.getBody().get(com.apimarketplace.common.storage.AdoptRunContextFields.ADOPTED);
+            return (adopted instanceof Number n) ? n.intValue() : 0;
+        } catch (Exception e) {
+            log.warn("Failed to adopt run context for {} file(s): {}", fileIds.size(), e.getMessage());
+            return 0;
+        }
+    }
+
+    /**
      * Generic upload without workflow context.
      *
      * <p>Returns the same {@link FileRefDto} shape as {@link #upload}: the

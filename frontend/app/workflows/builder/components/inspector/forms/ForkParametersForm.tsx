@@ -93,7 +93,7 @@ export function ForkParametersForm({
             <PopoverTrigger asChild>
               <button
                 type="button"
-                className="inline-flex items-center justify-center rounded-full hover:bg-slate-200 dark:hover:bg-slate-700 p-0.5"
+                className="inline-flex items-center justify-center rounded-md hover:bg-slate-200 dark:hover:bg-slate-700 p-0.5"
               >
                 <Info className="h-3 w-3 text-slate-400 dark:text-slate-500" />
               </button>
@@ -134,7 +134,7 @@ export function ForkParametersForm({
           const connectedLabel = outputLabels.get(output.id);
           return (
             <div key={output.id} className="flex items-center gap-2">
-              <div className="w-6 h-6 rounded-full bg-indigo-100 dark:bg-indigo-900/30 flex items-center justify-center flex-shrink-0">
+              <div className="w-6 h-6 rounded-lg bg-indigo-100 dark:bg-indigo-900/30 flex items-center justify-center flex-shrink-0">
                 <span className="text-xs font-medium text-indigo-600 dark:text-indigo-400">{index + 1}</span>
               </div>
               <div className={`flex-1 h-8 px-3 flex items-center rounded-md border text-sm ${

@@ -10,10 +10,10 @@ import { orchestratorApi } from '@/lib/api';
 import { publicationService } from '@/lib/api/orchestrator/publication.service';
 import { getActivePublicPreview } from '@/contexts/PublicationSnapshotContext';
 import { parseUtcAware, formatRelativeDateI18n } from '@/lib/utils/dateFormatters';
-import { getIconSlug, NodeIcon } from '@/app/workflows/builder/components/nodes/shared';
+import { getIconSlug, NodeIcon, nodeIconRadiusClass } from '@/app/workflows/builder/components/nodes/shared';
 import { nodeMatchesStep } from '@/app/workflows/builder/services/nodeMatcher';
 import { findNodeClassById } from '@/app/workflows/builder/nodes/nodeClasses';
-import { getCanvasNodes, subscribeCanvasNodes } from '@/app/workflows/builder/services/canvasNodesStore';
+import { getCanvasEdges, getCanvasNodes, subscribeCanvasNodes } from '@/app/workflows/builder/services/canvasNodesStore';
 import { nodeRegistry } from '@/app/workflows/builder/registry/nodeRegistry';
 import type { BuilderNodeData } from '@/app/workflows/builder/types';
 import { StepRowActions } from '@/components/workflow/StepRowActions';
@@ -21,12 +21,15 @@ import { EpochSelector } from './EpochSelector';
 import { StepTooltipContent } from './StepTooltipContent';
 import { WaterfallView } from './WaterfallView';
 import { formatCompactDuration, type EpochTimestamp, type StepEntry } from './runFormatting';
+import { computeDagOrder, sortByDagOrder } from '@/lib/workflow/dagStepOrder';
 
 export interface RunStepsPanelProps {
   /** The run being inspected (needs runId/id, costCredits, budgetCredits, costByEpoch). */
   currentRunInfo: {
     runId?: string;
     id?: string;
+    /** Raw run status - tells an OPEN epoch apart from a merely unclosed one. */
+    status?: string;
     costCredits?: number | null;
     budgetCredits?: number | null;
     costByEpoch?: Record<string, number>;
@@ -174,21 +177,12 @@ export function RunStepsPanel({
     prevSelectedEpochRef.current = undefined;
   }, [runId]);
 
-  // Find the matching canvas node for a step alias (for icon + human label).
+  // ── Canvas graph subscription ──
+  //
   // Read from the module-level canvas store: this panel lives in the side panel,
   // a different React tree from the builder, so there is no ref to thread down.
   // Scoped by workflowId - with a sub-workflow canvas also mounted, the unscoped
   // read would label these steps with the other canvas's nodes.
-  const findNodeForStep = useCallback((stepAlias: string): Node<BuilderNodeData> | undefined => {
-    const nodes = getCanvasNodes(workflowId);
-    if (!nodes?.length) return undefined;
-    return nodes.find((n) => nodeMatchesStep(n, { stepAlias, id: stepAlias }));
-  }, [workflowId]);
-
-  // ── Nodes to show when the run has produced NO step yet ──
-  // A workflow that has never fired still has a shape: listing its nodes (greyed,
-  // no counts, no timing) is far more useful than an empty "no steps yet" box -
-  // the user sees what WILL run and can still click through to a node.
   //
   // Subscribed to the store rather than to a "node created" window event: the
   // panel can mount BEFORE the canvas publishes (opened straight on the Run tab),
@@ -197,30 +191,84 @@ export function RunStepsPanel({
   const [canvasNodesTick, setCanvasNodesTick] = useState(0);
   useEffect(() => subscribeCanvasNodes(() => setCanvasNodesTick(prev => prev + 1)), []);
 
+  // Reading order for the step list: triggers first, each branch's terminal node
+  // last, the way the DAG executes. Rebuilt only when the canvas publishes, not
+  // per step and not per render - the step list re-renders on every WebSocket
+  // push while the graph itself barely changes.
+  const dagOrder = useMemo(
+    () => computeDagOrder(getCanvasNodes(workflowId), getCanvasEdges(workflowId)),
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- canvasNodesTick is the store's change signal
+    [canvasNodesTick, workflowId],
+  );
+
+  // Resolve every step's canvas node ONCE per data change (icon, label and DAG
+  // rank all need it). The previous per-call `nodes.find` ran once per step per
+  // render in the list AND again in the waterfall, i.e. O(steps x nodes) on
+  // every push; this is a single pass that both views then read by key.
+  const nodeByStepAlias = useMemo(() => {
+    const nodes = getCanvasNodes(workflowId);
+    const map = new Map<string, Node<BuilderNodeData> | undefined>();
+    if (!nodes.length) return map;
+    for (const step of aggregatedSteps) {
+      if (map.has(step.alias)) continue;
+      map.set(step.alias, nodes.find((n) => nodeMatchesStep(n, { stepAlias: step.alias, id: step.alias })));
+    }
+    return map;
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- canvasNodesTick is the store's change signal
+  }, [aggregatedSteps, canvasNodesTick, workflowId]);
+
+  const findNodeForStep = useCallback((stepAlias: string): Node<BuilderNodeData> | undefined => {
+    if (nodeByStepAlias.has(stepAlias)) return nodeByStepAlias.get(stepAlias);
+    // A caller outside `aggregatedSteps` (never happens today, but the prop is
+    // public) still gets an answer rather than a missing icon.
+    return getCanvasNodes(workflowId).find((n) => nodeMatchesStep(n, { stepAlias, id: stepAlias }));
+  }, [nodeByStepAlias, workflowId]);
+
+  // ── Nodes to show when the run has produced NO step yet ──
+  // A workflow that has never fired still has a shape: listing its nodes (greyed,
+  // no counts, no timing) is far more useful than an empty "no steps yet" box -
+  // the user sees what WILL run and can still click through to a node.
+  //
+  // Ordered by the same DAG rank as the executed steps, so the preview reads as
+  // the run it is standing in for instead of flipping order the moment the first
+  // step lands.
   const previewNodes = useMemo(() => {
     if (aggregatedSteps.length > 0) return [];
-    return getCanvasNodes(workflowId)
+    const nodes = getCanvasNodes(workflowId)
       // Notes are annotations, never executed - they are not steps-to-be.
-      .filter((n) => !nodeRegistry.isNoteNode(n))
+      .filter((n) => !nodeRegistry.isNoteNode(n));
+    return sortByDagOrder(nodes, dagOrder, (n) => n.id)
       .map((n) => ({
         node: n,
         label: n.data?.label || n.data?.id || n.id,
         nodeClass: n.data ? findNodeClassById(n.data.id || '') : null,
       }));
     // eslint-disable-next-line react-hooks/exhaustive-deps -- canvasNodesTick is the store's change signal
-  }, [aggregatedSteps.length, canvasNodesTick, workflowId]);
+  }, [aggregatedSteps.length, canvasNodesTick, workflowId, dagOrder]);
 
-  // Filter steps by selected status
+  // Filter steps by selected status, then put them in DAG reading order.
+  //
+  // The aggregate arrives in execution order (WebSocket push order for "all
+  // epochs", row order for a single one), which scatters as soon as branches run
+  // in parallel or an epoch re-fires only part of the graph. Sorting here covers
+  // BOTH views - the list and the waterfall both render `filteredSteps`.
+  //
+  // Steps the canvas cannot resolve (node deleted since the run) keep their
+  // incoming order at the end: never dropped, never interleaved at random.
   const filteredSteps = useMemo(() => {
-    if (!statusFilter) return aggregatedSteps;
-    // Map filter key to statusCounts field (awaiting_signal → awaitingSignal)
-    const countsKey = statusFilter === 'awaiting_signal' ? 'awaitingSignal' : statusFilter;
-    return aggregatedSteps.filter(s => {
-      if (s.status === statusFilter) return true;
-      if (s.statusCounts && (s.statusCounts as Record<string, number | undefined>)[countsKey]! > 0) return true;
-      return false;
-    });
-  }, [aggregatedSteps, statusFilter]);
+    const matching = !statusFilter
+      ? aggregatedSteps
+      : (() => {
+          // Map filter key to statusCounts field (awaiting_signal → awaitingSignal)
+          const countsKey = statusFilter === 'awaiting_signal' ? 'awaitingSignal' : statusFilter;
+          return aggregatedSteps.filter(s => {
+            if (s.status === statusFilter) return true;
+            if (s.statusCounts && (s.statusCounts as Record<string, number | undefined>)[countsKey]! > 0) return true;
+            return false;
+          });
+        })();
+    return sortByDagOrder(matching, dagOrder, (s) => nodeByStepAlias.get(s.alias)?.id);
+  }, [aggregatedSteps, statusFilter, dagOrder, nodeByStepAlias]);
 
   return (
     <>
@@ -285,6 +333,7 @@ export function RunStepsPanel({
             selectedEpoch={selectedEpoch}
             onSelectEpoch={onSelectEpoch}
             viewMode={stepsView}
+            runStatus={currentRunInfo?.status}
           />
         )}
 
@@ -298,7 +347,7 @@ export function RunStepsPanel({
             {Array.from({ length: 4 }).map((_, i) => (
               <div key={i} className="flex items-center gap-1.5 px-3 py-1">
                 <div className="w-6 shrink-0 flex items-center justify-center">
-                  <div className="h-4 w-4 bg-gray-200 dark:bg-gray-700 rounded-full animate-pulse" />
+                  <div className={`h-4 w-4 bg-gray-200 dark:bg-gray-700 ${nodeIconRadiusClass('xs')} animate-pulse`} />
                 </div>
                 <div className="flex-1 min-w-0 flex items-center h-5">
                   <div
@@ -338,7 +387,7 @@ export function RunStepsPanel({
                       size="xs"
                     />
                   ) : (
-                    <div className="h-4 w-4 rounded-full bg-gray-100 dark:bg-gray-700" />
+                    <div className={`h-4 w-4 ${nodeIconRadiusClass('xs')} bg-gray-100 dark:bg-gray-700`} />
                   )}
                 </div>
                 <span className="flex-1 min-w-0 text-sm font-medium text-gray-500 dark:text-gray-400 truncate">{label}</span>
@@ -364,6 +413,10 @@ export function RunStepsPanel({
                 <Tooltip key={step.alias} delayDuration={150}>
                   <TooltipTrigger asChild>
                     <div
+                      // Row identity, in render order: what the DAG ordering is
+                      // asserted on end-to-end (the visible label is the node's,
+                      // which several nodes may share).
+                      data-run-step-row={step.alias}
                       className="flex items-center gap-1.5 px-3 py-1 cursor-pointer hover:bg-gray-100/60 dark:hover:bg-gray-700/40 transition-colors"
                       onClick={(e) => {
                         e.stopPropagation();
@@ -384,7 +437,7 @@ export function RunStepsPanel({
                             size="xs"
                           />
                         ) : (
-                          <div className="h-4 w-4 rounded-full bg-gray-100 dark:bg-gray-700" />
+                          <div className={`h-4 w-4 ${nodeIconRadiusClass('xs')} bg-gray-100 dark:bg-gray-700`} />
                         )}
                       </div>
                       <span className="flex-1 min-w-0 text-sm font-medium text-gray-900 dark:text-gray-100 truncate">{stepLabel}</span>

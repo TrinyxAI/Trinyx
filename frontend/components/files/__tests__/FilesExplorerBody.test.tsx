@@ -248,3 +248,47 @@ describe('FilesExplorerBody - shared layout contract', () => {
     expect(screen.getByTestId('row-file-x')).toHaveAttribute('data-highlight', 'true');
   });
 });
+
+describe('FilesExplorerBody - groupByDay', () => {
+  // The day sections ARE a date ordering. When the caller sorts by name/size/type, keeping
+  // them would chop the chosen order into date buckets and honour neither, so the body
+  // renders one flat block in exactly the order it was handed.
+  const mixedDays = [
+    folder('fA', '2026-01-01T00:00:00Z', 'Alpha'),
+    file('zzz', '2026-06-17T12:00:00Z'),
+    file('aaa', '2026-06-10T12:00:00Z'),
+  ];
+
+  it('groups by day by DEFAULT, so every surface that omits the prop is unchanged', () => {
+    render(<FilesExplorerBody variant="grid" entries={mixedDays} enableFolders {...baseProps} />);
+    expect(screen.getAllByText(/^Day /).length).toBeGreaterThan(1);
+  });
+
+  it('renders ONE flat block with no day headers when grouping is off', () => {
+    render(<FilesExplorerBody variant="grid" entries={mixedDays} enableFolders groupByDay={false} {...baseProps} />);
+    expect(screen.queryByText(/^Day /)).toBeNull();
+  });
+
+  it('preserves the server order exactly - the chosen sort is not re-sorted client-side', () => {
+    // 'zzz' precedes 'aaa' although it is the NEWER file: under a name/size/type sort the
+    // server's order is the answer, and the body must not re-impose a date order on it.
+    render(<FilesExplorerBody variant="grid" entries={mixedDays} enableFolders groupByDay={false} {...baseProps} />);
+    // The tiles themselves, not the selection handles nested inside them.
+    const tiles = screen.getAllByTestId(/^grid-(folder|file)-(?!sel-)/).map((el) => el.getAttribute('data-testid'));
+    expect(tiles).toEqual(['grid-folder-fA', 'grid-file-zzz', 'grid-file-aaa']);
+  });
+
+  it('still renders every entry, folders included, in the flat block', () => {
+    render(<FilesExplorerBody variant="grid" entries={mixedDays} enableFolders groupByDay={false} {...baseProps} />);
+    expect(screen.getByTestId('grid-folder-fA')).toBeInTheDocument();
+    expect(screen.getByTestId('grid-file-zzz')).toBeInTheDocument();
+    expect(screen.getByTestId('grid-file-aaa')).toBeInTheDocument();
+  });
+
+  it('applies to the compact variant too (the side panel keeps its row layout)', () => {
+    render(<FilesExplorerBody variant="compact" entries={mixedDays} enableFolders groupByDay={false} {...baseProps} />);
+    expect(screen.queryByText(/^Day /)).toBeNull();
+    expect(screen.getByTestId('row-folder-fA')).toBeInTheDocument();
+    expect(screen.getByTestId('row-file-zzz')).toBeInTheDocument();
+  });
+});

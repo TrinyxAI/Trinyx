@@ -210,7 +210,18 @@ public class AgentCrudModule implements ToolModule {
         Object tablesList = p.get("tables");
         Object interfacesList = p.get("interfaces");
         Object agentsList = p.get("agents");
-        Boolean webSearch = (Boolean) p.get("web_search");
+        Boolean webSearch = getBooleanParam(p, "web_search");
+        Boolean generation = getBooleanParam(p, "generation");
+        // A value nobody can interpret is not "not stated": on create it would
+        // land on a default the caller did not ask for (web_search grants
+        // itself), and on update it would be a no-op the caller reads as a
+        // change. Both are worse than being told, so say so and change nothing.
+        String unusableGrant = firstUnusableBooleanGrant(p, "web_search", "generation");
+        if (unusableGrant != null) {
+            return ToolExecutionResult.failure(ToolErrorCode.INVALID_PARAMETER_VALUE,
+                "'" + unusableGrant + "' must be true or false (got '" + p.get(unusableGrant)
+                    + "'). Nothing was changed.");
+        }
         String tableAccessModeParam = getStringParam(p, "table_access_mode");
         String workflowAccessModeParam = getStringParam(p, "workflow_access_mode");
         String interfaceAccessModeParam = getStringParam(p, "interface_access_mode");
@@ -324,7 +335,7 @@ public class AgentCrudModule implements ToolModule {
         }
 
         try {
-            Map<String, Object> toolsConfig = buildToolsConfig(toolsMode, toolsList, workflowsList, applicationsList, tablesList, interfacesList, agentsList, webSearch, maxIterations, tableAccessModeParam, workflowAccessModeParam, interfaceAccessModeParam, agentAccessModeParam, applicationAccessModeParam, skillAccessModeParam, workflowsGrantParam, applicationsGrantParam, tablesGrantParam, interfacesGrantParam, agentsGrantParam, fileAccessModeParam);
+            Map<String, Object> toolsConfig = buildToolsConfig(toolsMode, toolsList, workflowsList, applicationsList, tablesList, interfacesList, agentsList, webSearch, generation, maxIterations, tableAccessModeParam, workflowAccessModeParam, interfaceAccessModeParam, agentAccessModeParam, applicationAccessModeParam, skillAccessModeParam, workflowsGrantParam, applicationsGrantParam, tablesGrantParam, interfacesGrantParam, agentsGrantParam, fileAccessModeParam);
             Map<String, Object> config = buildConfig(maxIterations);
             String orgId = context != null ? context.orgId() : null;
 
@@ -783,7 +794,18 @@ public class AgentCrudModule implements ToolModule {
         Object tablesList = p.get("tables");
         Object interfacesList = p.get("interfaces");
         Object agentsList = p.get("agents");
-        Boolean webSearch = (Boolean) p.get("web_search");
+        Boolean webSearch = getBooleanParam(p, "web_search");
+        Boolean generation = getBooleanParam(p, "generation");
+        // A value nobody can interpret is not "not stated": on create it would
+        // land on a default the caller did not ask for (web_search grants
+        // itself), and on update it would be a no-op the caller reads as a
+        // change. Both are worse than being told, so say so and change nothing.
+        String unusableGrant = firstUnusableBooleanGrant(p, "web_search", "generation");
+        if (unusableGrant != null) {
+            return ToolExecutionResult.failure(ToolErrorCode.INVALID_PARAMETER_VALUE,
+                "'" + unusableGrant + "' must be true or false (got '" + p.get(unusableGrant)
+                    + "'). Nothing was changed.");
+        }
         String tableAccessModeParam = getStringParam(p, "table_access_mode");
         String workflowAccessModeParam = getStringParam(p, "workflow_access_mode");
         String interfaceAccessModeParam = getStringParam(p, "interface_access_mode");
@@ -858,7 +880,7 @@ public class AgentCrudModule implements ToolModule {
         }
 
         try {
-            Map<String, Object> toolsConfigPatch = buildToolsConfig(toolsMode, toolsList, workflowsList, applicationsList, tablesList, interfacesList, agentsList, webSearch, maxIterations, tableAccessModeParam, workflowAccessModeParam, interfaceAccessModeParam, agentAccessModeParam, applicationAccessModeParam, skillAccessModeParam, workflowsGrantParam, applicationsGrantParam, tablesGrantParam, interfacesGrantParam, agentsGrantParam, fileAccessModeParam);
+            Map<String, Object> toolsConfigPatch = buildToolsConfig(toolsMode, toolsList, workflowsList, applicationsList, tablesList, interfacesList, agentsList, webSearch, generation, maxIterations, tableAccessModeParam, workflowAccessModeParam, interfaceAccessModeParam, agentAccessModeParam, applicationAccessModeParam, skillAccessModeParam, workflowsGrantParam, applicationsGrantParam, tablesGrantParam, interfacesGrantParam, agentsGrantParam, fileAccessModeParam);
             Map<String, Object> config = buildConfig(maxIterations);
 
             // Patch is forwarded as-is to AgentService.updateAgent - the service does
@@ -1128,9 +1150,30 @@ public class AgentCrudModule implements ToolModule {
         }
     }
 
+    /**
+     * The first grant parameter that was SENT but cannot be read as a boolean,
+     * or null when every one of them is usable.
+     *
+     * <p>Tool arguments come from a language model, and one told "boolean"
+     * sometimes sends a word. Reading an unusable value as "not stated" is
+     * safe for the tools config itself, but it hides the mistake: on create
+     * the parameter falls back to a default the caller did not choose, and on
+     * update the call reports success while changing nothing. Naming the
+     * parameter costs the caller one turn and tells it exactly what to fix.
+     */
+    private static String firstUnusableBooleanGrant(Map<String, Object> p, String... names) {
+        for (String name : names) {
+            if (p.containsKey(name) && p.get(name) != null && getBooleanParam(p, name) == null) {
+                return name;
+            }
+        }
+        return null;
+    }
+
     private Map<String, Object> buildToolsConfig(String toolsMode, Object toolsList,
             Object workflowsList, Object applicationsList, Object tablesList,
-            Object interfacesList, Object agentsList, Boolean webSearch, Integer maxIterations,
+            Object interfacesList, Object agentsList, Boolean webSearch, Boolean generation,
+            Integer maxIterations,
             String tableAM, String workflowAM, String interfaceAM, String agentAM, String applicationAM, String skillAM,
             String workflowsGrant, String applicationsGrant, String tablesGrant, String interfacesGrant, String agentsGrant,
             String fileAM) {
@@ -1155,6 +1198,11 @@ public class AgentCrudModule implements ToolModule {
         if (interfacesList != null) toolsConfig.put("interfaces", interfacesList);
         if (agentsList != null) toolsConfig.put("agents", agentsList);
         if (webSearch != null) toolsConfig.put("webSearch", webSearch);
+        // The unified generation tool. Opt-IN and never defaulted, unlike the web
+        // search beside it: every create it exposes SPENDS the account's credits,
+        // so an agent has to be given it deliberately rather than inheriting it
+        // from a create call that never mentioned it.
+        if (generation != null) toolsConfig.put("generation", generation);
         if (maxIterations != null) toolsConfig.put("maxIterations", maxIterations);
         // Access modes - store when provided so merge can revert read→write
         if (tableAM != null) toolsConfig.put("tableAccessMode", tableAM);
@@ -1215,6 +1263,9 @@ public class AgentCrudModule implements ToolModule {
         if (toolsConfig.containsKey("webSearch")) {
             summary.put("webSearch", toolsConfig.get("webSearch"));
         }
+        if (toolsConfig.containsKey("generation")) {
+            summary.put("generation", toolsConfig.get("generation"));
+        }
         return summary;
     }
 
@@ -1244,6 +1295,7 @@ public class AgentCrudModule implements ToolModule {
         addResourceEntry(enabledResources, toolsConfig, "agents", "agent");
         addResourceEntry(enabledResources, toolsConfig, "applications", "application");
         if (Boolean.TRUE.equals(toolsConfig.get("webSearch"))) enabledResources.add("web_search");
+        if (Boolean.TRUE.equals(toolsConfig.get("generation"))) enabledResources.add("generation");
         // Skills and catalog are always available (not resource-gated)
         enabledResources.add("skill");
         enabledResources.add("catalog");

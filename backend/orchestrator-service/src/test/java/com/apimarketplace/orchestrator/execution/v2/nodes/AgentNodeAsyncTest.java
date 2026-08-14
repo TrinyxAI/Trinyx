@@ -566,6 +566,43 @@ class AgentNodeAsyncTest {
         }
 
         @Test
+        @DisplayName("Async queue: an agent with NO toolsConfig still carries the no-config module set, so the worker cannot hand it the credit-spending generation tools")
+        void asyncQueueNullToolsConfigStillScopesEnabledModules() {
+            Agent agent = new Agent(
+                "agent-id", "agent", "Async Unconfigured Agent", "agent-config-none",
+                null, "openai", "gpt-4o", "system",
+                "Process", 0.7, 4096, 10, 5,
+                List.of(), null, Map.of(), List.of(), null, List.of(), null, null);
+
+            AgentConfigResolver resolver = mock(AgentConfigResolver.class);
+            when(resolver.getToolsConfig(any(), any(), any())).thenReturn(null); // never configured
+
+            AgentNode node = new AgentNode("agent:async_unconfigured", agent);
+            node.acceptServices(ServiceRegistry.builder()
+                .agentClient(mockAgentClient)
+                .pendingAgentRegistry(mockPendingAgentRegistry)
+                .agentConfigResolver(resolver)
+                .build());
+            node.setAsyncQueueEnabled(true);
+
+            NodeExecutionResult result = node.execute(context.withOrganization("org-async-1", "ADMIN"));
+
+            AgentExecutionRequestMessage queueMessage =
+                (AgentExecutionRequestMessage) result.output().get("queueMessage");
+            @SuppressWarnings("unchecked")
+            List<String> enabledModules = (List<String>) queueMessage.requestPayload().get("enabledModules");
+            // Pre-fix this key was OMITTED for a null toolsConfig, so the worker deserialized
+            // enabledModules=null and fell back to the UNFILTERED core tool set - handing an
+            // agent that opted into nothing the credit-spending generation / image_generation
+            // tools. The no-config set keeps every ordinary family and drops exactly those two.
+            assertThat(enabledModules)
+                .as("a never-configured async agent must still be scoped, and never to the opt-ins")
+                .isNotNull()
+                .doesNotContain("generation", "image_generation")
+                .contains("catalog", "table", "workflow", "files");
+        }
+
+        @Test
         @DisplayName("Regression - async workflow agent payload mirrors inline credentials, variables, prompts, and execution id")
         void asyncWorkflowAgentPayloadMirrorsInlineExecutionEnvelope() {
             Agent agent = new Agent(

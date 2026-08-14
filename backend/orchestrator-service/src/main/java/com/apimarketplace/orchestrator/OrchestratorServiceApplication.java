@@ -17,9 +17,8 @@ import org.springframework.scheduling.annotation.EnableScheduling;
         "com.apimarketplace.orchestrator",
         "com.apimarketplace.common.storage",
         "com.apimarketplace.common.security",
-        "com.apimarketplace.common.billing",  // CatalogBillingDispatcher (shared with catalog-service)
         "com.apimarketplace.common.credit",   // CreditClientAutoConfig (was orchestrator's CreditClientConfig)
-        "com.apimarketplace.agent",  // Full scan of shared-agent-lib (incl. ImageGenerationBillingStrategy)
+        "com.apimarketplace.agent",  // Full scan of shared-agent-lib
         "com.apimarketplace.auth.client"
     },
     excludeFilters = {

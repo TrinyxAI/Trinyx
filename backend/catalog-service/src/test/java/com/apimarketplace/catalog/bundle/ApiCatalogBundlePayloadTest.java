@@ -46,9 +46,50 @@ class ApiCatalogBundlePayloadTest {
                                 List<ParameterRow> params,
                                 List<ResponseRow> responses,
                                 List<ToolCredentialRow> creds) {
+        return tool(id, slug, params, responses, creds, null);
+    }
+
+    /** @param generationSpec the descriptor, or null for an ordinary endpoint. */
+    private static ToolRow tool(UUID id, String slug,
+                                List<ParameterRow> params,
+                                List<ResponseRow> responses,
+                                List<ToolCredentialRow> creds,
+                                String generationSpec) {
         return new ToolRow(id, slug, "does " + slug, null, "GET", "/v1/" + slug, "HTTP",
                 null, null, "{\"mode\":\"http\"}", "[{\"name\":\"x\"}]", "http", null,
-                null, null, "ACTIVE", null, true, "1.0.0", params, responses, creds);
+                null, generationSpec, null, "ACTIVE", null, true, "1.0.0", params, responses, creds);
+    }
+
+    @Test
+    @DisplayName("the generation descriptor is part of the payload, or an install fed by the bundle "
+            + "cannot see a single generation")
+    void generationSpecIsCarriedInThePayload() {
+        // This payload is the ONLY way an install that does not run the importer
+        // receives the catalog. A descriptor missing here lands as NULL, so the
+        // registry finds nothing, no model resolves, and every fail-closed guard
+        // that asks "is this a generation" answers no.
+        String descriptor = "{\"kind\":\"video\",\"models\":[{\"id\":\"seedance-2.0\"}]}";
+        List<ApiRow> apis = List.of(api(UUID.randomUUID(), "Seedance", List.of(
+                tool(UUID.randomUUID(), "create-video-task", List.of(), List.of(), List.of(),
+                        descriptor))));
+
+        String payload = new String(ApiCatalogBundlePayload.canonicalBytes(
+                7L, 1, "cloud", SNAPSHOT_AT, apis, sampleTemplates()), StandardCharsets.UTF_8);
+
+        assertThat(payload).contains("generationSpec");
+        assertThat(payload).contains("seedance-2.0");
+    }
+
+    @Test
+    @DisplayName("and an ordinary endpoint carries none, so nothing else becomes a generation")
+    void ordinaryToolCarriesNoDescriptor() {
+        List<ApiRow> apis = List.of(api(UUID.randomUUID(), "OpenWeather", List.of(
+                tool(UUID.randomUUID(), "current-weather", List.of(), List.of(), List.of()))));
+
+        String payload = new String(ApiCatalogBundlePayload.canonicalBytes(
+                7L, 1, "cloud", SNAPSHOT_AT, apis, sampleTemplates()), StandardCharsets.UTF_8);
+
+        assertThat(payload).doesNotContain("generationSpec");
     }
 
     private static ParameterRow param(UUID id, String name) {
@@ -83,8 +124,8 @@ class ApiCatalogBundlePayloadTest {
                 shuffledTools.add(new ToolRow(t.id(), t.toolSlug(), t.description(), t.toolNameId(),
                         t.method(), t.endpoint(), t.protocol(), t.defaultHeaders(), t.runtimeMetadata(),
                         t.executionSpec(), t.outputSchema(), t.executionMode(), t.pagination(),
-                        t.requiredScopes(), t.nextHint(), t.status(), t.testStatus(), t.isActive(),
-                        t.version(), p, t.responses(), c));
+                        t.requiredScopes(), t.generationSpec(), t.nextHint(), t.status(),
+                        t.testStatus(), t.isActive(), t.version(), p, t.responses(), c));
             }
             Collections.shuffle(shuffledTools, new Random(42));
             shuffledApis.add(new ApiRow(a.id(), a.apiName(), a.apiSlug(), a.description(), a.baseUrl(),
@@ -184,6 +225,86 @@ class ApiCatalogBundlePayloadTest {
     void gunzipRejectsGarbage() {
         assertThatThrownBy(() -> ApiCatalogBundlePayload.gunzip(new byte[]{1, 2, 3}))
                 .isInstanceOf(java.io.UncheckedIOException.class);
+    }
+
+    // ── V430: the published generation price rides with the descriptor ───────
+
+    private static ApiCatalogBundlePayload.GenerationPriceRow price(
+            String integration, String toolId, String modelId, String unit, String perUnit) {
+        return new ApiCatalogBundlePayload.GenerationPriceRow(
+                integration, toolId, modelId, unit, "0", perUnit, null, null);
+    }
+
+    @Test
+    @DisplayName("the published price travels in the SIGNED payload, so an install cannot keep the "
+            + "descriptor and substitute a rate of its own")
+    void generationPriceIsCarriedInTheSignedPayload() {
+        // The descriptor alone makes a model visible and unsellable: an unpriced
+        // generation is refused by design. These bytes are what the Ed25519
+        // signature covers, so carrying the price here is what makes it both
+        // deliverable and unforgeable.
+        String toolId = "33333333-3333-3333-3333-333333333333";
+
+        String payload = new String(ApiCatalogBundlePayload.canonicalBytes(
+                7L, 1, "cloud", SNAPSHOT_AT, sampleApis(), sampleTemplates(),
+                List.of(price("seedance", toolId, "seedance-2.0", "second", "60"))),
+                StandardCharsets.UTF_8);
+
+        assertThat(payload).contains("generationPrices");
+        assertThat(payload).contains("seedance-2.0");
+        // Amounts are plain STRINGS: these bytes are signed and compared for
+        // equality on the far side, so a rate must not round-trip through a
+        // double and "60" must not become 60.0.
+        assertThat(payload).contains("\"unitCredits\":\"60\"");
+    }
+
+    @Test
+    @DisplayName("a catalog with no published price is byte-identical to the pre-V430 payload, "
+            + "so the addition is invisible to a cloud that has nothing to carry")
+    void noPricesMeansTheKeyIsAbsentEntirely() {
+        byte[] withoutArgument = ApiCatalogBundlePayload.canonicalBytes(
+                7L, 1, "cloud", SNAPSHOT_AT, sampleApis(), sampleTemplates());
+        byte[] withEmptyList = ApiCatalogBundlePayload.canonicalBytes(
+                7L, 1, "cloud", SNAPSHOT_AT, sampleApis(), sampleTemplates(), List.of());
+        byte[] withNull = ApiCatalogBundlePayload.canonicalBytes(
+                7L, 1, "cloud", SNAPSHOT_AT, sampleApis(), sampleTemplates(), null);
+
+        assertThat(withEmptyList).isEqualTo(withoutArgument);
+        assertThat(withNull).isEqualTo(withoutArgument);
+        assertThat(new String(withoutArgument, StandardCharsets.UTF_8))
+                .doesNotContain("generationPrices");
+    }
+
+    @Test
+    @DisplayName("price row order does not change the bytes - the signer depends on it")
+    void generationPriceOrderIndependence() {
+        String toolA = "33333333-3333-3333-3333-333333333333";
+        String toolB = "44444444-4444-4444-4444-444444444444";
+        List<ApiCatalogBundlePayload.GenerationPriceRow> ordered = List.of(
+                price("seedance", toolA, "seedance-2.0", "second", "60"),
+                price("seedance", toolA, "seedance-2.0-fast", "second", "30"),
+                price("elevenlabs", toolB, null, "character", "2"));
+        List<ApiCatalogBundlePayload.GenerationPriceRow> shuffled = new ArrayList<>(ordered);
+        Collections.shuffle(shuffled, new Random(42));
+
+        assertThat(ApiCatalogBundlePayload.canonicalBytes(
+                7L, 1, "cloud", SNAPSHOT_AT, sampleApis(), sampleTemplates(), shuffled))
+                .isEqualTo(ApiCatalogBundlePayload.canonicalBytes(
+                        7L, 1, "cloud", SNAPSHOT_AT, sampleApis(), sampleTemplates(), ordered));
+    }
+
+    @Test
+    @DisplayName("an endpoint-wide price omits modelId rather than writing null")
+    void endpointWidePriceOmitsTheModel() throws Exception {
+        byte[] bytes = ApiCatalogBundlePayload.canonicalBytes(
+                7L, 1, "cloud", SNAPSHOT_AT, sampleApis(), sampleTemplates(),
+                List.of(price("elevenlabs", "44444444-4444-4444-4444-444444444444",
+                        null, "character", "2")));
+
+        JsonNode row = new ObjectMapper().readTree(bytes).get("generationPrices").get(0);
+        assertThat(row.has("modelId")).isFalse();
+        assertThat(row.get("integrationName").asText()).isEqualTo("elevenlabs");
+        assertThat(row.get("priceUnit").asText()).isEqualTo("character");
     }
 
     private static List<ApiRow> sampleApis() {

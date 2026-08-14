@@ -85,7 +85,7 @@ export default function UpgradeModal({
           {/* Header */}
           <div className="p-6 pb-4">
             <div className="flex items-center gap-3">
-              <div className="p-2 rounded-full bg-theme-tertiary">
+              <div className="p-2 rounded-md bg-theme-tertiary">
                 <ArrowUp className="h-5 w-5 text-theme-secondary" />
               </div>
               <h2 className="text-lg font-semibold text-theme-primary">

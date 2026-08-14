@@ -1013,13 +1013,13 @@ class SubAgentExecutionHandlerTest {
     class ToolResolutionTests {
 
         @Test
-        @DisplayName("should use all core tools when toolsConfig is null")
-        void shouldUseAllToolsWhenConfigNull() {
+        @DisplayName("toolsConfig=null resolves through the canonical NO-CONFIG module set (never the unfiltered cache) so the credit-spending tools stay out")
+        void shouldUseNoConfigModuleSetWhenConfigNull() {
             AgentEntity entity = createAgent();
             entity.setToolsConfig(null);
             when(agentService.getAgent(AGENT_ID, TENANT_ID)).thenReturn(Optional.of(entity));
             when(conversationServiceClient.findOrCreateAgentConversation(any(), any(), any(), any())).thenReturn("conv-1");
-            when(coreToolsCache.getCoreTools()).thenReturn(List.of(
+            when(coreToolsCache.getCoreTools(anySet())).thenReturn(List.of(
                 ToolDefinition.builder().name("agent").build(),
                 ToolDefinition.builder().name("workflow").build()
             ));
@@ -1041,6 +1041,13 @@ class SubAgentExecutionHandlerTest {
             verify(agentLoopService).execute(contextCaptor.capture(), any(StreamingCallback.class));
 
             assertThat(contextCaptor.getValue().tools()).hasSize(2);
+            // The FILTERED overload is used with the no-config module set: pre-fix this branch
+            // short-circuited on the null and returned the whole cache, handing a config-less
+            // child the credit-spending generation / image_generation tools.
+            verify(coreToolsCache).getCoreTools(argThat(set ->
+                !set.contains("generation") && !set.contains("image_generation")
+                    && set.contains("catalog") && set.contains("table")));
+            verify(coreToolsCache, never()).getCoreTools();
         }
 
         @Test

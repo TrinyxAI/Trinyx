@@ -263,10 +263,28 @@ class WaitToolsProviderTest {
     @DisplayName("interruption")
     class Interruption {
 
+        /**
+         * The interrupt must land INSIDE the sleep loop, so the handshake is the
+         * cancellation probe itself: the sleep loop only reaches it after a full
+         * {@code sliceMs} slice, and awaiting it proves the worker is parked in
+         * {@link Thread#sleep} rather than merely started.
+         *
+         * <p>A bare {@code Thread.sleep(100)} on the test thread is not that proof.
+         * {@code Thread#start} returns before the new thread is scheduled, and
+         * interrupting a started-but-not-yet-running thread just sets the flag, so
+         * on a loaded machine the worker woke up already interrupted and threw out
+         * of its FIRST {@code Thread.sleep} - never touching the probe. Every
+         * assertion below still passed; the test died in Mockito's afterEach with
+         * {@code UnnecessaryStubbing}, and it was no longer testing "mid-sleep".
+         */
         @Test
         @DisplayName("thread interrupt mid-sleep -> EXECUTION_FAILED and the interrupt flag is restored")
         void interruptMidSleep() throws Exception {
-            when(cancellationProbe.isCallerCancelled(any())).thenReturn(false);
+            java.util.concurrent.CountDownLatch insideSleepLoop = new java.util.concurrent.CountDownLatch(1);
+            when(cancellationProbe.isCallerCancelled(any())).thenAnswer(invocation -> {
+                insideSleepLoop.countDown();
+                return false;
+            });
             java.util.concurrent.atomic.AtomicReference<ToolExecutionResult> resultRef = new java.util.concurrent.atomic.AtomicReference<>();
             java.util.concurrent.atomic.AtomicBoolean flagRestored = new java.util.concurrent.atomic.AtomicBoolean(false);
 
@@ -275,7 +293,9 @@ class WaitToolsProviderTest {
                 flagRestored.set(Thread.currentThread().isInterrupted());
             });
             worker.start();
-            Thread.sleep(100);
+            assertThat(insideSleepLoop.await(30, java.util.concurrent.TimeUnit.SECONDS))
+                .as("the sleep loop must reach the cancellation probe before we interrupt it")
+                .isTrue();
             worker.interrupt();
             worker.join(5_000);
 

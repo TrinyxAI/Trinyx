@@ -77,6 +77,11 @@ export function BrowserAgentNode({ data, selected, id }: NodeProps<BuilderNodeDa
       if (executionStatus.isRunning) return 'running';
       if (executionStatus.isFailed) return 'failed';
       if (executionStatus.isSkipped) return 'skipped';
+      // The backend's PARTIAL_SUCCESS must survive: the node IS in completedSteps (that is what
+      // opens its rerun gate), so testing isCompleted first would discard it and paint a node
+      // carrying a failure in its own tally the same green as a clean one. Border only - the
+      // rerun button reads deriveNodeStatus, which deliberately still sees 'completed'.
+      if (data.status === 'partial_success') return 'partial_success';
       if (executionStatus.isCompleted) return 'completed';
       if (executionStatus.isReady) return 'ready';
       if (data.status && data.status !== 'pending') return data.status;

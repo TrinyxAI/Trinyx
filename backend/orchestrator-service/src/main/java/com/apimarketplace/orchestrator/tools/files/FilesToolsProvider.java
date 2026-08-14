@@ -736,7 +736,15 @@ public class FilesToolsProvider implements ToolsProvider {
         // A FileRef the agent can drop into a workflow node's file parameter (only files
         // backed by object storage have one; inline text/binary cannot be wired this way).
         if (e.getS3Key() != null) out.put("ref", buildFileRef(e));
-        out.put("NEXT", "files(action='view', file_id='" + e.getId() + "') to read the content or get the file's url");
+        // The hint has to name 'ref' when there is one. It pointed only at
+        // 'view', so an agent asked to feed this file to something that takes a
+        // file went looking for content or a url, and a url is exactly the value
+        // those tools refuse: they need the bytes, which only the ref locates.
+        out.put("NEXT", e.getS3Key() != null
+                ? "pass 'ref' whole to any tool that takes a file (generation input_image / input_audio / "
+                  + "input_video, a workflow node's file parameter), or files(action='view', file_id='"
+                  + e.getId() + "') to read the content"
+                : "files(action='view', file_id='" + e.getId() + "') to read the content or get the file's url");
 
         return ToolExecutionResult.success(ToolResultSizeCap.capLargeStrings(out));
     }
@@ -1233,7 +1241,10 @@ public class FilesToolsProvider implements ToolsProvider {
         String description = "Browse and open files in your workspace (documents, images, exports, uploads), newest first.\n"
             + "- list: paginated file listing. Filters: query (name), run_id, workflow_id, date_from, date_to. default 25, max 50. "
             + "Pass folder='root' (or a folder_ref) to browse the folder TREE instead of a flat list - returns folders[] + files[].\n"
-            + "- get: metadata + a cheap preview (JSON skeleton / text head) for one file_id. No full content.\n"
+            + "- get: metadata + a cheap preview (JSON skeleton / text head) for one file_id. No full content. "
+            + "Also returns 'ref' for a stored file: the file OBJECT to hand to any tool that takes a file "
+            + "(generation input_image / input_audio / input_video, a workflow node's file parameter). Pass 'ref' "
+            + "whole and unchanged - a file_id, a url or a name is not a file object and is refused.\n"
             + "- view: read a file's content for one file_id. This is how you access an uploaded file's data: "
             + "documents (PDF, Word, Excel, HTML, CSV, text/code) come back as extracted TEXT in 'content'; images "
             + "are inlined so a vision model SEES them; audio/video/other binaries return an opaque permanent 'url' "

@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useState, useEffect, useRef, useCallback, useMemo } from "react";
-import { useQueryClient } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { getClientLocale } from "@/lib/utils/locale";
 import {
   Dialog,
@@ -74,6 +74,19 @@ export interface CredentialWizardProps {
    * on the BYOK form without having to manually toggle. Defaults to 'standard'.
    */
   initialMode?: 'standard' | 'advanced';
+  /**
+   * Called when the user picks the platform's key instead of adding one of
+   * their own, with the integration it applies to. The wizard closes and
+   * creates NOTHING: choosing the platform's key is the absence of a
+   * credential, not a different kind of one, and which pool a call runs on is
+   * recorded where that decision belongs (the node's credential source), never
+   * on the credential itself.
+   *
+   * <p>Omit it and the choice is still explained but not actionable from here,
+   * which is the right behaviour for a caller with nowhere to record it (the
+   * settings list, for instance).
+   */
+  onUsePlatformCredential?: (integrationName: string) => void;
 }
 
 type CredentialStatus = "pending" | "completed" | "current";
@@ -473,6 +486,7 @@ export function CredentialWizard({
   onComplete,
   onCredentialAdded,
   initialMode = 'standard',
+  onUsePlatformCredential,
 }: CredentialWizardProps) {
   const t = useTranslations("credentials.wizard");
   const tConfig = useTranslations("credentials.configureDialog");
@@ -612,6 +626,35 @@ export function CredentialWizard({
     && hasPlatformCredentials === true
     && byokConfig.surface !== 'hidden'
     && !fullyByok;
+
+  /**
+   * Whether this key-based integration is one the platform also sells on its
+   * own key, so the user has a real choice to make rather than a form to fill.
+   *
+   * <p>OAuth2 already has this conversation, through the Standard / Custom
+   * toggle above. A key-based integration never did: the wizard opened on
+   * "paste your API key" whether or not the platform had one, which quietly
+   * made BYOK the only path for the integrations most likely to be resold
+   * (every generation provider is key-based). The choice is not cosmetic, it
+   * decides who pays: the platform's key bills credits, the user's key bills
+   * the provider directly and the platform charges nothing.
+   */
+  const platformKeyOffered = !isOAuth2 && !isNone && hasPlatformCredentials === true;
+
+  const platformIntegrationName = template?.credential_name || template?.display_name || '';
+
+  // The published price for that key, so the choice is made against a number
+  // rather than against a promise. Same endpoint the workflow inspector and the
+  // generation modal quote from, so all three state one price.
+  const { data: platformKeyInfo } = useQuery({
+    // Trailing `false`: this screen asks about a credential, not about one
+    // endpoint, so it is never quoting a generation. Kept in the key so the
+    // shape matches the inspector's and the two cannot collide.
+    queryKey: ['platform-credential-public-info', platformIntegrationName.toLowerCase(), null, null, null, false],
+    queryFn: () => orchestratorApi.getPlatformCredentialPublicInfo(platformIntegrationName),
+    enabled: open && platformKeyOffered && !!platformIntegrationName,
+    staleTime: 5 * 60_000,
+  });
 
   // ============================================
   // Effects
@@ -753,11 +796,31 @@ export function CredentialWizard({
       return;
     }
 
-    // For non-OAuth2 types (api_key, bearer, basic, custom), no platform credentials needed
+    // Non-OAuth2 types (api_key, bearer, basic, custom) need no platform
+    // credential to RUN the wizard, and the form is shown either way. But
+    // whether the platform HAS a key of its own is not the same question, and
+    // this used to assert `true` without asking: for an integration the
+    // platform resells (every generation provider is one), the user was walked
+    // straight to "paste your API key" without being told they did not have to
+    // have one. The answer only decides whether the choice is offered, so it is
+    // fetched, never assumed, and a failure leaves it unknown rather than
+    // claiming a key that may not exist.
     if (authTypeNorm !== "oauth2") {
-      setHasPlatformCredentials(true);
       setShowUnverifiedAppWarning(false);
       setStep("configure");
+      const integrationName = tmpl.credential_name || tmpl.display_name || "";
+      if (!integrationName) {
+        setHasPlatformCredentials(false);
+        return;
+      }
+      try {
+        const availability = await orchestratorApi.getPlatformCredentialsAvailability(integrationName);
+        if (activeTemplateIdRef.current !== tmpl.id) return; // stale click - newer variant won
+        setHasPlatformCredentials(availability.available);
+      } catch {
+        if (activeTemplateIdRef.current !== tmpl.id) return;
+        setHasPlatformCredentials(false);
+      }
       return;
     }
 
@@ -1351,7 +1414,7 @@ export function CredentialWizard({
               onClick={() => isClickable && goToCredential(index)}
               disabled={!isClickable}
               className={`
-                flex items-center gap-2 px-3 py-1.5 rounded-full text-xs font-medium transition-all
+                flex items-center gap-2 px-3 py-1.5 rounded-md text-xs font-medium transition-all
                 ${state.status === "current" ? "bg-slate-100 dark:bg-slate-800 text-slate-900 dark:text-slate-100 ring-2 ring-slate-900 dark:ring-slate-100" : ""}
                 ${state.status === "completed" ? "bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-300" : ""}
                 ${state.status === "pending" ? "bg-slate-100 dark:bg-slate-800 text-slate-500 dark:text-slate-400 cursor-pointer hover:bg-slate-200 dark:hover:bg-slate-700" : ""}
@@ -1689,7 +1752,7 @@ export function CredentialWizard({
         {step === "success" && (
           <div className="space-y-5">
             <div className="flex flex-col items-center gap-4 py-6">
-              <div className="w-12 h-12 rounded-full bg-green-100 dark:bg-green-950/30 flex items-center justify-center">
+              <div className="w-12 h-12 rounded-xl bg-green-100 dark:bg-green-950/30 flex items-center justify-center">
                 <CheckCircle className="h-6 w-6 text-green-500" />
               </div>
               <div className="text-center">
@@ -1720,7 +1783,7 @@ export function CredentialWizard({
         {step === "error" && (
           <div className="space-y-5">
             <div className="flex flex-col items-center gap-4 py-6">
-              <div className="w-12 h-12 rounded-full bg-red-100 dark:bg-red-950/30 flex items-center justify-center">
+              <div className="w-12 h-12 rounded-xl bg-red-100 dark:bg-red-950/30 flex items-center justify-center">
                 <AlertCircle className="h-6 w-6 text-red-500" />
               </div>
               <div className="text-center">
@@ -2059,6 +2122,42 @@ export function CredentialWizard({
         {/* Configure state */}
         {step === "configure" && template && (
           <div className="space-y-5">
+            {/* The choice a key-based integration never used to offer: the
+                platform's key, or your own. Placed above the form because it
+                decides whether the form is needed at all, and it decides who
+                pays, which is not something to discover after typing a secret. */}
+            {platformKeyOffered && (
+              <div className="rounded-xl border border-theme p-3 space-y-2">
+                <p className="text-sm font-medium text-theme-primary">{t("platformKey.title")}</p>
+                {/* NO NUMBER HERE, deliberately. This screen asks about a
+                    CREDENTIAL, so its quote carries no endpoint, and the server
+                    only ever returns an amount for an endpoint: the priced
+                    sentence could not render, and the one payload that would
+                    have made it render is the credential-wide default, which is
+                    not what any endpoint charges and is refused outright for a
+                    generation. Quoting a number the server will not honour is
+                    the single thing this branch forbids everywhere else, so the
+                    price is stated where the endpoint is known (the builder
+                    inspector and the generation modal) and not here. */}
+                <p className="text-sm text-theme-secondary">{t("platformKey.explanation")}</p>
+                {onUsePlatformCredential && (
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    disabled={isSubmitting}
+                    onClick={() => {
+                      onUsePlatformCredential(platformIntegrationName);
+                      onOpenChange(false);
+                    }}
+                  >
+                    {t("platformKey.use")}
+                  </Button>
+                )}
+                <p className="text-xs text-theme-secondary">{t("platformKey.orOwn")}</p>
+              </div>
+            )}
+
             {/* Inline 2-pill toggle (Standard | Custom OAuth) - rendered only
                 when the catalog declares surface='inline'. No provider
                 currently ships inline on prod (kept for future per-provider
@@ -2098,7 +2197,7 @@ export function CredentialWizard({
                       aria-selected={isActive}
                       onClick={() => handleSelectVariant(v)}
                       className={
-                        "rounded-full border px-3 py-1 text-sm transition " +
+                        "rounded-md border px-3 py-1 text-sm transition " +
                         (isActive
                           ? "border-theme bg-theme-accent text-theme-primary"
                           : "border-theme bg-transparent text-theme-secondary hover:bg-theme-tertiary")
@@ -2119,7 +2218,7 @@ export function CredentialWizard({
                 <Label className="text-sm font-semibold text-slate-500 dark:text-slate-400">
                   {tConfig("authType")}
                 </Label>
-                <span className="inline-flex items-center rounded-full bg-theme-tertiary px-3 py-1 text-sm text-theme-secondary">
+                <span className="inline-flex items-center rounded-md bg-theme-tertiary px-3 py-1 text-sm text-theme-secondary">
                   {template.auth_type.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase())}
                 </span>
               </div>

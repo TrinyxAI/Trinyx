@@ -42,6 +42,32 @@ public final class ToolParamUtils {
         return val != null ? val : defaultValue;
     }
 
+    /**
+     * A boolean tool parameter, tolerating the string form models emit.
+     *
+     * <p>Tool arguments arrive as JSON produced by a language model, and a
+     * model that has been told "boolean" routinely sends {@code "true"}. A bare
+     * cast to {@link Boolean} then throws a ClassCastException, which reaches
+     * the caller as an unexplained failure rather than as an answer, and
+     * {@code "false"} crashes exactly as loudly as {@code "true"} - so the
+     * parameter cannot even be turned OFF by the callers that get it wrong.
+     *
+     * <p>Anything that is neither a boolean nor one of those two words is
+     * {@code null}, meaning "not stated", which every caller already handles.
+     * Guessing at {@code "yes"} or {@code "1"} would be inventing a decision
+     * nobody made, and some of these parameters authorise spending.
+     */
+    public static Boolean getBooleanParam(Map<String, Object> params, String key) {
+        Object val = params == null ? null : params.get(key);
+        if (val instanceof Boolean bool) return bool;
+        if (val instanceof String str) {
+            String normalized = str.trim().toLowerCase(Locale.ROOT);
+            if ("true".equals(normalized)) return Boolean.TRUE;
+            if ("false".equals(normalized)) return Boolean.FALSE;
+        }
+        return null;
+    }
+
     public static Long getLongParam(Map<String, Object> params, String key) {
         Object val = params.get(key);
         if (val instanceof Number num) return num.longValue();

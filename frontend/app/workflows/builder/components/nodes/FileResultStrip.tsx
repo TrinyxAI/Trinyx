@@ -33,7 +33,7 @@ export interface FileStripFile {
 }
 
 /** Round icon-button used inside the pill / preview-card header. */
-const PILL_BTN_CLS = 'inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-slate-400 hover:text-slate-600 hover:bg-slate-100 dark:text-slate-500 dark:hover:text-slate-300 dark:hover:bg-slate-700 transition-colors';
+const PILL_BTN_CLS = 'inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-lg text-slate-400 hover:text-slate-600 hover:bg-slate-100 dark:text-slate-500 dark:hover:text-slate-300 dark:hover:bg-slate-700 transition-colors';
 
 /**
  * Compact one-line file pill: mime-family icon + truncated name + human size +

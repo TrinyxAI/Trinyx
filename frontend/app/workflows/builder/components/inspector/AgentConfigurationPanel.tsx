@@ -274,7 +274,7 @@ function AgentEntityPanel({
                         </Label>
                         <Popover>
                             <PopoverTrigger asChild>
-                                <button type="button" className="inline-flex items-center justify-center rounded-full hover:bg-slate-200 dark:hover:bg-slate-700 p-0.5">
+                                <button type="button" className="inline-flex items-center justify-center rounded-md hover:bg-slate-200 dark:hover:bg-slate-700 p-0.5">
                                     <Info className="h-3 w-3 text-slate-400" />
                                 </button>
                             </PopoverTrigger>
@@ -458,7 +458,7 @@ function InlineConfigPanel({
                                                 alt={tool.name}
                                                 width={18}
                                                 height={18}
-                                                className="w-[18px] h-[18px] rounded-full p-0.5 dark:bg-slate-100/10"
+                                                className="w-[18px] h-[18px] rounded-md p-0.5 dark:bg-slate-100/10"
                                                 onError={(e) => {
                                                     const target = e.target as HTMLImageElement;
                                                     target.src = "/mcp_black.png";
@@ -470,7 +470,7 @@ function InlineConfigPanel({
                                                 alt="Tool"
                                                 width={18}
                                                 height={18}
-                                                className="w-[18px] h-[18px] rounded-full p-0.5 dark:bg-slate-100/10"
+                                                className="w-[18px] h-[18px] rounded-md p-0.5 dark:bg-slate-100/10"
                                             />
                                         )}
                                     </div>
@@ -485,7 +485,7 @@ function InlineConfigPanel({
                                 alt="MCP"
                                 width={18}
                                 height={18}
-                                className="w-[18px] h-[18px] rounded-full p-0.5 dark:bg-slate-100/10"
+                                className="w-[18px] h-[18px] rounded-md p-0.5 dark:bg-slate-100/10"
                             />
                             <span className="text-sm text-slate-700 dark:text-slate-300">{tf('agentInline.allTools')}</span>
                         </div>
@@ -525,7 +525,7 @@ function InlineConfigPanel({
                         <Label className="text-sm font-semibold text-slate-500 dark:text-slate-400">{tf('temperature')}</Label>
                         <Popover>
                             <PopoverTrigger asChild>
-                                <button type="button" className="inline-flex items-center justify-center rounded-full hover:bg-slate-200 dark:hover:bg-slate-700 p-0.5">
+                                <button type="button" className="inline-flex items-center justify-center rounded-md hover:bg-slate-200 dark:hover:bg-slate-700 p-0.5">
                                     <Info className="h-3 w-3 text-slate-400" />
                                 </button>
                             </PopoverTrigger>
@@ -551,7 +551,7 @@ function InlineConfigPanel({
                         <Label className="text-sm font-semibold text-slate-500 dark:text-slate-400">{tf('maxTokens')}</Label>
                         <Popover>
                             <PopoverTrigger asChild>
-                                <button type="button" className="inline-flex items-center justify-center rounded-full hover:bg-slate-200 dark:hover:bg-slate-700 p-0.5">
+                                <button type="button" className="inline-flex items-center justify-center rounded-md hover:bg-slate-200 dark:hover:bg-slate-700 p-0.5">
                                     <Info className="h-3 w-3 text-slate-400" />
                                 </button>
                             </PopoverTrigger>
@@ -577,7 +577,7 @@ function InlineConfigPanel({
                         <Label className="text-sm font-semibold text-slate-500 dark:text-slate-400">{tf('agentInline.maxIterations')}</Label>
                         <Popover>
                             <PopoverTrigger asChild>
-                                <button type="button" className="inline-flex items-center justify-center rounded-full hover:bg-slate-200 dark:hover:bg-slate-700 p-0.5">
+                                <button type="button" className="inline-flex items-center justify-center rounded-md hover:bg-slate-200 dark:hover:bg-slate-700 p-0.5">
                                     <Info className="h-3 w-3 text-slate-400" />
                                 </button>
                             </PopoverTrigger>
@@ -604,7 +604,7 @@ function InlineConfigPanel({
                             <Label className="text-sm font-semibold text-slate-500 dark:text-slate-400">{tf('agentInline.maxToolsToDiscover')}</Label>
                             <Popover>
                                 <PopoverTrigger asChild>
-                                    <button type="button" className="inline-flex items-center justify-center rounded-full hover:bg-slate-200 dark:hover:bg-slate-700 p-0.5">
+                                    <button type="button" className="inline-flex items-center justify-center rounded-md hover:bg-slate-200 dark:hover:bg-slate-700 p-0.5">
                                         <Info className="h-3 w-3 text-slate-400" />
                                     </button>
                                 </PopoverTrigger>

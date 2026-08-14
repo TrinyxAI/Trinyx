@@ -3,7 +3,7 @@
 import * as React from 'react';
 import { Edge, Node, useEdgesState, useNodesState } from 'reactflow';
 import { useRouter } from 'next/navigation';
-import { deriveBadgeCycleResult } from '@/lib/utils/runStatusUtils';
+import { resolveBadgeCycleResult } from '@/lib/utils/runStatusUtils';
 import { useQuery } from '@tanstack/react-query';
 
 import { INITIAL_EDGES, INITIAL_NODES } from '../data/initialGraph';
@@ -27,6 +27,7 @@ import { resolveInsertedTargetHandle } from '../utils/hoverConnectHandles';
 import { reconcilePlanCredentials } from '@/lib/credentials/reconcilePlanCredentials';
 import type { Credential } from '@/lib/api/orchestrator';
 import { normalizeLabel, triggerKey, agentKey } from '../utils/labelNormalizer';
+import { isNavigateRef, navigateTargetLabel } from '../utils/interfaceActionRefs';
 import { findLiveFormTriggerNode } from '../utils/formTriggerNodeMatcher';
 import { syncRunStateToReactFlow } from '../services/runStateSyncService';
 import type { TriggerPanelConfig } from './TriggerPanel';
@@ -52,7 +53,7 @@ import { orchestratorApi, webhookSettingsService, chatEndpointSettingsService, f
 import { StepByStepProvider } from '../contexts/StepByStepContext';
 import { ValidationProvider } from '../contexts/ValidationContext';
 import { withDerivedBackEdges } from '../utils/backEdgeDetection';
-import { setCanvasNodes, clearCanvasNodes } from '../services/canvasNodesStore';
+import { setCanvasNodes, setCanvasEdges, clearCanvasNodes } from '../services/canvasNodesStore';
 import { useWorkflowRunContext } from '@/contexts/WorkflowRunContext';
 import { calculateNodePosition } from '../utils/nodePositioning';
 import { useWorkflowLayoutDirectionSafe } from '@/contexts/WorkflowLayoutDirectionContext';
@@ -60,13 +61,13 @@ import { resolveEffectiveRunId } from '../utils/effectiveRunId';
 import Toast, { useToast } from '@/components/Toast';
 import { useTranslations } from 'next-intl';
 import { streamDebug } from '@/contexts/workflow-run/streamingDebug';
-import { TERMINAL_STATUSES } from '@/contexts/workflow-run/RunStateStore';
+import { TERMINAL_STATUSES, UNREVIVABLE_STATUSES } from '@/contexts/workflow-run/RunStateStore';
 
 export interface RunInfoData {
   runInfo: any | null;
   isStepByStep: boolean;
   currentEpoch: number;
-  epochTimestamps: Array<{ epoch: number; startedAt: string; endedAt: string | null; workDurationMs?: number | null }>;
+  epochTimestamps: Array<{ epoch: number; startedAt: string; endedAt: string | null; workDurationMs?: number | null; status?: string | null }>;
   /** Aggregated steps derived from WebSocket batch-updates (includes timing). */
   streamedSteps?: Array<{
     alias: string;
@@ -755,7 +756,14 @@ export function WorkflowBuilder({
     // the raw idle "waiting_trigger" once a reusable-trigger run rests between fires. currentRunInfo
     // is assembled from run-state (which carries no run.metadata), so we synthesize the
     // metadata.lastCycleResult shape that getRunDisplayStatus already consumes.
-    const lastCycleResult = deriveBadgeCycleResult(
+    // The backend's own verdict, scoped to the epoch that closed. Deriving it here from
+    // `completedSteps`/`failedSteps` could not be right: those are CUMULATIVE, and a node that
+    // failed in an early epoch then succeeded is PARTIAL_SUCCESS - which the client buckets as
+    // completed to open its rerun gate, so the failure vanished from `failedSteps` and this
+    // badge went green while the run-history row, reading the same backend value, went red.
+    // deriveBadgeCycleResult remains for run shapes whose payload predates the field.
+    const lastCycleResult = resolveBadgeCycleResult(
+      runState.rawRunState?.lastCycleResult as string | undefined,
       runState.runStatus,
       runState.completedSteps ? Array.from(runState.completedSteps) : [],
       (runState.failedSteps?.size ?? 0) > 0,
@@ -1181,9 +1189,8 @@ export function WorkflowBuilder({
     // Navigate action: pure frontend tab switch - no API call.
     // This is handled in WorkflowPanelContent, but guard here as a safety net
     // in case the event reaches WorkflowBuilder through an alternative path.
-    if (triggerRef.endsWith(':navigate')) {
-      const parts = triggerRef.split(':');
-      const targetLabel = parts.length >= 3 ? parts.slice(1, -1).join(':') : null;
+    if (isNavigateRef(triggerRef)) {
+      const targetLabel = navigateTargetLabel(triggerRef);
       if (targetLabel) {
         const normalizedTarget = normalizeLabel(targetLabel);
         const matchingConfig = applicationConfigs.find(c => {
@@ -1418,7 +1425,9 @@ export function WorkflowBuilder({
     onCreateNode: handleCreateNode,
   });
 
-  const { undo, redo, canUndo, canRedo } = useHistory(nodes, edges, setNodes, setEdges);
+  // workflowLoaded is what tells the stack "this graph is the baseline, not an edit":
+  // the builder mounts empty and the loader paints the real graph a beat later.
+  const { undo, redo, canUndo, canRedo } = useHistory(nodes, edges, setNodes, setEdges, workflowLoaded);
 
   // Loop-back classification for validation: the same derivation the canvas renders and the
   // save path serializes, so all three agree on which edges close a loop.
@@ -1452,6 +1461,14 @@ export function WorkflowBuilder({
   React.useEffect(() => {
     setCanvasNodes(preparedNodes, workflowId);
   }, [preparedNodes, workflowId]);
+
+  // Publish the RAW edges alongside them: the run panel orders its step list by
+  // DAG depth, which needs the wiring, not just the nodes. Raw `edges` and not
+  // `preparedEdges` for the same reason as above - consumers want the plan shape
+  // (source/target), not the runtime decorations the prepared graph adds.
+  React.useEffect(() => {
+    setCanvasEdges(edges, workflowId);
+  }, [edges, workflowId]);
 
   React.useEffect(() => {
     if (!workflowId) return;
@@ -1569,6 +1586,7 @@ export function WorkflowBuilder({
       isEnabled={pauseResumeState.mode === 'step_by_step'}
       isPaused={pauseResumeState.isPaused}
       isRunTerminal={!!runState?.runStatus && TERMINAL_STATUSES.has(runState.runStatus)}
+      isRunUnrevivable={!!runState?.runStatus && UNREVIVABLE_STATUSES.has(runState.runStatus)}
       readySteps={pauseResumeState.readySteps}
       completedSteps={pauseResumeState.completedSteps}
       failedSteps={pauseResumeState.failedSteps}
@@ -1597,7 +1615,7 @@ export function WorkflowBuilder({
           {/* Syncing indicator */}
           {isSyncingPlan && (
             <div className="absolute top-3 left-1/2 -translate-x-1/2 z-50 pointer-events-none">
-              <div className="flex items-center gap-1.5 px-3 py-1.5 bg-blue-500/90 text-white text-xs font-medium rounded-full shadow-lg animate-pulse">
+              <div className="flex items-center gap-1.5 px-3 py-1.5 bg-blue-500/90 text-white text-xs font-medium rounded-md shadow-lg animate-pulse">
                 <svg className="w-3 h-3 animate-spin" viewBox="0 0 24 24" fill="none">
                   <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
                   <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />

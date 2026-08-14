@@ -1,5 +1,6 @@
 package com.apimarketplace.storage.web;
 
+import com.apimarketplace.common.storage.AdoptRunContextFields;
 import com.apimarketplace.storage.domain.FileRef;
 import com.apimarketplace.storage.service.file.DownloadStream;
 import com.apimarketplace.storage.service.file.FileStorageService;
@@ -19,7 +20,9 @@ import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 
 import java.io.IOException;
 import java.time.Duration;
+import java.util.List;
 import java.util.Map;
+import java.util.UUID;
 
 /**
  * Internal API controller for inter-service file operations.
@@ -37,10 +40,88 @@ public class InternalFileController {
     private final FileStorageService fileStorageService;
     private final StorageStreamingMetrics streamingMetrics;
 
+    /** The {@code storage.storage} indexer. Optional for the same reason as in
+     *  {@code S3FileStorageService}: some test profiles do not wire common-storage-service. */
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private com.apimarketplace.common.storage.service.StorageService storageIndexService;
+
     public InternalFileController(FileStorageService fileStorageService,
                                   StorageStreamingMetrics streamingMetrics) {
         this.fileStorageService = fileStorageService;
         this.streamingMetrics = streamingMetrics;
+    }
+
+    /**
+     * Attach a workflow run context to files that were stored without one.
+     *
+     * <p>POST /api/internal/storage/adopt-run-context</p>
+     *
+     * <p>A catalog API answering with binary (text-to-speech, image generation) is uploaded from
+     * catalog-service, which knows the tenant and nothing else - so the row lands with no workflow,
+     * and the Files browser, which builds its workflow folders from exactly those columns, shows it
+     * at the root instead of inside the run. The step that called the tool knows the context and
+     * posts it here once the call returns.</p>
+     *
+     * <p>Answers {@code {"adopted": n}}. Never 4xx on unknown ids: a file that cannot be adopted is
+     * skipped, because where a file is filed must not decide whether a workflow step succeeded.</p>
+     */
+    @PostMapping("/adopt-run-context")
+    public ResponseEntity<Map<String, Object>> adoptRunContext(
+            @RequestBody Map<String, Object> body,
+            @RequestHeader("X-User-ID") String tenantId) {
+
+        if (storageIndexService == null) {
+            return ResponseEntity.ok(Map.of(AdoptRunContextFields.ADOPTED, 0));
+        }
+        List<UUID> ids = parseIds(body.get(AdoptRunContextFields.IDS));
+        String workflowId = asString(body.get(AdoptRunContextFields.WORKFLOW_ID));
+        if (ids.isEmpty() || workflowId == null) {
+            return ResponseEntity.ok(Map.of(AdoptRunContextFields.ADOPTED, 0));
+        }
+        try {
+            int adopted = storageIndexService.adoptRunContext(
+                tenantId, ids, workflowId,
+                asString(body.get(AdoptRunContextFields.RUN_ID)),
+                asString(body.get(AdoptRunContextFields.STEP_KEY)),
+                asInt(body.get(AdoptRunContextFields.EPOCH), 0),
+                asInt(body.get(AdoptRunContextFields.SPAWN), 0),
+                asInteger(body.get(AdoptRunContextFields.ITEM_INDEX)));
+            return ResponseEntity.ok(Map.of(AdoptRunContextFields.ADOPTED, adopted));
+        } catch (Exception e) {
+            logger.warn("adopt-run-context failed for tenant {}: {}", tenantId, e.getMessage());
+            return ResponseEntity.ok(Map.of(AdoptRunContextFields.ADOPTED, 0));
+        }
+    }
+
+    /** Ids arrive as JSON strings; anything unparseable is dropped rather than failing the batch. */
+    private static List<UUID> parseIds(Object raw) {
+        if (!(raw instanceof List<?> list)) {
+            return List.of();
+        }
+        List<UUID> ids = new java.util.ArrayList<>(list.size());
+        for (Object item : list) {
+            if (item == null) {
+                continue;
+            }
+            try {
+                ids.add(UUID.fromString(item.toString()));
+            } catch (IllegalArgumentException ignored) {
+                // not a UUID - skip
+            }
+        }
+        return ids;
+    }
+
+    private static String asString(Object value) {
+        return value == null || value.toString().isBlank() ? null : value.toString();
+    }
+
+    private static int asInt(Object value, int fallback) {
+        return (value instanceof Number n) ? n.intValue() : fallback;
+    }
+
+    private static Integer asInteger(Object value) {
+        return (value instanceof Number n) ? n.intValue() : null;
     }
 
     /**

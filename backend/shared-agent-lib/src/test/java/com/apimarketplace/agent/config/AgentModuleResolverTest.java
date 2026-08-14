@@ -213,74 +213,136 @@ class AgentModuleResolverTest {
             assertThat(modules).contains("catalog");
         }
 
-        // ── image_generation (opt-in) ───────────────────────────────────
+        // ── retired image_generation grant ──────────────────────────────
+
+        /**
+         * The legacy image-generation tool and its module are gone. A persisted row
+         * that still carries the old grant must resolve to NOTHING: not the retired
+         * module (no tool serves it), and not {@code generation} either. Honouring it
+         * as a fallback would hand an agent granted images the per-second video models
+         * the unified tool also reaches, widening its spending authority without
+         * anyone asking.
+         */
+        @Test
+        @DisplayName("a retired imageGeneration grant resolves to no module at all, in any shape or mode")
+        void retiredImageGenerationGrantResolvesToNothing() {
+            for (Object grant : new Object[]{true, Map.of("enabled", true), Map.of("enabled", false)}) {
+                Map<String, Object> config = new HashMap<>();
+                config.put("imageGeneration", grant);
+                assertThat(AgentModuleResolver.resolveEnabledModules(config))
+                        .as("imageGeneration=%s must grant neither module", grant)
+                        .doesNotContain("image_generation", "generation");
+            }
+
+            // mode=none takes the early-return branch, which reads the grants separately.
+            Map<String, Object> modeNone = new HashMap<>();
+            modeNone.put("mode", "none");
+            modeNone.put("imageGeneration", true);
+            assertThat(AgentModuleResolver.resolveEnabledModules(modeNone))
+                    .doesNotContain("image_generation", "generation");
+        }
+
+        // ── generation (opt-in, spends credits per create) ──────────────
 
         @Test
-        @DisplayName("image_generation absent → disabled even when toolsConfig is otherwise unrestricted")
-        void imageGenAbsentDisabled() {
+        @DisplayName("generation absent → disabled even when toolsConfig is otherwise unrestricted")
+        void generationAbsentDisabled() {
             Map<String, Object> config = new HashMap<>();
-            // No imageGeneration key
             Set<String> modules = AgentModuleResolver.resolveEnabledModules(config);
-            assertThat(modules).doesNotContain("image_generation");
+            assertThat(modules).doesNotContain("generation");
         }
 
         @Test
-        @DisplayName("imageGeneration=true → enabled")
-        void imageGenBooleanTrueEnabled() {
-            Map<String, Object> config = new HashMap<>();
-            config.put("imageGeneration", true);
-            Set<String> modules = AgentModuleResolver.resolveEnabledModules(config);
-            assertThat(modules).contains("image_generation");
+        @DisplayName("no toolsConfig at all → generation is NOT granted (it spends credits)")
+        void generationNotGrantedWithoutConfig() {
+            assertThat(AgentModuleResolver.resolveEnabledModules(null)).doesNotContain("generation");
         }
 
         @Test
-        @DisplayName("imageGeneration={enabled:true,...} → enabled")
-        void imageGenObjectEnabledTrue() {
+        @DisplayName("generation=true → granted, so a configured agent actually receives the tool")
+        void generationBooleanTrueEnabled() {
             Map<String, Object> config = new HashMap<>();
-            config.put("imageGeneration", Map.of(
-                    "enabled", true,
-                    "provider", "openai",
-                    "model", "gpt-image-1.5",
-                    "quality", "medium"));
-            Set<String> modules = AgentModuleResolver.resolveEnabledModules(config);
-            assertThat(modules).contains("image_generation");
+            config.put("generation", true);
+            assertThat(AgentModuleResolver.resolveEnabledModules(config)).contains("generation");
         }
 
         @Test
-        @DisplayName("imageGeneration={enabled:false} → disabled")
-        void imageGenObjectEnabledFalse() {
+        @DisplayName("generation={enabled:true,...} → granted (config object accepted like imageGeneration)")
+        void generationObjectEnabledTrue() {
             Map<String, Object> config = new HashMap<>();
-            config.put("imageGeneration", Map.of("enabled", false));
-            Set<String> modules = AgentModuleResolver.resolveEnabledModules(config);
-            assertThat(modules).doesNotContain("image_generation");
+            config.put("generation", Map.of("enabled", true, "model", "seedance-2.0-fast"));
+            assertThat(AgentModuleResolver.resolveEnabledModules(config)).contains("generation");
         }
 
         @Test
-        @DisplayName("image_generation independent of webSearch toggle (no cross-contamination)")
-        void imageGenIndependentOfWebSearch() {
+        @DisplayName("generation={enabled:false} → denied")
+        void generationObjectEnabledFalse() {
             Map<String, Object> config = new HashMap<>();
-            config.put("webSearch", true);
-            config.put("imageGeneration", false);
-            Set<String> modules = AgentModuleResolver.resolveEnabledModules(config);
-            assertThat(modules).contains("web_search");
-            assertThat(modules).doesNotContain("image_generation");
+            config.put("generation", Map.of("enabled", false));
+            assertThat(AgentModuleResolver.resolveEnabledModules(config)).doesNotContain("generation");
         }
 
         @Test
-        @DisplayName("mode=none keeps image_generation opt-in posture")
-        void modeNoneKeepsImageGenOptIn() {
-            // Even though mode=none enables all "internal" tools by convention,
-            // image_generation is treated as a separately-priced capability and
-            // must be explicitly enabled.
+        @DisplayName("generation=false → denied")
+        void generationBooleanFalseDisabled() {
+            Map<String, Object> config = new HashMap<>();
+            config.put("generation", false);
+            assertThat(AgentModuleResolver.resolveEnabledModules(config)).doesNotContain("generation");
+        }
+
+        /**
+         * The two toggles are separate on purpose: an imageGeneration grant was given
+         * for images, and a per-second video model spends an order of magnitude more
+         * credits. Inheriting it would widen an existing agent's spending authority
+         * without anyone asking for it.
+         */
+        @Test
+        @DisplayName("only the generation key grants generation - the retired imageGeneration key never does")
+        void onlyTheGenerationKeyGrantsGeneration() {
+            Map<String, Object> imageOnly = new HashMap<>();
+            imageOnly.put("imageGeneration", true);
+            assertThat(AgentModuleResolver.resolveEnabledModules(imageOnly))
+                    .doesNotContain("generation");
+
+            Map<String, Object> generationOnly = new HashMap<>();
+            generationOnly.put("generation", true);
+            assertThat(AgentModuleResolver.resolveEnabledModules(generationOnly))
+                    .contains("generation");
+        }
+
+        @Test
+        @DisplayName("mode=none keeps generation opt-in, and honours the opt-in when present")
+        void modeNoneKeepsGenerationOptIn() {
             Map<String, Object> config = new HashMap<>();
             config.put("mode", "none");
-            Set<String> modules = AgentModuleResolver.resolveEnabledModules(config);
-            assertThat(modules).doesNotContain("image_generation");
+            assertThat(AgentModuleResolver.resolveEnabledModules(config)).doesNotContain("generation");
 
-            Map<String, Object> configWithIg = new HashMap<>();
-            configWithIg.put("mode", "none");
-            configWithIg.put("imageGeneration", true);
-            assertThat(AgentModuleResolver.resolveEnabledModules(configWithIg)).contains("image_generation");
+            Map<String, Object> withGeneration = new HashMap<>();
+            withGeneration.put("mode", "none");
+            withGeneration.put("generation", true);
+            assertThat(AgentModuleResolver.resolveEnabledModules(withGeneration)).contains("generation");
+        }
+
+        @Test
+        @DisplayName("mode=off advertises no tools at all, generation opt-in included")
+        void modeOffDropsGenerationEvenWhenOptedIn() {
+            Map<String, Object> config = new HashMap<>();
+            config.put("mode", "off");
+            config.put("generation", true);
+            assertThat(AgentModuleResolver.resolveEnabledModules(config)).isEmpty();
+        }
+
+        @Test
+        @DisplayName("isGenerationEnabled reads its own key and never falls back to imageGeneration")
+        void isGenerationEnabledReadsItsOwnKey() {
+            assertThat(AgentModuleResolver.isGenerationEnabled(null)).isFalse();
+            assertThat(AgentModuleResolver.isGenerationEnabled(Map.of())).isFalse();
+            assertThat(AgentModuleResolver.isGenerationEnabled(Map.of("generation", true))).isTrue();
+            assertThat(AgentModuleResolver.isGenerationEnabled(Map.of("imageGeneration", true))).isFalse();
+            // A config block with no explicit `enabled` field means the user meant it
+            assertThat(AgentModuleResolver.isGenerationEnabled(Map.of("generation", Map.of("model", "x")))).isTrue();
+            // Malformed values stay deny-safe
+            assertThat(AgentModuleResolver.isGenerationEnabled(Map.of("generation", "yes"))).isFalse();
         }
     }
 

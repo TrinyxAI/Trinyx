@@ -426,7 +426,7 @@ const Step1: React.FC<Step1Props> = React.memo(({
                                                 placeholder={t('category.selectCategory')}
                                             />
                                             {categoryData.isCustomCategory && (
-                                                <div className="absolute -top-2 -right-2 bg-yellow-500 text-white text-xs px-2 py-1 rounded-full">
+                                                <div className="absolute -top-2 -right-2 bg-yellow-500 text-white text-xs px-2 py-1 rounded-md">
                                                     {t('common.custom')}
                                                 </div>
                                             )}
@@ -437,7 +437,7 @@ const Step1: React.FC<Step1Props> = React.memo(({
                                     <Button
                                         variant="ghost"
                                         size="icon"
-                                        className="rounded-full w-10 h-10 sm:w-10 sm:h-10 min-w-[44px] min-h-[44px]"
+                                        className="rounded-xl w-10 h-10 sm:w-10 sm:h-10 min-w-[44px] min-h-[44px]"
                                         onClick={() => setShowNewCategoryForm(!showNewCategoryForm)}
                                         disabled={categoriesLoading}
                                     >
@@ -547,7 +547,7 @@ const Step1: React.FC<Step1Props> = React.memo(({
                                                 disabled={subcategoriesLoading || !categoryData.category}
                                             />
                                             {categoryData.isCustomSubcategory && (
-                                                <div className="absolute -top-2 -right-2 bg-yellow-500 text-white text-xs px-2 py-1 rounded-full">
+                                                <div className="absolute -top-2 -right-2 bg-yellow-500 text-white text-xs px-2 py-1 rounded-md">
                                                     {t('common.custom')}
                                                 </div>
                                             )}
@@ -558,7 +558,7 @@ const Step1: React.FC<Step1Props> = React.memo(({
                                     <Button
                                         variant="ghost"
                                         size="icon"
-                                        className="rounded-full w-10 h-10 sm:w-10 sm:h-10 min-w-[44px] min-h-[44px]"
+                                        className="rounded-xl w-10 h-10 sm:w-10 sm:h-10 min-w-[44px] min-h-[44px]"
                                         onClick={() => setShowNewSubcategoryForm(!showNewSubcategoryForm)}
                                         disabled={subcategoriesLoading || !categoryData.category}
                                     >

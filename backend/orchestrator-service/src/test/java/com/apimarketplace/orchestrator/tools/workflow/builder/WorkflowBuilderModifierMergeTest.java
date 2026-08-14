@@ -1233,6 +1233,7 @@ class WorkflowBuilderModifierMergeTest {
                     Arguments.of("download_file", "url", "download", "https://a.example/x"),
                     Arguments.of("public_link", "file", "params", "{{core:dl.output.file}}"),
                     Arguments.of("media", "operation", "params", "mux_audio"),
+                    Arguments.of("generate", "model", "params", "seedance-2.0-fast"),
                     Arguments.of("http_request", "url", "httpRequest", "https://a.example/y"),
                     Arguments.of("response", "message", "response", "ok"),
                     Arguments.of("aggregate", "strategy", "aggregate", "concat"),

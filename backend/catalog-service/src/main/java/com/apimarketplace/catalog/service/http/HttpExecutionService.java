@@ -262,7 +262,7 @@ public class HttpExecutionService {
         if (userCredentialService == null) {
             return Optional.empty();
         }
-        Long selectedCredentialId = selectedUserCredentialId();
+        Long selectedCredentialId = selectedUserCredentialId(userId, credentialName);
         if (selectedCredentialId != null) {
             Optional<CredentialScopesDto> byId = userCredentialService.getCredentialScopesById(userId, selectedCredentialId);
             if (byId.isPresent()) {
@@ -278,7 +278,7 @@ public class HttpExecutionService {
         if (userCredentialService == null) {
             return Optional.empty();
         }
-        Long selectedCredentialId = selectedUserCredentialId();
+        Long selectedCredentialId = selectedUserCredentialId(userId, credentialName);
         if (selectedCredentialId != null) {
             Optional<AccessTokenResult> byId = userCredentialService.getAccessTokenInfoById(userId, selectedCredentialId);
             if (byId.isPresent()) {
@@ -293,7 +293,7 @@ public class HttpExecutionService {
         if (userCredentialService == null) {
             return Map.of();
         }
-        Long selectedCredentialId = selectedUserCredentialId();
+        Long selectedCredentialId = selectedUserCredentialId(userId, credentialName);
         if (selectedCredentialId != null) {
             Map<String, String> byId = userCredentialService.getCredentialDataMapById(userId, selectedCredentialId);
             if (!byId.isEmpty()) {
@@ -304,10 +304,151 @@ public class HttpExecutionService {
         return credentialName != null ? userCredentialService.getCredentialDataMap(userId, credentialName) : Map.of();
     }
 
-    private Long selectedUserCredentialId() {
-        return "user".equals(CredentialModeContext.getExplicitSource())
-                ? CredentialModeContext.getSelectedCredentialId()
-                : null;
+    /**
+     * The pinned own-key id, but only when it is a key OF THIS ENDPOINT'S
+     * PROVIDER.
+     *
+     * <p><b>Why the second half exists.</b> The id resolves through
+     * {@code findActiveCredentialById}, which checks that the caller owns the
+     * credential (or shares its organization) and nothing else. Ownership stops
+     * one tenant reading another's key; it does NOT stop a caller sending their
+     * OWN key for provider Q to provider P. Without this check, a pinned id is
+     * a way to have any secret in the account decrypted and put in an
+     * {@code Authorization} header aimed at a host the caller chooses through
+     * {@code tool_id}. The picker on every surface only ever offers credentials
+     * of the bound integration, so this enforces on the server what the screens
+     * already promise, for callers that are not screens.
+     *
+     * <p>A mismatch is treated as "no pin" rather than as a failure. Every
+     * caller of this already falls back to the integration's default key, which
+     * is the credential the run would have used before anyone pinned anything,
+     * so a stale or hostile id costs nothing and changes no working call. The
+     * refusal it deserves belongs upstream, where the choice is made and can be
+     * corrected.
+     *
+     * <p>Unresolvable ({@code credentialName} unknown, the lookup failed) is
+     * also read as "no pin": the check exists to narrow what a pinned id can
+     * reach, and it must never be the reason a call widens.
+     */
+    private Long selectedUserCredentialId(String userId, String credentialName) {
+        if (!"user".equals(CredentialModeContext.getExplicitSource())) {
+            return null;
+        }
+        Long pinned = CredentialModeContext.getSelectedCredentialId();
+        if (pinned == null) {
+            return null;
+        }
+        if (userId == null || credentialName == null || credentialName.isBlank()
+                || userCredentialService == null) {
+            return null;
+        }
+        return pinnedCredentialBelongsTo(userId, pinned, credentialName) ? pinned : null;
+    }
+
+    /**
+     * True when the pinned credential is one the endpoint's own integration
+     * would have offered.
+     *
+     * <p>Matched the same two ways the auth side identifies a credential for an
+     * endpoint: by its {@code integration}, or by its {@code name} against the
+     * requirement's credential name. The {@code -credential} suffix is stripped
+     * because that is how the requirement names it and how the auth side
+     * derives the integration from it.
+     */
+    /** A credential that carries no system-set integration at all. */
+    private static boolean isBlankIdentifier(String value) {
+        return value == null || value.isBlank();
+    }
+
+    /**
+     * True when two credential identifiers name the same thing.
+     *
+     * <p>Collapsed to the canonical icon slug first, the same normalisation
+     * the credential templates and the pickers are keyed on, so a difference
+     * that is only punctuation ({@code stability-ai} against
+     * {@code stabilityai}) does not read as a different provider.
+     */
+    private static boolean sameCredentialIdentity(String a, String b) {
+        if (a == null || b == null || a.isBlank() || b.isBlank()) {
+            return false;
+        }
+        String left = com.apimarketplace.catalog.util.IconSlugNormalizer.normalizeForKey(a);
+        String right = com.apimarketplace.catalog.util.IconSlugNormalizer.normalizeForKey(b);
+        return !left.isBlank() && left.equals(right);
+    }
+
+    private boolean pinnedCredentialBelongsTo(String userId, Long credentialId, String credentialName) {
+        // Asked ONCE per execution. Five helpers resolve a credential during one
+        // call and every one of them lands here; without this they each pay a
+        // round trip to auth-service and, worse, a blip mid-call could have some
+        // of them honour the pin while others fall back, inside a single
+        // request. One lookup, one verdict, for the whole call.
+        Boolean alreadyDecided = CredentialModeContext.getPinVerdict(credentialName);
+        if (alreadyDecided != null) {
+            return alreadyDecided;
+        }
+        boolean verdict = resolvePinnedCredentialOwnership(userId, credentialId, credentialName);
+        CredentialModeContext.rememberPinVerdict(credentialName, verdict);
+        return verdict;
+    }
+
+    private boolean resolvePinnedCredentialOwnership(String userId, Long credentialId, String credentialName) {
+        String requirement = credentialName.trim();
+        String integration = requirement.replaceAll("-credential$", "");
+        // The IDENTITY lookup, not the record. Both answer the question, but
+        // the record arrives with its fields decrypted, and asking for a secret
+        // in order to decide not to use it is the one shape this check must not
+        // have. This one also resolves only an ACTIVE credential, which is the
+        // same set the key resolution below will accept.
+        Optional<CredentialScopesDto> summary =
+                userCredentialService.getCredentialScopesById(userId, credentialId);
+        if (summary.isEmpty()) {
+            // Deliberately NOT trusted. "We could not check" has to read as "do
+            // not use it", or an auth-service hiccup would reopen the very hole
+            // this exists to close. It is logged at WARN because the run then
+            // uses a DIFFERENT key from the one the plan names, and that
+            // substitution is otherwise invisible: a deleted credential, a
+            // workspace-shared one this call could not resolve, or a transient
+            // failure all look identical from the outside.
+            log.warn("Pinned credential {} could not be identified for a '{}' call, so it was not used. "
+                            + "This run falls back to the account's default key for that integration; "
+                            + "if the pinned credential still exists, check that it is reachable from "
+                            + "this execution's organization context.",
+                    credentialId, integration);
+            return false;
+        }
+        CredentialScopesDto found = summary.get();
+        // Compared on the CANONICAL slug, and against both of the credential's
+        // identifying fields in both directions, because that is what the
+        // pickers do. A credential can identify itself by integration
+        // ('seedance'), by the requirement's own name ('smtp-credential'), or
+        // by a spelling that only differs in its separators ('stability-ai' vs
+        // 'stabilityai'). A narrower comparison here does not leak anything -
+        // it silently drops a LEGITIMATE pin and runs the account's default key
+        // instead, which is the same invisible substitution this check exists
+        // to prevent, arrived at from the other side.
+        // `integration` is set by the system and is the only identifier a
+        // caller cannot choose, so when it is present it DECIDES, and a label
+        // can never overrule it.
+        //
+        // The label is admitted in exactly one case: a credential that carries
+        // no integration at all, which is how the workflow-native connectors
+        // (smtp, ssh, database) identify themselves, matching the auth side's
+        // own by-name resolution. Admitting it more widely is a way back into
+        // the hole: requirement names for a user-registered API are derived
+        // from the API's own name, and both sides collapse to the same slug, so
+        // anyone able to register an API could name it after a colleague's
+        // org-shared credential and have that key answer their own endpoint.
+        boolean matches = sameCredentialIdentity(integration, found.getIntegration())
+                || sameCredentialIdentity(requirement, found.getIntegration())
+                || (isBlankIdentifier(found.getIntegration())
+    && sameCredentialIdentity(requirement, found.getName()));
+        if (!matches) {
+            log.warn("Ignoring pinned credential {} on a '{}' call: it belongs to '{}'. "
+                            + "Falling back to the default key for this integration.",
+                    credentialId, integration, found.getIntegration());
+        }
+        return matches;
     }
 
     /**
@@ -560,7 +701,7 @@ public class HttpExecutionService {
                 //     fallback when a platform credential is configured.
                 boolean tryUser = !"platform".equals(explicitSource);
                 if (tryUser && userId != null && userCredentialService != null) {
-                    Long selectedCredentialId = selectedUserCredentialId();
+                    Long selectedCredentialId = selectedUserCredentialId(userId, credentialName);
                     if (selectedCredentialId != null) {
                         newToken = userCredentialService.forceRefreshAndGetTokenById(userId, selectedCredentialId);
                     }
@@ -770,11 +911,24 @@ public class HttpExecutionService {
             String key = injection.path("key").asText(null);
             String field = metadata.path("field").asText("api_key");
             // Prefix: canonical injection.prefix, else fakeAuth.apiKeyConfig.prefix (older imports);
-            // null when absent (downstream defaults to "Bearer " for Authorization headers).
-            String prefix = injection.path("prefix").asText(null);
-            if (prefix == null || prefix.isEmpty()) {
-                prefix = metadata.path("fakeAuth").path("apiKeyConfig").path("prefix").asText(null);
-                if (prefix != null && prefix.isEmpty()) prefix = null;
+            // null only when absent from BOTH (downstream then defaults to "Bearer ").
+            // An EXPLICIT empty prefix means "send the credential raw" and must survive to the
+            // header branch, which defaults a null prefix to "Bearer ". Collapsing "" to null
+            // here made that intent unexpressible: ClickUp, Linear, Wix and 7 other catalog
+            // files declare prefix:"" precisely because their vendor rejects a scheme, and every
+            // one of them was silently sent "Bearer <token>". ClickUp proves the difference is
+            // real: a raw personal token answers OAUTH_025 "Token invalid" while the same token
+            // behind "Bearer " answers OAUTH_019 "Oauth token not found", i.e. the prefix routes
+            // the request into the OAuth-token lookup where a personal token cannot be found.
+            // So distinguish ABSENT (fall back, then default to Bearer) from DECLARED-EMPTY (honour it).
+            String prefix = null;
+            if (injection.has("prefix") && !injection.path("prefix").isNull()) {
+                prefix = injection.path("prefix").asText("");
+            } else {
+                JsonNode fallback = metadata.path("fakeAuth").path("apiKeyConfig").path("prefix");
+                if (!fallback.isMissingNode() && !fallback.isNull()) {
+                    prefix = fallback.asText("");
+                }
             }
             // Multi-field custom auth carries one entry PER field in fakeAuth.customConfig.fields[]
             // (Algolia X-Algolia-Application-Id + X-Algolia-API-Key, Plaid client-id + secret, …),
@@ -1028,11 +1182,13 @@ public class HttpExecutionService {
             // Check if this is a Bearer token (Authorization header)
             if ("Authorization".equalsIgnoreCase(headerKey) || "Bearer".equalsIgnoreCase(headerKey)) {
                 // Source-of-truth prefix from the migration JSON's apiKeyConfig.prefix
-                // (e.g. "Bearer "). Default to "Bearer " when the metadata row predates
-                // the prefix column - historical behavior of this branch.
-                String prefix = injection.prefix() != null && !injection.prefix().isEmpty()
-                    ? injection.prefix()
-                    : "Bearer ";
+                // (e.g. "Bearer "). A null prefix means the metadata row predates the prefix
+                // column, so it still defaults to "Bearer " - historical behavior of this branch.
+                // An EMPTY prefix is different: it is an explicit "send the credential raw",
+                // which the vendors that reject a scheme (ClickUp, Linear, Qonto, OpenPix, ...)
+                // require. Treating the two the same made a whole class of API unusable while
+                // its catalog file looked correct, so the emptiness check is deliberately gone.
+                String prefix = injection.prefix() != null ? injection.prefix() : "Bearer ";
                 value = stripUserTypedPrefix(value, prefix);
                 headers.add("Authorization", prefix + value);
                 log.info("[HttpExecutionService.prepareHeadersWithCredentials] Added Authorization header with prefix={}",
@@ -1317,8 +1473,8 @@ public class HttpExecutionService {
         return subResourceTokenCache.size();
     }
 
-    private Optional<String> tryGetSelectedUserCredential(String userId) {
-        Long selectedCredentialId = selectedUserCredentialId();
+    private Optional<String> tryGetSelectedUserCredential(String userId, String credentialName) {
+        Long selectedCredentialId = selectedUserCredentialId(userId, credentialName);
         if (userId == null || selectedCredentialId == null || userCredentialService == null) {
             return Optional.empty();
         }
@@ -1356,9 +1512,9 @@ public class HttpExecutionService {
         if (explicitSource != null) {
             switch (explicitSource) {
                 case "user": {
-                    Long selectedCredentialId = selectedUserCredentialId();
+                    Long selectedCredentialId = selectedUserCredentialId(userId, credentialName);
                     Optional<String> v = selectedCredentialId != null
-                            ? tryGetSelectedUserCredential(userId)
+                            ? tryGetSelectedUserCredential(userId, credentialName)
                             : Optional.empty();
                     if (v.isEmpty()) {
                         // Pinned credential missing/deleted → fall back to the user's
@@ -2291,7 +2447,16 @@ public class HttpExecutionService {
      * Converts values to their expected types (e.g., array conversion).
      */
     public Object prepareRequestBody(ApiToolEntity tool, JsonNode parameters) {
-        if ("GET".equals(tool.getMethod()) || "DELETE".equals(tool.getMethod())) {
+        // GET has no body. DELETE does: 60 catalog endpoints declare body params on DELETE
+        // because their vendor requires one (Spotify playlist track removal, Auth0 role
+        // removal, Cloudflare bulk key delete, Quickbase record delete, Segment user delete,
+        // Coda row delete, Weaviate batch delete, ...). Lumping DELETE in with GET discarded
+        // those params before the request was assembled, so the calls went out bodyless: no
+        // error, just a delete that removed nothing or a 400 the agent could not diagnose.
+        // The transport was never the obstacle. DeleteBodyProbeTest sends a real DELETE with a
+        // body through the configured factory and the server records it intact, so this early
+        // return was the whole cause.
+        if ("GET".equals(tool.getMethod())) {
             return null;
         }
 

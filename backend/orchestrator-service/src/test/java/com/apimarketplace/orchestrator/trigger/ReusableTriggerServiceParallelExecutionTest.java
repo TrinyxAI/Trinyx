@@ -67,7 +67,7 @@ class ReusableTriggerServiceParallelExecutionTest {
                 mock(com.apimarketplace.orchestrator.repository.WorkflowPlanVersionRepository.class),
                 epochManager, streamingService,
                 executionService, triggerResolverService, stateSnapshotService,
-                epochConcurrencyLimiter, executionQueueService, creditClient, creditBudgetService);
+                epochConcurrencyLimiter, executionQueueService, creditBudgetService);
 
         // Inject @Autowired fields via reflection
         ReflectionTestUtils.setField(service, "v2StepByStepService", v2StepByStepService);

@@ -69,7 +69,7 @@ class ToolExecutionManagerTest {
             .thenReturn(Optional.empty());
 
         // Default mock behavior for shaper - pass through data as-is, no shaping action.
-        lenient().when(responseShaper.shape(any(), any(), any(), any()))
+        lenient().when(responseShaper.shape(any(), any(), any(), any(), anyBoolean()))
             .thenAnswer(inv -> new ResponseShaper.ShapingResult(
                     inv.getArgument(0),
                     java.util.List.of(),

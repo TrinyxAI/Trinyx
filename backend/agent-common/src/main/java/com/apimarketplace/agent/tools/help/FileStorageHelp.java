@@ -43,7 +43,7 @@ public final class FileStorageHelp {
 
         map.put("concept",
             "Files (images, audio, PDFs, etc.) live in object storage. Many node types - MCP catalog " +
-            "binary tools (image_generation, screenshot, …), the download_file core node, sftp downloads, " +
+            "binary tools (generation, screenshot, …), the download_file core node, sftp downloads, " +
             "convert_to_file, compression, form file uploads, chat trigger attachments - emit a canonical " +
             "FileRef. The interface render auto-converts every FileRef into an authenticated proxy URL " +
             "(logged-in app) or HMAC-signed URL (marketplace + share preview) inside <img src>, " +
@@ -52,7 +52,7 @@ public final class FileStorageHelp {
         map.put("shapes", Map.of(
             "canonical",
                 "{_type:'file', path:'tenantId/.../filename', name, mimeType, size}  - the universal " +
-                "shape. Emitted by MCP catalog binary tools (image_generation, screenshot, …), the " +
+                "shape. Emitted by MCP catalog binary tools (generation, screenshot, …), the " +
                 "catalog auto-dehydrator (any base64 leaf ≥ 64KB), the 4 core file-producing nodes " +
                 "(download_file, sftp, convert_to_file, compression), form file uploads (under the " +
                 "field's name), and chat trigger attachments.",

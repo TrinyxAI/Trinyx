@@ -68,7 +68,7 @@ class ReusableTriggerServiceCancelRaceTest {
                 runRepository, workflowRepository, planVersionRepository,
                 epochManager, streamingService,
                 executionService, triggerResolverService, stateSnapshotService,
-                epochConcurrencyLimiter, executionQueueService, creditClient, creditBudgetService);
+                epochConcurrencyLimiter, executionQueueService, creditBudgetService);
 
         Field signalField = ReusableTriggerService.class.getDeclaredField("unifiedSignalService");
         signalField.setAccessible(true);
@@ -84,7 +84,10 @@ class ReusableTriggerServiceCancelRaceTest {
         when(runRepository.findByRunIdPublic(RUN_ID)).thenReturn(Optional.of(cancelledRun));
 
         WorkflowRunEntity staleRun = mock(WorkflowRunEntity.class);
-        when(epochManager.getCurrentEpoch(staleRun, TRIGGER_ID)).thenReturn(1);
+        // The epoch to close is resolved from the DB copy, NOT from the caller's
+        // stale entity (which still points at the pre-increment epoch) - see
+        // ReusableTriggerServiceResetEpochTest.
+        when(epochManager.getCurrentEpoch(cancelledRun, TRIGGER_ID)).thenReturn(1);
 
         // Act: invoke resetRunOnFailure via reflection (private method)
         Method resetMethod = ReusableTriggerService.class.getDeclaredMethod(
@@ -106,7 +109,7 @@ class ReusableTriggerServiceCancelRaceTest {
         when(runRepository.findByRunIdPublic(RUN_ID)).thenReturn(Optional.of(freshRun));
 
         WorkflowRunEntity staleRun = mock(WorkflowRunEntity.class);
-        when(epochManager.getCurrentEpoch(staleRun, TRIGGER_ID)).thenReturn(1);
+        when(epochManager.getCurrentEpoch(freshRun, TRIGGER_ID)).thenReturn(1);
         when(stateSnapshotService.hasAnyActiveEpoch(RUN_ID)).thenReturn(false);
 
         Method resetMethod = ReusableTriggerService.class.getDeclaredMethod(

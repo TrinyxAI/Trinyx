@@ -14,6 +14,7 @@ import {
   updateLoopInternalEdges,
 } from '../services/edgeStatusService';
 import { nodesHaveChanged, edgesHaveChanged } from '../utils/graphCompare';
+import { isTerminalStepStatus } from '../utils/statusCounts';
 import { normalizeLabel, coreKey, mcpKey } from '../utils/labelNormalizer';
 import { nodeRegistry } from '../registry/nodeRegistry';
 import { streamDebug } from '@/contexts/workflow-run/streamingDebug';
@@ -113,11 +114,11 @@ export function useRunStateProcessing({
       if (hasChanges) {
         nodesRef.current = updatedNodes as any;
 
-        // Dispatch event for completed/failed steps to trigger data refetch
-        const terminalSteps = batchSteps.filter((step: BatchStepData) => {
-          const status = (step.status || '').toLowerCase();
-          return status === 'completed' || status === 'failed';
-        });
+        // Dispatch event for terminal steps to trigger data refetch. The predicate is shared
+        // (isTerminalStepStatus) rather than inlined here: the inline list omitted
+        // partial_success, which silently stopped the refresh for every node that had ever failed.
+        const terminalSteps = batchSteps.filter((step: BatchStepData) =>
+          isTerminalStepStatus(step.status));
 
         if (terminalSteps.length > 0) {
           window.dispatchEvent(new CustomEvent('stepExecutionCompleted', {

@@ -50,17 +50,20 @@ public class ApiCatalogBundleApplier {
     private static final TypeReference<Map<String, Object>> JSON_MAP = new TypeReference<>() {};
 
     private final ApiCatalogMergeService mergeService;
+    private final ApiCatalogGenerationPriceApplier priceApplier;
     private final ApiCatalogBundleRepository bundleRepo;
     private final ApiCatalogBundleSyncStatusRepository syncStatusRepo;
     private final ObjectMapper objectMapper;
     private final TransactionTemplate recordTx;
 
     public ApiCatalogBundleApplier(ApiCatalogMergeService mergeService,
+                                   ApiCatalogGenerationPriceApplier priceApplier,
                                    ApiCatalogBundleRepository bundleRepo,
                                    ApiCatalogBundleSyncStatusRepository syncStatusRepo,
                                    ObjectMapper objectMapper,
                                    PlatformTransactionManager transactionManager) {
         this.mergeService = mergeService;
+        this.priceApplier = priceApplier;
         this.bundleRepo = bundleRepo;
         this.syncStatusRepo = syncStatusRepo;
         this.objectMapper = objectMapper;
@@ -100,6 +103,15 @@ public class ApiCatalogBundleApplier {
         // 0. Idempotency: if this version is already the active bundle, skip.
         Optional<ApiCatalogBundleEntity> existing = bundleRepo.findByVersion(bundle.version());
         if (existing.isPresent() && existing.get().isActive()) {
+            // The CATALOG is already in place, but a price this version carries
+            // can become applicable later than the version itself: the price
+            // hangs off a platform credential, and an operator who pastes a
+            // provider key next week had no credential for it to attach to when
+            // this bundle first landed. Re-offering costs nothing (auth
+            // publishes nothing when nothing changed) and is what eventually
+            // prices that integration without waiting for the cloud to cut a new
+            // bundle it has no reason to cut.
+            priceApplier.apply(parsePricesQuietly(verifiedGzipBytes, bundle.version()), bundle.version());
             writeSuccessStatus(bundle.version(), now());
             return ApplyResult.alreadyApplied(bundle.version());
         }
@@ -107,6 +119,7 @@ public class ApiCatalogBundleApplier {
         // 1. Gunzip + parse payload.
         List<Map<String, Object>> apiMaps;
         List<Map<String, Object>> templateMaps;
+        List<Map<String, Object>> priceMaps;
         try {
             byte[] raw = ApiCatalogBundlePayload.gunzip(verifiedGzipBytes);
             Map<String, Object> root = objectMapper.readValue(raw, JSON_MAP);
@@ -114,6 +127,11 @@ public class ApiCatalogBundleApplier {
             if (apiMaps == null) return ApplyResult.failed("payload has no 'apis' array");
             templateMaps = listOfMaps(root.get("credentialTemplates"));
             if (templateMaps == null) templateMaps = List.of();
+            // Absent on every bundle built by a cloud older than V430, and on
+            // any cloud with no published generation price. Absent means "this
+            // bundle says nothing about prices", never "there are no prices",
+            // so it is a no-op rather than a reason to fail or to unprice.
+            priceMaps = listOfMaps(root.get("generationPrices"));
         } catch (Exception e) {
             return ApplyResult.failed("payload gunzip/parse failed: " + e.getMessage());
         }
@@ -154,6 +172,18 @@ public class ApiCatalogBundleApplier {
                     merge.upsertedApis(), merge.upsertedTools(), merge.deprecatedApis(),
                     merge.skippedCustom(), merge.failedApis(), detail);
         }
+
+        // 2b. Prices, once every endpoint has landed. Deliberately AFTER the
+        // merge and only on a FULL success: a price row is keyed on an endpoint
+        // UUID, so publishing prices over a half-applied catalog would price
+        // endpoints this install does not have yet. A partial apply returns
+        // above and is retried next tick, which is when its prices arrive.
+        //
+        // Deliberately OUTSIDE the bookkeeping transaction below as well: the
+        // prices live in another service's schema, so there is no transaction
+        // that could span both, and the honest arrangement is the one that
+        // cannot lose the catalog because the price call failed.
+        priceApplier.apply(priceMaps, bundle.version());
 
         Instant now = now();
 
@@ -263,6 +293,28 @@ public class ApiCatalogBundleApplier {
         status.setConsecutiveFailures(0);
         status.setUpdatedAt(now);
         syncStatusRepo.save(status);
+    }
+
+    /**
+     * The {@code generationPrices} array of an already-applied bundle, or null.
+     *
+     * <p>Separate from the main parse because the two failures mean different
+     * things. On the apply path a payload that will not parse is a real failure
+     * and is reported. Here the catalog is already in place and the only thing
+     * at stake is a price refresh, so a parse problem must not turn a green
+     * ALREADY_APPLIED into a red one.
+     */
+    private List<Map<String, Object>> parsePricesQuietly(byte[] verifiedGzipBytes, long version) {
+        try {
+            byte[] raw = ApiCatalogBundlePayload.gunzip(verifiedGzipBytes);
+            Map<String, Object> root = objectMapper.readValue(raw, JSON_MAP);
+            return listOfMaps(root.get("generationPrices"));
+        } catch (Exception e) {
+            log.warn("API catalog bundle v{} is already applied but its payload could not be re-read "
+                    + "for prices ({}: {}) - pricing left unchanged",
+                    version, e.getClass().getSimpleName(), e.getMessage());
+            return null;
+        }
     }
 
     @SuppressWarnings("unchecked")

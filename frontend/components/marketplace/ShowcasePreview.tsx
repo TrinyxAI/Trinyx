@@ -281,7 +281,7 @@ export function ShowcasePreview({ runId, interfaceId, className = '', hidePagina
                 onClick={(e) => { e.preventDefault(); e.stopPropagation(); handleNewer(); }}
                 disabled={currentPage === 0 || isLoading}
                 className={clsx(
-                  'w-6 h-6 p-0 rounded-full transition-colors inline-flex items-center justify-center text-white',
+                  'w-6 h-6 p-0 rounded-lg transition-colors inline-flex items-center justify-center text-white',
                   currentPage === 0 || isLoading
                     ? 'opacity-40 cursor-not-allowed'
                     : 'hover:bg-white/20'
@@ -297,7 +297,7 @@ export function ShowcasePreview({ runId, interfaceId, className = '', hidePagina
                 onClick={(e) => { e.preventDefault(); e.stopPropagation(); handleOlder(); }}
                 disabled={currentPage >= totalPages - 1 || isLoading}
                 className={clsx(
-                  'w-6 h-6 p-0 rounded-full transition-colors inline-flex items-center justify-center text-white',
+                  'w-6 h-6 p-0 rounded-lg transition-colors inline-flex items-center justify-center text-white',
                   currentPage >= totalPages - 1 || isLoading
                     ? 'opacity-40 cursor-not-allowed'
                     : 'hover:bg-white/20'

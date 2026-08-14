@@ -121,7 +121,7 @@ export function MCPTable({ className = '' }: MCPTableProps) {
             {mcps.length > 0 && (
                 <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
                     <div className="flex items-center gap-3">
-                        <div className="w-10 h-10 bg-theme-secondary rounded-full flex items-center justify-center">
+                        <div className="w-10 h-10 bg-theme-secondary rounded-xl flex items-center justify-center">
                             <Wrench className="w-5 h-5 text-theme-primary" />
                         </div>
                         <div>
@@ -132,7 +132,7 @@ export function MCPTable({ className = '' }: MCPTableProps) {
                     {canMutate && (
                         <Button
                             onClick={() => router.push('/app/settings/developers')}
-                            className="inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-full border border-transparent font-medium tracking-wide transition-all duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent-primary)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--bg-primary)] disabled:pointer-events-none disabled:opacity-60 disabled:cursor-not-allowed bg-[var(--accent-primary)] text-[var(--accent-foreground)] shadow-[0_10px_28px_var(--shadow-color)] hover:bg-[var(--accent-hover)] hover:text-[var(--accent-foreground)] hover:shadow-[0_12px_32px_var(--shadow-color)] h-11 px-6 text-sm"
+                            className="inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-xl border border-transparent font-medium tracking-wide transition-all duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent-primary)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--bg-primary)] disabled:pointer-events-none disabled:opacity-60 disabled:cursor-not-allowed bg-[var(--accent-primary)] text-[var(--accent-foreground)] shadow-[0_10px_28px_var(--shadow-color)] hover:bg-[var(--accent-hover)] hover:text-[var(--accent-foreground)] hover:shadow-[0_12px_32px_var(--shadow-color)] h-11 px-6 text-sm"
                         >
                             <Plus className="w-4 h-4" />
                             {t('emptyState.mcp.addButton')}
@@ -201,7 +201,7 @@ export function MCPTable({ className = '' }: MCPTableProps) {
                                 variant="outline"
                                 onClick={() => setShowDeleteModal(false)}
                                 disabled={isDeleting}
-                                className="inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-full font-medium tracking-wide transition-all duration-200 border border-[var(--accent-primary)] bg-transparent text-[var(--accent-primary)] hover:bg-[var(--accent-primary)] hover:text-[var(--accent-foreground)] h-11 px-6 text-sm"
+                                className="inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-xl font-medium tracking-wide transition-all duration-200 border border-[var(--accent-primary)] bg-transparent text-[var(--accent-primary)] hover:bg-[var(--accent-primary)] hover:text-[var(--accent-foreground)] h-11 px-6 text-sm"
                             >
                                 {t('common.cancel')}
                             </Button>
@@ -209,7 +209,7 @@ export function MCPTable({ className = '' }: MCPTableProps) {
                                 variant="destructive"
                                 onClick={confirmDeleteMCPs}
                                 disabled={isDeleting}
-                                className="inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-full border border-transparent font-medium tracking-wide transition-all duration-200 bg-red-600 text-white hover:bg-red-700 h-11 px-6 text-sm"
+                                className="inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-xl border border-transparent font-medium tracking-wide transition-all duration-200 bg-red-600 text-white hover:bg-red-700 h-11 px-6 text-sm"
                             >
                                 {t('common.delete')}
                             </Button>

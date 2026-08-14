@@ -38,7 +38,7 @@ function CopyButton({ code, className }: { code: string; className?: string }) {
   return (
     <button
       onClick={handleCopy}
-      className={`copy-button absolute top-2 right-2 p-1 rounded-full text-theme-muted hover:text-theme-primary hover:bg-theme-tertiary/50 transition-all duration-200 opacity-0 group-hover:opacity-100 ${className}`}
+      className={`copy-button absolute top-2 right-2 p-1 rounded-md text-theme-muted hover:text-theme-primary hover:bg-theme-tertiary/50 transition-all duration-200 opacity-0 group-hover:opacity-100 ${className}`}
       title={copied ? "Copied" : "Copy code"}
     >
       {copied ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}

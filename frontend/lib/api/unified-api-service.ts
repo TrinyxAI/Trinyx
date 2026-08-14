@@ -159,6 +159,8 @@ export class UnifiedApiService {
   getDisplayNameStatus = () => this.userService.getDisplayNameStatus();
   getHandleStatus = () => this.userService.getHandleStatus();
   deleteAccount = () => this.userService.deleteAccount();
+  getAccountDeletionStatus = () => this.userService.getAccountDeletionStatus();
+  restoreAccount = () => this.userService.restoreAccount();
 
   // ==================== Tools API Methods ====================
 

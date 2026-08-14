@@ -96,7 +96,7 @@ export default function CreditChangeModal({
         <DialogContent className="max-w-md p-0 gap-0 overflow-hidden">
           <div className="p-6">
             <div className="text-center">
-              <div className="w-16 h-16 bg-green-100 dark:bg-green-900/30 rounded-full flex items-center justify-center mx-auto mb-4">
+              <div className="w-16 h-16 bg-green-100 dark:bg-green-900/30 rounded-2xl flex items-center justify-center mx-auto mb-4">
                 <Coins className="h-8 w-8 text-green-600 dark:text-green-400" />
               </div>
               <h2 className="text-lg font-semibold text-theme-primary mb-2">
@@ -128,7 +128,7 @@ export default function CreditChangeModal({
           {/* Header */}
           <div className="p-6 pb-4">
             <div className="flex items-center gap-3">
-              <div className="p-2 bg-amber-100 dark:bg-amber-900/50 rounded-full">
+              <div className="p-2 bg-amber-100 dark:bg-amber-900/50 rounded-md">
                 <ArrowDown className="h-5 w-5 text-amber-600 dark:text-amber-400" />
               </div>
               <h2 className="text-lg font-semibold text-theme-primary">
@@ -254,7 +254,7 @@ export default function CreditChangeModal({
         {/* Header */}
         <div className="p-6 pb-4">
           <div className="flex items-center gap-3">
-            <div className="p-2 rounded-full bg-theme-tertiary">
+            <div className="p-2 rounded-md bg-theme-tertiary">
               <ArrowUp className="h-5 w-5 text-theme-secondary" />
             </div>
             <h2 className="text-lg font-semibold text-theme-primary">

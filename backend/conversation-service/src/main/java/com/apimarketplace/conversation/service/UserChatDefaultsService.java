@@ -38,7 +38,11 @@ public class UserChatDefaultsService {
             "inactivityTimeout",
             "toolsMode",
             "webSearch",
-            "imageGeneration",
+            // Unified generation grant (image, video, audio, voice, music). Opt-in on its
+            // own key: the retired imageGeneration grant is never honoured as a fallback,
+            // because a per-second video model spends an order of magnitude more per call
+            // than the images that grant was given for.
+            "generation",
             "autoAuthorizeTools",
             "defaultSkillIds",
             "turnLimits",

@@ -22,7 +22,13 @@ import java.util.List;
 public class AccountPurgeScheduler {
 
     private static final Logger logger = LoggerFactory.getLogger(AccountPurgeScheduler.class);
-    private static final int GRACE_PERIOD_DAYS = 30;
+
+    /**
+     * Single source of truth, shared with the deletion date this service reports to the user
+     * through {@code getDeletionStatus}. A second constant here would let the date shown drift
+     * from the day the purge actually fires, which is worse than showing no date at all.
+     */
+    public static final int GRACE_PERIOD_DAYS = UserService.ACCOUNT_GRACE_PERIOD_DAYS;
 
     private final UserRepository userRepository;
     private final UserOnboardingRepository onboardingRepository;
@@ -53,6 +59,16 @@ public class AccountPurgeScheduler {
 
         for (User user : expired) {
             try {
+                // An irreversible delete of someone who did sign in during the grace period is
+                // worth a line before it happens, not after: it is the one case where support
+                // may need to explain what became of an account whose owner half-changed their
+                // mind and never pressed the button.
+                if (user.getLastLoginAt() != null && user.getLastLoginAt().isAfter(user.getDeactivatedAt())) {
+                    logger.warn("Account purge: user {} signed in at {} after requesting deletion at {} "
+                                    + "but never restored the account; purging as scheduled.",
+                            user.getId(), user.getLastLoginAt(), user.getDeactivatedAt());
+                }
+
                 // Capture email + name BEFORE purge deletes the rows
                 String email = user.getEmail();
                 String displayName = onboardingRepository.findByUserId(user.getId())

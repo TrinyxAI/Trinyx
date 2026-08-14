@@ -504,7 +504,7 @@ export function AgentMetricsDashboard() {
         <div className="space-y-3">
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
             <div className="flex items-center gap-3 min-w-0">
-              <div className="w-10 h-10 bg-theme-tertiary rounded-full flex items-center justify-center flex-shrink-0">
+              <div className="w-10 h-10 bg-theme-tertiary rounded-xl flex items-center justify-center flex-shrink-0">
                 <TrendingUp className="h-5 w-5 text-theme-primary" />
               </div>
               <div className="min-w-0">
@@ -637,7 +637,7 @@ export function AgentMetricsDashboard() {
       {/* Per-Agent Table */}
       <div className="space-y-4">
         <div className="flex items-center gap-3">
-          <div className="w-10 h-10 bg-theme-tertiary rounded-full flex items-center justify-center">
+          <div className="w-10 h-10 bg-theme-tertiary rounded-xl flex items-center justify-center">
             <Activity className="h-5 w-5 text-theme-primary" />
           </div>
           <div>
@@ -692,7 +692,7 @@ export function AgentMetricsDashboard() {
                           ) : (
                             <ChevronRight className="h-3.5 w-3.5 text-theme-muted flex-shrink-0" />
                           )}
-                          <div className="w-8 h-8 bg-theme-tertiary rounded-full flex items-center justify-center flex-shrink-0">
+                          <div className="w-8 h-8 bg-theme-tertiary rounded-xl flex items-center justify-center flex-shrink-0">
                             <MessageSquare className="h-3.5 w-3.5 text-theme-primary" />
                           </div>
                           <span className="font-medium truncate">{t('generalChat')}</span>
@@ -886,7 +886,7 @@ export function AgentMetricsDashboard() {
                       <td className="px-4 py-2.5 text-sm text-theme-primary">
                         <div className="flex items-center gap-2 min-w-0">
                           {isExp ? <ChevronDown className="h-3.5 w-3.5 text-theme-muted flex-shrink-0" /> : <ChevronRight className="h-3.5 w-3.5 text-theme-muted flex-shrink-0" />}
-                          <div className="w-8 h-8 bg-purple-100 dark:bg-purple-900/30 rounded-full flex items-center justify-center flex-shrink-0">
+                          <div className="w-8 h-8 bg-purple-100 dark:bg-purple-900/30 rounded-xl flex items-center justify-center flex-shrink-0">
                             <Tag className="h-3.5 w-3.5 text-purple-600 dark:text-purple-400" />
                           </div>
                           <span className="font-medium truncate">{t('classify')}</span>
@@ -990,7 +990,7 @@ export function AgentMetricsDashboard() {
                       <td className="px-4 py-2.5 text-sm text-theme-primary">
                         <div className="flex items-center gap-2 min-w-0">
                           {isExp ? <ChevronDown className="h-3.5 w-3.5 text-theme-muted flex-shrink-0" /> : <ChevronRight className="h-3.5 w-3.5 text-theme-muted flex-shrink-0" />}
-                          <div className="w-8 h-8 bg-amber-100 dark:bg-amber-900/30 rounded-full flex items-center justify-center flex-shrink-0">
+                          <div className="w-8 h-8 bg-amber-100 dark:bg-amber-900/30 rounded-xl flex items-center justify-center flex-shrink-0">
                             <Shield className="h-3.5 w-3.5 text-amber-600 dark:text-amber-400" />
                           </div>
                           <span className="font-medium truncate">{t('guardrail')}</span>
@@ -1098,7 +1098,7 @@ export function AgentMetricsDashboard() {
                       <td className="px-4 py-2.5 text-sm text-theme-primary">
                         <div className="flex items-center gap-2 min-w-0">
                           {isExp ? <ChevronDown className="h-3.5 w-3.5 text-theme-muted flex-shrink-0" /> : <ChevronRight className="h-3.5 w-3.5 text-theme-muted flex-shrink-0" />}
-                          <div className="w-8 h-8 bg-blue-100 dark:bg-blue-900/30 rounded-full flex items-center justify-center flex-shrink-0">
+                          <div className="w-8 h-8 bg-blue-100 dark:bg-blue-900/30 rounded-xl flex items-center justify-center flex-shrink-0">
                             <Globe className="h-3.5 w-3.5 text-blue-600 dark:text-blue-400" />
                           </div>
                           <span className="font-medium truncate">{t('browserAgent')}</span>
@@ -1483,7 +1483,7 @@ export function AgentMetricsDashboard() {
       <div className="space-y-4">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
           <div className="flex items-center gap-3 min-w-0">
-            <div className="w-10 h-10 bg-theme-tertiary rounded-full flex items-center justify-center flex-shrink-0">
+            <div className="w-10 h-10 bg-theme-tertiary rounded-xl flex items-center justify-center flex-shrink-0">
               <BarChart3 className="h-5 w-5 text-theme-primary" />
             </div>
             <div className="min-w-0">
@@ -1621,7 +1621,7 @@ export function AgentMetricsDashboard() {
         <div className="space-y-4">
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
             <div className="flex items-center gap-3 flex-shrink-0 min-w-0">
-              <div className="w-10 h-10 bg-theme-tertiary rounded-full flex items-center justify-center flex-shrink-0">
+              <div className="w-10 h-10 bg-theme-tertiary rounded-xl flex items-center justify-center flex-shrink-0">
                 <Wrench className="h-5 w-5 text-theme-primary" />
               </div>
               <div className="min-w-0">

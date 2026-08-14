@@ -38,6 +38,7 @@ class ApiCatalogBundleServiceTest {
 
     @Mock private ApiCatalogBundleRepository bundleRepo;
     @Mock private ApiCatalogSnapshotReader snapshotReader;
+    @Mock private ApiCatalogGenerationPriceReader priceReader;
 
     private ApiCatalogBundleSigner signer;
     private ApiCatalogBundleService service;
@@ -49,7 +50,7 @@ class ApiCatalogBundleServiceTest {
         String pub  = Base64.getEncoder().encodeToString(kp.getPublic().getEncoded());
 
         signer = new ApiCatalogBundleSigner(priv, pub, "test-key", "test-cloud");
-        service = new ApiCatalogBundleService(bundleRepo, snapshotReader, signer);
+        service = new ApiCatalogBundleService(bundleRepo, snapshotReader, priceReader, signer);
     }
 
     private static ApiCatalogSnapshotReader.Snapshot snapshotWith(int apiCount, int toolsPerApi) {
@@ -58,8 +59,8 @@ class ApiCatalogBundleServiceTest {
             List<ToolRow> tools = new java.util.ArrayList<>();
             for (int j = 0; j < toolsPerApi; j++) {
                 tools.add(new ToolRow(UUID.randomUUID(), "tool-" + j, "d", null, "GET", "/x",
-                        "HTTP", null, null, null, null, null, null, null, null, "ACTIVE", null,
-                        true, "1.0.0", List.of(), List.of(), List.of()));
+                        "HTTP", null, null, null, null, null, null, null, null, null, "ACTIVE",
+                        null, true, "1.0.0", List.of(), List.of(), List.of()));
             }
             apis.add(new ApiRow(UUID.randomUUID(), "Api" + i, "api" + i, "d", "https://x", null,
                     "Cat", "cat", "Sub", "sub", "apikey", null, null, "public", true, true, false,
@@ -112,7 +113,8 @@ class ApiCatalogBundleServiceTest {
     @DisplayName("buildBundle throws if signing key not configured")
     void buildBundleRequiresKey() {
         ApiCatalogBundleSigner noKey = new ApiCatalogBundleSigner("", "", "k", "i");
-        ApiCatalogBundleService svc = new ApiCatalogBundleService(bundleRepo, snapshotReader, noKey);
+        ApiCatalogBundleService svc =
+                new ApiCatalogBundleService(bundleRepo, snapshotReader, priceReader, noKey);
 
         assertThatThrownBy(svc::buildBundle)
                 .isInstanceOf(IllegalStateException.class)

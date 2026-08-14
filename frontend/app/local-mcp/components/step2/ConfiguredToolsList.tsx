@@ -90,10 +90,10 @@ export const ConfiguredToolsList: React.FC<ConfiguredToolsListProps> = ({ tools,
                       </div>
 
                       <div className="mt-3 flex items-center gap-2">
-                        <span className="inline-block px-2 py-1 text-xs bg-blue-500/20 text-blue-600 dark:text-blue-400 rounded-full">
+                        <span className="inline-block px-2 py-1 text-xs bg-blue-500/20 text-blue-600 dark:text-blue-400 rounded-md">
                           {getToolTypeLabel(tool.toolType)}
                         </span>
-                        <span className="inline-block px-2 py-1 text-xs bg-gray-500/20 text-gray-600 dark:text-gray-400 rounded-full">
+                        <span className="inline-block px-2 py-1 text-xs bg-gray-500/20 text-gray-600 dark:text-gray-400 rounded-md">
                           {tool.toolCategory}
                         </span>
                       </div>

@@ -10,7 +10,7 @@
  *    still reach every control instead of having it clipped off the edge.
  */
 import React from 'react';
-import { describe, it, expect, vi } from 'vitest';
+import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen } from '@testing-library/react';
 
 vi.mock('next-intl', () => ({ useTranslations: () => (k: string) => k }));
@@ -41,6 +41,7 @@ import {
   canvasChromeSurfaceClass,
 } from '@/components/ui/canvas-chrome';
 import { CanvasToolbar } from '../CanvasToolbar';
+import { FileStripExpansionProvider } from '@/contexts/FileStripExpansionContext';
 
 const baseProps = () => ({
   isRunMode: false,
@@ -74,6 +75,13 @@ const iconButtons = (container: HTMLElement) =>
     (b) => b.getAttribute('data-testid') !== 'canvas-cursor-mode-select',
   );
 
+// The file-strip toggle reads a stored preference and paints itself active when it
+// says "expanded", so every case here starts from "nothing stored" to compare against
+// the inactive shared class.
+beforeEach(() => {
+  window.localStorage.clear();
+});
+
 describe('CanvasToolbar - canvas chrome style', () => {
   it('draws the card as the shared square chrome surface', () => {
     const { container } = render(<CanvasToolbar {...baseProps()} />);
@@ -86,12 +94,31 @@ describe('CanvasToolbar - canvas chrome style', () => {
     const { container } = render(<CanvasToolbar {...baseProps()} />);
     const buttons = iconButtons(container);
     // Undo, redo, zoom in/out, fit, auto-layout, lock, settings, AI assistant.
+    // The file-strip toggle is NOT among them: it renders nothing without a
+    // FileStripExpansionProvider, and it is the one control with a documented
+    // deviation from the shared class, so it gets its own case below rather than
+    // silently escaping this one.
     expect(buttons).toHaveLength(9);
     // None of them is in its active state under these props.
     for (const button of buttons) {
       expect(button.className, `${button.getAttribute('title')} is off the shared style`)
         .toBe(canvasChromeCompactButtonClass(false));
     }
+  });
+
+  it('holds the file-strip toggle to the same style, minus its one documented deviation', () => {
+    // It carries two glyphs, so it gives up the square width - and nothing else.
+    // Spelled out here because the invariant above cannot see it: without a
+    // provider it renders nothing, which would let a hand-rolled className through.
+    const { container } = render(
+      <FileStripExpansionProvider>
+        <CanvasToolbar {...baseProps()} />
+      </FileStripExpansionProvider>,
+    );
+    const toggle = container.querySelector<HTMLElement>('[data-testid="canvas-toggle-all-files"]');
+
+    expect(toggle).not.toBeNull();
+    expect(toggle!.className).toBe(canvasChromeCompactButtonClass(false, 'w-auto gap-0.5 px-1.5'));
   });
 
   it('leaves nothing round behind, in either mode', () => {

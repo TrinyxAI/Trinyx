@@ -710,11 +710,16 @@ class StepStateBuilderTest {
         }
 
         @Test
-        @DisplayName("regression: current-epoch COMPLETED wins over stale failed counts (rerun fixed a FAILED node)")
-        void completedInCurrentEpochWinsOverStaleFailedCounts() {
-            // Bug: a node FAILED, the user reran it with a fixed config and it COMPLETED.
-            // NodeCounts (never reset) still carried failed=1 from the superseded spawn -
-            // deriveStatusFromCounts demoted the fresh COMPLETED to PARTIAL_SUCCESS forever.
+        @DisplayName("a node that failed in one spawn and succeeded in the next is PARTIAL_SUCCESS")
+        void failedThenCompletedAcrossSpawnsIsPartialSuccess() {
+            // Deliberate reversal, and this test asserted the opposite until now: a node that
+            // FAILED, was re-run and then COMPLETED used to report COMPLETED, so the accumulated
+            // failure disappeared from the status.
+            //
+            // It must not. The node's badge DISPLAYS those accumulated counts - a green tally and
+            // a red tally side by side - so a green border next to a red count contradicts what
+            // the user is reading. The status follows the same source as the badge, and the node
+            // keeps its amber until the failure leaves the counts.
             Step step = createStep("step-1", "Fmt Date");
             WorkflowPlan plan = createPlanWithSteps(List.of(step));
             ExecutionGraph graph = createMockExecutionGraph();
@@ -743,8 +748,139 @@ class StepStateBuilderTest {
             );
 
             assertEquals(1, states.size());
+            assertEquals(RunStatus.PARTIAL_SUCCESS, states.get(0).status(),
+                    "the node carries a failure in its own tally, so its status must say so too");
+        }
+
+        @Test
+        @DisplayName("the failure survives a NEW epoch: a node that ran cleanly this fire is still PARTIAL_SUCCESS")
+        void accumulatedFailureSurvivesANewEpoch() {
+            // Deliberate, and worth pinning because it is the consequence people find surprising:
+            // NodeCounts are never reset (not by a new epoch, not by resetDag, not by pruning), so
+            // one bad night on a scheduled workflow leaves that node amber on every later fire,
+            // even the clean ones.
+            //
+            // That is the point rather than a leak. The node's badge shows the same cumulative
+            // tally, and the red count in it does not disappear either - a green border beside it
+            // would be the contradiction. The CYCLE, judged on the epoch that just closed, still
+            // reports "completed" for that same fire: the two levels answer different questions,
+            // and only the node accumulates.
+            Step step = createStep("step-1", "Fmt Date");
+            WorkflowPlan plan = createPlanWithSteps(List.of(step));
+            ExecutionGraph graph = createMockExecutionGraph();
+
+            WorkflowStepDataEntity entity = createStepEntity("fmt_date", "completed");
+            Map<String, List<WorkflowStepDataEntity>> stepsByAlias = Map.of(
+                    "fmt_date", List.of(entity)
+            );
+            // Current epoch (a fresh trigger fire): the node ran and COMPLETED, nothing failed now.
+            Set<String> completedStepIds = new HashSet<>(Set.of("mcp:fmt_date"));
+            Set<String> failedStepIds = new HashSet<>();
+            Set<String> skippedStepIds = new HashSet<>();
+            Set<String> readySteps = new HashSet<>();
+            Map<String, StatusCounts> stepStatusCounts = new HashMap<>();
+
+            when(helper.determineStepStatus(anyString(), any(), any(), any(), any()))
+                    .thenReturn(RunStatus.COMPLETED);
+            when(helper.loadStepOutput(entity)).thenReturn(Map.of());
+            when(helper.calculateExecutionTime(entity)).thenReturn(0L);
+            // Cumulative across epochs: 2 clean fires plus the one that failed an epoch ago.
+            when(statusCountsBuilder.getStatusCountsMap(anyString(), anyString(), any()))
+                    .thenReturn(Map.of("completed", 2, "failed", 1, "total", 3));
+
+            List<WorkflowRunState.StepState> states = builder.buildStepStates(
+                    plan, graph, stepsByAlias, completedStepIds, failedStepIds,
+                    skippedStepIds, readySteps, stepStatusCounts
+            );
+
+            assertEquals(1, states.size());
+            assertEquals(RunStatus.PARTIAL_SUCCESS, states.get(0).status(),
+                    "an older epoch's failure stays in the tally, so the node keeps reporting it");
+        }
+
+        @Test
+        @DisplayName("a node with no failure in its counts stays COMPLETED")
+        void cleanCountsStayCompleted() {
+            // The counterexample that keeps the rule honest: accumulation demotes only when there
+            // really is a failure to show. A node re-run twice, both times cleanly, stays green.
+            Step step = createStep("step-1", "Fmt Date");
+            WorkflowPlan plan = createPlanWithSteps(List.of(step));
+            ExecutionGraph graph = createMockExecutionGraph();
+
+            WorkflowStepDataEntity entity = createStepEntity("fmt_date", "completed");
+            Map<String, List<WorkflowStepDataEntity>> stepsByAlias = Map.of("fmt_date", List.of(entity));
+
+            when(helper.determineStepStatus(anyString(), any(), any(), any(), any()))
+                    .thenReturn(RunStatus.COMPLETED);
+            when(helper.loadStepOutput(entity)).thenReturn(Map.of());
+            when(helper.calculateExecutionTime(entity)).thenReturn(0L);
+            when(statusCountsBuilder.getStatusCountsMap(anyString(), anyString(), any()))
+                    .thenReturn(Map.of("completed", 2, "total", 2));
+
+            List<WorkflowRunState.StepState> states = builder.buildStepStates(
+                    plan, graph, stepsByAlias, new HashSet<>(Set.of("mcp:fmt_date")),
+                    new HashSet<>(), new HashSet<>(), new HashSet<>(), new HashMap<>()
+            );
+
+            assertEquals(RunStatus.COMPLETED, states.get(0).status());
+        }
+
+        @Test
+        @DisplayName("a COMPLETED node is never demoted below PARTIAL_SUCCESS, whatever the counts say")
+        void completedIsNeverDemotedToFailedOrSkipped() {
+            // Only PARTIAL_SUCCESS may demote a COMPLETED node, and only when the counts carry
+            // BOTH sides. markNodeCompletedEpochOnly (the split-async barrier seal) puts a node in
+            // completedNodeIds WITHOUT incrementing `completed`, so an all-failed sealed split
+            // would otherwise read FAILED and drag the run badge with it.
+            Step step = createStep("step-1", "Sealed Split");
+            WorkflowPlan plan = createPlanWithSteps(List.of(step));
+            ExecutionGraph graph = createMockExecutionGraph();
+
+            WorkflowStepDataEntity entity = createStepEntity("sealed_split", "completed");
+            Map<String, List<WorkflowStepDataEntity>> stepsByAlias = Map.of("sealed_split", List.of(entity));
+
+            when(helper.determineStepStatus(anyString(), any(), any(), any(), any()))
+                    .thenReturn(RunStatus.COMPLETED);
+            when(helper.loadStepOutput(entity)).thenReturn(Map.of());
+            when(helper.calculateExecutionTime(entity)).thenReturn(0L);
+            // Sealed complete, but every item failed: no `completed` count at all.
+            when(statusCountsBuilder.getStatusCountsMap(anyString(), anyString(), any()))
+                    .thenReturn(Map.of("failed", 3, "total", 3));
+
+            List<WorkflowRunState.StepState> states = builder.buildStepStates(
+                    plan, graph, stepsByAlias, new HashSet<>(Set.of("mcp:sealed_split")),
+                    new HashSet<>(), new HashSet<>(), new HashSet<>(), new HashMap<>()
+            );
+
             assertEquals(RunStatus.COMPLETED, states.get(0).status(),
-                    "current-epoch COMPLETED must not be demoted by a stale failed count from a superseded spawn");
+                    "the current epoch sealed this node complete; counts may only add the partial nuance");
+        }
+
+        @Test
+        @DisplayName("a node still RUNNING in a parallel epoch beats its accumulated counts")
+        void runningStillWinsOverAccumulation() {
+            // The one override the COMPLETED branch keeps: live activity in another epoch is more
+            // useful than the terminal history.
+            Step step = createStep("step-1", "Fmt Date");
+            WorkflowPlan plan = createPlanWithSteps(List.of(step));
+            ExecutionGraph graph = createMockExecutionGraph();
+
+            WorkflowStepDataEntity entity = createStepEntity("fmt_date", "completed");
+            Map<String, List<WorkflowStepDataEntity>> stepsByAlias = Map.of("fmt_date", List.of(entity));
+
+            when(helper.determineStepStatus(anyString(), any(), any(), any(), any()))
+                    .thenReturn(RunStatus.COMPLETED);
+            when(helper.loadStepOutput(entity)).thenReturn(Map.of());
+            when(helper.calculateExecutionTime(entity)).thenReturn(0L);
+            when(statusCountsBuilder.getStatusCountsMap(anyString(), anyString(), any()))
+                    .thenReturn(Map.of("completed", 1, "failed", 1, "running", 1, "total", 3));
+
+            List<WorkflowRunState.StepState> states = builder.buildStepStates(
+                    plan, graph, stepsByAlias, new HashSet<>(Set.of("mcp:fmt_date")),
+                    new HashSet<>(), new HashSet<>(), new HashSet<>(), new HashMap<>()
+            );
+
+            assertEquals(RunStatus.RUNNING, states.get(0).status());
         }
 
         @Test
@@ -753,6 +889,17 @@ class StepStateBuilderTest {
             // The fix above must NOT hide genuine current-pass partial failures: those are
             // carried by EpochState.partialFailedNodeIds (split continue-anyway), not by
             // accumulated counts.
+            //
+            // The counts below deliberately carry NO failure. They used to be {completed:2,
+            // failed:1}, which the accumulated-counts rule now demotes on its own - so the test
+            // passed whether or not the marker was consulted and stopped guarding anything.
+            // With a clean tally, only the marker can produce PARTIAL_SUCCESS.
+            //
+            // The counts stay clean here to isolate the marker, but note that in PRODUCTION they
+            // no longer can: the sync inline split now counts its failure
+            // (StepCompletionOrchestrator, SPLIT_PARTIAL_FAILURE), so a real partial split reaches
+            // this method with failed >= 1 and the counts rule would demote it on its own. The
+            // marker remains as the earlier signal, for the window before the counts catch up.
             Step step = createStep("step-1", "Per Item");
             WorkflowPlan plan = createPlanWithSteps(List.of(step));
             ExecutionGraph graph = createMockExecutionGraph();
@@ -772,7 +919,7 @@ class StepStateBuilderTest {
             when(helper.loadStepOutput(entity)).thenReturn(Map.of());
             when(helper.calculateExecutionTime(entity)).thenReturn(0L);
             when(statusCountsBuilder.getStatusCountsMap(anyString(), anyString(), any()))
-                    .thenReturn(Map.of("completed", 2, "failed", 1, "total", 3));
+                    .thenReturn(Map.of("completed", 1, "failed", 0, "total", 1));
 
             List<WorkflowRunState.StepState> states = builder.buildStepStates(
                     plan, graph, stepsByAlias, completedStepIds, failedStepIds,
@@ -784,7 +931,42 @@ class StepStateBuilderTest {
 
             assertEquals(1, states.size());
             assertEquals(RunStatus.PARTIAL_SUCCESS, states.get(0).status(),
-                    "a node marked partial-failed in the current epoch must surface PARTIAL_SUCCESS");
+                    "a node marked partial-failed in the current epoch must surface PARTIAL_SUCCESS "
+                            + "even though its accumulated counts show no failure");
+        }
+
+        @Test
+        @DisplayName("without the marker, the same clean counts stay COMPLETED")
+        void cleanCountsWithoutMarkerStayCompleted() {
+            // The counterexample that makes the test above discriminate: identical inputs minus
+            // the marker. Without it there is nothing to justify amber, and the node stays green.
+            Step step = createStep("step-1", "Per Item");
+            WorkflowPlan plan = createPlanWithSteps(List.of(step));
+            ExecutionGraph graph = createMockExecutionGraph();
+
+            WorkflowStepDataEntity entity = createStepEntity("per_item", "completed");
+            Map<String, List<WorkflowStepDataEntity>> stepsByAlias = Map.of(
+                    "per_item", List.of(entity)
+            );
+
+            when(helper.determineStepStatus(anyString(), any(), any(), any(), any()))
+                    .thenReturn(RunStatus.COMPLETED);
+            when(helper.loadStepOutput(entity)).thenReturn(Map.of());
+            when(helper.calculateExecutionTime(entity)).thenReturn(0L);
+            when(statusCountsBuilder.getStatusCountsMap(anyString(), anyString(), any()))
+                    .thenReturn(Map.of("completed", 1, "failed", 0, "total", 1));
+
+            List<WorkflowRunState.StepState> states = builder.buildStepStates(
+                    plan, graph, stepsByAlias, new HashSet<>(Set.of("mcp:per_item")),
+                    new HashSet<>(), new HashSet<>(), new HashSet<>(), new HashMap<>(),
+                    null, Map.of(), Map.of(), null,
+                    StateReconstructor.OutputLoadMode.FULL,
+                    Set.of() // no partial-failure marker this time
+            );
+
+            assertEquals(1, states.size());
+            assertEquals(RunStatus.COMPLETED, states.get(0).status(),
+                    "a clean tally with no marker must stay green");
         }
 
         @Test

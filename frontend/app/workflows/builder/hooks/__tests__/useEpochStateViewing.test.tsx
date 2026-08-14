@@ -50,7 +50,7 @@ vi.mock('@/contexts/workflow-run/streamingDebug', () => ({
   streamDebug: { log: vi.fn(), warn: vi.fn() },
 }));
 
-import { useEpochStateViewing } from '../useEpochStateViewing';
+import { isTerminalNodeStatus, useEpochStateViewing } from '../useEpochStateViewing';
 
 type AnyNode = Node<{ label: string; status?: unknown; statusCounts?: unknown; selectedBranch?: unknown }>;
 
@@ -809,5 +809,34 @@ describe('useEpochStateViewing - guardrail per-epoch edge disambiguation (integr
       expect((pass.data as { status?: string }).status).toBe('completed');
       expect((fail.data as { status?: string }).status).toBe('skipped');
     });
+  });
+});
+
+/**
+ * A finished node must not be repainted "awaiting_signal" by a stale pending signal.
+ *
+ * `partial_success` was missing from the terminal set, so a node that had finished - carrying an
+ * old failure in its tally - lost its amber badge and falsely claimed it was waiting for user
+ * input. The same file already DERIVES partial_success through the shared util, so its two halves
+ * disagreed about whether that status means "finished".
+ */
+describe('isTerminalNodeStatus - the signal-override guard', () => {
+  it('treats a partial node as finished, so a stale signal cannot repaint it', () => {
+    expect(isTerminalNodeStatus('partial_success')).toBe(true);
+  });
+
+  it('treats the plain terminal statuses as finished', () => {
+    for (const status of ['completed', 'failed', 'skipped']) {
+      expect(isTerminalNodeStatus(status), `${status} is finished`).toBe(true);
+    }
+  });
+
+  it('lets the override apply to a node that has NOT finished', () => {
+    // The counterexample: this is the whole point of the override, and it must survive.
+    expect(isTerminalNodeStatus('running')).toBe(false);
+    expect(isTerminalNodeStatus('pending')).toBe(false);
+    expect(isTerminalNodeStatus('awaiting_signal')).toBe(false);
+    expect(isTerminalNodeStatus(undefined)).toBe(false);
+    expect(isTerminalNodeStatus(null)).toBe(false);
   });
 });

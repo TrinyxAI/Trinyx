@@ -1,5 +1,7 @@
 package com.apimarketplace.agent.config;
 
+import java.util.Collection;
+import java.util.Collections;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
@@ -13,18 +15,19 @@ import java.util.Set;
  * <p>
  * Contract:
  * <ul>
- *   <li>{@code null} toolsConfig → all modules enabled (unrestricted) <b>except image_generation</b>
+ *   <li>{@code null} toolsConfig → all modules enabled (unrestricted) <b>except generation</b>,
  *       which is opt-in even in unrestricted mode.</li>
  *   <li>{@code mode=none} → only MCP/catalog tools blocked; internal tools (table, web_search, etc.)
- *       remain enabled. {@code image_generation} stays opt-in.</li>
+ *       remain enabled. {@code generation} stays opt-in.</li>
  *   <li>Per-resource family: the AUTHORITATIVE per-family grant ({@code <family>Grant}) decides -
  *       {@code "all"} → unrestricted, {@code "custom"} → accessible iff the id list (the "custom"
  *       payload) is non-empty, {@code "none"}/absent → blocked. The id list is NEVER consulted to
  *       decide none/all; see {@link #isResourceAccessible}.</li>
  *   <li>Web search: opt-OUT boolean toggle - absent/null/true → enabled, false → disabled</li>
- *   <li>Image generation: opt-IN - accepts {@code true} OR {@code { enabled: true, ... }};
- *       absent/null/false → disabled. Default off because per-image cost (5-133 credits) is
- *       significantly higher than web_search (1 credit) and many agents will never need it.</li>
+ *   <li>Generation (image/video/audio/voice/music): opt-IN under the {@code generation} key -
+ *       accepts {@code true} OR {@code { enabled: true, ... }}; absent/null/false → disabled.
+ *       Default off because every create spends the customer's credits at the model's own rate,
+ *       and a per-second video model spends far more of them than web_search (1 credit).</li>
  * </ul>
  */
 public final class AgentModuleResolver {
@@ -32,10 +35,30 @@ public final class AgentModuleResolver {
     private AgentModuleResolver() {}
 
     /**
+     * The module set a caller gets when NOTHING decided for it: no {@code toolsConfig}
+     * at all (an agent row that never got one, a plain chat, a sub-agent whose entity
+     * carries none), or a wire field that arrived {@code null}.
+     *
+     * <p>It is {@link #resolveEnabledModules(Map)} on a {@code null} config, i.e. this
+     * class's own definition of "unrestricted", which deliberately leaves out the
+     * credit-spending opt-in module ({@code generation}).
+     * Every surface that used to answer "no config ⇒ every tool" must use this instead:
+     * handing a caller that enabled nothing a tool that spends the customer's credits is
+     * the exact opposite of those modules being opt-in.
+     *
+     * <p>Hoisted here (rather than re-derived per service) so the workflow agent node,
+     * the remote agent loop, the sub-agent handler, the CLI/bridge session and chat all
+     * read ONE definition and cannot drift apart. Computed once: module keys depend on
+     * neither the request nor the date.
+     */
+    public static final Set<String> NO_CONFIG_MODULES =
+        Collections.unmodifiableSet(resolveEnabledModules(null));
+
+    /**
      * Determine which prompt modules are enabled based on toolsConfig.
      *
      * @param toolsConfig the agent entity's tools configuration map (nullable)
-     * @return set of enabled module keys (e.g., "catalog", "table", "web_search", "image_generation")
+     * @return set of enabled module keys (e.g., "catalog", "table", "web_search", "generation")
      */
     public static Set<String> resolveEnabledModules(Map<String, Object> toolsConfig) {
         Set<String> enabled = new LinkedHashSet<>();
@@ -53,7 +76,8 @@ public final class AgentModuleResolver {
         enabled.add("catalog"); // Catalog is always available
 
         if (toolsConfig == null) {
-            // No config → all opt-out modules enabled. image_generation stays opt-in.
+            // No config → all opt-out modules enabled. The credit-spending
+            // generation module stays opt-in.
             enabled.addAll(Set.of("table", "interface", "agent", "skill", "workflow", "application", "web_search", "files", "wait"));
             return enabled;
         }
@@ -61,10 +85,11 @@ public final class AgentModuleResolver {
         String mode = (String) toolsConfig.get("mode");
         if ("none".equals(mode)) {
             // mode=none → only MCP/catalog tools blocked; internal tools stay enabled.
-            // image_generation still requires explicit opt-in (it's not "internal").
+            // generation still requires explicit opt-in (it is not "internal": it spends
+            // the customer's credits).
             enabled.addAll(Set.of("table", "interface", "agent", "skill", "workflow", "application", "web_search", "files", "wait"));
             enabled.remove("catalog");
-            if (isImageGenerationEnabled(toolsConfig)) enabled.add("image_generation");
+            if (isGenerationEnabled(toolsConfig)) enabled.add("generation");
             return enabled;
         }
 
@@ -88,8 +113,8 @@ public final class AgentModuleResolver {
         if (isResourceAccessible(toolsConfig, "applications")) enabled.add("application");
         // Web search: opt-out boolean toggle (absent or true = enabled, false = disabled)
         if (isBooleanEnabled(toolsConfig, "webSearch"))        enabled.add("web_search");
-        // Image generation: opt-in (default off; richer config - accepts both bool and {enabled,...})
-        if (isImageGenerationEnabled(toolsConfig))             enabled.add("image_generation");
+        // Generation (any format): opt-in (default off; accepts both bool and {enabled,...})
+        if (isGenerationEnabled(toolsConfig))                  enabled.add("generation");
 
         return enabled;
     }
@@ -131,20 +156,74 @@ public final class AgentModuleResolver {
     }
 
     /**
-     * Image-generation toggle (opt-IN). Accepts two shapes for forward
-     * compatibility:
+     * Generation toggle (opt-IN), for the format-neutral {@code generation} tool
+     * that produces images, video, audio, voice or music. Accepts two shapes for
+     * forward compatibility:
      * <ul>
-     *   <li>{@code imageGeneration: true} - simple boolean toggle (Phase 1
-     *       UI may emit this).</li>
-     *   <li>{@code imageGeneration: { enabled: true, provider: "openai",
-     *       model: "gpt-image-1.5", quality: "medium" }} - richer object
-     *       once the model picker lands (Phase 2 UI).</li>
+     *   <li>{@code generation: true} - simple boolean toggle.</li>
+     *   <li>{@code generation: { enabled: true, ... }} - config object, so the
+     *       key can grow fields without changing how it is read.</li>
      * </ul>
      * Anything else (absent, null, false, malformed) → disabled.
+     *
+     * <p>Read from the {@code generation} key and nothing else. The retired
+     * {@code imageGeneration} grant is NOT honoured as a fallback: it was given
+     * for images, and this tool also reaches per-second video models that spend
+     * an order of magnitude more credits, so an old image grant must never
+     * silently widen into it. A row that still carries the retired key resolves
+     * to no generation module at all until its owner opts in again.
      */
-    public static boolean isImageGenerationEnabled(Map<String, Object> toolsConfig) {
+    public static boolean isGenerationEnabled(Map<String, Object> toolsConfig) {
+        return isOptInEnabled(toolsConfig, "generation");
+    }
+
+    /**
+     * Credential key carrying the modules the CALLING agent was granted.
+     *
+     * <p>The agent id already travels in tool-execution credentials, but the
+     * id alone answers "who" and not "what they may do", and a tool running in
+     * another service cannot load the agent to find out. So the resolved set
+     * travels with it.
+     *
+     * <p>Written by whoever drives the agent and already knows the set (the
+     * CLI/bridge session and the chat context builder). Read by any tool whose
+     * ACTION spends what a module gates, which today means the workflow builder
+     * creating a generate node: that node spends the customer's credits on a
+     * paid provider exactly as the generation tool does, so an agent without
+     * the grant must not be able to reach it one indirection away.
+     */
+    public static final String ENABLED_MODULES_CREDENTIAL_KEY = "__enabledModules__";
+
+    /**
+     * Whether the calling agent may use {@code module}, as far as the
+     * credentials of the current tool call can say.
+     *
+     * <p>Answers TRUE when the credentials say nothing. Absence is not a
+     * denial: it is every caller that predates this key, and every path with no
+     * bound agent at all (a workflow fired by a schedule has no agent to ask).
+     * Reading silence as "denied" would refuse work that was always allowed,
+     * which is a worse failure than the one this closes and is invisible until
+     * a customer reports it.
+     */
+    @SuppressWarnings("unchecked")
+    public static boolean callerMayUse(Map<String, Object> credentials, String module) {
+        if (credentials == null || module == null) return true;
+        Object raw = credentials.get(ENABLED_MODULES_CREDENTIAL_KEY);
+        if (!(raw instanceof Collection<?> granted)) return true;
+        for (Object key : granted) {
+            if (module.equals(key)) return true;
+        }
+        return false;
+    }
+
+    /**
+     * Shared opt-IN reader for the credit-spending toggles. Accepts a plain
+     * boolean or a config object, so a key can grow extra fields (provider,
+     * model, quality) without changing how it is read.
+     */
+    private static boolean isOptInEnabled(Map<String, Object> toolsConfig, String key) {
         if (toolsConfig == null) return false;
-        Object value = toolsConfig.get("imageGeneration");
+        Object value = toolsConfig.get(key);
         if (value == null) return false;
         if (value instanceof Boolean b) return b;
         if (value instanceof Map<?, ?> m) {

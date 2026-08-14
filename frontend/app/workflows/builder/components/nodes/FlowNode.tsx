@@ -8,7 +8,7 @@ import { getNodeVisual } from '../../data/nodeVisuals';
 import { deriveStatusFromCounts } from '../../utils/statusCounts';
 import type { BuilderNodeData, DerivedNodeStatus, NodeStatus } from '../../types';
 import { useValidation } from '../../contexts/ValidationContext';
-import { NodeHeader, useHoverVisibility, getIconSlug, getIconUrl, getStatusBorderColor } from './shared';
+import { NodeHeader, useHoverVisibility, getIconSlug, getIconUrl, getStatusBorderColor, showsNodeRunActions } from './shared';
 import { findNodeClassById } from '../../nodes/nodeClasses';
 import { NodeStatusBadge } from '../NodeStatusBadge';
 import { useWorkflowMode } from '@/contexts/WorkflowModeContext';
@@ -278,6 +278,11 @@ export function FlowNode({ data, selected, id }: NodeProps<BuilderNodeData>) {
       if (stepByStepStatus.isRunning) return 'running';
       if (stepByStepStatus.isFailed) return 'failed';
       if (stepByStepStatus.isSkipped) return 'skipped';
+      // The backend's PARTIAL_SUCCESS must survive: the node IS in completedSteps (that is what
+      // opens its rerun gate), so testing isCompleted first would discard it and paint a node
+      // carrying a failure in its own tally the same green as a clean one. Border only - the
+      // rerun button reads deriveNodeStatus, which deliberately still sees 'completed'.
+      if (data.status === 'partial_success') return 'partial_success';
       if (stepByStepStatus.isCompleted) return 'completed';
       if (stepByStepStatus.isReady) return 'ready';
       return 'pending';
@@ -518,10 +523,10 @@ export function FlowNode({ data, selected, id }: NodeProps<BuilderNodeData>) {
           {data.metrics ? (
             <div className="mt-4 flex flex-wrap gap-2 text-[11px] text-slate-500 dark:text-slate-400">
               {data.metrics.tokens ? (
-                <span className="rounded-full bg-slate-100 dark:bg-slate-700 px-2 py-1">{data.metrics.tokens}</span>
+                <span className="rounded-md bg-slate-100 dark:bg-slate-700 px-2 py-1">{data.metrics.tokens}</span>
               ) : null}
               {data.metrics.latency ? (
-                <span className="rounded-full bg-slate-100 dark:bg-slate-700 px-2 py-1">{data.metrics.latency}</span>
+                <span className="rounded-md bg-slate-100 dark:bg-slate-700 px-2 py-1">{data.metrics.latency}</span>
               ) : null}
             </div>
           ) : null}
@@ -657,9 +662,11 @@ export function FlowNode({ data, selected, id }: NodeProps<BuilderNodeData>) {
         // flags: every surface offering a play (this bar, the run-step popover,
         // the run-mode toolbar) has to agree on what is runnable.
         const isTriggerForPlayButton = isFireableTrigger(ctxFlags);
+        // showsNodeRunActions is shared with every other node renderer: the restart affordance
+        // has to appear on all of them or it appears on some node types and not others.
         const showPlay = !isPreviewOnly && !isInterfaceNode && isRunMode && (
           (isTriggerForPlayButton && (stepByStepStatus.isStepByStepMode || stepByStepStatus.isReady)) ||
-          (!isTriggerForPlayButton && stepByStepStatus.isStepByStepMode)
+          (!isTriggerForPlayButton && showsNodeRunActions(stepByStepStatus))
         );
 
         // Edit-mode trigger launcher - replaces the legacy top-hover play

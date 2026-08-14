@@ -436,6 +436,18 @@
                                 <include>**/e2e/nodes/ClassifyAgentE2ETest.java</include>
                                 <include>**/e2e/nodes/DecisionE2ETest.java</include>
                                 <include>**/e2e/nodes/SwitchE2ETest.java</include>
+                                <!-- SwitchOutputRehydratedE2ETest is deliberately NOT listed
+                                     here. It is the only test that proves a switch template
+                                     resolves to a VALUE on a DB-rehydrated run, and it passes,
+                                     but it timed out once in four runs waiting out the 15s
+                                     window in resolveSignalAndWait. This job already fails on
+                                     roughly one run in seven, always one test out of 124 and
+                                     almost always one of CombinationStress / GuardrailAgent /
+                                     RerunCycle. Adding a fourth intermittent class to a
+                                     REQUIRED check makes the check less trusted, not more.
+                                     Run it with -P e2e; promote it here once the resume-path
+                                     timing is fixed rather than absorbed by a longer wait. -->
+
                                 <include>**/e2e/nodes/ForkMergeE2ETest.java</include>
                                 <include>**/e2e/nodes/MergeEdgeCasesE2ETest.java</include>
                                 <include>**/e2e/nodes/SplitLoopEdgeCasesE2ETest.java</include>
@@ -475,7 +487,22 @@
                                      must re-arm the run (WAITING_TRIGGER) and must not reactivate the
                                      trigger:default sentinel nor a sibling DAG's epoch. Cheap (H2 +
                                      set nodes), gates the zombie-kills-armed-app bug class in CI. -->
+                                <!-- Async-agent epoch-close guard (2026-08-06): the AUTOMATIC-mode
+                                     cycle close must not prune an epoch whose agent is mid-delivery.
+                                     This is the defect behind this job's ~1-in-7 failure - Guardrail,
+                                     Classify and CombinationStress all asserted "Step not found:
+                                     <node downstream of the async agent>". Deterministic: it drives
+                                     the consume->stage handoff window with two e2e knobs instead of
+                                     racing for it. -->
+                                <include>**/e2e/nodes/AsyncAgentEpochCloseGuardE2ETest.java</include>
                                 <include>**/e2e/nodes/RerunCycleE2ETest.java</include>
+                                <!-- Run-birth DAG layout (2026-08-06): a reusable-trigger run must be
+                                     born with its REAL trigger DAG only. A phantom "trigger:default"
+                                     put the trigger node in two dags, and findDagContaining picks
+                                     between them by Map.copyOf iteration order - randomised per JVM,
+                                     so the resulting misbehaviour was constant within a process and
+                                     different between processes. Asserts the state, not a symptom. -->
+                                <include>**/e2e/nodes/TriggerDagBirthE2ETest.java</include>
                                 <include>**/e2e/nodes/RerunMultiTriggerE2ETest.java</include>
                                 <include>**/e2e/nodes/ComplexPatternsE2ETest.java</include>
                                 <include>**/e2e/stress/CombinationStressE2ETest.java</include>

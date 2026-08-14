@@ -65,7 +65,7 @@ export function FaviconStack({ urls, max = 4, size = 18, className = '', ariaLab
             // `rounded-full p-0.5 bg-theme-primary dark:bg-slate-100/10`.
             // The padding+bg pair acts as a soft separator when chips overlap,
             // replacing the harder `ring-1 ring-theme` previously used.
-            className="rounded-full p-0.5 bg-theme-primary dark:bg-slate-100/10 inline-flex"
+            className="rounded-md p-0.5 bg-theme-primary dark:bg-slate-100/10 inline-flex"
             style={{ marginLeft: idx === 0 ? 0 : -overlapPx, zIndex: shown.length - idx }}
           >
             <Favicon url={url} size={size} />
@@ -74,7 +74,7 @@ export function FaviconStack({ urls, max = 4, size = 18, className = '', ariaLab
       })}
       {remainder > 0 && (
         <span
-          className="rounded-full p-0.5 bg-theme-primary dark:bg-slate-100/10 inline-flex items-center justify-center"
+          className="rounded-md p-0.5 bg-theme-primary dark:bg-slate-100/10 inline-flex items-center justify-center"
           style={{
             marginLeft: -overlapPx,
             zIndex: 0,
@@ -83,7 +83,7 @@ export function FaviconStack({ urls, max = 4, size = 18, className = '', ariaLab
           aria-label={t('moreCount', { count: remainder })}
         >
           <span
-            className="rounded-full bg-theme-secondary text-theme-muted inline-flex items-center justify-center font-medium"
+            className="rounded-md bg-theme-secondary text-theme-muted inline-flex items-center justify-center font-medium"
             style={{
               width: size,
               height: size,

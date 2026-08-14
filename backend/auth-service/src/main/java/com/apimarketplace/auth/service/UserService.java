@@ -681,6 +681,12 @@ public class UserService {
      * Deactivates a user account with a 30-day grace period before hard-delete.
      * Sets enabled=false + deactivatedAt=now, then sends a confirmation email.
      * The AccountPurgeScheduler will hard-delete all data after 30 days.
+     *
+     * <p>The Keycloak account is deliberately LEFT ENABLED during the grace period. That is
+     * what makes {@link #restoreUser} reachable: the user can still authenticate, the gateway
+     * lets the restore endpoint through, and they get their account back by their own hand. If
+     * we disabled the identity too, the only way back would be a signed e-mail link or a support
+     * ticket, and the 30-day grace we promise them would be a grace they cannot use.
      */
     public User deactivateUser(User user) {
         user.setEnabled(false);
@@ -696,6 +702,73 @@ public class UserService {
                 user.getId(), user.getEmail());
         return saved;
     }
+
+    /**
+     * Cancels a scheduled account deletion: the exact inverse of {@link #deactivateUser}.
+     *
+     * <p>Before this existed, {@code deactivated_at} was a one-way door. Nothing in the codebase
+     * ever cleared it - not a login, not an endpoint, not an admin action - while the
+     * deactivation e-mail promised a 30-day window to change your mind and pointed at a support
+     * address that had no means to act. Production carried a user in exactly that state: locked
+     * out on 2026-08-09, refused again when they came back on 2026-08-10, and scheduled for
+     * irreversible deletion.
+     *
+     * <p>Idempotent: restoring an account that is not scheduled for deletion is a no-op, so a
+     * double click or a retried request cannot produce a second confirmation e-mail.
+     *
+     * <p>Keyed on {@code deactivatedAt} alone, deliberately. A scheduled deletion is the only
+     * thing this endpoint is entitled to undo, and it is the only thing that sets that column.
+     * An account disabled WITHOUT it is an operator suspension, the only lever the schema offers
+     * for that; since the gateway allow-lists this path for inactive accounts, keying on
+     * {@code enabled} would let a suspended person re-enable themselves by calling it.
+     *
+     * @return true when this call actually restored a scheduled-for-deletion account
+     */
+    public boolean restoreUser(User user) {
+        if (user.getDeactivatedAt() == null) {
+            logger.debug("Account restore: user {} was not scheduled for deletion, no-op", user.getId());
+            return false;
+        }
+        LocalDateTime scheduledAt = user.getDeactivatedAt();
+        user.setEnabled(true);
+        user.setDeactivatedAt(null);
+        userRepository.save(user);
+
+        String displayName = onboardingRepository.findByUserId(user.getId())
+                .map(UserOnboarding::getDisplayName)
+                .orElse(user.getFirstName());
+        deactivationMailer.sendRestorationEmail(user.getEmail(), displayName);
+
+        logger.info("Account restored for user {} ({}), deletion scheduled at {} cancelled",
+                user.getId(), user.getEmail(), scheduledAt);
+        return true;
+    }
+
+    /**
+     * Deletion status for the account-scheduled-for-deletion screen: is a purge pending, and
+     * when would it run. Returns nulls for a healthy account.
+     */
+    @Transactional(readOnly = true)
+    public java.util.Map<String, Object> getDeletionStatus(User user) {
+        java.util.Map<String, Object> status = new java.util.HashMap<>();
+        LocalDateTime deactivatedAt = user.getDeactivatedAt();
+        boolean scheduled = deactivatedAt != null;
+        status.put("scheduledForDeletion", scheduled);
+        status.put("deactivatedAt", scheduled ? deactivatedAt.toString() : null);
+        status.put("deletionAt", scheduled
+                ? deactivatedAt.plusDays(ACCOUNT_GRACE_PERIOD_DAYS).toString() : null);
+        status.put("gracePeriodDays", ACCOUNT_GRACE_PERIOD_DAYS);
+        return status;
+    }
+
+    /**
+     * Grace window between deactivation and hard-delete, and the single source of truth for it:
+     * {@code AccountPurgeScheduler.GRACE_PERIOD_DAYS} reads this constant, and the frontend reads
+     * it over the wire through {@code getDeletionStatus} rather than mirroring it. The screen
+     * tells the user a date, and a date that does not match when the purge actually fires is
+     * worse than no date at all.
+     */
+    public static final int ACCOUNT_GRACE_PERIOD_DAYS = 30;
 
     /**
      * Mappe une entite User vers un DTO UserProfile

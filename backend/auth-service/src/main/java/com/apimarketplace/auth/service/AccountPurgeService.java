@@ -87,9 +87,16 @@ public class AccountPurgeService {
             return false;
         }
 
-        // --- External service calls (best-effort, before DB mutations) ---
+        // --- Identity first, and it is NOT best-effort ---
+        // Deleting the application rows while the Keycloak identity survives is the worst of
+        // both worlds: the person's data is destroyed, their e-mail address stays on file, and
+        // signing in again hands them a brand-new account (resolveUser bootstraps one) - so the
+        // deletion neither honoured the promise nor removed the access. It has to be all or
+        // nothing, and identity goes first because it is the only step we cannot undo by
+        // re-running. If it fails we abort: the row stays queued and the next nightly pass
+        // retries. That is why this throws instead of warning.
+        deleteKeycloakUserOrThrow(user.getProviderId());
         cancelStripeSubscription(userId);
-        deleteKeycloakUser(user.getProviderId());
 
         // --- Organization handling ---
         List<Organization> ownedOrgs = organizationRepository.findByOwnerId(userId);
@@ -224,13 +231,38 @@ public class AccountPurgeService {
         }
     }
 
-    private void deleteKeycloakUser(String providerId) {
-        if (!"keycloak".equals(authMode) || providerId == null || providerId.isBlank()) {
-            return;
+    /**
+     * Removes the Keycloak identity, or aborts the whole purge.
+     *
+     * <p>Previously this warned and carried on, which meant a missing {@code KC_ADMIN_CLIENT_SECRET}
+     * (its exact state in production) silently downgraded "delete my account" to "delete my data,
+     * keep my login". Two failure modes came out of that: the e-mail address stayed in the identity
+     * provider after a deletion advertised as permanent, and the person could sign in again and be
+     * bootstrapped a fresh account, so the deletion removed their work but not their access.
+     *
+     * <p>A 404 from Keycloak is success: the identity is already gone, which is the state we want.
+     *
+     * @throws IllegalStateException when the identity cannot be removed, aborting the transaction
+     */
+    private void deleteKeycloakUserOrThrow(String providerId) {
+        if (!"keycloak".equals(authMode)) {
+            return; // CE / embedded auth: there is no external identity to remove.
+        }
+        if (providerId == null || providerId.isBlank()) {
+            // Not "nothing to delete": under keycloak mode the identity exists, we have simply lost
+            // the handle to it. Carrying on would destroy the data and leave a realm identity keyed
+            // by the same e-mail, so signing in again bootstraps a fresh account - the exact
+            // outcome this method exists to prevent. Abort and let a human reconcile the id.
+            throw new IllegalStateException(
+                    "User has no provider_id while auth.mode=keycloak, so the Keycloak identity "
+                    + "cannot be located. Refusing to delete application data while the identity "
+                    + "would survive.");
         }
         if (kcServerUrl.isBlank() || kcClientSecret.isBlank()) {
-            logger.warn("Account purge: KC admin config missing, skipping KC user delete for {}", providerId);
-            return;
+            throw new IllegalStateException(
+                    "Keycloak admin credentials are not configured (keycloak.admin.server-url / "
+                    + "client-secret). Refusing to delete application data while the identity would "
+                    + "survive - set KC_ADMIN_CLIENT_SECRET on auth-service and the purge will retry.");
         }
         try {
             String token = fetchKcAdminToken();
@@ -239,8 +271,12 @@ public class AccountPurgeService {
             headers.setBearerAuth(token);
             restTemplate.exchange(url, HttpMethod.DELETE, new HttpEntity<>(headers), Void.class);
             logger.info("Account purge: Keycloak user {} deleted", providerId);
+        } catch (org.springframework.web.client.HttpClientErrorException.NotFound alreadyGone) {
+            logger.info("Account purge: Keycloak user {} already absent, treating as deleted", providerId);
         } catch (Exception e) {
-            logger.warn("Account purge: KC user delete failed for {}: {}", providerId, e.getMessage());
+            throw new IllegalStateException(
+                    "Keycloak user delete failed for " + providerId + " (" + e.getMessage()
+                    + "). Aborting the purge so data and identity cannot diverge.", e);
         }
     }
 

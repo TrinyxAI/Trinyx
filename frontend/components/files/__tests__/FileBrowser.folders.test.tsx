@@ -31,6 +31,9 @@ let hookState: { entries: StorageExplorerEntry[]; parentFolderId: string | null 
 };
 vi.mock('@/app/workflows/builder/components/inspector/useStorageExplorer', () => ({
   useStorageExplorer: () => ({
+    sort: 'date' as const,
+    direction: 'desc' as const,
+    setSort: vi.fn(),
     entries: hookState.entries,
     totalElements: hookState.entries.length,
     totalPages: 1,
@@ -63,6 +66,7 @@ const deleteEntries = vi.fn().mockResolvedValue({ deletedCount: 1 });
 const deleteVirtualFolder = vi.fn().mockResolvedValue({ deletedCount: 3 });
 vi.mock('@/lib/api/storage-api', () => ({
   storageApi: {
+    getFolderTrail: vi.fn().mockResolvedValue([]),
     createFolder: (...a: unknown[]) => createFolder(...a),
     moveEntries: (...a: unknown[]) => moveEntries(...a),
     deleteEntries: (...a: unknown[]) => deleteEntries(...a),
@@ -118,6 +122,18 @@ vi.mock('../FileCard', () => ({
   ),
 }));
 vi.mock('@/components/app/FileDetailView', () => ({ FileDetailView: () => <div data-testid="detail" /> }));
+// ---- next/navigation: the open folder now lives in the URL, so FileBrowser reads
+// useSearchParams() and navigates with router.push(). A fake router records the pushes;
+// tests that need to ARRIVE in a folder set searchParams before rendering.
+const routerPush = vi.fn();
+const routerReplace = vi.fn();
+let searchParams = new URLSearchParams();
+vi.mock('next/navigation', () => ({
+  useRouter: () => ({ push: routerPush, replace: routerReplace }),
+  usePathname: () => '/en/app/files',
+  useSearchParams: () => searchParams,
+}));
+
 vi.mock('../FileFilterBar', () => ({ FileFilterBar: () => <div /> }));
 vi.mock('@/components/ui/PaginationBar', () => ({ PaginationBar: () => <div /> }));
 vi.mock('@/components/ui/BulkDeleteModal', () => ({
@@ -128,6 +144,13 @@ vi.mock('@/components/ui/BulkDeleteModal', () => ({
 vi.mock('@/components/ToastContainer', () => ({ default: () => null }));
 vi.mock('@/components/Toast', () => ({ useToast: () => ({ toasts: [], addToast: vi.fn(), removeToast: vi.fn() }) }));
 vi.mock('@/hooks/useAuthToken', () => ({ useAuthToken: () => 'token' }));
+// The toolbar asks whether this install serves generation at all before it
+// offers the action. Answered "yes, with models" here so these folder tests
+// render the toolbar they were written against; the gate itself is covered by
+// FileBrowser.generateEntryPoint.test.tsx.
+vi.mock('@/hooks/useGenerationModels', () => ({
+  useGenerationModels: () => ({ models: [], isLoading: false, availability: 'ready' }),
+}));
 vi.mock('@/hooks/useDebouncedValue', () => ({ useDebouncedValue: (v: unknown) => v }));
 vi.mock('@/lib/hooks/useOrgScopedReset', () => ({ useOrgScopedReset: () => {} }));
 vi.mock('@/lib/stores/current-org-store', () => ({
@@ -172,6 +195,9 @@ function vfolder(virtualId: string, extra: Partial<StorageExplorerEntry> = {}): 
 
 beforeEach(() => {
   hookState = { entries: [], parentFolderId: null };
+  searchParams = new URLSearchParams();
+  routerPush.mockClear();
+  routerReplace.mockClear();
   navigateToFolder.mockClear();
   refresh.mockClear();
   createFolder.mockClear();
@@ -191,26 +217,35 @@ describe('FileBrowser - manual folders (V313)', () => {
     expect(getByTestId('file-a').getAttribute('data-draggable')).toBe('true');
   });
 
-  it('entering a folder calls navigateToFolder(id) and broadcasts the folder trail on the bus', () => {
+  it('entering a folder pushes it into the URL and broadcasts the folder trail on the bus', () => {
     hookState.entries = [folder('f1', 'Reports')];
     const states: FilesDetailState[] = [];
     const off = onFilesDetailState((s) => states.push(s));
     const { getByTestId } = render(<FileBrowser />);
     act(() => fireEvent.click(getByTestId('open-folder-f1')));
-    expect(navigateToFolder).toHaveBeenCalledWith('f1');
+    // The open folder lives in the URL, so a refresh comes back to it.
+    expect(routerPush).toHaveBeenCalledWith('/en/app/files?folder=f1');
     // The latest broadcast carries the trail [Reports].
     const last = states[states.length - 1];
     expect(last.folderTrail).toEqual([{ id: 'f1', name: 'Reports' }]);
     off();
   });
 
-  it('a folder-navigate bus event (breadcrumb/header back) returns to root via navigateToFolder(null)', () => {
-    hookState.entries = [folder('f1', 'Reports')];
-    const { getByTestId } = render(<FileBrowser />);
-    act(() => fireEvent.click(getByTestId('open-folder-f1')));
-    navigateToFolder.mockClear();
+  it('the URL folder drives the listing: mounting with ?folder=f1 navigates into f1', () => {
+    searchParams = new URLSearchParams('folder=f1');
+    hookState.entries = [file('a', 'a.png')];
+    render(<FileBrowser />);
+    expect(navigateToFolder).toHaveBeenCalledWith('f1');
+  });
+
+  it('a folder-navigate bus event (breadcrumb/header back) returns to root by clearing the URL folder', () => {
+    searchParams = new URLSearchParams('folder=f1');
+    hookState.entries = [file('a', 'a.png')];
+    hookState.parentFolderId = 'f1';
+    render(<FileBrowser />);
+    routerPush.mockClear();
     act(() => emitFilesFolderNavigate(null));
-    expect(navigateToFolder).toHaveBeenCalledWith(null);
+    expect(routerPush).toHaveBeenCalledWith('/en/app/files');
   });
 
   it('creating a folder calls createFolder(name, currentFolderId) then refreshes', async () => {
@@ -261,21 +296,25 @@ describe('FileBrowser - manual folders (V313)', () => {
 
   it('shows an in-page breadcrumb (current folder) + an up-one-level back button once inside a folder', () => {
     hookState.entries = [folder('f1', 'Reports')];
-    const { getByTestId, queryByLabelText, getByLabelText, getByRole } = render(<FileBrowser />);
+    const { getByTestId, queryByLabelText, getByLabelText, getByRole, rerender } = render(<FileBrowser />);
     // At root: header is just the title, no in-page back button.
     expect(queryByLabelText('backToParent')).toBeNull();
 
     act(() => fireEvent.click(getByTestId('open-folder-f1')));
+    // The navigation lands - the URL now names the folder we just entered.
+    searchParams = new URLSearchParams('folder=f1');
+    hookState.parentFolderId = 'f1';
+    rerender(<FileBrowser />);
 
     // Inside the folder: the current folder name is in the in-page heading and a back button appears.
     expect(getByRole('heading', { level: 1 }).textContent).toContain('Reports');
     const back = getByLabelText('backToParent');
     expect(back).toBeTruthy();
 
-    // Clicking back at depth 1 returns to root (goToFolder(null)).
-    navigateToFolder.mockClear();
+    // Clicking back at depth 1 returns to root - which now means clearing the URL folder.
+    routerPush.mockClear();
     act(() => fireEvent.click(back));
-    expect(navigateToFolder).toHaveBeenCalledWith(null);
+    expect(routerPush).toHaveBeenCalledWith('/en/app/files');
   });
 
   it('dropping a card on a folder calls moveEntries([draggedId], folderId) and refreshes', async () => {
@@ -393,7 +432,8 @@ describe('FileBrowser - virtual workflow folders (Phase 2b)', () => {
     hookState.entries = [vfolder('wf:1/e0', { virtualKind: 'EPOCH', epoch: 0 })];
     const { getByTestId } = render(<FileBrowser />);
     act(() => fireEvent.click(getByTestId('open-vfolder-wf:1/e0')));
-    expect(navigateToFolder).toHaveBeenCalledWith('wf:1/e0');
+    // The virtualId is what lands in the URL - a virtual folder has no real id to navigate by.
+    expect(routerPush).toHaveBeenCalledWith('/en/app/files?folder=wf%3A1%2Fe0');
   });
 
   it('a virtual folder IS selectable - it joins the same selection as the file rows', () => {

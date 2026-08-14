@@ -55,46 +55,12 @@ public final class ToolAuthorizationScopeResolver {
      * @return true iff the tool-authorization gate should apply to this execution.
      */
     public static boolean isActive(Map<String, Object> credentials) {
-        if (credentials == null) {
-            return false;
-        }
-
-        boolean agentOverride = isTruthy(credentials.get(KEY_REQUIRE_AUTHORIZATION));
-
-        // NOTE: the CLI bridge (claude-code, codex, …) is NOT exempt - it is the MODEL
-        // backing many interactive general chats, which must be gated. The bridge runs
-        // through the same CliAgentService as the headless external agent-cli MCP, so
-        // there is no bridge-vs-chat marker; gating keys on the interactive signals below
-        // (conversationId + streamId + no bound agent). Headless contexts without a live
-        // stream stay exempt via the interactiveChat check.
-
-        // Sub-agent (depth >= 1): inherits the parent's launch authorization → exempt.
-        if (agentDepth(credentials) >= 1) {
-            return agentOverride;
-        }
-        // Workflow- or task-driven execution: exempt (the user authorized the workflow/task).
-        if (hasText(credentials.get(KEY_WORKFLOW_RUN_ID))
-                || hasText(credentials.get(KEY_WORKFLOW_RUN_ID_PLAIN))
-                || hasText(credentials.get(KEY_TASK_ID))) {
-            return agentOverride;
-        }
-        // Interactive conversation: a live stream the user is watching.
-        boolean interactiveChat = hasText(credentials.get(KEY_CONVERSATION_ID))
-                && (hasText(credentials.get(KEY_STREAM_ID)) || hasText(credentials.get(KEY_STREAM_ID_PLAIN)));
-        if (interactiveChat) {
-            // Only the GENERAL shared-agent chat (no bound agent) is gated. An agent-backed
-            // chat is "an agent" - exempt today, opt-in via the per-agent flag tomorrow.
-            // (Product: "c'est juste pour les conversations générales ; les agents = sans
-            // autorisation aujourd'hui".)
-            if (hasText(credentials.get(KEY_AGENT_ID))) {
-                return agentOverride;
-            }
-            return true;
-        }
-        // Anything else (headless / unrecognized) → exempt unless explicitly overridden.
-        return agentOverride;
+        // Delegates to the shared predicate in agent-common. It used to live here alone, so any
+        // other surface that needed to know "will the user actually be asked?" had to guess, and a
+        // plausible guess says yes for a sub-agent and for an unattended workflow run - both
+        // exempt. One implementation, one answer.
+        return com.apimarketplace.agent.tools.authz.ToolAuthorizationScope.isCardRaised(credentials);
     }
-
     private static int agentDepth(Map<String, Object> credentials) {
         Object depth = credentials.get(KEY_AGENT_DEPTH);
         if (depth instanceof Number num) {

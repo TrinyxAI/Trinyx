@@ -96,17 +96,10 @@ function formatPricePerMillion(value: number | undefined | null): string | null 
   return `$${Math.round(value)}`;
 }
 
-/**
- * Format a USD-per-image price. Image-gen rates sit in $0.005-$0.211 - render
- * up to 3 decimals and trim trailing zeros (0.039 → "$0.039", 0.150 → "$0.15",
- * 0.200 → "$0.2") so the value reads naturally in cells and tooltips.
- */
-function formatPricePerImage(value: number | undefined | null): string | null {
-  if (value === undefined || value === null) return null;
-  const fixed = value.toFixed(3);
-  const trimmed = fixed.replace(/\.?0+$/, '');
-  return `$${trimmed || '0'}`;
-}
+// No per-image formatter here: these components render models from
+// /v3/chat/models, whose response is mode-filtered as 'chat', so a
+// `mode === 'image'` row never reaches them. It could, while the image
+// generation tab existed and fed the same picker.
 
 function formatRateLimit(value: number | null | undefined): string | null {
   if (value === undefined || value === null) return null;
@@ -276,15 +269,10 @@ export function ModelOptionDisplay({
 }: ModelOptionDisplayProps) {
   const t = useTranslations('modelInfo');
   const ctx = formatContextWindow(model.contextWindow);
-  const isImage = model.mode === 'image';
-  const priceIn = isImage
-    ? formatPricePerImage(model.pricing?.input)
-    : formatPricePerMillion(model.pricing?.input);
+  const priceIn = formatPricePerMillion(model.pricing?.input);
   const priceOut = formatPricePerMillion(model.pricing?.output);
   const deprecated = !!model.deprecatedAt;
-  const showPrice = variant !== 'compact' && (
-    isImage ? priceIn !== null : (priceIn !== null && priceOut !== null)
-  );
+  const showPrice = variant !== 'compact' && priceIn !== null && priceOut !== null;
   const maxInline = variant === 'compact' ? 3 : 4;
 
   return (
@@ -330,11 +318,7 @@ export function ModelOptionDisplay({
           <span aria-hidden className="text-slate-300 dark:text-slate-600">·</span>
         )}
         {showPrice && (
-          <span>
-            {isImage
-              ? t('priceShortPerImage', { input: priceIn })
-              : t('priceShort', { input: priceIn, output: priceOut })}
-          </span>
+          <span>{t('priceShort', { input: priceIn, output: priceOut })}</span>
         )}
       </div>
     </div>
@@ -361,13 +345,10 @@ export function ModelInfoPopover({ model, trigger, className }: ModelInfoPopover
   const t = useTranslations('modelInfo');
   const [open, setOpen] = React.useState(false);
 
-  const isImage = model.mode === 'image';
-  const priceIn = isImage
-    ? formatPricePerImage(model.pricing?.input)
-    : formatPricePerMillion(model.pricing?.input);
-  const priceOut = isImage ? null : formatPricePerMillion(model.pricing?.output);
-  const priceCacheRead = isImage ? null : formatPricePerMillion(model.priceCacheRead);
-  const priceBatchIn = isImage ? null : formatPricePerMillion(model.priceInputBatch);
+  const priceIn = formatPricePerMillion(model.pricing?.input);
+  const priceOut = formatPricePerMillion(model.pricing?.output);
+  const priceCacheRead = formatPricePerMillion(model.priceCacheRead);
+  const priceBatchIn = formatPricePerMillion(model.priceInputBatch);
   const ctx = formatContextWindow(model.contextWindow);
   const maxOut = formatContextWindow(model.maxOutputTokens);
   const tpm = formatRateLimit(model.rateLimitTpm);
@@ -384,7 +365,7 @@ export function ModelInfoPopover({ model, trigger, className }: ModelInfoPopover
               title={t('infoTooltip')}
               data-model-selector-keep-open
               className={cn(
-                'inline-flex h-5 w-5 items-center justify-center rounded-full text-slate-400 hover:text-slate-700 hover:bg-slate-100 dark:hover:bg-slate-800 dark:hover:text-slate-200 transition-colors',
+                'inline-flex h-5 w-5 items-center justify-center rounded-lg text-slate-400 hover:text-slate-700 hover:bg-slate-100 dark:hover:bg-slate-800 dark:hover:text-slate-200 transition-colors',
                 className,
               )}
               onPointerDown={e => e.stopPropagation()}
@@ -470,13 +451,13 @@ export function ModelInfoPopover({ model, trigger, className }: ModelInfoPopover
           {(priceIn || priceOut || priceCacheRead || priceBatchIn) && (
             <div className="rounded-md border border-slate-200 dark:border-slate-700 p-2">
               <div className="text-[11px] uppercase tracking-wide text-slate-500 dark:text-slate-400 mb-1">
-                {isImage ? t('perImage') : t('perMillion')}
+                {t('perMillion')}
               </div>
               <dl className="grid grid-cols-2 gap-x-3 gap-y-0.5 text-xs">
                 {priceIn && (
                   <>
                     <dt className="text-slate-500 dark:text-slate-400">
-                      {isImage ? t('priceImageLabel') : t('priceInputLabel')}
+                      {t('priceInputLabel')}
                     </dt>
                     <dd className="font-mono text-right">{priceIn}</dd>
                   </>

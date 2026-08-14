@@ -54,7 +54,7 @@ export interface Comparison {
 const LAST_UPDATED = 'July 2026';
 
 const INTEGRATIONS_ANSWER =
-  'LiveContext ships 600+ built-in API integrations with more than 14,000 ready-to-call operations, plus a generic HTTP request node, a code node, and custom API definitions for anything not in the catalog.';
+  'LiveContext ships 700+ built-in API integrations with more than 17,000 ready-to-call operations, plus a generic HTTP request node, a code node, and custom API definitions for anything not in the catalog.';
 
 const SELF_HOST_ANSWER =
   'Yes. The LiveContext Community Edition is free and self-hosted: one docker compose up on your own server, with the code public on GitHub (livecontext-ai/livecontext-ce). The cloud edition at livecontext.ai adds managed hosting, SAML SSO, workspaces and platform credits.';

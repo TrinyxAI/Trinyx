@@ -1,0 +1,1838 @@
+{
+  "version": 2026,
+  "generatedFrom": "scripts/api-migrations/*.json",
+  "generator": "scripts/api-migrations/generate_generation_seed.py",
+  "endpointCount": 21,
+  "modelCount": 49,
+  "endpoints": [
+    {
+      "apiToolId": "d2d25686-a86b-41de-a654-27c382f19a9f",
+      "endpointName": "generate_music",
+      "sourceFile": "audiocraft.json",
+      "generationSpec": {
+        "kind": "music",
+        "modelParam": "input.model_version",
+        "assetPath": "output",
+        "paramMap": {
+          "prompt": "input.prompt",
+          "duration_seconds": "input.duration",
+          "seed": "input.seed"
+        },
+        "models": [
+          {
+            "id": "musicgen-stereo-large",
+            "upstream": "stereo-large",
+            "label": "MusicGen Stereo Large",
+            "capabilities": [
+              "prompt",
+              "duration_seconds",
+              "seed"
+            ],
+            "required": [
+              "prompt",
+              "duration_seconds"
+            ],
+            "constraints": {
+              "duration_seconds": {
+                "min": 1,
+                "max": 300
+              }
+            },
+            "price": {
+              "unit": "second",
+              "unitCredits": 10
+            }
+          },
+          {
+            "id": "musicgen-stereo-melody-large",
+            "upstream": "stereo-melody-large",
+            "label": "MusicGen Stereo Melody Large",
+            "capabilities": [
+              "prompt",
+              "duration_seconds",
+              "seed"
+            ],
+            "required": [
+              "prompt",
+              "duration_seconds"
+            ],
+            "constraints": {
+              "duration_seconds": {
+                "min": 1,
+                "max": 300
+              }
+            },
+            "price": {
+              "unit": "second",
+              "unitCredits": 10
+            }
+          },
+          {
+            "id": "musicgen-large",
+            "upstream": "large",
+            "label": "MusicGen Large",
+            "capabilities": [
+              "prompt",
+              "duration_seconds",
+              "seed"
+            ],
+            "required": [
+              "prompt",
+              "duration_seconds"
+            ],
+            "constraints": {
+              "duration_seconds": {
+                "min": 1,
+                "max": 300
+              }
+            },
+            "price": {
+              "unit": "second",
+              "unitCredits": 8
+            }
+          }
+        ]
+      }
+    },
+    {
+      "apiToolId": "cb1d49ec-d4fa-4790-96bd-7ccad2cf65f3",
+      "endpointName": "text_to_image",
+      "sourceFile": "clipdrop.json",
+      "generationSpec": {
+        "kind": "image",
+        "assetPath": "$binary",
+        "paramMap": {
+          "prompt": "prompt"
+        },
+        "models": [
+          {
+            "id": "clipdrop-text-to-image",
+            "label": "Clipdrop Text to Image",
+            "capabilities": [
+              "prompt"
+            ],
+            "required": [
+              "prompt"
+            ],
+            "price": {
+              "unit": "call",
+              "baseCredits": 100
+            }
+          }
+        ]
+      }
+    },
+    {
+      "apiToolId": "1eadd880-683e-4519-8f90-7bc73bf77318",
+      "endpointName": "text_to_speech",
+      "sourceFile": "deepgram.json",
+      "generationSpec": {
+        "kind": "voice",
+        "assetPath": "$binary",
+        "paramMap": {
+          "prompt": "text",
+          "voice": "model"
+        },
+        "models": [
+          {
+            "id": "deepgram-aura",
+            "label": "Deepgram Aura",
+            "capabilities": [
+              "prompt",
+              "voice"
+            ],
+            "required": [
+              "prompt"
+            ],
+            "price": {
+              "unit": "character",
+              "unitCredits": 0.03,
+              "minCredits": 1
+            }
+          }
+        ]
+      }
+    },
+    {
+      "apiToolId": "8ae75387-30cd-43aa-a5b2-86cc728eb9e0",
+      "endpointName": "text_to_speech",
+      "sourceFile": "elevenlabs.json",
+      "generationSpec": {
+        "kind": "voice",
+        "modelParam": "model_id",
+        "assetPath": "$binary",
+        "paramMap": {
+          "prompt": "text",
+          "voice": "voice_id",
+          "seed": "seed",
+          "language": "language_code"
+        },
+        "models": [
+          {
+            "id": "eleven-v3",
+            "upstream": "eleven_v3",
+            "label": "ElevenLabs v3",
+            "capabilities": [
+              "prompt",
+              "voice",
+              "seed",
+              "language"
+            ],
+            "required": [
+              "prompt",
+              "voice"
+            ],
+            "price": {
+              "unit": "character",
+              "unitCredits": 0.3,
+              "minCredits": 1
+            }
+          },
+          {
+            "id": "eleven-multilingual-v2",
+            "upstream": "eleven_multilingual_v2",
+            "label": "ElevenLabs Multilingual v2",
+            "capabilities": [
+              "prompt",
+              "voice",
+              "seed",
+              "language"
+            ],
+            "required": [
+              "prompt",
+              "voice"
+            ],
+            "price": {
+              "unit": "character",
+              "unitCredits": 0.2,
+              "minCredits": 1
+            }
+          },
+          {
+            "id": "eleven-flash-v2-5",
+            "upstream": "eleven_flash_v2_5",
+            "label": "ElevenLabs Flash v2.5",
+            "capabilities": [
+              "prompt",
+              "voice",
+              "seed",
+              "language"
+            ],
+            "required": [
+              "prompt",
+              "voice"
+            ],
+            "price": {
+              "unit": "character",
+              "unitCredits": 0.1,
+              "minCredits": 1
+            }
+          }
+        ]
+      }
+    },
+    {
+      "apiToolId": "3e2f8ed3-e8d3-4f59-b1b5-0bd307784ee2",
+      "endpointName": "sound_generation",
+      "sourceFile": "elevenlabs.json",
+      "generationSpec": {
+        "kind": "audio",
+        "assetPath": "$binary",
+        "paramMap": {
+          "prompt": "text",
+          "duration_seconds": "duration_seconds"
+        },
+        "models": [
+          {
+            "id": "eleven-sound-effects",
+            "label": "ElevenLabs Sound Effects",
+            "capabilities": [
+              "prompt",
+              "duration_seconds"
+            ],
+            "required": [
+              "duration_seconds"
+            ],
+            "constraints": {
+              "duration_seconds": {
+                "min": 0.5,
+                "max": 30
+              }
+            },
+            "price": {
+              "unit": "second",
+              "unitCredits": 4,
+              "minCredits": 8
+            }
+          }
+        ]
+      }
+    },
+    {
+      "apiToolId": "e29dccd4-cfd2-4608-800d-bdab8e860741",
+      "endpointName": "compose_music",
+      "sourceFile": "elevenlabs.json",
+      "generationSpec": {
+        "kind": "music",
+        "modelParam": "model_id",
+        "assetPath": "$binary",
+        "paramMap": {
+          "prompt": "prompt",
+          "seed": "seed",
+          "duration_seconds": {
+            "path": "music_length_ms",
+            "scale": 1000
+          }
+        },
+        "models": [
+          {
+            "id": "eleven-music-v1",
+            "upstream": "music_v1",
+            "label": "ElevenLabs Music v1",
+            "capabilities": [
+              "prompt",
+              "seed",
+              "duration_seconds"
+            ],
+            "required": [
+              "duration_seconds"
+            ],
+            "constraints": {
+              "duration_seconds": {
+                "min": 10,
+                "max": 300
+              }
+            },
+            "price": {
+              "unit": "second",
+              "unitCredits": 8,
+              "minCredits": 80
+            }
+          }
+        ]
+      }
+    },
+    {
+      "apiToolId": "5026c025-a83a-4d22-a124-6b156600529b",
+      "endpointName": "flux_pro",
+      "sourceFile": "flux.json",
+      "generationSpec": {
+        "kind": "image",
+        "assetPath": "result.sample",
+        "paramMap": {
+          "prompt": "prompt",
+          "seed": "seed",
+          "input_image": {
+            "path": "image_prompt",
+            "encoding": "base64",
+            "role": "reference"
+          }
+        },
+        "models": [
+          {
+            "id": "flux-1.1-pro",
+            "label": "FLUX 1.1 Pro",
+            "capabilities": [
+              "prompt",
+              "seed",
+              "input_image"
+            ],
+            "required": [
+              "prompt"
+            ],
+            "price": {
+              "unit": "call",
+              "baseCredits": 80
+            }
+          }
+        ]
+      }
+    },
+    {
+      "apiToolId": "570f97fa-b997-418d-b4e2-48ca5cec2e60",
+      "endpointName": "flux_dev",
+      "sourceFile": "flux.json",
+      "generationSpec": {
+        "kind": "image",
+        "assetPath": "result.sample",
+        "paramMap": {
+          "prompt": "prompt",
+          "seed": "seed",
+          "input_image": {
+            "path": "image_prompt",
+            "encoding": "base64",
+            "role": "reference"
+          }
+        },
+        "models": [
+          {
+            "id": "flux-dev",
+            "label": "FLUX.1 Dev",
+            "capabilities": [
+              "prompt",
+              "seed",
+              "input_image"
+            ],
+            "required": [
+              "prompt"
+            ],
+            "price": {
+              "unit": "call",
+              "baseCredits": 50
+            }
+          }
+        ]
+      }
+    },
+    {
+      "apiToolId": "feae87d2-da3c-4c11-be88-8da5771167fa",
+      "endpointName": "flux_pro_ultra",
+      "sourceFile": "flux.json",
+      "generationSpec": {
+        "kind": "image",
+        "assetPath": "result.sample",
+        "paramMap": {
+          "prompt": "prompt",
+          "aspect_ratio": "aspect_ratio",
+          "seed": "seed",
+          "input_image": {
+            "path": "image_prompt",
+            "encoding": "base64",
+            "role": "reference"
+          }
+        },
+        "models": [
+          {
+            "id": "flux-1.1-pro-ultra",
+            "label": "FLUX 1.1 Pro Ultra",
+            "capabilities": [
+              "prompt",
+              "aspect_ratio",
+              "seed",
+              "input_image"
+            ],
+            "required": [
+              "prompt"
+            ],
+            "constraints": {
+              "aspect_ratio": {
+                "allowed": [
+                  "21:9",
+                  "16:9",
+                  "3:2",
+                  "4:3",
+                  "1:1",
+                  "3:4",
+                  "2:3",
+                  "9:16",
+                  "9:21"
+                ]
+              }
+            },
+            "price": {
+              "unit": "call",
+              "baseCredits": 120
+            }
+          }
+        ]
+      }
+    },
+    {
+      "apiToolId": "70cba26f-cbea-4e7a-b407-f87c8ef45e0a",
+      "endpointName": "generate_content",
+      "sourceFile": "google_gemini.json",
+      "generationSpec": {
+        "kind": "image",
+        "modelParam": "model",
+        "assetPath": "$base64:candidates[0].content.parts[*].inlineData.data",
+        "paramMap": {
+          "prompt": "contents[0].parts[0].text",
+          "input_image": {
+            "path": "contents[0].parts[1].inlineData.data",
+            "encoding": "base64",
+            "mimePath": "contents[0].parts[1].inlineData.mimeType",
+            "role": "source",
+            "maxItems": 3
+          }
+        },
+        "constants": {
+          "contents[0].role": "user",
+          "generationConfig.responseModalities[0]": "IMAGE"
+        },
+        "models": [
+          {
+            "id": "gemini-2.5-flash-image",
+            "upstream": "gemini-2.5-flash-image",
+            "label": "Gemini 2.5 Flash Image (Nano Banana)",
+            "capabilities": [
+              "prompt",
+              "input_image"
+            ],
+            "required": [
+              "prompt"
+            ],
+            "price": {
+              "unit": "call",
+              "baseCredits": 78
+            }
+          },
+          {
+            "id": "gemini-3-pro-image",
+            "upstream": "gemini-3-pro-image",
+            "label": "Gemini 3 Pro Image",
+            "capabilities": [
+              "prompt",
+              "input_image"
+            ],
+            "required": [
+              "prompt"
+            ],
+            "price": {
+              "unit": "call",
+              "baseCredits": 268
+            }
+          }
+        ]
+      }
+    },
+    {
+      "apiToolId": "dd9ef2ea-1fd1-4a2d-854e-e2f34e5404df",
+      "endpointName": "generate_v3",
+      "sourceFile": "ideogram.json",
+      "generationSpec": {
+        "kind": "image",
+        "modelParam": "rendering_speed",
+        "assetPath": "data[0].url",
+        "paramMap": {
+          "prompt": "prompt",
+          "negative_prompt": "negative_prompt",
+          "aspect_ratio": "aspect_ratio",
+          "seed": "seed",
+          "style": "style_type"
+        },
+        "models": [
+          {
+            "id": "ideogram-v3-turbo",
+            "upstream": "TURBO",
+            "label": "Ideogram v3 Turbo",
+            "capabilities": [
+              "prompt",
+              "negative_prompt",
+              "aspect_ratio",
+              "seed",
+              "style"
+            ],
+            "required": [
+              "prompt"
+            ],
+            "constraints": {
+              "aspect_ratio": {
+                "allowed": [
+                  "1x3",
+                  "3x1",
+                  "1x2",
+                  "2x1",
+                  "9x16",
+                  "16x9",
+                  "10x16",
+                  "16x10",
+                  "2x3",
+                  "3x2",
+                  "3x4",
+                  "4x3",
+                  "4x5",
+                  "5x4",
+                  "1x1"
+                ]
+              },
+              "style": {
+                "allowed": [
+                  "AUTO",
+                  "GENERAL",
+                  "REALISTIC",
+                  "DESIGN"
+                ]
+              }
+            },
+            "price": {
+              "unit": "call",
+              "baseCredits": 60
+            }
+          },
+          {
+            "id": "ideogram-v3",
+            "upstream": "DEFAULT",
+            "label": "Ideogram v3",
+            "capabilities": [
+              "prompt",
+              "negative_prompt",
+              "aspect_ratio",
+              "seed",
+              "style"
+            ],
+            "required": [
+              "prompt"
+            ],
+            "constraints": {
+              "aspect_ratio": {
+                "allowed": [
+                  "1x3",
+                  "3x1",
+                  "1x2",
+                  "2x1",
+                  "9x16",
+                  "16x9",
+                  "10x16",
+                  "16x10",
+                  "2x3",
+                  "3x2",
+                  "3x4",
+                  "4x3",
+                  "4x5",
+                  "5x4",
+                  "1x1"
+                ]
+              },
+              "style": {
+                "allowed": [
+                  "AUTO",
+                  "GENERAL",
+                  "REALISTIC",
+                  "DESIGN"
+                ]
+              }
+            },
+            "price": {
+              "unit": "call",
+              "baseCredits": 120
+            }
+          },
+          {
+            "id": "ideogram-v3-quality",
+            "upstream": "QUALITY",
+            "label": "Ideogram v3 Quality",
+            "capabilities": [
+              "prompt",
+              "negative_prompt",
+              "aspect_ratio",
+              "seed",
+              "style"
+            ],
+            "required": [
+              "prompt"
+            ],
+            "constraints": {
+              "aspect_ratio": {
+                "allowed": [
+                  "1x3",
+                  "3x1",
+                  "1x2",
+                  "2x1",
+                  "9x16",
+                  "16x9",
+                  "10x16",
+                  "16x10",
+                  "2x3",
+                  "3x2",
+                  "3x4",
+                  "4x3",
+                  "4x5",
+                  "5x4",
+                  "1x1"
+                ]
+              },
+              "style": {
+                "allowed": [
+                  "AUTO",
+                  "GENERAL",
+                  "REALISTIC",
+                  "DESIGN"
+                ]
+              }
+            },
+            "price": {
+              "unit": "call",
+              "baseCredits": 180
+            }
+          }
+        ]
+      }
+    },
+    {
+      "apiToolId": "7b83e249-cede-44e6-8502-a6e846ce6ed9",
+      "endpointName": "create_image",
+      "sourceFile": "openai.json",
+      "generationSpec": {
+        "kind": "image",
+        "modelParam": "model",
+        "assetPath": "$base64:data[0].b64_json",
+        "paramMap": {
+          "prompt": "prompt"
+        },
+        "models": [
+          {
+            "id": "openai-gpt-image-2-low",
+            "upstream": "gpt-image-2",
+            "label": "OpenAI GPT Image 2 (low)",
+            "capabilities": [
+              "prompt"
+            ],
+            "required": [
+              "prompt"
+            ],
+            "constraints": {
+              "prompt": {
+                "maxLength": 32000
+              }
+            },
+            "constants": {
+              "quality": "low",
+              "size": "1024x1024"
+            },
+            "price": {
+              "unit": "call",
+              "baseCredits": 12
+            }
+          },
+          {
+            "id": "openai-gpt-image-2-medium",
+            "upstream": "gpt-image-2",
+            "label": "OpenAI GPT Image 2 (medium)",
+            "capabilities": [
+              "prompt"
+            ],
+            "required": [
+              "prompt"
+            ],
+            "constraints": {
+              "prompt": {
+                "maxLength": 32000
+              }
+            },
+            "constants": {
+              "quality": "medium",
+              "size": "1024x1024"
+            },
+            "price": {
+              "unit": "call",
+              "baseCredits": 106
+            }
+          },
+          {
+            "id": "openai-gpt-image-2-high",
+            "upstream": "gpt-image-2",
+            "label": "OpenAI GPT Image 2 (high)",
+            "capabilities": [
+              "prompt"
+            ],
+            "required": [
+              "prompt"
+            ],
+            "constraints": {
+              "prompt": {
+                "maxLength": 32000
+              }
+            },
+            "constants": {
+              "quality": "high",
+              "size": "1024x1024"
+            },
+            "price": {
+              "unit": "call",
+              "baseCredits": 422
+            }
+          },
+          {
+            "id": "openai-gpt-image-1-5-low",
+            "upstream": "gpt-image-1.5",
+            "label": "OpenAI GPT Image 1.5 (low)",
+            "capabilities": [
+              "prompt"
+            ],
+            "required": [
+              "prompt"
+            ],
+            "constraints": {
+              "prompt": {
+                "maxLength": 32000
+              }
+            },
+            "constants": {
+              "quality": "low",
+              "size": "1024x1024"
+            },
+            "price": {
+              "unit": "call",
+              "baseCredits": 18
+            }
+          },
+          {
+            "id": "openai-gpt-image-1-5-medium",
+            "upstream": "gpt-image-1.5",
+            "label": "OpenAI GPT Image 1.5 (medium)",
+            "capabilities": [
+              "prompt"
+            ],
+            "required": [
+              "prompt"
+            ],
+            "constraints": {
+              "prompt": {
+                "maxLength": 32000
+              }
+            },
+            "constants": {
+              "quality": "medium",
+              "size": "1024x1024"
+            },
+            "price": {
+              "unit": "call",
+              "baseCredits": 68
+            }
+          },
+          {
+            "id": "openai-gpt-image-1-5-high",
+            "upstream": "gpt-image-1.5",
+            "label": "OpenAI GPT Image 1.5 (high)",
+            "capabilities": [
+              "prompt"
+            ],
+            "required": [
+              "prompt"
+            ],
+            "constraints": {
+              "prompt": {
+                "maxLength": 32000
+              }
+            },
+            "constants": {
+              "quality": "high",
+              "size": "1024x1024"
+            },
+            "price": {
+              "unit": "call",
+              "baseCredits": 266
+            }
+          },
+          {
+            "id": "openai-gpt-image-1-mini-low",
+            "upstream": "gpt-image-1-mini",
+            "label": "OpenAI GPT Image 1 mini (low)",
+            "capabilities": [
+              "prompt"
+            ],
+            "required": [
+              "prompt"
+            ],
+            "constraints": {
+              "prompt": {
+                "maxLength": 32000
+              }
+            },
+            "constants": {
+              "quality": "low",
+              "size": "1024x1024"
+            },
+            "price": {
+              "unit": "call",
+              "baseCredits": 10
+            }
+          },
+          {
+            "id": "openai-gpt-image-1-mini-medium",
+            "upstream": "gpt-image-1-mini",
+            "label": "OpenAI GPT Image 1 mini (medium)",
+            "capabilities": [
+              "prompt"
+            ],
+            "required": [
+              "prompt"
+            ],
+            "constraints": {
+              "prompt": {
+                "maxLength": 32000
+              }
+            },
+            "constants": {
+              "quality": "medium",
+              "size": "1024x1024"
+            },
+            "price": {
+              "unit": "call",
+              "baseCredits": 22
+            }
+          },
+          {
+            "id": "openai-gpt-image-1-mini-high",
+            "upstream": "gpt-image-1-mini",
+            "label": "OpenAI GPT Image 1 mini (high)",
+            "capabilities": [
+              "prompt"
+            ],
+            "required": [
+              "prompt"
+            ],
+            "constraints": {
+              "prompt": {
+                "maxLength": 32000
+              }
+            },
+            "constants": {
+              "quality": "high",
+              "size": "1024x1024"
+            },
+            "price": {
+              "unit": "call",
+              "baseCredits": 72
+            }
+          }
+        ]
+      }
+    },
+    {
+      "apiToolId": "f55faa62-c244-4fdb-bc7c-44a6bb24b844",
+      "endpointName": "edit_image",
+      "sourceFile": "openai.json",
+      "generationSpec": {
+        "kind": "image",
+        "modelParam": "model",
+        "assetPath": "$base64:data[0].b64_json",
+        "paramMap": {
+          "prompt": "prompt",
+          "input_image": {
+            "path": "image",
+            "encoding": "file_ref",
+            "role": "source"
+          }
+        },
+        "models": [
+          {
+            "id": "openai-edit-gpt-image-2-low",
+            "upstream": "gpt-image-2",
+            "label": "OpenAI GPT Image 2 edit (low)",
+            "capabilities": [
+              "prompt",
+              "input_image"
+            ],
+            "required": [
+              "prompt",
+              "input_image"
+            ],
+            "constraints": {
+              "prompt": {
+                "maxLength": 32000
+              }
+            },
+            "constants": {
+              "quality": "low",
+              "size": "1024x1024"
+            },
+            "price": {
+              "unit": "call",
+              "baseCredits": 12
+            }
+          },
+          {
+            "id": "openai-edit-gpt-image-2-medium",
+            "upstream": "gpt-image-2",
+            "label": "OpenAI GPT Image 2 edit (medium)",
+            "capabilities": [
+              "prompt",
+              "input_image"
+            ],
+            "required": [
+              "prompt",
+              "input_image"
+            ],
+            "constraints": {
+              "prompt": {
+                "maxLength": 32000
+              }
+            },
+            "constants": {
+              "quality": "medium",
+              "size": "1024x1024"
+            },
+            "price": {
+              "unit": "call",
+              "baseCredits": 106
+            }
+          },
+          {
+            "id": "openai-edit-gpt-image-2-high",
+            "upstream": "gpt-image-2",
+            "label": "OpenAI GPT Image 2 edit (high)",
+            "capabilities": [
+              "prompt",
+              "input_image"
+            ],
+            "required": [
+              "prompt",
+              "input_image"
+            ],
+            "constraints": {
+              "prompt": {
+                "maxLength": 32000
+              }
+            },
+            "constants": {
+              "quality": "high",
+              "size": "1024x1024"
+            },
+            "price": {
+              "unit": "call",
+              "baseCredits": 422
+            }
+          }
+        ]
+      }
+    },
+    {
+      "apiToolId": "68c27721-8095-43b4-a7a6-93e4ad1899e5",
+      "endpointName": "create_speech",
+      "sourceFile": "openai.json",
+      "generationSpec": {
+        "kind": "voice",
+        "modelParam": "model",
+        "assetPath": "$binary",
+        "paramMap": {
+          "prompt": "input",
+          "voice": "voice",
+          "style": "instructions"
+        },
+        "models": [
+          {
+            "id": "openai-tts-1",
+            "upstream": "tts-1",
+            "label": "OpenAI TTS-1",
+            "capabilities": [
+              "prompt",
+              "voice"
+            ],
+            "required": [
+              "prompt",
+              "voice"
+            ],
+            "constraints": {
+              "prompt": {
+                "maxLength": 4096
+              },
+              "voice": {
+                "allowed": [
+                  "alloy",
+                  "ash",
+                  "coral",
+                  "echo",
+                  "fable",
+                  "nova",
+                  "onyx",
+                  "sage",
+                  "shimmer"
+                ]
+              }
+            },
+            "price": {
+              "unit": "character",
+              "unitCredits": 0.03,
+              "minCredits": 1
+            }
+          },
+          {
+            "id": "openai-tts-1-hd",
+            "upstream": "tts-1-hd",
+            "label": "OpenAI TTS-1 HD",
+            "capabilities": [
+              "prompt",
+              "voice"
+            ],
+            "required": [
+              "prompt",
+              "voice"
+            ],
+            "constraints": {
+              "prompt": {
+                "maxLength": 4096
+              },
+              "voice": {
+                "allowed": [
+                  "alloy",
+                  "ash",
+                  "coral",
+                  "echo",
+                  "fable",
+                  "nova",
+                  "onyx",
+                  "sage",
+                  "shimmer"
+                ]
+              }
+            },
+            "price": {
+              "unit": "character",
+              "unitCredits": 0.06,
+              "minCredits": 1
+            }
+          },
+          {
+            "id": "openai-gpt-4o-mini-tts",
+            "upstream": "gpt-4o-mini-tts",
+            "label": "OpenAI GPT-4o mini TTS",
+            "capabilities": [
+              "prompt",
+              "voice",
+              "style"
+            ],
+            "required": [
+              "prompt",
+              "voice"
+            ],
+            "constraints": {
+              "prompt": {
+                "maxLength": 4096
+              },
+              "style": {
+                "maxLength": 4096
+              },
+              "voice": {
+                "allowed": [
+                  "alloy",
+                  "ash",
+                  "ballad",
+                  "coral",
+                  "echo",
+                  "fable",
+                  "nova",
+                  "onyx",
+                  "sage",
+                  "shimmer",
+                  "verse"
+                ]
+              }
+            },
+            "price": {
+              "unit": "character",
+              "unitCredits": 0.04,
+              "minCredits": 1
+            }
+          }
+        ]
+      }
+    },
+    {
+      "apiToolId": "9b3b5035-d655-415c-9e93-cc580f7866db",
+      "endpointName": "generate_video",
+      "sourceFile": "runway.json",
+      "generationSpec": {
+        "kind": "video",
+        "modelParam": "model",
+        "assetPath": "output[0]",
+        "paramMap": {
+          "prompt": "promptText",
+          "duration_seconds": "duration",
+          "resolution": "ratio",
+          "seed": "seed"
+        },
+        "models": [
+          {
+            "id": "runway-gen4.5",
+            "upstream": "gen4.5",
+            "label": "Runway Gen-4.5",
+            "capabilities": [
+              "prompt",
+              "duration_seconds",
+              "resolution",
+              "seed"
+            ],
+            "required": [
+              "prompt",
+              "duration_seconds",
+              "resolution"
+            ],
+            "constraints": {
+              "duration_seconds": {
+                "allowed": [
+                  5,
+                  10
+                ]
+              },
+              "resolution": {
+                "allowed": [
+                  "1280:720",
+                  "720:1280",
+                  "1104:832",
+                  "832:1104",
+                  "960:960",
+                  "1584:672"
+                ]
+              }
+            },
+            "price": {
+              "unit": "second",
+              "unitCredits": 240
+            }
+          },
+          {
+            "id": "runway-veo3.1",
+            "upstream": "veo3.1",
+            "label": "Veo 3.1 (via Runway)",
+            "capabilities": [
+              "prompt",
+              "duration_seconds",
+              "resolution",
+              "seed"
+            ],
+            "required": [
+              "prompt",
+              "duration_seconds",
+              "resolution"
+            ],
+            "constraints": {
+              "duration_seconds": {
+                "allowed": [
+                  4,
+                  6,
+                  8
+                ]
+              },
+              "resolution": {
+                "allowed": [
+                  "1280:720",
+                  "720:1280"
+                ]
+              }
+            },
+            "price": {
+              "unit": "second",
+              "unitCredits": 800
+            }
+          },
+          {
+            "id": "runway-veo3.1-fast",
+            "upstream": "veo3.1_fast",
+            "label": "Veo 3.1 Fast (via Runway)",
+            "capabilities": [
+              "prompt",
+              "duration_seconds",
+              "resolution",
+              "seed"
+            ],
+            "required": [
+              "prompt",
+              "duration_seconds",
+              "resolution"
+            ],
+            "constraints": {
+              "duration_seconds": {
+                "allowed": [
+                  4,
+                  6,
+                  8
+                ]
+              },
+              "resolution": {
+                "allowed": [
+                  "1280:720",
+                  "720:1280"
+                ]
+              }
+            },
+            "price": {
+              "unit": "second",
+              "unitCredits": 300
+            }
+          },
+          {
+            "id": "runway-seedance2",
+            "upstream": "seedance2",
+            "label": "Seedance 2 (via Runway)",
+            "capabilities": [
+              "prompt",
+              "duration_seconds",
+              "resolution",
+              "seed"
+            ],
+            "required": [
+              "prompt",
+              "duration_seconds",
+              "resolution"
+            ],
+            "constraints": {
+              "duration_seconds": {
+                "allowed": [
+                  5,
+                  10
+                ]
+              },
+              "resolution": {
+                "allowed": [
+                  "1280:720",
+                  "720:1280"
+                ]
+              }
+            },
+            "price": {
+              "unit": "second",
+              "unitCredits": 120
+            }
+          },
+          {
+            "id": "runway-seedance2-fast",
+            "upstream": "seedance2_fast",
+            "label": "Seedance 2 Fast (via Runway)",
+            "capabilities": [
+              "prompt",
+              "duration_seconds",
+              "resolution",
+              "seed"
+            ],
+            "required": [
+              "prompt",
+              "duration_seconds",
+              "resolution"
+            ],
+            "constraints": {
+              "duration_seconds": {
+                "allowed": [
+                  5,
+                  10
+                ]
+              },
+              "resolution": {
+                "allowed": [
+                  "1280:720",
+                  "720:1280"
+                ]
+              }
+            },
+            "price": {
+              "unit": "second",
+              "unitCredits": 80
+            }
+          }
+        ]
+      }
+    },
+    {
+      "apiToolId": "d20036f3-ffb4-4dfa-81c0-77d491d37ecc",
+      "endpointName": "image_to_video",
+      "sourceFile": "runway.json",
+      "generationSpec": {
+        "kind": "video",
+        "modelParam": "model",
+        "assetPath": "output[0]",
+        "paramMap": {
+          "prompt": "promptText",
+          "input_image": {
+            "path": "promptImage",
+            "encoding": "data_url",
+            "role": "first_frame"
+          },
+          "duration_seconds": "duration",
+          "resolution": "ratio"
+        },
+        "models": [
+          {
+            "id": "runway-i2v-gen4-turbo",
+            "upstream": "gen4_turbo",
+            "label": "Runway Gen-4 Turbo (image to video)",
+            "capabilities": [
+              "prompt",
+              "input_image",
+              "duration_seconds",
+              "resolution"
+            ],
+            "required": [
+              "prompt",
+              "input_image",
+              "duration_seconds",
+              "resolution"
+            ],
+            "constraints": {
+              "duration_seconds": {
+                "allowed": [
+                  5,
+                  10
+                ]
+              },
+              "resolution": {
+                "allowed": [
+                  "1280:720",
+                  "720:1280",
+                  "1104:832",
+                  "832:1104",
+                  "960:960",
+                  "1584:672"
+                ]
+              }
+            },
+            "price": {
+              "unit": "second",
+              "unitCredits": 100
+            }
+          },
+          {
+            "id": "runway-i2v-gen4.5",
+            "upstream": "gen4.5",
+            "label": "Runway Gen-4.5 (image to video)",
+            "capabilities": [
+              "prompt",
+              "input_image",
+              "duration_seconds",
+              "resolution"
+            ],
+            "required": [
+              "prompt",
+              "input_image",
+              "duration_seconds",
+              "resolution"
+            ],
+            "constraints": {
+              "duration_seconds": {
+                "allowed": [
+                  5,
+                  10
+                ]
+              },
+              "resolution": {
+                "allowed": [
+                  "1280:720",
+                  "720:1280",
+                  "1104:832",
+                  "832:1104",
+                  "960:960",
+                  "1584:672"
+                ]
+              }
+            },
+            "price": {
+              "unit": "second",
+              "unitCredits": 240
+            }
+          }
+        ]
+      }
+    },
+    {
+      "apiToolId": "624c2566-d8d1-457c-a77b-0b29fcafdeac",
+      "endpointName": "create_video_task",
+      "sourceFile": "seedance.json",
+      "generationSpec": {
+        "kind": "video",
+        "modelParam": "model",
+        "assetPath": "content.video_url",
+        "paramMap": {
+          "prompt": "content[0].text",
+          "aspect_ratio": "ratio",
+          "resolution": "resolution",
+          "duration_seconds": "duration",
+          "seed": "seed"
+        },
+        "constants": {
+          "content[0].type": "text"
+        },
+        "models": [
+          {
+            "id": "seedance-2.0",
+            "upstream": "dreamina-seedance-2-0-260128",
+            "label": "Seedance 2.0",
+            "capabilities": [
+              "prompt",
+              "aspect_ratio",
+              "resolution",
+              "duration_seconds",
+              "seed"
+            ],
+            "constraints": {
+              "duration_seconds": {
+                "allowed": [
+                  5,
+                  10
+                ]
+              },
+              "resolution": {
+                "allowed": [
+                  "480p",
+                  "720p",
+                  "1080p"
+                ]
+              },
+              "aspect_ratio": {
+                "allowed": [
+                  "16:9",
+                  "9:16",
+                  "1:1"
+                ]
+              }
+            },
+            "price": {
+              "unit": "second",
+              "unitCredits": 60
+            }
+          },
+          {
+            "id": "seedance-2.0-fast",
+            "upstream": "dreamina-seedance-2-0-fast-260128",
+            "label": "Seedance 2.0 Fast",
+            "capabilities": [
+              "prompt",
+              "aspect_ratio",
+              "resolution",
+              "duration_seconds",
+              "seed"
+            ],
+            "constraints": {
+              "duration_seconds": {
+                "allowed": [
+                  5,
+                  10
+                ]
+              },
+              "resolution": {
+                "allowed": [
+                  "480p",
+                  "720p",
+                  "1080p"
+                ]
+              },
+              "aspect_ratio": {
+                "allowed": [
+                  "16:9",
+                  "9:16",
+                  "1:1"
+                ]
+              }
+            },
+            "price": {
+              "unit": "second",
+              "unitCredits": 30
+            }
+          }
+        ]
+      }
+    },
+    {
+      "apiToolId": "075317ec-f97e-4136-a091-f2124d00a71a",
+      "endpointName": "generate_sd3",
+      "sourceFile": "stability_ai.json",
+      "generationSpec": {
+        "kind": "image",
+        "modelParam": "model",
+        "assetPath": "$binary",
+        "paramMap": {
+          "prompt": "prompt",
+          "negative_prompt": "negative_prompt",
+          "aspect_ratio": "aspect_ratio",
+          "seed": "seed"
+        },
+        "models": [
+          {
+            "id": "sd3.5-large",
+            "upstream": "sd3.5-large",
+            "label": "Stable Diffusion 3.5 Large",
+            "capabilities": [
+              "prompt",
+              "negative_prompt",
+              "aspect_ratio",
+              "seed"
+            ],
+            "required": [
+              "prompt"
+            ],
+            "constraints": {
+              "aspect_ratio": {
+                "allowed": [
+                  "16:9",
+                  "1:1",
+                  "21:9",
+                  "2:3",
+                  "3:2",
+                  "4:5",
+                  "5:4",
+                  "9:16",
+                  "9:21"
+                ]
+              }
+            },
+            "price": {
+              "unit": "call",
+              "baseCredits": 130
+            }
+          },
+          {
+            "id": "sd3.5-large-turbo",
+            "upstream": "sd3.5-large-turbo",
+            "label": "Stable Diffusion 3.5 Large Turbo",
+            "capabilities": [
+              "prompt",
+              "negative_prompt",
+              "aspect_ratio",
+              "seed"
+            ],
+            "required": [
+              "prompt"
+            ],
+            "constraints": {
+              "aspect_ratio": {
+                "allowed": [
+                  "16:9",
+                  "1:1",
+                  "21:9",
+                  "2:3",
+                  "3:2",
+                  "4:5",
+                  "5:4",
+                  "9:16",
+                  "9:21"
+                ]
+              }
+            },
+            "price": {
+              "unit": "call",
+              "baseCredits": 80
+            }
+          },
+          {
+            "id": "sd3.5-medium",
+            "upstream": "sd3.5-medium",
+            "label": "Stable Diffusion 3.5 Medium",
+            "capabilities": [
+              "prompt",
+              "negative_prompt",
+              "aspect_ratio",
+              "seed"
+            ],
+            "required": [
+              "prompt"
+            ],
+            "constraints": {
+              "aspect_ratio": {
+                "allowed": [
+                  "16:9",
+                  "1:1",
+                  "21:9",
+                  "2:3",
+                  "3:2",
+                  "4:5",
+                  "5:4",
+                  "9:16",
+                  "9:21"
+                ]
+              }
+            },
+            "price": {
+              "unit": "call",
+              "baseCredits": 70
+            }
+          }
+        ]
+      }
+    },
+    {
+      "apiToolId": "49351ae3-4b2a-403d-a3de-7294b6250a93",
+      "endpointName": "generate_core",
+      "sourceFile": "stability_ai.json",
+      "generationSpec": {
+        "kind": "image",
+        "assetPath": "$binary",
+        "paramMap": {
+          "prompt": "prompt",
+          "negative_prompt": "negative_prompt",
+          "aspect_ratio": "aspect_ratio",
+          "seed": "seed",
+          "style": "style_preset"
+        },
+        "models": [
+          {
+            "id": "stable-image-core",
+            "label": "Stable Image Core",
+            "capabilities": [
+              "prompt",
+              "negative_prompt",
+              "aspect_ratio",
+              "seed",
+              "style"
+            ],
+            "required": [
+              "prompt"
+            ],
+            "constraints": {
+              "aspect_ratio": {
+                "allowed": [
+                  "16:9",
+                  "1:1",
+                  "21:9",
+                  "2:3",
+                  "3:2",
+                  "4:5",
+                  "5:4",
+                  "9:16",
+                  "9:21"
+                ]
+              }
+            },
+            "price": {
+              "unit": "call",
+              "baseCredits": 60
+            }
+          }
+        ]
+      }
+    },
+    {
+      "apiToolId": "a3869551-b236-445f-b294-fff875ad3ef6",
+      "endpointName": "generate_ultra",
+      "sourceFile": "stability_ai.json",
+      "generationSpec": {
+        "kind": "image",
+        "assetPath": "$binary",
+        "paramMap": {
+          "prompt": "prompt",
+          "negative_prompt": "negative_prompt",
+          "aspect_ratio": "aspect_ratio",
+          "seed": "seed",
+          "input_image": {
+            "path": "image",
+            "encoding": "file_ref",
+            "role": "source"
+          }
+        },
+        "models": [
+          {
+            "id": "stable-image-ultra",
+            "label": "Stable Image Ultra",
+            "capabilities": [
+              "prompt",
+              "negative_prompt",
+              "aspect_ratio",
+              "seed",
+              "input_image"
+            ],
+            "required": [
+              "prompt"
+            ],
+            "constraints": {
+              "aspect_ratio": {
+                "allowed": [
+                  "16:9",
+                  "1:1",
+                  "21:9",
+                  "2:3",
+                  "3:2",
+                  "4:5",
+                  "5:4",
+                  "9:16",
+                  "9:21"
+                ]
+              }
+            },
+            "price": {
+              "unit": "call",
+              "baseCredits": 160
+            }
+          }
+        ]
+      }
+    },
+    {
+      "apiToolId": "fddb5a87-aa56-448e-bdb4-1a4e4882531e",
+      "endpointName": "generate_video",
+      "sourceFile": "xai.json",
+      "generationSpec": {
+        "kind": "video",
+        "modelParam": "model",
+        "assetPath": "url",
+        "paramMap": {
+          "prompt": "prompt",
+          "duration_seconds": "duration",
+          "aspect_ratio": "aspect_ratio",
+          "resolution": "resolution",
+          "input_image": {
+            "path": "image.url",
+            "encoding": "data_url",
+            "role": "first_frame"
+          }
+        },
+        "models": [
+          {
+            "id": "grok-imagine-video",
+            "upstream": "grok-imagine-video",
+            "label": "Grok Imagine Video",
+            "capabilities": [
+              "prompt",
+              "duration_seconds",
+              "aspect_ratio",
+              "resolution",
+              "input_image"
+            ],
+            "required": [
+              "prompt",
+              "duration_seconds"
+            ],
+            "constraints": {
+              "duration_seconds": {
+                "min": 1,
+                "max": 15
+              },
+              "aspect_ratio": {
+                "allowed": [
+                  "16:9",
+                  "9:16",
+                  "1:1"
+                ]
+              },
+              "resolution": {
+                "allowed": [
+                  "480p",
+                  "720p"
+                ]
+              }
+            },
+            "price": {
+              "unit": "second",
+              "unitCredits": 100
+            }
+          },
+          {
+            "id": "grok-imagine-video-1.5",
+            "upstream": "grok-imagine-video-1.5",
+            "label": "Grok Imagine Video 1.5",
+            "capabilities": [
+              "prompt",
+              "duration_seconds",
+              "aspect_ratio",
+              "resolution",
+              "input_image"
+            ],
+            "required": [
+              "prompt",
+              "duration_seconds"
+            ],
+            "constraints": {
+              "duration_seconds": {
+                "min": 1,
+                "max": 15
+              },
+              "aspect_ratio": {
+                "allowed": [
+                  "16:9",
+                  "9:16",
+                  "1:1"
+                ]
+              },
+              "resolution": {
+                "allowed": [
+                  "480p",
+                  "720p"
+                ]
+              }
+            },
+            "price": {
+              "unit": "second",
+              "unitCredits": 160
+            }
+          }
+        ]
+      }
+    }
+  ]
+}

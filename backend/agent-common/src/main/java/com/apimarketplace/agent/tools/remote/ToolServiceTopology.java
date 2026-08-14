@@ -14,7 +14,7 @@ import java.util.Map;
  *   <li>{@code agent}, {@code skill} → agent-service</li>
  *   <li>{@code table} → datasource-service</li>
  *   <li>{@code interface} → interface-service</li>
- *   <li>{@code catalog} → catalog-service</li>
+ *   <li>{@code catalog}, {@code generation} → catalog-service</li>
  *   <li>everything else → orchestrator-service</li>
  * </ul>
  *
@@ -40,7 +40,11 @@ public final class ToolServiceTopology {
             "skill", ServiceKey.AGENT,
             "table", ServiceKey.DATASOURCE,
             "interface", ServiceKey.INTERFACE,
-            "catalog", ServiceKey.CATALOG
+            "catalog", ServiceKey.CATALOG,
+            // generation executes through the catalog path (same provider, same
+            // credential resolution and credit reserve/commit), so it is owned by
+            // catalog-service, not by orchestrator like the older image_generation.
+            "generation", ServiceKey.CATALOG
     );
 
     private ToolServiceTopology() {}

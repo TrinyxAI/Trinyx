@@ -34,7 +34,7 @@ export interface RunInfoChangeData {
   runInfo: any | null;
   isStepByStep: boolean;
   currentEpoch: number;
-  epochTimestamps: Array<{ epoch: number; startedAt: string; endedAt: string | null; workDurationMs?: number | null }>;
+  epochTimestamps: Array<{ epoch: number; startedAt: string; endedAt: string | null; workDurationMs?: number | null; status?: string | null }>;
   streamedSteps?: any[];
 }
 
@@ -111,7 +111,7 @@ export function WorkflowRunCanvas({
   const [isStepByStep, setIsStepByStep] = useState(false);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [currentEpoch, setCurrentEpoch] = useState(0);
-  const [epochTimestamps, setEpochTimestamps] = useState<Array<{ epoch: number; startedAt: string; endedAt: string | null; workDurationMs?: number | null }>>([]);
+  const [epochTimestamps, setEpochTimestamps] = useState<Array<{ epoch: number; startedAt: string; endedAt: string | null; workDurationMs?: number | null; status?: string | null }>>([]);
   const [streamedSteps, setStreamedSteps] = useState<any[] | undefined>(undefined);
   const [pinnedVersion, setPinnedVersion] = useState<number | null>(null);
 

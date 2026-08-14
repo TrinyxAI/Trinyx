@@ -100,6 +100,22 @@ public class AgentContextBuilder {
     @Value("${conversation.agent.max-tokens:16000}")
     private int defaultMaxTokens;
 
+    /**
+     * Modules granted when NOTHING decides for the caller: a plain general chat, or an
+     * agent row that carries no toolsConfig at all.
+     *
+     * <p>It is {@link AgentModuleResolver#NO_CONFIG_MODULES}, i.e. the platform's own
+     * definition of "unrestricted", which deliberately leaves out the two credit-spending
+     * opt-in modules ({@code image_generation}, {@code generation}). Reusing the shared
+     * constant rather than listing the keys here is what keeps chat, the workflow agent
+     * node, the sub-agent handler and the CLI/bridge session from drifting apart.
+     */
+    static final List<String> NO_CONFIG_MODULES =
+        List.copyOf(AgentModuleResolver.NO_CONFIG_MODULES);
+
+    /** Per-family grant sentinel meaning "unrestricted" (see {@link AgentModuleResolver#isResourceAccessible}). */
+    private static final String GRANT_ALL = "all";
+
     private static final String NEW_CONVERSATION_INSTRUCTION = """
         [START - DO THIS IMMEDIATELY]
         1. Call set_conversation_title with a short title (3-6 words max)
@@ -265,10 +281,19 @@ public class AgentContextBuilder {
                 agentConfig.agentId() != null ? "Agent " + agentConfig.agentId() : "Chat config",
                 enabledModules, promptResult.coreToolNames());
         } else if (agentConfig != null && agentConfig.agentId() != null) {
-            DefaultSystemPrompts.ModularPromptResult agentPromptResult = DefaultSystemPrompts.buildAgentDefault();
+            // An agent whose row carries no toolsConfig granted nothing: build the concise
+            // agent prompt from NO_CONFIG_MODULES so its routing table lists exactly the tools
+            // handed over below. The no-arg buildAgentDefault() listed EVERY module, so the
+            // prompt advertised image_generation / generation to an agent that (correctly)
+            // never received them - teaching the model to call a tool it does not have.
+            DefaultSystemPrompts.ModularPromptResult agentPromptResult =
+                DefaultSystemPrompts.buildAgentDefault(new java.util.LinkedHashSet<>(NO_CONFIG_MODULES));
             blockSlots[0] = agentPromptResult.systemPrompt();
-            tools = coreToolsProvider.getCoreTools(agentPromptResult.coreToolNames(), shouldIncludeConversationTitle);
-            log.info("Agent {} without toolsConfig: using concise agent prompt, all tools available", agentConfig.agentId());
+            enabledModulesForContext = NO_CONFIG_MODULES;
+            tools = coreToolsProvider.getCoreTools(
+                CoreToolsProvider.NO_CONFIG_CORE_TOOL_NAMES, shouldIncludeConversationTitle);
+            log.info("Agent {} without toolsConfig: using concise agent prompt, modules={}",
+                agentConfig.agentId(), NO_CONFIG_MODULES);
         } else {
             // General chat: workflow-specific / custom / default base.
             // Block 5 (workflow builder session) and block 9 (conversation
@@ -280,7 +305,12 @@ public class AgentContextBuilder {
             blockSlots[0] = "";
         }
         if (tools == null) {
-            // General chat / no-agent path: load unfiltered core tools.
+            // General chat / no-agent path: no toolsConfig decided anything, so the caller
+            // gets the NO_CONFIG module set - everything except the credit-spending opt-ins.
+            // enabledModulesForContext is set to the same set (instead of left null) because
+            // null means "unrestricted" to the bridge, which would rebuild an MCP tool set
+            // containing image_generation and generation on a chat that granted neither.
+            enabledModulesForContext = NO_CONFIG_MODULES;
             tools = getCoreTools(shouldIncludeConversationTitle);
         }
 
@@ -570,6 +600,16 @@ public class AgentContextBuilder {
         if (agentId != null && !agentId.isBlank()) {
             credentials.put("__agentId__", agentId);
         }
+        // What this caller may DO, alongside who it is. A tool running in
+        // another service cannot load the agent to find out, so a grant that
+        // does not travel is a grant only this service enforces, and the same
+        // spend stays reachable through any tool whose own module is on by
+        // default. Written even for a plain chat with no agent, because the
+        // opt-in modules are opt-in there too.
+        if (enabledModulesForContext != null) {
+            credentials.put(AgentModuleResolver.ENABLED_MODULES_CREDENTIAL_KEY,
+                    new java.util.ArrayList<>(enabledModulesForContext));
+        }
         // Agent credit budget for bridge-path budget enforcement
         if (agentConfig != null && agentConfig.creditBudget() != null) {
             credentials.put("__creditBudget__", agentConfig.creditBudget());
@@ -759,10 +799,29 @@ public class AgentContextBuilder {
         }
         Boolean webSearch = chatConfig.get("webSearch") instanceof Boolean b ? b : null;
 
+        // Credit-spending opt-IN grant, persisted flat on chat_config by the chat settings
+        // panel in the SAME shapes as an agent's toolsConfig (Boolean or {enabled,...}).
+        // Kept raw so AgentModuleResolver stays the only reader of that shape. Dropping it
+        // here made the general-chat switch inert: turning generation ON changed nothing.
+        Object generation = readOptInGrant(chatConfig, "generation");
+
         ToolsConfig toolsConfig = null;
-        if (!"all".equals(toolsMode) || Boolean.FALSE.equals(webSearch)) {
+        // A granted credit-spending tool is a restriction decision like any other, so it must
+        // produce a ToolsConfig: without one the caller falls through to the NO_CONFIG path,
+        // which grants neither.
+        if (!"all".equals(toolsMode) || Boolean.FALSE.equals(webSearch)
+                || generation != null) {
             toolsConfig = new ToolsConfig(toolsMode, List.of(), null, null, null, null, null,
-                webSearch, null, null, null, null, null, null);
+                webSearch, null, null, null, null, null, null, null,
+                // The 5 per-family grants are "all" because general chat has NO per-family
+                // scoping: the settings panel only offers all/no external tools, web search
+                // and the generation grant. Leaving them absent means "none" (the
+                // deny-by-default rule that exists for BACKFILLED AGENT ROWS), which would
+                // strip table/workflow/interface/agent/application from the chat and pass
+                // empty allow-lists down to the tools - a chat that merely turned web search
+                // off would silently lose five tool families.
+                GRANT_ALL, GRANT_ALL, GRANT_ALL, GRANT_ALL, GRANT_ALL, null,
+                generation);
         }
 
         // Conversation-scope guard overrides - chatConfig.turnLimits.{key}. Null if absent.
@@ -780,6 +839,26 @@ public class AgentContextBuilder {
     @SuppressWarnings("unchecked")
     private static Map<String, Object> castToStringObjectMap(Map<?, ?> m) {
         return (Map<String, Object>) m;
+    }
+
+    /**
+     * Read the credit-spending opt-IN {@code generation} grant off
+     * a stored chat_config in its RAW shape - a {@link Boolean} or the richer
+     * {@code {enabled, provider, model, ...}} map, the same two shapes an agent's toolsConfig
+     * uses. Anything else (absent, null, a string, a number) yields {@code null} = the key is
+     * not carried, which the resolver reads as NOT granted.
+     *
+     * <p>Not collapsed to a boolean here on purpose: {@link AgentModuleResolver} owns the
+     * "is it granted?" rule for both shapes, and a second implementation of it here would be
+     * free to drift.
+     */
+    static Object readOptInGrant(Map<String, Object> config, String key) {
+        if (config == null) return null;
+        Object value = config.get(key);
+        if (value instanceof Boolean || value instanceof Map<?, ?>) {
+            return value;
+        }
+        return null;
     }
 
     /**
@@ -824,7 +903,11 @@ public class AgentContextBuilder {
         // The marketplace-discovery cue ("is there an existing app for this?" before
         // reaching for workflow(action='init')) now lives on the application module
         // line, so the default prompt already carries it - no separate reflex variant.
-        return DefaultSystemPrompts.getDefault();
+        // Built from NO_CONFIG_MODULES rather than DefaultSystemPrompts.getDefault()
+        // (= every module) so the routing table lists exactly the tools this chat is
+        // actually handed: advertising image_generation / generation to a chat that
+        // granted neither only teaches the model to call a tool it does not have.
+        return DefaultSystemPrompts.build(new java.util.LinkedHashSet<>(NO_CONFIG_MODULES), true).systemPrompt();
     }
 
     /**

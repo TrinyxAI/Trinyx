@@ -100,7 +100,7 @@ function PublicationCard({
                 className="absolute inset-0 opacity-40 hidden dark:block"
                 style={{ backgroundImage: 'radial-gradient(circle, #475569 1px, transparent 1px)', backgroundSize: '16px 16px' }}
               />
-              <div className="relative z-10 w-14 h-14 bg-theme-secondary rounded-full flex items-center justify-center">
+              <div className="relative z-10 w-14 h-14 bg-theme-secondary rounded-xl flex items-center justify-center">
                 <Package className="w-7 h-7 text-theme-tertiary" />
               </div>
             </div>
@@ -115,7 +115,7 @@ function PublicationCard({
 
         {/* Top-right: installed badge */}
         {isAcquired || isOwn ? (
-          <span className="absolute top-3 right-3 z-20 inline-flex items-center gap-1 h-[22px] px-2 rounded-full text-[11px] font-medium bg-emerald-500 text-white shadow-sm">
+          <span className="absolute top-3 right-3 z-20 inline-flex items-center gap-1 h-[22px] px-2 rounded-lg text-[11px] font-medium bg-emerald-500 text-white shadow-sm">
             <CheckCircle className="h-3 w-3" />
             {t('installed')}
           </span>
@@ -130,7 +130,7 @@ function PublicationCard({
             <button
               type="button"
               onClick={() => onAcquire(publication)}
-              className="inline-flex items-center gap-1 h-[22px] px-2 rounded-full text-[11px] font-medium bg-[var(--accent-primary)] text-[var(--bg-primary)] hover:brightness-110 active:scale-95 transition-[filter,transform] shrink-0"
+              className="inline-flex items-center gap-1 h-[22px] px-2 rounded-lg text-[11px] font-medium bg-[var(--accent-primary)] text-[var(--bg-primary)] hover:brightness-110 active:scale-95 transition-[filter,transform] shrink-0"
             >
               <Download className="h-3 w-3" />
               {t('acquire')}
@@ -210,7 +210,7 @@ export function ResourceMarketplaceGrid({ type, icon: Icon, title, subtitle, emp
       <div className="min-h-full w-full p-6 pb-12">
         <div className="max-w-6xl mx-auto space-y-6 w-full">
           <div className="flex items-center gap-3">
-            <div className="w-10 h-10 bg-theme-secondary rounded-full flex items-center justify-center">
+            <div className="w-10 h-10 bg-theme-secondary rounded-xl flex items-center justify-center">
               <Icon className="w-5 h-5 text-theme-primary" />
             </div>
             <div>
@@ -231,7 +231,7 @@ export function ResourceMarketplaceGrid({ type, icon: Icon, title, subtitle, emp
             </div>
           ) : publications.length === 0 ? (
             <div className="p-12 rounded-xl bg-theme-secondary text-center">
-              <div className="w-12 h-12 bg-theme-tertiary rounded-full flex items-center justify-center mx-auto mb-3">
+              <div className="w-12 h-12 bg-theme-tertiary rounded-xl flex items-center justify-center mx-auto mb-3">
                 <Icon className="w-6 h-6 text-theme-secondary" />
               </div>
               <p className="text-sm text-theme-secondary">{emptyText}</p>

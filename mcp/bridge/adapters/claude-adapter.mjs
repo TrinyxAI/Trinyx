@@ -479,6 +479,13 @@ export class ClaudeAdapter {
 
         for (const block of userContent) {
           if (block.type === 'tool_result') {
+            // DELIBERATELY not routed through resolveItemError: the Claude CLI already
+            // unwraps the MCP envelope and hands us the block list in `block.content` with
+            // the failure flag beside it in `block.is_error`. There is no envelope here to
+            // inspect, so the shared resolver would only add fields that never exist on this
+            // shape. The codex-style and flat paths DO need it - they receive the raw
+            // CallToolResult. If a future Claude CLI starts passing the envelope through,
+            // switch this line to resolveItemError(block) and add the envelope test.
             const isError = block.is_error === true;
             const { content: resultContent, metadata } = ctx.extractToolResultAndMetadata(block.content);
             await dispatchToolResult(ctx, {

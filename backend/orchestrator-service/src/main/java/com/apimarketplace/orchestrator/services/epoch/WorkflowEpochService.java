@@ -5,9 +5,11 @@ import com.apimarketplace.orchestrator.repository.WorkflowEpochRepository;
 import com.apimarketplace.orchestrator.repository.WorkflowEpochRepository.EpochCountRow;
 import com.apimarketplace.orchestrator.repository.WorkflowEpochRepository.EpochHeaderRow;
 import com.apimarketplace.orchestrator.repository.WorkflowEpochRepository.EpochHeaderWithEpochRow;
+import com.apimarketplace.orchestrator.repository.WorkflowEpochRepository.EpochTimelineRow;
 import com.apimarketplace.orchestrator.repository.WorkflowEpochRepository.EpochTimestampRow;
 import com.apimarketplace.orchestrator.persistence.EpochWorkWindowProjection;
 import com.apimarketplace.orchestrator.persistence.WorkflowStepDataRepository;
+import com.apimarketplace.orchestrator.services.state.StateSnapshotService;
 import com.apimarketplace.orchestrator.services.streaming.state.RunningNodeTracker;
 import com.apimarketplace.orchestrator.utils.LabelNormalizer;
 import com.fasterxml.jackson.core.JsonProcessingException;
@@ -135,6 +137,21 @@ public class WorkflowEpochService {
             logger.debug("[WorkflowEpoch] Opened epoch header: runId={}, triggerId={}, epoch={}", runId, triggerId, epoch);
         } catch (JsonProcessingException e) {
             throw new RuntimeException("Failed to serialize EpochState for open: runId=" + runId + ", epoch=" + epoch, e);
+        }
+    }
+
+    /**
+     * Reopen a CLOSED epoch header so a rerun re-executes inside the epoch that holds its
+     * outputs. Restores {@code is_active} and clears {@code closed_at}, which
+     * {@link #openEpoch} cannot do (its upsert only rewrites {@code epoch_state}).
+     */
+    public void reopenEpoch(String runId, String triggerId, int epoch, EpochState state) {
+        try {
+            String json = objectMapper.writeValueAsString(state);
+            repository.reopenHeader(runId, triggerId, epoch, json);
+            logger.info("[WorkflowEpoch] Reopened epoch header: runId={}, triggerId={}, epoch={}", runId, triggerId, epoch);
+        } catch (JsonProcessingException e) {
+            throw new RuntimeException("Failed to serialize EpochState for reopen: runId=" + runId + ", epoch=" + epoch, e);
         }
     }
 
@@ -333,12 +350,49 @@ public class WorkflowEpochService {
      * not free and must not be called in a loop.
      */
     public List<EpochTimestampRow> listEpochTimestamps(String runId) {
-        List<EpochTimestampRow> rows = repository.listEpochTimestamps(runId);
-        if (rows.isEmpty()) return rows;
+        List<EpochTimelineRow> rows = repository.listEpochTimestamps(runId);
+        if (rows.isEmpty()) return List.of();
         Map<Integer, Long> workByEpoch = getEpochWorkDurations(runId);
         return rows.stream()
-                .map(row -> row.withWorkDurationMs(workByEpoch.get(row.epoch())))
+                .map(row -> new EpochTimestampRow(row.epoch(), row.startedAt(), row.endedAt())
+                        .withWorkDurationMs(workByEpoch.get(row.epoch()))
+                        .withStatus(deriveEpochOutcome(
+                                deserializeEpochState(row.epochStateJson()), row.isActive())))
                 .toList();
+    }
+
+    /**
+     * What an epoch ACHIEVED: {@code COMPLETED}, {@code FAILED}, or null when there is
+     * nothing to claim yet.
+     *
+     * <p>Read from the epoch's own persisted {@link EpochState} - specifically
+     * {@code failedNodeIds}, the very set the run's cycle verdict is computed from - and
+     * turned into a status by {@link StateSnapshotService#deriveCycleStatus}, the same
+     * function. That shared input is what keeps the epoch badge from contradicting the run
+     * badge for the same cycle. The epoch counter rows are NOT usable here: they are
+     * additive (a node that failed and was then rerun to success keeps its FAILED row) and
+     * they record a FAILED for a continue-anyway split partial failure, which the cycle
+     * verdict deliberately excludes.
+     *
+     * <p>Binary on purpose. PARTIAL_SUCCESS is a NODE verdict (a node accumulates items and
+     * can be half-done); an epoch either did the job or did not.
+     *
+     * <p>Null in two cases, both meaning "no honest answer yet":
+     * <ul>
+     *   <li><b>Active epoch</b> - its header holds the state written when the epoch OPENED,
+     *       so it cannot describe an outcome. Nothing here ever returns RUNNING either:
+     *       "is it still executing" is the run status's answer, not this one's, because a
+     *       settled epoch stays open until its deferred close.</li>
+     *   <li><b>Nothing executed</b> - {@link StateSnapshotService#hasExecuted}, the same
+     *       test the run's own reconcile applies: the trigger completes on every fire, so
+     *       its completion alone means armed, not ran, while skips DO count (a cycle whose
+     *       downstream was entirely skipped still fired and still reached its end).</li>
+     * </ul>
+     */
+    public static String deriveEpochOutcome(EpochState state, boolean isActive) {
+        if (state == null || isActive) return null;
+        if (!StateSnapshotService.hasExecuted(state)) return null;
+        return StateSnapshotService.deriveCycleStatus(!state.getFailedNodeIds().isEmpty()).name();
     }
 
     /**
@@ -500,9 +554,15 @@ public class WorkflowEpochService {
      * Deserialize an EpochHeaderRow into an EpochState. Returns null on failure.
      */
     private EpochState deserializeHeader(EpochHeaderRow header) {
-        if (header == null || header.epochStateJson() == null) return null;
+        if (header == null) return null;
+        return deserializeEpochState(header.epochStateJson());
+    }
+
+    /** Parse a stored EpochState payload; null (never a throw) when it is absent or unreadable. */
+    private EpochState deserializeEpochState(String epochStateJson) {
+        if (epochStateJson == null) return null;
         try {
-            return objectMapper.readValue(header.epochStateJson(), EpochState.class);
+            return objectMapper.readValue(epochStateJson, EpochState.class);
         } catch (JsonProcessingException e) {
             logger.error("[WorkflowEpoch] Failed to deserialize EpochState from header: {}", e.getMessage(), e);
             return null;

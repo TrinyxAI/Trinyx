@@ -288,13 +288,13 @@ class CloudCatalogRelayControllerTest {
         @DisplayName("requires authentication and an active link, like execute")
         void requiresAuthAndLink() {
             ResponseEntity<Map<String, Object>> unauthenticated =
-                    controller.platformInfo(null, INSTALL_ID, "openweather", null);
+                    controller.platformInfo(null, INSTALL_ID, "openweather", null, null, null);
             assertThat(unauthenticated.getStatusCode()).isEqualTo(HttpStatus.UNAUTHORIZED);
 
             when(authClient.userOwnsActiveCeLink(String.valueOf(CLOUD_USER_ID), INSTALL_ID))
                     .thenReturn(false);
             ResponseEntity<Map<String, Object>> unlinked =
-                    controller.platformInfo(CLOUD_USER_ID, INSTALL_ID, "openweather", null);
+                    controller.platformInfo(CLOUD_USER_ID, INSTALL_ID, "openweather", null, null, null);
             assertThat(unlinked.getStatusCode()).isEqualTo(HttpStatus.FORBIDDEN);
             verifyNoInteractions(relayService);
         }
@@ -306,7 +306,7 @@ class CloudCatalogRelayControllerTest {
             when(relayService.tryAcquire(INSTALL_ID)).thenReturn(false);
 
             ResponseEntity<Map<String, Object>> response =
-                    controller.platformInfo(CLOUD_USER_ID, INSTALL_ID, "openweather", null);
+                    controller.platformInfo(CLOUD_USER_ID, INSTALL_ID, "openweather", null, null, null);
 
             assertThat(response.getStatusCode()).isEqualTo(HttpStatus.TOO_MANY_REQUESTS);
             assertThat(response.getBody()).isEqualTo(Map.of("error", "RATE_LIMITED"));
@@ -319,11 +319,11 @@ class CloudCatalogRelayControllerTest {
             stubActiveLink();
             stubSubscription(new CeLinkEntitlementsResult("FREE", false));
             when(relayService.tryAcquire(INSTALL_ID)).thenReturn(true);
-            when(relayService.platformInfo("openweather", null))
+            when(relayService.platformInfo("openweather", null, null, null))
                     .thenReturn(new PlatformInfo("openweather", true, 77L, true, "0.25", true));
 
             ResponseEntity<Map<String, Object>> response =
-                    controller.platformInfo(CLOUD_USER_ID, INSTALL_ID, "openweather", null);
+                    controller.platformInfo(CLOUD_USER_ID, INSTALL_ID, "openweather", null, null, null);
 
             assertThat(response.getStatusCode()).isEqualTo(HttpStatus.OK);
             assertThat(response.getBody())
@@ -342,11 +342,11 @@ class CloudCatalogRelayControllerTest {
             stubActiveLink();
             stubSubscription(new CeLinkEntitlementsResult("PRO", true));
             when(relayService.tryAcquire(INSTALL_ID)).thenReturn(true);
-            when(relayService.platformInfo("nope", null))
+            when(relayService.platformInfo("nope", null, null, null))
                     .thenReturn(new PlatformInfo("nope", false, null, false, null, false));
 
             ResponseEntity<Map<String, Object>> response =
-                    controller.platformInfo(CLOUD_USER_ID, INSTALL_ID, "nope", null);
+                    controller.platformInfo(CLOUD_USER_ID, INSTALL_ID, "nope", null, null, null);
 
             assertThat(response.getStatusCode()).isEqualTo(HttpStatus.OK);
             assertThat(response.getBody())

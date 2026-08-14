@@ -64,6 +64,18 @@ public class H2WorkflowEpochRepository extends WorkflowEpochRepository {
             VALUES (?, ?, ?, 'EPOCH_HEADER', '_', '_', ?, TRUE, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
             """;
 
+    /**
+     * H2 dialect of the base REOPEN_HEADER_SQL (no JSONB cast, CURRENT_TIMESTAMP).
+     * Like every other header statement here it leaves {@code started_at} alone, so
+     * {@code MAX(started_at)} per run keeps meaning "when each epoch first fired".
+     */
+    private static final String H2_REOPEN_HEADER_SQL = """
+            UPDATE workflow_epochs
+            SET is_active = TRUE, closed_at = NULL,
+                epoch_state = ?, updated_at = CURRENT_TIMESTAMP
+            WHERE run_id = ? AND trigger_id = ? AND epoch = ? AND entry_type = 'EPOCH_HEADER'
+            """;
+
     private static final String H2_CLOSE_HEADER_SQL = """
             UPDATE workflow_epochs
             SET is_active = FALSE, closed_at = CURRENT_TIMESTAMP, epoch_state = ?,
@@ -125,6 +137,12 @@ public class H2WorkflowEpochRepository extends WorkflowEpochRepository {
                 }
             }
         }
+    }
+
+    @Override
+    public void reopenHeader(String runId, String triggerId, int epoch, String epochStateJson) {
+        String tid = triggerId != null ? triggerId : DEFAULT_TRIGGER_ID;
+        getJdbcTemplate().update(H2_REOPEN_HEADER_SQL, epochStateJson, runId, tid, epoch);
     }
 
     @Override

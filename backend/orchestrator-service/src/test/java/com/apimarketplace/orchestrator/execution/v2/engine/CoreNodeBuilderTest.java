@@ -7,6 +7,7 @@ import com.apimarketplace.orchestrator.execution.v2.nodes.DecisionNode;
 import com.apimarketplace.orchestrator.execution.v2.nodes.ExecutionNode;
 import com.apimarketplace.orchestrator.execution.v2.nodes.FilterNode;
 import com.apimarketplace.orchestrator.execution.v2.nodes.ForkNode;
+import com.apimarketplace.orchestrator.execution.v2.nodes.GenerateNode;
 import com.apimarketplace.orchestrator.execution.v2.nodes.LimitNode;
 import com.apimarketplace.orchestrator.execution.v2.nodes.MergeNode;
 import com.apimarketplace.orchestrator.execution.v2.nodes.MediaNode;
@@ -733,6 +734,71 @@ class CoreNodeBuilderTest {
             Map<String, ExecutionNode> nodeMap = new HashMap<>();
 
             builder.createMediaNodes(nodeMap, plan);
+
+            assertTrue(nodeMap.isEmpty());
+        }
+    }
+
+    @Nested
+    @DisplayName("createGenerateNodes() - generic params map passthrough")
+    class CreateGenerateNodesTests {
+
+        private WorkflowPlan planWithGenerateCore(String label, Map<String, Object> params) {
+            Map<String, Object> data = createBasePlanData();
+            Map<String, Object> coreData = new HashMap<>();
+            coreData.put("id", "g1");
+            coreData.put("type", "generate");
+            coreData.put("label", label);
+            if (params != null) {
+                coreData.put("params", params);
+            }
+            data.put("cores", List.of(coreData));
+            return WorkflowPlan.fromMap(data);
+        }
+
+        @Test
+        @DisplayName("Should create generate node carrying the FULL params map verbatim (validated against the model at execute time)")
+        void shouldCreateGenerateNodeWithParamsMap() {
+            Map<String, Object> params = Map.of(
+                "model", "seedance-2.0-fast",
+                "prompt", "a paper boat in a rain gutter",
+                "duration_seconds", 5,
+                "credential_source", "platform");
+            WorkflowPlan plan = planWithGenerateCore("Make Clip", params);
+            Map<String, ExecutionNode> nodeMap = new HashMap<>();
+
+            builder.createGenerateNodes(nodeMap, plan);
+
+            assertTrue(nodeMap.containsKey("core:make_clip"));
+            assertInstanceOf(GenerateNode.class, nodeMap.get("core:make_clip"));
+            GenerateNode node = (GenerateNode) nodeMap.get("core:make_clip");
+            assertEquals("seedance-2.0-fast", node.getParams().get("model"));
+            // Numbers must survive the plan round trip: a stringified duration would
+            // change what the platform bills the run on.
+            assertEquals(5, node.getParams().get("duration_seconds"));
+            assertEquals("platform", node.getParams().get("credential_source"));
+        }
+
+        @Test
+        @DisplayName("Should create node with empty params when the params map is absent (fails at runtime, not build time)")
+        void shouldCreateNodeWithEmptyParamsWhenAbsent() {
+            WorkflowPlan plan = planWithGenerateCore("Make Clip", null);
+            Map<String, ExecutionNode> nodeMap = new HashMap<>();
+
+            builder.createGenerateNodes(nodeMap, plan);
+
+            assertTrue(nodeMap.containsKey("core:make_clip"));
+            GenerateNode node = (GenerateNode) nodeMap.get("core:make_clip");
+            assertTrue(node.getParams().isEmpty());
+        }
+
+        @Test
+        @DisplayName("Should ignore cores that are not generate")
+        void shouldIgnoreNonGenerateCores() {
+            WorkflowPlan plan = createPlanWithCore("download_file", "DL");
+            Map<String, ExecutionNode> nodeMap = new HashMap<>();
+
+            builder.createGenerateNodes(nodeMap, plan);
 
             assertTrue(nodeMap.isEmpty());
         }

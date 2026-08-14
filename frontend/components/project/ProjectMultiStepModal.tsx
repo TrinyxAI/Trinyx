@@ -2,6 +2,7 @@
 
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { createPortal } from 'react-dom';
+import { ModalStepIndicator } from '@/components/ui/ModalStepIndicator';
 import {
   ArrowLeft,
   ArrowRight,
@@ -339,48 +340,18 @@ interface StepIndicatorProps {
 
 const StepIndicator: React.FC<StepIndicatorProps> = ({ currentStep, totalSteps, onStepClick }) => {
   const t = useTranslations('project');
-  const steps = [
-    { number: 1, icon: FileText, label: t('steps.info') },
-    { number: 2, icon: FolderOpen, label: t('steps.resources') },
-  ];
-
   return (
-    <div className="flex items-center justify-center gap-2 mb-6">
-      {steps.slice(0, totalSteps).map((step, index) => {
-        const isActive = step.number === currentStep;
-        const isCompleted = step.number < currentStep;
-        const Icon = step.icon;
-
-        return (
-          <React.Fragment key={step.number}>
-            <button
-              type="button"
-              onClick={() => onStepClick(step.number)}
-              disabled={step.number > currentStep}
-              className={`flex items-center gap-2 px-3 py-1.5 rounded-full transition-all ${
-                isActive
-                  ? 'bg-[var(--accent-primary)] text-[var(--accent-foreground)]'
-                  : isCompleted
-                  ? 'bg-emerald-500/20 text-emerald-600 dark:text-emerald-400 cursor-pointer hover:bg-emerald-500/30'
-                  : 'bg-theme-tertiary text-theme-secondary cursor-not-allowed'
-              }`}
-            >
-              {isCompleted ? (
-                <Check className="h-4 w-4" />
-              ) : (
-                <Icon className="h-4 w-4" />
-              )}
-              <span className="text-sm font-medium hidden sm:inline">{step.label}</span>
-            </button>
-            {index < totalSteps - 1 && (
-              <div className={`w-8 h-0.5 rounded-full ${
-                step.number < currentStep ? 'bg-emerald-500' : 'bg-theme-tertiary'
-              }`} />
-            )}
-          </React.Fragment>
-        );
-      })}
-    </div>
+    <ModalStepIndicator
+      currentStep={currentStep}
+      onStepClick={onStepClick}
+      // The steps ahead build on what the current one collects, so they stay
+      // unreachable until the user gets there.
+      isStepEnabled={(step) => step <= currentStep}
+      steps={[
+        { number: 1, icon: FileText, label: t('steps.info') },
+        { number: 2, icon: FolderOpen, label: t('steps.resources') },
+      ].slice(0, totalSteps)}
+    />
   );
 };
 
@@ -476,7 +447,7 @@ const ResourceSection: React.FC<ResourceSectionProps> = ({
         className="flex items-center gap-3 px-4 py-3 cursor-pointer hover:bg-[var(--bg-secondary)] transition-colors"
         onClick={() => setExpanded(!expanded)}
       >
-        <div className="w-8 h-8 rounded-full bg-theme-tertiary flex items-center justify-center flex-shrink-0">
+        <div className="w-8 h-8 rounded-xl bg-theme-tertiary flex items-center justify-center flex-shrink-0">
           <Icon className="h-4 w-4 text-theme-primary" />
         </div>
         <div className="flex-1 min-w-0">
@@ -492,7 +463,7 @@ const ResourceSection: React.FC<ResourceSectionProps> = ({
           ) : null}
         </div>
         {!isLoading && assigned.length > 0 && (
-          <span className="text-xs text-theme-secondary bg-theme-tertiary px-2 py-0.5 rounded-full">
+          <span className="text-xs text-theme-secondary bg-theme-tertiary px-2 py-0.5 rounded-md">
             {assigned.length}
           </span>
         )}
@@ -855,7 +826,7 @@ export function ProjectMultiStepModal({
                       key={c}
                       type="button"
                       onClick={() => setColor(c)}
-                      className={`w-7 h-7 rounded-full transition-transform ${
+                      className={`w-7 h-7 rounded-xl transition-transform ${
                         color === c ? 'ring-2 ring-offset-2 ring-black/30 dark:ring-white/30 scale-110' : 'hover:scale-105'
                       }`}
                       style={{ backgroundColor: c }}
@@ -870,7 +841,7 @@ export function ProjectMultiStepModal({
                 <div className="flex items-center gap-3">
                   {/* Preview circle */}
                   <div
-                    className="w-10 h-10 rounded-full flex items-center justify-center flex-shrink-0"
+                    className="w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0"
                     style={{ backgroundColor: color }}
                   >
                     {(() => {

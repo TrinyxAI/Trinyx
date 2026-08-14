@@ -286,7 +286,7 @@ const ParameterListTab: React.FC<ParameterListTabProps> = ({
           onClick={addParameter}
           variant="ghost"
           size="icon"
-          className="rounded-full w-10 h-10 min-w-[44px] min-h-[44px]"
+          className="rounded-xl w-10 h-10 min-w-[44px] min-h-[44px]"
           title={t('parameterList.addParameter')}
         >
           <Plus className="w-4 h-4" />

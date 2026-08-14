@@ -65,7 +65,7 @@ class EdgeSkipDoubleIncrementIntegrationTest {
         final Map<String, AtomicInteger> tally = new ConcurrentHashMap<>();
 
         CountingStateSnapshotService() {
-            super(null, null, null, null, null, null, null);
+            super(null, null, null, null, null, null, null, null);
         }
 
         @Override

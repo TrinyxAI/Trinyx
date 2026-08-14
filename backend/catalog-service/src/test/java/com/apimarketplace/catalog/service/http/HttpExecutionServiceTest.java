@@ -2362,11 +2362,50 @@ class HttpExecutionServiceTest {
             try {
                 CredentialModeContext.setExplicitSource("user");
                 CredentialModeContext.setSelectedCredentialId(42L);
+                // A pinned id is now honoured only once it is known to belong
+                // to the integration being called: ownership alone would let a
+                // caller send their key for one provider to another. So the
+                // identity lookup is part of resolving a pin, and stubbing it
+                // is what makes this credential one of 'my-cred'.
+                com.apimarketplace.credential.client.dto.CredentialScopesDto summary =
+                        new com.apimarketplace.credential.client.dto.CredentialScopesDto();
+                summary.setName("my-cred");
+                when(userCredentialService.getCredentialScopesById("user1", 42L))
+                        .thenReturn(Optional.of(summary));
                 when(userCredentialService.getAccessTokenInfoById("user1", 42L))
                         .thenReturn(Optional.of(result));
 
                 assertEquals("api_key", service.resolveCredentialVariant("user1", "my-cred", api));
                 verify(userCredentialService, never()).getAccessTokenInfo("user1", "my-cred");
+            } finally {
+                CredentialModeContext.clear();
+            }
+        }
+
+        @Test
+        @DisplayName("a pin on another provider's credential resolves the variant from the DEFAULT key instead")
+        void foreignSelectedCredentialIdDoesNotDriveVariantResolution() {
+            ApiEntity api = createTestApi("http://api.example.com");
+
+            com.apimarketplace.credential.client.dto.AccessTokenResult ownVariant =
+                    new com.apimarketplace.credential.client.dto.AccessTokenResult("k", true, "OAuth2");
+            try {
+                CredentialModeContext.setExplicitSource("user");
+                CredentialModeContext.setSelectedCredentialId(42L);
+                com.apimarketplace.credential.client.dto.CredentialScopesDto foreign =
+                        new com.apimarketplace.credential.client.dto.CredentialScopesDto();
+                foreign.setIntegration("stripe");
+                foreign.setName("My Stripe key");
+                when(userCredentialService.getCredentialScopesById("user1", 42L))
+                        .thenReturn(Optional.of(foreign));
+                when(userCredentialService.getAccessTokenInfo("user1", "my-cred"))
+                        .thenReturn(Optional.of(ownVariant));
+
+                // The variant is the one of the key that will actually be sent.
+                // Reading it off a foreign credential would shape the request
+                // for an auth scheme the endpoint is not going to receive.
+                assertEquals("oauth2", service.resolveCredentialVariant("user1", "my-cred", api));
+                verify(userCredentialService, never()).getAccessTokenInfoById("user1", 42L);
             } finally {
                 CredentialModeContext.clear();
             }
@@ -2713,6 +2752,15 @@ class HttpExecutionServiceTest {
             try {
                 CredentialModeContext.setExplicitSource("user");
                 CredentialModeContext.setSelectedCredentialId(42L);
+                // Resolving a pin now includes checking it belongs to the
+                // integration being called, so the credential's identity has to
+                // exist for it to be honoured. Ownership alone used to be
+                // enough, which let a key for one provider be sent to another.
+                com.apimarketplace.credential.client.dto.CredentialScopesDto summary =
+                        new com.apimarketplace.credential.client.dto.CredentialScopesDto();
+                summary.setName(CRED);
+                when(userCredentialService.getCredentialScopesById(USER_ID, 42L))
+                        .thenReturn(Optional.of(summary));
                 when(userCredentialService.getAccessTokenInfoById(USER_ID, 42L))
                         .thenReturn(Optional.of(selected));
 
@@ -2743,8 +2791,12 @@ class HttpExecutionServiceTest {
             try {
                 CredentialModeContext.setExplicitSource("user");
                 CredentialModeContext.setSelectedCredentialId(99L); // pinned, but since deleted
-                when(userCredentialService.getAccessTokenInfoById(USER_ID, 99L))
-                        .thenReturn(Optional.empty());
+                // A deleted credential now drops out one step EARLIER: resolving
+                // a pin starts by asking which integration it belongs to, and a
+                // credential that no longer exists answers nothing. The outcome
+                // is the one this test has always pinned - the user's default
+                // for the integration, never platform - reached by a shorter
+                // path, so the by-id token lookup is never made at all.
                 when(userCredentialService.getAccessToken(USER_ID, CRED))
                         .thenReturn(Optional.of("default-token"));
 

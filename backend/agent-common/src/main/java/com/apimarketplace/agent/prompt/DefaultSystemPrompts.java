@@ -161,10 +161,16 @@ public final class DefaultSystemPrompts {
         Set.of("web_search")
     );
 
-    public static final PromptModule IMAGE_GENERATION = new PromptModule(
-        "image_generation",
-        "\n        - image_generation - Generate images from a text prompt. Bills per image returned. Call image_generation(action='help') for the (provider, model, credits) catalog before generate.\n",
-        Set.of("image_generation")
+    /**
+     * The one generation module, format-neutral: the model decides whether the
+     * asset is an image, a video, audio, a voice or music. Opt-in per agent
+     * because every create spends the customer's credits, and a per-second
+     * video model spends far more of them than an image.
+     */
+    public static final PromptModule GENERATION = new PromptModule(
+        "generation",
+        "\n        - generation - Produce an asset from a prompt: image, video, audio, voice or music. Spends credits per create, and the model sets the rate. Call generation(action='models') for the model ids, what each accepts and what each costs, before the first create.\n",
+        Set.of("generation")
     );
 
     public static final PromptModule FILES = new PromptModule(
@@ -197,7 +203,8 @@ public final class DefaultSystemPrompts {
      * To add a new resource: create a PromptModule constant + add it here.
      */
     public static final List<PromptModule> ALL_RESOURCE_MODULES = List.of(
-        CATALOG, TABLE, INTERFACE, AGENT, SKILL, WORKFLOW, APPLICATION, WEB_SEARCH, IMAGE_GENERATION, FILES, WAIT
+        CATALOG, TABLE, INTERFACE, AGENT, SKILL, WORKFLOW, APPLICATION, WEB_SEARCH,
+        GENERATION, FILES, WAIT
     );
 
 
@@ -230,26 +237,53 @@ public final class DefaultSystemPrompts {
         """ + HELP_FIRST_CORE;
 
     /**
+     * Build a concise agent default prompt with EVERY module listed.
+     *
+     * @deprecated advertises modules the caller may not be granted. Prefer
+     *             {@link #buildAgentDefault(Set)} with the module set the caller will
+     *             actually receive, so the routing table and the tool list agree.
+     */
+    @Deprecated
+    public static ModularPromptResult buildAgentDefault() {
+        return buildAgentDefault(null);
+    }
+
+    /**
      * Build a concise agent default prompt: foundation + help-first + tool routing table.
      * Agents rely on their custom system prompt + tool definitions for specifics.
-     * All core tool names are still returned so tools remain available.
+     *
+     * <p>The routing table AND the returned tool names are both scoped to
+     * {@code enabledModuleKeys}, so a caller cannot advertise a module it will not hand
+     * over. Listing {@code generation} to an agent that has no {@code generation} tool
+     * only teaches the model to call something it does not have; the reverse (granting
+     * the tool without the line) hides a capability that was paid for. One argument,
+     * one answer, both halves.
+     *
+     * @param enabledModuleKeys {@code null} = ALL modules (legacy unrestricted); otherwise
+     *                          only matching module keys are listed and returned. An empty
+     *                          set yields no routing table and no tools.
      */
-    public static ModularPromptResult buildAgentDefault() {
+    public static ModularPromptResult buildAgentDefault(Set<String> enabledModuleKeys) {
         StringBuilder sb = new StringBuilder();
         sb.append(agentIntro()).append(AGENT_CORE_RULES).append(AGENT_HELP_FIRST);
 
+        List<PromptModule> activeModules = ALL_RESOURCE_MODULES.stream()
+            .filter(m -> enabledModuleKeys == null || enabledModuleKeys.contains(m.key()))
+            .toList();
+
         // Append tool routing table (same one-liners as chat prompt)
-        sb.append("\n    # Available Tools\n");
-        for (PromptModule module : ALL_RESOURCE_MODULES) {
-            sb.append(module.promptSection());
+        if (!activeModules.isEmpty()) {
+            sb.append("\n    # Available Tools\n");
+            for (PromptModule module : activeModules) {
+                sb.append(module.promptSection());
+            }
         }
 
-        // Return all tool names so agents still have access to every tool
-        Set<String> allToolNames = ALL_RESOURCE_MODULES.stream()
+        Set<String> toolNames = activeModules.stream()
             .flatMap(m -> m.toolNames().stream())
             .collect(Collectors.toCollection(LinkedHashSet::new));
 
-        return new ModularPromptResult(sb.toString(), allToolNames);
+        return new ModularPromptResult(sb.toString(), Collections.unmodifiableSet(toolNames));
     }
 
     /**
@@ -409,7 +443,7 @@ public final class DefaultSystemPrompts {
      * Always builds a fresh prompt so the date is accurate.
      */
     public static String getAgentDefault() {
-        return buildAgentDefault().systemPrompt();
+        return buildAgentDefault(null).systemPrompt();
     }
 
     public static String getByType(String type) {

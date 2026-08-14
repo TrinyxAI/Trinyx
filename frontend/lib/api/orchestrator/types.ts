@@ -865,6 +865,20 @@ export interface AcquirePublicationResponse {
   title: string;
 }
 
+/**
+ * Outcome of "reset the acquired application's data to the template".
+ *
+ * `tablesSkipped` carries the labels of snapshot tables with no counterpart in the
+ * caller's clone (or whose replace failed); a non-empty list means the reset was
+ * PARTIAL, so the UI must say so instead of reporting a clean success.
+ */
+export interface ResetApplicationDataResponse {
+  publicationId: string;
+  tablesReset: number;
+  rowsRestored: number;
+  tablesSkipped: string[];
+}
+
 // ============================================
 // Purchase (Receipt) Types
 // ============================================
@@ -1138,6 +1152,29 @@ export interface EndpointStatus {
   isEnabled: boolean;
 }
 
+/**
+ * One published price row: `base + rate x quantity`, clamped to [min, max].
+ *
+ * <p>Amounts are strings so a decimal rate survives the trip without being
+ * rounded through a double. A null `modelId` is the endpoint-wide price, which
+ * is what every row published before per-model pricing is.
+ */
+export interface PricingEntry {
+  apiToolId: string;
+  /** Generation model this price applies to, or null for the whole endpoint. */
+  modelId: string | null;
+  /** What `unitCredits` is charged per: call, second, minute, image, character. */
+  priceUnit: string;
+  /** Fixed component. For a flat `call` price this is the whole price. */
+  baseCredits: string;
+  /** Credits per unit. Zero for a flat price. */
+  unitCredits: string;
+  /** Floor applied after the formula, null for none. */
+  minCredits?: string | null;
+  /** Ceiling applied after the formula, null for none. */
+  maxCredits?: string | null;
+}
+
 /** Immutable pricing snapshot attached to a platform credential. */
 export interface PricingVersion {
   id: number;
@@ -1151,14 +1188,34 @@ export interface PricingVersion {
   defaultMarkupCredits: number | string | null;
   createdAt?: string;
   createdBy?: string | null;
-  /** apiToolId (UUID) -> markupCredits as a string (to preserve precision). */
+  /**
+   * apiToolId (UUID) -> markupCredits as a string, for the FLAT per-endpoint
+   * prices only. A per-model or unit-priced row has no honest one-number form,
+   * so it is absent here and present in `prices`.
+   */
   overrides: Record<string, string>;
+  /**
+   * Every published row of the version. Absent only when talking to a backend
+   * that predates per-model pricing, in which case `overrides` is the whole
+   * picture.
+   */
+  prices?: PricingEntry[];
 }
 
 export interface PublishPricingVersionRequest {
   /** Pass null to publish a version with no API-wide default. */
   defaultMarkupCredits: string | null;
-  overrides: Record<string, string>;
+  /** Legacy flat shape: one amount per endpoint. Still accepted verbatim. */
+  overrides?: Record<string, string>;
+  /** Full shape: per-endpoint and per-model prices with their unit and clamps. */
+  prices?: PricingEntry[];
+  /**
+   * True publishes `prices` as the COMPLETE row set of the new version, so a row
+   * the admin deleted stays deleted. Omitted or false carries forward the rows
+   * of the latest version that this request does not mention, which is what
+   * keeps a flat-only client from collapsing a per-second price into a flat one.
+   */
+  replace?: boolean;
 }
 
 /**
@@ -1188,10 +1245,44 @@ export interface PlatformCredentialPublicInfo {
   hasPricing: boolean;
   /** Per-tool resolved markup when apiToolId was supplied and hasPricing is true. */
   markupCredits?: string;
+  /**
+   * What the rate is charged per: `call`, `second`, `minute`, `image` or
+   * `character`. Present with the other components when the quote resolved a
+   * priced entry, so a surface can explain the number ("60 credits per second")
+   * instead of only stating it. A generation model is usually priced per unit;
+   * an ordinary endpoint is priced per call.
+   */
+  priceUnit?: string;
+  /** Fixed component of the price, added on top of unitCredits x quantity. */
+  baseCredits?: string;
+  /** Credits charged per `priceUnit`. Zero for a flat per-call rate. */
+  unitCredits?: string;
+  /** Floor applied to the computed price, when the entry declares one. */
+  minCredits?: string;
+  /** Ceiling applied to the computed price, when the entry declares one. */
+  maxCredits?: string;
+  /** The quantity the quote was computed for, echoed back when one was supplied. */
+  quantity?: string;
   /** Default markup of the latest version when it is set (may be absent / null). */
   defaultMarkupCredits?: string;
   /** Version number of the latest pricing snapshot when one exists. */
   pricingVersion?: number;
+  /**
+   * True when a GENERATION quote could only be reached through the
+   * credential-wide default rather than a price published for that generation.
+   * Such a call is REFUSED at execution (a generation is never sold on a
+   * catch-all), so the amount is not a price and must never be rendered as one.
+   * Always arrives with {@link hasPricing} false; the surface says the endpoint
+   * is not sold on the platform key instead of quoting a number.
+   *
+   * <p>"Is this a generation" is answered exactly as the billing path answers
+   * it: the call named a generation model, OR the caller stated that the
+   * endpoint carries a generation descriptor (the `generation` request
+   * parameter). A quote that only asked the first half agreed with execution on
+   * `core:generate` steps and disagreed on `mcp:` steps bound straight to a
+   * generation endpoint, which name no model.
+   */
+  versionDefaultOnly?: boolean;
   /**
    * CE only: true when the credential is offered by the linked cloud account
    * (executions relay to the cloud, which uses ITS platform credentials).
@@ -1470,6 +1561,8 @@ export interface WorkflowRunState {
     endedAt: string | null;
     /** Executed window (first node start -> last node end). See `EpochTimestamp`. */
     workDurationMs?: number | null;
+    /** Epoch outcome: COMPLETED | FAILED (null = the epoch executed nothing but its trigger). */
+    status?: string | null;
   }>;
   /** Total accumulated run cost across all epochs, in credits (1 credit = $0.001). */
   costCredits?: number | null;

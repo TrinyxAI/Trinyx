@@ -75,6 +75,26 @@ public class WorkflowEpochRepository {
             DO UPDATE SET epoch_state = CAST(EXCLUDED.epoch_state AS JSONB), updated_at = NOW()
             """;
 
+    /**
+     * Reopen a CLOSED header so a rerun re-executes inside the epoch that holds its outputs.
+     *
+     * <p>{@link #UPSERT_HEADER_SQL} cannot serve this: its ON CONFLICT clause touches only
+     * {@code epoch_state} and {@code updated_at}, leaving {@code is_active=false} and the old
+     * {@code closed_at} behind.
+     *
+     * <p>{@code started_at} is deliberately NOT touched, exactly as on the upsert path: it
+     * answers "when did this epoch first fire" and {@link #getLatestEpochStartedAtByRunIds}
+     * derives the run history's last-fire time from {@code MAX(started_at)}. A rerun is not a
+     * fire. The epoch's execution clock lives in {@code epoch_state.startedAt}, which the
+     * reopening caller re-stamps.
+     */
+    private static final String REOPEN_HEADER_SQL = """
+            UPDATE workflow_epochs
+            SET is_active = TRUE, closed_at = NULL,
+                epoch_state = CAST(? AS JSONB), updated_at = NOW()
+            WHERE run_id = ? AND trigger_id = ? AND epoch = ? AND entry_type = 'EPOCH_HEADER'
+            """;
+
     private static final String CLOSE_HEADER_SQL = """
             UPDATE workflow_epochs
             SET is_active = FALSE, closed_at = NOW(), epoch_state = CAST(? AS JSONB),
@@ -96,8 +116,28 @@ public class WorkflowEpochRepository {
             LIMIT 1
             """;
 
+    /**
+     * The timeline of a run's epochs, with the raw material of each epoch's OUTCOME:
+     * {@code epoch_state} + {@code is_active} come from the same header rows, so the
+     * verdict is read from the stored {@link
+     * com.apimarketplace.orchestrator.domain.execution.EpochState} - the very set the
+     * run's own cycle verdict is computed from - without a second round trip.
+     *
+     * <p><b>Known cost, deliberate.</b> This ships one JSONB document per epoch instead
+     * of three scalars, and the caller deserializes each one. It is bounded by the run's
+     * epoch count, which is unbounded for a long-lived reusable-trigger run (a
+     * once-a-minute schedule accumulates ~10k epochs a week), and every caller of
+     * {@code WorkflowEpochService#listEpochTimestamps} pays it - the polled {@code /state},
+     * the SSE snapshot, the showcase capture. Accepted because correctness had no cheaper
+     * source: the epoch COUNTER rows are additive and count a continue-anyway split
+     * failure the cycle verdict excludes, so they answer a different question. If this
+     * becomes hot, the fix is to stop recomputing on every read - stamp the outcome into
+     * a column when the epoch closes (write-once, and the timeline goes back to scalars).
+     * Computing it in SQL is NOT the way out: the "did anything but the trigger run" test
+     * needs array-element inspection, which the H2 test repository cannot express.
+     */
     private static final String LIST_EPOCH_TIMESTAMPS_SQL = """
-            SELECT epoch, started_at, closed_at
+            SELECT epoch, started_at, closed_at, is_active, epoch_state
             FROM workflow_epochs
             WHERE run_id = ? AND entry_type = 'EPOCH_HEADER'
             ORDER BY epoch ASC
@@ -246,6 +286,14 @@ public class WorkflowEpochRepository {
     }
 
     /**
+     * Reopen a closed epoch header (see {@link #REOPEN_HEADER_SQL}). No-op when the row is absent.
+     */
+    public void reopenHeader(String runId, String triggerId, int epoch, String epochStateJson) {
+        String tid = triggerId != null ? triggerId : DEFAULT_TRIGGER_ID;
+        jdbcTemplate.update(REOPEN_HEADER_SQL, epochStateJson, runId, tid, epoch);
+    }
+
+    /**
      * Close an epoch header: set is_active=false, closed_at=NOW(), update epoch_state and duration_ms.
      */
     public void closeEpochHeader(String runId, String triggerId, int epoch, String epochStateJson, long durationMs) {
@@ -258,12 +306,14 @@ public class WorkflowEpochRepository {
      * Replaces the growing metadata.epochTimestamps array - this is O(1) per epoch in DB
      * and the source of truth lives in workflow_epochs, not in workflow_runs.metadata.
      */
-    public List<EpochTimestampRow> listEpochTimestamps(String runId) {
+    public List<EpochTimelineRow> listEpochTimestamps(String runId) {
         return jdbcTemplate.query(LIST_EPOCH_TIMESTAMPS_SQL,
-                (rs, rowNum) -> new EpochTimestampRow(
+                (rs, rowNum) -> new EpochTimelineRow(
                         rs.getInt("epoch"),
                         rs.getTimestamp("started_at") != null ? rs.getTimestamp("started_at").toInstant().toString() : null,
-                        rs.getTimestamp("closed_at") != null ? rs.getTimestamp("closed_at").toInstant().toString() : null
+                        rs.getTimestamp("closed_at") != null ? rs.getTimestamp("closed_at").toInstant().toString() : null,
+                        rs.getBoolean("is_active"),
+                        rs.getString("epoch_state")
                 ),
                 runId);
     }
@@ -416,20 +466,43 @@ public class WorkflowEpochRepository {
      * {@code workDurationMs} is the executed window, filled in from the step rows by
      * {@code WorkflowEpochService}; it is null for an epoch that has produced no step
      * row yet.
+     *
+     * <p>{@code status} is the epoch's OUTCOME (COMPLETED or FAILED, the same binary
+     * verdict the run badge uses for a cycle). {@code WorkflowEpochService} derives it
+     * from the epoch's stored {@link
+     * com.apimarketplace.orchestrator.domain.execution.EpochState} - NOT from the epoch's
+     * node tallies, which are additive and count a continue-anyway split failure the cycle
+     * verdict excludes (see {@code deriveEpochOutcome}). It is null in the two cases the
+     * epoch cannot be spoken for: it executed nothing but its trigger, or it is still
+     * ACTIVE, whose stored state is the one written when it opened.
+     *
+     * <p>It never says RUNNING either: an epoch stays open long after its last node
+     * finished (the close is deferred, see the note on
+     * {@code getLatestEpochStartedAtByRunIds}), so "is it still executing" is the caller's
+     * call from the RUN status, not this field's.
      */
-    public record EpochTimestampRow(int epoch, String startedAt, String endedAt, Long workDurationMs) {
+    public record EpochTimestampRow(int epoch, String startedAt, String endedAt, Long workDurationMs, String status) {
 
-        /** Header-only row, before the step-derived work window is attached. */
+        /** Header-only row, before the step-derived work window and outcome are attached. */
         public EpochTimestampRow(int epoch, String startedAt, String endedAt) {
-            this(epoch, startedAt, endedAt, null);
+            this(epoch, startedAt, endedAt, null, null);
+        }
+
+        /** Header row + work window, before the outcome is attached (test/back-compat shape). */
+        public EpochTimestampRow(int epoch, String startedAt, String endedAt, Long workDurationMs) {
+            this(epoch, startedAt, endedAt, workDurationMs, null);
         }
 
         public EpochTimestampRow withWorkDurationMs(Long millis) {
-            return new EpochTimestampRow(epoch, startedAt, endedAt, millis);
+            return new EpochTimestampRow(epoch, startedAt, endedAt, millis, status);
+        }
+
+        public EpochTimestampRow withStatus(String epochStatus) {
+            return new EpochTimestampRow(epoch, startedAt, endedAt, workDurationMs, epochStatus);
         }
 
         public EpochTimestampRow withEpoch(int renumbered) {
-            return new EpochTimestampRow(renumbered, startedAt, endedAt, workDurationMs);
+            return new EpochTimestampRow(renumbered, startedAt, endedAt, workDurationMs, status);
         }
 
         /**
@@ -444,8 +517,25 @@ public class WorkflowEpochRepository {
             wire.put("startedAt", startedAt);
             wire.put("endedAt", endedAt);
             wire.put("workDurationMs", workDurationMs);
+            wire.put("status", status);
             return wire;
         }
+    }
+
+    /**
+     * One epoch of the timeline, as stored: its timestamps plus the raw material of its
+     * status badge ({@code isActive} + the persisted {@code EpochState} JSON).
+     *
+     * <p>Kept separate from {@link EpochTimestampRow}, which is the WIRE shape: the epoch
+     * state JSON is an internal payload and must not reach a client.
+     */
+    public record EpochTimelineRow(
+            int epoch,
+            String startedAt,
+            String endedAt,
+            boolean isActive,
+            String epochStateJson
+    ) {
     }
 
     /**

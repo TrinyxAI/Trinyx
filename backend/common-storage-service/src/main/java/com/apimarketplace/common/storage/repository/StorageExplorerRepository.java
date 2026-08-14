@@ -1,5 +1,6 @@
 package com.apimarketplace.common.storage.repository;
 
+import com.apimarketplace.common.storage.dto.ExplorerSort;
 import com.apimarketplace.common.storage.dto.StorageExplorerProjection;
 import com.apimarketplace.common.storage.dto.StoragePreviewFile;
 import com.apimarketplace.common.storage.dto.VirtualFolderAddress;
@@ -50,6 +51,35 @@ public class StorageExplorerRepository {
     static final int PREVIEW_FILES_PER_FOLDER = 9;
 
     /**
+     * ORDER BY fragment for a user-chosen {@link ExplorerSort}.
+     *
+     * <p>Every branch is a CONSTANT string picked by a switch over a closed enum, so no request
+     * text ever reaches SQL. {@code dateExpr} is the expression that means "this row's date" in
+     * the calling query - plain {@code s.created_at} for a flat/leaf listing, or the
+     * folder-activity CASE for a mixed folder+file listing - so a DATE sort keeps ordering
+     * folders by their last activity exactly as before.</p>
+     *
+     * <p>NULLs always sort LAST, in both directions (Postgres would otherwise put them first on
+     * DESC): a nameless / sizeless / typeless row is noise, never the first thing a user sees -
+     * and folder rows have no size or mime type at all. Ties break on {@code created_at DESC}
+     * then {@code s.id}, which makes offset pagination deterministic (without a unique tiebreaker
+     * the same row can appear on two pages).</p>
+     */
+    private static String orderByExpr(ExplorerSort sort, String dateExpr) {
+        ExplorerSort effective = sort == null ? ExplorerSort.DEFAULT : sort;
+        String dir = effective.ascending() ? "ASC" : "DESC";
+        String primary = switch (effective.key()) {
+            case DATE -> dateExpr + " " + dir + " NULLS LAST";
+            case NAME -> "LOWER(s.file_name) " + dir + " NULLS LAST";
+            case SIZE -> "s.size_bytes " + dir + " NULLS LAST";
+            case TYPE -> "LOWER(COALESCE(s.mime_type, s.content_type)) " + dir + " NULLS LAST";
+        };
+        // created_at is already the primary key of a DATE sort - don't repeat it there.
+        String tieBreak = effective.key() == ExplorerSort.Key.DATE ? "" : ", " + dateExpr + " DESC NULLS LAST";
+        return primary + tieBreak + ", s.id";
+    }
+
+    /**
      * Org-scoped search. Returns only rows tagged with {@code organizationId};
      * tenant is ignored (org membership is asserted upstream by the controller
      * via the gateway's {@code X-Organization-Role} claim).
@@ -92,6 +122,26 @@ public class StorageExplorerRepository {
             String fileCategory,
             Collection<UUID> excludedIds,
             Pageable pageable) {
+        return search(organizationId, search, sourceType, storageType, workflowId, runId, dateFrom, dateTo,
+                filesOnly, s3Only, fileCategory, excludedIds, ExplorerSort.DEFAULT, pageable);
+    }
+
+    /** {@link #search} with an explicit user-chosen ordering (see {@link ExplorerSort}). */
+    public Page<StorageExplorerProjection> search(
+            String organizationId,
+            String search,
+            String sourceType,
+            String storageType,
+            String workflowId,
+            String runId,
+            Instant dateFrom,
+            Instant dateTo,
+            boolean filesOnly,
+            boolean s3Only,
+            String fileCategory,
+            Collection<UUID> excludedIds,
+            ExplorerSort sort,
+            Pageable pageable) {
 
         if (organizationId == null || organizationId.isBlank()) {
             throw new IllegalArgumentException("organizationId is required (post-V261 sweep)");
@@ -118,7 +168,7 @@ public class StorageExplorerRepository {
         // Data query
         String dataSql = "SELECT " + PROJECTION_COLUMNS +
                 " FROM storage.storage s " + where +
-                " ORDER BY s.created_at DESC" +
+                " ORDER BY " + orderByExpr(sort, "s.created_at") +
                 " LIMIT :limit OFFSET :offset";
 
         Query dataQuery = em.createNativeQuery(dataSql);
@@ -225,6 +275,28 @@ public class StorageExplorerRepository {
             Collection<UUID> excludedIds,
             int limit,
             int offset) {
+        return listFolderScope(organizationId, parentFolderId, search, sourceType, storageType, workflowId, runId,
+                dateFrom, dateTo, filesOnly, s3Only, fileCategory, excludedIds, ExplorerSort.DEFAULT, limit, offset);
+    }
+
+    /** {@link #listFolderScope} with an explicit user-chosen ordering (see {@link ExplorerSort}). */
+    public SliceResult listFolderScope(
+            String organizationId,
+            UUID parentFolderId,
+            String search,
+            String sourceType,
+            String storageType,
+            String workflowId,
+            String runId,
+            Instant dateFrom,
+            Instant dateTo,
+            boolean filesOnly,
+            boolean s3Only,
+            String fileCategory,
+            Collection<UUID> excludedIds,
+            ExplorerSort sort,
+            int limit,
+            int offset) {
 
         if (organizationId == null || organizationId.isBlank()) {
             throw new IllegalArgumentException("organizationId is required (post-V261 sweep)");
@@ -295,9 +367,12 @@ public class StorageExplorerRepository {
         // workflow folder already uses, so manual and virtual folders order consistently. The member
         // restricted-id deny-list is honoured in the child-date subquery so a restricted child neither
         // advances a folder's position nor leaks its recency (mirrors the childCount/preview exclusion).
+        // Folders stay ahead of files whatever the sort key (is_folder DESC first); the chosen key
+        // then orders within each group. A folder has no size and no mime type, so a SIZE/TYPE sort
+        // leaves the folder block in its NULLS-LAST tie-break order (last activity, newest first).
         String dataSql = "SELECT " + PROJECTION_COLUMNS +
                 " FROM storage.storage s " + where +
-                " ORDER BY s.is_folder DESC, " + folderActivityOrderExpr(excludedIds) + " DESC" +
+                " ORDER BY s.is_folder DESC, " + orderByExpr(sort, folderActivityOrderExpr(excludedIds)) +
                 " LIMIT :limit OFFSET :offset";
         Query dataQuery = em.createNativeQuery(dataSql);
         setFolderScopeParams(dataQuery, organizationId, parentFolderId, search, sourceType,
@@ -754,6 +829,17 @@ public class StorageExplorerRepository {
             String search, String sourceType, String storageType, boolean filesOnly, boolean s3Only,
             String fileCategory, Instant dateFrom, Instant dateTo, Collection<UUID> excludedIds,
             boolean nullItemOnly, int limit, int offset) {
+        return listVirtualLeafFiles(organizationId, workflowId, runId, epoch, spawn, itemIndex, search, sourceType,
+                storageType, filesOnly, s3Only, fileCategory, dateFrom, dateTo, excludedIds, nullItemOnly,
+                ExplorerSort.DEFAULT, limit, offset);
+    }
+
+    /** {@link #listVirtualLeafFiles} with an explicit user-chosen ordering (see {@link ExplorerSort}). */
+    public SliceResult listVirtualLeafFiles(
+            String organizationId, String workflowId, String runId, Integer epoch, Integer spawn, Integer itemIndex,
+            String search, String sourceType, String storageType, boolean filesOnly, boolean s3Only,
+            String fileCategory, Instant dateFrom, Instant dateTo, Collection<UUID> excludedIds,
+            boolean nullItemOnly, ExplorerSort sort, int limit, int offset) {
 
         if (organizationId == null || organizationId.isBlank()) {
             throw new IllegalArgumentException("organizationId is required (post-V261 sweep)");
@@ -805,7 +891,7 @@ public class StorageExplorerRepository {
 
         String dataSql = "SELECT " + PROJECTION_COLUMNS +
                 " FROM storage.storage s " + where +
-                " ORDER BY s.created_at DESC" +
+                " ORDER BY " + orderByExpr(sort, "s.created_at") +
                 " LIMIT :limit OFFSET :offset";
         Query dataQuery = em.createNativeQuery(dataSql);
         setVirtualLeafParams(dataQuery, organizationId, workflowId, runId, epoch, spawn, itemIndex, nullItemOnly,
@@ -858,6 +944,69 @@ public class StorageExplorerRepository {
             query.setParameter("dateTo", Timestamp.from(dateTo));
         }
     }
+
+    /**
+     * The manual-folder ancestry of {@code folderId}, ROOT FIRST and ending with the folder itself -
+     * the breadcrumb trail the Files page rebuilds after a refresh or a deep link (where the URL
+     * carries only the current folder id).
+     *
+     * <p>One recursive CTE, so a 5-deep trail is a single round-trip, not 5. Org-scoped and
+     * {@code is_folder}-restricted at every hop: a chain that leaves the org (or hits a deleted
+     * folder) simply stops, and an unknown id yields an empty list rather than an error. The depth
+     * guard is a cycle backstop - moves are cycle-checked on write, so it should never fire.</p>
+     *
+     * <p>{@code excludedIds} (the member restricted-id deny-list) is applied at BOTH hops, so a
+     * denied folder ends the recursion and the caller gets the visible tail of the path - never a
+     * name the listing would have hidden. It is a required argument on purpose: there is no
+     * overload that lets a caller drop it.</p>
+     *
+     * @return {@code (id, name)} pairs from the top-level folder down to {@code folderId}; empty when
+     *         the id is unknown, not a folder, or not in this org.
+     */
+    public List<ManualCrumb> manualFolderAncestry(String organizationId, UUID folderId,
+                                                  Collection<UUID> excludedIds) {
+        if (organizationId == null || organizationId.isBlank()) {
+            throw new IllegalArgumentException("organizationId is required (post-V261 sweep)");
+        }
+        if (folderId == null) {
+            return List.of();
+        }
+        boolean hasExclusions = excludedIds != null && !excludedIds.isEmpty();
+        String seedExclusion = hasExclusions ? " AND s.id NOT IN (:excludedIds)" : "";
+        String hopExclusion = hasExclusions ? " AND p.id NOT IN (:excludedIds)" : "";
+        String sql = "WITH RECURSIVE ancestry AS ("
+                + "  SELECT s.id, s.file_name, s.parent_folder_id, 0 AS depth"
+                + "  FROM storage.storage s"
+                + "  WHERE s.id = :folderId AND s.organization_id = :orgId"
+                + "    AND s.status = 'ACTIVE' AND s.is_folder = true" + seedExclusion
+                + "  UNION ALL"
+                + "  SELECT p.id, p.file_name, p.parent_folder_id, a.depth + 1"
+                + "  FROM storage.storage p JOIN ancestry a ON p.id = a.parent_folder_id"
+                + "  WHERE p.organization_id = :orgId AND p.status = 'ACTIVE'"
+                + "    AND p.is_folder = true AND a.depth < " + MAX_FOLDER_DEPTH + hopExclusion
+                + ") SELECT id, file_name FROM ancestry ORDER BY depth DESC";
+
+        Query query = em.createNativeQuery(sql);
+        query.setParameter("folderId", folderId);
+        query.setParameter("orgId", organizationId);
+        if (hasExclusions) {
+            query.setParameter("excludedIds", excludedIds);
+        }
+
+        @SuppressWarnings("unchecked")
+        List<Object[]> rows = query.getResultList();
+        List<ManualCrumb> crumbs = new ArrayList<>(rows.size());
+        for (Object[] row : rows) {
+            crumbs.add(new ManualCrumb((UUID) row[0], (String) row[1]));
+        }
+        return crumbs;
+    }
+
+    /** One manual folder on an ancestry path: its id and its stored name. */
+    public record ManualCrumb(UUID id, String name) {}
+
+    /** Cycle backstop for {@link #manualFolderAncestry} - far deeper than any real folder tree. */
+    private static final int MAX_FOLDER_DEPTH = 64;
 
     /**
      * The manual folders at the Files root ({@code is_folder = true AND parent_folder_id IS NULL}),

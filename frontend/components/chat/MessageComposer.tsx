@@ -13,6 +13,8 @@ import { useDefaultSkills } from '@/hooks/useDefaultSkills';
 import { useMobileDetection } from '@/hooks/useMobileDetection';
 import { orchestratorApi } from '@/lib/api/orchestrator';
 import { QueuedMessageBar } from './QueuedMessageBar';
+import { CreateGenerationModal } from '@/components/chat/generationModalEntry';
+import { GenerateEntryButton } from '@/components/chat/GenerateEntryButton';
 import { MAX_QUEUE_SIZE, type QueuedMessage } from '@/lib/stores/message-queue-store';
 import { readDraft, writeDraft, clearDraft } from '@/lib/chat/draftStorage';
 import { fetchLinkedAgent, canFetchLinkedAgent } from '@/lib/chat/linkedAgent';
@@ -50,8 +52,10 @@ export interface MessageComposerProps {
   /** When true, disables the textarea and send button */
   disabled?: boolean;
   /** Minimal/DM mode: render the same composer as a plain text+send box, hiding the
-   *  AI-only controls (attachments, tools & skills, voice dictation) and skipping the
-   *  per-conversation agent lookup. Defaults to false - chat behaviour is unchanged. */
+   *  AI-only controls (tools & skills) and skipping the per-conversation agent lookup.
+   *  Attachments, voice dictation and the generate action stay: a DM carries real files,
+   *  and making an asset is about the account rather than about who reads the thread.
+   *  Defaults to false - chat behaviour is unchanged. */
   minimal?: boolean;
   conversationId?: string;
   queuedMessages?: QueuedMessage[];
@@ -185,6 +189,7 @@ export function MessageComposer({
 
   const [localValue, setLocalValue] = useState(inputValue);
   const [openPanel, setOpenPanel] = useState<AttachmentView | null>(null);
+  const [generationOpen, setGenerationOpen] = useState(false);
   const [pendingAttachments, setPendingAttachments] = useState<PendingAttachment[]>([]);
   const [isListening, setIsListening] = useState(false);
   // Pre-send image preview shown enlarged in the lightbox (null = closed). Uses the local
@@ -671,6 +676,25 @@ export function MessageComposer({
                   </>
                 )}
 
+                {/* Make an asset, beside the tools that use one. Outside the
+                    `minimal` block on purpose: making one is about the account,
+                    not about who reads the thread, so a DM offers it too, and
+                    so do the builder's chat-trigger panels, which render this
+                    composer whole. Every composer, deliberately: an asset is
+                    worth making wherever a message is written.
+
+                    The asset lands in the workspace files and is NOT attached
+                    to the draft: an attachment needs the bytes in hand, so that
+                    would download a stored asset only to upload a second copy
+                    of it, and the composer accepts neither video nor audio
+                    anyway. Independent of `disabled` too, which says this
+                    message cannot be sent yet, not that nothing may be made. */}
+                <GenerateEntryButton
+                  variant="icon"
+                  label={t('chat.generateAsset')}
+                  onOpen={() => setGenerationOpen(true)}
+                />
+
                 {/* Notification bell relocated to AppHeader (next to the
                     right-side-panel toggle) so the chat-home page surfaces
                     notifications without the composer needing to render. */}
@@ -690,7 +714,7 @@ export function MessageComposer({
                   isListening ? (
                     <button
                       onClick={toggleDictation}
-                      className="flex items-center gap-2 h-9 px-3 rounded-full bg-red-500/10 hover:bg-red-500/20 transition-colors"
+                      className="flex items-center gap-2 h-9 px-3 rounded-xl bg-red-500/10 hover:bg-red-500/20 transition-colors"
                       title={t('chat.stopDictation')}
                     >
                       {/* Animated sound bars */}
@@ -727,6 +751,7 @@ export function MessageComposer({
                         size="icon"
                         onClick={handleSend}
                         disabled={disabled || isUploading || queueIsFull}
+                        // Same slot, same control: the queue variant is round too.
                         className="h-9 w-9 rounded-full shadow-none hover:shadow-none"
                         title={queueIsFull ? t('chat.queue.full') : t('chat.queue.queued')}
                       >
@@ -741,6 +766,13 @@ export function MessageComposer({
                       size="icon"
                       onClick={showStopButton ? onStopStream : handleSend}
                       disabled={disabled || isUploading || (!showStopButton && !hasInput)}
+                      // THE one deliberate exception to the square-rounded radius ladder
+                      // (components/ui/README.md): this button is ROUND in every state -
+                      // Send, Stop, and greyed out. It is the anchor of the composer and
+                      // the only control that changes what it does under the cursor without
+                      // moving; a shape that flips with the state (or with disabled) made it
+                      // read as two different buttons. Everything else in the app stays on
+                      // the square ladder.
                       className="h-9 w-9 rounded-full shadow-none hover:shadow-none"
                       title={showStopButton ? t('chat.stop') : t('chat.send')}
                     >
@@ -774,6 +806,15 @@ export function MessageComposer({
           )}
         </div>
       </div>
+
+      {generationOpen && (
+        <React.Suspense fallback={null}>
+          <CreateGenerationModal
+            isOpen
+            onClose={() => setGenerationOpen(false)}
+          />
+        </React.Suspense>
+      )}
 
       {/* Enlarge a pre-send image preview. Local object URL → no auth, not downloadable. */}
       <ImageLightbox

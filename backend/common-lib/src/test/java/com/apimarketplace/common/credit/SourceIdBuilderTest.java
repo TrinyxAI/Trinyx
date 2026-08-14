@@ -100,73 +100,99 @@ class SourceIdBuilderTest {
                 .isInstanceOf(NullPointerException.class);
     }
 
-    // ── Image generation ────────────────────────────────────────────────────
-
-    @Test
-    @DisplayName("imageGenerationDebitChat: shape uses :CHAT: scope discriminator")
-    void imageGenChatShape() {
-        String id = SourceIdBuilder.imageGenerationDebitChat("stream-7", "tool-call-9", 0);
-        assertThat(id).isEqualTo("image-generation:CHAT:stream-7:tool-call-9:0");
-    }
-
-    @Test
-    @DisplayName("imageGenerationDebitWorkflow: shape uses :RUN: scope discriminator")
-    void imageGenWorkflowShape() {
-        String id = SourceIdBuilder.imageGenerationDebitWorkflow("run-abc", "mcp:image", 5);
-        assertThat(id).isEqualTo("image-generation:RUN:run-abc:step:mcp:image:5");
-    }
-
-    @Test
-    @DisplayName("imageGeneration: chat and workflow keys never collide")
-    void imageGenScopesDoNotCollide() {
-        String chat = SourceIdBuilder.imageGenerationDebitChat("x", "y", 0);
-        String wf = SourceIdBuilder.imageGenerationDebitWorkflow("x", "y", 0);
-        assertThat(chat).isNotEqualTo(wf);
-    }
-
     // ── Cross-tool isolation ────────────────────────────────────────────────
 
     @Test
-    @DisplayName("web-search and image-generation keys never collide (distinct prefixes)")
+    @DisplayName("web-fetch and web-search keys never collide (distinct prefixes)")
     void crossToolNoCollision() {
         String ws = SourceIdBuilder.webSearchDebitChat("s", "t", 0);
-        String ig = SourceIdBuilder.imageGenerationDebitChat("s", "t", 0);
-        assertThat(ws).isNotEqualTo(ig);
+        String wf = SourceIdBuilder.webFetchDebitChat("s", "t", 0);
+        assertThat(ws).isNotEqualTo(wf);
     }
 
     @Test
-    @DisplayName("classifiers correctly identify web-search and image-generation debits")
+    @DisplayName("classifiers correctly identify web-search and web-fetch debits")
     void toolClassifiers() {
         String ws = SourceIdBuilder.webSearchDebitChat("s", "t", 0);
-        String ig = SourceIdBuilder.imageGenerationDebitWorkflow("r", "s", 0);
+        String wf = SourceIdBuilder.webFetchDebitWorkflow("r", "s", 0);
         String markup = SourceIdBuilder.markupDebit("r", "s", 0, 0, 0, 0);
 
         assertThat(SourceIdBuilder.isWebSearchDebit(ws)).isTrue();
-        assertThat(SourceIdBuilder.isWebSearchDebit(ig)).isFalse();
+        assertThat(SourceIdBuilder.isWebSearchDebit(wf)).isFalse();
         assertThat(SourceIdBuilder.isWebSearchDebit(markup)).isFalse();
 
-        assertThat(SourceIdBuilder.isImageGenerationDebit(ig)).isTrue();
-        assertThat(SourceIdBuilder.isImageGenerationDebit(ws)).isFalse();
-        assertThat(SourceIdBuilder.isImageGenerationDebit(markup)).isFalse();
+        assertThat(SourceIdBuilder.isWebFetchDebit(wf)).isTrue();
+        assertThat(SourceIdBuilder.isWebFetchDebit(ws)).isFalse();
+        assertThat(SourceIdBuilder.isWebFetchDebit(markup)).isFalse();
 
         assertThat(SourceIdBuilder.isWebSearchDebit(null)).isFalse();
-        assertThat(SourceIdBuilder.isImageGenerationDebit(null)).isFalse();
+        assertThat(SourceIdBuilder.isWebFetchDebit(null)).isFalse();
     }
 
     // ── V148+ scope-aware keys ──────────────────────────────────────────────
 
     @Test
-    @DisplayName("markupDebitWithCall: 7-segment workflow per-call shape preserves runId+stepId+coords")
+    @DisplayName("markupDebitWithCall: workflow per-call shape preserves runId+stepId and ends in the callRef")
     void markupDebitWithCallShape() {
-        String id = SourceIdBuilder.markupDebitWithCall("run-1", "mcp:image", 2, 1, 0, 3, 7);
-        assertThat(id).isEqualTo("platform-markup:RUN:run-1:step:mcp:image:2:1:0:3:7");
+        String id = SourceIdBuilder.markupDebitWithCall("run-1", "mcp:image", "call-7");
+        assertThat(id).isEqualTo("platform-markup:RUN:run-1:step:mcp:image:call-7");
     }
 
     @Test
-    @DisplayName("markupDebitChat: 5-segment chat shape - distinct from workflow")
+    @DisplayName("markupDebitChat: chat shape - distinct from workflow")
     void markupDebitChatShape() {
-        String id = SourceIdBuilder.markupDebitChat("stream-abc", "openai/openai-create-image", 2);
-        assertThat(id).isEqualTo("platform-markup:STREAM:stream-abc:openai/openai-create-image:2");
+        String id = SourceIdBuilder.markupDebitChat("stream-abc", "openai/openai-create-image", "call-2");
+        assertThat(id).isEqualTo("platform-markup:STREAM:stream-abc:openai/openai-create-image:call-2");
+    }
+
+    /**
+     * The tail is not decoration: the ledger is keyed on the whole sourceId and
+     * a repeat is answered as "already reserved, zero debit". Two calls that
+     * differ only in their callRef must therefore produce two different keys, or
+     * the second one is a free generation.
+     */
+    @Test
+    @DisplayName("two calls in the SAME run and step differ only by callRef, and that is what makes them two charges")
+    void differentCallRefsInOneStepProduceDifferentKeys() {
+        String first = SourceIdBuilder.markupDebitWithCall("run-1", "core:generate", "call-a");
+        String second = SourceIdBuilder.markupDebitWithCall("run-1", "core:generate", "call-b");
+        assertThat(first).isNotEqualTo(second);
+
+        String firstChat = SourceIdBuilder.markupDebitChat("stream-1", "seedance/create", "call-a");
+        String secondChat = SourceIdBuilder.markupDebitChat("stream-1", "seedance/create", "call-b");
+        assertThat(firstChat).isNotEqualTo(secondChat);
+    }
+
+    /**
+     * A defaulted callRef is exactly the defect: every call in the scope keys
+     * the same row and only the first is charged. Loud failure beats a silent
+     * giveaway.
+     */
+    @Test
+    @DisplayName("a missing callRef is rejected rather than defaulted, on both scope shapes")
+    void blankCallRefIsRejected() {
+        assertThatThrownBy(() -> SourceIdBuilder.markupDebitWithCall("r", "s", null))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("callRef");
+        assertThatThrownBy(() -> SourceIdBuilder.markupDebitWithCall("r", "s", "  "))
+                .isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> SourceIdBuilder.markupDebitChat("s", "t", null))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("callRef");
+        assertThatThrownBy(() -> SourceIdBuilder.markupDebitChat("s", "t", ""))
+                .isInstanceOf(IllegalArgumentException.class);
+    }
+
+    /**
+     * The legacy 6-segment rows are still in the prod ledger. A new per-call key
+     * must not be able to land on one of them.
+     */
+    @Test
+    @DisplayName("a per-call key never collides with a legacy 6-segment markupDebit row")
+    void doesNotCollideWithLegacyShape() {
+        String legacy = SourceIdBuilder.markupDebit("run-1", "core:generate", 0, 0, 0, 0);
+        String perCall = SourceIdBuilder.markupDebitWithCall("run-1", "core:generate", "0");
+        assertThat(perCall).isNotEqualTo(legacy);
     }
 
     @Test
@@ -182,16 +208,14 @@ class SourceIdBuilderTest {
         assertThat(SourceIdBuilder.isMarkupDebit(
                 SourceIdBuilder.markupDebit("r", "s", 0, 0, 0, 0))).isTrue();
         assertThat(SourceIdBuilder.isMarkupDebit(
-                SourceIdBuilder.markupDebitWithCall("r", "s", 0, 0, 0, 0, 0))).isTrue();
+                SourceIdBuilder.markupDebitWithCall("r", "s", "call-0"))).isTrue();
         assertThat(SourceIdBuilder.isMarkupDebit(
-                SourceIdBuilder.markupDebitChat("s", "t", 0))).isTrue();
+                SourceIdBuilder.markupDebitChat("s", "t", "call-0"))).isTrue();
         assertThat(SourceIdBuilder.isMarkupDebit(
                 SourceIdBuilder.markupReserveInit("RUN", "r", 7L))).isTrue();
         // Non-markup keys still reject
         assertThat(SourceIdBuilder.isMarkupDebit(
                 SourceIdBuilder.webSearchDebitChat("s", "t", 0))).isFalse();
-        assertThat(SourceIdBuilder.isMarkupDebit(
-                SourceIdBuilder.imageGenerationDebitChat("s", "t", 0))).isFalse();
         assertThat(SourceIdBuilder.isMarkupDebit("random:string")).isFalse();
         assertThat(SourceIdBuilder.isMarkupDebit(null)).isFalse();
     }
@@ -199,8 +223,8 @@ class SourceIdBuilderTest {
     @Test
     @DisplayName("STREAM and RUN scope keys never collide on same id (different discriminators)")
     void scopeIsolation() {
-        String run = SourceIdBuilder.markupDebitWithCall("abc", "step", 0, 0, 0, 0, 0);
-        String stream = SourceIdBuilder.markupDebitChat("abc", "step", 0);
+        String run = SourceIdBuilder.markupDebitWithCall("abc", "step", "call-0");
+        String stream = SourceIdBuilder.markupDebitChat("abc", "step", "call-0");
         assertThat(run).isNotEqualTo(stream);
         assertThat(run).contains(":RUN:");
         assertThat(stream).contains(":STREAM:");

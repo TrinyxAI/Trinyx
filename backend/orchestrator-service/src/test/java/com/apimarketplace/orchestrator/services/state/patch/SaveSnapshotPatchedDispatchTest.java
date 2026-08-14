@@ -90,7 +90,8 @@ class SaveSnapshotPatchedDispatchTest {
         mapper = new ObjectMapper().registerModule(new JavaTimeModule());
 
         service = new StateSnapshotService(runRepository, mapper, workflowEpochService,
-                eventPublisher, breakdownService, txCache, workflowMetrics);
+                eventPublisher, breakdownService, txCache, workflowMetrics,
+            org.mockito.Mockito.mock(com.apimarketplace.orchestrator.services.state.ClaimRefusalRegistry.class));
 
         // Plan v4 E2E5 - saveSnapshotFullRewrite now uses the native UPDATE
         // updateSnapshotAndSeq (was: runRepository.save(run)). Stub it lenient(ly)

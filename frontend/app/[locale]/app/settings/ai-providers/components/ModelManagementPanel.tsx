@@ -166,10 +166,10 @@ function PricingCell({
   const [inputVal, setInputVal] = useState(String(model.pricing?.input ?? 0));
   const [outputVal, setOutputVal] = useState(String(model.pricing?.output ?? 0));
 
-  // Image-gen rows overload `priceInput` as USD per image; `priceOutput` is
-  // unused (V158 seeds it to 0). The token-style "$in / $out per 1M" rendering
-  // is misleading there - render a single `$X / image` cell instead.
-  const isImage = model.mode === 'image';
+  // No per-image rendering here: `getEffectiveModelList` mode-filters every
+  // response (`modeFilterKey` maps the global read to `chat`), and neither
+  // surviving category accepts `mode='image'`, so such a row cannot reach this
+  // cell. It used to, when the image tab existed.
 
   const commitInput = () => {
     setEditingInput(false);
@@ -187,9 +187,7 @@ function PricingCell({
     }
   };
 
-  const isFree = isImage
-    ? (model.pricing?.input ?? 0) === 0
-    : (model.pricing?.input ?? 0) === 0 && (model.pricing?.output ?? 0) === 0;
+  const isFree = (model.pricing?.input ?? 0) === 0 && (model.pricing?.output ?? 0) === 0;
 
   if (isFree && !editingInput && !editingOutput) {
     return (
@@ -201,35 +199,6 @@ function PricingCell({
       >
         Free
       </button>
-    );
-  }
-
-  if (isImage) {
-    return (
-      <div className="flex items-center gap-1 text-sm text-theme-secondary">
-        {editingInput ? (
-          <input
-            type="number"
-            value={inputVal}
-            onChange={(e) => setInputVal(e.target.value)}
-            onBlur={commitInput}
-            onKeyDown={(e) => e.key === "Enter" && commitInput()}
-            className="w-20 h-6 px-1 text-sm rounded border border-theme bg-theme-primary text-theme-primary text-right"
-            autoFocus
-            step="0.001"
-          />
-        ) : (
-          <button
-            type="button"
-            onClick={() => { setInputVal(String(model.pricing?.input ?? 0)); setEditingInput(true); }}
-            className="hover:text-theme-primary transition-colors tabular-nums"
-            title="Per-image price (USD)"
-          >
-            ${model.pricing?.input ?? 0}
-          </button>
-        )}
-        <span className="text-xs text-theme-secondary opacity-70">/ image</span>
-      </div>
     );
   }
 
@@ -529,7 +498,7 @@ function SortableModelRow({
           data-testid={`model-bundle-enabled-${model.provider}-${model.id}`}
           title={t("modelConfig.bundleShipTooltip")}
           className={cn(
-            "w-full px-1.5 py-0.5 rounded-full text-xs font-medium border transition-colors whitespace-nowrap text-center",
+            "w-full px-1.5 py-0.5 rounded-md text-xs font-medium border transition-colors whitespace-nowrap text-center",
             model.bundleEnabled == null
               ? "border-theme text-theme-secondary bg-theme-tertiary"
               : model.bundleEnabled
@@ -554,7 +523,7 @@ function SortableModelRow({
           <NameCell model={model} onNameChange={onNameChange} t={t} />
         </div>
         {model.isCustom && (
-          <span className="text-sm bg-purple-100 text-purple-700 dark:bg-purple-900/30 dark:text-purple-400 px-1.5 py-0.5 rounded-full whitespace-nowrap flex-shrink-0">
+          <span className="text-sm bg-purple-100 text-purple-700 dark:bg-purple-900/30 dark:text-purple-400 px-1.5 py-0.5 rounded-md whitespace-nowrap flex-shrink-0">
             {t("modelConfig.custom")}
           </span>
         )}
@@ -564,7 +533,7 @@ function SortableModelRow({
         {model.available === false && model.providerKind !== 'bridge' && (
           <span
             title={t("modelConfig.notConfiguredTooltip")}
-            className="text-xs bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400 px-1.5 py-0.5 rounded-full whitespace-nowrap flex-shrink-0"
+            className="text-xs bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400 px-1.5 py-0.5 rounded-md whitespace-nowrap flex-shrink-0"
           >
             {t("modelConfig.notConfigured")}
           </span>
@@ -577,7 +546,7 @@ function SortableModelRow({
         onValueChange={(value) => onTierChange(model, value)}
       >
         <SelectTrigger className={cn(
-          "!h-6 !min-h-0 text-sm font-medium !border-0 !rounded-full !px-2 !py-0.5 min-w-0 w-auto gap-0.5 [&>svg]:h-3 [&>svg]:w-3 !hover:bg-none hover:!bg-[unset]",
+          "!h-6 !min-h-0 text-sm font-medium !border-0 !rounded-lg !px-2 !py-0.5 min-w-0 w-auto gap-0.5 [&>svg]:h-3 [&>svg]:w-3 !hover:bg-none hover:!bg-[unset]",
           TIER_BADGE[model.tier || "mid"]
         )}>
           <SelectValue />
@@ -598,7 +567,7 @@ function SortableModelRow({
           value={model.defaultReasoningEffort || EFFORT_INHERIT}
           onValueChange={(value) => onReasoningEffortChange(model, value === EFFORT_INHERIT ? "" : value)}
         >
-          <SelectTrigger className="!h-6 !min-h-0 text-sm !rounded-full !px-2 !py-0.5 min-w-0 w-auto gap-0.5 [&>svg]:h-3 [&>svg]:w-3 bg-theme-tertiary text-theme-secondary">
+          <SelectTrigger className="!h-6 !min-h-0 text-sm !rounded-lg !px-2 !py-0.5 min-w-0 w-auto gap-0.5 [&>svg]:h-3 [&>svg]:w-3 bg-theme-tertiary text-theme-secondary">
             <SelectValue placeholder="-" />
           </SelectTrigger>
           <SelectContent>
@@ -668,13 +637,46 @@ function SortableModelRow({
 
 /**
  * V156 - model categories the admin can manage independently. Order matches
- * the tab rendering order in the panel. Adding a new category here +
- * extending the i18n keys + extending the V156 CHECK reach is enough - the
- * backend is forward-compatible (any lowercase snake_case key passes the
- * shape regex; absent rows fall back to global ranking).
+ * the tab rendering order in the panel. Adding a category here + its i18n keys
+ * is enough for the backend, which is forward-compatible (any lowercase
+ * snake_case key passes the shape regex; absent rows fall back to global
+ * ranking). Adding one to this list is what gives a category a reader, so it is
+ * also the decision that a ranking means something for it - see below.
  */
-const CATEGORIES = ['chat', 'browser_agent', 'image_generation'] as const;
+const CATEGORIES = [
+  'chat',
+  'browser_agent',
+] as const;
 type Category = typeof CATEGORIES[number];
+
+// Deliberately NOT here: the five generation formats (image, video, audio,
+// voice, music).
+//
+// This panel exists to choose between interchangeable models: rank them so a
+// failed call falls through to the next, enable one, read its per-token price.
+// None of that applies to a generation model. There is no fallback order (the
+// caller names its model, and a video model is not a substitute for a voice
+// one), nothing to enable (the model exists because the catalog endpoint
+// exists), and its price is per image or per second and is published against a
+// platform credential, not here.
+//
+// The tabs were added when image generation still ran on model-catalogue rows
+// with a fallback ranking. That subsystem is gone, so what those tabs listed was
+// models no code can execute, next to four tabs the LLM feed never fills.
+// Platform Credentials is the one screen that decides whether a generation model
+// is sellable and at what price; a read-only copy here would only be a second
+// place for the same price to be stated, and to drift.
+//
+// The backend keeps accepting `?category=<format>_generation` on purpose: rows
+// already written for those categories stay readable, and the CE contract specs
+// that assert the parameter's shape keep their meaning. What went away is the
+// only screen that offered them.
+//
+// One consequence worth stating plainly: a `mode='image'` row persisted in
+// model_config_overrides is now unreachable from every admin screen. There is no
+// way left to price, disable or delete one from the UI. That is accepted, since
+// no code path can run such a model either, but it does mean the rows are
+// leftovers, and clearing them is a data question rather than a UI one.
 
 export default function ModelManagementPanel({ t }: ModelManagementPanelProps) {
   const [models, setModels] = useState<ModelConfigEntry[]>([]);
@@ -700,7 +702,8 @@ export default function ModelManagementPanel({ t }: ModelManagementPanelProps) {
   useEffect(() => {
     const updateSlider = () => {
       if (!categoryTabRef.current) return;
-      const activeButton = categoryTabRef.current.querySelector(`[data-category-id="${category}"]`) as HTMLButtonElement | null;
+      const activeButton = categoryTabRef.current.querySelector(
+        `[data-category-id="${category}"]`) as HTMLButtonElement | null;
       if (activeButton) {
         const containerRect = categoryTabRef.current.getBoundingClientRect();
         const buttonRect = activeButton.getBoundingClientRect();
@@ -734,12 +737,14 @@ export default function ModelManagementPanel({ t }: ModelManagementPanelProps) {
     let filtered = providerFilter === "all"
       ? models
       : models.filter(m => m.provider === providerFilter);
-    // V156 - hide bridges on the per-category tabs because they don't expose
-    // per-step chat completions for browser_agent and the image_generation
-    // tool only routes through OpenAI/Google. Re-ranking or disabling a
-    // bridge here has zero runtime effect, so the row would mislead. Chat
-    // tab keeps showing them - full-session bridges DO work for chat.
-    if (category === 'browser_agent' || category === 'image_generation') {
+    // V156 - hide bridges on the browser_agent tab because they don't expose
+    // the per-step chat completions it drives. Re-ranking or disabling a bridge
+    // there has zero runtime effect, so the row would mislead. Chat tab keeps
+    // showing them - full-session bridges DO work for chat.
+    //
+    // Named, not `!== 'chat'`: a category added later should have to state
+    // whether bridges belong to it, rather than inherit the answer.
+    if (category === 'browser_agent') {
       filtered = filtered.filter(m => m.providerKind !== 'bridge');
     }
     return filtered;
@@ -1043,21 +1048,21 @@ export default function ModelManagementPanel({ t }: ModelManagementPanelProps) {
               opacity: categorySliderStyle.width ? 1 : 0,
             }}
           />
-          {CATEGORIES.map((c) => (
+          {CATEGORIES.map((tab) => (
             <button
-              key={c}
-              data-category-id={c}
+              key={tab}
+              data-category-id={tab}
               type="button"
-              onClick={() => setCategory(c)}
-              aria-pressed={category === c}
+              onClick={() => setCategory(tab)}
+              aria-pressed={category === tab}
               className={cn(
                 "relative z-10 flex h-9 flex-shrink-0 items-center px-4 rounded-xl text-sm font-medium transition-all duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent-primary)]/60 outline-none",
-                category === c
+                category === tab
                   ? "text-[var(--text-primary)]"
                   : "text-theme-secondary hover:text-theme-primary hover:bg-[var(--bg-primary)]/50"
               )}
             >
-              {t(`modelConfig.category.${c}.label`)}
+              {t(`modelConfig.category.${tab}.label`)}
             </button>
           ))}
         </div>

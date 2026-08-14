@@ -32,6 +32,7 @@ import { useStreaming } from '@/contexts/StreamingContext';
 import { WorkflowModeProvider, useWorkflowMode } from '@/contexts/WorkflowModeContext';
 import type { TriggerPanelConfig } from '@/app/workflows/builder/components/TriggerPanel';
 import { normalizeLabel } from '@/app/workflows/builder/utils/labelNormalizer';
+import { isNavigateRef, navigateTargetLabel } from '@/app/workflows/builder/utils/interfaceActionRefs';
 import { TERMINAL_STATUSES } from '@/contexts/workflow-run/RunStateStore';
 import { useCurrentOrgStore } from '@/lib/stores/current-org-store';
 import { OPEN_TRIGGER_TAB_EVENT, findTriggerTabConfig, type OpenTriggerTabDetail } from '@/lib/workflow/triggerTabEvent';
@@ -609,12 +610,10 @@ function WorkflowPanelInner({ workflowId, runId: runIdProp, workflowCanvasSlot, 
     triggerRef: string,
     data: Record<string, unknown>
   ) => {
-    // Navigate action: pure frontend carousel switch - no API call
-    if (triggerRef.endsWith(':navigate')) {
-      // Parse "interface:settings_page:navigate" → target normalized label = "settings_page"
-      const parts = triggerRef.split(':');
-      // Remove action suffix (:navigate) and prefix (interface:) to get the label
-      const targetLabel = parts.length >= 3 ? parts.slice(1, -1).join(':') : null;
+    // Navigate action: pure frontend carousel switch - no API call.
+    // "interface:settings_page:navigate" → target normalized label = "settings_page"
+    if (isNavigateRef(triggerRef)) {
+      const targetLabel = navigateTargetLabel(triggerRef);
       if (targetLabel) {
         const normalizedTarget = normalizeLabel(targetLabel);
         const idx = applicationConfigs.findIndex(c => {
@@ -801,7 +800,7 @@ function WorkflowPanelInner({ workflowId, runId: runIdProp, workflowCanvasSlot, 
                 )}
                 {isReady && (
                   <span
-                    className="absolute -inset-1.5 rounded-full pointer-events-none overflow-hidden"
+                    className="absolute -inset-1.5 rounded-md pointer-events-none overflow-hidden"
                     style={{
                       backgroundImage: `linear-gradient(90deg, transparent 0%, ${
                         config.type === 'chat' ? 'rgba(59, 130, 246, 0.3)' : 'rgba(147, 51, 234, 0.3)'

@@ -11,6 +11,7 @@ import {
   Dialog, DialogContent, DialogHeader, DialogTitle,
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
+import { ModalStepIndicator } from "@/components/ui/ModalStepIndicator";
 import { publicationService } from "@/lib/api/orchestrator/publication.service";
 import { actionErrorMessage } from "./comparisonErrors";
 import type { WorkflowPublication, PublicationComparisonData } from "@/lib/api/orchestrator/types";
@@ -47,46 +48,22 @@ interface PublicationComparisonViewProps {
   onRejected: () => void;
 }
 
-// ─── Step Indicator (same pattern as ShareWorkflowModal) ───
+// ─── Step Indicator ───
 
-function StepIndicator({ currentStep, onStepClick }: { currentStep: number; onStepClick: (s: number) => void }) {
-  const steps = [
-    { number: 1, icon: FileText, label: "Overview" },
-    { number: 2, icon: GitCompare, label: "Comparison" },
-    { number: 3, icon: ShieldCheck, label: "Decision" },
-  ];
-
-  return (
-    <div className="flex items-center justify-center gap-2 mb-6">
-      {steps.map((step, index) => {
-        const isActive = step.number === currentStep;
-        const isCompleted = step.number < currentStep;
-        const Icon = step.icon;
-
-        return (
-          <React.Fragment key={step.number}>
-            <button
-              onClick={() => (isCompleted || isActive) && onStepClick(step.number)}
-              className={`flex items-center gap-2 px-3 py-1.5 rounded-full transition-all ${
-                isActive
-                  ? "bg-[var(--accent-primary)] text-[var(--accent-foreground)]"
-                  : isCompleted
-                  ? "bg-emerald-500/20 text-emerald-600 dark:text-emerald-400 cursor-pointer hover:bg-emerald-500/30"
-                  : "bg-theme-tertiary text-theme-secondary cursor-not-allowed"
-              }`}
-            >
-              {isCompleted ? <Check className="h-4 w-4" /> : <Icon className="h-4 w-4" />}
-              <span className="text-sm font-medium hidden sm:inline">{step.label}</span>
-            </button>
-            {index < steps.length - 1 && (
-              <div className={`w-8 h-0.5 rounded-full ${step.number < currentStep ? "bg-emerald-500" : "bg-theme-tertiary"}`} />
-            )}
-          </React.Fragment>
-        );
-      })}
-    </div>
-  );
-}
+/**
+ * The steps of this review, on the shared header every multi-step surface uses.
+ *
+ * This screen carried its own copy, labelled "same pattern as ShareWorkflowModal"
+ * - which it was, character for character, from before that pattern was
+ * extracted. Being a copy it had already drifted: its steps sat on the label rung
+ * (`rounded-md`) instead of the Button one, so the same three steps were drawn
+ * smaller-cornered here than in every modal next door.
+ */
+const REVIEW_STEPS = [
+  { number: 1, icon: FileText, label: "Overview" },
+  { number: 2, icon: GitCompare, label: "Comparison" },
+  { number: 3, icon: ShieldCheck, label: "Decision" },
+];
 
 // ─── Collapsible Section ───
 
@@ -418,7 +395,7 @@ export default function PublicationComparisonView({
     <div className="space-y-4">
       <div className="rounded-xl border border-theme p-5">
         <div className="flex items-start gap-4">
-          <div className="w-10 h-10 rounded-full bg-theme-secondary flex items-center justify-center shrink-0">
+          <div className="w-10 h-10 rounded-xl bg-theme-secondary flex items-center justify-center shrink-0">
             <TypeIcon className="h-5 w-5 text-theme-primary" />
           </div>
           <div className="flex-1 min-w-0 space-y-3">
@@ -447,7 +424,7 @@ export default function PublicationComparisonView({
               ]
                 .filter(r => (r.count ?? 0) > 0)
                 .map(r => (
-                  <span key={r.label} className="text-xs bg-theme-secondary text-theme-secondary rounded-full px-2.5 py-1">
+                  <span key={r.label} className="text-xs bg-theme-secondary text-theme-secondary rounded-md px-2.5 py-1">
                     {r.count} {r.label}
                   </span>
                 ))}
@@ -955,7 +932,7 @@ export default function PublicationComparisonView({
   const renderStep3 = () => (
     <div className="space-y-6">
       <div className="rounded-xl border border-theme p-6 text-center">
-        <div className="w-12 h-12 rounded-full bg-theme-secondary flex items-center justify-center mx-auto mb-4">
+        <div className="w-12 h-12 rounded-xl bg-theme-secondary flex items-center justify-center mx-auto mb-4">
           <ShieldCheck className="h-6 w-6 text-theme-primary" />
         </div>
         <h3 className="text-sm font-semibold text-theme-primary mb-1">{publication.title}</h3>
@@ -1037,7 +1014,15 @@ export default function PublicationComparisonView({
             </DialogTitle>
           </DialogHeader>
           <div className="mt-4">
-            <StepIndicator currentStep={currentStep} onStepClick={setCurrentStep} />
+            <ModalStepIndicator
+              steps={REVIEW_STEPS}
+              currentStep={currentStep}
+              onStepClick={setCurrentStep}
+              // A reviewer moves forward through the review, so the steps behind
+              // are a way back and the ones ahead are not reachable yet. Same
+              // rule the local copy applied inline.
+              isStepEnabled={(step) => step <= currentStep}
+            />
           </div>
         </div>
 

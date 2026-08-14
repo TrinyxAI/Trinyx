@@ -74,7 +74,7 @@ class PinnedVersionTest {
                 runRepository, workflowRepository, planVersionRepository,
                 epochManager, streamingService,
                 executionService, triggerResolverService, stateSnapshotService,
-                epochConcurrencyLimiter, executionQueueService, creditClient, creditBudgetService);
+                epochConcurrencyLimiter, executionQueueService, creditBudgetService);
         ReflectionTestUtils.setField(service, "resumeService", resumeService);
         ReflectionTestUtils.setField(service, "unifiedSignalService", unifiedSignalService);
         ReflectionTestUtils.setField(service, "snapshotService", snapshotService);

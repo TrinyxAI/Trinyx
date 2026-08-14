@@ -566,7 +566,7 @@ const Step3: React.FC<Step3Props> = ({
                       disabled={categoriesLoading}
                     />
                     {toolData.isCustomCategory && (
-                      <div className="absolute -top-2 -right-2 bg-yellow-500 text-white text-xs px-2 py-1 rounded-full">
+                      <div className="absolute -top-2 -right-2 bg-yellow-500 text-white text-xs px-2 py-1 rounded-md">
                         {t('common.custom')}
                       </div>
                     )}
@@ -576,7 +576,7 @@ const Step3: React.FC<Step3Props> = ({
                   <Button
                     variant="ghost"
                     size="icon"
-                    className="rounded-full w-10 h-10 sm:w-10 sm:h-10 min-w-[44px] min-h-[44px]"
+                    className="rounded-xl w-10 h-10 sm:w-10 sm:h-10 min-w-[44px] min-h-[44px]"
                     onClick={() => setShowNewToolCategoryForm(!showNewToolCategoryForm)}
                   >
                     <Plus className="h-4 w-4" />
@@ -684,7 +684,7 @@ const Step3: React.FC<Step3Props> = ({
                       disabled={categoryToolNamesLoading || !toolData.toolCategory}
                     />
                     {toolData.isCustomToolName && (
-                      <div className="absolute -top-2 -right-2 bg-yellow-500 text-white text-xs px-2 py-1 rounded-full">
+                      <div className="absolute -top-2 -right-2 bg-yellow-500 text-white text-xs px-2 py-1 rounded-md">
                         {t('common.custom')}
                       </div>
                     )}
@@ -694,7 +694,7 @@ const Step3: React.FC<Step3Props> = ({
                   <Button
                     variant="ghost"
                     size="icon"
-                    className="rounded-full w-10 h-10 sm:w-10 sm:h-10 min-w-[44px] min-h-[44px]"
+                    className="rounded-xl w-10 h-10 sm:w-10 sm:h-10 min-w-[44px] min-h-[44px]"
                     onClick={() => setShowNewToolNameForm(!showNewToolNameForm)}
                   >
                     <Plus className="h-4 w-4" />
@@ -953,7 +953,7 @@ const Step3: React.FC<Step3Props> = ({
                 </span>
               </button>
               {isTestingAll && (
-                <div className="px-2 py-1 rounded-full text-xs font-medium bg-yellow-100 text-yellow-800">
+                <div className="px-2 py-1 rounded-md text-xs font-medium bg-yellow-100 text-yellow-800">
                   {t('testSummary.testingAllBadge')}
                 </div>
               )}
@@ -971,7 +971,7 @@ const Step3: React.FC<Step3Props> = ({
               <div className="flex items-center space-x-2">
                 {mcpTools.every(tool => tool.testStatus === 'success') && !mcpTools.some(tool => !tool.testStatus) ? (
                   <>
-                    <div className="w-5 h-5 bg-green-500 rounded-full flex items-center justify-center">
+                    <div className="w-5 h-5 bg-green-500 rounded-lg flex items-center justify-center">
                       <span className="text-xs text-white font-bold">✓</span>
                     </div>
                     <span className="text-sm font-medium text-green-800 dark:text-green-200">
@@ -980,7 +980,7 @@ const Step3: React.FC<Step3Props> = ({
                   </>
                 ) : mcpTools.some(tool => tool.testStatus === 'error') ? (
                   <>
-                    <div className="w-5 h-5 bg-red-500 rounded-full flex items-center justify-center">
+                    <div className="w-5 h-5 bg-red-500 rounded-lg flex items-center justify-center">
                       <span className="text-xs text-white font-bold">✗</span>
                     </div>
                     <span className="text-sm font-medium text-red-800 dark:text-red-200">
@@ -989,7 +989,7 @@ const Step3: React.FC<Step3Props> = ({
                   </>
                 ) : (
                   <>
-                    <div className="w-5 h-5 bg-yellow-500 rounded-full flex items-center justify-center">
+                    <div className="w-5 h-5 bg-yellow-500 rounded-lg flex items-center justify-center">
                       <span className="text-xs text-white font-bold">!</span>
                     </div>
                     <span className="text-sm font-medium text-yellow-800 dark:text-yellow-200">

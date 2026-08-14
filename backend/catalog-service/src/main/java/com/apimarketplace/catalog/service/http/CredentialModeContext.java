@@ -40,6 +40,9 @@ public final class CredentialModeContext {
     private static final ThreadLocal<String> EXPLICIT_SOURCE = new ThreadLocal<>();
     private static final ThreadLocal<Long> SELECTED_CREDENTIAL_ID = new ThreadLocal<>();
 
+    /** @see #rememberPinVerdict(boolean) */
+    private static final ThreadLocal<String> PIN_VERDICT = new ThreadLocal<>();
+
     /**
      * Whitelist of agentic-override values an external caller may supply.
      * Limited to the fallback-enabling value only - accepting
@@ -131,9 +134,46 @@ public final class CredentialModeContext {
         return SELECTED_CREDENTIAL_ID.get();
     }
 
+    /**
+     * Whether the pinned credential was found to belong to the integration
+     * being called, remembered for the rest of THIS request.
+     *
+     * <p>Five helpers resolve a credential during one execution (the scope
+     * preflight, the token, the token info, the data map behind URL template
+     * substitution, and the refresh after a 401), and each one asks the same
+     * question. Without this they each make their own call to auth-service, so
+     * one execution pays four extra round trips AND can get four different
+     * answers: a blip mid-request would have some helpers honour the pin and
+     * others fall back to the default key, inside a single call. One lookup,
+     * one verdict.
+     */
+    public static void rememberPinVerdict(String credentialName, boolean belongsToIntegration) {
+        PIN_VERDICT.set(credentialName + "=" + belongsToIntegration);
+    }
+
+    /**
+     * The verdict already reached this request FOR THIS REQUIREMENT, or null.
+     *
+     * <p>Keyed on the requirement, not just on the thread. One execution
+     * resolves a single credential name today, so an unkeyed cache would be
+     * correct by accident; the day a tool needs two, the first answer would
+     * stand in for the second and a pin validated against one provider would
+     * be honoured for another. That is the failure this cache exists to
+     * prevent, so it must not be the failure it introduces.
+     */
+    public static Boolean getPinVerdict(String credentialName) {
+        String remembered = PIN_VERDICT.get();
+        if (remembered == null) return null;
+        String prefix = credentialName + "=";
+        return remembered.startsWith(prefix)
+                ? Boolean.valueOf(remembered.substring(prefix.length()))
+                : null;
+    }
+
     public static void clear() {
         AGENTIC_OVERRIDE.remove();
         EXPLICIT_SOURCE.remove();
         SELECTED_CREDENTIAL_ID.remove();
+        PIN_VERDICT.remove();
     }
 }

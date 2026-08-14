@@ -965,7 +965,8 @@
     "dashboard": {
       "storageOverview": "Storage overview"
     },
-    "openInSidePanel": "Open in side panel"
+    "openInSidePanel": "Open in side panel",
+    "generateAsset": "Generate an image, video or sound"
   },
   "resourceCarousel": {
     "resourcesCreated": "{count, plural, one {# resource} other {# resources}}",
@@ -1048,9 +1049,6 @@
       "scrollForMoreRows": "Scroll for more rows",
       "epochTooltip": {
         "epoch": "Epoch #{epoch}",
-        "running": "Running",
-        "completed": "Completed",
-        "pending": "Pending",
         "started": "Started",
         "ended": "Ended",
         "duration": "Duration",
@@ -1238,14 +1236,11 @@
     "maxOutputLabel": "Max output",
     "tokens": "{count} tokens",
     "priceShort": "{input}/{output} per 1M",
-    "priceShortPerImage": "{input} / image",
     "priceInputLabel": "Input price",
     "priceOutputLabel": "Output price",
-    "priceImageLabel": "Per image",
     "priceCacheLabel": "Cached input",
     "priceBatchLabel": "Batch price",
     "perMillion": "per 1M tokens",
-    "perImage": "per image",
     "rateLimitsTitle": "Rate limits",
     "rpmLabel": "Requests / min",
     "tpmLabel": "Tokens / min",
@@ -1580,6 +1575,30 @@
     "filterApplications": "Applications",
     "filterInterfaces": "Interfaces",
     "filterAgents": "Agents",
+    "filterByType": "Filter by type",
+    "sortBy": "Sort by",
+    "sortPopular": "Most liked",
+    "sortRating": "Best rated",
+    "sortRecent": "Newest",
+    "sortInstalls": "Most installed",
+    "filterByRating": "Filter by rating",
+    "ratingAny": "Any rating",
+    "ratingRated": "Rated",
+    "rating4Plus": "4 stars and up",
+    "rating3Plus": "3 stars and up",
+    "filterByDate": "Filter by date",
+    "dateAny": "Any date",
+    "date7Days": "Last 7 days",
+    "date30Days": "Last 30 days",
+    "date90Days": "Last 3 months",
+    "dateYear": "Last year",
+    "filterByPrice": "Filter by price",
+    "priceAny": "Any price",
+    "priceFree": "Free",
+    "pricePaid": "Paid",
+    "resetFilters": "Reset filters",
+    "noFilterResults": "No application matches these filters",
+    "noFilterResultsHint": "Widen the rating, date or price filter to see more applications.",
     "filterTables": "Tables",
     "filterSkills": "Skills",
     "filterWorkflows": "Workflows",
@@ -1604,6 +1623,16 @@
     "continueWorkflow": "Continue",
     "itemAlreadyResolved": "This item has already been continued",
     "continueItemRemaining": "Continue this item ({count} pending)",
+    "loadTemplateValues": "Load the example values",
+    "loadTemplateValuesHint": "Fill the forms with the example values from the original app. Nothing is sent until you submit.",
+    "templateValuesEmpty": "This app ships no example values",
+    "templateValuesFailed": "Could not load the example values",
+    "resetData": "Reset the data",
+    "resetDataHint": "Restore this app's tables to the rows it came with",
+    "resetDataConfirm": "Restore this app's tables to the rows it came with? The rows you added or edited are replaced. Your workflow and its runs are left untouched.",
+    "resetDataSuccess": "{tables, plural, one {# table restored} other {# tables restored}}, {rows, plural, one {# row written} other {# rows written}}",
+    "resetDataPartial": "{tables, plural, one {# table restored} other {# tables restored}}, {rows, plural, one {# row written} other {# rows written}}. Left alone: {skipped}",
+    "resetDataFailed": "Could not reset the data",
     "own": "Your publication",
     "acquire": "Install",
     "ceExclusiveBadge": "CE exclusive",
@@ -1866,6 +1895,21 @@
     "workflowSteps": "Workflow Steps"
   },
   "modals": {
+    "accountRestore": {
+      "title": "Your account is scheduled for deletion",
+      "checkingTitle": "Checking your account",
+      "checkingDescription": "One moment while we look up the state of your account.",
+      "description": "It will be permanently deleted on {date}. Until then you can bring it back exactly as you left it.",
+      "blockedTitle": "Your account is inactive",
+      "blockedDescription": "This account cannot be used right now. If you did not expect this, contact support.",
+      "whatHappens": "If you reactivate it",
+      "keepEverything": "Your workflows, agents, tables and files come back untouched",
+      "untilThenNothingLost": "Nothing has been deleted yet, the account is only deactivated",
+      "afterThatPermanent": "Once that date passes, the deletion is permanent and cannot be reversed",
+      "reactivate": "Reactivate my account",
+      "signOut": "Sign out",
+      "restoreFailed": "We could not reactivate your account. Please try again."
+    },
     "agentError": {
       "title": "Something went wrong",
       "description": "An error occurred while running this. Please try again in a moment.",
@@ -3067,15 +3111,38 @@
       "publish": "Publish",
       "publishing": "Publishing…",
       "publishedVersion": "Version v{version} published",
+      "retry": "Retry",
       "success": "Saved",
       "errors": {
         "fetchFailed": "Failed to load pricing",
+        "loadFailed": "The published prices could not be loaded. Publishing would replace the live prices with an empty list, so it stays blocked until they load.",
         "publishFailed": "Failed to publish pricing",
         "credentialNotFound": "Credential not found",
         "invalidDefault": "Default markup must be a non-negative number",
         "invalidOverride": "Invalid markup for tool {tool}",
-        "duplicateTool": "Each tool can appear only once"
-      }
+        "duplicateTool": "Each endpoint and model can appear only once"
+      },
+      "model": "Model",
+      "modelAny": "All models (endpoint-wide)",
+      "modelHint": "Leave the model empty to price the whole endpoint. Pick a model when one endpoint runs several of them at different rates.",
+      "unit": "Billed per",
+      "baseCredits": "Base",
+      "unitCredits": "Per unit",
+      "minCredits": "Floor",
+      "maxCredits": "Ceiling",
+      "removePrice": "Remove this price",
+      "units": {
+        "call": "call",
+        "second": "second",
+        "minute": "minute",
+        "image": "image",
+        "character": "character"
+      },
+      "summaryFlat": "{amount} credits per call",
+      "summaryPerUnit": "{rate} credits per {unit}",
+      "summaryBasePlusUnit": "{base} credits + {rate} credits per {unit}",
+      "floorNote": "minimum {min} credits",
+      "ceilingNote": "maximum {max} credits"
     },
     "success": {
       "saved": "Credential Saved",
@@ -3130,10 +3197,11 @@
       "local": "Local keys",
       "cloudHint": "Integration calls run through your linked LiveContext Cloud account using its platform credentials. Requests transit through the cloud and a small per-call markup in credits is billed there.",
       "localHint": "Integration credentials are configured and used locally on this install.",
-      "subscriptionRequired": "Using Cloud requires an active paid subscription on your linked cloud account.",
+      "subscriptionRequired": "Using Cloud requires an active paid subscription on your linked cloud account. A free account cannot pay for relayed calls.",
       "viewPlans": "View plans",
       "linkRequired": "Link a Cloud account before switching to Cloud.",
-      "saveError": "Failed to update the integration credential source."
+      "saveError": "Failed to update the integration credential source.",
+      "cloudCovers": "This covers generation too: images, video, sound, speech and music run on the cloud account's provider keys and are billed there in credits, per second or per asset, at the price published for each model."
     },
     "getDocs": "Get API key",
     "save": "Save",
@@ -3382,10 +3450,6 @@
         "browser_agent": {
           "label": "Browser Agent",
           "hint": "Models available to the Browser Agent. Rank sets the default order; disable removes the model from Browser Agent runs."
-        },
-        "image_generation": {
-          "label": "Image Generation",
-          "hint": "Image-generation providers. Rank controls the default order in the picker; disable removes the model from the image-gen tool."
         }
       }
     },
@@ -3521,6 +3585,16 @@
       "notAvailable": "No platform credential is configured for this service",
       "markupNote": "This step will use the shared platform credential. A small markup is billed on each call.",
       "markupNoteWithRate": "This step will use the shared platform credential. {rate} credits are billed on each call as markup.",
+      "markupNoteNotSold": "This step is set to the shared platform credential, but this generation is not sold on it: no price is published for this model, only the credential-wide default, which a generation never inherits. Switch to your own key to run it.",
+      "markupNoteWithUnitRate": "This step will use the shared platform credential. It is billed {unitRate} credits per {unit}, so a bigger request costs more.",
+      "markupNoteWithUnitRateAndTotal": "This step will use the shared platform credential. {unitRate} credits per {unit}, {quantity} {unit} = {total} credits for this run.",
+      "priceUnits": {
+        "call": "call",
+        "second": "second",
+        "minute": "minute",
+        "image": "image",
+        "character": "character"
+      },
       "platformExplanation": "No personal setup required - the platform owns the API key. You are only billed the per-call markup on top of the base node cost."
     },
     "manageAll": "Manage all credentials",
@@ -3815,6 +3889,13 @@
         "scopesPlaceholder": "e.g. read write (space-separated)",
         "tokenUrl": "Token URL",
         "tokenUrlPlaceholder": "https://provider.com/oauth/token"
+      },
+      "platformKey": {
+        "title": "You do not have to add a key",
+        "explanation": "This service is available on the platform key, billed in credits per call. Adding your own key instead means you pay the provider directly and the platform charges you nothing.",
+        "explanationPriced": "This service is available on the platform key at {credits} credits per call. Adding your own key instead means you pay the provider directly and the platform charges you nothing.",
+        "use": "Use the platform key",
+        "orOwn": "Or add your own key below."
       }
     }
   },
@@ -5157,6 +5238,13 @@
     "noMatches": "No files match your filters",
     "viewGrid": "Grid view",
     "viewList": "List view",
+    "sortBy": "Sort by",
+    "sortByDate": "Date",
+    "sortByName": "Name",
+    "sortBySize": "Size",
+    "sortByType": "Type",
+    "sortAscending": "Ascending order",
+    "sortDescending": "Descending order",
     "dateFrom": "From",
     "dateTo": "To",
     "typeColumn": "Type",
@@ -5203,7 +5291,8 @@
     "moveToRoot": "Top level (root)",
     "moveHere": "Move here",
     "noFoldersYet": "No folders yet - create one first, or move to the top level.",
-    "backToParent": "Up one level"
+    "backToParent": "Up one level",
+    "generate": "Generate"
   },
   "fileDetail": {
     "download": "Download {name}",
@@ -5692,17 +5781,17 @@
     },
     "advanced": {
       "deleteTitle": "Delete Account",
-      "deleteWarning": "This action is irreversible. All your data, subscriptions and configurations will be permanently deleted.",
+      "deleteWarning": "Your account is deactivated right away, then permanently deleted after a grace period. At that point your data, subscriptions and configurations are gone for good.",
       "deleteButton": "Delete My Account"
     },
     "deleteDialog": {
       "title": "Delete Account?",
-      "description": "This action is irreversible. All your data will be permanently lost.",
+      "description": "Your account is deactivated right away and permanently deleted after {days} days. You can cancel during that time by signing back in.",
       "whatHappens": "What happens?",
       "dataDeleted": "All your data will be deleted",
       "subscriptionCancelled": "Your subscription will be cancelled",
       "toolsDeleted": "Your MCP tools will be deleted",
-      "cannotUndo": "This action cannot be undone",
+      "cannotUndo": "After {days} days, this cannot be undone",
       "confirmInstruction": "To confirm, type",
       "typePlaceholder": "Type DELETE",
       "deletePermanently": "Delete Permanently"
@@ -6183,6 +6272,7 @@
       "waitingDependencies": "Waiting for dependencies",
       "rerunning": "Re-running...",
       "rerunTooltip": "Re-run this step and all downstream steps",
+      "rerunTooltipAuto": "Re-run this step, then let the rest of the workflow run again on its own",
       "fixValidationErrors": "Fix validation errors before running",
       "startStepByStep": "Start workflow in step-by-step mode",
       "onlyTriggersCanStart": "Only triggers can start step-by-step execution",
@@ -6876,6 +6966,8 @@
       "autoLayout": "Auto-layout (reorganize nodes)",
       "expandAllFiles": "Expand all file previews",
       "collapseAllFiles": "Collapse all file previews",
+      "expandFilesByDefault": "Expand file previews by default",
+      "collapseFilesByDefault": "Collapse file previews by default",
       "disableInteractivity": "Disable interactivity",
       "enableInteractivity": "Enable interactivity",
       "cursorMode": "Cursor mode",
@@ -6923,6 +7015,7 @@
       "waitingError": "Bootstrap run - click to seed; real failures fire automatically",
       "executeStep": "Execute this step",
       "rerunStep": "Re-run from this step",
+      "rerunStepAuto": "Restart from this step (the rest runs again automatically)",
       "waitingDependencies": "Waiting for dependencies",
       "previous": "Previous",
       "next": "Next",
@@ -7226,6 +7319,44 @@
         "disposition": "Disposition",
         "dispositionInline": "Inline (display in browser)",
         "dispositionAttachment": "Attachment (download prompt)"
+      },
+      "generate": {
+        "title": "Generate",
+        "description": "Generates one asset from a prompt: image, video, audio, voice or music. The model you pick decides the format produced, the parameters it accepts and what each run costs.",
+        "model": "Model",
+        "modelPlaceholder": "Select a model",
+        "modelsLoading": "Loading models...",
+        "modelHint": "Changing the model clears any parameter the new model does not accept.",
+        "noModels": "No generation models are available on this installation.",
+        "selectValue": "Select a value",
+        "filePlaceholder": "e.g. {{core:download.output.file}}",
+        "limitRange": "Allowed range: {min} to {max}",
+        "params": {
+          "prompt": "Prompt",
+          "negative_prompt": "Negative prompt",
+          "duration_seconds": "Duration (seconds)",
+          "n": "How many",
+          "aspect_ratio": "Aspect ratio",
+          "resolution": "Resolution",
+          "quality": "Quality",
+          "style": "Style",
+          "voice": "Voice",
+          "language": "Language",
+          "seed": "Seed",
+          "input_image": "Reference image",
+          "input_audio": "Reference audio",
+          "input_video": "Reference video"
+        },
+        "placeholders": {
+          "prompt": "Describe what to generate",
+          "negative_prompt": "What to avoid",
+          "aspect_ratio": "e.g. 16:9",
+          "resolution": "e.g. 720p",
+          "quality": "e.g. high",
+          "style": "e.g. cinematic",
+          "voice": "Voice id",
+          "language": "e.g. en"
+        }
       },
       "media": {
         "title": "Media",
@@ -9145,8 +9276,8 @@
     "toolsModeCustom": "Custom",
     "webSearchLabel": "Web search",
     "webSearchInfo": "Allows the agent to search the web when it needs up-to-date information.",
-    "imageGenerationLabel": "Image generation",
-    "imageGenerationInfo": "Lets the agent generate images via OpenAI gpt-image-1.5/mini or Google Gemini 2.5 Flash Image (nano-banana) / 3 Pro Image. Bills per image returned (5-134 credits depending on model and quality). If you have your own provider API key configured, it is used (no internal credit charge); otherwise the platform key is used and credits are deducted.",
+    "generationLabel": "Generation",
+    "generationInfo": "Lets the assistant create images, videos, audio, voices and music. Each generation is charged in credits at the platform rate; a longer video or a longer text costs more.",
     "autoAuthorizeLabel": "Run sensitive actions without asking",
     "autoAuthorizeInfo": "When on, the agent installs and runs applications (and other sensitive actions) in this conversation without showing an authorization card. Applies to this conversation only.",
     "enabled": "Enabled",
@@ -10041,6 +10172,90 @@
           "link": "Link"
         }
       }
+    }
+  },
+  "generationModal": {
+    "title": "Generate an asset",
+    "subtitle": {
+      "format": "What do you want to produce?",
+      "prompt": "Pick a model and describe it",
+      "result": "Your asset"
+    },
+    "steps": {
+      "format": "Format",
+      "prompt": "Prompt",
+      "result": "Result"
+    },
+    "formats": {
+      "image": "Image",
+      "video": "Video",
+      "audio": "Sound",
+      "voice": "Speech",
+      "music": "Music"
+    },
+    "params": {
+      "negative_prompt": "What to avoid",
+      "voice": "Voice",
+      "language": "Language",
+      "style": "Style",
+      "aspect_ratio": "Aspect ratio",
+      "resolution": "Resolution",
+      "quality": "Quality",
+      "duration_seconds": "Duration (seconds)",
+      "n": "How many",
+      "seed": "Seed",
+      "input_image": "Reference image",
+      "input_audio": "Reference audio",
+      "input_video": "Reference video"
+    },
+    "price": {
+      "perUnit": "{rate} credits per {unit}",
+      "plusBase": "plus {base} to start",
+      "flat": "{credits} credits",
+      "min": "minimum {credits}",
+      "max": "capped at {credits}",
+      "total": "{credits} credits for this request",
+      "unpriced": "Not sold on the platform key"
+    },
+    "fields": {
+      "model": "Model",
+      "modelPlaceholder": "Choose a model",
+      "prompt": "Prompt",
+      "promptPlaceholder": "Describe what you want",
+      "options": "Options",
+      "unset": "Leave to the model",
+      "uploading": "Uploading...",
+      "uploadFailed": "That file could not be uploaded: {error}",
+      "provider": "Provider",
+      "providerPlaceholder": "Choose a provider",
+      "chooseFile": "Choose a file",
+      "replaceFile": "Replace",
+      "noFile": "No file chosen"
+    },
+    "modelCount": "{count} models",
+    "empty": "No generation model is available yet.",
+    "running": "Generating. This can take a while for video.",
+    "done": "Done",
+    "billedOn": "Billed on {quantity} {unit}",
+    "download": "Download",
+    "generate": "Generate",
+    "again": "Change something",
+    "back": "Back",
+    "cancel": "Cancel",
+    "close": "Close",
+    "errors": {
+      "unexpected": "The generation could not be started.",
+      "stillRunning": "The connection dropped, but the generation is still running on the server and will be charged. Your file will appear in your files once it is finished.",
+      "unreadable": "The generation was refused and nothing was produced, but the reason came back in a form this page cannot show. Try another model, or try again in a moment."
+    },
+    "payer": {
+      "monthlyCreditsOnly": "Your monthly credits fund workflow runs, not generation. Use your own key, or subscribe or top up to pay with credits."
+    },
+    "assetRoles": {
+      "source": "Source image",
+      "first_frame": "First frame",
+      "reference": "Reference image",
+      "mask": "Mask"
     }
   }
 }

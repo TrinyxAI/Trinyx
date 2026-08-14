@@ -111,8 +111,7 @@ class CoreToolsProviderTest {
                     buildToolData("agent", "Agent"),
                     buildToolData("skill", "Skill"),
                     buildToolData("application", "Application"),
-                    buildToolData("web_search", "Web search"),
-                    buildToolData("image_generation", "Image generation")
+                    buildToolData("web_search", "Web search")
             );
 
             when(restTemplate.getForEntity(anyString(), eq(Map.class)))
@@ -126,6 +125,57 @@ class CoreToolsProviderTest {
                     .map(ToolDefinition::name))
                     .contains("catalog")
                     .doesNotContain("web_search");
+        }
+
+        /**
+         * generation debits credits on every create, so the install-level flag has to
+         * reach the chat cache too. With the flag off catalog-service never registers
+         * the provider; a cache that still expected the tool would hand it to chat the
+         * moment any source advertised the name.
+         */
+        @Test
+        @DisplayName("spend gate off: generation is neither expected nor served to chat")
+        void disabledGenerationIsNotExpectedOrCached() throws Exception {
+            setFeatureFlag("generationEnabled", false);
+            List<Map<String, Object>> tools = List.of(
+                    buildToolData("catalog", "Catalog"),
+                    buildToolData("generation", "Generation")
+            );
+
+            when(restTemplate.getForEntity(anyString(), eq(Map.class)))
+                    .thenReturn(new ResponseEntity<>(Map.of("tools", tools), HttpStatus.OK));
+
+            coreToolsProvider.refreshCoreTools();
+
+            assertThat(coreToolsProvider.activeCoreToolNames()).doesNotContain("generation");
+            assertThat(coreToolsProvider.getMissingTools()).doesNotContain("generation");
+            assertThat(coreToolsProvider.getCoreTools(Set.of("catalog", "generation"), false).stream()
+                    .map(ToolDefinition::name))
+                    .contains("catalog")
+                    .doesNotContain("generation");
+        }
+
+        @Test
+        @DisplayName("spend gate on: generation is expected, cached, and served when its module is granted")
+        void enabledGenerationIsExpectedAndServed() {
+            List<Map<String, Object>> tools = List.of(
+                    buildToolData("catalog", "Catalog"),
+                    buildToolData("generation", "Generation")
+            );
+
+            when(restTemplate.getForEntity(anyString(), eq(Map.class)))
+                    .thenReturn(new ResponseEntity<>(Map.of("tools", tools), HttpStatus.OK));
+
+            coreToolsProvider.refreshCoreTools();
+
+            assertThat(coreToolsProvider.activeCoreToolNames()).contains("generation");
+            assertThat(coreToolsProvider.getCoreTools(Set.of("generation"), false).stream()
+                    .map(ToolDefinition::name))
+                    .contains("generation");
+            // and an agent whose modules do NOT include it never sees it
+            assertThat(coreToolsProvider.getCoreTools(Set.of("catalog"), false).stream()
+                    .map(ToolDefinition::name))
+                    .doesNotContain("generation");
         }
 
         @Test
@@ -178,6 +228,45 @@ class CoreToolsProviderTest {
             assertThat(names).contains("credential");
             // Legacy routing alias must never be advertised to the LLM.
             assertThat(names).doesNotContain("request_credential");
+        }
+
+        /**
+         * "No toolsConfig" is not "everything". AgentModuleResolver.resolveEnabledModules(null)
+         * is the platform's definition of unrestricted and leaves the two credit-spending
+         * opt-in modules out; the unfiltered accessor used to ignore that and hand a general
+         * chat, where nobody enabled anything, a tool that spends the customer's credits.
+         */
+        @Test
+        @DisplayName("no-config caller gets every ordinary tool but NEITHER credit-spending opt-in")
+        void noConfigCallerNeverGetsTheCreditSpendingTools() {
+            List<Map<String, Object>> tools = List.of(
+                    buildToolData("catalog", "Catalog"),
+                    buildToolData("workflow", "Workflow"),
+                    buildToolData("table", "Table"),
+                    buildToolData("interface", "Interface"),
+                    buildToolData("agent", "Agent"),
+                    buildToolData("skill", "Skill"),
+                    buildToolData("application", "Application"),
+                    buildToolData("web_search", "Web search"),
+                    buildToolData("files", "Files"),
+                    buildToolData("wait", "Wait"),
+                    buildToolData("generation", "Generation")
+            );
+
+            when(restTemplate.getForEntity(anyString(), eq(Map.class)))
+                    .thenReturn(new ResponseEntity<>(Map.of("tools", tools), HttpStatus.OK));
+
+            List<String> names = coreToolsProvider.getCoreTools(false).stream()
+                    .map(ToolDefinition::name).toList();
+
+            assertThat(names).contains("catalog", "workflow", "table", "interface", "agent",
+                    "skill", "application", "web_search", "files", "wait");
+            assertThat(names).doesNotContain("generation", "image_generation");
+            // The cache still HOLDS it - it is only withheld from a caller that granted
+            // nothing, and is served the moment a resolved module set asks for it.
+            assertThat(coreToolsProvider.getCoreTools(Set.of("generation"), false)
+                    .stream().map(ToolDefinition::name))
+                    .contains("generation");
         }
 
         @Test

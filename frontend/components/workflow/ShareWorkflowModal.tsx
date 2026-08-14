@@ -34,6 +34,7 @@ import { CategoryPicker } from '@/components/marketplace/CategoryPicker';
 import { PAID_TEMPLATES_ENABLED } from '@/lib/featureFlags';
 import { screeningService, type FlaggedImage, type ScreeningDecisionEntry } from '@/lib/api/orchestrator/screening.service';
 import { ImageScreeningModal } from '@/components/marketplace/ImageScreeningModal';
+import { ModalStepIndicator } from '@/components/ui/ModalStepIndicator';
 import {
   getPublicationEpochOptions,
   resolveDefaultPublicationEpoch,
@@ -111,49 +112,18 @@ interface StepIndicatorProps {
 
 const StepIndicator: React.FC<StepIndicatorProps> = ({ currentStep, onStepClick }) => {
   const t = useTranslations('publishWorkflow');
-  const steps = [
-    { number: 1, icon: FileText, label: t('step1Title') },
-    { number: 2, icon: Play, label: t('step2Title') },
-    { number: 3, icon: Globe, label: t('step3Title') },
-  ];
-
   return (
-    <div className="flex items-center justify-center gap-2 mb-6">
-      {steps.map((step, index) => {
-        const isActive = step.number === currentStep;
-        const isCompleted = step.number < currentStep;
-        const Icon = step.icon;
-
-        return (
-          <React.Fragment key={step.number}>
-            <button
-              type="button"
-              onClick={() => onStepClick?.(step.number)}
-              disabled={step.number > currentStep}
-              className={`flex items-center gap-2 px-3 py-1.5 rounded-full transition-all ${
-                isActive
-                  ? 'bg-[var(--accent-primary)] text-[var(--accent-foreground)]'
-                  : isCompleted
-                  ? 'bg-emerald-500/20 text-emerald-600 dark:text-emerald-400 cursor-pointer hover:bg-emerald-500/30'
-                  : 'bg-theme-tertiary text-theme-secondary cursor-not-allowed'
-              }`}
-            >
-              {isCompleted ? (
-                <Check className="h-4 w-4" />
-              ) : (
-                <Icon className="h-4 w-4" />
-              )}
-              <span className="text-sm font-medium hidden sm:inline">{step.label}</span>
-            </button>
-            {index < steps.length - 1 && (
-              <div className={`w-8 h-0.5 rounded-full ${
-                step.number < currentStep ? 'bg-emerald-500' : 'bg-theme-tertiary'
-              }`} />
-            )}
-          </React.Fragment>
-        );
-      })}
-    </div>
+    <ModalStepIndicator
+      currentStep={currentStep}
+      onStepClick={onStepClick}
+      // Publishing builds forward: a step ahead has nothing to show yet.
+      isStepEnabled={(step) => step <= currentStep}
+      steps={[
+        { number: 1, icon: FileText, label: t('step1Title') },
+        { number: 2, icon: Play, label: t('step2Title') },
+        { number: 3, icon: Globe, label: t('step3Title') },
+      ]}
+    />
   );
 };
 
@@ -988,12 +958,12 @@ export function PublishWorkflowModal({
                       <span className={`text-sm font-medium ${isSelected ? 'font-semibold' : ''}`}>v{v.version}</span>
                       {v.label && <span className="text-xs text-theme-secondary">{v.label}</span>}
                       {v.version === (activeVersion ?? currentVersion) && (
-                        <span className="text-xs bg-emerald-100 dark:bg-emerald-900/30 text-emerald-600 dark:text-emerald-400 px-1.5 py-0.5 rounded-full">
+                        <span className="text-xs bg-emerald-100 dark:bg-emerald-900/30 text-emerald-600 dark:text-emerald-400 px-1.5 py-0.5 rounded-md">
                           {t('currentVersion')}
                         </span>
                       )}
                       {isPublished && existingPublication?.planVersion === v.version && (
-                        <span className="text-xs bg-blue-100 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400 px-1.5 py-0.5 rounded-full">
+                        <span className="text-xs bg-blue-100 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400 px-1.5 py-0.5 rounded-md">
                           {t('publishedVersion')}
                         </span>
                       )}
@@ -1099,7 +1069,7 @@ export function PublishWorkflowModal({
                             <span className="text-xs text-slate-400">&middot; {run.status?.toLowerCase()}</span>
                           )}
                           {isPublished && existingPublication?.showcaseRunId === run.runId && (
-                            <span className="text-xs bg-blue-100 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400 px-1.5 py-0.5 rounded-full whitespace-nowrap">
+                            <span className="text-xs bg-blue-100 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400 px-1.5 py-0.5 rounded-md whitespace-nowrap">
                               {t('publishedVersion')}
                             </span>
                           )}
@@ -1276,7 +1246,7 @@ export function PublishWorkflowModal({
               {/* "Coming soon" badge to the right of the price while paid
                   templates are disabled. */}
               {!PAID_TEMPLATES_ENABLED && (
-                <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-300 whitespace-nowrap">
+                <span className="inline-flex items-center px-2 py-0.5 rounded-md text-xs font-medium bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-300 whitespace-nowrap">
                   {t('comingSoon')}
                 </span>
               )}
@@ -1298,7 +1268,7 @@ export function PublishWorkflowModal({
       <div className="fixed inset-0 bg-black/20 backdrop-blur-sm z-[9999] flex items-center justify-center p-4">
         <div className="max-w-md w-full bg-theme-primary rounded-3xl shadow-2xl p-8 animate-in fade-in-0 zoom-in-95 duration-300 border border-theme max-h-[90vh] overflow-y-auto">
           <div className="text-center">
-            <div className="w-16 h-16 bg-theme-secondary rounded-full flex items-center justify-center mx-auto mb-5">
+            <div className="w-16 h-16 bg-theme-secondary rounded-2xl flex items-center justify-center mx-auto mb-5">
               <LoadingSpinner size="md" />
             </div>
             <h2 className="text-2xl font-semibold text-theme-primary mb-2">{t('publishing')}</h2>
@@ -1315,7 +1285,7 @@ export function PublishWorkflowModal({
       <div className="fixed inset-0 bg-black/20 backdrop-blur-sm z-[9999] flex items-center justify-center p-4" onClick={() => setPublishPhase(null)}>
         <div className="max-w-md w-full bg-theme-primary rounded-3xl shadow-2xl p-8 animate-in fade-in-0 zoom-in-95 duration-300 border border-theme max-h-[90vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
           <div className="text-center">
-            <div className="w-16 h-16 bg-red-100 dark:bg-red-900/30 rounded-full flex items-center justify-center mx-auto mb-5">
+            <div className="w-16 h-16 bg-red-100 dark:bg-red-900/30 rounded-2xl flex items-center justify-center mx-auto mb-5">
               <AlertTriangle className="h-8 w-8 text-red-600 dark:text-red-400" />
             </div>
             <h2 className="text-2xl font-semibold text-theme-primary mb-2">{t('publishError')}</h2>
@@ -1460,7 +1430,7 @@ export function PublishWorkflowModal({
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex items-center gap-3 mb-4">
-          <div className="w-10 h-10 rounded-full bg-red-100 dark:bg-red-900/30 flex items-center justify-center shrink-0">
+          <div className="w-10 h-10 rounded-xl bg-red-100 dark:bg-red-900/30 flex items-center justify-center shrink-0">
             <EyeOff className="w-5 h-5 text-red-600 dark:text-red-400" />
           </div>
           <h3 id="unpublish-workflow-modal-title" className="text-base font-semibold text-theme-primary">

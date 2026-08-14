@@ -176,7 +176,7 @@ export function WorkflowPreviewBlock({ workflowId, onError, onDelete, onRun, rea
       {/* Active tab overlay */}
       {isTabActive && (
         <div className="absolute inset-0 z-20 bg-black/5 backdrop-blur-[3px] flex items-center justify-center rounded-[18px] cursor-pointer">
-          <div className="flex items-center gap-2 px-4 py-2 bg-white/90 dark:bg-slate-800/90 rounded-full">
+          <div className="flex items-center gap-2 px-4 py-2 bg-white/90 dark:bg-slate-800/90 rounded-md">
             <X className="w-4 h-4 text-theme-primary" />
             <span className="text-sm font-medium text-theme-primary">{t('clickToClose')}</span>
           </div>
@@ -207,7 +207,7 @@ export function WorkflowPreviewBlock({ workflowId, onError, onDelete, onRun, rea
           {workflowData.nodeIcons && workflowData.nodeIcons.length > 0 ? (
             <WorkflowNodeIcons nodeIcons={workflowData.nodeIcons} />
           ) : (
-            <div className="w-14 h-14 bg-theme-secondary rounded-full flex items-center justify-center">
+            <div className="w-14 h-14 bg-theme-secondary rounded-xl flex items-center justify-center">
               <Workflow className="w-7 h-7 text-theme-primary" />
             </div>
           )}

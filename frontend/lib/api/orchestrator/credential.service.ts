@@ -371,15 +371,56 @@ export class CredentialService {
    * <p>When {@code apiToolId} is provided, {@code hasPricing} reflects the
    * rate resolved for that specific endpoint. Without it, the response falls
    * back to "any non-zero rate on this integration".
+   *
+   * <p>{@code modelId} and {@code quantity} quote a GENERATION model rather
+   * than the endpoint as a whole. One endpoint can back several models at
+   * different prices, and a generation usually scales with the size of the
+   * request, so quoting the endpoint would show a number the customer is never
+   * charged. With them, {@code markupCredits} is the price of a run of exactly
+   * that size, and the components ({@code priceUnit}, {@code unitCredits}, ...)
+   * are returned alongside so the surface can explain how it was reached.
+   *
+   * <p>{@code generation} states that the endpoint resells a generated asset.
+   * The caller knows it from the catalog row it is bound to; the pricing
+   * service cannot look it up, because the descriptor lives in a schema it
+   * never queries. It decides whether the credential-wide default may be
+   * quoted: a generation is never sold on a catch-all, so without it a step
+   * bound to a generation endpoint but naming no model was quoted a price
+   * execution refuses.
    */
   async getPlatformCredentialPublicInfo(
     integrationName: string,
     apiToolId?: string | null,
+    quote?: {
+      modelId?: string | null;
+      quantity?: number | string | null;
+      generation?: boolean | null;
+      /**
+       * What the call is COUNTED in (second, image, character, call), which a
+       * model states as its `measuredUnit`. Not the unit it is SOLD by: a model
+       * counted in seconds can be published per minute.
+       */
+      quantityUnit?: string | null;
+    },
   ): Promise<PlatformCredentialPublicInfo> {
-    const params = apiToolId ? { apiToolId } : undefined;
+    const params: Record<string, string> = {};
+    if (apiToolId) params.apiToolId = apiToolId;
+    if (quote?.modelId) params.modelId = quote.modelId;
+    if (quote?.quantity !== undefined && quote?.quantity !== null && quote.quantity !== '') {
+      params.quantity = String(quote.quantity);
+    }
+    // Only sent when the caller can positively say so. Absent means "the caller
+    // could not tell", which is the answer every pre-existing caller gives and
+    // leaves the server on the behaviour it already had.
+    if (quote?.generation) params.generation = 'true';
+    // Sent so the quote can refuse a rate that cannot price this call at all
+    // (a per-image rate against a call counted in seconds). Absent leaves that
+    // question unasked, and it can only ever turn a quote OFF, so it is not a
+    // channel for buying anything cheaply.
+    if (quote?.quantityUnit) params.quantityUnit = quote.quantityUnit;
     return apiClient.get<PlatformCredentialPublicInfo>(
       `/platform-credentials/${encodeURIComponent(integrationName)}/public-info`,
-      params ? { params } : undefined,
+      Object.keys(params).length > 0 ? { params } : undefined,
     );
   }
 

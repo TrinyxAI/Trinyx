@@ -117,4 +117,62 @@ class MonolithFileStorageServiceAdapterTest {
         verify(storageFileStorageService, never()).upload(
                 "tenant-1", "workflow-1", "run-1", "core:make_file", "rec.json", "application/json", content, 3L);
     }
+
+    @Test
+    @DisplayName("adoptRunContext files catalog-produced files in-process - the CE half of the fix")
+    void adoptRunContextDelegatesInProcess() {
+        // This test exists because deleting the override leaves the code COMPILING: it falls back
+        // to the interface's default, which returns 0 and does nothing. CE would then keep showing
+        // every text-to-speech / image-generation output at the ROOT of the Files browser instead
+        // of inside its run - the very bug this change fixes, present in CE only. Same trap the
+        // epoch-0 overrides above guard against.
+        com.apimarketplace.common.storage.service.StorageService indexService =
+                org.mockito.Mockito.mock(com.apimarketplace.common.storage.service.StorageService.class);
+        org.springframework.test.util.ReflectionTestUtils.setField(adapter, "storageIndexService", indexService);
+        java.util.UUID id = java.util.UUID.randomUUID();
+        when(indexService.adoptRunContext(org.mockito.ArgumentMatchers.anyString(),
+                org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.anyString(),
+                org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any(),
+                org.mockito.ArgumentMatchers.anyInt(), org.mockito.ArgumentMatchers.anyInt(),
+                org.mockito.ArgumentMatchers.any())).thenReturn(1);
+
+        int adopted = adapter.adoptRunContext("tenant-1", java.util.List.of(id.toString()),
+                "workflow-1", "run-1", "mcp:elevenlabs_tts", 4, 1, 2);
+
+        assertThat(adopted).isEqualTo(1);
+        org.mockito.ArgumentCaptor<java.util.Collection<java.util.UUID>> ids =
+                org.mockito.ArgumentCaptor.forClass(java.util.Collection.class);
+        verify(indexService).adoptRunContext(org.mockito.ArgumentMatchers.eq("tenant-1"), ids.capture(),
+                org.mockito.ArgumentMatchers.eq("workflow-1"), org.mockito.ArgumentMatchers.eq("run-1"),
+                org.mockito.ArgumentMatchers.eq("mcp:elevenlabs_tts"), org.mockito.ArgumentMatchers.eq(4),
+                org.mockito.ArgumentMatchers.eq(1), org.mockito.ArgumentMatchers.eq(2));
+        assertThat(ids.getValue()).containsExactly(id);
+    }
+
+    @Test
+    @DisplayName("adoptRunContext skips a non-UUID id instead of failing the batch")
+    void adoptRunContextSkipsUnparseableIds() {
+        com.apimarketplace.common.storage.service.StorageService indexService =
+                org.mockito.Mockito.mock(com.apimarketplace.common.storage.service.StorageService.class);
+        org.springframework.test.util.ReflectionTestUtils.setField(adapter, "storageIndexService", indexService);
+        java.util.UUID good = java.util.UUID.randomUUID();
+
+        adapter.adoptRunContext("tenant-1", java.util.List.of("not-a-uuid", good.toString()),
+                "workflow-1", "run-1", "step", 1, 0, null);
+
+        org.mockito.ArgumentCaptor<java.util.Collection<java.util.UUID>> ids =
+                org.mockito.ArgumentCaptor.forClass(java.util.Collection.class);
+        verify(indexService).adoptRunContext(org.mockito.ArgumentMatchers.anyString(), ids.capture(),
+                org.mockito.ArgumentMatchers.anyString(), org.mockito.ArgumentMatchers.any(),
+                org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.anyInt(),
+                org.mockito.ArgumentMatchers.anyInt(), org.mockito.ArgumentMatchers.any());
+        assertThat(ids.getValue()).containsExactly(good);
+    }
+
+    @Test
+    @DisplayName("adoptRunContext without an indexer wired returns 0 rather than throwing")
+    void adoptRunContextWithoutIndexer() {
+        assertThat(adapter.adoptRunContext("tenant-1", java.util.List.of(java.util.UUID.randomUUID().toString()),
+                "workflow-1", "run-1", "step", 1, 0, null)).isZero();
+    }
 }

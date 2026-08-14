@@ -36,6 +36,12 @@ interface SecondaryAction {
  * Step-by-step execution status
  */
 interface StepByStepStatus {
+  /**
+   * The run's persisted execution mode, terminality NOT folded in (unlike
+   * {@code isStepByStepMode}). Drives the rerun label: on a stepped run a rerun executes
+   * nothing and waits for the user, whatever the run's status.
+   */
+  isSteppedRun: boolean;
   isStepByStepMode: boolean;
   canExecute: boolean;
   isExecuting: boolean;
@@ -380,11 +386,14 @@ export function InspectorPanelHeader({
           <SecondaryActionsMenu items={secondaryActions} moreActionsLabel={t('moreActions')} />
         )}
 
-        {/* Play button for step-by-step execution - always visible */}
+        {/* Run actions. The play button is step-by-step only (nothing to step in automatic
+            mode), but the re-run button is offered in BOTH modes: restarting from a node is
+            mode-blind on the backend. They are gated separately so automatic mode does not
+            show a permanently disabled play button next to a usable re-run. */}
         {node && !isInterfaceNode && !isPreviewOnly && (
           isRunMode ? (
-            stepByStepStatus.isStepByStepMode && (
-              <>
+            <>
+              {stepByStepStatus.isStepByStepMode && (
                 <Button
                   type="button"
                   variant="ghost"
@@ -410,9 +419,12 @@ export function InspectorPanelHeader({
                     <Play className="h-4 w-4" fill="currentColor" />
                   )}
                 </Button>
+              )}
 
-                {/* Re-run button */}
-                {stepByStepStatus.canRerun && (
+              {/* Re-run button - both execution modes. Triggers excluded, matching the canvas
+                  bar and the context menu: "restart from here" on a trigger is the whole DAG,
+                  and this surface has no distinct label for that. */}
+              {stepByStepStatus.canRerun && !isTriggerNode && (
                   <Button
                     type="button"
                     variant="ghost"
@@ -430,7 +442,13 @@ export function InspectorPanelHeader({
                         stepByStepStatus.rerunStep();
                       }
                     }}
-                    title={stepByStepStatus.isRerunning ? t('rerunning') : t('rerunTooltip')}
+                    title={stepByStepStatus.isRerunning
+                      ? t('rerunning')
+                      // In automatic mode the rerun does not stop at this node: say so, since
+                      // the downstream chain re-runs unattended and may cost real calls.
+                      // isSteppedRun, not isStepByStepMode: the latter folds in terminality and
+                      // would show the automatic warning on a FINISHED stepped run.
+                      : t(stepByStepStatus.isSteppedRun ? 'rerunTooltip' : 'rerunTooltipAuto')}
                   >
                     {stepByStepStatus.isRerunning ? (
                       <LoadingSpinner size="xs" />
@@ -439,8 +457,7 @@ export function InspectorPanelHeader({
                     )}
                   </Button>
                 )}
-              </>
-            )
+            </>
           ) : (
             <Button
               type="button"

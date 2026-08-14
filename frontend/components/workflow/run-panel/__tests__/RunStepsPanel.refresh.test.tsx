@@ -37,6 +37,9 @@ vi.mock('./../EpochSelector', () => ({ EpochSelector: () => null }));
 vi.mock('@/app/workflows/builder/components/nodes/shared', () => ({
   getIconSlug: () => 'x',
   NodeIcon: () => null,
+  // The no-icon placeholder reads its corner from here. Its real value is
+  // pinned in nodeIconShape.test.tsx; this file is about the refresh cycle.
+  nodeIconRadiusClass: () => 'rounded-md',
 }));
 
 import { RunStepsPanel } from '@/components/workflow/run-panel/RunStepsPanel';

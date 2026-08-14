@@ -294,6 +294,72 @@ class InternalInterfaceControllerTest {
     }
 
     @Nested
+    @DisplayName("POST /image-generation - hands the generation result to the service untouched")
+    class Generation {
+
+        @Test
+        @DisplayName("Forwards the generation tool's result and the prompt that produced it")
+        void shouldForwardGenerationResultAndPrompt() throws Exception {
+            InterfaceEntity entity = createEntity();
+            entity.setInterfaceType("image_generation");
+            when(interfaceService.createOrUpdateImageGenerationInterface(
+                    eq(TENANT), eq("conv-1"), eq("msg-1"), eq("agent-1"),
+                    eq("a paper boat"), any(), eq("a paper boat drifting"), isNull()))
+                    .thenReturn(entity);
+
+            String body = "{\"name\":\"a paper boat\",\"conversation_id\":\"conv-1\","
+                    + "\"message_id\":\"msg-1\",\"agent_id\":\"agent-1\","
+                    + "\"prompt\":\"a paper boat drifting\","
+                    + "\"data\":{\"model\":\"seedance-2.0-fast\",\"kind\":\"video\","
+                    + "\"file\":{\"_type\":\"file\",\"path\":\"tenant-1/gen/clip.mp4\"}}}";
+
+            mockMvc.perform(post(BASE + "/image-generation")
+                            .header("X-User-ID", TENANT)
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content(body))
+                    .andExpect(status().isOk());
+
+            // The payload reaches the service as posted: shaping it here would
+            // put one of the two producer shapes in a controller.
+            verify(interfaceService).createOrUpdateImageGenerationInterface(
+                    eq(TENANT), eq("conv-1"), eq("msg-1"), eq("agent-1"), eq("a paper boat"),
+                    argThat(data -> "seedance-2.0-fast".equals(data.get("model"))
+                            && data.get("file") instanceof Map),
+                    eq("a paper boat drifting"), isNull());
+        }
+
+        @Test
+        @DisplayName("A body from an older sender, with no prompt field, still persists")
+        void shouldAcceptABodyWithoutTheNewPromptField() throws Exception {
+            InterfaceEntity entity = createEntity();
+            entity.setInterfaceType("image_generation");
+            when(interfaceService.createOrUpdateImageGenerationInterface(
+                    eq(TENANT), eq("conv-1"), eq("msg-1"), eq("agent-1"),
+                    eq("a paper boat"), any(), isNull(), isNull()))
+                    .thenReturn(entity);
+
+            // Exactly what orchestrator's image tool posts today. A rolling
+            // deploy runs an older sender against this endpoint, so the absent
+            // field has to be absent, not invalid.
+            String body = "{\"name\":\"a paper boat\",\"conversation_id\":\"conv-1\","
+                    + "\"message_id\":\"msg-1\",\"agent_id\":\"agent-1\","
+                    + "\"data\":{\"images\":[{\"path\":\"tenant-1/img/a.png\"}],"
+                    + "\"provider\":\"openai\",\"billing_model\":\"gpt-image-1.5-medium\","
+                    + "\"prompt\":\"a paper boat\"}}";
+
+            mockMvc.perform(post(BASE + "/image-generation")
+                            .header("X-User-ID", TENANT)
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content(body))
+                    .andExpect(status().isOk());
+
+            verify(interfaceService).createOrUpdateImageGenerationInterface(
+                    anyString(), anyString(), anyString(), anyString(), anyString(),
+                    any(), isNull(), isNull());
+        }
+    }
+
+    @Nested
     class Slides {
         @Test
         void shouldCreateSlide() throws Exception {

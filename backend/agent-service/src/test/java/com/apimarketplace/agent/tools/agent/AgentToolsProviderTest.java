@@ -152,6 +152,26 @@ class AgentToolsProviderTest {
         }
 
         @Test
+        @DisplayName("generation is in the schema, and says it is opt-in and spends credits")
+        void generationGrantIsAdvertised() {
+            // Same shape of gap file_access_mode had, and worse: the execution
+            // surface has honoured toolsConfig.generation since the generation
+            // tool shipped, so an agent that could not discover this parameter
+            // could not give a sub-agent the ability to produce an asset, and
+            // had nothing in the payload explaining why.
+            ToolParameter generation = findParam("generation");
+
+            assertThat(generation.type()).isEqualTo("boolean");
+            assertThat(generation.required()).isFalse();
+            // The two facts an agent needs to decide, both stated where it
+            // reads: it is off unless asked for, and using it costs the account
+            // money. Without the second, a builder turns it on everywhere.
+            assertThat(generation.description())
+                    .contains("default: false")
+                    .contains("credits");
+        }
+
+        @Test
         @DisplayName("RESOURCE GRANTS cross-references resolve: params point at a block that exists in the tool description")
         void resourceGrantsCrossRefResolves() {
             // The grant/list/access-mode params share one semantics block ('RESOURCE GRANTS') in the

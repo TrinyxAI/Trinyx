@@ -58,6 +58,21 @@ public class V2StepByStepContextManager implements RunScopedCache {
     // This cache preserves data that only exists in-memory between step-by-step calls.
     private final Map<String, Map<String, Object>> globalDataCache = new ConcurrentHashMap<>();
 
+    /**
+     * Which epoch last wrote each ENTRY of the run-level {@code globalDataCache} mirror:
+     * {@code runId -> (globalData key -> epoch)}. Read by {@link #getCachedGlobalData(String, int)}
+     * so an epoch never inherits another epoch's back-edge state through the fallback.
+     *
+     * <p>Per ENTRY, not per run, on purpose. A run-level attribution has to be dropped whenever
+     * the epoch-less overload writes - otherwise data written for no epoch in particular becomes
+     * unreadable - and dropping it re-admits every previously attributed entry, which is the leak
+     * itself. Per entry, an un-attributed write only un-attributes the keys it actually wrote.
+     *
+     * <p>A key with no entry here is un-attributed and readable by any epoch, which is the
+     * pre-existing behaviour for callers that do not know their epoch.
+     */
+    private final Map<String, Map<String, Integer>> globalDataMirrorEpochByKey = new ConcurrentHashMap<>();
+
     private final ExecutionCacheManager executionCacheManager;
     private final RunContextService runContextService;
     private final TriggerEpochManager triggerEpochManager;
@@ -255,7 +270,13 @@ public class V2StepByStepContextManager implements RunScopedCache {
 
         // Merge cached globalData (e.g., BackEdgeState for loop iterations) into the state.
         // This preserves in-memory state across step-by-step calls.
-        Map<String, Object> cachedGlobalData = getCachedGlobalData(tree.runId());
+        // Epoch-scoped whenever this build resolved an epoch, exactly like the sibling overload
+        // twelve lines up resolves its ExecutionState: reading the mirror epoch-blind here would
+        // hand epoch N's back_edge_state{terminated=true} to epoch N+1 and drop its loop in
+        // silence. Epoch 0 / unresolved keeps the run-level read (nothing to scope by).
+        Map<String, Object> cachedGlobalData = epoch > 0
+            ? getCachedGlobalData(tree.runId(), epoch)
+            : getCachedGlobalData(tree.runId());
         if (!cachedGlobalData.isEmpty()) {
             for (Map.Entry<String, Object> entry : cachedGlobalData.entrySet()) {
                 state = state.withGlobalData(entry.getKey(), entry.getValue());
@@ -522,6 +543,14 @@ public class V2StepByStepContextManager implements RunScopedCache {
     public void updateGlobalData(String runId, Map<String, Object> globalData) {
         if (globalData != null && !globalData.isEmpty()) {
             globalDataCache.computeIfAbsent(runId, k -> new ConcurrentHashMap<>()).putAll(globalData);
+            // This writer has no epoch, so the keys it writes stop belonging to one and become
+            // readable by any epoch again. Only THESE keys: dropping the whole run's attribution
+            // would re-admit every entry an earlier epoch-scoped write attributed, which is the
+            // cross-epoch leak this attribution exists to stop.
+            Map<String, Integer> attribution = globalDataMirrorEpochByKey.get(runId);
+            if (attribution != null) {
+                attribution.keySet().removeAll(globalData.keySet());
+            }
             log.debug("[ContextManager] Updated globalData cache: runId={}, keys={}", runId, globalData.keySet());
         }
     }
@@ -542,17 +571,71 @@ public class V2StepByStepContextManager implements RunScopedCache {
             globalDataCache.computeIfAbsent(key, k -> new ConcurrentHashMap<>()).putAll(globalData);
             // Also update run-level cache for backward compat
             globalDataCache.computeIfAbsent(runId, k -> new ConcurrentHashMap<>()).putAll(globalData);
+            // Remember which epoch each mirrored entry belongs to, so an epoch-scoped read can
+            // refuse to inherit another epoch's. See getCachedGlobalData(runId, epoch).
+            Map<String, Integer> attribution =
+                globalDataMirrorEpochByKey.computeIfAbsent(runId, k -> new ConcurrentHashMap<>());
+            globalData.keySet().forEach(dataKey -> attribution.put(dataKey, epoch));
             log.debug("[ContextManager] Updated globalData cache: runId={}, epoch={}, keys={}", runId, epoch, globalData.keySet());
         }
     }
 
     /**
      * Get the cached global data for a specific epoch.
-     * Falls back to run-level cache if epoch-specific cache is not found.
+     *
+     * <p>Falls back to the run-level mirror when this epoch has no entry yet - but ONLY when
+     * that mirror was not written by a DIFFERENT epoch.
+     *
+     * <p>Without that guard the fallback leaks epoch-scoped execution state forward. The one
+     * that hurts is {@code back_edge_state:<edgeId>}: a loop that terminated in epoch N leaves
+     * {@code terminated=true} in the mirror, and the first epoch-N+1 read that finds no
+     * {@code runId:N+1} entry adopts it. {@code BackEdgeHandler.executeBackEdgeIteration} then
+     * takes its {@code if (state.terminated()) continue} branch - the loop neither iterates nor
+     * routes to its exit, the signal resume finds nothing ready, and the epoch closes COMPLETED
+     * with the rest of the workflow never executed. No failed node, no error.
+     *
+     * <p>A single replica usually hides it, because the nodes at the head of epoch N+1 populate
+     * {@code runId:N+1} before the loop tail is reached. It bites when the epoch's head and its
+     * post-signal tail run on DIFFERENT replicas: the replica that resumes ran epoch N (so it has
+     * the mirror) but not the head of epoch N+1 (so it has no epoch entry) - exactly the shape of
+     * a long Wait inside a loop body, where the resume is dispatched cross-instance.
+     *
+     * <p>{@code reconcileWithSharedProgress} cannot rescue this: it only ever ADDS a termination
+     * published by a peer, it never clears one.
      */
     public Map<String, Object> getCachedGlobalData(String runId, int epoch) {
         Map<String, Object> epochData = globalDataCache.get(runId + ":" + epoch);
-        return epochData != null ? epochData : globalDataCache.getOrDefault(runId, Map.of());
+        if (epochData != null) {
+            return epochData;
+        }
+        Map<String, Object> mirror = globalDataCache.getOrDefault(runId, Map.of());
+        if (mirror.isEmpty()) {
+            return mirror;
+        }
+        Map<String, Integer> attribution = globalDataMirrorEpochByKey.getOrDefault(runId, Map.of());
+        if (attribution.isEmpty()) {
+            return mirror;
+        }
+        Map<String, Object> inheritable = new HashMap<>();
+        List<String> withheld = new ArrayList<>();
+        for (Map.Entry<String, Object> entry : mirror.entrySet()) {
+            Integer owner = attribution.get(entry.getKey());
+            if (owner == null || owner == epoch) {
+                inheritable.put(entry.getKey(), entry.getValue());
+            } else {
+                withheld.add(entry.getKey());
+            }
+        }
+        if (!withheld.isEmpty()) {
+            // INFO, not DEBUG: this line is the only runtime evidence that the cross-epoch
+            // isolation is doing its job on the shape that caused the 2026-08-05 truncation.
+            // One line per epoch per run at most - the epoch's own entry short-circuits every
+            // later read.
+            log.info("[ContextManager] Withheld {} run-level globalData entries from epoch {} "
+                    + "(written by another epoch): runId={}, keys={}",
+                withheld.size(), epoch, runId, withheld);
+        }
+        return inheritable;
     }
 
     // ==================== Cleanup ====================
@@ -569,6 +652,7 @@ public class V2StepByStepContextManager implements RunScopedCache {
         triggerItemsCache.keySet().removeIf(k -> k.startsWith(prefix));
         globalDataCache.remove(runId);
         globalDataCache.keySet().removeIf(k -> k.startsWith(prefix));
+        globalDataMirrorEpochByKey.remove(runId);
     }
 
     /**

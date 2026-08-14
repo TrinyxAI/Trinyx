@@ -58,7 +58,8 @@ public class PublicationCloudPlatformInfoAccess implements CloudPlatformCredenti
 
     @Override
     @SuppressWarnings("unchecked")
-    public Optional<Map<String, Object>> fetchPlatformInfo(String integrationName, String apiToolId) {
+    public Optional<Map<String, Object>> fetchPlatformInfo(String integrationName, String apiToolId,
+                                                            String modelId, String quantity) {
         if (integrationName == null || integrationName.isBlank()) {
             return Optional.empty();
         }
@@ -73,7 +74,7 @@ public class PublicationCloudPlatformInfoAccess implements CloudPlatformCredenti
         headers.set(INSTALL_HEADER, credentials.installId());
         headers.setAccept(List.of(MediaType.APPLICATION_JSON));
 
-        String url = url(credentials.cloudApiUrl(), integrationName, apiToolId);
+        String url = url(credentials.cloudApiUrl(), integrationName, apiToolId, modelId, quantity);
         try {
             ResponseEntity<Map> response = restTemplate.exchange(
                     url, HttpMethod.GET, new HttpEntity<>(headers), Map.class);
@@ -90,14 +91,30 @@ public class PublicationCloudPlatformInfoAccess implements CloudPlatformCredenti
         }
     }
 
-    private static String url(String base, String integrationName, String apiToolId) {
+    private static String url(String base, String integrationName, String apiToolId,
+                              String modelId, String quantity) {
         String cleanBase = base.endsWith("/") ? base.substring(0, base.length() - 1) : base;
-        String url = cleanBase + PLATFORM_INFO_PATH
-                + URLEncoder.encode(integrationName, StandardCharsets.UTF_8);
-        if (apiToolId != null && !apiToolId.isBlank()) {
-            url = url + "?apiToolId=" + URLEncoder.encode(apiToolId, StandardCharsets.UTF_8);
+        StringBuilder url = new StringBuilder(cleanBase).append(PLATFORM_INFO_PATH)
+                .append(URLEncoder.encode(integrationName, StandardCharsets.UTF_8));
+        boolean first = true;
+        first = appendParam(url, first, "apiToolId", apiToolId);
+        first = appendParam(url, first, "modelId", modelId);
+        appendParam(url, first, "quantity", quantity);
+        return url.toString();
+    }
+
+    /**
+     * Appends one query parameter when it carries a value, returning whether the
+     * next one is still the first. An absent value adds nothing, so the cloud
+     * sees exactly the parameters the caller could answer for.
+     */
+    private static boolean appendParam(StringBuilder url, boolean first, String name, String value) {
+        if (value == null || value.isBlank()) {
+            return first;
         }
-        return url;
+        url.append(first ? '?' : '&').append(name).append('=')
+                .append(URLEncoder.encode(value, StandardCharsets.UTF_8));
+        return false;
     }
 
     private static RestTemplate defaultRestTemplate() {

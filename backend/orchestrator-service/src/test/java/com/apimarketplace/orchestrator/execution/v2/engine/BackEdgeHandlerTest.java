@@ -437,6 +437,105 @@ class BackEdgeHandlerTest {
             );
         }
 
+        /**
+         * Regression: a later epoch's first back-edge advance was silently swallowed by the
+         * per-JVM claim set, which keyed on {@code runId:edgeId:iteration} and so had no way
+         * to tell epoch 2's completed-iteration 0 from epoch 1's. The advance was mistaken
+         * for a split sibling and skipped: no body re-entry, no exit routing, no ready nodes,
+         * and no error - the epoch closes as COMPLETED with everything after the loop missing.
+         *
+         * <p>Single-replica deployments hid it because {@code cleanupRun} clears the set on the
+         * epoch reset; with several replicas only the pod that performed the reset clears, and
+         * a resume that lands on any other pod hits the stale entry. The cross-replica claim
+         * ({@code RedisLoopIterationStore.claimKey}) has always been epoch-scoped, so this was
+         * the two layers disagreeing on what a claim identifies.
+         */
+        @Test
+        @DisplayName("Epoch 2's back-edge must not be swallowed by epoch 1's per-JVM claim")
+        void laterEpochBackEdgeIsNotSwallowedByEarlierEpochClaim() {
+            ExecutionNode sourceNode = mock(ExecutionNode.class);
+            when(sourceNode.getNodeId()).thenReturn("mcp:body_last");
+            Edge iterateEdge = createIterateEdge("mcp:body_last", "core:my_loop:iterate");
+            Core loopCore = createLoopCore("my_loop", null, 3);  // no condition = always true
+
+            WorkflowPlan plan = mock(WorkflowPlan.class);
+            when(plan.getIterateEdgesForSource("mcp:body_last")).thenReturn(List.of(iterateEdge));
+            when(plan.findLoopCoreForIterateEdge(iterateEdge)).thenReturn(Optional.of(loopCore));
+            when(plan.findLoopBodyTarget("core:my_loop")).thenReturn("mcp:body_first");
+
+            when(execution.getRunId()).thenReturn("run-epoch-claim");
+
+            ExecutionNode bodyEntry = mock(ExecutionNode.class);
+            java.util.function.Function<String, ExecutionNode> nodeFinder = id ->
+                "mcp:body_first".equals(id) ? bodyEntry : null;
+
+            List<Integer> bodyReEntriesByEpoch = new ArrayList<>();
+
+            // Epoch 1: first back-edge advance (completed body iteration 0).
+            handler.handleBackEdge(
+                sourceNode, freshLoopContext(plan, 1), execution, eventService,
+                mock(TriggerItem.class), nodeFinder,
+                (n, c, e, es, i) -> { bodyReEntriesByEpoch.add(1); return c; });
+            assertEquals(List.of(1), bodyReEntriesByEpoch,
+                "Epoch 1 must re-enter the loop body");
+
+            // Epoch 2 on the SAME handler instance (= the same replica): a new epoch restarts
+            // the loop at completed-iteration 0, with its own fresh back-edge state.
+            handler.handleBackEdge(
+                sourceNode, freshLoopContext(plan, 2), execution, eventService,
+                mock(TriggerItem.class), nodeFinder,
+                (n, c, e, es, i) -> { bodyReEntriesByEpoch.add(2); return c; });
+
+            assertEquals(List.of(1, 2), bodyReEntriesByEpoch,
+                "Epoch 2's back-edge must re-enter the loop body too. A missing second entry is "
+              + "the silent truncation: the loop neither iterates nor routes to its exit, the "
+              + "resume finds nothing ready, and the epoch closes COMPLETED with the rest of the "
+              + "workflow never executed.");
+        }
+
+        /**
+         * The purge in {@code clearNestedBackEdgeState} removes a nested loop's claims by
+         * PREFIX. If the prefix and the key are ever built differently the purge matches
+         * nothing, the inner loop keeps its iteration-0 claim across outer passes, and its
+         * back-edge is dropped in silence. Both now come from one place; this pins that they
+         * agree, which no behavioural test in this repo can currently do (nested loops have a
+         * separate, pre-existing defect that masks the difference end-to-end).
+         */
+        @Test
+        @DisplayName("The nested-claim purge prefix matches the claim key it must remove")
+        void claimKeyAndPurgePrefixAgree() {
+            String key = BackEdgeHandler.localClaimKey("run-7", 3, "edge-a", 0);
+            String prefix = BackEdgeHandler.localClaimKeyPrefix("run-7", 3, "edge-a");
+
+            assertTrue(key.startsWith(prefix),
+                "A claim the purge cannot match is a claim that outlives its loop: key=" + key
+              + " prefix=" + prefix);
+            assertFalse(BackEdgeHandler.localClaimKey("run-7", 4, "edge-a", 0).startsWith(prefix),
+                "The prefix must not reach into another epoch's claims");
+            // "edge-a2" starts with "edge-a": without the trailing separator the prefix would
+            // purge a DIFFERENT loop's claims. One character, silently wrong, and the pair of
+            // ids has to be chosen this way for the assertion to be able to see it.
+            assertFalse(BackEdgeHandler.localClaimKey("run-7", 3, "edge-a2", 0).startsWith(prefix),
+                "The prefix must stop at the edge id, not swallow every id it prefixes");
+            assertFalse(BackEdgeHandler.localClaimKey("run-70", 3, "edge-a", 0).startsWith(prefix),
+                "The prefix must stop at the run id too");
+            assertTrue(BackEdgeHandler.localClaimKey("run-7", 3, "edge-a", 12).startsWith(prefix),
+                "The prefix must cover EVERY iteration of its own edge - that is what it purges");
+        }
+
+        /** A context for a loop back-edge in {@code epoch}, with no prior back-edge state. */
+        private ExecutionContext freshLoopContext(WorkflowPlan plan, int epoch) {
+            ExecutionContext ctx = mock(ExecutionContext.class);
+            when(ctx.plan()).thenReturn(plan);
+            when(ctx.epoch()).thenReturn(epoch);
+            when(ctx.itemIndex()).thenReturn(0);
+            when(ctx.getGlobalData(anyString())).thenReturn(Optional.empty());
+            when(ctx.withGlobalData(anyString(), any())).thenReturn(ctx);
+            when(ctx.withoutNodes(anySet())).thenReturn(ctx);
+            when(ctx.withStepOutput(anyString(), anyMap())).thenReturn(ctx);
+            return ctx;
+        }
+
         @Test
         @DisplayName("Bug A regression (AUTO mode) - terminate when state.iteration() + 1 == maxIterations and skip body re-traversal")
         void autoModeTerminatesWhenNextIterEqualsMax() {
@@ -832,6 +931,64 @@ class BackEdgeHandlerTest {
                 "Termination must activate the loop's exit target after the last admissible body iter");
             assertFalse(sbsResult.readyNodes().contains("mcp:body_first"),
                 "Termination must NOT re-traverse the body - no more iters fit");
+        }
+
+        /**
+         * Companion to {@code laterEpochBackEdgeIsNotSwallowedByEarlierEpochClaim} in
+         * {@code HandleBackEdgeTests}, on the SIGNAL-RESUME entry point.
+         *
+         * <p>A loop body that yields (wait / approval / interface) never reaches the AUTO
+         * traversal at its tail: the back-edge is advanced from here instead, when the resume
+         * runs the body's last node. This path does not claim today, so the test passes on
+         * both sides of that fix - it is here so a future refactor that gives this entry point
+         * the same claim cannot reintroduce the epoch-1 collision on the very path where a
+         * dropped back-edge is invisible (no exception, epoch closes COMPLETED).
+         */
+        @Test
+        @DisplayName("Epoch 2 back-edge must not be swallowed by epoch 1's per-JVM claim")
+        void shouldNotDropLaterEpochBackEdgeClaimedInEarlierEpoch() {
+            ExecutionNode sourceNode = mock(ExecutionNode.class);
+            Edge iterateEdge = createIterateEdge("mcp:body_last", "core:my_loop:iterate");
+            Core loopCore = createLoopCore("my_loop", null, 3);
+
+            WorkflowPlan plan = mock(WorkflowPlan.class);
+            when(plan.getIterateEdgesForSource("mcp:body_last")).thenReturn(List.of(iterateEdge));
+            when(plan.findLoopCoreForIterateEdge(iterateEdge)).thenReturn(Optional.of(loopCore));
+            when(plan.findLoopBodyTarget("core:my_loop")).thenReturn("mcp:body_first");
+
+            when(execution.getRunId()).thenReturn("run-epoch-claim");
+
+            NodeExecutionResult result = NodeExecutionResult.success("mcp:body_last", Map.of());
+
+            // Epoch 1, first back-edge advance (completed body iteration 0).
+            StepByStepExecutionResult epochOne = handler.executeBackEdgeIteration(
+                sourceNode, "mcp:body_last", result, freshLoopContext(plan, 1), execution, eventService,
+                mock(TriggerItem.class), 0, new HashMap<>());
+            assertTrue(epochOne.readyNodes().contains("mcp:body_first"),
+                "Epoch 1 must re-enter the loop body");
+
+            // Epoch 2 on the SAME handler instance: a new epoch restarts at completed
+            // iteration 0, with its own fresh (empty) back-edge state.
+            StepByStepExecutionResult epochTwo = handler.executeBackEdgeIteration(
+                sourceNode, "mcp:body_last", result, freshLoopContext(plan, 2), execution, eventService,
+                mock(TriggerItem.class), 0, new HashMap<>());
+
+            assertTrue(epochTwo.readyNodes().contains("mcp:body_first"),
+                "Epoch 2's back-edge must advance the loop. Empty ready nodes here is the silent "
+              + "truncation: the resume loop sees nothing ready and closes the epoch as COMPLETED "
+              + "with everything after the loop never executed.");
+        }
+
+        /** A context for a loop back-edge in {@code epoch}, with no prior back-edge state. */
+        private ExecutionContext freshLoopContext(WorkflowPlan plan, int epoch) {
+            ExecutionContext ctx = mock(ExecutionContext.class);
+            when(ctx.plan()).thenReturn(plan);
+            when(ctx.epoch()).thenReturn(epoch);
+            when(ctx.getGlobalData(anyString())).thenReturn(Optional.empty());
+            when(ctx.withGlobalData(anyString(), any())).thenReturn(ctx);
+            when(ctx.withoutNodes(anySet())).thenReturn(ctx);
+            when(ctx.withStepOutput(anyString(), anyMap())).thenReturn(ctx);
+            return ctx;
         }
     }
 

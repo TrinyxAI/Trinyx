@@ -220,7 +220,7 @@ export function EditColumnModal({
         {/* Header - same shape as AddColumnModal Step-2 (centered icon-circle + title + subtitle). */}
         <div className="px-8 pt-8 pb-4 flex-shrink-0">
           <div className="text-center mb-4">
-            <div className="w-16 h-16 bg-theme-secondary rounded-full flex items-center justify-center mx-auto mb-4">
+            <div className="w-16 h-16 bg-theme-secondary rounded-2xl flex items-center justify-center mx-auto mb-4">
               <Pencil className="w-8 h-8 text-theme-primary" />
             </div>
             <h3 className="text-2xl font-semibold text-theme-primary">{t('title')}</h3>
@@ -235,7 +235,7 @@ export function EditColumnModal({
               * Type is read-only here; the description below the card explains why. */}
             <div className="rounded-xl border border-slate-200 dark:border-slate-700/50 bg-theme-secondary/50 overflow-hidden">
               <div className="flex items-center gap-3 px-4 py-3 border-b border-slate-200 dark:border-slate-700/50">
-                <div className="w-8 h-8 rounded-full bg-[var(--accent-primary)]/10 flex items-center justify-center">
+                <div className="w-8 h-8 rounded-xl bg-[var(--accent-primary)]/10 flex items-center justify-center">
                   <RecapIcon className="h-4 w-4 text-[var(--accent-primary)]" />
                 </div>
                 <div className="flex-1 min-w-0">
@@ -244,7 +244,7 @@ export function EditColumnModal({
                     <p className="text-xs text-theme-muted leading-tight mt-0.5">{recapDescription}</p>
                   )}
                 </div>
-                <span className="text-[10px] uppercase tracking-wider text-theme-muted px-2 py-0.5 rounded-full bg-theme-tertiary flex-shrink-0">
+                <span className="text-[10px] uppercase tracking-wider text-theme-muted px-2 py-0.5 rounded-md bg-theme-tertiary flex-shrink-0">
                   {t('typeImmutableHint')}
                 </span>
               </div>

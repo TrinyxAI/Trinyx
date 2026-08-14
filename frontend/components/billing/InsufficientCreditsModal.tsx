@@ -175,7 +175,7 @@ export default function InsufficientCreditsModal() {
         <DialogContent className="max-w-3xl w-full max-h-[95vh] overflow-y-auto p-0 gap-0">
           {/* Header */}
           <div className="p-4 sm:p-6 pb-3 sm:pb-4 pr-12 text-center border-b border-theme">
-            <div className="w-12 h-12 sm:w-14 sm:h-14 bg-amber-100 dark:bg-amber-900/30 rounded-full flex items-center justify-center mx-auto mb-3 sm:mb-4">
+            <div className="w-12 h-12 sm:w-14 sm:h-14 bg-amber-100 dark:bg-amber-900/30 rounded-xl flex items-center justify-center mx-auto mb-3 sm:mb-4">
               <AlertTriangle className="h-6 w-6 sm:h-7 sm:w-7 text-amber-600 dark:text-amber-400" />
             </div>
             <h2 className="text-lg sm:text-xl font-semibold text-theme-primary mb-1">

@@ -114,7 +114,7 @@ export default function InviteMemberModal({ open, onClose, orgId, onInviteSent }
       >
         {/* Header */}
         <div className="flex flex-col items-center text-center mb-6">
-          <div className="w-16 h-16 bg-theme-secondary rounded-full flex items-center justify-center mb-4">
+          <div className="w-16 h-16 bg-theme-secondary rounded-2xl flex items-center justify-center mb-4">
             <UserPlus className="h-7 w-7 text-theme-primary" />
           </div>
           <h2 className="text-2xl font-semibold text-theme-primary">{t('inviteTitle')}</h2>

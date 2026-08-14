@@ -320,15 +320,18 @@ public class InterfaceClient {
         }
     }
 
-    // ========== Image Generation Interfaces ==========
+    // ========== Generation Interfaces ==========
 
     /**
-     * Create or update an image-generation interface (groups by conversation/message/agent).
+     * Create or update a generation interface (groups by conversation/message/agent).
      *
      * <p>Mirrors {@link #createOrUpdateAgentBrowseInterface}. Persists the
-     * generated image payload as an Interface entity so the chat side
-     * panel can re-fetch it via {@code interfaceId} (rather than relying
-     * on the inline base64 staying in conversation history forever).
+     * generated asset as an Interface entity so the chat side panel can
+     * re-fetch it via {@code interfaceId} (rather than relying on the tool
+     * result staying in conversation history forever). The request carries a
+     * generation tool result verbatim in either producer shape, the unified
+     * tool's single {@code file} or the legacy image tool's {@code images[]};
+     * see {@link com.apimarketplace.interfaces.client.dto.ImageGenerationInterfaceRequest}.
      *
      * <p>Returns {@code null} on failure - the caller (the
      * {@code ToolResultPersistEnricher} pipeline) treats {@code null} as

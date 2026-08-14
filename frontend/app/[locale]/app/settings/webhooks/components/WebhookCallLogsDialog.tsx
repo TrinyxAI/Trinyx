@@ -74,7 +74,7 @@ export function WebhookCallLogsDialog({ open, onOpenChange, webhook }: WebhookCa
       >
         {/* Header */}
         <div className="text-center mb-6">
-          <div className="w-16 h-16 bg-theme-secondary rounded-full flex items-center justify-center mx-auto mb-4">
+          <div className="w-16 h-16 bg-theme-secondary rounded-2xl flex items-center justify-center mx-auto mb-4">
             <ScrollText className="w-8 h-8 text-theme-primary" />
           </div>
           <h3 id={titleId} className="text-2xl font-semibold text-theme-primary">{t('callHistory')}</h3>
@@ -91,7 +91,7 @@ export function WebhookCallLogsDialog({ open, onOpenChange, webhook }: WebhookCa
           </div>
         ) : logs.length === 0 ? (
           <div className="text-center py-10">
-            <div className="w-12 h-12 bg-theme-secondary rounded-full flex items-center justify-center mx-auto mb-3">
+            <div className="w-12 h-12 bg-theme-secondary rounded-xl flex items-center justify-center mx-auto mb-3">
               <ScrollText className="w-6 h-6 text-theme-secondary" />
             </div>
             <p className="text-sm text-theme-secondary">{t('noLogs')}</p>

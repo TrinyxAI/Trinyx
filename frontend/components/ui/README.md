@@ -43,6 +43,54 @@ npm install @radix-ui/react-toggle @radix-ui/react-checkbox @radix-ui/react-radi
 - **Tabs** - Onglets (TabsList, TabsTrigger, TabsContent)
 - **Table** - Tableau avec Header, Body, Footer, Row, Cell
 
+## Échelle de rayons (square-rounded) - source de vérité
+
+Tout ce que l'application affiche suit **une seule** échelle de rayons. Une capsule
+(`rounded-full`) posée à côté d'un bouton carré est ce qui casse le thème, donc la
+capsule est réservée aux formes qui sont réellement des cercles.
+
+| Rayon | Pour quoi | Où c'est déjà écrit |
+|-------|-----------|---------------------|
+| `rounded-2xl` | une **surface flottante** qui contient des contrôles (carte de chrome canvas, panneau flottant, barre d'action flottante) | `canvasChromeSurfaceClass` |
+| `rounded-xl` | un **contrôle** : Button (toutes tailles), bouton icône, carte, **étape d'une modale multi-étapes** | `buttonVariants`, `card.tsx`, `ModalStepIndicator` |
+| `rounded-lg` | la piste d'un Switch (son curseur prend le cran en dessous, `rounded-md`, pour que les rayons restent concentriques) | `switch.tsx` |
+| `rounded-md` | un **petit label non interactif** : badge, chip, compteur, pastille de statut textuelle | `badge.tsx`, `canvasChromeChipRadiusClass` |
+
+**Le cran se choisit contre la HAUTEUR de la boîte, jamais à l'œil.** Un rayon qui
+atteint la moitié de la hauteur redessine une capsule, quel que soit son nom : les
+étapes de `ModalStepIndicator` font 32px de haut, et `rounded-2xl` (16px) en faisait
+donc exactement des pilules, alors que la classe disait « carré ». Même piège sur une
+bulle d'icône de 28px passée en `rounded-xl` (12px). Règle : rester **sous le tiers**
+de la hauteur, et si la boîte a une hauteur inhabituelle, faire le calcul.
+
+**Une tuile d'icône monte d'un cran avec sa taille**, pour que le coin garde le même
+poids visuel : un rayon unique se lit comme un cercle sur une tuile de 24px et comme un
+angle vif sur une de 44px. La tuile d'icône de nœud (`NodeIcon`, la seule source d'icône
+pour le canvas, la palette, l'inspecteur, le panneau de run, la liste et le board de
+workflows, la carte marketplace) applique donc : 24px → `rounded-md`, 32/36px →
+`rounded-lg`, 44px → `rounded-xl`. Un emplacement qui dessine un substitut de cette tuile
+(placeholder « cette étape n'a pas d'icône ») lit son rayon dans `nodeIconRadiusClass()`
+plutôt que de le réécrire, sinon la ligne change de forme au moment où l'icône arrive.
+
+**Une boîte qui ENTOURE une tuile d'icône est sur la même échelle, lue à SA hauteur à
+elle** : `nodeIconBoxRadiusClass(hauteurEnPx)`. C'est le cas des bulles de
+`WorkflowNodeIcons` (24 / 28 / 40px) sur la liste et le board de workflows, les cartes de
+templates, la marketplace et les blocs de chat. Le cran choisi à l'œil est exactement ce
+qui a raté : `rounded-xl` (12px) sur une bulle de 28px, c'est 12px de coin pour 14px de
+demi-hauteur, donc un **cercle** posé au milieu des tuiles carrées, ce que montraient les
+aperçus de templates. Ne pas réécrire un cran à la main, passer la hauteur.
+
+**`rounded-full` reste correct** pour : avatars et images rondes, points de statut
+(`w-2 h-2` et plus petits, sans texte), spinners, barres et pistes de progression,
+et les décors (halos, blobs). Ces formes sont des cercles, pas des boutons.
+
+**Une seule exception délibérée, et elle est commentée sur place** : le bouton d'envoi du
+`MessageComposer` est **rond dans tous ses états** - Envoyer, Arrêter, file d'attente, et
+grisé. C'est l'ancre du composer et le seul contrôle qui change d'action sous le curseur
+sans bouger ; une forme qui varie avec l'état (ou avec `disabled`) le faisait lire comme
+deux boutons différents, et le passage carré → rond se déclenchait au premier caractère
+tapé. Ne pas « réaligner » ce bouton sur l'échelle carrée : c'est l'exception, pas un oubli.
+
 ## Exemple d'utilisation
 
 ```tsx

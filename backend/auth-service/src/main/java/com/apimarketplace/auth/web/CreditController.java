@@ -73,13 +73,13 @@ public class CreditController {
                     userId, request.sourceId(), request.cost() != null ? request.cost() : 0);
             case "WEB_SEARCH" -> creditService.consumeForWebSearch(userId, request.sourceId());
             case "WEB_FETCH" -> creditService.consumeForWebFetch(userId, request.sourceId());
+            // Still live: publication screening bills its replacement image here.
+            // IMAGE_GENERATION_BYOK is gone with the legacy tool's billing strategy - it
+            // stays readable on historical ledger rows, but nothing writes it any more.
             case "IMAGE_GENERATION" -> creditService.consumeForImageGeneration(
                     userId, request.sourceId(), request.provider(), request.model(),
                     // imageCount = actualImageCount returned by the provider; defaults
                     // to 1 for backward-compat with old client builds that don't set it.
-                    request.imageCount() != null ? request.imageCount() : 1);
-            case "IMAGE_GENERATION_BYOK" -> creditService.consumeForImageGenerationByok(
-                    userId, request.sourceId(), request.provider(), request.model(),
                     request.imageCount() != null ? request.imageCount() : 1);
             default -> throw new IllegalArgumentException("Unknown source type: " + request.sourceType());
         };
@@ -104,7 +104,12 @@ public class CreditController {
                 "balance", breakdown.balance(),
                 "subBalance", breakdown.subBalance(),
                 "paygBalance", breakdown.paygBalance(),
-                "delinquent", breakdown.delinquent()));
+                "delinquent", breakdown.delinquent(),
+                // Whether the monthly bucket is workflow-scoped on this plan, so
+                // a surface can warn BEFORE a platform-key purchase instead of
+                // deriving the rule from the two balances and getting it wrong
+                // for the ordinary paid account.
+                "monthlyCreditsAreWorkflowOnly", breakdown.monthlyCreditsAreWorkflowOnly()));
     }
 
     /**

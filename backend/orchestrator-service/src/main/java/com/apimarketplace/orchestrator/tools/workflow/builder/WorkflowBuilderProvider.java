@@ -1,5 +1,6 @@
 package com.apimarketplace.orchestrator.tools.workflow.builder;
 
+import com.apimarketplace.agent.config.AgentModuleResolver;
 import com.apimarketplace.agent.config.GuardOverrides;
 import com.apimarketplace.agent.config.ToolAccessControl;
 import com.apimarketplace.common.scope.ScopeGuard;
@@ -8,9 +9,15 @@ import com.apimarketplace.agent.registry.AgentToolDefinition;
 import com.apimarketplace.agent.registry.ToolCategory;
 import com.apimarketplace.agent.tools.ToolErrorCode;
 import com.apimarketplace.agent.tools.ToolsProvider;
+import com.apimarketplace.agent.tools.authz.ToolAuthorizationScope;
 import com.apimarketplace.agent.tools.common.ToolRateLimiter;
 import com.apimarketplace.orchestrator.config.AgentDefaultsConfig;
 import com.apimarketplace.orchestrator.domain.workflow.WorkflowPlan;
+import com.apimarketplace.orchestrator.execution.v2.adhoc.AdHocNodeExecutionService;
+import com.apimarketplace.orchestrator.execution.v2.adhoc.AdHocNodeRequest;
+import com.apimarketplace.orchestrator.execution.v2.adhoc.AdHocNodeResult;
+import com.apimarketplace.orchestrator.execution.v2.adhoc.AdHocNodeTypeResolver;
+import com.apimarketplace.orchestrator.execution.v2.adhoc.AdHocSecretRedactor;
 import com.apimarketplace.orchestrator.service.NodeLibraryService;
 import com.apimarketplace.orchestrator.service.NodeParamsValidator;
 import com.apimarketplace.orchestrator.service.validation.ValidationResult;
@@ -67,6 +74,7 @@ public class WorkflowBuilderProvider implements ToolsProvider {
     private final WorkflowManagementService workflowService;
     private final InterfaceClient interfaceClient;
     private final NodeTypeSearchService nodeTypeSearchService;
+    private final AdHocNodeExecutionService adHocNodeExecutionService;
     private final NodeLibraryService nodeLibraryService;
     private final NodeParamsValidator nodeParamsValidator;
     private final WorkflowHelpProvider workflowHelpProvider;
@@ -273,7 +281,7 @@ public class WorkflowBuilderProvider implements ToolsProvider {
             case "insert_row", "read_rows", "update_row", "delete_row", "find_rows" -> delegateTableOperation(params, tenantId, ctx, action);
             case "connect" -> delegateCreator(s -> connectionManager.executeConnect(s, params), params, tenantId, ctx);
             case "disconnect" -> delegateCreator(s -> connectionManager.executeDisconnect(s, params), params, tenantId, ctx);
-            case "modify" -> delegateCreator(s -> modifier.executeModifyNode(s, params), params, tenantId, ctx);
+            case "modify" -> delegateModify(params, tenantId, ctx);
             case "remove" -> delegateCreator(s -> modifier.executeRemove(s, params), params, tenantId, ctx);
             case "undo" -> delegateCreator(s -> modifier.executeUndo(s), params, tenantId, ctx);
             case "mock_suggest" -> delegateCreator(s -> executeMockSuggest(s, params, tenantId), params, tenantId, ctx);
@@ -299,7 +307,9 @@ public class WorkflowBuilderProvider implements ToolsProvider {
             case "get_run" -> delegateCrud("get_run", params, tenantId, ctx);
             case "wait_run" -> delegateCrud("wait_run", params, tenantId, ctx);
             case "stop_run" -> delegateCrud("stop_run", params, tenantId, ctx);
+            case "restart_from_node" -> delegateCrud("restart_from_node", params, tenantId, ctx);
             case "get_node_output" -> delegateCrud("get_node_output", params, tenantId, ctx);
+            case "run_node" -> executeRunNode(params, tenantId, ctx);
             case "resolve_approval" -> executeResolveApproval(params, tenantId, ctx);
             case "continue_interface" -> executeContinueInterface(params, tenantId, ctx);
             case "pin" -> delegateCrud("pin", params, tenantId, ctx);
@@ -308,6 +318,172 @@ public class WorkflowBuilderProvider implements ToolsProvider {
             case "unpublish" -> delegateCrud("unpublish", params, tenantId, ctx);
             default -> ToolExecutionResult.failure(ToolErrorCode.INVALID_ENUM_VALUE, "Unknown action: " + action);
         };
+    }
+
+    // ==================== Standalone node execution (no workflow, no run) ====================
+
+    /**
+     * Run ONE node from a configuration, with no workflow and no run.
+     *
+     * <p>Session-free by design (same shape as resolve_approval / continue_interface): there is
+     * no draft to attach to, and requiring one would force an agent to open a build session just
+     * to try a node.
+     *
+     * <p><b>The config comes ONLY from {@code params}.</b> {@code add_node} flattens the whole
+     * top-level argument map into the node config with top-level winning, which means a declared
+     * tool parameter silently overwrites a node config key of the same name: {@code to} would
+     * replace a send_email recipient, {@code workflow_id} the sub_workflow target, {@code query}
+     * the SQL. That is survivable when it corrupts a draft you can inspect; it is not when the
+     * node executes immediately. Nothing outside {@code params} is read as configuration here.
+     */
+    private ToolExecutionResult executeRunNode(Map<String, Object> params, String tenantId, ToolExecutionContext ctx) {
+        ToolExecutionResult surfaceDenied = denyRunNodeOutsideConversation(ctx);
+        if (surfaceDenied != null) return surfaceDenied;
+
+        String rawType = safeString(params.get("type"));
+        if (rawType == null || rawType.isBlank()) {
+            return ToolExecutionResult.failure(ToolErrorCode.MISSING_PARAMETER,
+                "'type' is required. Example: workflow(action='run_node', type='http_request', "
+                    + "params={url: 'https://example.com', method: 'GET'}).");
+        }
+
+        // The config must be an object. add_node accepts a non-Map here and silently creates an
+        // EMPTY node; for a draft that is a puzzle, for something that executes immediately it
+        // would mean running an unconfigured node against real credentials.
+        Object paramsObj = params.containsKey("params") ? params.get("params") : params.get("parameters");
+        if (paramsObj != null && !(paramsObj instanceof Map)) {
+            return ToolExecutionResult.failure(ToolErrorCode.VALIDATION_ERROR,
+                "'params' must be an object, not " + paramsObj.getClass().getSimpleName()
+                    + ". Send params={key: value}, not a JSON string.");
+        }
+        @SuppressWarnings("unchecked")
+        Map<String, Object> nodeConfig = paramsObj instanceof Map
+            ? new LinkedHashMap<>((Map<String, Object>) paramsObj)
+            : new LinkedHashMap<>();
+
+        Object runInputObj = params.get("run_input");
+        if (runInputObj != null && !(runInputObj instanceof Map)) {
+            return ToolExecutionResult.failure(ToolErrorCode.VALIDATION_ERROR,
+                "'run_input' must be an object mapping upstream names to values.");
+        }
+        @SuppressWarnings("unchecked")
+        Map<String, Object> runInput = runInputObj instanceof Map
+            ? new LinkedHashMap<>((Map<String, Object>) runInputObj)
+            : new LinkedHashMap<>();
+
+        String canonicalType = AdHocNodeTypeResolver.canonicalType(rawType);
+        String refusal = AdHocNodeTypeResolver.refusalReason(canonicalType);
+        if (refusal != null) {
+            return ToolExecutionResult.failure(ToolErrorCode.VALIDATION_ERROR, refusal);
+        }
+        // Gate the CANONICAL type, after alias resolution. Gating the typed name (what add_node
+        // does) lets type='remote_command' through a gate an administrator set on 'ssh'.
+        if (!nodeTypeSearchService.isNodeTypeEnabled(canonicalType)) {
+            return ToolExecutionResult.failure(ToolErrorCode.PERMISSION_DENIED,
+                "Node type '" + canonicalType + "' is disabled by the administrator.");
+        }
+        // Same grant add_node requires. A generate node spends the customer's credits on a paid
+        // provider; leaving it out here would reopen the opt-in one indirection away, this time
+        // without even a workflow to show for it.
+        if ("generate".equals(canonicalType)) {
+            ToolExecutionResult generateDenied = refuseGenerateWithoutGrant(ctx);
+            if (generateDenied != null) return generateDenied;
+        }
+        // The config must not be able to rewrite what the node IS. Without this, a type whose
+        // config sits at the core's top level lets params={type:'ssh', ssh:{...}} build an SSH
+        // node while every gate above was asked about the declared type, and while the
+        // conversation and the observability row both record the declared type.
+        for (String reserved : AdHocNodeRequest.RESERVED_CORE_KEYS) {
+            if (nodeConfig.containsKey(reserved)) {
+                return ToolExecutionResult.failure(ToolErrorCode.VALIDATION_ERROR,
+                    "'" + reserved + "' cannot be set in params: it identifies the node itself, not its "
+                        + "configuration. Use the top-level 'type' and 'label' parameters.");
+            }
+        }
+
+        String label = safeString(params.get("label"));
+        AdHocNodeRequest request = new AdHocNodeRequest(
+            canonicalType,
+            AdHocNodeTypeResolver.configKey(canonicalType),
+            nodeConfig,
+            runInput,
+            tenantId,
+            ctx != null ? ctx.orgId() : null,
+            ctx != null ? ctx.orgRole() : null,
+            label != null && !label.isBlank() ? label : canonicalType);
+
+        AdHocNodeResult outcome = adHocNodeExecutionService.execute(request);
+        return buildRunNodeResult(canonicalType, rawType, nodeConfig, outcome);
+    }
+
+    /**
+     * Refuse run_node anywhere but a conversation, or null when the caller is in one.
+     *
+     * <p>The external {@code /mcp} endpoint runs this same tool registry with EMPTY credentials
+     * and no turn: no authorization card can be raised there, no per-turn ceiling applies, and
+     * nothing is written to the conversation. API-key scopes are per TOOL, never per action, so
+     * every key already issued with the {@code workflow} scope would gain the ability to send
+     * mail and run SQL the moment this ships, without its owner doing anything. Until scopes can
+     * express an action, the honest answer is that this surface does not carry run_node.
+     */
+    private ToolExecutionResult denyRunNodeOutsideConversation(ToolExecutionContext ctx) {
+        // Ask the SAME predicate that decides whether a card is raised, rather than a lookalike.
+        // A plausible test on "is there a conversationId or a streamId?" says yes for a sub-agent,
+        // for an agent-backed chat, and for an agent node inside an unattended scheduled run -
+        // all of them EXEMPT from the card. run_node would then send mail and run SQL from an
+        // agent-written config with nobody to ask, which is the exact hole this guard exists to
+        // close. Gate on "a card will actually be raised", nothing weaker.
+        if (ToolAuthorizationScope.isCardRaised(ctx != null ? ctx.credentials() : null)) {
+            return null;
+        }
+        return ToolExecutionResult.failure(ToolErrorCode.PERMISSION_DENIED,
+            "run_node runs a node immediately with real side effects, so it is only available where "
+                + "the user can be asked to authorize it: an interactive conversation. This context "
+                + "(an external API key, a sub-agent, a task, or a workflow run) has no one to ask. "
+                + "Build the node into a workflow and use workflow(action='execute') instead.");
+    }
+
+    /**
+     * Shape the response, with the configuration echoed back REDACTED.
+     *
+     * <p>Echoing the config is what makes the result reusable: the agent pastes it into add_node.
+     * Echoing it raw is what would write an ssh password into the conversation and into the
+     * observability row, both stored in full.
+     */
+    private ToolExecutionResult buildRunNodeResult(String canonicalType, String rawType,
+                                                   Map<String, Object> nodeConfig, AdHocNodeResult outcome) {
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("node_type", canonicalType);
+        if (!canonicalType.equals(rawType)) {
+            body.put("resolved_from", rawType);
+        }
+        body.put("status", outcome.status());
+        body.put("duration_ms", outcome.durationMs());
+        body.put("output", outcome.output());
+        if (outcome.error() != null) body.put("error", outcome.error());
+        if (outcome.note() != null) body.put("note", outcome.note());
+        body.put("config", AdHocSecretRedactor.redactMap(nodeConfig, canonicalType));
+        body.put("hint", "Nothing was saved. To keep this node, reuse the same config: "
+            + "workflow(action='add_node', type='" + canonicalType + "', label='...', params={...}).");
+
+        Map<String, Object> metadata = new LinkedHashMap<>();
+        metadata.put("toolName", "Run node: " + canonicalType);
+        metadata.put("adHocNodeType", canonicalType);
+        metadata.put("adHocStatus", outcome.status());
+
+        if (outcome.completed()) {
+            return ToolExecutionResult.success(body, metadata);
+        }
+        // A failure carries only its message to the agent, so everything it needs to act has to
+        // be IN that message: the reason AND the note that says what to do instead. Leaving the
+        // note in the body would drop it exactly where it matters most.
+        StringBuilder message = new StringBuilder();
+        message.append(outcome.status()).append(" (").append(canonicalType).append("): ");
+        message.append(outcome.error() != null ? outcome.error() : "the node did not complete.");
+        if (outcome.note() != null) {
+            message.append(' ').append(outcome.note());
+        }
+        return ToolExecutionResult.failure(ToolErrorCode.EXECUTION_FAILED, message.toString(), metadata);
     }
 
     // ==================== Signal resolution (advance a paused run) ====================
@@ -1095,10 +1271,89 @@ public class WorkflowBuilderProvider implements ToolsProvider {
         return planExporter.executeGetPlan(sr.session());
     }
 
-    private ToolExecutionResult delegatePlanImport(Map<String, Object> params, String tenantId, ToolExecutionContext ctx) {
+    /** Package-private so the set_plan grant wiring is testable without the whole provider graph. */
+    /**
+     * Third and last door onto the same node. Creation was gated, then
+     * set_plan; a node can also simply be RENAMED into a generation, which
+     * spends the same money on the same provider.
+     *
+     * <p>Extracted to sit beside {@link #delegatePlanImport} rather than living
+     * inline in the dispatch switch, so all three gates have the same shape and
+     * the same kind of test: a missing check has to be provable, not argued.
+     */
+    ToolExecutionResult delegateModify(Map<String, Object> params, String tenantId, ToolExecutionContext ctx) {
+        if (modifyTurnsANodeIntoAGeneration(params)) {
+            ToolExecutionResult denied = refuseGenerateWithoutGrant(ctx);
+            if (denied != null) return denied;
+        }
+        return delegateCreator(s -> modifier.executeModifyNode(s, params), params, tenantId, ctx);
+    }
+
+    ToolExecutionResult delegatePlanImport(Map<String, Object> params, String tenantId, ToolExecutionContext ctx) {
+        // Same gate as add_node, because this creates the same node. A plan can
+        // carry a generate core directly, so gating only the one-node action
+        // left the grant reachable by writing the node into a plan instead of
+        // adding it, which is the same money on the same provider.
+        if (planCarriesAGenerateNode(params)) {
+            ToolExecutionResult denied = refuseGenerateWithoutGrant(ctx);
+            if (denied != null) return denied;
+        }
         var sr = sessionManager.getSession(params, tenantId, extractConversationId(ctx));
         if (sr.isError()) return sr.error();
         return planExporter.executeSetPlan(sr.session(), params);
+    }
+
+    /**
+     * Whether a modify turns a node INTO a generate node.
+     *
+     * <p>`type` is a writable top-level key, so a node added as something
+     * harmless can be flipped afterwards. Gating creation and not mutation
+     * would have left the grant reachable in two ordinary calls: add a
+     * transform, then rename its type. Same node, same provider, same money.
+     *
+     * <p>Reads both spellings the action accepts, `params` and the legacy
+     * `changes`, because gating only one of them is the same mistake one level
+     * down.
+     */
+    @SuppressWarnings("unchecked")
+    static boolean modifyTurnsANodeIntoAGeneration(Map<String, Object> params) {
+        if (params == null) return false;
+        for (String key : new String[]{"params", "changes"}) {
+            Object changes = params.get(key);
+            if (!(changes instanceof Map)) continue;
+            Object type = ((Map<String, Object>) changes).get("type");
+            if (type instanceof String s && "generate".equalsIgnoreCase(s.trim())) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /**
+     * Whether a submitted plan declares a generate core.
+     *
+     * <p>Read defensively, because this runs BEFORE the plan is validated: any
+     * shape may arrive, and a shape this does not recognise is a plan that
+     * walks past the grant. Package-private so that is testable directly, which
+     * is cheaper and more pointed than driving the whole provider.
+     */
+    @SuppressWarnings("unchecked")
+    static boolean planCarriesAGenerateNode(Map<String, Object> params) {
+        Object planObj = params == null ? null : params.get("plan");
+        if (!(planObj instanceof Map)) return false;
+        Object coresObj = ((Map<String, Object>) planObj).get("cores");
+        if (!(coresObj instanceof List)) return false;
+        for (Object core : (List<Object>) coresObj) {
+            if (!(core instanceof Map)) continue;
+            Object type = ((Map<String, Object>) core).get("type");
+            // "generate" exactly, because that is the only value the plan
+            // validator turns into a generate core. Matching more would refuse
+            // plans that never create one.
+            if (type instanceof String s && "generate".equalsIgnoreCase(s.trim())) {
+                return true;
+            }
+        }
+        return false;
     }
 
     private ToolExecutionResult delegateLoad(Map<String, Object> params, String tenantId, ToolExecutionContext ctx) {
@@ -1144,6 +1399,42 @@ public class WorkflowBuilderProvider implements ToolsProvider {
     /**
      * Unified node creation action: action='add_node', type='...', label='...', params={...}
      */
+    /**
+     * Refuse a generate node when the calling agent was not granted generation,
+     * or null when it may proceed.
+     *
+     * <p>A generate node spends the customer's credits on a paid provider,
+     * exactly as the generation tool does. That tool is opt-in; adding the node
+     * was not, and building workflows is on by default for every agent, so the
+     * opt-in was reachable one indirection away: add the node, run the
+     * workflow, same money, no grant anywhere.
+     *
+     * <p>Only the CREATE side is gated here. Whether an existing node should
+     * also be gated at RUN time is a different question with a different
+     * answer: a workflow fired by a schedule or a webhook has no agent to ask,
+     * and refusing there would break runs that belong to the workspace owner
+     * rather than to any agent.
+     */
+    private ToolExecutionResult refuseGenerateWithoutGrant(ToolExecutionContext ctx) {
+        Map<String, Object> credentials = ctx != null ? ctx.credentials() : null;
+        // ONLY the generation grant. Accepting `image_generation` here as well
+        // was a mistake of mine: this node runs any format, so an agent granted
+        // images alone could build and run a per-second video node, which is
+        // precisely the widening AgentModuleResolver says must never happen
+        // silently. The two grants are asserted independent in both directions
+        // on the chat surfaces, and a builder that disagreed with them would
+        // make the platform's own rule false rather than merely inconsistent.
+        if (AgentModuleResolver.callerMayUse(credentials, "generation")) {
+            return null;
+        }
+        return ToolExecutionResult.failure(ToolErrorCode.PERMISSION_DENIED,
+                "You are not set up to run generations, so a generate node cannot be added. "
+                        + "A generate node spends credits on a paid provider, which is why it is off "
+                        + "until it is turned on for you. Enabling it is the workspace owner's decision "
+                        + "and nothing you send can trigger it. Everything else in this workflow can "
+                        + "still be built.");
+    }
+
     private ToolExecutionResult executeAddNode(Map<String, Object> params, String tenantId, ToolExecutionContext ctx) {
         String type = safeString(params.get("type"));
         if (type == null || type.isBlank()) {
@@ -1337,6 +1628,10 @@ public class WorkflowBuilderProvider implements ToolsProvider {
                 case "download_file", "download", "fetch_file" -> creator.executeAddDownloadFile(sr.session(), merged);
                 case "public_link", "public_url", "share_link" -> creator.executeAddPublicLink(sr.session(), merged);
                 case "media", "audio", "mux" -> creator.executeAddMedia(sr.session(), merged);
+                case "generate", "generation", "image_generation", "text_to_image",
+                     "text_to_video", "text_to_speech" -> refuseGenerateWithoutGrant(ctx) != null
+                        ? refuseGenerateWithoutGrant(ctx)
+                        : creator.executeAddGenerate(sr.session(), merged);
                 case "http_request", "http", "request", "api_call" -> creator.executeAddHttpRequest(sr.session(), merged);
                 case "exit", "halt", "abort" -> creator.executeAddExit(sr.session(), merged);
                 case "response", "message", "reply" -> creator.executeAddResponse(sr.session(), merged);

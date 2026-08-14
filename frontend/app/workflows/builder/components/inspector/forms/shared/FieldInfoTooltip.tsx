@@ -28,7 +28,7 @@ export const FieldInfoTooltip = ({ description }: { description: string }) => {
           e.stopPropagation();
           setIsOpen(!isOpen);
         }}
-        className="p-0.5 rounded-full hover:bg-slate-200 dark:hover:bg-slate-700 transition-colors"
+        className="p-0.5 rounded-md hover:bg-slate-200 dark:hover:bg-slate-700 transition-colors"
         title="Click for more info"
       >
         <Info className="h-3 w-3 text-slate-400 dark:text-slate-500 hover:text-slate-600 dark:hover:text-slate-300" />

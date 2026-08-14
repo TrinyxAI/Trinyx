@@ -292,6 +292,12 @@ public class PendingAgentRegistry {
         // replica A's dispatch were invisible - exactly the Gmail Auto-Labeler
         // run da7994c7 regression (2026-05-06). Mirror of hasAnyPendingForRun's
         // two-tier strategy, scoped to (run, trigger, epoch).
+        //
+        // A false here does NOT mean the epoch has no work left. This store only knows a
+        // delivery from dispatch until consume(); RedisInFlightStore takes over from consume
+        // until the end of delivery, and the handoff between them is not instantaneous. The
+        // epoch-close guard must therefore also consult the running-node state - see
+        // ReusableTriggerService.hasRunningNodesForEpoch.
         if (redisStore != null) {
             return redisStore.hasPendingFor(runId, dagTriggerId, epoch);
         }

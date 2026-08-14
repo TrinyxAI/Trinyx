@@ -448,7 +448,7 @@ public class StateReconstructor {
 
         // Determine overall status
         RunStatus overallStatus = getHelper().determineOverallStatus(
-            runEntity, completedStepIds, failedStepIds, readySteps, plan);
+            runEntity, completedStepIds, failedStepIds, skippedStepIds, readySteps, plan);
 
         // Log summary for debugging
         logStateSummary(runId, stepStates, edgeStates, readySteps);

@@ -14,14 +14,29 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 class ModelCategoryTest {
 
     @Test
-    @DisplayName("Known categories cover the three V156 seed values")
+    @DisplayName("Known categories cover the V156 seed values plus one key per generation format")
     void knownCategoriesMatchV156Seed() {
         assertThat(ModelCategory.CHAT.key()).isEqualTo("chat");
         assertThat(ModelCategory.BROWSER_AGENT.key()).isEqualTo("browser_agent");
         assertThat(ModelCategory.IMAGE_GENERATION.key()).isEqualTo("image_generation");
+        assertThat(ModelCategory.VIDEO_GENERATION.key()).isEqualTo("video_generation");
 
         assertThat(ModelCategory.defaultKeys())
-                .containsExactlyInAnyOrder("chat", "browser_agent", "image_generation");
+                .containsExactlyInAnyOrder("chat", "browser_agent", "image_generation",
+                        "video_generation", "audio_generation", "voice_generation",
+                        "music_generation");
+    }
+
+    @Test
+    @DisplayName("a generation category derives its mode from its own name, so adding a format is free")
+    void generationModeIsDerivedFromTheName() {
+        assertThat(ModelCategory.modeForGenerationCategory("video_generation")).isEqualTo("video");
+        assertThat(ModelCategory.modeForGenerationCategory("image_generation")).isEqualTo("image");
+        // A format nobody has added yet still resolves correctly.
+        assertThat(ModelCategory.modeForGenerationCategory("slides_generation")).isEqualTo("slides");
+        assertThat(ModelCategory.modeForGenerationCategory("chat")).isNull();
+        assertThat(ModelCategory.modeForGenerationCategory("_generation")).isNull();
+        assertThat(ModelCategory.modeForGenerationCategory(null)).isNull();
     }
 
     @Test
@@ -35,7 +50,7 @@ class ModelCategoryTest {
     @Test
     @DisplayName("of() rejects unknown keys with IllegalArgumentException")
     void ofRejectsUnknownKey() {
-        assertThatThrownBy(() -> ModelCategory.of("video_generation"))
+        assertThatThrownBy(() -> ModelCategory.of("slides_generation"))
                 .isInstanceOf(IllegalArgumentException.class);
         assertThatThrownBy(() -> ModelCategory.of("CHAT"))
                 .isInstanceOf(IllegalArgumentException.class); // case-sensitive
@@ -71,21 +86,45 @@ class ModelCategoryTest {
     @DisplayName("acceptsMode - image_generation accepts ONLY mode='image' rows (chat models filtered out)")
     void modeEligibilityImageGeneration() {
         assertThat(ModelCategory.acceptsMode("image_generation", "image")).isTrue();
-        // The bug the user reported: chat-capable rows must NOT appear in the image tab.
+        // The bug the user reported: chat-capable rows must NOT be admitted by an image category.
         assertThat(ModelCategory.acceptsMode("image_generation", "chat")).isFalse();
         assertThat(ModelCategory.acceptsMode("image_generation", null)).isFalse();
         assertThat(ModelCategory.acceptsMode("image_generation", "embedding")).isFalse();
     }
 
     @Test
-    @DisplayName("acceptsMode - unknown / future categories are permissive until explicitly tightened")
-    void modeEligibilityUnknownCategoryPermissive() {
-        // Forward-compat: a new category (e.g. video_generation) seeded into
-        // the sidecar without a code change here MUST surface its rows until
-        // someone adds an explicit mode predicate. Returning false would
-        // silently hide every row for that category.
+    @DisplayName("acceptsMode - every generation category admits its own format and nothing else")
+    void modeEligibilityGenerationCategories() {
         assertThat(ModelCategory.acceptsMode("video_generation", "video")).isTrue();
-        assertThat(ModelCategory.acceptsMode("video_generation", null)).isTrue();
+        assertThat(ModelCategory.acceptsMode("audio_generation", "audio")).isTrue();
+        assertThat(ModelCategory.acceptsMode("voice_generation", "voice")).isTrue();
+        assertThat(ModelCategory.acceptsMode("music_generation", "music")).isTrue();
+
+        // The formats must not bleed into each other: a voice model admitted
+        // by video_generation would be offered for a job it cannot do.
+        assertThat(ModelCategory.acceptsMode("video_generation", "image")).isFalse();
+        assertThat(ModelCategory.acceptsMode("video_generation", "chat")).isFalse();
+        assertThat(ModelCategory.acceptsMode("video_generation", null)).isFalse();
+        assertThat(ModelCategory.acceptsMode("music_generation", "audio")).isFalse();
+    }
+
+    @Test
+    @DisplayName("acceptsMode - a format nobody has added yet already works, without a code change")
+    void modeEligibilityFutureGenerationCategory() {
+        // The convention is the point: seeding 'slides_generation' into the
+        // sidecar needs no edit here for its rows to be filtered correctly.
+        assertThat(ModelCategory.acceptsMode("slides_generation", "slides")).isTrue();
+        assertThat(ModelCategory.acceptsMode("slides_generation", "video")).isFalse();
+    }
+
+    @Test
+    @DisplayName("acceptsMode - a non-generation unknown category stays permissive rather than hiding rows")
+    void modeEligibilityUnknownCategoryPermissive() {
+        // Returning false for a category nobody taught this class about would
+        // silently hide every one of its rows, which is worse than showing too
+        // much.
+        assertThat(ModelCategory.acceptsMode("file_processing", "anything")).isTrue();
+        assertThat(ModelCategory.acceptsMode("embedding", null)).isTrue();
         // null category = legacy global path; everything passes through.
         assertThat(ModelCategory.acceptsMode(null, "anything")).isTrue();
     }

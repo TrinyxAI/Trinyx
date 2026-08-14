@@ -10,6 +10,7 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
+import org.mockito.InOrder;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.mockito.junit.jupiter.MockitoSettings;
@@ -25,6 +26,7 @@ import java.util.Optional;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyList;
+import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
@@ -42,6 +44,7 @@ import static org.mockito.Mockito.when;
 class ApiCatalogBundleApplierTest {
 
     @Mock private ApiCatalogMergeService mergeService;
+    @Mock private ApiCatalogGenerationPriceApplier priceApplier;
     @Mock private ApiCatalogBundleRepository bundleRepo;
     @Mock private ApiCatalogBundleSyncStatusRepository syncStatusRepo;
     @Mock private PlatformTransactionManager txManager;
@@ -50,7 +53,8 @@ class ApiCatalogBundleApplierTest {
 
     @BeforeEach
     void setUp() {
-        applier = new ApiCatalogBundleApplier(mergeService, bundleRepo, syncStatusRepo, new ObjectMapper(), txManager);
+        applier = new ApiCatalogBundleApplier(mergeService, priceApplier, bundleRepo, syncStatusRepo,
+                new ObjectMapper(), txManager);
         when(syncStatusRepo.findById(ApiCatalogBundleSyncStatusEntity.SINGLETON_ID))
                 .thenReturn(Optional.of(new ApiCatalogBundleSyncStatusEntity()));
         when(bundleRepo.findByVersion(any())).thenReturn(Optional.empty());
@@ -344,6 +348,98 @@ class ApiCatalogBundleApplierTest {
         verify(bundleRepo).save(rowCap.capture());
         assertThat(rowCap.getValue().getId()).isEqualTo(77L);
         assertThat(rowCap.getValue().isActive()).isTrue();
+    }
+
+    // ── V430: the generation prices the bundle carries ──────────────────────
+
+    @SuppressWarnings("unchecked")
+    private List<Map<String, Object>> capturedPrices() {
+        ArgumentCaptor<List<Map<String, Object>>> cap = ArgumentCaptor.forClass(List.class);
+        verify(priceApplier).apply(cap.capture(), any());
+        return cap.getValue();
+    }
+
+    @Test
+    @DisplayName("The prices reach the price applier only after every endpoint has landed")
+    void pricesAreAppliedAfterTheMerge() {
+        // A price row is keyed on an endpoint UUID, so offering prices over a
+        // catalog that has not landed would price endpoints this install does
+        // not have.
+        when(mergeService.merge(anyList(), anyList())).thenReturn(okMerge());
+
+        ApiCatalogBundleApplier.ApplyResult r = applier.apply(bundle(21L), gzPayload(
+                "{\"apis\":[{\"id\":\"x\"}],\"generationPrices\":[{\"integrationName\":\"seedance\","
+                        + "\"apiToolId\":\"33333333-3333-3333-3333-333333333333\","
+                        + "\"modelId\":\"seedance-2.0\",\"priceUnit\":\"second\","
+                        + "\"baseCredits\":\"0\",\"unitCredits\":\"60\"}]}"),
+                "https://cloud");
+
+        assertThat(r.status()).isEqualTo(ApiCatalogBundleApplier.Status.APPLIED);
+        assertThat(capturedPrices()).hasSize(1);
+        assertThat(capturedPrices().get(0)).containsEntry("modelId", "seedance-2.0");
+        InOrder order = inOrder(mergeService, priceApplier);
+        order.verify(mergeService).merge(anyList(), anyList());
+        order.verify(priceApplier).apply(anyList(), any());
+    }
+
+    @Test
+    @DisplayName("A bundle from an older cloud has no 'generationPrices' key - the applier is still "
+            + "called, with null, and the catalog still lands")
+    void olderBundleShapeStillApplies() {
+        // The compatibility posture. A missing key must not fail the apply, and
+        // must not be turned into an empty list that could be read as "no
+        // prices exist".
+        when(mergeService.merge(anyList(), anyList())).thenReturn(okMerge());
+
+        ApiCatalogBundleApplier.ApplyResult r =
+                applier.apply(bundle(22L), gzPayload("{\"apis\":[{\"id\":\"x\"}]}"), "https://cloud");
+
+        assertThat(r.status()).isEqualTo(ApiCatalogBundleApplier.Status.APPLIED);
+        assertThat(capturedPrices()).isNull();
+    }
+
+    @Test
+    @DisplayName("Re-applying the ACTIVE version still re-offers its prices: a platform key pasted "
+            + "later has no other way to get priced")
+    void alreadyAppliedStillReOffersPrices() {
+        // The price hangs off a platform credential. An operator who pastes a
+        // provider key a week after this version landed had nothing for the
+        // price to attach to at the time, and the cloud has no reason to cut a
+        // new bundle. Re-offering costs nothing (auth publishes nothing when
+        // nothing changed) and is what eventually prices that integration.
+        ApiCatalogBundleEntity active = new ApiCatalogBundleEntity();
+        active.setVersion(23L);
+        active.setActive(true);
+        when(bundleRepo.findByVersion(23L)).thenReturn(Optional.of(active));
+
+        ApiCatalogBundleApplier.ApplyResult r = applier.apply(bundle(23L), gzPayload(
+                "{\"apis\":[],\"generationPrices\":[{\"integrationName\":\"seedance\","
+                        + "\"apiToolId\":\"33333333-3333-3333-3333-333333333333\","
+                        + "\"priceUnit\":\"call\",\"baseCredits\":\"9\",\"unitCredits\":\"0\"}]}"),
+                "https://cloud");
+
+        assertThat(r.status()).isEqualTo(ApiCatalogBundleApplier.Status.ALREADY_APPLIED);
+        verifyNoInteractions(mergeService);
+        assertThat(capturedPrices()).hasSize(1);
+    }
+
+    @Test
+    @DisplayName("A partially-applied bundle offers NO prices - half a catalog is not something to "
+            + "price against")
+    void partialApplyOffersNoPrices() {
+        // The version is not recorded either, so the next tick retries the whole
+        // thing; that is when its prices arrive.
+        when(mergeService.merge(anyList(), anyList())).thenReturn(
+                new ApiCatalogMergeService.MergeResult(1, 1, 0, 2, 0, 0, 0, List.of("api a: boom")));
+
+        ApiCatalogBundleApplier.ApplyResult r = applier.apply(bundle(24L), gzPayload(
+                "{\"apis\":[{\"id\":\"x\"}],\"generationPrices\":[{\"integrationName\":\"seedance\","
+                        + "\"apiToolId\":\"33333333-3333-3333-3333-333333333333\","
+                        + "\"priceUnit\":\"call\",\"baseCredits\":\"9\",\"unitCredits\":\"0\"}]}"),
+                "https://cloud");
+
+        assertThat(r.status()).isEqualTo(ApiCatalogBundleApplier.Status.APPLY_PARTIAL);
+        verifyNoInteractions(priceApplier);
     }
 
     private ApiCatalogBundleSyncStatusEntity capturedStatus() {

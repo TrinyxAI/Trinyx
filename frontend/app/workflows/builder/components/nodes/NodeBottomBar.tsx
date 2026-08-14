@@ -48,6 +48,8 @@ interface PlayButtonConfig {
     isSkipped: boolean;
     isCompleted: boolean;
     canRerun: boolean;
+    /** The run's persisted mode, terminality NOT folded in - drives the rerun label. */
+    isSteppedRun: boolean;
     /** Backend step id - names the exact trigger in the open-tab event. */
     stepId?: string;
     executeStep: () => void;
@@ -196,6 +198,7 @@ export function NodeBottomBar({ borderColor, isRunning, buttons, playButton, ext
             variant={playButton.variant}
             triggerId={playButton.stepByStepStatus.stepId}
             isAutoMode={playButton.isAutoMode}
+            isStepByStepMode={playButton.stepByStepStatus.isSteppedRun}
             position="bottom-center"
             borderColor={borderColor}
           />

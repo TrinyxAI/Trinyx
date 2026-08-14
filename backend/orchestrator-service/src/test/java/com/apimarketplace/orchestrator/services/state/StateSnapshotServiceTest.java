@@ -21,6 +21,10 @@ import org.mockito.junit.jupiter.MockitoExtension;
 
 import com.apimarketplace.orchestrator.domain.WorkflowRunEntity;
 
+import java.time.Duration;
+import java.time.Instant;
+import java.util.HashMap;
+import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 
@@ -55,7 +59,8 @@ class StateSnapshotServiceTest {
         mapper.registerModule(new JavaTimeModule());
         meterRegistry = new io.micrometer.core.instrument.simple.SimpleMeterRegistry();
         workflowMetrics = new com.apimarketplace.orchestrator.metrics.WorkflowMetrics(meterRegistry);
-        service = new StateSnapshotService(runRepository, mapper, workflowEpochService, eventPublisher, breakdownService, new TxScopedSnapshotCache(runRepository, meterRegistry), workflowMetrics);
+        service = new StateSnapshotService(runRepository, mapper, workflowEpochService, eventPublisher, breakdownService, new TxScopedSnapshotCache(runRepository, meterRegistry), workflowMetrics,
+            org.mockito.Mockito.mock(com.apimarketplace.orchestrator.services.state.ClaimRefusalRegistry.class));
         // Plan v4 E2E5 - saveSnapshotFullRewrite now uses the native UPDATE
         // updateSnapshotAndSeq (was: runRepository.save(run)). Default-stub it
         // lenient(ly) to return 1 row so tests that exercise the legacy
@@ -1112,7 +1117,8 @@ class StateSnapshotServiceTest {
 
             TxScopedSnapshotCache cache = new TxScopedSnapshotCache(runRepository, meterRegistry);
             StateSnapshotService cachedService = new StateSnapshotService(
-                runRepository, spyMapper, workflowEpochService, eventPublisher, breakdownService, cache, workflowMetrics);
+                runRepository, spyMapper, workflowEpochService, eventPublisher, breakdownService, cache, workflowMetrics,
+                org.mockito.Mockito.mock(com.apimarketplace.orchestrator.services.state.ClaimRefusalRegistry.class));
 
             String runId = "run-cache-test";
             StateSnapshot snapshot = StateSnapshot.empty().withIncrementedSeq();
@@ -1157,7 +1163,8 @@ class StateSnapshotServiceTest {
 
             StateSnapshotService cachedService = new StateSnapshotService(
                 runRepository, spyMapper, workflowEpochService, eventPublisher, breakdownService,
-                new TxScopedSnapshotCache(runRepository, meterRegistry), workflowMetrics);
+                new TxScopedSnapshotCache(runRepository, meterRegistry), workflowMetrics,
+            org.mockito.Mockito.mock(com.apimarketplace.orchestrator.services.state.ClaimRefusalRegistry.class));
 
             String json = realMapper.writeValueAsString(StateSnapshot.empty().withIncrementedSeq());
 
@@ -1181,7 +1188,8 @@ class StateSnapshotServiceTest {
             realMapper.registerModule(new JavaTimeModule());
             TxScopedSnapshotCache cache = new TxScopedSnapshotCache(runRepository, meterRegistry);
             StateSnapshotService cachedService = new StateSnapshotService(
-                runRepository, realMapper, workflowEpochService, eventPublisher, breakdownService, cache, workflowMetrics);
+                runRepository, realMapper, workflowEpochService, eventPublisher, breakdownService, cache, workflowMetrics,
+                org.mockito.Mockito.mock(com.apimarketplace.orchestrator.services.state.ClaimRefusalRegistry.class));
 
             String runId = "run-cache-state-test";
             StateSnapshot snapshot = StateSnapshot.empty().withIncrementedSeq();
@@ -1222,7 +1230,8 @@ class StateSnapshotServiceTest {
             realMapper.registerModule(new JavaTimeModule());
             TxScopedSnapshotCache cache = new TxScopedSnapshotCache(runRepository, meterRegistry);
             StateSnapshotService cachedService = new StateSnapshotService(
-                runRepository, realMapper, workflowEpochService, eventPublisher, breakdownService, cache, workflowMetrics);
+                runRepository, realMapper, workflowEpochService, eventPublisher, breakdownService, cache, workflowMetrics,
+                org.mockito.Mockito.mock(com.apimarketplace.orchestrator.services.state.ClaimRefusalRegistry.class));
 
             String runId = "run-save-cache-test";
             // DB always returns an EMPTY snapshot - only the cache will reflect the mutation.
@@ -1278,7 +1287,8 @@ class StateSnapshotServiceTest {
 
             TxScopedSnapshotCache cache = new TxScopedSnapshotCache(runRepository, meterRegistry);
             StateSnapshotService cachedService = new StateSnapshotService(
-                runRepository, spyMapper, workflowEpochService, eventPublisher, breakdownService, cache, workflowMetrics);
+                runRepository, spyMapper, workflowEpochService, eventPublisher, breakdownService, cache, workflowMetrics,
+                org.mockito.Mockito.mock(com.apimarketplace.orchestrator.services.state.ClaimRefusalRegistry.class));
 
             String json = realMapper.writeValueAsString(StateSnapshot.empty().withIncrementedSeq());
 
@@ -1624,6 +1634,189 @@ class StateSnapshotServiceTest {
         }
     }
 
+    /**
+     * The payload of the rerun-on-a-closed-cycle fix: after this call the snapshot must let the
+     * rerun target re-execute IN the epoch that holds the run's outputs, with its upstream nodes
+     * still marked executed. Asserted on the persisted snapshot, since that is what the next
+     * execution reads.
+     */
+    @Nested
+    @DisplayName("reopenEpochResetDagAndSetReady - rerun after the cycle closed")
+    class ReopenEpochResetDagAndSetReady {
+
+        private static final String TRIGGER = "trigger:a";
+        private static final int EXECUTED = 4;
+        private static final int DORMANT = 5;
+
+        /** Post-close shape: executed epoch pruned from the snapshot, dormant epoch staged. */
+        private StateSnapshot closedCycleSnapshot() {
+            DagState dag = new DagState(DORMANT, 0, 2,
+                    Map.of(DORMANT, EpochState.fresh().addReadyNode(TRIGGER)), Set.of());
+            return new StateSnapshot(3, 7L, Map.of(TRIGGER, dag),
+                    null, null, null, null, null,
+                    new HashMap<>(), new HashMap<>(),
+                    null, null, null, null, null, null);
+        }
+
+        /** What the workflow_epochs header holds for the executed epoch. */
+        private EpochState durableState() {
+            return EpochState.fresh()
+                    .markNodeCompleted(TRIGGER)
+                    .markNodeCompleted("mcp:a_step")
+                    .markNodeCompleted("mcp:b_step")
+                    .markNodeSkipped("mcp:skipped_branch");
+        }
+
+        private WorkflowRunEntity stubRun(String runId, StateSnapshot snapshot) throws Exception {
+            ObjectMapper mapper = new ObjectMapper();
+            mapper.registerModule(new JavaTimeModule());
+            WorkflowRunEntity run = mock(WorkflowRunEntity.class);
+            when(run.getRunIdPublic()).thenReturn(runId);
+            when(run.getStateSnapshot()).thenReturn(mapper.writeValueAsString(snapshot));
+            when(runRepository.findByRunIdPublicForUpdate(runId)).thenReturn(Optional.of(run));
+            return run;
+        }
+
+        private StateSnapshot persisted(WorkflowRunEntity run) {
+            org.mockito.ArgumentCaptor<String> json = org.mockito.ArgumentCaptor.forClass(String.class);
+            verify(run).setStateSnapshot(json.capture());
+            return service.parseSnapshotJson(json.getValue());
+        }
+
+        @Test
+        @DisplayName("Restores the executed epoch and makes it current and active")
+        void restoresAndActivatesTheExecutedEpoch() throws Exception {
+            WorkflowRunEntity run = stubRun("run-reopen", closedCycleSnapshot());
+
+            service.reopenEpochResetDagAndSetReady("run-reopen", TRIGGER, EXECUTED,
+                    durableState(), Set.of("mcp:b_step"), "mcp:b_step");
+
+            DagState dag = persisted(run).getDags().get(TRIGGER);
+            assertEquals(EXECUTED, dag.getCurrentEpoch());
+            assertTrue(dag.getActiveEpochs().contains(EXECUTED));
+            assertNotNull(dag.getEpochState(EXECUTED));
+        }
+
+        @Test
+        @DisplayName("Upstream nodes stay executed while the target and its downstream are cleared")
+        void keepsUpstreamExecutedAndClearsTheTarget() throws Exception {
+            WorkflowRunEntity run = stubRun("run-reopen", closedCycleSnapshot());
+
+            service.reopenEpochResetDagAndSetReady("run-reopen", TRIGGER, EXECUTED,
+                    durableState(), Set.of("mcp:b_step"), "mcp:b_step");
+
+            EpochState epoch = persisted(run).getDags().get(TRIGGER).getEpochState(EXECUTED);
+            // This is the whole point: mcp:a_step must still read as completed, otherwise
+            // {{mcp:a_step.output.x}} has nothing to resolve against and the rerun re-runs blind.
+            assertTrue(epoch.getCompletedNodeIds().contains("mcp:a_step"),
+                    "upstream node must stay completed in the reopened epoch");
+            assertTrue(epoch.getSkippedNodeIds().contains("mcp:skipped_branch"),
+                    "SKIPPED marks must survive: a downstream merge unblocks on them");
+            assertFalse(epoch.getCompletedNodeIds().contains("mcp:b_step"),
+                    "the rerun target must no longer read as completed");
+            assertTrue(epoch.getReadyNodeIds().contains("mcp:b_step"),
+                    "the rerun target must be READY in the reopened epoch");
+        }
+
+        @Test
+        @DisplayName("Restarts the epoch's execution clock so its duration measures the rerun")
+        void restartsTheEpochExecutionClock() throws Exception {
+            Instant firstExecution = Instant.now().minus(Duration.ofHours(24));
+            EpochState durableFromYesterday = durableState().withStartedAt(firstExecution);
+            WorkflowRunEntity run = stubRun("run-reopen", closedCycleSnapshot());
+
+            service.reopenEpochResetDagAndSetReady("run-reopen", TRIGGER, EXECUTED,
+                    durableFromYesterday, Set.of("mcp:b_step"), "mcp:b_step");
+
+            // closeEpoch() derives duration_ms and totalDurationMs from THIS field. Carrying
+            // yesterday's start forward would record a 24h epoch for a rerun that took seconds.
+            Instant restarted = persisted(run).getDags().get(TRIGGER)
+                    .getEpochState(EXECUTED).getStartedAt();
+            assertTrue(restarted.isAfter(firstExecution.plus(Duration.ofHours(23))),
+                    "the reopened epoch's clock must restart, was " + restarted);
+        }
+
+        @Test
+        @DisplayName("Restarting the clock preserves the rest of the epoch, including partial failures")
+        void restartingTheClockPreservesPartialFailures() {
+            // withStartedAt must use the canonical 11-arg constructor: the 10-arg back-compat
+            // overload compiles just as well and silently drops partialFailedNodeIds, which is
+            // how a split's partial-failure marks would vanish on rerun.
+            EpochState withPartial = EpochState.fresh()
+                    .markNodeCompleted("mcp:a_step")
+                    .markNodePartialFailure("mcp:split_step");
+
+            EpochState restamped = withPartial.withStartedAt(Instant.now());
+
+            assertTrue(restamped.getPartialFailedNodeIds().contains("mcp:split_step"),
+                    "partial-failure marks must survive the clock restart");
+            assertTrue(restamped.getCompletedNodeIds().contains("mcp:a_step"));
+        }
+
+        @Test
+        @DisplayName("Marks the reopened epoch active in the durable header too")
+        void dualWritesTheEpochHeader() throws Exception {
+            stubRun("run-reopen", closedCycleSnapshot());
+
+            service.reopenEpochResetDagAndSetReady("run-reopen", TRIGGER, EXECUTED,
+                    durableState(), Set.of("mcp:b_step"), "mcp:b_step");
+
+            // Without this the header stays is_active=false with its old closed_at while the
+            // epoch re-executes, and the close that follows overwrites its duration with the
+            // whole idle gap since the first execution.
+            verify(workflowEpochService).reopenEpoch(eq("run-reopen"), eq(TRIGGER), eq(EXECUTED),
+                    argThat(state -> state.getReadyNodeIds().contains("mcp:b_step")
+                            && state.getCompletedNodeIds().contains("mcp:a_step")));
+        }
+
+        @Test
+        @DisplayName("Keeps the snapshot's own epoch state when it still carries the epoch")
+        void doesNotOverwriteAnEpochTheSnapshotStillHolds() throws Exception {
+            EpochState live = EpochState.fresh()
+                    .markNodeCompleted(TRIGGER)
+                    .markNodeCompleted("mcp:live_only");
+            DagState dag = new DagState(DORMANT, 0, 2,
+                    Map.of(EXECUTED, live, DORMANT, EpochState.fresh().addReadyNode(TRIGGER)), Set.of());
+            StateSnapshot snapshot = new StateSnapshot(3, 7L, Map.of(TRIGGER, dag),
+                    null, null, null, null, null,
+                    new HashMap<>(), new HashMap<>(),
+                    null, null, null, null, null, null);
+            WorkflowRunEntity run = stubRun("run-reopen", snapshot);
+
+            service.reopenEpochResetDagAndSetReady("run-reopen", TRIGGER, EXECUTED,
+                    durableState(), Set.of("mcp:b_step"), "mcp:b_step");
+
+            EpochState epoch = persisted(run).getDags().get(TRIGGER).getEpochState(EXECUTED);
+            assertTrue(epoch.getCompletedNodeIds().contains("mcp:live_only"),
+                    "an epoch the snapshot still holds is newer than the header - do not clobber it");
+        }
+
+        @Test
+        @DisplayName("Survives a missing header instead of throwing")
+        void toleratesMissingDurableState() throws Exception {
+            WorkflowRunEntity run = stubRun("run-reopen", closedCycleSnapshot());
+
+            service.reopenEpochResetDagAndSetReady("run-reopen", TRIGGER, EXECUTED,
+                    null, Set.of("mcp:b_step"), "mcp:b_step");
+
+            DagState dag = persisted(run).getDags().get(TRIGGER);
+            assertEquals(EXECUTED, dag.getCurrentEpoch());
+            assertTrue(dag.getEpochState(EXECUTED).getReadyNodeIds().contains("mcp:b_step"));
+        }
+
+        @Test
+        @DisplayName("Does nothing when the run is gone")
+        void noOpWhenRunMissing() {
+            when(runRepository.findByRunIdPublicForUpdate("missing")).thenReturn(Optional.empty());
+
+            service.reopenEpochResetDagAndSetReady("missing", TRIGGER, EXECUTED,
+                    durableState(), Set.of("mcp:b_step"), "mcp:b_step");
+
+            verify(workflowEpochService, never())
+                    .reopenEpoch(anyString(), anyString(), anyInt(), any());
+        }
+    }
+
     @Nested
     @DisplayName("resetDagAndSetReady - multi-trigger DAG targeting (rerun)")
     class ResetDagAndSetReadyDagTargeting {
@@ -1830,6 +2023,165 @@ class StateSnapshotServiceTest {
             assertEquals(midLoop.currentIndex(),
                     persisted.getEpochState("trigger:a").getLoopState("core:my_loop").currentIndex(),
                     "iteration counter must be preserved");
+        }
+    }
+
+    /**
+     * Run birth for a reusable-trigger workflow.
+     *
+     * <p>Regression for the phantom {@code "trigger:default"} DAG: arming a new run through the
+     * FLAT {@code updateReadyNodes(runId, readyTriggers)} resolved its target via
+     * {@code StateSnapshot.getDefaultTriggerId()}, and {@code dags} is empty at that instant, so
+     * the trigger's ready marker was written under {@code DEFAULT_TRIGGER_SENTINEL}. The first
+     * fire then created the trigger's real DAG and the same node existed in two dags, leaving
+     * {@code findDagContaining} to pick by {@code Map.copyOf} iteration order - randomised per
+     * JVM, so the resulting misbehaviour was constant within a process and different between
+     * processes.
+     */
+    @Nested
+    @DisplayName("initializeReadyNodes()")
+    class InitializeReadyTriggerDagsTests {
+
+        private WorkflowRunEntity stubEmptyRun(String runId) {
+            WorkflowRunEntity run = mock(WorkflowRunEntity.class);
+            lenient().when(run.getRunIdPublic()).thenReturn(runId);
+            lenient().when(run.getStateSnapshot()).thenReturn(null);
+            return run;
+        }
+
+        private StateSnapshot capturePersisted(WorkflowRunEntity run) {
+            org.mockito.ArgumentCaptor<String> jsonCaptor = org.mockito.ArgumentCaptor.forClass(String.class);
+            verify(run).setStateSnapshot(jsonCaptor.capture());
+            return service.parseSnapshotJson(jsonCaptor.getValue());
+        }
+
+        @Test
+        @DisplayName("Arms the trigger inside its OWN DAG, never on the trigger:default sentinel")
+        void armsTheTriggerInItsOwnDag() {
+            String runId = "run-birth";
+            WorkflowRunEntity run = stubEmptyRun(runId);
+            when(runRepository.findByRunIdPublicForUpdate(runId)).thenReturn(Optional.of(run));
+
+            service.initializeReadyNodes(runId, Set.of("trigger:start"));
+
+            StateSnapshot persisted = capturePersisted(run);
+            assertFalse(persisted.getDags().containsKey(StateSnapshot.DEFAULT_TRIGGER_SENTINEL),
+                    "a run born on the sentinel makes the trigger live in two dags after the "
+                            + "first fire, and findDagContaining then resolves by JVM map order");
+            assertEquals(Set.of("trigger:start"), persisted.getDags().keySet());
+            assertTrue(persisted.getDags().get("trigger:start").currentEpochState()
+                            .getReadyNodeIds().contains("trigger:start"),
+                    "the trigger must be ready in its own DAG");
+        }
+
+        @Test
+        @DisplayName("Keeps the flat readyNodeIds view populated, which is why the birth write exists")
+        void keepsFlatReadyViewPopulated() {
+            String runId = "run-birth-flat";
+            WorkflowRunEntity run = stubEmptyRun(runId);
+            when(runRepository.findByRunIdPublicForUpdate(runId)).thenReturn(Optional.of(run));
+
+            service.initializeReadyNodes(runId, Set.of("trigger:start"));
+
+            assertTrue(capturePersisted(run).getReadyNodeIds().contains("trigger:start"),
+                    "an empty flat view makes WS batch-updates send readyStepIds:[] and blank "
+                            + "the frontend's API-loaded readySteps");
+        }
+
+        @Test
+        @DisplayName("A multi-trigger workflow gets one DAG per trigger, in a single write")
+        void oneDagPerTriggerInOneWrite() {
+            String runId = "run-birth-multi";
+            WorkflowRunEntity run = stubEmptyRun(runId);
+            when(runRepository.findByRunIdPublicForUpdate(runId)).thenReturn(Optional.of(run));
+
+            service.initializeReadyNodes(runId, Set.of("trigger:hook", "trigger:cron"));
+
+            org.mockito.ArgumentCaptor<String> jsonCaptor = org.mockito.ArgumentCaptor.forClass(String.class);
+            verify(run, times(1)).setStateSnapshot(jsonCaptor.capture());
+            StateSnapshot persisted = service.parseSnapshotJson(jsonCaptor.getValue());
+
+            assertEquals(Set.of("trigger:hook", "trigger:cron"), persisted.getDags().keySet());
+            assertEquals(Set.of("trigger:hook"), persisted.getDags().get("trigger:hook")
+                    .currentEpochState().getReadyNodeIds(),
+                    "each DAG holds only its own trigger: a DAG is per-trigger state");
+            assertEquals(Set.of("trigger:cron"), persisted.getDags().get("trigger:cron")
+                    .currentEpochState().getReadyNodeIds());
+        }
+
+        @Test
+        @DisplayName("No trigger to arm writes nothing at all")
+        void emptyTriggerSetWritesNothing() {
+            service.initializeReadyNodes("run-birth-none", Set.of());
+
+            verify(runRepository, never()).findByRunIdPublicForUpdate(anyString());
+        }
+
+        @Test
+        @DisplayName("A ready set that is not all triggers falls back to the flat write unchanged")
+        void nonTriggerReadySetFallsBackToFlatWrite() {
+            // A triggerless workflow has no DAG a core node could be said to belong to, so the
+            // sentinel legitimately ends up as the only DAG. Changing that is out of scope, and
+            // pretending core:first owns a DAG would invent state.
+            String runId = "run-birth-triggerless";
+            WorkflowRunEntity run = stubEmptyRun(runId);
+            when(runRepository.findByRunIdPublicForUpdate(runId)).thenReturn(Optional.of(run));
+
+            service.initializeReadyNodes(runId, Set.of("core:first"));
+
+            StateSnapshot persisted = capturePersisted(run);
+            assertTrue(persisted.getReadyNodeIds().contains("core:first"),
+                    "the ready marker must survive whichever DAG holds it");
+        }
+
+        @Test
+        @DisplayName("Re-arming a run that already has its trigger DAGs does not cross-wire them (SBS start after birth)")
+        void rearmingDoesNotCrossWireExistingTriggerDags() {
+            // StepByStepExecutor.startInStepByStepMode runs this a second time, on a snapshot
+            // that already carries the real DAGs. The flat write would have resolved to ONE of
+            // them by Map.copyOf order and replaced that DAG's ready set with BOTH triggers,
+            // leaving trigger:hook ready in two REAL dags - the same findDagContaining coin
+            // flip as the phantom, and one no deserialization heal can repair.
+            String runId = "run-rearm";
+            WorkflowRunEntity run = stubEmptyRun(runId);
+            when(runRepository.findByRunIdPublicForUpdate(runId)).thenReturn(Optional.of(run));
+            service.initializeReadyNodes(runId, Set.of("trigger:hook", "trigger:cron"));
+
+            org.mockito.ArgumentCaptor<String> first = org.mockito.ArgumentCaptor.forClass(String.class);
+            verify(run).setStateSnapshot(first.capture());
+            String afterBirth = first.getValue();
+
+            WorkflowRunEntity run2 = mock(WorkflowRunEntity.class);
+            lenient().when(run2.getRunIdPublic()).thenReturn(runId);
+            lenient().when(run2.getStateSnapshot()).thenReturn(afterBirth);
+            when(runRepository.findByRunIdPublicForUpdate(runId)).thenReturn(Optional.of(run2));
+
+            service.initializeReadyNodes(runId, Set.of("trigger:hook", "trigger:cron"));
+
+            StateSnapshot persisted = capturePersisted(run2);
+            assertEquals(Set.of("trigger:hook"), persisted.getDags().get("trigger:hook")
+                    .currentEpochState().getReadyNodeIds(),
+                    "each trigger stays alone in its own DAG");
+            assertEquals(Set.of("trigger:cron"), persisted.getDags().get("trigger:cron")
+                    .currentEpochState().getReadyNodeIds());
+            assertEquals("trigger:hook", persisted.findDagContaining("trigger:hook"),
+                    "exactly one DAG holds it, so the answer cannot depend on map iteration order");
+        }
+
+        @Test
+        @DisplayName("Birth leaves no active epoch: the run is armed, not running")
+        void birthOpensNoEpoch() {
+            String runId = "run-birth-idle";
+            WorkflowRunEntity run = stubEmptyRun(runId);
+            when(runRepository.findByRunIdPublicForUpdate(runId)).thenReturn(Optional.of(run));
+
+            service.initializeReadyNodes(runId, Set.of("trigger:start"));
+
+            StateSnapshot persisted = capturePersisted(run);
+            assertFalse(persisted.hasAnyActiveEpoch(),
+                    "arming must not open an epoch - only a real fire does, via openEpoch");
+            assertEquals(0, persisted.getDags().get("trigger:start").getFireCount(),
+                    "no fire has happened yet");
         }
     }
 }

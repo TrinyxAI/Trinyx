@@ -2,6 +2,8 @@ package com.apimarketplace.orchestrator.controllers.storage;
 
 import com.apimarketplace.auth.client.access.OrgAccessGuard;
 import com.apimarketplace.common.web.ContentDispositions;
+import com.apimarketplace.common.storage.dto.ExplorerSort;
+import com.apimarketplace.common.storage.dto.FolderCrumbDto;
 import com.apimarketplace.common.storage.dto.StorageExplorerDto;
 import com.apimarketplace.common.storage.dto.VirtualFolderAddress;
 import com.apimarketplace.common.storage.service.StorageExplorerService;
@@ -28,6 +30,8 @@ import java.time.Instant;
 import java.time.LocalDate;
 import java.time.ZoneOffset;
 import java.util.ArrayList;
+import java.util.Collection;
+import java.util.Comparator;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
@@ -93,12 +97,18 @@ public class StorageExplorerController {
             @RequestParam(defaultValue = "false") boolean filesOnly,
             @RequestParam(defaultValue = "false") boolean s3Only,
             @RequestParam(required = false) String parentFolderId,
-            @RequestParam(defaultValue = "false") boolean virtualWorkflowFolders) {
+            @RequestParam(defaultValue = "false") boolean virtualWorkflowFolders,
+            @RequestParam(required = false) String sort,
+            @RequestParam(required = false) String direction) {
 
-        logger.debug("Storage explorer search: tenantId={}, orgId={}, page={}, size={}, search={}, fileType={}, filesOnly={}, s3Only={}, parentFolderId={}, virtualWorkflowFolders={}",
-            tenantId, organizationId, page, size, search, fileType, filesOnly, s3Only, parentFolderId, virtualWorkflowFolders);
+        logger.debug("Storage explorer search: tenantId={}, orgId={}, page={}, size={}, search={}, fileType={}, filesOnly={}, s3Only={}, parentFolderId={}, virtualWorkflowFolders={}, sort={}, direction={}",
+            tenantId, organizationId, page, size, search, fileType, filesOnly, s3Only, parentFolderId, virtualWorkflowFolders, sort, direction);
 
         Pageable pageable = PageRequest.of(page, Math.min(size, 100));
+        // Unrecognised sort/direction degrade to the default (date, newest first) instead of
+        // failing the request - a stale bookmark must still list files. The parsed value is a
+        // closed enum, so no request text ever reaches the SQL ORDER BY.
+        ExplorerSort explorerSort = ExplorerSort.parse(sort, direction);
 
         // Phase 2b virtual workflow folder tree: the Files browser opts in with
         // virtualWorkflowFolders=true. The parentFolderId then carries a virtual address
@@ -111,8 +121,9 @@ public class StorageExplorerController {
                 Page<StorageExplorerDto> virtualResults = explorerService.searchVirtualScope(
                     tenantId, organizationId, address, search, sourceType, storageType,
                     filesOnly, s3Only, fileType, dateFrom, dateTo,
-                    restrictedFileIds(organizationId, tenantId, orgRole), pageable);
-                return ResponseEntity.ok(resolveWorkflowNames(virtualResults, pageable));
+                    restrictedFileIds(organizationId, tenantId, orgRole), explorerSort, pageable);
+                return ResponseEntity.ok(
+                    sortRootFoldersByName(resolveWorkflowNames(virtualResults, pageable), address, explorerSort, pageable));
             }
             // Not a virtual token (e.g. a manual folder UUID) → fall through to the V313 branch.
         }
@@ -135,17 +146,111 @@ public class StorageExplorerController {
             Page<StorageExplorerDto> folderResults = explorerService.searchFolderScope(
                 tenantId, organizationId, parentId, search, sourceType, storageType, workflowId, runId,
                 dateFrom, dateTo, filesOnly, s3Only, fileType,
-                restrictedFileIds(organizationId, tenantId, orgRole), pageable
+                restrictedFileIds(organizationId, tenantId, orgRole), explorerSort, pageable
             );
             return ResponseEntity.ok(folderResults);
         }
 
         Page<StorageExplorerDto> results = explorerService.search(
             tenantId, organizationId, search, sourceType, storageType, workflowId, runId,
-            dateFrom, dateTo, filesOnly, s3Only, fileType, restrictedFileIds(organizationId, tenantId, orgRole), pageable
+            dateFrom, dateTo, filesOnly, s3Only, fileType, restrictedFileIds(organizationId, tenantId, orgRole),
+            explorerSort, pageable
         );
 
         return ResponseEntity.ok(results);
+    }
+
+    /**
+     * The breadcrumb trail of a folder, root-first and ending with the folder itself.
+     *
+     * <p>GET /api/storage/explorer/trail?folderId=wf:&lt;id&gt;/r&lt;run&gt;/e&lt;epoch&gt;</p>
+     *
+     * <p>The Files page carries only the CURRENT folder in the URL, so a refresh or a pasted link
+     * arrives with no path behind it. This rebuilds the path for both folder kinds - the manual
+     * ancestry chain, or the computed workflow tree - so the breadcrumb and the up-one-level button
+     * survive a reload instead of silently snapping back to the root.</p>
+     *
+     * <p>{@code filesOnly}/{@code s3Only} mirror what the listing sends: they decide which runs count
+     * as folders, hence the "Run N" numbering. An unknown / cross-org / non-folder id returns an
+     * EMPTY trail (200), which the client reads as "you are at the root" - a stale bookmark degrades
+     * rather than erroring.</p>
+     *
+     * <p><b>A trail may never disclose more than the listing.</b> Both branches therefore apply the
+     * SAME gates the listing applies: the manual branch resolves the folder in the caller's scope
+     * before walking it and passes the member restricted-id deny-list (a denied ancestor truncates
+     * the path), and the virtual branch is gated inside the service on the org actually owning
+     * storage under that workflow - the folder name is data, and a caller-supplied id must not turn
+     * into one.</p>
+     */
+    @GetMapping("/trail")
+    public ResponseEntity<List<FolderCrumbDto>> folderTrail(
+            @RequestHeader("X-User-ID") String tenantId,
+            @RequestHeader(value = "X-Organization-ID", required = false) String organizationId,
+            @RequestHeader(value = "X-Organization-Role", required = false) String orgRole,
+            @RequestParam(required = false) String folderId,
+            @RequestParam(defaultValue = "false") boolean filesOnly,
+            @RequestParam(defaultValue = "false") boolean s3Only) {
+
+        if (isRootFolderToken(folderId)) {
+            return ResponseEntity.ok(List.of());
+        }
+
+        Collection<UUID> restricted = restrictedFileIds(organizationId, tenantId, orgRole);
+
+        VirtualFolderAddress address = VirtualFolderAddress.parse(folderId);
+        if (address != null) {
+            List<FolderCrumbDto> trail = explorerService.virtualFolderTrail(
+                organizationId, address, filesOnly, s3Only, restricted);
+            return ResponseEntity.ok(resolveCrumbWorkflowNames(trail));
+        }
+
+        UUID parentId = resolveParentFolderId(folderId);
+        if (parentId == null) {
+            return ResponseEntity.ok(List.of());
+        }
+        // Same scope check the listing performs before it lists a folder's children.
+        if (storageService.getEntityByIdForScope(parentId, tenantId, organizationId)
+                .filter(StorageEntity::isFolder).isEmpty()) {
+            return ResponseEntity.ok(List.of());
+        }
+        return ResponseEntity.ok(explorerService.manualFolderTrail(organizationId, parentId, restricted));
+    }
+
+    /**
+     * Fill in the workflow name of the WORKFLOW crumb - the same cross-boundary lookup
+     * {@link #resolveWorkflowNames} does for a listing (the storage boundary cannot read the
+     * workflows table). A crumb whose workflow no longer exists keeps a null name; the client falls
+     * back to its generic "Workflow" label rather than rendering a blank breadcrumb.
+     */
+    private List<FolderCrumbDto> resolveCrumbWorkflowNames(List<FolderCrumbDto> trail) {
+        Set<UUID> ids = new HashSet<>();
+        for (FolderCrumbDto crumb : trail) {
+            if ("WORKFLOW".equals(crumb.virtualKind())) {
+                parseUuid(workflowIdOf(crumb)).ifPresent(ids::add);
+            }
+        }
+        if (ids.isEmpty()) {
+            return trail;
+        }
+        Map<UUID, String> names = new HashMap<>();
+        for (Object[] pair : workflowRepository.findIdNamePairs(ids)) {
+            names.put((UUID) pair[0], (String) pair[1]);
+        }
+        List<FolderCrumbDto> resolved = new ArrayList<>(trail.size());
+        for (FolderCrumbDto crumb : trail) {
+            if ("WORKFLOW".equals(crumb.virtualKind())) {
+                resolved.add(crumb.withWorkflowName(parseUuid(workflowIdOf(crumb)).map(names::get).orElse(null)));
+            } else {
+                resolved.add(crumb);
+            }
+        }
+        return resolved;
+    }
+
+    /** The workflow id inside a WORKFLOW crumb's address ({@code "wf:<id>"}). */
+    private static String workflowIdOf(FolderCrumbDto crumb) {
+        VirtualFolderAddress address = VirtualFolderAddress.parse(crumb.virtualId());
+        return address == null ? null : address.workflowId();
     }
 
     /**
@@ -195,6 +300,57 @@ public class StorageExplorerController {
             }
         }
         return new org.springframework.data.domain.PageImpl<>(resolved, pageable, page.getTotalElements());
+    }
+
+    /**
+     * Order the ROOT's folder block by NAME when the user asked to sort by name.
+     *
+     * <p>Everywhere else the chosen sort is applied in SQL. The Files root is the one place it
+     * cannot be: its folders are a mix of manual folders (name in the row) and computed workflow
+     * folders whose name is only resolved HERE, one layer above the service - so a name sort has to
+     * happen after that resolution, and this is the only place that has both.</p>
+     *
+     * <p>Safe to do post-pagination because the root puts EVERY folder on the first page (see
+     * {@code StorageExplorerService.foldersOnFirstPage}): the leading run of folder rows is the
+     * complete folder set, never a window into it, so re-ordering it cannot move a folder across a
+     * page boundary. Files keep the order the SQL gave them, and are untouched.</p>
+     *
+     * <p>Only NAME is handled: DATE is already applied by the service, and a folder has neither a
+     * size nor a mime type, so SIZE/TYPE leave the block on its last-activity order.</p>
+     */
+    private static Page<StorageExplorerDto> sortRootFoldersByName(Page<StorageExplorerDto> page,
+                                                                  VirtualFolderAddress address,
+                                                                  ExplorerSort sort,
+                                                                  Pageable pageable) {
+        if (address != null || sort.key() != ExplorerSort.Key.NAME) {
+            return page;
+        }
+        List<StorageExplorerDto> content = page.getContent();
+        int folderCount = 0;
+        while (folderCount < content.size() && content.get(folderCount).isFolder()) {
+            folderCount++;
+        }
+        if (folderCount < 2) {
+            return page; // nothing to reorder
+        }
+        // Reverse the TEXT comparator, never the composed one: reversing the composed comparator
+        // would negate the null handling with it and float a nameless folder to the top of a
+        // descending sort - the exact opposite of the NULLS LAST the SQL side guarantees in both
+        // directions. Nameless folders should not occur (an unresolvable workflow folder is
+        // dropped upstream), which is precisely why the divergence would go unnoticed.
+        Comparator<String> byText = sort.ascending()
+                ? String.CASE_INSENSITIVE_ORDER
+                : String.CASE_INSENSITIVE_ORDER.reversed();
+        List<StorageExplorerDto> reordered = new ArrayList<>(content.subList(0, folderCount));
+        reordered.sort(Comparator.comparing(StorageExplorerController::folderDisplayName,
+                Comparator.nullsLast(byText)));
+        reordered.addAll(content.subList(folderCount, content.size()));
+        return new org.springframework.data.domain.PageImpl<>(reordered, pageable, page.getTotalElements());
+    }
+
+    /** The name a root folder is LABELLED with: a workflow folder's workflow name, else the row's own. */
+    private static String folderDisplayName(StorageExplorerDto dto) {
+        return "WORKFLOW".equals(dto.virtualKind()) ? dto.workflowName() : dto.fileName();
     }
 
     /** Rebuild a virtual-folder DTO with a resolved workflow name (records are immutable). */

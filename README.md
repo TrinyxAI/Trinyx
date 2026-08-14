@@ -159,7 +159,7 @@ Clone the repo and use `docker compose` directly to turn them on.
   human-approval steps, and triggers (schedule, webhook, chat, form, datasource).
 - **AI agents.** Chat agents that design, build and run workflows, with per-workspace skills, scoped
   tool access, per-agent credit budgets and per-agent metrics.
-- **Integration catalog.** 600+ ready-made integrations seeded at first boot, fully offline. Add your
+- **Integration catalog.** 700+ ready-made integrations seeded at first boot, fully offline. Add your
   own as OpenAPI specs.
 - **Interfaces and apps.** Small web pages served by your workflows (forms, dashboards, approval
   screens), shareable as standalone apps.

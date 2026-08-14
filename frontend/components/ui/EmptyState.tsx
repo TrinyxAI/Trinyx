@@ -15,7 +15,7 @@ export function EmptyState({ icon, title, subtitle, actions, size = 'lg' }: Empt
 
   return (
     <div className="flex flex-col items-center justify-center py-16 text-center">
-      <div className={`${s} rounded-full flex items-center justify-center mb-4`}>
+      <div className={`${s} rounded-md flex items-center justify-center mb-4`}>
         {icon}
       </div>
       <h3 className="text-sm font-medium text-theme-primary mb-1">{title}</h3>

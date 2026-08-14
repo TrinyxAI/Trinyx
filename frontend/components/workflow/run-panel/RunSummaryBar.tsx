@@ -351,7 +351,7 @@ export function RunSummaryBar({
             onClick={(e) => e.stopPropagation()}
           >
             <div className="text-center mb-6">
-              <div className="w-14 h-14 bg-red-100 dark:bg-red-900/30 rounded-full flex items-center justify-center mx-auto mb-4">
+              <div className="w-14 h-14 bg-red-100 dark:bg-red-900/30 rounded-xl flex items-center justify-center mx-auto mb-4">
                 <XCircle className="w-7 h-7 text-red-600 dark:text-red-400" />
               </div>
               <h3 id="cancel-run-dialog-title" className="text-lg font-semibold text-theme-primary">

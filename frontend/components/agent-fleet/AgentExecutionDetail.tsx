@@ -272,7 +272,7 @@ function ToolCallsView({
               </span>
 
               {tc.isRepeat && (
-                <span className="text-xs bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-400 px-1.5 py-0.5 rounded-full">
+                <span className="text-xs bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-400 px-1.5 py-0.5 rounded-md">
                   {t('repeat')} x{tc.consecutiveCount}
                 </span>
               )}

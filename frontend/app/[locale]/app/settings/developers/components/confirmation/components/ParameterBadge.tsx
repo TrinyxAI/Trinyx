@@ -11,7 +11,7 @@ export function ParameterBadge({ type }: ParameterBadgeProps) {
   const colorClass = PARAMETER_TYPE_COLORS[type] || 'bg-gray-100 text-gray-800';
 
   return (
-    <span className={`px-2 py-1 rounded-full text-xs font-medium ${colorClass}`}>
+    <span className={`px-2 py-1 rounded-md text-xs font-medium ${colorClass}`}>
       {type}
     </span>
   );

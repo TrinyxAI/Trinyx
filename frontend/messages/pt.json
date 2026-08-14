@@ -965,7 +965,8 @@
     "dashboard": {
       "storageOverview": "Visão geral do armazenamento"
     },
-    "openInSidePanel": "Abrir no painel lateral"
+    "openInSidePanel": "Abrir no painel lateral",
+    "generateAsset": "Gerar uma imagem, um vídeo ou um som"
   },
   "resourceCarousel": {
     "resourcesCreated": "{count, plural, one {# recurso} other {# recursos}}",
@@ -1028,12 +1029,9 @@
       "loadingMoreRows": "Carregando mais linhas…",
       "scrollForMoreRows": "Role para carregar mais",
       "epochTooltip": {
-        "completed": "Concluída",
         "duration": "Duração",
         "ended": "Finalizada",
         "epoch": "Época #{epoch}",
-        "pending": "Pendente",
-        "running": "Em execução",
         "started": "Iniciada",
         "stillRunning": "Ainda em execução"
       },
@@ -1470,6 +1468,16 @@
     "continueWorkflow": "Continuar",
     "itemAlreadyResolved": "Este item já foi continuado",
     "continueItemRemaining": "Continuar este item ({count} pendentes)",
+    "loadTemplateValues": "Carregar os valores de exemplo",
+    "loadTemplateValuesHint": "Preenche os formulários com os valores de exemplo da app original. Nada é enviado até você confirmar.",
+    "templateValuesEmpty": "Esta app não inclui valores de exemplo",
+    "templateValuesFailed": "Não foi possível carregar os valores de exemplo",
+    "resetData": "Redefinir os dados",
+    "resetDataHint": "Restaura as tabelas desta app para as linhas com que ela veio",
+    "resetDataConfirm": "Restaurar as tabelas desta app para as linhas com que ela veio? As linhas que você adicionou ou editou serão substituídas. Seu fluxo de trabalho e suas execuções não são afetados.",
+    "resetDataSuccess": "{tables, plural, one {# tabela restaurada} other {# tabelas restauradas}}, {rows, plural, one {# linha escrita} other {# linhas escritas}}",
+    "resetDataPartial": "{tables, plural, one {# tabela restaurada} other {# tabelas restauradas}}, {rows, plural, one {# linha escrita} other {# linhas escritas}}. Não alteradas: {skipped}",
+    "resetDataFailed": "Não foi possível redefinir os dados",
     "workflows": {
       "title": "Workflows",
       "subtitle": "Descubra e use workflows prontos da comunidade",
@@ -1580,6 +1588,30 @@
     "emptyWorkflows": "Ainda não há fluxos de trabalho compartilhados",
     "emptyWorkflowsHint": "Seja o primeiro a compartilhar um fluxo de trabalho!",
     "filterAgents": "Agentes",
+    "filterByType": "Filtrar por tipo",
+    "sortBy": "Ordenar por",
+    "sortPopular": "Mais populares",
+    "sortRating": "Melhor avaliadas",
+    "sortRecent": "Mais recentes",
+    "sortInstalls": "Mais instaladas",
+    "filterByRating": "Filtrar por avaliação",
+    "ratingAny": "Qualquer avaliação",
+    "ratingRated": "Com avaliações",
+    "rating4Plus": "4 estrelas ou mais",
+    "rating3Plus": "3 estrelas ou mais",
+    "filterByDate": "Filtrar por data",
+    "dateAny": "Qualquer data",
+    "date7Days": "Últimos 7 dias",
+    "date30Days": "Últimos 30 dias",
+    "date90Days": "Últimos 3 meses",
+    "dateYear": "Último ano",
+    "filterByPrice": "Filtrar por preço",
+    "priceAny": "Qualquer preço",
+    "priceFree": "Gratuito",
+    "pricePaid": "Pago",
+    "resetFilters": "Repor filtros",
+    "noFilterResults": "Nenhuma aplicação corresponde a estes filtros",
+    "noFilterResultsHint": "Alargue o filtro de avaliação, data ou preço para ver mais aplicações.",
     "filterSkills": "Skills",
     "filterTables": "Tabelas",
     "noLandingPreview": "Nenhuma prévia disponível",
@@ -1795,6 +1827,21 @@
     "workflowSteps": "Passos do Workflow"
   },
   "modals": {
+    "accountRestore": {
+      "title": "A sua conta está agendada para eliminação",
+      "checkingTitle": "A verificar a sua conta",
+      "checkingDescription": "Um momento, estamos a consultar o estado da sua conta.",
+      "description": "Será eliminada definitivamente a {date}. Até lá pode recuperá-la tal como a deixou.",
+      "blockedTitle": "A sua conta está inativa",
+      "blockedDescription": "Esta conta não pode ser utilizada neste momento. Se não estava à espera disto, contacte o suporte.",
+      "whatHappens": "Se a reativar",
+      "keepEverything": "Os seus fluxos, agentes, tabelas e ficheiros voltam intactos",
+      "untilThenNothingLost": "Ainda não foi eliminado nada, a conta está apenas desativada",
+      "afterThatPermanent": "Depois dessa data, a eliminação é definitiva e irreversível",
+      "reactivate": "Reativar a minha conta",
+      "signOut": "Terminar sessão",
+      "restoreFailed": "Não foi possível reativar a sua conta. Tente novamente."
+    },
     "agentError": {
       "title": "Algo correu mal",
       "description": "Ocorreu um erro durante a execução. Tente novamente daqui a pouco.",
@@ -2924,10 +2971,11 @@
       "defaultMarkupLabel": "padrão",
       "errors": {
         "credentialNotFound": "Credencial não encontrada",
-        "duplicateTool": "Cada ferramenta só pode aparecer uma vez",
+        "duplicateTool": "Cada endpoint e modelo pode aparecer apenas uma vez",
         "fetchFailed": "Falha ao carregar os preços",
         "invalidDefault": "A margem padrão deve ser um número não negativo",
         "invalidOverride": "Margem inválida para a ferramenta {tool}",
+        "loadFailed": "Não foi possível carregar os preços publicados. Publicar substituiria os preços em vigor por uma lista vazia, por isso a ação fica bloqueada até que sejam carregados.",
         "publishFailed": "Falha ao publicar os preços"
       },
       "history": "Histórico de versões",
@@ -2941,12 +2989,34 @@
       "publishNew": "Publicar nova versão",
       "publishedVersion": "Versão v{version} publicada",
       "publishing": "Publicando…",
+      "retry": "Tentar novamente",
       "selectTool": "Selecione uma ferramenta…",
       "subtitle": "Publique uma nova versão de preços para esta credencial. As execuções de fluxos de trabalho existentes mantêm a versão à qual foram fixadas.",
       "success": "Salvo",
       "title": "Preços de margem",
       "unknownTool": "Ferramenta desconhecida",
-      "warningInFlightRuns": "A publicação cria a versão N+1. As execuções de fluxos de trabalho já em andamento mantêm a versão à qual foram fixadas - apenas as novas execuções adotam esta."
+      "warningInFlightRuns": "A publicação cria a versão N+1. As execuções de fluxos de trabalho já em andamento mantêm a versão à qual foram fixadas - apenas as novas execuções adotam esta.",
+      "model": "Modelo",
+      "modelAny": "Todos os modelos (endpoint inteiro)",
+      "modelHint": "Deixe o modelo vazio para precificar o endpoint inteiro. Escolha um modelo quando um mesmo endpoint executar vários com tarifas diferentes.",
+      "unit": "Cobrado por",
+      "baseCredits": "Base",
+      "unitCredits": "Por unidade",
+      "minCredits": "Mínimo",
+      "maxCredits": "Máximo",
+      "removePrice": "Remover este preço",
+      "units": {
+        "call": "chamada",
+        "second": "segundo",
+        "minute": "minuto",
+        "image": "imagem",
+        "character": "caractere"
+      },
+      "summaryFlat": "{amount} créditos por chamada",
+      "summaryPerUnit": "{rate} créditos por {unit}",
+      "summaryBasePlusUnit": "{base} créditos + {rate} créditos por {unit}",
+      "floorNote": "mínimo de {min} créditos",
+      "ceilingNote": "máximo de {max} créditos"
     }
   },
   "aiProviders": {
@@ -3119,10 +3189,6 @@
         "browser_agent": {
           "label": "Agente de navegador",
           "hint": "Modelos disponíveis para o Browser Agent. A classificação define a ordem padrão; desativar remove o modelo das execuções do Browser Agent."
-        },
-        "image_generation": {
-          "label": "Geração de imagens",
-          "hint": "Provedores de geração de imagens. A ordem controla a lista padrão; desativar remove o modelo da ferramenta image-gen."
         }
       },
       "allProviders": "Todos os provedores",
@@ -3223,10 +3289,11 @@
       "local": "Chaves locais",
       "cloudHint": "As chamadas de integração passam pela sua conta vinculada do LiveContext Cloud e usam as credenciais de plataforma dela. As solicitações transitam pela nuvem e uma pequena margem em créditos é cobrada lá a cada chamada.",
       "localHint": "As credenciais de integração são configuradas e usadas localmente nesta instalação.",
-      "subscriptionRequired": "A opção Cloud exige uma assinatura paga ativa na sua conta de nuvem vinculada.",
+      "subscriptionRequired": "Usar a nuvem exige uma subscrição paga ativa na sua conta na nuvem associada. Uma conta gratuita não pode pagar as chamadas retransmitidas.",
       "viewPlans": "Ver planos",
       "linkRequired": "Vincule uma conta Cloud antes de mudar para Cloud.",
-      "saveError": "Falha ao atualizar a origem das credenciais de integração."
+      "saveError": "Falha ao atualizar a origem das credenciais de integração.",
+      "cloudCovers": "Isto abrange também a geração: imagens, vídeo, som, voz e música correm com as chaves de fornecedor da conta na nuvem e são faturadas aí em créditos, por segundo ou por ficheiro, ao preço publicado para cada modelo."
     },
     "cloudSource": {
       "apiKeys": "Chaves de API",
@@ -3583,6 +3650,13 @@
         "scopesPlaceholder": "ex.: read write (separados por espaço)",
         "tokenUrl": "URL de token",
         "tokenUrlPlaceholder": "https://provider.com/oauth/token"
+      },
+      "platformKey": {
+        "title": "Não é obrigado a adicionar uma chave",
+        "explanation": "Este serviço está disponível na chave da plataforma, faturada em créditos por chamada. Se adicionar a sua própria chave, paga diretamente ao fornecedor e a plataforma não lhe cobra nada.",
+        "explanationPriced": "Este serviço está disponível na chave da plataforma por {credits} créditos por chamada. Se adicionar a sua própria chave, paga diretamente ao fornecedor e a plataforma não lhe cobra nada.",
+        "use": "Usar a chave da plataforma",
+        "orOwn": "Ou adicione a sua própria chave abaixo."
       }
     },
     "options": "Opções",
@@ -3594,6 +3668,16 @@
       "label": "Origem da credencial",
       "markupNote": "Esta etapa usará a credencial de plataforma compartilhada. Uma pequena margem é cobrada em cada chamada.",
       "markupNoteWithRate": "Esta etapa usará a credencial de plataforma compartilhada. {rate} créditos são cobrados em cada chamada como margem.",
+      "markupNoteNotSold": "Esta etapa está definida para a credencial de plataforma compartilhada, mas esta geração não é vendida nela: não há preço publicado para este modelo, apenas o padrão da credencial, que uma geração nunca herda. Mude para a sua própria chave para executá-la.",
+      "markupNoteWithUnitRate": "Esta etapa usará a credencial de plataforma compartilhada. São cobrados {unitRate} créditos por {unit}, portanto um pedido maior custa mais.",
+      "markupNoteWithUnitRateAndTotal": "Esta etapa usará a credencial de plataforma compartilhada. {unitRate} créditos por {unit}, {quantity} {unit} = {total} créditos nesta execução.",
+      "priceUnits": {
+        "call": "chamada",
+        "second": "segundo",
+        "minute": "minuto",
+        "image": "imagem",
+        "character": "caractere"
+      },
       "notAvailable": "Nenhuma credencial de plataforma está configurada para este serviço",
       "platform": "Plataforma",
       "platformExplanation": "Nenhuma configuração pessoal necessária - a plataforma é dona da chave de API. Você é cobrado apenas pela margem por chamada além do custo base do nó.",
@@ -4940,6 +5024,13 @@
     "noMatches": "Nenhum arquivo corresponde aos seus filtros",
     "viewGrid": "Visualização em grade",
     "viewList": "Visualização em lista",
+    "sortBy": "Ordenar por",
+    "sortByDate": "Data",
+    "sortByName": "Nome",
+    "sortBySize": "Tamanho",
+    "sortByType": "Tipo",
+    "sortAscending": "Ordem crescente",
+    "sortDescending": "Ordem decrescente",
     "dateFrom": "De",
     "dateTo": "Até",
     "typeColumn": "Tipo",
@@ -4986,7 +5077,8 @@
     "moveToRoot": "Nível superior (raiz)",
     "moveHere": "Mover aqui",
     "noFoldersYet": "Ainda não há pastas - crie uma primeiro ou mova para o nível superior.",
-    "backToParent": "Subir um nível"
+    "backToParent": "Subir um nível",
+    "generate": "Gerar"
   },
   "fileDetail": {
     "download": "Baixar {name}",
@@ -5408,17 +5500,17 @@
     },
     "advanced": {
       "deleteTitle": "Excluir Conta",
-      "deleteWarning": "Esta acao e irreversivel. Todos os seus dados, assinaturas e configuracoes serao excluidos permanentemente.",
+      "deleteWarning": "A sua conta é desativada de imediato e eliminada definitivamente após um período de tolerância. A partir daí, os seus dados, subscrições e configurações são perdidos.",
       "deleteButton": "Excluir Minha Conta"
     },
     "deleteDialog": {
       "title": "Excluir Conta?",
-      "description": "Esta acao e irreversivel. Todos os seus dados serao perdidos permanentemente.",
+      "description": "A sua conta é desativada de imediato e eliminada definitivamente ao fim de {days} dias. Durante esse prazo pode cancelar, bastando iniciar sessão novamente.",
       "whatHappens": "O que acontece?",
       "dataDeleted": "Todos os seus dados serao excluidos",
       "subscriptionCancelled": "Sua assinatura sera cancelada",
       "toolsDeleted": "Suas ferramentas MCP serao excluidas",
-      "cannotUndo": "Esta acao nao pode ser desfeita",
+      "cannotUndo": "Passados {days} dias, isto não pode ser desfeito",
       "confirmInstruction": "Para confirmar, digite",
       "typePlaceholder": "Digite EXCLUIR",
       "deletePermanently": "Excluir Permanentemente"
@@ -5939,8 +6031,9 @@
       "executing": "Executing...",
       "executeStep": "Executar etapa",
       "waitingDependencies": "Aguardando dependências",
-      "rerunning": "Re-running...",
+      "rerunning": "Reexecutando...",
       "rerunTooltip": "Reexecutar esta etapa e todas as etapas posteriores",
+      "rerunTooltipAuto": "Reexecutar esta etapa e deixar o resto do fluxo rodar de novo sozinho",
       "fixValidationErrors": "Corrija os erros de validação antes de executar",
       "startStepByStep": "Iniciar o workflow no modo passo a passo",
       "onlyTriggersCanStart": "Apenas os gatilhos podem iniciar a execução passo a passo",
@@ -6654,6 +6747,8 @@
       "autoLayout": "Layout automático (reorganizar nós)",
       "expandAllFiles": "Expandir todas as pré-visualizações de arquivos",
       "collapseAllFiles": "Recolher todas as pré-visualizações de arquivos",
+      "expandFilesByDefault": "Expandir as pré-visualizações de arquivos por padrão",
+      "collapseFilesByDefault": "Recolher as pré-visualizações de arquivos por padrão",
       "disableInteractivity": "Desativar interatividade",
       "enableInteractivity": "Ativar interatividade",
       "cursorMode": "Modo do cursor",
@@ -6693,6 +6788,7 @@
       "waitingSchedule": "Aguardando o horário agendado...",
       "executeStep": "Executar esta etapa",
       "rerunStep": "Reexecutar a partir desta etapa",
+      "rerunStepAuto": "Recomeçar desta etapa (o resto é reexecutado automaticamente)",
       "waitingDependencies": "Aguardando dependências",
       "previous": "Previous",
       "next": "Next",
@@ -6955,6 +7051,44 @@
         "disposition": "Disposição",
         "dispositionInline": "Inline (exibir no navegador)",
         "dispositionAttachment": "Anexo (solicitação de download)"
+      },
+      "generate": {
+        "title": "Gerar",
+        "description": "Gera um recurso a partir de um comando: imagem, vídeo, áudio, voz ou música. O modelo escolhido define o formato produzido, os parâmetros aceites e o custo de cada execução.",
+        "model": "Modelo",
+        "modelPlaceholder": "Selecionar um modelo",
+        "modelsLoading": "A carregar modelos...",
+        "modelHint": "Mudar de modelo remove os parâmetros que o novo modelo não aceita.",
+        "noModels": "Não há modelos de geração disponíveis nesta instalação.",
+        "selectValue": "Selecionar um valor",
+        "filePlaceholder": "ex. {{core:download.output.file}}",
+        "limitRange": "Intervalo permitido: {min} a {max}",
+        "params": {
+          "prompt": "Comando",
+          "negative_prompt": "Comando negativo",
+          "duration_seconds": "Duração (segundos)",
+          "n": "Quantidade",
+          "aspect_ratio": "Proporção",
+          "resolution": "Resolução",
+          "quality": "Qualidade",
+          "style": "Estilo",
+          "voice": "Voz",
+          "language": "Idioma",
+          "seed": "Semente",
+          "input_image": "Imagem de referência",
+          "input_audio": "Áudio de referência",
+          "input_video": "Vídeo de referência"
+        },
+        "placeholders": {
+          "prompt": "Descreva o que gerar",
+          "negative_prompt": "O que evitar",
+          "aspect_ratio": "ex. 16:9",
+          "resolution": "ex. 720p",
+          "quality": "ex. high",
+          "style": "ex. cinematic",
+          "voice": "Id da voz",
+          "language": "ex. pt"
+        }
       },
       "media": {
         "title": "Mídia",
@@ -8972,8 +9106,8 @@
     "inactivityTimeoutLabel": "Tempo de inatividade (s)",
     "inactivityTimeoutInfo": "Força a parada do agente se ele não produzir nenhuma saída (sem token, chamada de ferramenta ou resultado) por estes segundos. 0 desativa; 10-7200s. Diferente do Tempo limite, que é o orçamento total.",
     "executionTimeoutLabel": "Tempo limite (s)",
-    "imageGenerationInfo": "Permite que o agente gere imagens via OpenAI gpt-image-1.5/mini ou Google Gemini 2.5 Flash Image (nano-banana) / 3 Pro Image. Cobra por imagem retornada (5-134 créditos dependendo do modelo e da qualidade). Se você tiver sua própria chave de API de provedor configurada, ela é usada (sem cobrança interna de créditos); caso contrário, a chave da plataforma é usada e créditos são deduzidos.",
-    "imageGenerationLabel": "Geração de imagens",
+    "generationLabel": "Geração",
+    "generationInfo": "Permite ao assistente criar imagens, vídeos, som, vozes e música. Cada geração é cobrada em créditos à tarifa da plataforma; um vídeo mais longo ou um texto mais longo custa mais.",
     "loopConsecutiveStopInfo": "Parar após esta quantidade de etapas consecutivas do modelo para evitar cadeias descontroladas.",
     "compactionEnabledLabel": "Compactação de contexto",
     "compactionEnabledInfo": "Resume os turnos antigos quando a conversa fica longa, para permanecer na janela de contexto do modelo. Desativado por padrão; herda a configuração da plataforma se não for alterado.",
@@ -9135,16 +9269,13 @@
     "infoTooltip": "Ver detalhes do modelo",
     "maxOutputLabel": "Saída máx.",
     "notSet": "-",
-    "perImage": "por imagem",
     "perMillion": "por 1M de tokens",
     "perTenantSuffix": "(por tenant)",
     "priceBatchLabel": "Preço em lote",
     "priceCacheLabel": "Entrada em cache",
-    "priceImageLabel": "Por imagem",
     "priceInputLabel": "Preço de entrada",
     "priceOutputLabel": "Preço de saída",
     "priceShort": "{input}/{output} por 1M",
-    "priceShortPerImage": "{input} / imagem",
     "providerKind": {
       "bridge": "Ponte (CLI)",
       "byok": "BYOK",
@@ -10041,6 +10172,90 @@
           "link": "Link"
         }
       }
+    }
+  },
+  "generationModal": {
+    "title": "Gerar um ficheiro",
+    "subtitle": {
+      "format": "O que quer produzir?",
+      "prompt": "Escolha um modelo e descreva",
+      "result": "O seu ficheiro"
+    },
+    "steps": {
+      "format": "Formato",
+      "prompt": "Instrução",
+      "result": "Resultado"
+    },
+    "formats": {
+      "image": "Imagem",
+      "video": "Vídeo",
+      "audio": "Som",
+      "voice": "Voz",
+      "music": "Música"
+    },
+    "params": {
+      "negative_prompt": "O que evitar",
+      "voice": "Voz",
+      "language": "Idioma",
+      "style": "Estilo",
+      "aspect_ratio": "Proporção",
+      "resolution": "Resolução",
+      "quality": "Qualidade",
+      "duration_seconds": "Duração (segundos)",
+      "n": "Quantos",
+      "seed": "Semente",
+      "input_image": "Imagem de referência",
+      "input_audio": "Áudio de referência",
+      "input_video": "Vídeo de referência"
+    },
+    "price": {
+      "perUnit": "{rate} créditos por {unit}",
+      "plusBase": "mais {base} de partida",
+      "flat": "{credits} créditos",
+      "min": "mínimo {credits}",
+      "max": "limitado a {credits}",
+      "total": "{credits} créditos por este pedido",
+      "unpriced": "Não é vendido com a chave da plataforma"
+    },
+    "fields": {
+      "model": "Modelo",
+      "modelPlaceholder": "Escolha um modelo",
+      "prompt": "Instrução",
+      "promptPlaceholder": "Descreva o que pretende",
+      "options": "Opções",
+      "unset": "Deixar ao modelo",
+      "uploading": "A enviar...",
+      "uploadFailed": "Não foi possível enviar este ficheiro: {error}",
+      "provider": "Fornecedor",
+      "providerPlaceholder": "Escolha um fornecedor",
+      "chooseFile": "Escolher um ficheiro",
+      "replaceFile": "Substituir",
+      "noFile": "Nenhum ficheiro escolhido"
+    },
+    "modelCount": "{count} modelos",
+    "empty": "Ainda não há nenhum modelo de geração disponível.",
+    "running": "A gerar. Pode demorar no caso do vídeo.",
+    "done": "Concluído",
+    "billedOn": "Faturado sobre {quantity} {unit}",
+    "download": "Transferir",
+    "generate": "Gerar",
+    "again": "Alterar algo",
+    "back": "Voltar",
+    "cancel": "Cancelar",
+    "close": "Fechar",
+    "errors": {
+      "unexpected": "Não foi possível iniciar a geração.",
+      "stillRunning": "A ligação caiu, mas a geração continua a correr no servidor e será faturada. O seu ficheiro aparecerá nos seus ficheiros assim que terminar.",
+      "unreadable": "A geração foi recusada e nada foi produzido, mas o motivo chegou num formato que esta página não consegue mostrar. Experimente outro modelo ou tente novamente daqui a pouco."
+    },
+    "payer": {
+      "monthlyCreditsOnly": "Os seus créditos mensais financiam as execuções de fluxos, não a geração. Use a sua própria chave, ou subscreva ou carregue para pagar com créditos."
+    },
+    "assetRoles": {
+      "source": "Imagem de origem",
+      "first_frame": "Primeira imagem",
+      "reference": "Imagem de referência",
+      "mask": "Máscara"
     }
   }
 }

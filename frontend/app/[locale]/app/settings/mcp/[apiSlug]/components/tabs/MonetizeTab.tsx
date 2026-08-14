@@ -605,7 +605,7 @@ const MonetizeTab: React.FC<MonetizeTabProps> = ({
       <div className="space-y-6">
         <div className="flex items-center justify-between">
           <div className="flex items-center space-x-3">
-            <div className="w-10 h-10 bg-theme-secondary rounded-full flex items-center justify-center">
+            <div className="w-10 h-10 bg-theme-secondary rounded-xl flex items-center justify-center">
               <DollarSign className="w-5 h-5 text-theme-primary" />
             </div>
             <div>
@@ -848,7 +848,7 @@ const MonetizeTab: React.FC<MonetizeTabProps> = ({
         <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center p-4 z-50">
           <div className="max-w-md w-full bg-theme-primary rounded-2xl shadow-2xl p-6 text-center border border-theme max-h-[90vh] overflow-y-auto">
             {/* Warning icon */}
-            <div className="w-16 h-16 bg-orange-100 rounded-full flex items-center justify-center mx-auto mb-4">
+            <div className="w-16 h-16 bg-orange-100 rounded-2xl flex items-center justify-center mx-auto mb-4">
               <AlertCircle className="w-8 h-8 text-orange-600" />
             </div>
 

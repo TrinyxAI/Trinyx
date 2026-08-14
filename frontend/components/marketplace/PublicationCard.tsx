@@ -178,7 +178,7 @@ export function StandardFallback({ publication }: { publication: WorkflowPublica
         {publication.nodeIcons && publication.nodeIcons.length > 0 ? (
           <WorkflowNodeIcons nodeIcons={publication.nodeIcons} />
         ) : (
-          <div className="w-14 h-14 bg-theme-secondary rounded-full flex items-center justify-center">
+          <div className="w-14 h-14 bg-theme-secondary rounded-xl flex items-center justify-center">
             <Package className="w-7 h-7 text-theme-tertiary" />
           </div>
         )}
@@ -320,7 +320,7 @@ export const PublicationCard = memo(function PublicationCard({ publication, curr
 
         {/* Top-right: status badge - owner = publisher already has access, visually equivalent to installed */}
         {isAcquired || isOwn ? (
-          <span className="absolute top-3 right-3 z-20 inline-flex items-center gap-1 h-[22px] px-2 rounded-full text-[11px] font-medium bg-emerald-500 text-white shadow-sm">
+          <span className="absolute top-3 right-3 z-20 inline-flex items-center gap-1 h-[22px] px-2 rounded-lg text-[11px] font-medium bg-emerald-500 text-white shadow-sm">
             <CheckCircle className="h-3 w-3" />
             {t('installed')}
           </span>
@@ -406,7 +406,7 @@ export const PublicationCard = memo(function PublicationCard({ publication, curr
                 });
                 router.push(openHref!);
               }}
-              className="inline-flex items-center gap-1 h-[22px] px-2 rounded-full text-[11px] font-medium bg-[var(--accent-primary)] text-[var(--bg-primary)] hover:brightness-110 active:scale-95 transition-[filter,transform] shrink-0"
+              className="inline-flex items-center gap-1 h-[22px] px-2 rounded-lg text-[11px] font-medium bg-[var(--accent-primary)] text-[var(--bg-primary)] hover:brightness-110 active:scale-95 transition-[filter,transform] shrink-0"
             >
               <ArrowUpRight className="h-3 w-3" />
               {t('open')}
@@ -415,7 +415,7 @@ export const PublicationCard = memo(function PublicationCard({ publication, curr
             <button
               type="button"
               onClick={(e) => { e.preventDefault(); e.stopPropagation(); onAcquire!(publication); }}
-              className="inline-flex items-center gap-1 h-[22px] px-2 rounded-full text-[11px] font-medium bg-[var(--accent-primary)] text-[var(--bg-primary)] hover:brightness-110 active:scale-95 transition-[filter,transform] shrink-0"
+              className="inline-flex items-center gap-1 h-[22px] px-2 rounded-lg text-[11px] font-medium bg-[var(--accent-primary)] text-[var(--bg-primary)] hover:brightness-110 active:scale-95 transition-[filter,transform] shrink-0"
             >
               <Download className="h-3 w-3" />
               {t('acquire')}

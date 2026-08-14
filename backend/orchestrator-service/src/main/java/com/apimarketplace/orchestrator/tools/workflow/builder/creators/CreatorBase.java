@@ -1,5 +1,6 @@
 package com.apimarketplace.orchestrator.tools.workflow.builder.creators;
 
+import com.apimarketplace.orchestrator.tools.workflow.builder.ActionMappingRefs;
 import com.apimarketplace.agent.tools.ToolsProvider.ToolExecutionResult;
 import com.apimarketplace.datasource.client.DataSourceClient;
 import com.apimarketplace.datasource.client.dto.DataSourceDto;
@@ -35,6 +36,7 @@ public abstract class CreatorBase {
         DOWNLOAD_FILE("core", "add_download_file"),  // Download file from URL and store for workflow use
         PUBLIC_LINK("core", "add_public_link"),      // Mint a public, time-limited signed URL for a stored file
         MEDIA("core", "add_media"),                  // Audio/video processing: probe, mux_audio, mix, extract_audio (renderer component)
+        GENERATE("core", "add_generate"),            // Generate an asset from a prompt: image, video, audio, voice, music
         EXIT("core", "add_exit"),            // Exit branch execution (terminal node, other parallel branches continue)
         RESPONSE("core", "add_response"),    // Send a message response to chat interface
         OPTION("core", "add_option"),        // Multiple choice branching (N choices, first true wins)
@@ -1084,6 +1086,14 @@ public abstract class CreatorBase {
 
             String[] parts = value.split(":");
             if (parts.length < 3 || !"trigger".equals(parts[0])) continue;
+            // A page switch is not a trigger fire, even under the `trigger:` prefix the
+            // builder UI used to emit for it. Without this skip the check asks whether a
+            // page belongs to this DAG and answers "trigger '<page>' belongs to a
+            // different DAG" - an assertion about something that is not a trigger at all.
+            // It used to be masked by alreadyFlaggedTriggers, fed from the sibling
+            // validator's "not found" message; that validator correctly stopped flagging
+            // these, which is what exposed this one.
+            if (ActionMappingRefs.isNavigate(parts)) continue;
 
             String triggerLabel = parts[1];
             // Skip triggers already flagged as non-existent to avoid double warnings

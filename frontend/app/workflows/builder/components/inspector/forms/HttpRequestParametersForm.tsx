@@ -288,7 +288,7 @@ export function HttpRequestParametersForm({
         <span className="text-sm font-semibold text-slate-500 dark:text-slate-400">{t('title')}</span>
         <Popover>
           <PopoverTrigger asChild>
-            <button type="button" className="p-0.5 rounded-full hover:bg-slate-200 dark:hover:bg-slate-700">
+            <button type="button" className="p-0.5 rounded-md hover:bg-slate-200 dark:hover:bg-slate-700">
               <Info className="h-3 w-3 text-slate-400 dark:text-slate-500" />
             </button>
           </PopoverTrigger>

@@ -514,7 +514,9 @@ public class NodeDescriptionBuilder {
         if (actionMapping != null) {
             config.put("action_mapping", actionMapping);
             modifiableFields.put("action_mapping", new ModifiableField(actionMapping, "action_mapping",
-                "Map CSS selectors to triggers: {'#btn': 'trigger:label:click'}. Types: click, submit, message, navigate"));
+                "Map CSS selectors to what a click does: {'#btn': 'trigger:label:click'} fires a trigger "
+                    + "(events: click, submit, message), {'#link': 'interface:label:navigate'} switches to that "
+                    + "interface without touching the run."));
         }
 
         return new DescriptionResult(config, modifiableFields, "interface", warning);

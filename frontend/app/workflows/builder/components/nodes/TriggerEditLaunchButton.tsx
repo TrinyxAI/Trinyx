@@ -5,7 +5,7 @@ import { createPortal } from 'react-dom';
 import { Play, Bug } from 'lucide-react';
 import { useTranslations } from 'next-intl';
 import { cn } from '@/lib/utils';
-import { canvasNodeButtonClass } from '@/components/ui/canvas-chrome';
+import { canvasNodeButtonClass, canvasNodeButtonShimmerRadiusClass } from '@/components/ui/canvas-chrome';
 import { useCanMutateInCurrentOrg } from '@/lib/stores/current-org-store';
 import { usePortalMenu } from '../../hooks/usePortalMenu';
 import type { TriggerButtonVariant } from '../NodePlayButton';
@@ -90,7 +90,9 @@ export function TriggerEditLaunchButton({ nodeId, variant, borderColor }: Trigge
         aria-expanded={open}
       >
         <span
-          className="absolute inset-0 rounded-full pointer-events-none"
+          // The shared constant, not a hand-written radius: an overlay whose
+          // corners disagree with the button's leaves a visibly clipped scan.
+          className={`absolute inset-0 ${canvasNodeButtonShimmerRadiusClass} pointer-events-none`}
           style={{
             background: `linear-gradient(90deg, transparent 0%, ${shimmerColor} 50%, transparent 100%)`,
             backgroundSize: '200% 100%',

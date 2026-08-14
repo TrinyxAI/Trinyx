@@ -215,6 +215,11 @@ public class AgentToolsProvider implements ToolsProvider {
                 .description("Sub-agent UUIDs the agent can call - see RESOURCE GRANTS. (for: create, update)")
                 .build(),
             boolParam("web_search", "Enable web search capability for the agent (default: true) (for: create, update)", false, true),
+            boolParam("generation", "Let the agent produce images, video, audio, voice and music with the "
+                + "generation tool (default: false) (for: create, update). Off unless you pass true: every "
+                + "asset it produces spends the account's credits, at the rate the chosen model sets. Turn it "
+                + "on for an agent whose job is to make assets, and leave it off for one that only reads and "
+                + "writes.", false, false),
             stringParam("workflow_id", "Single workflow ID to link agent to (legacy, prefer 'workflows' array)", false),
             ToolParameter.builder()
                 .name("datasource_id")

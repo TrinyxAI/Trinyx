@@ -1,8 +1,10 @@
 package com.apimarketplace.conversation.service.ai;
 
+import com.apimarketplace.agent.config.AgentModuleResolver;
 import com.apimarketplace.agent.domain.ToolDefinition;
 import com.apimarketplace.agent.domain.ToolParameter;
 import com.apimarketplace.agent.prompt.ConversationToolDefinitions;
+import com.apimarketplace.agent.prompt.DefaultSystemPrompts;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.*;
@@ -58,7 +60,7 @@ public class CoreToolsProvider {
         "skill",             // Unified facade: CRUD
         "application",       // Unified facade: marketplace
         "web_search",        // Unified facade: search, fetch
-        "image_generation",  // Unified facade: generate, help (gated by orchestrator's image-generation.enabled flag)
+        "generation",        // Unified facade: create, models, help (gated by catalog-service's generation.enabled flag)
         "files",             // Unified facade: browse & open workspace files (list, get, view, help)
         "wait"               // Unified facade: sleep, help (blocking pause primitive)
     );
@@ -76,8 +78,13 @@ public class CoreToolsProvider {
     @org.springframework.beans.factory.annotation.Autowired(required = false)
     private com.apimarketplace.agent.cloud.CeWebSearchRelayGate webSearchRelayGate;
 
-    @Value("${image-generation.enabled:true}")
-    private boolean imageGenerationEnabled = true;
+    /**
+     * Install-level gate for the credit-spending {@code generation} tool. Off ⇒
+     * catalog-service never registers the provider, so the tool is dropped from the
+     * expected set rather than chased by the retry loop.
+     */
+    @Value("${generation.enabled:true}")
+    private boolean generationEnabled = true;
 
     @Value("${orchestrator.service.url:http://localhost:8099}")
     private String orchestratorUrl;
@@ -114,20 +121,31 @@ public class CoreToolsProvider {
     }
 
     /**
-     * Get minimal core tools for the agent.
-     * Returns only essential tools (8) plus conversation-specific tools.
+     * Tool names a caller receives when NOTHING decides for it (no toolsConfig at all:
+     * plain general chat, or an agent row that never got one).
+     *
+     * <p>Derived from {@link AgentModuleResolver#NO_CONFIG_MODULES}, which is the single
+     * definition of "unrestricted" and deliberately leaves out the two credit-spending opt-in modules
+     * ({@code generation}). Returning every cached tool here
+     * instead handed a general chat, where nobody enabled anything, a tool that spends
+     * the customer's credits - the exact opposite of what those modules being opt-in
+     * means. Computed once: module keys do not depend on the request or the date.
+     */
+    public static final Set<String> NO_CONFIG_CORE_TOOL_NAMES =
+        DefaultSystemPrompts.build(AgentModuleResolver.NO_CONFIG_MODULES, true).coreToolNames();
+
+    /**
+     * Get the core tools for a caller with NO toolsConfig, plus conversation-specific tools.
      * The agent can discover additional tools via tool(action='help') or catalog(action='search').
+     *
+     * <p>"No config" is not "everything": the credit-spending opt-in tools are excluded
+     * (see {@link #NO_CONFIG_CORE_TOOL_NAMES}). A caller that opted in reaches them
+     * through {@link #getCoreTools(Set, boolean)} with its resolved module set.
      *
      * @param isNewConversation if true, includes set_conversation_title tool
      */
     public List<ToolDefinition> getCoreTools(boolean isNewConversation) {
-        if (!reachable || !getMissingTools().isEmpty()) {
-            refreshCoreTools();
-        }
-        List<ToolDefinition> tools = new ArrayList<>(coreToolsCache.values());
-        // Add conversation-specific tools (conditionally)
-        tools.addAll(getConversationTools(isNewConversation));
-        return sortByName(tools);
+        return getCoreTools(NO_CONFIG_CORE_TOOL_NAMES, isNewConversation);
     }
 
     /**
@@ -231,8 +249,8 @@ public class CoreToolsProvider {
         if (!webSearchExposable) {
             active.remove("web_search");
         }
-        if (!imageGenerationEnabled) {
-            active.remove("image_generation");
+        if (!generationEnabled) {
+            active.remove("generation");
         }
         return Collections.unmodifiableSet(active);
     }

@@ -666,11 +666,11 @@ export default function OrganizationSettingsPage() {
 
             {/* Right: Badges */}
             <div className="flex items-center gap-2 flex-shrink-0">
-              <span className={cn("inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-medium", ROLE_BADGE_STYLES[currentOrg.currentUserRole])}>
+              <span className={cn("inline-flex items-center gap-1 px-2.5 py-1 rounded-md text-xs font-medium", ROLE_BADGE_STYLES[currentOrg.currentUserRole])}>
                 {ROLE_ICONS[currentOrg.currentUserRole]}
                 {getRoleLabel(currentOrg.currentUserRole)}
               </span>
-              <span className={cn("inline-flex items-center px-2.5 py-1 rounded-full text-xs font-medium", getPlanBadgeStyle(currentOrg.planCode))}>
+              <span className={cn("inline-flex items-center px-2.5 py-1 rounded-md text-xs font-medium", getPlanBadgeStyle(currentOrg.planCode))}>
                 {currentOrg.planCode || "FREE"}
               </span>
             </div>
@@ -679,7 +679,7 @@ export default function OrganizationSettingsPage() {
           {/* Stats Row */}
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mt-5 pt-5">
             <div className="flex items-center gap-3">
-              <div className="w-10 h-10 bg-theme-tertiary rounded-full flex items-center justify-center">
+              <div className="w-10 h-10 bg-theme-tertiary rounded-xl flex items-center justify-center">
                 <Clock className="h-5 w-5 text-theme-primary" />
               </div>
               <div>
@@ -688,7 +688,7 @@ export default function OrganizationSettingsPage() {
               </div>
             </div>
             <div className="flex items-center gap-3">
-              <div className="w-10 h-10 bg-theme-tertiary rounded-full flex items-center justify-center">
+              <div className="w-10 h-10 bg-theme-tertiary rounded-xl flex items-center justify-center">
                 <Building2 className="h-5 w-5 text-theme-primary" />
               </div>
               <div>
@@ -792,7 +792,7 @@ export default function OrganizationSettingsPage() {
       {currentOrg && currentOrg.members && currentOrg.members.length > 0 && (
         <section>
           <div className="mb-4 flex items-center gap-3">
-            <div className="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-full bg-theme-secondary">
+            <div className="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-xl bg-theme-secondary">
               <Users className="h-5 w-5 text-theme-primary" />
             </div>
             <div>
@@ -835,7 +835,7 @@ export default function OrganizationSettingsPage() {
 
                 {/* Role Badge */}
                 <div className="flex flex-col items-start gap-1">
-                  <span className={cn("inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium", ROLE_BADGE_STYLES[member.role])}>
+                  <span className={cn("inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-xs font-medium", ROLE_BADGE_STYLES[member.role])}>
                     {ROLE_ICONS[member.role]}
                     {getRoleLabel(member.role)}
                   </span>
@@ -843,7 +843,7 @@ export default function OrganizationSettingsPage() {
                       upgrades - mark the seat so the owner isn't misled by it. */}
                   {!supportsTeam && member.role !== "OWNER" && (
                     <span
-                      className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400"
+                      className="inline-flex items-center px-2 py-0.5 rounded-md text-xs font-medium bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400"
                       title={tNav("workspacePausedHint")}
                     >
                       {tNav("workspacePaused")}
@@ -951,12 +951,12 @@ export default function OrganizationSettingsPage() {
                 className="grid grid-cols-[1fr_100px_120px_120px_88px] gap-4 px-4 py-3 items-center border-b last:border-b-0 border-slate-100 dark:border-slate-800 min-w-[560px]"
               >
                 <div className="flex items-center gap-2 min-w-0">
-                  <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-400">
+                  <span className="inline-flex items-center px-2 py-0.5 rounded-md text-xs font-medium bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-400">
                     {t("organization.pendingInvitations").split(" ")[0]}
                   </span>
                   <span className="text-sm text-theme-primary truncate">{inv.email}</span>
                 </div>
-                <span className={cn("inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium w-fit", ROLE_BADGE_STYLES[inv.role])}>
+                <span className={cn("inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-xs font-medium w-fit", ROLE_BADGE_STYLES[inv.role])}>
                   {ROLE_ICONS[inv.role]}
                   {getRoleLabel(inv.role)}
                 </span>
@@ -996,7 +996,7 @@ export default function OrganizationSettingsPage() {
       {currentOrg && !supportsTeam && (
         <section className="bg-theme-secondary rounded-xl p-6 border border-theme">
           <div className="flex items-start gap-4">
-            <div className="w-10 h-10 bg-black dark:bg-white rounded-full flex items-center justify-center flex-shrink-0">
+            <div className="w-10 h-10 bg-black dark:bg-white rounded-xl flex items-center justify-center flex-shrink-0">
               <Users className="h-5 w-5 text-white dark:text-black" />
             </div>
             <div className="flex-1">
@@ -1018,7 +1018,7 @@ export default function OrganizationSettingsPage() {
       {currentOrg && (
         <section>
           <div className="mb-4 flex items-center gap-3">
-            <div className="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-full bg-theme-secondary">
+            <div className="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-xl bg-theme-secondary">
               <Building2 className="h-5 w-5 text-theme-primary" />
             </div>
             <div>
@@ -1089,7 +1089,7 @@ export default function OrganizationSettingsPage() {
                     </span>
                     {org.paused && (
                       <span
-                        className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400"
+                        className="inline-flex items-center px-2 py-0.5 rounded-md text-xs font-medium bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400"
                         title={tNav("workspacePausedHint")}
                       >
                         {tNav("workspacePaused")}
@@ -1100,7 +1100,7 @@ export default function OrganizationSettingsPage() {
                         missing Delete action is intentional, not a bug. */}
                     {org.isPersonal && (
                       <span
-                        className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-theme-secondary text-theme-secondary border border-theme"
+                        className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-xs font-medium bg-theme-secondary text-theme-secondary border border-theme"
                         title={tNav("workspaceUndeletableHint")}
                       >
                         <Lock className="h-3 w-3" />
@@ -1136,7 +1136,7 @@ export default function OrganizationSettingsPage() {
       {currentOrg && !canCreateWorkspace && (
         <section className="bg-theme-secondary rounded-xl p-6 border border-theme">
           <div className="flex items-start gap-4">
-            <div className="w-10 h-10 bg-black dark:bg-white rounded-full flex items-center justify-center flex-shrink-0">
+            <div className="w-10 h-10 bg-black dark:bg-white rounded-xl flex items-center justify-center flex-shrink-0">
               <Building2 className="h-5 w-5 text-white dark:text-black" />
             </div>
             <div className="flex-1">
@@ -1239,7 +1239,7 @@ export default function OrganizationSettingsPage() {
         <div className="fixed inset-0 bg-black/20 backdrop-blur-sm flex items-center justify-center z-[9999] p-4">
           <div className="max-w-md w-full bg-theme-primary rounded-3xl shadow-2xl p-8 border border-theme animate-in fade-in-0 zoom-in-95 duration-300 max-h-[90vh] overflow-y-auto">
             <div className="flex flex-col items-center text-center">
-              <div className="w-16 h-16 bg-theme-secondary rounded-full flex items-center justify-center mb-4">
+              <div className="w-16 h-16 bg-theme-secondary rounded-2xl flex items-center justify-center mb-4">
                 <RefreshCw className="h-7 w-7 text-theme-primary animate-spin" />
               </div>
               <h2 className="text-2xl font-semibold text-theme-primary">

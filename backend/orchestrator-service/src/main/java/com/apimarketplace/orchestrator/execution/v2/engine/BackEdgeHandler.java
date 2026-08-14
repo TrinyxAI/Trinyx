@@ -125,7 +125,22 @@ public class BackEdgeHandler implements RunScopedCache {
      * Tracks which back-edge iterations have been claimed for processing.
      * When a forEach (split) is inside a loop body, multiple split items reach
      * the same back-edge. Only the first one should process it; the rest are no-ops.
-     * Key format: "runId:edgeId:iteration"
+     * Key format: "runId:epoch:edgeId:iteration" - the same shape as
+     * {@link RedisLoopIterationStore#claimKey}, and for the same reason.
+     *
+     * <p>Every epoch restarts the loop at completed-iteration 0, so without the epoch this
+     * key cannot tell epoch N+1's first advance from epoch N's: the advance is taken for a
+     * split sibling and dropped, and a dropped back-edge is silent (no body re-entry, no
+     * exit routing, no ready nodes, no error). {@link #cleanupRun} masks it on a single JVM
+     * by clearing the set on the epoch reset; with several replicas only the pod that
+     * performed the reset clears, so any other pod keeps the stale entry.
+     *
+     * <p>Scope note, so the next reader does not over-attribute this: only the AUTO
+     * traversal claims ({@link #handleBackEdge}). A loop body that YIELDS - a long Wait, an
+     * approval, an interface - advances its back-edge from
+     * {@link #executeBackEdgeIteration}, which does not claim, so that shape was never
+     * affected by this key. Its own cross-epoch leak lived in the run-level globalData
+     * mirror, see {@code V2StepByStepContextManager.getCachedGlobalData(String, int)}.
      *
      * <p>Per-JVM fallback only: {@link RedisLoopIterationStore#tryClaim} is the
      * cross-replica claim. Kept so a Redis-less deployment (and the unit tests) keep
@@ -185,12 +200,28 @@ public class BackEdgeHandler implements RunScopedCache {
     }
 
     /**
+     * The per-JVM claim key for one back-edge advance. Always built here, never inline: the
+     * purge in {@link #clearNestedBackEdgeState} matches claims by PREFIX, so a key built in
+     * two places can silently drift apart. When it did, the purge matched nothing and an inner
+     * loop kept its iteration-0 claim across outer passes - its back-edge then dropped in
+     * silence, which is the exact failure this key's shape exists to prevent.
+     */
+    static String localClaimKey(String runId, int epoch, String edgeId, int completedIteration) {
+        return localClaimKeyPrefix(runId, epoch, edgeId) + completedIteration;
+    }
+
+    /** Everything in {@link #localClaimKey} that identifies the edge, without the iteration. */
+    static String localClaimKeyPrefix(String runId, int epoch, String edgeId) {
+        return runId + ":" + epoch + ":" + edgeId + ":";
+    }
+
+    /**
      * Cross-replica claim for one back-edge advance, falling back to the per-JVM set when no
      * shared store is wired. Both layers are consulted so a Redis outage degrades to the old
      * single-instance behavior instead of double-processing within a JVM.
      */
     private boolean claimBackEdgeAdvance(String runId, int epoch, String edgeId, int completedIteration) {
-        if (!claimedBackEdgeCalls.add(runId + ":" + edgeId + ":" + completedIteration)) {
+        if (!claimedBackEdgeCalls.add(localClaimKey(runId, epoch, edgeId, completedIteration))) {
             return false;
         }
         if (loopIterationStore == null) {
@@ -978,7 +1009,7 @@ public class BackEdgeHandler implements RunScopedCache {
 
             updated = updated.withGlobalData(key, null);
             if (execution != null) {
-                String prefix = execution.getRunId() + ":" + edgeId + ":";
+                String prefix = localClaimKeyPrefix(execution.getRunId(), context.epoch(), edgeId);
                 claimedBackEdgeCalls.removeIf(claim -> claim.startsWith(prefix));
             }
             logger.info("[BackEdge] Cleared nested back-edge state inside reset span: {}", edgeId);

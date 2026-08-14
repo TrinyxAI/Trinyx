@@ -40,6 +40,7 @@ import { NodeBottomBar } from '../NodeBottomBar';
 
 const stepStatus = (over: Record<string, boolean> = {}) => ({
   isStepByStepMode: false,
+  isSteppedRun: false,
   isReady: false,
   canExecute: false,
   isExecuting: false,

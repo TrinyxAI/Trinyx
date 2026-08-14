@@ -213,7 +213,7 @@ export function WorkflowKanbanBoard({ source = 'workflow' }: { source?: Workflow
       {/* Header */}
       <div className="flex-shrink-0 flex flex-col sm:flex-row sm:items-center justify-between gap-2 sm:gap-3 px-4 pt-3 pb-1">
         <div className="flex items-center gap-3 min-w-0">
-          <div className="w-10 h-10 bg-theme-tertiary rounded-full flex items-center justify-center flex-shrink-0">
+          <div className="w-10 h-10 bg-theme-tertiary rounded-xl flex items-center justify-center flex-shrink-0">
             {isApp
               ? <AppWindow className="h-5 w-5 text-theme-primary" />
               : <ClipboardList className="h-5 w-5 text-theme-primary" />}
@@ -435,7 +435,7 @@ function KanbanColumn({
       <div className="flex items-center gap-2 px-3 py-2 bg-theme-secondary border-b border-slate-200 dark:border-slate-700/50">
         {icon}
         <span className="text-sm font-medium text-theme-primary">{title}</span>
-        <span className="ml-auto text-xs font-semibold text-theme-muted bg-theme-tertiary rounded-full px-2 py-0.5 min-w-[24px] text-center tabular-nums">
+        <span className="ml-auto text-xs font-semibold text-theme-muted bg-theme-tertiary rounded-lg px-2 py-0.5 min-w-[24px] text-center tabular-nums">
           {count}
         </span>
       </div>

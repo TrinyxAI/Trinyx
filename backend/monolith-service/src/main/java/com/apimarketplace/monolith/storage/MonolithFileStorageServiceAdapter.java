@@ -24,6 +24,11 @@ public class MonolithFileStorageServiceAdapter implements com.apimarketplace.orc
 
     private final com.apimarketplace.storage.service.file.FileStorageService storageFileStorageService;
 
+    /** The {@code storage.storage} indexer, for run-context adoption. Optional: some test
+     *  profiles wire the file service without common-storage-service. */
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private com.apimarketplace.common.storage.service.StorageService storageIndexService;
+
     public MonolithFileStorageServiceAdapter(
             com.apimarketplace.storage.service.file.FileStorageService storageFileStorageService) {
         this.storageFileStorageService = storageFileStorageService;
@@ -73,6 +78,34 @@ public class MonolithFileStorageServiceAdapter implements com.apimarketplace.orc
         return toOrchestratorRef(storageFileStorageService.upload(
                 tenantId, workflowId, runId, stepAlias, fileName, mimeType, content, size,
                 epoch, spawn, itemIndex, sourceType));
+    }
+
+    /**
+     * File catalog-produced files under the run that produced them. MUST be overridden for the same
+     * reason as the epoch-aware uploads above: the orchestrator interface ships a DEFAULT that does
+     * nothing, and microservice mode dodges it because {@code StorageClientAdapter} overrides it
+     * (posting to the internal HTTP endpoint, which is not mounted in monolith mode). Without this,
+     * every CE install would keep showing text-to-speech / image-generation outputs at the ROOT of
+     * the Files browser instead of inside their run folder - the exact bug this exists to fix,
+     * present in CE only.
+     */
+    @Override
+    public int adoptRunContext(String tenantId, java.util.Collection<String> fileIds,
+                               String workflowId, String runId, String stepAlias,
+                               int epoch, int spawn, Integer itemIndex) {
+        if (storageIndexService == null || fileIds == null || fileIds.isEmpty()) {
+            return 0;
+        }
+        java.util.List<java.util.UUID> ids = new java.util.ArrayList<>(fileIds.size());
+        for (String id : fileIds) {
+            try {
+                ids.add(java.util.UUID.fromString(id));
+            } catch (IllegalArgumentException ignored) {
+                // not a storage row id - skip it rather than fail the batch
+            }
+        }
+        return storageIndexService.adoptRunContext(tenantId, ids, workflowId, runId, stepAlias,
+                epoch, spawn, itemIndex);
     }
 
     @Override

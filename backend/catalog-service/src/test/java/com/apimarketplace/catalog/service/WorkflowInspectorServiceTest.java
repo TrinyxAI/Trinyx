@@ -402,6 +402,72 @@ class WorkflowInspectorServiceTest {
             assertEquals("to", result.get().parameters().get(0).name());
         }
 
+        /**
+         * The endpoint's own nature has to leave the catalog, because the
+         * service that prices it cannot read this table.
+         *
+         * <p>auth-service decides whether the credential-wide default may be
+         * quoted, and refuses it for a generation exactly as the billing path
+         * does. It owns no catalog schema, so the descriptor travels on this
+         * DTO: without it an {@code mcp:} step bound to a generation endpoint
+         * (which names no model) was quoted the catch-all and offered the
+         * platform key for a call the server refuses.
+         */
+        @Test
+        @DisplayName("should report whether the endpoint is a generation, so the price quote can refuse the catch-all")
+        void shouldReportWhetherTheEndpointIsAGeneration() {
+            UUID toolId = UUID.randomUUID();
+            Map<String, Object> toolRow = new HashMap<>();
+            toolRow.put("id", toolId);
+            toolRow.put("api_id", UUID.randomUUID());
+            toolRow.put("tool_slug", "seedance-create-video-task");
+            toolRow.put("tool_name", "Create Video Task");
+            toolRow.put("api_slug", "seedance");
+            // What the SQL projects: the descriptor's presence, not its body.
+            toolRow.put("is_generation", true);
+
+            when(jdbcTemplate.queryForList(contains("api_tools"), eq("seedance-create-video-task")))
+                .thenReturn(List.of(toolRow));
+            when(jdbcTemplate.queryForList(contains("api_tool_parameters"), eq(toolId)))
+                .thenReturn(List.of());
+            when(jdbcTemplate.queryForList(contains("tool_responses"), eq(toolId)))
+                .thenReturn(List.of());
+            when(jdbcTemplate.queryForList(contains("tool_credentials"), eq(toolId)))
+                .thenReturn(List.of());
+
+            Optional<WorkflowToolDetailDTO> result = service.getToolDetailBySlug("seedance-create-video-task");
+
+            assertTrue(result.isPresent());
+            assertTrue(result.get().generation());
+        }
+
+        @Test
+        @DisplayName("an ordinary endpoint reports generation=false, which is what the 700+ of them are")
+        void shouldReportOrdinaryEndpointAsNotAGeneration() {
+            UUID toolId = UUID.randomUUID();
+            Map<String, Object> toolRow = new HashMap<>();
+            toolRow.put("id", toolId);
+            toolRow.put("api_id", UUID.randomUUID());
+            toolRow.put("tool_slug", "gmail-api-send-email");
+            toolRow.put("tool_name", "Send Email");
+            toolRow.put("api_slug", "gmail-api");
+            toolRow.put("is_generation", false);
+
+            when(jdbcTemplate.queryForList(contains("api_tools"), eq("gmail-api-send-email")))
+                .thenReturn(List.of(toolRow));
+            when(jdbcTemplate.queryForList(contains("api_tool_parameters"), eq(toolId)))
+                .thenReturn(List.of());
+            when(jdbcTemplate.queryForList(contains("tool_responses"), eq(toolId)))
+                .thenReturn(List.of());
+            when(jdbcTemplate.queryForList(contains("tool_credentials"), eq(toolId)))
+                .thenReturn(List.of());
+
+            Optional<WorkflowToolDetailDTO> result = service.getToolDetailBySlug("gmail-api-send-email");
+
+            assertTrue(result.isPresent());
+            assertFalse(result.get().generation());
+        }
+
         @Test
         @DisplayName("should propagate defaultValue + allowedValues from DB to DTO (drives inspector dropdown)")
         void shouldPropagateDefaultAndAllowedValues() {

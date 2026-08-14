@@ -1,5 +1,6 @@
 package com.apimarketplace.orchestrator.tools.workflow.builder.creators;
 
+import com.apimarketplace.orchestrator.tools.workflow.builder.ActionMappingRefs;
 import com.apimarketplace.agent.tools.ToolsProvider.ToolExecutionResult;
 import com.apimarketplace.interfaces.client.InterfaceClient;
 import com.apimarketplace.interfaces.client.dto.InterfaceDto;
@@ -366,8 +367,17 @@ public class InterfaceNodeCreator extends CreatorBase {
 
             String prefix = parts[0];
             String label = parts[1];
-            String nodeKey = prefix + ":" + label;
 
+            // A navigate event always targets an interface, whatever the prefix says.
+            // See ActionMappingRefs for why the prefix cannot be trusted here.
+            if (ActionMappingRefs.isNavigate(parts)) {
+                if (!existingInterfaceKeys.contains(ActionMappingRefs.targetInterfaceKey(parts))) {
+                    invalidRefs.add(entry.getKey() + " -> " + value + " (interface '" + label + "' not found)");
+                }
+                continue;
+            }
+
+            String nodeKey = prefix + ":" + label;
             if ("trigger".equals(prefix)) {
                 if (!existingTriggerKeys.contains(nodeKey)) {
                     invalidRefs.add(entry.getKey() + " -> " + value + " (trigger '" + label + "' not found)");

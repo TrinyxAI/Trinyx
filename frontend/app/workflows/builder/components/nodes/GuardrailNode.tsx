@@ -16,6 +16,7 @@ import { useWorkflowMode } from '@/contexts/WorkflowModeContext';
 import { NodePlayButton } from '../NodePlayButton';
 import { useNodeExecutionStatus } from '../../contexts/StepByStepContext';
 import { NodeBottomBar } from './NodeBottomBar';
+import { showsNodeRunActions } from './shared';
 import { getEffectiveDefaultProvider } from '@/hooks/useModels';
 import { getProviderIconSlug } from '@/lib/ai-providers/providerIcons';
 
@@ -74,6 +75,10 @@ export function GuardrailNode({ data, selected, id }: NodeProps<BuilderNodeData>
       if (executionStatus.isRunning) return 'running';
       if (executionStatus.isFailed) return 'failed';
       if (executionStatus.isSkipped) return 'skipped';
+      // Same rule as the other node components: the backend's PARTIAL_SUCCESS must reach the
+      // border, or a node carrying a failure in its own tally renders the same green as a clean
+      // one. Border only - the rerun button reads deriveNodeStatus, which still sees 'completed'.
+      if (data.status === 'partial_success') return 'partial_success';
       if (executionStatus.isCompleted || executionStatus.isEvaluated) return 'completed';
       if (executionStatus.isReady) return 'ready';
       if (data.status && data.status !== 'pending') {
@@ -193,7 +198,7 @@ export function GuardrailNode({ data, selected, id }: NodeProps<BuilderNodeData>
       )}
 
       {/* Step-by-step play button */}
-      {executionStatus.isStepByStepMode && (
+      {showsNodeRunActions(executionStatus) && (
         <NodeBottomBar
           hover={{ isVisible: showActions, onHover: show }}
           borderColor={borderColor}

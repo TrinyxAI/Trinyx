@@ -168,10 +168,15 @@ class V2StepByStepServiceTest {
 
             service.initializeStepByStep(mockExecution, mockPlan);
 
-            // Verify initial ready nodes are persisted to StateSnapshot
+            // Verify initial ready nodes are persisted to StateSnapshot.
+            // Per-DAG, not flat: the flat write resolves through getDefaultTriggerId(), which on
+            // this empty snapshot returns DEFAULT_TRIGGER_SENTINEL and mints a phantom
+            // "trigger:default" DAG holding both real triggers. Both would then live in two dags
+            // once they fire, and findDagContaining picks between them by JVM map order.
             verify(mockStateSnapshotService).initializeSnapshot("run-1");
-            verify(mockStateSnapshotService).updateReadyNodes("run-1",
+            verify(mockStateSnapshotService).initializeReadyNodes("run-1",
                 Set.of("trigger:webhook_a", "trigger:webhook_b"));
+            verify(mockStateSnapshotService, never()).updateReadyNodes(eq("run-1"), anySet());
         }
 
         @Test
@@ -1119,7 +1124,7 @@ class V2StepByStepServiceTest {
         }
 
         @Test
-        @DisplayName("should use flat updateReadyNodes when triggerId is null")
+        @DisplayName("should route by node when triggerId is null, never through the flat write")
         void shouldUseFlatUpdateWhenTriggerIdNull() {
             when(mockExecution.getRunId()).thenReturn("run-1");
             when(mockExecution.getWorkflowRunId()).thenReturn(WORKFLOW_RUN_ID);
@@ -1133,9 +1138,12 @@ class V2StepByStepServiceTest {
             // 2-arg init (no triggerId) → delegates to 3-arg with null
             service.initializeStepByStep(mockExecution, mockPlan);
 
-            // Flat: 2-arg updateReadyNodes
-            verify(mockStateSnapshotService).updateReadyNodes("run-1", Set.of("trigger:start"));
-            // Must NOT call the 4-arg DAG-scoped version
+            // With no triggerId to write under, the ready set is routed BY NODE: a trigger owns
+            // its own DAG. The flat write would have resolved to DEFAULT_TRIGGER_SENTINEL on
+            // this empty snapshot and minted the phantom "trigger:default" DAG.
+            verify(mockStateSnapshotService).initializeReadyNodes("run-1", Set.of("trigger:start"));
+            verify(mockStateSnapshotService, never()).updateReadyNodes(eq("run-1"), anySet());
+            // Must NOT call the 4-arg DAG-scoped version either: there is no triggerId here.
             verify(mockStateSnapshotService, never()).updateReadyNodes(eq("run-1"), anyString(), anyInt(), anySet());
         }
     }

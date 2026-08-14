@@ -194,7 +194,10 @@ public class V2StepByStepService {
             // DAG-scoped: stores under real trigger, avoiding "trigger:default" sentinel
             stateSnapshotService.updateReadyNodes(runId, triggerId, 0, readyNodes);
         } else {
-            stateSnapshotService.updateReadyNodes(runId, readyNodes);
+            // No trigger id to write under, so route by node: a trigger owns its own DAG.
+            // The flat write would resolve to DEFAULT_TRIGGER_SENTINEL on the empty snapshot
+            // this runs against and mint the phantom "trigger:default" DAG.
+            stateSnapshotService.initializeReadyNodes(runId, readyNodes);
         }
 
         // Emit step-by-step ready event

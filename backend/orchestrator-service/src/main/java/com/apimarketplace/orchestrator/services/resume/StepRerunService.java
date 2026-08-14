@@ -2,7 +2,9 @@ package com.apimarketplace.orchestrator.services.resume;
 
 import com.apimarketplace.orchestrator.domain.WorkflowRunEntity;
 import com.apimarketplace.orchestrator.domain.WorkflowStepDataEntity;
+import com.apimarketplace.orchestrator.domain.execution.EpochState;
 import com.apimarketplace.orchestrator.domain.execution.StateSnapshot;
+import com.apimarketplace.orchestrator.domain.workflow.ExecutionMode;
 import com.apimarketplace.orchestrator.domain.workflow.RunStatus;
 import com.apimarketplace.orchestrator.domain.workflow.WorkflowExecution;
 import com.apimarketplace.orchestrator.domain.workflow.WorkflowPlan;
@@ -11,7 +13,10 @@ import com.apimarketplace.orchestrator.persistence.WorkflowStepDataRepository;
 import com.apimarketplace.orchestrator.services.WorkflowExecutionService;
 import com.apimarketplace.orchestrator.services.WorkflowStreamingService;
 import com.apimarketplace.orchestrator.services.cache.RunScopedCache;
+import com.apimarketplace.orchestrator.services.epoch.WorkflowEpochService;
 import com.apimarketplace.orchestrator.services.state.NodeId;
+import com.apimarketplace.orchestrator.services.state.patch.AdvisoryLockHelper;
+import com.apimarketplace.orchestrator.services.state.patch.AdvisoryLockHolding;
 import com.apimarketplace.orchestrator.services.state.StateSnapshotService;
 import com.apimarketplace.orchestrator.services.state.WorkflowGraph;
 import com.apimarketplace.orchestrator.services.state.WorkflowGraphBuilder;
@@ -35,8 +40,10 @@ import java.util.*;
 /**
  * Service for handling step re-run functionality in step-by-step mode.
  *
- * <p>When a user wants to re-run a step (whether COMPLETED, FAILED, or SKIPPED),
- * this service:
+ * <p>Re-runnable states, as enforced in {@code rerunFromStep} step 3b: COMPLETED, FAILED,
+ * AWAITING_SIGNAL and READY. NOT re-runnable: a node that never ran, a node whose branch was
+ * SKIPPED (restart from the decision above it), a node executing right now on an automatic run,
+ * and any node of a run that was CANCELLED or timed out. For such a step, this service:
  * <ul>
  *   <li>Finds all downstream steps (successors) that depend on the target step</li>
  *   <li>Resets those steps to PENDING state</li>
@@ -51,6 +58,15 @@ import java.util.*;
 public class StepRerunService {
 
     private static final Logger logger = LoggerFactory.getLogger(StepRerunService.class);
+
+    /**
+     * Run statuses a rerun must not revive. Deliberately NARROWER than "terminal": a run that
+     * merely FINISHED (completed / failed / partial_success) stays restartable from any of its
+     * nodes, which is the common case. Mirrors {@code UNREVIVABLE_STATUSES} in the frontend's
+     * RunStateStore - keep the two in step.
+     */
+    private static final Set<RunStatus> UNREVIVABLE_RUN_STATUSES =
+            Set.of(RunStatus.CANCELLED, RunStatus.TIMEOUT);
 
     private final WorkflowRunRepository runRepository;
     private final WorkflowStepDataRepository stepDataRepository;
@@ -85,6 +101,25 @@ public class StepRerunService {
     @Autowired(required = false)
     @Lazy
     private SignalResumeService signalResumeService;
+
+    /**
+     * Durable per-epoch state, read at step 5b to tell a CLOSED cycle (executed epoch pruned,
+     * a dormant one staged for the next fire) from a still-active epoch. Optional + lazy for
+     * the same reason as the fields above; when absent the rerun keeps its prior behaviour.
+     */
+    @Autowired(required = false)
+    @Lazy
+    private WorkflowEpochService workflowEpochService;
+
+    /**
+     * Per-run advisory lock, the same one the trigger-fire and cycle-reset paths take.
+     * A rerun reads the snapshot to decide WHICH epoch to execute in, then writes several
+     * statements later; without this, a concurrent fire or cycle close landing in that window
+     * moves the epoch under the decision. Optional: null degrades to the pessimistic row lock
+     * that {@code loadFreshForUpdate} already takes on the write itself.
+     */
+    @Autowired(required = false)
+    private AdvisoryLockHelper advisoryLockHelper;
 
     /**
      * Cross-replica loop counters. A rerun deliberately keeps the EPOCH (it only increments the
@@ -144,8 +179,17 @@ public class StepRerunService {
      *     workflow.plan refresh.
      */
     @Transactional
+    @AdvisoryLockHolding
     public RerunResult rerunFromStep(String runId, String stepId, boolean planFromPayload) {
         logger.info("[RerunService] Re-running from step: {} for run: {} (planFromPayload={})", stepId, runId, planFromPayload);
+
+        // Serialise against a concurrent fire / cycle reset on the same run, the same way
+        // executeTriggerInternal and resetForNextCycle do. Taken first so it covers the
+        // read-decide-write window: the epoch is chosen from the snapshot read below and
+        // only written several steps later.
+        if (advisoryLockHelper != null) {
+            advisoryLockHelper.acquireForRun(runId);
+        }
 
         // 1. Load workflow run
         WorkflowRunEntity runEntity = runRepository.findByRunIdPublic(runId)
@@ -187,6 +231,33 @@ public class StepRerunService {
             );
         }
 
+        // 3c. Refuse a run the user (or a timeout) deliberately put down. Reviving one is a
+        // re-trigger decision, not a rerun: the stop also suspended the workflow's schedules,
+        // which a rerun does not restore, so the run would resume with its schedules disarmed
+        // and its recorded stop_reason erased.
+        // Enforced HERE, not in the callers: this is the single choke point behind both the
+        // REST endpoint and the restart_from_node agent action.
+        if (UNREVIVABLE_RUN_STATUSES.contains(runEntity.getStatus())) {
+            throw new IllegalStateException(
+                "Cannot rerun step " + stepId + ": this run was " + runEntity.getStatus().getValue()
+                + ". Fire the workflow again instead of restarting a run that was stopped."
+            );
+        }
+
+        // 3d. Refuse a node that is executing RIGHT NOW on a run nobody is stepping. The
+        // terminality check above is satisfied by cumulative NodeCounts, which survive epoch
+        // close, so a node that completed in an EARLIER epoch and is running in this one reads
+        // as rerunnable - resetting it would race the in-flight execution, which still writes
+        // its own completion (double execution, lost write). On a step-by-step run the user is
+        // the scheduler and this stays an escape hatch for a stuck loop or a long agent.
+        if (runEntity.getExecutionMode() != ExecutionMode.STEP_BY_STEP
+                && snapshot.getRunningNodeIds().contains(stepId)) {
+            throw new IllegalStateException(
+                "Cannot rerun step " + stepId + ": it is still executing on an automatic run. "
+                + "Wait for it to settle, or stop the run first."
+            );
+        }
+
         // 4. Find all downstream steps (including the target step)
         Set<String> stepsToReset = findAllDownstreamSteps(graph, targetNodeId);
         stepsToReset.add(stepId);
@@ -205,18 +276,64 @@ public class StepRerunService {
                 ? triggerEpochManager.getGlobalEpochForDag(runId, ownerTriggerId)
                 : triggerEpochManager.getCurrentEpoch(runId);
 
-        // 5b. Sync dagLastEpoch with snapshot's DagState.currentEpoch.
-        // After AUTO execution, resetForNextCycle advances DagState.currentEpoch via
-        // prepareDagForNextCycle but dagLastEpoch in metadata stays at the trigger fire's epoch.
-        // Without this sync, V2 execution resolves the wrong epoch, writes node completions
-        // to an inactive epoch, and changes become invisible to computeFlatSet.
+        // 5b. Resolve the epoch this rerun must execute in.
+        //
+        // Two different shapes reach this point with a snapshot epoch that differs from
+        // metadata.dagLastEpoch, and they need OPPOSITE answers:
+        //
+        //  - Epoch still ACTIVE (SBS, multi-epoch): the snapshot is authoritative. Sync to it,
+        //    otherwise V2 execution writes node completions to an inactive epoch and the
+        //    changes never reach computeFlatSet.
+        //
+        //  - Cycle already CLOSED (AUTO ran to quiescence): resetForNextCycle pruned the
+        //    executed epoch and prepareNextCycle pointed currentEpoch at a DORMANT epoch
+        //    holding nothing but the trigger. Every stored output still belongs to
+        //    dagLastEpoch, and storage reads are epoch-filtered, so syncing to the dormant
+        //    epoch makes each {{upstream.output.x}} resolve EMPTY while every node still
+        //    reports success. Reopen the executed epoch instead of following the dormant one.
+        EpochState executedEpoch = null;
         if (ownerTriggerId != null) {
             var dagState = snapshot.getDags().get(ownerTriggerId);
             if (dagState != null && dagState.getCurrentEpoch() != currentEpoch) {
                 int snapshotEpoch = dagState.getCurrentEpoch();
-                logger.info("[RerunService] Epoch mismatch: dagLastEpoch={}, snapshot.currentEpoch={}. Syncing to {}",
-                        currentEpoch, snapshotEpoch, snapshotEpoch);
-                currentEpoch = snapshotEpoch;
+                // isEmpty() ignores readyNodeIds, so a prepared-but-never-executed epoch
+                // (trigger staged as ready) reads as empty here - which is exactly the case.
+                boolean dormant = !dagState.getActiveEpochs().contains(snapshotEpoch)
+                        && dagState.currentEpochState().isEmpty();
+                // Reopening is skipped under the migration sentinel when a real DAG exists:
+                // resetDag() then deliberately closes ALL of the sentinel's active epochs,
+                // which would discard the epoch just restored. The epoch SYNC below still
+                // applies there, as it did before this branch existed.
+                boolean sentinelWithRealDag = StateSnapshot.DEFAULT_TRIGGER_SENTINEL.equals(ownerTriggerId)
+                        && snapshot.getDags().keySet().stream()
+                                .anyMatch(key -> !StateSnapshot.DEFAULT_TRIGGER_SENTINEL.equals(key));
+                if (dormant && !sentinelWithRealDag && workflowEpochService != null) {
+                    executedEpoch = workflowEpochService.getFullEpochState(runId, ownerTriggerId, currentEpoch);
+                }
+                if (executedEpoch != null) {
+                    logger.info("[RerunService] Cycle already closed: reopening executed epoch {} "
+                            + "(snapshot pointed at dormant epoch {}) for runId={}, triggerId={}",
+                            currentEpoch, snapshotEpoch, runId, ownerTriggerId);
+                } else {
+                    if (dormant && sentinelWithRealDag) {
+                        logger.warn("[RerunService] Rerun target owned by the migration sentinel beside a real DAG "
+                                + "for runId={} - not reopening epoch {}; falling back to dormant snapshot epoch {}",
+                                runId, currentEpoch, snapshotEpoch);
+                    } else if (dormant && workflowEpochService == null) {
+                        logger.warn("[RerunService] Epoch service unwired - cannot reopen the executed epoch "
+                                + "for runId={}; falling back to dormant snapshot epoch {}", runId, snapshotEpoch);
+                    } else if (dormant) {
+                        // Legacy run, or an epoch never closed through WorkflowEpochService: the
+                        // executed epoch cannot be restored, so the rerun keeps the pre-existing
+                        // behaviour and upstream outputs may not resolve. Degraded, not silent.
+                        logger.warn("[RerunService] No epoch header for runId={}, triggerId={}, epoch={} - "
+                                + "falling back to dormant snapshot epoch {}; upstream outputs may resolve empty",
+                                runId, ownerTriggerId, currentEpoch, snapshotEpoch);
+                    }
+                    logger.info("[RerunService] Epoch mismatch: dagLastEpoch={}, snapshot.currentEpoch={}. Syncing to {}",
+                            currentEpoch, snapshotEpoch, snapshotEpoch);
+                    currentEpoch = snapshotEpoch;
+                }
             }
         }
 
@@ -325,9 +442,23 @@ public class StepRerunService {
         // This is more efficient (1 DB operation instead of 2) and eliminates sync issues.
         // ownerTriggerId targets the READY marker at the rerun target's own DAG - the flat
         // fallback resolves an arbitrary DAG in multi-trigger workflows.
-        stateSnapshotService.resetDagAndSetReady(runId, stepsToReset, stepId, ownerTriggerId);
-        logger.info("[RerunService] Reset StateSnapshot: removed {} steps, marked {} as READY (ownerTriggerId={})",
-                stepsToReset.size(), stepId, ownerTriggerId);
+        // When the cycle already closed (step 5b), the same atomic write also reopens the
+        // executed epoch and restores its real state from the workflow_epochs header.
+        if (executedEpoch != null) {
+            stateSnapshotService.reopenEpochResetDagAndSetReady(
+                    runId, ownerTriggerId, currentEpoch, executedEpoch, stepsToReset, stepId);
+        } else {
+            // Pin the READY marker to the epoch this rerun decided on, exactly as the
+            // reopen branch above already does. Without the epoch the marker is written at
+            // whatever DagState.currentEpoch is at write time, which is a SECOND, independent
+            // resolution of the epoch - and resetForNextCycle moves currentEpoch between its
+            // early prune and its late advance, so the two can disagree. Execution and the
+            // ready-removal both use currentEpoch, so a marker written elsewhere is never
+            // removed and the drive loop replays the node to its wave cap.
+            stateSnapshotService.resetDagAndSetReady(runId, stepsToReset, stepId, ownerTriggerId, currentEpoch);
+        }
+        logger.info("[RerunService] Reset StateSnapshot: removed {} steps, marked {} as READY (ownerTriggerId={}, epoch={}, reopened={})",
+                stepsToReset.size(), stepId, ownerTriggerId, currentEpoch, executedEpoch != null);
 
         // 9. Reconstruct state and get new ready steps
         WorkflowRunState newState = resumeService.reconstructStateForApi(runId);
@@ -368,14 +499,15 @@ public class StepRerunService {
      * Finds all downstream steps (successors) from a given node.
      * Uses BFS to traverse the graph and collect all reachable nodes.
      *
-     * <p><b>Loop bodies are covered by the plain successor walk</b>, not by the
-     * {@code loopBody()} calls below: {@code WorkflowGraphBuilder} adds every edge as an ordinary
-     * successor edge including the iterate (loop-back) one, so the BFS follows the body chain and
-     * reaches the body TAIL - the node that owns the iterate edge - whether the rerun target is
-     * the loop controller, a mid-body node, or an upstream node. That matters beyond node reset:
-     * the loop counter clear in {@code rerunFromStep} keys off the back-edge SOURCE being present
-     * in this set. No production builder currently populates {@code WorkflowNode.loopBody()}, so
-     * those calls are inert belt-and-braces; do not rely on them.
+     * <p><b>Loop bodies are covered by the plain successor walk</b> when the walk STARTS at or
+     * above the loop node: {@code WorkflowGraphBuilder.processV2Edge} drops back edges
+     * ({@code WorkflowPlan.isBackEdge}, which matches the {@code :iterate} port), so the BFS
+     * descends body -> body tail and stops there. It never wraps around, which also means it is
+     * NOT symmetric: started FROM a mid-body node the closure is that node and whatever follows
+     * it, not the rest of the loop. The loop counter clear in {@code rerunFromStep} keys off the
+     * back-edge SOURCE being present in this set, and that holds for a walk from the loop node.
+     * No production builder currently populates {@code WorkflowNode.loopBody()}, so those calls
+     * are inert belt-and-braces; do not rely on them.
      *
      * @param graph      The workflow graph
      * @param startNodeId The starting node ID
@@ -463,6 +595,12 @@ public class StepRerunService {
                     .filter(t -> ownerTriggerId.equals(t.getNormalizedKey()))
                     .findFirst().orElse(null);
             if (owner == null || !TriggerType.isReusable(owner)) {
+                // Only reachable on a malformed plan (owner absent, or a trigger whose `type` is
+                // null / not a known TriggerType). Loud, because the rerun may have REOPENED an
+                // epoch: nothing else closes it, so hasAnyActiveEpoch() stays true, the run never
+                // re-arms, and the zombie scanner fails it much later with no clue why.
+                logger.warn("[RerunService] No reusable owner trigger for runId={} triggerId={} - cycle NOT closed "
+                        + "after the rerun; epoch {} stays active and the run will not re-arm", runId, ownerTriggerId, rerunEpoch);
                 return;
             }
             signalResumeService.performDeferredReset(runId, ownerTriggerId, rerunEpoch);

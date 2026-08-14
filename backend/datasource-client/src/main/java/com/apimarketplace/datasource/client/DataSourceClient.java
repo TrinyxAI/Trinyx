@@ -533,6 +533,27 @@ public class DataSourceClient {
         }
     }
 
+    /**
+     * Replace every row of a datasource with {@code items}, atomically (used by the
+     * publication "reset application data" path). Unlike {@link #bulkInsertItems} this
+     * WIPES the existing rows first, so the caller must already have decided the current
+     * rows are disposable.
+     *
+     * @return the number of rows inserted, or -1 when the call failed (distinct from a
+     *         legitimate 0-row replace, which the caller must not treat as an error)
+     */
+    public int replaceItems(Long dataSourceId, List<Map<String, Object>> items, String tenantId, String organizationId) {
+        String url = baseUrl + "/api/internal/datasource/" + dataSourceId + "/items/replace";
+        HttpEntity<List<Map<String, Object>>> entity = new HttpEntity<>(items, buildHeaders(tenantId, organizationId));
+        try {
+            ResponseEntity<Integer> response = restTemplate.exchange(url, HttpMethod.POST, entity, Integer.class);
+            return response.getBody() != null ? response.getBody() : 0;
+        } catch (Exception e) {
+            log.error("Failed to replace items for ds={}: {}", dataSourceId, e.getMessage());
+            return -1;
+        }
+    }
+
     // ========== Storage Usage ==========
 
     /**

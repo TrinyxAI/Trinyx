@@ -23,7 +23,7 @@ export const TestResultItem: React.FC<TestResultItemProps> = ({
       <div className="flex-1">
         <div className="flex items-center gap-2 mb-2">
           <h4 className="font-medium text-theme-primary">{tool.name}</h4>
-          <span className="inline-block px-2 py-1 text-xs bg-blue-500/20 text-blue-600 dark:text-blue-400 rounded-full">
+          <span className="inline-block px-2 py-1 text-xs bg-blue-500/20 text-blue-600 dark:text-blue-400 rounded-md">
             {tool.toolType.replace('LOCAL_', '')}
           </span>
         </div>

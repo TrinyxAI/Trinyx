@@ -30,7 +30,7 @@ export function SentimentCell({ value, rowKey, field, onSaveAndExit }: VisualCel
               e.stopPropagation();
               onSaveAndExit(active ? 'neutral' : id);
             }}
-            className={`flex h-8 w-8 items-center justify-center rounded-full transition-all ${
+            className={`flex h-8 w-8 items-center justify-center rounded-xl transition-all ${
               active
                 ? activeClass
                 : 'bg-slate-100 dark:bg-slate-800 opacity-40 hover:opacity-100 group-hover/cell:opacity-70'

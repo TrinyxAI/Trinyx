@@ -28,6 +28,8 @@ public class StepNode extends BaseNode {
 
     private final Step stepConfig;
     private final List<String> dependencies;
+    /** Used to file catalog-produced files under this run - see {@link #adoptProducedFiles}. */
+    private com.apimarketplace.orchestrator.services.file.FileStorageService fileStorageService;
 
     public StepNode(String nodeId, Step stepConfig, List<String> dependencies) {
         super(nodeId, NodeType.MCP);
@@ -42,6 +44,50 @@ public class StepNode extends BaseNode {
     @Override
     protected List<String> getDependencies(ExecutionContext context) {
         return dependencies;
+    }
+
+    @Override
+    public void acceptServices(com.apimarketplace.orchestrator.execution.v2.engine.ServiceRegistry registry) {
+        super.acceptServices(registry);
+        this.fileStorageService = registry.getFileStorageService();
+    }
+
+    /**
+     * File the files this step produced under this run.
+     *
+     * <p>A tool that answers with binary (text-to-speech, image generation, …) is uploaded from
+     * catalog-service, which knows the tenant and nothing else. Its {@code storage.storage} row
+     * therefore has no workflow, no run and no step, and the Files browser - which builds its
+     * workflow folders purely from those columns - shows the file at the ROOT instead of inside the
+     * run that produced it. The step is the first place that knows both the file and the context,
+     * so it adopts them here.</p>
+     *
+     * <p>Failure is swallowed on purpose, and the call sits AFTER the step is judged successful:
+     * where a file is filed must not decide whether the step succeeded, and the file is stored and
+     * reachable from this step's output either way. The epoch comes from
+     * {@link BaseNode#resolveStorageEpoch} so an adopted file lands in the same epoch bucket as
+     * files the run uploaded itself.</p>
+     */
+    private void adoptProducedFiles(ExecutionContext context, Map<String, Object> output) {
+        if (fileStorageService == null || output == null || context.plan() == null) {
+            return;
+        }
+        try {
+            List<String> fileIds = com.apimarketplace.orchestrator.domain.file.FileRefScanner.collectFileIds(output);
+            if (fileIds.isEmpty()) {
+                return;
+            }
+            int adopted = fileStorageService.adoptRunContext(
+                context.tenantId(), fileIds, context.plan().getId(), context.runId(), nodeId,
+                resolveStorageEpoch(context), context.spawn(), context.itemIndex());
+            if (adopted > 0) {
+                logger.debug("Adopted {} produced file(s) into the run: nodeId={}, runId={}",
+                    adopted, nodeId, context.runId());
+            }
+        } catch (Exception e) {
+            logger.warn("Could not file this step's produced files under the run (nodeId={}): {}",
+                nodeId, e.getMessage());
+        }
     }
 
     @Override
@@ -141,6 +187,11 @@ public class StepNode extends BaseNode {
             enrichedOutput.put("resolved_params", inputData);
 
             if (result.isSuccess()) {
+                adoptProducedFiles(context, result.output());
+                // Re-measure: adoption is a synchronous call on this step's critical path, so
+                // reporting the pre-adoption number would under-state the step's real wall time
+                // in the run inspector.
+                duration = System.currentTimeMillis() - startTime;
                 logger.debug("✅ Step executed successfully: nodeId={}, duration={}ms",
                     nodeId, duration);
                 return NodeExecutionResult.success(nodeId, enrichedOutput, duration);

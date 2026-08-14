@@ -260,12 +260,12 @@ function SetupProviderCard({
 
         <div className="flex items-center gap-2 flex-shrink-0">
           {configured ? (
-            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400">
+            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-xs font-medium bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400">
               <CheckCircle2 className="w-3 h-3" />
               {source === 'database' ? tProviders('source.database') : tProviders('source.environment')}
             </span>
           ) : (
-            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-theme-tertiary text-theme-secondary">
+            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-xs font-medium bg-theme-tertiary text-theme-secondary">
               <Settings className="w-3 h-3" />
               {tProviders('source.none')}
             </span>
@@ -513,12 +513,12 @@ function PlatformIntegrationCard({
 
       <div className="flex items-center gap-2 flex-shrink-0">
         {integration.hasSecrets ? (
-          <span className="flex items-center gap-1 text-xs text-emerald-600 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-900/20 px-2 py-0.5 rounded-full">
+          <span className="flex items-center gap-1 text-xs text-emerald-600 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-900/20 px-2 py-0.5 rounded-md">
             <CheckCircle2 className="w-3 h-3" />
             {tPlatform('visibility.configured')}
           </span>
         ) : (
-          <span className="flex items-center gap-1 text-xs text-theme-secondary bg-theme-tertiary px-2 py-0.5 rounded-full">
+          <span className="flex items-center gap-1 text-xs text-theme-secondary bg-theme-tertiary px-2 py-0.5 rounded-md">
             <Settings className="w-3 h-3" />
             {tPlatform('visibility.configure')}
           </span>
@@ -978,7 +978,7 @@ export default function CeSetupPage() {
           <Card className="border-theme animate-fade-in">
             <CardHeader className="pb-4">
               <div className="flex items-center gap-3">
-                <div className="w-10 h-10 min-w-[2.5rem] aspect-square flex-shrink-0 rounded-full bg-[var(--accent-primary)]/10 flex items-center justify-center">
+                <div className="w-10 h-10 min-w-[2.5rem] aspect-square flex-shrink-0 rounded-xl bg-[var(--accent-primary)]/10 flex items-center justify-center">
                   <Cloud className="h-5 w-5 text-[var(--accent-primary)]" />
                 </div>
                 <div>
@@ -998,7 +998,7 @@ export default function CeSetupPage() {
                   { icon: RefreshCw, text: t('cloudStep.benefitUpdates') },
                 ]).map((benefit, i) => (
                   <li key={i} className="flex items-start gap-2.5">
-                    <span className="mt-0.5 flex h-5 w-5 flex-shrink-0 items-center justify-center rounded-full bg-[var(--accent-primary)]/10">
+                    <span className="mt-0.5 flex h-5 w-5 flex-shrink-0 items-center justify-center rounded-lg bg-[var(--accent-primary)]/10">
                       <benefit.icon className="h-3 w-3 text-[var(--accent-primary)]" />
                     </span>
                     <span className="text-sm text-theme-primary">{benefit.text}</span>
@@ -1086,7 +1086,7 @@ export default function CeSetupPage() {
           <Card className="border-theme animate-fade-in">
             <CardHeader className="pb-4">
               <div className="flex items-center gap-3">
-                <div className="w-10 h-10 min-w-[2.5rem] aspect-square flex-shrink-0 rounded-full bg-[var(--accent-primary)]/10 flex items-center justify-center">
+                <div className="w-10 h-10 min-w-[2.5rem] aspect-square flex-shrink-0 rounded-xl bg-[var(--accent-primary)]/10 flex items-center justify-center">
                   <Key className="h-5 w-5 text-[var(--accent-primary)]" />
                 </div>
                 <div>
@@ -1134,7 +1134,7 @@ export default function CeSetupPage() {
           <Card className="border-theme animate-fade-in">
             <CardHeader className="pb-4">
               <div className="flex items-center gap-3">
-                <div className="w-10 h-10 min-w-[2.5rem] aspect-square flex-shrink-0 rounded-full bg-[var(--accent-primary)]/10 flex items-center justify-center">
+                <div className="w-10 h-10 min-w-[2.5rem] aspect-square flex-shrink-0 rounded-xl bg-[var(--accent-primary)]/10 flex items-center justify-center">
                   <Terminal className="h-5 w-5 text-[var(--accent-primary)]" />
                 </div>
                 <div>
@@ -1175,7 +1175,7 @@ export default function CeSetupPage() {
                 {cliSteps.map((step, index) => (
                   <div key={`${selectedCli}-${index}`} className="space-y-2">
                     <div className="flex items-center gap-2">
-                      <span className="flex-shrink-0 w-6 h-6 rounded-full bg-theme-tertiary flex items-center justify-center text-xs font-medium text-theme-primary">
+                      <span className="flex-shrink-0 w-6 h-6 rounded-lg bg-theme-tertiary flex items-center justify-center text-xs font-medium text-theme-primary">
                         {index + 1}
                       </span>
                       <span className="text-sm font-medium text-theme-primary">{step.title}</span>
@@ -1220,7 +1220,7 @@ export default function CeSetupPage() {
                       data-testid="bridge-verify-badge"
                       data-cli-status={ok ? 'connected' : loginRequired ? 'login-required' : verifiedAccessOff ? 'access-off' : 'not-verified'}
                       className={cn(
-                        'inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium max-w-[24rem] truncate',
+                        'inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-medium max-w-[24rem] truncate',
                         ok
                           ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400'
                           : amber
@@ -1248,7 +1248,7 @@ export default function CeSetupPage() {
           <Card className="border-theme animate-fade-in">
             <CardHeader className="pb-4">
               <div className="flex items-center gap-3">
-                <div className="w-10 h-10 min-w-[2.5rem] aspect-square flex-shrink-0 rounded-full bg-[var(--accent-primary)]/10 flex items-center justify-center">
+                <div className="w-10 h-10 min-w-[2.5rem] aspect-square flex-shrink-0 rounded-xl bg-[var(--accent-primary)]/10 flex items-center justify-center">
                   <Plug className="h-5 w-5 text-[var(--accent-primary)]" />
                 </div>
                 <div>
@@ -1305,7 +1305,7 @@ export default function CeSetupPage() {
               <CardHeader className="pb-4">
                 <div className="flex items-center gap-3">
                   <div className={cn(
-                    'w-10 h-10 min-w-[2.5rem] aspect-square flex-shrink-0 rounded-full flex items-center justify-center',
+                    'w-10 h-10 min-w-[2.5rem] aspect-square flex-shrink-0 rounded-xl flex items-center justify-center',
                     hasAnything
                       ? 'bg-emerald-100 dark:bg-emerald-900/30'
                       : 'bg-amber-100 dark:bg-amber-900/30'

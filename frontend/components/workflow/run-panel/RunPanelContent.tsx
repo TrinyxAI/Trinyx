@@ -252,7 +252,7 @@ export function RunPanelContent({ workflowId, allowHistory = false, viewRequest,
             data-run-panel-back
             onClick={() => setView('history')}
             title={t('runs.title')}
-            className="flex items-center gap-0.5 h-5 pl-1 pr-1.5 rounded-full text-theme-secondary hover:bg-theme-secondary hover:text-theme-primary transition-colors flex-shrink-0"
+            className="flex items-center gap-0.5 h-5 pl-1 pr-1.5 rounded-lg text-theme-secondary hover:bg-theme-secondary hover:text-theme-primary transition-colors flex-shrink-0"
           >
             <ArrowLeft className="w-3 h-3" />
             <History className="w-3.5 h-3.5" />

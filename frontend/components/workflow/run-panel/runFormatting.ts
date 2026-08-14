@@ -8,7 +8,7 @@
  * pulling in React.
  */
 
-import { TERMINAL_STATUSES } from '@/contexts/workflow-run/RunStateStore';
+import { TERMINAL_STATUSES, UNREVIVABLE_STATUSES } from '@/contexts/workflow-run/RunStateStore';
 import { parseUtcAware } from '@/lib/utils/dateFormatters';
 
 /**
@@ -51,6 +51,15 @@ export interface EpochTimestamp {
    * on the timeline, this to say how long it took.
    */
   workDurationMs?: number | null;
+  /**
+   * What this epoch ACHIEVED, as the backend tallied its nodes: COMPLETED or FAILED
+   * (absent while the epoch has executed nothing but its trigger).
+   *
+   * Never says RUNNING: an epoch's header stays open long after its last node
+   * finished, for the same deferred-close reason as above. `resolveEpochBadgeStatus`
+   * combines this with the RUN's status to decide what the row badges.
+   */
+  status?: string | null;
 }
 
 export interface StepStatusCounts {
@@ -89,9 +98,13 @@ export function formatCompactDuration(ms: number): string {
 /** Tailwind classes for a waterfall duration bar, by effective step status. */
 export function getBarColor(status: string): string {
   switch (status) {
+    // Amber, like the node border, the status badge and the edge stroke. It read red here while
+    // every other surface showed amber, so the same node looked failed in the waterfall and
+    // partial everywhere else.
+    case 'partial_success':
+      return 'bg-amber-400/80 dark:bg-amber-500/70';
     case 'error':
     case 'failed':
-    case 'partial_success':
       return 'bg-red-400/80 dark:bg-red-500/70';
     case 'running':
     case 'pending':
@@ -138,13 +151,16 @@ export function isRunStatusActive(status: string | null | undefined): boolean {
  * sweep hours or days after the last node finished. That span is where the run
  * history's 32h42m came from, for epochs whose nodes ran for seconds.
  *
- * An epoch that is still OPEN reports elapsed-since-start, and it ticks. The normal
- * close happens at the end of the cycle, so an open epoch is one that has not
- * finished: either it is executing, or it is blocked on an approval or an in-flight
- * agent, which is the one case that defers the close. Both are genuinely still in
- * progress, and the row shows the pulsing "running" marker beside the figure, so a
- * growing number reads correctly. The settled window would under-report them: an
- * epoch three minutes into an approval is not a two-second epoch.
+ * An epoch that is LIVE reports elapsed-since-start, and it ticks: it is executing, or
+ * blocked on an approval or an in-flight agent. The settled window would under-report
+ * it - an epoch three minutes into an approval is not a two-second epoch.
+ *
+ * "Live" is NOT "has no endedAt". A cycle normally closes its epoch as it ends, but the
+ * close is DEFERRED when a blocking signal or an in-flight agent is still around, and a
+ * run that is then stopped, cancelled or timed out leaves that epoch unclosed for good.
+ * Counting elapsed time for it is how a settled epoch reached "2h05m and rising". Callers
+ * pass `isLive` from {@link resolveEpochBadgeStatus}, which asks the RUN. The default
+ * keeps the old open-means-live reading for callers that have no run status to offer.
  *
  * Returns null for "unknown", which is NOT the same as 0. Zero is a measurement (an
  * all-skipped epoch really does start and end at the same instant); null means the
@@ -154,6 +170,7 @@ export function isRunStatusActive(status: string | null | undefined): boolean {
 export function epochDisplayDurationMs(
   entry: Pick<EpochTimestamp, 'startedAt' | 'endedAt' | 'workDurationMs'>,
   now: number,
+  isLive: boolean = entry.endedAt == null,
 ): number | null {
   const measured = entry.workDurationMs != null ? Math.max(0, entry.workDurationMs) : null;
   if (!entry.startedAt) return measured;
@@ -162,11 +179,72 @@ export function epochDisplayDurationMs(
   // frontend running ahead of its orchestrator mid-deploy. Callers render nothing.
   // Returning 0 here would print "<1s", a confident claim that the epoch was
   // instantaneous, on every epoch of every application published before this shipped.
-  if (entry.endedAt) return measured;
+  if (entry.endedAt || !isLive) return measured;
   const start = parseUtcAware(entry.startedAt).getTime();
   if (isNaN(start)) return measured;
-  // Open epoch: the larger of the two. Elapsed is the truth for the epoch as a
+  // Live epoch: the larger of the two. Elapsed is the truth for the epoch as a
   // whole, and the measured window guards against a start timestamp in the future
   // (a client clock ahead of the server) collapsing a real duration to zero.
   return Math.max(measured ?? 0, Math.max(0, now - start));
+}
+
+/**
+ * Run statuses whose ending ABANDONS whatever epoch was still open: the run was killed
+ * mid-flight, so that epoch never reached the ending its own tally would suggest.
+ * Reuses the store's set rather than restating it.
+ */
+const ABANDONING_RUN_STATUSES = UNREVIVABLE_STATUSES;
+
+/**
+ * Run statuses during which an epoch that is still open really is executing.
+ *
+ * The RunStatus union minus the terminal ones (they end the run) and minus
+ * WAITING_TRIGGER (the run is parked between fires, doing nothing). Enumerated rather
+ * than computed as "not terminal": an UNKNOWN status - a value from a newer backend, a
+ * typo, a payload from another product surface - must not be read as "executing", which
+ * would put a live pulse on a settled epoch and start its duration counting again.
+ */
+const EXECUTING_RUN_STATUSES: ReadonlySet<string> = new Set([
+  'pending', 'running', 'paused', 'awaiting_signal',
+]);
+
+/**
+ * The status to badge for ONE epoch row, upper-case, or null when there is nothing
+ * honest to say yet.
+ *
+ * A run accumulates many epochs and its own status can only describe the last one, so
+ * each row carries the outcome the backend derived for it (`entry.status`: COMPLETED or
+ * FAILED). The backend sends NO status for an epoch it cannot speak for - one that ran
+ * nothing but its trigger, and one that is still ACTIVE, whose stored state is the one
+ * written when it opened. So in practice a status arrives only with a close timestamp.
+ *
+ * What the backend deliberately does not answer is whether an open epoch is executing
+ * right now: the epoch row cannot tell, because the close is deferred and
+ * `endedAt == null` means "not reconciled yet". Only the RUN knows, hence this function.
+ */
+export function resolveEpochBadgeStatus(
+  entry: Pick<EpochTimestamp, 'endedAt' | 'status'> | null | undefined,
+  runStatus?: string | null,
+): string | null {
+  if (!entry) return null;
+  const outcome = entry.status ? String(entry.status).toUpperCase() : null;
+  // Closed epoch: its outcome is final and outranks the run, which may already be
+  // executing the NEXT epoch.
+  if (entry.endedAt) return outcome;
+  const lower = (runStatus || '').toLowerCase();
+  // Killed mid-flight: the epoch never reached the ending its own tally would suggest.
+  if (ABANDONING_RUN_STATUSES.has(lower as never)) return lower.toUpperCase();
+  if (EXECUTING_RUN_STATUSES.has(lower)) return 'RUNNING';
+  // Open epoch, run neither executing nor abandoned (parked at WAITING_TRIGGER, or a
+  // status this build does not know). Defensive: today the backend attaches no outcome
+  // to an open epoch, so this yields no badge rather than a stale one.
+  return outcome;
+}
+
+/** Whether an epoch row is genuinely executing (drives the ticking duration + live styling). */
+export function isEpochLive(
+  entry: Pick<EpochTimestamp, 'endedAt' | 'status'>,
+  runStatus?: string | null,
+): boolean {
+  return resolveEpochBadgeStatus(entry, runStatus) === 'RUNNING';
 }

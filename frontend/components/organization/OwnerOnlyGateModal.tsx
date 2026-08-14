@@ -38,7 +38,7 @@ export function OwnerOnlyGateModal({ open, onClose, action }: OwnerOnlyGateModal
     <Dialog open={open} onOpenChange={(o) => !o && onClose()}>
       <DialogContent className="max-w-md p-6 gap-0">
         <div className="text-center">
-          <div className="w-12 h-12 bg-indigo-100 dark:bg-indigo-900/30 rounded-full flex items-center justify-center mx-auto mb-4">
+          <div className="w-12 h-12 bg-indigo-100 dark:bg-indigo-900/30 rounded-xl flex items-center justify-center mx-auto mb-4">
             <Icon className="h-6 w-6 text-indigo-600 dark:text-indigo-400" />
           </div>
           <h2 className="text-lg font-semibold text-theme-primary mb-2">

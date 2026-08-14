@@ -1,5 +1,7 @@
 package com.apimarketplace.publication.controller;
 
+import com.apimarketplace.publication.service.ApplicationTemplateResetService;
+
 import com.apimarketplace.auth.client.access.OrgAccessGuard;
 import com.apimarketplace.publication.config.OrchestratorInternalClient;
 import com.apimarketplace.publication.domain.WorkflowPublicationEntity;
@@ -81,7 +83,8 @@ class WorkflowPublicationControllerAcquirerAccessTest {
                 publicationService, agentPublicationService, listQueryService,
                 reviewService, resourcePublicationService, orchestratorClient,
                 landingInterfaceSnapshotter, showcaseSnapshotReader, fileRefRewriter,
-                new OnboardingCategoryMapper(), orgAccessGuard);
+                new OnboardingCategoryMapper(), orgAccessGuard,
+                org.mockito.Mockito.mock(ApplicationTemplateResetService.class));
     }
 
     private WorkflowPublicationEntity publication(PublicationStatus status, PublicationVisibility visibility) {

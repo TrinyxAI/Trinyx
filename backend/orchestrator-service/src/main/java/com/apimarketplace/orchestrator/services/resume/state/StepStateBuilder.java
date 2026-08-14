@@ -131,11 +131,13 @@ public class StepStateBuilder {
      *
      * <p>{@code partialFailedNodeIds} is the flat
      * {@link StateSnapshot#getPartialFailedNodeIds()} view: nodes that COMPLETED in the
-     * current pass with per-item failures (split continue-anyway). It is the ONLY
-     * evidence allowed to demote a current-epoch COMPLETED to PARTIAL_SUCCESS -
-     * accumulated NodeCounts keep stale {@code failed} entries after a rerun fixed a
-     * previously-FAILED node, and using them resurrected PARTIAL_SUCCESS forever (see
-     * {@link #deriveStatusFromCounts}).
+     * current pass with per-item failures (split continue-anyway). It demotes a COMPLETED
+     * node to PARTIAL_SUCCESS even when the accumulated counts do not show the failure yet.
+     *
+     * <p>It is no longer the ONLY such evidence: the accumulated counts demote too (see
+     * {@link #deriveStatusFromCounts}), so a node that failed in one pass and succeeded in a
+     * later one stays partial. That is intentional - the node's badge displays those counts,
+     * and a green border beside a red tally contradicts what the user is reading.
      */
     public List<WorkflowRunState.StepState> buildStepStates(
             WorkflowPlan plan,
@@ -212,9 +214,9 @@ public class StepStateBuilder {
         }
 
         // Post-process: surface CURRENT-pass partial failures (split continue-anyway).
-        // deriveStatusFromCounts no longer demotes COMPLETED via accumulated counts
-        // (stale failed entries survive reruns), so the per-epoch partialFailed marker
-        // is the single source of truth for the PARTIAL_SUCCESS display.
+        // Complements deriveStatusFromCounts rather than replacing it: the counts demote a
+        // COMPLETED node once a failure appears in them, and this marker catches the case where
+        // the current pass failed items the counts have not caught up with yet.
         if (partialFailedNodeIds != null && !partialFailedNodeIds.isEmpty()) {
             for (int i = 0; i < states.size(); i++) {
                 WorkflowRunState.StepState s = states.get(i);
@@ -330,16 +332,38 @@ public class StepStateBuilder {
             return defaultStatus;
         }
 
-        // COMPLETED in the current epoch is also current-state-wins. Accumulated counts
-        // keep a stale failed entry after a rerun fixed a previously-FAILED node - letting
-        // counts decide demoted the fresh COMPLETED to PARTIAL_SUCCESS forever. Genuine
-        // current-pass partial failures (split continue-anyway) are surfaced by the
-        // partialFailedNodeIds post-process in buildStepStates, NOT by these counts.
-        // Only the RUNNING override survives: a parallel epoch may still be executing
-        // this node and the live activity beats the terminal state of the other epoch.
+        // COMPLETED is the one terminal state that DOES yield to the accumulated counts, unlike
+        // the four guards above. A node carrying both a success and a failure is a partial
+        // success, whether the two came from items of one pass (split continue-anyway) or from
+        // two different passes - spawn 1 failed, spawn 2 succeeded is still "this node has a
+        // failure to look at".
+        //
+        // The reason is that the node DISPLAYS these very counts: its badge shows the green
+        // tally and the red tally side by side (NodeStatusBadge). A green border next to a red
+        // count contradicts itself, and the count is what the user is reading. So the border
+        // follows the same source.
+        //
+        // This is a deliberate reversal: the guard used to keep COMPLETED here precisely so a
+        // rerun that fixed a failed node would clear its amber. That optimises for "is it clean
+        // NOW", which the badge does not say - and the badge wins, because it is on screen.
+        //
+        // The RUNNING override still comes first: a parallel epoch executing this node beats the
+        // terminal state of another epoch.
         if (defaultStatus == RunStatus.COMPLETED) {
             int runningNow = counts != null ? counts.getOrDefault("running", 0) : 0;
-            return runningNow > 0 ? RunStatus.RUNNING : defaultStatus;
+            if (runningNow > 0) return RunStatus.RUNNING;
+            // PARTIAL_SUCCESS is the ONLY demotion allowed from COMPLETED, and only when the
+            // counts really carry both sides. The narrowing is deliberate: the split-async
+            // barrier seal marks a node through markNodeCompletedEpochOnly, which adds it to
+            // completedNodeIds WITHOUT incrementing `completed`, so a node can be COMPLETED while
+            // its counts say otherwise. Falling through to the generic branch would then let the
+            // counts alone answer FAILED or SKIPPED for a node the epoch calls completed.
+            // Defence rather than a fix for an observed bug: the all-failed seal is routed to
+            // markNodeFailedEpochOnly (StepCompletionOrchestrator.recordSplitAggregateIfMissing),
+            // so it never arrives here as COMPLETED today.
+            int done = counts != null ? counts.getOrDefault("completed", 0) : 0;
+            int bad = counts != null ? counts.getOrDefault("failed", 0) : 0;
+            return (done > 0 && bad > 0) ? RunStatus.PARTIAL_SUCCESS : defaultStatus;
         }
 
         if (counts == null || counts.isEmpty()) {

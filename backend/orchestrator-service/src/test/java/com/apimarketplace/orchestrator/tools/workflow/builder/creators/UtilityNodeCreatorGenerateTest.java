@@ -1,0 +1,185 @@
+package com.apimarketplace.orchestrator.tools.workflow.builder.creators;
+
+import com.apimarketplace.agent.tools.ToolErrorCode;
+import com.apimarketplace.agent.tools.ToolsProvider.ToolExecutionResult;
+import com.apimarketplace.orchestrator.repository.WorkflowRepository;
+import com.apimarketplace.orchestrator.service.NodeLibraryService;
+import com.apimarketplace.orchestrator.tools.workflow.builder.ResponseOptimizer;
+import com.apimarketplace.orchestrator.tools.workflow.builder.WorkflowBuilderSession;
+import com.apimarketplace.orchestrator.tools.workflow.builder.WorkflowBuilderSessionStore;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.DisplayName;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.Mock;
+import org.mockito.junit.jupiter.MockitoExtension;
+
+import java.time.Instant;
+import java.util.LinkedHashMap;
+import java.util.Map;
+import java.util.Optional;
+
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.Mockito.lenient;
+
+/**
+ * {@code workflow(action='add_node', type='generate', ...)}.
+ *
+ * <p>The creator deliberately validates only what it can know without the
+ * catalog: that a model was named and that the credential source is one of the
+ * two real pools. Which parameters a given model accepts is the catalog's
+ * answer, given before the provider is called and therefore before anything is
+ * charged, so the creator must FORWARD unknown-to-it parameters rather than drop
+ * them: dropping one would send a call the author did not configure.
+ */
+@ExtendWith(MockitoExtension.class)
+@DisplayName("UtilityNodeCreator - add_generate")
+class UtilityNodeCreatorGenerateTest {
+
+    @Mock private WorkflowBuilderSessionStore sessionStore;
+    @Mock private ResponseOptimizer responseOptimizer;
+    @Mock private NodeLibraryService nodeLibraryService;
+    @Mock private WorkflowRepository workflowRepository;
+
+    private UtilityNodeCreator creator;
+    private WorkflowBuilderSession session;
+
+    @BeforeEach
+    void setUp() {
+        creator = new UtilityNodeCreator(sessionStore, responseOptimizer, nodeLibraryService, workflowRepository);
+        session = WorkflowBuilderSession.builder()
+            .sessionId("s")
+            .tenantId("t")
+            .workflowName("w")
+            .createdAt(Instant.now())
+            .updatedAt(Instant.now())
+            .build();
+        Map<String, Object> trigger = new LinkedHashMap<>();
+        trigger.put("label", "Start");
+        trigger.put("id", "trigger:start");
+        trigger.put("type", "webhook");
+        session.getTriggers().add(trigger);
+
+        lenient().when(nodeLibraryService.findByType(anyString())).thenReturn(Optional.empty());
+    }
+
+    private static Map<String, Object> baseParams() {
+        Map<String, Object> p = new LinkedHashMap<>();
+        p.put("label", "Make Clip");
+        p.put("connect_after", "Start");
+        p.put("model", "seedance-2.0-fast");
+        return p;
+    }
+
+    @SuppressWarnings("unchecked")
+    private Map<String, Object> firstCoreParams() {
+        return (Map<String, Object>) session.getCores().get(0).get("params");
+    }
+
+    @Test
+    @DisplayName("creates a core of type 'generate' with the config under params")
+    void createsGenerateCore() {
+        Map<String, Object> p = baseParams();
+        p.put("prompt", "a paper boat in a rain gutter");
+        p.put("duration_seconds", 5);
+
+        ToolExecutionResult result = creator.executeAddGenerate(session, p);
+
+        assertThat(result.success()).isTrue();
+        Map<String, Object> core = session.getCores().get(0);
+        assertThat(core.get("type")).isEqualTo("generate");
+        assertThat(core.get("label")).isEqualTo("Make Clip");
+        assertThat(firstCoreParams())
+            .containsEntry("model", "seedance-2.0-fast")
+            .containsEntry("prompt", "a paper boat in a rain gutter")
+            .containsEntry("duration_seconds", 5);
+    }
+
+    @Test
+    @DisplayName("missing model is refused, and the refusal says how to find a model id")
+    void modelIsRequired() {
+        Map<String, Object> p = baseParams();
+        p.remove("model");
+
+        ToolExecutionResult result = creator.executeAddGenerate(session, p);
+
+        assertThat(result.success()).isFalse();
+        assertThat(result.errorCode()).isEqualTo(ToolErrorCode.MISSING_PARAMETER);
+        assertThat(result.error()).contains("generation(action='models')");
+        assertThat(session.getCores()).isEmpty();
+    }
+
+    @Test
+    @DisplayName("the model id is normalised the same way the registry resolves it")
+    void modelIsNormalised() {
+        Map<String, Object> p = baseParams();
+        p.put("model", "  Seedance-2.0-Fast  ");
+
+        assertThat(creator.executeAddGenerate(session, p).success()).isTrue();
+        assertThat(firstCoreParams().get("model")).isEqualTo("seedance-2.0-fast");
+    }
+
+    @Test
+    @DisplayName("an unknown credential_source is refused, naming both real pools")
+    void credentialSourceMustBeUserOrPlatform() {
+        Map<String, Object> p = baseParams();
+        p.put("credential_source", "borrowed");
+
+        ToolExecutionResult result = creator.executeAddGenerate(session, p);
+
+        assertThat(result.success()).isFalse();
+        assertThat(result.errorCode()).isEqualTo(ToolErrorCode.INVALID_ENUM_VALUE);
+        assertThat(result.error()).contains("'platform'").contains("'user'");
+        assertThat(session.getCores()).isEmpty();
+    }
+
+    @Test
+    @DisplayName("credential_source 'user' is stored so the run uses the author's own key")
+    void credentialSourceIsStored() {
+        Map<String, Object> p = baseParams();
+        p.put("credential_source", "USER");
+
+        assertThat(creator.executeAddGenerate(session, p).success()).isTrue();
+        assertThat(firstCoreParams().get("credential_source")).isEqualTo("user");
+    }
+
+    @Test
+    @DisplayName("a parameter the creator does not know about is FORWARDED, not dropped")
+    void unknownParametersAreForwarded() {
+        // The vocabulary lives in the generation catalog. A local allow-list here
+        // would silently drop a dimension the day a seed adds one, and the run
+        // would then generate something the author did not ask for.
+        Map<String, Object> p = baseParams();
+        p.put("some_new_dimension", "value");
+
+        assertThat(creator.executeAddGenerate(session, p).success()).isTrue();
+        assertThat(firstCoreParams().get("some_new_dimension")).isEqualTo("value");
+    }
+
+    @Test
+    @DisplayName("builder-only keys never leak into the node's params")
+    void builderKeysAreNotGenerationParams() {
+        Map<String, Object> p = baseParams();
+        p.put("session_id", "s");
+        p.put("type", "generate");
+
+        assertThat(creator.executeAddGenerate(session, p).success()).isTrue();
+        assertThat(firstCoreParams())
+            .doesNotContainKey("label")
+            .doesNotContainKey("connect_after")
+            .doesNotContainKey("session_id")
+            .doesNotContainKey("type");
+    }
+
+    @Test
+    @DisplayName("the response tells the agent the node is charged per run and where to read the size billed")
+    void responseWarnsAboutCost() {
+        ToolExecutionResult result = creator.executeAddGenerate(session, baseParams());
+
+        assertThat(result.success()).isTrue();
+        String rendered = String.valueOf(result.data());
+        assertThat(rendered).contains("charged");
+        assertThat(rendered).contains("billed_quantity");
+    }
+}

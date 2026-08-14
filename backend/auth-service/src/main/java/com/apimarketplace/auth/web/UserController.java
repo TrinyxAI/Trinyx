@@ -155,6 +155,53 @@ public class UserController {
     }
 
     /**
+     * Cancels a scheduled account deletion.
+     *
+     * <p>Reachable by a DEACTIVATED account on purpose: the gateway blocks every other path for
+     * an inactive user, and allow-lists this one plus {@code /profile/deletion-status}. Without
+     * that exception the 30-day grace period we promise would be unusable - the person is locked
+     * out the moment they ask for deletion, so the only way to change their mind would be a
+     * support ticket that, until now, nobody could action either.
+     *
+     * <p>Idempotent: restoring an account that is not scheduled for deletion returns 200 with
+     * {@code restored=false} rather than an error.
+     *
+     * <p>Resolves the caller through {@code X-User-ID} like every other endpoint here. The
+     * {@link #getCurrentUser()} fallback cannot resolve anyone in this service: SecurityConfig is
+     * {@code anyRequest().permitAll()} with no resource server, so nothing ever populates the
+     * SecurityContext and the gateway header is the only identity there is.
+     */
+    @PostMapping("/profile/restore")
+    public ResponseEntity<java.util.Map<String, Object>> restoreMyAccount(
+            @RequestHeader(value = "X-User-ID", required = false) String userIdHeader) {
+        Optional<User> userOpt = resolveUser(userIdHeader);
+        if (userOpt.isEmpty()) {
+            return ResponseEntity.notFound().build();
+        }
+        boolean restored = userService.restoreUser(userOpt.get());
+        java.util.Map<String, Object> body = new java.util.HashMap<>(
+                userService.getDeletionStatus(userOpt.get()));
+        body.put("restored", restored);
+        return ResponseEntity.ok(body);
+    }
+
+    /**
+     * Whether this account is scheduled for deletion, and when it would happen. Drives the
+     * interstitial the frontend shows instead of the app for a deactivated user.
+     *
+     * <p>Same {@code X-User-ID} resolution as {@link #restoreMyAccount}, for the same reason.
+     */
+    @GetMapping("/profile/deletion-status")
+    public ResponseEntity<java.util.Map<String, Object>> myDeletionStatus(
+            @RequestHeader(value = "X-User-ID", required = false) String userIdHeader) {
+        Optional<User> userOpt = resolveUser(userIdHeader);
+        if (userOpt.isEmpty()) {
+            return ResponseEntity.notFound().build();
+        }
+        return ResponseEntity.ok(userService.getDeletionStatus(userOpt.get()));
+    }
+
+    /**
      * Recupere le statut de premier login et profil de l'utilisateur connecte
      */
     @GetMapping("/status")

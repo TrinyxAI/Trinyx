@@ -48,6 +48,7 @@ public class ServiceRegistry {
     private final FileDownloader fileDownloader;
     private final com.apimarketplace.orchestrator.services.file.PublicLinkService publicLinkService;
     private final com.apimarketplace.orchestrator.services.media.MediaRenderService mediaRenderService;
+    private final com.apimarketplace.orchestrator.services.generation.GenerationExecutionService generationExecutionService;
     private final MimeTypeRegistry mimeTypeRegistry;
     private final WorkflowEventPublisher eventPublisher;
     private final RestTemplate restTemplate;
@@ -88,6 +89,7 @@ public class ServiceRegistry {
         this.fileDownloader = builder.fileDownloader;
         this.publicLinkService = builder.publicLinkService;
         this.mediaRenderService = builder.mediaRenderService;
+        this.generationExecutionService = builder.generationExecutionService;
         this.mimeTypeRegistry = builder.mimeTypeRegistry;
         this.eventPublisher = builder.eventPublisher;
         this.restTemplate = builder.restTemplate;
@@ -150,6 +152,10 @@ public class ServiceRegistry {
 
     public com.apimarketplace.orchestrator.services.media.MediaRenderService getMediaRenderService() {
         return mediaRenderService;
+    }
+
+    public com.apimarketplace.orchestrator.services.generation.GenerationExecutionService getGenerationExecutionService() {
+        return generationExecutionService;
     }
 
     public MimeTypeRegistry getMimeTypeRegistry() {
@@ -308,6 +314,7 @@ public class ServiceRegistry {
         private FileDownloader fileDownloader;
         private com.apimarketplace.orchestrator.services.file.PublicLinkService publicLinkService;
         private com.apimarketplace.orchestrator.services.media.MediaRenderService mediaRenderService;
+        private com.apimarketplace.orchestrator.services.generation.GenerationExecutionService generationExecutionService;
         private MimeTypeRegistry mimeTypeRegistry;
         private WorkflowEventPublisher eventPublisher;
         private RestTemplate restTemplate;
@@ -368,6 +375,12 @@ public class ServiceRegistry {
 
         public Builder mediaRenderService(com.apimarketplace.orchestrator.services.media.MediaRenderService service) {
             this.mediaRenderService = service;
+            return this;
+        }
+
+        public Builder generationExecutionService(
+                com.apimarketplace.orchestrator.services.generation.GenerationExecutionService service) {
+            this.generationExecutionService = service;
             return this;
         }
 

@@ -349,6 +349,10 @@ export function useCreditBalance() {
     subBalance: data?.subBalance ?? null,
     paygBalance: data?.paygBalance ?? null,
     delinquent: data?.delinquent ?? false,
+    // The server's answer to "may this account's monthly credits pay for a
+    // platform-key purchase". Absent (pre-V250 shape, or CE where the rule does
+    // not exist) reads as false, so a surface never warns on a guess.
+    monthlyCreditsAreWorkflowOnly: data?.monthlyCreditsAreWorkflowOnly ?? false,
     isLoading,
     error: error?.message || null,
   };

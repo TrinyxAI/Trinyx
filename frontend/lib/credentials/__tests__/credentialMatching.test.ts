@@ -40,10 +40,22 @@ describe('credentialMatching', () => {
       expect(out).toHaveLength(0);
     });
 
-    it('matches on exact user credential name', () => {
-      const creds = [makeCred({ id: 3, integration: 'custom', name: 'gmail' })];
+    it('matches on exact user credential name when the credential has no integration of its own', () => {
+      // The workflow-native connectors (smtp, ssh, database) identify
+      // themselves by the requirement's own name and carry no integration.
+      const creds = [makeCred({ id: 3, integration: undefined, name: 'gmail' })];
       const out = matchUserCredentialsForTool(creds, { credentialName: 'gmail' }, undefined);
       expect(out).toHaveLength(1);
+    });
+
+    it('does NOT match a credential of another integration that merely carries that label', () => {
+      // `name` is free text. Offering a 'custom' key because someone called it
+      // 'gmail' shows a selected credential the server then refuses: it admits
+      // the label only for a credential with no integration, and the run falls
+      // back to the account default with nothing on screen to say so.
+      const creds = [makeCred({ id: 3, integration: 'custom', name: 'gmail' })];
+      const out = matchUserCredentialsForTool(creds, { credentialName: 'gmail' }, undefined);
+      expect(out).toHaveLength(0);
     });
 
     it('does not match when user credential name merely contains tool credentialName', () => {

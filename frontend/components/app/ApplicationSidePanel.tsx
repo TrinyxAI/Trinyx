@@ -9,7 +9,8 @@ import { WorkflowModeProvider } from '@/contexts/WorkflowModeContext';
 import { useRun } from '@/contexts/WorkflowRunContext';
 import { useWorkflowStreaming } from '@/app/workflows/builder/hooks/execution';
 import { getActivePublicPreview, usePublicationSnapshot } from '@/contexts/PublicationSnapshotContext';
-import { ApplicationTabContent, type ApplicationConfig } from '@/components/chat/ApplicationTabContent';
+import { ApplicationTabContent, type ApplicationConfig, type ApplicationTemplateSource } from '@/components/chat/ApplicationTabContent';
+import { isNavigateRef } from '@/app/workflows/builder/utils/interfaceActionRefs';
 import LoadingSpinner from '@/components/LoadingSpinner';
 
 // ── Tab content: delegates to ApplicationTabContent with full interaction ──
@@ -31,6 +32,12 @@ export function ApplicationPanelContent({ publicationId, runId: runIdOverride }:
     runId: string;
     workflowId: string;
     appConfig: ApplicationConfig;
+    /**
+     * Set only for an INSTALLED application: enables the toolbar's template
+     * actions. Withheld in a preview context (read-only showcase) and for the
+     * publisher's own publication, whose page is bound to the source workflow.
+     */
+    templateSource?: ApplicationTemplateSource;
   } | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -184,6 +191,13 @@ export function ApplicationPanelContent({ publicationId, runId: runIdOverride }:
               label: iface?.label || pub.title || 'Application',
               actionMapping: iface?.actionMapping || {},
             },
+            // Same split as ApplicationDetailView: the example values help anyone whose
+            // run has no data yet, the publisher included; the reset is withheld from the
+            // publisher because this surface resolves their SOURCE workflow while the
+            // endpoint rewrites the APPLICATION clone's tables.
+            templateSource: !inPreviewContext
+              ? { publicationId, remote: !!pub.remote, canReset: !pub.ownedByMe }
+              : undefined,
           });
         }
       } catch {
@@ -218,13 +232,23 @@ export function ApplicationPanelContent({ publicationId, runId: runIdOverride }:
   const previewActive = !!getActivePublicPreview();
   return (
     <WorkflowModeProvider workflowId={panelData.workflowId} initialRunId={panelData.runId} readOnly={previewActive}>
-      <ApplicationPanelInner config={panelData.appConfig} runId={panelData.runId} workflowId={panelData.workflowId} />
+      <ApplicationPanelInner
+        config={panelData.appConfig}
+        runId={panelData.runId}
+        workflowId={panelData.workflowId}
+        templateSource={panelData.templateSource}
+      />
     </WorkflowModeProvider>
   );
 }
 
 /** Inner component - has access to WorkflowRunContext from the layout */
-function ApplicationPanelInner({ config, runId, workflowId }: { config: ApplicationConfig; runId: string; workflowId: string }) {
+function ApplicationPanelInner({ config, runId, workflowId, templateSource }: {
+  config: ApplicationConfig;
+  runId: string;
+  workflowId: string;
+  templateSource?: ApplicationTemplateSource;
+}) {
   const [, runContext] = useRun(runId);
   const previewActive = !!getActivePublicPreview();
   useWorkflowStreaming(runId, !previewActive);
@@ -233,6 +257,15 @@ function ApplicationPanelInner({ config, runId, workflowId }: { config: Applicat
     if (!runContext) return;
     // No actions in preview context - the showcase clone is read-only.
     if (getActivePublicPreview()) return;
+
+    // A page switch is frontend-only and has no target here: this panel renders ONE
+    // interface, not the carousel. Falling through would strip the ':navigate' suffix
+    // and fire the remaining key as a manual trigger - a real backend call from what
+    // the author wrote as a navigation link.
+    if (isNavigateRef(triggerRef)) {
+      console.warn("[ApplicationSidePanel] Navigate ignored: this panel renders a single interface, there is no page to switch to:", triggerRef);
+      return;
+    }
 
     // Parse triggerRef: "trigger:label:actiontype" → triggerKey + triggerType
     // Same logic as WorkflowBuilder.handleApplicationAction
@@ -255,6 +288,7 @@ function ApplicationPanelInner({ config, runId, workflowId }: { config: Applicat
       // tab): the application IS what the user came for, so it shows the newest
       // fire rather than a pager spanning every one of them.
       openOnLatestEpoch
+      templateSource={templateSource}
     />
   );
 }

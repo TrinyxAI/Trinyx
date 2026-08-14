@@ -47,7 +47,7 @@ export default function StepIndicator({
                 )}
                 
                 <div 
-                  className={`relative flex items-center justify-center w-12 h-12 rounded-full border-2 transition-all duration-300 ${
+                  className={`relative flex items-center justify-center w-12 h-12 rounded-2xl border-2 transition-all duration-300 ${
                     isCompleted 
                       ? 'bg-green-500 border-green-500 text-white' 
                       : isActive 
@@ -64,7 +64,7 @@ export default function StepIndicator({
                   )}
                   
                   {!isCompleted && (
-                    <div className="absolute -top-1 -right-1 w-5 h-5 bg-theme-primary text-theme-secondary text-xs rounded-full flex items-center justify-center border border-theme">
+                    <div className="absolute -top-1 -right-1 w-5 h-5 bg-theme-primary text-theme-secondary text-xs rounded-md flex items-center justify-center border border-theme">
                       {step.id}
                     </div>
                   )}
@@ -113,19 +113,19 @@ export default function StepIndicator({
     switch (step.status) {
       case 'completed':
         return (
-          <div className="w-10 h-10 bg-black dark:bg-white rounded-full flex items-center justify-center shadow-lg text-white dark:text-black">
+          <div className="w-10 h-10 bg-black dark:bg-white rounded-2xl flex items-center justify-center shadow-lg text-white dark:text-black">
             <Check className="w-6 h-6" />
           </div>
         );
       case 'current':
         return (
-          <div className="w-10 h-10 bg-black dark:bg-white rounded-full flex items-center justify-center shadow-lg text-white dark:text-black">
+          <div className="w-10 h-10 bg-black dark:bg-white rounded-2xl flex items-center justify-center shadow-lg text-white dark:text-black">
             <IconComponent className="w-5 h-5" />
           </div>
         );
       case 'upcoming':
         return (
-          <div className="w-10 h-10 bg-theme-tertiary rounded-full flex items-center justify-center text-theme-secondary">
+          <div className="w-10 h-10 bg-theme-tertiary rounded-2xl flex items-center justify-center text-theme-secondary">
             <IconComponent className="w-5 h-5" />
           </div>
         );

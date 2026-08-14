@@ -34,7 +34,7 @@ export function Favicon({ url, size = 16, className = '', title }: FaviconProps)
   if (!hostname || errored) {
     return (
       <span
-        className={`inline-flex items-center justify-center rounded-full bg-theme-secondary text-theme-muted ${className}`}
+        className={`inline-flex items-center justify-center rounded-md bg-theme-secondary text-theme-muted ${className}`}
         style={containerStyle}
         title={fallbackTitle}
         aria-hidden="true"

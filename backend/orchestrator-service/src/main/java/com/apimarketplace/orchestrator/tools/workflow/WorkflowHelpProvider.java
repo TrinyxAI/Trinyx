@@ -75,6 +75,7 @@ public class WorkflowHelpProvider {
         "sftp",          // SFTP node (file operations on remote servers)
         "database",      // Database node (execute SQL queries)
         "media",         // Media node (probe, mux_audio, mix, extract_audio, concat, frame, overlay)
+        "generate",      // Generate node (image, video, audio, voice, music from a prompt)
         "runs",          // Inspecting past workflow runs
         "pin",           // Production version pinning (pin/unpin actions)
         "mocking"        // Node mocks: pin a node's output for editor runs (mock/mock_mode/mock_suggest)
@@ -205,6 +206,11 @@ public class WorkflowHelpProvider {
                 // adds the operations table, per-op options and the worked recipes.
                 formatted = new LinkedHashMap<>(formatted);
                 formatted.putAll(getMediaHelp());
+            } else if ("generate".equals(topic)) {
+                // The DB row carries the params/outputs reference; the static section
+                // below adds the pricing rules and the worked recipes.
+                formatted = new LinkedHashMap<>(formatted);
+                formatted.putAll(getGenerateHelp());
             }
             return formatted;
         }
@@ -246,6 +252,11 @@ public class WorkflowHelpProvider {
             // itself is normally answered above with the DB row merged with this section)
             case "media", "mux", "mux_audio", "extract_audio", "audio_video",
                  "concat", "stitch", "join", "join_videos", "frame", "thumbnail", "cover", "overlay", "watermark" -> getMediaHelp();
+
+            // Generate aliases (fallback when the node docs row is absent; the "generate"
+            // topic itself is normally answered above with the DB row merged with this section)
+            case "generate", "generation", "image_generation", "text_to_image", "text_to_video",
+                 "text_to_speech", "tts", "voice_over", "music_generation" -> getGenerateHelp();
 
             // Edge help (connection format)
             case "edge", "edges", "connection", "connections" -> getEdgeHelp();
@@ -390,7 +401,7 @@ public class WorkflowHelpProvider {
                     "If you wanted to rename fields, see 'field_binding_is_automatic_no_renaming' - fix the HTML <input name> or remap downstream.",
                 "WRONG: action_mapping: {'#form': 'search:submit'} - value MUST start with the prefix 'trigger:' or 'interface:' (or be one of '__continue', '__pagination:*').",
                 "WRONG: action_mapping: {'#form': 'trigger:Search Input:submit'} - labels MUST be normalized (lowercase, spaces → '_'). Use 'trigger:search_input:submit'.",
-                "WRONG: action_mapping: {'#form': 'trigger:search_input:fire'} - only 'submit', 'click', 'message' are valid trigger event suffixes. 'navigate' is reserved for 'interface:' prefix.",
+                "WRONG: action_mapping: {'#form': 'trigger:search_input:fire'} - only 'submit', 'click', 'message' are valid trigger event suffixes. Use 'interface:<label>:navigate' to switch page; a 'trigger:<label>:navigate' written by an older builder still works and resolves against interfaces.",
                 "WRONG: action_mapping: {'#btn': 'trigger:other_dag_trigger:click'} - see 'same_dag_rule' below. The trigger must live in the SAME DAG as this interface node."
             ),
             "same_dag_rule", "Interface can ONLY reference triggers/interfaces in its OWN DAG. Multiple buttons = multiple triggers in ONE DAG, NOT multiple DAGs.",
@@ -638,6 +649,95 @@ public class WorkflowHelpProvider {
         return result;
     }
 
+    /**
+     * Generate node help: how a model is chosen, what it costs, and the shape of
+     * what comes back.
+     */
+    private Map<String, Object> getGenerateHelp() {
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("title", "Generate Node - one asset from a prompt (image, video, audio, voice, music)");
+        result.put("model_first", "'model' is the only required param and it decides everything else: the "
+            + "format produced, which other params are accepted, and the price. Model ids cannot be guessed. "
+            + "Call generation(action='models') to list them, optionally narrowed with kind='video'; each row "
+            + "gives the id, what it accepts, its limits and its rate. Then "
+            + "workflow(action='add_node', type='generate', label='Make Clip', "
+            + "params={model:'<id-from-that-list>', prompt:'...'}, connect_after='...').");
+        result.put("params", ordered(
+            "model", "REQUIRED. A model id from generation(action='models').",
+            "prompt", "What to generate. Required by every model that accepts it.",
+            "duration_seconds", "Length for video, music and speech. Models priced per second bill on this.",
+            "aspect_ratio", "Framing, e.g. '16:9'. Only the values in that model's limits.",
+            "resolution", "Output size, e.g. '720p'. Only the values in that model's limits.",
+            "voice", "Voice id for speech synthesis.",
+            "language", "Language code for speech synthesis.",
+            "quality", "Provider quality tier. Only the values in that model's limits.",
+            "style", "Provider style preset.",
+            "seed", "Seed for reproducible output.",
+            "negative_prompt", "What to avoid.",
+            "input_image / input_audio / input_video", "A whole FileRef from an upstream node, used as a "
+                + "reference or a first frame, e.g. '{{core:download.output.file}}' - never .path, never a URL.",
+            "credential_source", "'platform' = the platform's provider key, billed at the platform price. "
+                + "'user' = a key you configured yourself, billed nothing by the platform. Omit and this "
+                + "node uses 'platform', which is the price every surface quotes for it.",
+            "credential_id", "WHICH of the owner's own provider keys this node runs on, when they hold "
+                + "several for the same provider. Only meaningful beside credential_source:'user'. You have "
+                + "no way to look one up: the ids belong to the owner's account and no action here lists "
+                + "them, so the owner sets this in the builder. What you must do is leave it ALONE - copy it "
+                + "unchanged when you rewrite a node that already has one, and never invent a number. A "
+                + "node without it runs on the owner's default key for that provider, which is the right "
+                + "answer for every node you create."
+        ));
+        result.put("accepted_params", "A model accepts only the params listed in its 'accepts' row. Sending "
+            + "one it does not accept is refused with the accepted list BEFORE the provider is called, so a "
+            + "rejected call costs nothing: correct the param and run again. The same applies to a value "
+            + "outside that model's limits.");
+        result.put("price", "Every successful run is charged. 1 credit = $0.001. A model is priced per call, "
+            + "per second, per image or per character, so a longer request costs more: a per-second video "
+            + "model at 60 credits/second costs 600 credits for a 10 second clip. The node reports what it "
+            + "actually billed on as output.billed_quantity, counted in output.billed_unit. That unit is the "
+            + "one the size was MEASURED in, which is not always the unit the rate is quoted in: a model "
+            + "listed per minute reports seconds. To work out what a run cost, convert billed_quantity into "
+            + "the rate's own unit first (60 seconds is 1 minute), then multiply. The size billed is derived "
+            + "from the request, and it is the size ASKED FOR rather than the size delivered: a provider "
+            + "that clamps a long request to its own maximum still charges what you sent, so set the "
+            + "length you need rather than the ceiling. It is not a param and setting one does not change "
+            + "it. With "
+            + "credential_source='user' the platform bills nothing and you pay the provider directly; "
+            + "unstated means 'platform'.");
+        result.put("outputs", ordered(
+            "file", "The generated asset as a whole FileRef, stored so it outlives the provider's own link. "
+                + "Map the WHOLE object into a downstream file param: '{{core:make_clip.output.file}}'.",
+            "model", "The model id that ran.",
+            "kind", "The format produced: image, video, audio, voice, music, ...",
+            "provider", "The provider whose model ran.",
+            "billed_quantity", "The size billed on, counted in billed_unit. A model sold per call reports 1.",
+            "billed_unit", "call, second, image or character. It is the unit the size was MEASURED in, not "
+                + "always the one the rate is quoted in: a model listed per minute reports seconds here.",
+            "provider_response", "The provider's own payload, kept under its own key so a provider field can "
+                + "never shadow file. Its shape varies by provider; do not build on it."
+        ));
+        result.put("failure", "The node FAILS when no asset comes back, rather than continuing with an empty "
+            + "file: the call has already been charged by then, and a downstream node running on nothing "
+            + "would hide that. A long job (a model listed as async) is waited for; the node never hands "
+            + "back a job id to poll.");
+        result.put("recipes", ordered(
+            "video_clip", "type='generate', label='Make Clip', params={model:'<a video model id>', "
+                + "prompt:'a paper boat drifting down a rain gutter, cinematic', duration_seconds:5, "
+                + "aspect_ratio:'16:9'}, connect_after='Start'.",
+            "voice_over", "type='generate', label='Say It', params={model:'<a voice model id>', "
+                + "prompt:'Welcome aboard. Please fasten your seatbelt.', voice:'<a voice id from limits>'}. "
+                + "Priced per character, so the prompt's length is the cost.",
+            "generate_then_edit", "Chain into core:media: 'Make Clip' -> 'Say It' -> 'Add Voice' with "
+                + "params={operation:'mux_audio', video:'{{core:make_clip.output.file}}', "
+                + "audio:'{{core:say_it.output.file}}'}.",
+            "own_key", "Add credential_source:'user' to run on a provider key you configured yourself; the "
+                + "platform then bills nothing for that node."
+        ));
+        result.put("edges", "No ports. Exactly ONE incoming edge (like every utility node - validate rejects "
+            + "more). It can reference ANY upstream node by template, not just its direct predecessor.");
+        return result;
+    }
+
     private Map<String, Object> getEdgeHelp() {
         Map<String, Object> result = new LinkedHashMap<>();
         result.put("title", "Edge Format - Connecting Nodes");
@@ -665,7 +765,7 @@ public class WorkflowHelpProvider {
             "approval", "approved, rejected, timeout - Example: core:review:approved",
             "guardrail", "pass, fail - Example: agent:safety:pass, agent:safety:fail",
             "classify", "category_0, category_1, ... - Example: agent:router:category_0",
-            "no_port_nodes", "split, merge, transform, wait, exit, stop_on_error, response, aggregate, http_request, download_file, public_link, media, data_input, code, filter, sort, limit, remove_duplicates, summarize, date_time, crypto_jwt, xml, compression, rss, convert_to_file, extract_from_file, compare_datasets, sub_workflow, respond_to_webhook, send_email, email_inbox, set, html_extract, task, ssh, sftp, database - NO ports, single outgoing edge"
+            "no_port_nodes", "split, merge, transform, wait, exit, stop_on_error, response, aggregate, http_request, download_file, public_link, media, generate, data_input, code, filter, sort, limit, remove_duplicates, summarize, date_time, crypto_jwt, xml, compression, rss, convert_to_file, extract_from_file, compare_datasets, sub_workflow, respond_to_webhook, send_email, email_inbox, set, html_extract, task, ssh, sftp, database - NO ports, single outgoing edge"
         ));
         return result;
     }
@@ -931,7 +1031,7 @@ public class WorkflowHelpProvider {
             "(3a) get_node_output → drill into ONE node (preferred when you know which one). " +
             "(3b) get_run with epoch=N → drill into ALL nodes of an epoch (expensive, use only if you need everything). " +
             "Never fetch epoch detail just to read one node - use get_node_output instead.");
-        help.put("status_values", "COMPLETED | FAILED | PARTIAL_SUCCESS | RUNNING | PAUSED | WAITING_TRIGGER | CANCELLED | TIMEOUT");
+        help.put("status_values", "COMPLETED | FAILED | RUNNING | PAUSED | WAITING_TRIGGER | CANCELLED | TIMEOUT. A run is never PARTIAL_SUCCESS: any failed node makes it FAILED, and the failing nodes carry the detail. A run whose trigger has not fired yet stays WAITING_TRIGGER. Runs that finished before this rule may still report a stored PARTIAL_SUCCESS.");
 
         help.put("examples", ordered(
             "list_all", "workflow(action='runs', workflow_id='<uuid>')",
@@ -1106,7 +1206,7 @@ public class WorkflowHelpProvider {
         response.put("fire_count", "Total number of times this trigger has been fired (epoch + 1).");
         response.put("plan_version", "Plan version this epoch ran at - references an entry of the version history (workflow(action='versions')). For editor runs and version replays the stored plan of that entry is the plan the epoch executed; pinned production fires may additionally carry pinned-version run state.");
         response.put("pinned_version", "Workflow's pinned version (may differ from plan_version).");
-        response.put("status", "COMPLETED | FAILED | PARTIAL_SUCCESS | AWAITING_INPUT | TIMEOUT");
+        response.put("status", "COMPLETED | FAILED | AWAITING_INPUT | TIMEOUT");
         response.put("duration_ms", "Wall-clock time of the triggered epoch.");
         response.put("outputs", "List of completed terminal nodes: [{node_id, status, output}]. Large outputs (>3 rows) truncated: {row_count, preview (3 rows), truncated: true}.");
         response.put("errors", "List of failed nodes: [{node, error}]. Includes actual error messages (one per node, the most recent across this run's epochs).");

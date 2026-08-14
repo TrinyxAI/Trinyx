@@ -4,7 +4,7 @@ import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { useSearchParams, useRouter, usePathname } from 'next/navigation';
 import { useQueryClient } from '@tanstack/react-query';
 import { useOrgScopedReset } from '@/lib/hooks/useOrgScopedReset';
-import { Search, Package, ShoppingBag, Bot, Zap, Monitor, Table, AppWindow, Eye, Cloud } from 'lucide-react';
+import { Search, Package, ShoppingBag, Bot, Zap, Monitor, Table, AppWindow, Eye, Cloud, ArrowUpDown, Star, CalendarDays, Coins } from 'lucide-react';
 import { useTranslations, useLocale } from 'next-intl';
 import { orchestratorApi, WorkflowPublication } from '@/lib/api';
 import { publicationService } from '@/lib/api/orchestrator/publication.service';
@@ -30,6 +30,74 @@ import { PublicationCard, PublicationCardSkeleton } from '@/components/marketpla
 
 const DISPLAY_FILTERS = ['apps', 'agents', 'interfaces', 'tables', 'skills'] as const;
 type DisplayFilter = (typeof DISPLAY_FILTERS)[number];
+
+// Which types the user can actually pick in the Explore type select. The other
+// DISPLAY_FILTERS keep their logic (empty states, filtering) so surfacing one is
+// a one-line addition here; the backend marketplace query already returns ALL
+// ACTIVE+PUBLIC types.
+const SELECTABLE_DISPLAY_FILTERS: readonly DisplayFilter[] = ['apps', 'agents'];
+
+const DISPLAY_FILTER_ICONS: Record<DisplayFilter, typeof Bot> = {
+  apps: AppWindow,
+  agents: Bot,
+  interfaces: Monitor,
+  tables: Table,
+  skills: Zap,
+};
+
+// ---------------------------------------------------------------------------
+// Explore refinements - sort + rating / date / price filters
+//
+// All four are applied CLIENT-side, on the page the backend already returned,
+// for the same reason the type filter is: the marketplace read is a single
+// 50-row fetch and every card carries the fields these need (averageRating,
+// reviewCount, publishedAt, creditsPerUse, useCount). Pushing them into the
+// query would mean a round trip per select change and four new backend
+// parameters for a set that fits in memory.
+//
+// 'rating' is the DEFAULT: the marketplace leads with what people rated best.
+// It composes with the server order rather than replacing it - the sort is
+// stable and unrated publications all share the same key, so everything without
+// a rating keeps the backend's popularity sequence behind the rated ones.
+//
+// 'popular' deliberately does NOT re-sort: it is the backend's own popularity
+// ordering (favorites, installs, rating mass - see
+// PublicationListQueryService.POPULARITY_ORDER_BY), which knows the favorite
+// counts the client never receives. Re-sorting it here would silently drop
+// that term.
+// ---------------------------------------------------------------------------
+
+const SORT_OPTIONS = ['rating', 'popular', 'recent', 'installs'] as const;
+type SortOption = (typeof SORT_OPTIONS)[number];
+
+const RATING_FILTERS = ['any', 'rated', 'rating4', 'rating3'] as const;
+type RatingFilter = (typeof RATING_FILTERS)[number];
+
+const DATE_FILTERS = ['any', 'd7', 'd30', 'd90', 'y1'] as const;
+type DateFilter = (typeof DATE_FILTERS)[number];
+
+const PRICE_FILTERS = ['any', 'free', 'paid'] as const;
+type PriceFilter = (typeof PRICE_FILTERS)[number];
+
+/** Minimum average rating a publication must reach to pass the rating filter. */
+const RATING_THRESHOLDS: Record<RatingFilter, number> = {
+  any: 0,
+  rated: 0,
+  rating4: 4,
+  rating3: 3,
+};
+
+/** Query params cleared together by the "reset filters" action. */
+const REFINEMENT_PARAM_KEYS = ['rating', 'date', 'price'] as const;
+
+/** Age window in days for the date filter. */
+const DATE_WINDOW_DAYS: Record<DateFilter, number | null> = {
+  any: null,
+  d7: 7,
+  d30: 30,
+  d90: 90,
+  y1: 365,
+};
 
 /**
  * Enum-valued state that lives in the URL query string instead of component
@@ -69,6 +137,73 @@ function useQueryParamState<T extends string>(
   return [value, setValue];
 }
 
+/**
+ * Clear several query params in ONE navigation.
+ *
+ * Not a loop over {@link useQueryParamState} setters: each of those closes over
+ * the `searchParams` of the current render, so calling three of them in the same
+ * tick makes each rebuild the URL from the same stale snapshot and only the last
+ * write survives - the other two params would silently stay in the URL.
+ */
+function useQueryParamReset(keys: readonly string[]): () => void {
+  const router = useRouter();
+  const pathname = usePathname();
+  const searchParams = useSearchParams();
+
+  return useCallback(() => {
+    const params = new URLSearchParams(searchParams.toString());
+    keys.forEach((key) => params.delete(key));
+    const qs = params.toString();
+    router.replace(qs ? `${pathname}?${qs}` : pathname, { scroll: false });
+  }, [router, pathname, searchParams, keys]);
+}
+
+/**
+ * One refinement dropdown (sort / rating / date / price). Same trigger shape as
+ * the type select it sits next to, so the row reads as one control strip.
+ */
+function RefinementSelect<T extends string>({
+  value,
+  onChange,
+  options,
+  optionLabel,
+  ariaLabel,
+  icon: Icon,
+  testId,
+}: {
+  value: T;
+  onChange: (next: T) => void;
+  options: readonly T[];
+  optionLabel: (option: T) => string;
+  ariaLabel: string;
+  icon: typeof Bot;
+  testId: string;
+}) {
+  return (
+    <Select value={value} onValueChange={(v) => onChange(v as T)}>
+      <SelectTrigger
+        className="h-9 w-auto min-w-[9rem] gap-1.5 rounded-xl bg-theme-primary border-theme"
+        aria-label={ariaLabel}
+        data-testid={testId}
+      >
+        <SelectValue>
+          <div className="flex items-center gap-2">
+            <Icon className="h-3.5 w-3.5 flex-shrink-0" />
+            <span className="text-sm">{optionLabel(value)}</span>
+          </div>
+        </SelectValue>
+      </SelectTrigger>
+      <SelectContent>
+        {options.map((option) => (
+          <SelectItem key={option} value={option}>
+            {optionLabel(option)}
+          </SelectItem>
+        ))}
+      </SelectContent>
+    </Select>
+  );
+}
+
 // ============== Explore Tab ==============
 
 // `remote` (CE cloud-parity, 2026-06-10): a cloud-linked CE renders this exact
@@ -97,11 +232,53 @@ function ExploreTab({ remote = false }: { remote?: boolean }) {
   const clearInstall = useMarketplaceInstallStore((s) => s.clear);
   const consumeInstallSuccess = useMarketplaceInstallStore((s) => s.consumeSuccess);
   const [displayFilter, setDisplayFilter] = useQueryParamState<DisplayFilter>('type', DISPLAY_FILTERS, 'apps');
-  // Applications and Agents are surfaced in the marketplace via the type-filter chips below.
-  // Interfaces / Tables / Skills stay hidden for now (their logic is intact - add them to the
-  // chip list below to surface them once ready). The backend marketplace query returns ALL
-  // ACTIVE+PUBLIC types, so this is purely which chips the user can pick.
-  const SHOW_DISPLAY_FILTERS = true;
+  // Refinements live in the URL like `type` does, so a filtered grid survives
+  // a Back/forward, a breadcrumb return, or a pasted link.
+  const [sortOption, setSortOption] = useQueryParamState<SortOption>('sort', SORT_OPTIONS, 'rating');
+  const [ratingFilter, setRatingFilter] = useQueryParamState<RatingFilter>('rating', RATING_FILTERS, 'any');
+  const [dateFilter, setDateFilter] = useQueryParamState<DateFilter>('date', DATE_FILTERS, 'any');
+  const [priceFilter, setPriceFilter] = useQueryParamState<PriceFilter>('price', PRICE_FILTERS, 'any');
+
+  const hasActiveRefinement =
+    ratingFilter !== 'any' || dateFilter !== 'any' || priceFilter !== 'any';
+
+  const resetRefinements = useQueryParamReset(REFINEMENT_PARAM_KEYS);
+
+  const displayFilterLabel = useCallback((filter: DisplayFilter) => (
+    filter === 'apps' ? t('filterApplications')
+    : filter === 'agents' ? t('filterAgents')
+    : filter === 'interfaces' ? t('filterInterfaces')
+    : filter === 'tables' ? t('filterTables')
+    : t('filterSkills')
+  ), [t]);
+
+  const sortLabel = useCallback((option: SortOption) => (
+    option === 'popular' ? t('sortPopular')
+    : option === 'rating' ? t('sortRating')
+    : option === 'recent' ? t('sortRecent')
+    : t('sortInstalls')
+  ), [t]);
+
+  const ratingLabel = useCallback((filter: RatingFilter) => (
+    filter === 'any' ? t('ratingAny')
+    : filter === 'rated' ? t('ratingRated')
+    : filter === 'rating4' ? t('rating4Plus')
+    : t('rating3Plus')
+  ), [t]);
+
+  const dateLabel = useCallback((filter: DateFilter) => (
+    filter === 'any' ? t('dateAny')
+    : filter === 'd7' ? t('date7Days')
+    : filter === 'd30' ? t('date30Days')
+    : filter === 'd90' ? t('date90Days')
+    : t('dateYear')
+  ), [t]);
+
+  const priceLabel = useCallback((filter: PriceFilter) => (
+    filter === 'any' ? t('priceAny')
+    : filter === 'free' ? t('priceFree')
+    : t('pricePaid')
+  ), [t]);
 
   // Phase 6 (2026-05-18) - `acquiredIds` is workspace-bound (each workspace
   // owns its own publication acquisitions); reset on switch so explore
@@ -262,21 +439,70 @@ function ExploreTab({ remote = false }: { remote?: boolean }) {
 
 
   const filteredPublications = useMemo(() => {
-    return publications.filter((p) => {
+    const cutoff = (() => {
+      const days = DATE_WINDOW_DAYS[dateFilter];
+      return days == null ? null : Date.now() - days * 24 * 60 * 60 * 1000;
+    })();
+
+    const matching = publications.filter((p) => {
       const mode = p.displayMode || 'WORKFLOW';
-      if (displayFilter === 'agents') return mode === 'AGENT';
-      if (displayFilter === 'apps') return mode === 'APPLICATION';
-      if (displayFilter === 'interfaces') return mode === 'INTERFACE';
-      if (displayFilter === 'tables') return mode === 'TABLE';
-      return mode === 'SKILL';
+      const typeMatches =
+        displayFilter === 'agents' ? mode === 'AGENT'
+        : displayFilter === 'apps' ? mode === 'APPLICATION'
+        : displayFilter === 'interfaces' ? mode === 'INTERFACE'
+        : displayFilter === 'tables' ? mode === 'TABLE'
+        : mode === 'SKILL';
+      if (!typeMatches) return false;
+
+      // Rating: an unrated publication has no average to compare, so it fails
+      // every rating filter rather than passing as a silent 0.
+      if (ratingFilter !== 'any') {
+        const reviews = p.reviewCount ?? 0;
+        if (reviews === 0) return false;
+        if ((p.averageRating ?? 0) < RATING_THRESHOLDS[ratingFilter]) return false;
+      }
+
+      // Date: a publication with no publishedAt cannot be placed in a window.
+      if (cutoff != null) {
+        const publishedAt = p.publishedAt ? Date.parse(p.publishedAt) : NaN;
+        if (Number.isNaN(publishedAt) || publishedAt < cutoff) return false;
+      }
+
+      if (priceFilter === 'free' && (p.creditsPerUse ?? 0) > 0) return false;
+      if (priceFilter === 'paid' && (p.creditsPerUse ?? 0) <= 0) return false;
+
+      return true;
     });
-  }, [publications, displayFilter]);
+
+    // 'popular' keeps the server order (it carries the favorite counts the
+    // client never sees), so only the explicit sorts reorder - and they copy
+    // first, because sort() mutates and `publications` is state.
+    if (sortOption === 'popular') return matching;
+
+    return [...matching].sort((a, b) => {
+      if (sortOption === 'rating') {
+        // Unrated last, then by average, then by how many people backed it.
+        const ra = (a.reviewCount ?? 0) > 0 ? (a.averageRating ?? 0) : -1;
+        const rb = (b.reviewCount ?? 0) > 0 ? (b.averageRating ?? 0) : -1;
+        if (rb !== ra) return rb - ra;
+        return (b.reviewCount ?? 0) - (a.reviewCount ?? 0);
+      }
+      if (sortOption === 'installs') return (b.useCount ?? 0) - (a.useCount ?? 0);
+      // 'recent' - missing dates sort last instead of jumping to the top as 0.
+      const da = a.publishedAt ? Date.parse(a.publishedAt) : Number.NEGATIVE_INFINITY;
+      const db = b.publishedAt ? Date.parse(b.publishedAt) : Number.NEGATIVE_INFINITY;
+      return db - da;
+    });
+  }, [publications, displayFilter, sortOption, ratingFilter, dateFilter, priceFilter]);
+
+  const SelectedTypeIcon = DISPLAY_FILTER_ICONS[displayFilter];
 
   return (
     <div className="space-y-5">
-      {/* Search + Category filter */}
-      <div className="flex items-center gap-3">
-        <div className="relative flex-1">
+      {/* Search + category + type + refinements. Wraps: seven controls do not
+          fit one line on a laptop, and the search field keeps the first row. */}
+      <div className="flex flex-wrap items-center gap-3">
+        <div className="relative flex-1 min-w-[16rem]">
           <Search className="pointer-events-none absolute left-4 top-1/2 -translate-y-1/2 h-4 w-4 text-theme-secondary" />
           <Input
             type="text"
@@ -290,46 +516,85 @@ function ExploreTab({ remote = false }: { remote?: boolean }) {
           selectedCategory={selectedCategory}
           onCategoryChange={handleCategoryChange}
         />
-      </div>
+        {/* Resource type - the grid is always scoped to a single type. A select
+            rather than chips so it reads as the sibling filter of the category
+            one it sits next to (icons mirror the left sidebar). */}
+        <Select value={displayFilter} onValueChange={(v) => setDisplayFilter(v as DisplayFilter)}>
+          <SelectTrigger
+            className="h-9 w-40 rounded-xl bg-theme-primary border-theme"
+            aria-label={t('filterByType')}
+          >
+            <SelectValue>
+              <div className="flex items-center gap-2">
+                <SelectedTypeIcon className="h-3.5 w-3.5 flex-shrink-0" />
+                <span className="text-sm">{displayFilterLabel(displayFilter)}</span>
+              </div>
+            </SelectValue>
+          </SelectTrigger>
+          <SelectContent>
+            {SELECTABLE_DISPLAY_FILTERS.map((filter) => {
+              const Icon = DISPLAY_FILTER_ICONS[filter];
+              return (
+                <SelectItem key={filter} value={filter}>
+                  <div className="flex items-center gap-2">
+                    <Icon className="h-3.5 w-3.5 flex-shrink-0" />
+                    <span>{displayFilterLabel(filter)}</span>
+                  </div>
+                </SelectItem>
+              );
+            })}
+          </SelectContent>
+        </Select>
 
-      {/* Display filter chips - always scoped to a single resource type (icons mirror the left sidebar). */}
-      {/* Applications + Agents surfaced for now; Interfaces/Tables/Skills kept in the logic but off the list. */}
-      {SHOW_DISPLAY_FILTERS && (
-      <div className="flex items-center flex-wrap gap-2">
-        {DISPLAY_FILTERS
-          .filter((filter) => filter === 'apps' || filter === 'agents')
-          .map((filter) => {
-          const isActive = displayFilter === filter;
-          const label =
-            filter === 'apps' ? t('filterApplications')
-            : filter === 'agents' ? t('filterAgents')
-            : filter === 'interfaces' ? t('filterInterfaces')
-            : filter === 'tables' ? t('filterTables')
-            : t('filterSkills');
-          const icon =
-            filter === 'agents' ? <Bot className="h-3.5 w-3.5" />
-            : filter === 'apps' ? <AppWindow className="h-3.5 w-3.5" />
-            : filter === 'interfaces' ? <Monitor className="h-3.5 w-3.5" />
-            : filter === 'tables' ? <Table className="h-3.5 w-3.5" />
-            : <Zap className="h-3.5 w-3.5" />;
-          return (
-            <button
-              key={filter}
-              type="button"
-              onClick={() => setDisplayFilter(filter)}
-              className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-sm font-medium transition-all ${
-                isActive
-                  ? 'bg-[var(--accent-primary)] text-[var(--bg-primary)]'
-                  : 'bg-[var(--bg-tertiary)] text-theme-secondary hover:text-theme-primary'
-              }`}
-            >
-              {icon}
-              {label}
-            </button>
-          );
-        })}
+        {/* Refinements, in the order a marketplace visitor actually reasons:
+            how to rank, then how good, then how fresh, then how much. */}
+        <RefinementSelect
+          value={sortOption}
+          onChange={setSortOption}
+          options={SORT_OPTIONS}
+          optionLabel={sortLabel}
+          ariaLabel={t('sortBy')}
+          icon={ArrowUpDown}
+          testId="marketplace-sort-select"
+        />
+        <RefinementSelect
+          value={ratingFilter}
+          onChange={setRatingFilter}
+          options={RATING_FILTERS}
+          optionLabel={ratingLabel}
+          ariaLabel={t('filterByRating')}
+          icon={Star}
+          testId="marketplace-rating-select"
+        />
+        <RefinementSelect
+          value={dateFilter}
+          onChange={setDateFilter}
+          options={DATE_FILTERS}
+          optionLabel={dateLabel}
+          ariaLabel={t('filterByDate')}
+          icon={CalendarDays}
+          testId="marketplace-date-select"
+        />
+        <RefinementSelect
+          value={priceFilter}
+          onChange={setPriceFilter}
+          options={PRICE_FILTERS}
+          optionLabel={priceLabel}
+          ariaLabel={t('filterByPrice')}
+          icon={Coins}
+          testId="marketplace-price-select"
+        />
+        {hasActiveRefinement && (
+          <button
+            type="button"
+            onClick={resetRefinements}
+            data-testid="marketplace-reset-filters"
+            className="h-9 px-3 rounded-xl text-sm text-theme-secondary hover:text-theme-primary hover:bg-theme-tertiary transition-colors"
+          >
+            {t('resetFilters')}
+          </button>
+        )}
       </div>
-      )}
 
       {error && (
         <div className="p-4 rounded-xl bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 text-sm text-red-600 dark:text-red-400">
@@ -368,9 +633,32 @@ function ExploreTab({ remote = false }: { remote?: boolean }) {
           : displayFilter === 'tables' ? t('emptyTablesHint')
           : displayFilter === 'skills' ? t('emptySkillsHint')
           : t('noPublicationsHint');
+        // A refinement that excludes everything is NOT "nothing was ever
+        // published here": saying so would send the visitor away when one click
+        // brings the grid back. The filter message wins over the type-specific
+        // one, and carries the way out.
+        if (hasActiveRefinement) {
+          return (
+            <div className="flex flex-col items-center justify-center py-16 text-center">
+              <div className="w-14 h-14 bg-theme-tertiary rounded-xl flex items-center justify-center mb-4">
+                <Search className="h-7 w-7 text-theme-muted" />
+              </div>
+              <h3 className="text-sm font-medium text-theme-primary mb-1">{t('noFilterResults')}</h3>
+              <p className="text-sm text-theme-secondary max-w-sm mb-4">{t('noFilterResultsHint')}</p>
+              <button
+                type="button"
+                onClick={resetRefinements}
+                data-testid="marketplace-reset-filters-empty"
+                className="h-9 px-4 rounded-xl text-sm font-medium bg-theme-tertiary text-theme-primary hover:bg-theme-secondary transition-colors"
+              >
+                {t('resetFilters')}
+              </button>
+            </div>
+          );
+        }
         return (
           <div className="flex flex-col items-center justify-center py-16 text-center">
-            <div className="w-14 h-14 bg-theme-tertiary rounded-full flex items-center justify-center mb-4">
+            <div className="w-14 h-14 bg-theme-tertiary rounded-xl flex items-center justify-center mb-4">
               {emptyIcon}
             </div>
             <h3 className="text-sm font-medium text-theme-primary mb-1">
@@ -544,7 +832,7 @@ function MyPublicationsTab() {
 
       {visiblePublications.length === 0 ? (
         <div className="flex flex-col items-center justify-center py-16 text-center">
-          <div className="w-14 h-14 bg-theme-tertiary rounded-full flex items-center justify-center mb-4">
+          <div className="w-14 h-14 bg-theme-tertiary rounded-xl flex items-center justify-center mb-4">
             <Package className="h-7 w-7 text-theme-muted" />
           </div>
           <h3 className="text-sm font-medium text-theme-primary mb-1">
@@ -696,7 +984,7 @@ export function MyPurchasesTab({ remote = false }: { remote?: boolean }) {
   if (purchases.length === 0) {
     return (
       <div className="flex flex-col items-center justify-center py-16 text-center">
-        <div className="w-14 h-14 bg-theme-tertiary rounded-full flex items-center justify-center mb-4">
+        <div className="w-14 h-14 bg-theme-tertiary rounded-xl flex items-center justify-center mb-4">
           <ShoppingBag className="h-7 w-7 text-theme-muted" />
         </div>
         <h3 className="text-sm font-medium text-theme-primary mb-1">
@@ -988,7 +1276,7 @@ function CeMarketplaceCloudConnect() {
 
           {/* Connect-to-cloud CTA - replaces every community publication until linked. */}
           <div className="flex flex-col items-center justify-center text-center py-20 px-6">
-            <div className="w-16 h-16 rounded-full bg-[var(--accent-primary)]/10 flex items-center justify-center mb-5">
+            <div className="w-16 h-16 rounded-2xl bg-[var(--accent-primary)]/10 flex items-center justify-center mb-5">
               <Cloud className="h-8 w-8 text-[var(--accent-primary)]" />
             </div>
             <h2 className="text-base font-semibold text-theme-primary mb-2">

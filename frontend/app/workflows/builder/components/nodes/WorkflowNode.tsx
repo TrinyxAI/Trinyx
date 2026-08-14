@@ -57,6 +57,11 @@ export function WorkflowNode({ data, selected, id }: NodeProps<BuilderNodeData>)
       if (stepByStepStatus.isRunning) return 'running';
       if (stepByStepStatus.isFailed) return 'failed';
       if (stepByStepStatus.isSkipped) return 'skipped';
+      // The backend's PARTIAL_SUCCESS must survive: the node IS in completedSteps (that is what
+      // opens its rerun gate), so testing isCompleted first would discard it and paint a node
+      // carrying a failure in its own tally the same green as a clean one. Border only - the
+      // rerun button reads deriveNodeStatus, which deliberately still sees 'completed'.
+      if (data.status === 'partial_success') return 'partial_success';
       if (stepByStepStatus.isCompleted) return 'completed';
       if (stepByStepStatus.isReady) return 'ready';
       return 'pending';

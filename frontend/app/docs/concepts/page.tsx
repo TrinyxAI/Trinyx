@@ -177,7 +177,7 @@ export default function ConceptsPage() {
             [<code key="s">AWAITING_SIGNAL</code>, 'Active', 'Paused on a signal (timer, approval, webhook, interface, agent execution, or browser takeover).'],
             [<code key="s">COMPLETED</code>, 'Terminal', 'Finished successfully.'],
             [<code key="s">FAILED</code>, 'Terminal', 'Ended on an error.'],
-            [<code key="s">PARTIAL_SUCCESS</code>, 'Terminal', 'Finished with some branches or items failed.'],
+            [<code key="s">PARTIAL_SUCCESS</code>, 'Terminal', 'A NODE whose accumulated items hold both successes and failures. A run or a cycle never reports this: it is completed or failed.'],
             [<code key="s">SKIPPED</code>, 'Terminal', 'The run or branch was skipped.'],
             [<code key="s">CANCELLED</code>, 'Terminal', 'Cancelled by a user.'],
             [<code key="s">TIMEOUT</code>, 'Terminal', 'Timed out.'],

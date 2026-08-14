@@ -246,6 +246,22 @@ public final class EpochState {
     // READY NODE MUTATIONS
     // ========================================================================
 
+    /**
+     * Restart this epoch's clock.
+     *
+     * <p>Used when a rerun reopens a closed epoch: {@code StateSnapshotService.closeEpoch}
+     * derives the epoch duration from THIS field, so carrying the original start forward would
+     * record the whole idle gap since the first execution (a rerun a day later would report a
+     * 24h epoch). The durable {@code workflow_epochs.started_at} column is deliberately NOT
+     * touched by the reopen: it answers "when did this epoch first fire", which
+     * {@code getLatestEpochStartedAtByRunIds} relies on for the run history's last-fire time.
+     */
+    public EpochState withStartedAt(Instant newStartedAt) {
+        return new EpochState(completedNodeIds, failedNodeIds, partialFailedNodeIds, skippedNodeIds,
+                runningNodeIds, readyNodeIds, awaitingSignalNodeIds,
+                decisionBranches, loops, splits, newStartedAt);
+    }
+
     public EpochState withReadyNodes(Set<String> newReadyNodes) {
         return new EpochState(completedNodeIds, failedNodeIds, partialFailedNodeIds, skippedNodeIds,
                 runningNodeIds, newReadyNodes != null ? newReadyNodes : Set.of(), awaitingSignalNodeIds,

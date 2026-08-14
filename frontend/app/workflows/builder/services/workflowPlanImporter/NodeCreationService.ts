@@ -25,6 +25,7 @@ import { createDefaultDecisionConditions, createDefaultSwitchCases, createDefaul
 import { nodeRegistry } from '../../registry/nodeRegistry';
 import { sanitizeNodePolicy } from '../../utils/nodePolicy';
 import { extractMediaDataFromPlanParams } from '../../utils/mediaParams';
+import { extractGenerateDataFromPlanParams } from '../../utils/generateParams';
 import { sanitizeNodeMock } from '../../utils/nodeMock';
 
 export interface NodeCreationResult {
@@ -824,6 +825,36 @@ export class NodeCreationService {
             kind: 'media',
             ...(mediaOperation !== undefined ? { mediaOperation } : {}),
             mediaParams,
+            paramExpressions: inputToParamExpressions((cn as any).params),
+          } as any,
+        });
+
+        labelToNodeIdMap.set(cn.label || nodeId, nodeId);
+        const normalized = normalizeLabel(cn.label || nodeId);
+        if (normalized) labelToNodeIdMap.set(normalized, nodeId);
+      } else if (cn.type === 'generate') {
+        const nodeId = cn.graphNodeId || cn.id || `generate-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+        // generate config lives in the generic params map (like media):
+        // { model, credential_source, credential_id, ...unified generation params }.
+        const { generateModel, generateCredentialSource, selectedCredentialId, generateParams } =
+          extractGenerateDataFromPlanParams((cn as any).params);
+
+        nodes.push({
+          id: nodeId,
+          type: 'flowNode',
+          position,
+          positionAbsolute: position,
+          data: {
+            id: nodeId,  // Use nodeId (starts with 'generate-') for consistent detection
+            label: cn.label || 'Generate',
+            kind: 'generate',
+            ...(generateModel !== undefined ? { generateModel } : {}),
+            ...(generateCredentialSource !== undefined ? { generateCredentialSource } : {}),
+            // The key this node runs on, under the name the inspector's picker
+            // reads. Absent means the account's default, which is also what the
+            // run does, so the two never disagree.
+            ...(selectedCredentialId !== undefined ? { selectedCredentialId } : {}),
+            generateParams,
             paramExpressions: inputToParamExpressions((cn as any).params),
           } as any,
         });

@@ -7,6 +7,7 @@ import com.apimarketplace.catalog.domain.dto.ToolExecutionResponse;
 import com.apimarketplace.catalog.repository.ApiRepository;
 import com.apimarketplace.catalog.repository.ToolNextHintRepository;
 import com.apimarketplace.catalog.service.billing.CatalogToolBillingService;
+import com.apimarketplace.catalog.service.exception.InsufficientCreditsException;
 import com.apimarketplace.catalog.service.exception.ToolNotFoundException;
 import com.apimarketplace.catalog.service.execution.BinaryResponseHandler;
 import com.apimarketplace.catalog.service.execution.ToolExecutionOrchestrator;
@@ -69,6 +70,18 @@ public class ToolExecutionManager {
         }
 
         long start = System.currentTimeMillis();
+        // Reservation lifecycle state. Non-null sourceId = credits are held and
+        // MUST be settled exactly once, by commit or by release. `settled`
+        // guards the finally-block safety net so a normal commit is not
+        // followed by a release that would refund a legitimate charge.
+        String reservationSourceId = null;
+        java.math.BigDecimal reservedAmount = null;
+        CatalogToolBillingService.BillingScope billingScope = null;
+        boolean reservationSettled = false;
+        // Set when the billing pre-flight allowed the call only because the
+        // caller has a provider key of their own. Restored in the finally block
+        // so the pin never outlives this call on a pooled thread.
+        boolean pinnedToCallersOwnKey = false;
         try {
             // Récupérer l'apiId depuis le context (déjà chargé)
             String apiIdStr = context.getApiId();
@@ -121,8 +134,25 @@ public class ToolExecutionManager {
             // discriminator mirrors the ResponseShaper.Mode selection below
             // ("STREAM" → AGENT, otherwise → WORKFLOW) so a single signal
             // governs both behaviours.
+            // A GENERATION is never cached, whatever its scope. The cache exists
+            // for reads, where serving the same answer twice costs nobody
+            // anything. A generation is a purchase: the reservation is taken
+            // before the cache is consulted and committed after, so a cache HIT
+            // charges the customer again for an asset the provider was never
+            // asked to make. The same request inside the window would take the
+            // money and hand back the previous run's signed URL, which the
+            // provider time-limits, so the second charge can also resolve to
+            // nothing at all.
+            //
+            // Recognised BOTH ways, because the two halves cover different
+            // callers. A named model is what the generation surface sends and
+            // needs no lookup; the endpoint's own descriptor is what identifies
+            // the same endpoint reached by raw slug through catalog(execute),
+            // which sends no model at all. A first version asked only the first
+            // half and left the second caller charging twice.
             boolean cacheEnabled = request != null
-                    && "STREAM".equalsIgnoreCase(request.getBillingScopeKind());
+                    && "STREAM".equalsIgnoreCase(request.getBillingScopeKind())
+                    && !isGenerationCall(request, context);
 
             // Credential-state versioning of the cache key. Without it, a cached
             // response survives a credential switch: connect a new Gmail account,
@@ -138,6 +168,125 @@ public class ToolExecutionManager {
             if (cacheEnabled) {
                 cacheKey = cacheKey + ":" + credentialClient.getCredentialStateVersion(userId);
             }
+            // ── V148+ unified billing, step 1 of 2: PRE-FLIGHT RESERVATION ──
+            //
+            // Runs BEFORE the tool is dispatched, and a refusal returns 402
+            // without dispatching. Reserving afterwards would only record that
+            // the customer could not pay for something they have already been
+            // given: a resold generation produces the video, stores it, hands
+            // it over, and the platform owner pays the provider out of pocket.
+            //
+            // Sits before the cache read on purpose, so the answer to "may this
+            // caller have this result?" does not depend on whether a previous
+            // identical call happens to still be cached. A cache hit is billed
+            // exactly as it is today (see the commit call at the end).
+            //
+            // Endpoints with no published platform price are untouched:
+            // preflightReserve returns allowedWithoutBilling for them (null
+            // sourceId), which is every ordinary catalog tool.
+            //
+            // ── One charge per dispatched call: the `callRef` ──
+            //
+            // Everything keys off `sourceId`, and the ledger has a unique index
+            // on it: the auth-side reserve answers "a row already exists for
+            // that sourceId, zero debit, success" for any key it has seen
+            // before. That makes the tail of the sourceId the thing that decides
+            // whether a call costs anything, and it is why this method mints a
+            // fresh `callRef` per invocation rather than reading one off the
+            // request.
+            //
+            // The comment that used to sit here claimed the opposite - that each
+            // call "carries its own call index, so it gets its own key" - and
+            // described a retry as deliberately free. Neither was true. The
+            // index came from ToolExecutionRequest fields no caller ever set, so
+            // it was 0 on every call: the first generation in a chat turn or a
+            // workflow run was charged and every one after it was free. Nor is
+            // there any retry to deduplicate at this layer - one HTTP execute is
+            // one dispatch to the provider, so a second one produced a second
+            // asset the provider billed the platform owner for, and it has to be
+            // a second charge.
+            //
+            // The value is server-generated for the same reason the generation
+            // quantity is: it decides the amount charged, so a caller who could
+            // choose it could re-send one key and take everything after the
+            // first call for free.
+            //
+            // Two paths remain safe on top of it:
+            //
+            // 1. CACHE HIT - reserved and committed exactly like a fresh call,
+            //    which is what this path already did before the reservation
+            //    moved. Its own callRef means it cannot collide with the call
+            //    that populated the cache.
+            // 2. EXCEPTION BETWEEN RESERVE AND SETTLE - the finally block below
+            //    releases. It cannot refund a committed charge: `settled` is set
+            //    by settleReservation, and an auth-side release on a committed
+            //    row answers ALREADY_COMMITTED without touching the balance.
+            //    If even the release fails, the reservation's TTL expiry sweeps
+            //    it, which is why the TTL is sized to the real call ceiling.
+            if (catalogBillingService != null) {
+                billingScope = buildBillingScope(context, request, intendedCredentialSource(request),
+                        userId, apiId, UUID.randomUUID().toString());
+                // No scope means no guard below can run, and the call would go
+                // out free. That is correct for the 600+ ordinary catalog
+                // endpoints and wrong for a generation, which spends the
+                // owner's paid provider key: an unresolvable composite slug or
+                // a user id that is not a number would produce the asset with
+                // no reservation and no ledger row. Refuse instead, using the
+                // one fact available without a scope, which is that the call
+                // named a generation model.
+                if (billingScope == null && catalogBillingService.generationRequiresAScope(
+                        intendedCredentialSource(request),
+                        isGenerationCall(request, context),
+                        request != null && Boolean.TRUE.equals(request.getBillingOwnedByCaller()))) {
+                    // Null-safe on the model: this guard also fires for a call
+                    // that named no model and was recognised by the endpoint's
+                    // own descriptor, and that caller can arrive with no request
+                    // object at all. Logging it unguarded would replace the
+                    // refusal with a NullPointerException, which the caller
+                    // reads as a server fault rather than as a price decision.
+                    log.error("[ToolExecutionManager] Refusing generation {} on tool {}: no billing scope "
+                                    + "could be built, so it cannot be charged.",
+                            request == null ? null : request.getGenerationModelId(),
+                            context.getToolName());
+                    throw new InsufficientCreditsException(
+                            CatalogToolBillingService.UNBILLABLE_GENERATION_UNIDENTIFIED_CALL, false);
+                }
+                CatalogToolBillingService.PreflightDecision decision = reserve(billingScope, context);
+                if (decision != null) {
+                    if (!decision.allowed()) {
+                        // No reservation was written, nothing to release. Thrown
+                        // rather than returned so the controller can answer 402
+                        // instead of a 200 envelope the caller has to introspect.
+                        throw new InsufficientCreditsException(decision.error(), decision.delinquent());
+                    }
+                    // Allowed only because the caller has a provider key of
+                    // their own, and unbilled on that basis. Pin the call to
+                    // that pool so the premise holds: the agentic path would
+                    // otherwise fall back to the PLATFORM credential the moment
+                    // their key failed (a revoked key answering 401 is the
+                    // ordinary case), producing a resold asset on the platform's
+                    // provider quota with no reservation to commit. With the pin
+                    // the platform key cannot answer at all, so the unbilled
+                    // verdict follows from which key ANSWERED rather than from
+                    // which keys the caller happens to have configured.
+                    if (decision.restrictToCallersOwnKey()) {
+                        com.apimarketplace.catalog.service.http.CredentialModeContext
+                                .setExplicitSource("user");
+                        pinnedToCallersOwnKey = true;
+                        log.info("[ToolExecutionManager] Tool {} runs on the caller's own credential only "
+                                        + "(no platform fallback): the platform reservation was refused and "
+                                        + "the call is not billed",
+                                context.getToolName());
+                    }
+                    // Null sourceId = allowed, but nothing to bill (BYOK toggle,
+                    // bridge credential, no published price, or an ORDINARY
+                    // endpoint called with no billing scope - a resold
+                    // generation with no scope is refused above, not allowed).
+                    reservationSourceId = decision.sourceId();
+                    reservedAmount = decision.reservedAmount();
+                }
+            }
+
             Object cachedData = cacheEnabled ? responseCache.get(cacheKey, parameters) : null;
 
             Object resultData;
@@ -296,8 +445,18 @@ public class ToolExecutionManager {
             ResponseShaper.Mode shapingMode = "STREAM".equalsIgnoreCase(scopeKind)
                     ? ResponseShaper.Mode.AGENT
                     : ResponseShaper.Mode.WORKFLOW;
-            ResponseShaper.ShapingResult shapingResult =
-                    responseShaper.shape(resultData, expandPaths, maxItems, shapingMode);
+            // An expand set survives the SIZE passes only on a generation call.
+            // The signal is the generation model id, which is @JsonIgnore and
+            // populated solely from the X-Lc-Generation-Model header this
+            // service sets on its own generation path: a caller cannot post it,
+            // for the same reason it cannot post the price. Without that gate,
+            // an agent naming a large subtree in `expand` would lift the 64 KB
+            // ceiling on its own context, and on a generation call the bytes
+            // never reach an agent at all, because the module reads the asset
+            // out of that subtree and prunes it from the reply.
+            boolean expandSurvivesBudget = request != null && request.getGenerationModelId() != null;
+            ResponseShaper.ShapingResult shapingResult = responseShaper.shape(
+                    resultData, expandPaths, maxItems, shapingMode, expandSurvivesBudget);
 
             logShapingOutcome(shapingResult, shapingMode, context, userId, requestId);
 
@@ -378,26 +537,14 @@ public class ToolExecutionManager {
                 metadata.put("nextAction", nextAction);
             }
 
-            // V148+ unified billing: post-success hook. Workflow-origin (RUN)
-            // and chat (STREAM) flow through the same path here, both keyed on
-            // the BillingScope built from request headers + credentialSource.
-            // Failures are swallowed inside CatalogToolBillingService - billing
-            // never blocks a successful tool result reaching the caller. Legacy
-            // CatalogBillingDispatcher stays alive (no-op'd by Phase 1b.orchestrator
-            // delete) until callers are migrated; this hook is the single entry
-            // point for all NEW tool calls.
-            if (success && catalogBillingService != null) {
-                try {
-                    String billingOutcome = invokeCatalogBilling(
-                            context, request, executionResult, userId, apiId);
-                    if (billingOutcome != null) {
-                        metadata.put("billingOutcome", billingOutcome);
-                    }
-                } catch (Exception billingEx) {
-                    log.warn("[ToolExecutionManager] Billing hook failed for tool {}: {} - tool result NOT affected",
-                            context.getToolName(), billingEx.getMessage());
-                }
-            }
+            // ── V148+ unified billing, step 2 of 2: COMMIT or RELEASE ──
+            //
+            // Exactly one of the two, exactly once, for every reservation taken
+            // above. A failed upstream call releases: the customer is never
+            // charged for a call that produced nothing.
+            reservationSettled = settleReservation(
+                    reservationSourceId, reservedAmount, billingScope, context,
+                    success, (String) executionResult.get("credentialSource"));
 
             return ToolExecutionResponse.builder()
                     .success(success)
@@ -408,6 +555,11 @@ public class ToolExecutionManager {
                     .toolId(context.getToolId())
                     .requestId(requestId)
                     .build();
+        } catch (InsufficientCreditsException e) {
+            // Refusal, not a failure of the tool: no reservation exists and the
+            // provider was never called. Rethrown so the controller answers 402
+            // with the error + delinquent flag instead of a 200 envelope.
+            throw e;
         } catch (Exception e) {
             long latency = System.currentTimeMillis() - start;
             log.error("Error while executing tool {}: {}", toolIdOrSlug, e.getMessage(), e);
@@ -438,30 +590,250 @@ public class ToolExecutionManager {
                     .requestId(requestId)
                     .metadata(errorMetadata)
                     .build();
+        } finally {
+            // Safety net for the third path: an exception thrown BETWEEN the
+            // reserve and the settle (dehydration, projection, shaping, an
+            // upstream client error, a bug). The reservation is released, so
+            // held credits are never abandoned to expire on their own, and the
+            // customer is not charged for a call whose result never reached
+            // them. Cannot double-refund a committed reservation: `settled` is
+            // set by settleReservation itself, and scope-release is idempotent
+            // (a second one answers ALREADY_RELEASED).
+            if (reservationSourceId != null && !reservationSettled) {
+                try {
+                    catalogBillingService.releaseOnFailure(reservationSourceId,
+                            "catalog: execution aborted before settlement");
+                    log.warn("[ToolExecutionManager] Released reservation {} for tool {} - execution aborted before settlement",
+                            reservationSourceId, context.getToolName());
+                } catch (Exception releaseEx) {
+                    // Nothing else to try. The auth-side TTL expiry is the last
+                    // line of defence and will return the credits on its own.
+                    log.error("[ToolExecutionManager] Could not release reservation {} for tool {}: {}",
+                            reservationSourceId, context.getToolName(), releaseEx.getMessage());
+                }
+            }
+            // Drop the caller's-own-key pin with the call that asked for it. The
+            // holder is thread-bound and this thread goes back to a pool, so
+            // leaving it set would silently deny the platform credential to
+            // whatever call lands on the thread next. Only ever applied when the
+            // request carried no explicit source of its own (the relaxation
+            // requires it), so clearing restores exactly the prior state.
+            if (pinnedToCallersOwnKey) {
+                com.apimarketplace.catalog.service.http.CredentialModeContext.setExplicitSource(null);
+            }
         }
     }
 
     /**
-     * V148+ unified billing dispatch. Builds a {@link CatalogToolBillingService.BillingScope}
-     * from the request DTO + executionResult metadata + the tool's API row,
-     * then calls {@code billImmediate}. Returns the outcome enum string (or
-     * null when no billing applies - BYOK, bridge, missing scope, etc).
+     * Reservation TTL for one catalog tool call, in minutes.
+     *
+     * <p>Must outlive the longest a single call can legitimately stay in
+     * flight, because the reservation is now taken BEFORE the call rather than
+     * after it. The two hard ceilings that bound it:
+     * <ul>
+     *   <li>10 min - the upstream read timeout ({@code http.client.read-timeout}
+     *       = 600000 ms), which is what a synchronous submit can burn.</li>
+     *   <li>10 min - {@code AsyncPollExecutor.ABSOLUTE_MAX_WAIT_MS}, the hard
+     *       cap on the in-process poll loop a long generation runs through,
+     *       whatever the endpoint's own {@code maxWaitMs} claims.</li>
+     * </ul>
+     * A worst-case async generation is therefore submit + poll = 20 minutes,
+     * before the result is dehydrated and uploaded to storage. 30 leaves a
+     * third of the window as slack. Under-sizing it is the expensive mistake:
+     * the reservation would expire mid-generation and the commit that follows
+     * would find nothing to commit, i.e. exactly the free generation this
+     * whole path exists to prevent. Over-sizing costs only a held balance on
+     * the one path where the process dies between reserve and settle.
+     */
+    static final int RESERVE_TTL_MINUTES = 30;
+
+    /**
+     * The upstream read ceiling a synchronous submit can burn
+     * ({@code http.client.read-timeout}).
+     */
+    public static final long UPSTREAM_READ_CEILING_MS = 600_000L;
+
+    /**
+     * How long ONE generation can legitimately stay in flight here, worst case:
+     * the synchronous submit plus the poll loop that follows it.
+     *
+     * <p>Exists as a number rather than as prose because two callers have to be
+     * sized on it and neither can afford to guess: the {@code generation} MCP
+     * tool's own budget and the {@code core:generate} node's read timeout. A
+     * caller that gives up before this elapses does not cancel anything. The
+     * generation completes, the asset is stored and the reservation is
+     * COMMITTED, while the caller is told the generation service could not be
+     * reached. The customer is charged for an asset they were told they did not
+     * get, and nothing releases it, because from this side nothing failed.
+     *
+     * <p>So every caller budget must be at least this, and
+     * {@link #RESERVE_TTL_MINUTES} must outlive the longest of them.
+     */
+    public static final long GENERATION_WORST_CASE_MS =
+            UPSTREAM_READ_CEILING_MS
+                    + com.apimarketplace.catalog.service.execution.AsyncPollExecutor.ABSOLUTE_MAX_WAIT_MS;
+
+    /**
+     * What a caller of a generation should wait, worst case plus room for the
+     * asset to be dehydrated and uploaded to storage after the provider is done.
+     *
+     * <p>Five minutes of slack, and still five minutes inside
+     * {@link #RESERVE_TTL_MINUTES}, so the ordering that matters holds end to
+     * end: caller budget >= server worst case, reservation > caller budget.
+     */
+    public static final long GENERATION_CALLER_BUDGET_MS = GENERATION_WORST_CASE_MS + 300_000L;
+
+    /**
+     * The credential pool this call is going to use, as far as it can be known
+     * BEFORE the call. Only the caller's explicit choice is knowable here:
+     * {@code "user"} (never billed) or {@code "platform"} (billed).
+     *
+     * <p>Null - the agentic path, which tries the user's credential and falls
+     * back to the platform's - is deliberately left null rather than guessed.
+     * Null does not short-circuit {@code shouldBill}, so the reservation is
+     * taken on the assumption that the platform key will answer, and
+     * {@link #settleReservation} RELEASES it if the response says the user's
+     * own credential answered instead. Assuming the cheaper outcome would put
+     * us back where we started: the call would go out unreserved and the
+     * refusal, if any, would arrive too late to prevent the spend.
+     */
+    private static String intendedCredentialSource(ToolExecutionRequest request) {
+        String source = request != null ? request.getCredentialSource() : null;
+        return source != null ? source.toUpperCase() : null;
+    }
+
+    /**
+     * Take the pre-flight reservation for {@code scope}. Returns the decision,
+     * or null when there is nothing to bill.
+     *
+     * <p>An exception out of {@code preflightReserve} (auth-service down, a
+     * database blip, a bug) is not one answer, it is two, because the two
+     * classes of endpoint have opposite money outcomes:
+     * <ul>
+     *   <li><b>Ordinary catalog endpoint</b> - proceeds UNBILLED, with a WARN.
+     *       The 600+ endpoints carry no published price, so the reserve was
+     *       going to resolve nothing anyway; taking the whole catalog down
+     *       because the credit ledger is unreachable costs more than it
+     *       protects.</li>
+     *   <li><b>Resold generation</b> - REFUSED with 402, provider never called.
+     *       The third-party provider charges the platform owner for the asset
+     *       whether or not the ledger answered, so "proceed unbilled" here
+     *       means "produce a paid video and give it away".</li>
+     * </ul>
+     *
+     * <p>That is what makes the posture consistent with itself. A transport
+     * failure INSIDE {@code CreditConsumptionClient.scopeReserve} already comes
+     * back as {@code allowed=false} and refuses; before this, the same outage
+     * one frame up allowed the call. Same outage, same answer now.
+     *
+     * <p>A reserve that is REFUSED (insufficient credits, delinquent, no price
+     * published, no billing scope) is unchanged: it arrives as
+     * {@code allowed=false} and the caller turns it into a 402.
+     */
+    private CatalogToolBillingService.PreflightDecision reserve(
+            CatalogToolBillingService.BillingScope scope,
+            ToolContextService.ToolContext context) {
+        if (scope == null) {
+            return null;
+        }
+        try {
+            return catalogBillingService.preflightReserve(scope);
+        } catch (Exception e) {
+            if (catalogBillingService.requiresBillingToProceed(scope)) {
+                log.error("[ToolExecutionManager] Pre-flight reservation failed for resold generation {}: {} "
+                                + "- refusing the call rather than generating it unbilled",
+                        context.getToolName(), e.getMessage());
+                throw new InsufficientCreditsException(
+                        "PLATFORM_NOT_AVAILABLE: this generation cannot be billed right now, so it is not "
+                                + "available on the platform key. Retry in a few minutes, or use your own "
+                                + "provider key.", false);
+            }
+            log.warn("[ToolExecutionManager] Pre-flight reservation failed for tool {}: {} - proceeding unbilled",
+                    context.getToolName(), e.getMessage());
+            return null;
+        }
+    }
+
+    /**
+     * Close the reservation exactly once: commit what is actually due, or
+     * release it. Returns true when the reservation has been settled (or when
+     * there was nothing to settle), which is what stops the finally-block
+     * safety net from releasing on top of a commit.
+     *
+     * <p>Three outcomes:
+     * <ul>
+     *   <li><b>Upstream failed</b> - release. A customer is never charged for a
+     *       call that produced nothing.</li>
+     *   <li><b>The user's own credential answered</b> - release. The agentic
+     *       path cannot know this before the call (see
+     *       {@link #intendedCredentialSource}), so BYOK is corrected here
+     *       rather than guessed earlier. The reserve/release pair nets to
+     *       zero.</li>
+     *   <li><b>Success on the platform key</b> - commit the reserved amount.
+     *       The projected amount IS the amount due: catalog pricing is resolved
+     *       per call from the model and the size of the call, so there is no
+     *       later adjustment to make.</li>
+     * </ul>
+     */
+    private boolean settleReservation(String sourceId,
+                                      java.math.BigDecimal reservedAmount,
+                                      CatalogToolBillingService.BillingScope scope,
+                                      ToolContextService.ToolContext context,
+                                      boolean success,
+                                      String resolvedCredentialSource) {
+        if (sourceId == null) {
+            return true; // nothing reserved - nothing to settle
+        }
+        try {
+            if (!success) {
+                catalogBillingService.releaseOnFailure(sourceId, "catalog: upstream call failed");
+                return true;
+            }
+            if ("USER".equalsIgnoreCase(resolvedCredentialSource)) {
+                catalogBillingService.releaseOnFailure(sourceId,
+                        "catalog: the user's own credential answered (BYOK) - not billable");
+                return true;
+            }
+            catalogBillingService.commitOnSuccess(sourceId, reservedAmount,
+                    scope != null ? scope.provider() : null,
+                    scope != null ? scope.model() : null);
+            return true;
+        } catch (Exception e) {
+            // Report NOT settled so the finally block attempts the release. A
+            // commit that threw after the ledger row flipped is safe to chase
+            // with a release: scope-release on a committed row is a no-op.
+            log.warn("[ToolExecutionManager] Could not settle reservation {} for tool {}: {}",
+                    sourceId, context.getToolName(), e.getMessage());
+            return false;
+        }
+    }
+
+    /**
+     * V148+ unified billing scope. Builds a {@link CatalogToolBillingService.BillingScope}
+     * from the request DTO + the tool's API row. Returns null when no billing
+     * can apply (unresolvable tool slug, non-numeric user id).
      *
      * <p>Resolves the platform credential numeric id via
      * {@code CredentialClient.findPlatformCredentialByName} since catalog
      * stores credentials by name and the markup subsystem keys on id.
      *
      * <p>Treats user-key calls (BYOK) as no-op via the
-     * {@link CatalogToolBillingService#shouldBill} branch - the scope still
+     * {@code CatalogToolBillingService.shouldBill} branch - the scope still
      * matters for the bypass logic, but BYOK short-circuits before any pricing
      * lookup.
+     *
+     * @param callRef server-generated per-dispatch reference, minted by the
+     *                caller of this method rather than read off the request:
+     *                it is the tail of the ledger key, so it decides whether
+     *                this call is charged at all.
      */
-    private String invokeCatalogBilling(ToolContextService.ToolContext context,
+    private CatalogToolBillingService.BillingScope buildBillingScope(
+                                          ToolContextService.ToolContext context,
                                           ToolExecutionRequest request,
-                                          Map<String, Object> executionResult,
+                                          String credentialSource,
                                           String userId,
-                                          UUID apiId) {
-        String credentialSource = (String) executionResult.get("credentialSource");
+                                          UUID apiId,
+                                          String callRef) {
         String toolSlug = buildCompositeSlug(context, apiId);
         if (toolSlug == null) {
             return null;
@@ -516,13 +888,9 @@ public class ToolExecutionManager {
             return null;
         }
 
-        // ttlMinutes default - short for catalog post-flight; callers that
-        // reserve longer (e.g. workflow run-init) do that out-of-band.
-        int ttlMinutes = 10;
-
         CatalogToolBillingService.BillingScope scope = CatalogToolBillingService.BillingScope.of(
                 userIdLong,
-                credentialSource != null ? credentialSource.toUpperCase() : null,
+                credentialSource,
                 platformCredentialId,
                 providerKind,
                 billingProvider,
@@ -531,14 +899,23 @@ public class ToolExecutionManager {
                 request != null ? request.getBillingScopeKind() != null && "RUN".equals(request.getBillingScopeKind()) ? request.getBillingScopeId() : null : null,
                 request != null ? request.getBillingScopeKind() != null && "STREAM".equals(request.getBillingScopeKind()) ? request.getBillingScopeId() : null : null,
                 request != null ? request.getBillingStepId() : null,
-                request != null && request.getBillingEpoch() != null ? request.getBillingEpoch() : 0,
-                request != null && request.getBillingSpawn() != null ? request.getBillingSpawn() : 0,
-                request != null && request.getBillingIteration() != null ? request.getBillingIteration() : 0,
-                request != null && request.getBillingItemIndex() != null ? request.getBillingItemIndex() : 0,
-                request != null && request.getBillingCallIndex() != null ? request.getBillingCallIndex() : 0,
-                ttlMinutes);
+                callRef,
+                RESERVE_TTL_MINUTES,
+                // V428: which generation model is being priced, and how big the
+                // call is. Absent for an ordinary tool, in which case pricing
+                // resolves exactly as it did before.
+                request != null ? request.getGenerationModelId() : null,
+                request != null ? request.getGenerationQuantity() : null,
+                // The unit that quantity is counted in. Carried so the billing
+                // layer can tell a rate and a measurement apart when they
+                // describe different things.
+                request != null ? request.getGenerationQuantityUnit() : null,
+                // The CE relay reserved this call against the linked cloud
+                // account before dispatching it and settles it itself. It is
+                // wire-sealed on the DTO, so no external caller can claim it.
+                request != null && Boolean.TRUE.equals(request.getBillingOwnedByCaller()));
 
-        return catalogBillingService.billImmediate(scope);
+        return scope;
     }
 
     /** Build {@code <api-slug>/<tool-slug>} from the tool context + api row.
@@ -548,6 +925,44 @@ public class ToolExecutionManager {
      *  through {@code CatalogToolBillingService.resolveApiToolUuid} which splits
      *  on "/" and looks up by {@code (apiId, tool_slug)} - wrong slug = silent
      *  bill-skip = revenue leak. */
+    /**
+     * Whether this call produces a generated asset, asked BOTH ways.
+     *
+     * <p>A generation is a purchase, so it must never be served from the
+     * response cache: the reservation is taken before the cache is read and
+     * committed after, so a hit charges again for something the provider was
+     * never asked to make.
+     *
+     * <p>Two callers reach the same endpoint and only one of them names a
+     * model. The generation surface sends it, and that is free to read. The
+     * ordinary {@code catalog(action='execute', tool_id='<api>/<tool>')} path
+     * sends nothing of the sort, so for that one the endpoint's own descriptor
+     * is the only signal there is. Asking only the cheap half left the second
+     * caller charging twice, which is the defect this method exists to close.
+     *
+     * <p>Fails OPEN, deliberately: an unreadable catalog answers "not a
+     * generation" and the call is merely cacheable, which is the behaviour
+     * every ordinary endpoint already has. Failing closed here would disable
+     * the cache for the whole surface on a database blip.
+     */
+    private boolean isGenerationCall(ToolExecutionRequest request, ToolContextService.ToolContext context) {
+        if (request != null && request.getGenerationModelId() != null) {
+            return true;
+        }
+        if (apiToolRepoForSlug == null || context == null || context.getToolId() == null) {
+            return false;
+        }
+        try {
+            return apiToolRepoForSlug.findById(UUID.fromString(context.getToolId()))
+                    .map(com.apimarketplace.catalog.domain.ApiToolEntity::isGeneration)
+                    .orElse(false);
+        } catch (Exception e) {
+            log.warn("[ToolExecutionManager] Could not tell whether tool {} is a generation: {} - "
+                    + "treating it as an ordinary endpoint for caching", context.getToolId(), e.getMessage());
+            return false;
+        }
+    }
+
     private String buildCompositeSlug(ToolContextService.ToolContext context, UUID apiId) {
         if (apiToolRepoForSlug == null) return null;
         var apiOpt = apiRepository.findById(apiId);

@@ -18,6 +18,7 @@ import {
   CANVAS_CHROME_TOP_ROW_HEIGHT_PX,
   canvasChromeButtonClass,
   canvasChromeChipRadiusClass,
+  canvasChromePrimaryButtonClass,
   canvasChromeSurfaceClass,
   canvasChromeCompactButtonClass,
   canvasNodeButtonClass,
@@ -144,6 +145,53 @@ describe('canvasChromeButtonClass', () => {
     expect(t).not.toContain('bg-transparent');
     // The state's hover survives: it is a different twMerge group.
     expect(t).toContain('hover:bg-[var(--bg-tertiary)]');
+  });
+});
+
+describe('canvasChromePrimaryButtonClass', () => {
+  it('is square, not the round FAB both of its call sites used to be', () => {
+    // The workflow canvas' add-node button was a 36px circle, the fleet canvas'
+    // Edit button a 44px one. Sharing this class is what stops them drifting
+    // apart again.
+    const t = tokens(canvasChromePrimaryButtonClass());
+    expect(t).toContain('rounded-xl');
+    expect(t).not.toContain('rounded-full');
+  });
+
+  it('lands on the ONE canvas chrome height, so it lines up with the toggle and the run bar', () => {
+    const t = tokens(canvasChromePrimaryButtonClass());
+    expect(t).toContain('h-9');
+    expect(t).toContain('w-9');
+    expect(t).toContain('p-0');
+    expect(CANVAS_CHROME_TOP_ROW_HEIGHT_PX).toBe(36);
+    expect(t).not.toContain('h-11');
+    expect(t).not.toContain('w-11');
+  });
+
+  it('is the one accent-filled canvas control - every other chrome control is a ghost', () => {
+    const t = tokens(canvasChromePrimaryButtonClass());
+    expect(t).toContain('bg-[var(--accent-primary)]');
+    expect(t).toContain('text-[var(--accent-foreground)]');
+    // The ghost controls around it must NOT pick up the accent fill.
+    expect(tokens(canvasChromeButtonClass(true))).not.toContain('bg-[var(--accent-primary)]');
+  });
+
+  it('is the same shape as every other chrome control, only filled', () => {
+    // Composition check: everything except the variant's colours has to match,
+    // or the corner button has stopped being part of the same system.
+    const primary = tokens(canvasChromePrimaryButtonClass());
+    for (const token of ['rounded-xl', 'transition-colors', 'duration-150', 'focus-visible:ring-2', 'shrink-0']) {
+      expect(primary, `primary corner button lost ${token}`).toContain(token);
+      expect(tokens(canvasChromeButtonClass(false)), `chrome control lost ${token}`).toContain(token);
+    }
+  });
+
+  it('lets a caller add positioning without restating the shape', () => {
+    const t = tokens(canvasChromePrimaryButtonClass('absolute top-4 right-4 z-10'));
+    expect(t).toContain('absolute');
+    expect(t).toContain('top-4');
+    expect(t).toContain('rounded-xl');
+    expect(t).toContain('h-9');
   });
 });
 

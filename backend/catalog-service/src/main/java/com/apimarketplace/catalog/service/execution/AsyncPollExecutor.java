@@ -46,8 +46,16 @@ import java.util.Map;
 @Slf4j
 public class AsyncPollExecutor {
 
-    /** Hard upper bound on polling - even if config says higher, never exceed this. */
-    private static final long ABSOLUTE_MAX_WAIT_MS = 10 * 60 * 1000L; // 10 minutes
+    /**
+     * Hard upper bound on polling - even if config says higher, never exceed this.
+     *
+     * <p>Public because it is half of how long a generation can legitimately
+     * stay in flight, and every budget downstream of it has to be sized on that
+     * number rather than on a copy of it: a caller that gives up first abandons
+     * a call this service goes on to finish and CHARGE for. See
+     * {@code ToolExecutionManager.GENERATION_WORST_CASE_MS}.
+     */
+    public static final long ABSOLUTE_MAX_WAIT_MS = 10 * 60 * 1000L; // 10 minutes
     /** Hard lower bound on poll interval to avoid hammering the upstream. */
     private static final long MIN_INTERVAL_MS = 250L;
 

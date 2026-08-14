@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect, useCallback, useRef } from 'react';
+import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { useRouter } from '@/i18n/navigation';
 import { Button } from '@/components/ui/button';
 import { Trash2, Sparkles } from 'lucide-react';
@@ -10,10 +10,11 @@ import { StatusBadge, mapBackendStatusToStatusType } from './ui/StatusBadge';
 import { orchestratorApi } from '@/lib/api/orchestrator';
 import { apiClient } from '@/lib/api/api-client';
 import { formatRelativeDate } from '@/lib/utils/dateFormatters';
-import { getCanvasNodes } from '@/app/workflows/builder/services/canvasNodesStore';
+import { getCanvasEdges, getCanvasNodes, subscribeCanvasNodes } from '@/app/workflows/builder/services/canvasNodesStore';
 import { nodeMatchesStep } from '@/app/workflows/builder/services/nodeMatcher';
-import { getIconSlug, NodeIcon } from '@/app/workflows/builder/components/nodes/shared';
+import { getIconSlug, NodeIcon, nodeIconRadiusClass } from '@/app/workflows/builder/components/nodes/shared';
 import { findNodeClassById } from '@/app/workflows/builder/nodes/nodeClasses';
+import { computeDagOrder, sortByDagOrder } from '@/lib/workflow/dagStepOrder';
 
 const orchestratorUrl = '/api/proxy';
 
@@ -230,6 +231,50 @@ export default function StepTable({
     setSelectedSteps(new Set(steps.map(s => s.id)));
   }, [steps]);
 
+  // ── DAG reading order ──
+  //
+  // The aggregate endpoint returns rows in execution order, which scatters as
+  // soon as branches run in parallel or an epoch re-fires part of the graph.
+  // Order by the canvas graph instead, exactly like the run panel's step list:
+  // trigger first, each branch contiguous, terminal nodes last, and the SAME
+  // order every time the modal is reopened on the same plan.
+  //
+  // The canvas store is invisible to React, so subscribe rather than read once:
+  // this table can be mounted before a rename or a deletion reaches it.
+  const [canvasNodesTick, setCanvasNodesTick] = useState(0);
+  useEffect(() => subscribeCanvasNodes(() => setCanvasNodesTick(prev => prev + 1)), []);
+
+  // Unscoped reads, as this table has always done for its icons: the modal is
+  // also opened from surfaces where the canvas publishes under a different id
+  // (the application view), and a scoped read there returns nothing. Nodes and
+  // edges are taken in the same pass so they always describe one graph.
+  const dagOrder = useMemo(
+    () => computeDagOrder(getCanvasNodes(), getCanvasEdges()),
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- canvasNodesTick is the store's change signal
+    [canvasNodesTick],
+  );
+
+  // Resolve each step's canvas node ONCE instead of scanning the node array
+  // inside every row's render, which is what the alias cell used to do.
+  const nodeByStepAlias = useMemo(() => {
+    const nodes = getCanvasNodes();
+    const map = new Map<string, ReturnType<typeof getCanvasNodes>[number] | undefined>();
+    if (!nodes.length) return map;
+    for (const s of steps) {
+      if (map.has(s.stepAlias)) continue;
+      map.set(s.stepAlias, nodes.find((n) => nodeMatchesStep(n, { stepAlias: s.stepAlias, id: s.stepAlias })));
+    }
+    return map;
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- canvasNodesTick is the store's change signal
+  }, [steps, canvasNodesTick]);
+
+  // Steps whose node the canvas cannot resolve keep their incoming order at the
+  // end: a row is never dropped just because its node was deleted since the run.
+  const orderedSteps = useMemo(
+    () => sortByDagOrder(steps, dagOrder, (s) => nodeByStepAlias.get(s.stepAlias)?.id),
+    [steps, dagOrder, nodeByStepAlias],
+  );
+
   return (
     <div className={`space-y-4 w-full h-full flex flex-col ${className}`}>
       {/* Actions contextuelles */}
@@ -345,9 +390,13 @@ export default function StepTable({
                     </tr>
                   ))
                 ) : (
-                  steps.map((s) => (
+                  orderedSteps.map((s) => (
                     <tr
                       key={s.id}
+                      // Row identity, in render order: what the DAG ordering is
+                      // asserted on end-to-end (the visible label is the node's,
+                      // which several nodes may share).
+                      data-step-row={s.stepAlias}
                       className="border border-transparent cursor-pointer transition-colors hover-row-datasource h-14 text-sm"
                       onClick={() => handleStepClick(s)}
                     >
@@ -387,9 +436,7 @@ export default function StepTable({
                       </td>
                       <td className="px-3 py-2 min-w-[200px]">
                         {(() => {
-                          const nodes = getCanvasNodes();
-                          const matched = nodes.find((n) => nodeMatchesStep(n, { stepAlias: s.stepAlias, id: s.stepAlias }));
-                          const d = matched?.data;
+                          const d = nodeByStepAlias.get(s.stepAlias)?.data;
                           const nc = d ? findNodeClassById(d.id || '') : null;
                           return (
                             <div className="flex items-center gap-2">
@@ -403,7 +450,7 @@ export default function StepTable({
                                   size="xs"
                                 />
                               ) : (
-                                <div className="h-5 w-5 rounded-full bg-gray-100 dark:bg-gray-700 flex-shrink-0" />
+                                <div className={`h-5 w-5 ${nodeIconRadiusClass('xs')} bg-gray-100 dark:bg-gray-700 flex-shrink-0`} />
                               )}
                               <span className="text-theme-primary">{d?.label || s.stepAlias}</span>
                             </div>

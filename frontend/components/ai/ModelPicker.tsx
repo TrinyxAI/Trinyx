@@ -196,7 +196,7 @@ export function ModelPicker({
                   alt={currentProvider}
                   width={16}
                   height={16}
-                  className="w-4 h-4 flex-shrink-0 rounded-full p-0.5 dark:bg-slate-100/10"
+                  className="w-4 h-4 flex-shrink-0 rounded-md p-0.5 dark:bg-slate-100/10"
                 />
               )}
               <span>{currentProvider ? getProviderDisplayName(currentProvider) : ''}</span>
@@ -214,7 +214,7 @@ export function ModelPicker({
                     alt={provider.name}
                     width={16}
                     height={16}
-                    className="w-4 h-4 flex-shrink-0 rounded-full p-0.5 dark:bg-slate-100/10"
+                    className="w-4 h-4 flex-shrink-0 rounded-md p-0.5 dark:bg-slate-100/10"
                   />
                   <span>{getProviderDisplayName(provider.name)}</span>
                 </div>
@@ -245,7 +245,7 @@ export function ModelPicker({
                   alt={currentProvider}
                   width={16}
                   height={16}
-                  className="w-4 h-4 flex-shrink-0 rounded-full p-0.5 dark:bg-slate-100/10"
+                  className="w-4 h-4 flex-shrink-0 rounded-md p-0.5 dark:bg-slate-100/10"
                 />
               )}
               {/* Show the full model info (tier · capabilities · context · price)
@@ -267,7 +267,7 @@ export function ModelPicker({
                     alt={currentProvider}
                     width={16}
                     height={16}
-                    className="w-4 h-4 flex-shrink-0 rounded-full p-0.5 dark:bg-slate-100/10 mt-0.5"
+                    className="w-4 h-4 flex-shrink-0 rounded-md p-0.5 dark:bg-slate-100/10 mt-0.5"
                   />
                   <ModelOptionDisplay model={model} />
                 </div>

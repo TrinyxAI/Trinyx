@@ -41,6 +41,15 @@ export interface InterfaceIframeProps {
   actionMapping?: Record<string, string>;
   /** Previous trigger data for form pre-fill (trigger ref -> field values) */
   triggerData?: Record<string, Record<string, unknown>>;
+  /**
+   * Trigger data to pre-fill the forms with REGARDLESS of `mode`, overriding
+   * {@link triggerData}. Used by the application's "load the template values" action:
+   * the app whose run has no data yet renders in `edit` mode (so `{{var|default}}`
+   * pipes resolve), and `triggerData` is dropped in that mode - which is exactly the
+   * case where showing the publisher's example inputs matters most. Pass `undefined`
+   * to keep the standard mode-gated behavior.
+   */
+  prefillTriggerData?: Record<string, Record<string, unknown>>;
   /** JavaScript template to inject as a script tag */
   jsTemplate?: string;
   /** Called when an action is triggered from the iframe via postMessage */
@@ -80,6 +89,7 @@ export const InterfaceIframe = React.forwardRef<HTMLIFrameElement, InterfaceIfra
       autoFit = false,
       actionMapping,
       triggerData,
+      prefillTriggerData,
       jsTemplate,
       onAction,
       onPagination,
@@ -140,13 +150,13 @@ export const InterfaceIframe = React.forwardRef<HTMLIFrameElement, InterfaceIfra
         customCss,
         autoFit,
         actionMapping,
-        triggerData: mode === 'run' ? triggerData : undefined,
+        triggerData: prefillTriggerData ?? (mode === 'run' ? triggerData : undefined),
         jsTemplate: removeScripts ? undefined : jsTemplate,
         resolveFileUrl: mode === 'run' ? resolveFileUrl : undefined,
       };
 
       return renderInterfaceTemplate(safeHtml, options);
-    }, [htmlTemplate, mode, resolvedData, customCss, autoFit, actionMapping, triggerData, jsTemplate, resolveFileUrl, removeScripts]);
+    }, [htmlTemplate, mode, resolvedData, customCss, autoFit, actionMapping, triggerData, prefillTriggerData, jsTemplate, resolveFileUrl, removeScripts]);
 
     // Fade out briefly when HTML content changes, fade in when iframe loads
     React.useEffect(() => {

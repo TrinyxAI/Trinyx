@@ -27,7 +27,13 @@ const MAX_OUTPUT_BYTES = 64 * 1024;   // 64 KB window per stream (stdout/stderr 
 // Secret-shaped environment variable names removed from the spawned child's env.
 // Targeted (not a blanket "KEY") so infra vars like PATH/HOME/SSH_AUTH_SOCK survive,
 // while provider keys, the Redis password (REDIS_URL), DB URLs, etc. are stripped.
-const SECRET_ENV_RE = /(SECRET|PASSWORD|PASSWD|TOKEN|_KEY$|_KEY_|APIKEY|API_KEY|ACCESS_KEY|PRIVATE_KEY|CREDENTIAL|REDIS_URL|DATABASE_URL|_DSN$|CONNECTION_STRING)/i;
+// _NONCE$ covers BRIDGE_META_NONCE, whose unguessability is what stops untrusted tool output
+// from forging trusted frontend cards. Anchored like _KEY$ / _DSN$ to stay targeted.
+// SCOPE, honestly: this only closes the `printenv` route. The nonce is still written in clear
+// to the per-session MCP config the CLI reads (claude-adapter mcp.json, codex-adapter
+// config.toml, whose directory the child is told about via CODEX_HOME), and on Linux a child
+// can read /proc/<ppid>/environ. Closing those needs a different mechanism than an env scrub.
+const SECRET_ENV_RE = /(SECRET|PASSWORD|PASSWD|TOKEN|_KEY$|_KEY_|APIKEY|API_KEY|ACCESS_KEY|PRIVATE_KEY|CREDENTIAL|REDIS_URL|DATABASE_URL|_DSN$|CONNECTION_STRING|_NONCE$)/i;
 
 export const SHELL_TOOL_DEF = {
   name: 'shell',

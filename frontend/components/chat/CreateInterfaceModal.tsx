@@ -11,6 +11,7 @@ import { orchestratorApi } from '@/lib/api/orchestrator';
 import { useTranslations } from 'next-intl';
 import { normalizeInterfaceFormat, resolveInterfaceFormat } from '@/lib/interfaces/interfaceFormats';
 import { InterfaceFormatSelect } from '@/components/interfaces/InterfaceFormatSelect';
+import { ModalStepIndicator } from '@/components/ui/ModalStepIndicator';
 import {
   Layout, ArrowRight, ArrowLeft, Check, Code, FileText
 } from 'lucide-react';
@@ -25,50 +26,16 @@ interface StepIndicatorProps {
   onStepClick?: (step: number) => void;
 }
 
-const StepIndicator: React.FC<StepIndicatorProps> = ({ currentStep, totalSteps, onStepClick }) => {
-  const steps = [
-    { number: 1, icon: FileText, label: 'Basic Info' },
-    { number: 2, icon: Code, label: 'Code' },
-  ];
-
-  return (
-    <div className="flex items-center justify-center gap-2 mb-6">
-      {steps.slice(0, totalSteps).map((step, index) => {
-        const isActive = step.number === currentStep;
-        const isCompleted = step.number < currentStep;
-        const Icon = step.icon;
-
-        return (
-          <React.Fragment key={step.number}>
-            <button
-              type="button"
-              onClick={() => onStepClick?.(step.number)}
-              className={`flex items-center gap-2 px-3 py-1.5 rounded-full transition-all ${
-                isActive
-                  ? 'bg-[var(--accent-primary)] text-[var(--accent-foreground)]'
-                  : isCompleted
-                  ? 'bg-emerald-500/20 text-emerald-600 dark:text-emerald-400 cursor-pointer hover:bg-emerald-500/30'
-                  : 'bg-theme-tertiary text-theme-secondary cursor-pointer hover:bg-theme-secondary'
-              }`}
-            >
-              {isCompleted ? (
-                <Check className="h-4 w-4" />
-              ) : (
-                <Icon className="h-4 w-4" />
-              )}
-              <span className="text-sm font-medium hidden sm:inline">{step.label}</span>
-            </button>
-            {index < totalSteps - 1 && (
-              <div className={`w-8 h-0.5 rounded-full ${
-                step.number < currentStep ? 'bg-emerald-500' : 'bg-theme-tertiary'
-              }`} />
-            )}
-          </React.Fragment>
-        );
-      })}
-    </div>
-  );
-};
+const StepIndicator: React.FC<StepIndicatorProps> = ({ currentStep, totalSteps, onStepClick }) => (
+  <ModalStepIndicator
+    currentStep={currentStep}
+    onStepClick={onStepClick}
+    steps={[
+      { number: 1, icon: FileText, label: 'Basic Info' },
+      { number: 2, icon: Code, label: 'Code' },
+    ].slice(0, totalSteps)}
+  />
+);
 
 // ============== Main Component ==============
 
@@ -219,7 +186,7 @@ export const CreateInterfaceModal: React.FC<CreateInterfaceModalProps> = ({
         <div className="px-8 pt-8 pb-4 flex-shrink-0">
           <div className="text-center mb-4">
             {currentStep === 1 && (
-              <div className="w-16 h-16 bg-theme-secondary rounded-full flex items-center justify-center mx-auto mb-4">
+              <div className="w-16 h-16 bg-theme-secondary rounded-2xl flex items-center justify-center mx-auto mb-4">
                 <Layout className="w-8 h-8 text-theme-primary" />
               </div>
             )}

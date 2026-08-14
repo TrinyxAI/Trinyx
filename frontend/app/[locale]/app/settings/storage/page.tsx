@@ -356,7 +356,7 @@ export default function StoragePage() {
             <div className="rounded-xl border border-theme p-6">
                 <div className="flex items-center justify-between mb-6">
                     <div className="flex items-center gap-3">
-                        <div className="w-10 h-10 bg-theme-secondary rounded-full flex items-center justify-center">
+                        <div className="w-10 h-10 bg-theme-secondary rounded-xl flex items-center justify-center">
                             <HardDrive className="w-5 h-5 text-theme-primary" />
                         </div>
                         <div>
@@ -432,7 +432,7 @@ export default function StoragePage() {
             {/* Storage Breakdown by Category */}
             <div>
                 <div className="flex items-center gap-3 mb-4">
-                    <div className="w-10 h-10 bg-theme-secondary rounded-full flex items-center justify-center">
+                    <div className="w-10 h-10 bg-theme-secondary rounded-xl flex items-center justify-center">
                         <Database className="w-5 h-5 text-theme-primary" />
                     </div>
                     <div>
@@ -504,7 +504,7 @@ export default function StoragePage() {
             {/* Quick Stats */}
             <div>
                 <div className="flex items-center gap-3 mb-4">
-                    <div className="w-10 h-10 bg-theme-secondary rounded-full flex items-center justify-center">
+                    <div className="w-10 h-10 bg-theme-secondary rounded-xl flex items-center justify-center">
                         <BarChart3 className="w-5 h-5 text-theme-primary" />
                     </div>
                     <div>
@@ -522,7 +522,7 @@ export default function StoragePage() {
                                 className="bg-theme-secondary rounded-xl p-4 hover:bg-theme-tertiary transition-colors"
                             >
                                 <div className="flex items-center gap-3">
-                                    <div className="w-10 h-10 bg-theme-tertiary rounded-full flex items-center justify-center">
+                                    <div className="w-10 h-10 bg-theme-tertiary rounded-xl flex items-center justify-center">
                                         <Icon className="w-5 h-5 text-theme-primary" />
                                     </div>
                                     <div>
@@ -542,7 +542,7 @@ export default function StoragePage() {
                 <div className="bg-theme-secondary rounded-xl p-6">
                     <div className="flex items-center justify-between">
                         <div className="flex items-center gap-3">
-                            <div className="w-10 h-10 bg-black dark:bg-white rounded-full flex items-center justify-center">
+                            <div className="w-10 h-10 bg-black dark:bg-white rounded-xl flex items-center justify-center">
                                 <Sparkles className="w-5 h-5 text-white dark:text-black" />
                             </div>
                             <div>

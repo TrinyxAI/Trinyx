@@ -625,7 +625,7 @@ export function ConversationSidebar({
               <Button
                 onClick={(e) => e.stopPropagation()}
                 variant="ghostGray"
-                className="absolute right-1 top-1/2 -translate-y-1/2 w-5 h-5 p-0 rounded-full text-theme-muted opacity-0 group-hover:opacity-100 group-hover:bg-surface-hover transition-opacity"
+                className="absolute right-1 top-1/2 -translate-y-1/2 w-5 h-5 p-0 rounded-lg text-theme-muted opacity-0 group-hover:opacity-100 group-hover:bg-surface-hover transition-opacity"
                 title={t('sidebar.conversationMenu')}
               >
                 <MoreVertical className="w-3 h-3" />
@@ -803,7 +803,7 @@ export function ConversationSidebar({
                     setShowProjectModal(true);
                   }}
                   variant="ghostGray"
-                  className="w-5 h-5 min-w-[20px] min-h-[20px] p-0 rounded-full text-theme-muted hover:text-[var(--bg-primary)] transition-colors font-normal flex items-center justify-center"
+                  className="w-5 h-5 min-w-[20px] min-h-[20px] p-0 rounded-lg text-theme-muted hover:text-[var(--bg-primary)] transition-colors font-normal flex items-center justify-center"
                   title={t('sidebar.newProject')}
                 >
                   <Plus className="w-4 h-4 flex-shrink-0" />
@@ -840,7 +840,7 @@ export function ConversationSidebar({
                       <Button
                         onClick={(e) => e.stopPropagation()}
                         variant="ghostGray"
-                        className="absolute right-1 top-1/2 -translate-y-1/2 w-5 h-5 p-0 rounded-full text-theme-muted opacity-0 group-hover:opacity-100 group-hover:bg-surface-hover transition-opacity"
+                        className="absolute right-1 top-1/2 -translate-y-1/2 w-5 h-5 p-0 rounded-lg text-theme-muted opacity-0 group-hover:opacity-100 group-hover:bg-surface-hover transition-opacity"
                       >
                         <MoreVertical className="w-3 h-3" />
                       </Button>
@@ -1099,7 +1099,7 @@ export function ConversationSidebar({
                       onClick={toggleMessagesMode}
                       variant="ghostGray"
                       data-testid="dm-mode-toggle"
-                      className={`w-5 h-5 min-w-[20px] min-h-[20px] p-0 rounded-full transition-all font-normal flex items-center justify-center opacity-100 ${
+                      className={`w-5 h-5 min-w-[20px] min-h-[20px] p-0 rounded-lg transition-all font-normal flex items-center justify-center opacity-100 ${
                         messagesMode
                           ? 'bg-[var(--text-primary)] text-[var(--bg-primary)] hover:opacity-90'
                           : 'text-theme-muted hover:text-[var(--bg-primary)]'
@@ -1118,7 +1118,7 @@ export function ConversationSidebar({
                               onClick={(e) => e.stopPropagation()}
                               variant="ghostGray"
                               data-testid="dm-filter-button"
-                              className={`w-5 h-5 min-w-[20px] min-h-[20px] p-0 rounded-full transition-colors font-normal flex items-center justify-center ${
+                              className={`w-5 h-5 min-w-[20px] min-h-[20px] p-0 rounded-lg transition-colors font-normal flex items-center justify-center ${
                                 dmFilter !== 'all'
                                   ? 'bg-[var(--text-primary)] text-[var(--bg-primary)] hover:opacity-90'
                                   : 'text-theme-muted hover:text-[var(--bg-primary)]'
@@ -1166,7 +1166,7 @@ export function ConversationSidebar({
                           }}
                           variant="ghostGray"
                           data-testid="dm-search-button"
-                          className={`w-5 h-5 min-w-[20px] min-h-[20px] p-0 rounded-full transition-colors font-normal flex items-center justify-center ${
+                          className={`w-5 h-5 min-w-[20px] min-h-[20px] p-0 rounded-lg transition-colors font-normal flex items-center justify-center ${
                             dmSearchOpen
                               ? 'bg-[var(--text-primary)] text-[var(--bg-primary)] hover:opacity-90'
                               : 'text-theme-muted hover:text-[var(--bg-primary)]'
@@ -1179,7 +1179,7 @@ export function ConversationSidebar({
                           onClick={(e) => e.stopPropagation()}
                           variant="ghostGray"
                           data-testid="dm-new-placeholder"
-                          className="w-5 h-5 min-w-[20px] min-h-[20px] p-0 rounded-full text-theme-muted hover:text-[var(--bg-primary)] transition-colors font-normal flex items-center justify-center"
+                          className="w-5 h-5 min-w-[20px] min-h-[20px] p-0 rounded-lg text-theme-muted hover:text-[var(--bg-primary)] transition-colors font-normal flex items-center justify-center"
                           title={t('dm.newMessage')}
                         >
                           <Plus className="w-4 h-4 flex-shrink-0" />
@@ -1192,7 +1192,7 @@ export function ConversationSidebar({
                           <Button
                             onClick={(e) => e.stopPropagation()}
                             variant="ghostGray"
-                            className="w-5 h-5 min-w-[20px] min-h-[20px] p-0 rounded-full text-theme-muted hover:text-[var(--bg-primary)] transition-colors font-normal flex items-center justify-center"
+                            className="w-5 h-5 min-w-[20px] min-h-[20px] p-0 rounded-lg text-theme-muted hover:text-[var(--bg-primary)] transition-colors font-normal flex items-center justify-center"
                             title={t('sidebar.filterChats')}
                           >
                             <ListFilter className="w-3.5 h-3.5 flex-shrink-0" />
@@ -1232,7 +1232,7 @@ export function ConversationSidebar({
                           onSearchClick();
                         }}
                         variant="ghostGray"
-                        className="w-5 h-5 min-w-[20px] min-h-[20px] p-0 rounded-full text-theme-muted hover:text-[var(--bg-primary)] transition-colors font-normal flex items-center justify-center"
+                        className="w-5 h-5 min-w-[20px] min-h-[20px] p-0 rounded-lg text-theme-muted hover:text-[var(--bg-primary)] transition-colors font-normal flex items-center justify-center"
                         title={t('sidebar.searchChats')}
                       >
                         <Search className="w-3.5 h-3.5 flex-shrink-0" />
@@ -1245,7 +1245,7 @@ export function ConversationSidebar({
                           onNewChat?.();
                         }}
                         variant="ghostGray"
-                        className="w-5 h-5 min-w-[20px] min-h-[20px] p-0 rounded-full text-theme-muted hover:text-[var(--bg-primary)] transition-colors font-normal flex items-center justify-center"
+                        className="w-5 h-5 min-w-[20px] min-h-[20px] p-0 rounded-lg text-theme-muted hover:text-[var(--bg-primary)] transition-colors font-normal flex items-center justify-center"
                         title={t('sidebar.newChat')}
                       >
                         <Plus className="w-4 h-4 flex-shrink-0" />

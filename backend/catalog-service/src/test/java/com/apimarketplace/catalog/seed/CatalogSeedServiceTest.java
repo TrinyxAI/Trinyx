@@ -43,6 +43,8 @@ class CatalogSeedServiceTest {
     @Mock private LexicalIndexSyncService lexicalIndexSyncService;
     @Mock private CatalogDataBootstrapService dataBootstrapService;
     @Mock private StructureSkeletonService structureSkeletonService;
+    @Mock private org.springframework.beans.factory.ObjectProvider<GenerationSeedBootstrap> generationSeedProvider;
+    @Mock private GenerationSeedBootstrap generationSeed;
 
     private CatalogSeedConfig config;
     private ObjectMapper objectMapper;
@@ -61,7 +63,7 @@ class CatalogSeedServiceTest {
                 config, seedStateRepository, apiService, apiRepository,
                 apiToolRepository, transformer, credentialService,
                 lexicalIndexSyncService, objectMapper, dataBootstrapService,
-                structureSkeletonService
+                structureSkeletonService, generationSeedProvider
         );
     }
 
@@ -285,6 +287,42 @@ class CatalogSeedServiceTest {
 
             assertEquals(0, result.imported());
             assertEquals(1, result.errors().size());
+        }
+    }
+
+    @Nested
+    @DisplayName("Boot-time seed pipeline")
+    class SeedPipeline {
+
+        @Test
+        @DisplayName("the generation seed runs after the catalog it describes has been loaded")
+        void generationSeedRunsAfterTheCatalogLoad() {
+            doAnswer(invocation -> {
+                invocation.<java.util.function.Consumer<GenerationSeedBootstrap>>getArgument(0)
+                        .accept(generationSeed);
+                return null;
+            }).when(generationSeedProvider).ifAvailable(any());
+
+            service.runSeedPipeline();
+
+            // Order, not mere presence: the descriptors attach to api_tools rows
+            // the dump load creates. Run on its own ApplicationReadyEvent
+            // listener it would race that load, find nothing to describe, and
+            // still burn its version marker.
+            var order = inOrder(dataBootstrapService, generationSeed);
+            order.verify(dataBootstrapService).bootstrapIfNeeded();
+            order.verify(generationSeed).seedOnStartup();
+        }
+
+        @Test
+        @DisplayName("a cloud install has no generation seed bean and the pipeline still completes")
+        void thePipelineRunsWithoutTheSeed() {
+            // ObjectProvider.ifAvailable is a no-op when the bean is absent,
+            // which is the cloud: its generation catalog comes from the importer.
+            service.runSeedPipeline();
+
+            verify(dataBootstrapService).bootstrapIfNeeded();
+            verifyNoInteractions(generationSeed);
         }
     }
 

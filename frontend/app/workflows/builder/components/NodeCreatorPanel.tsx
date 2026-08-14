@@ -7,6 +7,7 @@ import { Search, X, Layers, Plus, Route, Boxes, Bot, Cpu } from 'lucide-react';
 import { ApiListSkeleton, ToolListSkeleton } from './SkeletonLoaders';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
+import { canvasChromeSurfaceClass } from '@/components/ui/canvas-chrome';
 import LoadingSpinner from '@/components/LoadingSpinner';
 import { useMcpApis, useMcpApiTools, ApiSystem, ApiTool } from '../hooks/useMcpData';
 import { useDataSources, useDataSourceTables, DataSource } from '../hooks/useDataSourceData';
@@ -314,7 +315,9 @@ export function NodeCreatorPanel({ isOpen, onClose, onSelectNode, currentWorkflo
           'flex flex-col overflow-hidden',
           embedded
             ? 'h-full w-full min-h-0'
-            : 'w-[min(340px,calc(100vw-48px))] max-h-[90vh] rounded-[32px] bg-white/80 dark:bg-gray-800/80 backdrop-blur pointer-events-auto relative z-[100]',
+            // Floating (not embedded in the side panel): the same chrome surface
+            // as the toolbar and the settings panel it shares the canvas with.
+            : `w-[min(340px,calc(100vw-48px))] max-h-[90vh] pointer-events-auto relative z-[100] ${canvasChromeSurfaceClass}`,
         )}
         onDragOver={(e) => { e.preventDefault(); e.stopPropagation(); e.dataTransfer.dropEffect = 'none'; }}
         onDrop={(e) => { e.preventDefault(); e.stopPropagation(); }}>
@@ -457,11 +460,11 @@ export function NodeCreatorPanel({ isOpen, onClose, onSelectNode, currentWorkflo
                   const isFlowCategory = category.id === 'flow';
                   const isCoreCategory = category.id === 'core';
                   const categoryIcon = isAiCategory
-                    ? <span className="flex items-center justify-center flex-shrink-0 h-8 w-8 rounded-full bg-blue-100 dark:bg-blue-900/30"><Bot className="h-5 w-5 text-slate-900 dark:text-slate-100" strokeWidth={1.7} /></span>
+                    ? <span className="flex items-center justify-center flex-shrink-0 h-8 w-8 rounded-xl bg-blue-100 dark:bg-blue-900/30"><Bot className="h-5 w-5 text-slate-900 dark:text-slate-100" strokeWidth={1.7} /></span>
                     : isFlowCategory
-                    ? <span className="flex items-center justify-center flex-shrink-0 h-8 w-8 rounded-full bg-violet-100 dark:bg-violet-900/30"><Route className="h-5 w-5 text-slate-900 dark:text-slate-100" strokeWidth={1.7} /></span>
+                    ? <span className="flex items-center justify-center flex-shrink-0 h-8 w-8 rounded-xl bg-violet-100 dark:bg-violet-900/30"><Route className="h-5 w-5 text-slate-900 dark:text-slate-100" strokeWidth={1.7} /></span>
                     : isCoreCategory
-                    ? <span className="flex items-center justify-center flex-shrink-0 h-8 w-8 rounded-full bg-yellow-100 dark:bg-yellow-900/30"><Cpu className="h-5 w-5 text-slate-900 dark:text-slate-100" strokeWidth={1.7} /></span>
+                    ? <span className="flex items-center justify-center flex-shrink-0 h-8 w-8 rounded-xl bg-yellow-100 dark:bg-yellow-900/30"><Cpu className="h-5 w-5 text-slate-900 dark:text-slate-100" strokeWidth={1.7} /></span>
                     : undefined;
 
                   return (

@@ -734,9 +734,26 @@ public class MonolithSecurityFilter implements Filter {
         }
     }
 
+    /**
+     * Headers this filter refuses to take from the caller.
+     *
+     * <p>Identity, plus the billing context. The CE monolith is the SECOND door
+     * into {@code /catalog/v1/**}: the cloud gateway strips the billing headers
+     * there for a reason that applies here word for word, and that path is not
+     * under {@code /api/internal/}, so on CE an authenticated user could
+     * otherwise name a cheap model, a quantity of one for a ten second video,
+     * or an existing billing scope whose pin bypasses the delinquent refusal.
+     *
+     * <p>Bounded today only because CE ships {@code markup.enabled=false}, and
+     * that file invites an operator to flip it. A guard whose safety depends on
+     * a default nobody promised to keep is not a guard.
+     */
     private static boolean isTrustedIdentityHeader(String name) {
         if (name == null) {
             return false;
+        }
+        if (BillingContextHeaders.contains(name)) {
+            return true;
         }
         return TRUSTED_IDENTITY_HEADERS.stream().anyMatch(header -> header.equalsIgnoreCase(name));
     }

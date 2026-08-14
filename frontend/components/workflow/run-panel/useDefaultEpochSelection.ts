@@ -14,10 +14,13 @@ import { useEffect } from 'react';
  * had pinned an epoch - it never leaves the cumulative view on its own.)
  *
  * What remains is continuity: an explicit pick must survive the surface that
- * made it. The choice lives at module scope, keyed by run id, because the two
- * surfaces that can change the epoch (the canvas and the side-panel Run tab) are
- * in separate React trees, and `viewingEpoch` dies with its provider - so a
- * panel that is closed and reopened would otherwise drop the choice.
+ * made it. The choice lives at module scope, keyed by run id, because the three
+ * surfaces that can change the epoch (the canvas, the side-panel Run tab and the
+ * application tab) are in separate React trees, and `viewingEpoch` dies with its
+ * provider - so a panel that is closed and reopened would otherwise drop the
+ * choice. The Run tab and the Application tab are sub-tabs of the SAME panel, so
+ * only one of them is ever mounted: the one-shot event that carries a pick is
+ * heard by nobody, and only this memory carries it across the switch.
  */
 const pickedEpochByRun = new Map<string, number | null>();
 

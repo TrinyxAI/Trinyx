@@ -55,7 +55,7 @@ function NodeLabelIcon({ label }: { label: string }): React.ReactElement {
   const bgMatch = iconBg.match(/(?:dark:)?bg-\S+/g);
   const bgClass = bgMatch ? bgMatch.join(' ') : 'bg-gray-100 dark:bg-gray-800';
   return (
-    <span className={`flex items-center justify-center w-[18px] h-[18px] rounded-full shrink-0 ${bgClass}`}>
+    <span className={`flex items-center justify-center w-[18px] h-[18px] rounded-md shrink-0 ${bgClass}`}>
       <IconComponent className="w-3 h-3 text-slate-900 dark:text-slate-100" strokeWidth={2} />
     </span>
   );
@@ -158,7 +158,7 @@ function ServiceApprovalPreview({ serviceApproval }: ServiceApprovalPreviewProps
     <div className="rounded-2xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 p-4">
       {/* Header */}
       <div className="flex items-center gap-3 mb-3">
-        <div className="flex items-center justify-center w-8 h-8 rounded-full bg-slate-100 dark:bg-slate-800">
+        <div className="flex items-center justify-center w-8 h-8 rounded-xl bg-slate-100 dark:bg-slate-800">
           <KeyRound className="w-4 h-4 text-slate-600 dark:text-slate-400" />
         </div>
         <div>
@@ -179,7 +179,7 @@ function ServiceApprovalPreview({ serviceApproval }: ServiceApprovalPreviewProps
             className="flex items-center gap-3 p-2.5 rounded-xl bg-slate-50 dark:bg-slate-800/50 border border-slate-100 dark:border-slate-700"
           >
             {/* Service icon */}
-            <div className="flex items-center justify-center w-7 h-7 rounded-full bg-white dark:bg-slate-700 border border-slate-200 dark:border-slate-600">
+            <div className="flex items-center justify-center w-7 h-7 rounded-lg bg-white dark:bg-slate-700 border border-slate-200 dark:border-slate-600">
               {service.iconSlug && !imageErrors[service.serviceType] ? (
                 <Image
                   src={`/icons/services/${normalizeIconSlug(service.iconSlug)}.svg`}
@@ -518,7 +518,7 @@ function CallTimelineItem({ call, index, isStreaming = false }: CallTimelineItem
               e.preventDefault();
               setShowMenu(prev => !prev);
             }}
-            className="inline-flex items-center justify-center w-5 h-5 rounded-full hover:bg-gray-200 dark:hover:bg-gray-700 transition-colors cursor-pointer"
+            className="inline-flex items-center justify-center w-5 h-5 rounded-lg hover:bg-gray-200 dark:hover:bg-gray-700 transition-colors cursor-pointer"
           >
             <MoreVertical className="h-3.5 w-3.5 text-slate-500 dark:text-slate-400" />
             {showMenu && mounted && createPortal(

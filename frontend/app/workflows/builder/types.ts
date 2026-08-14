@@ -25,6 +25,7 @@ export type BuilderNodeKind =
   | 'download_file'
   | 'public_link'
   | 'media'
+  | 'generate'
   | 'aggregate'
   | 'response'
   | 'exit'

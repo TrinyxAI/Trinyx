@@ -70,17 +70,49 @@ public class PublicationListQueryService {
             FROM workflow_publications p
             """;
 
+    /**
+     * Default ordering for the public marketplace browse lists: the most-liked
+     * publications first, instead of the plain "newest wins" that made the
+     * marketplace a chronological feed where a popular app sank as soon as
+     * anything else was published.
+     *
+     * <p>The score is built ONLY from signals the platform actually measures:
+     * <ul>
+     *   <li>{@code favorites} (a user starred it) - weight 3, the closest thing
+     *       to an explicit "I like this";</li>
+     *   <li>{@code use_count} (a user installed/ran it) - weight 2, an implicit
+     *       but costly signal;</li>
+     *   <li>rating mass ({@code average_rating * review_count}) - weight 0.4, so
+     *       one 5-star review is worth one install and a single rating cannot
+     *       outrank a genuinely used app.</li>
+     * </ul>
+     *
+     * <p>Rating mass, not the bare average: a 5.0 from one reviewer must not beat
+     * a 4.5 from twenty. Ties fall back to {@code published_at DESC}, which keeps
+     * the previous behaviour for the (currently large) set of publications with
+     * no engagement at all, so the ordering degrades gracefully to chronological
+     * rather than to something arbitrary.
+     */
+    private static final String POPULARITY_ORDER_BY = """
+             ORDER BY (
+                 3 * (SELECT COUNT(*) FROM user_publication_favorites f WHERE f.publication_id = p.id)
+                 + 2 * COALESCE(p.use_count, 0)
+                 + 0.4 * COALESCE(p.average_rating, 0) * COALESCE(p.review_count, 0)
+             ) DESC, p.published_at DESC
+            """;
+
     // ========================================================================
     // Marketplace (paginated)
     // ========================================================================
 
     /**
      * Get marketplace publications (ACTIVE + PUBLIC), excluding planSnapshot.
+     * Ordered by {@link #POPULARITY_ORDER_BY} (most-liked first).
      */
     public Page<PublicationListItem> findMarketplacePublications(int page, int size) {
         String dataSql = "SELECT " + SELECT_COLUMNS + FROM_CLAUSE
                 + " WHERE p.status = 'ACTIVE' AND p.visibility = 'PUBLIC'"
-                + " ORDER BY p.published_at DESC";
+                + POPULARITY_ORDER_BY;
 
         String countSql = "SELECT COUNT(*) FROM workflow_publications p"
                 + " WHERE p.status = 'ACTIVE' AND p.visibility = 'PUBLIC'";
@@ -95,7 +127,7 @@ public class PublicationListQueryService {
         String dataSql = "SELECT " + SELECT_COLUMNS + FROM_CLAUSE
                 + " WHERE p.status = 'ACTIVE' AND p.visibility = 'PUBLIC'"
                 + " AND p.category_slug = :categorySlug"
-                + " ORDER BY p.published_at DESC";
+                + POPULARITY_ORDER_BY;
 
         String countSql = "SELECT COUNT(*) FROM workflow_publications p"
                 + " WHERE p.status = 'ACTIVE' AND p.visibility = 'PUBLIC'"
@@ -233,7 +265,7 @@ public class PublicationListQueryService {
         String dataSql = "SELECT " + SELECT_COLUMNS + FROM_CLAUSE
                 + " WHERE p.status = 'ACTIVE' AND p.visibility = 'PUBLIC'"
                 + " AND p.publication_type = 'AGENT'"
-                + " ORDER BY p.published_at DESC";
+                + POPULARITY_ORDER_BY;
 
         String countSql = "SELECT COUNT(*) FROM workflow_publications p"
                 + " WHERE p.status = 'ACTIVE' AND p.visibility = 'PUBLIC'"
@@ -251,7 +283,7 @@ public class PublicationListQueryService {
         String dataSql = "SELECT " + SELECT_COLUMNS + FROM_CLAUSE
                 + " WHERE p.status = 'ACTIVE' AND p.visibility = 'PUBLIC'"
                 + " AND p.publication_type = :type"
-                + " ORDER BY p.published_at DESC";
+                + POPULARITY_ORDER_BY;
 
         String countSql = "SELECT COUNT(*) FROM workflow_publications p"
                 + " WHERE p.status = 'ACTIVE' AND p.visibility = 'PUBLIC'"

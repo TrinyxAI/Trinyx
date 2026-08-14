@@ -1,5 +1,7 @@
 package com.apimarketplace.publication.controller;
 
+import com.apimarketplace.publication.service.ApplicationTemplateResetService;
+
 import com.apimarketplace.auth.client.access.OrgAccessGuard;
 import com.apimarketplace.publication.config.OrchestratorInternalClient;
 import com.apimarketplace.publication.dto.PublicationListItem;
@@ -64,7 +66,8 @@ class WorkflowPublicationControllerMarketplaceWiringTest {
         controller = new WorkflowPublicationController(publicationService, agentPublicationService,
                 listQueryService, reviewService, resourcePublicationService, orchestratorClient,
                 landingInterfaceSnapshotter, showcaseSnapshotReader, fileRefRewriter,
-                onboardingCategoryMapper, orgAccessGuard);
+                onboardingCategoryMapper, orgAccessGuard,
+                org.mockito.Mockito.mock(ApplicationTemplateResetService.class));
     }
 
     /** Minimal ORG-owned ACTIVE+PUBLIC list item. */

@@ -2,7 +2,7 @@
 
 import * as React from 'react';
 import { createPortal } from 'react-dom';
-import { AlertCircle, X, Lock, StepForward, Grip, Calendar, Play, FormInput, MessageCircle, Webhook, ChevronLeft, ChevronRight } from 'lucide-react';
+import { AlertCircle, X, Lock, StepForward, Grip, Calendar, Play, FormInput, MessageCircle, Webhook, ChevronLeft, ChevronRight, Wand2, RotateCcw } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { useInterfaceRender, useInterfaceById } from '@/app/workflows/builder/hooks/useInterfaces';
 import { useRun } from '@/contexts/WorkflowRunContext';
@@ -20,15 +20,19 @@ import { useSharedInterfacePage } from '@/lib/stores/interface-pagination-store'
 
 import { computeIsAwaitingSignal, isCurrentInterfaceItemPending } from './interfaceAwaitingSignal';
 import { orchestratorApi } from '@/lib/api';
+import { publicationService } from '@/lib/api/orchestrator/publication.service';
 import { workflowService } from '@/lib/api/orchestrator/workflow.service';
 import { executionService } from '@/lib/api/orchestrator/execution.service';
 import { triggerKey } from '@/app/workflows/builder/utils/labelNormalizer';
+import { isNavigateRef } from '@/app/workflows/builder/utils/interfaceActionRefs';
 import { TriggerPanel, type TriggerPanelConfig } from '@/app/workflows/builder/components/TriggerPanel';
 import { formatUtcTime } from '@/lib/utils/dateFormatters';
 import { RunningBorder } from './RunningBorder';
 import { VIEWING_EPOCH_EVENT, shouldAdoptEpochEvent, type EpochEventDetail } from '@/lib/workflow/epochEventScope';
-import { getPickedEpoch, markEpochPickedByUser } from '@/components/workflow/run-panel/useDefaultEpochSelection';
-import { epochDisplayDurationMs } from '@/components/workflow/run-panel/runFormatting';
+import { getPickedEpoch, markEpochPickedByUser, useDefaultEpochSelection } from '@/components/workflow/run-panel/useDefaultEpochSelection';
+import { epochDisplayDurationMs, isEpochLive, resolveEpochBadgeStatus } from '@/components/workflow/run-panel/runFormatting';
+import { EpochStatusIcon } from '@/components/workflow/EpochStatusIcon';
+import { getRunStatusLabel } from '@/lib/utils/runStatusUtils';
 
 export interface ApplicationConfig {
   interfaceId: string;
@@ -38,6 +42,27 @@ export interface ApplicationConfig {
   nodeId?: string;
   /** The app's declared entry page (isEntryInterface). The carousel OPENS on it; page ORDER stays canvas order. */
   isEntryInterface?: boolean;
+}
+
+/**
+ * The publication an application is shown against, and what the template actions may do
+ * with it. Threaded down unchanged through the carousel, so it is declared once here.
+ */
+export interface ApplicationTemplateSource {
+  publicationId: string;
+  /**
+   * The publication is sourced from the CLOUD marketplace. Reads route through the cloud
+   * proxy; the reset endpoint is local-only and has no publication row to read, so it is
+   * withheld.
+   */
+  remote?: boolean;
+  /**
+   * Whether "reset the data" applies on THIS surface. False for the publisher's own view:
+   * the page is bound to the source workflow while the reset targets the APPLICATION
+   * clone, so the button would write to tables the screen does not show. Loading the
+   * example values is unaffected and stays available either way.
+   */
+  canReset?: boolean;
 }
 
 interface ApplicationTabContentProps {
@@ -91,6 +116,24 @@ interface ApplicationTabContentProps {
    * same gates, regardless of auth state.
    */
   previewMode?: boolean;
+  /**
+   * The publication this application was installed from. Its presence is what
+   * enables the two "template" toolbar actions, so a caller that is not showing
+   * an installed application simply omits it:
+   * <ul>
+   *   <li><b>Load the template values</b> - reads the publisher's showcase render
+   *       and seeds the interface forms + the trigger panel with the example
+   *       inputs. Read-only, nothing is submitted.</li>
+   *   <li><b>Reset the data</b> - restores the installed app's tables to the rows
+   *       frozen in the publication. Destructive, confirmed first, and hidden for
+   *       a {@code remote} publication (a cloud-sourced install has no local
+   *       publication row, so the reset endpoint has nothing to read).</li>
+   * </ul>
+   * Callers must omit it for the publisher's own view: the publisher's page is
+   * bound to the SOURCE workflow, so resetting their preview clone would be an
+   * invisible no-op.
+   */
+  templateSource?: ApplicationTemplateSource;
 }
 
 type ResolvedVariablePagination = {
@@ -109,14 +152,29 @@ function isExplicitFalse(value: unknown): boolean {
   return value === false || value === 'false';
 }
 
-export function ApplicationTabContent({ config, runId, workflowId, onAction, carouselControls, isExpanded: controlledExpanded, onExpandedChange, toolbarOpen: controlledToolbarOpen, onToolbarOpenChange, viewingEpoch: controlledViewingEpoch, onViewingEpochChange, openOnLatestEpoch = false, previewMode = false }: ApplicationTabContentProps) {
+export function ApplicationTabContent({ config, runId, workflowId, onAction, carouselControls, isExpanded: controlledExpanded, onExpandedChange, toolbarOpen: controlledToolbarOpen, onToolbarOpenChange, viewingEpoch: controlledViewingEpoch, onViewingEpochChange, openOnLatestEpoch = false, previewMode = false, templateSource }: ApplicationTabContentProps) {
   const t = useTranslations('marketplace');
   const tActions = useTranslations('actions');
   const tCanvas = useTranslations('workflowBuilder.canvas');
   const tRun = useTranslations('runMode');
+  // Root-scoped: the epoch status names live under `status.*`, shared with every other
+  // run badge, so the epoch dropdown says exactly what the run panel says.
+  const tRoot = useTranslations();
   const openControlsLabel = tCanvas('openApplicationControls');
   const [isDragging, setIsDragging] = React.useState(false);
   const [actionError, setActionError] = React.useState<string | null>(null);
+  /**
+   * The publisher's example inputs, once the user asks for them. Declared here (rather
+   * than next to the handlers that write it) because the SUBMIT paths below must be able
+   * to clear it: the seed exists to help the user fill the form, and the moment they fire
+   * a trigger their own input supersedes it. Left set, it would outrank the run's real
+   * trigger data in the iframe forever and silently revert every later submission back to
+   * the publisher's example.
+   */
+  const [templateValues, setTemplateValues] =
+    React.useState<Record<string, Record<string, unknown>> | null>(null);
+  const [actionNotice, setActionNotice] =
+    React.useState<{ type: 'success' | 'warning'; message: string } | null>(null);
   const [showPreviewToast, setShowPreviewToast] = React.useState(false);
   const previewToastTimeoutRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -326,6 +384,33 @@ export function ApplicationTabContent({ config, runId, workflowId, onAction, car
     markEpochPickedByUser(runId, epoch);
     handleViewEpoch(epoch);
   }, [handleViewEpoch, runId]);
+
+  /**
+   * Restore the epoch the user picked for this run - the same hook the canvas
+   * and the Run tab use, for the same reason.
+   *
+   * This tab is mounted and unmounted by the side-panel sub-tab switch, and the
+   * cross-tree event that carries a pick is fired once, at the click. A tab that
+   * was not mounted then has no way to learn about it: picking an epoch in the
+   * Run tab and switching to Application dropped the choice and showed the
+   * cumulative view again (and, on an application page, the newest fire seeded
+   * over it). The pick lives at module scope keyed by run, precisely so it
+   * survives the surface that made it.
+   *
+   * Gated on run mode like the other two surfaces: the edit/run toggle clears the
+   * epoch WITHOUT recording it (deliberately - a reset the user did not ask for is
+   * not a choice), so a tab still mounted with a run id would otherwise restore
+   * the pick and broadcast it back onto the canvas that just dropped it. The gate
+   * costs nothing: the epoch list comes from `useRun`, which this tab already
+   * subscribes to in run mode only.
+   */
+  useDefaultEpochSelection({
+    runId,
+    selectedEpoch: viewingEpoch,
+    onSelectEpoch: handleViewEpoch,
+    enabled: isRunMode,
+  });
+
   const [runState, runContext] = useRun(isRunMode ? runId || undefined : undefined);
 
   // Multi-trigger panel state: when there are chat/form/webhook triggers,
@@ -348,6 +433,14 @@ export function ApplicationTabContent({ config, runId, workflowId, onAction, car
     }
     if (launchable.firstManual && runId && !isLaunching) {
       setIsLaunching(true);
+      // Firing manual/schedule produces a new epoch with its own trigger data. The seed
+      // has to step aside here too, otherwise it keeps overriding that epoch's real values
+      // in the interface - the same trap the submit paths close.
+      //
+      // Cleared BEFORE the try, unlike a form submit which keeps the seed when it fails.
+      // The asymmetry is deliberate: these triggers carry no user input, so a failed fire
+      // leaves nothing worth retyping and nothing to preserve.
+      setTemplateValues(null);
       try {
         if (runContext?.executeStep) {
           await runContext.executeStep(runId, launchable.firstManual.id, undefined, 'manual');
@@ -363,6 +456,8 @@ export function ApplicationTabContent({ config, runId, workflowId, onAction, car
     }
     if (launchable.firstSchedule && !isLaunching) {
       setIsLaunching(true);
+      // Same contract as the manual branch above: new epoch, so the seed steps aside.
+      setTemplateValues(null);
       try {
         if (runId) {
           if (runContext?.executeStep) {
@@ -390,6 +485,10 @@ export function ApplicationTabContent({ config, runId, workflowId, onAction, car
     payload: Record<string, unknown>,
   ): Promise<string[] | undefined> => {
     if (!runId) return undefined;
+    // Same contract as safeOnAction: once the user fires a trigger, their input replaces
+    // the template seed - keeping it would revert the interface to the example on the
+    // next render.
+    setTemplateValues(null);
     if (runContext?.executeStep) {
       // Returns StepExecutionResult; readySteps is on the response shape.
       const result = await runContext.executeStep(runId, triggerId, payload, triggerType);
@@ -425,6 +524,19 @@ export function ApplicationTabContent({ config, runId, workflowId, onAction, car
   React.useEffect(() => {
     if (!openOnLatestEpoch || seededLatestRef.current || totalEpochs === 0) return;
     if (viewingEpoch != null) { seededLatestRef.current = true; return; }
+    // A choice the user made for this run outranks the seed - "All epochs" is a
+    // choice too, hence `!== undefined`. Without this, an app page reopened
+    // after picking an epoch in the Run tab would seed the newest fire over it
+    // in the same commit the restore above put it back.
+    //
+    // That deliberately includes the `null` written by `selectAllEpochs` when the
+    // user fires from a focused epoch: after a "fire from here" the app opens on
+    // the cumulative view rather than pinning the newest epoch. Nothing is hidden
+    // by that - All-epochs pins the pager to page 0, which IS the newest fire's
+    // content (see the pagination rules below); only the badge differs. Treating
+    // that null as "no choice" would instead let the seed re-pin an epoch the
+    // user just left, which is the exact failure `selectAllEpochs` exists to stop.
+    if (getPickedEpoch(runId) !== undefined) { seededLatestRef.current = true; return; }
     const latest = Math.max(...epochTimestamps.map((e: { epoch?: number }) => e.epoch ?? 0));
     // Latch only on a real seed, so a first snapshot that carries no usable
     // epoch does not disable seeding for the life of this tab.
@@ -432,7 +544,7 @@ export function ApplicationTabContent({ config, runId, workflowId, onAction, car
     seededLatestRef.current = true;
     if (onViewingEpochChange) onViewingEpochChange(latest);
     else setLocalViewingEpoch(latest);
-  }, [openOnLatestEpoch, totalEpochs, epochTimestamps, viewingEpoch, onViewingEpochChange]);
+  }, [openOnLatestEpoch, totalEpochs, epochTimestamps, viewingEpoch, onViewingEpochChange, runId]);
 
   const { data: renderData, isLoading, isFetching, isPlaceholderData, refetch } = useInterfaceRender(
     config.interfaceId,
@@ -789,9 +901,11 @@ export function ApplicationTabContent({ config, runId, workflowId, onAction, car
   // Uses actionInFlightRef to prevent duplicate trigger calls (bridge script can fire twice)
   // isRunning guard only affects trigger actions (safeOnAction); __continue and __pagination
   // use separate callbacks (handleContinue, handleIframePagination) and are never blocked.
-  // Navigate actions (:navigate suffix) are pure frontend tab switches - always allowed through.
+  // Navigate actions (<prefix>:<label>:navigate) are pure frontend tab switches - always
+  // allowed through. A trigger merely LABELLED "Navigate" is not one of them: see
+  // isNavigateRef, which is why this is not a bare `endsWith(':navigate')`.
   const safeOnAction = React.useCallback(async (triggerRef: string, data: Record<string, unknown>) => {
-    const isNavigateAction = triggerRef.endsWith(':navigate');
+    const isNavigateAction = isNavigateRef(triggerRef);
     if (isPreviewOnly && !isNavigateAction) {
       showPreviewBlockedToast();
       return;
@@ -806,6 +920,18 @@ export function ApplicationTabContent({ config, runId, workflowId, onAction, car
     setActionError(null);
     try {
       await onAction(triggerRef, data);
+      // The user has SUBMITTED: their own input is now the run's trigger data, so the
+      // template seed must step aside or the next render would show the example again.
+      //
+      // A navigate action is exempt. It is a pure page switch with no API call, and on a
+      // multi-page app the menu page is routinely where the user loads the values and the
+      // form lives one navigate away - clearing here would make the whole action a silent
+      // no-op the moment they turn the page. A failed submit also keeps the seed on
+      // purpose: the user is going to retry, and retyping the example is exactly what the
+      // action exists to spare them.
+      if (!isNavigateAction) {
+        setTemplateValues(null);
+      }
       // After trigger fires, stay on current viewingEpoch. The auto-navigate effect
       // will switch to the new epoch once it appears in epochTimestamps.
     } catch (error: any) {
@@ -936,13 +1062,116 @@ export function ApplicationTabContent({ config, runId, workflowId, onAction, car
       // when it is reconciled (the next fire, a resume, a restart recovery sweep),
       // so that span counted idle time and printed 32h42m for epochs that ran for
       // seconds.
-      const duration = epochDisplayDurationMs(entry, now);
-      const isRunning = entry.startedAt != null && entry.endedAt == null;
-      return { ...entry, duration, isRunning, startMs };
+      // Same rule as the RunInfo EpochSelector: the epoch's own outcome, except while
+      // the RUN says it is executing. An open header alone does not mean "running" - a
+      // stopped or cancelled run abandons whatever epoch was open, and its duration
+      // must stop counting there too.
+      const badgeStatus = resolveEpochBadgeStatus(entry, runState?.runStatus);
+      const isRunning = isEpochLive(entry, runState?.runStatus);
+      const duration = epochDisplayDurationMs(entry, now, isRunning);
+      return { ...entry, duration, isRunning, badgeStatus, startMs };
     });
-  }, [epochTimestamps]);
+  }, [epochTimestamps, runState?.runStatus]);
 
   const maxDuration = React.useMemo(() => Math.max(...sortedEpochs.map(e => e.duration ?? 0), 1), [sortedEpochs]);
+
+  /** Status of the epoch currently on screen, for the collapsed selector button. */
+  const displayedEpochStatus: string | null = React.useMemo(
+    () => sortedEpochs.find(e => e.epoch === currentDisplayEpoch)?.badgeStatus ?? null,
+    [sortedEpochs, currentDisplayEpoch],
+  );
+
+  // ── Template actions: load the publisher's example inputs, reset the data ──
+  //
+  // Both are only offered for an INSTALLED application (templateSource present) and
+  // never in a preview: an anonymous visitor must not write to the publisher's tenant,
+  // and there is no install of theirs to reset.
+  const templateActionsAvailable = !!templateSource && !previewMode && !isPreviewOnly;
+  // A cloud-sourced (remote) install has no local publication row, so the reset
+  // endpoint would have nothing to read. Loading the values still works - that read
+  // goes through the cloud proxy.
+  // Reset needs more than the publication: the caller must be on a surface where the
+  // tables it rewrites are the ones on screen (canReset), and the publication must be
+  // local. Loading the example values needs neither - it only fills the forms.
+  const canResetData = templateActionsAvailable
+    && !templateSource?.remote
+    && templateSource?.canReset !== false;
+
+  const [isLoadingTemplateValues, setIsLoadingTemplateValues] = React.useState(false);
+  const [isResettingData, setIsResettingData] = React.useState(false);
+
+  /**
+   * Read the publisher's showcase render and seed every form with its trigger inputs.
+   *
+   * <p>The interface id is deliberately NOT passed: ours belongs to the INSTALLED
+   * clone and does not exist in the publisher's frozen workflow, so asking for it
+   * would miss. The publication's landing render is used instead, and that is
+   * sufficient because `triggerData` is keyed by trigger key (a normalized label,
+   * stable across the clone) rather than by interface - so the values apply to
+   * whichever page the user is on.
+   */
+  const handleLoadTemplateValues = React.useCallback(async () => {
+    if (!templateSource || isLoadingTemplateValues) return;
+    setIsLoadingTemplateValues(true);
+    setActionError(null);
+    setActionNotice(null);
+    try {
+      const render = await publicationService.getShowcaseRender(
+        templateSource.publicationId,
+        { authenticated: true },
+        !!templateSource.remote
+      );
+      const values = render?.items?.[0]?.triggerData;
+      if (!values || Object.keys(values).length === 0) {
+        setActionError(t('templateValuesEmpty'));
+        return;
+      }
+      // Fresh object identity on every load so asking twice re-seeds the inputs
+      // even when the values are unchanged.
+      setTemplateValues({ ...values });
+      // Open the trigger panel when there is one: that is where the user submits.
+      if (hasPanelTriggers) setIsTriggerPanelOpen(true);
+    } catch (err: any) {
+      setActionError(err?.message || t('templateValuesFailed'));
+    } finally {
+      setIsLoadingTemplateValues(false);
+    }
+  }, [templateSource, isLoadingTemplateValues, hasPanelTriggers, t]);
+
+  /**
+   * Restore the installed application's tables to the rows frozen in the publication.
+   * Destructive, so it confirms first; on success the interface is re-rendered so the
+   * restored rows are visible immediately.
+   */
+  const handleResetData = React.useCallback(async () => {
+    if (!templateSource || isResettingData) return;
+    if (typeof window !== 'undefined' && !window.confirm(t('resetDataConfirm'))) return;
+    setIsResettingData(true);
+    setActionError(null);
+    setActionNotice(null);
+    try {
+      const result = await publicationService.resetApplicationData(templateSource.publicationId);
+      const partial = (result.tablesSkipped?.length ?? 0) > 0;
+      // Reported in the component's own banner rather than the `workflowToast`
+      // event: that listener lives on the builder canvas, which is not guaranteed
+      // to be mounted on every surface showing an application.
+      setActionNotice({
+        type: partial ? 'warning' : 'success',
+        message: partial
+          ? t('resetDataPartial', {
+              tables: result.tablesReset,
+              rows: result.rowsRestored,
+              skipped: result.tablesSkipped.join(', '),
+            })
+          : t('resetDataSuccess', { tables: result.tablesReset, rows: result.rowsRestored }),
+      });
+      refetch();
+    } catch (err: any) {
+      setActionError(err?.message || t('resetDataFailed'));
+    } finally {
+      setIsResettingData(false);
+    }
+  }, [templateSource, isResettingData, t, refetch]);
 
   // ── Shared toolbar extraControls (launch + epoch selector + continue) ──
   const toolbarExtraControls = React.useMemo(() => {
@@ -999,7 +1228,7 @@ export function ApplicationTabContent({ config, runId, workflowId, onAction, car
         // - schedule needs only workflowId (spawns a fresh run server-side)
         disabled={isLaunching || (!hasPanelTriggers && !runId && !launchable.firstSchedule)}
         size="sm"
-        className="h-8 px-3 rounded-full shadow-none border-0 gap-1.5 bg-black dark:bg-white text-white dark:text-black hover:bg-gray-800 dark:hover:bg-gray-200 focus-visible:ring-2 focus-visible:ring-theme-tertiary disabled:opacity-50"
+        className="h-8 px-3 rounded-xl shadow-none border-0 gap-1.5 bg-black dark:bg-white text-white dark:text-black hover:bg-gray-800 dark:hover:bg-gray-200 focus-visible:ring-2 focus-visible:ring-theme-tertiary disabled:opacity-50"
         title={tActions('launchTrigger', { label: buttonLabel })}
       >
         {isLaunching ? <LoadingSpinner size="sm" /> : <TriggerIcon className="h-3.5 w-3.5" />}
@@ -1013,19 +1242,27 @@ export function ApplicationTabContent({ config, runId, workflowId, onAction, car
         <button
           type="button"
           onClick={() => totalEpochs > 1 ? setEpochDropdownOpen(prev => !prev) : undefined}
-          className={`h-7 flex items-center gap-1.5 px-2.5 rounded-full text-xs transition-colors ${
+          className={`h-7 flex items-center gap-1.5 px-2.5 rounded-xl text-xs transition-colors ${
             epochDropdownOpen
               ? 'bg-gray-900 dark:bg-gray-100 text-white dark:text-gray-900'
               : 'text-[var(--text-secondary)] hover:bg-gray-200 dark:hover:bg-gray-700 hover:text-gray-900 dark:hover:text-gray-100'
           }`}
           data-testid="application-epoch-selector"
           data-all-epochs={showsAllEpochs || undefined}
-          title={showsAllEpochs ? tRun('allEpochs') : tRun('epochBadge', { number: currentDisplayEpoch })}
+          data-epoch-status={(!showsAllEpochs && displayedEpochStatus) || undefined}
+          title={showsAllEpochs
+            ? tRun('allEpochs')
+            : [tRun('epochBadge', { number: currentDisplayEpoch }),
+               displayedEpochStatus ? getRunStatusLabel(displayedEpochStatus, (k) => tRoot(k)) : null,
+              ].filter(Boolean).join('\n')}
         >
           <Calendar className="h-3 w-3" />
           <span className={`font-medium ${showsAllEpochs ? '' : 'tabular-nums'}`}>
             {showsAllEpochs ? tRun('allEpochs') : currentDisplayEpoch}
           </span>
+          {/* Closed dropdown still tells the outcome of the epoch on screen - the
+              status is the reason to open the list, so it must not require opening it. */}
+          {!showsAllEpochs && <EpochStatusIcon status={displayedEpochStatus} />}
         </button>
 
         {/* Epoch dropdown popup (same layout as RunInfo EpochSelector) */}
@@ -1066,6 +1303,12 @@ export function ApplicationTabContent({ config, runId, workflowId, onAction, car
                     setEpochDropdownOpen(false);
                   }}
                   data-testid={`application-epoch-option-${entry.epoch}`}
+                  data-epoch-status={entry.badgeStatus ?? undefined}
+                  /* The status word: the row is too narrow for a text pill, so the
+                     badge is the icon and the title carries the name. */
+                  title={entry.badgeStatus
+                    ? getRunStatusLabel(entry.badgeStatus, (k) => tRoot(k))
+                    : undefined}
                   className={`w-full flex items-center gap-1.5 px-3 py-1.5 text-xs transition-colors ${
                     isSelected
                       ? 'border-l-2 border-gray-900 dark:border-gray-100 bg-gray-50 dark:bg-white/[0.04] font-semibold text-gray-900 dark:text-gray-100'
@@ -1078,11 +1321,13 @@ export function ApplicationTabContent({ config, runId, workflowId, onAction, car
                   }`}>
                     {entry.epoch}
                   </div>
-                  {entry.isRunning && (
-                    <span className="relative flex h-1.5 w-1.5 shrink-0">
-                      <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-blue-400 opacity-75" />
-                      <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-blue-500" />
-                    </span>
+                  {/* Per-epoch status badge - reserved slot, so the row never shifts
+                      as an epoch goes from running to its outcome. The word is added
+                      for screen readers ADDITIVELY: an aria-label on the button would
+                      replace the time range and duration it also announces. */}
+                  <EpochStatusIcon status={entry.badgeStatus} />
+                  {entry.badgeStatus && (
+                    <span className="sr-only">{getRunStatusLabel(entry.badgeStatus, (k) => tRoot(k))}</span>
                   )}
                   {/* Time range */}
                   <span className={`flex-1 text-center text-[10px] tabular-nums whitespace-nowrap ${
@@ -1145,13 +1390,13 @@ export function ApplicationTabContent({ config, runId, workflowId, onAction, car
         onClick={handleDefaultContinue}
         disabled={isContinuing || !isCurrentItemPending}
         size="sm"
-        className="h-8 px-3 rounded-full shadow-none border-0 gap-1.5 bg-black dark:bg-white text-white dark:text-black hover:bg-gray-800 dark:hover:bg-gray-200 focus-visible:ring-2 focus-visible:ring-theme-tertiary disabled:opacity-50"
+        className="h-8 px-3 rounded-xl shadow-none border-0 gap-1.5 bg-black dark:bg-white text-white dark:text-black hover:bg-gray-800 dark:hover:bg-gray-200 focus-visible:ring-2 focus-visible:ring-theme-tertiary disabled:opacity-50"
         title={continueTitle}
       >
         {isContinuing ? <LoadingSpinner size="sm" /> : <StepForward className="h-3.5 w-3.5" />}
         <span className="text-xs font-medium">{continueLabel}</span>
         {pendingSignalCount > 1 && (
-          <span className="inline-flex items-center justify-center h-4 min-w-[16px] px-1 rounded-full bg-white/20 dark:bg-black/20 text-[10px] font-semibold tabular-nums">
+          <span className="inline-flex items-center justify-center h-4 min-w-[16px] px-1 rounded-md bg-white/20 dark:bg-black/20 text-[10px] font-semibold tabular-nums">
             {pendingSignalCount}
           </span>
         )}
@@ -1167,7 +1412,7 @@ export function ApplicationTabContent({ config, runId, workflowId, onAction, car
             aria-label={tCanvas('variablePageSource')}
             title={tCanvas('variablePageSource')}
             data-testid="application-variable-page-select"
-            className="h-7 max-w-[92px] rounded-full bg-transparent px-2 text-xs font-medium text-[var(--text-secondary)] outline-none hover:bg-gray-200 dark:hover:bg-gray-700 hover:text-gray-900 dark:hover:text-gray-100"
+            className="h-7 max-w-[92px] rounded-xl bg-transparent px-2 text-xs font-medium text-[var(--text-secondary)] outline-none hover:bg-gray-200 dark:hover:bg-gray-700 hover:text-gray-900 dark:hover:text-gray-100"
           >
             {variablePaginationItems.map(item => (
               <option key={item.name} value={item.name}>{item.name}</option>
@@ -1188,7 +1433,7 @@ export function ApplicationTabContent({ config, runId, workflowId, onAction, car
           aria-label={tCanvas('previousVariablePage')}
           title={tCanvas('previousVariablePage')}
           data-testid="application-variable-page-previous"
-          className="w-7 h-7 p-0 rounded-full transition-colors inline-flex items-center justify-center text-[var(--text-secondary)] hover:bg-[var(--text-primary)] hover:text-[var(--bg-primary)] disabled:opacity-30 disabled:cursor-not-allowed disabled:hover:bg-transparent disabled:hover:text-[var(--text-secondary)]"
+          className="w-7 h-7 p-0 rounded-xl transition-colors inline-flex items-center justify-center text-[var(--text-secondary)] hover:bg-[var(--text-primary)] hover:text-[var(--bg-primary)] disabled:opacity-30 disabled:cursor-not-allowed disabled:hover:bg-transparent disabled:hover:text-[var(--text-secondary)]"
         >
           <ChevronLeft className="h-3.5 w-3.5" />
         </button>
@@ -1205,16 +1450,54 @@ export function ApplicationTabContent({ config, runId, workflowId, onAction, car
           aria-label={tCanvas('nextVariablePage')}
           title={tCanvas('nextVariablePage')}
           data-testid="application-variable-page-next"
-          className="w-7 h-7 p-0 rounded-full transition-colors inline-flex items-center justify-center text-[var(--text-secondary)] hover:bg-[var(--text-primary)] hover:text-[var(--bg-primary)] disabled:opacity-30 disabled:cursor-not-allowed disabled:hover:bg-transparent disabled:hover:text-[var(--text-secondary)]"
+          className="w-7 h-7 p-0 rounded-xl transition-colors inline-flex items-center justify-center text-[var(--text-secondary)] hover:bg-[var(--text-primary)] hover:text-[var(--bg-primary)] disabled:opacity-30 disabled:cursor-not-allowed disabled:hover:bg-transparent disabled:hover:text-[var(--text-secondary)]"
         >
           <ChevronRight className="h-3.5 w-3.5" />
         </button>
       </div>
     ) : null;
 
-    if (!variablePaginationControl && !launchButton && !epochSelector && !continueButton) return undefined;
-    return <>{variablePaginationControl}{launchButton}{epochSelector}{continueButton}</>;
-  }, [totalEpochs, epochTimestamps, sortedEpochs, maxDuration, viewingEpoch, showsAllEpochs, currentDisplayEpoch, epochDropdownOpen, handleViewEpoch, handleEpochPickedByUser, runId, isAwaitingSignal, config.nodeId, isContinuing, isCurrentItemPending, handleDefaultContinue, t, tRun, currentItemTriple, pendingSignalCount, launchable, hasPanelTriggers, hasAnyLaunchable, handleLaunchTrigger, isLaunching, tActions, previewMode, activeVariablePage, variablePaginationItems, handleVariablePrevious, handleVariableNext, tCanvas]);
+    // Template values: fills the forms with the publisher's example inputs. Icon-only
+    // so the pill stays compact next to Launch / Continue, which are the actions that
+    // actually run something - this one only prepares them.
+    const templateValuesButton = templateActionsAvailable ? (
+      <button
+        key="template-values"
+        type="button"
+        onClick={handleLoadTemplateValues}
+        disabled={isLoadingTemplateValues}
+        aria-label={t('loadTemplateValues')}
+        title={t('loadTemplateValuesHint')}
+        data-testid="application-load-template-values"
+        className="w-7 h-7 p-0 rounded-xl transition-colors inline-flex items-center justify-center text-[var(--text-secondary)] hover:bg-[var(--text-primary)] hover:text-[var(--bg-primary)] disabled:opacity-30 disabled:cursor-not-allowed disabled:hover:bg-transparent disabled:hover:text-[var(--text-secondary)]"
+      >
+        {isLoadingTemplateValues ? <LoadingSpinner size="sm" /> : <Wand2 className="h-3.5 w-3.5" />}
+      </button>
+    ) : null;
+
+    // Reset data: destructive, so it is visually quiet (icon-only, same weight as the
+    // pagination controls) and confirms before doing anything.
+    const resetDataButton = canResetData ? (
+      <button
+        key="reset-data"
+        type="button"
+        onClick={handleResetData}
+        disabled={isResettingData}
+        aria-label={t('resetData')}
+        title={t('resetDataHint')}
+        data-testid="application-reset-data"
+        className="w-7 h-7 p-0 rounded-xl transition-colors inline-flex items-center justify-center text-[var(--text-secondary)] hover:bg-[var(--text-primary)] hover:text-[var(--bg-primary)] disabled:opacity-30 disabled:cursor-not-allowed disabled:hover:bg-transparent disabled:hover:text-[var(--text-secondary)]"
+      >
+        {isResettingData ? <LoadingSpinner size="sm" /> : <RotateCcw className="h-3.5 w-3.5" />}
+      </button>
+    ) : null;
+
+    if (!variablePaginationControl && !launchButton && !epochSelector && !continueButton
+        && !templateValuesButton && !resetDataButton) {
+      return undefined;
+    }
+    return <>{variablePaginationControl}{templateValuesButton}{resetDataButton}{launchButton}{epochSelector}{continueButton}</>;
+  }, [totalEpochs, epochTimestamps, sortedEpochs, maxDuration, viewingEpoch, showsAllEpochs, currentDisplayEpoch, displayedEpochStatus, epochDropdownOpen, handleViewEpoch, handleEpochPickedByUser, runId, isAwaitingSignal, config.nodeId, isContinuing, isCurrentItemPending, handleDefaultContinue, t, tRun, tRoot, currentItemTriple, pendingSignalCount, launchable, hasPanelTriggers, hasAnyLaunchable, handleLaunchTrigger, isLaunching, tActions, previewMode, activeVariablePage, variablePaginationItems, handleVariablePrevious, handleVariableNext, tCanvas, templateActionsAvailable, canResetData, handleLoadTemplateValues, isLoadingTemplateValues, handleResetData, isResettingData]);
 
   // ── The interface's display format - scale-to-fit virtual viewport ──
   // When the INTERFACE declares a format (preset name or "WxH"), the iframe renders inside a
@@ -1271,6 +1554,7 @@ export function ApplicationTabContent({ config, runId, workflowId, onAction, car
       sandbox="allow-same-origin allow-scripts allow-forms"
       actionMapping={config.actionMapping}
       triggerData={triggerData}
+      prefillTriggerData={templateValues ?? undefined}
       onAction={safeOnAction}
       onPagination={handleIframePagination}
       onContinue={handleContinue}
@@ -1387,7 +1671,7 @@ export function ApplicationTabContent({ config, runId, workflowId, onAction, car
             onClick={handleToggleExpanded}
             variant="ghost"
             size="sm"
-            className="h-8 w-8 p-0 rounded-full shadow-none border-0 bg-white/40 dark:bg-gray-800/40 backdrop-blur-sm hover:bg-white/90 dark:hover:bg-gray-800/90 opacity-50 hover:opacity-100 transition-all duration-200"
+            className="h-8 w-8 p-0 rounded-xl shadow-none border-0 bg-white/40 dark:bg-gray-800/40 backdrop-blur-sm hover:bg-white/90 dark:hover:bg-gray-800/90 opacity-50 hover:opacity-100 transition-all duration-200"
             title="Close (Escape)"
           >
             <X className="h-4 w-4" />
@@ -1425,7 +1709,7 @@ export function ApplicationTabContent({ config, runId, workflowId, onAction, car
                 aria-label={openControlsLabel}
                 title={openControlsLabel}
                 data-testid="application-controls-toggle"
-                className="h-8 w-8 rounded-full flex items-center justify-center bg-white/40 dark:bg-gray-800/40 backdrop-blur-sm text-gray-400 dark:text-gray-500 hover:bg-white/90 dark:hover:bg-gray-800/90 hover:text-gray-700 dark:hover:text-gray-200 opacity-50 hover:opacity-100 transition-all duration-200"
+                className="h-8 w-8 rounded-xl flex items-center justify-center bg-white/40 dark:bg-gray-800/40 backdrop-blur-sm text-gray-400 dark:text-gray-500 hover:bg-white/90 dark:hover:bg-gray-800/90 hover:text-gray-700 dark:hover:text-gray-200 opacity-50 hover:opacity-100 transition-all duration-200"
               >
                 <Grip className="h-3.5 w-3.5" />
               </button>
@@ -1467,6 +1751,7 @@ export function ApplicationTabContent({ config, runId, workflowId, onAction, car
             onExecuteTrigger={handlePanelExecuteTrigger}
             onTriggerSuccess={() => setIsTriggerPanelOpen(false)}
             anchorElement={appContainerEl}
+            prefillValues={templateValues}
           />
         )}
       </div>,
@@ -1498,6 +1783,28 @@ export function ApplicationTabContent({ config, runId, workflowId, onAction, car
               type="button"
               onClick={() => setActionError(null)}
               className="flex-shrink-0 text-red-400 hover:text-red-600 dark:hover:text-red-300"
+            >
+              <X className="h-3.5 w-3.5" />
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Outcome of a template action (data reset). Amber when the reset was
+          PARTIAL so "some tables were left alone" never reads as a clean success. */}
+      {actionNotice && (
+        <div className="flex-shrink-0 w-full px-2">
+          <div
+            data-testid="application-action-notice"
+            className={actionNotice.type === 'warning'
+              ? 'flex items-start gap-2 px-3 py-2 bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800 rounded-md text-sm text-amber-800 dark:text-amber-300'
+              : 'flex items-start gap-2 px-3 py-2 bg-emerald-50 dark:bg-emerald-950/30 border border-emerald-200 dark:border-emerald-800 rounded-md text-sm text-emerald-700 dark:text-emerald-400'}
+          >
+            <span className="flex-1 break-words">{actionNotice.message}</span>
+            <button
+              type="button"
+              onClick={() => setActionNotice(null)}
+              className="flex-shrink-0 opacity-60 hover:opacity-100"
             >
               <X className="h-3.5 w-3.5" />
             </button>
@@ -1543,7 +1850,7 @@ export function ApplicationTabContent({ config, runId, workflowId, onAction, car
             aria-label={openControlsLabel}
             title={openControlsLabel}
             data-testid="application-controls-toggle"
-            className="h-8 w-8 rounded-full flex items-center justify-center bg-white/40 dark:bg-gray-800/40 backdrop-blur-sm text-gray-400 dark:text-gray-500 hover:bg-white/90 dark:hover:bg-gray-800/90 hover:text-gray-700 dark:hover:text-gray-200 opacity-50 hover:opacity-100 transition-all duration-200"
+            className="h-8 w-8 rounded-xl flex items-center justify-center bg-white/40 dark:bg-gray-800/40 backdrop-blur-sm text-gray-400 dark:text-gray-500 hover:bg-white/90 dark:hover:bg-gray-800/90 hover:text-gray-700 dark:hover:text-gray-200 opacity-50 hover:opacity-100 transition-all duration-200"
           >
             <Grip className="h-3.5 w-3.5" />
           </button>
@@ -1618,6 +1925,7 @@ export function ApplicationTabContent({ config, runId, workflowId, onAction, car
           onExecuteTrigger={handlePanelExecuteTrigger}
           onTriggerSuccess={() => setIsTriggerPanelOpen(false)}
           anchorElement={appContainerEl}
+          prefillValues={templateValues}
         />
       )}
     </div>

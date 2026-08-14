@@ -284,6 +284,27 @@ public class StepCompletionOrchestrator {
                     && Boolean.TRUE.equals(completionCtx.result().output().get(ExecutionMetadataKeys.SPLIT_PARTIAL_FAILURE))
                     && triggerId != null
                     && !completionCtx.suppressGlobalMark()) {
+                // The node's tally must SHOW the failure the marker asserts. The branch above
+                // recorded one aggregate COMPLETED for this node and nothing else, so without
+                // this the node ended up with an amber border (from the marker) sitting next to
+                // a badge reading zero failures - and the streaming path, which derives purely
+                // from the counts, still called the node completed. Same node, three surfaces,
+                // two answers.
+                //
+                // Incremented by ONE, at node granularity, to stay symmetric with that single
+                // aggregate COMPLETED and to respect the invariant documented above: every
+                // NodeCounts increment is mirrored one-for-one into workflow_epochs, and
+                // recordNodeCount has no multiplicity. It says "this node also failed", not "how
+                // many items failed" - the per-item detail stays in split_failed_item_indices.
+                //
+                // This does NOT change the run verdict: a cycle is failed when
+                // EpochState.failedNodeIds is non-empty, and a continue-anyway split deliberately
+                // keeps the node OUT of that set (it is marked completed).
+                snapshotCounts = stateSnapshotService.incrementNodeCountsOnly(
+                    completionCtx.runId(), completionCtx.nodeId(), "FAILED", 1);
+                recordEpochNodeCount(
+                    completionCtx.execution(), completionCtx.nodeId(), "FAILED",
+                    completionCtx.epoch(), triggerId);
                 stateSnapshotService.markNodePartialFailure(
                     completionCtx.runId(), triggerId, completionCtx.epoch(), completionCtx.nodeId());
                 logger.info("[StepCompletion] Marked partial-failure: runId={}, nodeId={}, epoch={}",

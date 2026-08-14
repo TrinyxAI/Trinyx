@@ -44,12 +44,12 @@ const ConfigTab: React.FC<ConfigTabProps> = ({
                         className="bg-muted/30 disabled:opacity-100 disabled:cursor-default disabled:text-foreground focus-visible:ring-0"
                     />
                     {tool?.isCustomCategory && (
-                        <div className="absolute -top-2 -right-2 bg-yellow-500 text-white text-xs px-2 py-1 rounded-full z-10">
+                        <div className="absolute -top-2 -right-2 bg-yellow-500 text-white text-xs px-2 py-1 rounded-md z-10">
                             {t('badges.custom')}
                         </div>
                     )}
                     {!tool?.toolCategory && !tool?.category && (
-                        <div className="absolute -top-2 -right-2 bg-red-500 text-white text-xs px-2 py-1 rounded-full z-10">
+                        <div className="absolute -top-2 -right-2 bg-red-500 text-white text-xs px-2 py-1 rounded-md z-10">
                             {t('badges.missing')}
                         </div>
                     )}
@@ -73,7 +73,7 @@ const ConfigTab: React.FC<ConfigTabProps> = ({
                         className="bg-muted/30 disabled:opacity-100 disabled:cursor-default disabled:text-foreground focus-visible:ring-0"
                     />
                     {tool?.isCustomToolName && (
-                        <div className="absolute -top-2 -right-2 bg-yellow-500 text-white text-xs px-2 py-1 rounded-full z-10">
+                        <div className="absolute -top-2 -right-2 bg-yellow-500 text-white text-xs px-2 py-1 rounded-md z-10">
                             {t('badges.custom')}
                         </div>
                     )}

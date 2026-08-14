@@ -151,7 +151,7 @@ export default function InsufficientStorageModal() {
       <DialogContent className="max-w-3xl w-full p-0 gap-0 overflow-hidden">
         {/* Header */}
         <div className="p-6 pb-4 text-center border-b border-theme">
-          <div className="w-14 h-14 bg-red-100 dark:bg-red-900/30 rounded-full flex items-center justify-center mx-auto mb-4">
+          <div className="w-14 h-14 bg-red-100 dark:bg-red-900/30 rounded-xl flex items-center justify-center mx-auto mb-4">
             <HardDrive className="h-7 w-7 text-red-600 dark:text-red-400" />
           </div>
           <h2 className="text-xl font-semibold text-theme-primary mb-1">

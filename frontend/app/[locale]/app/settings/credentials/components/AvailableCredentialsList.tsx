@@ -296,7 +296,7 @@ export function AvailableCredentialsList({
               }
               clearTemplateSelection();
             }}
-            className="rounded-full bg-black dark:bg-white text-white dark:text-black"
+            className="rounded-md bg-black dark:bg-white text-white dark:text-black"
           >
             {t('connectCount', { count: selectedTemplates.size })}
           </Button>
@@ -346,7 +346,7 @@ export function AvailableCredentialsList({
                     </div>
                   </td>
                   <td className="px-4 py-3">
-                    <div className="h-5 bg-theme-tertiary rounded-full animate-pulse w-16" />
+                    <div className="h-5 bg-theme-tertiary rounded-2xl animate-pulse w-16" />
                   </td>
                 </tr>
               ))
@@ -387,7 +387,7 @@ export function AvailableCredentialsList({
                           iconUrl={template.icon_url}
                           size="lg"
                           fallbackIcon={
-                            <div className="h-8 w-8 rounded-full bg-theme-tertiary flex items-center justify-center">
+                            <div className="h-8 w-8 rounded-xl bg-theme-tertiary flex items-center justify-center">
                               <span className="text-sm font-bold text-theme-secondary">
                                 {template.display_name?.charAt(0) || "?"}
                               </span>
@@ -401,7 +401,7 @@ export function AvailableCredentialsList({
                             </span>
                             {configured && (
                               <span
-                                className="inline-flex items-center gap-1 rounded-full bg-emerald-500/10 px-2 py-0.5 text-xs font-medium text-emerald-600 dark:text-emerald-400"
+                                className="inline-flex items-center gap-1 rounded-md bg-emerald-500/10 px-2 py-0.5 text-xs font-medium text-emerald-600 dark:text-emerald-400"
                                 title={t('configuredTooltip')}
                               >
                                 <CheckCircle2 className="h-3 w-3" />
@@ -429,7 +429,7 @@ export function AvailableCredentialsList({
                                 e.stopPropagation();
                                 setAuthTypeFilter(active ? "all" : type);
                               }}
-                              className={`text-xs px-2 py-1 rounded-full transition-all ${authTypeStyle(type)} ${active ? "ring-2 ring-offset-1 ring-current" : "hover:ring-1 hover:ring-current/40"}`}
+                              className={`text-xs px-2 py-1 rounded-md transition-all ${authTypeStyle(type)} ${active ? "ring-2 ring-offset-1 ring-current" : "hover:ring-1 hover:ring-current/40"}`}
                               title={t('filterByAuthMethod', { method: authTypeLabel(type) })}
                             >
                               {authTypeLabel(type)}

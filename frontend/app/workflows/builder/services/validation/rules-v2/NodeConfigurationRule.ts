@@ -213,6 +213,17 @@ export class NodeConfigurationRule extends BaseValidationRule {
     if (kind === 'media') {
       this.validateMedia(d, node.id, elementKey, issues);
     }
+    // Generate: a model is required. Which parameters that model accepts, and
+    // their limits, live in the generation catalog and are enforced there before
+    // the provider is called, so they are deliberately not re-checked here: a
+    // stale copy of a model's limits would block a request the platform accepts.
+    if (kind === 'generate') {
+      this.requireField(d, 'generateModel', 'Model is required', 'generate_missing_model', node.id, elementKey, issues);
+      const source = d?.generateCredentialSource;
+      if (source !== undefined && source !== null && source !== '' && source !== 'user' && source !== 'platform') {
+        issues.push(this.createError(elementKey, 'core', "Credential source must be 'platform' or 'user'", { rule: 'generate_invalid_credential_source', nodeId: node.id }));
+      }
+    }
     // SendEmail: to and subject required
     if (kind === 'send_email') {
       this.requireField(d, 'emailTo', 'Recipient email is required', 'email_missing_to', node.id, elementKey, issues);

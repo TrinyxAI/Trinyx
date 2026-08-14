@@ -2,8 +2,28 @@ import { describe, expect, it } from 'vitest';
 import {
   deriveEffectiveStatus,
   formatCompactDuration,
+  getBarColor,
   isRunStatusActive,
 } from '@/components/workflow/run-panel/runFormatting';
+
+describe('getBarColor', () => {
+  it('paints a partial step amber, the same colour every other surface gives it', () => {
+    // It used to fall into the red branch, so one node read "failed" in the waterfall and
+    // "partial" on the canvas, badge and edge - the contradiction this whole change removes.
+    const partial = getBarColor('partial_success');
+    expect(partial).toContain('amber');
+    expect(partial).not.toContain('red');
+  });
+
+  it('still paints a plainly failed step red, so partial stays distinguishable from failed', () => {
+    expect(getBarColor('failed')).toContain('red');
+    expect(getBarColor('error')).toContain('red');
+  });
+
+  it('leaves a clean step green', () => {
+    expect(getBarColor('completed')).toContain('emerald');
+  });
+});
 
 describe('formatCompactDuration', () => {
   it('collapses sub-second durations to "<1s"', () => {

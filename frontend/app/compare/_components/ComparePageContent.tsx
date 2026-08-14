@@ -33,7 +33,7 @@ function Cta() {
     <div className="flex flex-wrap gap-3">
       <SignInButton
         variant="primary"
-        className="inline-flex items-center gap-2 h-12 px-6 rounded-full text-sm font-semibold transition-all hover:brightness-110 active:scale-[0.98] cursor-pointer"
+        className="inline-flex items-center gap-2 h-12 px-6 rounded-xl text-sm font-semibold transition-all hover:brightness-110 active:scale-[0.98] cursor-pointer"
       >
         Start free <ArrowRight className="w-4 h-4" />
       </SignInButton>
@@ -41,7 +41,7 @@ function Cta() {
         href={SELF_HOSTED_GITHUB_URL}
         target="_blank"
         rel="noopener noreferrer"
-        className="inline-flex items-center gap-2 h-12 px-6 rounded-full text-sm font-semibold transition-all cursor-pointer hover:brightness-110 bg-[var(--bg-tertiary)]"
+        className="inline-flex items-center gap-2 h-12 px-6 rounded-xl text-sm font-semibold transition-all cursor-pointer hover:brightness-110 bg-[var(--bg-tertiary)]"
         style={{ color: 'var(--text-primary)' }}
       >
         <Github className="w-4 h-4" /> Self-host

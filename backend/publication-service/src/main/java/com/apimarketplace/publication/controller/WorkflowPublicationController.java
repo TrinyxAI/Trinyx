@@ -10,13 +10,17 @@ import com.apimarketplace.publication.domain.WorkflowPublicationEntity.Publicati
 import com.apimarketplace.publication.domain.PublicationSnapshotVersionEntity;
 import com.apimarketplace.publication.config.OrchestratorInternalClient;
 import com.apimarketplace.publication.service.AgentPublicationService;
+import com.apimarketplace.publication.service.ApplicationTemplateResetService;
 import com.apimarketplace.publication.service.CeExclusivePublicationException;
 import com.apimarketplace.publication.service.LandingInterfaceSnapshotter;
 import com.apimarketplace.publication.service.OnboardingCategoryMapper;
 import com.apimarketplace.publication.service.PublicationListQueryService;
 import com.apimarketplace.publication.service.PublicationPendingReviewException;
 import com.apimarketplace.publication.service.PublicationValidationException;
+import com.apimarketplace.common.auth.UserSummaryDto;
 import com.apimarketplace.publication.service.PublicationReviewService;
+import com.apimarketplace.publication.service.ReviewerIdentityResolver;
+import org.springframework.util.StringUtils;
 import com.apimarketplace.publication.service.ResourcePublicationService;
 import com.apimarketplace.publication.service.ShowcaseFileRefRewriter;
 import com.apimarketplace.publication.service.ShowcaseSnapshotReader;
@@ -73,6 +77,7 @@ public class WorkflowPublicationController {
     private final ShowcaseFileRefRewriter fileRefRewriter;
     private final OnboardingCategoryMapper onboardingCategoryMapper;
     private final OrgAccessGuard orgAccessGuard;
+    private final ApplicationTemplateResetService templateResetService;
 
     public WorkflowPublicationController(WorkflowPublicationService publicationService,
                                           AgentPublicationService agentPublicationService,
@@ -84,7 +89,8 @@ public class WorkflowPublicationController {
                                           ShowcaseSnapshotReader showcaseSnapshotReader,
                                           ShowcaseFileRefRewriter fileRefRewriter,
                                           OnboardingCategoryMapper onboardingCategoryMapper,
-                                          OrgAccessGuard orgAccessGuard) {
+                                          OrgAccessGuard orgAccessGuard,
+                                          ApplicationTemplateResetService templateResetService) {
         this.publicationService = publicationService;
         this.agentPublicationService = agentPublicationService;
         this.listQueryService = listQueryService;
@@ -96,6 +102,7 @@ public class WorkflowPublicationController {
         this.fileRefRewriter = fileRefRewriter;
         this.onboardingCategoryMapper = onboardingCategoryMapper;
         this.orgAccessGuard = orgAccessGuard;
+        this.templateResetService = templateResetService;
     }
 
     // ========================================================================
@@ -760,9 +767,14 @@ public class WorkflowPublicationController {
                     .toList();
             Map<UUID, Long> replyCounts = reviewService.getReplyCountsBatch(reviewIds);
 
+            // One lookup for the whole page, and only for the rows whose stored
+            // name is blank (written before the identity was resolved server-side).
+            Map<String, UserSummaryDto> identities =
+                    reviewService.resolveAuthorIdentities(reviews.getContent());
+
             List<Map<String, Object>> items = reviews.getContent().stream()
                     .map(r -> {
-                        Map<String, Object> resp = toReviewResponse(r);
+                        Map<String, Object> resp = toReviewResponse(r, identities);
                         resp.put("replyCount", replyCounts.getOrDefault(r.getId(), 0L));
                         return resp;
                     })
@@ -829,15 +841,12 @@ public class WorkflowPublicationController {
     @PostMapping("/{publicationId}/reviews")
     public ResponseEntity<?> submitReview(
             @RequestHeader("X-User-ID") String userId,
-            @RequestHeader(value = "X-User-Name", required = false) String userName,
-            @RequestHeader(value = "X-User-Avatar", required = false) String userAvatar,
             @PathVariable String publicationId,
             @RequestBody SubmitReviewRequest request) {
         try {
             UUID pubId = UUID.fromString(publicationId);
             PublicationReviewEntity review = reviewService.submitReview(
-                    pubId, userId, userName, userAvatar,
-                    request.rating, request.comment);
+                    pubId, userId, request.rating, request.comment);
 
             return ResponseEntity.ok(toReviewResponse(review));
         } catch (IllegalArgumentException e) {
@@ -938,8 +947,10 @@ public class WorkflowPublicationController {
             UUID revId = UUID.fromString(reviewId);
             List<PublicationReviewEntity> replies = reviewService.getReplies(revId);
 
+            Map<String, UserSummaryDto> identities = reviewService.resolveAuthorIdentities(replies);
+
             List<Map<String, Object>> items = replies.stream()
-                    .map(this::toReviewResponse)
+                    .map(r -> toReviewResponse(r, identities))
                     .toList();
 
             return ResponseEntity.ok(Map.of(
@@ -959,15 +970,12 @@ public class WorkflowPublicationController {
     @PostMapping("/{publicationId}/reviews/{reviewId}/replies")
     public ResponseEntity<?> submitReply(
             @RequestHeader("X-User-ID") String userId,
-            @RequestHeader(value = "X-User-Name", required = false) String userName,
-            @RequestHeader(value = "X-User-Avatar", required = false) String userAvatar,
             @PathVariable String publicationId,
             @PathVariable String reviewId,
             @RequestBody SubmitReplyRequest request) {
         try {
             UUID revId = UUID.fromString(reviewId);
-            PublicationReviewEntity reply = reviewService.submitReply(
-                    revId, userId, userName, userAvatar, request.comment);
+            PublicationReviewEntity reply = reviewService.submitReply(revId, userId, request.comment);
             return ResponseEntity.ok(toReviewResponse(reply));
         } catch (IllegalArgumentException e) {
             logger.warn("Bad request submitting reply: {}", e.getMessage());
@@ -1025,13 +1033,32 @@ public class WorkflowPublicationController {
     }
 
     private Map<String, Object> toReviewResponse(PublicationReviewEntity review) {
+        return toReviewResponse(review, reviewService.resolveAuthorIdentities(List.of(review)));
+    }
+
+    /**
+     * @param identities live author identities keyed by reviewer id, used ONLY to
+     *                   fill a blank stored name / avatar. A row that carries its
+     *                   own snapshot keeps it, so an author renaming themselves
+     *                   does not silently rewrite the history of their comments.
+     */
+    private Map<String, Object> toReviewResponse(PublicationReviewEntity review,
+                                                 Map<String, UserSummaryDto> identities) {
+        UserSummaryDto identity = identities.get(review.getReviewerId());
+        String reviewerName = StringUtils.hasText(review.getReviewerName())
+                ? review.getReviewerName()
+                : (identity != null ? identity.displayName() : null);
+        String reviewerAvatarUrl = StringUtils.hasText(review.getReviewerAvatarUrl())
+                ? review.getReviewerAvatarUrl()
+                : (identity != null ? identity.avatarUrl() : null);
+
         Map<String, Object> response = new HashMap<>();
         response.put("id", review.getId().toString());
         response.put("publicationId", review.getPublicationId().toString());
         response.put("parentId", review.getParentId() != null ? review.getParentId().toString() : null);
         response.put("reviewerId", review.getReviewerId());
-        response.put("reviewerName", review.getReviewerName());
-        response.put("reviewerAvatarUrl", review.getReviewerAvatarUrl());
+        response.put("reviewerName", reviewerName);
+        response.put("reviewerAvatarUrl", reviewerAvatarUrl);
         response.put("rating", review.getRating());
         response.put("comment", review.getComment());
         response.put("createdAt", review.getCreatedAt() != null ? review.getCreatedAt().toString() : null);
@@ -1384,6 +1411,89 @@ public class WorkflowPublicationController {
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
                     .body(Map.of("error", "Failed to acquire publication"));
         }
+    }
+
+    /**
+     * Restore the caller's acquired application's tables to the rows frozen in the
+     * publication snapshot - the "reset to the downloaded template" action.
+     *
+     * <p>Only an install of the caller's OWN workspace is ever touched: the clone is
+     * resolved through the ORG-scoped {@code findBySourcePublication}, so a caller whose
+     * workspace never acquired this publication gets a 404 rather than reaching anyone
+     * else's data. Within a shared workspace any teammate who may write the application
+     * may reset it, which is why the row writes downstream are keyed on the install's own
+     * tenant and not on the caller's.
+     *
+     * <p>Destructive by design (the acquirer's current rows are replaced), hence the same
+     * write guards as acquire: a read-only VIEWER is refused, and an org member restricted
+     * on this application cannot reset it either.
+     */
+    @PostMapping("/{publicationId}/reset-data")
+    public ResponseEntity<?> resetApplicationData(
+            @RequestHeader("X-User-ID") String tenantId,
+            @RequestHeader(value = "X-Organization-ID", required = false) String organizationId,
+            @RequestHeader(value = "X-Organization-Role", required = false) String organizationRole,
+            @PathVariable String publicationId) {
+        try {
+            if (isViewerRole(organizationRole)) {
+                return ResponseEntity.status(HttpStatus.FORBIDDEN)
+                        .body(Map.of("error", "VIEWER role cannot reset application data"));
+            }
+            // Parse before the restriction guard: a malformed id is a client mistake, and
+            // asking the access guard about a string that is not an id would answer 403 for
+            // a typo. Letting it fall through to the catch below would be worse still - the
+            // service uses IllegalArgumentException for "you have not installed this", so
+            // the caller would get a 404 carrying a raw "Invalid UUID string".
+            UUID pubId;
+            try {
+                pubId = UUID.fromString(publicationId);
+            } catch (IllegalArgumentException e) {
+                return ResponseEntity.badRequest().body(Map.of("error", "Invalid publication id"));
+            }
+
+            ResponseEntity<?> writeDenied = denyIfApplicationWriteRestricted(
+                    tenantId, organizationId, organizationRole, publicationId);
+            if (writeDenied != null) {
+                return writeDenied;
+            }
+
+            WorkflowPublicationEntity publication = publicationService.getPublicationById(pubId).orElse(null);
+            if (publication == null) {
+                return ResponseEntity.notFound().build();
+            }
+
+            ApplicationTemplateResetService.ResetResult result =
+                    templateResetService.resetTables(publication, tenantId, organizationId);
+            logger.info("Reset application data for publication {} (tenant={}): {} tables, {} rows",
+                    publicationId, tenantId, result.tablesReset(), result.rowsRestored());
+            return ResponseEntity.ok(Map.of(
+                    "publicationId", publicationId,
+                    "tablesReset", result.tablesReset(),
+                    "rowsRestored", result.rowsRestored(),
+                    "tablesSkipped", result.tablesSkipped()
+            ));
+        } catch (IllegalStateException e) {
+            // No plan snapshot: nothing to restore from. Map.of rejects a null value, so a
+            // message-less exception here would throw INSIDE the catch and escape as an
+            // unhandled 500 past the sibling handler below.
+            logger.warn("Cannot reset application data for publication {}: {}", publicationId, e.getMessage());
+            return ResponseEntity.status(HttpStatus.CONFLICT)
+                    .body(Map.of("error", errorMessageOr(e, "Publication has no plan snapshot")));
+        } catch (IllegalArgumentException e) {
+            logger.warn("Cannot reset application data for publication {}: {}", publicationId, e.getMessage());
+            return ResponseEntity.status(HttpStatus.NOT_FOUND)
+                    .body(Map.of("error", errorMessageOr(e, "No acquired application for this publication")));
+        } catch (Exception e) {
+            logger.error("Error resetting application data for publication {}", publicationId, e);
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
+                    .body(Map.of("error", "Failed to reset application data"));
+        }
+    }
+
+    /** The exception's message, or {@code fallback} when it carries none (Map.of rejects nulls). */
+    private static String errorMessageOr(Exception e, String fallback) {
+        String message = e.getMessage();
+        return message != null && !message.isBlank() ? message : fallback;
     }
 
     /**

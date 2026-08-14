@@ -2,6 +2,7 @@ package com.apimarketplace.auth.credential.service;
 
 import com.apimarketplace.auth.credential.domain.PlatformCredentialModels.AuthType;
 import com.apimarketplace.auth.credential.domain.PlatformCredentialPricingVersion;
+import com.apimarketplace.auth.credential.domain.PriceUnit;
 import com.apimarketplace.auth.credential.domain.PricingVersionEntry;
 import org.springframework.stereotype.Component;
 
@@ -51,6 +52,50 @@ public class MarkupPolicy {
     }
 
     /**
+     * Refuse a republish that would price a row in a unit nothing measures for
+     * it.
+     *
+     * <p>A caller measures a call ONCE, in the platform unit of the dimension
+     * the row was seeded with: a video endpoint reports seconds, a speech
+     * endpoint reports characters, a flat endpoint reports nothing at all. The
+     * published unit is what that measurement is converted into, so it may move
+     * freely WITHIN the dimension (per-second to per-minute is the same
+     * measurement at another scale, and {@link #billableQuantity} converts it),
+     * and it may always collapse to {@code call}, which reads no measurement.
+     *
+     * <p>What it may not do is cross to another dimension. Republishing a
+     * per-call price as per-second does not make anything start measuring
+     * seconds: the caller keeps reporting one call, and every request would bill
+     * a single second, which is a silent undercharge on every call rather than a
+     * visible failure. The mirror case (a per-second row republished per
+     * character) bills a count of seconds at a per-character rate. Neither has a
+     * defensible amount to charge, so the publish is refused instead, with the
+     * two ways out named in the message.
+     *
+     * @param current  unit the row carries in the version being replaced
+     * @param incoming unit the publish is asking for
+     * @param where    endpoint (and model) quoted in the error message
+     */
+    public void validateUnitChange(PriceUnit current, PriceUnit incoming, String where) {
+        if (current == null || incoming == null) {
+            return;
+        }
+        if (incoming.canPriceMeasurementFor(current)) {
+            return;
+        }
+        String reason = current == PriceUnit.CALL
+                ? "this price is per call, so nothing measures " + incoming.dimension().measurementNoun()
+                        + " for it and every request would be billed a single " + incoming.wire()
+                        + ". Keep the flat 'call' price."
+                : "this price is per " + current.wire() + ", so a call here is measured in "
+                        + current.dimension().measurementNoun() + " and nothing would measure "
+                        + incoming.dimension().measurementNoun() + " for it. Publish a rate per "
+                        + current.wire() + ", or a flat 'call' price.";
+        throw new IllegalArgumentException(
+                "cannot publish " + where + " per " + incoming.wire() + ": " + reason);
+    }
+
+    /**
      * Resolve the effective per-call markup for a given tool under a pricing version.
      *
      * <p>Per-tool override wins over the version-wide default. A null version
@@ -69,6 +114,130 @@ public class MarkupPolicy {
         }
         BigDecimal def = version.getDefaultMarkupCredits();
         return def != null ? def : BigDecimal.ZERO;
+    }
+
+    /**
+     * Price a call that arrives with NO quantity because its caller has no
+     * notion of one.
+     *
+     * <p>Only the generation surface knows how big a call is (seconds of video,
+     * characters of speech). Every other path through the platform hits an
+     * endpoint expecting a flat per-call amount. Before V428 that was always
+     * true, so those callers could read the base and be right.
+     *
+     * <p>V428 made it possible for an admin to attach a per-unit price to an
+     * endpoint that some OTHER path also calls. Reading the base there would
+     * charge the fixed part only, which for a pure per-second rate is ZERO: the
+     * platform would hand out its own provider key for free, silently, which is
+     * the exact failure this feature exists to prevent.
+     *
+     * <p>So a unit-priced row seen without a quantity bills ONE unit. That is
+     * the smallest amount that is defensible rather than invented, it is never
+     * zero, and the caller is told about it by {@link #isUnitPricedWithoutQuantity}
+     * so the mismatch can be logged instead of passing unnoticed.
+     *
+     * <p>This is now the same rule {@link #resolveEffectivePrice} applies to a
+     * null quantity, so the two entry points cannot drift. The method survives
+     * as the name a caller uses to SAY it has no quantity, which reads better at
+     * the call site than passing a bare null.
+     */
+    public BigDecimal resolveEffectivePriceWithoutQuantity(PlatformCredentialPricingVersion version,
+                                                            Optional<PricingVersionEntry> perTool) {
+        return resolveEffectivePrice(version, perTool, null);
+    }
+
+    /**
+     * True when this row prices per unit but the caller could not say how many.
+     * A caller in that position is billing an approximation and should say so
+     * in its logs.
+     */
+    public boolean isUnitPricedWithoutQuantity(Optional<PricingVersionEntry> perTool) {
+        return perTool != null && perTool.isPresent()
+                && perTool.get().getUnitCredits() != null
+                && perTool.get().getUnitCredits().signum() > 0;
+    }
+
+    /**
+     * How many PUBLISHED units a call is billed for, given the platform
+     * measurement its caller took.
+     *
+     * <p>This is the single place the two halves of a price meet: the caller
+     * measures a call in the platform's own unit (seconds, assets, characters)
+     * and the published row says what it is charged per, so the conversion has
+     * to happen where the row is read. Doing it in the caller instead is what
+     * let a per-minute rate be multiplied by a count of seconds, billing 60x.
+     *
+     * <p>A NULL quantity and a ZERO quantity are different statements and must
+     * not collapse into one another. ZERO means the caller measured the call and
+     * it was empty, so only the base is due. NULL means the caller had no way to
+     * measure it, which is every path that predates unit pricing. Reading NULL as
+     * zero there charges the fixed part only, and for a pure per-second rate the
+     * fixed part is nothing: the platform would hand out its own provider key
+     * for free, silently, which is the single outcome this whole feature exists
+     * to prevent. So NULL bills ONE unit: the smallest amount that is defensible
+     * rather than invented, and never zero.
+     *
+     * <p>A negative measurement is treated as zero. Never bill a negative
+     * amount, never guess a missing one.
+     */
+    public BigDecimal billableQuantity(Optional<PricingVersionEntry> perTool, BigDecimal quantity) {
+        if (perTool == null || perTool.isEmpty()) {
+            // No row means no unit, so there is nothing to convert into.
+            return quantity;
+        }
+        if (quantity == null) {
+            return BigDecimal.ONE;
+        }
+        if (quantity.signum() < 0) {
+            return BigDecimal.ZERO;
+        }
+        return perTool.get().unit().quantityOf(quantity);
+    }
+
+    /**
+     * Resolve the effective price for one call, honouring V428 unit pricing.
+     *
+     * <p>Extends {@link #resolveEffectiveMarkup(PlatformCredentialPricingVersion, Optional)}
+     * with the quantity dimension:
+     * <pre>
+     *   price = base + unitCredits x billableQuantity,  clamped to [minCredits, maxCredits]
+     * </pre>
+     *
+     * <p>The two-arg overload stays the entry point for flat, per-call pricing
+     * and simply delegates here with a quantity of 1. A row that has never been
+     * given a unit is {@code CALL} + {@code unitCredits=0}, so it returns its
+     * base unchanged - which is why no existing price changes on upgrade.
+     *
+     * <p>{@code quantity} is the PLATFORM measurement of the call (seconds,
+     * assets, characters), supplied by the caller because only the call site
+     * knows the actual parameters. It is converted into the row's published unit
+     * by {@link #billableQuantity} before it multiplies anything, so the unit
+     * that scales the quantity is always the unit that carries the rate.
+     */
+    public BigDecimal resolveEffectivePrice(PlatformCredentialPricingVersion version,
+                                             Optional<PricingVersionEntry> perTool,
+                                             BigDecimal quantity) {
+        BigDecimal base = resolveEffectiveMarkup(version, perTool);
+        if (perTool == null || perTool.isEmpty()) {
+            // No per-tool row: the version default is a flat per-call amount by
+            // definition (a version carries no unit), so there is nothing to scale.
+            return base;
+        }
+        PricingVersionEntry entry = perTool.get();
+        BigDecimal unitRate = entry.getUnitCredits();
+        BigDecimal price = base;
+        if (unitRate != null && unitRate.signum() > 0) {
+            price = price.add(unitRate.multiply(billableQuantity(perTool, quantity)));
+        }
+        BigDecimal min = entry.getMinCredits();
+        if (min != null && price.compareTo(min) < 0) {
+            price = min;
+        }
+        BigDecimal max = entry.getMaxCredits();
+        if (max != null && price.compareTo(max) > 0) {
+            price = max;
+        }
+        return price.signum() < 0 ? BigDecimal.ZERO : price;
     }
 
     /**

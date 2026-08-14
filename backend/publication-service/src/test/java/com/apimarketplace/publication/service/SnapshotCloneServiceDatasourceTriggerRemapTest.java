@@ -156,6 +156,47 @@ class SnapshotCloneServiceDatasourceTriggerRemapTest {
     }
 
     @Test
+    @DisplayName("Acquire-time credential scrub strips a generate node's pinned credential id from the GENERIC params map")
+    @SuppressWarnings("unchecked")
+    void acquireTimeCredentialScrubRemovesGeneratePinnedCredential() throws Exception {
+        // Everything scrubbed above lives under a NAMED child. A generate node
+        // has none: its whole config is `params`, so the publisher's pinned key
+        // was copied verbatim into every acquirer's plan - a dangling id at
+        // best, and one an acquirer inside the publisher's organization can
+        // actually resolve at worst.
+        Map<String, Object> params = new LinkedHashMap<>();
+        params.put("model", "seedance-2.0-fast");
+        params.put("prompt", "a paper boat");
+        params.put("credential_source", "user");
+        params.put("credential_id", 42);
+
+        Map<String, Object> core = new LinkedHashMap<>();
+        core.put("type", "generate");
+        core.put("params", params);
+
+        // A different node type keeps its params: `params` is the generic
+        // config map EVERY core uses, so an unconditional removal would delete
+        // a same-named field from a node that means something else by it.
+        Map<String, Object> codeParams = new LinkedHashMap<>();
+        codeParams.put("credential_id", 7);
+        Map<String, Object> codeNode = new LinkedHashMap<>();
+        codeNode.put("type", "code");
+        codeNode.put("params", codeParams);
+
+        Map<String, Object> plan = new LinkedHashMap<>();
+        plan.put("cores", new java.util.ArrayList<>(List.of(core, codeNode)));
+
+        invokeStrip(plan);
+
+        assertThat(params).doesNotContainKey("credential_id");
+        assertThat(codeParams).containsEntry("credential_id", 7);
+        // The pool stays: it names an arrangement, not a credential, and the
+        // acquired node has to keep running the way it was published.
+        assertThat(params.get("credential_source")).isEqualTo("user");
+        assertThat(params.get("model")).isEqualTo("seedance-2.0-fast");
+    }
+
+    @Test
     @DisplayName("remapTriggerWorkflowIds remaps an 'error' trigger's workflow id via the sub-workflow mapping (the error counterpart of the workflow trigger)")
     void remapsErrorTriggerWorkflowIdViaMapping() throws Exception {
         Map<String, Object> errorTrigger = trigger("error", "old-root-wf-id");

@@ -123,7 +123,7 @@ export function EmptyCanvasChat({
                         <Button
                           variant="ghost"
                           size="icon"
-                          className="w-8 h-8 rounded-full"
+                          className="w-8 h-8 rounded-xl"
                           title={t('toolsAttachments')}
                         >
                           <Plus className="w-4 h-4" />
@@ -165,7 +165,7 @@ export function EmptyCanvasChat({
                       <button
                         onClick={() => setShowTriggerDropdown(!showTriggerDropdown)}
                         className={cn(
-                          "flex items-center gap-1.5 px-3 py-1.5 rounded-full",
+                          "flex items-center gap-1.5 px-3 py-1.5 rounded-md",
                           "bg-white/80 dark:bg-gray-800/80 backdrop-blur",
                           "border border-slate-200/80 dark:border-slate-700/80",
                           `${textSize} font-medium text-slate-600 dark:text-slate-400`,
@@ -206,9 +206,14 @@ export function EmptyCanvasChat({
                       return (
                         <button
                           key={suggestion.id}
+                          // A stable handle for the chip. e2e used to find it by
+                          // `button.rounded-full`, which is a styling detail: the
+                          // chips are square now, like every other label, and the
+                          // shape must not be what identifies them.
+                          data-testid="empty-canvas-suggestion"
                           onClick={() => onSuggestionClick(suggestion)}
                           className={cn(
-                            "relative overflow-hidden flex items-center gap-1.5 px-3 py-1.5 rounded-full",
+                            "relative overflow-hidden flex items-center gap-1.5 px-3 py-1.5 rounded-md",
                             "bg-white/80 dark:bg-gray-800/80 backdrop-blur",
                             "border border-slate-200/80 dark:border-slate-700/80",
                             `${textSize} font-medium text-slate-600 dark:text-slate-400`,
@@ -221,7 +226,7 @@ export function EmptyCanvasChat({
                           {/* Shimmer effect when active */}
                           {isActive && (
                             <div
-                              className="absolute inset-0 pointer-events-none rounded-full"
+                              className="absolute inset-0 pointer-events-none rounded-md"
                               style={{
                                 background: 'linear-gradient(90deg, transparent 0%, rgba(148, 163, 184, 0.4) 50%, transparent 100%)',
                                 backgroundSize: '200% 100%',

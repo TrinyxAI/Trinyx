@@ -152,7 +152,7 @@ export default function NodeTypeSettingsPage() {
       <div className="flex items-start justify-between gap-4">
         <PageHeader icon={Blocks} title={t("title")} subtitle={t("subtitle")} />
         <div className="flex items-center gap-2">
-          <div className="hidden sm:flex items-center gap-2 px-3 py-1.5 rounded-full bg-amber-500/10 text-amber-700 dark:text-amber-400 text-xs font-medium">
+          <div className="hidden sm:flex items-center gap-2 px-3 py-1.5 rounded-md bg-amber-500/10 text-amber-700 dark:text-amber-400 text-xs font-medium">
             <Shield className="w-3.5 h-3.5" />
             {t("adminOnlyBadge")}
           </div>

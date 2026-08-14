@@ -51,7 +51,13 @@ export function matchUserCredentialsForTool(
 
     if (toolCredName && userIntegration === toolCredName) return true;
 
-    if (toolCredName && userName === toolCredName) return true;
+    // The credential's NAME is the free-text label a person typed, so it only
+    // identifies a provider for a credential that carries no integration of
+    // its own (the workflow-native connectors: smtp, ssh, database). The
+    // server applies exactly this restriction when it validates a pinned key,
+    // and offering more here means offering a key the run then silently
+    // refuses, falling back to the account default with nothing on screen.
+    if (toolCredName && !userIntegration && userName === toolCredName) return true;
 
     if (toolDisplayName && userIntegration === toolDisplayName) return true;
 

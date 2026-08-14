@@ -57,6 +57,25 @@ export interface CloudLinkStatus {
  */
 export const CLOUD_NO_SUBSCRIPTION = '__NONE__';
 
+/**
+ * Whether the bound cloud account can pay for work relayed to it: a platform
+ * credential, a generation, any call the cloud bills.
+ *
+ * <p>Mirrors the server's own answer, which is the authority
+ * ({@code InternalAuthController.ceLinkEntitlements}: an active plan that is
+ * neither the no-subscription sentinel NOR {@code FREE}). Stating it here in
+ * one place matters because the two are not the same test, and a surface that
+ * only checked for the sentinel would tell a Free-linked install that
+ * everything is fine right up to the moment every relayed call is refused.
+ *
+ * <p>The Free plan is excluded for the same reason it is on the cloud itself:
+ * its monthly credits fund workflow runs, not the platform's provider keys.
+ */
+export function cloudSubscriptionPays(cloudPlanCode?: string | null): boolean {
+  if (!cloudPlanCode) return false;
+  return cloudPlanCode !== CLOUD_NO_SUBSCRIPTION && cloudPlanCode.toUpperCase() !== 'FREE';
+}
+
 export interface AuthUrlResponse {
   authUrl: string;
   state: string;

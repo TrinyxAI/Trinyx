@@ -1,5 +1,6 @@
 package com.apimarketplace.conversation.service.ai;
 
+import com.apimarketplace.agent.config.AgentModuleResolver;
 import com.apimarketplace.conversation.service.ai.AgentConfigProvider.AgentConfig;
 import com.apimarketplace.conversation.service.ai.AgentConfigProvider.AvailableModel;
 import com.apimarketplace.conversation.service.ai.AgentConfigProvider.ToolsConfig;
@@ -322,6 +323,63 @@ class AgentConfigProviderTest {
             assertThat(config.toolsConfig().isWorkflowsAll()).isFalse();
             assertThat(config.toolsConfig().toMap()).doesNotContainKey("workflowsGrant");
             assertThat(config.toolsConfig().toMap()).doesNotContainKey("tablesGrant");
+        }
+
+        @Test
+        @DisplayName("Parse: the credit-spending opt-in grants survive parse->toMap in BOTH persisted shapes")
+        void parseToolsConfigCarriesCreditSpendingGrants() {
+            // This key used to be dropped by the record, so the persisted switch was
+            // inert in chat. It must round-trip RAW (boolean or {enabled,...} object) into
+            // toMap(), which is what AgentModuleResolver reads. The retired imageGeneration
+            // key travels in the same payload and must NOT be carried into toMap().
+            String jsonResponse = """
+                {
+                    "name": "Creator Agent",
+                    "toolsConfig": {
+                        "mode": "all",
+                        "imageGeneration": true,
+                        "generation": { "enabled": true, "model": "seedance-1" }
+                    }
+                }
+                """;
+
+            when(restTemplate.exchange(anyString(), eq(HttpMethod.GET), any(HttpEntity.class), eq(String.class)))
+                    .thenReturn(new ResponseEntity<>(jsonResponse, HttpStatus.OK));
+
+            ToolsConfig tc = agentConfigProvider.getAgentConfig("agent-1", "tenant-1").toolsConfig();
+
+            assertThat(tc.generation()).isInstanceOf(java.util.Map.class);
+            assertThat(tc.toMap().get("generation"))
+                    .isEqualTo(java.util.Map.of("enabled", true, "model", "seedance-1"));
+            assertThat(AgentModuleResolver.isGenerationEnabled(tc.toMap())).isTrue();
+            // The retired grant travelled in the same stored payload and is dropped on the
+            // way through: a row that still carries it must not reach the resolver at all.
+            assertThat(tc.toMap()).doesNotContainKey("imageGeneration");
+        }
+
+        @Test
+        @DisplayName("Parse: absent / disabled / malformed credit-spending grants never reach toMap as granted")
+        void parseToolsConfigRejectsUngrantedCreditSpendingShapes() {
+            String jsonResponse = """
+                {
+                    "name": "Plain Agent",
+                    "toolsConfig": {
+                        "mode": "all",
+                        "generation": { "enabled": false },
+                        "imageGeneration": "yes please"
+                    }
+                }
+                """;
+
+            when(restTemplate.exchange(anyString(), eq(HttpMethod.GET), any(HttpEntity.class), eq(String.class)))
+                    .thenReturn(new ResponseEntity<>(jsonResponse, HttpStatus.OK));
+
+            ToolsConfig tc = agentConfigProvider.getAgentConfig("agent-1", "tenant-1").toolsConfig();
+
+            // A disabled object is carried (it is a real stored decision) but resolves to NOT granted.
+            assertThat(AgentModuleResolver.isGenerationEnabled(tc.toMap())).isFalse();
+            // The retired imageGeneration key is never carried into toMap(), whatever it holds.
+            assertThat(tc.toMap()).doesNotContainKey("imageGeneration");
         }
 
         @Test

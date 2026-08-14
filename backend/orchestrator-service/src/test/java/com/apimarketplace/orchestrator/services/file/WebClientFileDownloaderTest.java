@@ -48,12 +48,22 @@ class WebClientFileDownloaderTest {
         server.stop(0);
     }
 
+    /**
+     * The download budget is deliberately generous: nothing here asserts latency,
+     * only that a 302 is rejected and {@code /target} is never fetched. A tight
+     * budget turns the first WebClient call in the JVM (Netty event loop, resolver
+     * and connection-pool bootstrap) into the thing under test - with 5 s this
+     * failed on a loaded machine with "Download timeout after 5s" instead of the
+     * 302, and passed with ~50 ms to spare on the very next run. A redirect that IS
+     * rejected comes back in milliseconds, so a larger ceiling costs nothing and
+     * only changes how long we wait before calling it a failure.
+     */
     @Test
     @DisplayName("should reject redirects without following them")
     void shouldRejectRedirectsWithoutFollowingThem() {
         String url = "http://127.0.0.1:" + server.getAddress().getPort() + "/redirect";
 
-        assertThatThrownBy(() -> downloader.download(url, Duration.ofSeconds(5)))
+        assertThatThrownBy(() -> downloader.download(url, Duration.ofSeconds(60)))
                 .isInstanceOf(FileDownloadException.class)
                 .hasMessageContaining("302");
         assertThat(targetHits).hasValue(0);

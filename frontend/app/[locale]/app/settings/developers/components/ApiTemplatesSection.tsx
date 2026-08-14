@@ -95,7 +95,7 @@ const ApiTemplatesSection: React.FC<ApiTemplatesSectionProps> = ({
     <div className="mb-6">
       {/* Header with icon */}
       <div className="flex items-center gap-3 mb-4">
-        <div className="w-10 h-10 bg-theme-secondary rounded-full flex items-center justify-center">
+        <div className="w-10 h-10 bg-theme-secondary rounded-xl flex items-center justify-center">
           <Sparkles className="w-5 h-5 text-theme-primary" />
         </div>
         <div>

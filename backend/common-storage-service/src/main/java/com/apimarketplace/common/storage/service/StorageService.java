@@ -287,6 +287,81 @@ public class StorageService implements StorageOperations {
         return saved.getId();
     }
 
+    /**
+     * {@inheritDoc}
+     *
+     * <p>Implementation notes. The guard is {@code getWorkflowId() == null}: adoption fills a gap,
+     * it never moves a file between runs. The tenant-scoped lookup is what stops one tenant's step
+     * from claiming another's file by id. Everything else about the row is left alone - the bytes,
+     * the name, the folder - because this is a filing correction, not a rewrite.</p>
+     */
+    @Override
+    @Transactional
+    public int adoptRunContext(String tenantId, Collection<UUID> ids, String workflowId, String runId,
+                               String stepKey, int epoch, int spawn, Integer itemIndex) {
+        if (ids == null || ids.isEmpty() || workflowId == null || workflowId.isBlank()) {
+            return 0;
+        }
+        int adopted = 0;
+        for (UUID id : ids) {
+            if (id == null) {
+                continue;
+            }
+            Optional<StorageEntity> found = storageRepository.findByIdAndTenantId(id, tenantId);
+            if (found.isEmpty()) {
+                // Unknown, deleted, or another tenant's file: skip silently. The step's own
+                // result is not in question here.
+                continue;
+            }
+            StorageEntity storage = found.get();
+            if (storage.getWorkflowId() != null) {
+                continue; // already filed under a run - never re-home it
+            }
+            if (!isAdoptableSourceType(storage.getSourceType())) {
+                // Only a generic object-storage upload is adoptable. Anything else reached this
+                // list by accident, and other kinds carry their own visibility rules: a
+                // CHAT_ATTACHMENT is DB-resident with no s3_key and appears in the Files browser
+                // ONLY through the source-type disjunct, so touching one risks hiding it.
+                continue;
+            }
+            storage.setWorkflowId(workflowId);
+            if (runId != null) {
+                storage.setRunId(runId);
+            }
+            if (stepKey != null) {
+                storage.setStepKey(stepKey);
+            }
+            if (itemIndex != null) {
+                storage.setItemIndex(itemIndex);
+            }
+            storage.setEpoch(epoch);
+            storage.setSpawn(spawn);
+            // sourceType is deliberately NOT rewritten. It is tempting to re-type the row
+            // STEP_OUTPUT, and it would change nothing that matters: the workflow folders group on
+            // the run coordinates alone, so the badge is all that moves. It would however break the
+            // usage ledger, which books bytes under a hard-coded FILES bucket at insert but derives
+            // the bucket from the CURRENT sourceType on delete - the row would be saved as FILES and
+            // deleted as STEP_OUTPUTS, permanently skewing the tenant's breakdown. This is a filing
+            // correction; it rewrites the run coordinates and nothing else.
+            storageRepository.save(storage);
+            adopted++;
+        }
+        if (adopted > 0) {
+            logger.info("Adopted {} file(s) into run context: workflowId={}, runId={}, stepKey={}, epoch={}, spawn={}",
+                    adopted, workflowId, runId, stepKey, epoch, spawn);
+        }
+        return adopted;
+    }
+
+    /**
+     * Which rows adoption may claim: a plain object-storage upload, which is what a generic
+     * (context-free) upload produces. A null type is treated as one - legacy rows predating the
+     * column default.
+     */
+    private static boolean isAdoptableSourceType(String sourceType) {
+        return sourceType == null || sourceType.isBlank() || StorageSourceTypes.S3_FILE.equals(sourceType);
+    }
+
     @Override
     public UUID saveText(String tenantId, String data, String fileName, String mimeType, Instant expiresAt) {
         logger.debug("Sauvegarde texte pour tenant: {}, fileName: {}", tenantId, fileName);

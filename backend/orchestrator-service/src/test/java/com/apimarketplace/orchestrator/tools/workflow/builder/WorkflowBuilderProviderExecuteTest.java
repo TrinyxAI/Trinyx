@@ -51,6 +51,7 @@ class WorkflowBuilderProviderExecuteTest {
     @Mock WorkflowManagementService workflowService;
     @Mock InterfaceClient interfaceClient;
     @Mock NodeTypeSearchService nodeTypeSearchService;
+    @Mock private com.apimarketplace.orchestrator.execution.v2.adhoc.AdHocNodeExecutionService adHocNodeExecutionService;
     @Mock NodeLibraryService nodeLibraryService;
     @Mock NodeParamsValidator nodeParamsValidator;
     @Mock WorkflowHelpProvider workflowHelpProvider;
@@ -81,7 +82,7 @@ class WorkflowBuilderProviderExecuteTest {
     void setUp() {
         provider = new WorkflowBuilderProvider(
             sessionManager, resultEnricher, draftAutoSaver, toolDefinitionFactory, buildLogger,
-            crudModule, workflowService, interfaceClient, nodeTypeSearchService, nodeLibraryService,
+            crudModule, workflowService, interfaceClient, nodeTypeSearchService, adHocNodeExecutionService, nodeLibraryService,
             nodeParamsValidator, workflowHelpProvider, creator, connectionManager, modifier, viewer,
             loader, tableOperations, planExporter, helpModule, executionService, workflowRunRepository,
             agentWorkflowFireService, runSignalResolution, planVersionService, productionRunResolver,

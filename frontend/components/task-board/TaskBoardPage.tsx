@@ -426,7 +426,7 @@ export function TaskBoardPage() {
       {/* ── Header ────────────────────────────────────────── */}
       <div className="flex-shrink-0 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
         <div className="flex items-center gap-3 min-w-0">
-          <div className="w-10 h-10 bg-theme-tertiary rounded-full flex items-center justify-center flex-shrink-0">
+          <div className="w-10 h-10 bg-theme-tertiary rounded-xl flex items-center justify-center flex-shrink-0">
             <ClipboardList className="h-5 w-5 text-theme-primary" />
           </div>
           <div className="min-w-0">
@@ -890,7 +890,7 @@ function KanbanColumn({
         <span
           data-testid={`task-column-count-${columnKey}`}
           title={wipLimit != null ? `${count} / ${wipLimit}` : undefined}
-          className={`ml-auto text-xs font-semibold rounded-full px-2 py-0.5 min-w-[24px] text-center tabular-nums ${
+          className={`ml-auto text-xs font-semibold rounded-lg px-2 py-0.5 min-w-[24px] text-center tabular-nums ${
             wipLimit != null && count > wipLimit
               ? 'bg-red-100 dark:bg-red-900/30 text-red-600 dark:text-red-400'
               : 'text-theme-muted bg-theme-tertiary'

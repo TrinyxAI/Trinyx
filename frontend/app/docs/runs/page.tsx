@@ -49,7 +49,7 @@ export default function RunsPage() {
             ['AWAITING_SIGNAL', 'No', 'A node is blocked, waiting on a signal (see below).'],
             ['WAITING_TRIGGER', 'No', 'Idle between trigger fires, for a reusable trigger.'],
             ['COMPLETED', 'Yes', 'Finished successfully. The only status counted as a success.'],
-            ['PARTIAL_SUCCESS', 'Yes', 'Finished with a mix of completed and failed steps.'],
+            ['PARTIAL_SUCCESS', 'Yes', 'A NODE whose items partly failed. Runs never report it: they are completed or failed. Older runs may still carry it.'],
             ['SKIPPED', 'Yes', 'Finished with the relevant path skipped.'],
             ['FAILED', 'Yes', 'Finished with a failure.'],
             ['CANCELLED', 'Yes', 'Stopped permanently by a user.'],
@@ -309,7 +309,7 @@ export default function RunsPage() {
         <DocsTable
           head={['Last epoch had...', 'Badge shows']}
           rows={[
-            ['A failed step and a real completed step', 'partial_success'],
+            ['A failed step and a real completed step', 'failed'],
             ['Every step failed', 'failed'],
             ['Every step completed', 'completed'],
             ['No steps ran that cycle', 'the raw idle status'],

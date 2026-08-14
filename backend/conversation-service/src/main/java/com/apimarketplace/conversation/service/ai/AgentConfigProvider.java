@@ -1,6 +1,7 @@
 package com.apimarketplace.conversation.service.ai;
 
 import com.apimarketplace.common.web.OrgContextHeaderForwarder;
+import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.extern.slf4j.Slf4j;
@@ -61,7 +62,16 @@ public class AgentConfigProvider {
                               // Files read/write axis (no grant - files are opt-in scoping). null ⇒ "write"
                               // (default). 'read' lets the agent list/get/view but blocks create_folder/move_to_folder.
                               // Appended last so positional constructors stay append-only.
-                              String fileAccessMode) {
+                              String fileAccessMode,
+                              // Credit-spending opt-IN grant, carried in its RAW persisted shape:
+                              // either a Boolean or the richer {enabled, ...} Map. It is NOT parsed
+                              // into a boolean here on purpose - toMap() hands the raw value straight
+                              // to AgentModuleResolver, which owns the single definition of "granted"
+                              // for both shapes. null = absent = NOT granted.
+                              // Dropping it (as this record used to) made the persisted switch inert
+                              // in chat: an agent that opted in never received the tool, and the
+                              // unfiltered general-chat fallback handed it to agents that never asked.
+                              Object generation) {
         /** Back-compat constructor (pre-files); files defaults to null = unrestricted, grants to null ⇒ "none" (deny). */
         public ToolsConfig(String mode, List<String> tools, List<String> workflows, List<String> applications,
                            List<String> tables, List<String> interfaces, List<String> agents, Boolean webSearch,
@@ -81,6 +91,22 @@ public class AgentConfigProvider {
             this(mode, tools, workflows, applications, tables, interfaces, agents, webSearch,
                  tableAccessMode, workflowAccessMode, interfaceAccessMode, agentAccessMode,
                  applicationAccessMode, skillAccessMode, files, null, null, null, null, null, null);
+        }
+
+        /**
+         * Back-compat constructor (pre-generation-grants); both credit-spending opt-in
+         * grants default to null = NOT granted, which is the safe direction.
+         */
+        public ToolsConfig(String mode, List<String> tools, List<String> workflows, List<String> applications,
+                           List<String> tables, List<String> interfaces, List<String> agents, Boolean webSearch,
+                           String tableAccessMode, String workflowAccessMode, String interfaceAccessMode,
+                           String agentAccessMode, String applicationAccessMode, String skillAccessMode,
+                           List<String> files, String workflowsGrant, String tablesGrant, String interfacesGrant,
+                           String agentsGrant, String applicationsGrant, String fileAccessMode) {
+            this(mode, tools, workflows, applications, tables, interfaces, agents, webSearch,
+                 tableAccessMode, workflowAccessMode, interfaceAccessMode, agentAccessMode,
+                 applicationAccessMode, skillAccessMode, files, workflowsGrant, tablesGrant,
+                 interfacesGrant, agentsGrant, applicationsGrant, fileAccessMode, null);
         }
 
         /** Files are opt-in: only a non-empty allow-list scopes the agent. */
@@ -203,6 +229,11 @@ public class AgentConfigProvider {
             if (interfacesGrant != null) map.put("interfacesGrant", interfacesGrant);
             if (agentsGrant != null) map.put("agentsGrant", agentsGrant);
             if (applicationsGrant != null) map.put("applicationsGrant", applicationsGrant);
+            // Credit-spending opt-IN grant, emitted RAW (Boolean or {enabled,...} Map) so
+            // AgentModuleResolver.isGenerationEnabled decides.
+            // Omitted when absent ⇒ the resolver reads no key ⇒ NOT granted. Emitting it
+            // is what makes the persisted switch decide in chat, in both directions.
+            if (generation != null) map.put("generation", generation);
             return map;
         }
     }
@@ -607,13 +638,46 @@ public class AgentConfigProvider {
             String agentsGrant = getTextOrNull(node, "agentsGrant");
             String applicationsGrant = getTextOrNull(node, "applicationsGrant");
 
+            // Credit-spending opt-IN grant. Read RAW (Boolean or {enabled,...} object) and
+            // handed to AgentModuleResolver unchanged - see readOptInGrant.
+            Object generation = readOptInGrant(node, "generation");
+
             return new ToolsConfig(mode, tools, workflows, applications, tables, interfaces, agents, webSearch,
                     tableAccessMode, workflowAccessMode, interfaceAccessMode, agentAccessMode, applicationAccessMode, skillAccessMode,
-                    files, workflowsGrant, tablesGrant, interfacesGrant, agentsGrant, applicationsGrant, fileAccessMode);
+                    files, workflowsGrant, tablesGrant, interfacesGrant, agentsGrant, applicationsGrant, fileAccessMode,
+                    generation);
         } catch (Exception e) {
             log.warn("Failed to parse toolsConfig: {}", e.getMessage());
             return null;
         }
+    }
+
+    /**
+     * Read the credit-spending opt-IN {@code generation} grant
+     * in the RAW shape it was persisted in, so the single reader of that shape stays
+     * {@link com.apimarketplace.agent.config.AgentModuleResolver}:
+     * <ul>
+     *   <li>boolean node → {@link Boolean}</li>
+     *   <li>object node → {@code Map<String, Object>} (keeps {@code enabled} plus any
+     *       provider/model/quality fields the UI stores alongside it)</li>
+     *   <li>absent, null, or any other JSON type → {@code null} = NOT granted</li>
+     * </ul>
+     * Deliberately not collapsed to a boolean here: collapsing would fork the
+     * "is it granted?" rule into a second implementation that can drift from the
+     * resolver's.
+     */
+    private Object readOptInGrant(JsonNode node, String field) {
+        if (node == null || !node.has(field) || node.get(field).isNull()) {
+            return null;
+        }
+        JsonNode value = node.get(field);
+        if (value.isBoolean()) {
+            return value.asBoolean();
+        }
+        if (value.isObject()) {
+            return objectMapper.convertValue(value, new TypeReference<Map<String, Object>>() {});
+        }
+        return null;
     }
 
     private String getTextOrNull(JsonNode node, String field) {

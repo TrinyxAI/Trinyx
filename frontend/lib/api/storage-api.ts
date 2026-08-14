@@ -140,6 +140,39 @@ export interface StorageExplorerParams {
    * lists that grouping's children. Only the full-page Files browser sets it.
    */
   virtualWorkflowFolders?: boolean;
+  /**
+   * Server-side ordering key: 'date' (default, a folder's last activity), 'name',
+   * 'size' or 'type'. Applied over the FULL result set, not the loaded page, so it
+   * composes with pagination. Folders always stay ahead of files; the computed
+   * workflow folders (run / epoch / spawn / iteration) keep their own sequence,
+   * since their labels ARE that sequence.
+   */
+  sort?: ExplorerSortKey;
+  /** 'asc' | 'desc'. Omitted = the natural default for the key (A→Z, newest, biggest). */
+  direction?: ExplorerSortDirection;
+}
+
+/** The orderings the Files browser offers. Mirrors the backend {@code ExplorerSort.Key}. */
+export type ExplorerSortKey = 'date' | 'name' | 'size' | 'type';
+export type ExplorerSortDirection = 'asc' | 'desc';
+
+/**
+ * One breadcrumb of a folder trail, root-first (see {@code GET /storage/explorer/trail}).
+ *
+ * Deliberately a SUBSET of {@link StorageExplorerEntry} - the same fields the folder-label
+ * helpers read - so a crumb and a folder tile are labelled by the exact same code.
+ */
+export interface FolderCrumb {
+  /** Navigation key: a manual folder UUID, or a virtual address ('wf:…'). */
+  id: string;
+  /** The virtual address again for a computed folder; null/absent for a manual one. */
+  virtualId?: string | null;
+  virtualKind?: 'WORKFLOW' | 'RUN' | 'EPOCH' | 'SPAWN' | 'ITERATION' | null;
+  fileName?: string | null;
+  workflowName?: string | null;
+  epoch?: number | null;
+  spawn?: number | null;
+  itemIndex?: number | null;
 }
 
 /**
@@ -326,10 +359,32 @@ class StorageApiService {
     // Phase 2b: also surface the computed virtual workflow folder tree at root and
     // navigate into it via the 'wf:…' virtual keys.
     if (params.virtualWorkflowFolders) queryParams.virtualWorkflowFolders = 'true';
+    // Ordering is server-side so it spans the whole result set, not just this page.
+    if (params.sort) queryParams.sort = params.sort;
+    if (params.direction) queryParams.direction = params.direction;
 
     return await apiClient.get<StorageExplorerPage>('/storage/explorer', {
       params: queryParams,
     });
+  }
+
+  /**
+   * The breadcrumb trail of a folder, root-first and ending with that folder.
+   *
+   * Used when the Files page opens on a folder it did not navigate to itself (a refresh
+   * or a pasted link): the URL carries only the current folder, so the path above it has
+   * to be rebuilt. `filesOnly`/`s3Only` must match what the listing sends - they decide
+   * which runs count as folders, and therefore the "Run N" numbering. An unknown or
+   * inaccessible folder returns an empty trail, which reads as "you are at the root".
+   */
+  async getFolderTrail(
+    folderId: string,
+    opts: { filesOnly?: boolean; s3Only?: boolean } = {},
+  ): Promise<FolderCrumb[]> {
+    const params: Record<string, string> = { folderId };
+    if (opts.filesOnly) params.filesOnly = 'true';
+    if (opts.s3Only) params.s3Only = 'true';
+    return await apiClient.get<FolderCrumb[]>('/storage/explorer/trail', { params });
   }
 
   /**

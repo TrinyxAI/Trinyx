@@ -203,7 +203,7 @@ export function ApplicationVisualizeCard({ publicationId, title, runId, onDelete
       {/* Active tab overlay */}
       {isTabActive && (
         <div className="absolute inset-0 z-20 bg-black/5 backdrop-blur-[3px] flex items-center justify-center rounded-xl cursor-pointer">
-          <div className="flex items-center gap-2 px-4 py-2 bg-white/90 dark:bg-slate-800/90 rounded-full">
+          <div className="flex items-center gap-2 px-4 py-2 bg-white/90 dark:bg-slate-800/90 rounded-md">
             <X className="w-4 h-4 text-theme-primary" />
             <span className="text-sm font-medium text-theme-primary">{t('clickToClose')}</span>
           </div>
@@ -248,7 +248,7 @@ export function ApplicationVisualizeCard({ publicationId, title, runId, onDelete
           {publication.nodeIcons && publication.nodeIcons.length > 0 ? (
             <WorkflowNodeIcons nodeIcons={publication.nodeIcons} />
           ) : (
-            <div className="w-12 h-12 bg-theme-secondary rounded-full flex items-center justify-center">
+            <div className="w-12 h-12 bg-theme-secondary rounded-xl flex items-center justify-center">
               <Package className="w-6 h-6 text-theme-tertiary" />
             </div>
           )}

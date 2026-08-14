@@ -829,22 +829,37 @@ public class InterfaceService {
     }
 
     /**
-     * Create or accumulate image-generation results into a single Interface
-     * grouped by (conversation, message, agent). Mirrors
+     * Create or accumulate generated assets into a single Interface grouped by
+     * (conversation, message, agent). Mirrors
      * {@link #createOrUpdateAgentBrowseInterface} so the chat side panel can
-     * follow the same protocol: re-fetch the interface, render the
-     * accumulated images, no client-side state.
+     * follow the same protocol: re-fetch the interface, render the accumulated
+     * assets, no client-side state.
      *
-     * <p>The {@code result} map is appended to {@code data.images[]} (each
-     * entry contains {@code {base64, mime_type, prompt, provider,
-     * billing_model, ...}}). This matches what
-     * {@code ImageGenerationModule.buildResultData} produces, so the
-     * persistence layer doesn't reshape the payload.
+     * <p><b>The stored shape is the contract, not the producer's shape.</b>
+     * Assets always land in {@code data.images[]}, each entry a FileRef
+     * ({@code {_type, path, name, mimeType, size, id}}), because that is what
+     * the persisted row is read back as. Two producers write here and this
+     * method normalizes both through {@link #extractAssets}:
+     * <ul>
+     *   <li>the unified generation tool returns ONE asset per call under
+     *       {@code file}, alongside {@code model}, {@code kind},
+     *       {@code provider}, {@code billed_quantity} and {@code billed_unit};</li>
+     *   <li>the legacy image tool returns a list under {@code images}, plus
+     *       {@code provider}, {@code billing_model} and {@code prompt}.</li>
+     * </ul>
+     * The legacy shape is READ, not required: that tool is still registered
+     * and still posts that body, and rows it already wrote are still rendered
+     * from storage. Deleting it takes its shape out of circulation without
+     * touching this method.
+     *
+     * @param prompt what the caller asked for, when the payload does not carry
+     *               it. The generation output has no prompt field (a prompt is
+     *               an input, not a result), so it travels as its own request
+     *               field; a legacy payload's own {@code prompt} wins.
      */
-    @SuppressWarnings("unchecked")
     public InterfaceEntity createOrUpdateImageGenerationInterface(
             String tenantId, String conversationId, String messageId, String agentId,
-            String name, Map<String, Object> result, String organizationId) {
+            String name, Map<String, Object> result, String prompt, String organizationId) {
 
         Optional<InterfaceEntity> existing = interfaceRepository.findImageGenerationInterface(
                 tenantId, conversationId, messageId, agentId);
@@ -854,18 +869,10 @@ public class InterfaceService {
             long oldSize = estimateInterfaceSize(entity);
             Map<String, Object> data = entity.getData();
             if (data == null) data = new HashMap<>();
+            @SuppressWarnings("unchecked")
             List<Map<String, Object>> images = (List<Map<String, Object>>) data.get("images");
             if (images == null) images = new ArrayList<>();
-            // Append every image from the new result - module already
-            // returns data.images[] as a list, even for n=1.
-            Object newImages = result.get("images");
-            if (newImages instanceof List<?> newList) {
-                for (Object item : newList) {
-                    if (item instanceof Map<?, ?> imgMap) {
-                        images.add((Map<String, Object>) imgMap);
-                    }
-                }
-            }
+            images.addAll(extractAssets(result));
             data.put("images", images);
             entity.setData(data);
             String currentName = entity.getName();
@@ -889,21 +896,8 @@ public class InterfaceService {
         }
 
         Map<String, Object> data = new HashMap<>();
-        List<Map<String, Object>> images = new ArrayList<>();
-        Object newImages = result.get("images");
-        if (newImages instanceof List<?> newList) {
-            for (Object item : newList) {
-                if (item instanceof Map<?, ?> imgMap) {
-                    images.add((Map<String, Object>) imgMap);
-                }
-            }
-        }
-        data.put("images", images);
-        // Preserve provenance metadata so the side panel can group by
-        // model, show cost breakdown, etc.
-        if (result.get("provider") != null) data.put("provider", result.get("provider"));
-        if (result.get("billing_model") != null) data.put("billing_model", result.get("billing_model"));
-        if (result.get("prompt") != null) data.put("prompt", result.get("prompt"));
+        data.put("images", extractAssets(result));
+        copyProvenance(result, prompt, data);
         entity.setData(data);
 
         InterfaceEntity saved = interfaceRepository.save(entity);
@@ -911,6 +905,72 @@ public class InterfaceService {
         log.info("[InterfaceService] Created image_generation interface {} for conversation={} message={} agent={}",
                 saved.getId(), conversationId, messageId, agentId);
         return saved;
+    }
+
+    /**
+     * The assets a generation payload carries, in the one stored shape.
+     *
+     * <p>Both keys are read on every call rather than one being chosen: a
+     * payload carrying both contributes both, so there is no precedence rule
+     * that can be wrong, and no second branch to keep in step when the legacy
+     * key stops being sent.
+     */
+    private static List<Map<String, Object>> extractAssets(Map<String, Object> result) {
+        List<Map<String, Object>> assets = new ArrayList<>();
+        if (result == null) return assets;
+        // Legacy image tool: a list, even for a single image.
+        if (result.get("images") instanceof List<?> list) {
+            for (Object item : list) {
+                if (item instanceof Map<?, ?> asset && !asset.isEmpty()) {
+                    assets.add(copyOf(asset));
+                }
+            }
+        }
+        // Generation tool: exactly one asset, as a canonical FileRef.
+        if (result.get("file") instanceof Map<?, ?> file && !file.isEmpty()) {
+            assets.add(copyOf(file));
+        }
+        return assets;
+    }
+
+    /**
+     * Carry the provenance the chat card reads back: who produced the asset,
+     * with which model, from which prompt, and what the call was billed on.
+     */
+    private static void copyProvenance(Map<String, Object> result, String prompt,
+                                        Map<String, Object> data) {
+        if (result != null) {
+            putIfPresent(data, "provider", result.get("provider"));
+            putIfPresent(data, "kind", result.get("kind"));
+            putIfPresent(data, "billed_quantity", result.get("billed_quantity"));
+            putIfPresent(data, "billed_unit", result.get("billed_unit"));
+            // One model id under two keys, deliberately. `model` is what the
+            // generation output calls it and is the name that survives; the
+            // already-stored rows and the card that renders them call it
+            // `billing_model`. Writing both means a generation names its model
+            // on the card without the card having to change, and a row written
+            // today still reads correctly after the legacy key is retired.
+            Object model = result.get("model") != null ? result.get("model") : result.get("billing_model");
+            putIfPresent(data, "model", model);
+            putIfPresent(data, "billing_model", model);
+            putIfPresent(data, "prompt", result.get("prompt"));
+        }
+        // Only when the payload did not carry one: a legacy payload's prompt is
+        // the exact text that was sent, so it outranks the caller's copy.
+        if (!data.containsKey("prompt")) {
+            putIfPresent(data, "prompt", prompt);
+        }
+    }
+
+    private static void putIfPresent(Map<String, Object> target, String key, Object value) {
+        if (value != null) target.put(key, value);
+    }
+
+    /** Defensive copy that also fixes the key type, since the payload is untyped JSON. */
+    private static Map<String, Object> copyOf(Map<?, ?> source) {
+        Map<String, Object> copy = new LinkedHashMap<>();
+        source.forEach((k, v) -> copy.put(String.valueOf(k), v));
+        return copy;
     }
 
     @SuppressWarnings("unchecked")

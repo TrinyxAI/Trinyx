@@ -40,8 +40,12 @@ vi.mock('@/contexts/WorkflowRunContext', () => ({
   useRun: () => [runStateRef.current, { executeStep: vi.fn() }],
 }));
 
+// Mutable so a test can put the surface in EDIT mode, which is where the epoch
+// is cleared without being recorded as a choice.
+const modeRef = vi.hoisted(() => ({ current: { isRunMode: true, isPreviewOnly: false } }));
+
 vi.mock('@/contexts/WorkflowModeContext', () => ({
-  useWorkflowMode: () => ({ isRunMode: true, isPreviewOnly: false }),
+  useWorkflowMode: () => modeRef.current,
 }));
 
 vi.mock('@/app/workflows/builder/hooks/useInterfaces', () => ({
@@ -130,6 +134,20 @@ vi.mock('next-intl', () => ({
 }));
 
 import { ApplicationTabContent } from '../ApplicationTabContent';
+import {
+  getPickedEpoch,
+  markEpochPickedByUser,
+  resetEpochSelectionState,
+} from '@/components/workflow/run-panel/useDefaultEpochSelection';
+
+// The picked epoch is a MODULE-GLOBAL keyed by run: a test whose assertion fails
+// before its own cleanup would leak a pick into every test after it - exactly
+// when the output is being read. Reset from a hook, which runs either way.
+beforeEach(() => {
+  resetEpochSelectionState();
+  modeRef.current = { isRunMode: true, isPreviewOnly: false };
+});
+afterEach(() => resetEpochSelectionState());
 
 const baseConfig = {
   interfaceId: 'iface-1',
@@ -451,6 +469,284 @@ describe('ApplicationTabContent - which epoch the tab opens on', () => {
 
     expect(getPickedEpoch('run_1'), 'the All-epochs choice survives the new fire').toBeNull();
     resetEpochSelectionState();
+  });
+
+  it('opens on the epoch picked in the Run tab, which it was not mounted to hear', async () => {
+    // The reported bug: the Run tab and the Application tab are sub-tabs of the
+    // same panel, so only one of them is mounted at a time. The pick travels as a
+    // one-shot window event, so the tab that was not there when it fired learnt
+    // nothing and came up on the cumulative view - the epoch the user had just
+    // clicked was gone one click later.
+    markEpochPickedByUser('run_1', 2);
+
+    const { getByTestId } = render(
+      <ApplicationTabContent
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        config={baseConfig as any}
+        runId="run_1"
+        workflowId="wf-1"
+        onAction={() => undefined}
+        toolbarOpen
+        onToolbarOpenChange={() => undefined}
+      />,
+    );
+    await flushEffects();
+
+    const control = getByTestId('application-epoch-selector');
+    expect(control.getAttribute('data-all-epochs'), 'restored onto the picked fire').toBeNull();
+    expect(control.textContent).toContain('2');
+  });
+
+  it('lets that pick outrank the newest-fire seed of an application page', async () => {
+    // The application page seeds the newest fire, which would otherwise land on
+    // top of the restore and silently undo the pick.
+    markEpochPickedByUser('run_1', 1);
+    const onViewingEpochChange = vi.fn();
+
+    render(
+      <ApplicationTabContent
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        config={baseConfig as any}
+        runId="run_1"
+        workflowId="wf-1"
+        onAction={() => undefined}
+        viewingEpoch={null}
+        onViewingEpochChange={onViewingEpochChange}
+        openOnLatestEpoch
+        toolbarOpen
+        onToolbarOpenChange={() => undefined}
+      />,
+    );
+    await flushEffects();
+
+    expect(onViewingEpochChange).toHaveBeenCalledWith(1);
+    expect(onViewingEpochChange, 'the seed must not overwrite the choice').not.toHaveBeenCalledWith(3);
+  });
+
+  it('restores over the seed on the published-app shape too, where it owns its own state', async () => {
+    // ApplicationSidePanel renders the tab UNCONTROLLED and with openOnLatestEpoch:
+    // restore and seed then both write the same local state, so this is where a
+    // mistake in either path's `onViewingEpochChange ?? setLocal` branching shows.
+    markEpochPickedByUser('run_1', 1);
+
+    const { getByTestId } = render(
+      <ApplicationTabContent
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        config={baseConfig as any}
+        runId="run_1"
+        workflowId="wf-1"
+        onAction={() => undefined}
+        openOnLatestEpoch
+        toolbarOpen
+        onToolbarOpenChange={() => undefined}
+      />,
+    );
+    await flushEffects();
+
+    const control = getByTestId('application-epoch-selector');
+    expect(control.getAttribute('data-all-epochs'), 'the pick wins over the seed').toBeNull();
+    expect(control.textContent, 'epoch 1 (the pick), not 3 (the newest fire)').toContain('1');
+  });
+
+  it('honours an explicit "All epochs" choice instead of seeding the newest fire', async () => {
+    // `null` is a choice, not an absence: a user who went back to all epochs in
+    // the Run tab must not find the newest fire pinned when they look at the app.
+    markEpochPickedByUser('run_1', null);
+    const onViewingEpochChange = vi.fn();
+
+    render(
+      <ApplicationTabContent
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        config={baseConfig as any}
+        runId="run_1"
+        workflowId="wf-1"
+        onAction={() => undefined}
+        viewingEpoch={null}
+        onViewingEpochChange={onViewingEpochChange}
+        openOnLatestEpoch
+        toolbarOpen
+        onToolbarOpenChange={() => undefined}
+      />,
+    );
+    await flushEffects();
+
+    expect(onViewingEpochChange, 'nothing to select: all epochs IS the choice').not.toHaveBeenCalled();
+  });
+
+  it('tells the other surfaces about the restored epoch, and records no new pick', async () => {
+    // The restore is deliberately routed through the BROADCASTING handler: the
+    // canvas beside this tab must land on the same epoch. Its sibling tests pin
+    // the absence of a broadcast for the two automatic paths; this one pins its
+    // presence, so swapping in a local-only setter cannot stay green. And it goes
+    // through the attribution-free handler, so showing a pick is not making one.
+    markEpochPickedByUser('run_1', 2);
+    const broadcasts: unknown[] = [];
+    const listener = (e: Event) => broadcasts.push((e as CustomEvent).detail);
+    window.addEventListener('viewingEpochChanged', listener);
+
+    render(
+      <ApplicationTabContent
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        config={baseConfig as any}
+        runId="run_1"
+        workflowId="wf-1"
+        onAction={() => undefined}
+        viewingEpoch={null}
+        onViewingEpochChange={() => undefined}
+        toolbarOpen
+        onToolbarOpenChange={() => undefined}
+      />,
+    );
+    await flushEffects();
+    window.removeEventListener('viewingEpochChanged', listener);
+
+    expect(broadcasts, 'scoped to this run, so a sibling app tab is unmoved')
+      .toEqual([{ epoch: 2, runId: 'run_1' }]);
+    expect(getPickedEpoch('run_1'), 'showing a pick is not making one').toBe(2);
+  });
+
+  it('leaves a tab bound to another run on its own view', async () => {
+    // Two published-app tabs stay mounted side by side: each carries its own
+    // choice, and a run with no pick of its own must not inherit its neighbour's.
+    markEpochPickedByUser('run_1', 2);
+    const onViewingEpochChange = vi.fn();
+
+    render(
+      <ApplicationTabContent
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        config={baseConfig as any}
+        runId="run_2"
+        workflowId="wf-1"
+        onAction={() => undefined}
+        viewingEpoch={null}
+        onViewingEpochChange={onViewingEpochChange}
+        toolbarOpen
+        onToolbarOpenChange={() => undefined}
+      />,
+    );
+    await flushEffects();
+
+    expect(onViewingEpochChange, 'another run carries its own choice').not.toHaveBeenCalled();
+    expect(getPickedEpoch('run_2')).toBeUndefined();
+  });
+
+  it('gives each of two mounted tabs the epoch picked for ITS run', async () => {
+    // The keepMounted multi-app side panel: the module-global is keyed by run
+    // precisely so two tabs alive at once do not slave each other.
+    markEpochPickedByUser('run_1', 1);
+    markEpochPickedByUser('run_2', 3);
+
+    const { getAllByTestId } = render(
+      <>
+        <ApplicationTabContent
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          config={baseConfig as any}
+          runId="run_1"
+          workflowId="wf-1"
+          onAction={() => undefined}
+          toolbarOpen
+          onToolbarOpenChange={() => undefined}
+        />
+        <ApplicationTabContent
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          config={{ ...baseConfig, interfaceId: 'iface-2' } as any}
+          runId="run_2"
+          workflowId="wf-1"
+          onAction={() => undefined}
+          toolbarOpen
+          onToolbarOpenChange={() => undefined}
+        />
+      </>,
+    );
+    await flushEffects();
+
+    const controls = getAllByTestId('application-epoch-selector');
+    expect(controls, 'both tabs render their own selector').toHaveLength(2);
+    expect(controls[0].textContent, "run_1's tab shows run_1's pick").toContain('1');
+    expect(controls[1].textContent, "run_2's tab shows run_2's pick").toContain('3');
+  });
+
+  it('stays on All epochs after the user clicks it here, instead of snapping back', async () => {
+    // Newly reachable now that this tab restores: a surface that reports "nothing
+    // selected" is indistinguishable from one that just mounted, so a return to
+    // All epochs that was NOT recorded would be undone on the very next commit -
+    // the user snapped back onto the epoch they just left. It sticks because the
+    // dropdown records the choice (`null` IS a choice) and the restore skips it.
+    markEpochPickedByUser('run_1', 2);
+    const onViewingEpochChange = vi.fn();
+
+    const { getByTestId, rerender } = render(
+      <ApplicationTabContent
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        config={baseConfig as any}
+        runId="run_1"
+        workflowId="wf-1"
+        onAction={() => undefined}
+        viewingEpoch={2}
+        onViewingEpochChange={onViewingEpochChange}
+        toolbarOpen
+        onToolbarOpenChange={() => undefined}
+      />,
+    );
+    await flushEffects();
+
+    act(() => { getByTestId('application-epoch-selector').click(); });
+    act(() => { getByTestId('application-epoch-option-all').click(); });
+    expect(onViewingEpochChange, 'the click asks for the cumulative view').toHaveBeenCalledWith(null);
+
+    // The parent applies it - the commit where a bounce-back would happen.
+    onViewingEpochChange.mockClear();
+    rerender(
+      <ApplicationTabContent
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        config={baseConfig as any}
+        runId="run_1"
+        workflowId="wf-1"
+        onAction={() => undefined}
+        viewingEpoch={null}
+        onViewingEpochChange={onViewingEpochChange}
+        toolbarOpen
+        onToolbarOpenChange={() => undefined}
+      />,
+    );
+    await flushEffects();
+
+    expect(onViewingEpochChange, 'nothing pulls the user back onto epoch 2').not.toHaveBeenCalled();
+    expect(getByTestId('application-epoch-selector').getAttribute('data-all-epochs'), 'and it shows it')
+      .toBe('true');
+  });
+
+  it('does not restore in edit mode, where the epoch was cleared on purpose', async () => {
+    // The edit/run toggle drops the epoch WITHOUT recording it: that reset is not
+    // a choice. A tab still mounted with a run id must not push the old pick back
+    // onto the canvas that just dropped it - hence the `enabled: isRunMode` gate,
+    // which mirrors the canvas and the Run tab.
+    markEpochPickedByUser('run_1', 2);
+    modeRef.current = { isRunMode: false, isPreviewOnly: false };
+    const onViewingEpochChange = vi.fn();
+    const broadcasts: unknown[] = [];
+    const listener = (e: Event) => broadcasts.push((e as CustomEvent).detail);
+    window.addEventListener('viewingEpochChanged', listener);
+
+    render(
+      <ApplicationTabContent
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        config={baseConfig as any}
+        runId="run_1"
+        workflowId="wf-1"
+        onAction={() => undefined}
+        viewingEpoch={null}
+        onViewingEpochChange={onViewingEpochChange}
+        toolbarOpen
+        onToolbarOpenChange={() => undefined}
+      />,
+    );
+    await flushEffects();
+    window.removeEventListener('viewingEpochChanged', listener);
+
+    expect(onViewingEpochChange, 'edit mode restores nothing').not.toHaveBeenCalled();
+    expect(broadcasts, 'and pushes nothing onto the canvas').toEqual([]);
+    expect(getPickedEpoch('run_1'), 'the pick is kept for the next run-mode mount').toBe(2);
   });
 });
 

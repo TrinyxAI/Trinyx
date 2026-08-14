@@ -965,7 +965,8 @@
     "dashboard": {
       "storageOverview": "Speicherübersicht"
     },
-    "openInSidePanel": "Im Seitenpanel öffnen"
+    "openInSidePanel": "Im Seitenpanel öffnen",
+    "generateAsset": "Bild, Video oder Ton erzeugen"
   },
   "resourceCarousel": {
     "resourcesCreated": "{count, plural, one {# Ressource} other {# Ressourcen}}",
@@ -1028,12 +1029,9 @@
       "loadingMoreRows": "Weitere Zeilen werden geladen…",
       "scrollForMoreRows": "Scrollen für weitere Zeilen",
       "epochTooltip": {
-        "completed": "Abgeschlossen",
         "duration": "Dauer",
         "ended": "Beendet",
         "epoch": "Epoche #{epoch}",
-        "pending": "Ausstehend",
-        "running": "Läuft",
         "started": "Gestartet",
         "stillRunning": "Läuft noch"
       },
@@ -1470,6 +1468,16 @@
     "continueWorkflow": "Weiter",
     "itemAlreadyResolved": "Dieses Element wurde bereits fortgesetzt",
     "continueItemRemaining": "Dieses Element fortsetzen ({count} ausstehend)",
+    "loadTemplateValues": "Beispielwerte laden",
+    "loadTemplateValuesHint": "Füllt die Formulare mit den Beispielwerten der Original-App. Es wird nichts gesendet, bis Sie absenden.",
+    "templateValuesEmpty": "Diese App liefert keine Beispielwerte",
+    "templateValuesFailed": "Beispielwerte konnten nicht geladen werden",
+    "resetData": "Daten zurücksetzen",
+    "resetDataHint": "Setzt die Tabellen dieser App auf die ursprünglich mitgelieferten Zeilen zurück",
+    "resetDataConfirm": "Die Tabellen dieser App auf die ursprünglich mitgelieferten Zeilen zurücksetzen? Von Ihnen hinzugefügte oder geänderte Zeilen werden ersetzt. Ihr Workflow und seine Ausführungen bleiben unberührt.",
+    "resetDataSuccess": "{tables, plural, one {# Tabelle zurückgesetzt} other {# Tabellen zurückgesetzt}}, {rows, plural, one {# Zeile geschrieben} other {# Zeilen geschrieben}}",
+    "resetDataPartial": "{tables, plural, one {# Tabelle zurückgesetzt} other {# Tabellen zurückgesetzt}}, {rows, plural, one {# Zeile geschrieben} other {# Zeilen geschrieben}}. Unberührt: {skipped}",
+    "resetDataFailed": "Daten konnten nicht zurückgesetzt werden",
     "workflows": {
       "title": "Workflows",
       "subtitle": "Entdecken und nutzen Sie vorgefertigte Workflows aus der Community",
@@ -1580,6 +1588,30 @@
     "emptyWorkflows": "Noch keine geteilten Workflows",
     "emptyWorkflowsHint": "Seien Sie der Erste, der einen Workflow teilt!",
     "filterAgents": "Agenten",
+    "filterByType": "Nach Typ filtern",
+    "sortBy": "Sortieren nach",
+    "sortPopular": "Am beliebtesten",
+    "sortRating": "Am besten bewertet",
+    "sortRecent": "Neueste",
+    "sortInstalls": "Am häufigsten installiert",
+    "filterByRating": "Nach Bewertung filtern",
+    "ratingAny": "Alle Bewertungen",
+    "ratingRated": "Mit Bewertung",
+    "rating4Plus": "4 Sterne und mehr",
+    "rating3Plus": "3 Sterne und mehr",
+    "filterByDate": "Nach Datum filtern",
+    "dateAny": "Alle Zeiträume",
+    "date7Days": "Letzte 7 Tage",
+    "date30Days": "Letzte 30 Tage",
+    "date90Days": "Letzte 3 Monate",
+    "dateYear": "Letztes Jahr",
+    "filterByPrice": "Nach Preis filtern",
+    "priceAny": "Alle Preise",
+    "priceFree": "Kostenlos",
+    "pricePaid": "Kostenpflichtig",
+    "resetFilters": "Filter zurücksetzen",
+    "noFilterResults": "Keine Anwendung entspricht diesen Filtern",
+    "noFilterResultsHint": "Erweitern Sie den Bewertungs-, Datums- oder Preisfilter, um mehr Anwendungen zu sehen.",
     "filterSkills": "Skills",
     "filterTables": "Tabellen",
     "noLandingPreview": "Keine Vorschau verfügbar",
@@ -1795,6 +1827,21 @@
     "workflowSteps": "Workflow-Schritte"
   },
   "modals": {
+    "accountRestore": {
+      "title": "Ihr Konto ist zur Löschung vorgemerkt",
+      "checkingTitle": "Konto wird geprüft",
+      "checkingDescription": "Einen Moment, wir rufen den Status Ihres Kontos ab.",
+      "description": "Es wird am {date} endgültig gelöscht. Bis dahin können Sie es unverändert zurückholen.",
+      "blockedTitle": "Ihr Konto ist inaktiv",
+      "blockedDescription": "Dieses Konto kann derzeit nicht verwendet werden. Wenn Sie das nicht erwartet haben, wenden Sie sich an den Support.",
+      "whatHappens": "Wenn Sie es reaktivieren",
+      "keepEverything": "Ihre Workflows, Agenten, Tabellen und Dateien kommen unverändert zurück",
+      "untilThenNothingLost": "Es wurde noch nichts gelöscht, das Konto ist nur deaktiviert",
+      "afterThatPermanent": "Nach diesem Datum ist die Löschung endgültig und nicht umkehrbar",
+      "reactivate": "Konto reaktivieren",
+      "signOut": "Abmelden",
+      "restoreFailed": "Ihr Konto konnte nicht reaktiviert werden. Bitte versuchen Sie es erneut."
+    },
     "agentError": {
       "title": "Etwas ist schiefgelaufen",
       "description": "Bei der Ausführung ist ein Fehler aufgetreten. Bitte versuchen Sie es gleich noch einmal.",
@@ -2924,10 +2971,11 @@
       "defaultMarkupLabel": "Standard",
       "errors": {
         "credentialNotFound": "Zugangsdaten nicht gefunden",
-        "duplicateTool": "Jedes Tool darf nur einmal vorkommen",
+        "duplicateTool": "Jede Kombination aus Endpunkt und Modell darf nur einmal vorkommen",
         "fetchFailed": "Preisgestaltung konnte nicht geladen werden",
         "invalidDefault": "Der Standardaufschlag muss eine nicht-negative Zahl sein",
         "invalidOverride": "Ungültiger Aufschlag für Tool {tool}",
+        "loadFailed": "Die veröffentlichten Preise konnten nicht geladen werden. Ein Veröffentlichen würde die aktiven Preise durch eine leere Liste ersetzen und bleibt daher gesperrt, bis sie geladen sind.",
         "publishFailed": "Preisgestaltung konnte nicht veröffentlicht werden"
       },
       "history": "Versionsverlauf",
@@ -2941,12 +2989,34 @@
       "publishNew": "Neue Version veröffentlichen",
       "publishedVersion": "Version v{version} veröffentlicht",
       "publishing": "Wird veröffentlicht…",
+      "retry": "Erneut versuchen",
       "selectTool": "Tool auswählen…",
       "subtitle": "Veröffentlichen Sie eine neue Preisversion für diese Zugangsdaten. Bestehende Workflow-Ausführungen behalten die Version, an die sie gebunden waren.",
       "success": "Gespeichert",
       "title": "Aufschlag-Preisgestaltung",
       "unknownTool": "Unbekanntes Tool",
-      "warningInFlightRuns": "Die Veröffentlichung erstellt Version N+1. Bereits laufende Workflow-Ausführungen behalten die Version, an die sie gebunden waren - nur neue Ausführungen übernehmen diese."
+      "warningInFlightRuns": "Die Veröffentlichung erstellt Version N+1. Bereits laufende Workflow-Ausführungen behalten die Version, an die sie gebunden waren - nur neue Ausführungen übernehmen diese.",
+      "model": "Modell",
+      "modelAny": "Alle Modelle (gesamter Endpunkt)",
+      "modelHint": "Lassen Sie das Modell leer, um den gesamten Endpunkt zu bepreisen. Wählen Sie ein Modell, wenn ein Endpunkt mehrere davon zu unterschiedlichen Sätzen ausführt.",
+      "unit": "Abgerechnet pro",
+      "baseCredits": "Grundbetrag",
+      "unitCredits": "Pro Einheit",
+      "minCredits": "Mindestbetrag",
+      "maxCredits": "Höchstbetrag",
+      "removePrice": "Diesen Preis entfernen",
+      "units": {
+        "call": "Aufruf",
+        "second": "Sekunde",
+        "minute": "Minute",
+        "image": "Bild",
+        "character": "Zeichen"
+      },
+      "summaryFlat": "{amount} Credits pro Aufruf",
+      "summaryPerUnit": "{rate} Credits pro {unit}",
+      "summaryBasePlusUnit": "{base} Credits + {rate} Credits pro {unit}",
+      "floorNote": "mindestens {min} Credits",
+      "ceilingNote": "höchstens {max} Credits"
     }
   },
   "aiProviders": {
@@ -3119,10 +3189,6 @@
         "browser_agent": {
           "label": "Browser-Agent",
           "hint": "Für den Browser Agent verfügbare Modelle. Der Rang legt die Standardreihenfolge fest; Deaktivieren entfernt das Modell aus Browser-Agent-Läufen."
-        },
-        "image_generation": {
-          "label": "Bildgenerierung",
-          "hint": "Anbieter für Bildgenerierung. Reihenfolge steuert die Standardansicht; deaktivieren entfernt das Modell aus dem Bildgenerierungs-Tool."
         }
       },
       "allProviders": "Alle Anbieter",
@@ -3223,10 +3289,11 @@
       "local": "Lokale Schlüssel",
       "cloudHint": "Integrationsaufrufe laufen über Ihr verknüpftes LiveContext-Cloud-Konto und verwenden dessen Plattform-Zugangsdaten. Anfragen laufen durch die Cloud, und pro Aufruf wird dort ein kleiner Aufschlag in Credits abgerechnet.",
       "localHint": "Integrations-Zugangsdaten werden lokal auf dieser Installation konfiguriert und verwendet.",
-      "subscriptionRequired": "Die Cloud-Option erfordert ein aktives kostenpflichtiges Abonnement für Ihr verknüpftes Cloud-Konto.",
+      "subscriptionRequired": "Die Cloud-Nutzung erfordert ein aktives kostenpflichtiges Abonnement im verknüpften Cloud-Konto. Ein kostenloses Konto kann weitergeleitete Aufrufe nicht bezahlen.",
       "viewPlans": "Tarife ansehen",
       "linkRequired": "Verknüpfen Sie ein Cloud-Konto, bevor Sie zu Cloud wechseln.",
-      "saveError": "Die Quelle der Integrations-Zugangsdaten konnte nicht aktualisiert werden."
+      "saveError": "Die Quelle der Integrations-Zugangsdaten konnte nicht aktualisiert werden.",
+      "cloudCovers": "Das gilt auch für die Generierung: Bilder, Video, Ton, Sprache und Musik laufen über die Anbieterschlüssel des Cloud-Kontos und werden dort in Credits abgerechnet, pro Sekunde oder pro Datei, zum für jedes Modell veröffentlichten Preis."
     },
     "cloudSource": {
       "apiKeys": "API-Schlüssel",
@@ -3583,6 +3650,13 @@
         "scopesPlaceholder": "z. B. read write (durch Leerzeichen getrennt)",
         "tokenUrl": "Token-URL",
         "tokenUrlPlaceholder": "https://provider.com/oauth/token"
+      },
+      "platformKey": {
+        "title": "Sie müssen keinen Schlüssel hinterlegen",
+        "explanation": "Dieser Dienst ist über den Plattformschlüssel verfügbar und wird pro Aufruf in Credits abgerechnet. Mit einem eigenen Schlüssel zahlen Sie stattdessen direkt beim Anbieter, und die Plattform berechnet Ihnen nichts.",
+        "explanationPriced": "Dieser Dienst ist über den Plattformschlüssel für {credits} Credits pro Aufruf verfügbar. Mit einem eigenen Schlüssel zahlen Sie stattdessen direkt beim Anbieter, und die Plattform berechnet Ihnen nichts.",
+        "use": "Plattformschlüssel verwenden",
+        "orOwn": "Oder hinterlegen Sie unten Ihren eigenen Schlüssel."
       }
     },
     "options": "Optionen",
@@ -3594,6 +3668,16 @@
       "label": "Quelle der Zugangsdaten",
       "markupNote": "Dieser Schritt verwendet die geteilten Plattform-Zugangsdaten. Bei jedem Aufruf wird ein kleiner Aufschlag berechnet.",
       "markupNoteWithRate": "Dieser Schritt verwendet die geteilten Plattform-Zugangsdaten. Bei jedem Aufruf werden {rate} Credits als Aufschlag berechnet.",
+      "markupNoteNotSold": "Dieser Schritt ist auf die geteilten Plattform-Zugangsdaten eingestellt, doch diese Generierung wird darüber nicht verkauft: Für dieses Modell ist kein Preis veröffentlicht, nur der Standardwert der Zugangsdaten, den eine Generierung nie erbt. Wechseln Sie zu Ihrem eigenen Schlüssel, um sie auszuführen.",
+      "markupNoteWithUnitRate": "Dieser Schritt verwendet die geteilten Plattform-Zugangsdaten. Berechnet werden {unitRate} Credits pro {unit}, eine größere Anfrage kostet also mehr.",
+      "markupNoteWithUnitRateAndTotal": "Dieser Schritt verwendet die geteilten Plattform-Zugangsdaten. {unitRate} Credits pro {unit}, {quantity} {unit} = {total} Credits für diesen Lauf.",
+      "priceUnits": {
+        "call": "Aufruf",
+        "second": "Sekunde",
+        "minute": "Minute",
+        "image": "Bild",
+        "character": "Zeichen"
+      },
       "notAvailable": "Für diesen Dienst sind keine Plattform-Zugangsdaten konfiguriert",
       "platform": "Plattform",
       "platformExplanation": "Keine persönliche Einrichtung erforderlich - die Plattform besitzt den API-Schlüssel. Ihnen wird nur der Aufschlag pro Aufruf zusätzlich zu den Basis-Node-Kosten berechnet.",
@@ -4940,6 +5024,13 @@
     "noMatches": "Keine Dateien entsprechen deinen Filtern",
     "viewGrid": "Rasteransicht",
     "viewList": "Listenansicht",
+    "sortBy": "Sortieren nach",
+    "sortByDate": "Datum",
+    "sortByName": "Name",
+    "sortBySize": "Größe",
+    "sortByType": "Typ",
+    "sortAscending": "Aufsteigende Reihenfolge",
+    "sortDescending": "Absteigende Reihenfolge",
     "dateFrom": "Von",
     "dateTo": "Bis",
     "typeColumn": "Typ",
@@ -4986,7 +5077,8 @@
     "moveToRoot": "Oberste Ebene (Stamm)",
     "moveHere": "Hierher verschieben",
     "noFoldersYet": "Noch keine Ordner - erstellen Sie zuerst einen oder verschieben Sie auf die oberste Ebene.",
-    "backToParent": "Eine Ebene nach oben"
+    "backToParent": "Eine Ebene nach oben",
+    "generate": "Generieren"
   },
   "fileDetail": {
     "download": "{name} herunterladen",
@@ -5408,17 +5500,17 @@
     },
     "advanced": {
       "deleteTitle": "Konto löschen",
-      "deleteWarning": "Diese Aktion ist unwiderruflich. Alle Ihre Daten, Abonnements und Konfigurationen werden dauerhaft gelöscht.",
+      "deleteWarning": "Ihr Konto wird sofort deaktiviert und nach einer Karenzzeit endgültig gelöscht. Danach sind Ihre Daten, Abonnements und Konfigurationen unwiderruflich verloren.",
       "deleteButton": "Mein Konto löschen"
     },
     "deleteDialog": {
       "title": "Konto löschen?",
-      "description": "Diese Aktion ist unwiderruflich. Alle Ihre Daten gehen dauerhaft verloren.",
+      "description": "Ihr Konto wird sofort deaktiviert und nach {days} Tagen endgültig gelöscht. In dieser Zeit können Sie den Vorgang abbrechen, indem Sie sich wieder anmelden.",
       "whatHappens": "Was passiert?",
       "dataDeleted": "Alle Ihre Daten werden gelöscht",
       "subscriptionCancelled": "Ihr Abonnement wird gekündigt",
       "toolsDeleted": "Ihre MCP-Tools werden gelöscht",
-      "cannotUndo": "Diese Aktion kann nicht rückgängig gemacht werden",
+      "cannotUndo": "Nach {days} Tagen ist dies nicht mehr umkehrbar",
       "confirmInstruction": "Zur Bestätigung geben Sie ein",
       "typePlaceholder": "LÖSCHEN eingeben",
       "deletePermanently": "Dauerhaft löschen"
@@ -5939,8 +6031,9 @@
       "executing": "Executing...",
       "executeStep": "Schritt ausführen",
       "waitingDependencies": "Warten auf Abhängigkeiten",
-      "rerunning": "Re-running...",
+      "rerunning": "Wird erneut ausgeführt...",
       "rerunTooltip": "Diesen Schritt und alle nachfolgenden Schritte erneut ausführen",
+      "rerunTooltipAuto": "Diesen Schritt erneut ausführen und den Rest des Workflows von selbst weiterlaufen lassen",
       "fixValidationErrors": "Validierungsfehler vor der Ausführung beheben",
       "startStepByStep": "Workflow im Schritt-für-Schritt-Modus starten",
       "onlyTriggersCanStart": "Nur Trigger können die schrittweise Ausführung starten",
@@ -6654,6 +6747,8 @@
       "autoLayout": "Auto-Layout (Knoten neu anordnen)",
       "expandAllFiles": "Alle Dateivorschauen ausklappen",
       "collapseAllFiles": "Alle Dateivorschauen einklappen",
+      "expandFilesByDefault": "Dateivorschauen standardmäßig ausklappen",
+      "collapseFilesByDefault": "Dateivorschauen standardmäßig einklappen",
       "disableInteractivity": "Interaktivität deaktivieren",
       "enableInteractivity": "Interaktivität aktivieren",
       "cursorMode": "Cursormodus",
@@ -6693,6 +6788,7 @@
       "waitingSchedule": "Warten auf geplante Zeit...",
       "executeStep": "Diesen Schritt ausführen",
       "rerunStep": "Ab diesem Schritt erneut ausführen",
+      "rerunStepAuto": "Ab diesem Schritt neu starten (der Rest läuft automatisch erneut)",
       "waitingDependencies": "Warten auf Abhängigkeiten",
       "previous": "Previous",
       "next": "Next",
@@ -6955,6 +7051,44 @@
         "disposition": "Darstellung",
         "dispositionInline": "Inline (im Browser anzeigen)",
         "dispositionAttachment": "Anhang (Download-Aufforderung)"
+      },
+      "generate": {
+        "title": "Generieren",
+        "description": "Erzeugt aus einer Eingabe ein Element: Bild, Video, Audio, Stimme oder Musik. Das gewählte Modell bestimmt das erzeugte Format, die akzeptierten Parameter und die Kosten pro Lauf.",
+        "model": "Modell",
+        "modelPlaceholder": "Modell auswählen",
+        "modelsLoading": "Modelle werden geladen...",
+        "modelHint": "Ein Modellwechsel entfernt Parameter, die das neue Modell nicht akzeptiert.",
+        "noModels": "Auf dieser Installation sind keine Generierungsmodelle verfügbar.",
+        "selectValue": "Wert auswählen",
+        "filePlaceholder": "z. B. {{core:download.output.file}}",
+        "limitRange": "Zulässiger Bereich: {min} bis {max}",
+        "params": {
+          "prompt": "Eingabe",
+          "negative_prompt": "Negative Eingabe",
+          "duration_seconds": "Dauer (Sekunden)",
+          "n": "Anzahl",
+          "aspect_ratio": "Seitenverhältnis",
+          "resolution": "Auflösung",
+          "quality": "Qualität",
+          "style": "Stil",
+          "voice": "Stimme",
+          "language": "Sprache",
+          "seed": "Startwert",
+          "input_image": "Referenzbild",
+          "input_audio": "Referenz-Audio",
+          "input_video": "Referenzvideo"
+        },
+        "placeholders": {
+          "prompt": "Beschreiben Sie, was erzeugt werden soll",
+          "negative_prompt": "Was vermieden werden soll",
+          "aspect_ratio": "z. B. 16:9",
+          "resolution": "z. B. 720p",
+          "quality": "z. B. high",
+          "style": "z. B. cinematic",
+          "voice": "Stimmen-ID",
+          "language": "z. B. de"
+        }
       },
       "media": {
         "title": "Medien",
@@ -8977,8 +9111,8 @@
     "inactivityTimeoutLabel": "Inaktivitäts-Timeout (s)",
     "inactivityTimeoutInfo": "Stoppt den Agenten erzwungen, wenn er für so viele Sekunden keine Ausgabe erzeugt (kein Token, Tool-Aufruf oder Ergebnis). 0 deaktiviert es; 10-7200s. Getrennt vom Zeitlimit, dem gesamten Laufzeitbudget.",
     "executionTimeoutLabel": "Zeitlimit (s)",
-    "imageGenerationInfo": "Ermöglicht dem Agenten, Bilder über OpenAI gpt-image-1.5/mini oder Google Gemini 2.5 Flash Image (nano-banana) / 3 Pro Image zu generieren. Abrechnung pro zurückgegebenem Bild (5-134 Credits je nach Modell und Qualität). Wenn Sie einen eigenen Anbieter-API-Schlüssel konfiguriert haben, wird dieser verwendet (keine interne Credit-Belastung); andernfalls wird der Plattformschlüssel verwendet und Credits werden abgezogen.",
-    "imageGenerationLabel": "Bildgenerierung",
+    "generationLabel": "Generierung",
+    "generationInfo": "Erlaubt dem Assistenten, Bilder, Videos, Ton, Stimmen und Musik zu erzeugen. Jede Generierung wird in Credits zum Plattformtarif abgerechnet; ein längeres Video oder ein längerer Text kostet mehr.",
     "loopConsecutiveStopInfo": "Nach dieser Anzahl aufeinanderfolgender Modellschritte stoppen, um unkontrollierte Ketten zu verhindern.",
     "compactionEnabledLabel": "Kontext-Komprimierung",
     "compactionEnabledInfo": "Fasst ältere Verläufe zusammen, wenn das Gespräch lang wird, um im Kontextfenster des Modells zu bleiben. Standardmäßig aus; übernimmt die Plattform-Einstellung, wenn unverändert.",
@@ -9135,16 +9269,13 @@
     "infoTooltip": "Modelldetails anzeigen",
     "maxOutputLabel": "Max. Ausgabe",
     "notSet": "-",
-    "perImage": "pro Bild",
     "perMillion": "pro 1 Mio. Tokens",
     "perTenantSuffix": "(pro Tenant)",
     "priceBatchLabel": "Batch-Preis",
     "priceCacheLabel": "Gecachte Eingabe",
-    "priceImageLabel": "Pro Bild",
     "priceInputLabel": "Eingabepreis",
     "priceOutputLabel": "Ausgabepreis",
     "priceShort": "{input}/{output} pro 1 Mio.",
-    "priceShortPerImage": "{input} / Bild",
     "providerKind": {
       "bridge": "Bridge (CLI)",
       "byok": "BYOK",
@@ -10041,6 +10172,90 @@
           "link": "Link"
         }
       }
+    }
+  },
+  "generationModal": {
+    "title": "Datei generieren",
+    "subtitle": {
+      "format": "Was möchten Sie erzeugen?",
+      "prompt": "Modell wählen und beschreiben",
+      "result": "Ihre Datei"
+    },
+    "steps": {
+      "format": "Format",
+      "prompt": "Anweisung",
+      "result": "Ergebnis"
+    },
+    "formats": {
+      "image": "Bild",
+      "video": "Video",
+      "audio": "Ton",
+      "voice": "Sprache",
+      "music": "Musik"
+    },
+    "params": {
+      "negative_prompt": "Zu vermeiden",
+      "voice": "Stimme",
+      "language": "Sprache",
+      "style": "Stil",
+      "aspect_ratio": "Seitenverhältnis",
+      "resolution": "Auflösung",
+      "quality": "Qualität",
+      "duration_seconds": "Dauer (Sekunden)",
+      "n": "Anzahl",
+      "seed": "Seed",
+      "input_image": "Referenzbild",
+      "input_audio": "Referenz-Audio",
+      "input_video": "Referenzvideo"
+    },
+    "price": {
+      "perUnit": "{rate} Credits pro {unit}",
+      "plusBase": "zuzüglich {base} zum Start",
+      "flat": "{credits} Credits",
+      "min": "mindestens {credits}",
+      "max": "begrenzt auf {credits}",
+      "total": "{credits} Credits für diese Anfrage",
+      "unpriced": "Über den Plattformschlüssel nicht erhältlich"
+    },
+    "fields": {
+      "model": "Modell",
+      "modelPlaceholder": "Modell auswählen",
+      "prompt": "Anweisung",
+      "promptPlaceholder": "Beschreiben Sie, was Sie möchten",
+      "options": "Optionen",
+      "unset": "Dem Modell überlassen",
+      "uploading": "Wird hochgeladen...",
+      "uploadFailed": "Diese Datei konnte nicht hochgeladen werden: {error}",
+      "provider": "Anbieter",
+      "providerPlaceholder": "Anbieter auswählen",
+      "chooseFile": "Datei auswählen",
+      "replaceFile": "Ersetzen",
+      "noFile": "Keine Datei ausgewählt"
+    },
+    "modelCount": "{count} Modelle",
+    "empty": "Es ist noch kein Generierungsmodell verfügbar.",
+    "running": "Wird generiert. Bei Video kann das dauern.",
+    "done": "Fertig",
+    "billedOn": "Abgerechnet über {quantity} {unit}",
+    "download": "Herunterladen",
+    "generate": "Generieren",
+    "again": "Etwas ändern",
+    "back": "Zurück",
+    "cancel": "Abbrechen",
+    "close": "Schließen",
+    "errors": {
+      "unexpected": "Die Generierung konnte nicht gestartet werden.",
+      "stillRunning": "Die Verbindung wurde unterbrochen, die Generierung läuft aber auf dem Server weiter und wird abgerechnet. Ihre Datei erscheint in Ihren Dateien, sobald sie fertig ist.",
+      "unreadable": "Die Generierung wurde abgelehnt und es wurde nichts erzeugt, doch der Grund kam in einer Form zurück, die diese Seite nicht anzeigen kann. Versuchen Sie ein anderes Modell oder versuchen Sie es gleich noch einmal."
+    },
+    "payer": {
+      "monthlyCreditsOnly": "Ihre monatlichen Credits finanzieren Workflow-Ausführungen, keine Generierung. Nutzen Sie Ihren eigenen Schlüssel, oder schließen Sie ein Abo ab oder laden Sie auf, um mit Credits zu zahlen."
+    },
+    "assetRoles": {
+      "source": "Quellbild",
+      "first_frame": "Erstes Bild",
+      "reference": "Referenzbild",
+      "mask": "Maske"
     }
   }
 }

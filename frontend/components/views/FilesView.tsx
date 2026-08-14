@@ -1,5 +1,6 @@
 'use client';
 
+import { Suspense } from 'react';
 import { FileBrowser } from '@/components/files/FileBrowser';
 import { AuthenticatedView } from './AuthenticatedView';
 
@@ -15,7 +16,13 @@ import { AuthenticatedView } from './AuthenticatedView';
 export function FilesView() {
   return (
     <AuthenticatedView maxWidth="max-w-6xl">
-      <FileBrowser />
+      {/* FileBrowser reads useSearchParams() - the open folder lives in the URL - and
+          Next requires that to sit under a Suspense boundary (same shape as the board
+          page). fallback=null: auth already gates this view, so there is nothing extra
+          worth flashing here. */}
+      <Suspense fallback={null}>
+        <FileBrowser />
+      </Suspense>
     </AuthenticatedView>
   );
 }

@@ -27,5 +27,19 @@ public interface CloudPlatformCredentialInfoAccess {
      *         empty otherwise (unlinked, BYOK catalog source, or any transport failure) so the
      *         caller falls back to the local not-found response
      */
-    Optional<Map<String, Object>> fetchPlatformInfo(String integrationName, String apiToolId);
+    default Optional<Map<String, Object>> fetchPlatformInfo(String integrationName, String apiToolId) {
+        return fetchPlatformInfo(integrationName, apiToolId, null, null);
+    }
+
+    /**
+     * V428 variant: names the generation model being quoted and the size of the
+     * call. A generation is priced per MODEL, so without them the cloud can only
+     * resolve an endpoint-wide row, which a seeded generation never has, and it
+     * answers "nothing published" for a model the relay would execute and charge.
+     *
+     * @param modelId  generation model, or null for an ordinary endpoint
+     * @param quantity PLATFORM measurement of the call, or null when unknown
+     */
+    Optional<Map<String, Object>> fetchPlatformInfo(String integrationName, String apiToolId,
+                                                     String modelId, String quantity);
 }

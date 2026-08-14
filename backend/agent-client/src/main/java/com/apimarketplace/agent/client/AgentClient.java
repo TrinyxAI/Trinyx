@@ -1123,8 +1123,8 @@ public class AgentClient {
     }
 
     /**
-     * Category-scoped variant. Pass one of {@code chat}, {@code browser_agent},
-     * {@code image_generation} (or any other V156 category) to fetch the catalog
+     * Category-scoped variant. Pass {@code chat}, {@code browser_agent} (or any
+     * other V156 category the caller stored rows under) to fetch the catalog
      * with the per-category sidecar applied - used by browser_agent help_models
      * so admins can re-rank or disable models for that role independently of
      * the main chat picker. Pass {@code null} for the legacy global view.

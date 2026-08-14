@@ -679,4 +679,88 @@ class WorkflowEpochServiceTest {
             assertThat(service.normalizeStatus("error")).isEqualTo("FAILED");
         }
     }
+
+    /**
+     * The header is the ONLY place a closed epoch's state survives: the snapshot prunes it at
+     * cycle close. A rerun that reopens that epoch replays whatever comes back from here, so
+     * anything the JSON mapping silently drops is state the replay starts without.
+     *
+     * <p>Asserted through the REAL ObjectMapper and the real close/read pair, not a stubbed
+     * hand-back: a test that feeds an EpochState in and checks the same object comes out proves
+     * only that a mock returns what it was told to.
+     */
+    @Nested
+    @DisplayName("Epoch header round-trip (what a reopened epoch gets back)")
+    class HeaderRoundTrip {
+
+        private EpochState roundTrip(EpochState state) {
+            service.closeEpoch(RUN_ID, TRIGGER_ID, 3, state, 1234L);
+            ArgumentCaptor<String> json = ArgumentCaptor.forClass(String.class);
+            verify(repository).closeEpochHeader(eq(RUN_ID), eq(TRIGGER_ID), eq(3), json.capture(), eq(1234L));
+            when(repository.getEpochHeader(RUN_ID, TRIGGER_ID, 3))
+                    .thenReturn(new EpochHeaderRow(json.getValue(), false, null, null, TRIGGER_ID, 1234L));
+            return service.getFullEpochState(RUN_ID, TRIGGER_ID, 3);
+        }
+
+        @Test
+        @DisplayName("Loop counters survive, so a reopened epoch does not replay a loop from zero")
+        void loopStateSurvives() {
+            EpochState restored = roundTrip(EpochState.fresh()
+                    .markNodeCompleted(TRIGGER_ID)
+                    .updateLoopState("core:my_loop",
+                            new com.apimarketplace.orchestrator.domain.execution.StateSnapshot.LoopState(3, 10, "ITERATING")));
+
+            var loop = restored.getLoopState("core:my_loop");
+            assertThat(loop).isNotNull();
+            assertThat(loop.currentIndex()).isEqualTo(3);
+            assertThat(loop.totalItems()).isEqualTo(10);
+            assertThat(loop.status()).isEqualTo("ITERATING");
+        }
+
+        @Test
+        @DisplayName("Node outcomes survive, including SKIPPED which a downstream merge unblocks on")
+        void nodeOutcomesSurvive() {
+            EpochState restored = roundTrip(EpochState.fresh()
+                    .markNodeCompleted("mcp:a")
+                    .markNodeFailed("mcp:b")
+                    .markNodeSkipped("mcp:branch_not_taken"));
+
+            assertThat(restored.getCompletedNodeIds()).contains("mcp:a");
+            assertThat(restored.getFailedNodeIds()).contains("mcp:b");
+            assertThat(restored.getSkippedNodeIds()).contains("mcp:branch_not_taken");
+        }
+
+        @Test
+        @DisplayName("Decision branches survive, so a replay keeps the route the run actually took")
+        void decisionBranchesSurvive() {
+            EpochState restored = roundTrip(EpochState.fresh()
+                    .recordDecisionBranch("core:check", "if"));
+
+            assertThat(restored.getDecisionBranches("core:check")).contains("if");
+        }
+
+        @Test
+        @DisplayName("Split item tracking survives, so a reopened epoch does not lose spawned items")
+        void splitStateSurvives() {
+            // The third of the three branching maps. Claiming "EpochState serialises loops AND
+            // splits" while only round-tripping loops leaves a third of the claim unverified.
+            EpochState restored = roundTrip(EpochState.fresh()
+                    .updateSplitState("core:split_people",
+                            new com.apimarketplace.orchestrator.domain.execution.StateSnapshot.SplitState(3, 1, 0)));
+
+            var split = restored.getSplitState("core:split_people");
+            assertThat(split).isNotNull();
+            assertThat(split.itemCount()).isEqualTo(3);
+            assertThat(split.completedCount()).isEqualTo(1);
+        }
+
+        @Test
+        @DisplayName("An epoch with nothing in it round-trips to an empty state, not to null")
+        void emptyEpochRoundTrips() {
+            EpochState restored = roundTrip(EpochState.fresh());
+
+            assertThat(restored).isNotNull();
+            assertThat(restored.isEmpty()).isTrue();
+        }
+    }
 }

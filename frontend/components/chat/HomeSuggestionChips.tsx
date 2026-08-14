@@ -53,7 +53,7 @@ export function HomeSuggestionChips({
               onPick(prompt);
             }}
             className={cn(
-              'inline-flex items-center gap-1.5 rounded-full px-3 py-1.5 text-sm transition-colors shrink-0',
+              'inline-flex items-center gap-1.5 rounded-md px-3 py-1.5 text-sm transition-colors shrink-0',
               'bg-white/70 hover:bg-white text-gray-700 hover:text-gray-900',
               'dark:bg-gray-800/60 dark:hover:bg-gray-800 dark:text-gray-300 dark:hover:text-gray-100',
               'border border-gray-200/70 dark:border-gray-700/60 backdrop-blur-sm'

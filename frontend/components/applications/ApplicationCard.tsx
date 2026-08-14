@@ -50,7 +50,7 @@ function StandardFallback({ publication }: { publication: WorkflowPublication })
         {publication.nodeIcons && publication.nodeIcons.length > 0 ? (
           <WorkflowNodeIcons nodeIcons={publication.nodeIcons} />
         ) : (
-          <div className="w-14 h-14 bg-theme-secondary rounded-full flex items-center justify-center">
+          <div className="w-14 h-14 bg-theme-secondary rounded-xl flex items-center justify-center">
             <Package className="w-7 h-7 text-theme-tertiary" />
           </div>
         )}
@@ -169,18 +169,18 @@ export function ApplicationCard({ publication, source, isSelected, onToggleSelec
           </div>
           {source === 'acquired' ? (
             isNew ? (
-              <span className="inline-flex items-center gap-1 h-[22px] px-2 rounded-full text-[11px] font-medium bg-blue-500 text-white shadow-sm">
+              <span className="inline-flex items-center gap-1 h-[22px] px-2 rounded-lg text-[11px] font-medium bg-blue-500 text-white shadow-sm">
                 <Sparkles className="h-3 w-3" />
                 {tApp('new')}
               </span>
             ) : (
-              <span className="inline-flex items-center gap-1 h-[22px] px-2 rounded-full text-[11px] font-medium bg-emerald-500 text-white shadow-sm">
+              <span className="inline-flex items-center gap-1 h-[22px] px-2 rounded-lg text-[11px] font-medium bg-emerald-500 text-white shadow-sm">
                 <CheckCircle className="h-3 w-3" />
                 {tApp('installed')}
               </span>
             )
           ) : isPending ? (
-            <span className="inline-flex items-center gap-1 h-[22px] px-2 rounded-full text-[11px] font-medium bg-amber-500 text-white shadow-sm">
+            <span className="inline-flex items-center gap-1 h-[22px] px-2 rounded-lg text-[11px] font-medium bg-amber-500 text-white shadow-sm">
               <Clock className="h-3 w-3" />
               {t('pendingReview')}
             </span>
@@ -193,7 +193,7 @@ export function ApplicationCard({ publication, source, isSelected, onToggleSelec
               }}
               title={publication.rejectionReason || ''}
               aria-label={t('viewRejectionReason')}
-              className="inline-flex items-center gap-1 h-[22px] px-2 rounded-full text-[11px] font-medium bg-red-500 text-white shadow-sm hover:brightness-110"
+              className="inline-flex items-center gap-1 h-[22px] px-2 rounded-lg text-[11px] font-medium bg-red-500 text-white shadow-sm hover:brightness-110"
             >
               <XCircle className="h-3 w-3" />
               {t('rejected')}
@@ -227,7 +227,7 @@ export function ApplicationCard({ publication, source, isSelected, onToggleSelec
             Absence of the badge IS the off state (no opposite "Inactive"). */}
         {pinnedVersion != null && (isAcquired || (!isPending && !isRejected)) && (
           <span
-            className="absolute bottom-3 right-3 z-20 inline-flex items-center gap-1 h-[22px] px-2 rounded-full text-[11px] font-medium shadow-sm bg-emerald-500 text-white"
+            className="absolute bottom-3 right-3 z-20 inline-flex items-center gap-1 h-[22px] px-2 rounded-lg text-[11px] font-medium shadow-sm bg-emerald-500 text-white"
             aria-label={tApp('live')}
           >
             <span className="h-1.5 w-1.5 rounded-full bg-white animate-pulse" aria-hidden="true" />
@@ -245,7 +245,7 @@ export function ApplicationCard({ publication, source, isSelected, onToggleSelec
             aria-pressed={!!isFavorite}
             aria-label={isFavorite ? tApp('unfavorite') : tApp('favorite')}
             title={isFavorite ? tApp('unfavorite') : tApp('favorite')}
-            className={`absolute bottom-3 left-3 z-20 inline-flex items-center justify-center h-7 w-7 rounded-full backdrop-blur bg-white/80 dark:bg-black/50 border border-white/40 dark:border-white/10 shadow-sm transition-opacity ${
+            className={`absolute bottom-3 left-3 z-20 inline-flex items-center justify-center h-7 w-7 rounded-xl backdrop-blur bg-white/80 dark:bg-black/50 border border-white/40 dark:border-white/10 shadow-sm transition-opacity ${
               isFavorite
                 ? 'opacity-100 text-amber-500'
                 : 'opacity-0 group-hover:opacity-100 focus-within:opacity-100 text-theme-secondary hover:text-theme-primary'

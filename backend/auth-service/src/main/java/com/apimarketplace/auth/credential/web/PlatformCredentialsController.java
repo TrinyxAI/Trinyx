@@ -2,6 +2,9 @@ package com.apimarketplace.auth.credential.web;
 
 import com.apimarketplace.auth.credential.domain.PlatformCredentialModels.*;
 import com.apimarketplace.auth.credential.domain.PlatformCredentialPricingVersion;
+import com.apimarketplace.auth.credential.domain.PriceSpec;
+import com.apimarketplace.auth.credential.domain.PriceUnit;
+import com.apimarketplace.auth.credential.domain.PricingVersionEntry;
 import com.apimarketplace.auth.credential.service.CredentialService;
 import com.apimarketplace.auth.credential.service.PlatformCredentialPricingService;
 import com.apimarketplace.auth.credential.service.PlatformCredentialService;
@@ -20,7 +23,9 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
 import java.math.BigDecimal;
+import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -467,18 +472,43 @@ public class PlatformCredentialsController {
      * enabled with a configured secret, and the default markup (if a pricing
      * version has been published). Shape is deliberately small - no client id,
      * no scopes, no endpoints.
+     *
+     * <p>{@code generation} is the endpoint's own nature travelling in from the
+     * caller. It decides whether the credential-wide default may be quoted, and
+     * the answer has to match the one the billing path reaches or this endpoint
+     * advertises a price the server then refuses. That fact lives on
+     * {@code catalog.api_tools.generation_spec}, a table this service does not
+     * read and must not: each service queries only its own schema. So the
+     * caller that already holds the catalog row (the inspector, which fetched
+     * the tool it is bound to) states it. See {@link #isGenerationCall}.
      */
     @GetMapping("/{integrationName}/public-info")
     public ResponseEntity<Map<String, Object>> publicInfo(
             @PathVariable String integrationName,
-            @RequestParam(value = "apiToolId", required = false) String apiToolIdRaw
+            @RequestParam(value = "apiToolId", required = false) String apiToolIdRaw,
+            @RequestParam(value = "modelId", required = false) String modelId,
+            @RequestParam(value = "quantity", required = false) BigDecimal quantity,
+            @RequestParam(value = "generation", required = false) Boolean generationEndpoint,
+            @RequestParam(value = "quantityUnit", required = false) String quantityUnit
     ) {
         var credOpt = service.getCredential(integrationName);
         if (credOpt.isEmpty()) {
             // CE-only: no LOCAL platform credential row - ask the cloud whether ITS
             // platform credential can be relayed for this integration (bean absent on
             // the cloud deployment, empty on unlinked/BYOK/failure = legacy shape).
-            Optional<Map<String, Object>> cloudInfo = cloudRelayPublicInfo(integrationName, apiToolIdRaw);
+            // The model and the size travel too: this endpoint already receives
+            // them for the local quote, and dropping them on the relay leg is
+            // what made a CE install read "not sold on the platform key" for a
+            // model the cloud then executed and charged.
+            //
+            // The `generation` flag is deliberately NOT forwarded: the cloud
+            // answers this probe from catalog-service, which owns the descriptor
+            // and already applies the same version-default refusal to it
+            // (CeCatalogRelayService.priceFor). Sending the install's opinion of
+            // what the endpoint is would add a second, weaker source for a fact
+            // the responder can read first-hand.
+            Optional<Map<String, Object>> cloudInfo =
+                    cloudRelayPublicInfo(integrationName, apiToolIdRaw, modelId, quantity);
             if (cloudInfo.isPresent()) {
                 return ResponseEntity.ok(cloudInfo.get());
             }
@@ -507,11 +537,93 @@ public class PlatformCredentialsController {
         // supplied, fall back to integration-level "has any non-zero rate".
         UUID apiToolId = parseUuid(apiToolIdRaw);
         if (apiToolId != null) {
-            var perToolMarkup = pricingService.resolveLatestMarkupForTool(cred.id(), apiToolId);
-            boolean hasPricing = perToolMarkup.isPresent() && perToolMarkup.get().signum() > 0;
+            // V428: when a generation model (and optionally the size of the call)
+            // is supplied, quote THAT model rather than the endpoint-wide rate.
+            // One endpoint can back several models at different prices, and a
+            // generation's price usually scales with the call, so quoting the
+            // endpoint would show a number the customer is never charged.
+            //
+            // `quantity` is the PLATFORM measurement of the call (seconds,
+            // assets, characters), the same one the billing path sends. The
+            // published unit converts it, so the quote and the invoice are
+            // reached by the same arithmetic instead of two copies of it.
+            var quote = pricingService.quoteLatest(cred.id(), apiToolId, modelId, quantity);
+            var entry = quote.map(PlatformCredentialPricingService.Quote::entry).orElse(null);
+            // A GENERATION quote that resolved out of the credential-wide
+            // DEFAULT is not a price this platform will honour. The billing path
+            // refuses that exact call - a generation is never sold on a
+            // catch-all, because the owner priced the ordinary calls of an API
+            // and never made a decision about a video - so reporting an amount
+            // here quotes a number the server then refuses to charge, which is
+            // the one thing a quote must never do.
+            //
+            // `entry == null` IS "the version default applied": the billing path
+            // reads the same fact off the wire as `pricedByPublishedRow`, which
+            // is written as `entry != null` one method away.
+            //
+            // Reported as an explicit fact rather than left to be inferred from
+            // the missing components: the CE cloud relay legitimately carries a
+            // real flat price with no components at all, so "no priceUnit" alone
+            // cannot tell the two apart.
+            boolean versionDefaultOnly =
+                    quote.isPresent() && isGenerationCall(generationEndpoint, modelId) && entry == null;
+            // A rate cannot price a measurement of another dimension, and BOTH
+            // billers refuse that pair. Quoting it anyway shows a number, then
+            // every run of that model is refused, which is the one thing a
+            // quote must never do.
+            //
+            // The unit TRAVELS because auth cannot look it up: the model's
+            // measurement lives in the catalog descriptor. Absent means "the
+            // caller could not say", so every existing caller keeps today's
+            // answer, and the flag cannot be used to buy anything: it can only
+            // ever turn a quote OFF.
+            boolean dimensionsDisagree = entry != null
+                    && !PriceUnit.fromWire(entry.getPriceUnit())
+                            .canPriceMeasurementFor(measuredUnitOrNull(quantityUnit));
+            // THE BILLER'S THIRD REFUSAL, which this quote was missing while the
+            // CE relay applied it. A per-unit row resolved without a size is an
+            // amount for ONE unit: quoting it prints "60 credits per second"
+            // for a ten second clip, and then every run of that step is refused
+            // GENERATION_SIZE_UNKNOWN. An mcp: step bound straight to a
+            // generation endpoint is exactly that caller, since it sends the
+            // endpoint but never a size.
+            //
+            // Only for a GENERATION. An ordinary endpoint priced per unit is
+            // sold and billed at its base amount, so suppressing its quote
+            // would hide a price that is charged.
+            boolean unitPricedWithoutASize = entry != null
+                    && isGenerationCall(generationEndpoint, modelId)
+                    && entry.getUnitCredits() != null && entry.getUnitCredits().signum() > 0
+                    && (quantity == null || quantity.signum() <= 0);
+            boolean hasPricing = quote.isPresent() && quote.get().credits().signum() > 0
+                    && !versionDefaultOnly && !dimensionsDisagree && !unitPricedWithoutASize;
             out.put("hasPricing", hasPricing);
+            if (versionDefaultOnly) {
+                out.put("versionDefaultOnly", true);
+            }
             if (hasPricing) {
-                out.put("markupCredits", formatDecimal(perToolMarkup.get()));
+                out.put("markupCredits", formatDecimal(quote.get().credits()));
+                if (entry != null) {
+                    // Components so the surface can explain the number
+                    // ("60 credits per second") instead of only stating it.
+                    out.put("priceUnit", entry.getPriceUnit());
+                    out.put("baseCredits", formatDecimal(entry.getMarkupCredits()));
+                    out.put("unitCredits", formatDecimal(entry.getUnitCredits()));
+                    if (entry.getMinCredits() != null) {
+                        out.put("minCredits", formatDecimal(entry.getMinCredits()));
+                    }
+                    if (entry.getMaxCredits() != null) {
+                        out.put("maxCredits", formatDecimal(entry.getMaxCredits()));
+                    }
+                }
+                // The quantity the price was actually reached with, in the
+                // PUBLISHED unit, not the platform measurement that was sent.
+                // The surface prints the two together ("480 credits per minute,
+                // quantity 1"), so echoing the raw 60 seconds back would have it
+                // contradict its own rate.
+                if (quote.get().quantity() != null) {
+                    out.put("quantity", formatDecimal(quote.get().quantity()));
+                }
             }
         } else {
             out.put("hasPricing", pricingService.hasAnyNonZeroMarkup(cred.id()));
@@ -542,7 +654,8 @@ public class PlatformCredentialsController {
      *       credential not offered) → empty, caller returns the legacy not-found shape.</li>
      * </ul>
      */
-    private Optional<Map<String, Object>> cloudRelayPublicInfo(String integrationName, String apiToolIdRaw) {
+    private Optional<Map<String, Object>> cloudRelayPublicInfo(String integrationName, String apiToolIdRaw,
+                                                                String modelId, BigDecimal quantity) {
         if (cloudPlatformInfoAccess == null) {
             return Optional.empty();
         }
@@ -552,7 +665,8 @@ public class PlatformCredentialsController {
         }
         Map<String, Object> info;
         try {
-            info = access.fetchPlatformInfo(integrationName, apiToolIdRaw).orElse(null);
+            info = access.fetchPlatformInfo(integrationName, apiToolIdRaw, modelId,
+                    quantity == null ? null : quantity.toPlainString()).orElse(null);
         } catch (RuntimeException e) {
             log.debug("public-info: cloud platform-info delegation failed for '{}': {}",
                     integrationName, e.getMessage());
@@ -596,6 +710,43 @@ public class PlatformCredentialsController {
         return Optional.empty();
     }
 
+    /**
+     * Whether this quote is about a resold generation, asked exactly the way the
+     * billing path asks it.
+     *
+     * <p>{@code CatalogToolBillingService.isResoldGeneration} answers YES when
+     * the call names a generation model OR the endpoint carries a generation
+     * descriptor, and it refuses a version-default amount on that verdict. A
+     * quote that used only the first half agreed with it on the generation
+     * surface (which always names a model) and disagreed on the one caller that
+     * cannot: an {@code mcp:} step bound straight to a generation endpoint sends
+     * an {@code apiToolId} and no model, so the quote printed the
+     * credential-wide default as a price beside a step the server refuses to
+     * run.
+     *
+     * <p>The descriptor half arrives as a request parameter because it lives in
+     * the catalog schema, which auth-service never queries. Absent means "the
+     * caller could not say", which keeps every pre-existing caller on the
+     * behaviour it has today: an ordinary endpoint inherits the default, which
+     * is what a default is for.
+     */
+    /**
+     * The unit a call is measured in, or null when the caller did not say.
+     *
+     * <p>Null is "cannot tell" and never "no unit": it leaves the dimension
+     * question unasked, which is what every caller predating this parameter
+     * needs. A spelling this build does not know lands in the same place,
+     * through {@link PriceUnit#fromWire}'s lenient reading, because refusing to
+     * quote on ignorance would blank out prices that are perfectly chargeable.
+     */
+    private static PriceUnit measuredUnitOrNull(String quantityUnit) {
+        return quantityUnit == null || quantityUnit.isBlank() ? null : PriceUnit.fromWire(quantityUnit);
+    }
+
+    private static boolean isGenerationCall(Boolean generationEndpoint, String modelId) {
+        return Boolean.TRUE.equals(generationEndpoint) || modelId != null;
+    }
+
     private static UUID parseUuid(String raw) {
         if (raw == null || raw.isBlank()) return null;
         try {
@@ -616,9 +767,36 @@ public class PlatformCredentialsController {
      * POST /api/platform-credentials/{id}/pricing-versions - publish a new
      * immutable pricing version for the credential.
      *
-     * <p>Body: {@code {"defaultMarkupCredits": "0.05", "overrides":
-     * {"<apiToolId-uuid>": "0.10"}}}. Serialized under an advisory lock to
-     * keep version numbers monotonic.
+     * <p>Body, all fields optional except that a version must end up with either
+     * a default or at least one price:
+     * <pre>
+     * {
+     *   "defaultMarkupCredits": "0.05",
+     *   "overrides": {"&lt;apiToolId&gt;": "0.10"},          // flat, one amount per endpoint
+     *   "prices": [{"apiToolId": "&lt;uuid&gt;", "modelId": "seedance-2.0",
+     *               "priceUnit": "second", "baseCredits": "0",
+     *               "unitCredits": "60", "minCredits": null, "maxCredits": null}],
+     *   "replace": true
+     * }
+     * </pre>
+     *
+     * <p><b>{@code overrides} is the pre-V428 shape and still means exactly what
+     * it always meant</b>: one flat amount charged per call on that endpoint,
+     * whatever model is used. It is kept because a client that speaks it must not
+     * break, and because most endpoints really are priced that way.
+     * {@code prices} is the full shape: which model, what the rate is charged per,
+     * the fixed part, the variable part and the two clamps. Both may be sent; a
+     * {@code prices} entry wins over an {@code overrides} entry for the same
+     * endpoint, since it is the more specific statement of the same thing.
+     *
+     * <p><b>{@code replace} decides what a republish does to rows this request
+     * does not mention.</b> Default {@code false}: they are carried forward from
+     * the latest version, so a client that can only express flat amounts cannot
+     * silently collapse a per-second video price into a flat one. Send
+     * {@code true} only from a surface that renders and edits EVERY row, because
+     * it then publishes that row set verbatim, deletions included.
+     *
+     * <p>Serialized under an advisory lock to keep version numbers monotonic.
      */
     @PostMapping("/{id}/pricing-versions")
     public ResponseEntity<?> publishPricingVersion(
@@ -631,19 +809,22 @@ public class PlatformCredentialsController {
 
         // Null / missing / empty-string defaultMarkupCredits is valid and means
         // "no API-wide default - only per-tool overrides apply". The service
-        // layer rejects the degenerate case (null default AND no overrides).
+        // layer rejects the degenerate case (null default AND no prices).
         BigDecimal defaultMarkup;
-        Map<UUID, BigDecimal> overrides;
+        List<PriceSpec> prices;
+        boolean replace;
         try {
             defaultMarkup = parseBigDecimalNullable(body.get("defaultMarkupCredits"));
-            overrides = parseOverrides(body.get("overrides"));
+            prices = combinePrices(parseOverrides(body.get("overrides")),
+                    parsePrices(body.get("prices")));
+            replace = parseBoolean(body.get("replace"));
         } catch (IllegalArgumentException ex) {
             return ResponseEntity.badRequest().body(Map.of("error", ex.getMessage()));
         }
 
         try {
             PlatformCredentialPricingVersion saved = pricingService.publishNextVersion(
-                    id, defaultMarkup, overrides, userId);
+                    id, defaultMarkup, prices, userId, !replace);
             return ResponseEntity.ok(toPricingResponse(saved));
         } catch (IllegalArgumentException ex) {
             return ResponseEntity.badRequest().body(Map.of("error", ex.getMessage()));
@@ -692,17 +873,53 @@ public class PlatformCredentialsController {
                 v.getDefaultMarkupCredits() == null ? NullNode.getInstance() : formatDecimal(v.getDefaultMarkupCredits()));
         out.put("createdAt", v.getCreatedAt());
         out.put("createdBy", v.getCreatedBy());
+        // Legacy view: the flat amounts, and ONLY those. A per-model or
+        // unit-priced row has no honest one-number form (see findOverrides), so it
+        // is absent here and present in full under "prices".
         Map<UUID, BigDecimal> overrides = pricingService.findOverrides(v.getId());
         Map<String, String> overridesOut = new HashMap<>(overrides.size());
         for (var e : overrides.entrySet()) {
             overridesOut.put(e.getKey().toString(), formatDecimal(e.getValue()));
         }
         out.put("overrides", overridesOut);
+        // Full view: every published row, so the admin can SEE what is live
+        // before deciding what to change.
+        List<Map<String, Object>> pricesOut = new ArrayList<>();
+        for (PricingVersionEntry entry : pricingService.findPrices(v.getId())) {
+            pricesOut.add(toPriceRow(entry));
+        }
+        out.put("prices", pricesOut);
         return out;
+    }
+
+    /**
+     * One published price row, with the six numbers that define it. Amounts are
+     * strings for the same reason the rest of this response uses them: a decimal
+     * rate must survive the trip without being rounded through a double.
+     */
+    private static Map<String, Object> toPriceRow(PricingVersionEntry entry) {
+        Map<String, Object> row = new LinkedHashMap<>();
+        row.put("apiToolId", entry.getApiToolId() == null ? null : entry.getApiToolId().toString());
+        row.put("modelId", entry.getModelId());
+        row.put("priceUnit", entry.getPriceUnit());
+        row.put("baseCredits", formatDecimalOrZero(entry.getMarkupCredits()));
+        row.put("unitCredits", formatDecimalOrZero(entry.getUnitCredits()));
+        row.put("minCredits", entry.getMinCredits() == null ? null : formatDecimal(entry.getMinCredits()));
+        row.put("maxCredits", entry.getMaxCredits() == null ? null : formatDecimal(entry.getMaxCredits()));
+        return row;
     }
 
     private static String formatDecimal(BigDecimal value) {
         return value.stripTrailingZeros().toPlainString();
+    }
+
+    /**
+     * A price row's base and per-unit amounts are NOT NULL in the schema, but a
+     * hand-written row or a stale entity could still hand us a null. Reporting
+     * "0" is the only reading that matches how the billing path resolves it.
+     */
+    private static String formatDecimalOrZero(BigDecimal value) {
+        return value == null ? "0" : formatDecimal(value);
     }
 
     /**
@@ -754,19 +971,109 @@ public class PlatformCredentialsController {
         return v;
     }
 
-    @SuppressWarnings("unchecked")
-    private static Map<UUID, BigDecimal> parseOverrides(Object raw) {
-        if (!(raw instanceof Map<?, ?> m)) return Map.of();
-        Map<UUID, BigDecimal> out = new HashMap<>();
+    /**
+     * The pre-V428 shape: one flat amount per endpoint. It stays exactly that,
+     * {@link PriceSpec#flat} resolves to the amount given, with no unit and no
+     * clamps, so a client that speaks only this map keeps billing what it always
+     * billed.
+     */
+    private static List<PriceSpec> parseOverrides(Object raw) {
+        if (!(raw instanceof Map<?, ?> m)) return List.of();
+        List<PriceSpec> out = new ArrayList<>();
         for (var e : m.entrySet()) {
             String key = e.getKey() == null ? null : e.getKey().toString();
             if (key == null) continue;
             try {
-                out.put(UUID.fromString(key), parseBigDecimalRequired(e.getValue()));
+                out.add(PriceSpec.flat(UUID.fromString(key), parseBigDecimalRequired(e.getValue())));
             } catch (IllegalArgumentException ex) {
                 throw new IllegalArgumentException("invalid override for apiToolId " + key + ": " + ex.getMessage());
             }
         }
         return out;
+    }
+
+    /**
+     * The full V428 shape: an array of rows, each naming the endpoint, optionally
+     * the model, and the five numbers that define the price. A blank or absent
+     * {@code modelId} is the endpoint-wide price, which is what every pre-V428 row
+     * is; {@link PriceSpec} normalises that (and an unknown unit) at construction.
+     *
+     * <p>Amounts are read as decimals from either JSON numbers or strings, so a
+     * client can send {@code "60"} and keep the precision a double would lose.
+     */
+    private static List<PriceSpec> parsePrices(Object raw) {
+        if (raw == null) return List.of();
+        if (!(raw instanceof List<?> list)) {
+            throw new IllegalArgumentException("prices must be an array of price objects");
+        }
+        List<PriceSpec> out = new ArrayList<>();
+        for (Object item : list) {
+            if (!(item instanceof Map<?, ?> m)) {
+                throw new IllegalArgumentException("each entry of prices must be an object");
+            }
+            Object toolRaw = m.get("apiToolId");
+            String toolKey = toolRaw == null ? null : toolRaw.toString().trim();
+            if (toolKey == null || toolKey.isEmpty()) {
+                throw new IllegalArgumentException("each entry of prices requires an apiToolId");
+            }
+            try {
+                out.add(new PriceSpec(
+                        UUID.fromString(toolKey),
+                        stringOrNull(m.get("modelId")),
+                        // Strict on the way IN. The lenient reader turns a typo
+                        // into a flat price, so "seconds" would publish a
+                        // per-second rate as per-call and bill a ten second clip
+                        // as one, silently and always cheaper than intended.
+                        PriceUnit.parseStrict(stringOrNull(m.get("priceUnit"))).wire(),
+                        parseBigDecimalNullable(m.get("baseCredits")),
+                        parseBigDecimalNullable(m.get("unitCredits")),
+                        parseBigDecimalNullable(m.get("minCredits")),
+                        parseBigDecimalNullable(m.get("maxCredits"))));
+            } catch (IllegalArgumentException ex) {
+                throw new IllegalArgumentException("invalid price for apiToolId " + toolKey + ": " + ex.getMessage());
+            }
+        }
+        return out;
+    }
+
+    /**
+     * Both request shapes describe the same table, so they are merged on that
+     * table's key, (endpoint, model), rather than concatenated: sending a flat
+     * override and a full price for one endpoint is a client stating the same row
+     * twice, not two rows. The richer statement wins, and the service still
+     * rejects a genuine duplicate WITHIN {@code prices}.
+     */
+    private static List<PriceSpec> combinePrices(List<PriceSpec> overrides, List<PriceSpec> prices) {
+        if (prices.isEmpty()) return overrides;
+        if (overrides.isEmpty()) return prices;
+        Map<String, PriceSpec> byKey = new LinkedHashMap<>();
+        for (PriceSpec p : overrides) {
+            byKey.put(p.apiToolId() + "|" + (p.modelId() == null ? "" : p.modelId()), p);
+        }
+        for (PriceSpec p : prices) {
+            byKey.put(p.apiToolId() + "|" + (p.modelId() == null ? "" : p.modelId()), p);
+        }
+        return new ArrayList<>(byKey.values());
+    }
+
+    /** Trimmed text, or null when the field is absent, null or blank. */
+    private static String stringOrNull(Object raw) {
+        if (raw == null) return null;
+        String s = raw.toString().trim();
+        return s.isEmpty() ? null : s;
+    }
+
+    /**
+     * Absent means false. Accepts a JSON boolean and the string form a form-encoded
+     * client would send; anything else is refused rather than guessed, because
+     * guessing here decides whether a republish keeps or drops existing rows.
+     */
+    private static boolean parseBoolean(Object raw) {
+        if (raw == null) return false;
+        if (raw instanceof Boolean b) return b;
+        String s = raw.toString().trim();
+        if (s.equalsIgnoreCase("true")) return true;
+        if (s.isEmpty() || s.equalsIgnoreCase("false")) return false;
+        throw new IllegalArgumentException("replace must be true or false (got '" + s + "')");
     }
 }

@@ -30,6 +30,21 @@ export interface CreditBalance {
    * next positive balance transition (refill / refund / release).
    */
   delinquent?: boolean;
+  /**
+   * True when this account's monthly grant funds workflow-node runs and
+   * nothing else, so a platform-key purchase (a generation, a chat, a web
+   * search) has to draw the top-up bucket instead.
+   *
+   * <p>The server's ANSWER, not the facts it is derived from. A surface that
+   * read "monthly balance, no top-up" and concluded the credits cannot pay
+   * would be right for the Free plan and wrong for every paid subscriber, for
+   * whom that is the ordinary state. The rule belongs to the plan, and only
+   * the credit service knows the plan.
+   *
+   * <p>Absent on a pre-V250-shaped response and on CE, where the rule does not
+   * apply at all; treat absent as false.
+   */
+  monthlyCreditsAreWorkflowOnly?: boolean;
 }
 
 export interface CreditSummary {

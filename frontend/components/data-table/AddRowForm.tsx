@@ -108,7 +108,7 @@ export function AddRowForm({
                       variant="ghost"
                       onClick={onCancelAddingRow}
                       disabled={isAddingRow}
-                      className="w-5 h-5 p-0 rounded-full"
+                      className="w-5 h-5 p-0 rounded-lg"
                       title={t('cancel')}
                     >
                       <X className="w-4 h-4" />
@@ -117,7 +117,7 @@ export function AddRowForm({
                       variant="ghost"
                       onClick={onAddRow}
                       disabled={isAddingRow}
-                      className="w-5 h-5 p-0 rounded-full"
+                      className="w-5 h-5 p-0 rounded-lg"
                       title={t('saveRow')}
                     >
                       <Save className="w-4 h-4" />
@@ -127,7 +127,7 @@ export function AddRowForm({
                   <Button
                     variant="default"
                     onClick={onStartAddingRow}
-                    className="w-5 h-5 p-0 rounded-full"
+                    className="w-5 h-5 p-0 rounded-lg"
                     title={t('addRow')}
                   >
                     <Plus className="w-4 h-4" />

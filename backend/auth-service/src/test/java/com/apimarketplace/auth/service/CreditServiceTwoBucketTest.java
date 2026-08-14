@@ -72,6 +72,25 @@ class CreditServiceTwoBucketTest {
     }
 
     @Test
+    @DisplayName("grantCredits sourceType=MANUAL_ADJUSTMENT routes an admin grant to the payg bucket")
+    void grantManualAdjustmentRoutesToPaygBucket() {
+        Subscription s = sub(new BigDecimal("25.00"), new BigDecimal("10.00"));
+        when(subscriptionRepository.findActiveByUserIdForUpdate(USER_ID)).thenReturn(Optional.of(s));
+        when(subscriptionRepository.save(any())).thenReturn(s);
+
+        creditService.grantCredits(USER_ID, new BigDecimal("500000.00"), "MANUAL_ADJUSTMENT",
+                "admin-grant-1", "Admin grant by user 1");
+
+        // The sub bucket is wiped wholesale by every renewal (PLAN_RESET), so an admin grant
+        // landing there silently evaporated at the account's next cycle - 453,494 credits on one
+        // production account, 482,142 on another. A deliberate out-of-cycle gift must outlive the
+        // billing period, so it goes to PAYG.
+        assertThat(s.getRemainingCredits()).isEqualByComparingTo("25.00");
+        assertThat(s.getPaygRemainingCredits()).isEqualByComparingTo("500010.00");
+        assertThat(s.getTotalBalance()).isEqualByComparingTo("500035.00");
+    }
+
+    @Test
     @DisplayName("grantCredits sourceType=GRANT (non-PAYG) routes +amount to sub bucket - backward compat")
     void grantNonPaygTopupRoutesToSubBucket() {
         Subscription s = sub(new BigDecimal("10.00"), new BigDecimal("5.00"));

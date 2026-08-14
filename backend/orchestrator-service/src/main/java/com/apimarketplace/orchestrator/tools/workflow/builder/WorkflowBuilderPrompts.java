@@ -445,6 +445,19 @@ public final class WorkflowBuilderPrompts {
                 File params (input/video/audio/image/tracks[].source/inputs[].source) take the WHOLE FileRef output of an upstream node
                 ('{{core:dl.output.file}}') or a literal FileRef object - never .path or a URL. Details: workflow(action='help', topics=['media']).
                 """;
+            case "add_generate", "generate" -> """
+                workflow(action='add_node', type='generate', label='Make Clip', params={model: 'a-model-id', prompt: 'a paper boat drifting down a rain gutter, cinematic', duration_seconds: 5, aspect_ratio: '16:9'}, connect_after='Start')
+                Generate = ONE asset from a prompt: image, video, audio, voice or music. 'model' is the only required param and it decides
+                the format produced, which other params are accepted and the price. Model ids cannot be guessed: call generation(action='models')
+                first (optionally kind='video') for the ids, what each accepts, its limits and its rate.
+                Other params: prompt, duration_seconds, aspect_ratio, resolution, voice, language, quality, style, seed, negative_prompt,
+                input_image/input_audio/input_video (a WHOLE FileRef from an upstream node), credential_source ('platform' | 'user').
+                A node may also carry credential_id, which names WHICH of the owner's provider keys it runs on. You cannot choose one:
+                only the owner sees their keys. Keep it exactly as you found it when you rewrite a node, and never invent one.
+                Output: the asset as a whole FileRef under {{core:make_clip.output.file}}, plus model, kind, provider, billed_quantity and
+                billed_unit. Every run is charged and a per-second or per-character model costs more for a longer request; the node fails
+                rather than continue when no asset comes back. Details: workflow(action='help', topics=['generate']).
+                """;
             case "add_code", "code" -> "workflow(action='add_node', type='code', label='Process', params={language: 'javascript', code: 'return {result: input.value * 2}'}, connect_after='...') - Execute custom code (JavaScript/Python).";
             case "add_option", "option" -> """
                 workflow(action='add_node', type='option', label='Pick Action', params={
@@ -634,6 +647,7 @@ public final class WorkflowBuilderPrompts {
             case "list" -> "workflow(action='list') - List all saved workflows. Returns id, name, status, trigger count.";
             case "list_nodes" -> "workflow(action='list_nodes') - Alias for 'describe'. Shows all nodes, edges, and issues in the current session.";
             case "execute" -> "workflow(action='execute', id='<uuid>', data_inputs={...}, version=<int|'pinned'>?) - Fire a workflow trigger. Omit version for current canvas run; version=N replays a historical version; version='pinned' fires the pinned production version. Returns {status, outputs, errors, run_id, plan_version, pinned_version}. Use workflow(action='help', topics=['execute']) for full docs.";
+            case "restart_from_node" -> "workflow(action='restart_from_node', run_id='<run>', node='<node-key>') - Re-run ONE node of an existing run and continue from there, keeping the outputs the run already produced upstream. Use it instead of execute when only part of a run needs redoing. Returns {outcome, replayed_nodes, epoch, attempt, status, summary} - read outcome before assuming the work finished.";
             case "stop_run" -> "workflow(action='stop_run', run_id='<id>', reason='<one sentence>', mode='cancel'|'graceful'?) - End a run that is still going: the counterpart of 'execute'. Cancels the nodes still in flight, including any browser-agent session, and records your reason so get_run reports it as stop_reason. mode='cancel' (default) ends the run for good AND suspends the schedules of its workflow; mode='graceful' only closes the running epoch, keeps the run available for its next trigger fire and leaves the schedules alone (refused on a run that is not currently executing). An agent running INSIDE a workflow can omit run_id to stop the run it is executing inside.";
             default -> "Use workflow(action='describe') to see current state, or workflow(action='help', topics=['...']) for detailed help.";
         };

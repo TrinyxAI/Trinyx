@@ -2,12 +2,19 @@
 
 import React from 'react';
 
+import { cn } from '@/lib/utils';
+
 /**
- * Generic skeleton box with animation
+ * Generic skeleton box with animation.
+ *
+ * `cn` and not a template string: the base carries `rounded`, so a caller asking
+ * for another rung used to ship BOTH classes and let the stylesheet order decide
+ * which one won. tailwind-merge drops the base, so the caller's radius is the
+ * one that renders - which is what the shapes below are chosen against.
  */
 function SkeletonBox({ className }: { className?: string }) {
   return (
-    <div className={`bg-theme-tertiary rounded animate-pulse ${className || ''}`} />
+    <div className={cn('bg-theme-tertiary rounded animate-pulse', className)} />
   );
 }
 
@@ -17,7 +24,7 @@ function SkeletonBox({ className }: { className?: string }) {
 export function SettingsHeaderSkeleton() {
   return (
     <div className="flex items-center gap-3">
-      <SkeletonBox className="w-10 h-10 rounded-full" />
+      <SkeletonBox className="w-10 h-10 rounded-xl" />
       <div className="space-y-2">
         <SkeletonBox className="h-5 w-32" />
         <SkeletonBox className="h-4 w-48" />
@@ -81,10 +88,15 @@ export function CredentialsListSkeleton() {
                   </div>
                 </td>
                 <td className="px-4 py-3">
-                  <SkeletonBox className="h-6 w-16 rounded-full" />
+                  {/* The credential TYPE chip. The real one is
+                      `text-xs px-2 py-1 rounded-md`, which is 24px tall - the same
+                      h-6 as here, so the corner has to be the label rung too.
+                      `rounded-2xl` is 16px on those 24px: a capsule, i.e. a shape
+                      the row never actually shows. */}
+                  <SkeletonBox className="h-6 w-16 rounded-md" />
                 </td>
                 <td className="px-4 py-3">
-                  <SkeletonBox className="h-4 w-4 mx-auto rounded-full" />
+                  <SkeletonBox className="h-4 w-4 mx-auto rounded-md" />
                 </td>
                 <td className="px-4 py-3">
                   <SkeletonBox className="h-4 w-24" />
@@ -99,13 +111,17 @@ export function CredentialsListSkeleton() {
 }
 
 /**
- * Skeleton for tabs navigation
+ * Skeleton for tabs navigation.
+ *
+ * Mirrors the settings overview tab bar it stands in for: a `rounded-2xl`
+ * surface holding `h-9` `rounded-xl` controls. It was a rung low on both, so the
+ * bar changed shape under the reader the moment the page resolved.
  */
 export function TabsSkeleton({ tabCount = 3 }: { tabCount?: number }) {
   return (
-    <div className="flex gap-2 p-1 bg-theme-tertiary rounded-xl">
+    <div className="flex gap-2 p-1 bg-theme-tertiary rounded-2xl">
       {Array.from({ length: tabCount }).map((_, i) => (
-        <SkeletonBox key={i} className="h-9 flex-1 rounded-lg" />
+        <SkeletonBox key={i} className="h-9 flex-1 rounded-xl" />
       ))}
     </div>
   );

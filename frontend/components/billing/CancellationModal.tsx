@@ -130,7 +130,7 @@ export default function CancellationModal({
                     {step === 'success' ? (
                         <>
                             {/* Success icon */}
-                            <div className="w-16 h-16 bg-green-100 dark:bg-green-900/30 rounded-full flex items-center justify-center mx-auto mb-5">
+                            <div className="w-16 h-16 bg-green-100 dark:bg-green-900/30 rounded-2xl flex items-center justify-center mx-auto mb-5">
                                 <Calendar className="h-8 w-8 text-green-600 dark:text-green-400" />
                             </div>
 
@@ -157,7 +157,7 @@ export default function CancellationModal({
                     ) : step === 'reason' ? (
                         <>
                             {/* Red icon */}
-                            <div className="w-16 h-16 bg-red-100 dark:bg-red-900/30 rounded-full flex items-center justify-center mx-auto mb-5">
+                            <div className="w-16 h-16 bg-red-100 dark:bg-red-900/30 rounded-2xl flex items-center justify-center mx-auto mb-5">
                                 <AlertTriangle className="h-8 w-8 text-red-600 dark:text-red-400" />
                             </div>
 
@@ -219,7 +219,7 @@ export default function CancellationModal({
                     ) : step === 'retention' ? (
                         <>
                             {/* Red icon */}
-                            <div className="w-16 h-16 bg-red-100 dark:bg-red-900/30 rounded-full flex items-center justify-center mx-auto mb-5">
+                            <div className="w-16 h-16 bg-red-100 dark:bg-red-900/30 rounded-2xl flex items-center justify-center mx-auto mb-5">
                                 <Heart className="h-8 w-8 text-red-600 dark:text-red-400" />
                             </div>
 
@@ -272,7 +272,7 @@ export default function CancellationModal({
                     ) : (
                         <>
                             {/* Red icon */}
-                            <div className="w-16 h-16 bg-red-100 dark:bg-red-900/30 rounded-full flex items-center justify-center mx-auto mb-5">
+                            <div className="w-16 h-16 bg-red-100 dark:bg-red-900/30 rounded-2xl flex items-center justify-center mx-auto mb-5">
                                 <AlertTriangle className="h-8 w-8 text-red-600 dark:text-red-400" />
                             </div>
 

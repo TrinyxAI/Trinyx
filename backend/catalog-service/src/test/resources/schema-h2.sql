@@ -83,6 +83,8 @@ CREATE TABLE IF NOT EXISTS api_tools (
     execution_mode VARCHAR(32),
     execution_spec TEXT,
     output_schema TEXT,
+    -- V428: generation descriptor. NULL for an ordinary endpoint.
+    generation_spec TEXT,
     pagination TEXT,
     next_hint VARCHAR(1000),
     is_active BOOLEAN NOT NULL DEFAULT false,

@@ -469,6 +469,104 @@ class CreditServiceFreeWorkflowScopingTest {
             // refunds entirely to PAYG, never converting paid money into sub credits.
             assertThat(captor.getValue().getPaygPortion()).isEqualByComparingTo("7.00");
         }
+
+        @Test
+        @DisplayName("the balance says WHETHER the monthly bucket is workflow-scoped, so no surface has to infer it from the two numbers")
+        void theBalanceCarriesTheAnswerNotJustTheNumbers() {
+            // A surface that read "monthly balance, no top-up" and concluded
+            // "these credits cannot pay" would be right for Free and WRONG for
+            // every paid subscriber, for whom that is the ordinary state. The
+            // rule is the plan's, and only this class knows the plan.
+            Subscription free = sub("FREE", new BigDecimal("1000.00"), BigDecimal.ZERO);
+            when(subscriptionRepository.findActiveByUserId(USER_ID)).thenReturn(Optional.of(free));
+            assertThat(cloud.getBalanceBreakdown(USER_ID).monthlyCreditsAreWorkflowOnly()).isTrue();
+
+            Subscription pro = sub("PRO", new BigDecimal("1000.00"), BigDecimal.ZERO);
+            when(subscriptionRepository.findActiveByUserId(USER_ID)).thenReturn(Optional.of(pro));
+            assertThat(cloud.getBalanceBreakdown(USER_ID).monthlyCreditsAreWorkflowOnly()).isFalse();
+        }
+
+        @Test
+        @DisplayName("an account with NO subscription is not told its monthly credits are scoped, because it has none")
+        void noSubscriptionIsNotAScopedPlan() {
+            // The warning is about which of two buckets pays. With no
+            // subscription there is no bucket and no plan, so answering "true"
+            // would put a rule on screen that does not apply to anything.
+            when(subscriptionRepository.findActiveByUserId(USER_ID)).thenReturn(Optional.empty());
+
+            assertThat(cloud.getBalanceBreakdown(USER_ID).monthlyCreditsAreWorkflowOnly()).isFalse();
+        }
+
+        @Test
+        @DisplayName("an account whose plan is unknown is not warned on a guess")
+        void anUnknownPlanIsNotScoped() {
+            // Absent is not "Free". Answering true here would put the warning in
+            // front of an account the rule may not even apply to.
+            Subscription noPlan = sub(null, new BigDecimal("1000.00"), BigDecimal.ZERO);
+            when(subscriptionRepository.findActiveByUserId(USER_ID)).thenReturn(Optional.of(noPlan));
+
+            assertThat(cloud.getBalanceBreakdown(USER_ID).monthlyCreditsAreWorkflowOnly()).isFalse();
+        }
+
+        @Test
+        @DisplayName("the refusal names the plan rule instead of reporting a zero balance the user can see is not zero")
+        void freeMarkupRefusalExplainsWhichCreditsCannotPay() {
+            // A generation is priced in the hundreds, and this account holds
+            // 1000 monthly credits, which its screen says so. Telling it
+            // "Insufficient credits: balance=0" is a true statement about a
+            // bucket the user has never heard of and a false one about the
+            // number in front of them. The refusal has to say WHICH credits
+            // cannot pay and what does.
+            Subscription s = sub("FREE", new BigDecimal("1000.00"), BigDecimal.ZERO);
+            when(subscriptionRepository.findActiveByUserIdForUpdate(USER_ID)).thenReturn(Optional.of(s));
+
+            CreditConsumeResult result = cloud.tryReserveMarkup(
+                    USER_ID, "platform-markup:STREAM:gen-1", "seedance", "seedance-2.0",
+                    new BigDecimal("300.00"), null, 15, "STREAM", "scope-1", false);
+
+            assertThat(result.success()).isFalse();
+            assertThat(result.error())
+                    .contains("PLAN_EXCLUDES_THIS")
+                    .contains("subscription")
+                    .contains("top-up")
+                    // the balance the user is looking at, not only the empty bucket
+                    .contains("1000");
+            assertThat(s.getRemainingCredits()).isEqualByComparingTo("1000.00");
+        }
+
+        @Test
+        @DisplayName("an account that is genuinely out of credits is still told it is out of credits, not that its plan excludes this")
+        void aTrulyEmptyAccountKeepsTheInsufficientMessage() {
+            // The two refusals must not collapse: one is fixed by topping up OR
+            // subscribing, the other only by having more credits. A FREE
+            // account with nothing in either bucket is the second.
+            Subscription s = sub("FREE", new BigDecimal("5.00"), BigDecimal.ZERO);
+            when(subscriptionRepository.findActiveByUserIdForUpdate(USER_ID)).thenReturn(Optional.of(s));
+
+            CreditConsumeResult result = cloud.tryReserveMarkup(
+                    USER_ID, "platform-markup:STREAM:gen-2", "seedance", "seedance-2.0",
+                    new BigDecimal("300.00"), null, 15, "STREAM", "scope-1", false);
+
+            assertThat(result.success()).isFalse();
+            assertThat(result.error()).contains("Insufficient credits");
+            assertThat(result.error()).doesNotContain("PLAN_EXCLUDES_THIS");
+        }
+
+        @Test
+        @DisplayName("a PAID plan pays for a generation out of the monthly bucket, which is what a subscription buys")
+        void aPaidPlanFundsAGenerationFromItsSubscription() {
+            // The other half of the rule, stated on its own: "subscription or
+            // top-up" is only a real answer if a subscription actually pays.
+            Subscription s = sub("PRO", new BigDecimal("1000.00"), BigDecimal.ZERO);
+            when(subscriptionRepository.findActiveByUserIdForUpdate(USER_ID)).thenReturn(Optional.of(s));
+
+            CreditConsumeResult result = cloud.tryReserveMarkup(
+                    USER_ID, "platform-markup:STREAM:gen-3", "seedance", "seedance-2.0",
+                    new BigDecimal("300.00"), null, 15, "STREAM", "scope-1", false);
+
+            assertThat(result.success()).isTrue();
+            assertThat(s.getRemainingCredits()).isEqualByComparingTo("700.00");
+        }
     }
 
     // ==========================================================================
@@ -539,6 +637,16 @@ class CreditServiceFreeWorkflowScopingTest {
 
         private CreditService ce() {
             return new CreditService(subscriptionRepository, ledgerRepository, pricingService, true);
+        }
+
+        @Test
+        @DisplayName("CE never scopes the monthly bucket, so the warning that rule drives never appears there")
+        void unlimitedNeverScopesTheMonthlyBucket() {
+            // Self-hosted runs unlimited: there are no two buckets to route
+            // between, and the operator's provider key is their own. A surface
+            // that showed "your monthly credits cannot pay for this" on CE
+            // would be describing a rule that does not exist on that install.
+            assertThat(ce().getBalanceBreakdown(USER_ID).monthlyCreditsAreWorkflowOnly()).isFalse();
         }
 
         @Test

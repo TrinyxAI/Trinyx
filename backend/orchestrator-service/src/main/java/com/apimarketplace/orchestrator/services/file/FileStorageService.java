@@ -74,6 +74,30 @@ public interface FileStorageService {
     }
 
     /**
+     * Attach this run's context to files that were stored WITHOUT one.
+     *
+     * <p>Not every file a step produces is uploaded BY the step. A catalog API that answers with
+     * binary (text-to-speech, image generation, …) is uploaded from catalog-service, which knows the
+     * tenant and nothing else - so the row carries no workflow, and the Files browser, which builds
+     * its workflow folders purely from those run-context columns, shows the file at the root instead
+     * of inside the run that produced it. The step knows the context and adopts its own outputs once
+     * the tool call returns.</p>
+     *
+     * <p>Best-effort by contract: implementations return 0 rather than throwing. Where a file is
+     * filed must never decide whether a workflow step succeeded, and the file is already stored and
+     * already reachable from the step's output either way. Adoption never overwrites an existing
+     * workflow id, so it is safe to repeat.</p>
+     *
+     * @param fileIds storage row ids ({@link com.apimarketplace.orchestrator.domain.file.FileRef#id()})
+     * @return how many rows were adopted; 0 when unsupported or on any failure
+     */
+    default int adoptRunContext(String tenantId, java.util.Collection<String> fileIds,
+                                String workflowId, String runId, String stepAlias,
+                                int epoch, int spawn, Integer itemIndex) {
+        return 0; // local/mock storage keeps no run-context index
+    }
+
+    /**
      * Generates a pre-signed URL for downloading a file.
      * The URL expires after the specified duration.
      *

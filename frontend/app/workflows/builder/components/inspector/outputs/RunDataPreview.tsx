@@ -220,7 +220,7 @@ export function RunDataPreview({
         <div className="flex items-center gap-2">
           <span
             data-testid="run-data-mocked-pill"
-            className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-indigo-100 dark:bg-indigo-900/40 text-indigo-700 dark:text-indigo-300"
+            className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-xs font-medium bg-indigo-100 dark:bg-indigo-900/40 text-indigo-700 dark:text-indigo-300"
           >
             <FlaskConical className="h-3 w-3" />
             {tMock('mockedBadge')}

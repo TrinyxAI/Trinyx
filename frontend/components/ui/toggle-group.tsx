@@ -22,6 +22,22 @@ export interface ToggleGroupProps {
   variant?: "grid" | "pill";
   activeClassName?: string;
   inactiveClassName?: string;
+  /**
+   * Names the group for a screen reader, AND opts it into radio semantics.
+   *
+   * <p>The control is a radio group by nature: exactly one option is selected
+   * and picking another replaces it. Announcing that needs two roles working
+   * together (`radiogroup` around `radio`), and a `radio` without an owning
+   * group is an ARIA violation an audit tool will flag. A radiogroup with no
+   * name is not much better: the reader hears the options and nothing saying
+   * what they decide.
+   *
+   * <p>So the roles are emitted only when a caller supplies the name, and every
+   * caller that does not is rendered exactly as before. This is deliberately a
+   * one-way door: adding a label to an existing toggle upgrades it, and no
+   * existing toggle is changed by somebody else's decision.
+   */
+  ariaLabel?: string;
 }
 
 export const ToggleGroup: React.FC<ToggleGroupProps> = ({
@@ -34,6 +50,7 @@ export const ToggleGroup: React.FC<ToggleGroupProps> = ({
   variant = "grid",
   activeClassName,
   inactiveClassName,
+  ariaLabel,
 }) => {
   const isPill = variant === "pill";
 
@@ -65,12 +82,24 @@ export const ToggleGroup: React.FC<ToggleGroupProps> = ({
   const resolvedInactiveClass = inactiveClassName ?? defaultInactiveClass;
 
   return (
-    <div className={containerClasses}>
+    <div
+      className={containerClasses}
+      role={ariaLabel ? 'radiogroup' : undefined}
+      aria-label={ariaLabel}
+    >
       <div className={wrapperClasses}>
         {options.map((option) => (
           <button
             key={option.value}
             type="button"
+            // Paired with the group role above, and emitted on the same
+            // condition: a radio outside a radiogroup is an ARIA violation, so
+            // the two are never split. Where they do apply, a screen reader
+            // says the options are alternatives and which one is in force -
+            // which on a screen that decides who pays for a purchase is the
+            // whole meaning of the control.
+            role={ariaLabel ? 'radio' : undefined}
+            aria-checked={ariaLabel ? value === option.value : undefined}
             disabled={disabled}
             onClick={() => !disabled && onValueChange(option.value)}
             className={cn(

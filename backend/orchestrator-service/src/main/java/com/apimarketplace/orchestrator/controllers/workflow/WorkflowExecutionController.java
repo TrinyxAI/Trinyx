@@ -17,7 +17,6 @@ import com.apimarketplace.orchestrator.repository.WorkflowRunRepository;
 import com.apimarketplace.orchestrator.services.EditorRunResolver;
 import com.apimarketplace.orchestrator.services.WorkflowExecutionService;
 import com.apimarketplace.orchestrator.services.WorkflowPlanVersionService;
-import com.apimarketplace.common.credit.CreditConsumptionClient;
 import com.apimarketplace.orchestrator.services.resume.ExecutionContextManager;
 import com.apimarketplace.orchestrator.services.resume.WorkflowResumeService;
 import com.apimarketplace.orchestrator.services.resume.WorkflowRunState;
@@ -68,9 +67,6 @@ public class WorkflowExecutionController {
 
     @Autowired
     private WorkflowRunRepository runRepository;
-
-    @Autowired
-    private CreditConsumptionClient creditClient;
 
     @Autowired
     private WorkflowPlanVersionService versionService;
@@ -162,11 +158,12 @@ public class WorkflowExecutionController {
                         .body(responseFactory.createFailureResponse("Workflow access is read-only"));
             }
 
-            if (!creditClient.checkCredits(userId)) {
-                logger.warn("Insufficient credits for user {}, blocking workflow execution", userId);
-                return ResponseEntity.status(HttpStatus.PAYMENT_REQUIRED)
-                        .body(responseFactory.createFailureResponse("Insufficient credits to execute workflow"));
-            }
+            // No credit pre-check. Execution is dispatched asynchronously here, so a
+            // pre-emptive 402 was the ONLY trace an out-of-credit user ever got - no run,
+            // no nodes, nothing to look at afterwards. The run is created and executed
+            // instead; NodeCreditGate fails its trigger node with the out-of-credit
+            // message and the downstream nodes are marked SKIPPED, so the refusal is
+            // visible on the canvas and in the run history.
 
             // Auto-save before run: if canvas plan differs from DB, update it.
             // APPLICATION-type workflows skip this entirely - their plan is the frozen
@@ -376,11 +373,8 @@ public class WorkflowExecutionController {
                 return ResponseEntity.badRequest().body(responseFactory.createFailureResponse("X-User-ID header is required"));
             }
 
-            if (!creditClient.checkCredits(userId)) {
-                logger.warn("Insufficient credits for user {}, blocking workflow start", userId);
-                return ResponseEntity.status(HttpStatus.PAYMENT_REQUIRED)
-                        .body(responseFactory.createFailureResponse("Insufficient credits to start workflow"));
-            }
+            // No credit pre-check - see executeWorkflow above. The PENDING run is started
+            // and its first node records the out-of-credit failure.
 
             // Get run entity to check authorization
             WorkflowRunEntity runEntity = runRepository.findByRunIdPublic(runId).orElse(null);

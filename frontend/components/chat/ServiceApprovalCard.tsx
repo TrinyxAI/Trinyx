@@ -222,7 +222,7 @@ export function ServiceApprovalCard({
       <div className={`my-4 ${className}`}>
         <div className="rounded-2xl border border-green-200 dark:border-green-800 bg-green-50 dark:bg-green-900/20 p-4">
           <div className="flex items-center gap-3">
-            <div className="flex items-center justify-center w-8 h-8 rounded-full bg-white dark:bg-slate-800">
+            <div className="flex items-center justify-center w-8 h-8 rounded-xl bg-white dark:bg-slate-800">
               <CheckCircle className="w-4 h-4 text-green-600 dark:text-green-400" />
             </div>
             <div className="flex-1">
@@ -245,7 +245,7 @@ export function ServiceApprovalCard({
       <div className={`my-4 ${className}`}>
         <div className="rounded-2xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/50 p-4">
           <div className="flex items-center gap-3">
-            <div className="flex items-center justify-center w-8 h-8 rounded-full bg-white dark:bg-slate-800">
+            <div className="flex items-center justify-center w-8 h-8 rounded-xl bg-white dark:bg-slate-800">
               <KeyRound className="w-4 h-4 text-slate-400 dark:text-slate-500" />
             </div>
             <div className="flex-1">
@@ -281,7 +281,7 @@ export function ServiceApprovalCard({
       <div className={`rounded-2xl border p-4 ${cardToneClass}`} data-approval-variant={needsAttentionMode ? 'warning' : 'neutral'}>
         {/* Header */}
         <div className="flex items-center gap-3 mb-3">
-          <div className={`flex items-center justify-center w-8 h-8 rounded-full ${iconToneClass}`}>
+          <div className={`flex items-center justify-center w-8 h-8 rounded-xl ${iconToneClass}`}>
             {needsAttentionMode ? (
               <AlertTriangle className={iconClassName} />
             ) : (

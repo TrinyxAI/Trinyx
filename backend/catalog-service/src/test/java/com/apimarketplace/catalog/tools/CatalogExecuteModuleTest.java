@@ -354,4 +354,332 @@ class CatalogExecuteModuleTest {
         assertThat(captured.getHeaders().getFirst("X-Organization-ID")).isEqualTo("org-1");
         assertThat(captured.getHeaders().getFirst("X-Organization-Role")).isEqualTo("MEMBER");
     }
+
+    /**
+     * A generation is a catalog call, so it meets the same pre-flight gates, and
+     * both of them recognise a tool by the id the platform hands out.
+     *
+     * <p>These exist because the execute route accepts TWO identifiers for the
+     * same endpoint - its id and its {@code api/tool} slug - while the gates in
+     * front of it accept only the first. Sending the slug therefore executes
+     * perfectly and disables both gates on the way, which is a failure no
+     * response body shows. The restriction half is the one with teeth: an id the
+     * list cannot contain is refused, so a restricted agent loses generation
+     * entirely, and the refusal sends it to a catalog search that will never
+     * return the id it is being asked for.
+     */
+    @Nested
+    @DisplayName("generation delegation - the restriction gate reads the id the platform hands out")
+    class GenerationRestrictionGate {
+
+        private static final String ENDPOINT_ID = "375ab18c-4d15-4274-8054-3830910296f2";
+
+        private ToolExecutionContext restrictedTo(String... allowedToolIds) {
+            return new ToolExecutionContext(
+                "user-1",
+                Map.of("allowedToolIds", List.of(allowedToolIds)),
+                Map.of(), Set.of(), null, null, null, null);
+        }
+
+        private ToolExecutionResult generate(String toolId, ToolExecutionContext context) {
+            return module.executeGeneration(
+                Map.of("tool_id", toolId, "params", Map.of("prompt", "a cat")),
+                context,
+                new CatalogExecuteModule.GenerationBilling(
+                    "vid-fast", new java.math.BigDecimal("10"), "second"))
+                .orElseThrow();
+        }
+
+        @Test
+        @DisplayName("an agent allowed this endpoint may generate with it")
+        @SuppressWarnings({"unchecked", "rawtypes"})
+        void allowedEndpointRuns() {
+            Map<String, Object> info = new LinkedHashMap<>();
+            info.put("iconSlug", "provider");
+            info.put("name", "generateVideo");
+            info.put("authType", "none");
+            stubInfo(ENDPOINT_ID, info);
+            when(restTemplate.exchange(
+                contains("/catalog/v1/tools/" + ENDPOINT_ID + "/execute"),
+                eq(HttpMethod.POST), any(HttpEntity.class), eq(String.class)))
+                .thenReturn(new ResponseEntity<>("{\"success\":true,\"result\":{}}", HttpStatus.OK));
+
+            ToolExecutionResult result = generate(ENDPOINT_ID, restrictedTo(ENDPOINT_ID));
+
+            assertThat(result.success())
+                .as("the endpoint is in the agent's allowed list, so the generation must run")
+                .isTrue();
+            verify(restTemplate).exchange(
+                contains("/catalog/v1/tools/" + ENDPOINT_ID + "/execute"),
+                eq(HttpMethod.POST), any(HttpEntity.class), eq(String.class));
+        }
+
+        @Test
+        @DisplayName("an agent NOT allowed this endpoint is refused, and no call is made")
+        @SuppressWarnings({"unchecked", "rawtypes"})
+        void endpointOutsideTheListIsRefused() {
+            ToolExecutionResult result = generate(
+                ENDPOINT_ID, restrictedTo("11111111-1111-1111-1111-111111111111"));
+
+            assertThat(result.success()).isFalse();
+            verify(restTemplate, never()).exchange(
+                contains("/execute"), eq(HttpMethod.POST), any(HttpEntity.class), eq(String.class));
+        }
+
+        @Test
+        @DisplayName("a caller buying on the PLATFORM key is not stopped for having no key of its own")
+        @SuppressWarnings({"unchecked", "rawtypes"})
+        void thePlatformPoolIsNotGatedOnTheCallersOwnKey() {
+            // THE BLOCKER THIS PINS. The credential pre-flight reads the
+            // caller's OWN credentials and never the platform's, and it returns
+            // a result, so the tool is never dispatched. Applied to a caller who
+            // asked for the platform key, that refuses the entire resale
+            // product: the generate node and the app modal both ask for
+            // `platform` by default, so no account without its own provider key
+            // could ever buy a generation.
+            //
+            // Drives the REAL module, not a fabricated approval payload: the
+            // defect was invisible to every test that mocked this boundary, and
+            // one of them had pinned the wrong refusal as correct.
+            Map<String, Object> info = new LinkedHashMap<>();
+            info.put("iconSlug", "elevenlabs");
+            info.put("name", "textToSpeech");
+            info.put("authType", "apiKey");
+            stubInfo(ENDPOINT_ID, info);
+            // No key of the caller's own, anywhere.
+            when(credentialClient.getDefaultCredential(eq("user-1"), eq("elevenlabs")))
+                .thenReturn(Optional.empty());
+            when(restTemplate.exchange(
+                contains("/catalog/v1/tools/" + ENDPOINT_ID + "/execute"),
+                eq(HttpMethod.POST), any(HttpEntity.class), eq(String.class)))
+                .thenReturn(new ResponseEntity<>("{\"success\":true,\"result\":{}}", HttpStatus.OK));
+
+            ToolExecutionResult result = module.executeGeneration(
+                Map.of("tool_id", ENDPOINT_ID,
+                       "params", Map.of("prompt", "a cat"),
+                       "credential_source", "platform"),
+                new ToolExecutionContext("user-1", Map.of(), Map.of(), Set.of(), null, null, null, null),
+                new CatalogExecuteModule.GenerationBilling(
+                    "eleven-v3", new java.math.BigDecimal("12"), "character"))
+                .orElseThrow();
+
+            assertThat(result.success())
+                .as("the platform pool is what this call asked for, so an empty own-key pool is irrelevant")
+                .isTrue();
+            verify(restTemplate).exchange(
+                contains("/catalog/v1/tools/" + ENDPOINT_ID + "/execute"),
+                eq(HttpMethod.POST), any(HttpEntity.class), eq(String.class));
+        }
+
+        @Test
+        @DisplayName("a caller who pinned its OWN key and has none is still warned, before anything runs")
+        @SuppressWarnings({"unchecked", "rawtypes"})
+        void pinningYourOwnKeyWithoutOneStillWarns() {
+            // The negative half. Skipping the gate for everyone would score as a
+            // pass on the test above while deleting the warning this gate
+            // exists to give.
+            Map<String, Object> info = new LinkedHashMap<>();
+            info.put("iconSlug", "elevenlabs");
+            info.put("name", "textToSpeech");
+            info.put("authType", "apiKey");
+            stubInfo(ENDPOINT_ID, info);
+            when(credentialClient.getDefaultCredential(eq("user-1"), eq("elevenlabs")))
+                .thenReturn(Optional.empty());
+
+            ToolExecutionResult result = module.executeGeneration(
+                Map.of("tool_id", ENDPOINT_ID,
+                       "params", Map.of("prompt", "a cat"),
+                       "credential_source", "user"),
+                new ToolExecutionContext("user-1", Map.of(), Map.of(), Set.of(), null, null, null, null),
+                new CatalogExecuteModule.GenerationBilling(
+                    "eleven-v3", new java.math.BigDecimal("12"), "character"))
+                .orElseThrow();
+
+            assertThat(result.data()).isInstanceOf(Map.class);
+            assertThat(((Map<String, Object>) result.data()).get("status")).isEqualTo("approval_needed");
+            verify(restTemplate, never()).exchange(
+                contains("/execute"), eq(HttpMethod.POST), any(HttpEntity.class), eq(String.class));
+        }
+
+        @Test
+        @DisplayName("saying nothing about the pool falls back to the platform key rather than refusing")
+        @SuppressWarnings({"unchecked", "rawtypes"})
+        void anUnpinnedCallFallsBackToThePlatformKey() {
+            // Absent means "own key first, platform second". A missing own key
+            // is therefore the second branch, not a dead end, and warning here
+            // would refuse a call the platform can serve.
+            Map<String, Object> info = new LinkedHashMap<>();
+            info.put("iconSlug", "elevenlabs");
+            info.put("name", "textToSpeech");
+            info.put("authType", "apiKey");
+            stubInfo(ENDPOINT_ID, info);
+            when(credentialClient.getDefaultCredential(eq("user-1"), eq("elevenlabs")))
+                .thenReturn(Optional.empty());
+            com.apimarketplace.credential.client.dto.PlatformCredentialLookupDto platform =
+                new com.apimarketplace.credential.client.dto.PlatformCredentialLookupDto();
+            platform.setFound(true);
+            platform.setIntegrationName("elevenlabs");
+            when(credentialClient.findPlatformCredentialByName("elevenlabs"))
+                .thenReturn(Optional.of(platform));
+            when(restTemplate.exchange(
+                contains("/catalog/v1/tools/" + ENDPOINT_ID + "/execute"),
+                eq(HttpMethod.POST), any(HttpEntity.class), eq(String.class)))
+                .thenReturn(new ResponseEntity<>("{\"success\":true,\"result\":{}}", HttpStatus.OK));
+
+            ToolExecutionResult result = module.executeGeneration(
+                Map.of("tool_id", ENDPOINT_ID, "params", Map.of("prompt", "a cat")),
+                new ToolExecutionContext("user-1", Map.of(), Map.of(), Set.of(), null, null, null, null),
+                new CatalogExecuteModule.GenerationBilling(
+                    "eleven-v3", new java.math.BigDecimal("12"), "character"))
+                .orElseThrow();
+
+            assertThat(result.success()).isTrue();
+        }
+
+        @Test
+        @DisplayName("the warning REPORTS whether a platform key exists, which is what picks the remedy")
+        @SuppressWarnings({"unchecked", "rawtypes"})
+        void theWarningReportsWhichPoolsWereEmpty() {
+            // THE JOINT. The consumer of this flag is tested against a value the
+            // test itself supplies, so inverting what the PRODUCER writes left
+            // 81 tests green: a caller with no platform key would be told to
+            // pass credential_source='platform', the wrong-remedy loop that was
+            // supposedly removed. Both directions are asserted, because a
+            // constant satisfies either one alone.
+            Map<String, Object> info = new LinkedHashMap<>();
+            info.put("iconSlug", "elevenlabs");
+            info.put("name", "textToSpeech");
+            info.put("authType", "apiKey");
+            stubInfo(ENDPOINT_ID, info);
+            when(credentialClient.getDefaultCredential(eq("user-1"), eq("elevenlabs")))
+                .thenReturn(Optional.empty());
+
+            com.apimarketplace.credential.client.dto.PlatformCredentialLookupDto sold =
+                new com.apimarketplace.credential.client.dto.PlatformCredentialLookupDto();
+            sold.setFound(true);
+            when(credentialClient.findPlatformCredentialByName("elevenlabs"))
+                .thenReturn(Optional.of(sold));
+
+            ToolExecutionResult withPlatformKey = module.executeGeneration(
+                Map.of("tool_id", ENDPOINT_ID, "params", Map.of("prompt", "a cat"),
+                       "credential_source", "user"),
+                new ToolExecutionContext("user-1", Map.of(), Map.of(), Set.of(), null, null, null, null),
+                new CatalogExecuteModule.GenerationBilling(
+                    "eleven-v3", new java.math.BigDecimal("12"), "character"))
+                .orElseThrow();
+
+            assertThat(((Map<String, Object>) withPlatformKey.data()).get("platformKeyAvailable"))
+                .as("the platform sells this one, so switching pool is a remedy that works")
+                .isEqualTo(true);
+
+            when(credentialClient.findPlatformCredentialByName("elevenlabs"))
+                .thenReturn(Optional.empty());
+
+            ToolExecutionResult withoutPlatformKey = module.executeGeneration(
+                Map.of("tool_id", ENDPOINT_ID, "params", Map.of("prompt", "a cat"),
+                       "credential_source", "user"),
+                new ToolExecutionContext("user-1", Map.of(), Map.of(), Set.of(), null, null, null, null),
+                new CatalogExecuteModule.GenerationBilling(
+                    "eleven-v3", new java.math.BigDecimal("12"), "character"))
+                .orElseThrow();
+
+            assertThat(((Map<String, Object>) withoutPlatformKey.data()).get("platformKeyAvailable"))
+                .as("neither pool has a key, and offering the empty one is advice that cannot work")
+                .isEqualTo(false);
+        }
+
+        @Test
+        @DisplayName("with no pool pinned and no platform key either, the warning is still given")
+        @SuppressWarnings({"unchecked", "rawtypes"})
+        void anUnpinnedCallWithNoPoolAtAllStillWarns() {
+            Map<String, Object> info = new LinkedHashMap<>();
+            info.put("iconSlug", "elevenlabs");
+            info.put("name", "textToSpeech");
+            info.put("authType", "apiKey");
+            stubInfo(ENDPOINT_ID, info);
+            when(credentialClient.getDefaultCredential(eq("user-1"), eq("elevenlabs")))
+                .thenReturn(Optional.empty());
+            when(credentialClient.findPlatformCredentialByName("elevenlabs"))
+                .thenReturn(Optional.empty());
+
+            ToolExecutionResult result = module.executeGeneration(
+                Map.of("tool_id", ENDPOINT_ID, "params", Map.of("prompt", "a cat")),
+                new ToolExecutionContext("user-1", Map.of(), Map.of(), Set.of(), null, null, null, null),
+                new CatalogExecuteModule.GenerationBilling(
+                    "eleven-v3", new java.math.BigDecimal("12"), "character"))
+                .orElseThrow();
+
+            assertThat(((Map<String, Object>) result.data()).get("status")).isEqualTo("approval_needed");
+        }
+
+        @Test
+        @DisplayName("the pricing context travels on the WIRE, or nothing downstream can charge correctly")
+        @SuppressWarnings({"unchecked", "rawtypes"})
+        void thePricingContextReachesTheExecuteRequest() {
+            // THE SEAM NOTHING WATCHED. The three X-Lc-Generation-* headers are
+            // the only channel by which the model, the size and the unit reach
+            // pricing. Deleting any of them silently disables a guard three
+            // classes away: the dimension check has six well-written tests, and
+            // every one of them builds its scope directly, so all six stay green
+            // while the unit never leaves this method.
+            //
+            // credential_source is here for the same reason: it reaching the
+            // body is what fixed "a workflow that asked for its OWN key was
+            // billed the platform price instead", and the existing test for it
+            // asserts on a helper that never removes the key, so it cannot fail.
+            Map<String, Object> info = new LinkedHashMap<>();
+            info.put("iconSlug", "provider");
+            info.put("name", "generateVideo");
+            info.put("authType", "none");
+            stubInfo(ENDPOINT_ID, info);
+            when(restTemplate.exchange(
+                contains("/catalog/v1/tools/" + ENDPOINT_ID + "/execute"),
+                eq(HttpMethod.POST), any(HttpEntity.class), eq(String.class)))
+                .thenReturn(new ResponseEntity<>("{\"success\":true,\"result\":{}}", HttpStatus.OK));
+
+            module.executeGeneration(
+                Map.of("tool_id", ENDPOINT_ID,
+                       "params", Map.of("prompt", "a cat"),
+                       "credential_source", "user"),
+                new ToolExecutionContext("user-1", Map.of(), Map.of(), Set.of(), null, null, null, null),
+                new CatalogExecuteModule.GenerationBilling(
+                    "seedance-2.0", new java.math.BigDecimal("10"), "second"));
+
+            org.mockito.ArgumentCaptor<HttpEntity> captor =
+                org.mockito.ArgumentCaptor.forClass(HttpEntity.class);
+            verify(restTemplate).exchange(
+                contains("/catalog/v1/tools/" + ENDPOINT_ID + "/execute"),
+                eq(HttpMethod.POST), captor.capture(), eq(String.class));
+            HttpEntity sent = captor.getValue();
+
+            assertThat(sent.getHeaders().getFirst("X-Lc-Generation-Model"))
+                .as("which price row applies")
+                .isEqualTo("seedance-2.0");
+            assertThat(sent.getHeaders().getFirst("X-Lc-Generation-Quantity"))
+                .as("how big the call is")
+                .isEqualTo("10");
+            assertThat(sent.getHeaders().getFirst("X-Lc-Generation-Unit"))
+                .as("what that number counts, without which it cannot be checked against the rate")
+                .isEqualTo("second");
+            assertThat(sent.getBody().toString())
+                .as("who pays, which decides whether the platform bills at all")
+                .contains("user");
+        }
+
+        @Test
+        @DisplayName("the api/tool slug is NOT an identifier this gate can honour, even for an allowed endpoint")
+        @SuppressWarnings({"unchecked", "rawtypes"})
+        void theSlugCannotBeMatchedAgainstTheAllowedList() {
+            // The regression this pins is upstream, in what the generation
+            // surface delegates: this gate is right to refuse an id it was never
+            // given, so the surface has to send the one it was. Were the slug
+            // ever delegated again, an agent that IS allowed this endpoint would
+            // lose generation with no trace but a log line.
+            ToolExecutionResult result = generate("provider/vid-fast", restrictedTo(ENDPOINT_ID));
+
+            assertThat(result.success()).isFalse();
+            verify(restTemplate, never()).exchange(
+                contains("/execute"), eq(HttpMethod.POST), any(HttpEntity.class), eq(String.class));
+        }
+    }
 }

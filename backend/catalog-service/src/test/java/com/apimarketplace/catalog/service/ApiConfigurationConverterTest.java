@@ -32,6 +32,87 @@ class ApiConfigurationConverterTest {
         converter = new ApiConfigurationConverter(objectMapper);
     }
 
+    @Nested
+    @DisplayName("fields that must survive the whole submission path")
+    class SurvivesSubmission {
+
+        /**
+         * The importer POSTs a JSON body, it is bound as a typed record, and this
+         * converter rebuilds the tool map field by field. A field can therefore be
+         * lost at TWO places without a single thing failing: no component on the
+         * record (dropped at binding) or no line in the converter (dropped on the
+         * way out). The orchestrator downstream reads whatever survived.
+         *
+         * <p>This drives both legs with real JSON rather than a hand-built record,
+         * because a positionally-constructed DTO would skip the binding half and
+         * pass while production loses the value.
+         */
+        private JsonNode convertToolJson(String toolFieldsJson) throws Exception {
+            String body = """
+                {
+                  "apiName": "Seedance", "apiDescription": "d", "selectedCategory": "c",
+                  "apiConfig": { "baseUrl": "https://example.test",
+                                 "authorization": { "type": "none" } },
+                  "monetization": { "pricing": "free" },
+                  "mcpTools": [ { "name": "create_video_task", "description": "d",
+                                  "endpoint": "/tasks", "method": "POST"%s } ]
+                }
+                """.formatted(toolFieldsJson.isEmpty() ? "" : "," + toolFieldsJson);
+            ApiConfigurationRequest request = objectMapper.readValue(body, ApiConfigurationRequest.class);
+            return converter.toJsonNode(request).get("mcpTools").get(0);
+        }
+
+        @Test
+        @DisplayName("the generation descriptor reaches the other side, or the whole feature is inert")
+        void generationSpecSurvives() throws Exception {
+            // Without this the descriptor never lands on api_tools.generation_spec:
+            // the generation surface lists nothing, core:generate cannot resolve a
+            // model, and isGeneration() is false forever, which silently switches
+            // off the descriptor half of every fail-closed billing guard.
+            JsonNode tool = convertToolJson("""
+                    "generationSpec": {"kind": "video", "assetPath": "content.video_url",
+                                       "paramMap": {"prompt": "content[0].text"},
+                                       "models": [{"id": "seedance-2.0",
+                                                   "price": {"unit": "second", "unitCredits": 60}}]}
+                    """);
+
+            assertTrue(tool.has("generationSpec"), "generationSpec must survive binding + conversion");
+            assertEquals("video", tool.get("generationSpec").get("kind").asText());
+            assertEquals("seedance-2.0",
+                    tool.get("generationSpec").get("models").get(0).get("id").asText());
+        }
+
+        @Test
+        @DisplayName("and so do the required scopes, so the two cannot drift apart again")
+        void requiredScopesSurvive() throws Exception {
+            // Asserted next to the descriptor deliberately: these two are carried
+            // the same way, and the descriptor shipped with only two of the four
+            // legs this one has.
+            JsonNode tool = convertToolJson("\"requiredScopes\": [\"video.write\"]");
+
+            assertTrue(tool.has("requiredScopes"));
+            assertEquals("video.write", tool.get("requiredScopes").get(0).asText());
+        }
+
+        @Test
+        @DisplayName("an ordinary endpoint carries no descriptor, so nothing else becomes a generation")
+        void ordinaryToolCarriesNoDescriptor() throws Exception {
+            JsonNode tool = convertToolJson("");
+
+            assertFalse(tool.has("generationSpec"),
+                    "an endpoint that declares no generation must not gain one");
+        }
+
+        @Test
+        @DisplayName("the snake_case spelling binds too, since that is what a seed file writes")
+        void snakeCaseAliasBinds() throws Exception {
+            JsonNode tool = convertToolJson("\"generation_spec\": {\"kind\": \"image\"}");
+
+            assertTrue(tool.has("generationSpec"));
+            assertEquals("image", tool.get("generationSpec").get("kind").asText());
+        }
+    }
+
     // ═══════════════════════════════════════════════════════════════════════════
     // toJsonNode() BASIC TESTS
     // ═══════════════════════════════════════════════════════════════════════════

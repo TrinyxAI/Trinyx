@@ -171,6 +171,13 @@ public class CatalogToolsProvider implements ToolsProvider {
                   (type: api_key | oauth2 | bearer_token | basic_auth | none; requiredScopes) = what
                   credential(action='require') would ask the user to connect ('none' = no credential, just execute).
                 - execute: run a tool with the user's credentials. catalog(action='execute', tool_id='<uuid>', params={...}).
+                  Every refusal comes back as one sentence led by a stable code, so branch on the code and
+                  report the sentence. CREDENTIALS_REQUIRED = no key of that tool's provider is available for
+                  the pool this call used; the sentence names the integration, and connecting a key is the
+                  user's act (credential(action='require', services=['<integration>'])), so do not retry the
+                  same call. UPSTREAM_REJECTED = the service refused the call, so change it before resending.
+                  TOOL_CALL_FAILED = the call never completed for a reason nothing in it can fix; send it once
+                  more at most.
                 - register_api / update_api / delete_api / list_custom_apis: manage your own custom APIs.
                   register_api needs api_definition (apiName, baseUrl, endpoints with outputSchema each);
                   call catalog(action='help', topics=['register']) FIRST for the field reference.

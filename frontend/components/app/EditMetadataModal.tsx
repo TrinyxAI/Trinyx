@@ -107,7 +107,7 @@ export const EditMetadataModal: React.FC<EditMetadataModalProps> = ({
         onClick={(e) => e.stopPropagation()}
       >
         <div className="text-center mb-6">
-          <div className="w-16 h-16 bg-theme-secondary rounded-full flex items-center justify-center mx-auto mb-4">
+          <div className="w-16 h-16 bg-theme-secondary rounded-2xl flex items-center justify-center mx-auto mb-4">
             <Icon className="w-8 h-8 text-theme-primary" />
           </div>
           <h3 className="text-2xl font-semibold text-theme-primary">{t('title')}</h3>

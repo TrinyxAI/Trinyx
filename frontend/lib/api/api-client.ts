@@ -66,6 +66,52 @@ export class ApiError extends Error {
   }
 }
 
+/**
+ * Fired on `window` on EVERY call refused because the account is deactivated (such an account has
+ * every call refused, so this arrives in bursts). AccountRestoreModal listens for it and offers to
+ * cancel the pending deletion.
+ */
+export const ACCOUNT_INACTIVE_EVENT = 'account-inactive';
+
+/**
+ * Latch for the same signal, because the event alone loses the race that matters. On /app/* the
+ * first blocked call is issued by FirstLoginGuard, which renders only a spinner until it resolves,
+ * so the modal is not mounted yet and the event reaches no listener. If nothing else happens to be
+ * refused afterwards (cached queries, `enabled:false` hooks), the person is left in an app where
+ * nothing loads and no path leads anywhere, which is the exact state the modal exists to prevent.
+ * A listener mounting later reads this instead of waiting for the next event.
+ */
+let accountInactiveSeen = false;
+
+export function hasBlockedCallBeenSeen(): boolean {
+  return accountInactiveSeen;
+}
+
+/** Cleared once the account is usable again, so a later session starts from a clean slate. */
+export function clearBlockedCallLatch(): void {
+  accountInactiveSeen = false;
+}
+
+/**
+ * The gateway rejects a deactivated account with HTTP 429 and message "Inactive account",
+ * reusing its quota response. Matching on the message is what separates it from a real
+ * rate limit, which must still be retried. Kept next to ApiError so both the response
+ * handler and the retry loop read the same definition.
+ */
+function isInactiveAccountResponse(status: number, details: any): boolean {
+  return status === 429 && details?.message === 'Inactive account';
+}
+
+/**
+ * True for the error apiClient throws when the gateway refused a call because the account is
+ * deactivated. Exported so every retry policy in the app reads the same definition: React Query
+ * wraps apiClient calls and applies its OWN ladder on 429, so without this the "fails on the
+ * first response" behaviour would only hold for direct callers.
+ */
+export function isInactiveAccountError(error: unknown): boolean {
+  return error instanceof ApiError && isInactiveAccountResponse(error.status, error.details);
+}
+
 class ApiClient {
   private baseUrl: string;
   private timeout: number;
@@ -286,6 +332,15 @@ class ApiClient {
       errorData.retryAfter = retryAfterHeader;
     }
 
+    // The gateway blocks a deactivated account with the same 429 it uses for quota, so
+    // this is a rate limit in shape only: waiting changes nothing until the person
+    // reactivates. Emit a global event so the restore interstitial can offer that, and
+    // let the retry loop below recognise it and give up immediately.
+    if (isInactiveAccountResponse(response.status, errorData) && typeof window !== 'undefined') {
+      accountInactiveSeen = true;
+      window.dispatchEvent(new CustomEvent(ACCOUNT_INACTIVE_EVENT));
+    }
+
     throw new ApiError(
       errorData.message || errorData.error || `HTTP ${response.status}: ${response.statusText}`,
       response.status,
@@ -339,6 +394,13 @@ class ApiClient {
             this.authFailureFired = true;
             this.onAuthFailure();
           }
+          throw error;
+        }
+
+        // An inactive account is not a rate limit: every retry gets the same answer, so
+        // backing off only delays the interstitial that lets the person do something
+        // about it. Fail on the first response instead of after the full backoff ladder.
+        if (isInactiveAccountError(error)) {
           throw error;
         }
 

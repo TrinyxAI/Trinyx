@@ -1,6 +1,5 @@
 package com.apimarketplace.orchestrator.trigger;
 
-import com.apimarketplace.common.credit.CreditConsumptionClient;
 import com.apimarketplace.orchestrator.domain.WorkflowRunEntity;
 import com.apimarketplace.orchestrator.domain.workflow.RunStatus;
 import com.apimarketplace.orchestrator.services.triggers.TriggerUserResolver;
@@ -43,7 +42,6 @@ class DatasourceTriggerDispatchServiceTest {
 
     @Mock private ProductionRunResolver productionRunResolver;
     @Mock private ReusableTriggerService triggerService;
-    @Mock private CreditConsumptionClient creditClient;
     @Mock private TriggerUserResolver triggerUserResolver;
 
     private DatasourceTriggerDispatchService service;
@@ -57,7 +55,7 @@ class DatasourceTriggerDispatchServiceTest {
 
     @BeforeEach
     void setUp() {
-        service = new DatasourceTriggerDispatchService(productionRunResolver, triggerService, creditClient, triggerUserResolver);
+        service = new DatasourceTriggerDispatchService(productionRunResolver, triggerService, triggerUserResolver);
     }
 
     private WorkflowRunEntity runEntity(RunStatus status) {
@@ -166,7 +164,6 @@ class DatasourceTriggerDispatchServiceTest {
                     WORKFLOW_ID, TRIGGER_ID, "row_created", DS_ID, ROW_ID, sampleRow(), null, TRIGGERED_AT);
 
             assertThat(result.status()).isEqualTo("run_terminal");
-            verify(creditClient, never()).checkCredits(anyString());
             verify(triggerService, never()).executeTrigger(any(), anyString(), any(), any());
         }
 
@@ -207,22 +204,6 @@ class DatasourceTriggerDispatchServiceTest {
         }
     }
 
-    // ==================== Credit gate ====================
-
-    @Test
-    @DisplayName("Tenant out of credits → status=insufficient_credits, no engine call")
-    void insufficientCreditsRefused() {
-        WorkflowRunEntity run = runEntity(RunStatus.WAITING_TRIGGER);
-        when(productionRunResolver.resolve(eq(WORKFLOW_ID), any())).thenReturn(foundResolution(run));
-        when(creditClient.checkCredits(TENANT_ID)).thenReturn(false);
-
-        DatasourceTriggerDispatchService.DispatchResult result = service.dispatch(
-                WORKFLOW_ID, TRIGGER_ID, "row_created", DS_ID, ROW_ID, sampleRow(), null, TRIGGERED_AT);
-
-        assertThat(result.status()).isEqualTo("insufficient_credits");
-        verify(triggerService, never()).executeTrigger(any(), anyString(), any(), any());
-    }
-
     // ==================== Happy path ====================
 
     @Nested
@@ -235,7 +216,6 @@ class DatasourceTriggerDispatchServiceTest {
         void rowCreatedFires() {
             WorkflowRunEntity run = runEntity(RunStatus.WAITING_TRIGGER);
             when(productionRunResolver.resolve(eq(WORKFLOW_ID), any())).thenReturn(foundResolution(run));
-            when(creditClient.checkCredits(TENANT_ID)).thenReturn(true);
             when(triggerUserResolver.resolveDisplayName(TENANT_ID)).thenReturn("Test User");
             when(triggerService.executeTrigger(eq(run), eq(TRIGGER_ID), eq(TriggerType.DATASOURCE), any()))
                     .thenReturn(TriggerExecutionResult.success(run.getRunIdPublic(), TRIGGER_ID,
@@ -272,7 +252,6 @@ class DatasourceTriggerDispatchServiceTest {
         void triggeredByResolvedViaUserResolver() {
             WorkflowRunEntity run = runEntity(RunStatus.WAITING_TRIGGER);
             when(productionRunResolver.resolve(eq(WORKFLOW_ID), any())).thenReturn(foundResolution(run));
-            when(creditClient.checkCredits(TENANT_ID)).thenReturn(true);
             when(triggerUserResolver.resolveDisplayName(TENANT_ID)).thenReturn("Alice");
             when(triggerService.executeTrigger(any(), anyString(), any(), any()))
                     .thenReturn(TriggerExecutionResult.success(run.getRunIdPublic(), TRIGGER_ID,
@@ -295,7 +274,6 @@ class DatasourceTriggerDispatchServiceTest {
         void triggeredByEmptyStringWhenResolverReturnsEmpty() {
             WorkflowRunEntity run = runEntity(RunStatus.WAITING_TRIGGER);
             when(productionRunResolver.resolve(eq(WORKFLOW_ID), any())).thenReturn(foundResolution(run));
-            when(creditClient.checkCredits(TENANT_ID)).thenReturn(true);
             when(triggerUserResolver.resolveDisplayName(TENANT_ID)).thenReturn("");
             when(triggerService.executeTrigger(any(), anyString(), any(), any()))
                     .thenReturn(TriggerExecutionResult.success(run.getRunIdPublic(), TRIGGER_ID,
@@ -318,7 +296,6 @@ class DatasourceTriggerDispatchServiceTest {
         void eventTypeNormalized() {
             WorkflowRunEntity run = runEntity(RunStatus.WAITING_TRIGGER);
             when(productionRunResolver.resolve(eq(WORKFLOW_ID), any())).thenReturn(foundResolution(run));
-            when(creditClient.checkCredits(TENANT_ID)).thenReturn(true);
             when(triggerService.executeTrigger(any(), anyString(), any(), any()))
                     .thenReturn(TriggerExecutionResult.success(run.getRunIdPublic(), TRIGGER_ID,
                             TriggerType.DATASOURCE, Set.of(), 1));
@@ -339,7 +316,6 @@ class DatasourceTriggerDispatchServiceTest {
         void nullTriggeredAtFallsBackToNow() {
             WorkflowRunEntity run = runEntity(RunStatus.WAITING_TRIGGER);
             when(productionRunResolver.resolve(eq(WORKFLOW_ID), any())).thenReturn(foundResolution(run));
-            when(creditClient.checkCredits(TENANT_ID)).thenReturn(true);
             when(triggerService.executeTrigger(any(), anyString(), any(), any()))
                     .thenReturn(TriggerExecutionResult.success(run.getRunIdPublic(), TRIGGER_ID,
                             TriggerType.DATASOURCE, Set.of(), 1));
@@ -359,7 +335,6 @@ class DatasourceTriggerDispatchServiceTest {
         void engineFailureSurfacesAsError() {
             WorkflowRunEntity run = runEntity(RunStatus.WAITING_TRIGGER);
             when(productionRunResolver.resolve(eq(WORKFLOW_ID), any())).thenReturn(foundResolution(run));
-            when(creditClient.checkCredits(TENANT_ID)).thenReturn(true);
             when(triggerService.executeTrigger(any(), anyString(), any(), any()))
                     .thenReturn(TriggerExecutionResult.failure(run.getRunIdPublic(), TRIGGER_ID,
                             TriggerType.DATASOURCE, "engine rejected"));
@@ -372,11 +347,31 @@ class DatasourceTriggerDispatchServiceTest {
         }
 
         @Test
+        @DisplayName("out-of-credit trigger node → the fire still happened, status is insufficient_credits")
+        void creditExhaustedSurfacesAsInsufficientCredits() {
+            WorkflowRunEntity run = runEntity(RunStatus.WAITING_TRIGGER);
+            when(productionRunResolver.resolve(eq(WORKFLOW_ID), any())).thenReturn(foundResolution(run));
+            // The engine now reports the refusal from the trigger node itself; pre-fix
+            // the dispatcher refused before any epoch existed and nothing was recorded.
+            when(triggerService.executeTrigger(any(), anyString(), any(), any()))
+                    .thenReturn(TriggerExecutionResult.failure(run.getRunIdPublic(), TRIGGER_ID,
+                            TriggerType.DATASOURCE,
+                            com.apimarketplace.orchestrator.services.credit.CreditExhaustion.MESSAGE));
+
+            DatasourceTriggerDispatchService.DispatchResult result = service.dispatch(
+                    WORKFLOW_ID, TRIGGER_ID, "row_created", DS_ID, ROW_ID, sampleRow(), null, TRIGGERED_AT);
+
+            assertThat(result.success()).isFalse();
+            assertThat(result.status()).isEqualTo("insufficient_credits");
+            // The engine WAS called: that is what leaves a failed trigger node behind.
+            verify(triggerService).executeTrigger(any(), anyString(), any(), any());
+        }
+
+        @Test
         @DisplayName("engine throws → caught and reported as error, not propagated")
         void engineExceptionSurfacesAsError() {
             WorkflowRunEntity run = runEntity(RunStatus.WAITING_TRIGGER);
             when(productionRunResolver.resolve(eq(WORKFLOW_ID), any())).thenReturn(foundResolution(run));
-            when(creditClient.checkCredits(TENANT_ID)).thenReturn(true);
             when(triggerService.executeTrigger(any(), anyString(), any(), any()))
                     .thenThrow(new RuntimeException("boom"));
 

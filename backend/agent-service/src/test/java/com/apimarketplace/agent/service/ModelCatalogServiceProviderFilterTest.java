@@ -370,8 +370,8 @@ class ModelCatalogServiceProviderFilterTest {
     }
 
     @Test
-    @DisplayName("admin image_generation tab (BYOK) SHOWS a keyless provider's image-gen model, annotated available=false")
-    void adminImageGenTabShowsKeylessProviderUnavailable() {
+    @DisplayName("image_generation category (BYOK) admits a keyless provider's image-gen model, annotated available=false")
+    void imageGenCategoryAdmitsKeylessProviderUnavailable() {
         // openai has NO key (configured=false, no DB key). The panel lists the
         // full catalog, so the mode filter keeps the image model and it is shown
         // for ranking, annotated available=false.

@@ -1,9 +1,9 @@
 package com.apimarketplace.catalog.controllers.tools;
 
+import com.apimarketplace.agent.tools.ToolErrorCode;
 import com.apimarketplace.agent.tools.ToolsProvider;
 import com.apimarketplace.agent.tools.ToolsProvider.ToolExecutionContext;
 import com.apimarketplace.agent.tools.ToolsProvider.ToolExecutionResult;
-import com.apimarketplace.catalog.tools.CatalogToolsProvider;
 import jakarta.servlet.http.HttpServletRequest;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -16,8 +16,14 @@ import java.util.*;
 /**
  * REST Controller for tool execution in catalog-service.
  * Exposes the same /api/agent-tools endpoint format as orchestrator/agent-service.
- * Routes directly to the local CatalogToolsProvider (no HTTP hop).
+ * Routes directly to the local tool providers (no HTTP hop).
  * Disabled in monolith mode (orchestrator's tools controller handles everything).
+ *
+ * <p>Serves EVERY {@code ToolsProvider} bean in this service, not just the catalog
+ * one: this endpoint is how the callers' tool caches discover what catalog-service
+ * owns, so a provider missing here is a tool that no agent can ever be handed, even
+ * when its module is granted. A provider gated off by configuration is simply not a
+ * bean, and drops out of both listing and execution with no extra branch.
  */
 @RestController
 @RequestMapping("/api/agent-tools")
@@ -26,10 +32,15 @@ public class ServiceToolsController {
 
     private static final Logger log = LoggerFactory.getLogger(ServiceToolsController.class);
 
-    private final CatalogToolsProvider catalogToolsProvider;
+    private final List<ToolsProvider> providers;
 
-    public ServiceToolsController(CatalogToolsProvider catalogToolsProvider) {
-        this.catalogToolsProvider = catalogToolsProvider;
+    public ServiceToolsController(List<ToolsProvider> providers) {
+        this.providers = providers != null ? providers : List.of();
+    }
+
+    /** All tool definitions served by this service, in provider declaration order. */
+    private List<com.apimarketplace.agent.registry.AgentToolDefinition> allTools() {
+        return providers.stream().flatMap(p -> p.getTools().stream()).toList();
     }
 
     /**
@@ -38,7 +49,7 @@ public class ServiceToolsController {
      */
     @GetMapping
     public ResponseEntity<Map<String, Object>> listTools() {
-        var tools = catalogToolsProvider.getTools();
+        var tools = allTools();
         var summaries = tools.stream()
             .map(t -> t.toSummary())
             .toList();
@@ -57,7 +68,7 @@ public class ServiceToolsController {
      */
     @GetMapping("/mcp/tools")
     public ResponseEntity<Map<String, Object>> listMcpTools() {
-        var mcpTools = catalogToolsProvider.getTools().stream()
+        var mcpTools = allTools().stream()
             .map(t -> t.toMcpFormat())
             .toList();
         return ResponseEntity.ok(Map.of("tools", mcpTools));
@@ -102,6 +113,20 @@ public class ServiceToolsController {
         copyIfPresent(request, "messageId", credentials, "__messageId__");
         copyIfPresent(request, "streamId", credentials, "__streamId__");
         copyIfPresent(request, "toolCallId", credentials, "__toolCallId__");
+        // The workflow half of the billing scope. This map is rebuilt key by
+        // key, so a key not named here simply does not exist by the time a tool
+        // reads it, and an agent node inside a workflow carries a run id and NO
+        // stream id. Without these two the scope has no kind, every billing
+        // branch is skipped, and a generation is refused for want of a scope:
+        // the surface fails 100% rather than partially. `__nodeId__` is the
+        // name the consumer reads, not `__workflowNodeId__`.
+        copyIfPresent(request, "workflowRunId", credentials, "__workflowRunId__");
+        copyIfPresent(request, "workflowNodeId", credentials, "__nodeId__");
+        // What the calling agent may DO. Nothing catalog-side reads it today,
+        // but it travels with the agent id everywhere else and a receiver that
+        // drops it is exactly how the grant stopped being enforced before.
+        copyIfPresent(request, "enabledModules", credentials,
+                com.apimarketplace.agent.config.AgentModuleResolver.ENABLED_MODULES_CREDENTIAL_KEY);
         for (String am : List.of("tableAccessMode", "workflowAccessMode", "interfaceAccessMode",
                 "agentAccessMode", "applicationAccessMode", "skillAccessMode", "fileAccessMode")) {
             copyIfPresent(request, am, credentials, am);
@@ -129,7 +154,22 @@ public class ServiceToolsController {
             viewingWorkflowId, viewingWorkflowName, orgId, orgRole
         );
 
-        ToolExecutionResult result = catalogToolsProvider.execute(toolName, parameters, context);
+        ToolsProvider provider = providers.stream()
+            .filter(p -> p.canHandle(toolName))
+            .findFirst()
+            .orElse(null);
+        if (provider == null) {
+            log.warn("No provider in catalog-service handles tool '{}'", toolName);
+            return ResponseEntity.badRequest().body(Map.of(
+                "success", false,
+                "tool", toolName,
+                "error", "Tool not found: " + toolName,
+                "errorCode", ToolErrorCode.TOOL_NOT_FOUND.getCode(),
+                "errorType", ToolErrorCode.TOOL_NOT_FOUND.name()
+            ));
+        }
+
+        ToolExecutionResult result = provider.execute(toolName, parameters, context);
 
         return buildToolResponse(toolName, result);
     }

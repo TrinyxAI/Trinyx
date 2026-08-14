@@ -133,28 +133,127 @@ public class ToolExecutionRequest {
      * changing the billing scope must introduce a new dedicated field;
      * piggy-backing on this one is by design (the "am I chat or am I
      * workflow?" question naturally answers all three).
+     *
+     * <p><b>Header-only, like the generation trio below.</b> The gateway strips
+     * {@code X-Lc-Billing-*} off every inbound request precisely so a client
+     * cannot name its own billing scope, and leaving the same value
+     * deserializable left the other half of that door open. Naming a scope is
+     * not cosmetic: an existing scope pin is what BYPASSES the delinquent-account
+     * refusal, and the pin is keyed on (scopeKind, scopeId, credentialId) with
+     * no user in it, so naming an older run also charges that run's older,
+     * cheaper pricing version and writes another scope's pin onto this ledger
+     * row. Every legitimate caller sets these through the header.
      */
+    @com.fasterxml.jackson.annotation.JsonIgnore
     private String billingScopeKind;
 
     /**
      * V148+ billing scope id - workflow {@code runId} for RUN scope, chat
      * {@code streamId} for STREAM scope. See {@link #billingScopeKind}.
-     * Forwarded from the {@code X-Lc-Billing-Scope-Id} HTTP header.
+     * Forwarded from the {@code X-Lc-Billing-Scope-Id} HTTP header, and only
+     * from there. @see #billingScopeKind for why it is sealed off the wire.
      */
+    @com.fasterxml.jackson.annotation.JsonIgnore
     private String billingScopeId;
 
     /**
      * V148+ workflow step id, for {@code RUN} scope only. Lets the source-id
-     * builder produce per-step idempotent keys via
+     * builder produce per-step keys via
      * {@code SourceIdBuilder.markupDebitWithCall(...)} instead of the simpler
      * chat shape. Forwarded from the {@code X-Lc-Billing-Step-Id} header.
+     *
+     * <p>Note what is deliberately NOT here: the per-call discriminator that
+     * separates the second charge in a scope from the first. It used to live on
+     * this DTO as {@code billingEpoch/Spawn/Iteration/ItemIndex/CallIndex}, and
+     * no caller ever set any of them, so the sourceId was identical for every
+     * call in a run or a chat turn and the ledger's idempotency fast-path made
+     * everything after the first one free. Those fields were also plain
+     * deserializable JSON, i.e. a value the caller could pin. The discriminator
+     * is now minted server-side per dispatch in {@code ToolExecutionManager},
+     * for the same reason {@link #generationQuantity} is: it decides the amount
+     * charged, so it must not be reachable from the wire. The three scope
+     * fields are now sealed for that same reason, which is the rule those
+     * removed fields were the first casualty of.
      */
+    @com.fasterxml.jackson.annotation.JsonIgnore
     private String billingStepId;
 
-    /** V148+ workflow execution coords (epoch / spawn / iteration / itemIndex / callIndex). */
-    private Integer billingEpoch;
-    private Integer billingSpawn;
-    private Integer billingIteration;
-    private Integer billingItemIndex;
-    private Integer billingCallIndex;
+    /**
+     * V428 generation model priced for this call, populated ONLY from the
+     * {@code X-Lc-Generation-Model} header by the controller. Null for an
+     * ordinary tool call.
+     *
+     * <p>Selects a PRICE row rather than a request parameter: one endpoint can
+     * back several models at different rates, so the endpoint id alone is not
+     * enough to know what to charge.
+     *
+     * <p>{@code @JsonIgnore} is load-bearing, not tidiness: this field and
+     * {@link #generationQuantity} DECIDE the amount charged. Leaving them
+     * deserializable would let anyone who can reach the execute endpoint post a
+     * body naming a cheap model, or a quantity of zero, and generate for free.
+     */
+    @com.fasterxml.jackson.annotation.JsonIgnore
+    private String generationModelId;
+
+    /**
+     * V428 size of the call in PLATFORM units (seconds, assets, characters),
+     * populated ONLY from the {@code X-Lc-Generation-Quantity} header.
+     *
+     * <p>Computed once, server side, from parameters that were already
+     * validated, and carried rather than re-derived: by the time the request
+     * reaches the provider the value may have been converted into the
+     * provider's own unit (milliseconds), and pricing must stay in the
+     * platform's.
+     *
+     * <p>It is NOT expressed in the price's unit. What a rate is charged per is
+     * a property of the published price row, which an administrator can change
+     * (per second today, per minute tomorrow), so converting the measurement
+     * here would scale it by one unit while the rate applied another. The
+     * conversion belongs to whoever reads the rate.
+     *
+     * <p>See {@link #generationModelId} for why this is never deserialized.
+     */
+    @com.fasterxml.jackson.annotation.JsonIgnore
+    private java.math.BigDecimal generationQuantity;
+
+    /**
+     * The PLATFORM unit {@link #generationQuantity} is counted in: call,
+     * second, image or character.
+     *
+     * <p>Travels with the number because the number alone cannot be checked
+     * against the published rate. A row priced per image and a call measured in
+     * seconds both arrive as a bare 10, and multiplying them charges a ten
+     * second clip ten times the per-image rate. Nothing downstream could
+     * notice, because both halves look perfectly ordinary on their own.
+     *
+     * <p>See {@link #generationModelId} for why this is never deserialized: it
+     * decides an amount, so a caller able to set it could name a unit that
+     * makes its call look small.
+     */
+    @com.fasterxml.jackson.annotation.JsonIgnore
+    private String generationQuantityUnit;
+
+    /**
+     * The caller has ALREADY reserved and will settle the charge for this call
+     * itself, so the catalog's own billing layer must neither charge again nor
+     * refuse for lack of a scope.
+     *
+     * <p>Exactly one in-process caller sets it:
+     * {@code CeCatalogRelayService}, which runs its own
+     * reserve → execute → commit/release around this execution against the
+     * linked cloud account. Its reservation is taken BEFORE the call and it
+     * refuses outright without a strictly positive markup, so a relayed call is
+     * always charged once and never zero times. Without this flag the execution
+     * looks scope-less from inside, and the fail-closed rule on a resold
+     * generation would refuse a call that was already paid for.
+     *
+     * <p>{@code @JsonIgnore} is load-bearing for the same reason it is on
+     * {@link #generationModelId} and {@link #generationQuantity}: this field
+     * decides whether the call is charged. Deserializing it would let anyone who
+     * can reach the execute endpoint post {@code {"billingOwnedByCaller":true}}
+     * and take every resold generation for free. It is reachable only by an
+     * in-process caller that builds this DTO itself.
+     */
+    @com.fasterxml.jackson.annotation.JsonIgnore
+    private Boolean billingOwnedByCaller;
 }

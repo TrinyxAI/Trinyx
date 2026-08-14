@@ -153,13 +153,45 @@ public class WorkflowBuilderHelpModule implements ToolModule {
             "tool calls will run. As a sub-agent that means the WHOLE parent run, not just your own step. Passing a run_id " +
             "that is not a run id string is refused, never taken as a self-abort. " +
             "stop_run is a WRITE action: an agent granted read-only access to workflows cannot stop a run, not even its own.");
+        runInspection.put("restart_from_node", "Re-run ONE node of an existing run and continue from there, keeping " +
+            "everything the run already produced upstream of it. Use it instead of execute when a run got most of the way " +
+            "and one node produced the wrong result or failed: execute fires the workflow from its trigger and redoes all " +
+            "the work (and pays for it again), restart_from_node redoes only that node and what depends on it. " +
+            "Params: run_id (required), node (required - the node key exactly as get_run reports it, e.g. 'mcp:fetch_data'). " +
+            "WHAT IT TOUCHES: the node you name and every node downstream of it are cleared and re-executed; nodes upstream " +
+            "keep their outputs, and templates pointing at them ({{mcp:earlier_node.output.field}}) resolve to those same " +
+            "values. The run's history is kept: each attempt is a new 'spawn', and get_node_output still returns earlier ones. " +
+            "WHEN IT IS REFUSED, each with an explanation you can act on: a node that has never run in this run (use execute); " +
+            "a node that is executing RIGHT NOW on this run (wait for it to settle, or stop_run first); a node whose branch " +
+            "was SKIPPED (the branch was not taken, so restart from the decision node above it instead); and a run that was " +
+            "CANCELLED or timed out (reviving it is a re-trigger decision - use execute, since the stop also suspended the " +
+            "workflow's schedules and a restart does not bring them back). A node parked on an approval, an interface or a " +
+            "timer IS restartable: its pending wait is cancelled and re-created. " +
+            "READ THE outcome FIELD, do not assume the work is done: 'QUIESCED' = the replay finished; 'YIELDED' = it stopped " +
+            "on something that needs resolving (approval, interface, timer, or an agent still working), so poll get_run and " +
+            "use resolve_approval / continue_interface; 'STEP_BY_STEP' = this run is stepped, so NOTHING was executed and the " +
+            "node is simply queued for the user; 'WAVE_CAP' = the replay hit the safety limit and is INCOMPLETE; " +
+            "'NOTHING_TO_RUN' / 'UNAVAILABLE' = the reset happened but nothing advanced. The response also carries " +
+            "replayed_nodes (what was cleared), epoch, attempt, status, and a one-sentence summary. " +
+            "restart_from_node is a WRITE action, and on an automatic run it re-executes nodes without asking again: an " +
+            "agent granted read-only access to workflows cannot call it.");
         actions.put("run_inspection", runInspection);
 
         actions.put("node_operations", Map.of(
             "add_node", "Add a node. Params: type (required), label (required), params={...}, connect_after (label of predecessor)",
             "modify", "Modify a node's params. Params: node (label), params={...}, connect_after (optional - replaces the incoming connection with a new one from the specified predecessor). params MERGES into the existing node (keys you omit are kept). To DELETE a param key, set it to null, e.g. params={AccountSid: null}. The response's changes.after shows the node's real post-merge value, so check it to confirm a deletion took effect.",
             "remove", "Remove a node. Shows disconnection info and reconnection hints. Params: node (label)",
-            "undo", "Undo the last action"
+            "undo", "Undo the last action",
+            "run_node", "Run ONE node right now from a config, with no workflow and no run - use it to "
+                + "check a config before you build it in. Params: type (required), params={...} (the node "
+                + "config; it is read ONLY from params, no other argument is used as config), run_input={...} "
+                + "(optional upstream data, so {{...}} templates resolve as they would in a workflow), label "
+                + "(optional). Nothing is saved. The response gives status, output (same field names a "
+                + "workflow would produce, so templates you write against it will resolve), duration_ms, and "
+                + "the config echoed back with credentials redacted so you can paste it into add_node. "
+                + "Types that pause on a signal (approval, interface, wait) and types whose meaning is the "
+                + "surrounding graph (merge, aggregate, split, fork, loop) are refused with the reason. The "
+                + "user is asked to authorize it, as for execute."
         ));
 
         actions.put("connection_operations", Map.of(
@@ -261,6 +293,7 @@ public class WorkflowBuilderHelpModule implements ToolModule {
         stepTypes.put("download_file", "Download a file from URL");
         stepTypes.put("public_link", "Mint a public, expiring signed URL for a stored file");
         stepTypes.put("media", "Process audio/video files: probe metadata, mux audio onto video, mix tracks, extract audio");
+        stepTypes.put("generate", "Generate one asset from a prompt: image, video, audio, voice or music (the model picked decides the format and the price)");
         stepTypes.put("wait", "Delay execution for a specified duration");
         stepTypes.put("exit", "Exit branch execution (other parallel branches continue)");
         stepTypes.put("stop_on_error", "Stop ENTIRE workflow with error (all branches cancelled, run → FAILED)");

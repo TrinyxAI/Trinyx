@@ -9,13 +9,24 @@ import java.util.Objects;
  * <ul>
  *   <li>Run-init reservation: {@code platform-markup:INIT:<scopeKind>:<scopeId>:<credentialId>}
  *       - workflow run-init ({@code scopeKind=RUN}) reserves whole-run budget.</li>
- *   <li>Per-call workflow debit: {@code platform-markup:RUN:<runId>:step:<stepId>:<epoch>:<spawn>:<iteration>:<itemIndex>:<callIndex>}
- *       - adds {@code callIndex} for n=N partial-release support (image-gen Gemini loop).</li>
- *   <li>Per-call chat debit: {@code platform-markup:STREAM:<streamId>:<toolId>:<callIndex>}
+ *   <li>Per-call workflow debit: {@code platform-markup:RUN:<runId>:step:<stepId>:<callRef>}
+ *       - one row per dispatched call, discriminated by {@code callRef}.</li>
+ *   <li>Per-call chat debit: {@code platform-markup:STREAM:<streamId>:<toolId>:<callRef>}
  *       - chat-scope tool calls bill via STREAM-pin.</li>
  *   <li>Refund (legacy): {@code platform-markup-refund:<originalSourceId>:<nonce>}
  *       - kept for backwards-compat with V101 markup refund flow.</li>
  * </ul>
+ *
+ * <p><b>{@code callRef} is what makes each call its own charge, and it is
+ * SERVER-GENERATED.</b> The ledger has a unique index on {@code source_id} and
+ * {@code CreditService.tryReserveMarkup} answers "already reserved, zero debit"
+ * for a key it has seen before. So whatever discriminates two calls inside one
+ * run or one chat turn IS the thing that decides whether the second one is
+ * charged. It used to be a caller-supplied {@code callIndex} that no caller ever
+ * set, which left it at 0 for every call: the first generation in a scope was
+ * charged and every generation after it was free. The producer
+ * ({@code ToolExecutionManager}) now mints a fresh value per dispatched call, so
+ * a caller has no way to force a collision and buy a free one.</p>
  *
  * <p><b>Lifecycle invariant:</b> {@code sourceId-pre IS sourceId-final}. The ledger
  * row written at {@code tryReserveMarkup} is the SAME row that {@code commitReservation}
@@ -48,7 +59,6 @@ public final class SourceIdBuilder {
     public static final String MARKUP_DEBIT_PREFIX = "platform-markup";
     public static final String WEB_SEARCH_PREFIX = "web-search";
     public static final String WEB_FETCH_PREFIX = "web-fetch";
-    public static final String IMAGE_GENERATION_PREFIX = "image-generation";
 
     private SourceIdBuilder() {
     }
@@ -70,34 +80,34 @@ public final class SourceIdBuilder {
     }
 
     /**
-     * Workflow per-call debit key with callIndex. Extends the legacy
-     * {@link #markupDebit} format with a 7th tail segment so n=N partial release
-     * (image-gen Gemini loop returns 1 image per call) gets distinct sourceIds
-     * per sub-call without colliding with the existing 6-segment format. The
-     * legacy 6-segment format remains for backwards compat with prod ledger rows
-     * written by the pre-V148 orchestrator-side markup-debit path (since removed;
-     * the live billing path is {@code CatalogToolBillingService.billImmediate}).
+     * Workflow per-call debit key. Format:
+     * {@code platform-markup:RUN:<runId>:step:<stepId>:<callRef>}.
+     *
+     * <p>The {@code callRef} tail is what separates the ten iterations of one
+     * loop node into ten charges instead of one. It replaced a fixed-width
+     * {@code epoch:spawn:iteration:itemIndex:callIndex} tail that no caller ever
+     * populated, so every call in a run wrote the same key and only the first
+     * one cost anything. Cannot collide with the legacy 6-segment
+     * {@link #markupDebit} rows still in prod: those end in four numeric
+     * segments, this one ends in a single opaque reference.
+     *
+     * @param callRef server-generated reference identifying THIS dispatched
+     *                call. Never a value a caller can choose - see the class
+     *                javadoc for why that distinction is the whole mechanism.
      */
     public static String markupDebitWithCall(String runId,
                                               String stepId,
-                                              int epoch,
-                                              int spawn,
-                                              int iteration,
-                                              int itemIndex,
-                                              int callIndex) {
+                                              String callRef) {
         Objects.requireNonNull(runId, "runId");
         Objects.requireNonNull(stepId, "stepId");
+        requireCallRef(callRef);
         return MARKUP_DEBIT_PREFIX + ":RUN:" + runId
                 + ":step:" + stepId
-                + ":" + epoch
-                + ":" + spawn
-                + ":" + iteration
-                + ":" + itemIndex
-                + ":" + callIndex;
+                + ":" + callRef;
     }
 
     /**
-     * Chat per-call debit key. Format: {@code platform-markup:STREAM:<streamId>:<toolId>:<callIndex>}.
+     * Chat per-call debit key. Format: {@code platform-markup:STREAM:<streamId>:<toolId>:<callRef>}.
      * Distinct from workflow keys via the {@code :STREAM:} discriminator so chat
      * and workflow billings can never collide on the {@code source_id} unique
      * index, even if a streamId happens to match a runId.
@@ -105,13 +115,31 @@ public final class SourceIdBuilder {
      * <p>{@code toolId} here is the catalog tool slug (e.g. {@code openai/openai-create-image}),
      * not the UUID - both encode tool identity but the slug is what callers
      * carry in their context.
+     *
+     * @param callRef server-generated reference identifying THIS dispatched
+     *                call; five generations in one chat turn are five charges
+     *                only because this differs between them.
      */
     public static String markupDebitChat(String streamId,
                                           String toolId,
-                                          int callIndex) {
+                                          String callRef) {
         Objects.requireNonNull(streamId, "streamId");
         Objects.requireNonNull(toolId, "toolId");
-        return MARKUP_DEBIT_PREFIX + ":STREAM:" + streamId + ":" + toolId + ":" + callIndex;
+        requireCallRef(callRef);
+        return MARKUP_DEBIT_PREFIX + ":STREAM:" + streamId + ":" + toolId + ":" + callRef;
+    }
+
+    /**
+     * A blank {@code callRef} would silently rebuild the defect it exists to
+     * close (every call in the scope keyed the same, all but the first free), so
+     * it is rejected rather than defaulted.
+     */
+    private static void requireCallRef(String callRef) {
+        if (callRef == null || callRef.isBlank()) {
+            throw new IllegalArgumentException(
+                    "callRef is required: without it every call in the scope keys the same ledger row "
+                            + "and only the first one is charged");
+        }
     }
 
     /**
@@ -160,20 +188,6 @@ public final class SourceIdBuilder {
         return WEB_FETCH_PREFIX + ":RUN:" + runId + ":step:" + stepId + ":" + callIndex;
     }
 
-    /** Image generation debit key for chat-scope invocations. */
-    public static String imageGenerationDebitChat(String streamId, String toolCallId, int callIndex) {
-        Objects.requireNonNull(streamId, "streamId");
-        Objects.requireNonNull(toolCallId, "toolCallId");
-        return IMAGE_GENERATION_PREFIX + ":CHAT:" + streamId + ":" + toolCallId + ":" + callIndex;
-    }
-
-    /** Image generation debit key for workflow-scope invocations. */
-    public static String imageGenerationDebitWorkflow(String runId, String stepId, int callIndex) {
-        Objects.requireNonNull(runId, "runId");
-        Objects.requireNonNull(stepId, "stepId");
-        return IMAGE_GENERATION_PREFIX + ":RUN:" + runId + ":step:" + stepId + ":" + callIndex;
-    }
-
     /**
      * True for any markup debit row family - workflow per-call ({@code :RUN:}),
      * chat per-call ({@code :STREAM:}), or scope init reservation ({@code :INIT:}).
@@ -195,7 +209,4 @@ public final class SourceIdBuilder {
         return sourceId != null && sourceId.startsWith(WEB_FETCH_PREFIX + ":");
     }
 
-    public static boolean isImageGenerationDebit(String sourceId) {
-        return sourceId != null && sourceId.startsWith(IMAGE_GENERATION_PREFIX + ":");
-    }
 }

@@ -2,10 +2,10 @@ package com.apimarketplace.orchestrator.controllers.internal;
 
 import com.apimarketplace.orchestrator.execution.v2.scheduler.V2StepByStepScheduler;
 import com.apimarketplace.orchestrator.execution.v2.services.V2StepByStepService;
-import com.apimarketplace.common.credit.CreditConsumptionClient;
 import com.apimarketplace.common.web.TenantResolver;
 import com.apimarketplace.orchestrator.repository.WorkflowRunRepository;
 import com.apimarketplace.orchestrator.services.resume.WorkflowResumeService;
+import com.apimarketplace.orchestrator.services.state.ClaimRefusalRegistry;
 import com.apimarketplace.orchestrator.services.state.StateSnapshotService;
 import com.apimarketplace.orchestrator.services.streaming.SnapshotService;
 import org.slf4j.Logger;
@@ -40,7 +40,6 @@ public class InternalSbsController {
     private final WorkflowResumeService resumeService;
     private final StateSnapshotService stateSnapshotService;
     private final SnapshotService snapshotService;
-    private final CreditConsumptionClient creditClient;
     private final TaskExecutor sbsExecutor;
     private final WorkflowRunRepository runRepository;
 
@@ -50,7 +49,6 @@ public class InternalSbsController {
             WorkflowResumeService resumeService,
             StateSnapshotService stateSnapshotService,
             SnapshotService snapshotService,
-            CreditConsumptionClient creditClient,
             @Qualifier("sbsExecutor") TaskExecutor sbsExecutor,
             WorkflowRunRepository runRepository) {
         this.v2StepByStepService = v2StepByStepService;
@@ -58,7 +56,6 @@ public class InternalSbsController {
         this.resumeService = resumeService;
         this.stateSnapshotService = stateSnapshotService;
         this.snapshotService = snapshotService;
-        this.creditClient = creditClient;
         this.sbsExecutor = sbsExecutor;
         this.runRepository = runRepository;
     }
@@ -106,15 +103,9 @@ public class InternalSbsController {
             ));
         }
 
-        // Credit pre-check
-        if (!creditClient.checkCredits(userId)) {
-            log.warn("[InternalSbs] Insufficient credits for user {}, rejecting: runId={}, nodeId={}", userId, runId, nodeId);
-            return ResponseEntity.status(402).body(Map.of(
-                    "accepted", false,
-                    "error", "INSUFFICIENT_CREDITS",
-                    "message", "Insufficient credits to execute step"
-            ));
-        }
+        // No credit pre-check: the node executes and NodeCreditGate fails it with the
+        // out-of-credit message, so the run records WHERE it stopped (and skips the
+        // downstream nodes) instead of the step vanishing without a trace.
 
         // Extract itemId from data (for split items)
         String itemId = "0";
@@ -148,12 +139,16 @@ public class InternalSbsController {
         // Prevents double-execution when multiple users click the same node.
         boolean claimed = stateSnapshotService.claimNodeForExecution(runId, nodeId);
         if (!claimed) {
-            log.warn("[InternalSbs] Node not ready, rejecting: runId={}, nodeId={}", runId, nodeId);
-            return ResponseEntity.status(409).body(Map.of(
-                    "accepted", false,
-                    "error", "NODE_NOT_READY",
-                    "message", "Node is not in READY state (already executing or not yet ready)"
-            ));
+            // Same diagnosis as the REST twin: the WS path is the one a user actually drives,
+            // so it is where a useless refusal costs the most.
+            var refusal = stateSnapshotService.lastClaimRefusal(runId, nodeId);
+            Map<String, Object> body = new java.util.LinkedHashMap<>();
+            body.put("accepted", false);
+            body.put("error", "NODE_NOT_READY");
+            body.put("nodeId", nodeId);
+            String message = ClaimRefusalRegistry.describeInto(body, refusal, nodeId);
+            log.warn("[InternalSbs] Rejecting execute: runId={}, {}", runId, message);
+            return ResponseEntity.status(409).body(body);
         }
 
         // Bind the worker to the org scope of the RUN row - it is authoritative

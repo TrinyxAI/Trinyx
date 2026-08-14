@@ -148,6 +148,46 @@ public final class CatalogBundlePayload {
         putIfNotNull(row, "source", m.getSource());
         putIfNotNull(row, "sourceModelId", m.getSourceModelId());
         putIfNotNull(row, "deprecatedAt", m.getDeprecatedAt() != null ? m.getDeprecatedAt().toString() : null);
+        // Everything the feed enriches a model with. These are applied by
+        // CatalogMergeService (they are all in APPLIED_FIELD_NAMES) but were
+        // never emitted here, and the bundle applies with partialUpdate=false,
+        // whose contract is "a field absent from the payload overwrites the row
+        // to null". So a cloud-linked install had them cleared on every apply,
+        // on the sync schedule, and the cloud's own enrichment never reached it.
+        // Absence has to mean "the cloud has no value", never "this producer
+        // forgot": CatalogBundlePayloadFieldParityTest holds that open.
+        putIfNotNull(row, "mode", m.getMode());
+        putIfNotNull(row, "releaseDate", m.getReleaseDate() != null ? m.getReleaseDate().toString() : null);
+        putIfNotNull(row, "deprecationDate",
+                m.getDeprecationDate() != null ? m.getDeprecationDate().toString() : null);
+        putIfNotNull(row, "supportsPromptCaching", m.getSupportsPromptCaching());
+        putIfNotNull(row, "supportsReasoning", m.getSupportsReasoning());
+        putIfNotNull(row, "supportsComputerUse", m.getSupportsComputerUse());
+        putIfNotNull(row, "supportsResponseSchema", m.getSupportsResponseSchema());
+        putIfNotNull(row, "supportsWebSearch", m.getSupportsWebSearch());
+        // Prices as strings, like priceInput/priceOutput above: a BigDecimal
+        // serialises by scale, so 0.5 and 0.50 would produce different bytes
+        // for the same price and break the determinism the signature rests on.
+        putIfNotNull(row, "priceInputBatch", bigDecString(m.getPriceInputBatch()));
+        putIfNotNull(row, "priceOutputBatch", bigDecString(m.getPriceOutputBatch()));
+        putIfNotNull(row, "priceCacheRead", bigDecString(m.getPriceCacheRead()));
+        putIfNotNull(row, "priceCacheWrite", bigDecString(m.getPriceCacheWrite()));
+        putIfNotNull(row, "priceFloorInput", bigDecString(m.getPriceFloorInput()));
+        putIfNotNull(row, "priceFloorOutput", bigDecString(m.getPriceFloorOutput()));
+        // Arrays are ordered data, so they are emitted as-is rather than sorted,
+        // matching how `modalities` is treated below.
+        if (m.getSupportedEndpoints() != null && m.getSupportedEndpoints().length > 0) {
+            row.put("supportedEndpoints", List.of(m.getSupportedEndpoints()));
+        }
+        if (m.getSupportedModalities() != null && m.getSupportedModalities().length > 0) {
+            row.put("supportedModalities", List.of(m.getSupportedModalities()));
+        }
+        if (m.getSupportedOutputModalities() != null && m.getSupportedOutputModalities().length > 0) {
+            row.put("supportedOutputModalities", List.of(m.getSupportedOutputModalities()));
+        }
+        if (m.getFeedMetadata() != null && !m.getFeedMetadata().isEmpty()) {
+            row.put("feedMetadata", canonicalise(m.getFeedMetadata()));
+        }
         if (m.getModalities() != null && !m.getModalities().isEmpty()) {
             // Deep-canonicalise: JSONB can decode as HashMap/ArrayList with
             // arbitrary iteration order at every level. Jackson's

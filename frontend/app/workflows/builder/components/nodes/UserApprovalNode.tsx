@@ -18,6 +18,7 @@ import { useWorkflowMode } from '@/contexts/WorkflowModeContext';
 import { NodePlayButton } from '../NodePlayButton';
 import { useNodeExecutionStatus } from '../../contexts/StepByStepContext';
 import { NodeBottomBar } from './NodeBottomBar';
+import { showsNodeRunActions } from './shared';
 import { requestApprovalReview } from '../../services/approvalReviewStore';
 import { ApprovalContextDialog } from '../ApprovalContextDialog';
 import type { PendingSignal } from '@/lib/websocket/ws-types';
@@ -103,6 +104,10 @@ export function UserApprovalNode({ data, selected, id }: NodeProps<BuilderNodeDa
       if (executionStatus.isRunning) return 'running';
       if (executionStatus.isFailed) return 'failed';
       if (executionStatus.isSkipped) return 'skipped';
+      // Same rule as the other node components: the backend's PARTIAL_SUCCESS must reach the
+      // border, or a node carrying a failure in its own tally renders the same green as a clean
+      // one. Border only - the rerun button reads deriveNodeStatus, which still sees 'completed'.
+      if (data.status === 'partial_success') return 'partial_success';
       if (executionStatus.isCompleted || executionStatus.isEvaluated) return 'completed';
       if (executionStatus.isReady) return 'ready';
 
@@ -316,7 +321,7 @@ export function UserApprovalNode({ data, selected, id }: NodeProps<BuilderNodeDa
               onClick={() => handleResolve('APPROVED')}
               disabled={isResolving}
               className={clsx(
-                'flex items-center gap-1 px-3 py-1.5 rounded-full text-xs font-medium transition-colors shadow-sm',
+                'flex items-center gap-1 px-3 py-1.5 rounded-md text-xs font-medium transition-colors shadow-sm',
                 'bg-emerald-100 text-emerald-700 hover:bg-emerald-200',
                 isResolving && 'opacity-50 cursor-not-allowed'
               )}
@@ -332,7 +337,7 @@ export function UserApprovalNode({ data, selected, id }: NodeProps<BuilderNodeDa
               onClick={() => handleResolve('REJECTED')}
               disabled={isResolving}
               className={clsx(
-                'flex items-center gap-1 px-3 py-1.5 rounded-full text-xs font-medium transition-colors shadow-sm',
+                'flex items-center gap-1 px-3 py-1.5 rounded-md text-xs font-medium transition-colors shadow-sm',
                 'bg-red-100 text-red-700 hover:bg-red-200',
                 isResolving && 'opacity-50 cursor-not-allowed'
               )}
@@ -355,7 +360,7 @@ export function UserApprovalNode({ data, selected, id }: NodeProps<BuilderNodeDa
                 signals={pendingSignals}
                 resolve={executionStatus.resolveApproval}
                 data-testid="approval-node-review-all"
-                className="nodrag nopan flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium bg-amber-100 text-amber-700 hover:bg-amber-200 dark:bg-amber-500/20 dark:text-amber-300 dark:hover:bg-amber-500/30 transition-colors shadow-sm"
+                className="nodrag nopan flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium bg-amber-100 text-amber-700 hover:bg-amber-200 dark:bg-amber-500/20 dark:text-amber-300 dark:hover:bg-amber-500/30 transition-colors shadow-sm"
               >
                 <MessageSquareQuote className="h-3.5 w-3.5" />
                 {tRun('approvalBar.reviewAll', { count: pendingSignals.length })}
@@ -391,7 +396,7 @@ export function UserApprovalNode({ data, selected, id }: NodeProps<BuilderNodeDa
                           {signal.epoch != null && (
                             <span
                               data-testid={`signal-epoch-badge-${signal.id}`}
-                              className="text-[10px] px-1.5 rounded-full bg-slate-100 dark:bg-slate-700 text-slate-500 dark:text-slate-400 whitespace-nowrap"
+                              className="text-[10px] px-1.5 rounded-md bg-slate-100 dark:bg-slate-700 text-slate-500 dark:text-slate-400 whitespace-nowrap"
                             >
                               {/* RAW epoch - TriggerEpochManager numbers fires from 1; the epoch
                                   selector and Files browser display the raw value too. */}
@@ -414,7 +419,7 @@ export function UserApprovalNode({ data, selected, id }: NodeProps<BuilderNodeDa
                           onClick={() => handleResolve('APPROVED', signal.itemId, signal.epoch)}
                           disabled={resolvingItemId === signal.itemId}
                           className={clsx(
-                            'flex items-center gap-0.5 px-2 py-0.5 rounded-full text-[10px] font-medium transition-colors',
+                            'flex items-center gap-0.5 px-2 py-0.5 rounded-md text-[10px] font-medium transition-colors',
                             'bg-emerald-50 text-emerald-600 hover:bg-emerald-100',
                             resolvingItemId === signal.itemId && 'opacity-50 cursor-not-allowed'
                           )}
@@ -429,7 +434,7 @@ export function UserApprovalNode({ data, selected, id }: NodeProps<BuilderNodeDa
                           onClick={() => handleResolve('REJECTED', signal.itemId, signal.epoch)}
                           disabled={resolvingItemId === signal.itemId}
                           className={clsx(
-                            'flex items-center gap-0.5 px-2 py-0.5 rounded-full text-[10px] font-medium transition-colors',
+                            'flex items-center gap-0.5 px-2 py-0.5 rounded-md text-[10px] font-medium transition-colors',
                             'bg-red-50 text-red-600 hover:bg-red-100',
                             resolvingItemId === signal.itemId && 'opacity-50 cursor-not-allowed'
                           )}
@@ -459,7 +464,7 @@ export function UserApprovalNode({ data, selected, id }: NodeProps<BuilderNodeDa
       )}
 
       {/* Step-by-step play button - User Approval executes as a regular step (not core/decision) */}
-      {executionStatus.isStepByStepMode && !isAwaitingSignal && (
+      {showsNodeRunActions(executionStatus) && !isAwaitingSignal && (
         <NodeBottomBar
           hover={{ isVisible: showActions, onHover: show }}
           borderColor={borderColor}

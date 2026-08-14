@@ -83,7 +83,7 @@ const ToolsTab: React.FC<ToolsTabProps> = ({ tools }) => {
       {/* Header with title and button */}
       <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
         <div className="flex items-center gap-3">
-          <div className="w-10 h-10 bg-theme-secondary rounded-full flex items-center justify-center">
+          <div className="w-10 h-10 bg-theme-secondary rounded-xl flex items-center justify-center">
             <Wrench className="w-5 h-5 text-theme-primary" />
           </div>
           <div>
@@ -133,7 +133,7 @@ const ToolsTab: React.FC<ToolsTabProps> = ({ tools }) => {
               {/* Category header */}
               <div className="flex items-center gap-2">
                 <h3 className="text-sm font-medium text-theme-secondary">{category}</h3>
-                <span className="px-2 py-0.5 bg-theme-tertiary text-theme-secondary text-xs rounded-full">
+                <span className="px-2 py-0.5 bg-theme-tertiary text-theme-secondary text-xs rounded-md">
                   {categoryTools.length}
                 </span>
               </div>
@@ -162,7 +162,7 @@ const ToolsTab: React.FC<ToolsTabProps> = ({ tools }) => {
                           </div>
                         </td>
                         <td className="px-3 py-2">
-                          <span className={`px-2 py-1 text-xs font-medium rounded-full ${getMethodColor(tool.method)}`}>
+                          <span className={`px-2 py-1 text-xs font-medium rounded-md ${getMethodColor(tool.method)}`}>
                             {tool.method}
                           </span>
                         </td>

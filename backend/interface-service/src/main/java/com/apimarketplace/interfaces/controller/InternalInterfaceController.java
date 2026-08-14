@@ -287,8 +287,16 @@ public class InternalInterfaceController {
         return ResponseEntity.ok().build();
     }
 
-    // ========== Image Generation ==========
+    // ========== Generation ==========
 
+    /**
+     * Persist a generated asset as an Interface row
+     * ({@code interface_type='image_generation'}) so the chat card can re-fetch
+     * it. Takes a generation tool result verbatim in either producer shape (the
+     * unified {@code generation} tool's single {@code file}, or the legacy image
+     * tool's {@code images[]}); the service normalizes both, so nothing about
+     * the payload is interpreted here.
+     */
     @PostMapping("/image-generation")
     public ResponseEntity<InterfaceDto> createOrUpdateImageGeneration(
             @RequestBody com.apimarketplace.interfaces.client.dto.ImageGenerationInterfaceRequest request,
@@ -300,6 +308,7 @@ public class InternalInterfaceController {
                 request.getAgentId(),
                 request.getName(),
                 request.getData(),
+                request.getPrompt(),
                 request.getOrganizationId());
         return ResponseEntity.ok(mapper.toDto(result));
     }

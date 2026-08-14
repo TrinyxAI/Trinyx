@@ -344,7 +344,11 @@ public class AgentWorkflowFireService {
      * <p>Scoped to (run_id, trigger_id, epoch). Includes:
      * <ul>
      *   <li>Epoch info (epoch number, total fire count, plan version)</li>
-     *   <li>Status: COMPLETED / FAILED / PARTIAL_SUCCESS / AWAITING_INPUT</li>
+     *   <li>Status: COMPLETED / FAILED / AWAITING_INPUT. Never PARTIAL_SUCCESS: that describes a
+     *       NODE with some failed items, not a run. A run that was launched but whose trigger has
+     *       not fired stays WAITING_TRIGGER instead of borrowing an outcome. Runs that finished
+     *       BEFORE this rule can still carry a stored partial_success, so readers keep handling
+     *       it.</li>
      *   <li>Terminal node statuses (nodes with no outgoing edges)</li>
      *   <li>Error info if failed</li>
      *   <li>Blocking signal info if awaiting user input</li>
@@ -790,11 +794,21 @@ public class AgentWorkflowFireService {
         return epochs;
     }
 
+    /**
+     * An epoch's outcome, for the agent's epoch list. Binary like every other run/epoch verdict
+     * (see {@code StateSnapshotService.deriveCycleStatus}): PARTIAL_SUCCESS describes a NODE that
+     * finished with some of its items failed, which is something the agent can act on. An epoch
+     * that reported "partially succeeded" told the agent nothing - the failing nodes are where
+     * the detail is, and they carry their own status.
+     */
     private String computeEpochStatus(EpochState state, boolean isActive) {
         if (isActive) return "ACTIVE";
-        if (!state.getFailedNodeIds().isEmpty() && !state.getCompletedNodeIds().isEmpty()) return "PARTIAL_SUCCESS";
-        if (!state.getFailedNodeIds().isEmpty()) return "FAILED";
-        return "COMPLETED";
+        // Delegated so the agent's epoch list and the epoch-timeline badge cannot drift:
+        // one function names an epoch's outcome. It answers null for an epoch that executed
+        // nothing (armed, trigger only) - a distinction the badge needs and this list does
+        // not, so a closed epoch still reads COMPLETED here rather than blank.
+        String outcome = WorkflowEpochService.deriveEpochOutcome(state, false);
+        return outcome != null ? outcome : "COMPLETED";
     }
 
     // ==================== Epoch Detail Helpers ====================

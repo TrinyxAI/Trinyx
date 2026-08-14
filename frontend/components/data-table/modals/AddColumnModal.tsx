@@ -13,6 +13,7 @@ import {
   X, Star,
 } from 'lucide-react';
 import LoadingSpinner from '@/components/LoadingSpinner';
+import { ModalStepIndicator } from '@/components/ui/ModalStepIndicator';
 
 const TOTAL_STEPS = 2;
 
@@ -25,50 +26,16 @@ interface StepIndicatorProps {
   labels: [string, string];
 }
 
-const StepIndicator: React.FC<StepIndicatorProps> = ({ currentStep, totalSteps, onStepClick, labels }) => {
-  const steps = [
-    { number: 1, icon: Columns3, label: labels[0] },
-    { number: 2, icon: Plus, label: labels[1] },
-  ];
-
-  return (
-    <div className="flex items-center justify-center gap-2 mb-6">
-      {steps.slice(0, totalSteps).map((step, index) => {
-        const isActive = step.number === currentStep;
-        const isCompleted = step.number < currentStep;
-        const Icon = step.icon;
-
-        return (
-          <React.Fragment key={step.number}>
-            <button
-              type="button"
-              onClick={() => onStepClick?.(step.number)}
-              className={`flex items-center gap-2 px-3 py-1.5 rounded-full transition-all ${
-                isActive
-                  ? 'bg-[var(--accent-primary)] text-[var(--accent-foreground)]'
-                  : isCompleted
-                  ? 'bg-emerald-500/20 text-emerald-600 dark:text-emerald-400 cursor-pointer hover:bg-emerald-500/30'
-                  : 'bg-theme-tertiary text-theme-secondary cursor-pointer hover:bg-theme-secondary'
-              }`}
-            >
-              {isCompleted ? (
-                <Check className="h-4 w-4" />
-              ) : (
-                <Icon className="h-4 w-4" />
-              )}
-              <span className="text-sm font-medium hidden sm:inline">{step.label}</span>
-            </button>
-            {index < totalSteps - 1 && (
-              <div className={`w-8 h-0.5 rounded-full ${
-                step.number < currentStep ? 'bg-emerald-500' : 'bg-theme-tertiary'
-              }`} />
-            )}
-          </React.Fragment>
-        );
-      })}
-    </div>
-  );
-};
+const StepIndicator: React.FC<StepIndicatorProps> = ({ currentStep, totalSteps, onStepClick, labels }) => (
+  <ModalStepIndicator
+    currentStep={currentStep}
+    onStepClick={onStepClick}
+    steps={[
+      { number: 1, icon: Columns3, label: labels[0] },
+      { number: 2, icon: Plus, label: labels[1] },
+    ].slice(0, totalSteps)}
+  />
+);
 
 // ============== Type-specific Config ==============
 
@@ -130,7 +97,7 @@ export const SelectConfig: React.FC<SelectConfigProps> = ({ options, onChange, l
         {options.map((opt) => (
           <span
             key={opt.value}
-            className="inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-sm text-white font-medium"
+            className="inline-flex items-center gap-1 rounded-md px-2.5 py-1 text-sm text-white font-medium"
             style={{ backgroundColor: opt.color || '#0ea5e9' }}
           >
             {opt.label}
@@ -427,7 +394,7 @@ export function AddColumnModal({
         <div className="px-8 pt-8 pb-4 flex-shrink-0">
           <div className="text-center mb-4">
             {currentStep === 1 && (
-              <div className="w-16 h-16 bg-theme-secondary rounded-full flex items-center justify-center mx-auto mb-4">
+              <div className="w-16 h-16 bg-theme-secondary rounded-2xl flex items-center justify-center mx-auto mb-4">
                 <Columns3 className="w-8 h-8 text-theme-primary" />
               </div>
             )}
@@ -481,7 +448,7 @@ export function AddColumnModal({
                           }`}
                         >
                           {isCeOnly && (
-                            <span className="absolute top-2 right-2 rounded-full bg-theme-secondary px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-theme-muted">
+                            <span className="absolute top-2 right-2 rounded-md bg-theme-secondary px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-theme-muted">
                               {t('ceOnlyBadge')}
                             </span>
                           )}
@@ -491,7 +458,7 @@ export function AddColumnModal({
                             </div>
                           )}
                           <div className="flex items-center gap-3 mb-2">
-                            <span className={`rounded-full p-2 ${
+                            <span className={`rounded-md p-2 ${
                               isSelected
                                 ? 'bg-[var(--accent-primary)]/10 text-[var(--accent-primary)]'
                                 : 'bg-theme-secondary text-theme-primary'
@@ -525,7 +492,7 @@ export function AddColumnModal({
               {/* Selected type recap */}
               <div className="rounded-xl border border-slate-200 dark:border-slate-700/50 bg-theme-secondary/50 overflow-hidden">
                 <div className="flex items-center gap-3 px-4 py-3 border-b border-slate-200 dark:border-slate-700/50">
-                  <div className="w-8 h-8 rounded-full bg-[var(--accent-primary)]/10 flex items-center justify-center">
+                  <div className="w-8 h-8 rounded-xl bg-[var(--accent-primary)]/10 flex items-center justify-center">
                     <SelectedIcon className="h-4 w-4 text-[var(--accent-primary)]" />
                   </div>
                   <div className="flex-1 min-w-0">

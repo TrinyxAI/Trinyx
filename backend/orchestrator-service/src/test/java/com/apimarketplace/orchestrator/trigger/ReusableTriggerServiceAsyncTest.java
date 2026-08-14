@@ -1,6 +1,5 @@
 package com.apimarketplace.orchestrator.trigger;
 
-import com.apimarketplace.common.credit.CreditConsumptionClient;
 import com.apimarketplace.common.web.TenantResolver;
 import com.apimarketplace.orchestrator.domain.WorkflowRunEntity;
 import com.apimarketplace.orchestrator.execution.v2.services.UnifiedSignalService;
@@ -39,9 +38,11 @@ import static org.mockito.Mockito.when;
  * fire-and-forget HTTP path added so the Tomcat thread doesn't block on the
  * full epoch cycle when the run is in AUTOMATIC mode.
  *
- * <p>Specifically: a tenant with insufficient credits must NOT consume a
- * worker-pool slot - the credit gate runs in the controller thread before
- * dispatch.
+ * <p>Specifically: the dispatch path holds NO credit gate. A zero-balance tenant
+ * used to be refused here, which left the fire with no epoch and no step rows -
+ * a scheduled workflow simply looked like it had stopped running. The gate moved
+ * into node execution ({@code NodeCreditGate}), so the fire is dispatched and the
+ * trigger node itself records the out-of-credit failure.
  */
 @ExtendWith(MockitoExtension.class)
 @DisplayName("ReusableTriggerService - executeTriggerAsync")
@@ -60,7 +61,6 @@ class ReusableTriggerServiceAsyncTest {
     @Mock private UnifiedSignalService unifiedSignalService;
     @Mock private SnapshotService snapshotService;
     @Mock private WorkflowResumeService resumeService;
-    @Mock private CreditConsumptionClient creditClient;
     @Mock private CreditBudgetService creditBudgetService;
 
     @Mock private WorkflowRunEntity run;
@@ -77,33 +77,36 @@ class ReusableTriggerServiceAsyncTest {
                 runRepository, workflowRepository, planVersionRepository,
                 epochManager, streamingService,
                 executionService, triggerResolverService, stateSnapshotService,
-                epochConcurrencyLimiter, executionQueueService, creditClient, creditBudgetService);
+                epochConcurrencyLimiter, executionQueueService, creditBudgetService);
     }
 
     @Test
-    @DisplayName("Insufficient credits: returns failure WITHOUT enqueueing on the worker pool")
-    void insufficientCreditsShortCircuitsBeforeEnqueue() {
+    @DisplayName("Regression - an out-of-credit tenant is still dispatched so the trigger node can record the failure")
+    void outOfCreditStillDispatchesSoTheFailureIsVisible() {
+        // The service holds no CreditConsumptionClient at all any more: there is
+        // nothing left here that could short-circuit the fire. Pre-fix this same
+        // call answered "Insufficient credits" and never reached the queue, so the
+        // run had no epoch, no failed trigger node and no skipped successors.
         when(run.getTenantId()).thenReturn(TENANT_ID);
-        when(run.getRunIdPublic()).thenReturn(RUN_ID);
-        when(creditClient.checkCredits(TENANT_ID)).thenReturn(false);
+        when(run.getMetadata()).thenReturn(Map.of("userPlan", "FREE"));
+
+        TriggerExecutionResult ack = TriggerExecutionResult.accepted(
+                RUN_ID, TRIGGER_ID, TriggerType.MANUAL);
+        when(executionQueueService.enqueueAsync(run, TRIGGER_ID, TriggerType.MANUAL, Map.of(), "FREE", null))
+                .thenReturn(ack);
 
         TriggerExecutionResult result = service.executeTriggerAsync(
                 run, TRIGGER_ID, TriggerType.MANUAL, Map.of());
 
-        assertThat(result.success()).isFalse();
-        assertThat(result.message()).contains("Insufficient credits");
-        // Worker pool must NOT be touched - the controller thread does the
-        // credit check before dispatch so a denied tenant burns no slot.
-        verify(executionQueueService, never())
-                .enqueueAsync(any(), anyString(), any(), any(), anyString(), any());
+        assertThat(result.success()).isTrue();
+        verify(executionQueueService).enqueueAsync(run, TRIGGER_ID, TriggerType.MANUAL, Map.of(), "FREE", null);
     }
 
     @Test
-    @DisplayName("Sufficient credits: dispatches to the queue and returns the queue's accepted ack")
-    void sufficientCreditsDispatchesToQueue() {
+    @DisplayName("Dispatches to the queue and returns the queue's accepted ack")
+    void dispatchesToQueue() {
         when(run.getTenantId()).thenReturn(TENANT_ID);
         when(run.getMetadata()).thenReturn(Map.of("userPlan", "PRO"));
-        when(creditClient.checkCredits(TENANT_ID)).thenReturn(true);
 
         TriggerExecutionResult ack = TriggerExecutionResult.accepted(
                 RUN_ID, TRIGGER_ID, TriggerType.MANUAL);
@@ -127,7 +130,6 @@ class ReusableTriggerServiceAsyncTest {
         when(run.getOrganizationId()).thenReturn("org-1");
         when(run.getTenantId()).thenReturn(TENANT_ID);
         when(run.getMetadata()).thenReturn(Map.of("userPlan", "PRO"));
-        when(creditClient.checkCredits(TENANT_ID)).thenReturn(true);
 
         TriggerExecutionResult ack = TriggerExecutionResult.accepted(
                 RUN_ID, TRIGGER_ID, TriggerType.MANUAL);
@@ -149,7 +151,6 @@ class ReusableTriggerServiceAsyncTest {
         when(run.getOrganizationId()).thenReturn("org-1");
         when(run.getTenantId()).thenReturn(TENANT_ID);
         when(run.getMetadata()).thenReturn(Map.of("userPlan", "PRO"));
-        when(creditClient.checkCredits(TENANT_ID)).thenReturn(true);
 
         TriggerExecutionResult ok = TriggerExecutionResult.accepted(
                 RUN_ID, TRIGGER_ID, TriggerType.MANUAL);
@@ -169,7 +170,6 @@ class ReusableTriggerServiceAsyncTest {
     void payloadRequestIdMarkerIsIgnored() {
         when(run.getTenantId()).thenReturn(TENANT_ID);
         when(run.getMetadata()).thenReturn(Map.of("userPlan", "PRO"));
-        when(creditClient.checkCredits(TENANT_ID)).thenReturn(true);
         Map<String, Object> payload = Map.of("__executionQueueRequestId", "attacker-controlled");
         TriggerExecutionResult ok = TriggerExecutionResult.accepted(RUN_ID, TRIGGER_ID, TriggerType.MANUAL);
         when(executionQueueService.enqueueAndWait(run, TRIGGER_ID, TriggerType.MANUAL, payload, "PRO", null))

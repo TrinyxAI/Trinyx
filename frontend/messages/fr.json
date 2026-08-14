@@ -965,7 +965,8 @@
     "dashboard": {
       "storageOverview": "Aperçu du stockage"
     },
-    "openInSidePanel": "Ouvrir dans le panneau latéral"
+    "openInSidePanel": "Ouvrir dans le panneau latéral",
+    "generateAsset": "Générer une image, une vidéo ou un son"
   },
   "resourceCarousel": {
     "resourcesCreated": "{count, plural, one {# ressource} other {# ressources}}",
@@ -1048,9 +1049,6 @@
       "scrollForMoreRows": "Faites défiler pour charger plus",
       "epochTooltip": {
         "epoch": "Époque n°{epoch}",
-        "running": "En cours",
-        "completed": "Terminée",
-        "pending": "En attente",
         "started": "Démarrée",
         "ended": "Terminée le",
         "duration": "Durée",
@@ -1238,14 +1236,11 @@
     "maxOutputLabel": "Sortie max",
     "tokens": "{count} tokens",
     "priceShort": "{input}/{output} / 1M",
-    "priceShortPerImage": "{input} / image",
     "priceInputLabel": "Prix entrée",
     "priceOutputLabel": "Prix sortie",
-    "priceImageLabel": "Par image",
     "priceCacheLabel": "Entrée en cache",
     "priceBatchLabel": "Prix batch",
     "perMillion": "par 1M de tokens",
-    "perImage": "par image",
     "rateLimitsTitle": "Limites de débit",
     "rpmLabel": "Requêtes / min",
     "tpmLabel": "Tokens / min",
@@ -1580,6 +1575,30 @@
     "filterApplications": "Applications",
     "filterInterfaces": "Interfaces",
     "filterAgents": "Agents",
+    "filterByType": "Filtrer par type",
+    "sortBy": "Trier par",
+    "sortPopular": "Les plus aimées",
+    "sortRating": "Les mieux notées",
+    "sortRecent": "Les plus récentes",
+    "sortInstalls": "Les plus installées",
+    "filterByRating": "Filtrer par note",
+    "ratingAny": "Toutes les notes",
+    "ratingRated": "Avec avis",
+    "rating4Plus": "4 étoiles et plus",
+    "rating3Plus": "3 étoiles et plus",
+    "filterByDate": "Filtrer par date",
+    "dateAny": "Toutes les dates",
+    "date7Days": "7 derniers jours",
+    "date30Days": "30 derniers jours",
+    "date90Days": "3 derniers mois",
+    "dateYear": "Dernière année",
+    "filterByPrice": "Filtrer par prix",
+    "priceAny": "Tous les prix",
+    "priceFree": "Gratuit",
+    "pricePaid": "Payant",
+    "resetFilters": "Réinitialiser les filtres",
+    "noFilterResults": "Aucune application ne correspond à ces filtres",
+    "noFilterResultsHint": "Élargissez le filtre de note, de date ou de prix pour voir plus d'applications.",
     "filterTables": "Tables",
     "filterSkills": "Compétences",
     "filterWorkflows": "Workflows",
@@ -1604,6 +1623,16 @@
     "continueWorkflow": "Continuer",
     "itemAlreadyResolved": "Cet élément a déjà été continué",
     "continueItemRemaining": "Continuer cet élément ({count} en attente)",
+    "loadTemplateValues": "Charger les valeurs d'exemple",
+    "loadTemplateValuesHint": "Remplit les formulaires avec les valeurs d'exemple de l'app d'origine. Rien n'est envoyé tant que vous ne validez pas.",
+    "templateValuesEmpty": "Cette app ne fournit aucune valeur d'exemple",
+    "templateValuesFailed": "Impossible de charger les valeurs d'exemple",
+    "resetData": "Réinitialiser les données",
+    "resetDataHint": "Restaure les tables de cette app avec les lignes livrées à l'origine",
+    "resetDataConfirm": "Restaurer les tables de cette app avec les lignes livrées à l'origine ? Les lignes que vous avez ajoutées ou modifiées seront remplacées. Votre workflow et ses exécutions ne sont pas touchés.",
+    "resetDataSuccess": "{tables, plural, one {# table restaurée} other {# tables restaurées}}, {rows, plural, one {# ligne écrite} other {# lignes écrites}}",
+    "resetDataPartial": "{tables, plural, one {# table restaurée} other {# tables restaurées}}, {rows, plural, one {# ligne écrite} other {# lignes écrites}}. Non touchées : {skipped}",
+    "resetDataFailed": "Impossible de réinitialiser les données",
     "own": "Votre partage",
     "acquire": "Installer",
     "ceExclusiveBadge": "Exclusif CE",
@@ -1866,6 +1895,21 @@
     "workflowSteps": "Étapes du workflow"
   },
   "modals": {
+    "accountRestore": {
+      "title": "Votre compte est programmé pour suppression",
+      "checkingTitle": "Vérification de votre compte",
+      "checkingDescription": "Un instant, nous consultons l'état de votre compte.",
+      "description": "Il sera définitivement supprimé le {date}. D'ici là, vous pouvez le récupérer tel que vous l'avez laissé.",
+      "blockedTitle": "Votre compte est inactif",
+      "blockedDescription": "Ce compte ne peut pas être utilisé pour le moment. Si vous ne vous y attendiez pas, contactez le support.",
+      "whatHappens": "Si vous le réactivez",
+      "keepEverything": "Vos workflows, agents, tables et fichiers reviennent intacts",
+      "untilThenNothingLost": "Rien n'a encore été supprimé, le compte est seulement désactivé",
+      "afterThatPermanent": "Une fois cette date passée, la suppression est définitive et irréversible",
+      "reactivate": "Réactiver mon compte",
+      "signOut": "Se déconnecter",
+      "restoreFailed": "Nous n'avons pas pu réactiver votre compte. Veuillez réessayer."
+    },
     "agentError": {
       "title": "Une erreur est survenue",
       "description": "Une erreur s'est produite pendant l'exécution. Réessayez dans un instant.",
@@ -3067,15 +3111,38 @@
       "publish": "Publier",
       "publishing": "Publication…",
       "publishedVersion": "Version v{version} publiée",
+      "retry": "Réessayer",
       "success": "Enregistré",
       "errors": {
         "fetchFailed": "Impossible de charger la tarification",
+        "loadFailed": "Les tarifs publiés n'ont pas pu être chargés. Publier remplacerait les tarifs en vigueur par une liste vide : l'action reste bloquée tant qu'ils ne sont pas chargés.",
         "publishFailed": "Impossible de publier la tarification",
         "credentialNotFound": "Identifiant introuvable",
         "invalidDefault": "Le markup par défaut doit être un nombre positif ou nul",
         "invalidOverride": "Markup invalide pour l'outil {tool}",
-        "duplicateTool": "Un outil ne peut apparaître qu'une seule fois"
-      }
+        "duplicateTool": "Chaque point de terminaison et modèle ne peut apparaître qu’une seule fois"
+      },
+      "model": "Modèle",
+      "modelAny": "Tous les modèles (tout le point de terminaison)",
+      "modelHint": "Laissez le modèle vide pour tarifer tout le point de terminaison. Choisissez un modèle lorsqu'un même point de terminaison en exécute plusieurs à des tarifs différents.",
+      "unit": "Facturé par",
+      "baseCredits": "Base",
+      "unitCredits": "Par unité",
+      "minCredits": "Plancher",
+      "maxCredits": "Plafond",
+      "removePrice": "Supprimer ce tarif",
+      "units": {
+        "call": "appel",
+        "second": "seconde",
+        "minute": "minute",
+        "image": "image",
+        "character": "caractère"
+      },
+      "summaryFlat": "{amount} crédits par appel",
+      "summaryPerUnit": "{rate} crédits par {unit}",
+      "summaryBasePlusUnit": "{base} crédits + {rate} crédits par {unit}",
+      "floorNote": "minimum {min} crédits",
+      "ceilingNote": "maximum {max} crédits"
     },
     "success": {
       "saved": "Identifiant enregistré",
@@ -3130,10 +3197,11 @@
       "local": "Clés locales",
       "cloudHint": "Les appels d'intégration passent par votre compte LiveContext Cloud lié et utilisent ses identifiants de plateforme. Les requêtes transitent par le cloud et une petite majoration en crédits y est facturée à chaque appel.",
       "localHint": "Les identifiants d'intégration sont configurés et utilisés localement sur cette installation.",
-      "subscriptionRequired": "L'option Cloud nécessite un abonnement payant actif sur votre compte cloud lié.",
+      "subscriptionRequired": "Utiliser le Cloud nécessite un abonnement payant actif sur votre compte cloud lié. Un compte gratuit ne peut pas payer les appels relayés.",
       "viewPlans": "Voir les offres",
       "linkRequired": "Liez un compte Cloud avant de basculer sur Cloud.",
-      "saveError": "Échec de la mise à jour de la source des identifiants d'intégration."
+      "saveError": "Échec de la mise à jour de la source des identifiants d'intégration.",
+      "cloudCovers": "Cela couvre aussi la génération : images, vidéo, son, voix et musique passent par les clés fournisseur du compte cloud et y sont facturées en crédits, à la seconde ou au fichier, au prix publié pour chaque modèle."
     },
     "getDocs": "Obtenir une clé API",
     "save": "Enregistrer",
@@ -3382,10 +3450,6 @@
         "browser_agent": {
           "label": "Browser Agent",
           "hint": "Modèles disponibles pour le Browser Agent. Le rang définit l'ordre par défaut ; désactiver retire le modèle des exécutions du Browser Agent."
-        },
-        "image_generation": {
-          "label": "Génération d'image",
-          "hint": "Fournisseurs de génération d'image. Le classement contrôle l'ordre par défaut dans le picker ; désactiver retire le modèle de l'outil image-gen."
         }
       }
     },
@@ -3521,6 +3585,16 @@
       "notAvailable": "Aucun identifiant plateforme n'est configuré pour ce service",
       "markupNote": "Cette étape utilisera l'identifiant partagé de la plateforme. Un petit surcoût est facturé à chaque appel.",
       "markupNoteWithRate": "Cette étape utilisera l'identifiant partagé de la plateforme. {rate} crédits sont facturés en supplément à chaque appel.",
+      "markupNoteNotSold": "Cette étape est réglée sur l'identifiant partagé de la plateforme, mais cette génération n'y est pas vendue : aucun prix n'est publié pour ce modèle, seulement la valeur par défaut de l'identifiant, dont une génération n'hérite jamais. Basculez sur votre propre clé pour l'exécuter.",
+      "markupNoteWithUnitRate": "Cette étape utilisera l'identifiant partagé de la plateforme. La facturation est de {unitRate} crédits par {unit}, une demande plus grande coûte donc plus cher.",
+      "markupNoteWithUnitRateAndTotal": "Cette étape utilisera l'identifiant partagé de la plateforme. {unitRate} crédits par {unit}, {quantity} {unit} = {total} crédits pour cette exécution.",
+      "priceUnits": {
+        "call": "appel",
+        "second": "seconde",
+        "minute": "minute",
+        "image": "image",
+        "character": "caractère"
+      },
       "platformExplanation": "Aucune configuration personnelle nécessaire - la plateforme possède la clé API. Seul le surcoût par appel s'ajoute au coût de base du nœud."
     },
     "manageAll": "Gérer tous les identifiants",
@@ -3815,6 +3889,13 @@
         "scopesPlaceholder": "ex. read write (séparés par des espaces)",
         "tokenUrl": "URL du token",
         "tokenUrlPlaceholder": "https://fournisseur.com/oauth/token"
+      },
+      "platformKey": {
+        "title": "Vous n’êtes pas obligé d’ajouter une clé",
+        "explanation": "Ce service est disponible sur la clé de la plateforme, facturée en crédits par appel. Ajouter votre propre clé signifie que vous payez le fournisseur directement et que la plateforme ne vous facture rien.",
+        "explanationPriced": "Ce service est disponible sur la clé de la plateforme, à {credits} crédits par appel. Ajouter votre propre clé signifie que vous payez le fournisseur directement et que la plateforme ne vous facture rien.",
+        "use": "Utiliser la clé de la plateforme",
+        "orOwn": "Ou ajoutez votre propre clé ci-dessous."
       }
     }
   },
@@ -5157,6 +5238,13 @@
     "noMatches": "Aucun fichier ne correspond à vos filtres",
     "viewGrid": "Vue en grille",
     "viewList": "Vue en liste",
+    "sortBy": "Trier par",
+    "sortByDate": "Date",
+    "sortByName": "Nom",
+    "sortBySize": "Taille",
+    "sortByType": "Type",
+    "sortAscending": "Ordre croissant",
+    "sortDescending": "Ordre décroissant",
     "dateFrom": "Du",
     "dateTo": "Au",
     "typeColumn": "Type",
@@ -5203,7 +5291,8 @@
     "moveToRoot": "Niveau supérieur (racine)",
     "moveHere": "Déplacer ici",
     "noFoldersYet": "Aucun dossier - créez-en un d'abord, ou déplacez au niveau supérieur.",
-    "backToParent": "Remonter d'un niveau"
+    "backToParent": "Remonter d'un niveau",
+    "generate": "Générer"
   },
   "fileDetail": {
     "download": "Télécharger {name}",
@@ -5692,17 +5781,17 @@
     },
     "advanced": {
       "deleteTitle": "Supprimer le compte",
-      "deleteWarning": "Cette action est irréversible. Toutes vos données, abonnements et configurations seront définitivement supprimés.",
+      "deleteWarning": "Votre compte est désactivé immédiatement, puis définitivement supprimé après un délai de grâce. À ce moment-là, vos données, abonnements et configurations sont perdus.",
       "deleteButton": "Supprimer mon compte"
     },
     "deleteDialog": {
       "title": "Supprimer le compte ?",
-      "description": "Cette action est irréversible. Toutes vos données seront définitivement perdues.",
+      "description": "Votre compte est désactivé immédiatement, puis définitivement supprimé au bout de {days} jours. Vous pouvez annuler pendant ce délai en vous reconnectant.",
       "whatHappens": "Que se passe-t-il ?",
       "dataDeleted": "Toutes vos données seront supprimées",
       "subscriptionCancelled": "Votre abonnement sera annulé",
       "toolsDeleted": "Vos outils MCP seront supprimés",
-      "cannotUndo": "Cette action ne peut pas être annulée",
+      "cannotUndo": "Passé {days} jours, cette action est irréversible",
       "confirmInstruction": "Pour confirmer, tapez",
       "typePlaceholder": "Tapez DELETE",
       "deletePermanently": "Supprimer définitivement"
@@ -6183,6 +6272,7 @@
       "waitingDependencies": "En attente des dépendances",
       "rerunning": "Relance...",
       "rerunTooltip": "Relancer cette étape et toutes les étapes en aval",
+      "rerunTooltipAuto": "Relancer cette étape, puis laisser le reste du workflow se réexécuter tout seul",
       "fixValidationErrors": "Corriger les erreurs de validation avant l'exécution",
       "startStepByStep": "Démarrer le workflow en mode pas à pas",
       "onlyTriggersCanStart": "Seuls les déclencheurs peuvent démarrer l'exécution pas à pas",
@@ -6876,6 +6966,8 @@
       "autoLayout": "Mise en page auto (réorganiser les nœuds)",
       "expandAllFiles": "Déplier tous les aperçus de fichiers",
       "collapseAllFiles": "Replier tous les aperçus de fichiers",
+      "expandFilesByDefault": "Déplier les aperçus de fichiers par défaut",
+      "collapseFilesByDefault": "Replier les aperçus de fichiers par défaut",
       "disableInteractivity": "Désactiver l'interactivité",
       "enableInteractivity": "Activer l'interactivité",
       "cursorMode": "Mode du curseur",
@@ -6923,6 +7015,7 @@
       "waitingError": "Run d'initialisation - cliquez pour amorcer ; les vraies erreurs se déclenchent automatiquement",
       "executeStep": "Exécuter cette étape",
       "rerunStep": "Relancer depuis cette étape",
+      "rerunStepAuto": "Repartir de cette étape (la suite se réexécute automatiquement)",
       "waitingDependencies": "En attente des dépendances",
       "previous": "Précédent",
       "next": "Suivant",
@@ -7226,6 +7319,44 @@
         "disposition": "Disposition",
         "dispositionInline": "Inline (affichage dans le navigateur)",
         "dispositionAttachment": "Pièce jointe (invite de téléchargement)"
+      },
+      "generate": {
+        "title": "Générer",
+        "description": "Génère un élément à partir d'une consigne : image, vidéo, audio, voix ou musique. Le modèle choisi détermine le format produit, les paramètres acceptés et le coût de chaque exécution.",
+        "model": "Modèle",
+        "modelPlaceholder": "Choisir un modèle",
+        "modelsLoading": "Chargement des modèles...",
+        "modelHint": "Changer de modèle efface les paramètres que le nouveau modèle n'accepte pas.",
+        "noModels": "Aucun modèle de génération n'est disponible sur cette installation.",
+        "selectValue": "Choisir une valeur",
+        "filePlaceholder": "ex. {{core:download.output.file}}",
+        "limitRange": "Plage autorisée : {min} à {max}",
+        "params": {
+          "prompt": "Consigne",
+          "negative_prompt": "Consigne négative",
+          "duration_seconds": "Durée (secondes)",
+          "n": "Quantité",
+          "aspect_ratio": "Format d'image",
+          "resolution": "Résolution",
+          "quality": "Qualité",
+          "style": "Style",
+          "voice": "Voix",
+          "language": "Langue",
+          "seed": "Graine",
+          "input_image": "Image de référence",
+          "input_audio": "Audio de référence",
+          "input_video": "Vidéo de référence"
+        },
+        "placeholders": {
+          "prompt": "Décrivez ce qu il faut générer",
+          "negative_prompt": "Ce qu il faut éviter",
+          "aspect_ratio": "ex. 16:9",
+          "resolution": "ex. 720p",
+          "quality": "ex. high",
+          "style": "ex. cinematic",
+          "voice": "Identifiant de voix",
+          "language": "ex. fr"
+        }
       },
       "media": {
         "title": "Média",
@@ -9145,8 +9276,8 @@
     "toolsModeCustom": "Personnalisé",
     "webSearchLabel": "Recherche web",
     "webSearchInfo": "Permet à l'agent de rechercher sur le web lorsqu'il a besoin d'informations à jour.",
-    "imageGenerationLabel": "Génération d'images",
-    "imageGenerationInfo": "Permet à l'agent de générer des images via OpenAI gpt-image-1.5/mini ou Google Gemini 2.5 Flash Image (nano-banana) / 3 Pro Image. Facturé par image générée (5 à 134 crédits selon le modèle et la qualité). Si vous avez configuré votre propre clé API, elle est utilisée (aucun crédit interne débité) ; sinon la clé de la plateforme est utilisée et les crédits sont déduits.",
+    "generationLabel": "Génération",
+    "generationInfo": "Permet à l'assistant de créer des images, des vidéos, du son, des voix et de la musique. Chaque génération est facturée en crédits au tarif de la plateforme ; une vidéo plus longue ou un texte plus long coûte plus cher.",
     "autoAuthorizeLabel": "Lancer les actions sensibles sans demander",
     "autoAuthorizeInfo": "Lorsque c'est activé, l'agent installe et exécute les applications (et autres actions sensibles) dans cette conversation sans afficher de carte d'autorisation. S'applique uniquement à cette conversation.",
     "enabled": "Activé",
@@ -10041,6 +10172,90 @@
           "link": "Lien"
         }
       }
+    }
+  },
+  "generationModal": {
+    "title": "Générer un fichier",
+    "subtitle": {
+      "format": "Que voulez-vous produire ?",
+      "prompt": "Choisissez un modèle et décrivez",
+      "result": "Votre fichier"
+    },
+    "steps": {
+      "format": "Format",
+      "prompt": "Consigne",
+      "result": "Résultat"
+    },
+    "formats": {
+      "image": "Image",
+      "video": "Vidéo",
+      "audio": "Son",
+      "voice": "Voix",
+      "music": "Musique"
+    },
+    "params": {
+      "negative_prompt": "À éviter",
+      "voice": "Voix",
+      "language": "Langue",
+      "style": "Style",
+      "aspect_ratio": "Format d’image",
+      "resolution": "Résolution",
+      "quality": "Qualité",
+      "duration_seconds": "Durée (secondes)",
+      "n": "Combien",
+      "seed": "Graine",
+      "input_image": "Image de référence",
+      "input_audio": "Audio de référence",
+      "input_video": "Vidéo de référence"
+    },
+    "price": {
+      "perUnit": "{rate} crédits par {unit}",
+      "plusBase": "plus {base} au départ",
+      "flat": "{credits} crédits",
+      "min": "minimum {credits}",
+      "max": "plafonné à {credits}",
+      "total": "{credits} crédits pour cette demande",
+      "unpriced": "Non vendu avec la clé de la plateforme"
+    },
+    "fields": {
+      "model": "Modèle",
+      "modelPlaceholder": "Choisissez un modèle",
+      "prompt": "Consigne",
+      "promptPlaceholder": "Décrivez ce que vous voulez",
+      "options": "Options",
+      "unset": "Laisser au modèle",
+      "uploading": "Envoi en cours...",
+      "uploadFailed": "Ce fichier n'a pas pu être envoyé : {error}",
+      "provider": "Fournisseur",
+      "providerPlaceholder": "Choisissez un fournisseur",
+      "chooseFile": "Choisir un fichier",
+      "replaceFile": "Remplacer",
+      "noFile": "Aucun fichier choisi"
+    },
+    "modelCount": "{count} modèles",
+    "empty": "Aucun modèle de génération n’est disponible pour l’instant.",
+    "running": "Génération en cours. Cela peut être long pour une vidéo.",
+    "done": "Terminé",
+    "billedOn": "Facturé sur {quantity} {unit}",
+    "download": "Télécharger",
+    "generate": "Générer",
+    "again": "Modifier",
+    "back": "Retour",
+    "cancel": "Annuler",
+    "close": "Fermer",
+    "errors": {
+      "unexpected": "La génération n’a pas pu être lancée.",
+      "stillRunning": "La connexion a été coupée, mais la génération continue sur le serveur et sera facturée. Votre fichier apparaîtra dans vos fichiers une fois terminé.",
+      "unreadable": "La génération a été refusée et rien n’a été produit, mais la raison est revenue sous une forme que cette page ne peut pas afficher. Essayez un autre modèle, ou réessayez dans un instant."
+    },
+    "payer": {
+      "monthlyCreditsOnly": "Vos crédits mensuels financent les exécutions de workflow, pas la génération. Utilisez votre propre clé, ou abonnez-vous ou rechargez pour payer en crédits."
+    },
+    "assetRoles": {
+      "source": "Image source",
+      "first_frame": "Première image",
+      "reference": "Image de référence",
+      "mask": "Masque"
     }
   }
 }

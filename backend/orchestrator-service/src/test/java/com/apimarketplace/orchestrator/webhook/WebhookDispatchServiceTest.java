@@ -8,7 +8,6 @@ import com.apimarketplace.orchestrator.domain.workflow.ExecutionMode;
 import com.apimarketplace.orchestrator.domain.workflow.RunStatus;
 import com.apimarketplace.orchestrator.repository.WorkflowRepository;
 import com.apimarketplace.orchestrator.repository.WorkflowRunRepository;
-import com.apimarketplace.common.credit.CreditConsumptionClient;
 import com.apimarketplace.orchestrator.trigger.ReusableTriggerService;
 import com.apimarketplace.orchestrator.trigger.TriggerExecutionResult;
 import com.apimarketplace.orchestrator.trigger.TriggerType;
@@ -39,7 +38,6 @@ class WebhookDispatchServiceTest {
     @Mock private WorkflowRunRepository runRepository;
     @Mock private ReusableTriggerService triggerService;
     @Mock private com.apimarketplace.orchestrator.trigger.ProductionRunResolver productionRunResolver;
-    @Mock private CreditConsumptionClient creditClient;
     @Mock private WebhookResponseRegistry webhookResponseRegistry;
 
     private WebhookDispatchService service;
@@ -53,10 +51,8 @@ class WebhookDispatchServiceTest {
     void setUp() {
         service = new WebhookDispatchService(
             triggerClient, workflowRepository, runRepository,
-            triggerService, productionRunResolver, creditClient, webhookResponseRegistry
+            triggerService, productionRunResolver, webhookResponseRegistry
         );
-        // Default: allow credits
-        lenient().when(creditClient.checkCredits(any())).thenReturn(true);
 
         // Default: ProductionRunResolver delegates to the existing repo stubs.
         // This lets the existing test stubs (workflowRepository.findById +
@@ -184,19 +180,35 @@ class WebhookDispatchServiceTest {
         }
 
         @Test
-        @DisplayName("Should return insufficientCredits when user has no credits")
-        void shouldReturnInsufficientCreditsWhenNoCredits() {
+        @DisplayName("Out-of-credit trigger node keeps the documented 402 status, and the fire still happened")
+        void creditExhaustedKeepsTheInsufficientCreditsStatus() {
             WorkflowRunEntity run = createRunEntity(RunStatus.WAITING_TRIGGER, ExecutionMode.AUTOMATIC);
-            run.setTenantId("42");
             setupUnpinnedDispatch(run);
-            when(creditClient.checkCredits("42")).thenReturn(false);
+            // The refusal now comes from the trigger node (NodeCreditGate) instead of a
+            // pre-execution gate, so the caller keeps its 402 AND the owner gets a failed
+            // trigger with skipped successors to look at.
+            when(triggerService.executeTrigger(eq(run), eq(TRIGGER_ID), eq(TriggerType.WEBHOOK), any()))
+                .thenReturn(TriggerExecutionResult.failure(RUN_ID, TRIGGER_ID, TriggerType.WEBHOOK,
+                    com.apimarketplace.orchestrator.services.credit.CreditExhaustion.MESSAGE));
 
             WebhookResponse response = service.dispatch(TOKEN, Map.of("data", "test"), false);
 
             assertEquals("insufficient_credits", response.status());
-            assertTrue(response.message().contains("Insufficient credits"));
-            assertTrue(response.message().contains("/app/settings/pricing"));
-            verify(triggerService, never()).executeTrigger(any(), any(), any(), any());
+            verify(triggerService).executeTrigger(eq(run), eq(TRIGGER_ID), eq(TriggerType.WEBHOOK), any());
+        }
+
+        @Test
+        @DisplayName("Any other trigger failure stays a generic error, not 402")
+        void otherFailureStaysGenericError() {
+            WorkflowRunEntity run = createRunEntity(RunStatus.WAITING_TRIGGER, ExecutionMode.AUTOMATIC);
+            setupUnpinnedDispatch(run);
+            when(triggerService.executeTrigger(eq(run), eq(TRIGGER_ID), eq(TriggerType.WEBHOOK), any()))
+                .thenReturn(TriggerExecutionResult.failure(RUN_ID, TRIGGER_ID, TriggerType.WEBHOOK,
+                    "Run has no plan"));
+
+            WebhookResponse response = service.dispatch(TOKEN, Map.of("data", "test"), false);
+
+            assertNotEquals("insufficient_credits", response.status());
         }
 
         @Test

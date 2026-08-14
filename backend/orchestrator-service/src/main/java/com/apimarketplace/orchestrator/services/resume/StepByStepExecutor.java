@@ -121,7 +121,14 @@ public class StepByStepExecutor {
 
         if (readySteps != null && !readySteps.isEmpty()) {
             stateSnapshotService.initializeSnapshot(runId);
-            stateSnapshotService.updateReadyNodes(runId, readySteps);
+            // Per-DAG, not flat: the flat write resolves its target through
+            // getDefaultTriggerId(). On an empty snapshot that is DEFAULT_TRIGGER_SENTINEL, so
+            // it minted a phantom "trigger:default" DAG; on a snapshot that ALREADY has the
+            // real trigger DAGs (a reusable run armed at birth) it picks one of them by
+            // Map.copyOf iteration order - randomised per JVM - and REPLACES that one DAG's
+            // ready set with every trigger, so trigger A ends up ready in dag A and dag B at
+            // once. Both shapes make findDagContaining a per-process coin flip.
+            stateSnapshotService.initializeReadyNodes(runId, readySteps);
             logger.info("Persisted {} initial ready nodes to StateSnapshot for runId={}: {}",
                 readySteps.size(), runId, readySteps);
 

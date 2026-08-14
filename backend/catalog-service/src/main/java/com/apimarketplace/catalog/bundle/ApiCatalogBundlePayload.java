@@ -83,7 +83,15 @@ public final class ApiCatalogBundlePayload {
             UUID id, String toolSlug, String description, String toolNameId, String method,
             String endpoint, String protocol, String defaultHeaders, String runtimeMetadata,
             String executionSpec, String outputSchema, String executionMode, String pagination,
-            String requiredScopes, String nextHint, String status, String testStatus,
+            String requiredScopes,
+            // The generation descriptor. Carried like requiredScopes above: it is
+            // what makes an endpoint visible to the generation surface, and what
+            // ApiToolEntity.isGeneration() reads, so an install that receives the
+            // catalog through this bundle and not through the importer would
+            // otherwise have every generation invisible and every fail-closed
+            // billing guard that asks "is this a generation" answering no.
+            String generationSpec,
+            String nextHint, String status, String testStatus,
             Boolean isActive, String version,
             List<ParameterRow> parameters, List<ResponseRow> responses,
             List<ToolCredentialRow> toolCredentials) {}
@@ -105,6 +113,33 @@ public final class ApiCatalogBundlePayload {
             String iconUrl, String iconSlug, String propertiesJson, String extendsJson,
             String metadataJson) {}
 
+    /**
+     * One published generation price (V430), read from {@code auth.pricing_version_entry}
+     * through auth-service (catalog never touches the {@code auth} schema).
+     *
+     * <p><b>Why the price rides the same bundle as the descriptor.</b> The
+     * descriptor already travels here, and a descriptor without a price is a
+     * model an install can see and cannot sell: an unpriced generation is
+     * refused by design ({@code CatalogToolBillingService.preflightReserve}), so
+     * an install fed only by this bundle receives the whole generation catalogue
+     * and can run none of it. Putting the two in one signed blob also makes them
+     * impossible to separate: the price is covered by the same Ed25519 signature
+     * over the same gzip bytes, so an install cannot keep the descriptor and
+     * substitute its own rate.
+     *
+     * <p><b>Keys are the portable ones.</b> {@code integrationName} rather than
+     * the platform credential's serial id (install-local), {@code apiToolId}
+     * because catalog tool UUIDs are stable by seed contract, {@code modelId}
+     * because one endpoint can back several models at different rates.
+     *
+     * <p>Amounts are PLAIN STRINGS. The bytes are signed, so a rate must not
+     * round-trip through a double, and {@code "60"} versus {@code "60.000000"}
+     * must not depend on how a driver happened to scale a DECIMAL.
+     */
+    public record GenerationPriceRow(
+            String integrationName, String apiToolId, String modelId, String priceUnit,
+            String baseCredits, String unitCredits, String minCredits, String maxCredits) {}
+
     // ─────────────────────────────────────────────────────────────────────────
     // Canonical serialisation
     // ─────────────────────────────────────────────────────────────────────────
@@ -118,6 +153,25 @@ public final class ApiCatalogBundlePayload {
                                         Instant snapshotTakenAt,
                                         List<ApiRow> apis,
                                         List<CredentialTemplateRow> credentialTemplates) {
+        return canonicalBytes(version, schemaVersion, issuer, snapshotTakenAt, apis,
+                credentialTemplates, List.of());
+    }
+
+    /**
+     * V430 form, additionally carrying the published generation prices.
+     *
+     * <p><b>The key is omitted entirely when there are no prices</b>, so this
+     * produces byte-identical output to the overload above for a catalog with no
+     * priced generation. That is what makes the addition invisible to a cloud
+     * that has nothing to price, and it is why {@code schemaVersion} does NOT
+     * move: nothing about an older payload became invalid, and an older CE reads
+     * the root as a map and simply never asks for a key it does not know.
+     */
+    public static byte[] canonicalBytes(long version, int schemaVersion, String issuer,
+                                        Instant snapshotTakenAt,
+                                        List<ApiRow> apis,
+                                        List<CredentialTemplateRow> credentialTemplates,
+                                        List<GenerationPriceRow> generationPrices) {
         if (issuer == null || snapshotTakenAt == null || apis == null) {
             throw new IllegalArgumentException(
                     "canonicalBytes requires non-null issuer, snapshotTakenAt, apis");
@@ -147,6 +201,19 @@ public final class ApiCatalogBundlePayload {
             templateJson.add(templateMap(t));
         }
         root.put("credentialTemplates", templateJson);
+
+        if (generationPrices != null && !generationPrices.isEmpty()) {
+            List<GenerationPriceRow> sortedPrices = new ArrayList<>(generationPrices);
+            sortedPrices.sort(Comparator
+                    .comparing(GenerationPriceRow::integrationName, Comparator.nullsLast(String::compareTo))
+                    .thenComparing(GenerationPriceRow::apiToolId, Comparator.nullsLast(String::compareTo))
+                    .thenComparing(p -> p.modelId() == null ? "" : p.modelId()));
+            List<Map<String, Object>> priceJson = new ArrayList<>(sortedPrices.size());
+            for (GenerationPriceRow p : sortedPrices) {
+                priceJson.add(generationPriceMap(p));
+            }
+            root.put("generationPrices", priceJson);
+        }
 
         try {
             return CANONICAL_MAPPER.writeValueAsBytes(root);
@@ -220,6 +287,7 @@ public final class ApiCatalogBundlePayload {
         putIfNotNull(row, "executionMode", tool.executionMode());
         putIfNotNull(row, "pagination", tool.pagination());
         putIfNotNull(row, "requiredScopes", tool.requiredScopes());
+        putIfNotNull(row, "generationSpec", tool.generationSpec());
         putIfNotNull(row, "nextHint", tool.nextHint());
         putIfNotNull(row, "status", tool.status());
         putIfNotNull(row, "testStatus", tool.testStatus());
@@ -316,6 +384,19 @@ public final class ApiCatalogBundlePayload {
         putIfNotNull(row, "properties", t.propertiesJson());
         putIfNotNull(row, "extends", t.extendsJson());
         putIfNotNull(row, "metadata", t.metadataJson());
+        return row;
+    }
+
+    private static Map<String, Object> generationPriceMap(GenerationPriceRow p) {
+        Map<String, Object> row = new TreeMap<>();
+        putIfNotNull(row, "integrationName", p.integrationName());
+        putIfNotNull(row, "apiToolId", p.apiToolId());
+        putIfNotNull(row, "modelId", p.modelId());
+        putIfNotNull(row, "priceUnit", p.priceUnit());
+        putIfNotNull(row, "baseCredits", p.baseCredits());
+        putIfNotNull(row, "unitCredits", p.unitCredits());
+        putIfNotNull(row, "minCredits", p.minCredits());
+        putIfNotNull(row, "maxCredits", p.maxCredits());
         return row;
     }
 

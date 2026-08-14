@@ -7,12 +7,19 @@ import java.util.regex.Pattern;
  * Known model categories. The DB constraint on
  * {@link ModelCategorySettingsEntity#getCategory()} is intentionally
  * permissive (any lowercase snake_case identifier) so adding a new category
- * is a code-only change - extend this enum, expose it in the admin UI tabs,
- * and ship.
+ * is a code-only change - extend this enum, give it a reader, and ship.
  *
- * <p>Forward-extensibility examples (not yet implemented):
- * {@code video_generation}, {@code file_processing}, {@code embedding},
- * {@code audio}.
+ * <p>Forward-extensibility examples (none of them implemented):
+ * {@code file_processing}, {@code embedding}, {@code transcription}.
+ *
+ * <p><b>Only {@code chat} and {@code browser_agent} have a screen.</b> The five
+ * {@code <format>_generation} constants are kept because rows were written
+ * under them and callers may still ask for them, but nothing offers them any
+ * more: a generation model has no ranking to give (the caller names its model,
+ * and a video model is no substitute for a voice one), nothing to enable (it
+ * exists because its catalog endpoint exists) and no per-token price (it bills
+ * per image or per second, against a platform credential). Do not treat them as
+ * a place to surface generation models.
  *
  * <p>Use {@link #isValidShape(String)} to validate a free-form category
  * string at API boundaries; use the enum {@link #of(String)} when callers
@@ -22,7 +29,24 @@ public enum ModelCategory {
 
     CHAT("chat"),
     BROWSER_AGENT("browser_agent"),
-    IMAGE_GENERATION("image_generation");
+    IMAGE_GENERATION("image_generation"),
+    VIDEO_GENERATION("video_generation"),
+    AUDIO_GENERATION("audio_generation"),
+    VOICE_GENERATION("voice_generation"),
+    MUSIC_GENERATION("music_generation");
+
+    /**
+     * Suffix marking a category as "one generation format". Everything before it
+     * is the {@code mode} its models carry, so
+     * {@code video_generation} accepts exactly {@code mode='video'}.
+     *
+     * <p>The convention is what keeps the eligibility rule generic: a constant
+     * of this shape needs no change to {@link #acceptsMode(String, String)} and
+     * no migration (the V156 CHECK already accepts any snake_case identifier).
+     * Adding one is nonetheless not the way to surface a generation model: see
+     * the class javadoc for why none of them has a screen.
+     */
+    public static final String GENERATION_SUFFIX = "_generation";
 
     private static final Pattern SHAPE = Pattern.compile("^[a-z][a-z0-9_]*$");
 
@@ -45,9 +69,27 @@ public enum ModelCategory {
         return key != null && key.length() <= 32 && SHAPE.matcher(key).matches();
     }
 
-    /** Stable iteration order for UI tab rendering / seeding. */
+    /** Stable iteration order for seeding. */
     public static Set<String> defaultKeys() {
-        return Set.of(CHAT.key, BROWSER_AGENT.key, IMAGE_GENERATION.key);
+        Set<String> keys = new java.util.LinkedHashSet<>();
+        for (ModelCategory c : values()) keys.add(c.key);
+        return java.util.Collections.unmodifiableSet(keys);
+    }
+
+    /** True when this category represents one generation format. */
+    public static boolean isGeneration(String category) {
+        return category != null && category.endsWith(GENERATION_SUFFIX)
+                && category.length() > GENERATION_SUFFIX.length();
+    }
+
+    /**
+     * The model {@code mode} a generation category accepts, derived from its
+     * name ({@code video_generation} to {@code video}). Null for a category
+     * that is not a generation format.
+     */
+    public static String modeForGenerationCategory(String category) {
+        if (!isGeneration(category)) return null;
+        return category.substring(0, category.length() - GENERATION_SUFFIX.length());
     }
 
     /**
@@ -57,26 +99,29 @@ public enum ModelCategory {
      * <p>Eligibility rules:
      * <ul>
      *   <li>{@code chat} and {@code browser_agent} → only chat-capable rows
-     *       ({@code mode IS NULL OR mode = 'chat'}). Image-gen rows do NOT
+     *       ({@code mode IS NULL OR mode = 'chat'}). Generation rows do NOT
      *       leak into chat tabs even if they share the same parent table.</li>
-     *   <li>{@code image_generation} → only {@code mode = 'image'} rows. Chat
-     *       models do NOT leak into the image-gen tab - they're not callable
-     *       through the {@code image_generation} tool anyway.</li>
+     *   <li>Any {@code <format>_generation} category → only {@code mode =
+     *       '<format>'} rows. So {@code image_generation} accepts
+     *       {@code mode='image'} and {@code video_generation} accepts
+     *       {@code mode='video'}, derived from the name rather than listed
+     *       here. Adding a format is a constant in this enum and nothing
+     *       else.</li>
      *   <li>Unknown / future categories → permissive (returns true) so a new
-     *       category can ship its own seed without a code change here. Tighten
-     *       per-category as new modes land.</li>
+     *       category can ship its own seed without a code change here.</li>
      * </ul>
      *
      * <p>Mirrors the V156 backfill SQL filter ({@code mode IS NULL OR mode = 'chat'}
-     * for chat/browser_agent ; {@code mode = 'image'} for image_generation).
+     * for chat/browser_agent ; {@code mode = '<format>'} for a generation category).
      */
     public static boolean acceptsMode(String category, String mode) {
         if (category == null) return true;
         if (CHAT.key.equals(category) || BROWSER_AGENT.key.equals(category)) {
             return mode == null || "chat".equals(mode);
         }
-        if (IMAGE_GENERATION.key.equals(category)) {
-            return "image".equals(mode);
+        String generationMode = modeForGenerationCategory(category);
+        if (generationMode != null) {
+            return generationMode.equals(mode);
         }
         // Forward-extensibility: an unknown category lets every mode through
         // until a future code change tightens the contract.

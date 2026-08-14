@@ -28,9 +28,8 @@ export interface ModelConfigEntry {
   rateLimitRpmPerTenant?: number | null;
   /**
    * V156 - set per-row by the backend (`getEffectiveModelList`). One of
-   * {@code 'cloud' | 'byok' | 'bridge'}. Used to hide bridges from category
-   * tabs (browser_agent / image_generation) where their rank has no runtime
-   * effect.
+   * {@code 'cloud' | 'byok' | 'bridge'}. Used to hide bridges from the
+   * browser_agent tab, where their rank has no runtime effect.
    */
   providerKind?: 'cloud' | 'byok' | 'bridge';
   // V125-enriched fields surfaced via ModelCatalogService.applyEnrichmentFields
@@ -144,9 +143,12 @@ export interface ModelExecutionLink {
 
 class ModelConfigService {
   /**
-   * V156 - pass a category key (chat / browser_agent / image_generation)
-   * to fetch the admin row list with the per-category sidecar overlaid on
-   * top of the global fields. Pass undefined for the legacy global view.
+   * V156 - pass a category key (chat / browser_agent) to fetch the admin row
+   * list with the per-category sidecar overlaid on top of the global fields.
+   * Pass undefined for the legacy global view.
+   *
+   * The backend still answers for the retired `<format>_generation` keys, so
+   * rows written under them stay readable; no screen sends one any more.
    */
   async getEffectiveModels(category?: string): Promise<ModelConfigEntry[]> {
     const url = category

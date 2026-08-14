@@ -27,7 +27,6 @@ import com.apimarketplace.orchestrator.services.streaming.state.RedisUnavailable
 import com.apimarketplace.orchestrator.services.streaming.state.RunningNodeTracker;
 import com.apimarketplace.orchestrator.services.transaction.TransactionalHelper;
 import com.apimarketplace.orchestrator.services.credit.CreditBudgetService;
-import com.apimarketplace.common.credit.CreditConsumptionClient;
 import com.apimarketplace.common.web.TenantResolver;
 import com.apimarketplace.orchestrator.trigger.queue.ExecutionQueue;
 import com.apimarketplace.orchestrator.trigger.queue.ExecutionQueueRequestContext;
@@ -143,7 +142,6 @@ public class ReusableTriggerService {
     private final StateSnapshotService stateSnapshotService;
     private final EpochConcurrencyLimiter epochConcurrencyLimiter;
     private final ExecutionQueue executionQueueService;
-    private final CreditConsumptionClient creditClient;
     private final CreditBudgetService creditBudgetService;
 
     /**
@@ -180,6 +178,13 @@ public class ReusableTriggerService {
 
     @Autowired(required = false)
     private com.apimarketplace.orchestrator.services.merge.ItemMergeCollector itemMergeCollector;
+
+    /**
+     * Diagnostic-only audit of what the closing epoch actually reached. {@code required=false}
+     * so narrow Spring tests boot without it - a missing auditor costs a log line, nothing else.
+     */
+    @Autowired(required = false)
+    private com.apimarketplace.orchestrator.services.epoch.EpochCompletenessAuditor epochCompletenessAuditor;
 
     /**
      * Async agent registry - queried by {@link #hasActiveSignalsForTrigger} so that
@@ -313,7 +318,6 @@ public class ReusableTriggerService {
             StateSnapshotService stateSnapshotService,
             EpochConcurrencyLimiter epochConcurrencyLimiter,
             @Lazy ExecutionQueue executionQueueService,
-            CreditConsumptionClient creditClient,
             CreditBudgetService creditBudgetService) {
         this.runRepository = runRepository;
         this.workflowRepository = workflowRepository;
@@ -325,7 +329,6 @@ public class ReusableTriggerService {
         this.stateSnapshotService = stateSnapshotService;
         this.epochConcurrencyLimiter = epochConcurrencyLimiter;
         this.executionQueueService = executionQueueService;
-        this.creditClient = creditClient;
         this.creditBudgetService = creditBudgetService;
     }
 
@@ -366,14 +369,14 @@ public class ReusableTriggerService {
         if (tenantId != null && creditBudgetService != null) {
             creditBudgetService.refreshBudget(tenantId);
         }
-        // Centralized credit check for ALL trigger types (webhook, schedule, workflow, manual, chat)
-        if (tenantId != null && !creditClient.checkCredits(tenantId)) {
-            logger.warn("[ReusableTrigger] Insufficient credits for tenant {}, rejecting {} trigger for run {}",
-                    tenantId, triggerType, run.getRunIdPublic());
-            return TriggerExecutionResult.failure(
-                    run.getRunIdPublic(), triggerId, triggerType,
-                    "Insufficient credits. Please upgrade your plan at /app/settings/pricing");
-        }
+        // NO credit gate here on purpose. Refusing the fire before the epoch opened
+        // left a zero-balance tenant with nothing to look at: no epoch, no step rows,
+        // just an orchestrator log line - a scheduled workflow simply appeared to stop
+        // running. The gate now lives in node execution (NodeCreditGate), so the
+        // trigger node itself fails with the out-of-credit message and every
+        // downstream node is marked SKIPPED by the ordinary failure cascade. The run
+        // stays reusable (a failed epoch resets it to WAITING_TRIGGER), so topping up
+        // revives it with no further action.
 
         String userPlan = resolveUserPlan(run);
         return executionQueueService.enqueueAndWait(
@@ -415,13 +418,11 @@ public class ReusableTriggerService {
         if (tenantId != null && creditBudgetService != null) {
             creditBudgetService.refreshBudget(tenantId);
         }
-        if (tenantId != null && !creditClient.checkCredits(tenantId)) {
-            logger.warn("[ReusableTrigger] Insufficient credits for tenant {}, rejecting async {} trigger for run {}",
-                    tenantId, triggerType, run.getRunIdPublic());
-            return TriggerExecutionResult.failure(
-                    run.getRunIdPublic(), triggerId, triggerType,
-                    "Insufficient credits. Please upgrade your plan at /app/settings/pricing");
-        }
+        // No credit gate here either - see executeTriggerInCurrentOrgScope. The async
+        // path is the one the UI uses, and it is exactly the path where a silent
+        // refusal was invisible: the caller gets an "accepted" placeholder and reads
+        // progress from SSE, so a pre-queue rejection produced no node, no epoch and
+        // no error anywhere on the canvas.
         String userPlan = resolveUserPlan(run);
         return executionQueueService.enqueueAsync(
                 run, triggerId, triggerType, payload, userPlan, ExecutionQueueRequestContext.currentRequestId());
@@ -1109,9 +1110,20 @@ public class ReusableTriggerService {
                 epochConcurrencyLimiter.release(runId, triggerId);
             }
 
-            // Close the epoch in StateSnapshot on failure too
+            // Close the epoch in StateSnapshot on failure too.
+            //
+            // The epoch number MUST be read from the DB, not from the caller's `run`
+            // entity: executeTriggerInternal increments the epoch AFTER loading that
+            // entity, so the in-memory copy still points at the previous epoch (0 on a
+            // first fire). Closing epoch 0 leaves the real epoch active, so
+            // hasAnyActiveEpoch() below stays true and the run is parked in RUNNING
+            // instead of WAITING_TRIGGER - a zombie run that no schedule/webhook
+            // dispatcher will ever pick up again (they resolve WAITING_TRIGGER).
+            // Reachable for ANY post-execution trigger failure; the out-of-credit gate
+            // is simply the first one that fails the trigger node routinely.
             if (triggerId != null) {
-                int failedEpoch = epochManager.getCurrentEpoch(run, triggerId);
+                WorkflowRunEntity epochSource = runRepository.findByRunIdPublic(runId).orElse(run);
+                int failedEpoch = epochManager.getCurrentEpoch(epochSource, triggerId);
                 // Cancel pending blocking signals before pruning the epoch to avoid
                 // zombie signals being resolved by the timer pollers post-close.
                 if (unifiedSignalService != null) {
@@ -1792,6 +1804,12 @@ public class ReusableTriggerService {
         // Close the epoch in StateSnapshot (removes from activeEpochs but keeps history)
         // Uses currentEpoch which respects explicitEpoch for parallel epoch correctness
         if (triggerId != null) {
+            // Single choke point for BOTH close paths (inline cycle and deferred signal reset):
+            // say out loud when an epoch closes having reached only part of its DAG, instead of
+            // reporting COMPLETED and leaving the gap to be found by comparing node counts.
+            if (epochCompletenessAuditor != null) {
+                epochCompletenessAuditor.auditEpochClose(runId, triggerId, currentEpoch, plan, hasFailures);
+            }
             stateSnapshotService.closeEpoch(runId, triggerId, currentEpoch);
         }
 
@@ -2048,6 +2066,84 @@ public class ReusableTriggerService {
     }
 
     /**
+     * Is any node still RUNNING in this DAG's epoch?
+     *
+     * <p>The async side stores answer "is a delivery in progress"; this answers "is the epoch
+     * finished", which is the question the close path actually needs. It is the one signal
+     * that spans a node's WHOLE offloaded life: the node is marked running when it is
+     * dispatched and unmarked when it reaches a terminal completion, with no handoff between
+     * two stores in the middle - which is exactly where the async guards go blind.
+     *
+     * <p>The shape is copied from {@link #closeEpochIfCompleteForSbs}, but be clear about what
+     * that does and does not buy: that method has NO production caller (grep it - only doc
+     * references remain), so the pattern is BORROWED, not pre-validated in production. The risk
+     * analysis below is load-bearing, not a formality.
+     *
+     * <p>In AUTOMATIC mode this gate is effectively SINGLE-SOURCED on Redis. The JSONB read is
+     * kept because {@code hasActiveSignalsForTrigger} is also reached from the step-by-step
+     * resume paths, but for an auto-mode run it always returns empty:
+     * {@code EpochState.runningNodeIds} is written only by
+     * {@code StateSnapshotService.claimNodeForExecution}, whose only callers are the two SBS
+     * controllers. Auto mode marks running through {@link RunningNodeTracker} alone
+     * ({@code V2ExecutionEventService.emitNodeStart} -> {@code NodeCompletionService}).
+     *
+     * <p><b>Fails OPEN on an unreachable Redis</b>, which deliberately REVERSES the SBS gate's
+     * policy. Fail-closed is only safe when something re-drives the close, and here nothing
+     * does: a one-shot manual trigger with no pending signal and no pending agent gets exactly
+     * one close attempt, so a deferral caused by a transient Redis error would be permanent -
+     * the run never re-arms and OrchestrationRecoveryService flips an armed app to FAILED. A
+     * blip therefore degrades to the PRE-FIX behaviour (one epoch may be pruned early) rather
+     * than wedging the run, and is reported at ERROR so the degradation is visible.
+     *
+     * <p><b>Known residual risk.</b> A node whose running count is never decremented blocks
+     * this epoch's close until the tracker key's 1 h TTL expires. Two such leaks exist today
+     * and were merely cosmetic before this gate: a split whose every item errors is
+     * {@code continue}d without persisting, so no per-item completion fires; and an aggregate
+     * that never reaches its expected count keeps returning COLLECTING and never reaches
+     * {@code markCompleted}. Both are defects in their own right. This gate converts them from
+     * a silently wrong result into a visibly stuck epoch, bounded by that TTL.
+     */
+    private boolean hasRunningNodesForEpoch(String runId, String triggerId, int epoch) {
+        // JSONB epoch state. Live only for the step-by-step paths that also reach this guard;
+        // always empty for auto-mode runs (see javadoc). Kept so the two modes share one gate.
+        try {
+            StateSnapshot snapshot = stateSnapshotService.getSnapshot(runId);
+            var dagState = snapshot.getDags().get(triggerId);
+            var epochState = dagState != null ? dagState.getEpochState(epoch) : null;
+            if (epochState != null && !epochState.getRunningNodeIds().isEmpty()) {
+                logger.info("[ReusableTrigger] Epoch {} still has running nodes {}, skip reset: runId={}, triggerId={}",
+                    epoch, epochState.getRunningNodeIds(), runId, triggerId);
+                return true;
+            }
+        } catch (Exception e) {
+            // A snapshot read failure must not by itself defer the close - the Redis gate
+            // below is the fail-closed one, and doubling the fail-closed surface here would
+            // wedge a run on any transient DB blip.
+            logger.warn("[ReusableTrigger] Snapshot read failed during the running-node gate (runId={}, triggerId={}, epoch={}): {}",
+                runId, triggerId, epoch, e.getMessage());
+        }
+        // Secondary, fail-CLOSED: once JSONB running is elided, Redis is the only authority.
+        if (runningNodeTracker != null) {
+            try {
+                Map<String, Integer> redisRunning = runningNodeTracker.getRunningCountsOrThrow(runId, epoch);
+                if (!redisRunning.isEmpty()) {
+                    logger.info("[ReusableTrigger] Epoch {} still has running nodes {} (Redis), skip reset: runId={}, triggerId={}",
+                        epoch, redisRunning.keySet(), runId, triggerId);
+                    return true;
+                }
+            } catch (RedisUnavailableException ex) {
+                // Fail OPEN, at ERROR - see the javadoc. Deferring here would be permanent for
+                // a run that gets only one close attempt, and an armed app failed by the zombie
+                // scanner is worse than one epoch pruned early.
+                logger.error("[ReusableTrigger] Redis unavailable during the running-node gate - allowing the close on incomplete information (runId={}, triggerId={}, epoch={}): {}",
+                    runId, triggerId, epoch, ex.getMessage());
+                return false;
+            }
+        }
+        return false;
+    }
+
+    /**
      * @param excludeInFlightCorrelationId the delivery that ASKED for this reset, when there is
      *        one - exempted from the in-flight check because it has already cleared its own entry
      *        and that clear is best-effort. Null for every caller that is not itself an agent
@@ -2095,7 +2191,18 @@ public class ReusableTriggerService {
                         epoch, runId, triggerId);
                     return true;
                 }
-                return false;
+                // Neither async store knows about the delivery. That is NOT the same as
+                // "the epoch has no work left", because the two of them do not cover the
+                // whole life of a delivery: PendingAgentRegistry.consume GETDELs the entry
+                // BEFORE RedisInFlightStore.stage takes it, and stage serializes JSON and
+                // writes to Redis, so the interval between them is milliseconds, not the
+                // "sub-millisecond" the comment at AgentAsyncCompletionService:357-364
+                // claims. A close landing in it sees both stores empty and prunes the epoch
+                // while the agent is still being delivered; the node downstream of the agent
+                // is then never dispatched, never marked SKIPPED, and gets no step row.
+                // Measured 2026-08-06 with -De2e.agent.prestage-delay-ms holding that window
+                // open: 3 runs out of 3, "Step not found: <that node>".
+                return hasRunningNodesForEpoch(runId, triggerId, epoch);
             }
             // Run-wide fallback (used by the 4-arg resetForNextCycle overload that
             // passes triggerId=null). Without this, the legacy code path silently

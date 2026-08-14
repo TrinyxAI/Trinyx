@@ -169,8 +169,22 @@ export function statusCountsToMetrics(counts?: Record<string, number>): EdgeItem
 }
 
 /**
+ * Has this step FINISHED, whatever the outcome?
+ *
+ * Used to decide when a node's cached data must be refetched. `partial_success` counts: the node
+ * ran to completion and produced its output, it merely carries a failure in its accumulated tally.
+ * Written as a shared predicate because the caller used to inline the list, and once the backend
+ * started reporting partial_success the omission silently stopped the refresh for those nodes -
+ * with counts that never reset, a node that failed once and was fixed stayed stale forever.
+ */
+export function isTerminalStepStatus(status?: string): boolean {
+  const s = (status || '').toLowerCase();
+  return s === 'completed' || s === 'failed' || s === 'partial_success';
+}
+
+/**
  * Derives node status from normalized status counts
- * 
+ *
  * Priority order:
  * 1. RUNNING if there are running items
  * 2. ERROR if there are failures
@@ -178,10 +192,11 @@ export function statusCountsToMetrics(counts?: Record<string, number>): EdgeItem
  * 4. COMPLETED if all items succeeded
  * 5. SKIPPED if all items were skipped
  * 6. PENDING otherwise
- * 
+ *
  * @param counts - Normalized status counts
  * @returns Derived node status
  */
+
 export function deriveStatusFromCounts(counts?: Record<string, number>): DerivedNodeStatus {
   if (!counts) {
     return 'pending';

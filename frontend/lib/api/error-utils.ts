@@ -107,6 +107,28 @@ export function isInsufficientCloudCreditError(error: unknown): boolean {
   return errorText(error).includes('INSUFFICIENT_CREDITS');
 }
 
+/** Token the orchestrator's node credit gate stamps on the failed node's output. */
+export const CREDIT_EXHAUSTED_CODE = 'CREDIT_EXHAUSTED';
+
+/** Opening words of the gate's node error message (backend `CreditExhaustion.MESSAGE`). */
+const CREDIT_EXHAUSTED_MESSAGE_PREFIX = 'Out of credits';
+
+/**
+ * A workflow NODE failed because the workspace ran out of credits.
+ *
+ * <p>An out-of-credit run is no longer refused up front: the node (the trigger
+ * itself, for a scheduled or webhook fire) is executed, fails, and the rest of the
+ * workflow is skipped. An AUTOMATIC fire is answered 202 before that happens, so
+ * there is no 402 to key the modal on - this recognises the failure from the node
+ * instead. Prefers the machine token; the message is the fallback for a payload
+ * whose output was trimmed.
+ */
+export function isCreditExhaustedFailure(errorCode: unknown, message: unknown): boolean {
+  if (typeof errorCode === 'string' && errorCode === CREDIT_EXHAUSTED_CODE) return true;
+  const text = errorText(message);
+  return text.includes(CREDIT_EXHAUSTED_CODE) || text.includes(CREDIT_EXHAUSTED_MESSAGE_PREFIX);
+}
+
 /**
  * CE cloud-relay: the requested model is not one the linked cloud account
  * curates (no catalog row, i.e. not in any bundle the install could hold - a

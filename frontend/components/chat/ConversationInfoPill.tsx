@@ -65,7 +65,7 @@ function ConversationInfoPillImpl({ conversation }: { conversation: Conversation
   return (
     <div className="flex flex-col gap-1 px-3 py-2 bg-white/95 dark:bg-gray-800/95 backdrop-blur rounded-2xl overflow-hidden">
       <div className="flex items-center gap-2">
-        <div className={`flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium ${typeClasses}`}>
+        <div className={`flex items-center gap-1 px-2 py-0.5 rounded-md text-xs font-medium ${typeClasses}`}>
           {typeLabel}
         </div>
 

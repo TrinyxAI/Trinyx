@@ -556,7 +556,12 @@ export function updateDecisionNodesFromEdges(
 
       let decisionStatus: DerivedNodeStatus = 'pending';
       if (edgeStatuses.includes('running')) decisionStatus = 'running';
-      else if (edgeStatuses.includes('completed') || edgeStatuses.includes('failed')) {
+      // `partial_success` means the branch RAN, so the decision resolved - same as completed or
+      // failed here. Edge statuses are copied verbatim from their source node (updateEdgesFromNodes
+      // above), so once a node can report partial its edges can too; matching neither this arm nor
+      // the all-skipped one below left decisionStatus at 'pending' and the update was dropped,
+      // leaving the decision node grey on a run that had plainly taken a branch.
+      else if (edgeStatuses.some(s => s === 'completed' || s === 'failed' || s === 'partial_success')) {
         decisionStatus = 'completed';
       } else if (edgeStatuses.every(s => s === 'skipped')) {
         decisionStatus = 'skipped';

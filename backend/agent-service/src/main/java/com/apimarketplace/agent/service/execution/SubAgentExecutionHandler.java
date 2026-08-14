@@ -318,6 +318,15 @@ public class SubAgentExecutionHandler {
 
         // 7. Build sub-agent credentials
         Map<String, Object> subCredentials = buildSubAgentCredentials(credentials, currentDepth, agentId);
+        // The CHILD's own grant, resolved from the CHILD's config with the same
+        // resolver the direct path uses. Not inherited from the parent, which
+        // would be wrong in both directions: a permissive parent would widen a
+        // restricted child, and a restricted one would narrow a child its owner
+        // configured deliberately. Written here rather than in the credential
+        // builder because that builder only knows the child's id, and an id is
+        // not a permission.
+        subCredentials.put(AgentModuleResolver.ENABLED_MODULES_CREDENTIAL_KEY,
+                new ArrayList<>(AgentModuleResolver.resolveEnabledModules(entity.getToolsConfig())));
         if (organizationId != null) {
             subCredentials.putIfAbsent("__orgId__", organizationId);
         }
@@ -815,12 +824,13 @@ public class SubAgentExecutionHandler {
             context.reasoningEffort(),  // resolved on the context (agent setting → model default)
             // enabledModules - the DIRECT sub-agent path is scoped via the explicit toolMaps
             // (resolveTools), but the BRIDGE sub-agent path ignores toolMaps and builds its own
-            // MCP tool set, so it needs the canonical module keys. Resolve them from the child
-            // entity's toolsConfig (same AgentModuleResolver the direct path uses); null when the
-            // child is unrestricted (no toolsConfig) ⇒ bridge keeps all modules.
-            entity.getToolsConfig() != null
-                ? List.copyOf(AgentModuleResolver.resolveEnabledModules(entity.getToolsConfig()))
-                : null
+            // MCP tool set, so it needs the canonical module keys. Resolved from the child
+            // entity's toolsConfig with the same AgentModuleResolver the direct path uses, and
+            // ALWAYS sent: a null here made the bridge keep every module, so a child with no
+            // toolsConfig got the credit-spending generation tool while the
+            // direct path (correctly) withheld them. resolveEnabledModules(null) is
+            // AgentModuleResolver.NO_CONFIG_MODULES, which excludes exactly those two.
+            List.copyOf(AgentModuleResolver.resolveEnabledModules(entity.getToolsConfig()))
         );
     }
 
@@ -1051,13 +1061,17 @@ public class SubAgentExecutionHandler {
      * replaced an ad-hoc path that diverged from the other two ({@code mode=none} → zero
      * tools; {@code mode=custom} → filter by the raw {@code tools} list rather than the
      * family grants), so the SAME agent now exposes the SAME core tool set whether it runs
-     * as a sub-agent, in chat, or in a workflow. {@code toolsConfig == null} ⇒ unrestricted.
+     * as a sub-agent, in chat, or in a workflow.
+     *
+     * <p>{@code toolsConfig == null} is handled by the resolver itself
+     * ({@link AgentModuleResolver#NO_CONFIG_MODULES}) - there is deliberately NO null
+     * short-circuit here. The one this replaced returned the UNFILTERED cache, so a child
+     * agent row with no toolsConfig received the credit-spending {@code generation} and
+     * {@code generation} tool and could spend the customer's balance with no grant
+     * set anywhere. "No config" is not "everything".
      */
     private List<ToolDefinition> resolveTools(AgentEntity entity) {
         Map<String, Object> toolsConfig = entity.getToolsConfig();
-        if (toolsConfig == null) {
-            return coreToolsCache.getCoreTools();
-        }
         Set<String> enabledModules = AgentModuleResolver.resolveEnabledModules(toolsConfig);
         Set<String> coreToolNames = DefaultSystemPrompts.build(enabledModules, false).coreToolNames();
         return coreToolsCache.getCoreTools(coreToolNames);

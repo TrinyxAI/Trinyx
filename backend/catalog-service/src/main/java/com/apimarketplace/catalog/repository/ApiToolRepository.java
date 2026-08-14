@@ -56,4 +56,26 @@ public interface ApiToolRepository extends CrudRepository<ApiToolEntity, UUID> {
      * Find tool by API ID and tool slug
      */
     Optional<ApiToolEntity> findByApiIdAndToolSlug(UUID apiId, String toolSlug);
+
+    /**
+     * Every endpoint carrying a V428 generation descriptor, on an active,
+     * non-deprecated API.
+     *
+     * <p>This is the whole input to the generation registry. The set is small
+     * (a handful of endpoints against 600+ ordinary ones) and backed by the
+     * partial index added in V428, so it is cheap enough to read and cache in
+     * one go rather than querying per model.
+     */
+    @Query("SELECT at.* FROM catalog.api_tools at "
+            + "JOIN catalog.apis a ON at.api_id = a.id "
+            + "WHERE at.generation_spec IS NOT NULL "
+            + "AND at.is_active = true AND a.is_active = true "
+            + "AND at.deprecated_at IS NULL AND a.deprecated_at IS NULL "
+            // Deterministic order matters: a model id is global, and the
+            // registry resolves a duplicate by keeping the FIRST endpoint it
+            // sees. Without an ORDER BY, which of two clashing providers owns
+            // the id could change between restarts, so the same call would bill
+            // a different rate after a redeploy.
+            + "ORDER BY a.api_slug, at.tool_slug, at.id")
+    List<ApiToolEntity> findGenerationEndpoints();
 }

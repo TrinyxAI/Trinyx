@@ -84,7 +84,6 @@ class ReusableTriggerServiceEpochFailedPublishTest {
                 stateSnapshotService,
                 epochConcurrencyLimiter,
                 mock(com.apimarketplace.orchestrator.trigger.queue.ExecutionQueue.class),
-                mock(CreditConsumptionClient.class),
                 mock(CreditBudgetService.class));
         ReflectionTestUtils.setField(service, "unifiedSignalService", unifiedSignalService);
         ReflectionTestUtils.setField(service, "self", service);

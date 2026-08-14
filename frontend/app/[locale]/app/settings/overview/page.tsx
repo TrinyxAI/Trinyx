@@ -140,6 +140,10 @@ export default function SettingsOverviewPage() {
   const [showNewPassword, setShowNewPassword] = useState(false);
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  // Grace window before the account is actually purged. Read from the backend when the
+  // dialog opens rather than hardcoded, so the number in the copy is the same one the
+  // purge scheduler acts on. The 30 is only the value shown if that read fails.
+  const [gracePeriodDays, setGracePeriodDays] = useState(30);
   const [deleteConfirmation, setDeleteConfirmation] = useState("");
   const [isDeleting, setIsDeleting] = useState(false);
   const [passwordForm, setPasswordForm] = useState({
@@ -448,7 +452,7 @@ export default function SettingsOverviewPage() {
               <div className="space-y-6">
                 <div className="flex items-center justify-between flex-wrap gap-4">
                   <div className="flex items-center space-x-3">
-                    <div className="w-10 h-10 rounded-full bg-theme-secondary flex items-center justify-center">
+                    <div className="w-10 h-10 rounded-xl bg-theme-secondary flex items-center justify-center">
                       <User className="w-5 h-5 text-theme-primary" />
                     </div>
                     <div>
@@ -602,7 +606,7 @@ export default function SettingsOverviewPage() {
             <TabsContent value="security" className="space-y-6">
               <div className="space-y-6">
                 <div className="flex items-center space-x-3">
-                  <div className="w-10 h-10 bg-theme-secondary rounded-full flex items-center justify-center">
+                  <div className="w-10 h-10 bg-theme-secondary rounded-xl flex items-center justify-center">
                     <Shield className="w-5 h-5 text-theme-primary" />
                   </div>
                   <div>
@@ -758,7 +762,7 @@ export default function SettingsOverviewPage() {
           <TabsContent value="preferences" className="space-y-6">
             <div className="space-y-6">
               <div className="flex items-center space-x-3">
-                <div className="w-10 h-10 bg-theme-secondary rounded-full flex items-center justify-center">
+                <div className="w-10 h-10 bg-theme-secondary rounded-xl flex items-center justify-center">
                   <Palette className="w-5 h-5 text-theme-primary" />
                 </div>
                 <div>
@@ -925,7 +929,7 @@ export default function SettingsOverviewPage() {
                   panel ('user-default' target) GET/PUTs /v3/chat/defaults and saves on change. */}
               <div className="space-y-4">
                 <div className="flex items-center space-x-3">
-                  <div className="w-10 h-10 rounded-full bg-theme-secondary flex items-center justify-center">
+                  <div className="w-10 h-10 rounded-xl bg-theme-secondary flex items-center justify-center">
                     <MessageSquare className="w-5 h-5 text-theme-primary" />
                   </div>
                   <div>
@@ -942,13 +946,13 @@ export default function SettingsOverviewPage() {
           <TabsContent value="notifications" className="space-y-6">
             <div className="space-y-6">
               <div className="flex items-center space-x-3">
-                <div className="w-10 h-10 bg-theme-secondary rounded-full flex items-center justify-center">
+                <div className="w-10 h-10 bg-theme-secondary rounded-xl flex items-center justify-center">
                   <Bell className="w-5 h-5 text-theme-primary" />
                 </div>
                 <div>
                   <div className="flex items-center gap-2 flex-wrap">
                     <h3 className="text-lg font-semibold text-theme-primary">{t('notifications.title')}</h3>
-                    <span className="text-xs font-medium px-2 py-0.5 rounded-full bg-theme-tertiary text-theme-secondary">
+                    <span className="text-xs font-medium px-2 py-0.5 rounded-md bg-theme-tertiary text-theme-secondary">
                       {t('notifications.comingSoon')}
                     </span>
                   </div>
@@ -1037,7 +1041,13 @@ export default function SettingsOverviewPage() {
                   </p>
                   <Button
                     variant="destructive"
-                    onClick={() => setShowDeleteConfirm(true)}
+                    onClick={() => {
+                      setShowDeleteConfirm(true);
+                      unifiedApiService
+                        .getAccountDeletionStatus()
+                        .then((s) => setGracePeriodDays(s.gracePeriodDays))
+                        .catch(() => { /* keep the default, the dialog still opens */ });
+                    }}
                     size="sm"
                     className="h-8 px-3"
                   >
@@ -1055,12 +1065,12 @@ export default function SettingsOverviewPage() {
           <DialogContent className="max-w-md bg-theme-primary">
             <DialogHeader>
               <div className="text-center">
-                <div className="w-16 h-16 bg-red-100 dark:bg-red-900/30 rounded-full flex items-center justify-center mx-auto mb-4">
+                <div className="w-16 h-16 bg-red-100 dark:bg-red-900/30 rounded-2xl flex items-center justify-center mx-auto mb-4">
                   <Trash2 className="w-8 h-8 text-red-600" />
                 </div>
                 <DialogTitle>{t('deleteDialog.title')}</DialogTitle>
                 <DialogDescription className="mt-2">
-                  {t('deleteDialog.description')}
+                  {t('deleteDialog.description', { days: gracePeriodDays })}
                 </DialogDescription>
               </div>
             </DialogHeader>
@@ -1074,7 +1084,7 @@ export default function SettingsOverviewPage() {
                 <p>* {t('deleteDialog.dataDeleted')}</p>
                 <p>* {t('deleteDialog.subscriptionCancelled')}</p>
                 <p>* {t('deleteDialog.toolsDeleted')}</p>
-                <p>* {t('deleteDialog.cannotUndo')}</p>
+                <p>* {t('deleteDialog.cannotUndo', { days: gracePeriodDays })}</p>
               </div>
             </div>
 

@@ -10,6 +10,7 @@ import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { resolve, join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { ClaudeAdapter, isExtendedThinkingContinuation } from '../adapters/claude-adapter.mjs';
+import { extractToolResultAndMetadata } from '../lib/toolContent.mjs';
 
 function makeCtx() {
   let usage = { promptTokens: 0, completionTokens: 0 };
@@ -51,7 +52,7 @@ function makeCtx() {
     thinkingSections,
     adapterState,
     stripMcpPrefix: (n) => n.replace(/^mcp__[^_]+__/, ''),
-    extractToolResultAndMetadata: (raw) => ({ content: typeof raw === 'string' ? raw : JSON.stringify(raw), metadata: {} }),
+    extractToolResultAndMetadata: extractToolResultAndMetadata,
     getContent: () => fullContent,
     state: {
       get usage() { return usage; },
@@ -154,6 +155,25 @@ test('claude-adapter: tool_result via case "user" publishes and clears pending',
   assert.equal(ctx._published.toolResults.length, 1);
   assert.equal(ctx._published.toolResults[0].success, true);
   assert.equal(ctx.pendingToolCalls.size, 0);
+});
+
+test('claude-adapter: a tool_result marked is_error fails the call and keeps its text', async () => {
+  // The Claude leg deliberately stays on `block.is_error` instead of the shared
+  // resolveItemError (the Claude CLI unwraps the envelope, so there is none to inspect).
+  // That decision was documented but unpinned: flipping the comparison survived the suite.
+  const { adapter, ctx } = makeCtx();
+  await adapter.handleMessage(assistantWith({
+    id: 'msg_err',
+    blocks: [{ type: 'tool_use', id: 'toolu_e', name: 'workflow', input: {} }],
+    usage: { input_tokens: 1, output_tokens: 1 },
+  }), ctx);
+  await adapter.handleMessage({
+    type: 'user',
+    message: { content: [{ type: 'tool_result', tool_use_id: 'toolu_e', content: 'boom', is_error: true }] },
+  }, ctx);
+
+  assert.equal(ctx._published.toolResults[0].success, false);
+  assert.equal(ctx.toolResults[0].error, 'boom');
 });
 
 test('claude-adapter: case "error" routes through applyResultMapping', async () => {

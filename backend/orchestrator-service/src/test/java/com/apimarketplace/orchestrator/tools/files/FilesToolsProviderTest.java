@@ -365,6 +365,34 @@ class FilesToolsProviderTest {
             assertThat((String) out.get("url"))
                     .isEqualTo(BASE + "/api/proxy/files/by-id/" + e.getId() + "/raw?disposition=inline");
             assertThat((String) ref.get("url")).isEqualTo(out.get("url"));
+            // The hint has to NAME the ref, or the agent never learns it is the
+            // thing to pass on. It used to offer only 'view' and the file's url,
+            // and a url is precisely what a tool taking a file refuses: those
+            // need the bytes, which only the ref locates.
+            assertThat((String) out.get("NEXT"))
+                    .contains("ref")
+                    .contains("input_image");
+        }
+
+        @Test
+        @DisplayName("a file with no stored bytes keeps the old hint, since it has no ref to offer")
+        void inlineFileStillPointsAtView() {
+            StorageEntity e = new StorageEntity();
+            e.setId(UUID.randomUUID());
+            e.setTenantId(TENANT);
+            e.setFileName("notes.txt");
+            e.setStorageType("TEXT");
+            e.setDataText("hello");
+            e.setMimeType("text/plain");
+            when(storageService.getEntityByIdForScope(any(), any(), any())).thenReturn(Optional.of(e));
+
+            Map<String, Object> out = data(provider.execute("files",
+                    Map.of("action", "get", "file_id", e.getId().toString()), ctx(TENANT, ORG)));
+
+            assertThat(out).doesNotContainKey("ref");
+            // Promising a ref that is not there would send the agent looking for
+            // a key the answer does not carry.
+            assertThat((String) out.get("NEXT")).contains("view").doesNotContain("ref");
         }
 
         @Test

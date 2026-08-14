@@ -45,6 +45,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.nio.charset.StandardCharsets;
+import java.time.Instant;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
@@ -83,6 +84,7 @@ public class StateSnapshotService
     private final StorageBreakdownService breakdownService;
     private final TxScopedSnapshotCache txCache;
     private final WorkflowMetrics workflowMetrics;
+    private final ClaimRefusalRegistry claimRefusalRegistry;
 
     // P2.3 - dedicated state-snapshot ObjectMapper with the
     // EpochStateRunningElideModule registered. Optional injection so existing
@@ -209,7 +211,8 @@ public class StateSnapshotService
                                 WorkflowEventPublisher eventPublisher,
                                 StorageBreakdownService breakdownService,
                                 TxScopedSnapshotCache txCache,
-                                WorkflowMetrics workflowMetrics) {
+                                WorkflowMetrics workflowMetrics,
+                                ClaimRefusalRegistry claimRefusalRegistry) {
         this.runRepository = runRepository;
         this.objectMapper = objectMapper;
         this.workflowEpochService = workflowEpochService;
@@ -217,6 +220,7 @@ public class StateSnapshotService
         this.breakdownService = breakdownService;
         this.txCache = txCache;
         this.workflowMetrics = workflowMetrics;
+        this.claimRefusalRegistry = claimRefusalRegistry;
     }
 
     // ========================================================================
@@ -965,18 +969,118 @@ public class StateSnapshotService
     @Transactional
     public void resetDagAndSetReady(String runId, Set<String> dagNodeIds, String readyNodeId,
                                     String ownerTriggerId) {
+        resetDagAndSetReady(runId, dagNodeIds, readyNodeId, ownerTriggerId, -1);
+    }
+
+    /**
+     * Variant that pins the READY marker to an EXPLICIT epoch.
+     *
+     * <p>The overloads above resolve the marker's epoch through
+     * {@code StateSnapshot.addReadyNode(triggerId, nodeId)}, which writes into
+     * {@code DagState.currentEpochState()} - that is, whatever the DAG's current epoch happens
+     * to be AT WRITE TIME. The caller, meanwhile, has already decided which epoch the rerun
+     * will execute in. Those are two independent resolutions of the same thing, and nothing
+     * keeps them in step: {@code resetForNextCycle} prunes the outgoing epoch early and
+     * advances {@code currentEpoch} much later, so a rerun that decided epoch N can have its
+     * marker written at N+1.
+     *
+     * <p>That split is what makes the marker unremovable. Execution and
+     * {@code mergeReadyNodesAfterExecution} both use the caller's epoch, so a removal aimed at
+     * N never touches a marker sitting at N+1 - and {@code removeReadyNode} materialises the
+     * missing epoch with {@code EpochState.fresh()} instead of complaining. The flat ready view
+     * then keeps returning the node to the rerun's drive loop, which does not recompute
+     * readiness, and it replays to its wave cap: one real execution plus a hundred SKIPPED
+     * dispatches, each of which still emits a counted completion.
+     *
+     * @param epoch the epoch the caller will execute in; {@code -1} keeps the legacy
+     *              write-time resolution for callers that have no epoch of their own
+     */
+    @Transactional
+    public void resetDagAndSetReady(String runId, Set<String> dagNodeIds, String readyNodeId,
+                                    String ownerTriggerId, int epoch) {
         loadFreshForUpdate(runId).ifPresent(run -> {
             StateSnapshot current = parseSnapshot(run);
             // Chain operations: reset DAG execution state (counts always accumulate) then add
             // ready node. Owner-scoped: sibling DAGs must NOT be reactivated by a rerun
             // (nothing outside a trigger fire ever closes them - multi-trigger wedge).
             StateSnapshot reset = current.resetDag(dagNodeIds, ownerTriggerId);
-            StateSnapshot updated = ownerTriggerId != null
-                ? reset.addReadyNode(ownerTriggerId, readyNodeId)
-                : reset.addReadyNode(readyNodeId);
+            StateSnapshot updated;
+            if (ownerTriggerId != null && epoch >= 0) {
+                updated = reset.addReadyNode(ownerTriggerId, readyNodeId, epoch);
+            } else if (ownerTriggerId != null) {
+                updated = reset.addReadyNode(ownerTriggerId, readyNodeId);
+            } else {
+                updated = reset.addReadyNode(readyNodeId);
+            }
             saveSnapshot(run, updated, "resetDagAndSetReady");
-            log.info("[StateSnapshot] DAG reset and ready node set: runId={}, dagNodeCount={}, readyNode={}, ownerTriggerId={}",
-                runId, dagNodeIds.size(), readyNodeId, ownerTriggerId);
+            log.info("[StateSnapshot] DAG reset and ready node set: runId={}, dagNodeCount={}, readyNode={}, ownerTriggerId={}, epoch={}",
+                runId, dagNodeIds.size(), readyNodeId, ownerTriggerId,
+                epoch >= 0 ? epoch : "current");
+        });
+    }
+
+    /**
+     * Reopen a closed epoch, then reset the rerun's nodes and mark the target ready,
+     * in ONE atomic snapshot write.
+     *
+     * <p>Companion to {@link #resetDagAndSetReady(String, Set, String, String)} for a run whose
+     * execution cycle already closed. {@code targetEpoch} is the epoch that actually holds the
+     * run's outputs; the DAG's current epoch is the dormant one staged for the next fire. The
+     * epoch's full state is restored from the {@code workflow_epochs} header when the snapshot
+     * no longer carries it (it is pruned at cycle close), so upstream nodes keep their REAL
+     * completed/skipped marks and decision branches rather than the flattened reconstruction
+     * from cumulative counts.
+     *
+     * <p>Always a full rewrite, never a JSONB patch: the restored epoch does not exist in the
+     * stored JSONB, so a {@code jsonb_set} against its path would be a silent no-op that
+     * diverges the DB from the in-memory snapshot.
+     *
+     * @param triggerId    the DAG owning the rerun target
+     * @param targetEpoch  the epoch holding the run's outputs, to become current and active
+     * @param restoredState the epoch's durable state, already read from the header by the caller
+     *                      that decided to reopen; used when the snapshot no longer carries it
+     */
+    @Transactional
+    public void reopenEpochResetDagAndSetReady(String runId, String triggerId, int targetEpoch,
+                                               EpochState restoredState,
+                                               Set<String> dagNodeIds, String readyNodeId) {
+        loadFreshForUpdate(runId).ifPresent(run -> {
+            StateSnapshot parsed = parseSnapshot(run);
+            DagState dagState = parsed.getDags().get(triggerId);
+            if (dagState == null || dagState.getEpochState(targetEpoch) == null) {
+                if (restoredState == null) {
+                    log.warn("[StateSnapshot] Rerun asked to reopen epoch {} of runId={} triggerId={} with no "
+                            + "durable state - upstream nodes will not be seen as executed",
+                            targetEpoch, runId, triggerId);
+                } else {
+                    // Restart the epoch's execution clock. closeEpoch() derives the epoch
+                    // duration from EpochState.startedAt, so carrying the original start
+                    // forward would bill this epoch for the whole idle gap since its first
+                    // execution (and accumulate that into totalDurationMs).
+                    // Scoped to the RESTORE: an epoch the snapshot still carries was never
+                    // pruned, so it has genuinely been open since its original start.
+                    parsed = parsed.withRestoredEpochState(triggerId, targetEpoch,
+                            restoredState.withStartedAt(Instant.now()));
+                    log.info("[StateSnapshot] Restored pruned epoch for rerun: runId={}, triggerId={}, epoch={}",
+                            runId, triggerId, targetEpoch);
+                }
+            }
+            StateSnapshot updated = parsed
+                    .reopenEpochForDag(triggerId, targetEpoch)
+                    .resetDag(dagNodeIds, triggerId)
+                    .addReadyNode(triggerId, readyNodeId);
+            saveSnapshot(run, updated, "reopenEpochResetDagAndSetReady");
+
+            // Dual-write the header, mirroring openEpoch(): while the epoch re-executes it must
+            // read as ACTIVE, or the RunningNodeTracker overlay is gated off and run reporting
+            // shows the epoch as already ended.
+            DagState reopenedDag = updated.getDags().get(triggerId);
+            EpochState headerState = reopenedDag != null ? reopenedDag.getEpochState(targetEpoch) : null;
+            workflowEpochService.reopenEpoch(runId, triggerId, targetEpoch,
+                    headerState != null ? headerState : EpochState.fresh());
+
+            log.info("[StateSnapshot] Epoch reopened for rerun: runId={}, triggerId={}, epoch={}, resetCount={}, readyNode={}",
+                    runId, triggerId, targetEpoch, dagNodeIds.size(), readyNodeId);
         });
     }
 
@@ -1593,6 +1697,54 @@ public class StateSnapshotService
     }
 
     /**
+     * Arm a freshly created run: mark every reusable trigger ready INSIDE ITS OWN DAG,
+     * in one snapshot write.
+     *
+     * <p>Called at run birth, when {@code dags} is still empty. The flat
+     * {@link #updateReadyNodes(String, Set)} cannot be used there: it resolves its target
+     * through {@code StateSnapshot.getDefaultTriggerId()}, which returns
+     * {@code DEFAULT_TRIGGER_SENTINEL} for an empty snapshot, so the trigger's ready marker
+     * landed on a phantom {@code "trigger:default"} DAG. The first fire then created the
+     * real DAG and the same trigger node existed in two dags at once, leaving
+     * {@code StateSnapshot.findDagContaining} to pick between them by
+     * {@code Map.copyOf} iteration order - randomised per JVM, hence per process.
+     *
+     * <p>One write, not one per trigger: a multi-trigger workflow would otherwise take the
+     * pessimistic row lock and bump {@code state_snapshot_seq} once per trigger for what is
+     * a single initialization.
+     *
+     * <p><b>Trigger ids only.</b> When the initial ready set contains anything that is not a
+     * trigger there is no DAG it can be said to belong to, so the call falls back to the flat
+     * write unchanged. That case is a workflow with no trigger at all, where the sentinel ends
+     * up as the only DAG - the legitimate legacy shape, not the phantom, since nothing else
+     * ever claims those nodes.
+     *
+     * @param readyNodes the run's initial ready set. All-triggers: each becomes its own DAG
+     *                   whose current epoch holds exactly that trigger as ready. Otherwise:
+     *                   handled by the flat write, as before.
+     */
+    @Transactional
+    public void initializeReadyNodes(String runId, Set<String> readyNodes) {
+        if (readyNodes == null || readyNodes.isEmpty()) {
+            return;
+        }
+        boolean allTriggers = readyNodes.stream().allMatch(id -> id != null && id.startsWith("trigger:"));
+        if (!allTriggers) {
+            updateReadyNodes(runId, readyNodes);
+            return;
+        }
+        loadFreshForUpdate(runId).ifPresent(run -> {
+            StateSnapshot updated = parseSnapshot(run);
+            for (String triggerId : readyNodes) {
+                updated = updated.withReadyNodes(triggerId, Set.of(triggerId));
+            }
+            saveSnapshot(run, updated, "initializeReadyNodes");
+            log.debug("[StateSnapshot] Ready trigger DAGs initialized: runId={}, triggers={}",
+                    runId, readyNodes);
+        });
+    }
+
+    /**
      * Update the set of ready nodes (flat - uses default DAG).
      */
     @Transactional
@@ -2051,17 +2203,60 @@ public class StateSnapshotService
     }
 
     /**
-     * Classify a completed cycle's outcome for display (the run badge / lastCycleResult). A cycle
-     * with BOTH a failure AND a real (non-trigger) completion is a PARTIAL_SUCCESS; any failure
-     * with no real completion is FAILED; otherwise COMPLETED. The trigger always completes, so it
-     * is excluded from the "real completion" signal by the caller - otherwise an all-failed cycle
-     * would read as partial.
+     * Classify a completed cycle's outcome for display (the run badge / lastCycleResult).
+     *
+     * <p>Binary on purpose. PARTIAL_SUCCESS describes a NODE that finished with some of its items
+     * failed - a real, actionable state you can see in the node's own tally. A cycle is not a
+     * collection of items: it either did what it was asked or it did not, and "partially
+     * succeeded" tells the user nothing they can act on. A cycle with any failure is FAILED, and
+     * the failing nodes are where the detail lives.
+     *
+     * <p>This is also what makes the two execution modes agree: the automatic rearm path has
+     * always been binary, and the step-by-step path used to answer PARTIAL_SUCCESS for the same
+     * run content, so the badge depended on how the run was driven rather than on what happened.
      */
-    public static RunStatus deriveCycleStatus(boolean hasFailures, boolean hasNonTriggerCompletions) {
-        if (hasFailures) {
-            return hasNonTriggerCompletions ? RunStatus.PARTIAL_SUCCESS : RunStatus.FAILED;
-        }
-        return RunStatus.COMPLETED;
+    public static RunStatus deriveCycleStatus(boolean hasFailures) {
+        return hasFailures ? RunStatus.FAILED : RunStatus.COMPLETED;
+    }
+
+    /**
+     * Has this cycle actually run anything, or is the run merely armed?
+     *
+     * <p>A run that was launched but whose trigger has never fired sits at WAITING_TRIGGER with
+     * nothing executed. Recording an outcome for it would badge it COMPLETED - a run that has
+     * done nothing reported as a success. It must keep reading "waiting for trigger" until the
+     * trigger fires.
+     *
+     * <p>The trigger itself does not count: it completes on every fire, so counting it would make
+     * "armed" indistinguishable from "ran".
+     *
+     * <p>Skipped nodes DO count. A cycle whose whole downstream was skipped (an exit branch, an
+     * unrouted split) still fired and still reached its end, so it owes an outcome. Leaving it out
+     * made the answer depend on which mode drove the run: the automatic path records "completed"
+     * for that same cycle unconditionally, while step-by-step recorded nothing and left a stale
+     * badge behind.
+     */
+    private static boolean hasExecutedThisCycle(StateSnapshot snapshot) {
+        return snapshot.getDags().values().stream()
+                .anyMatch(dag -> hasExecuted(dag.currentEpochState()));
+    }
+
+    /**
+     * Did this epoch actually run anything? Shared with the epoch timeline, which asks the
+     * same question of a CLOSED epoch's stored state to decide whether it owes a badge -
+     * two answers to "did it run" would put the badge and the run status in disagreement
+     * on the same cycle.
+     *
+     * <p>The trigger does not count: it completes on every fire, so counting it would make
+     * "armed" indistinguishable from "ran". Skips DO count: a cycle whose whole downstream
+     * was skipped (an exit branch, an unrouted split) still fired and still reached its
+     * end, so it owes an outcome.
+     */
+    public static boolean hasExecuted(EpochState epoch) {
+        if (epoch == null) return false;
+        return !epoch.getFailedNodeIds().isEmpty()
+                || !epoch.getSkippedNodeIds().isEmpty()
+                || epoch.getCompletedNodeIds().stream().anyMatch(id -> !id.startsWith("trigger:"));
     }
 
     /**
@@ -2116,24 +2311,18 @@ public class StateSnapshotService
 
         // When an SBS epoch completes and the run rests at WAITING_TRIGGER (reusable trigger
         // between fires), record the cycle result in run.metadata so the run badge shows
-        // COMPLETED / FAILED / PARTIAL_SUCCESS instead of the raw idle "waiting_trigger". A cycle
-        // with BOTH real (non-trigger) completions AND failures is a PARTIAL_SUCCESS, not a plain
-        // FAILED (see deriveCycleStatus). NOTE: the AUTO rearm path
-        // (ReusableTriggerService.resetForNextCycle) still collapses a mix to FAILED; unifying it
-        // is a separate follow-up because lastCycleResult there also gates error-trigger and
-        // notification dispatch.
+        // COMPLETED / FAILED instead of the raw idle "waiting_trigger". Same binary rule as the
+        // automatic rearm path (deriveCycleStatus): the outcome must not depend on which mode
+        // drove the run. It used to answer PARTIAL_SUCCESS here and FAILED there for identical
+        // run content.
+        //
+        // Left null on any other status, which is what keeps a launched run whose trigger has
+        // not fired reading "waiting for trigger" rather than borrowing an outcome.
         final String cycleResultValue;
-        if (desired == RunStatus.WAITING_TRIGGER) {
-            boolean hasFailures = false;
-            boolean hasNonTriggerCompletions = false;
-            for (var dag : snapshot.getDags().values()) {
-                var es = dag.currentEpochState();
-                if (!es.getFailedNodeIds().isEmpty()) hasFailures = true;
-                if (es.getCompletedNodeIds().stream().anyMatch(id -> !id.startsWith("trigger:"))) {
-                    hasNonTriggerCompletions = true;
-                }
-            }
-            cycleResultValue = deriveCycleStatus(hasFailures, hasNonTriggerCompletions).getValue();
+        if (desired == RunStatus.WAITING_TRIGGER && hasExecutedThisCycle(snapshot)) {
+            boolean hasFailures = snapshot.getDags().values().stream()
+                    .anyMatch(dag -> !dag.currentEpochState().getFailedNodeIds().isEmpty());
+            cycleResultValue = deriveCycleStatus(hasFailures).getValue();
         } else {
             cycleResultValue = null;
         }
@@ -2276,6 +2465,22 @@ public class StateSnapshotService
     }
 
     /**
+     * The reason the claim for THIS node was refused, so the HTTP 409 carries the same diagnosis
+     * as the log line instead of a generic sentence. Empty when the last refusal on the run
+     * concerned a different node, or when the last claim succeeded: callers then fall back to
+     * the generic message, which is vague but never contradicts the id they asked about.
+     *
+     * @see ClaimRefusalRegistry
+     */
+    public java.util.Optional<ClaimRefusalRegistry.ClaimRefusal> lastClaimRefusal(String runId, String nodeId) {
+        return claimRefusalRegistry.lastRefusal(runId, nodeId);
+    }
+
+    private boolean refuseClaim(String runId, StateSnapshot current, String nodeId) {
+        return claimRefusalRegistry.refuse(runId, current, nodeId);
+    }
+
+    /**
      * Atomic claim within a specific DAG: verify node is READY, move to RUNNING.
      */
     @Transactional
@@ -2283,10 +2488,9 @@ public class StateSnapshotService
         return loadFreshForUpdate(runId).map(run -> {
             StateSnapshot current = parseSnapshot(run);
             if (!current.getReadyNodeIds().contains(nodeId)) {
-                log.warn("[StateSnapshot] Claim rejected: node {} not in readyNodeIds for run {}, triggerId={}, epoch={}",
-                        nodeId, runId, triggerId, epoch);
-                return false;
+                return refuseClaim(runId, current, nodeId);
             }
+            claimRefusalRegistry.clear(runId, nodeId);
             // Move from ready to running within the specific DAG and epoch
             StateSnapshot updated;
             if (epoch >= 0) {
@@ -2300,7 +2504,13 @@ public class StateSnapshotService
             log.info("[StateSnapshot] Node claimed for execution: runId={}, triggerId={}, epoch={}, nodeId={}",
                     runId, triggerId, epoch, nodeId);
             return true;
-        }).orElse(false);
+        }).orElseGet(() -> {
+            // No run row (deleted, archived, or never existed). Drop any recorded reason:
+            // keeping it would let this refusal answer with a diagnosis computed minutes ago
+            // against a snapshot that no longer exists.
+            claimRefusalRegistry.clear(runId, nodeId);
+            return false;
+        });
     }
 
     /**
@@ -2311,15 +2521,21 @@ public class StateSnapshotService
         return loadFreshForUpdate(runId).map(run -> {
             StateSnapshot current = parseSnapshot(run);
             if (!current.getReadyNodeIds().contains(nodeId)) {
-                log.warn("[StateSnapshot] Claim rejected: node {} not in readyNodeIds for run {}", nodeId, runId);
-                return false;
+                return refuseClaim(runId, current, nodeId);
             }
+            claimRefusalRegistry.clear(runId, nodeId);
             // Move from ready to running
             StateSnapshot updated = current.removeReadyNode(nodeId).addRunningNode(nodeId);
             saveSnapshot(run, updated, "claimNodeForExecution");
             log.info("[StateSnapshot] Node claimed for execution: runId={}, nodeId={}", runId, nodeId);
             return true;
-        }).orElse(false);
+        }).orElseGet(() -> {
+            // No run row (deleted, archived, or never existed). Drop any recorded reason:
+            // keeping it would let this refusal answer with a diagnosis computed minutes ago
+            // against a snapshot that no longer exists.
+            claimRefusalRegistry.clear(runId, nodeId);
+            return false;
+        });
     }
 
     /**

@@ -428,7 +428,7 @@ function ApplicationsPageContent() {
                         key={value}
                         type="button"
                         onClick={() => setSourceFilter(value)}
-                        className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-sm font-medium transition-all ${
+                        className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm font-medium transition-all ${
                           isActive
                             ? 'bg-[var(--accent-primary)] text-[var(--bg-primary)]'
                             : 'bg-[var(--bg-tertiary)] text-theme-secondary hover:text-theme-primary'

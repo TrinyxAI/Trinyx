@@ -82,7 +82,7 @@ class StorageExplorerServiceFolderTest {
                 fileRow(looseFileId, null, now.minusSeconds(1)));
 
         when(repository.listFolderScope(eq(ORG), eq(null), any(), any(), any(), any(), any(),
-                any(), any(), eq(false), eq(true), any(), any(), eq(20), eq(0)))
+                any(), any(), eq(false), eq(true), any(), any(), any(), eq(20), eq(0)))
                 .thenReturn(new StorageExplorerRepository.SliceResult(rows, 2));
 
         StoragePreviewFile previewA = prev(UUID.randomUUID());
@@ -121,7 +121,7 @@ class StorageExplorerServiceFolderTest {
             folders.add(folderRow(id, now.minusSeconds(i)));
         }
         when(repository.listFolderScope(eq(ORG), eq(null), any(), any(), any(), any(), any(),
-                any(), any(), any(Boolean.class), any(Boolean.class), any(), any(), eq(20), eq(0)))
+                any(), any(), any(Boolean.class), any(Boolean.class), any(), any(), any(), eq(20), eq(0)))
                 .thenReturn(new StorageExplorerRepository.SliceResult(folders, 4));
         when(repository.countChildrenByParent(eq(ORG), any(), any())).thenReturn(Map.of());
         when(repository.findPreviewFilesByParent(eq(ORG), any(), any())).thenReturn(Map.of());
@@ -146,7 +146,7 @@ class StorageExplorerServiceFolderTest {
         UUID folderId = UUID.randomUUID();
         Instant now = Instant.now();
         when(repository.listFolderScope(eq(ORG), eq(folderId), any(), any(), any(), any(), any(),
-                any(), any(), any(Boolean.class), any(Boolean.class), any(), any(), eq(20), eq(0)))
+                any(), any(), any(Boolean.class), any(Boolean.class), any(), any(), any(), eq(20), eq(0)))
                 .thenReturn(new StorageExplorerRepository.SliceResult(List.of(folderRow(folderId, now)), 1));
         when(repository.countChildrenByParent(eq(ORG), any(), any())).thenReturn(Map.of(folderId, 25));
         // Repo already slices to ≤9 (PREVIEW_FILES_PER_FOLDER); simulate that contract.
@@ -167,7 +167,7 @@ class StorageExplorerServiceFolderTest {
     void emptyPreviewListForFolderWithoutPreviewableChildren() {
         UUID folderId = UUID.randomUUID();
         when(repository.listFolderScope(eq(ORG), any(), any(), any(), any(), any(), any(),
-                any(), any(), any(Boolean.class), any(Boolean.class), any(), any(), eq(20), eq(0)))
+                any(), any(), any(Boolean.class), any(Boolean.class), any(), any(), any(), eq(20), eq(0)))
                 .thenReturn(new StorageExplorerRepository.SliceResult(
                         List.of(folderRow(folderId, Instant.now())), 1));
         when(repository.countChildrenByParent(eq(ORG), any(), any())).thenReturn(Map.of(folderId, 0));
@@ -187,14 +187,14 @@ class StorageExplorerServiceFolderTest {
     void forwardsParentFolderId() {
         UUID parentId = UUID.randomUUID();
         when(repository.listFolderScope(eq(ORG), eq(parentId), any(), any(), any(), any(), any(),
-                any(), any(), any(Boolean.class), any(Boolean.class), any(), any(), eq(50), eq(0)))
+                any(), any(), any(Boolean.class), any(Boolean.class), any(), any(), any(), eq(50), eq(0)))
                 .thenReturn(new StorageExplorerRepository.SliceResult(List.of(), 0));
 
         service().searchFolderScope(TENANT, ORG, parentId, null, null, null, null, null, null, null,
                 false, false, null, List.of(), PageRequest.of(0, 50));
 
         verify(repository).listFolderScope(eq(ORG), eq(parentId), any(), any(), any(), any(), any(),
-                any(), any(), any(Boolean.class), any(Boolean.class), any(), any(), eq(50), eq(0));
+                any(), any(), any(Boolean.class), any(Boolean.class), any(), any(), any(), eq(50), eq(0));
     }
 
     @Test
@@ -207,7 +207,7 @@ class StorageExplorerServiceFolderTest {
         List<UUID> excluded = List.of(restrictedChild);
 
         when(repository.listFolderScope(eq(ORG), eq(null), any(), any(), any(), any(), any(),
-                any(), any(), any(Boolean.class), any(Boolean.class), any(), eq(excluded), eq(20), eq(0)))
+                any(), any(), any(Boolean.class), any(Boolean.class), any(), eq(excluded), any(), eq(20), eq(0)))
                 .thenReturn(new StorageExplorerRepository.SliceResult(
                         List.of(folderRow(folderId, Instant.now())), 1));
         // Repo (with the deny-list applied) reports the REDUCED count and the preview set
@@ -240,7 +240,7 @@ class StorageExplorerServiceFolderTest {
         Instant folderOwnCreatedAt = Instant.parse("2026-01-01T00:00:00Z");
         Instant lastChildAddedAt = Instant.parse("2026-06-17T12:00:00Z"); // much later than the folder itself
         when(repository.listFolderScope(eq(ORG), eq(null), any(), any(), any(), any(), any(),
-                any(), any(), any(Boolean.class), any(Boolean.class), any(), any(), eq(20), eq(0)))
+                any(), any(), any(Boolean.class), any(Boolean.class), any(), any(), any(), eq(20), eq(0)))
                 .thenReturn(new StorageExplorerRepository.SliceResult(
                         List.of(folderRow(folderId, folderOwnCreatedAt)), 1));
         when(repository.countChildrenByParent(eq(ORG), any(), any())).thenReturn(Map.of(folderId, 3));
@@ -262,7 +262,7 @@ class StorageExplorerServiceFolderTest {
         UUID folderId = UUID.randomUUID();
         Instant folderOwnCreatedAt = Instant.parse("2026-03-03T09:00:00Z");
         when(repository.listFolderScope(eq(ORG), eq(null), any(), any(), any(), any(), any(),
-                any(), any(), any(Boolean.class), any(Boolean.class), any(), any(), eq(20), eq(0)))
+                any(), any(), any(Boolean.class), any(Boolean.class), any(), any(), any(), eq(20), eq(0)))
                 .thenReturn(new StorageExplorerRepository.SliceResult(
                         List.of(folderRow(folderId, folderOwnCreatedAt)), 1));
         when(repository.countChildrenByParent(eq(ORG), any(), any())).thenReturn(Map.of(folderId, 0));
@@ -282,7 +282,7 @@ class StorageExplorerServiceFolderTest {
         UUID folderId = UUID.randomUUID();
         List<UUID> excluded = List.of(UUID.randomUUID());
         when(repository.listFolderScope(eq(ORG), eq(null), any(), any(), any(), any(), any(),
-                any(), any(), any(Boolean.class), any(Boolean.class), any(), eq(excluded), eq(20), eq(0)))
+                any(), any(), any(Boolean.class), any(Boolean.class), any(), eq(excluded), any(), eq(20), eq(0)))
                 .thenReturn(new StorageExplorerRepository.SliceResult(
                         List.of(folderRow(folderId, Instant.now())), 1));
         when(repository.countChildrenByParent(eq(ORG), any(), eq(excluded))).thenReturn(Map.of(folderId, 1));

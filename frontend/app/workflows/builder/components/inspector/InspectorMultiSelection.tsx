@@ -72,7 +72,7 @@ export function InspectorMultiSelection({
           variant="ghost"
           size="sm"
           onClick={handleDuplicateAll}
-          className="h-7 px-2.5 text-xs font-medium rounded-full"
+          className="h-7 px-2.5 text-xs font-medium rounded-xl"
           title={t('duplicateAllTooltip')}
         >
           <Copy className="h-3.5 w-3.5 mr-1.5" />
@@ -87,7 +87,7 @@ export function InspectorMultiSelection({
           size="sm"
           onClick={onUndo}
           disabled={!canUndo}
-          className="h-7 px-2.5 text-xs font-medium rounded-full disabled:opacity-50"
+          className="h-7 px-2.5 text-xs font-medium rounded-xl disabled:opacity-50"
           title={t('undoTooltip')}
         >
           <Undo2 className="h-3.5 w-3.5 mr-1.5" />
@@ -101,7 +101,7 @@ export function InspectorMultiSelection({
           variant="ghost"
           size="sm"
           onClick={handleDeleteAll}
-          className="h-7 px-2.5 text-xs font-medium text-red-500 hover:text-red-600 hover:bg-red-50 dark:text-red-400 dark:hover:text-red-300 dark:hover:bg-red-950/50 rounded-full"
+          className="h-7 px-2.5 text-xs font-medium text-red-500 hover:text-red-600 hover:bg-red-50 dark:text-red-400 dark:hover:text-red-300 dark:hover:bg-red-950/50 rounded-xl"
           title={t('deleteAllTooltip')}
         >
           <Trash2 className="h-3.5 w-3.5 mr-1.5" />
@@ -121,7 +121,7 @@ export function InspectorMultiSelection({
               e.stopPropagation();
               onClose();
             }}
-            className="h-7 w-7 rounded-full"
+            className="h-7 w-7 rounded-xl"
             title={t('clearSelection')}
           >
             <X className="h-3.5 w-3.5" />

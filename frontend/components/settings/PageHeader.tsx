@@ -27,7 +27,7 @@ export function PageHeader({
 }: PageHeaderProps) {
   return (
     <div className="flex items-center gap-3">
-      <div className="w-10 h-10 bg-theme-secondary rounded-full flex items-center justify-center">
+      <div className="w-10 h-10 bg-theme-secondary rounded-xl flex items-center justify-center">
         <Icon className={iconClassName} />
       </div>
       <div>

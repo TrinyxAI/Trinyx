@@ -7,6 +7,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { MistralAdapter } from '../adapters/mistral-adapter.mjs';
+import { extractToolResultAndMetadata } from '../lib/toolContent.mjs';
 
 function makeCtx() {
   let usage = { promptTokens: 0, completionTokens: 0 };
@@ -43,7 +44,7 @@ function makeCtx() {
       thinkingSections,
       adapterState,
       stripMcpPrefix: (n) => n.replace(/^mcp__[^_]+__/, ''),
-      extractToolResultAndMetadata: (raw) => ({ content: typeof raw === 'string' ? raw : JSON.stringify(raw), metadata: {} }),
+      extractToolResultAndMetadata: extractToolResultAndMetadata,
       getContent: () => fullContent,
       state: {
         get usage() { return usage; },

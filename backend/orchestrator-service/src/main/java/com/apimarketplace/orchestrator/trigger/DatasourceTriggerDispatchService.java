@@ -1,6 +1,5 @@
 package com.apimarketplace.orchestrator.trigger;
 
-import com.apimarketplace.common.credit.CreditConsumptionClient;
 import com.apimarketplace.orchestrator.domain.WorkflowRunEntity;
 import com.apimarketplace.orchestrator.domain.workflow.RunStatus;
 import com.apimarketplace.orchestrator.services.triggers.TriggerUserResolver;
@@ -35,16 +34,13 @@ public class DatasourceTriggerDispatchService {
 
     private final ProductionRunResolver productionRunResolver;
     private final ReusableTriggerService triggerService;
-    private final CreditConsumptionClient creditClient;
     private final TriggerUserResolver triggerUserResolver;
 
     public DatasourceTriggerDispatchService(ProductionRunResolver productionRunResolver,
                                             ReusableTriggerService triggerService,
-                                            CreditConsumptionClient creditClient,
                                             TriggerUserResolver triggerUserResolver) {
         this.productionRunResolver = productionRunResolver;
         this.triggerService = triggerService;
-        this.creditClient = creditClient;
         this.triggerUserResolver = triggerUserResolver;
     }
 
@@ -111,11 +107,9 @@ public class DatasourceTriggerDispatchService {
             return DispatchResult.runTerminal(status.name());
         }
 
-        if (!creditClient.checkCredits(run.getTenantId())) {
-            log.warn("Insufficient credits for tenant {}, skipping datasource trigger on run {}",
-                    run.getTenantId(), run.getRunIdPublic());
-            return DispatchResult.insufficientCredits();
-        }
+        // No credit gate here: the fire proceeds and NodeCreditGate fails the trigger
+        // node with the out-of-credit message, so a datasource-driven workflow that
+        // stops running says so on the canvas instead of only in the logs.
 
         // Datasource rows can contain arbitrary remote-sourced fields; strip
         // the internal plan-control marker as defense-in-depth.
@@ -127,6 +121,12 @@ public class DatasourceTriggerDispatchService {
                     run, triggerId, TriggerType.DATASOURCE, payload);
             if (result.success()) {
                 return DispatchResult.fired(run.getRunIdPublic());
+            }
+            // Keep the dedicated out-of-credit status for the caller, now derived
+            // from the trigger node's real failure rather than a pre-execution gate.
+            if (com.apimarketplace.orchestrator.services.credit.CreditExhaustion
+                    .isCreditExhausted(result.message())) {
+                return DispatchResult.insufficientCredits();
             }
             return DispatchResult.error(result.message());
         } catch (Exception e) {

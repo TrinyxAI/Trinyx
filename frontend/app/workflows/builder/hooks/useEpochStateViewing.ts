@@ -87,8 +87,20 @@ function extractNormalizedLabelFromKey(key: string): string | null {
   return null;
 }
 
-/** Statuses that indicate a node has finished - signal override should not apply. */
-const TERMINAL_STATUSES = new Set(['completed', 'failed', 'skipped']);
+/**
+ * Statuses that indicate a node has finished - the signal override must not apply.
+ *
+ * `partial_success` belongs here: the node finished, it merely carries a failure in its
+ * accumulated tally. Omitting it let a stale pending signal repaint a finished node as
+ * "awaiting_signal", losing its amber badge and falsely claiming it waits for input - and this
+ * same file already DERIVES partial_success through the shared util, so the two halves disagreed.
+ */
+const TERMINAL_STATUSES = new Set(['completed', 'failed', 'skipped', 'partial_success']);
+
+/** Exported so the rule above is pinned by a test rather than by the set literal alone. */
+export function isTerminalNodeStatus(status?: string | null): boolean {
+  return Boolean(status && TERMINAL_STATUSES.has(status));
+}
 
 /**
  * Build a lookup map: normalized label → Node, for O(1) matching.
@@ -472,7 +484,7 @@ export function useEpochStateViewing({
           if (idx === -1) continue;
 
           // Don't override terminal statuses - the node completed despite having a pending signal
-          if (updatedNodes[idx].data.status && TERMINAL_STATUSES.has(updatedNodes[idx].data.status!)) {
+          if (isTerminalNodeStatus(updatedNodes[idx].data.status)) {
             continue;
           }
 

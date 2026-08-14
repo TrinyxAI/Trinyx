@@ -76,7 +76,7 @@ export const EdgeStatusLabel = React.memo(function EdgeStatusLabel({
   if (!counts && !status) return null;
 
   return (
-    <div className="flex items-center gap-1 rounded-full bg-white dark:bg-gray-800 px-2 py-0.5" title={title}>
+    <div className="flex items-center gap-1 rounded-md bg-white dark:bg-gray-800 px-2 py-0.5" title={title}>
       {counts ? (
         <>
           {counts.completed > 0 && (

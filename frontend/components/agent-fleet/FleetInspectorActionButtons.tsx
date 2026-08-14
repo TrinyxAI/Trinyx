@@ -18,7 +18,7 @@ interface FleetInspectorActionButtonsProps {
 }
 
 const actionButtonClass =
-  'h-8 w-8 p-0 rounded-full bg-[var(--bg-primary)] text-[var(--text-primary)] hover:bg-[var(--text-primary)] hover:text-[var(--bg-primary)] shadow-none';
+  'h-8 w-8 p-0 rounded-xl bg-[var(--bg-primary)] text-[var(--text-primary)] hover:bg-[var(--text-primary)] hover:text-[var(--bg-primary)] shadow-none';
 
 /**
  * Outside action buttons for the FleetInspectorPanel.
@@ -43,7 +43,7 @@ export function FleetInspectorActionButtons({
     : null;
 
   return (
-    <div className="absolute z-[10000] hidden lg:flex flex-col items-center gap-2 rounded-full p-0 pointer-events-auto top-0 -right-10">
+    <div className="absolute z-[10000] hidden lg:flex flex-col items-center gap-2 rounded-md p-0 pointer-events-auto top-0 -right-10">
       {/* Open in side panel - conditional */}
       {sidePanelAction && sidePanel && IconComponent && (
         <Button

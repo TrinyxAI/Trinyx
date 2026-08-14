@@ -17,6 +17,7 @@ import ModelNotManagedModal from '@/components/billing/ModelNotManagedModal';
 import AgentErrorModal from '@/components/billing/AgentErrorModal';
 import WelcomeGiftModal from '@/components/billing/WelcomeGiftModal';
 import SuggestedAppsModal from '@/components/billing/SuggestedAppsModal';
+import AccountRestoreModal from '@/components/auth/AccountRestoreModal';
 
 /**
  * Layout for all /app routes
@@ -56,6 +57,7 @@ export default function AppLayout({
                     <CeCloudCreditModal />
                     <ModelNotManagedModal />
                     <AgentErrorModal />
+                    <AccountRestoreModal />
                   </div>
                 </NavigationGuardProvider>
                 </WorkflowLayoutDirectionProvider>

@@ -77,6 +77,75 @@ export interface WorkflowRunBlockProps {
  * Displays workflow execution progress in a minimal timeline style.
  * Matches the tool call style in the conversation.
  */
+/**
+ * The RUN verdict, read off its resolved nodes.
+ *
+ * Binary, like every other run/cycle verdict: a run either did the job or it did not.
+ * "Partially succeeded" is a NODE answer (a node holds items and can be half-done), and this
+ * function used to return it, contradicting the rule every other surface follows.
+ *
+ * A node reporting `partial_success` carries a failure in its own tally and therefore counts as a
+ * failure for the run. That is also what made the old shape fail OPEN: it tested `=== 'completed'`
+ * and `=== 'failed'` separately, so a partial node matched neither and the block rendered a green
+ * "completed" run for a run whose node had failed.
+ */
+export function deriveRunStatusFromNodes(nodes: Array<{ status?: string }>): 'failed' | 'completed' {
+  const hasFailed = nodes.some(n => n.status === 'failed' || n.status === 'partial_success');
+  return hasFailed ? 'failed' : 'completed';
+}
+
+/** Statuses a stored run status may carry that the block trusts over its nodes. */
+const TRUSTED_RUN_STATUSES = ['completed', 'failed', 'cancelled', 'stopped', 'paused', 'partial_success'];
+
+/**
+ * The status shown in the block header.
+ *
+ * Extracted whole rather than just its last line: a review proved that leaving the branch chain
+ * inline let the fail-open body be restored with the helper's own tests still green. The rule and
+ * the branch that reaches it have to be pinned together.
+ *
+ * Priority: saved (historical) > fetched > waiting_trigger > stored run status > live nodes.
+ * `partial_success` survives in TRUSTED_RUN_STATUSES because runs recorded before the binary rule
+ * still carry it stored; nothing produces it any more.
+ */
+export function deriveDisplayStatus(input: {
+  isHistorical?: boolean;
+  savedStatus?: string | null;
+  fetchedStatus?: string | null;
+  isFetching?: boolean;
+  workflowStatus?: { status?: string } | null;
+  nodes: Array<{ status?: string }>;
+}): string {
+  const { isHistorical, savedStatus, fetchedStatus, isFetching, workflowStatus, nodes } = input;
+
+  if (isHistorical && savedStatus) return savedStatus;
+  if (isHistorical && fetchedStatus) return normalizeStatus(fetchedStatus);
+  // A historical run is a past execution: it cannot be "pending" in real time.
+  if (isHistorical && !savedStatus && !fetchedStatus && !isFetching) return 'completed';
+  if (isHistorical && isFetching) return 'completed';
+
+  // Before the nodes: while waiting for a trigger, nodes legitimately sit at 'pending' and
+  // would otherwise read as "running".
+  if (workflowStatus?.status === 'waiting_trigger') return 'waiting_trigger';
+
+  if (nodes.length === 0) {
+    if (workflowStatus?.status && TRUSTED_RUN_STATUSES.includes(workflowStatus.status)) {
+      return workflowStatus.status;
+    }
+    return 'pending';
+  }
+
+  // A finished run beats its nodes: skipped branches can stay 'pending' forever.
+  if (workflowStatus?.status && TRUSTED_RUN_STATUSES.includes(workflowStatus.status)) {
+    return workflowStatus.status;
+  }
+
+  if (nodes.some(n => n.status === 'running' || n.status === 'pending')) return 'running';
+
+  // All nodes resolved: the run's own verdict.
+  return deriveRunStatusFromNodes(nodes);
+}
+
 export function WorkflowRunBlock({
   workflowId,
   runId,
@@ -206,64 +275,13 @@ export function WorkflowRunBlock({
 
   // Derive overall status for header display
   // Priority: savedStatus (historical) > fetchedStatus > workflowStatus > nodes
-  const displayStatus = useMemo(() => {
-    // For historical runs with saved status, use it directly (no API call needed)
-    if (isHistorical && savedStatus) {
-      return savedStatus;
-    }
-
-    // For historical runs with fetched status (from API), use it
-    if (isHistorical && fetchedStatus) {
-      return normalizeStatus(fetchedStatus);
-    }
-
-    // For historical runs without any status, show as completed (not shimmer)
-    // Historical runs are from past executions - they can't be "pending" in real-time
-    if (isHistorical && !savedStatus && !fetchedStatus && !isFetching) {
-      return 'completed'; // Default to completed for historical runs without status
-    }
-
-    // While fetching, show pending (but not shimmer since it's historical)
-    if (isHistorical && isFetching) {
-      return 'completed'; // Still show completed while loading
-    }
-
-    // IMPORTANT: Check for waiting_trigger FIRST - this takes precedence over node statuses
-    // When waiting for trigger, nodes may exist with 'pending' status but we should show waiting_trigger
-    if (workflowStatus?.status === 'waiting_trigger') {
-      return 'waiting_trigger';
-    }
-
-    // No nodes yet means pending (starting) - only for live runs
-    if (nodes.length === 0) {
-      // But if workflowStatus says it's done, use that
-      if (workflowStatus?.status && ['completed', 'failed', 'cancelled', 'stopped', 'paused', 'partial_success'].includes(workflowStatus.status)) {
-        return workflowStatus.status;
-      }
-      return 'pending';
-    }
-
-    // If workflowStatus indicates completion, trust it over node statuses
-    // (some nodes like skipped branches may stay pending)
-    if (workflowStatus?.status && ['completed', 'failed', 'cancelled', 'stopped', 'paused', 'partial_success'].includes(workflowStatus.status)) {
-      return workflowStatus.status;
-    }
-
-    // Check node statuses - if any is running or pending, workflow is running
-    const hasRunning = nodes.some(n => n.status === 'running');
-    const hasPending = nodes.some(n => n.status === 'pending');
-
-    if (hasRunning || hasPending) {
-      return 'running';
-    }
-
-    // All nodes are resolved (not running/pending) - determine final status from nodes
-    const hasCompleted = nodes.some(n => n.status === 'completed');
-    const hasFailed = nodes.some(n => n.status === 'failed');
-    if (hasFailed && hasCompleted) return 'partial_success';
-    if (hasFailed) return 'failed';
-    return 'completed';
-  }, [workflowStatus, nodes, isHistorical, savedStatus, fetchedStatus, isFetching]);
+  const displayStatus = useMemo(
+    () => deriveDisplayStatus({
+      isHistorical, savedStatus, fetchedStatus, isFetching,
+      workflowStatus: workflowStatus ?? null, nodes,
+    }),
+    [workflowStatus, nodes, isHistorical, savedStatus, fetchedStatus, isFetching],
+  );
 
   const isRunning = displayStatus === 'running' || displayStatus === 'pending';
   const isWaitingTrigger = displayStatus === 'waiting_trigger';
@@ -544,7 +562,7 @@ export function WorkflowRunBlock({
       {isWaitingTrigger && !isHistorical && hasEnteredRunMode && isExternalTrigger && (
         <div className="mb-3 ml-3">
           <div
-            className="relative inline-flex items-center h-8 px-4 rounded-full bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 cursor-default overflow-hidden"
+            className="relative inline-flex items-center h-8 px-4 rounded-xl bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 cursor-default overflow-hidden"
             title={triggerType === 'schedule' ? t('waitingSchedule') : t('listeningWebhook')}
           >
             {/* Shimmer scan effect - same as NodePlayButton */}
@@ -572,7 +590,7 @@ export function WorkflowRunBlock({
       {isWaitingTrigger && !isHistorical && hasEnteredRunMode && isChatTrigger && (
         <div className="mb-3 ml-3">
           <div
-            className="relative inline-flex items-center h-8 px-4 rounded-full bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 cursor-default overflow-hidden"
+            className="relative inline-flex items-center h-8 px-4 rounded-xl bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 cursor-default overflow-hidden"
             title={t('sendMessageTrigger')}
           >
             {/* Shimmer scan effect - green tint for chat */}

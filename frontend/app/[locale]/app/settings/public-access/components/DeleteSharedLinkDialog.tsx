@@ -50,7 +50,7 @@ export function DeleteSharedLinkDialog({
       >
         {/* Warning icon */}
         <div className="flex justify-center mb-4">
-          <div className="w-14 h-14 bg-red-100 dark:bg-red-900/30 rounded-full flex items-center justify-center">
+          <div className="w-14 h-14 bg-red-100 dark:bg-red-900/30 rounded-xl flex items-center justify-center">
             <AlertTriangle className="w-7 h-7 text-red-600 dark:text-red-400" />
           </div>
         </div>

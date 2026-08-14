@@ -482,7 +482,7 @@ export default function PlatformCredentialsPage() {
     return (
       <div className="space-y-8 animate-pulse">
         <div className="flex items-center gap-3">
-          <div className="w-10 h-10 bg-theme-secondary rounded-full" />
+          <div className="w-10 h-10 bg-theme-secondary rounded-xl" />
           <div className="space-y-2">
             <div className="h-5 bg-theme-secondary rounded w-48" />
             <div className="h-4 bg-theme-secondary rounded w-64" />
@@ -490,7 +490,7 @@ export default function PlatformCredentialsPage() {
         </div>
         <div className="flex gap-2">
           {[...Array(5)].map((_, i) => (
-            <div key={i} className="h-8 w-24 bg-theme-secondary rounded-full" />
+            <div key={i} className="h-8 w-24 bg-theme-secondary rounded-2xl" />
           ))}
         </div>
         <div className="space-y-4">
@@ -601,7 +601,7 @@ export default function PlatformCredentialsPage() {
       {/* Header */}
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-3">
-          <div className="w-10 h-10 bg-theme-secondary rounded-full flex items-center justify-center">
+          <div className="w-10 h-10 bg-theme-secondary rounded-xl flex items-center justify-center">
             <Shield className="w-5 h-5 text-theme-primary" />
           </div>
           <div>
@@ -610,7 +610,7 @@ export default function PlatformCredentialsPage() {
           </div>
         </div>
         <div className="flex items-center gap-2">
-          <div className="hidden sm:flex items-center gap-2 px-3 py-1.5 rounded-full bg-amber-500/10 text-amber-700 dark:text-amber-400 text-xs font-medium">
+          <div className="hidden sm:flex items-center gap-2 px-3 py-1.5 rounded-md bg-amber-500/10 text-amber-700 dark:text-amber-400 text-xs font-medium">
             <Shield className="w-3.5 h-3.5" />
             {t("adminOnlyBadge")}
           </div>

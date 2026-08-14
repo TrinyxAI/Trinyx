@@ -44,7 +44,7 @@ import { internalSignedHeaders } from './lib/gatewayAuth.mjs';
 import { resolveInactivityMs } from './lib/inactivityResolver.mjs';
 import { createInactivityWatchdog } from './lib/inactivityWatchdog.mjs';
 import { detectAll, detectOne, invalidateCache, CLI_IDS } from './cli-detector.mjs';
-import { parseBridgeMeta } from './lib/toolContent.mjs';
+import { extractToolResultAndMetadata } from './lib/toolContent.mjs';
 
 // Per-process secret that authenticates the trusted `__BRIDGE_META__` channel. Minted ONCE
 // at startup and handed to the agent-cli MCP subprocess via env, so only content this bridge
@@ -194,30 +194,10 @@ function stripMcpPrefix(toolName) {
   return toolName;
 }
 
-/**
- * Extract tool result text content and embedded metadata.
- *
- * agent-cli-server.mjs (this bridge's trusted MCP subprocess) appends metadata as
- * `\n__BRIDGE_META__:<nonce>:{json}`, where <nonce> is the per-process BRIDGE_META_NONCE.
- * Only that nonce-stamped marker is parsed, so untrusted tool output (shell/read/fetch)
- * containing a bare or wrong-nonce `__BRIDGE_META__:` sentinel is left as plain text and
- * can never forge trusted frontend cards. `lastIndexOf` matches the trusted append, which
- * is always the final block.
- */
-function extractToolResultAndMetadata(rawContent) {
-  let text = '';
-  if (!rawContent) {
-    text = '';
-  } else if (typeof rawContent === 'string') {
-    text = rawContent;
-  } else if (Array.isArray(rawContent)) {
-    text = rawContent.filter((b) => b.type === 'text').map((b) => b.text).join('\n');
-  } else {
-    text = String(rawContent);
-  }
-
-  return parseBridgeMeta(text);
-}
+// `extractToolResultAndMetadata` lives in ./lib/toolContent.mjs next to the producer
+// (`buildSuccessContent`) and the marker definition, so both sides of the sentinel share one
+// implementation and can be unit-tested without loading this Express server. It is injected
+// into each adapter's ctx below.
 
 // ─── Express App ──────────────────────────────────────────────────────────
 
@@ -370,7 +350,8 @@ app.post('/api/bridge/execute', async (req, res) => {
     // agent's toolsConfig. Forwarded to the MCP subprocess (ENABLED_MODULES env) so
     // CliAgentService scopes the core tool set - without this the bridge ignored
     // toolsConfig.mode and advertised every core tool, billing its schema every turn.
-    // Absent/null ⇒ unrestricted (CliAgentService.resolveModules(null) = all modules).
+    // Absent/null ⇒ CliAgentService.resolveModules(null) = the NO-CONFIG module set:
+    // everything EXCEPT the credit-spending opt-ins (image_generation, generation).
     enabledModules,
   } = dto;
   const effectiveOrgId = req.headers['x-organization-id'] || organizationId || '';

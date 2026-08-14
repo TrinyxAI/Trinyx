@@ -321,6 +321,120 @@ class UserServiceTest {
             verify(userRepository).save(userCaptor.capture());
             assertThat(userCaptor.getValue().isEnabled()).isFalse();
         }
+
+        @Test
+        @DisplayName("stamps the deletion date, which is what schedules the purge")
+        void stampsTheDeletionDate() {
+            User user = createUser(1L, "activeuser");
+            user.setEnabled(true);
+            when(userRepository.save(any(User.class))).thenAnswer(inv -> inv.getArgument(0));
+
+            userService.deactivateUser(user);
+
+            assertThat(user.getDeactivatedAt()).isNotNull();
+        }
+    }
+
+    @Nested
+    @DisplayName("restoreUser() method")
+    class RestoreUserTests {
+
+        /**
+         * Before this existed, deactivation was a one-way door: no login, no endpoint and no
+         * admin action ever cleared deactivatedAt, while the deactivation e-mail promised 30
+         * days to change your mind. Production carried a user locked out and queued for
+         * irreversible deletion with no way back.
+         */
+        @Test
+        @DisplayName("cancels a scheduled deletion: re-enables and clears the deletion date")
+        void cancelsAScheduledDeletion() {
+            User user = createUser(1L, "returning");
+            user.setEnabled(false);
+            user.setDeactivatedAt(java.time.LocalDateTime.now().minusDays(3));
+            when(userRepository.save(any(User.class))).thenAnswer(inv -> inv.getArgument(0));
+
+            boolean restored = userService.restoreUser(user);
+
+            assertThat(restored).isTrue();
+            assertThat(user.isEnabled()).isTrue();
+            assertThat(user.getDeactivatedAt())
+                    .as("a lingering deletion date is what the purge selects on")
+                    .isNull();
+            verify(deactivationMailer).sendRestorationEmail(eq(user.getEmail()), any());
+        }
+
+        @Test
+        @DisplayName("is a no-op on a healthy account - no write, no second e-mail")
+        void isANoOpOnAHealthyAccount() {
+            User user = createUser(1L, "healthy");
+            user.setEnabled(true);
+            user.setDeactivatedAt(null);
+
+            boolean restored = userService.restoreUser(user);
+
+            // A double click or a retried request must not send a second "account restored"
+            // e-mail, nor rewrite a row that is already correct.
+            assertThat(restored).isFalse();
+            verify(userRepository, never()).save(any(User.class));
+            verify(deactivationMailer, never()).sendRestorationEmail(any(), any());
+        }
+
+        @Test
+        @DisplayName("refuses to re-enable an account disabled WITHOUT a scheduled deletion")
+        void doesNotUnsuspendAnOperatorDisabledAccount() {
+            // enabled=false with no deactivatedAt is an operator suspension, the only lever the
+            // schema offers for one. The gateway allow-lists this endpoint for inactive accounts,
+            // so keying the guard on `enabled` would let a suspended person lift their own
+            // suspension by calling it. Only a scheduled deletion is ours to undo.
+            User user = createUser(1L, "suspended");
+            user.setEnabled(false);
+            user.setDeactivatedAt(null);
+
+            boolean restored = userService.restoreUser(user);
+
+            assertThat(restored).isFalse();
+            assertThat(user.isEnabled()).isFalse();
+            verify(userRepository, never()).save(any(User.class));
+            verify(deactivationMailer, never()).sendRestorationEmail(any(), any());
+        }
+
+        @Test
+        @DisplayName("clears a scheduled deletion even on an account still marked enabled")
+        void clearsTheDateOnAStillEnabledAccount() {
+            // The mixed state: the deletion date is what the purge selects on, so leaving it set
+            // because the row happens to still be enabled would delete the account anyway.
+            User user = createUser(1L, "mixed");
+            user.setEnabled(true);
+            user.setDeactivatedAt(java.time.LocalDateTime.now().minusDays(1));
+            when(userRepository.save(any(User.class))).thenAnswer(inv -> inv.getArgument(0));
+
+            boolean restored = userService.restoreUser(user);
+
+            assertThat(restored).isTrue();
+            assertThat(user.getDeactivatedAt()).isNull();
+        }
+
+        @Test
+        @DisplayName("deletion status reports the scheduled date while pending, nulls once restored")
+        void deletionStatusReflectsState() {
+            User user = createUser(1L, "pending");
+            java.time.LocalDateTime deactivated = java.time.LocalDateTime.now().minusDays(2);
+            user.setEnabled(false);
+            user.setDeactivatedAt(deactivated);
+
+            java.util.Map<String, Object> pending = userService.getDeletionStatus(user);
+            assertThat(pending.get("scheduledForDeletion")).isEqualTo(true);
+            assertThat(pending.get("deletionAt"))
+                    .as("the screen shows this date to the user; it must match the grace period")
+                    .isEqualTo(deactivated.plusDays(UserService.ACCOUNT_GRACE_PERIOD_DAYS).toString());
+
+            when(userRepository.save(any(User.class))).thenAnswer(inv -> inv.getArgument(0));
+            userService.restoreUser(user);
+
+            java.util.Map<String, Object> after = userService.getDeletionStatus(user);
+            assertThat(after.get("scheduledForDeletion")).isEqualTo(false);
+            assertThat(after.get("deletionAt")).isNull();
+        }
     }
 
     @Nested

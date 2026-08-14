@@ -41,6 +41,7 @@ import { AggregateParametersForm } from '../forms/AggregateParametersForm';
 import { DownloadFileParametersForm } from '../forms/DownloadFileParametersForm';
 import { PublicLinkParametersForm } from '../forms/PublicLinkParametersForm';
 import { MediaParametersForm } from '../forms/MediaParametersForm';
+import { GenerateParametersForm } from '../forms/GenerateParametersForm';
 import { HttpRequestParametersForm } from '../forms/HttpRequestParametersForm';
 import { DataInputParametersForm } from '../forms/DataInputParametersForm';
 import { WhileGroupParametersForm } from '../forms/WhileGroupParametersForm';
@@ -475,6 +476,21 @@ export function MediaFormAdapter(props: InspectorFormProps) {
 
   return (
     <MediaParametersForm
+      node={props.node}
+      data={props.node.data}
+      isRunMode={props.isRunMode}
+      onUpdate={(data) => props.onUpdate(data)}
+      connectionProps={legacyProps}
+      findUnknownVariables={props.findUnknownVariables}
+    />
+  );
+}
+
+export function GenerateFormAdapter(props: InspectorFormProps) {
+  const legacyProps = unpackConnectionProps(props.connectionProps, props.node.id);
+
+  return (
+    <GenerateParametersForm
       node={props.node}
       data={props.node.data}
       isRunMode={props.isRunMode}

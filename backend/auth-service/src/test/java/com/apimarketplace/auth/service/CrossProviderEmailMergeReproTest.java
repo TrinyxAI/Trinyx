@@ -57,6 +57,7 @@ class CrossProviderEmailMergeReproTest {
     @Mock private SubscriptionRepository subscriptionRepository;
     @Mock private BillingCustomerRepository billingCustomerRepository;
     @Mock private PlanRepository planRepository;
+    @Mock private FreeSubscriptionProvisioner freeSubscriptionProvisioner;
     @Mock private CreditAttributionService creditAttributionService;
 
     private UserResolutionService service;
@@ -72,7 +73,7 @@ class CrossProviderEmailMergeReproTest {
                 userRepository, creditService, usernameValidator, ageValidator,
                 onboardingService, organizationService, subscriptionRepository,
                 billingCustomerRepository, planRepository, creditAttributionService,
-                new PlanStorageQuotaSyncer(null, null));
+                new PlanStorageQuotaSyncer(null, null), freeSubscriptionProvisioner);
         lenient().when(userRepository.updateLastLoginIfStale(anyLong(), any(), any())).thenReturn(1);
         ReflectionTestUtils.setField(service, "self", service);
     }

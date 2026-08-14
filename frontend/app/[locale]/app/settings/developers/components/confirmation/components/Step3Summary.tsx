@@ -102,7 +102,7 @@ export function Step3Summary({
                       <h4 className="text-base font-medium text-theme-primary capitalize">
                         {category}
                       </h4>
-                      <span className="px-2 py-1 bg-theme-secondary text-theme-muted text-xs rounded-full">
+                      <span className="px-2 py-1 bg-theme-secondary text-theme-muted text-xs rounded-md">
                         {groupedTools[category].length} tool{groupedTools[category].length > 1 ? 's' : ''}
                       </span>
                     </div>

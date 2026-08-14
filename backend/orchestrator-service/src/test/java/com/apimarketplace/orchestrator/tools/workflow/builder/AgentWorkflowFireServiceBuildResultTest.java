@@ -827,6 +827,40 @@ class AgentWorkflowFireServiceBuildResultTest {
         }
 
         @Test
+        @DisplayName("an epoch with both a completed and a failed node reports FAILED, never partial")
+        void macro_mixedEpochReportsFailed() throws Exception {
+            // The agent's epoch list is a RUN-level verdict and is binary like every other one:
+            // PARTIAL_SUCCESS describes a NODE that finished with some of its items failed, which
+            // the agent can act on. An epoch reporting "partially succeeded" told it nothing - the
+            // failing nodes carry their own status and that is where the detail is.
+            WorkflowRunEntity run = runWith(RunStatus.WAITING_TRIGGER);
+
+            String epochStateJson = mapper.writeValueAsString(Map.of(
+                    "completedNodeIds", List.of("mcp:step"),
+                    "failedNodeIds", List.of("mcp:broken"),
+                    "skippedNodeIds", List.of(),
+                    "runningNodeIds", List.of(),
+                    "readyNodeIds", List.of(),
+                    "awaitingSignalNodeIds", List.of()
+            ));
+            var header0 = new EpochHeaderWithEpochRow(
+                    0, epochStateJson, false,
+                    java.time.Instant.parse("2026-03-20T10:00:00Z"),
+                    java.time.Instant.parse("2026-03-20T10:00:05Z"),
+                    "trigger:start", 5000L);
+            when(epochService.listEpochHeaders(RUN_ID)).thenReturn(List.of(header0));
+            when(epochService.getEpochWorkDurations(RUN_ID)).thenReturn(Map.of(0, 3_000L));
+
+            Map<String, Object> result = service.buildRunMacroReport(run, emptyPlan(), TENANT_ID);
+
+            @SuppressWarnings("unchecked")
+            var epochs = (List<Map<String, Object>>) result.get("epochs");
+            assertThat(epochs.get(0).get("status"))
+                    .as("a mix is FAILED at epoch level; the node keeps the partial nuance")
+                    .isEqualTo("FAILED");
+        }
+
+        @Test
         @DisplayName("macro includes epochs from persistent data")
         void macro_includesEpochsFromPersistentData() throws Exception {
             WorkflowRunEntity run = runWith(RunStatus.WAITING_TRIGGER);

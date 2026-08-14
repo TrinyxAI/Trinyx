@@ -9,6 +9,7 @@ import com.apimarketplace.agent.domain.ToolResult;
 import com.apimarketplace.agent.dto.cli.*;
 import com.apimarketplace.agent.dto.cli.CliSessionResponse.ToolInfo;
 import com.apimarketplace.agent.prompt.ConversationToolDefinitions;
+import com.apimarketplace.agent.config.AgentModuleResolver;
 import com.apimarketplace.agent.prompt.DefaultSystemPrompts;
 import com.apimarketplace.agent.service.AgentObservabilityService;
 import com.apimarketplace.agent.service.AgentService;
@@ -116,7 +117,8 @@ public class CliAgentService {
 
         // Resolve modules
         List<String> enabledModules = request != null ? request.enabledModules() : null;
-        Set<String> modules = resolveModules(enabledModules);
+        Set<String> modules = capToAgentGrant(resolveModules(enabledModules), request,
+                tenantId, organizationId, organizationRole);
 
         // Build system prompt
         DefaultSystemPrompts.ModularPromptResult promptResult =
@@ -175,6 +177,13 @@ public class CliAgentService {
         // for cascade budget reservation/settlement (consumed_from_subagents tracking).
         if (request != null && request.agentId() != null && !request.agentId().isBlank()) {
             credentials.put("__agentId__", request.agentId());
+            // What that agent may DO, alongside who it is. A tool running in
+            // another service cannot load the agent to find out, so a grant
+            // that does not travel is a grant only this service enforces: the
+            // same spend is then reachable through any tool whose own module is
+            // on by default.
+            credentials.put(AgentModuleResolver.ENABLED_MODULES_CREDENTIAL_KEY,
+                    new ArrayList<>(modules));
         }
         // Inject executionId so AgentTaskService.claimTask can write the claim log
         // keyed by the same UUID the observability writer will persist as
@@ -383,10 +392,73 @@ public class CliAgentService {
 
     // ==================== Helpers ====================
 
+    /**
+     * Narrow the requested modules to what the BOUND AGENT actually grants.
+     *
+     * <p>The module list arrives in the request body, and the body is not the
+     * grant: it is a claim about the grant. Validating it against the list of
+     * module names that exist checks spelling, not permission, so a session
+     * that asked for {@code generation} received it whatever the agent's owner
+     * had configured. For the two credit-spending modules that is the whole
+     * gate, and it was on the wire.
+     *
+     * <p>Only NARROWS, never widens: a caller that asks for less than the agent
+     * allows still gets less, which is how a deliberately tool-less session
+     * (mode=off, an empty list) keeps working. With no bound agent there is no
+     * grant to read and the request stands, matching the direct-API path.
+     */
+    private Set<String> capToAgentGrant(Set<String> requested, CliSessionStartRequest request,
+                                         String tenantId, String organizationId, String organizationRole) {
+        if (request == null || request.agentId() == null || request.agentId().isBlank()) {
+            return requested;
+        }
+        UUID agentId;
+        try {
+            agentId = UUID.fromString(request.agentId());
+        } catch (IllegalArgumentException e) {
+            // Same posture as the resource allow-list below: an unusable id is
+            // not evidence of a grant, and refusing here would break a session
+            // over a malformed field rather than over a permission.
+            return requested;
+        }
+        Map<String, Object> toolsConfig;
+        try {
+            toolsConfig = agentService.getAgent(agentId, tenantId, organizationId, organizationRole)
+                .map(AgentEntity::getToolsConfig)
+                .orElse(null);
+        } catch (Exception e) {
+            log.warn("Could not read agent {} tools config to cap the session modules: {}",
+                    agentId, e.getMessage());
+            return requested;
+        }
+        if (toolsConfig == null) {
+            // An agent that carries no config is the "nobody decided" case, and
+            // this platform's answer to that is NO_CONFIG_MODULES, which leaves
+            // out exactly the credit-spending opt-ins.
+            Set<String> capped = new LinkedHashSet<>(requested);
+            capped.retainAll(AgentModuleResolver.NO_CONFIG_MODULES);
+            return capped;
+        }
+        Set<String> granted = AgentModuleResolver.resolveEnabledModules(toolsConfig);
+        Set<String> capped = new LinkedHashSet<>(requested);
+        if (capped.retainAll(granted)) {
+            log.info("CLI session for agent {} asked for modules its config does not grant; "
+                    + "narrowed to {}", agentId, capped);
+        }
+        return capped;
+    }
+
     private Set<String> resolveModules(List<String> enabledModules) {
-        // null = all modules enabled (unrestricted - matches DefaultSystemPrompts.build(null) behavior)
+        // null = the caller sent no module list, which is "nobody decided" - NOT "everything".
+        // Fall back to AgentModuleResolver.NO_CONFIG_MODULES (= resolveEnabledModules(null)),
+        // the platform's own definition of unrestricted, which deliberately leaves out the
+        // credit-spending opt-in (generation). Returning KNOWN_MODULE_KEYS
+        // here handed those two to any bridge session started without a module list - e.g. a
+        // sub-agent whose entity carries no toolsConfig - so it could spend the customer's
+        // credits with no grant set anywhere. A caller that HAS the grant sends the module
+        // explicitly and reaches the loop below.
         if (enabledModules == null) {
-            return new LinkedHashSet<>(KNOWN_MODULE_KEYS);
+            return new LinkedHashSet<>(AgentModuleResolver.NO_CONFIG_MODULES);
         }
         // An EMPTY list = NO modules = 0 tools (a mode=off / tool-less judge agent), matching the
         // canonical DefaultSystemPrompts.build([]) contract (null=all, []=none). Unknown keys are

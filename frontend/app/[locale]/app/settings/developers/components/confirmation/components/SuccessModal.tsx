@@ -36,7 +36,7 @@ export function SuccessModal({
         onClick={(e) => e.stopPropagation()}
       >
         {/* Success icon */}
-        <div className="w-16 h-16 bg-green-100 rounded-full flex items-center justify-center mx-auto mb-6">
+        <div className="w-16 h-16 bg-green-100 rounded-2xl flex items-center justify-center mx-auto mb-6">
           <CheckCircle className="w-8 h-8 text-green-600" />
         </div>
 
@@ -57,10 +57,10 @@ export function SuccessModal({
           </h2>
           <div className="text-lg text-theme-secondary">
             <div className="flex items-center justify-center gap-4 mb-3">
-              <span className="px-3 py-1 bg-theme-secondary rounded-full text-sm font-medium text-theme-primary">
+              <span className="px-3 py-1 bg-theme-secondary rounded-md text-sm font-medium text-theme-primary">
                 {apiName || t('common.unnamedApi')}
               </span>
-              <span className="px-3 py-1 bg-blue-100 dark:bg-blue-900 rounded-full text-sm font-medium text-blue-700 dark:text-blue-300">
+              <span className="px-3 py-1 bg-blue-100 dark:bg-blue-900 rounded-md text-sm font-medium text-blue-700 dark:text-blue-300">
                 {toolsCount === 1
                   ? t('tools.singleConfigured', { name: firstToolName })
                   : t('tools.multipleConfigured', { count: toolsCount })

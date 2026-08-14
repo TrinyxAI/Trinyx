@@ -178,17 +178,27 @@ class AgentRemoteExecutionServiceTest {
     }
 
     @Test
-    @DisplayName("Auto-discover with null enabledModules keeps the legacy unfiltered cache - unrestricted agents (no toolsConfig) are unchanged (no-op back-compat)")
-    void autoDiscoverWithNullEnabledModulesUsesUnfilteredOverload() {
+    @DisplayName("Auto-discover with null enabledModules falls back to the NO-CONFIG module set (not the unfiltered cache) - a config-less agent is never handed the credit-spending tools")
+    void autoDiscoverWithNullEnabledModulesUsesTheNoConfigSet() {
         ArgumentCaptor<AgentLoopContext> ctx = ArgumentCaptor.forClass(AgentLoopContext.class);
         when(agentLoopService.execute(ctx.capture(), any(StreamingCallback.class)))
             .thenReturn(successfulLoopResult());
-        when(coreToolsCache.getCoreTools()).thenReturn(List.of(ToolDefinition.builder().name("catalog").build()));
+        when(coreToolsCache.getCoreTools(anySet()))
+            .thenReturn(List.of(ToolDefinition.builder().name("catalog").build()));
 
         service.executeAgent(autoDiscoverRequest(null));
 
-        verify(coreToolsCache).getCoreTools();
-        verify(coreToolsCache, never()).getCoreTools(anySet());
+        // Pre-fix this called the unfiltered getCoreTools(), which includes image_generation and
+        // generation - so an agent row with no toolsConfig could spend the customer's credits
+        // with no grant set anywhere. null now means "the producer decided nothing", which
+        // resolves to AgentModuleResolver.NO_CONFIG_MODULES: everything EXCEPT those two.
+        ArgumentCaptor<Set<String>> names = ArgumentCaptor.forClass(Set.class);
+        verify(coreToolsCache).getCoreTools(names.capture());
+        verify(coreToolsCache, never()).getCoreTools();
+        assertThat(names.getValue())
+            .as("a config-less agent must not be advertised the credit-spending tools")
+            .doesNotContain("generation", "image_generation")
+            .contains("catalog", "table", "workflow");
         assertThat(ctx.getValue().tools()).extracting(ToolDefinition::name).containsExactly("catalog");
     }
 

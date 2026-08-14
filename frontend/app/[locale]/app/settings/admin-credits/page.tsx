@@ -359,7 +359,7 @@ export default function AdminCreditsPage() {
       <div className="bg-theme-secondary rounded-xl p-6">
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-3">
-            <div className="w-10 h-10 bg-theme-tertiary rounded-full flex items-center justify-center">
+            <div className="w-10 h-10 bg-theme-tertiary rounded-xl flex items-center justify-center">
               <Coins className="w-5 h-5 text-theme-primary" />
             </div>
             <div>
@@ -367,7 +367,7 @@ export default function AdminCreditsPage() {
               <p className="text-sm text-theme-secondary">{t('subtitle')}</p>
             </div>
           </div>
-          <div className="hidden sm:flex items-center gap-2 px-3 py-1.5 rounded-full bg-amber-500/10 text-amber-700 dark:text-amber-400 text-xs font-medium">
+          <div className="hidden sm:flex items-center gap-2 px-3 py-1.5 rounded-md bg-amber-500/10 text-amber-700 dark:text-amber-400 text-xs font-medium">
             <Shield className="w-3.5 h-3.5" />
             {t('adminOnlyBadge')}
           </div>

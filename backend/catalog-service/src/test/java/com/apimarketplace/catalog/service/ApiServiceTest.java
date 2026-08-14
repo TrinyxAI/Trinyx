@@ -732,7 +732,7 @@ class ApiServiceTest {
         }
 
         @Test
-        @DisplayName("explicitSource='user' + selectedCredentialId validates the selected credential id, not the default integration credential")
+        @DisplayName("explicitSource='user' + selectedCredentialId passes on the pinned key even when the NAME lookup finds nothing")
         void selectedCredentialIdValidatesSelectedCredential() throws Exception {
             ApiEntity api = createTestApi();
             api.setPlatformCredentialName("googlegemini");
@@ -749,10 +749,16 @@ class ApiServiceTest {
             credReqCtor.setAccessible(true);
             Object credReq = credReqCtor.newInstance("googlegemini", "api_key");
 
+            // The name lookup compares EXACTLY while the executor compares
+            // canonical slugs, so a credential the executor would happily
+            // resolve can be invisible here. Asking only the name question
+            // refused pinned calls that worked, on every workflow step and
+            // every generation. Whether the pinned key belongs to this
+            // provider is the executor's question, and it answers it.
+            when(userCredentialService.getCredentialDataMap(eq("user-1"), eq("googlegemini")))
+                    .thenReturn(java.util.Map.of());
             when(userCredentialService.getCredentialDataMapById(eq("user-1"), eq(42L)))
                     .thenReturn(java.util.Map.of("api_key", "selected"));
-            when(userCredentialService.getAccessToken(eq("PLATFORM"), eq("googlegemini")))
-                    .thenReturn(Optional.empty());
 
             try {
                 com.apimarketplace.catalog.service.http.CredentialModeContext.setExplicitSource("user");
@@ -763,7 +769,6 @@ class ApiServiceTest {
                         service, api, tool, credReq, "user-1", "generate_content");
 
                 assertNull(result);
-                verify(userCredentialService, never()).getCredentialDataMap(eq("user-1"), eq("googlegemini"));
             } finally {
                 com.apimarketplace.catalog.service.http.CredentialModeContext.clear();
             }
@@ -787,10 +792,10 @@ class ApiServiceTest {
             credReqCtor.setAccessible(true);
             Object credReq = credReqCtor.newInstance("googlegemini", "api_key");
 
-            // Pinned id 99 no longer resolves (deleted/reconnected) ...
-            when(userCredentialService.getCredentialDataMapById(eq("user-1"), eq(99L)))
-                    .thenReturn(java.util.Map.of());
-            // ... but the user still has a default credential for the integration.
+            // Pinned id 99 no longer resolves (deleted/reconnected), which the
+            // pre-flight does not even have to look up any more: it asks only
+            // whether the account holds a key for this integration, and the
+            // executor falls back to that same key when a pin is unusable.
             when(userCredentialService.getCredentialDataMap(eq("user-1"), eq("googlegemini")))
                     .thenReturn(java.util.Map.of("api_key", "default"));
 
@@ -826,8 +831,6 @@ class ApiServiceTest {
             credReqCtor.setAccessible(true);
             Object credReq = credReqCtor.newInstance("googlegemini", "api_key");
 
-            when(userCredentialService.getCredentialDataMapById(eq("user-1"), eq(99L)))
-                    .thenReturn(java.util.Map.of());
             when(userCredentialService.getCredentialDataMap(eq("user-1"), eq("googlegemini")))
                     .thenReturn(java.util.Map.of());
             when(userCredentialService.getAccessToken(eq("PLATFORM"), eq("googlegemini")))

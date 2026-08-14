@@ -113,7 +113,7 @@ export default function OrganizationDangerZone({
               className="flex w-full items-center justify-between gap-4 p-6 text-left transition-colors hover:bg-red-50/70 dark:hover:bg-red-950/20"
             >
               <div className="flex min-w-0 items-center gap-3">
-                <div className="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-full bg-red-100 dark:bg-red-900/30">
+                <div className="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-xl bg-red-100 dark:bg-red-900/30">
                   <AlertTriangle className="h-5 w-5 text-red-600 dark:text-red-400" />
                 </div>
                 <div className="min-w-0">
@@ -330,7 +330,7 @@ function LeaveOrganizationModal({
 
   return (
     <ModalShell onClose={onClose} disableClose={busy}>
-      <div className="w-16 h-16 bg-red-100 dark:bg-red-900/30 rounded-full flex items-center justify-center mx-auto mb-5">
+      <div className="w-16 h-16 bg-red-100 dark:bg-red-900/30 rounded-2xl flex items-center justify-center mx-auto mb-5">
         <LogOut className="h-8 w-8 text-red-600 dark:text-red-400" />
       </div>
 
@@ -396,7 +396,7 @@ function TransferOwnershipModal({
 
   return (
     <ModalShell onClose={onClose} disableClose={busy}>
-      <div className="w-16 h-16 bg-amber-100 dark:bg-amber-900/30 rounded-full flex items-center justify-center mx-auto mb-5">
+      <div className="w-16 h-16 bg-amber-100 dark:bg-amber-900/30 rounded-2xl flex items-center justify-center mx-auto mb-5">
         <Crown className="h-8 w-8 text-amber-600 dark:text-amber-400" />
       </div>
 
@@ -490,7 +490,7 @@ function DeleteOrganizationModal({
 
   return (
     <ModalShell onClose={onClose} disableClose={busy}>
-      <div className="w-16 h-16 bg-red-100 dark:bg-red-900/30 rounded-full flex items-center justify-center mx-auto mb-5">
+      <div className="w-16 h-16 bg-red-100 dark:bg-red-900/30 rounded-2xl flex items-center justify-center mx-auto mb-5">
         <Trash2 className="h-8 w-8 text-red-600 dark:text-red-400" />
       </div>
 

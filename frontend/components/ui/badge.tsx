@@ -2,8 +2,13 @@ import * as React from "react"
 import { cva, type VariantProps } from "class-variance-authority"
 import { cn } from "@/lib/utils"
 
+// `rounded-md`, not `rounded-full`: a badge is the small non-interactive label at
+// the bottom of the same radius ladder the Button (`rounded-xl`) and the floating
+// surfaces (`rounded-2xl`) already sit on. A capsule badge next to a square button
+// was the most repeated shape mismatch in the app, since this base class reaches
+// every <Badge> at once.
 const badgeVariants = cva(
-  "inline-flex items-center rounded-full border px-2.5 py-0.5 text-xs font-semibold transition-colors focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2",
+  "inline-flex items-center rounded-md border px-2.5 py-0.5 text-xs font-semibold transition-colors focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2",
   {
     variants: {
       variant: {

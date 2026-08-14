@@ -81,7 +81,7 @@ export default function AddModelDialog({ onSave, onClose, t }: AddModelDialogPro
         <div className="px-8 pt-8 pb-4">
           <div className="text-center mb-2">
             <div className="flex justify-center mb-4">
-              <div className="w-14 h-14 bg-theme-secondary rounded-full flex items-center justify-center">
+              <div className="w-14 h-14 bg-theme-secondary rounded-xl flex items-center justify-center">
                 <Plus className="w-7 h-7 text-theme-primary" />
               </div>
             </div>

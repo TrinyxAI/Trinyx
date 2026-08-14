@@ -46,6 +46,52 @@ public class ApiCatalogSnapshotReader {
         public int toolCount() {
             return apis.stream().mapToInt(a -> a.tools() == null ? 0 : a.tools().size()).sum();
         }
+
+        /**
+         * Endpoints in this snapshot that carry a generation descriptor, as
+         * UUID strings.
+         *
+         * <p>Read from the snapshot rather than re-queried, so the prices the
+         * bundle carries can only ever be for endpoints the SAME bundle ships.
+         * A price for an endpoint the receiving install does not have would be a
+         * row hanging off nothing.
+         */
+        public java.util.Set<String> generationToolIds() {
+            java.util.Set<String> ids = new java.util.LinkedHashSet<>();
+            for (ApiRow api : apis) {
+                if (api.tools() == null) continue;
+                for (var tool : api.tools()) {
+                    if (tool.generationSpec() != null && !tool.generationSpec().isBlank()) {
+                        ids.add(String.valueOf(tool.id()));
+                    }
+                }
+            }
+            return ids;
+        }
+
+        /**
+         * Platform-credential integration names of the APIs that own a
+         * generation endpoint. This is the key the price hangs off on both
+         * sides, and the reason an API with no platform credential name
+         * contributes nothing: there is no credential to publish a price
+         * against, here or on the install.
+         */
+        public java.util.Set<String> generationIntegrationNames() {
+            java.util.Set<String> names = new java.util.LinkedHashSet<>();
+            for (ApiRow api : apis) {
+                if (api.tools() == null || api.platformCredentialName() == null
+                        || api.platformCredentialName().isBlank()) {
+                    continue;
+                }
+                for (var tool : api.tools()) {
+                    if (tool.generationSpec() != null && !tool.generationSpec().isBlank()) {
+                        names.add(api.platformCredentialName());
+                        break;
+                    }
+                }
+            }
+            return names;
+        }
     }
 
     public Snapshot snapshot() {
@@ -74,7 +120,8 @@ public class ApiCatalogSnapshotReader {
                        t.endpoint, t.protocol, t.default_headers, t.runtime_metadata,
                        t.execution_spec::text AS execution_spec, t.output_schema::text AS output_schema,
                        t.execution_mode, t.pagination::text AS pagination,
-                       t.required_scopes::text AS required_scopes, t.next_hint, t.status,
+                       t.required_scopes::text AS required_scopes,
+                       t.generation_spec::text AS generation_spec, t.next_hint, t.status,
                        t.test_status, t.is_active, t.version
                   FROM catalog.api_tools t
                   JOIN catalog.apis a ON a.id = t.api_id
@@ -170,7 +217,8 @@ public class ApiCatalogSnapshotReader {
                             str(r, "method"), str(r, "endpoint"), str(r, "protocol"),
                             str(r, "default_headers"), str(r, "runtime_metadata"),
                             str(r, "execution_spec"), str(r, "output_schema"), str(r, "execution_mode"),
-                            str(r, "pagination"), str(r, "required_scopes"), str(r, "next_hint"),
+                            str(r, "pagination"), str(r, "required_scopes"),
+                            str(r, "generation_spec"), str(r, "next_hint"),
                             str(r, "status"), str(r, "test_status"), bool(r, "is_active"),
                             str(r, "version"),
                             paramsByTool.getOrDefault(toolId, List.of()),

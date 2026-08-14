@@ -64,7 +64,11 @@ export function SelectionActionBar({ count, onClear, children, testId = 'selecti
   return (
     <div
       data-testid={testId}
-      className="absolute bottom-6 left-1/2 -translate-x-1/2 z-40 flex items-center gap-1.5 rounded-full border border-black/10 dark:border-white/15 bg-black dark:bg-white text-white dark:text-black shadow-lg px-3 py-2"
+      // rounded-2xl, not rounded-full: a floating card takes one radius step above the
+      // controls it holds (its buttons are rounded-md), the same ladder the canvas
+      // chrome uses. A pill container around square buttons is what made this read as
+      // a leftover from the round era.
+      className="absolute bottom-6 left-1/2 -translate-x-1/2 z-40 flex items-center gap-1.5 rounded-2xl border border-black/10 dark:border-white/15 bg-black dark:bg-white text-white dark:text-black shadow-lg px-3 py-2"
     >
       <span className="text-sm font-medium text-white dark:text-black tabular-nums px-1">
         {t('selectedCount', { count })}

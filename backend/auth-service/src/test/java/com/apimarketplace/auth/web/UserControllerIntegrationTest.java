@@ -489,4 +489,96 @@ class UserControllerIntegrationTest {
                     .andExpect(jsonPath("$.count").value(expectedCount));
         }
     }
+
+    // ===== Account deletion grace period =====
+
+    /**
+     * These two endpoints are the ONLY way a deactivated person cancels their own deletion, and
+     * they are the only reason the gateway allow-lists anything for an inactive account. They must
+     * resolve the caller from {@code X-User-ID}: nothing in this service ever populates the
+     * SecurityContext (SecurityConfig is {@code anyRequest().permitAll()} with no resource server),
+     * so a SecurityContext-only resolution answers 404 to every caller in every deployment, and the
+     * whole feature is dead while looking wired up.
+     */
+    @Nested
+    @DisplayName("Account deletion grace period endpoints")
+    class DeletionGracePeriod {
+
+        @Test
+        @DisplayName("POST /profile/restore should resolve the caller from X-User-ID and cancel the deletion")
+        void restoreShouldResolveFromHeader() throws Exception {
+            User user = createTestUser(7L, "returning");
+            when(userService.findById(7L)).thenReturn(Optional.of(user));
+            when(userService.restoreUser(user)).thenReturn(true);
+            when(userService.getDeletionStatus(user)).thenReturn(java.util.Map.of(
+                    "scheduledForDeletion", false,
+                    "gracePeriodDays", 30));
+
+            mockMvc.perform(post("/api/users/profile/restore")
+                            .header("X-User-ID", "7"))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.restored").value(true))
+                    .andExpect(jsonPath("$.scheduledForDeletion").value(false));
+
+            verify(userService).restoreUser(user);
+        }
+
+        @Test
+        @DisplayName("POST /profile/restore should report restored=false when nothing was scheduled")
+        void restoreShouldBeIdempotent() throws Exception {
+            User user = createTestUser(7L, "healthy");
+            when(userService.findById(7L)).thenReturn(Optional.of(user));
+            when(userService.restoreUser(user)).thenReturn(false);
+            when(userService.getDeletionStatus(user)).thenReturn(java.util.Map.of(
+                    "scheduledForDeletion", false,
+                    "gracePeriodDays", 30));
+
+            mockMvc.perform(post("/api/users/profile/restore")
+                            .header("X-User-ID", "7"))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.restored").value(false));
+        }
+
+        @Test
+        @DisplayName("POST /profile/restore should return 404 for an unknown user id")
+        void restoreShouldReturn404ForUnknownUser() throws Exception {
+            when(userService.findById(999L)).thenReturn(Optional.empty());
+
+            mockMvc.perform(post("/api/users/profile/restore")
+                            .header("X-User-ID", "999"))
+                    .andExpect(status().isNotFound());
+
+            verify(userService, never()).restoreUser(any());
+        }
+
+        @Test
+        @DisplayName("GET /profile/deletion-status should return the deadline the purge will act on")
+        void deletionStatusShouldResolveFromHeader() throws Exception {
+            User user = createTestUser(7L, "scheduled");
+            java.util.Map<String, Object> status = new java.util.HashMap<>();
+            status.put("scheduledForDeletion", true);
+            status.put("deactivatedAt", "2026-08-09T10:00");
+            status.put("deletionAt", "2026-09-08T10:00");
+            status.put("gracePeriodDays", 30);
+            when(userService.findById(7L)).thenReturn(Optional.of(user));
+            when(userService.getDeletionStatus(user)).thenReturn(status);
+
+            mockMvc.perform(get("/api/users/profile/deletion-status")
+                            .header("X-User-ID", "7"))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.scheduledForDeletion").value(true))
+                    .andExpect(jsonPath("$.deletionAt").value("2026-09-08T10:00"))
+                    .andExpect(jsonPath("$.gracePeriodDays").value(30));
+        }
+
+        @Test
+        @DisplayName("GET /profile/deletion-status should return 404 for an unknown user id")
+        void deletionStatusShouldReturn404ForUnknownUser() throws Exception {
+            when(userService.findById(999L)).thenReturn(Optional.empty());
+
+            mockMvc.perform(get("/api/users/profile/deletion-status")
+                            .header("X-User-ID", "999"))
+                    .andExpect(status().isNotFound());
+        }
+    }
 }

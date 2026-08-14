@@ -61,7 +61,7 @@ class ReusableTriggerServiceInFlightAgentGuardTest {
         // The constructor takes a dozen collaborators the guard never touches; nulls keep the
         // fixture about the one decision under test.
         service = new ReusableTriggerService(
-                null, null, null, null, null, null, null, null, null, null, null, null);
+                null, null, null, null, null, null, null, null, null, null, null);
         ReflectionTestUtils.setField(service, "pendingAgentRegistry", pendingAgentRegistry);
         ReflectionTestUtils.setField(service, "agentInFlightStore", agentInFlightStore);
         ReflectionTestUtils.setField(service, "unifiedSignalService", unifiedSignalService);

@@ -146,6 +146,111 @@ class CliAgentServiceTest {
         }
 
         @Test
+        @DisplayName("startSession with NO enabledModules falls back to the no-config set, so a bridge session nobody scoped never gets the credit-spending tools")
+        void startSessionWithNullEnabledModulesFallsBackToTheNoConfigSet() {
+            ArgumentCaptor<Set<String>> namesCaptor = ArgumentCaptor.forClass(Set.class);
+            when(coreToolsCache.getCoreTools(namesCaptor.capture())).thenReturn(List.of());
+
+            // A caller that sends no module list (e.g. a sub-agent whose entity carries no
+            // toolsConfig) used to get KNOWN_MODULE_KEYS = EVERY module, so the CLI advertised
+            // generation / image_generation and the agent could spend the customer's credits
+            // with no grant set anywhere. null now means "nobody decided", not "everything".
+            CliSessionStartRequest request = new CliSessionStartRequest(
+                null, null, "test-model", null, null, null, null, null, null, null);
+
+            service.startSession(request, "tenant-1", "org-test");
+
+            assertThat(namesCaptor.getValue())
+                .as("an unscoped bridge session must not be advertised the credit-spending tools")
+                .doesNotContain("generation", "image_generation")
+                .contains("catalog", "table", "workflow", "files");
+            verify(coreToolsCache, never()).getCoreTools();
+        }
+
+        @Test
+        @DisplayName("startSession with the generation module explicitly granted DOES advertise it (the ON direction survives the fallback change)")
+        void startSessionWithGenerationModuleGrantedAdvertisesIt() {
+            ArgumentCaptor<Set<String>> namesCaptor = ArgumentCaptor.forClass(Set.class);
+            when(coreToolsCache.getCoreTools(namesCaptor.capture())).thenReturn(List.of());
+
+            CliSessionStartRequest request = new CliSessionStartRequest(
+                List.of("table", "generation"), null, "test-model", null, null, null, null, null, null, null);
+
+            service.startSession(request, "tenant-1", "org-test");
+
+            assertThat(namesCaptor.getValue())
+                .contains("generation")
+                .doesNotContain("image_generation");
+        }
+
+        @Test
+        @DisplayName("a session cannot ASK for a module its bound agent does not grant")
+        void theWireCannotWidenTheAgentGrant() {
+            // The module list arrives in the request body, and the body is a
+            // claim about the grant, not the grant. It used to be checked only
+            // for spelling, so a session could name `generation` and receive it
+            // whatever the agent's owner had configured. For the two modules
+            // that spend the customer's credits, that check WAS the gate.
+            String agentId = UUID.randomUUID().toString();
+            stubBoundAgent(agentId, Map.of("mode", "custom"));   // no generation grant
+            ArgumentCaptor<Set<String>> namesCaptor = ArgumentCaptor.forClass(Set.class);
+            when(coreToolsCache.getCoreTools(namesCaptor.capture())).thenReturn(List.of());
+
+            CliSessionStartRequest request = new CliSessionStartRequest(
+                List.of("table", "generation", "image_generation"), null, "test-model",
+                null, null, null, null, agentId, null, null);
+
+            service.startSession(request, "tenant-1", "org-test");
+
+            assertThat(namesCaptor.getValue())
+                .doesNotContain("generation")
+                .doesNotContain("image_generation");
+        }
+
+        @Test
+        @DisplayName("and it still RECEIVES the module once the agent actually grants it")
+        void aRealGrantStillReachesTheSession() {
+            // The cap must narrow, never block: if this failed, granting the
+            // module in the agent's config would stop working and the gate
+            // would be a wall.
+            String agentId = UUID.randomUUID().toString();
+            stubBoundAgent(agentId, Map.of("generation", true));
+            ArgumentCaptor<Set<String>> namesCaptor = ArgumentCaptor.forClass(Set.class);
+            when(coreToolsCache.getCoreTools(namesCaptor.capture())).thenReturn(List.of());
+
+            CliSessionStartRequest request = new CliSessionStartRequest(
+                List.of("table", "generation"), null, "test-model",
+                null, null, null, null, agentId, null, null);
+
+            service.startSession(request, "tenant-1", "org-test");
+
+            assertThat(namesCaptor.getValue()).contains("generation");
+        }
+
+        @Test
+        @DisplayName("a bound agent with NO config cannot be talked into the credit-spending modules")
+        void anAgentWithNoConfigCannotBeWidenedEither() {
+            // An agent row that never got a config is the "nobody decided"
+            // case, and this platform answers that with the set that leaves the
+            // opt-ins out. Reading the wire instead would make a missing config
+            // more permissive than a real one.
+            String agentId = UUID.randomUUID().toString();
+            stubBoundAgent(agentId, null);
+            ArgumentCaptor<Set<String>> namesCaptor = ArgumentCaptor.forClass(Set.class);
+            when(coreToolsCache.getCoreTools(namesCaptor.capture())).thenReturn(List.of());
+
+            CliSessionStartRequest request = new CliSessionStartRequest(
+                List.of("table", "generation"), null, "test-model",
+                null, null, null, null, agentId, null, null);
+
+            service.startSession(request, "tenant-1", "org-test");
+
+            assertThat(namesCaptor.getValue())
+                .contains("table")
+                .doesNotContain("generation");
+        }
+
+        @Test
         @DisplayName("should inject __approvedToolActions__ so the bridge gate skips on resume")
         void shouldInjectApprovedToolActions() throws Exception {
             CliSessionStartRequest request = new CliSessionStartRequest(

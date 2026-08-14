@@ -25,7 +25,7 @@ export default function Error({
   return (
     <div className="min-h-screen flex items-center justify-center bg-theme-primary p-8">
       <div className="max-w-md w-full text-center space-y-6">
-        <div className="w-12 h-12 bg-red-100 dark:bg-red-900/30 rounded-full flex items-center justify-center mx-auto">
+        <div className="w-12 h-12 bg-red-100 dark:bg-red-900/30 rounded-xl flex items-center justify-center mx-auto">
           <span className="text-red-600 dark:text-red-400 text-xl font-bold">!</span>
         </div>
         <div>

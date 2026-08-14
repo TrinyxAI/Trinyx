@@ -332,7 +332,7 @@ export default function AgentsPage() {
             ['workflow', 'The multi-step automation builder (stateful: init/load before add_node); also inspects and executes runs.'],
             ['application', 'The marketplace as a toolbox: a published app can add a missing capability; check here before reaching for web_search/catalog/workflow(init). Also publishes apps.'],
             ['web_search', 'Search the web, fetch a page as markdown, or drive an LLM browser.'],
-            ['image_generation', 'Generate images from a text prompt; bills per image returned.'],
+            ['generation', 'Produce an asset from a prompt: image, video, audio, voice or music. Spends credits per create, at the rate the chosen model sets.'],
             ['files', 'Browse and reuse workspace files (docs, images, exports, uploads); get/view returns a ref usable by a workflow node.'],
             ['wait', 'Block server-side for a set number of seconds (1-240) between status checks or after a rate limit, instead of busy-polling.'],
           ]}

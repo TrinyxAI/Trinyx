@@ -324,7 +324,7 @@ public final class ToolSchemaGenerator {
                     Map.entry("id", Map.of("type", "string", "description", "Interface identifier (UUID from interface(action='create'))")),
                     Map.entry("label", Map.of("type", "string", "description", "Interface label")),
                     Map.entry("variable_mapping", Map.of("type", "object", "description", "Map generic template variable names to workflow expressions. Example: {\"title\": \"{{mcp:fetch.output.name}}\", \"price\": \"{{mcp:fetch.output.price}}\"}")),
-                    Map.entry("action_mapping", Map.of("type", "object", "description", "Map CSS selectors to workflow triggers or other interfaces. Format: {\"cssSelector\": \"trigger:label:actiontype\"}. Action types: click (manual trigger), submit (form trigger), message (chat trigger), navigate (switch interface).")),
+                    Map.entry("action_mapping", Map.of("type", "object", "description", "Map CSS selectors to workflow triggers or other interfaces. Format: {\"cssSelector\": \"trigger:label:actiontype\"} to fire a trigger, {\"cssSelector\": \"interface:label:navigate\"} to switch to another page. Action types: click (manual trigger), submit (form trigger), message (chat trigger), navigate (switch to the interface with that label).")),
                     Map.entry("position", Map.of("type", "object", "properties", Map.of("x", Map.of("type", "number"), "y", Map.of("type", "number"))))
                 ),
                 "required", List.of("id")
@@ -389,7 +389,7 @@ public final class ToolSchemaGenerator {
         properties.put("targetTable", Map.of("type", "string", "description", "Target database table"));
         properties.put("dataSourceId", Map.of("type", "integer"));
         properties.put("variable_mapping", Map.of("type", "object", "description", "Map generic template variable names to workflow expressions. Configured on the workflow interface node. Example: {\"title\": \"{{mcp:fetch.output.name}}\"}"));
-        properties.put("action_mapping", Map.of("type", "object", "description", "Map CSS selectors to workflow triggers or interfaces. Format: {\"cssSelector\": \"trigger:label:actiontype\"}. Action types: submit (form→trigger), click (button→trigger), message (chat→trigger), navigate (→interface), __pagination:prev/next (navigate between items by itemIndex). A bridge script is auto-injected - no JavaScript needed."));
+        properties.put("action_mapping", Map.of("type", "object", "description", "Map CSS selectors to workflow triggers or interfaces. Use \"trigger:label:actiontype\" to fire a trigger and \"interface:label:navigate\" to switch to another page. Action types: submit (form→trigger), click (button→trigger), message (chat→trigger), navigate (→the interface with that label), __pagination:prev/next (move between items by itemIndex). A bridge script is auto-injected - no JavaScript needed."));
 
         Map<String, Object> schema = new LinkedHashMap<>();
         schema.put("type", "object");

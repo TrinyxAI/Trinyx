@@ -18,7 +18,7 @@
 import { orchestratorApi } from '@/lib/api';
 import { publicationService } from '@/lib/api/orchestrator/publication.service';
 import { getActivePublicPreview } from '@/contexts/PublicationSnapshotContext';
-import { is402Error, is413StorageError } from '@/lib/api/error-utils';
+import { is402Error, is413StorageError, isCreditExhaustedFailure } from '@/lib/api/error-utils';
 import { showInsufficientCreditsModal } from '@/components/billing/InsufficientCreditsModal';
 import { showInsufficientStorageModal } from '@/components/billing/InsufficientStorageModal';
 import { handleCeRelayError } from '@/lib/billing/ceRelayErrorModals';
@@ -26,6 +26,7 @@ import { normalizeLabel } from '@/app/workflows/builder/utils/labelNormalizer';
 import { wsClient } from '@/lib/websocket';
 import { RunStateStore, getRunStateStore, deleteRunStateStore, TERMINAL_STATUSES, type RunState } from './RunStateStore';
 import { streamDebug } from './streamingDebug';
+import { usePendingInterfacesStore } from '@/lib/stores/pending-interfaces-store';
 
 /**
  * Fetch the run state for this manager's runId.
@@ -102,6 +103,55 @@ const POST_COMPLETION_REFRESH_DELAY_MS = 500;
 // ============================================================================
 // WORKFLOW RUN MANAGER CLASS
 // ============================================================================
+
+/**
+ * Should this interface-node status drop its entry from the pending-interfaces panel?
+ *
+ * Everything that is not "still going" clears it. Written as the complement rather than a list of
+ * terminal statuses, because the list shape is exactly what broke: it named
+ * completed/success/failed/error/skipped, and the moment the backend started emitting
+ * `partial_success` over the socket the entry matched nothing and leaked - an interface node that
+ * failed once and was re-run successfully stayed "awaiting" in the application panel for the rest
+ * of the run, with no error to notice. A future status now clears by default instead of stranding
+ * the panel.
+ *
+ * Exported as a pure function so the rule is testable: its caller reaches the store through
+ * `require()` (deliberate, to avoid a circular import) inside a try/catch that swallows, so the
+ * branch itself cannot be observed from a test.
+ */
+export function interfaceStatusClearsPending(status: string): boolean {
+  return status !== 'awaiting_signal' && status !== 'running' && status !== 'pending';
+}
+
+/**
+ * Did THIS pass of the step fail?
+ *
+ * A plain status check is not enough any more. A node that has ever succeeded reports the
+ * ACCUMULATED `partial_success` even on the pass that just failed, so gating on 'failed' alone
+ * silently stopped the failure toast for exactly the long-running scheduled workflows where it
+ * matters most.
+ *
+ * The discriminator is the failure TALLY GOING UP. An earlier attempt keyed off an error message
+ * instead, which cannot work: the streaming payload carries `status` and `statusCounts` and
+ * nothing else (SnapshotService.buildSteps emits no error text at all), so that condition was
+ * structurally always false and left the regression in place while its unit test passed on a
+ * hand-built payload the producer cannot emit.
+ *
+ * `previousFailedCount` undefined means this is the first sighting of the node, so there is no
+ * increase to observe and nothing fires: a page opened onto an already-failed node does not
+ * re-toast history. That is also the safe direction, since counts never reset across epochs and a
+ * stale-but-flat tally must stay quiet.
+ */
+export function stepFailedNow(
+  status: string | undefined,
+  failedCount: number,
+  previousFailedCount?: number,
+): boolean {
+  const s = (status || '').toLowerCase();
+  if (['failed', 'error', 'failure'].includes(s)) return true;
+  if (s !== 'partial_success') return false;
+  return previousFailedCount !== undefined && failedCount > previousFailedCount;
+}
 
 export class WorkflowRunManager {
   private runId: string;
@@ -230,9 +280,21 @@ export class WorkflowRunManager {
       }
       if (runState.steps) {
         for (const step of runState.steps) {
-          const stepId = step.id || step.nodeId;
-          if (stepId && ['failed', 'error', 'failure'].includes((step.status || '').toLowerCase())) {
-            this.failureEmitted.add(stepId);
+          // `stepId` FIRST: the REST payload names it that (WorkflowRunState.StepState), while the
+          // socket uses `id`. Reading only `id || nodeId` here made this whole block dead - it
+          // never matched a single step, so the baseline it claims to seed was never seeded.
+          const stepId = step.stepId || step.id || step.nodeId;
+          if (stepId) {
+            // Record the tally so the first live update after a page load compares against a real
+            // baseline instead of treating the node as newly seen.
+            const failedCount = Number(step?.statusCounts?.failed ?? 0);
+            this.lastFailedCount.set(stepId, failedCount);
+            // Mark ONLY a node whose current status is a failure. Marking every node with a
+            // historical failure would suppress its next real one: handleStepFailed early-returns
+            // on this set, and the set is not cleared until the following cycle closes.
+            if (stepFailedNow(step.status, failedCount, undefined)) {
+              this.failureEmitted.add(stepId);
+            }
           }
         }
       }
@@ -1350,8 +1412,10 @@ export class WorkflowRunManager {
    */
   private handleWorkflowStatusTransition(newStatus: RunState['runStatus']): void {
     // Transition to waiting_trigger (multi-DAG: one DAG completed, another has trigger ready).
-    // No REST refresh needed - the WS batch-update already delivers readyStepIds,
-    // tracking sets, and epoch data. With 12 parallel epochs this would fire 12x.
+    // The WS batch-update already delivers readyStepIds, tracking sets and epoch data, so the
+    // refresh below is NOT for those - it exists solely to pull the closed cycle's verdict, which
+    // no WS payload carries. It is guarded per epoch because this handler runs on every batch that
+    // carries a status, and with 12 parallel epochs an unguarded refresh fired 12x per cycle.
     if (newStatus === 'waiting_trigger') {
       // Reset tracking for next epoch
       this.interfaceAwaitingEmitted.clear();
@@ -1366,6 +1430,24 @@ export class WorkflowRunManager {
         batchStepsCount: st.batchSteps?.length,
         epoch: st.currentEpoch,
       });
+      // Pull the closed cycle's verdict. The run badge reads `lastCycleResult` off rawRunState,
+      // and ONLY a full REST hydrate writes that field - the WS batch does not carry it. Without
+      // this refresh the canvas keeps showing the PREVIOUS cycle's outcome for the whole live
+      // session while the run-history row shows the current one: exactly the contradiction
+      // between two badges on one run that this change set exists to remove.
+      //
+      // Guarded per epoch, which is what keeps the reason the refresh was dropped here in the
+      // first place: with parallel DAGs this transition fires once per DAG, and refreshing per
+      // transition meant 12 requests for one cycle. One per closed cycle is what the badge needs.
+      const epochNow = st.currentEpoch ?? 0;
+      if (this.cycleVerdictRefreshedForEpoch !== epochNow) {
+        this.cycleVerdictRefreshedForEpoch = epochNow;
+        this.scheduleTimer(() => {
+          this.refreshStateInternal().catch(err => {
+            streamDebug.warn('WorkflowRunManager', 'Cycle-verdict refresh failed:', err);
+          });
+        }, POST_COMPLETION_REFRESH_DELAY_MS);
+      }
       return;
     }
 
@@ -1546,12 +1628,16 @@ export class WorkflowRunManager {
         if (stepId?.startsWith('core:') && (step.status || '').toLowerCase() === 'running') {
           this.handleSubWorkflowStepRunning(stepId, step);
         }
-        // Detect agent node completion → dispatch event so conversation panel reloads messages
-        if (stepId?.startsWith('agent:') && ['completed', 'success'].includes((step.status || '').toLowerCase())) {
+        // Detect agent node completion → dispatch event so conversation panel reloads messages.
+        // partial_success counts: the node finished and produced its messages, it merely carries
+        // an older failure in its accumulated tally.
+        if (stepId?.startsWith('agent:')
+            && ['completed', 'success', 'partial_success'].includes((step.status || '').toLowerCase())) {
           this.handleAgentStepCompleted(stepId, step);
         }
-        // Detect step failure → dispatch event for toast notification
-        if (stepId && ['failed', 'error', 'failure'].includes((step.status || '').toLowerCase())) {
+        // Detect step failure → dispatch event for toast notification, and, in CE, the actionable
+        // modal for a relay refusal (model not supported / out of credit).
+        if (stepId && this.stepFailedInThisUpdate(stepId, step)) {
           this.handleStepFailed(stepId, step);
         }
       }
@@ -1583,6 +1669,11 @@ export class WorkflowRunManager {
       switch (status) {
         case 'completed':
         case 'success':
+        // A node whose tally holds both a success and a failure. It counts as completed HERE,
+        // which is what keeps its rerun button (canRerunStep tests completedSteps || failedSteps),
+        // while the amber border comes from data.status further down. Dropping it from both sets
+        // is what removed the rerun button from a partial node on the live canvas.
+        case 'partial_success':
           completed.push(stepId);
           break;
         case 'failed':
@@ -1617,8 +1708,10 @@ export class WorkflowRunManager {
    */
   private handleInterfaceStepUpdate(stepId: string, step: any): void {
     try {
-      // Dynamic import to avoid circular dependencies
-      const { usePendingInterfacesStore } = require('@/lib/stores/pending-interfaces-store');
+      // Statically imported. It used to be a `require()` "to avoid circular dependencies", but
+      // the store imports nothing but zustand - there is no cycle, and the require() made this
+      // branch unreachable from any test (it throws under ESM and the catch below swallows it),
+      // which is why the panel-stranding bug it guards went unnoticed.
       const store = usePendingInterfacesStore.getState();
       const status = (step.status || '').toLowerCase();
 
@@ -1634,9 +1727,7 @@ export class WorkflowRunManager {
         });
         // Dispatch event for auto-opening the application panel (fires once per stepId per epoch)
         this.handleInterfaceAwaiting(stepId, step);
-      } else if (status === 'completed' || status === 'success') {
-        store.removePending(stepId);
-      } else if (status === 'failed' || status === 'error' || status === 'skipped') {
+      } else if (interfaceStatusClearsPending(status)) {
         store.removePending(stepId);
       }
     } catch {
@@ -1675,6 +1766,30 @@ export class WorkflowRunManager {
   private agentCompletedEmitted = new Set<string>();
   /** Track which step failures have already triggered a toast (avoid duplicates). */
   private failureEmitted = new Set<string>();
+
+  /**
+   * Last failure tally seen per step. Deliberately NOT cleared between epochs: the counts are
+   * cumulative, so carrying the value forward is what makes "the tally went up" mean "it failed
+   * again" rather than "a new epoch started".
+   */
+  private lastFailedCount = new Map<string, number>();
+
+  /**
+   * Stateful wrapper over {@link stepFailedNow}: records the tally it just saw so the next update
+   * can tell an increase from a carried-over failure.
+   */
+  private stepFailedInThisUpdate(stepId: string, step: any): boolean {
+    const failedCount = Number(step?.statusCounts?.failed ?? 0);
+    const previous = this.lastFailedCount.get(stepId);
+    this.lastFailedCount.set(stepId, failedCount);
+    return stepFailedNow(step?.status, failedCount, previous);
+  }
+
+  /**
+   * Epoch whose closed-cycle verdict has already been re-fetched, so the refresh on the
+   * waiting_trigger transition happens once per CYCLE rather than once per DAG.
+   */
+  private cycleVerdictRefreshedForEpoch: number | null = null;
 
   /**
    * Dispatch a CustomEvent when an agent node starts running so the UI can
@@ -1750,6 +1865,14 @@ export class WorkflowRunManager {
     // the same actionable modal as chat. No-op in the Cloud edition.
     handleCeRelayError(errorMessage);
 
+    // The workspace ran out of credits: the node carries the refusal (the trigger
+    // node itself on a scheduled/webhook fire). An AUTOMATIC fire is acked 202
+    // before the node runs, so this is the only place the modal can be raised for
+    // it - the sync paths get their 402 from the HTTP layer.
+    if (isCreditExhaustedFailure(step.output?.error_code, errorMessage)) {
+      showInsufficientCreditsModal();
+    }
+
     try {
       window.dispatchEvent(new CustomEvent('workflowStepFailed', {
         detail: {
@@ -1820,7 +1943,11 @@ export class WorkflowRunManager {
   private injectReusableTriggers(runState: any): string[] {
     let readySteps = runState.readySteps || [];
     const status = runState.status?.toLowerCase();
-    const needsTriggers = status === 'completed' || status === 'failed' || status === 'waiting_trigger';
+    // partial_success is here for RUNS THAT PREDATE the binary-cycle rule: a run never reports it
+    // any more, but rows stored before still carry it, and without this those runs never get their
+    // reusable triggers back and cannot be re-fired at all.
+    const needsTriggers = status === 'completed' || status === 'failed'
+      || status === 'partial_success' || status === 'waiting_trigger';
 
     if (needsTriggers && runState.plan?.triggers) {
       for (const trigger of runState.plan.triggers) {

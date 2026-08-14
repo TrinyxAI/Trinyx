@@ -232,45 +232,6 @@ class CreditServicePayerRedirectIntegrationTest {
     }
 
     @Test
-    @DisplayName("consumeForImageGenerationByok(member in TEAM workspace) STAYS on member - "
-            + "BYOK passthrough, executor IS payer, balance_after reads MEMBER's wallet")
-    void imageByokStaysOnMember() {
-        // Setup: OWNER has 100 credits, MEMBER has 50, with the resolver wired to
-        // redirect MEMBER→OWNER on every other path. BYOK must escape the redirect.
-        service.consumeForImageGenerationByok(MEMBER_ID, "byok-1", "openai", "gpt-image-1", 1);
-
-        // BYOK does NOT lock subscription (zero-amount trace only)
-        verify(subscriptionRepository, never()).findActiveByUserIdForUpdate(anyLong());
-        // BYOK reads MEMBER's wallet (not OWNER's) via getBalanceForSelf
-        verify(subscriptionRepository).findActiveByUserId(MEMBER_ID);
-        verify(subscriptionRepository, never()).findActiveByUserId(OWNER_ID);
-
-        verify(ledgerRepository).save(ledgerCaptor.capture());
-        CreditLedgerEntry entry = ledgerCaptor.getValue();
-        assertThat(entry.getUserId())
-                .as("BYOK row's user_id must be MEMBER (not OWNER) - escape from owner-pays redirect")
-                .isEqualTo(MEMBER_ID);
-        assertThat(entry.getExecutorUserId())
-                .as("BYOK: executor IS payer - same column value")
-                .isEqualTo(MEMBER_ID);
-        assertThat(entry.getSourceType()).isEqualTo("IMAGE_GENERATION_BYOK");
-        assertThat(entry.getAmount()).isEqualByComparingTo(BigDecimal.ZERO);
-        assertThat(entry.getBalanceAfter())
-                .as("Invariant: balance_after must read MEMBER's wallet (= "
-                        + MEMBER_BALANCE + "), NOT OWNER's (= " + OWNER_BALANCE + "). "
-                        + "Regression guard for the pre-fix bug where getBalance(userId) "
-                        + "resolved payer → owner balance leaked into the executor's row.")
-                .isEqualByComparingTo(MEMBER_BALANCE);
-        assertThat(entry.getDescription())
-                .as("BYOK has no executor breadcrumb - executor IS payer, suffix is a no-op")
-                .doesNotContain("[executed by user");
-    }
-
-    // =====================================================================
-    // LENGTH-SAFE EXECUTOR BREADCRUMB - round-2 audit B fix
-    // =====================================================================
-
-    @Test
     @DisplayName("appendExecutorAudit: long base description truncated to leave room for suffix; "
             + "suffix ALWAYS preserved on redirect rows")
     void appendExecutorAuditLengthSafe() {

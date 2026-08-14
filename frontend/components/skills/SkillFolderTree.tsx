@@ -288,7 +288,7 @@ export function SkillFolderTree({
               variant="ghostGray"
               aria-label={t('addMenu')}
               onClick={(e) => e.stopPropagation()}
-              className="w-5 h-5 min-w-[20px] min-h-[20px] p-0 rounded-full text-theme-muted hover:text-[var(--bg-primary)] transition-colors font-normal flex items-center justify-center"
+              className="w-5 h-5 min-w-[20px] min-h-[20px] p-0 rounded-lg text-theme-muted hover:text-[var(--bg-primary)] transition-colors font-normal flex items-center justify-center"
               style={{ marginLeft: '4px' }}
             >
               <Plus className="w-4 h-4 flex-shrink-0" />
@@ -413,7 +413,7 @@ export function SkillFolderTree({
                 variant="ghostGray"
                 aria-label={t('skillActions', { name: skill.name })}
                 onClick={(e) => e.stopPropagation()}
-                className={`w-5 h-5 min-w-[20px] min-h-[20px] p-0 rounded-full text-theme-muted hover:text-[var(--bg-primary)] transition-colors font-normal flex items-center justify-center flex-shrink-0 ml-1 ${isOpen ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'}`}
+                className={`w-5 h-5 min-w-[20px] min-h-[20px] p-0 rounded-lg text-theme-muted hover:text-[var(--bg-primary)] transition-colors font-normal flex items-center justify-center flex-shrink-0 ml-1 ${isOpen ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'}`}
               >
                 <MoreVertical className="w-3 h-3 flex-shrink-0" />
               </Button>
@@ -554,7 +554,7 @@ export function SkillFolderTree({
                   variant="ghostGray"
                   aria-label={t('folderActions', { name: node.folder.name })}
                   onClick={(e) => e.stopPropagation()}
-                  className={`w-5 h-5 min-w-[20px] min-h-[20px] p-0 rounded-full text-theme-muted hover:text-[var(--bg-primary)] transition-colors font-normal flex items-center justify-center flex-shrink-0 ml-1 ${isOpen ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'}`}
+                  className={`w-5 h-5 min-w-[20px] min-h-[20px] p-0 rounded-lg text-theme-muted hover:text-[var(--bg-primary)] transition-colors font-normal flex items-center justify-center flex-shrink-0 ml-1 ${isOpen ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'}`}
                 >
                   <MoreVertical className="w-3 h-3 flex-shrink-0" />
                 </Button>

@@ -54,6 +54,11 @@ class WorkflowEpochServiceWorkDurationTest {
         return new EpochWorkWindowProjection(runId, epoch, T0.plusSeconds(fromSec), T0.plusSeconds(toSec));
     }
 
+    /** A stored timeline row with no epoch state - this file is about durations, not outcomes. */
+    private static WorkflowEpochRepository.EpochTimelineRow timelineRow(int epoch, String startedAt, String endedAt) {
+        return new WorkflowEpochRepository.EpochTimelineRow(epoch, startedAt, endedAt, endedAt == null, null);
+    }
+
     @Test
     @DisplayName("The run-history duration is the step window, keyed by public run id")
     void latestDurationComesFromStepRows() {
@@ -156,8 +161,8 @@ class WorkflowEpochServiceWorkDurationTest {
         // The header span here is ~33 hours (the deferred close); the work windows are
         // seconds. Asserting both on the same rows is what pins the distinction.
         when(repository.listEpochTimestamps(anyString())).thenReturn(List.of(
-                new EpochTimestampRow(1, "2026-08-01T00:00:00Z", "2026-08-02T08:42:00Z"),
-                new EpochTimestampRow(2, "2026-08-02T09:00:00Z", "2026-08-02T09:00:30Z")));
+                timelineRow(1, "2026-08-01T00:00:00Z", "2026-08-02T08:42:00Z"),
+                timelineRow(2, "2026-08-02T09:00:00Z", "2026-08-02T09:00:30Z")));
         when(stepDataRepository.findEpochWorkWindows(java.util.List.of("run-A")))
                 .thenReturn(List.of(window("run-A", 1, 0, 5), window("run-A", 2, 0, 30)));
 
@@ -176,7 +181,7 @@ class WorkflowEpochServiceWorkDurationTest {
     @DisplayName("An epoch that has produced no step row yet gets a null duration, not a wrong one")
     void epochWithoutStepRowsHasNullDuration() {
         when(repository.listEpochTimestamps(anyString())).thenReturn(List.of(
-                new EpochTimestampRow(1, "2026-08-02T09:00:00Z", null)));
+                timelineRow(1, "2026-08-02T09:00:00Z", null)));
         when(stepDataRepository.findEpochWorkWindows(java.util.List.of("run-A"))).thenReturn(List.of());
 
         assertThat(service.listEpochTimestamps("run-A").get(0).workDurationMs()).isNull();
@@ -188,14 +193,16 @@ class WorkflowEpochServiceWorkDurationTest {
         // The public app and the showcase snapshot each used to hand-build this map and
         // each omitted workDurationMs, so those clients silently kept computing the
         // duration from the header span. One shared shape is what stops that recurring.
-        Map<String, Object> wire =
-                new EpochTimestampRow(4, "2026-08-02T09:00:00Z", "2026-08-02T09:00:30Z", 12_000L).toWireMap();
+        Map<String, Object> wire = new EpochTimestampRow(4, "2026-08-02T09:00:00Z", "2026-08-02T09:00:30Z", 12_000L)
+                .withStatus("COMPLETED")
+                .toWireMap();
 
         assertThat(wire).containsExactlyInAnyOrderEntriesOf(Map.of(
                 "epoch", 4,
                 "startedAt", "2026-08-02T09:00:00Z",
                 "endedAt", "2026-08-02T09:00:30Z",
-                "workDurationMs", 12_000L));
+                "workDurationMs", 12_000L,
+                "status", "COMPLETED"));
     }
 
     @Test

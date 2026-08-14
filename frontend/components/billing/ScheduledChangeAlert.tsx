@@ -124,7 +124,7 @@ export default function ScheduledChangeAlert({
         return (
             <div className={`rounded-xl p-4 bg-red-50 border-red-200 dark:bg-red-900/20 dark:border-red-700 ${className}`}>
                 <div className="flex items-start gap-3">
-                    <div className="flex-shrink-0 p-2 rounded-full bg-red-100 dark:bg-red-800">
+                    <div className="flex-shrink-0 p-2 rounded-md bg-red-100 dark:bg-red-800">
                         <AlertTriangle className="h-5 w-5 text-red-600 dark:text-red-400" />
                     </div>
                     <div className="flex-1 min-w-0">
@@ -259,7 +259,7 @@ export default function ScheduledChangeAlert({
             } ${className}`}>
             <div className="flex items-start gap-3">
                 {/* Icon */}
-                <div className={`flex-shrink-0 p-2 rounded-full ${isWarningStyle
+                <div className={`flex-shrink-0 p-2 rounded-md ${isWarningStyle
                     ? 'bg-amber-100 dark:bg-amber-800'
                     : 'bg-gray-100 dark:bg-gray-700'
                     }`}>

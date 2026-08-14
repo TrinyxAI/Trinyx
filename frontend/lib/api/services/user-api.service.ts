@@ -21,6 +21,19 @@ export interface PublicProfile {
   joinedAt?: string | null;
 }
 
+/**
+ * Deletion state of the signed-in account, from GET /users/profile/deletion-status.
+ * {@code deletionAt} is when the purge would run; it is {@code deactivatedAt} plus
+ * {@code gracePeriodDays}, computed by the backend so the date shown always matches the
+ * one the scheduler acts on. Both dates are null when nothing is scheduled.
+ */
+export interface AccountDeletionStatus {
+  scheduledForDeletion: boolean;
+  deactivatedAt: string | null;
+  deletionAt: string | null;
+  gracePeriodDays: number;
+}
+
 export class UserApiService {
   constructor() {}
 
@@ -90,6 +103,24 @@ export class UserApiService {
 
   async deleteAccount(): Promise<void> {
     await apiClient.delete('/users/profile');
+  }
+
+  /**
+   * Whether this account is scheduled for hard-deletion, and when that happens.
+   * Reachable while the account is deactivated: the gateway allow-lists this path and
+   * {@link restoreAccount}, otherwise the grace period we promise would be unusable
+   * (the person is blocked the moment they ask for deletion).
+   */
+  async getAccountDeletionStatus(): Promise<AccountDeletionStatus> {
+    return await apiClient.get<AccountDeletionStatus>('/users/profile/deletion-status');
+  }
+
+  /**
+   * Cancels a scheduled deletion and re-enables the account. Idempotent: restoring an
+   * account that is not scheduled returns {@code restored: false} rather than an error.
+   */
+  async restoreAccount(): Promise<AccountDeletionStatus & { restored: boolean }> {
+    return await apiClient.post<AccountDeletionStatus & { restored: boolean }>('/users/profile/restore');
   }
 
   /**

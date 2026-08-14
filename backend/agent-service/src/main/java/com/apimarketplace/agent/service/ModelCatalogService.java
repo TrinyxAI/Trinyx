@@ -120,9 +120,10 @@ public class ModelCatalogService {
      * fields BEFORE the standard merge pipeline runs. When the sidecar has no
      * row for a given model, the global values stand (legacy behaviour).
      *
-     * <p>Categories supported: {@code chat}, {@code browser_agent},
-     * {@code image_generation}, plus any future category that matches the
-     * V156 shape CHECK ({@link ModelCategory#isValidShape(String)}).
+     * <p>Categories supported: {@code chat}, {@code browser_agent}, the five
+     * retired {@code <format>_generation} keys (answered for compatibility, no
+     * screen sends them), plus any future category that matches the V156 shape
+     * CHECK ({@link ModelCategory#isValidShape(String)}).
      *
      * <p>Resolution rule:
      * <pre>
@@ -150,9 +151,9 @@ public class ModelCatalogService {
         Map<String, Object> base = getAvailableProvidersBase(tenantId, includeUnconfigured);
         filterUnavailableBridgeProviders(base);
         // V156/V158: filter the YAML/Bridge base catalog to only models whose
-        // mode matches the category contract - so the image_generation tab shows
-        // ONLY image-gen models (mode='image'), and chat / browser_agent
-        // completion lists do NOT show image-gen rows. The null/global path here
+        // mode matches the category contract, so chat / browser_agent completion
+        // lists do NOT show image-gen rows. (A <format>_generation category admits
+        // only that mode, which is what keeps the two apart.) The null/global path here
         // backs the main chat picker (ChatControllerV3 → getModelsInfo(null)),
         // the flat LLM catalog (listAvailableModels) and the default-model pick;
         // it must apply the SAME mode-filter as the explicit 'chat' category,
@@ -870,19 +871,19 @@ public class ModelCatalogService {
         // Compute which bridges are actually installed right now so we can
         // annotate rows rather than drop them.
         Map<String, Boolean> bridgeInstalled = bridgeAvailabilityFilter.installedMap();
-        // V156: scope the YAML/bridge base + overrides by category mode so the
-        // admin tab shows ONLY models eligible for that category (image-gen
-        // tab → mode='image' rows only ; chat/browser_agent → mode IS NULL
-        // OR mode='chat'). This is the same filter applied by
-        // getModelsForCategory() so picker and admin stay in sync.
-        // V156/V158: scope the base + overrides by category mode. The admin
-        // Chat / Agent tab reads the null/global view (to keep chat's writes on
-        // the global ranking/enabled columns), but it must STILL drop image-gen
-        // rows (mode='image') - they belong only to the Image Generation tab. So
-        // apply the mode-filter for the null path too (treated as 'chat'). The
-        // per-category sidecar OVERLAY stays gated to a non-null category -
-        // overlaying the V156-backfilled chat sidecar here would diverge from the
-        // global ranking the Chat tab writes through.
+        // V156/V158: scope the YAML/bridge base + overrides by category mode, so
+        // a row only surfaces under a category its mode is eligible for. This is
+        // the same filter applied by getModelsForCategory(), so picker and admin
+        // stay in sync.
+        //
+        // The admin Chat / Agent tab reads the null/global view (to keep chat's
+        // writes on the global ranking/enabled columns), but it must STILL drop
+        // image-gen rows (mode='image'), so the mode-filter applies to the null
+        // path too (treated as 'chat'). That is what makes an image row
+        // unreachable from every surviving screen. The per-category sidecar
+        // OVERLAY stays gated to a non-null category - overlaying the
+        // V156-backfilled chat sidecar here would diverge from the global
+        // ranking the Chat tab writes through.
         String modeKey = modeFilterKey(category);
         filterProvidersByCategoryMode(base, modeKey);
         List<ModelConfigOverrideEntity> overrides = repository.findAllByOrderByRankingAsc();
@@ -1184,8 +1185,8 @@ public class ModelCatalogService {
         // Lazy-creation fallback for YAML-only rows (mirrors the legacy
         // bulkUpdateRankings behaviour). Without this, models declared in
         // application.yml but never synced into model_config_overrides would
-        // be silently skipped on browser_agent / image_generation re-rank,
-        // and the admin's drag-and-drop would not persist for those rows.
+        // be silently skipped on a browser_agent re-rank, and the admin's
+        // drag-and-drop would not persist for those rows.
         // The chat tab gets this for free via the legacy path; the category
         // path needs it explicitly.
         Map<String, String> catalogDisplayNames = collectCatalogDisplayNames();
@@ -1532,25 +1533,6 @@ public class ModelCatalogService {
     }
 
     /**
-     * V156 - drop YAML/bridge-derived models whose mode is not eligible for
-     * the active category. Without this, the YAML catalog (chat models seeded
-     * from {@code application.yml}) leaks into the {@code image_generation}
-     * tab because the YAML rows have no sidecar entry and no DB override; the
-     * mode predicate is the only eligibility signal.
-     *
-     * <p><b>Empty provider shells are preserved on purpose</b>. Image-gen rows
-     * land in {@code model_config_overrides} as DB-only entries with
-     * {@code is_custom=false} and {@code mode='image'} (V157 seed). The
-     * downstream injection loop in {@link #getModelsWithOverrides()} /
-     * {@link #getEffectiveModelList(String)} only adds those rows to providers
-     * already present in the YAML base. If we removed the openai/google
-     * provider shells here just because their YAML models are all chat, the
-     * gpt-image-* / gemini-*-image rows would have nowhere to land and the
-     * admin tab would render "No models configured" even though V157 ran.
-     * Keeping the shell with an empty {@code models[]} lets the injection
-     * step refill it with the eligible DB rows.
-     */
-    /**
      * Effective mode-filter key for a (possibly null) category. The legacy
      * GLOBAL path ({@code category == null}) backs both the admin "Chat / Agent"
      * tab and the main chat picker / flat LLM catalog - it must apply the SAME
@@ -1564,6 +1546,25 @@ public class ModelCatalogService {
         return category != null ? category : ModelCategory.CHAT.key();
     }
 
+    /**
+     * V156 - drop YAML/bridge-derived models whose mode is not eligible for
+     * the active category. Without this, the YAML catalog (chat models seeded
+     * from {@code application.yml}) leaks into a {@code <format>_generation}
+     * category because the YAML rows have no sidecar entry and no DB override;
+     * the mode predicate is the only eligibility signal.
+     *
+     * <p><b>Empty provider shells are preserved on purpose</b>. Image-gen rows
+     * land in {@code model_config_overrides} as DB-only entries with
+     * {@code is_custom=false} and {@code mode='image'} (V157 seed). The
+     * downstream injection loop in {@link #getModelsWithOverrides()} /
+     * {@link #getEffectiveModelList(String)} only adds those rows to providers
+     * already present in the YAML base, so dropping the openai/google provider
+     * shells here would leave the gpt-image-* / gemini-*-image rows nowhere to
+     * land. Keeping the shell with an empty {@code models[]} lets the injection
+     * step refill it. Note that no screen asks for a
+     * {@code <format>_generation} category any more, so today this only matters
+     * to a caller that asks the API for one directly.
+     */
     @SuppressWarnings("unchecked")
     private void filterProvidersByCategoryMode(Map<String, Object> base, String category) {
         List<Map<String, Object>> providers = (List<Map<String, Object>>) base.get("providers");

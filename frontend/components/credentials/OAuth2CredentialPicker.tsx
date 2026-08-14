@@ -301,7 +301,7 @@ export function OAuth2CredentialPicker({
                   }}
                 />
               ) : (
-                <div className="h-6 w-6 rounded-full bg-theme-tertiary flex items-center justify-center">
+                <div className="h-6 w-6 rounded-lg bg-theme-tertiary flex items-center justify-center">
                   <span className="text-xs font-bold text-theme-secondary">
                     {template.display_name?.charAt(0) || "?"}
                   </span>
@@ -310,7 +310,7 @@ export function OAuth2CredentialPicker({
               <span className="flex-1 text-sm font-medium text-theme-primary truncate">
                 {template.display_name || template.credential_name}
               </span>
-              <span className="text-xs px-2 py-0.5 bg-theme-tertiary rounded-full text-theme-secondary">
+              <span className="text-xs px-2 py-0.5 bg-theme-tertiary rounded-md text-theme-secondary">
                 {template.auth_type}
               </span>
             </button>
@@ -381,7 +381,7 @@ export function OAuth2CredentialPicker({
                 if (template) handleConfigure(template);
               });
             }}
-            className="rounded-full bg-black dark:bg-white text-white dark:text-black"
+            className="rounded-md bg-black dark:bg-white text-white dark:text-black"
           >
             {t("connectCount", { count: selectedTemplates.size })}
           </Button>
@@ -446,7 +446,7 @@ export function OAuth2CredentialPicker({
                     </div>
                   </td>
                   <td className="px-4 py-3">
-                    <div className="h-5 bg-theme-tertiary rounded-full animate-pulse w-16" />
+                    <div className="h-5 bg-theme-tertiary rounded-2xl animate-pulse w-16" />
                   </td>
                 </tr>
               ))
@@ -497,7 +497,7 @@ export function OAuth2CredentialPicker({
                           }}
                         />
                       ) : (
-                        <div className="h-8 w-8 rounded-full bg-theme-tertiary flex items-center justify-center">
+                        <div className="h-8 w-8 rounded-xl bg-theme-tertiary flex items-center justify-center">
                           <span className="text-sm font-bold text-theme-secondary">
                             {template.display_name?.charAt(0) || "?"}
                           </span>
@@ -516,7 +516,7 @@ export function OAuth2CredentialPicker({
                     </div>
                   </td>
                   <td className="px-4 py-3">
-                    <span className="text-xs px-2 py-1 bg-theme-tertiary rounded-full text-theme-secondary">
+                    <span className="text-xs px-2 py-1 bg-theme-tertiary rounded-md text-theme-secondary">
                       {template.auth_type}
                     </span>
                   </td>
@@ -533,7 +533,7 @@ export function OAuth2CredentialPicker({
           <Button
             variant="outline"
             onClick={handleLoadMore}
-            className="gap-2 rounded-full"
+            className="gap-2 rounded-md"
           >
             <ChevronDown className="h-4 w-4" />
             {t("showMore", { count: remainingCount })}

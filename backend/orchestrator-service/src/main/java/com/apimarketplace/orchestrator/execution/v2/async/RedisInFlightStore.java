@@ -101,12 +101,25 @@ public class RedisInFlightStore {
         if (pending == null || result == null) return;
         try {
             String json = objectMapper.writeValueAsString(toInFlightMap(pending, result));
-            // Index BEFORE value, same ordering rationale as RedisPendingAgentStore: a crash
-            // between the two leaves an index member with no value, which every reader
-            // tolerates (and prunes), whereas a value with no index would be invisible to the
-            // per-run lookups below - the failure mode that actually matters.
-            boolean indexed = indexAdd(pending.runId(), pending.correlationId());
-            redisTemplate.opsForValue().set(KEY_PREFIX + pending.correlationId(), json, ttl.toMillis(), TimeUnit.MILLISECONDS);
+            // Value + index member + index TTL in ONE Redis transaction, so no observer can
+            // ever see the member without its value.
+            //
+            // This used to be an ordered pair of round trips (SADD, then SET), and the gap
+            // between them was a real defect rather than a theoretical one. A per-run guard
+            // reading in that gap resolved the member's value to null and, per the old
+            // listForRun, PRUNED the member. Nothing re-added it - the SADD had already
+            // happened - so from that moment the delivery was invisible to every per-run
+            // guard, its epoch could be closed while it was still being delivered, and the
+            // node downstream of the agent was never dispatched, never marked SKIPPED, and
+            // got no step row. Nothing above INFO was logged. In CI (cpu: 500m) that window,
+            // three Redis round trips wide, is wide enough to land in; on a developer machine
+            // it is not, which is why the affected e2e classes never reproduced locally.
+            //
+            // A transaction is available here because Redis is standalone in every deployment
+            // of this repo (plain spring.data.redis host/port/database, no cluster block, a
+            // single redis:7-alpine in both compose files, one host:port in values-prod). On a
+            // clustered Redis these three keys would be cross-slot and MULTI would be refused.
+            boolean indexed = stageAtomically(pending.runId(), pending.correlationId(), json);
             if (!indexed) {
                 // The value IS written even so: AgentRecoveryService.replayInFlightEntries scans
                 // the value namespace directly, so it still recovers this delivery after a crash.
@@ -119,6 +132,18 @@ public class RedisInFlightStore {
                         + "the per-run in-flight guards cannot see this agent, so its epoch may be "
                         + "reset while the delivery is still running",
                     pending.correlationId(), pending.runId());
+                // Write the value on its own: AgentRecoveryService.replayInFlightEntries scans
+                // the value namespace directly and can still recover this delivery after a
+                // crash, which is worth preserving even when the guards are lost.
+                //
+                // Idempotent on purpose. Usually nothing was written (a discarded transaction
+                // applies nothing), but one case writes twice: an EXEC that reached the server
+                // and applied, whose reply then failed client-side. The re-SET is the same JSON
+                // over the same key, so the only cost is a redundant round trip - and in that
+                // case the ERROR above is a false alarm, which is the price of not being able
+                // to tell the two apart from here.
+                redisTemplate.opsForValue().set(KEY_PREFIX + pending.correlationId(), json,
+                    ttl.toMillis(), TimeUnit.MILLISECONDS);
             }
         } catch (Exception e) {
             // Best-effort: a Redis hiccup on staging degrades to the prior (unprotected)
@@ -156,21 +181,56 @@ public class RedisInFlightStore {
     static final String RUN_INDEX_PREFIX = "agent:in-flight-run-index:";
 
     /**
-     * @return true when the member is indexed and therefore visible to the per-run guards.
-     *         One retry, because the caller cannot come back later: by the time the guards look,
-     *         the delivery is already running and an unindexed entry has already lost its
-     *         protection.
+     * Write the value, the index member and the index TTL as ONE Redis transaction.
+     *
+     * <p>Atomicity is the point, not a nicety. As three separate round trips there was an
+     * interval in which the member existed and its value did not, and a per-run guard reading
+     * in it saw an unresolvable member - which {@link #listForRun} is entitled to prune,
+     * because after this method returns an unresolvable member really is stale. MULTI removes
+     * the interval instead of teaching every reader to tolerate it.
+     *
+     * <p>All-or-nothing: on failure the caller writes the value alone and logs the loss of
+     * guard protection, which is strictly better than a half-applied index.
+     *
+     * @return true when the transaction applied and the entry is therefore visible to the
+     *         per-run guards. One retry, because the caller cannot come back later: by the
+     *         time the guards look, the delivery is already running and an unindexed entry
+     *         has already lost its protection.
      */
-    private boolean indexAdd(String runId, String correlationId) {
+    @SuppressWarnings({"unchecked", "rawtypes"})
+    private boolean stageAtomically(String runId, String correlationId, String json) {
         if (runId == null || correlationId == null) return false;
         String indexKey = RUN_INDEX_PREFIX + runId;
+        String valueKey = KEY_PREFIX + correlationId;
         for (int attempt = 1; attempt <= 2; attempt++) {
             try {
-                redisTemplate.opsForSet().add(indexKey, correlationId);
-                // Same TTL as the entries it points at, so an index abandoned by a crash cannot
-                // outlive them and keep a run's resets deferred forever.
-                redisTemplate.expire(indexKey, ttl.toMillis(), TimeUnit.MILLISECONDS);
-                return true;
+                List<Object> applied = redisTemplate.execute(new org.springframework.data.redis.core.SessionCallback<List<Object>>() {
+                    @Override
+                    public List<Object> execute(org.springframework.data.redis.core.RedisOperations operations) {
+                        operations.multi();
+                        operations.opsForValue().set(valueKey, json, ttl.toMillis(), TimeUnit.MILLISECONDS);
+                        operations.opsForSet().add(indexKey, correlationId);
+                        // Same TTL as the entries it points at, so an index abandoned by a crash
+                        // cannot outlive them and keep a run's resets deferred forever.
+                        operations.expire(indexKey, ttl.toMillis(), TimeUnit.MILLISECONDS);
+                        return operations.exec();
+                    }
+                });
+                // A null result is Spring's signal that the transaction was DISCARDED (a
+                // queue-time error, or a WATCH conflict). Treating that as success would
+                // report protection the guards do not have.
+                //
+                // Deliberately NOT checking the result arity: the number of wire commands is
+                // Spring's business, not this method's. RedisTemplate.expire, for one, may
+                // decompose into PEXPIRE with an EXPIRE fallback depending on the driver, so
+                // pinning "exactly 3" would couple this guard to an implementation detail and
+                // turn a harmless refactor into a permanent, and false, STAGED WITHOUT INDEX
+                // error on every single agent delivery.
+                if (applied != null) {
+                    return true;
+                }
+                logger.warn("[InFlightStore] stage transaction was discarded (attempt {}/2) for correlationId={} runId={}",
+                    attempt, correlationId, runId);
             } catch (Exception e) {
                 logger.warn("[InFlightStore] index add attempt {}/2 failed for correlationId={} runId={}: {}",
                     attempt, correlationId, runId, e.getMessage());
@@ -184,7 +244,25 @@ public class RedisInFlightStore {
      *
      * <p>Members whose value no longer resolves (TTL expiry, or a delete whose index cleanup
      * failed) are skipped AND pruned, so a stale member can never keep a run's epoch from
-     * resetting. Fails OPEN on a Redis error - an empty list restores the pre-index behaviour
+     * resetting.
+     *
+     * <p><b>The prune depends on {@link #stage} being atomic</b>, and the two must stay
+     * coupled. An unresolvable member means "stale" only if no writer can be halfway through
+     * creating it. When staging was a SADD followed by a separate SET, a guard reading between
+     * the two pruned a member that was about to become valid, and nothing re-added it - the
+     * delivery went permanently invisible to every per-run guard and its epoch could be closed
+     * mid-delivery. If anyone ever splits {@code stage} back into separate round trips, this
+     * prune becomes that defect again.
+     *
+     * <p>Necessary, not sufficient: the prune is itself a check-then-act across two round
+     * trips (GET, then SREM), so an atomic re-stage of the SAME correlationId landing between
+     * them still loses a member whose value now exists. That is reachable - a delivery that
+     * throws clears the value while deliberately leaving the member, and the recovery scan
+     * re-stages the same id. The window is one round trip rather than the three-round-trip one
+     * removed from {@code stage}, so this is a narrowing and not a closure. Conditioning the
+     * SREM on the value still being absent (one Lua script) is what would close it.
+     *
+     * <p>Fails OPEN on a Redis error - an empty list restores the pre-index behaviour
      * rather than freezing the cycle, which is the same policy {@link #listAll} already uses.
      */
     List<InFlightEntry> listForRun(String runId) {

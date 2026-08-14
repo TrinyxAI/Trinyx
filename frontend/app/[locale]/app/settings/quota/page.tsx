@@ -233,7 +233,7 @@ function CeQuotaPage() {
       <div className="bg-theme-secondary rounded-xl p-6">
         <div className="flex items-center justify-between mb-6">
           <div className="flex items-center gap-3">
-            <div className="w-10 h-10 bg-theme-tertiary rounded-full flex items-center justify-center">
+            <div className="w-10 h-10 bg-theme-tertiary rounded-xl flex items-center justify-center">
               <Coins className="w-5 h-5 text-theme-primary" />
             </div>
             <div>
@@ -274,7 +274,7 @@ function CeQuotaPage() {
       <div>
         <div className="flex items-center justify-between mb-4">
           <div className="flex items-center gap-3">
-            <div className="w-10 h-10 bg-theme-secondary rounded-full flex items-center justify-center">
+            <div className="w-10 h-10 bg-theme-secondary rounded-xl flex items-center justify-center">
               <Coins className="w-5 h-5 text-theme-primary" />
             </div>
             <h2 className="text-lg font-semibold text-theme-primary">{t('history.title')}</h2>
@@ -569,7 +569,7 @@ function QuotaPageInner() {
       <div>
         <div className="flex items-center justify-between mb-4 gap-3">
           <div className="flex items-center gap-3 min-w-0">
-            <div className="w-10 h-10 bg-theme-secondary rounded-full flex items-center justify-center shrink-0">
+            <div className="w-10 h-10 bg-theme-secondary rounded-xl flex items-center justify-center shrink-0">
               <Filter className="w-5 h-5 text-theme-primary" />
             </div>
             <div className="min-w-0">
@@ -607,7 +607,7 @@ function QuotaPageInner() {
             return (
               <div key={card.key} className="bg-theme-secondary rounded-xl p-4">
                 <div className="flex items-center gap-3">
-                  <div className="w-10 h-10 bg-theme-tertiary rounded-full flex items-center justify-center">
+                  <div className="w-10 h-10 bg-theme-tertiary rounded-xl flex items-center justify-center">
                     <Icon className="w-5 h-5 text-theme-primary" />
                   </div>
                   <div>
@@ -630,7 +630,7 @@ function QuotaPageInner() {
       <div>
         <div className="flex items-center justify-between mb-4">
           <div className="flex items-center gap-3">
-            <div className="w-10 h-10 bg-theme-secondary rounded-full flex items-center justify-center">
+            <div className="w-10 h-10 bg-theme-secondary rounded-xl flex items-center justify-center">
               <Coins className="w-5 h-5 text-theme-primary" />
             </div>
             <h2 className="text-lg font-semibold text-theme-primary">{t('history.title')}</h2>

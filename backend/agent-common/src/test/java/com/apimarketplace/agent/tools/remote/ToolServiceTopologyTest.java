@@ -28,6 +28,19 @@ class ToolServiceTopologyTest {
         assertThat(ToolServiceTopology.serviceFor("catalog")).isEqualTo(ServiceKey.CATALOG);
     }
 
+    /**
+     * generation lives in catalog-service, unlike the older image_generation which
+     * orchestrator still owns. Without this entry the call would default to
+     * orchestrator, which has no such tool: the agent would be granted a tool whose
+     * every call fails.
+     */
+    @Test
+    @DisplayName("generation is owned by catalog-service, not by the default orchestrator")
+    void generationOwnedByCatalogService() {
+        assertThat(ToolServiceTopology.serviceFor("generation")).isEqualTo(ServiceKey.CATALOG);
+        assertThat(ToolServiceTopology.hasDedicatedService("generation")).isTrue();
+    }
+
     @Test
     @DisplayName("any other tool defaults to orchestrator")
     void defaultsToOrchestrator() {

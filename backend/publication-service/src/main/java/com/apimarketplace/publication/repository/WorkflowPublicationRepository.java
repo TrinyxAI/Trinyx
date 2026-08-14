@@ -21,6 +21,24 @@ import java.util.UUID;
 @Repository
 public interface WorkflowPublicationRepository extends JpaRepository<WorkflowPublicationEntity, UUID> {
 
+    /**
+     * Marketplace browse ordering, JPQL form: most-liked first. Kept identical to
+     * {@code PublicationListQueryService.POPULARITY_ORDER_BY} (which serves the
+     * cloud marketplace) so a CE install browsing the same catalogue through the
+     * internal endpoints sees the same order. See that constant for the weights
+     * and why rating MASS is used rather than the bare average.
+     */
+    String POPULARITY_ORDER_JPQL =
+            " ORDER BY (3 * (SELECT COUNT(f) FROM UserPublicationFavoriteEntity f WHERE f.publicationId = p.id)"
+            + " + 2 * COALESCE(p.useCount, 0)"
+            + " + 0.4 * COALESCE(p.averageRating, 0) * COALESCE(p.reviewCount, 0)) DESC, p.publishedAt DESC";
+
+    /** Native-SQL twin of {@link #POPULARITY_ORDER_JPQL}, for the nativeQuery finders. */
+    String POPULARITY_ORDER_SQL =
+            " ORDER BY (3 * (SELECT COUNT(*) FROM user_publication_favorites f WHERE f.publication_id = p.id)"
+            + " + 2 * COALESCE(p.use_count, 0)"
+            + " + 0.4 * COALESCE(p.average_rating, 0) * COALESCE(p.review_count, 0)) DESC, p.published_at DESC";
+
     Optional<WorkflowPublicationEntity> findByWorkflowId(UUID workflowId);
 
     boolean existsByWorkflowId(UUID workflowId);
@@ -92,7 +110,8 @@ public interface WorkflowPublicationRepository extends JpaRepository<WorkflowPub
             @Param("status") PublicationStatus status,
             @Param("visibility") PublicationVisibility visibility);
 
-    @Query("SELECT p FROM WorkflowPublicationEntity p WHERE p.status = 'ACTIVE' AND p.visibility = 'PUBLIC' ORDER BY p.publishedAt DESC")
+    @Query("SELECT p FROM WorkflowPublicationEntity p WHERE p.status = 'ACTIVE' AND p.visibility = 'PUBLIC'"
+            + POPULARITY_ORDER_JPQL)
     Page<WorkflowPublicationEntity> findMarketplacePublications(Pageable pageable);
 
     @Query("SELECT p FROM WorkflowPublicationEntity p WHERE p.status = 'ACTIVE' AND p.visibility = 'PUBLIC' ORDER BY p.useCount DESC")
@@ -101,11 +120,13 @@ public interface WorkflowPublicationRepository extends JpaRepository<WorkflowPub
     @Query("SELECT p FROM WorkflowPublicationEntity p WHERE p.status = 'ACTIVE' AND p.visibility = 'PUBLIC' AND LOWER(p.title) LIKE LOWER(CONCAT('%', :search, '%')) ORDER BY p.publishedAt DESC")
     List<WorkflowPublicationEntity> searchByTitle(@Param("search") String search);
 
-    @Query("SELECT p FROM WorkflowPublicationEntity p WHERE p.status = 'ACTIVE' AND p.visibility = 'PUBLIC' AND p.categoryId = :categoryId ORDER BY p.publishedAt DESC")
+    @Query("SELECT p FROM WorkflowPublicationEntity p WHERE p.status = 'ACTIVE' AND p.visibility = 'PUBLIC' AND p.categoryId = :categoryId"
+            + POPULARITY_ORDER_JPQL)
     Page<WorkflowPublicationEntity> findMarketplacePublicationsByCategory(
             @Param("categoryId") UUID categoryId, Pageable pageable);
 
-    @Query(value = "SELECT p.* FROM workflow_publications p WHERE p.status = 'ACTIVE' AND p.visibility = 'PUBLIC' AND p.category_slug = :categorySlug ORDER BY p.published_at DESC",
+    @Query(value = "SELECT p.* FROM workflow_publications p WHERE p.status = 'ACTIVE' AND p.visibility = 'PUBLIC' AND p.category_slug = :categorySlug"
+                   + POPULARITY_ORDER_SQL,
            countQuery = "SELECT COUNT(*) FROM workflow_publications p WHERE p.status = 'ACTIVE' AND p.visibility = 'PUBLIC' AND p.category_slug = :categorySlug",
            nativeQuery = true)
     Page<WorkflowPublicationEntity> findMarketplacePublicationsByCategorySlug(
@@ -330,7 +351,8 @@ public interface WorkflowPublicationRepository extends JpaRepository<WorkflowPub
 
     long countByStatus(PublicationStatus status);
 
-    @Query("SELECT p FROM WorkflowPublicationEntity p WHERE p.status = 'ACTIVE' AND p.visibility = 'PUBLIC' AND p.publicationType = :type ORDER BY p.publishedAt DESC")
+    @Query("SELECT p FROM WorkflowPublicationEntity p WHERE p.status = 'ACTIVE' AND p.visibility = 'PUBLIC' AND p.publicationType = :type"
+            + POPULARITY_ORDER_JPQL)
     Page<WorkflowPublicationEntity> findMarketplacePublicationsByType(
             @Param("type") PublicationType type, Pageable pageable);
 

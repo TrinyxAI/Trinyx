@@ -113,6 +113,43 @@ class HelpToolsProviderTest {
             assertThat(advertised).containsExactlyInAnyOrderElementsOf(allSlugs);
         }
 
+        /**
+         * The prose the agent actually reads has to agree with the enum above
+         * it. The enum is machine-checked on the way in (an unknown slug is
+         * refused with INVALID_PARAMETER_VALUE), so a stale category left in
+         * the description is invisible to every existing guard while being the
+         * ONLY half an agent reads before choosing a filter: it spends a turn
+         * on a category that answers 400. That is how `imagegeneration`
+         * outlived the tool it named.
+         */
+        @Test
+        @DisplayName("the help text lists exactly the categories the filter accepts")
+        void descriptionListsExactlyTheRealCategories() {
+            String helpText = provider.getTools().stream()
+                    .filter(t -> t.name().equals("list_all_tools"))
+                    .map(AgentToolDefinition::helpText)
+                    .findFirst()
+                    .orElseThrow();
+
+            java.util.regex.Matcher m = java.util.regex.Pattern
+                    .compile("(?m)^\\s*-\\s*([a-z_]+):")
+                    .matcher(helpText);
+            List<String> listed = new java.util.ArrayList<>();
+            while (m.find()) {
+                listed.add(m.group(1));
+            }
+
+            assertThat(listed)
+                    .as("the help text must actually enumerate the categories")
+                    .isNotEmpty();
+            assertThat(listed).allSatisfy(slug ->
+                    assertThat(ToolCategory.fromSlug(slug))
+                            .as("category '%s' is described but would be refused at runtime", slug)
+                            .isNotNull());
+            assertThat(listed).containsExactlyInAnyOrderElementsOf(
+                    java.util.Arrays.stream(ToolCategory.values()).map(ToolCategory::getSlug).toList());
+        }
+
         @Test
         @DisplayName("tools should not require auth")
         void shouldNotRequireAuth() {

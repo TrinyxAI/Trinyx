@@ -168,7 +168,7 @@ export function ProjectDetailView({ projectId }: ProjectDetailViewProps) {
             const bgColor = project.color || '#3b82f6';
             return (
               <div
-                className="w-10 h-10 rounded-full flex items-center justify-center"
+                className="w-10 h-10 rounded-xl flex items-center justify-center"
                 style={{ backgroundColor: bgColor }}
               >
                 <IconComp className="w-5 h-5 text-white" />
@@ -217,7 +217,7 @@ export function ProjectDetailView({ projectId }: ProjectDetailViewProps) {
               <Icon className="h-4 w-4" />
               {t(tab.labelKey)}
               {count > 0 && (
-                <span className={`text-xs px-1.5 py-0.5 rounded-full ${
+                <span className={`text-xs px-1.5 py-0.5 rounded-md ${
                   isActive
                     ? 'bg-[var(--accent-primary)]/10 text-[var(--accent-primary)]'
                     : 'bg-theme-tertiary text-theme-muted'
@@ -359,7 +359,7 @@ function WorkflowsGrid({
                 {w.nodeIcons && w.nodeIcons.length > 0 ? (
                   <WorkflowNodeIcons nodeIcons={w.nodeIcons} totalNodeCount={nodeCount} />
                 ) : (
-                  <div className="w-12 h-12 bg-theme-secondary rounded-full flex items-center justify-center">
+                  <div className="w-12 h-12 bg-theme-secondary rounded-xl flex items-center justify-center">
                     <WorkflowIcon className="w-6 h-6 text-theme-primary" />
                   </div>
                 )}
@@ -584,7 +584,7 @@ function InterfacesGrid({
                     }}
                   />
                   <div className="relative z-10">
-                    <div className="w-12 h-12 bg-theme-secondary rounded-full flex items-center justify-center">
+                    <div className="w-12 h-12 bg-theme-secondary rounded-xl flex items-center justify-center">
                       <Monitor className="w-6 h-6 text-theme-tertiary" />
                     </div>
                   </div>

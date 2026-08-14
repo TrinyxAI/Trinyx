@@ -520,7 +520,7 @@ export function CredentialFormDialog({
                       aria-selected={isActive}
                       onClick={() => setSelectedVariantKey(tab.variant)}
                       className={cn(
-                        "flex items-center gap-2 px-3 py-1.5 text-sm rounded-full border transition-colors",
+                        "flex items-center gap-2 px-3 py-1.5 text-sm rounded-md border transition-colors",
                         isActive
                           ? "bg-indigo-500/10 border-indigo-500/30 text-indigo-600 dark:text-indigo-300"
                           : "bg-theme-secondary border-theme text-theme-secondary hover:text-theme-primary"
@@ -529,7 +529,7 @@ export function CredentialFormDialog({
                       <span className="font-medium">{tab.authType}</span>
                       {hasSaved && (
                         <span className={cn(
-                          "text-xs px-1.5 py-0.5 rounded-full",
+                          "text-xs px-1.5 py-0.5 rounded-md",
                           tab.savedCredential?.isEnabled
                             ? "bg-emerald-500/15 text-emerald-600 dark:text-emerald-300"
                             : "bg-amber-500/15 text-amber-600 dark:text-amber-300"

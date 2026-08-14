@@ -92,7 +92,7 @@ class DefaultSystemPromptsTest {
         // carry only today's UTC date (yyyy-MM-dd) so the prefix stays stable for 24h.
         for (String prompt : new String[] {
                 DefaultSystemPrompts.build(Set.of("table"), false).systemPrompt(), // chat intro()
-                DefaultSystemPrompts.buildAgentDefault().systemPrompt()            // agent agentIntro()
+                DefaultSystemPrompts.buildAgentDefault(null).systemPrompt()        // agent agentIntro()
         }) {
             // date present in yyyy-MM-dd form, with the label space restored
             assertThat(prompt).containsPattern("Current date: \\d{4}-\\d{2}-\\d{2}");
@@ -113,7 +113,7 @@ class DefaultSystemPromptsTest {
     class BuildTests {
 
         @Test
-        @DisplayName("null enabledModuleKeys = all modules enabled (incl. image_generation)")
+        @DisplayName("null enabledModuleKeys = all modules enabled")
         void nullKeysEnablesAllModules() {
             ModularPromptResult result = DefaultSystemPrompts.build(null, false);
 
@@ -121,7 +121,7 @@ class DefaultSystemPromptsTest {
                 .contains("catalog",
                     "table", "interface", "agent", "skill",
                     "workflow",
-                    "application", "web_search", "image_generation");
+                    "application", "web_search", "generation");
         }
 
         @Test
@@ -196,9 +196,33 @@ class DefaultSystemPromptsTest {
     // ═══════════════════════════════════════════════════════════════════════════════
 
     @Test
-    @DisplayName("ALL_RESOURCE_MODULES contains 11 modules (incl. image_generation, files, wait)")
+    @DisplayName("ALL_RESOURCE_MODULES contains 11 modules (incl. generation, files, wait)")
     void allResourceModulesContains11Modules() {
         assertThat(DefaultSystemPrompts.ALL_RESOURCE_MODULES).hasSize(11);
+    }
+
+    /**
+     * A module is the ONLY way a tool can be granted to a restricted agent: the
+     * enabled module set is what resolves to the core tool names the agent is handed.
+     * Without this entry the generation tool would be unreachable for every agent
+     * that has a toolsConfig, while still being handed to those that have none.
+     */
+    @Test
+    @DisplayName("GENERATION module is registered with key 'generation' and the generation tool")
+    void generationModuleRegistered() {
+        assertThat(DefaultSystemPrompts.GENERATION.key()).isEqualTo("generation");
+        assertThat(DefaultSystemPrompts.GENERATION.toolNames()).containsExactly("generation");
+        assertThat(DefaultSystemPrompts.GENERATION.promptSection())
+                .contains("generation", "models", "credits");
+    }
+
+    @Test
+    @DisplayName("granting only the generation module resolves to exactly the generation tool")
+    void generationModuleResolvesToItsToolAlone() {
+        ModularPromptResult result = DefaultSystemPrompts.build(Set.of("generation"), false);
+
+        assertThat(result.coreToolNames()).containsExactly("generation");
+        assertThat(result.systemPrompt()).contains("generation(action='models')");
     }
 
     @Test
@@ -210,13 +234,20 @@ class DefaultSystemPromptsTest {
                 .contains("files", "list", "view", "visualize", "help");
     }
 
+    /**
+     * The legacy image-generation module was retired with its tool. No module may
+     * advertise it again: the routing table an agent reads is built from these
+     * modules, so a re-added entry would teach the model to call a tool that no
+     * provider serves.
+     */
     @Test
-    @DisplayName("IMAGE_GENERATION module is registered with key 'image_generation'")
-    void imageGenerationModuleRegistered() {
-        assertThat(DefaultSystemPrompts.IMAGE_GENERATION.key()).isEqualTo("image_generation");
-        assertThat(DefaultSystemPrompts.IMAGE_GENERATION.toolNames()).containsExactly("image_generation");
-        assertThat(DefaultSystemPrompts.IMAGE_GENERATION.promptSection())
-                .contains("image_generation", "credits", "help");
+    @DisplayName("no module advertises the retired image_generation tool")
+    void retiredImageGenerationModuleIsGone() {
+        assertThat(DefaultSystemPrompts.ALL_RESOURCE_MODULES)
+                .extracting(DefaultSystemPrompts.PromptModule::key)
+                .doesNotContain("image_generation");
+        assertThat(DefaultSystemPrompts.getAllCoreToolNames())
+                .doesNotContain("image_generation");
     }
 
     @Test
@@ -251,7 +282,7 @@ class DefaultSystemPromptsTest {
             .contains("catalog",
                 "table", "interface", "agent", "skill",
                 "workflow",
-                "application", "web_search", "image_generation", "files", "wait");
+                "application", "web_search", "generation", "files", "wait");
     }
 
     @Test
@@ -475,6 +506,79 @@ class DefaultSystemPromptsTest {
             // fired reliably. The literal example is the load-bearing anchor; deleting it would
             // silently reintroduce the prod bug.
             assertThat(appLine()).contains("airbnb");
+        }
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════════════
+    // buildAgentDefault(Set) - the routing table must not advertise what it will not grant
+    // ═══════════════════════════════════════════════════════════════════════════════
+
+    @Nested
+    @DisplayName("buildAgentDefault(enabledModuleKeys)")
+    class BuildAgentDefaultScopedTests {
+
+        /** The module set a caller with no toolsConfig gets: everything but the opt-ins. */
+        private final Set<String> noConfigModules =
+            com.apimarketplace.agent.config.AgentModuleResolver.NO_CONFIG_MODULES;
+
+        @Test
+        @DisplayName("scoped build lists ONLY the given modules and returns ONLY their tool names")
+        void scopedBuildFiltersBothHalves() {
+            ModularPromptResult result = DefaultSystemPrompts.buildAgentDefault(noConfigModules);
+
+            assertThat(result.coreToolNames())
+                .doesNotContain("generation", "image_generation")
+                .contains("catalog", "table", "workflow", "files", "wait");
+            assertThat(result.systemPrompt())
+                .doesNotContain("- generation -")
+                .doesNotContain("- image_generation -")
+                .contains("- workflow -");
+        }
+
+        @Test
+        @DisplayName("the routing table and the tool names agree for EVERY module - the prompt can never advertise an ungranted tool")
+        void promptAndToolNamesAgreeForEveryModule() {
+            // The concrete defect this guards: the no-arg build listed all twelve modules while
+            // its caller handed over ten, so the prompt taught the model to call a tool it did
+            // not have. Checked per module rather than on one example so a new module cannot
+            // reintroduce the split.
+            for (DefaultSystemPrompts.PromptModule module : DefaultSystemPrompts.ALL_RESOURCE_MODULES) {
+                ModularPromptResult result = DefaultSystemPrompts.buildAgentDefault(noConfigModules);
+                boolean listed = result.systemPrompt().contains(module.promptSection());
+                boolean granted = result.coreToolNames().containsAll(module.toolNames());
+                assertThat(listed)
+                    .as("module '%s': prompt listing must match tool granting", module.key())
+                    .isEqualTo(granted);
+            }
+        }
+
+        @Test
+        @DisplayName("an explicitly granted generation module IS listed and IS returned")
+        void explicitGrantIsListedAndReturned() {
+            Set<String> withGeneration = new java.util.LinkedHashSet<>(noConfigModules);
+            withGeneration.add("generation");
+
+            ModularPromptResult result = DefaultSystemPrompts.buildAgentDefault(withGeneration);
+
+            assertThat(result.coreToolNames()).contains("generation").doesNotContain("image_generation");
+            assertThat(result.systemPrompt()).contains("- generation -");
+        }
+
+        @Test
+        @DisplayName("null keeps the legacy every-module behaviour (back-compat for the no-arg overload)")
+        void nullKeysMeansAllModules() {
+            ModularPromptResult result = DefaultSystemPrompts.buildAgentDefault(null);
+
+            assertThat(result.coreToolNames()).containsAll(DefaultSystemPrompts.getAllCoreToolNames());
+        }
+
+        @Test
+        @DisplayName("an EMPTY module set yields no routing table and no tools (mode=off)")
+        void emptyKeysMeansNoModules() {
+            ModularPromptResult result = DefaultSystemPrompts.buildAgentDefault(Set.of());
+
+            assertThat(result.coreToolNames()).isEmpty();
+            assertThat(result.systemPrompt()).doesNotContain("# Available Tools");
         }
     }
 

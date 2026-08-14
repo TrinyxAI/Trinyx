@@ -42,7 +42,7 @@ export function PriorityBadge({ priority }: { priority: TaskPriority }) {
   };
 
   return (
-    <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${colors[priority] || colors.normal}`}>
+    <span className={`text-xs px-2 py-0.5 rounded-md font-medium ${colors[priority] || colors.normal}`}>
       {t(`priority.${priority}`)}
     </span>
   );

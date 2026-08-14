@@ -75,6 +75,12 @@ interface NodePlayButtonProps {
   onBeforeLaunch?: () => void;
   /** Whether in automatic execution mode (hides pending state for non-triggers) */
   isAutoMode?: boolean;
+  /**
+   * Whether the run is stepped rather than driven automatically. Only affects the rerun
+   * tooltip: in automatic mode the rerun does not stop at this node, the downstream chain
+   * re-runs unattended, and the label has to say so.
+   */
+  isStepByStepMode?: boolean;
   /** Position style: 'top-right' (legacy corner badge) or 'bottom-center' (persistent below node) */
   position?: 'top-right' | 'bottom-center';
   /** Border color for bottom-center position (matches node status) */
@@ -98,6 +104,7 @@ export function NodePlayButton({
   title,
   onBeforeLaunch,
   isAutoMode = false,
+  isStepByStepMode = true,
   position = 'top-right',
   borderColor: borderColorProp,
 }: NodePlayButtonProps) {
@@ -206,7 +213,7 @@ export function NodePlayButton({
           onClick={handleRerun}
           className={cn(bottomBaseCls, 'cursor-pointer', className)}
           style={bottomBaseStyle}
-          title={t('rerunStep')}
+          title={t(isStepByStepMode ? 'rerunStep' : 'rerunStepAuto')}
           data-testid="node-rerun-button"
         >
           <span className="relative z-10"><RotateCcw className="h-3 w-3" strokeWidth={2} /></span>
@@ -218,7 +225,7 @@ export function NodePlayButton({
         onClick={handleRerun}
         className={cn(
           positionCls,
-          'w-8 h-8 rounded-full',
+          'w-8 h-8 rounded-xl',
           status === 'failed'
             ? 'bg-red-500 hover:bg-red-600 text-white'
             : 'bg-white dark:bg-slate-700 text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-600',
@@ -228,7 +235,7 @@ export function NodePlayButton({
           'focus:outline-none focus:ring-2 focus:ring-blue-400 focus:ring-offset-1',
           className
         )}
-        title={t('rerunStep')}
+        title={t(isStepByStepMode ? 'rerunStep' : 'rerunStepAuto')}
         data-testid="node-rerun-button"
       >
         <RotateCcw className="h-4 w-4" />
@@ -253,7 +260,7 @@ export function NodePlayButton({
     }
     return (
       <div
-        className={cn(positionCls, 'w-8 h-8 rounded-full bg-blue-500 text-white flex items-center justify-center shadow-lg border-2 border-white', className)}
+        className={cn(positionCls, 'w-8 h-8 rounded-xl bg-blue-500 text-white flex items-center justify-center shadow-lg border-2 border-white', className)}
       >
         <LoadingSpinner size="xs" />
       </div>
@@ -307,7 +314,7 @@ export function NodePlayButton({
       return (
         <button
           onClick={onClick}
-          className={cn(positionCls, 'w-8 h-8 rounded-full flex items-center justify-center cursor-pointer bg-white border-2 border-slate-200 shadow-lg overflow-hidden hover:scale-110 transition-transform duration-200', className)}
+          className={cn(positionCls, 'w-8 h-8 rounded-xl flex items-center justify-center cursor-pointer bg-white border-2 border-slate-200 shadow-lg overflow-hidden hover:scale-110 transition-transform duration-200', className)}
           title={buttonTitle}
         >
           {shimmerOverlay(RUNNABLE_SHIMMER)}
@@ -339,7 +346,7 @@ export function NodePlayButton({
     return (
       <button
         onClick={handleClick}
-        className={cn(positionCls, 'w-8 h-8 rounded-full', bgColor, 'text-white flex items-center justify-center shadow-lg cursor-pointer transition-all duration-200 hover:scale-110 border-2 border-white focus:outline-none focus:ring-2 focus:ring-offset-1', ringColor, className)}
+        className={cn(positionCls, 'w-8 h-8 rounded-xl', bgColor, 'text-white flex items-center justify-center shadow-lg cursor-pointer transition-all duration-200 hover:scale-110 border-2 border-white focus:outline-none focus:ring-2 focus:ring-offset-1', ringColor, className)}
         title={buttonTitle}
       >
         {getIcon()}
@@ -360,7 +367,7 @@ export function NodePlayButton({
     }
     return (
       <div
-        className={cn(positionCls, 'w-8 h-8 rounded-full bg-slate-300 dark:bg-slate-600 text-slate-500 dark:text-slate-400 flex items-center justify-center shadow-lg border-2 border-white cursor-not-allowed', className)}
+        className={cn(positionCls, 'w-8 h-8 rounded-xl bg-slate-300 dark:bg-slate-600 text-slate-500 dark:text-slate-400 flex items-center justify-center shadow-lg border-2 border-white cursor-not-allowed', className)}
         title={t('waitingDependencies')}
       >
         <Clock className="h-4 w-4" />

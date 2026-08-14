@@ -26,6 +26,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyBoolean;
 import static org.mockito.ArgumentMatchers.anyMap;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.doAnswer;
@@ -104,7 +105,7 @@ class ToolExecutionManagerCacheKeyTest {
             return null;
         }).when(responseCache).put(anyString(), anyMap(), any());
 
-        lenient().when(responseShaper.shape(any(), any(), any(), any()))
+        lenient().when(responseShaper.shape(any(), any(), any(), any(), anyBoolean()))
                 .thenAnswer(inv -> new ResponseShaper.ShapingResult(
                         inv.getArgument(0), List.of(), ResponseShaper.Action.UNTOUCHED, 1, 1));
         lenient().when(nextActionBuilder.build(any(), any(), any())).thenReturn(Optional.empty());

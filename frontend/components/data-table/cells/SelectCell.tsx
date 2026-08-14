@@ -26,7 +26,7 @@ export function SelectCell({ value, rowKey, field, displayConfig, onSaveAndExit 
   if (options.length === 0 && Object.keys(palette).length > 0) {
     const color = palette[value as string] || '#0ea5e9';
     return (
-      <span className="rounded-full px-3 py-1 text-xs font-semibold text-white" style={{ backgroundColor: color }}>
+      <span className="rounded-md px-3 py-1 text-xs font-semibold text-white" style={{ backgroundColor: color }}>
         {value || '\u2014'}
       </span>
     );
@@ -44,7 +44,7 @@ export function SelectCell({ value, rowKey, field, displayConfig, onSaveAndExit 
       <Select value={value || ''} onValueChange={(v) => onSaveAndExit(v)}>
         <SelectTrigger className="h-7 min-h-0 w-full rounded-lg border-0 bg-transparent px-2 py-0.5 text-xs shadow-none focus:ring-0 focus:ring-offset-0 hover:bg-[var(--bg-secondary)] [&>svg]:opacity-0 [&:hover>svg]:opacity-50">
           {currentColor ? (
-            <span className="rounded-full px-2 py-0.5 text-[11px] font-semibold text-white" style={{ backgroundColor: currentColor }}>
+            <span className="rounded-md px-2 py-0.5 text-[11px] font-semibold text-white" style={{ backgroundColor: currentColor }}>
               {currentOption?.label || value || '\u2014'}
             </span>
           ) : (

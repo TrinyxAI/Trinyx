@@ -17,7 +17,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 class ToolCategoryTest {
 
     @Test
-    @DisplayName("should have 12 categories (added IMAGE_GENERATION)")
+    @DisplayName("should have 12 categories (IMAGE_GENERATION retired, GENERATION replaces it)")
     void shouldHaveTwelveCategories() {
         assertThat(ToolCategory.values()).hasSize(12);
     }

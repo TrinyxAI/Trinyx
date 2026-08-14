@@ -161,6 +161,7 @@ const ACTION_TO_REGISTRY_KEY: Record<string, string> = {
   add_download_file: 'download_file',
   add_public_link: 'public_link',
   add_media: 'media',
+  add_generate: 'generate',
   add_data_input: 'data_input',
   add_approval: 'user-approval',
   add_interface: 'interface',
@@ -278,7 +279,7 @@ export function WorkflowActionIcon({ action }: { action: string }): React.ReactE
 
   const IconComponent = config.icon;
   return (
-    <span className={`flex items-center justify-center w-[18px] h-[18px] rounded-full shrink-0 ${config.bgClassName}`}>
+    <span className={`flex items-center justify-center w-[18px] h-[18px] rounded-md shrink-0 ${config.bgClassName}`}>
       <IconComponent className="w-3 h-3 text-slate-900 dark:text-slate-100" strokeWidth={2} />
     </span>
   );
@@ -302,12 +303,43 @@ export function getNodeIconComponent(
 
 export type NodeIconSize = 'xs' | 'sm' | 'md' | 'lg';
 
-const SIZE_CONFIG: Record<NodeIconSize, { container: string; icon: string; image: number }> = {
-  xs: { container: 'h-6 w-6', icon: 'h-3.5 w-3.5', image: 16 },
-  sm: { container: 'h-8 w-8', icon: 'h-5 w-5', image: 20 },
-  md: { container: 'h-9 w-9', icon: 'h-6 w-6', image: 24 },
-  lg: { container: 'h-11 w-11', icon: 'h-5 w-5', image: 28 },
+// `box` is the rendered side of `container`, in pixels. It is what the radius is
+// derived from, so the corner keeps the same weight at every size: a single
+// radius reads as a circle on the 24px tile and as a hard corner on the 44px one.
+const SIZE_CONFIG: Record<NodeIconSize, { container: string; icon: string; image: number; box: number }> = {
+  xs: { container: 'h-6 w-6', icon: 'h-3.5 w-3.5', image: 16, box: 24 },
+  sm: { container: 'h-8 w-8', icon: 'h-5 w-5', image: 20, box: 32 },
+  md: { container: 'h-9 w-9', icon: 'h-6 w-6', image: 24, box: 36 },
+  lg: { container: 'h-11 w-11', icon: 'h-5 w-5', image: 28, box: 44 },
 };
+
+/**
+ * The app's icon-tile ladder (components/ui/README.md), keyed by the box it has
+ * to fill: 24px -> `rounded-md`, 32/36px -> `rounded-lg`, larger -> `rounded-xl`.
+ *
+ * Keyed by PIXELS rather than by `NodeIconSize` because the tile is not the only
+ * box on this ladder: the surfaces that show a row of node icons (workflow list,
+ * board, template cards, marketplace) draw a bubble a couple of pixels wider
+ * around it, and those in-between sizes have no `NodeIconSize` name. Reading the
+ * rung from the height is what stops a 28px bubble taking the 44px rung, where
+ * 12px of corner on 14px of half-height draws a circle - the capsule the ladder
+ * exists to avoid, and exactly what the template previews were showing.
+ */
+export function nodeIconBoxRadiusClass(heightPx: number): string {
+  if (heightPx <= 24) return 'rounded-md';
+  if (heightPx <= 36) return 'rounded-lg';
+  return 'rounded-xl';
+}
+
+/**
+ * The corner of a node-icon tile, for the few places that draw a stand-in for
+ * one (a "this step has no icon" placeholder) instead of rendering NodeIcon.
+ * Exported so the placeholder cannot drift away from the real thing and make a
+ * row change shape the moment the icon resolves.
+ */
+export function nodeIconRadiusClass(size: NodeIconSize = 'lg'): string {
+  return nodeIconBoxRadiusClass(SIZE_CONFIG[size].box);
+}
 
 export interface NodeIconProps {
   /** Service icon slug (e.g., 'openai', 'github') */
@@ -407,12 +439,16 @@ export function NodeIcon({
     : slugAttempt === 1 ? normalizedIconSlug : undefined;
 
   // Determine background class - no background for service icons
+  const radiusClass = nodeIconBoxRadiusClass(sizeConfig.box);
   const effectiveBgClassName = React.useMemo(() => {
     const hasVisibleIcon = !!effectiveIconSlug || (iconUrl && !iconUrlError && authIconUrl);
-    if (hasVisibleIcon) return 'rounded-full p-0.5 dark:bg-slate-100/10';
-    if (bgClassName) return `${bgClassName} rounded-full overflow-hidden`;
-    return `${resolved.iconBg} rounded-full overflow-hidden`;
-  }, [bgClassName, effectiveIconSlug, iconUrl, iconUrlError, authIconUrl, resolved.iconBg]);
+    // Square-rounded, on the app's radius ladder, like every other tile it sits
+    // next to. The three branches have to agree, or the same node changes shape
+    // depending on whether its service icon resolved.
+    if (hasVisibleIcon) return `${radiusClass} p-0.5 dark:bg-slate-100/10`;
+    if (bgClassName) return `${bgClassName} ${radiusClass} overflow-hidden`;
+    return `${resolved.iconBg} ${radiusClass} overflow-hidden`;
+  }, [bgClassName, effectiveIconSlug, iconUrl, iconUrlError, authIconUrl, resolved.iconBg, radiusClass]);
 
   // A 404 on the slug as given falls back to the normalized form once, then
   // gives up so the dynamic icon / MCP logo / lucide glyph can take over.
@@ -735,4 +771,23 @@ export function NodeHeader({
       </div>
     </div>
   );
+}
+
+/**
+ * Whether a node should render its run-action bar (play / restart).
+ *
+ * <p>Two reasons, and both must be honoured on EVERY node renderer or the affordance exists
+ * on some node types and not others: the run is being stepped by the user (play), or the node
+ * has settled and can be restarted from (restart). The restart half is what makes
+ * "re-run from this node" reachable on an automatic run.
+ *
+ * <p>Running nodes are excluded from the restart half: NodePlayButton only renders a restart
+ * for completed/failed, so including them would reveal a bar holding nothing but a spinner.
+ */
+export function showsNodeRunActions(status: {
+  isStepByStepMode: boolean;
+  canRerun: boolean;
+  isRunning: boolean;
+}): boolean {
+  return status.isStepByStepMode || (status.canRerun && !status.isRunning);
 }

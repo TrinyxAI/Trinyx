@@ -1,3 +1,14 @@
+// THIS FILE DOES NOT RUN. It is excluded from test COMPILATION in pom.xml
+// (three profiles: default, e2e, and the third), so nothing in it has executed
+// since the prompt rewrite, and anything added here is silently dead. That was
+// discovered the hard way: new assertions "passed" without ever running.
+//
+// Live coverage for the same behaviour is in AgentNodeGenerationGrantTest, which
+// does run. The assertions below have been kept CORRECT rather than reverted, so
+// that re-enabling this file surfaces a compile error or a real result, never a
+// stale assertion pinning behaviour the code no longer has.
+//
+// Re-enable it or delete it, but do not add to it.
 package com.apimarketplace.orchestrator.execution.v2.nodes;
 
 import com.apimarketplace.agent.client.AgentClient;
@@ -487,9 +498,13 @@ class AgentNodeModularPromptTest {
             // Tools are null because agent-service handles tool discovery remotely
             assertThat(request.tools()).isNull();
             assertThat(request.autoDiscoverTools()).isTrue();
-            // No entity (entityId=null) → no toolsConfig → enabledModules stays null so
-            // agent-service keeps the legacy unrestricted "all core tools" fallback.
-            assertThat(request.enabledModules()).isNull();
+            // No entity (entityId=null) → no toolsConfig, but the module set is STILL sent:
+            // it is resolveEnabledModules(null) = the no-config set. Leaving it null made
+            // agent-service fall back to every core tool, including the credit-spending ones.
+            assertThat(request.enabledModules())
+                .isNotNull()
+                .doesNotContain("generation", "image_generation")
+                .contains("catalog", "table", "workflow");
         }
     }
 

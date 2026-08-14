@@ -116,7 +116,7 @@ export function ResourceCarousel({ items, onDeleteVisualization, onRunWorkflow, 
           disabled={safeIndex === 0}
           variant="ghost"
           size="sm"
-          className="h-7 w-7 p-0 rounded-full shadow-none border-0 focus-visible:ring-2 focus-visible:ring-theme-tertiary"
+          className="h-7 w-7 p-0 rounded-xl shadow-none border-0 focus-visible:ring-2 focus-visible:ring-theme-tertiary"
           title={t('previous')}
         >
           <ChevronLeft className="h-3.5 w-3.5" />
@@ -131,7 +131,7 @@ export function ResourceCarousel({ items, onDeleteVisualization, onRunWorkflow, 
               onClick={() => setCurrentIndex(i)}
               title={item.title || `${item.vizType} ${i + 1}`}
               className={cn(
-                'rounded-full transition-all duration-200',
+                'rounded-md transition-all duration-200',
                 i === safeIndex
                   ? 'w-2 h-2 bg-slate-500 dark:bg-slate-400'
                   : 'w-1.5 h-1.5 bg-slate-300 dark:bg-slate-600',
@@ -146,7 +146,7 @@ export function ResourceCarousel({ items, onDeleteVisualization, onRunWorkflow, 
           disabled={safeIndex >= items.length - 1}
           variant="ghost"
           size="sm"
-          className="h-7 w-7 p-0 rounded-full shadow-none border-0 focus-visible:ring-2 focus-visible:ring-theme-tertiary"
+          className="h-7 w-7 p-0 rounded-xl shadow-none border-0 focus-visible:ring-2 focus-visible:ring-theme-tertiary"
           title={t('next')}
         >
           <ChevronRight className="h-3.5 w-3.5" />

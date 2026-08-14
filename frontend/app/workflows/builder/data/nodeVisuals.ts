@@ -51,6 +51,7 @@ import {
   HardDrive,
   Link2,
   Music4,
+  Sparkles,
 } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import { createElement, forwardRef } from 'react';
@@ -295,6 +296,12 @@ export const NODE_VISUALS: Record<BuilderNodeKind, NodeVisuals> = {
     iconBg: 'bg-rose-50 dark:bg-rose-900/30 text-rose-600',
     badgeBg: 'bg-rose-100 dark:bg-rose-900/30 text-rose-700',
     textClass: 'text-rose-700',
+  },
+  generate: {
+    accent: '#a855f7',
+    iconBg: 'bg-purple-50 dark:bg-purple-900/30 text-purple-600',
+    badgeBg: 'bg-purple-100 dark:bg-purple-900/30 text-purple-700',
+    textClass: 'text-purple-700',
   },
   aggregate: {
     accent: '#8b5cf6',
@@ -555,6 +562,11 @@ export const NODE_ICON_REGISTRY: Record<string, NodeIconEntry> = {
   'media': { icon: Music4, iconBg: CORE_BG },
   'audio': { icon: Music4, iconBg: CORE_BG },
   'mux': { icon: Music4, iconBg: CORE_BG },
+  'generate': { icon: Sparkles, iconBg: CORE_BG },
+  'generation': { icon: Sparkles, iconBg: CORE_BG },
+  'text-to-image': { icon: Sparkles, iconBg: CORE_BG },
+  'text-to-video': { icon: Sparkles, iconBg: CORE_BG },
+  'text-to-speech': { icon: Sparkles, iconBg: CORE_BG },
   'http-request': { icon: Globe, iconBg: CORE_BG },
   'http_request': { icon: Globe, iconBg: CORE_BG },
   'http': { icon: Globe, iconBg: CORE_BG },

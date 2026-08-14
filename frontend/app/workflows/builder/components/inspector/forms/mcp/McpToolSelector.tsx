@@ -331,6 +331,13 @@ export function McpToolSelector({
               ?? (toolDetails as any)?.toolId
               ?? null
             }
+            // Read live from the catalog rather than persisted on the node: it
+            // decides whether the credential-wide default counts as a price for
+            // this endpoint, and a copy frozen at tool-selection time would keep
+            // quoting the catch-all after the endpoint became a generation.
+            // Without it this step, which names no model, was offered the
+            // platform key at the default rate while execution refuses that call.
+            isGeneration={(toolDetails as any)?.generation === true}
             isRunMode={isRunMode}
             onCredentialStatusChange={setAllRequiredCredentialsConfigured}
             // V166: surface per-endpoint OAuth scope requirements so the

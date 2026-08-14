@@ -657,7 +657,7 @@ export function PublicationInfoPanel({
       aria-label={hasMissingCreds ? tApplications('indicatorLabel', { count: missingCreds.count }) : t('title')}
       title={hasMissingCreds ? tApplications('indicatorLabel', { count: missingCreds.count }) : t('title')}
       className={cn(
-        'relative h-8 p-0 rounded-full flex items-center justify-center',
+        'relative h-8 p-0 rounded-xl flex items-center justify-center',
         'backdrop-blur-sm transition-all duration-200 animate-[fadeIn_0.5s_ease-in-out]',
         // Amber emphasis when an action is required so the icon reads as a
         // state change, not decoration.
@@ -895,14 +895,14 @@ export function PublicationInfoPanel({
                   {totalPages > 1 && (
                     <div className="flex items-center justify-center gap-1 py-2">
                       <button type="button" onClick={() => loadReviews(page - 1)} disabled={page === 0}
-                        className="w-7 h-7 p-0 rounded-full transition-colors inline-flex items-center justify-center text-[var(--text-secondary)] hover:bg-[var(--text-primary)] hover:text-[var(--bg-primary)] disabled:opacity-30 disabled:cursor-not-allowed disabled:hover:bg-transparent disabled:hover:text-[var(--text-secondary)]">
+                        className="w-7 h-7 p-0 rounded-xl transition-colors inline-flex items-center justify-center text-[var(--text-secondary)] hover:bg-[var(--text-primary)] hover:text-[var(--bg-primary)] disabled:opacity-30 disabled:cursor-not-allowed disabled:hover:bg-transparent disabled:hover:text-[var(--text-secondary)]">
                         <ChevronLeft className="h-3.5 w-3.5" />
                       </button>
                       <span className="text-xs text-[var(--text-secondary)] font-medium min-w-[50px] text-center">
                         {page + 1} / {totalPages}
                       </span>
                       <button type="button" onClick={() => loadReviews(page + 1)} disabled={page >= totalPages - 1}
-                        className="w-7 h-7 p-0 rounded-full transition-colors inline-flex items-center justify-center text-[var(--text-secondary)] hover:bg-[var(--text-primary)] hover:text-[var(--bg-primary)] disabled:opacity-30 disabled:cursor-not-allowed disabled:hover:bg-transparent disabled:hover:text-[var(--text-secondary)]">
+                        className="w-7 h-7 p-0 rounded-xl transition-colors inline-flex items-center justify-center text-[var(--text-secondary)] hover:bg-[var(--text-primary)] hover:text-[var(--bg-primary)] disabled:opacity-30 disabled:cursor-not-allowed disabled:hover:bg-transparent disabled:hover:text-[var(--text-secondary)]">
                         <ChevronRight className="h-3.5 w-3.5" />
                       </button>
                     </div>

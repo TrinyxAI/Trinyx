@@ -1,8 +1,15 @@
 'use client';
 
 import * as React from 'react';
+import { useRouter, usePathname, useSearchParams } from 'next/navigation';
 import { useTranslations } from 'next-intl';
 import { Folder, FolderOpen, FolderPlus, FolderInput, Upload, Download, Trash2, Pencil, ArrowLeft, ChevronRight } from 'lucide-react';
+
+// The dialog and the control that opens it are stated once, for every surface
+// that offers a way in. The dialog stays behind React.lazy, so its chunk is
+// fetched on hover or on the click, never as part of this page's first load.
+import { CreateGenerationModal } from '@/components/chat/generationModalEntry';
+import { GenerateEntryButton } from '@/components/chat/GenerateEntryButton';
 import {
   DndContext,
   DragOverlay,
@@ -53,6 +60,20 @@ import {
   entryKey,
   folderLabel,
 } from '@/lib/files/virtualFolders';
+import { usePersistentState } from '@/hooks/usePersistentState';
+import {
+  FILES_FOLDER_PARAM,
+  FILES_SORT_STORAGE_KEY,
+  FILES_VIEW_MODE_STORAGE_KEY,
+  DEFAULT_SORT_PREFERENCE,
+  folderQueryString,
+  isSameFolder,
+  naturalDirectionFor,
+  normalizeSortPreference,
+  normalizeViewMode,
+  type FilesSortPreference,
+  type FilesViewMode,
+} from '@/lib/files/filesViewPreferences';
 import { formatUtcDate } from '@/lib/utils/dateFormatters';
 import LoadingSpinner from '@/components/LoadingSpinner';
 
@@ -77,6 +98,30 @@ export function FileBrowser() {
   // filtering and downloads stay available. Same gating as the tables page.
   const canMutate = useCanMutateInCurrentOrg();
 
+  const router = useRouter();
+  const pathname = usePathname();
+  const searchParams = useSearchParams();
+
+  // ---- What the browser remembers, and where ----
+  // The OPEN FOLDER lives in the URL: it describes what is on screen, so a refresh, a
+  // browser Back, or a pasted link must land on the same folder instead of snapping back
+  // to the root. HOW the user looks at files (grid vs list, the sort criterion) lives in
+  // localStorage instead: it should follow them across folders and sessions rather than
+  // ride along in a link they share.
+  const urlFolder = searchParams.get(FILES_FOLDER_PARAM);
+  const [storedViewMode, setStoredViewMode] = usePersistentState<FilesViewMode>(FILES_VIEW_MODE_STORAGE_KEY, 'grid');
+  const [storedSort, setStoredSort] = usePersistentState<FilesSortPreference>(
+    FILES_SORT_STORAGE_KEY,
+    DEFAULT_SORT_PREFERENCE,
+  );
+  // Re-validated on read: a preference written by an older build (or hand-edited) must
+  // degrade to the default, never render an unsortable listing or a blank view.
+  const viewMode = normalizeViewMode(storedViewMode);
+  const savedSort = React.useMemo(() => normalizeSortPreference(storedSort), [storedSort]);
+  // Seeds for the data hook's own state, read ONCE: after mount the hook is driven by
+  // setSort / navigateToFolder, so these refs never need to stay in sync.
+  const seedRef = React.useRef({ folder: urlFolder, sort: savedSort });
+
   const {
     entries,
     totalElements,
@@ -91,6 +136,9 @@ export function FileBrowser() {
     dateFrom,
     dateTo,
     fileType,
+    sort,
+    direction,
+    setSort,
     setDateFrom,
     setDateTo,
     setFileType,
@@ -107,37 +155,144 @@ export function FileBrowser() {
     // folders + loose files; a folder UUID → that folder's children).
     // virtualWorkflowFolders (Phase 2b): also surface the computed workflow folder
     // tree (workflow → epoch → spawn → iteration) at root and navigate into it.
-  } = useStorageExplorer(undefined, undefined, undefined, { pageSize: PAGE_SIZE, ...S3_FILES_FILTER, folderAware: true, virtualWorkflowFolders: true });
+  } = useStorageExplorer(undefined, undefined, undefined, {
+    pageSize: PAGE_SIZE,
+    ...S3_FILES_FILTER,
+    folderAware: true,
+    virtualWorkflowFolders: true,
+    initialFolderId: seedRef.current.folder,
+    initialSort: seedRef.current.sort.key,
+    initialDirection: seedRef.current.sort.direction,
+  });
 
-  // V313: the manual-folder breadcrumb trail the user has navigated into
-  // (root → … → current). Drives the header back-up-one-folder + the breadcrumb;
-  // the current folder is its last entry (empty = root). The hook owns the actual
-  // parentFolderId query param; this trail is the display/navigation history.
+  // V313: the breadcrumb trail the user has navigated into (root → … → current).
+  // Drives the header back-up-one-folder + the breadcrumb; the current folder is its
+  // last entry (empty = root). The URL owns WHICH folder is open; this trail is the
+  // path that led there, kept in sync with the URL by the effect below.
   const [folderTrail, setFolderTrail] = React.useState<FilesFolderCrumb[]>([]);
 
-  // Enter a folder: push it onto the trail and re-query its children (page 0). The
-  // nav key is the virtualId for a computed workflow folder, else the real id;
-  // the crumb id IS that nav key (FilesFolderCrumb.id is a string), so the
-  // breadcrumb/back navigation re-uses it directly.
+  /** Open a folder by pushing it into the URL - so Back returns to the folder above. */
+  const pushFolder = React.useCallback((folderId: string | null) => {
+    const query = folderQueryString(searchParams, folderId);
+    router.push(query ? `${pathname}?${query}` : pathname);
+  }, [router, pathname, searchParams]);
+
+  // True while the cards on screen do not belong to the folder the URL names: either a
+  // navigation has landed in the URL but the new listing has not arrived yet
+  // (parentFolderId still trails urlFolder), or that listing is in flight. Acting on those
+  // cards would file a crumb under the wrong parent.
+  const listingStale = !isSameFolder(parentFolderId ?? null, urlFolder) || loading;
+
+  // Enter a folder. The nav key is the virtualId for a computed workflow folder, else
+  // the real id.
+  //
+  // THREE guards, all for the same production symptom: a slow listing keeps the PREVIOUS
+  // folder's cards on screen, the user clicks again, and each extra click used to push
+  // another crumb - the breadcrumb read "Run 12 / Run 12 / Run 12" and it took as many
+  // Backs to get out.
+  //  1. Already there → nothing to do (the click that repeats the current folder).
+  //  2. The listing on screen belongs to another folder → ignore; a click on a SIBLING
+  //     card in that window would otherwise append a crumb that is not a child of the
+  //     current folder and desync the trail from the URL.
+  //  3. Belt and braces on the trail itself: never push a crumb already on the path, so
+  //     even an unforeseen route into this function cannot stack a duplicate.
   const enterFolder = React.useCallback((entry: StorageExplorerEntry) => {
     const navKey = folderNavKey(entry);
     if (!navKey) return; // malformed row (no id and no virtualId) - no-op.
-    setFolderTrail((prev) => [...prev, { id: navKey, name: folderLabel(entry, t) }]);
-    navigateToFolder(navKey);
-  }, [navigateToFolder, t]);
+    if (isSameFolder(navKey, urlFolder)) return;
+    if (listingStale) return;
+    setFolderTrail((prev) => (
+      prev.some((c) => c.id === navKey) ? prev : [...prev, { id: navKey, name: folderLabel(entry, t) }]
+    ));
+    pushFolder(navKey);
+  }, [pushFolder, urlFolder, listingStale, t]);
 
-  // Navigate to a specific folder id in the trail (or null = root). Truncates the
-  // trail at that folder. Used by the breadcrumb crumbs + the header back button.
+  // Navigate to a specific folder id in the trail (or null = root) - the breadcrumb
+  // crumbs and the header back button. Re-selecting the folder already open is a no-op
+  // (same guard as above): the crumb of the folder you are IN must not push history.
   const goToFolder = React.useCallback((folderId: string | null) => {
-    setFolderTrail((prev) => {
-      if (folderId === null) return [];
-      const idx = prev.findIndex((c) => c.id === folderId);
-      return idx >= 0 ? prev.slice(0, idx + 1) : prev;
-    });
-    navigateToFolder(folderId);
-  }, [navigateToFolder]);
+    if (isSameFolder(folderId, urlFolder)) return;
+    pushFolder(folderId);
+  }, [pushFolder, urlFolder]);
 
-  const [viewMode, setViewMode] = React.useState<'grid' | 'list'>('grid');
+  // ---- URL → state ----
+  // The single place the open folder is applied. It runs for every way the URL can
+  // change: an in-app navigation, browser Back/Forward, a refresh, a pasted link.
+  //
+  // The trail is reconciled rather than rebuilt: it is already correct when we pushed the
+  // crumb ourselves, truncatable when the user walked back up, and only fetched from the
+  // server in the one case where the path is genuinely unknown - arriving cold on a deep
+  // link. `trailRequestRef` drops a response that lost the race with a newer navigation.
+  const trailRequestRef = React.useRef<string | null>(null);
+  // Mirrors folderTrail for the effect below to read WITHOUT depending on it (depending on
+  // it would re-run the effect on every trail change and re-enter the reconciliation).
+  // Declared before that effect so it is already refreshed when the effect runs.
+  const folderTrailRef = React.useRef<FilesFolderCrumb[]>(folderTrail);
+  React.useEffect(() => {
+    folderTrailRef.current = folderTrail;
+  }, [folderTrail]);
+  // next-intl's translator is NOT referentially stable across renders, so it must not be a
+  // dependency of the effect below: the effect would re-run on every render, re-issuing the
+  // very trail request whose response caused that render - an endless fetch loop. Read it
+  // through a ref instead, which is always the current translator anyway.
+  const tRef = React.useRef(t);
+  tRef.current = t;
+
+  React.useEffect(() => {
+    navigateToFolder(urlFolder);
+
+    if (!urlFolder) {
+      // Keep the SAME array when it is already empty. Handing React a fresh [] would
+      // re-render, and any re-render that changes one of this effect's dependencies
+      // re-enters it - a self-feeding loop. Idempotent state writes are what stop that.
+      setFolderTrail((prev) => (prev.length === 0 ? prev : []));
+      trailRequestRef.current = null;
+      return;
+    }
+
+    const trail = folderTrailRef.current;
+    const idx = trail.findIndex((c) => c.id === urlFolder);
+    if (idx >= 0) {
+      // Already on the path: either the crumb we just pushed ourselves (last), or an
+      // ancestor the user walked back up to (truncate). No request needed either way.
+      if (idx !== trail.length - 1) setFolderTrail(trail.slice(0, idx + 1));
+      trailRequestRef.current = null;
+      return;
+    }
+
+    // The one case the path is genuinely unknown: arriving cold on this folder (refresh,
+    // pasted link, Forward past a truncation). Ask the server to rebuild it.
+    trailRequestRef.current = urlFolder;
+    storageApi.getFolderTrail(urlFolder, S3_FILES_FILTER)
+      .then((crumbs) => {
+        if (trailRequestRef.current !== urlFolder) return; // a newer navigation won
+        setFolderTrail(crumbs.map((c) => ({ id: folderNavKey(c) ?? c.id, name: folderLabel(c, tRef.current) })));
+      })
+      .catch((err) => {
+        // A trail we cannot rebuild costs the breadcrumb, not the listing: the files
+        // themselves are already loading from the URL's folder id.
+        console.error('Failed to load folder trail:', err);
+      });
+  }, [urlFolder, navigateToFolder]);
+
+  // ---- View + sort preferences ----
+  const changeViewMode = React.useCallback((mode: FilesViewMode) => {
+    setStoredViewMode(normalizeViewMode(mode));
+  }, [setStoredViewMode]);
+
+  // Picking a criterion adopts its natural direction (A→Z for text, newest/biggest for
+  // date and size); the toggle then flips it. Both are remembered for the next visit.
+  const changeSortKey = React.useCallback((key: FilesSortPreference['key']) => {
+    const next = { key, direction: naturalDirectionFor(key) };
+    setSort(next.key, next.direction);
+    setStoredSort(next);
+  }, [setSort, setStoredSort]);
+
+  const toggleSortDirection = React.useCallback(() => {
+    const next: FilesSortPreference = { key: sort, direction: direction === 'asc' ? 'desc' : 'asc' };
+    setSort(next.key, next.direction);
+    setStoredSort(next);
+  }, [sort, direction, setSort, setStoredSort]);
 
   // Search - debounced into the hook's server-side filter.
   const [searchInput, setSearchInput] = React.useState('');
@@ -237,6 +392,12 @@ export function FileBrowser() {
     setDetailEntry(null);
     setSelected(new Map());
     setFolderTrail([]);
+    // Drop the folder from the URL too, or a refresh would re-open a folder that
+    // belongs to the workspace we just left. Through the same helper as every other
+    // navigation, so any OTHER query param survives. `replace`, not `push`: leaving a
+    // workspace is not a navigation step the user should be able to Back into.
+    const query = folderQueryString(searchParams, null);
+    router.replace(query ? `${pathname}?${query}` : pathname);
     navigateToFolder(null);
     setPage(0);
     refresh();
@@ -474,6 +635,7 @@ export function FileBrowser() {
   // ---- Upload (button + drag-and-drop) ----
   const fileInputRef = React.useRef<HTMLInputElement>(null);
   const [uploading, setUploading] = React.useState(false);
+  const [generationOpen, setGenerationOpen] = React.useState(false);
   const [isDragging, setIsDragging] = React.useState(false);
   const handleFiles = React.useCallback(async (files: FileList | File[]) => {
     // VIEWER (org workspace) cannot upload - also blocks OS drag-and-drop, which
@@ -666,7 +828,7 @@ export function FileBrowser() {
                   <ArrowLeft className="h-4 w-4" />
                 </button>
               )}
-              <div className="w-10 h-10 bg-theme-secondary rounded-full flex items-center justify-center flex-shrink-0">
+              <div className="w-10 h-10 bg-theme-secondary rounded-xl flex items-center justify-center flex-shrink-0">
                 <Folder className="w-5 h-5 text-theme-primary" />
               </div>
               <div className="min-w-0">
@@ -699,11 +861,26 @@ export function FileBrowser() {
                 {loading ? (
                   <div className="h-4 w-16 bg-theme-tertiary rounded animate-pulse mt-1" />
                 ) : (
-                  <p className="text-sm text-theme-secondary">{t('count', { count: totalElements })}</p>
+                  <p className="truncate text-sm text-theme-secondary">{t('count', { count: totalElements })}</p>
                 )}
               </div>
             </div>
-            <div className="flex items-center gap-2">
+            {/* The three ways of getting a file in here. Their labels are
+                `whitespace-nowrap`, so side by side they are wider than a phone:
+                below `sm` each one keeps its icon and drops its label, and the
+                word survives as the accessible name and the tooltip rather than
+                being lost. `flex-shrink-0` keeps the group at its natural width
+                so it is the TITLE that gives ground (it truncates), never the
+                actions overflowing the page. */}
+            <div className="flex flex-shrink-0 items-center gap-1.5 sm:gap-2">
+              {/* Generating a file belongs where files are, beside the other way
+                  of getting one in here - but only where a generation can
+                  actually be started. */}
+              <GenerateEntryButton
+                variant="toolbar"
+                label={t('generate')}
+                onOpen={() => setGenerationOpen(true)}
+              />
               {/* New folder - inline name input (V313). Opens an input that creates
                   the folder in the current location on Enter / blur. Hidden inside a
                   computed VIRTUAL workflow folder (no real parent to attach to) and
@@ -721,20 +898,37 @@ export function FileBrowser() {
                       if (e.key === 'Escape') { setCreatingFolder(false); setNewFolderName(''); }
                     }}
                     onBlur={() => void handleCreateFolder()}
-                    disabled={savingFolder}
-                    className="text-sm h-9 px-2.5 rounded-lg border border-theme bg-theme-secondary text-theme-primary focus:outline-none focus:ring-2 focus:ring-[var(--accent-primary)]"
+                    // Sized in rem rather than left to the browser: an unsized
+                    // text input is ~20 characters wide, which on a phone is
+                    // wider than what the two remaining buttons leave it.
+                    className="w-32 sm:w-48 text-sm h-9 px-2.5 rounded-lg border border-theme bg-theme-secondary text-theme-primary focus:outline-none focus:ring-2 focus:ring-[var(--accent-primary)]"
                   />
                 ) : (
-                  <Button variant="outline" size="default" onClick={() => setCreatingFolder(true)}>
-                    <FolderPlus className="h-4 w-4 mr-1.5" />
-                    {t('newFolder')}
+                  <Button
+                    variant="outline"
+                    size="default"
+                    className="px-2.5 sm:px-4"
+                    title={t('newFolder')}
+                    aria-label={t('newFolder')}
+                    onClick={() => setCreatingFolder(true)}
+                  >
+                    <FolderPlus className="h-4 w-4 sm:mr-1.5" />
+                    <span className="hidden sm:inline">{t('newFolder')}</span>
                   </Button>
                 )
               )}
               {canMutate && (
-                <Button variant="default" size="default" onClick={() => fileInputRef.current?.click()} disabled={uploading}>
-                  {uploading ? <LoadingSpinner size="xs" className="mr-1.5" /> : <Upload className="h-4 w-4 mr-1.5" />}
-                  {t('upload')}
+                <Button
+                  variant="default"
+                  size="default"
+                  className="px-2.5 sm:px-4"
+                  title={t('upload')}
+                  aria-label={t('upload')}
+                  onClick={() => fileInputRef.current?.click()}
+                  disabled={uploading}
+                >
+                  {uploading ? <LoadingSpinner size="xs" className="sm:mr-1.5" /> : <Upload className="h-4 w-4 sm:mr-1.5" />}
+                  <span className="hidden sm:inline">{t('upload')}</span>
                 </Button>
               )}
             </div>
@@ -754,7 +948,11 @@ export function FileBrowser() {
               onDateFromChange={handleDateFrom}
               onDateToChange={handleDateTo}
               viewMode={viewMode}
-              onViewModeChange={setViewMode}
+              onViewModeChange={changeViewMode}
+              sortKey={sort}
+              sortDirection={direction}
+              onSortKeyChange={changeSortKey}
+              onSortDirectionToggle={toggleSortDirection}
               onRefresh={refresh}
               loading={loading}
             />
@@ -784,7 +982,11 @@ export function FileBrowser() {
               the scroll), so there is no inner scrollbar boxed to the grid. Grows
               (flex-1) so the pagination bar stays docked at the bottom of the page
               even when the list is empty or shorter than the viewport. */}
-          <div className="flex-1">
+          {/* While the cards on screen still belong to the folder being left, clicks on
+              them are ignored (they would file a crumb under the wrong parent). Dim and
+              mute them so that is visible: a card that looks live but does nothing reads
+              as a broken app, and is exactly what made users click a folder three times. */}
+          <div className={`flex-1 ${listingStale && entries.length > 0 ? 'opacity-60 pointer-events-none' : ''}`}>
             {error && <div className="p-3 text-sm text-red-500">{error}</div>}
 
             {loading && entries.length === 0 && (
@@ -797,13 +999,16 @@ export function FileBrowser() {
               <div className="flex flex-col items-center justify-center py-16 text-center text-theme-secondary">
                 <FolderOpen className="h-12 w-12 mb-3 text-theme-muted" />
                 <p className="text-sm">
+                  {/* Keyed off the URL, not the trail: on a cold deep link into an empty
+                      folder the trail is still being fetched, and keying off it showed the
+                      workspace-level "no files at all" copy for a folder that simply has none. */}
                   {filtersActive
                     ? t('noMatches')
-                    : folderTrail.length > 0
+                    : urlFolder
                       ? t('emptyFolder')
                       : t('empty')}
                 </p>
-                {!filtersActive && folderTrail.length === 0 && (
+                {!filtersActive && !urlFolder && (
                   <>
                     <p className="text-xs mt-1 text-theme-muted">{t('emptyHint')}</p>
                     {canMutate && (
@@ -833,11 +1038,15 @@ export function FileBrowser() {
                     last activity), then files grouped into collapsible per-day sections -
                     the SAME body the side-panel explorer + project Files tab render. The
                     tiles stay dnd-kit draggable/droppable inside this DndContext, so the
-                    drag-to-move behaviour is unchanged. */}
+                    drag-to-move behaviour is unchanged.
+                    groupByDay only while sorting by date: the per-day sections ARE a date
+                    ordering, so keeping them under a name/size/type sort would chop that
+                    order into date buckets and show neither. */}
                 <FilesExplorerBody
                   variant="grid"
                   entries={entries}
                   enableFolders
+                  groupByDay={sort === 'date'}
                   tFiles={t}
                   onOpenFolder={enterFolder}
                   onOpenFile={setDetailEntry}
@@ -914,7 +1123,7 @@ export function FileBrowser() {
                           </td>
                           <td className="px-3 py-2 hidden sm:table-cell">
                             {entry.sourceType && (
-                              <span className={`text-[10px] leading-tight px-1.5 py-0.5 rounded-full font-medium ${STORAGE_SOURCE_STYLES[entry.sourceType] ?? 'bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-400'}`}>
+                              <span className={`text-[10px] leading-tight px-1.5 py-0.5 rounded-md font-medium ${STORAGE_SOURCE_STYLES[entry.sourceType] ?? 'bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-400'}`}>
                                 {STORAGE_SOURCE_LABELS[entry.sourceType] ?? entry.sourceType}
                               </span>
                             )}
@@ -981,6 +1190,20 @@ export function FileBrowser() {
           e.target.value = '';
         }}
       />
+
+      {/* Mounted only while open: the modal reads its translations at the top
+          of its body, before it can decide it is closed. */}
+      {generationOpen && (
+        <React.Suspense fallback={null}>
+          <CreateGenerationModal
+            isOpen
+            onClose={() => setGenerationOpen(false)}
+            // The asset lands in this workspace, so the list it landed in
+            // refreshes rather than making the reader wonder where it went.
+            onGenerated={() => refresh()}
+          />
+        </React.Suspense>
+      )}
 
       <ToastContainer toasts={toasts} onRemoveToast={removeToast} />
     </div>

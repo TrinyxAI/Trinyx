@@ -5,6 +5,7 @@ import { useTranslations } from 'next-intl';
 import { Panel, type Node, type Edge } from 'reactflow';
 import { X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import { canvasChromeSurfaceClass } from '@/components/ui/canvas-chrome';
 import {
   Select,
   SelectTrigger,
@@ -71,15 +72,17 @@ export function CanvasSettingsPanel({
 
   return (
     <Panel position="top-right" className="m-4 relative z-[200]">
-      <div className="w-72 rounded-[32px] bg-white/80 dark:bg-gray-800/80 backdrop-blur overflow-hidden">
+      {/* A floating chrome surface like the toolbar it opens from, not a
+          rounded-[32px] capsule: one radius step above the controls it holds. */}
+      <div className={`w-72 overflow-hidden ${canvasChromeSurfaceClass}`}>
         {/* Header */}
-        <div className="flex items-center justify-between px-5 pt-5 pb-3">
-          <span className="text-sm font-semibold text-slate-900 dark:text-slate-100">{t('settings')}</span>
+        <div className="flex items-center justify-between px-5 pt-4 pb-3">
+          <span className="text-sm font-semibold text-[var(--text-primary)]">{t('settings')}</span>
           <Button
             onClick={onClose}
             variant="ghost"
             size="icon"
-            className="h-8 w-8 p-0 rounded-full shadow-none border-0 focus-visible:ring-2 focus-visible:ring-theme-tertiary"
+            className="h-7 w-7 flex-shrink-0"
             title={t('closeSettings')}
           >
             <X className="h-4 w-4" />
@@ -89,7 +92,7 @@ export function CanvasSettingsPanel({
         <div className="px-5 pb-5 space-y-4">
           {/* Connection Type Section */}
           <div className="space-y-3">
-            <span className="text-sm font-medium text-slate-700 dark:text-slate-300 mb-1 block">
+            <span className="text-sm font-medium text-[var(--text-secondary)] mb-1 block">
               {t('connectionStyle')}
             </span>
             {onReactFlowConnectionTypeChange && (
@@ -107,7 +110,7 @@ export function CanvasSettingsPanel({
               (its layout is frozen). */}
           {!isPreviewOnly && (
             <div className="space-y-3">
-              <span className="text-sm font-medium text-slate-700 dark:text-slate-300 mb-1 block">
+              <span className="text-sm font-medium text-[var(--text-secondary)] mb-1 block">
                 {t('layoutDirection')}
               </span>
               <Select value={direction} onValueChange={(v) => changeDirection(v as WorkflowLayoutDirection)}>
@@ -132,7 +135,7 @@ export function CanvasSettingsPanel({
             <>
               <div className="border-b border-gray-200/50 dark:border-gray-700/50" />
               <div className="space-y-3">
-                <span className="text-sm font-medium text-slate-700 dark:text-slate-300 mb-1 block">
+                <span className="text-sm font-medium text-[var(--text-secondary)] mb-1 block">
                   {t('developerTools')}
                 </span>
                 <WorkflowPlanGenerator

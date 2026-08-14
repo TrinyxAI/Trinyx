@@ -21,6 +21,7 @@ import {
 import { OPEN_RUN_PANEL_EVENT, type OpenRunPanelDetail } from '@/components/workflow/run-panel/runPanelBus';
 import { useInterfacePaginationStore } from '@/lib/stores/interface-pagination-store';
 import { normalizeLabel } from '@/app/workflows/builder/utils/labelNormalizer';
+import { isNavigateRef, navigateTargetLabel } from '@/app/workflows/builder/utils/interfaceActionRefs';
 import { PublicationInfoPanel } from '@/components/marketplace/PublicationInfoPanel';
 import { PublisherAvatar } from '@/components/marketplace/PublisherAvatar';
 import { useOrgScopedReset } from '@/lib/hooks/useOrgScopedReset';
@@ -371,9 +372,8 @@ export function ApplicationDetailView({ workflowId, runId, title, publisherName,
     triggerRef: string,
     data: Record<string, unknown>
   ) => {
-    if (triggerRef.endsWith(':navigate')) {
-      const parts = triggerRef.split(':');
-      const targetLabel = parts.length >= 3 ? parts.slice(1, -1).join(':') : null;
+    if (isNavigateRef(triggerRef)) {
+      const targetLabel = navigateTargetLabel(triggerRef);
       if (targetLabel) {
         const normalizedTarget = normalizeLabel(targetLabel);
         const idx = applicationConfigs.findIndex(c =>
@@ -496,6 +496,27 @@ export function ApplicationDetailView({ workflowId, runId, title, publisherName,
   // /app/u/{handle} route, even before the link status resolves.
   const effectiveRemote = remote || publication?.remote || false;
 
+  // The two template actions are gated SEPARATELY, because only one of them depends
+  // on which workflow this page is bound to.
+  //
+  // Loading the example values only fills the forms of the interface on screen, so it
+  // is useful to anyone looking at a data-less run - the publisher very much included:
+  // their own page opens just as empty as an acquirer's.
+  //
+  // Resetting the data is different. The publisher's page binds to the editable SOURCE
+  // workflow (see ApplicationLayout), while the reset endpoint always resolves the
+  // APPLICATION clone - for a publisher that is their preview clone, whose tables this
+  // page does not show. Offering it here would write to data the user cannot see while
+  // the screen stays unchanged, so it stays withheld until the endpoint can target the
+  // bound workflow.
+  const templateSource = !publicPreviewMode && publication?.id
+    ? {
+        publicationId: publication.id,
+        remote: effectiveRemote,
+        canReset: !publication?.ownedByMe,
+      }
+    : undefined;
+
   return (
     <div className="absolute inset-0 overflow-hidden flex flex-col">
       {/* Publish-update button intentionally not rendered. The publish logic
@@ -574,6 +595,7 @@ export function ApplicationDetailView({ workflowId, runId, title, publisherName,
               // Here the application IS the page: its visitors want the latest
               // result, not a pager spanning every fire the workflow ever had.
               openOnLatestEpoch
+              templateSource={templateSource}
             />
           );
         })()

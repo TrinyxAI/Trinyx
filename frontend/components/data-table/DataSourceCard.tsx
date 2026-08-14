@@ -161,7 +161,7 @@ export function DataSourceCard({ ds, rowCount, sampleRows, onClick, selected, on
           // Column-less table (no schema AND no rows): a clean centered table
           // icon, mirroring ChatTableView's "no data yet" state.
           <div className="h-[200px] flex items-center justify-center">
-            <div className="w-12 h-12 bg-theme-secondary rounded-full flex items-center justify-center">
+            <div className="w-12 h-12 bg-theme-secondary rounded-xl flex items-center justify-center">
               <Table className="w-6 h-6 text-theme-primary" />
             </div>
           </div>

@@ -22,7 +22,7 @@ export function CategoryTabs({
         {[...Array(5)].map((_, i) => (
           <div
             key={i}
-            className="h-8 w-24 bg-theme-secondary rounded-full animate-pulse"
+            className="h-8 w-24 bg-theme-secondary rounded-2xl animate-pulse"
           />
         ))}
       </div>
@@ -33,7 +33,7 @@ export function CategoryTabs({
     <div className="flex gap-2 overflow-x-auto pb-2">
       <button
         onClick={() => onSelectCategory(null)}
-        className={`px-4 py-1.5 rounded-full text-sm font-medium whitespace-nowrap transition-colors ${
+        className={`px-4 py-1.5 rounded-md text-sm font-medium whitespace-nowrap transition-colors ${
           selectedCategory === null
             ? "bg-blue-500 text-white"
             : "bg-theme-secondary text-theme-secondary hover:bg-theme-tertiary"
@@ -45,7 +45,7 @@ export function CategoryTabs({
         <button
           key={category.slug}
           onClick={() => onSelectCategory(category.slug)}
-          className={`px-4 py-1.5 rounded-full text-sm font-medium whitespace-nowrap transition-colors ${
+          className={`px-4 py-1.5 rounded-md text-sm font-medium whitespace-nowrap transition-colors ${
             selectedCategory === category.slug
               ? "bg-blue-500 text-white"
               : "bg-theme-secondary text-theme-secondary hover:bg-theme-tertiary"

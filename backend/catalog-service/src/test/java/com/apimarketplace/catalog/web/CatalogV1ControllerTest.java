@@ -19,7 +19,10 @@ import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 import java.util.Collections;
 import java.util.UUID;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.mockito.ArgumentMatchers.*;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
@@ -145,6 +148,76 @@ class CatalogV1ControllerTest {
                     .andExpect(status().isOk())
                     .andExpect(jsonPath("$.success").value(true))
                     .andExpect(jsonPath("$.toolId").value(toolId.toString()));
+        }
+
+        @Test
+        @DisplayName("the generation pricing headers reach the request object, or nothing downstream can price the call")
+        void generationHeadersReachTheRequest() throws Exception {
+            // THE BOUNDARY NOTHING WATCHED. Three separate tests prove the body
+            // cannot set these, that the sender emits them, and that the gateway
+            // strips them from outside. None proved the RECEIVER reads them.
+            // Disabling the model binding here left 72 tests green and BUILD
+            // SUCCESS, while downstream the per-model price row is never
+            // selected: on an endpoint with per-model rows only, every
+            // generation is refused "no price published"; on one that also
+            // carries an endpoint-wide row, it is charged that rate instead of
+            // the model's.
+            UUID toolId = UUID.randomUUID();
+            when(catalogV1Service.executeTool(eq(toolId.toString()), any(ToolExecutionRequest.class),
+                    any(), any(), any()))
+                    .thenReturn(ToolExecutionResponse.builder().success(true).build());
+
+            mockMvc.perform(post("/catalog/v1/tools/{toolId}/execute", toolId)
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .header("X-Lc-Generation-Model", "seedance-2.0")
+                            .header("X-Lc-Generation-Quantity", "10")
+                            .header("X-Lc-Generation-Unit", "second")
+                            .header("X-Lc-Billing-Scope-Kind", "RUN")
+                            .header("X-Lc-Billing-Scope-Id", "run-1")
+                            .header("X-Lc-Billing-Step-Id", "step-1")
+                            .content("{}"))
+                    .andExpect(status().isOk());
+
+            org.mockito.ArgumentCaptor<ToolExecutionRequest> captor =
+                    org.mockito.ArgumentCaptor.forClass(ToolExecutionRequest.class);
+            verify(catalogV1Service).executeTool(eq(toolId.toString()), captor.capture(),
+                    any(), any(), any());
+            ToolExecutionRequest sent = captor.getValue();
+
+            assertEquals("seedance-2.0", sent.getGenerationModelId(),
+                    "which published row prices this call");
+            assertEquals(0, new java.math.BigDecimal("10").compareTo(sent.getGenerationQuantity()),
+                    "a ten second clip must not arrive as one");
+            assertEquals("second", sent.getGenerationQuantityUnit(),
+                    "without the unit a per-image rate can multiply a count of seconds");
+            assertEquals("RUN", sent.getBillingScopeKind());
+            assertEquals("run-1", sent.getBillingScopeId());
+            assertEquals("step-1", sent.getBillingStepId());
+        }
+
+        @Test
+        @DisplayName("an ordinary call carries no generation context, so nothing is priced as a generation")
+        void anOrdinaryCallCarriesNoGenerationContext() throws Exception {
+            // Hard-coding the three values would satisfy the test above while
+            // pricing every ordinary endpoint as a generation.
+            UUID toolId = UUID.randomUUID();
+            when(catalogV1Service.executeTool(eq(toolId.toString()), any(ToolExecutionRequest.class),
+                    any(), any(), any()))
+                    .thenReturn(ToolExecutionResponse.builder().success(true).build());
+
+            mockMvc.perform(post("/catalog/v1/tools/{toolId}/execute", toolId)
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content("{}"))
+                    .andExpect(status().isOk());
+
+            org.mockito.ArgumentCaptor<ToolExecutionRequest> captor =
+                    org.mockito.ArgumentCaptor.forClass(ToolExecutionRequest.class);
+            verify(catalogV1Service).executeTool(eq(toolId.toString()), captor.capture(),
+                    any(), any(), any());
+
+            assertNull(captor.getValue().getGenerationModelId());
+            assertNull(captor.getValue().getGenerationQuantity());
+            assertNull(captor.getValue().getGenerationQuantityUnit());
         }
 
         @Test

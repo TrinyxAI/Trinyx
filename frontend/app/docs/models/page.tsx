@@ -180,11 +180,10 @@ export default function ModelsPage() {
           head={['Field', 'Detail']}
           rows={[
             ['Tier', <><code>top</code>, <code>high</code>, <code>mid</code>, <code>budget</code>; a new or custom model defaults to <code>mid</code>.</>],
-            ['Ranking', 'set by drag-and-drop; the chat tab writes the global ranking, other category tabs write a per-category ranking.'],
+            ['Ranking', 'set by drag-and-drop; the chat tab writes the global ranking, the browser agent tab writes a per-category ranking.'],
             [
               'Pricing',
-              <>USD per 1M tokens, input and output. Image-generation rows instead show USD per image
-              (the output price field is unused for those). The credits columns shown alongside are
+              <>USD per 1M tokens, input and output. The credits columns shown alongside are
               derived from price and markup and aren&apos;t directly editable.</>,
             ],
             [
@@ -222,14 +221,19 @@ export default function ModelsPage() {
           rows={[
             ['chat', 'chat-capable models (mode unset or chat)', 'the legacy global list; this is also what other parts of the picker read.'],
             ['browser_agent', 'chat-capable models', 'a per-category sidecar, independent of chat.'],
-            ['image_generation', 'image-mode models only', 'a per-category sidecar, independent of chat.'],
           ]}
         />
         <p>
-          Bridge (CLI) providers are hidden from the <code>browser_agent</code> and{' '}
-          <code>image_generation</code> tabs, since re-ranking or disabling them there would have no
-          runtime effect; they still appear on the <code>chat</code> tab because full CLI sessions do
-          serve chat.
+          Bridge (CLI) providers are hidden from the <code>browser_agent</code> tab, since re-ranking
+          or disabling them there would have no runtime effect; they still appear on the{' '}
+          <code>chat</code> tab because full CLI sessions do serve chat.
+        </p>
+        <p>
+          Generation models (image, video, sound, speech, music) are not listed here. A ranking has
+          nothing to say about them: the caller names its model, a video model is no substitute for a
+          voice one, and the price is per image or per second rather than per token. What decides
+          whether a generation model is available, and at what price, is the platform credential it
+          is published against, under Settings &gt; Platform Credentials.
         </p>
 
         <h2>Model execution links (cloud only)</h2>

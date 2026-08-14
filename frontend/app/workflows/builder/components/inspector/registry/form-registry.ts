@@ -34,6 +34,7 @@ import {
   DownloadFileFormAdapter,
   PublicLinkFormAdapter,
   MediaFormAdapter,
+  GenerateFormAdapter,
   HttpRequestFormAdapter,
   DataInputFormAdapter,
   ResponseFormAdapter,
@@ -234,6 +235,11 @@ export const formRegistry: Record<InspectorNodeType, FormDefinition> = {
   'media': {
     component: MediaFormAdapter,
     displayName: 'Media',
+    hasExpressions: true,
+  },
+  'generate': {
+    component: GenerateFormAdapter,
+    displayName: 'Generate',
     hasExpressions: true,
   },
   'http_request': {

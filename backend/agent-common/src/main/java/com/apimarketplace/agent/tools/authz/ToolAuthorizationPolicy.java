@@ -64,7 +64,11 @@ public final class ToolAuthorizationPolicy {
             // If agents are observed disarming workflows users wanted running, the fix is
             // to gate 'cancel' specifically or make 'graceful' the default - not to gate
             // the whole action, which would take the safety valve away.
-            "workflow",    Set.of("execute", "continue_interface", "resolve_approval"),
+            // restart_from_node belongs with execute rather than with stop_run: it STARTS work.
+            // On an automatic run it re-executes the named node and everything downstream
+            // unattended, with the same credit spend and the same external side effects as a
+            // fresh fire - only the part upstream of the node is spared.
+            "workflow",    Set.of("execute", "continue_interface", "resolve_approval", "restart_from_node", "run_node"),
             "agent",       Set.of("execute"),
             "catalog",     Set.of("execute", "call")   // "call" is an alias of "execute"
     );

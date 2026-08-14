@@ -5,7 +5,7 @@ import { useTranslations } from 'next-intl';
 import { ChevronLeft, ChevronRight } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
-import { ApplicationTabContent, type ApplicationConfig } from './ApplicationTabContent';
+import { ApplicationTabContent, type ApplicationConfig, type ApplicationTemplateSource } from './ApplicationTabContent';
 import { useRun } from '@/contexts/WorkflowRunContext';
 import { useWorkflowMode } from '@/contexts/WorkflowModeContext';
 import { useInterfacePaginationStore } from '@/lib/stores/interface-pagination-store';
@@ -35,6 +35,13 @@ interface ApplicationCarouselProps {
    * shows the same cumulative view as the canvas and the Run panel.
    */
   openOnLatestEpoch?: boolean;
+  /**
+   * Publication this application was installed from - enables the toolbar's
+   * template actions (load the example inputs / reset the data). Forwarded
+   * verbatim to {@link ApplicationTabContent}; omit it wherever those actions
+   * do not apply (preview, publisher's own view).
+   */
+  templateSource?: ApplicationTemplateSource;
 }
 
 export function ApplicationCarousel({
@@ -46,6 +53,7 @@ export function ApplicationCarousel({
   onTargetConsumed,
   previewMode = false,
   openOnLatestEpoch = false,
+  templateSource,
 }: ApplicationCarouselProps) {
   const t = useTranslations('chat.carousel');
   const { isRunMode } = useWorkflowMode();
@@ -170,7 +178,7 @@ export function ApplicationCarousel({
         disabled={currentIndex === 0}
         variant="ghost"
         size="sm"
-        className="h-8 w-8 p-0 rounded-full shadow-none border-0 focus-visible:ring-2 focus-visible:ring-theme-tertiary"
+        className="h-8 w-8 p-0 rounded-xl shadow-none border-0 focus-visible:ring-2 focus-visible:ring-theme-tertiary"
         title={t('previous')}
       >
         <ChevronLeft className="h-4 w-4" />
@@ -187,7 +195,7 @@ export function ApplicationCarousel({
               onClick={() => setCarouselIndex(i)}
               title={config.label}
               className={cn(
-                'rounded-full transition-all duration-200',
+                'rounded-md transition-all duration-200',
                 i === currentIndex ? 'w-2 h-2' : 'w-1.5 h-1.5',
                 i === currentIndex
                   ? status === 'active'
@@ -212,7 +220,7 @@ export function ApplicationCarousel({
         disabled={currentIndex >= configs.length - 1}
         variant="ghost"
         size="sm"
-        className="h-8 w-8 p-0 rounded-full shadow-none border-0 focus-visible:ring-2 focus-visible:ring-theme-tertiary"
+        className="h-8 w-8 p-0 rounded-xl shadow-none border-0 focus-visible:ring-2 focus-visible:ring-theme-tertiary"
         title={t('next')}
       >
         <ChevronRight className="h-4 w-4" />
@@ -245,6 +253,7 @@ export function ApplicationCarousel({
             onViewingEpochChange={setViewingEpoch}
             openOnLatestEpoch={openOnLatestEpoch}
             previewMode={previewMode}
+            templateSource={templateSource}
           />
         </div>
       )}

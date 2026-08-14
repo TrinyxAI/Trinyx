@@ -43,7 +43,7 @@ export function BulkDeleteModal({
         onClick={(e) => e.stopPropagation()}
       >
         <div className="text-center mb-6">
-          <div className="w-16 h-16 bg-red-100 dark:bg-red-950/40 rounded-full flex items-center justify-center mx-auto mb-4">
+          <div className="w-16 h-16 bg-red-100 dark:bg-red-950/40 rounded-2xl flex items-center justify-center mx-auto mb-4">
             {icon ?? <Trash2 className="w-8 h-8 text-red-500" />}
           </div>
           <h3 className="text-2xl font-semibold text-theme-primary">{title}</h3>

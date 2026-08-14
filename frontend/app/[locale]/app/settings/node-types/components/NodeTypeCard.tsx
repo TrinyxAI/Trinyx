@@ -91,13 +91,13 @@ export function NodeTypeCard({ nodeType, onToggle, toggling }: NodeTypeCardProps
             <h3 className="text-sm font-medium text-theme-primary truncate">
               {nodeType.label}
             </h3>
-            <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${
+            <span className={`inline-flex items-center px-2 py-0.5 rounded-md text-xs font-medium ${
               CATEGORY_BADGE_STYLES[categoryBucket] || "bg-gray-100 text-gray-700 dark:bg-gray-800 dark:text-gray-300"
             }`}>
               {t(NODE_CATEGORY_LABEL_KEY[categoryBucket])}
             </span>
             {nodeType.variablePrefix && (
-              <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-mono bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-400">
+              <span className="inline-flex items-center px-2 py-0.5 rounded-md text-xs font-mono bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-400">
                 {nodeType.variablePrefix}:
               </span>
             )}

@@ -37,12 +37,12 @@ describe('useChatConfig - per-(user, workspace) default seeding', () => {
     expect(second).toMatchObject({ webSearch: false }); // default still applies to the next one
   });
 
-  it('seedsImageGenerationDefault (regression: it was editable/persisted but not seeded)', () => {
-    setUserDefaultChatConfigCache({ imageGeneration: { enabled: true } });
+  it('seedsGenerationDefault (regression: it was editable/persisted but not seeded)', () => {
+    setUserDefaultChatConfigCache({ generation: { enabled: true } });
 
     const body = consumeDraftChatConfig();
 
-    expect(body).toMatchObject({ imageGeneration: { enabled: true } });
+    expect(body).toMatchObject({ generation: { enabled: true } });
   });
 
   it('returnsUndefinedWhenNoDefaultAndNoDraft (so the create body omits chatConfig)', () => {

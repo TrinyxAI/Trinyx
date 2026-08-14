@@ -24,6 +24,18 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.*;
 
+/**
+ * Routing-level tests for the internal renewal scheduler: which subscriptions it picks up,
+ * what it delegates, and - critically - what it must NOT do itself.
+ *
+ * <p>These tests mock {@link CreditAttributionService}, so they can say nothing about whether
+ * the credits actually persist. That is deliberate and it is also why this file alone was
+ * blind to the production lost update: the defect lived in the transaction seam between the
+ * scheduler and the real attribution service. The persistence contract is pinned separately
+ * by {@code InternalRenewalCreditPersistenceTest} against a real database. What this file adds
+ * is the structural guard that reintroducing the defect breaks a test here too: the scheduler
+ * performs NO write of its own.
+ */
 @ExtendWith(MockitoExtension.class)
 @DisplayName("FreeSubscriptionRenewalScheduler Tests")
 class FreeSubscriptionRenewalSchedulerTest {
@@ -71,8 +83,34 @@ class FreeSubscriptionRenewalSchedulerTest {
     }
 
     @Test
-    @DisplayName("should renew expired FREE subscription: reset credits + roll period forward")
+    @DisplayName("should renew expired FREE subscription: delegate with the new period start")
     void shouldRenewExpiredFreeSubscription() {
+        LocalDateTime expiredEnd = LocalDateTime.of(2026, 1, 15, 0, 0);
+        LocalDateTime before = LocalDateTime.now();
+        Subscription sub = createExpiredFreeSubscription(expiredEnd);
+
+        when(subscriptionRepository.findExpiredInternalSubscriptions(any(LocalDateTime.class)))
+                .thenReturn(List.of(sub));
+
+        scheduler.renewExpiredInternalSubscriptions();
+
+        // The period start is handed to the attribution service, which advances the row and
+        // derives the renewal sourceId from it inside ONE transaction.
+        ArgumentCaptor<LocalDateTime> periodStart = ArgumentCaptor.forClass(LocalDateTime.class);
+        verify(creditAttributionService).attributeOnRenewal(eq(USER_ID), eq(sub), periodStart.capture());
+        assertThat(periodStart.getValue()).isNotNull().isAfterOrEqualTo(before);
+
+        // The expiry cutoff and the new period start must be the SAME instant: the guard that
+        // skips an already-renewed row compares currentPeriodEnd against this value, so a
+        // cutoff read later than the period start would make the comparison meaningless.
+        ArgumentCaptor<LocalDateTime> cutoff = ArgumentCaptor.forClass(LocalDateTime.class);
+        verify(subscriptionRepository).findExpiredInternalSubscriptions(cutoff.capture());
+        assertThat(periodStart.getValue()).isEqualTo(cutoff.getValue());
+    }
+
+    @Test
+    @DisplayName("must never write the subscription row itself (lost-update guard)")
+    void mustNotWriteTheSubscriptionItself() {
         LocalDateTime expiredEnd = LocalDateTime.of(2026, 1, 15, 0, 0);
         Subscription sub = createExpiredFreeSubscription(expiredEnd);
 
@@ -81,14 +119,69 @@ class FreeSubscriptionRenewalSchedulerTest {
 
         scheduler.renewExpiredInternalSubscriptions();
 
-        // Should call attributeOnRenewal with the subscription (sourceId derived internally)
-        verify(creditAttributionService).attributeOnRenewal(eq(USER_ID), eq(sub));
+        // `sub` is detached (a @Scheduled thread has no persistence context) and the grant
+        // lands on a re-resolved managed instance. ANY save from this loop merges the stale
+        // pre-grant copy back over the fresh balance - which is exactly what production did.
+        verify(subscriptionRepository, never()).save(any(Subscription.class));
+        verify(subscriptionRepository, never()).saveAll(any());
+        // Paired with a positive assertion so the test cannot pass by the loop doing nothing.
+        verify(creditAttributionService).attributeOnRenewal(eq(USER_ID), eq(sub), any(LocalDateTime.class));
+    }
 
-        // Should save with rolled-forward period
-        ArgumentCaptor<Subscription> captor = ArgumentCaptor.forClass(Subscription.class);
-        verify(subscriptionRepository).save(captor.capture());
-        Subscription saved = captor.getValue();
-        assertThat(saved.getCurrentPeriodEnd()).isAfter(saved.getCurrentPeriodStart());
+    @Test
+    @DisplayName("announces a renewal only when one actually happened")
+    void logsTheRealOutcome() {
+        Subscription sub = createExpiredFreeSubscription(LocalDateTime.of(2026, 1, 15, 0, 0));
+        when(subscriptionRepository.findExpiredInternalSubscriptions(any(LocalDateTime.class)))
+                .thenReturn(List.of(sub));
+        when(creditAttributionService.attributeOnRenewal(eq(USER_ID), eq(sub), any(LocalDateTime.class)))
+                .thenReturn(CreditAttributionService.RenewalOutcome.ALREADY_RENEWED);
+
+        ch.qos.logback.classic.Logger logger =
+                (ch.qos.logback.classic.Logger) org.slf4j.LoggerFactory.getLogger(FreeSubscriptionRenewalScheduler.class);
+        ch.qos.logback.core.read.ListAppender<ch.qos.logback.classic.spi.ILoggingEvent> appender =
+                new ch.qos.logback.core.read.ListAppender<>();
+        appender.start();
+        logger.addAppender(appender);
+        try {
+            scheduler.renewExpiredInternalSubscriptions();
+        } finally {
+            logger.detachAppender(appender);
+        }
+
+        // The pre-fix scheduler said "renewed" unconditionally. That is precisely why a renewal
+        // granting nothing stayed invisible: the logs claimed success on the broken path.
+        assertThat(appender.list).noneMatch(e -> e.getFormattedMessage().matches(".*id=\\d+ renewed for.*"));
+        assertThat(appender.list).anyMatch(e -> e.getFormattedMessage().contains("already renewed by another actor"));
+        // Expected interleaving, not an incident: it must not page.
+        assertThat(appender.list)
+                .filteredOn(e -> e.getFormattedMessage().contains("already renewed by another actor"))
+                .allMatch(e -> e.getLevel() == ch.qos.logback.classic.Level.INFO);
+    }
+
+    @Test
+    @DisplayName("announces the renewal when one really happened")
+    void logsSuccessOnlyOnRenewed() {
+        Subscription sub = createExpiredFreeSubscription(LocalDateTime.of(2026, 1, 15, 0, 0));
+        when(subscriptionRepository.findExpiredInternalSubscriptions(any(LocalDateTime.class)))
+                .thenReturn(List.of(sub));
+        when(creditAttributionService.attributeOnRenewal(eq(USER_ID), eq(sub), any(LocalDateTime.class)))
+                .thenReturn(CreditAttributionService.RenewalOutcome.RENEWED);
+
+        ch.qos.logback.classic.Logger logger =
+                (ch.qos.logback.classic.Logger) org.slf4j.LoggerFactory.getLogger(FreeSubscriptionRenewalScheduler.class);
+        ch.qos.logback.core.read.ListAppender<ch.qos.logback.classic.spi.ILoggingEvent> appender =
+                new ch.qos.logback.core.read.ListAppender<>();
+        appender.start();
+        logger.addAppender(appender);
+        try {
+            scheduler.renewExpiredInternalSubscriptions();
+        } finally {
+            logger.detachAppender(appender);
+        }
+
+        assertThat(appender.list).anyMatch(e -> e.getFormattedMessage().matches(".*id=\\d+ renewed for.*"));
+        assertThat(appender.list).noneMatch(e -> e.getFormattedMessage().contains("NOT renewed"));
     }
 
     @Test
@@ -99,7 +192,8 @@ class FreeSubscriptionRenewalSchedulerTest {
 
         scheduler.renewExpiredInternalSubscriptions();
 
-        verify(creditAttributionService, never()).attributeOnRenewal(anyLong(), any(Subscription.class));
+        verify(creditAttributionService, never())
+                .attributeOnRenewal(anyLong(), any(Subscription.class), any(LocalDateTime.class));
         verify(subscriptionRepository, never()).save(any(Subscription.class));
     }
 
@@ -118,18 +212,14 @@ class FreeSubscriptionRenewalSchedulerTest {
         when(subscriptionRepository.findExpiredInternalSubscriptions(any(LocalDateTime.class)))
                 .thenReturn(List.of(sub1, sub2));
 
-        // First subscription throws, second should still be processed
+        // First subscription throws, second should still be processed. Per-row isolation is
+        // the reason the loop is not wrapped in a single transaction.
         doThrow(new RuntimeException("DB error"))
-                .when(creditAttributionService).attributeOnRenewal(eq(USER_ID), eq(sub1));
+                .when(creditAttributionService).attributeOnRenewal(eq(USER_ID), eq(sub1), any(LocalDateTime.class));
 
         scheduler.renewExpiredInternalSubscriptions();
 
-        // sub2 should still be renewed
-        verify(creditAttributionService).attributeOnRenewal(eq(USER_ID), eq(sub2));
-        verify(subscriptionRepository).save(sub2);
-
-        // sub1 should NOT be saved (failed before save)
-        verify(subscriptionRepository, never()).save(sub1);
+        verify(creditAttributionService).attributeOnRenewal(eq(USER_ID), eq(sub2), any(LocalDateTime.class));
     }
 
     @Test
@@ -154,8 +244,30 @@ class FreeSubscriptionRenewalSchedulerTest {
 
         scheduler.renewExpiredInternalSubscriptions();
 
-        verify(creditAttributionService, times(2)).attributeOnRenewal(anyLong(), any(Subscription.class));
-        verify(subscriptionRepository, times(2)).save(any(Subscription.class));
+        verify(creditAttributionService, times(2))
+                .attributeOnRenewal(anyLong(), any(Subscription.class), any(LocalDateTime.class));
+    }
+
+    @Test
+    @DisplayName("all subscriptions in one pass share the same new period start")
+    void allSubscriptionsInAPassShareTheSamePeriodStart() {
+        Subscription sub1 = createExpiredFreeSubscription(LocalDateTime.of(2026, 1, 10, 0, 0));
+        sub1.setId(201L);
+        Subscription sub2 = createExpiredFreeSubscription(LocalDateTime.of(2026, 1, 20, 0, 0));
+        sub2.setId(202L);
+
+        when(subscriptionRepository.findExpiredInternalSubscriptions(any(LocalDateTime.class)))
+                .thenReturn(List.of(sub1, sub2));
+
+        scheduler.renewExpiredInternalSubscriptions();
+
+        ArgumentCaptor<LocalDateTime> starts = ArgumentCaptor.forClass(LocalDateTime.class);
+        verify(creditAttributionService, times(2))
+                .attributeOnRenewal(anyLong(), any(Subscription.class), starts.capture());
+        // One `now` captured once, outside the loop: the renewal instant is the pass, not the row.
+        List<LocalDateTime> captured = starts.getAllValues();
+        assertThat(captured).hasSize(2);
+        assertThat(captured.get(1)).isEqualTo(captured.get(0));
     }
 
     @Test
@@ -191,29 +303,7 @@ class FreeSubscriptionRenewalSchedulerTest {
         // Act
         scheduler.renewExpiredInternalSubscriptions();
 
-        // Assert - the comp PRO row is renewed exactly like a FREE row (period rolled, credits re-granted).
-        verify(creditAttributionService).attributeOnRenewal(eq(USER_ID), eq(compPro));
-        verify(subscriptionRepository).save(compPro);
-        assertThat(compPro.getCurrentPeriodEnd()).isAfter(compPro.getCurrentPeriodStart());
-    }
-
-    @Test
-    @DisplayName("period should roll forward by 1 month after renewal")
-    void shouldRollPeriodForwardByOneMonth() {
-        LocalDateTime expiredEnd = LocalDateTime.of(2026, 1, 15, 0, 0);
-        Subscription sub = createExpiredFreeSubscription(expiredEnd);
-
-        when(subscriptionRepository.findExpiredInternalSubscriptions(any(LocalDateTime.class)))
-                .thenReturn(List.of(sub));
-
-        scheduler.renewExpiredInternalSubscriptions();
-
-        // After renewal, currentPeriodStart = now, currentPeriodEnd = now + 1 month
-        assertThat(sub.getCurrentPeriodStart()).isNotNull();
-        assertThat(sub.getCurrentPeriodEnd()).isNotNull();
-        assertThat(sub.getCurrentPeriodEnd()).isAfter(sub.getCurrentPeriodStart());
-        // The period should be approximately 1 month apart
-        assertThat(sub.getCurrentPeriodEnd().getMonthValue())
-                .isNotEqualTo(sub.getCurrentPeriodStart().getMonthValue());
+        // Assert - the comp PRO row is renewed exactly like a FREE row.
+        verify(creditAttributionService).attributeOnRenewal(eq(USER_ID), eq(compPro), any(LocalDateTime.class));
     }
 }

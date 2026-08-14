@@ -69,7 +69,7 @@ export default function ToolGroupDisplay({ groups, selectedTools, onToolSelect, 
                 <div className="flex-1 text-left">
                   <div className="flex items-center gap-2">
                     <span className="font-medium text-theme-primary">{group.serverName}</span>
-                    <span className="text-xs px-2 py-1 rounded-full bg-theme-primary/10 text-theme-secondary border border-theme-primary/20">
+                    <span className="text-xs px-2 py-1 rounded-md bg-theme-primary/10 text-theme-secondary border border-theme-primary/20">
                       {selectedInGroup}/{group.tools.length}
                     </span>
                   </div>
@@ -107,7 +107,7 @@ export default function ToolGroupDisplay({ groups, selectedTools, onToolSelect, 
                         <div className="flex-1">
                           <h5 className="font-medium text-sm text-theme-primary">{tool.name}</h5>
                           <p className="text-xs text-theme-secondary mt-1">{tool.description}</p>
-                          <span className="text-xs px-2 py-1 rounded-full mt-1 inline-block text-theme-secondary bg-theme-primary/10 border border-theme-primary/20">
+                          <span className="text-xs px-2 py-1 rounded-md mt-1 inline-block text-theme-secondary bg-theme-primary/10 border border-theme-primary/20">
                             {tool.category}
                           </span>
                         </div>

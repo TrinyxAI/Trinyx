@@ -19,6 +19,7 @@ import { orchestratorApi } from '@/lib/api';
 import { useTranslations } from 'next-intl';
 import { IS_CE } from '@/lib/edition';
 import LoadingSpinner from '@/components/LoadingSpinner';
+import { ModalStepIndicator } from '@/components/ui/ModalStepIndicator';
 
 // ============== Types ==============
 
@@ -48,50 +49,16 @@ interface StepIndicatorProps {
   labels: [string, string];
 }
 
-const StepIndicator: React.FC<StepIndicatorProps> = ({ currentStep, onStepClick, labels }) => {
-  const steps = [
-    { number: 1, icon: TableIcon, label: labels[0] },
-    { number: 2, icon: Columns3, label: labels[1] },
-  ];
-
-  return (
-    <div className="flex items-center justify-center gap-2 mb-6">
-      {steps.map((step, index) => {
-        const isActive = step.number === currentStep;
-        const isCompleted = step.number < currentStep;
-        const Icon = step.icon;
-
-        return (
-          <React.Fragment key={step.number}>
-            <button
-              type="button"
-              onClick={() => onStepClick(step.number)}
-              className={`flex items-center gap-2 px-3 py-1.5 rounded-full transition-all ${
-                isActive
-                  ? 'bg-[var(--accent-primary)] text-[var(--accent-foreground)]'
-                  : isCompleted
-                  ? 'bg-emerald-500/20 text-emerald-600 dark:text-emerald-400 cursor-pointer hover:bg-emerald-500/30'
-                  : 'bg-theme-tertiary text-theme-secondary cursor-pointer hover:bg-theme-secondary'
-              }`}
-            >
-              {isCompleted ? (
-                <Check className="h-4 w-4" />
-              ) : (
-                <Icon className="h-4 w-4" />
-              )}
-              <span className="text-sm font-medium hidden sm:inline">{step.label}</span>
-            </button>
-            {index < TOTAL_STEPS - 1 && (
-              <div className={`w-8 h-0.5 rounded-full ${
-                step.number < currentStep ? 'bg-emerald-500' : 'bg-theme-tertiary'
-              }`} />
-            )}
-          </React.Fragment>
-        );
-      })}
-    </div>
-  );
-};
+const StepIndicator: React.FC<StepIndicatorProps> = ({ currentStep, onStepClick, labels }) => (
+  <ModalStepIndicator
+    currentStep={currentStep}
+    onStepClick={onStepClick}
+    steps={[
+      { number: 1, icon: TableIcon, label: labels[0] },
+      { number: 2, icon: Columns3, label: labels[1] },
+    ]}
+  />
+);
 
 // ============== Column Config Inline ==============
 
@@ -174,7 +141,7 @@ const ColumnConfigInline: React.FC<ColumnConfigInlineProps> = ({ column, onChang
         {options.length > 0 && (
           <div className="flex flex-wrap gap-1 mb-2">
             {options.map(opt => (
-              <span key={opt.value} className="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs text-white font-medium" style={{ backgroundColor: opt.color || '#0ea5e9' }}>
+              <span key={opt.value} className="inline-flex items-center gap-1 rounded-md px-2 py-0.5 text-xs text-white font-medium" style={{ backgroundColor: opt.color || '#0ea5e9' }}>
                 {opt.label}
                 <button type="button" onClick={() => onChange({ ...config, options: options.filter(o => o.value !== opt.value) })} className="hover:opacity-70"><X className="h-2.5 w-2.5" /></button>
               </span>
@@ -309,7 +276,7 @@ const InlineColumnAdder: React.FC<InlineColumnAdderProps> = ({ onAdd, onCancel, 
                       }`}
                     >
                       {isCeOnly && (
-                        <span className="absolute top-1.5 right-1.5 rounded-full bg-theme-secondary px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-theme-muted">
+                        <span className="absolute top-1.5 right-1.5 rounded-md bg-theme-secondary px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-theme-muted">
                           {ct('ceOnlyBadge')}
                         </span>
                       )}
@@ -319,7 +286,7 @@ const InlineColumnAdder: React.FC<InlineColumnAdderProps> = ({ onAdd, onCancel, 
                         </div>
                       )}
                       <div className="flex items-center gap-2 mb-1.5">
-                        <span className={`rounded-full p-1.5 ${
+                        <span className={`rounded-md p-1.5 ${
                           isSelected && !isCeOnly
                             ? 'bg-[var(--accent-primary)]/10 text-[var(--accent-primary)]'
                             : 'bg-theme-secondary text-theme-primary'
@@ -486,7 +453,7 @@ export const CreateDataSourceModal: React.FC<CreateDataSourceModalProps> = ({
         <div className="px-8 pt-8 pb-4 flex-shrink-0">
           <div className="text-center mb-4">
             {currentStep === 1 && (
-              <div className="w-16 h-16 bg-theme-secondary rounded-full flex items-center justify-center mx-auto mb-4">
+              <div className="w-16 h-16 bg-theme-secondary rounded-2xl flex items-center justify-center mx-auto mb-4">
                 <TableIcon className="w-8 h-8 text-theme-primary" />
               </div>
             )}
@@ -555,7 +522,7 @@ export const CreateDataSourceModal: React.FC<CreateDataSourceModalProps> = ({
                       >
                         <div className="flex items-center justify-between p-3">
                           <div className="flex items-center gap-3">
-                            <span className="rounded-full p-1.5 bg-[var(--accent-primary)]/10">
+                            <span className="rounded-md p-1.5 bg-[var(--accent-primary)]/10">
                               <Icon className="h-3.5 w-3.5 text-[var(--accent-primary)]" />
                             </span>
                             <div>

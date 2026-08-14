@@ -203,7 +203,7 @@ export function ChatTableView({ dataSourceId, className = '', maxRows = 10, onDe
       {/* Active tab overlay */}
       {isTabActive && (
         <div className="absolute inset-0 z-20 bg-black/5 backdrop-blur-[3px] flex items-center justify-center rounded-[18px] cursor-pointer">
-          <div className="flex items-center gap-2 px-4 py-2 bg-white/90 dark:bg-slate-800/90 rounded-full">
+          <div className="flex items-center gap-2 px-4 py-2 bg-white/90 dark:bg-slate-800/90 rounded-md">
             <X className="w-4 h-4 text-theme-primary" />
             <span className="text-sm font-medium text-theme-primary">{t('clickToClose')}</span>
           </div>

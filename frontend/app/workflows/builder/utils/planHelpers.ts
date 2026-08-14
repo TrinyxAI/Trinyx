@@ -226,6 +226,13 @@ export function isMediaNode(node: Node<BuilderNodeData>): boolean {
 }
 
 /**
+ * Detects if a node is a Generate node.
+ */
+export function isGenerateNode(node: Node<BuilderNodeData>): boolean {
+  return nodeRegistry.isGenerateNode(node);
+}
+
+/**
  * Detects if a node is an HTTP Request node.
  */
 export function isHttpRequestNode(node: Node<BuilderNodeData>): boolean {

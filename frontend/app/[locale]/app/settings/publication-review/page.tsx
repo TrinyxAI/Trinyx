@@ -145,12 +145,12 @@ export default function PublicationReviewPage() {
       <div className="flex items-center justify-between">
         <PageHeader icon={ClipboardCheck} title={t("title")} subtitle={t("subtitle")} />
         <div className="flex items-center gap-2">
-          <div className="hidden sm:flex items-center gap-2 px-3 py-1.5 rounded-full bg-amber-500/10 text-amber-700 dark:text-amber-400 text-xs font-medium">
+          <div className="hidden sm:flex items-center gap-2 px-3 py-1.5 rounded-md bg-amber-500/10 text-amber-700 dark:text-amber-400 text-xs font-medium">
             <Shield className="w-3.5 h-3.5" />
             {t("adminOnlyBadge")}
           </div>
           {stats && stats.pendingCount > 0 && (
-            <span className="inline-flex items-center gap-1.5 text-xs font-medium px-2.5 py-1 rounded-full bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-400">
+            <span className="inline-flex items-center gap-1.5 text-xs font-medium px-2.5 py-1 rounded-md bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-400">
               {t("pendingCount", { count: stats.pendingCount })}
             </span>
           )}
@@ -164,7 +164,7 @@ export default function PublicationReviewPage() {
         </div>
       ) : publications.length === 0 ? (
         <div className="rounded-xl border border-theme p-12 flex flex-col items-center justify-center text-center">
-          <div className="w-12 h-12 bg-theme-secondary rounded-full flex items-center justify-center mb-4">
+          <div className="w-12 h-12 bg-theme-secondary rounded-xl flex items-center justify-center mb-4">
             <Inbox className="h-6 w-6 text-theme-tertiary" />
           </div>
           <h3 className="text-sm font-medium text-theme-primary mb-1">{t("noPending")}</h3>
@@ -188,7 +188,7 @@ export default function PublicationReviewPage() {
               >
                 <div className="flex items-start gap-4">
                   {/* Icon */}
-                  <div className="w-10 h-10 rounded-full bg-theme-secondary flex items-center justify-center shrink-0">
+                  <div className="w-10 h-10 rounded-xl bg-theme-secondary flex items-center justify-center shrink-0">
                     <TypeIcon className="h-5 w-5 text-theme-primary" />
                   </div>
 

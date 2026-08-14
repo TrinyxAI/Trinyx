@@ -52,6 +52,7 @@ public class CoreNodeBuilder {
         createDownloadFileNodes(nodeMap, plan);
         createPublicLinkNodes(nodeMap, plan);
         createMediaNodes(nodeMap, plan);
+        createGenerateNodes(nodeMap, plan);
         createExitNodes(nodeMap, plan);
         createEndNodes(nodeMap, plan);
         createResponseNodes(nodeMap, plan);
@@ -701,6 +702,38 @@ public class CoreNodeBuilder {
             MediaNode mediaNode = new MediaNode(mediaKey, params);
             nodeMap.put(mediaKey, mediaNode);
             logger.info("🎬 Created media node: {} (operation={})", mediaKey, params.get("operation"));
+        }
+    }
+
+    /**
+     * Creates generate nodes from Core definitions.
+     * Generate nodes produce an asset from a prompt (image, video, audio, voice,
+     * music); the chosen model decides the format, the accepted parameters and the
+     * price. Config comes from the generic {@code params} map and is validated
+     * against the model at execute() time (params accept runtime templates).
+     */
+    public void createGenerateNodes(Map<String, ExecutionNode> nodeMap, WorkflowPlan plan) {
+        if (plan.getCores() == null) {
+            return;
+        }
+
+        for (Core coreNode : plan.getCores()) {
+            if (!"generate".equals(coreNode.type())) {
+                continue;
+            }
+
+            String label = coreNode.label() != null ? coreNode.label() : coreNode.id();
+            String normalizedLabel = LabelNormalizer.normalizeLabel(label);
+            String generateKey = "core:" + normalizedLabel;
+
+            if (nodeMap.containsKey(generateKey)) {
+                continue; // Already created
+            }
+
+            Map<String, Object> params = coreNode.params() != null ? coreNode.params() : Map.of();
+            GenerateNode generateNode = new GenerateNode(generateKey, params);
+            nodeMap.put(generateKey, generateNode);
+            logger.info("✨ Created generate node: {} (model={})", generateKey, params.get("model"));
         }
     }
 

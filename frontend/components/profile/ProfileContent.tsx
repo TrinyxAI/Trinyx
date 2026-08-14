@@ -152,7 +152,7 @@ export default function ProfileContent({ handle }: ProfileContentProps) {
           // Substantial empty state that stretches with the page (min-height floor when
           // the shell can't flex) - an empty profile must still look like a full page.
           <div className="flex min-h-[40vh] flex-1 flex-col items-center justify-center gap-2 rounded-xl border border-dashed border-theme px-6 py-20 text-center">
-            <div className="flex h-12 w-12 items-center justify-center rounded-full bg-theme-tertiary">
+            <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-theme-tertiary">
               <LayoutGrid className="h-5 w-5 text-theme-muted" aria-hidden="true" />
             </div>
             <p className="mt-1 text-sm font-medium text-theme-primary">{t('noApps')}</p>

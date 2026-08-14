@@ -89,7 +89,7 @@ class ReusableTriggerServiceOrphanTriggerGuardTest {
                 runRepository, workflowRepository, planVersionRepository,
                 epochManager, streamingService,
                 executionService, triggerResolverService, stateSnapshotService,
-                epochConcurrencyLimiter, executionQueueService, creditClient, creditBudgetService);
+                epochConcurrencyLimiter, executionQueueService, creditBudgetService);
         ReflectionTestUtils.setField(service, "resumeService", resumeService);
         ReflectionTestUtils.setField(service, "v2StepByStepService", v2StepByStepService);
         ReflectionTestUtils.setField(service, "unifiedSignalService", unifiedSignalService);

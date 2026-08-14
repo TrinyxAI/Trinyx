@@ -143,7 +143,7 @@ const ToolForm: React.FC<ToolFormProps> = ({
                 onClick={() => setShowNewToolNameForm(!showNewToolNameForm)}
                 variant="ghost"
                 size="icon"
-                className="rounded-full w-10 h-10 min-w-[44px] min-h-[44px]"
+                className="rounded-xl w-10 h-10 min-w-[44px] min-h-[44px]"
               >
                 <Plus className="h-4 w-4" />
               </Button>

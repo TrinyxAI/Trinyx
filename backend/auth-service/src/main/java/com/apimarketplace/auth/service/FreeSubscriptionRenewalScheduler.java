@@ -21,9 +21,16 @@ import java.util.List;
  * {@link CreditAttributionService#attributeOnRenewal} - FREE renews at its 1K plan-included
  * grant, comp plans renew at the 5K tier-0 base (admin-credits "5k/month max" rule).
  *
- * <p>Idempotence: the renewal sourceId includes the subscription's currentPeriodStart, which
- * is unique per period. If the scheduler runs twice for the same period, attributeOnRenewal()
- * detects the duplicate via ledgerRepository.existsBySourceId("reset_" + ...) and skips.
+ * <p>The whole renewal of one subscription (advance the period, reset, re-grant) happens
+ * inside {@link CreditAttributionService#attributeOnRenewal(Long, Subscription, java.time.LocalDateTime)}'s
+ * transaction, one per row, so a failure on one subscription neither rolls back nor blocks
+ * the others. This loop deliberately performs NO write of its own.
+ *
+ * <p>Idempotence: a renewal moves currentPeriodEnd a month forward in the same transaction
+ * that grants the credits, so a second pass no longer selects that subscription at all. The
+ * sourceId, derived from the NEW currentPeriodStart, is fresh every cycle - deriving it from
+ * the OLD one used to collide with the key an admin plan grant had already consumed, and the
+ * existsBySourceId guards then skipped the renewal silently.
  */
 @Component
 public class FreeSubscriptionRenewalScheduler {
@@ -39,7 +46,9 @@ public class FreeSubscriptionRenewalScheduler {
         this.creditAttributionService = creditAttributionService;
     }
 
-    @Scheduled(cron = "0 0 * * * *") // Every hour
+    // Hourly by default. Overridable so a test that drives this pass explicitly can set "-"
+    // (Spring's disabled marker) and not race its own fixture against a live firing.
+    @Scheduled(cron = "${subscription.internal-renewal.cron:0 0 * * * *}")
     @SchedulerLock(name = "free_subscription_renewal", lockAtMostFor = "PT10M", lockAtLeastFor = "PT30S")
     public void renewExpiredInternalSubscriptions() {
         LocalDateTime now = LocalDateTime.now();
@@ -55,15 +64,26 @@ public class FreeSubscriptionRenewalScheduler {
             try {
                 Long userId = sub.getBillingCustomer().getUser().getId();
 
-                creditAttributionService.attributeOnRenewal(userId, sub);
+                // Period advance + reset + re-grant, all inside attributeOnRenewal's single
+                // transaction. This loop must NOT write the subscription row itself: `sub` is
+                // detached (a @Scheduled thread has no persistence context) and the grant lands
+                // on a re-resolved managed instance, so any save here would merge this pre-grant
+                // copy back over the fresh balance and silently destroy the credits just granted.
+                CreditAttributionService.RenewalOutcome outcome =
+                        creditAttributionService.attributeOnRenewal(userId, sub, now);
 
-                sub.setCurrentPeriodStart(now);
-                sub.setCurrentPeriodEnd(now.plusMonths(1));
-                sub.setUpdatedAt(now);
-                subscriptionRepository.save(sub);
-
-                log.info("Internal subscription renewed for userId={} (plan={}), new period ends {}",
-                        userId, sub.getPlan() != null ? sub.getPlan().getCode() : "?", sub.getCurrentPeriodEnd());
+                // Log what actually happened. Announcing "renewed" unconditionally is how a
+                // renewal that granted nothing stayed invisible in production for weeks.
+                if (outcome == CreditAttributionService.RenewalOutcome.RENEWED) {
+                    log.info("Internal subscription id={} renewed for userId={}", sub.getId(), userId);
+                } else if (outcome == CreditAttributionService.RenewalOutcome.ALREADY_RENEWED) {
+                    // Benign and expected whenever an admin grant lands in the same minute -
+                    // INFO, not WARN, so it never pages on healthy interleaving.
+                    log.info("Internal subscription id={} already renewed by another actor, skipped", sub.getId());
+                } else {
+                    log.warn("Internal subscription id={} NOT renewed for userId={}: {}",
+                            sub.getId(), userId, outcome);
+                }
             } catch (Exception e) {
                 log.error("Failed to renew internal subscription id={}: {}",
                         sub.getId(), e.getMessage());

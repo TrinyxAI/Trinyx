@@ -183,7 +183,7 @@ export function ShareLinkDialog({
   const renderConfirmPhase = () => (
     <>
       <div className="text-center mb-6">
-        <div className="w-16 h-16 bg-theme-secondary rounded-full flex items-center justify-center mx-auto mb-4">
+        <div className="w-16 h-16 bg-theme-secondary rounded-2xl flex items-center justify-center mx-auto mb-4">
           <Globe className="w-8 h-8 text-theme-primary" />
         </div>
         <h3 id={titleId} className="text-2xl font-semibold text-theme-primary">{t('confirmTitle')}</h3>
@@ -228,7 +228,7 @@ export function ShareLinkDialog({
   const renderLimitPhase = () => (
     <>
       <div className="text-center mb-6">
-        <div className="w-16 h-16 bg-amber-50 dark:bg-amber-900/20 rounded-full flex items-center justify-center mx-auto mb-4">
+        <div className="w-16 h-16 bg-amber-50 dark:bg-amber-900/20 rounded-2xl flex items-center justify-center mx-auto mb-4">
           <AlertCircle className="w-8 h-8 text-amber-600 dark:text-amber-400" />
         </div>
         <h3 id={titleId} className="text-2xl font-semibold text-theme-primary">{t('limitReachedTitle')}</h3>
@@ -265,7 +265,7 @@ export function ShareLinkDialog({
   const renderSharedPhase = () => (
     <>
       <div className="text-center mb-6">
-        <div className="w-16 h-16 bg-theme-secondary rounded-full flex items-center justify-center mx-auto mb-4">
+        <div className="w-16 h-16 bg-theme-secondary rounded-2xl flex items-center justify-center mx-auto mb-4">
           <Globe className="w-8 h-8 text-theme-primary" />
         </div>
         <h3 id={titleId} className="text-2xl font-semibold text-theme-primary">{t('shareLink')}</h3>
@@ -381,7 +381,7 @@ export function ShareLinkDialog({
   const renderLoading = () => (
     <>
       <div className="text-center mb-6">
-        <div className="w-16 h-16 bg-theme-secondary rounded-full flex items-center justify-center mx-auto mb-4">
+        <div className="w-16 h-16 bg-theme-secondary rounded-2xl flex items-center justify-center mx-auto mb-4">
           <Globe className="w-8 h-8 text-theme-primary" />
         </div>
         <h3 id={titleId} className="text-2xl font-semibold text-theme-primary">{t('shareLink')}</h3>

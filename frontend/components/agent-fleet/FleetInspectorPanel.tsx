@@ -1723,7 +1723,7 @@ export function AgentExecutionList({
 
 /**
  * FleetInspectorPanel - read-only inspector panel for the Agent Fleet canvas.
- * Matches the InspectorPanel visual style: rounded-[32px], bg-white, drag handle
+ * Matches the InspectorPanel visual style: rounded-2xl, bg-white, drag handle
  * on left edge with hover reveal, NodeIcon in header, uppercase subtitle.
  * All fields use disabled Select/Input components (same as run mode).
  */
@@ -1841,7 +1841,9 @@ export function FleetInspectorPanel({
           'fixed inset-0 w-full h-full z-[9999]',
           // Desktop: sized panel
           'lg:relative lg:inset-auto lg:w-auto lg:h-auto lg:z-[150]',
-          'lg:max-h-[90vh] lg:rounded-[32px] bg-white dark:bg-gray-800 flex flex-col pointer-events-auto overflow-hidden group/inspector transition-[width] duration-200',
+          // rounded-2xl: the floating-surface step of the radius ladder, same as
+          // the workflow InspectorPanel this one mirrors.
+          'lg:max-h-[90vh] lg:rounded-2xl bg-white dark:bg-gray-800 flex flex-col pointer-events-auto overflow-hidden group/inspector transition-[width] duration-200',
           isAgent && viewMode === 'executions' ? 'lg:w-[35vw] lg:min-w-[480px]' : 'lg:w-[300px]',
         )}
         style={availableWidth ? { maxWidth: typeof window !== 'undefined' && window.innerWidth >= 1024 ? Math.max(300, availableWidth - 16) : undefined } : undefined}
@@ -1852,14 +1854,14 @@ export function FleetInspectorPanel({
           <div className="lg:hidden flex items-center gap-1.5 absolute right-3 top-3 z-10">
             <button
               onClick={() => onMinimizedChange?.(true)}
-              className="h-7 w-7 flex items-center justify-center rounded-full hover:bg-slate-100 dark:hover:bg-slate-700 transition-colors"
+              className="h-7 w-7 flex items-center justify-center rounded-xl hover:bg-slate-100 dark:hover:bg-slate-700 transition-colors"
               title={t('collapse')}
             >
               <Minus className="h-3.5 w-3.5 text-theme-secondary" />
             </button>
             <button
               onClick={onClose}
-              className="h-7 w-7 flex items-center justify-center rounded-full hover:bg-slate-100 dark:hover:bg-slate-700 transition-colors"
+              className="h-7 w-7 flex items-center justify-center rounded-xl hover:bg-slate-100 dark:hover:bg-slate-700 transition-colors"
               title={t('close')}
             >
               <X className="h-3.5 w-3.5 text-theme-secondary" />

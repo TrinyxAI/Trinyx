@@ -45,6 +45,7 @@ public class ApiCatalogBundleService {
 
     private final ApiCatalogBundleRepository bundleRepository;
     private final ApiCatalogSnapshotReader snapshotReader;
+    private final ApiCatalogGenerationPriceReader priceReader;
     private final ApiCatalogBundleSigner signer;
 
     /**
@@ -73,10 +74,14 @@ public class ApiCatalogBundleService {
                     "deprecated_at IS NULL) - refusing to publish an empty API catalog bundle");
         }
 
+        // Read ONCE, before the retry loop: a version collision is a race with
+        // another pod, not a reason to re-ask auth-service for the same prices.
+        List<ApiCatalogBundlePayload.GenerationPriceRow> prices = priceReader.read(snapshot);
+
         long version = nextVersion();
         for (int attempt = 1; attempt <= BUILD_MAX_ATTEMPTS; attempt++) {
             try {
-                return attemptBuild(version, snapshot);
+                return attemptBuild(version, snapshot, prices);
             } catch (DataIntegrityViolationException e) {
                 long next = version + 1;
                 log.warn("API catalog bundle version {} already taken (attempt {}/{}): {} - retrying with {}",
@@ -89,7 +94,8 @@ public class ApiCatalogBundleService {
                 " version-collision retries - another pod is racing at an unexpected rate");
     }
 
-    private ApiCatalogBundleEntity attemptBuild(long version, ApiCatalogSnapshotReader.Snapshot snapshot) {
+    private ApiCatalogBundleEntity attemptBuild(long version, ApiCatalogSnapshotReader.Snapshot snapshot,
+                                                List<ApiCatalogBundlePayload.GenerationPriceRow> prices) {
         // Truncate to microseconds (Postgres TIMESTAMPTZ precision). The value
         // is embedded in the canonical JSON; keeping it micro-aligned avoids
         // any in-memory/DB drift in diagnostics, even though this bundle never
@@ -98,7 +104,7 @@ public class ApiCatalogBundleService {
 
         byte[] rawPayload = ApiCatalogBundlePayload.canonicalBytes(
                 version, CURRENT_SCHEMA_VERSION, signer.issuer(), snapshotAt,
-                snapshot.apis(), snapshot.credentialTemplates());
+                snapshot.apis(), snapshot.credentialTemplates(), prices);
         byte[] gzipped = ApiCatalogBundlePayload.gzip(rawPayload);
 
         ApiCatalogBundleEntity entity = new ApiCatalogBundleEntity();
@@ -117,8 +123,10 @@ public class ApiCatalogBundleService {
         entity.setSignature(signer.sign(gzipped));
 
         ApiCatalogBundleEntity saved = bundleRepository.save(entity);
-        log.info("Built API catalog bundle: version={}, apis={}, tools={}, rawBytes={}, gzBytes={}, checksum={}",
+        log.info("Built API catalog bundle: version={}, apis={}, tools={}, generationPrices={}, "
+                        + "rawBytes={}, gzBytes={}, checksum={}",
                 saved.getVersion(), saved.getApiCount(), saved.getToolCount(),
+                prices == null ? 0 : prices.size(),
                 saved.getRawBytesSize(), gzipped.length, saved.getChecksum());
         return saved;
     }

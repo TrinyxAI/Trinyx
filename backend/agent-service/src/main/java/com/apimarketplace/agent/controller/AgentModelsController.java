@@ -28,8 +28,9 @@ import java.util.Map;
  *
  * <p>Optional {@code ?category=<key>} query parameter (V156 - per-category
  * ranking + enabled): when supplied, the per-category sidecar overrides the
- * global ranking / enabled. Categories: {@code chat}, {@code browser_agent},
- * {@code image_generation}; forward-extensible to any
+ * global ranking / enabled. Categories with a reader: {@code chat} and
+ * {@code browser_agent}. The retired {@code <format>_generation} keys are still
+ * accepted so stored rows stay reachable; forward-extensible to any
  * {@link ModelCategory#isValidShape(String)} key.
  */
 @RestController

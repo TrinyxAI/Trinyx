@@ -2,8 +2,9 @@
 
 import { useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
+import { useRouter } from 'next/navigation';
 import { useTranslations } from 'next-intl';
-import { ArrowRight, Coins, Gift, Monitor, Network, Package, Star, Table, Workflow, Zap } from 'lucide-react';
+import { ArrowRight, ArrowUpRight, CheckCircle, Coins, Download, Gift, Monitor, Network, Package, Star, Table, Workflow, Zap } from 'lucide-react';
 import { orchestratorApi } from '@/lib/api';
 import type { WorkflowPublication, AcquiredApplication } from '@/lib/api/orchestrator/types';
 import { favoriteService } from '@/lib/api/orchestrator/favorite.service';
@@ -19,6 +20,7 @@ import { isCeMode } from '@/lib/format-cost';
 import { IS_CE } from '@/lib/edition';
 import { useCeCloudLinkStatus } from '@/hooks/useCeCloudLinkStatus';
 import { useCurrentOrgStore } from '@/lib/stores/current-org-store';
+import AcquirePublicationModal from '@/components/marketplace/AcquirePublicationModal';
 
 /**
  * Highlighted-this-week row rendered in the chat welcome view.
@@ -130,7 +132,7 @@ function PublicationThumb({ pub, remote, ownerView }: { pub: DisplayPub; remote?
         {real.nodeIcons && real.nodeIcons.length > 0 ? (
           <WorkflowNodeIcons nodeIcons={real.nodeIcons} />
         ) : (
-          <div className="w-14 h-14 bg-white dark:bg-slate-800 rounded-full flex items-center justify-center shadow-sm">
+          <div className="w-14 h-14 bg-white dark:bg-slate-800 rounded-xl flex items-center justify-center shadow-sm">
             <Package className="w-7 h-7 text-theme-tertiary" />
           </div>
         )}
@@ -139,9 +141,19 @@ function PublicationThumb({ pub, remote, ownerView }: { pub: DisplayPub; remote?
   );
 }
 
-function HighlightCard({ pub, remote, target = 'marketplace' }: { pub: DisplayPub; remote?: boolean; target?: 'marketplace' | 'application' }) {
+function HighlightCard({ pub, remote, target = 'marketplace', onAcquire, isAcquired, openHref }: {
+  pub: DisplayPub;
+  remote?: boolean;
+  target?: 'marketplace' | 'application';
+  /** Opens the acquire modal. Omitted when the viewer cannot install this app (anonymous, owner, already installed). */
+  onAcquire?: (publication: WorkflowPublication) => void;
+  isAcquired?: boolean;
+  /** Destination of the "Open" button that replaces Install once the app is installed. */
+  openHref?: string;
+}) {
   const t = useTranslations('marketplace');
   const tHl = useTranslations('chat.highlights');
+  const router = useRouter();
   const isFree = !pub.creditsPerUse || pub.creditsPerUse === 0;
   const priceLabel = isFree
     ? t('free')
@@ -188,12 +200,51 @@ function HighlightCard({ pub, remote, target = 'marketplace' }: { pub: DisplayPu
 
       {/* Footer - always visible below the thumbnail (mirrors /app/interface card layout) */}
       <div className="px-1 pt-2 pb-1 space-y-1">
-        <div className="flex items-center gap-1.5 min-w-0">
-          <h3 className="text-sm font-medium text-theme-primary truncate">{pub.title}</h3>
-          {/* Highlights are the most-seen surface (anonymous Home / chat row), so a
-              self-hosted-only app must be marked here too - otherwise this is the
-              one place it looks like any other installable app. */}
-          <CeExclusiveBadge publication={pub.real} variant="inline" />
+        <div className="flex items-center justify-between gap-2">
+          <div className="flex items-center gap-1.5 min-w-0 flex-1">
+            <h3 className="text-sm font-medium text-theme-primary truncate">{pub.title}</h3>
+            {/* Highlights are the most-seen surface (anonymous Home / chat row), so a
+                self-hosted-only app must be marked here too - otherwise this is the
+                one place it looks like any other installable app. */}
+            <CeExclusiveBadge publication={pub.real} variant="inline" />
+            {/* Same rating chip as the marketplace card: this row is the first
+                thing a visitor sees, so the social proof has to be here too. */}
+            {(pub.real.reviewCount ?? 0) > 0 && (
+              <span className="inline-flex items-center gap-1 text-xs text-theme-muted shrink-0">
+                <Star className="h-3 w-3 fill-amber-400 text-amber-400" />
+                {(pub.real.averageRating ?? 0).toFixed(1)}
+                <span className="text-theme-muted">({pub.real.reviewCount})</span>
+              </span>
+            )}
+          </div>
+          {/* Install / Open, mirroring PublicationCard. Nested <a> inside the card
+              Link is invalid HTML, so Open navigates imperatively. */}
+          {openHref ? (
+            <button
+              type="button"
+              data-testid="highlight-card-open"
+              onClick={(e) => { e.preventDefault(); e.stopPropagation(); router.push(openHref); }}
+              className="inline-flex items-center gap-1 h-[22px] px-2 rounded-lg text-[11px] font-medium bg-[var(--accent-primary)] text-[var(--bg-primary)] hover:brightness-110 active:scale-95 transition-[filter,transform] shrink-0"
+            >
+              <ArrowUpRight className="h-3 w-3" />
+              {t('open')}
+            </button>
+          ) : onAcquire ? (
+            <button
+              type="button"
+              data-testid="highlight-card-acquire"
+              onClick={(e) => { e.preventDefault(); e.stopPropagation(); onAcquire(pub.real); }}
+              className="inline-flex items-center gap-1 h-[22px] px-2 rounded-lg text-[11px] font-medium bg-[var(--accent-primary)] text-[var(--bg-primary)] hover:brightness-110 active:scale-95 transition-[filter,transform] shrink-0"
+            >
+              <Download className="h-3 w-3" />
+              {t('acquire')}
+            </button>
+          ) : isAcquired ? (
+            <span className="inline-flex items-center gap-1 h-[22px] px-2 rounded-lg text-[11px] font-medium bg-emerald-500 text-white shrink-0">
+              <CheckCircle className="h-3 w-3" />
+              {t('installed')}
+            </span>
+          ) : null}
         </div>
         {pub.description && (
           <p className="text-xs text-theme-muted line-clamp-2 leading-snug">{pub.description}</p>
@@ -268,6 +319,9 @@ function HighlightRow({
   remote,
   target,
   toggle,
+  onAcquire,
+  acquiredIds,
+  currentUserId,
 }: {
   heading: string;
   items: DisplayPub[];
@@ -277,6 +331,10 @@ function HighlightRow({
   remote?: boolean;
   target?: 'marketplace' | 'application';
   toggle?: React.ReactNode;
+  /** Absent for anonymous visitors: installing is an authenticated action. */
+  onAcquire?: (publication: WorkflowPublication) => void;
+  acquiredIds?: Set<string>;
+  currentUserId?: string;
 }) {
   return (
     <div>
@@ -296,7 +354,29 @@ function HighlightRow({
       <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
         {isLoading
           ? Array.from({ length: 4 }, (_, i) => <HighlightCardSkeleton key={i} />)
-          : items.map(p => <HighlightCard key={p.id} pub={p} remote={p.real.remote ?? remote} target={target} />)}
+          : items.map(p => {
+              // Favorites already live in the viewer's library and the whole card
+              // links to the app, so the Install/Open slot only applies to the
+              // discovery (marketplace) row.
+              const isDiscovery = target !== 'application';
+              const installed = !!acquiredIds?.has(p.id);
+              const isOwn = !!currentUserId && p.publisherId === currentUserId;
+              return (
+                <HighlightCard
+                  key={p.id}
+                  pub={p}
+                  remote={p.real.remote ?? remote}
+                  target={target}
+                  isAcquired={isDiscovery && (installed || isOwn)}
+                  onAcquire={isDiscovery && onAcquire && !installed && !isOwn ? onAcquire : undefined}
+                  openHref={
+                    isDiscovery && installed && (p.displayMode || 'WORKFLOW') === 'APPLICATION'
+                      ? `/app/applications/${p.id}`
+                      : undefined
+                  }
+                />
+              );
+            })}
       </div>
     </div>
   );
@@ -331,7 +411,7 @@ function writeStoredHighlightMode(mode: HighlightMode): void {
 
 export function HighlightedApps() {
   const tHl = useTranslations('chat.highlights');
-  const { isAuthenticated, isReady } = useAuthGuard();
+  const { isAuthenticated, isReady, numericUserId } = useAuthGuard();
   // CE cloud-parity (2026-06-10): a cloud-linked CE shows the SAME curated
   // highlights row as cloud, read through the CE backend's
   // /publications/remote/* proxies of the cloud public API. Community apps are
@@ -356,6 +436,11 @@ export function HighlightedApps() {
   // cloud-linked CE - a user favorites apps in their own library).
   const [favorites, setFavorites] = useState<DisplayPub[]>([]);
   const [favoritesLoading, setFavoritesLoading] = useState(false);
+  // Publications the viewer already owns, so a highlight tile offers "Open"
+  // instead of a second install. Derived from the acquired-applications page the
+  // favorites effect already fetches - no extra round trip.
+  const [acquiredIds, setAcquiredIds] = useState<Set<string>>(new Set());
+  const [acquireTarget, setAcquireTarget] = useState<WorkflowPublication | null>(null);
 
   const [mode, setMode] = useState<HighlightMode>('HIGHLIGHTS');
   // An explicit toggle by the user wins over the favorites-first auto-default,
@@ -431,6 +516,7 @@ export function HighlightedApps() {
   useEffect(() => {
     if (!isReady || !isAuthenticated) {
       setFavorites([]);
+      setAcquiredIds(new Set());
       setFavoritesLoading(false);
       return;
     }
@@ -448,6 +534,8 @@ export function HighlightedApps() {
     ])
       .then(async ([pubFavs, wfFavIds, acquired]) => {
         if (cancelled) return;
+        setAcquiredIds(new Set(
+          acquired.map(a => a.sourcePublicationId).filter((id): id is string => !!id)));
         const wfSet = new Set(wfFavIds);
         const pubCards = pubFavs.map(p => toDisplayPub(p as unknown as WorkflowPublication));
         const seen = new Set(pubCards.map(c => c.id));
@@ -470,7 +558,7 @@ export function HighlightedApps() {
         // Cap the Home row at 8 favorites; the "see all" CTA links to the full list.
         setFavorites([...pubCards, ...acquiredCards].slice(0, 8));
       })
-      .catch(() => { if (!cancelled) setFavorites([]); })
+      .catch(() => { if (!cancelled) { setFavorites([]); setAcquiredIds(new Set()); } })
       .finally(() => { if (!cancelled) setFavoritesLoading(false); });
     return () => { cancelled = true; };
   }, [isAuthenticated, isReady, currentOrgId]);
@@ -559,7 +647,28 @@ export function HighlightedApps() {
         remote={showFavorites ? false : useRemoteSource}
         target={showFavorites ? 'application' : 'marketplace'}
         toggle={toggle}
+        // Anonymous visitors browse but cannot install: no handler, no button.
+        onAcquire={isAuthenticated ? setAcquireTarget : undefined}
+        acquiredIds={acquiredIds}
+        // Cloud (remote) publisher ids live in another id namespace, so an
+        // ownership check would be a collision, not a match.
+        currentUserId={useRemoteSource || numericUserId == null ? undefined : String(numericUserId)}
       />
+
+      {/* Full-modal install (progress + errors owned by the modal): the Home row
+          has no card-level progress surface, unlike the marketplace grid. */}
+      {acquireTarget && (
+        <AcquirePublicationModal
+          isOpen
+          onClose={() => setAcquireTarget(null)}
+          publication={acquireTarget}
+          ceMode={useRemoteSource}
+          onSuccess={() => {
+            setAcquiredIds(prev => new Set(prev).add(acquireTarget.id));
+            setAcquireTarget(null);
+          }}
+        />
+      )}
     </section>
   );
 }

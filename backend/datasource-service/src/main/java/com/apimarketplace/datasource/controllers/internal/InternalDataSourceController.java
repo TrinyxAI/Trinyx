@@ -23,6 +23,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.http.ResponseEntity;
+import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.*;
@@ -467,41 +468,84 @@ public class InternalDataSourceController {
      * a DS-ID guess could insert rows into another org's table. 404 on mismatch (does not
      * reveal whether the DS exists in a different org).
      */
-    @SuppressWarnings("unchecked")
     @PostMapping("/{id}/items/bulk-insert")
     public ResponseEntity<Integer> bulkInsertItems(@PathVariable Long id,
                                                      @RequestBody List<Map<String, Object>> items,
                                                      @RequestHeader("X-User-ID") String tenantId,
                                                      @RequestHeader(value = "X-Organization-ID", required = false) String organizationId) {
-        // Item-row invariant: rows are stamped with the parent DS owner's tenantId,
-        // not the caller's - caller-stamped rows are invisible to every
-        // owner-tenant-scoped read (see CrudExecutorService.execute + V333).
-        String ownerTenantId;
+        String ownerTenantId = resolveItemWriteOwnerTenant(id, tenantId, organizationId, "bulk-insert");
+        if (ownerTenantId == null) {
+            return ResponseEntity.notFound().build();
+        }
+        return ResponseEntity.ok(insertItemSnapshots(id, items, ownerTenantId));
+    }
+
+    /**
+     * Replace every row of a datasource with the supplied snapshots, in one transaction
+     * (used by the publication "reset application data" path, which restores an acquired
+     * app's tables to the rows frozen in the publication snapshot).
+     *
+     * <p>Same ownership gate as {@link #bulkInsertItems}. Atomic on purpose: a
+     * delete-then-insert split across two calls would leave the table visibly empty (and
+     * readable as such by a concurrent workflow run) between the two.
+     */
+    @Transactional
+    @PostMapping("/{id}/items/replace")
+    public ResponseEntity<Integer> replaceItems(@PathVariable Long id,
+                                                  @RequestBody List<Map<String, Object>> items,
+                                                  @RequestHeader("X-User-ID") String tenantId,
+                                                  @RequestHeader(value = "X-Organization-ID", required = false) String organizationId) {
+        String ownerTenantId = resolveItemWriteOwnerTenant(id, tenantId, organizationId, "replace");
+        if (ownerTenantId == null) {
+            return ResponseEntity.notFound().build();
+        }
+        dataSourceItemRepository.deleteByDataSourceId(id);
+        int inserted = insertItemSnapshots(id, items, ownerTenantId);
+        log.info("[InternalDataSource] replaced rows of ds={} with {} snapshot rows (tenant={})",
+                id, inserted, ownerTenantId);
+        return ResponseEntity.ok(inserted);
+    }
+
+    /**
+     * Ownership gate shared by every item-write endpoint. Returns the tenant the new rows
+     * must be stamped with, or {@code null} when the caller may not write to this datasource.
+     *
+     * <p>Item-row invariant: rows are stamped with the parent DS owner's tenantId, not the
+     * caller's - caller-stamped rows are invisible to every owner-tenant-scoped read (see
+     * CrudExecutorService.execute + V333).
+     */
+    private String resolveItemWriteOwnerTenant(Long id, String tenantId, String organizationId, String operation) {
         if (hasOrg(organizationId)) {
             // Org-strict gate: the parent DS must belong to this workspace.
             Optional<DataSource> inScope = dataSourceService.findByIdAndOrganizationIdStrict(id.intValue(), organizationId);
             if (inScope.isEmpty()) {
-                log.warn("[InternalDataSource] bulk-insert rejected: ds={} not in org={}, tenant={}",
-                        id, organizationId, tenantId);
-                return ResponseEntity.notFound().build();
+                log.warn("[InternalDataSource] {} rejected: ds={} not in org={}, tenant={}",
+                        operation, id, organizationId, tenantId);
+                return null;
             }
-            ownerTenantId = inScope.get().tenantId();
-        } else {
-            // Tenant-only fallback. Pre-fix this path inserted without ANY ownership check -
-            // letting a caller without an org header have MORE privilege than one with the
-            // header (a perverse incentive). Minimum gate: the DS must belong to this tenant.
-            // Post-V261 the gateway always injects X-Organization-ID, so this path should only
-            // fire for internal/scheduler callers - and even those should not write to a foreign
-            // DS by ID guess.
-            boolean tenantOwns = dataSourceService.findByIdAndTenantId(id.intValue(), tenantId).isPresent();
-            if (!tenantOwns) {
-                log.warn("[InternalDataSource] bulk-insert rejected: ds={} not owned by tenant={} (no orgId either)",
-                        id, tenantId);
-                return ResponseEntity.notFound().build();
-            }
-            log.warn("[InternalDataSource] bulk-insert fell back to tenant-only scope (no organizationId): tenantId={}, dsId={}",
-                    tenantId, id);
-            ownerTenantId = tenantId; // tenant gate passed → caller IS the owner
+            return inScope.get().tenantId();
+        }
+        // Tenant-only fallback. Pre-fix this path inserted without ANY ownership check -
+        // letting a caller without an org header have MORE privilege than one with the
+        // header (a perverse incentive). Minimum gate: the DS must belong to this tenant.
+        // Post-V261 the gateway always injects X-Organization-ID, so this path should only
+        // fire for internal/scheduler callers - and even those should not write to a foreign
+        // DS by ID guess.
+        boolean tenantOwns = dataSourceService.findByIdAndTenantId(id.intValue(), tenantId).isPresent();
+        if (!tenantOwns) {
+            log.warn("[InternalDataSource] {} rejected: ds={} not owned by tenant={} (no orgId either)",
+                    operation, id, tenantId);
+            return null;
+        }
+        log.warn("[InternalDataSource] {} fell back to tenant-only scope (no organizationId): tenantId={}, dsId={}",
+                operation, tenantId, id);
+        return tenantId; // tenant gate passed → caller IS the owner
+    }
+
+    @SuppressWarnings("unchecked")
+    private int insertItemSnapshots(Long dataSourceId, List<Map<String, Object>> items, String ownerTenantId) {
+        if (items == null || items.isEmpty()) {
+            return 0;
         }
         int count = 0;
         for (Map<String, Object> itemSnapshot : items) {
@@ -510,11 +554,11 @@ public class InternalDataSourceController {
             Integer priority = itemSnapshot.get("priority") instanceof Number
                     ? ((Number) itemSnapshot.get("priority")).intValue() : null;
 
-            DataSourceItem newItem = new DataSourceItem(null, id, ownerTenantId, data, priority, null);
+            DataSourceItem newItem = new DataSourceItem(null, dataSourceId, ownerTenantId, data, priority, null);
             dataSourceItemRepository.save(newItem);
             count++;
         }
-        return ResponseEntity.ok(count);
+        return count;
     }
 
     // ========== Internal CRUD endpoints (mirror public API for inter-service calls) ==========

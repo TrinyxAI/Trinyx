@@ -8,7 +8,6 @@ import com.apimarketplace.orchestrator.domain.workflow.RunStatus;
 import com.apimarketplace.orchestrator.repository.WorkflowRepository;
 import com.apimarketplace.orchestrator.repository.WorkflowRunRepository;
 import com.apimarketplace.orchestrator.services.context.RunContextService;
-import com.apimarketplace.common.credit.CreditConsumptionClient;
 import com.apimarketplace.trigger.client.TriggerClient;
 import com.apimarketplace.trigger.client.dto.StandaloneChatEndpointDto;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -45,7 +44,6 @@ class ChatDispatchServiceTest {
     @Mock private WorkflowRunRepository runRepository;
     @Mock private ReusableTriggerService triggerService;
     @Mock private ProductionRunResolver productionRunResolver;
-    @Mock private CreditConsumptionClient creditClient;
     @Mock private AgentDefaultsConfig agentDefaults;
     @Mock private AgentClient agentClient;
     @Mock private RunContextService runContextService;
@@ -65,8 +63,7 @@ class ChatDispatchServiceTest {
         service = new ChatDispatchService(
                 triggerClient, redisTemplate, restTemplate, objectMapper,
                 workflowRepository, runRepository, triggerService, productionRunResolver,
-                creditClient, shareInvocationLimiter, agentDefaults, agentClient, runContextService, "http://localhost:8087");
-        lenient().when(creditClient.checkCredits(any())).thenReturn(true);
+                shareInvocationLimiter, agentDefaults, agentClient, runContextService, "http://localhost:8087");
         lenient().when(shareInvocationLimiter.tryAcquire(any(), any())).thenReturn(true);
 
         // ProductionRunResolver delegates to existing repo stubs (refactor compat).
@@ -229,29 +226,6 @@ class ChatDispatchServiceTest {
             Map<String, Object> result = service.sendMessage(TOKEN, "sess-1", "hello");
 
             assertThat(result.get("status")).isEqualTo("run_terminated");
-            verify(triggerService, never()).executeTrigger(any(), any(), any(), any());
-        }
-
-        @Test
-        @DisplayName("Should return insufficient_credits when no credits")
-        void shouldReturnInsufficientCredits() {
-            StandaloneChatEndpointDto endpoint = createEndpoint(TRIGGER_ID);
-            WorkflowEntity workflow = createWorkflow(null);
-            WorkflowRunEntity run = createRun(RunStatus.WAITING_TRIGGER);
-
-            when(triggerClient.findChatEndpointByToken(TOKEN)).thenReturn(endpoint);
-            when(hashOperations.entries(any())).thenReturn(Map.of(
-                    "sessionId", "sess-1", "conversationId", "conv-1",
-                    "chatEndpointId", endpoint.getId().toString(),
-                    "tenantId", TENANT_ID, "ipAddress", "", "createdAt", "2026-01-01T00:00:00Z"));
-            when(workflowRepository.findById(WORKFLOW_ID)).thenReturn(Optional.of(workflow));
-            when(runRepository.findFirstByWorkflowIdOrderByStartedAtDesc(WORKFLOW_ID))
-                    .thenReturn(Optional.of(run));
-            when(creditClient.checkCredits(TENANT_ID)).thenReturn(false);
-
-            Map<String, Object> result = service.sendMessage(TOKEN, "sess-1", "hello");
-
-            assertThat(result.get("status")).isEqualTo("insufficient_credits");
             verify(triggerService, never()).executeTrigger(any(), any(), any(), any());
         }
 

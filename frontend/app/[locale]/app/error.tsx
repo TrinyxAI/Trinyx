@@ -27,7 +27,7 @@ export default function AppError({
       <div className="flex flex-col items-center justify-center min-h-full p-8">
         {/* Error Icon */}
         <div className="mb-6">
-          <div className="w-24 h-24 bg-red-100 dark:bg-red-900/30 rounded-full flex items-center justify-center">
+          <div className="w-24 h-24 bg-red-100 dark:bg-red-900/30 rounded-2xl flex items-center justify-center">
             <AlertTriangle className="w-12 h-12 text-red-600 dark:text-red-400" />
           </div>
         </div>

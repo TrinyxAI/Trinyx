@@ -5,7 +5,6 @@ import com.apimarketplace.orchestrator.domain.WorkflowRunEntity;
 import com.apimarketplace.orchestrator.domain.workflow.RunStatus;
 import com.apimarketplace.orchestrator.repository.WorkflowRepository;
 import com.apimarketplace.orchestrator.repository.WorkflowRunRepository;
-import com.apimarketplace.common.credit.CreditConsumptionClient;
 import com.apimarketplace.trigger.client.TriggerClient;
 import com.apimarketplace.trigger.client.dto.StandaloneFormEndpointDto;
 import org.slf4j.Logger;
@@ -38,7 +37,6 @@ public class FormDispatchService {
     private final WorkflowRunRepository runRepository;
     private final ReusableTriggerService triggerService;
     private final ProductionRunResolver productionRunResolver;
-    private final CreditConsumptionClient creditClient;
     private final ShareInvocationLimiter shareInvocationLimiter;
     private final com.apimarketplace.common.storage.url.PublicFileUrlBuilder publicFileUrlBuilder;
 
@@ -47,7 +45,6 @@ public class FormDispatchService {
                                WorkflowRunRepository runRepository,
                                ReusableTriggerService triggerService,
                                ProductionRunResolver productionRunResolver,
-                               CreditConsumptionClient creditClient,
                                ShareInvocationLimiter shareInvocationLimiter,
                                com.apimarketplace.common.storage.url.PublicFileUrlBuilder publicFileUrlBuilder) {
         this.triggerClient = triggerClient;
@@ -55,7 +52,6 @@ public class FormDispatchService {
         this.runRepository = runRepository;
         this.triggerService = triggerService;
         this.productionRunResolver = productionRunResolver;
-        this.creditClient = creditClient;
         this.shareInvocationLimiter = shareInvocationLimiter;
         this.publicFileUrlBuilder = publicFileUrlBuilder;
     }
@@ -179,9 +175,10 @@ public class FormDispatchService {
                         if (matchedTriggerId == null) {
                             logger.warn("No triggerId on form endpoint '{}' - link the endpoint to a workflow with a form trigger",
                                     endpoint.getName());
-                        } else if (!creditClient.checkCredits(run.getTenantId())) {
-                            logger.warn("Insufficient credits for tenant {}, skipping form dispatch", run.getTenantId());
                         } else {
+                            // No credit gate: the fire proceeds and NodeCreditGate fails
+                            // the trigger node, so the submission is visibly refused on
+                            // the run instead of being dropped silently.
                             Map<String, Object> payload = buildFormPayload(formData, endpoint.getId().toString(), endpoint.getName());
 
                             TriggerExecutionResult result = triggerService.executeTrigger(

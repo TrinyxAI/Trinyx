@@ -102,7 +102,7 @@ export function ToolAuthorizationCard({
       <div className={`my-4 ${className}`}>
         <div className="rounded-2xl border border-green-200 dark:border-green-800 bg-green-50 dark:bg-green-900/20 p-4">
           <div className="flex items-center gap-3">
-            <div className="flex items-center justify-center w-8 h-8 rounded-full bg-white dark:bg-slate-800">
+            <div className="flex items-center justify-center w-8 h-8 rounded-xl bg-white dark:bg-slate-800">
               <CheckCircle className="w-4 h-4 text-green-600 dark:text-green-400" />
             </div>
             <div className="flex-1">
@@ -124,7 +124,7 @@ export function ToolAuthorizationCard({
       <div className={`my-4 ${className}`}>
         <div className="rounded-2xl border border-theme bg-theme-secondary/50 p-4">
           <div className="flex items-center gap-3">
-            <div className="flex items-center justify-center w-8 h-8 rounded-full bg-theme-primary">
+            <div className="flex items-center justify-center w-8 h-8 rounded-xl bg-theme-primary">
               <Ban className="w-4 h-4 text-theme-secondary" />
             </div>
             <div className="flex-1">
@@ -142,7 +142,7 @@ export function ToolAuthorizationCard({
       <div className="rounded-2xl border border-theme bg-gradient-to-br from-[var(--bg-secondary)] to-[var(--bg-tertiary)] p-4 shadow-sm">
         {/* Header */}
         <div className="flex items-center gap-3 mb-3">
-          <div className="flex items-center justify-center w-8 h-8 rounded-full bg-theme-primary border border-theme shrink-0">
+          <div className="flex items-center justify-center w-8 h-8 rounded-xl bg-theme-primary border border-theme shrink-0">
             {isInstall ? (
               <PackagePlus className="w-4 h-4 text-theme-primary" />
             ) : (

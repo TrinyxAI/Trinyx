@@ -43,9 +43,12 @@ export function getRunDisplayStatus(
  * at WAITING_TRIGGER between fires, so the badge reflects the OUTCOME (green / red / amber) rather
  * than the idle "waiting_trigger".
  *
- * A cycle with BOTH a failed node AND a real (non-trigger) completed node is a PARTIAL_SUCCESS;
- * all-failed is FAILED, all-completed is COMPLETED. The trigger always completes, so it is excluded
- * from the "real completion" check (otherwise an all-failed cycle would read as partial). Returns
+ * FALLBACK ONLY: the backend ships its own `lastCycleResult` on the run-state payload, and that is
+ * what callers use. This remains for a payload that predates the field.
+ *
+ * Any failure makes the cycle FAILED, otherwise COMPLETED - a cycle is never partial, that is a
+ * NODE verdict. The trigger always completes, so it is excluded from the "real completion"
+ * check, otherwise a cycle where nothing but the trigger ran would report success. Returns
  * `undefined` for any non-WAITING_TRIGGER status or an empty cycle (nothing ran yet) - the caller
  * then keeps the raw status. Output is the lowercase enum value consumed by
  * {@link getRunDisplayStatus} via `metadata.lastCycleResult`.
@@ -57,10 +60,45 @@ export function deriveBadgeCycleResult(
 ): string | undefined {
   if ((runStatus || '').toUpperCase() !== 'WAITING_TRIGGER') return undefined;
   const completedNonTrigger = completedStepIds.some((id) => !String(id).startsWith('trigger:'));
-  if (hasFailed && completedNonTrigger) return 'partial_success';
+  // Binary, matching the backend (StateSnapshotService.deriveCycleStatus). It used to answer
+  // 'partial_success' here while the backend wrote 'failed' for the same cycle, so the canvas
+  // badge and the run-history row contradicted each other on one run. partial_success is a NODE
+  // verdict: a node accumulates items and can be half-done, a cycle either did the job or did not.
   if (hasFailed) return 'failed';
   if (completedNonTrigger) return 'completed';
+  // Nothing ran: keep the raw status, so a launched run whose trigger has not fired reads
+  // "waiting for trigger" instead of borrowing an outcome.
   return undefined;
+}
+
+/**
+ * The cycle outcome the run badge should show, preferring the BACKEND's own verdict.
+ *
+ * The client cannot derive this correctly on its own: it sees only the CUMULATIVE completed and
+ * failed sets, while the verdict is scoped to the epoch that actually closed. A node that failed
+ * in an early epoch and succeeded later is PARTIAL_SUCCESS, which the client buckets as completed
+ * so the node keeps its rerun button - and the failure then disappears from `failedSteps`, so a
+ * client-side derivation reports "completed" for a cycle the backend recorded as failed. Same run,
+ * two badges, opposite colours.
+ *
+ * {@link deriveBadgeCycleResult} stays as the fallback for run payloads that predate the backend
+ * field; it is never consulted when the backend has answered, including when the backend
+ * deliberately answers nothing (a launched run whose trigger has not fired keeps reading
+ * "waiting for trigger" rather than borrowing an outcome).
+ */
+export function resolveBadgeCycleResult(
+  backendVerdict: string | undefined,
+  runStatus: string,
+  completedStepIds: string[],
+  hasFailed: boolean,
+): string | undefined {
+  // The WAITING_TRIGGER gate applies to the backend verdict too. Without it this wrapper widened
+  // the contract of the function it delegates to: a RUNNING run still carries the PREVIOUS
+  // cycle's `lastCycleResult` in its metadata, so the badge would show that stale outcome instead
+  // of "running". It only looked harmless because getRunDisplayStatus re-gates on the same status
+  // two layers away - an invariant held by accident, in a different file, is not held.
+  if ((runStatus || '').toUpperCase() !== 'WAITING_TRIGGER') return undefined;
+  return backendVerdict ?? deriveBadgeCycleResult(runStatus, completedStepIds, hasFailed);
 }
 
 /**
@@ -124,14 +162,19 @@ export function getStatusClasses(status: string): string {
       return 'bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300';
     case 'FAILED':
       return 'bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-300';
-    // A run/cycle with BOTH failed and completed nodes is a partial success: amber/orange,
-    // distinct from the plain-failed red and the idle-yellow default. Handles the uppercase
-    // run status and the lowercase enum value (lastCycleResult).
+    // A NODE that finished with some of its items failed: amber, distinct from the plain-failed
+    // red and the idle-yellow default. Runs no longer report this, but runs that finished before
+    // that rule still carry it in their metadata, so it must keep rendering. Handles the
+    // uppercase status and the lowercase enum value (lastCycleResult).
     case 'PARTIAL_SUCCESS':
     case 'partial_success':
       return 'bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-300';
+    // Ended without reaching its end: grey, the "abandoned" family. TIMEOUT belongs
+    // with them - it fell through to the idle yellow of a run that has not started,
+    // which also put a grey epoch icon next to a yellow pill for the same status.
     case 'CANCELLED':
     case 'STOPPED':
+    case 'TIMEOUT':
       return 'bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-400';
     // Alive and blocked on someone: violet, so it does not read as the idle
     // yellow of a run that has not started.

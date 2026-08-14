@@ -31,7 +31,7 @@ export default function UpgradeSuccessModal({
     <Dialog open={open} onOpenChange={(o) => !o && onClose()}>
       <DialogContent className="max-w-sm p-0 gap-0 overflow-hidden">
         <div className="p-8 text-center">
-          <div className="w-16 h-16 bg-green-100 dark:bg-green-900/30 rounded-full flex items-center justify-center mx-auto mb-5">
+          <div className="w-16 h-16 bg-green-100 dark:bg-green-900/30 rounded-2xl flex items-center justify-center mx-auto mb-5">
             <CheckCircle className="h-8 w-8 text-green-600 dark:text-green-400" />
           </div>
 

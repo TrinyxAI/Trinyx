@@ -124,7 +124,7 @@ export function DataSourceColumnIcons({ types, maxDisplay = 5, size = 'md', clas
   const chipSize = size === 'sm' ? 'h-7 w-7' : 'h-10 w-10';
   const iconSize = size === 'sm' ? 'h-3.5 w-3.5' : 'h-4 w-4';
   const base =
-    `flex items-center justify-center ${chipSize} rounded-full border border-slate-200 dark:border-slate-700 shadow-sm`;
+    `flex items-center justify-center ${chipSize} rounded-md border border-slate-200 dark:border-slate-700 shadow-sm`;
 
   return (
     <div className={`flex items-center gap-2 ${className}`}>

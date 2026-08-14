@@ -301,7 +301,7 @@ export function WorkflowPlanGenerator({ nodes, edges, readOnly = false, onNodesC
               <Button
                 variant="ghost"
                 size="icon"
-                className="h-8 w-8 rounded-full shrink-0"
+                className="h-8 w-8 rounded-xl shrink-0"
                 onClick={() => setIsOpen(false)}
               >
                 <X className="h-4 w-4" />
@@ -372,7 +372,7 @@ export function WorkflowPlanGenerator({ nodes, edges, readOnly = false, onNodesC
               <Button
                 variant="ghost"
                 size="icon"
-                className="h-8 w-8 rounded-full shrink-0"
+                className="h-8 w-8 rounded-xl shrink-0"
                 onClick={() => {
                   setIsImportOpen(false);
                   setImportJson('');

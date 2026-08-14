@@ -1,6 +1,5 @@
 package com.apimarketplace.orchestrator.trigger;
 
-import com.apimarketplace.common.credit.CreditConsumptionClient;
 import com.apimarketplace.interfaces.client.InterfaceClient;
 import com.apimarketplace.orchestrator.domain.WorkflowEntity;
 import com.apimarketplace.orchestrator.domain.WorkflowRunEntity;
@@ -44,7 +43,6 @@ public class PublicApplicationService {
     private final InterfaceActionService interfaceActionService;
     private final UnifiedSignalService signalService;
     private final ReusableTriggerService triggerService;
-    private final CreditConsumptionClient creditClient;
     private final StorageClient storageClient;
     private final WorkflowEpochService epochService;
     private final InterfaceClient interfaceClient;
@@ -73,7 +71,6 @@ public class PublicApplicationService {
                                     InterfaceActionService interfaceActionService,
                                     UnifiedSignalService signalService,
                                     ReusableTriggerService triggerService,
-                                    CreditConsumptionClient creditClient,
                                     StorageClient storageClient,
                                     WorkflowEpochService epochService,
                                     InterfaceClient interfaceClient) {
@@ -84,7 +81,6 @@ public class PublicApplicationService {
         this.interfaceActionService = interfaceActionService;
         this.signalService = signalService;
         this.triggerService = triggerService;
-        this.creditClient = creditClient;
         this.storageClient = storageClient;
         this.epochService = epochService;
         this.interfaceClient = interfaceClient;
@@ -243,10 +239,9 @@ public class PublicApplicationService {
 
         String runId = run.getRunIdPublic();
 
-        // Credit check
-        if (!creditClient.checkCredits(ctx.tenantId())) {
-            throw new IllegalStateException("Insufficient credits");
-        }
+        // No credit gate here: resuming proceeds and the next node to execute fails
+        // through NodeCreditGate, which puts the out-of-credit message on the node
+        // that stopped rather than on an opaque "Insufficient credits" throw.
 
         // Find active INTERFACE_SIGNAL for this nodeId
         List<SignalWaitEntity> activeSignals = signalService.getActiveSignals(runId);
@@ -354,10 +349,8 @@ public class PublicApplicationService {
             throw new IllegalStateException("No active run for this application");
         }
 
-        // Credit check
-        if (!creditClient.checkCredits(ctx.tenantId())) {
-            throw new IllegalStateException("Insufficient credits");
-        }
+        // No credit gate: the fire proceeds and NodeCreditGate fails the trigger node
+        // with the out-of-credit message (see the signal path above).
 
         TriggerType type = "chat".equalsIgnoreCase(triggerType) ? TriggerType.CHAT :
                            "form".equalsIgnoreCase(triggerType) ? TriggerType.FORM : TriggerType.MANUAL;

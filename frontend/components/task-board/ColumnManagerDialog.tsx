@@ -122,12 +122,12 @@ export function ColumnManagerDialog({ statuses, onClose, onChanged }: {
         onClick={(e) => e.stopPropagation()}
       >
         <Button variant="ghost" size="icon" onClick={onClose} disabled={busy}
-          className="absolute right-4 top-4 h-8 w-8 rounded-full z-10" aria-label={t('manageColumns.close')}>
+          className="absolute right-4 top-4 h-8 w-8 rounded-xl z-10" aria-label={t('manageColumns.close')}>
           <X className="h-4 w-4" />
         </Button>
         {/* Header (mirrors CreateTaskDialog) */}
         <div className="text-center px-8 pt-8 pb-5">
-          <div className="w-14 h-14 bg-theme-secondary rounded-full flex items-center justify-center mx-auto mb-3">
+          <div className="w-14 h-14 bg-theme-secondary rounded-xl flex items-center justify-center mx-auto mb-3">
             <Columns3 className="w-7 h-7 text-theme-primary" />
           </div>
           <h3 className="text-2xl font-semibold text-theme-primary">{t('manageColumns.title')}</h3>

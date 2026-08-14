@@ -480,7 +480,7 @@ const OverviewTab: React.FC<OverviewTabProps> = ({ apiData, apiConfig, onSaveCon
       <div className="space-y-6">
         <div className="flex items-center justify-between">
           <div className="flex items-center space-x-3">
-            <div className="w-10 h-10 bg-theme-secondary rounded-full flex items-center justify-center">
+            <div className="w-10 h-10 bg-theme-secondary rounded-xl flex items-center justify-center">
               <Info className="w-5 h-5 text-theme-primary" />
             </div>
             <div>
@@ -672,7 +672,7 @@ const OverviewTab: React.FC<OverviewTabProps> = ({ apiData, apiConfig, onSaveCon
                 </button>
                 {testingEndpoints && (
                   <div
-                    className="px-3 py-1 rounded-full text-xs font-medium bg-yellow-100 dark:bg-yellow-800/50 text-yellow-800 dark:text-yellow-200">
+                    className="px-3 py-1 rounded-md text-xs font-medium bg-yellow-100 dark:bg-yellow-800/50 text-yellow-800 dark:text-yellow-200">
                     {t('apiConfig.endpointTesting.testingAll')}
                   </div>
                 )}
@@ -716,7 +716,7 @@ const OverviewTab: React.FC<OverviewTabProps> = ({ apiData, apiConfig, onSaveCon
                                 <Clock className="w-4 h-4 text-yellow-500" />
                               )}
                               {!testingIndividualEndpoint && !testResult && (
-                                <div className="w-4 h-4 rounded-full bg-gray-300 dark:bg-gray-600" />
+                                <div className="w-4 h-4 rounded-md bg-gray-300 dark:bg-gray-600" />
                               )}
                             </div>
 
@@ -837,7 +837,7 @@ const OverviewTab: React.FC<OverviewTabProps> = ({ apiData, apiConfig, onSaveCon
         <div className="space-y-6">
           <div className="flex items-center justify-between">
             <div className="flex items-center space-x-3">
-              <div className="w-10 h-10 bg-theme-secondary rounded-full flex items-center justify-center">
+              <div className="w-10 h-10 bg-theme-secondary rounded-xl flex items-center justify-center">
                 <Cog className="w-5 h-5 text-theme-primary" />
               </div>
               <div>

@@ -54,7 +54,7 @@ class TriggerControllerMultiDagTest {
     @BeforeEach
     void setUp() {
         lenient().when(creditClient.checkCredits(any())).thenReturn(true);
-        controller = new TriggerController(runRepository, triggerService, resumeService, creditClient);
+        controller = new TriggerController(runRepository, triggerService, resumeService);
     }
 
     // ==================== Helper Methods ====================

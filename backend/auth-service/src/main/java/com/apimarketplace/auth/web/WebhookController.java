@@ -882,8 +882,16 @@ public class WebhookController {
                     com.apimarketplace.auth.domain.Subscription subscription = localSub.get();
                     Long userId = subscription.getBillingCustomer().getUser().getId();
 
-                    creditAttributionService.attributeOnRenewal(userId, subscription);
-                    logger.info("Credits renewed for userId={} on subscription cycle (invoice={})", userId, invoice.getId());
+                    var outcome = creditAttributionService.attributeOnRenewal(userId, subscription);
+                    // Log the real outcome, never a blanket success: a renewal that attributed
+                    // nothing (row no longer resolvable, cycle already attributed) is exactly
+                    // the failure that stayed invisible on the internal path for weeks.
+                    if (outcome == CreditAttributionService.RenewalOutcome.RENEWED) {
+                        logger.info("Credits renewed for userId={} on subscription cycle (invoice={})", userId, invoice.getId());
+                    } else {
+                        logger.warn("Credits NOT renewed for userId={} on subscription cycle (invoice={}): {}",
+                                userId, invoice.getId(), outcome);
+                    }
 
                     // PR9: renewal regrants credits - members of orgs the
                     // user owns should see fresh credit balance immediately,

@@ -84,11 +84,35 @@ public class ResponseShaper {
     }
 
     public ShapingResult shape(Object response, List<String> expandPaths, Integer maxItems, Mode mode) {
+        return shape(response, expandPaths, maxItems, mode, false);
+    }
+
+    /**
+     * @param expandSurvivesBudget whether {@code expandPaths} may also survive
+     *        the SIZE passes, not only the per-leaf one.
+     *
+     *        <p>False for anything a caller asked for. An agent chooses its own
+     *        expand paths, so honouring them past the budget would let it lift
+     *        the 64 KB ceiling on its own context by naming a large subtree, and
+     *        that ceiling is the only thing standing between a multi-megabyte
+     *        API response and the model's input.
+     *
+     *        <p>True only where the platform itself named the path and knows
+     *        the value never reaches an agent: a generated asset is read out of
+     *        this subtree, stored as a file, and pruned from the reply before
+     *        anyone sees it. Passed as a separate argument rather than inferred,
+     *        so no future caller acquires it by accident.
+     */
+    public ShapingResult shape(Object response, List<String> expandPaths, Integer maxItems,
+                                Mode mode, boolean expandSurvivesBudget) {
         if (response == null) {
             return new ShapingResult(null, List.of(), Action.UNTOUCHED, 0, 0);
         }
 
         Set<String> expandSet = expandPaths != null ? new HashSet<>(expandPaths) : Set.of();
+        // What the SIZE passes honour, which is nothing at all unless the
+        // platform vouched for the paths.
+        Set<String> budgetProofExpand = expandSurvivesBudget ? expandSet : Set.of();
         // Aggregator state, mutated by the recursive walk.
         Map<String, int[]> patternAgg = new HashMap<>();   // canonicalPath -> {count, maxBytes}
 
@@ -118,7 +142,7 @@ public class ResponseShaper {
         if (mode == Mode.AGENT) {
             int currentSize = serializedBytes(shaped);
             if (currentSize > MAX_TOTAL_RESPONSE_SIZE) {
-                ShapeAndAction repacked = repackToBudget(shaped);
+                ShapeAndAction repacked = repackToBudget(shaped, budgetProofExpand);
                 shaped = repacked.tree;
                 if (repacked.action != null) {
                     action = repacked.action;
@@ -264,24 +288,24 @@ public class ResponseShaper {
 
     private record ShapeAndAction(Object tree, Action action) {}
 
-    private ShapeAndAction repackToBudget(Object tree) {
+    private ShapeAndAction repackToBudget(Object tree, Set<String> expandSet) {
         Object current = tree;
         for (int iter = 0; iter < MAX_REPACK_ITERATIONS; iter++) {
             int size = serializedBytes(current);
             if (size <= MAX_TOTAL_RESPONSE_SIZE) {
                 return new ShapeAndAction(current, Action.ARRAY_DIGESTED);
             }
-            List<ArrayLocator> arrays = collectArraysByCost(current);
+            List<ArrayLocator> arrays = collectArraysByCost(current, expandSet);
             if (arrays.isEmpty()) {
                 // No array to digest → straight to Pass 1.5
-                return passOneFiveFallback(current);
+                return passOneFiveFallback(current, expandSet);
             }
             ArrayLocator winner = arrays.get(0);
             current = replaceAtPath(current, winner.path, makeDigest(winner.list));
         }
         // Repack cap hit, still over → Pass 1.5
         if (serializedBytes(current) > MAX_TOTAL_RESPONSE_SIZE) {
-            return passOneFiveFallback(current);
+            return passOneFiveFallback(current, expandSet);
         }
         return new ShapeAndAction(current, Action.ARRAY_DIGESTED);
     }
@@ -306,9 +330,9 @@ public class ResponseShaper {
 
     /** Collect arrays in DFS order with serialised byte cost; sort byteCost desc, path asc. */
     @SuppressWarnings("unchecked")
-    private List<ArrayLocator> collectArraysByCost(Object root) {
+    private List<ArrayLocator> collectArraysByCost(Object root, Set<String> expandSet) {
         List<ArrayLocator> out = new ArrayList<>();
-        collectArraysRec(root, "", out);
+        collectArraysRec(root, "", out, expandSet);
         out.sort(Comparator
                 .comparingInt(ArrayLocator::byteCost).reversed()
                 .thenComparing(ArrayLocator::path));
@@ -316,7 +340,11 @@ public class ResponseShaper {
     }
 
     @SuppressWarnings("unchecked")
-    private void collectArraysRec(Object node, String path, List<ArrayLocator> out) {
+    private void collectArraysRec(Object node, String path, List<ArrayLocator> out,
+                                   Set<String> expandSet) {
+        // A subtree the caller asked for verbatim is opaque here for the same
+        // reason a FileRef is: digesting it answers a question nobody asked.
+        if (shouldExpand(path, expandSet)) return;
         if (node instanceof Map<?,?> m) {
             // FileRef is opaque
             if ("file".equals(m.get("_type"))) return;
@@ -324,7 +352,7 @@ public class ResponseShaper {
             if ("array_digest".equals(m.get("_shape")) || "oversize".equals(m.get("_shape"))) return;
             for (Map.Entry<?, ?> e : m.entrySet()) {
                 String childPath = path.isEmpty() ? String.valueOf(e.getKey()) : path + "." + e.getKey();
-                collectArraysRec(e.getValue(), childPath, out);
+                collectArraysRec(e.getValue(), childPath, out, expandSet);
             }
         } else if (node instanceof List<?> list) {
             // Skip arrays whose only members are FileRef Maps.
@@ -335,7 +363,7 @@ public class ResponseShaper {
                 out.add(new ArrayLocator(path, list, cost));
             }
             for (int i = 0; i < list.size(); i++) {
-                collectArraysRec(list.get(i), path + "[" + i + "]", out);
+                collectArraysRec(list.get(i), path + "[" + i + "]", out, expandSet);
             }
         }
     }
@@ -404,36 +432,53 @@ public class ResponseShaper {
 
     // ---- Pass-1.5 wide-object fallback ---------------------------------------
 
-    private ShapeAndAction passOneFiveFallback(Object tree) {
+    private ShapeAndAction passOneFiveFallback(Object tree, Set<String> expandSet) {
         // Re-clip every string leaf at MAX_STRING_SIZE_FALLBACK.
         Map<String, int[]> dummyAgg = new HashMap<>();
-        Object reclipped = walk(tree, "", Set.of(), 0, MAX_STRING_SIZE_FALLBACK, dummyAgg);
+        Object reclipped = walk(tree, "", expandSet, 0, MAX_STRING_SIZE_FALLBACK, dummyAgg);
         if (serializedBytes(reclipped) <= MAX_TOTAL_RESPONSE_SIZE) {
+            return new ShapeAndAction(reclipped, Action.OVERSIZE_FALLBACK);
+        }
+        // Still over budget WITH an expand in play: the caller named a subtree
+        // and it is what does not fit. The skeleton would save nothing here,
+        // because it keeps that subtree verbatim too, and it would MOVE it: the
+        // tree is re-rooted under "skeleton", so a caller reading the path it
+        // asked for finds nothing there. Handing back the re-clipped tree keeps
+        // the shape they addressed. Callers that asked for nothing keep the
+        // skeleton exactly as before.
+        if (expandSet != null && !expandSet.isEmpty()) {
             return new ShapeAndAction(reclipped, Action.OVERSIZE_FALLBACK);
         }
         // Last resort: skeleton.
         Map<String, Object> oversize = new LinkedHashMap<>();
         oversize.put("_shape", "oversize");
         oversize.put("total_size_bytes", serializedBytes(tree));
-        oversize.put("skeleton", buildSkeleton(tree, 0));
+        oversize.put("skeleton", buildSkeleton(tree, 0, "", expandSet));
         return new ShapeAndAction(oversize, Action.OVERSIZE_FALLBACK);
     }
 
     /** Lightweight inline skeleton: keep keys + types, drop values. */
     @SuppressWarnings("unchecked")
-    private Object buildSkeleton(Object node, int depth) {
+    private Object buildSkeleton(Object node, int depth, String path, Set<String> expandSet) {
+        // Even the last resort keeps what the caller explicitly asked for: a
+        // skeleton of it would be a successful-looking answer with the one
+        // field they named replaced by "<string>".
+        if (shouldExpand(path, expandSet)) return node;
         if (depth > MAX_DEPTH) return "<deep>";
         if (node == null) return "null";
         if (node instanceof Map<?,?> m) {
             Map<String, Object> out = new LinkedHashMap<>();
             for (Map.Entry<?, ?> e : m.entrySet()) {
-                out.put(String.valueOf(e.getKey()), buildSkeleton(e.getValue(), depth + 1));
+                String childPath = path.isEmpty() ? String.valueOf(e.getKey())
+                        : path + "." + e.getKey();
+                out.put(String.valueOf(e.getKey()),
+                        buildSkeleton(e.getValue(), depth + 1, childPath, expandSet));
             }
             return out;
         }
         if (node instanceof List<?> l) {
             if (l.isEmpty()) return List.of();
-            return List.of(buildSkeleton(l.get(0), depth + 1));
+            return List.of(buildSkeleton(l.get(0), depth + 1, path + "[0]", expandSet));
         }
         if (node instanceof String) return "<string>";
         if (node instanceof Boolean) return "<boolean>";

@@ -91,7 +91,8 @@ class ApiCatalogBundleApplierTxRegressionTest {
         Mockito.when(mergeService.merge(anyList(), anyList())).thenReturn(
                 new ApiCatalogMergeService.MergeResult(1, 0, 0, 0, 0, 0, 0, List.of()));
         ApiCatalogBundleApplier applier = new ApiCatalogBundleApplier(
-                mergeService, bundleRepo, syncStatusRepo, new ObjectMapper(), txManager);
+                mergeService, Mockito.mock(ApiCatalogGenerationPriceApplier.class),
+                bundleRepo, syncStatusRepo, new ObjectMapper(), txManager);
 
         String json = "{\"apis\":[{\"id\":\"11111111-1111-1111-1111-111111111111\"," +
                 "\"apiName\":\"Demo\",\"tools\":[]}],\"credentialTemplates\":[]}";

@@ -34,7 +34,7 @@ export function DataTablePagination({ controller }: DataTablePaginationProps) {
       {pagination.totalPages > 1 && (
         <div className="flex items-center gap-1">
           <button
-            className="w-7 h-7 p-0 rounded-full transition-colors inline-flex items-center justify-center text-[var(--text-secondary)] hover:bg-[var(--text-primary)] hover:text-[var(--bg-primary)] disabled:opacity-30 disabled:cursor-not-allowed disabled:hover:bg-transparent disabled:hover:text-[var(--text-secondary)]"
+            className="w-7 h-7 p-0 rounded-xl transition-colors inline-flex items-center justify-center text-[var(--text-secondary)] hover:bg-[var(--text-primary)] hover:text-[var(--bg-primary)] disabled:opacity-30 disabled:cursor-not-allowed disabled:hover:bg-transparent disabled:hover:text-[var(--text-secondary)]"
             onClick={() => handlePageChange(pagination.currentPage - 1)}
             disabled={pagination.currentPage <= 1}
             aria-label={t('previous')}
@@ -47,7 +47,7 @@ export function DataTablePagination({ controller }: DataTablePaginationProps) {
           </span>
 
           <button
-            className="w-7 h-7 p-0 rounded-full transition-colors inline-flex items-center justify-center text-[var(--text-secondary)] hover:bg-[var(--text-primary)] hover:text-[var(--bg-primary)] disabled:opacity-30 disabled:cursor-not-allowed disabled:hover:bg-transparent disabled:hover:text-[var(--text-secondary)]"
+            className="w-7 h-7 p-0 rounded-xl transition-colors inline-flex items-center justify-center text-[var(--text-secondary)] hover:bg-[var(--text-primary)] hover:text-[var(--bg-primary)] disabled:opacity-30 disabled:cursor-not-allowed disabled:hover:bg-transparent disabled:hover:text-[var(--text-secondary)]"
             onClick={() => handlePageChange(pagination.currentPage + 1)}
             disabled={pagination.currentPage >= pagination.totalPages}
             aria-label={t('next')}

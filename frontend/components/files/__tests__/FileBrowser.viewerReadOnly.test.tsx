@@ -29,6 +29,9 @@ let hookState: { entries: StorageExplorerEntry[]; parentFolderId: string | null 
 };
 vi.mock('@/app/workflows/builder/components/inspector/useStorageExplorer', () => ({
   useStorageExplorer: () => ({
+    sort: 'date' as const,
+    direction: 'desc' as const,
+    setSort: vi.fn(),
     entries: hookState.entries,
     totalElements: hookState.entries.length,
     totalPages: 1,
@@ -56,6 +59,7 @@ vi.mock('@/app/workflows/builder/components/inspector/useStorageExplorer', () =>
 
 vi.mock('@/lib/api/storage-api', () => ({
   storageApi: {
+    getFolderTrail: vi.fn().mockResolvedValue([]),
     createFolder: vi.fn(),
     moveEntries: vi.fn(),
     deleteEntries: vi.fn().mockResolvedValue({ deletedCount: 0 }),
@@ -94,12 +98,31 @@ vi.mock('../FileCard', () => ({
   ),
 }));
 vi.mock('@/components/app/FileDetailView', () => ({ FileDetailView: () => <div data-testid="detail" /> }));
+// ---- next/navigation: the open folder now lives in the URL, so FileBrowser reads
+// useSearchParams() and navigates with router.push(). A fake router records the pushes;
+// tests that need to ARRIVE in a folder set searchParams before rendering.
+const routerPush = vi.fn();
+const routerReplace = vi.fn();
+let searchParams = new URLSearchParams();
+vi.mock('next/navigation', () => ({
+  useRouter: () => ({ push: routerPush, replace: routerReplace }),
+  usePathname: () => '/en/app/files',
+  useSearchParams: () => searchParams,
+}));
+
 vi.mock('../FileFilterBar', () => ({ FileFilterBar: () => <div /> }));
 vi.mock('@/components/ui/PaginationBar', () => ({ PaginationBar: () => <div /> }));
 vi.mock('@/components/ui/BulkDeleteModal', () => ({ BulkDeleteModal: () => null }));
 vi.mock('@/components/ToastContainer', () => ({ default: () => null }));
 vi.mock('@/components/Toast', () => ({ useToast: () => ({ toasts: [], addToast: vi.fn(), removeToast: vi.fn() }) }));
 vi.mock('@/hooks/useAuthToken', () => ({ useAuthToken: () => 'token' }));
+// The toolbar asks whether this install serves generation at all before it
+// offers the action. Answered "yes, with models" here so the read-only gate is
+// what these tests measure; the availability gate has its own suite in
+// FileBrowser.generateEntryPoint.test.tsx.
+vi.mock('@/hooks/useGenerationModels', () => ({
+  useGenerationModels: () => ({ models: [], isLoading: false, availability: 'ready' }),
+}));
 vi.mock('@/hooks/useDebouncedValue', () => ({ useDebouncedValue: (v: unknown) => v }));
 vi.mock('@/lib/hooks/useOrgScopedReset', () => ({ useOrgScopedReset: () => {} }));
 

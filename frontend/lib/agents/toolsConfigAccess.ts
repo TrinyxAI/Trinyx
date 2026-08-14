@@ -81,7 +81,13 @@ export interface ToolsConfigShape {
   agents?: string[];
   applications?: string[];
   webSearch?: boolean;
-  imageGeneration?: boolean;
+  /**
+   * Opt-IN grant for the unified `generation` tool (image, video, audio, voice,
+   * music). The retired `imageGeneration` grant is never honoured as a fallback:
+   * it was given for images, and a per-second video model spends an order of
+   * magnitude more, so it must not widen an agent's spending authority.
+   */
+  generation?: boolean;
   // Per-family access GRANT (axis 1) - none|all|custom. Absent ⇒ 'none' (see getGrant).
   workflowsGrant?: ResourceGrant;
   tablesGrant?: ResourceGrant;
@@ -191,15 +197,26 @@ export function isWebSearchEnabled(tc: unknown): boolean {
 }
 
 /**
- * Image generation is opt-IN - defaults to disabled when absent (mirrors backend
- * `AgentModuleResolver.isImageGenerationEnabled`). Tolerates both the boolean
- * (`imageGeneration: true`) and object (`{enabled: true, ...}`) shapes; an object
- * without an explicit `enabled` is treated as enabled.
+ * The unified generation tool is opt-IN, defaulting to disabled when absent
+ * (mirrors backend `AgentModuleResolver.isGenerationEnabled`).
+ *
+ * <p>The retired `imageGeneration` grant is never a fallback for it: granting
+ * images must not silently grant video, which costs an order of magnitude more
+ * per call.
  */
-export function isImageGenerationEnabled(tc: unknown): boolean {
+export function isGenerationEnabled(tc: unknown): boolean {
+  return readOptIn(tc, 'generation');
+}
+
+/**
+ * Shared reader for an opt-in flag. Tolerates both the boolean
+ * (`key: true`) and object (`{enabled: true, ...}`) shapes; an object without an
+ * explicit `enabled` is treated as enabled.
+ */
+function readOptIn(tc: unknown, key: string): boolean {
   const obj = asObject(tc);
   if (!obj) return false;
-  const raw = obj.imageGeneration as unknown;
+  const raw = obj[key] as unknown;
   if (raw === undefined || raw === null) return false;
   if (typeof raw === 'boolean') return raw;
   if (typeof raw === 'object') {
@@ -242,7 +259,11 @@ export function buildToolsConfigPayload(input: {
    */
   files?: string[];
   webSearch?: boolean;
-  imageGeneration?: boolean;
+  /**
+   * Opt-IN grant for the unified `generation` tool (image, video, audio, voice,
+   * music). The retired `imageGeneration` grant is never honoured as a fallback.
+   */
+  generation?: boolean;
   tableAccessMode?: 'read' | 'write';
   workflowAccessMode?: 'read' | 'write';
   interfaceAccessMode?: 'read' | 'write';
@@ -287,7 +308,7 @@ export function buildToolsConfigPayload(input: {
   // keeps the prior value, so turning a flag OFF must send `false` (otherwise an
   // agent that had it ON could never be switched off).
   if (input.webSearch !== undefined) payload.webSearch = input.webSearch;
-  if (input.imageGeneration !== undefined) payload.imageGeneration = input.imageGeneration;
+  if (input.generation !== undefined) payload.generation = input.generation;
   // Per-family read/write access mode (axis 2) - emit for BOTH 'read' AND 'write'.
   // The pre-fix code emitted only on 'read' (omit-on-write); combined with the
   // backend's merge-on-update that made a read→write toggle never persist (the

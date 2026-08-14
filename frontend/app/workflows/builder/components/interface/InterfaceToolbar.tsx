@@ -5,6 +5,7 @@ import { useTranslations } from 'next-intl';
 import { ChevronLeft, ChevronRight, Maximize2, Minimize2, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import clsx from 'clsx';
+import { canvasChromeSurfaceClass } from '@/components/ui/canvas-chrome';
 
 interface InterfaceToolbarProps {
   currentPage: number;
@@ -103,7 +104,7 @@ export function InterfaceToolbar({
   const badgeNode = hasBadge ? (
     <span
       data-testid="interface-pagination-rerun-badge"
-      className="text-[10px] px-1.5 py-0.5 rounded-full bg-amber-100 dark:bg-amber-900/40 text-amber-700 dark:text-amber-300 font-medium whitespace-nowrap"
+      className="text-[10px] px-1.5 py-0.5 rounded-md bg-amber-100 dark:bg-amber-900/40 text-amber-700 dark:text-amber-300 font-medium whitespace-nowrap"
     >
       {pageBadge}
     </span>
@@ -117,7 +118,13 @@ export function InterfaceToolbar({
       <div
         data-testid="interface-toolbar"
         className={clsx(
-          'flex items-center gap-1 rounded-full bg-white/95 dark:bg-gray-800/95 px-3 py-2 backdrop-blur border-0',
+          // The floating card joins the canvas chrome system rather than restating it:
+          // same rounded-2xl surface, same hairline border, same palette-driven fill.
+          // It used to be a rounded-full pill with a hardcoded bg-white/gray-800 that
+          // ignored the theme, which is what made it read as a foreign island next to
+          // the square chrome everywhere else.
+          canvasChromeSurfaceClass,
+          'flex items-center gap-1 px-1.5 py-1',
           className,
         )}
       >
@@ -146,7 +153,7 @@ export function InterfaceToolbar({
                 <button
                   onClick={onPrevious}
                   disabled={currentPage === 0}
-                  className="w-7 h-7 p-0 rounded-full transition-colors inline-flex items-center justify-center text-[var(--text-secondary)] hover:bg-[var(--text-primary)] hover:text-[var(--bg-primary)] disabled:opacity-30 disabled:cursor-not-allowed disabled:hover:bg-transparent disabled:hover:text-[var(--text-secondary)]"
+                  className="w-7 h-7 p-0 rounded-xl transition-colors inline-flex items-center justify-center text-[var(--text-secondary)] hover:bg-[var(--text-primary)] hover:text-[var(--bg-primary)] disabled:opacity-30 disabled:cursor-not-allowed disabled:hover:bg-transparent disabled:hover:text-[var(--text-secondary)]"
                   aria-label={t('previous')}
                 >
                   <ChevronLeft className="h-3.5 w-3.5" />
@@ -177,7 +184,7 @@ export function InterfaceToolbar({
                 <button
                   onClick={onNext}
                   disabled={currentPage >= totalPages - 1}
-                  className="w-7 h-7 p-0 rounded-full transition-colors inline-flex items-center justify-center text-[var(--text-secondary)] hover:bg-[var(--text-primary)] hover:text-[var(--bg-primary)] disabled:opacity-30 disabled:cursor-not-allowed disabled:hover:bg-transparent disabled:hover:text-[var(--text-secondary)]"
+                  className="w-7 h-7 p-0 rounded-xl transition-colors inline-flex items-center justify-center text-[var(--text-secondary)] hover:bg-[var(--text-primary)] hover:text-[var(--bg-primary)] disabled:opacity-30 disabled:cursor-not-allowed disabled:hover:bg-transparent disabled:hover:text-[var(--text-secondary)]"
                   aria-label={t('next')}
                 >
                   <ChevronRight className="h-3.5 w-3.5" />
@@ -200,7 +207,7 @@ export function InterfaceToolbar({
               onClick={onFullscreen}
               variant="ghost"
               size="sm"
-              className="h-8 w-8 p-0 rounded-full shadow-none border-0 focus-visible:ring-2 focus-visible:ring-theme-tertiary"
+              className="h-8 w-8 p-0 rounded-xl shadow-none border-0 focus-visible:ring-2 focus-visible:ring-theme-tertiary"
               title={isFullscreen ? t('exitFullscreen') : t('fullscreen')}
             >
               {isFullscreen ? <Minimize2 className="h-4 w-4" /> : <Maximize2 className="h-4 w-4" />}
@@ -220,7 +227,7 @@ export function InterfaceToolbar({
           <button
             type="button"
             onClick={onClose}
-            className="w-7 h-7 p-0 rounded-full transition-colors inline-flex items-center justify-center text-[var(--text-secondary)] hover:bg-[var(--text-primary)] hover:text-[var(--bg-primary)]"
+            className="w-7 h-7 p-0 rounded-xl transition-colors inline-flex items-center justify-center text-[var(--text-secondary)] hover:bg-[var(--text-primary)] hover:text-[var(--bg-primary)]"
           >
             <X className="h-3.5 w-3.5" />
           </button>
@@ -234,7 +241,7 @@ export function InterfaceToolbar({
     <div
       data-testid="interface-toolbar"
       className={clsx(
-        'flex items-center gap-2 bg-slate-900/80 text-white rounded-full px-3 py-2 shadow-lg',
+        'flex items-center gap-2 bg-slate-900/80 text-white rounded-2xl px-3 py-2 shadow-lg',
         className,
       )}
     >
@@ -258,7 +265,7 @@ export function InterfaceToolbar({
                 onClick={onPrevious}
                 disabled={currentPage === 0}
                 className={clsx(
-                  'p-1.5 rounded-full hover:bg-white/20 transition-colors',
+                  'p-1.5 rounded-xl hover:bg-white/20 transition-colors',
                   currentPage === 0 && 'opacity-30 cursor-not-allowed',
                 )}
                 title={t('previousArrow')}
@@ -296,7 +303,7 @@ export function InterfaceToolbar({
                 onClick={onNext}
                 disabled={currentPage >= totalPages - 1}
                 className={clsx(
-                  'p-1.5 rounded-full hover:bg-white/20 transition-colors',
+                  'p-1.5 rounded-xl hover:bg-white/20 transition-colors',
                   currentPage >= totalPages - 1 && 'opacity-30 cursor-not-allowed',
                 )}
                 title={t('nextArrow')}
@@ -316,7 +323,7 @@ export function InterfaceToolbar({
           <button
             type="button"
             onClick={onFullscreen}
-            className="p-1.5 rounded-full hover:bg-white/20 transition-colors"
+            className="p-1.5 rounded-xl hover:bg-white/20 transition-colors"
             title={isFullscreen ? t('exitFullscreen') : t('fullscreen')}
           >
             {isFullscreen ? <Minimize2 className="w-5 h-5" /> : <Maximize2 className="w-5 h-5" />}

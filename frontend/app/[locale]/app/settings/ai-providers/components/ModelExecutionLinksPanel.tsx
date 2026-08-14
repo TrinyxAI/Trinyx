@@ -274,13 +274,13 @@ export default function ModelExecutionLinksPanel() {
                   {getProviderDisplayName(link.executionProvider)}
                   {link.executionModel ? ` · ${link.executionModel}` : ""}
                 </span>
-                <span className="text-xs rounded-full bg-theme-secondary px-2 py-0.5 text-theme-muted shrink-0">
+                <span className="text-xs rounded-md bg-theme-secondary px-2 py-0.5 text-theme-muted shrink-0">
                   {t(`executionLinks.${SCOPE_KEY[link.scope ?? "ALL"] ?? "scopeAll"}`)}
                 </span>
               </div>
               <button
                 onClick={() => handleToggle(link)}
-                className={`text-xs rounded-full px-2 py-0.5 ${link.enabled ? "bg-emerald-500/15 text-emerald-500" : "bg-theme-secondary text-theme-muted"}`}
+                className={`text-xs rounded-md px-2 py-0.5 ${link.enabled ? "bg-emerald-500/15 text-emerald-500" : "bg-theme-secondary text-theme-muted"}`}
               >
                 {link.enabled ? t("executionLinks.enabled") : t("executionLinks.disabled")}
               </button>

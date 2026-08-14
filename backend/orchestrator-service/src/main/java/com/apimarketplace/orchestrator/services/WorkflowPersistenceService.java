@@ -356,11 +356,33 @@ public class WorkflowPersistenceService {
      *
      * <p>This mirrors what V2StepByStepService does at SBS initialization:
      * {@code stateSnapshotService.initializeSnapshot(runId)} +
-     * {@code stateSnapshotService.updateReadyNodes(runId, readyNodes)}.
+     * a ready-node write.
      *
      * <p>Without this, the StateSnapshot has empty readyNodeIds and WS batch-updates
      * send {@code readyStepIds: []} to the frontend, which overwrites the correctly
      * API-loaded readySteps.
+     *
+     * <p><b>Each trigger is marked ready inside ITS OWN DAG.</b> The flat
+     * {@code updateReadyNodes(runId, readyTriggers)} used here before resolved its target
+     * through {@code StateSnapshot.getDefaultTriggerId()}, and {@code dags} is still empty
+     * at run birth, so it returned {@code DEFAULT_TRIGGER_SENTINEL} and minted a phantom
+     * {@code "trigger:default"} DAG holding the real trigger as ready. The first fire then
+     * created the real DAG and the trigger node lived in TWO dags, which made
+     * {@code findDagContaining} ambiguous - and it resolves by iterating a {@code Map.copyOf},
+     * whose order is randomised per JVM, so downstream behaviour was bimodal per process.
+     * A trigger belongs to its own DAG, so that is where its ready marker goes.
+     *
+     * <p>One behavioural difference this DOES introduce, stated rather than glossed: the birth
+     * marker lands in the real DAG's epoch 0, and the first fire opens epoch 1
+     * ({@code TriggerEpochManager.incrementEpoch}), so once that epoch is active
+     * {@code computeFlatSet} unions only epoch 1 and the birth marker stops contributing. The
+     * phantom, never being active, contributed through the no-active-epochs fallback for the
+     * whole run. So mid-epoch the flat ready set no longer carries the trigger until
+     * {@code prepareNextEpochReady} re-adds it at the end of the cycle. That is what the
+     * pre-fix state SHOULD have been: the trigger is not ready while its own epoch runs. It is
+     * safe now because the consumer that made a non-empty ready set load-bearing
+     * ({@code StateReconstructorHelper.determineOverallStatus} short-circuiting to RUNNING over
+     * a plan set that omitted {@code core:} nodes) was repaired first.
      */
     private void initializeSnapshotWithReadyTriggers(WorkflowExecution execution, boolean hasReusable) {
         if (!hasReusable) return;
@@ -374,7 +396,7 @@ public class WorkflowPersistenceService {
                 .collect(Collectors.toSet());
 
         if (!readyTriggers.isEmpty()) {
-            stateSnapshotService.updateReadyNodes(runId, readyTriggers);
+            stateSnapshotService.initializeReadyNodes(runId, readyTriggers);
             logger.info("Initialized StateSnapshot with ready triggers {} for runId={}", readyTriggers, runId);
         }
     }

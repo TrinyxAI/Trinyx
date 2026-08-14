@@ -12,10 +12,15 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 // of the agent (and the avatar falls back to the model selector).
 
 // Capture the config passed to useQuery so we can invoke its queryFn directly.
+// Only the linked-agent query is kept: the composer reads other caches too (the
+// generation catalogue), and taking whichever call came last would let an
+// unrelated query silently stand in for the one under test.
 let capturedQuery: { queryKey?: unknown; queryFn?: () => unknown; enabled?: boolean } | null = null;
 vi.mock('@tanstack/react-query', () => ({
   useQuery: (cfg: { queryKey?: unknown; queryFn?: () => unknown; enabled?: boolean }) => {
-    capturedQuery = cfg;
+    if (Array.isArray(cfg.queryKey) && cfg.queryKey[0] === 'linked-agent') {
+      capturedQuery = cfg;
+    }
     return { data: null, isPending: false };
   },
 }));

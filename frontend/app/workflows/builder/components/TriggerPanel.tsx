@@ -78,6 +78,17 @@ interface TriggerPanelProps {
    * panel falls back to viewport-center (`left: 50% + position.x`).
    */
   anchorElement?: HTMLElement | null;
+  /**
+   * Values to seed the trigger inputs with, keyed by trigger id then field name
+   * (the shape of a render's {@code triggerData}). Used by the application's
+   * "load the template values" action so the user sees the publisher's example
+   * inputs and can submit them as-is.
+   *
+   * <p>Applied whenever the object IDENTITY changes, so the caller re-seeds by
+   * passing a fresh object; it never fights the user's own typing in between.
+   * Nothing is submitted automatically - the user still presses the button.
+   */
+  prefillValues?: Record<string, Record<string, unknown>> | null;
 }
 
 export function TriggerPanel({
@@ -94,6 +105,7 @@ export function TriggerPanel({
   runStatus,
   isStepByStepMode = false,
   anchorElement,
+  prefillValues,
 }: TriggerPanelProps) {
   const t = useTranslations('triggerPanel');
   const [isSubmitting, setIsSubmitting] = React.useState(false);
@@ -274,6 +286,107 @@ export function TriggerPanel({
       });
     }
   }, [selectedConfig]);
+
+  // Seed the inputs from a template ("load the example values").
+  //
+  // Keyed on the prefillValues IDENTITY, not its content: the caller hands over a
+  // fresh object every time the user asks for the values, so a second request
+  // re-seeds even with identical content and nothing clobbers what the user typed
+  // in between. Seeding only fills the inputs - the user still presses Submit.
+  //
+  // triggerConfigs is read through a ref ON PURPOSE. Callers build that array
+  // inline, so its identity changes on every parent render; as an effect dep it
+  // would re-apply the seed on each one and silently overwrite the user's edits.
+  //
+  // A REMOUNT (the application toggling fullscreen renders this panel from a
+  // different position in the tree) does re-seed, and that is the wanted outcome:
+  // the remount resets formDataByTrigger anyway, so the choice there is between the
+  // template values and an empty form, never between the template and the user's
+  // edits - those are already gone.
+  const triggerConfigsRef = React.useRef(triggerConfigs);
+  triggerConfigsRef.current = triggerConfigs;
+  React.useEffect(() => {
+    if (!prefillValues) return;
+    const triggerConfigs = triggerConfigsRef.current;
+
+    const formSeeds: Record<string, Record<string, any>> = {};
+    const webhookSeeds: Record<string, WebhookDraft> = {};
+    let chatSeed: string | null = null;
+
+    for (const config of triggerConfigs) {
+      const values = prefillValues[config.triggerId];
+      if (!values || typeof values !== 'object') continue;
+
+      if (config.type === 'chat') {
+        if (typeof values.message === 'string' && values.message.trim()) {
+          chatSeed = values.message;
+        }
+        continue;
+      }
+
+      if (config.type === 'webhook') {
+        // Only the BODY carries the template payload. The method and headers are the
+        // user's own request setup, so an edited value there survives the seed exactly
+        // like a typed form field would.
+        const draft = webhookDataByTrigger[config.triggerId];
+        webhookSeeds[config.triggerId] = {
+          method: draft?.method ?? config.webhookMethod ?? 'POST',
+          headers: draft?.headers
+            ?? config.webhookDefaultHeaders
+            ?? '{\n  "Content-Type": "application/json"\n}',
+          body: JSON.stringify(values, null, 2),
+        };
+        continue;
+      }
+
+      const seeded: Record<string, any> = {};
+      for (const field of config.fields ?? []) {
+        // A file input cannot be pre-filled from JS, and a template's file value is
+        // a FileRef owned by the PUBLISHER's tenant - injecting it would hand the
+        // user a reference they cannot read. Leave file fields for the user to fill.
+        if (field.type === 'file') continue;
+        if (!(field.name in values)) continue;
+        const value = values[field.name];
+        if (value === null || value === undefined) continue;
+
+        if (field.type === 'checkbox') {
+          seeded[field.name] = value === true || value === 'true';
+        } else if (field.type === 'multiselect' || field.type === 'checkboxGroup') {
+          // A single-choice template value is legitimate here (the publisher picked one
+          // option); dropping it because it is not an array would silently lose the seed.
+          if (Array.isArray(value)) {
+            seeded[field.name] = value.map(String);
+          } else if (typeof value !== 'object') {
+            seeded[field.name] = [String(value)];
+          }
+        } else if (typeof value !== 'object') {
+          seeded[field.name] = String(value);
+        }
+      }
+      if (Object.keys(seeded).length > 0) {
+        formSeeds[config.triggerId] = seeded;
+      }
+    }
+
+    if (Object.keys(formSeeds).length > 0) {
+      setFormDataByTrigger(prev => {
+        const next = { ...prev };
+        for (const [triggerId, seeded] of Object.entries(formSeeds)) {
+          next[triggerId] = { ...(prev[triggerId] || {}), ...seeded };
+        }
+        return next;
+      });
+    }
+    if (Object.keys(webhookSeeds).length > 0) {
+      setWebhookDataByTrigger(prev => ({ ...prev, ...webhookSeeds }));
+    }
+    if (chatSeed !== null) {
+      setChatMessage(chatSeed);
+    }
+    // webhookDataByTrigger is read to preserve the user's edited headers; re-running
+    // on every header keystroke would re-seed the body, so it stays out of the deps.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [prefillValues]);
 
   // Load the EXISTING conversation for this chat trigger and its messages.
   // FIND-ONLY - never create here. Creating a conversation just because the

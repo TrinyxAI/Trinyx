@@ -102,11 +102,11 @@ export function MultiSelectCell({ value, rowKey, field, displayConfig, onSaveAnd
                 selectedOptions.map(opt => {
                   const optColor = opt.color || palette[opt.value];
                   return optColor ? (
-                    <span key={opt.value} className="rounded-full px-2 py-0.5 text-[11px] font-semibold text-white" style={{ backgroundColor: optColor }}>
+                    <span key={opt.value} className="rounded-md px-2 py-0.5 text-[11px] font-semibold text-white" style={{ backgroundColor: optColor }}>
                       {opt.label}
                     </span>
                   ) : (
-                    <span key={opt.value} className="rounded-full px-2 py-0.5 text-[11px] font-medium bg-slate-200 dark:bg-slate-700 text-[var(--text-primary)]">
+                    <span key={opt.value} className="rounded-md px-2 py-0.5 text-[11px] font-medium bg-slate-200 dark:bg-slate-700 text-[var(--text-primary)]">
                       {opt.label}
                     </span>
                   );

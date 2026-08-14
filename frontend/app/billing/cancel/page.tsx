@@ -30,7 +30,7 @@ export default function BillingCancelPage() {
     <div className="min-h-screen bg-gradient-to-br from-red-50 to-orange-50 dark:from-gray-900 dark:to-gray-800 flex items-center justify-center p-4">
       <div className="max-w-2xl w-full bg-white dark:bg-gray-800 rounded-3xl shadow-2xl dark:shadow-gray-900/50 p-8 text-center">
         {/* Icône d'annulation */}
-        <div className="w-24 h-24 bg-red-100 dark:bg-red-900/30 rounded-full flex items-center justify-center mx-auto mb-6">
+        <div className="w-24 h-24 bg-red-100 dark:bg-red-900/30 rounded-2xl flex items-center justify-center mx-auto mb-6">
           <XCircle className="w-12 h-12 text-red-600 dark:text-red-400" />
         </div>
 

@@ -53,7 +53,7 @@ export function UnsavedChangesModal({
         onClick={(e) => e.stopPropagation()}
       >
         {/* Icon */}
-        <div className="w-16 h-16 bg-amber-100 dark:bg-amber-950/40 rounded-full flex items-center justify-center mx-auto mb-5">
+        <div className="w-16 h-16 bg-amber-100 dark:bg-amber-950/40 rounded-2xl flex items-center justify-center mx-auto mb-5">
           <AlertTriangle className="h-8 w-8 text-amber-600 dark:text-amber-400" />
         </div>
 

@@ -136,6 +136,7 @@ export function NotificationBell() {
     unreadCount,
     hasMore,
     deleteBuckets,
+    isLoading: inboxLoading,
   } = useNotificationsPaged(page, INBOX_PAGE_SIZE);
 
   const imminent = useMemo(() => hasImminentFire(automations), [automations]);
@@ -146,8 +147,12 @@ export function NotificationBell() {
   // (recently-edited resources, almost always non-empty for a real user).
   // Also covers the original imminent-fire case (automations present →
   // Triggers).
+  // Only fall back once the inbox has actually answered. While the first fetch is
+  // in flight `items` is empty and `unreadCount` is 0, which is indistinguishable
+  // from a genuinely empty inbox - so opening the bell early bounced the user to
+  // Activity and hid rows that were about to land one tick later.
   const handleOpenChange = (next: boolean) => {
-    if (next && unreadCount === 0 && items.length === 0) {
+    if (next && !inboxLoading && unreadCount === 0 && items.length === 0) {
       setTab(automations.length > 0 ? 'triggers' : 'activity');
     }
     setOpen(next);
@@ -452,7 +457,7 @@ function RecentActivityFilter({
             // icon, bg always visible) so the Activity filter strip is
             // visually consistent with the Triggers filter strip (which
             // uses NodeIcon directly).
-            className={`inline-flex items-center justify-center h-6 w-6 rounded-full bg-theme-secondary transition-colors
+            className={`inline-flex items-center justify-center h-6 w-6 rounded-lg bg-theme-secondary transition-colors
                        ${isActive
                          ? 'ring-2 ring-[var(--accent-primary)] ring-offset-1 ring-offset-theme-primary'
                          : 'hover:ring-1 hover:ring-gray-300 dark:hover:ring-gray-600'}`}
@@ -545,7 +550,7 @@ function RecentActivityList({
           >
             <span
               className="relative inline-flex items-center justify-center
-                          h-7 w-7 rounded-full bg-theme-secondary shrink-0"
+                          h-7 w-7 rounded-xl bg-theme-secondary shrink-0"
             >
               <Icon className="h-3.5 w-3.5 text-theme-secondary" />
             </span>
@@ -648,7 +653,7 @@ function SharedResourceFilter({
             aria-label={label}
             title={label}
             onClick={() => onToggle(kind)}
-            className={`inline-flex items-center justify-center h-6 w-6 rounded-full bg-theme-secondary transition-colors
+            className={`inline-flex items-center justify-center h-6 w-6 rounded-lg bg-theme-secondary transition-colors
                        ${isActive
                          ? 'ring-2 ring-[var(--accent-primary)] ring-offset-1 ring-offset-theme-primary'
                          : 'hover:ring-1 hover:ring-gray-300 dark:hover:ring-gray-600'}`}
@@ -780,7 +785,7 @@ function SharedConversationRow({
       />
       <span
         className="relative z-[1] inline-flex items-center justify-center
-                    h-7 w-7 rounded-full bg-theme-secondary shrink-0"
+                    h-7 w-7 rounded-xl bg-theme-secondary shrink-0"
         title={link.resourceType}
       >
         {renderSharedLinkIcon(link.resourceType)}
@@ -789,7 +794,7 @@ function SharedConversationRow({
         <span className="flex items-center gap-1.5 min-w-0">
           <span className="block text-sm text-theme-primary truncate">{title}</span>
           {!link.isActive && (
-            <span className="inline-flex items-center px-1.5 rounded-full
+            <span className="inline-flex items-center px-1.5 rounded-md
                              bg-gray-200 dark:bg-gray-700 text-[10px] text-theme-muted shrink-0">
               {t('inactive')}
             </span>
@@ -919,7 +924,7 @@ function TabButton({
       {label}
       {badge !== undefined && badge > 0 && (
         <span className="ml-1.5 inline-flex items-center justify-center
-                         h-4 min-w-4 px-1 rounded-full bg-red-500 text-white text-[10px]">
+                         h-4 min-w-4 px-1 rounded-md bg-red-500 text-white text-[10px]">
           {badge > 99 ? '99+' : badge}
         </span>
       )}
@@ -1035,7 +1040,7 @@ function InboxList({
                     e.stopPropagation();
                     onRowClick(item);
                   }}
-                  className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium
+                  className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-xs font-medium
                              bg-gray-100 text-gray-700 hover:bg-gray-200
                              dark:bg-gray-700/60 dark:text-gray-200 dark:hover:bg-gray-700 transition-colors"
                 >
@@ -1049,7 +1054,7 @@ function InboxList({
                     e.stopPropagation();
                     onReviewApprovals(item);
                   }}
-                  className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium
+                  className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-xs font-medium
                              bg-amber-100 text-amber-700 hover:bg-amber-200
                              dark:bg-amber-500/20 dark:text-amber-300 dark:hover:bg-amber-500/30 transition-colors"
                 >
@@ -1275,7 +1280,7 @@ function TriggerKindFilter({
             aria-label={label}
             title={label}
             onClick={() => onToggle(kind)}
-            className={`inline-flex items-center justify-center rounded-full
+            className={`inline-flex items-center justify-center rounded-md
                        transition-colors
                        ${isActive
                          ? 'ring-2 ring-[var(--accent-primary)] ring-offset-1 ring-offset-theme-primary'

@@ -263,7 +263,7 @@ const EnterprisePricingModal = React.memo(function EnterprisePricingModal({
                   >
                     {option.label}
                     {option.badge && (
-                      <span className={`ml-2 px-2 py-0.5 text-[10px] font-bold rounded-full transition-colors ${isActive ? 'bg-green-100 text-green-800' : 'bg-green-100/50 text-green-700/70'
+                      <span className={`ml-2 px-2 py-0.5 text-[10px] font-bold rounded-md transition-colors ${isActive ? 'bg-green-100 text-green-800' : 'bg-green-100/50 text-green-700/70'
                         }`}>
                         {option.badge}
                       </span>

@@ -193,16 +193,7 @@ public class SnapshotReader {
     }
 
     private String determineStatus(StateSnapshot.NodeCounts counts) {
-        if (counts.running() > 0) {
-            return "running";
-        } else if (counts.failed() > 0) {
-            return "failed";
-        } else if (counts.skipped() > 0 && counts.completed() == 0) {
-            return "skipped";
-        } else if (counts.completed() > 0) {
-            return "completed";
-        }
-        return "pending";
+        return counts.deriveStatus();
     }
 
     private List<Map<String, Object>> buildEdges(StateSnapshot stateSnapshot) {

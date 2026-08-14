@@ -1,12 +1,14 @@
 'use client';
 
 import React, { useMemo } from 'react';
-import { NodeIcon, type NodeIconProps } from '@/app/workflows/builder/components/nodes/shared';
+import { NodeIcon, nodeIconBoxRadiusClass, type NodeIconProps } from '@/app/workflows/builder/components/nodes/shared';
 import type { NodeIconData } from '@/lib/api/orchestrator/types';
 
 const DEFAULT_MAX_DISPLAY = 5;
 
 type Size = 'inline' | 'compact' | 'default';
+
+const BUBBLE_CHROME = 'bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 shadow-sm';
 
 /**
  * Single-source-of-truth size config. The `iconSize` value here is the
@@ -15,6 +17,13 @@ type Size = 'inline' | 'compact' | 'default';
  * dimensions must match its `container` mapping or the icon will visually
  * overflow the wrapper. Right now NodeIcon's `xs` is `h-6 w-6`, so the
  * inline wrapper is also `h-6 w-6`.
+ *
+ * The corner comes from `nodeIconBoxRadiusClass(<the bubble's own height>)`, not
+ * from a hand-picked rung: these boxes are 24/28/40px, and the ladder's rungs are
+ * chosen against the box they fill. A hand-picked `rounded-xl` on the 28px bubble
+ * put 12px of corner on 14px of half-height, which draws a CIRCLE - which is why
+ * the template previews showed round icons next to the square tiles everywhere
+ * else. Passing the height keeps that impossible to re-introduce by eye.
  */
 const SIZE_PRESETS: Record<Size, {
   bubble: string;
@@ -23,19 +32,19 @@ const SIZE_PRESETS: Record<Size, {
   overflowText: string;
 }> = {
   inline: {
-    bubble: 'h-6 w-6 rounded-full bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 shadow-sm',
+    bubble: `h-6 w-6 ${nodeIconBoxRadiusClass(24)} ${BUBBLE_CHROME}`,
     gap: 'gap-1',
     iconSize: 'xs',
     overflowText: 'text-[10px] font-medium text-slate-500 dark:text-slate-400',
   },
   compact: {
-    bubble: 'h-7 w-7 rounded-full bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 shadow-sm',
+    bubble: `h-7 w-7 ${nodeIconBoxRadiusClass(28)} ${BUBBLE_CHROME}`,
     gap: 'gap-1.5',
     iconSize: 'xs',
     overflowText: 'text-xs font-medium text-slate-500 dark:text-slate-400',
   },
   default: {
-    bubble: 'h-10 w-10 rounded-full bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 shadow-sm',
+    bubble: `h-10 w-10 ${nodeIconBoxRadiusClass(40)} ${BUBBLE_CHROME}`,
     gap: 'gap-2',
     iconSize: 'sm',
     overflowText: 'text-xs font-medium text-slate-500 dark:text-slate-400',

@@ -821,6 +821,7 @@ public class WorkflowBuilderModifier {
         Map.entry("download_file", "download"),
         Map.entry("public_link", "params"),
         Map.entry("media", "params"),
+        Map.entry("generate", "params"),
         Map.entry("http_request", "httpRequest"),
         Map.entry("response", "response"),
         Map.entry("aggregate", "aggregate"),
@@ -1385,8 +1386,19 @@ public class WorkflowBuilderModifier {
 
             String prefix = parts[0];
             String label = parts[1];
-            String nodeKey = prefix + ":" + label;
 
+            // Same rule as the add_node validator, from the same place: this path is the
+            // one the agent is told to use to FIX a mapping, so a private copy that
+            // drifts from the create path is how an agent ends up "repairing" correct
+            // data. See ActionMappingRefs.
+            if (ActionMappingRefs.isNavigate(parts)) {
+                if (!existingInterfaceKeys.contains(ActionMappingRefs.targetInterfaceKey(parts))) {
+                    invalidRefs.add(entry.getKey() + " -> " + value + " (interface '" + label + "' not found)");
+                }
+                continue;
+            }
+
+            String nodeKey = prefix + ":" + label;
             if ("trigger".equals(prefix) && !existingTriggerKeys.contains(nodeKey)) {
                 invalidRefs.add(entry.getKey() + " -> " + value + " (trigger '" + label + "' not found)");
             } else if ("interface".equals(prefix) && !existingInterfaceKeys.contains(nodeKey)) {

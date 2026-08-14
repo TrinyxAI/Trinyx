@@ -337,7 +337,7 @@ function BillingPageInner() {
         >
           <div className="flex items-center justify-between mb-4">
             <div className="flex items-center gap-3">
-              <div className="w-10 h-10 bg-theme-secondary rounded-full flex items-center justify-center">
+              <div className="w-10 h-10 bg-theme-secondary rounded-xl flex items-center justify-center">
                 <FileText className="w-5 h-5 text-theme-primary" />
               </div>
               <h2
@@ -411,7 +411,7 @@ function BillingPageInner() {
                       </td>
                       <td className="px-4 py-2 text-sm">
                         <span
-                          className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${statusBadgeClass(
+                          className={`inline-flex items-center px-2 py-0.5 rounded-md text-xs font-medium ${statusBadgeClass(
                             inv.status,
                           )}`}
                         >

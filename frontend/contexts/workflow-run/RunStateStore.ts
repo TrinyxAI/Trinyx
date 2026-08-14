@@ -79,6 +79,13 @@ export interface RunState {
      * which counts the idle tail before its deferred close.
      */
     workDurationMs?: number | null;
+    /**
+     * The epoch's OUTCOME as the backend tallied its nodes: COMPLETED or FAILED
+     * (null while the epoch has executed nothing but its trigger). Never RUNNING -
+     * `resolveEpochBadgeStatus` decides that from the RUN's status, because an
+     * epoch's header stays open long after its last node finished.
+     */
+    status?: string | null;
   }>;
   /** Monotonic counter from backend StateSnapshot. Bumps on every state change. */
   snapshotSeq: number;
@@ -182,6 +189,15 @@ export interface InitializeFromApiPayload {
 // such a run does not read as running forever.
 export const TERMINAL_STATUSES: ReadonlySet<RunStatus> = new Set(['completed', 'failed', 'partial_success', 'skipped', 'stopped', 'cancelled', 'timeout']);
 
+/**
+ * Terminal statuses a run cannot be restarted FROM: the user put it down, or it timed out.
+ * Deliberately narrower than {@link TERMINAL_STATUSES} - a run that merely FINISHED
+ * (completed / failed / partial_success / skipped) stays restartable from any of its nodes,
+ * which is what "rerun from here" means on an automatic run. Reviving a stopped run is a
+ * re-trigger decision, not a rerun.
+ */
+export const UNREVIVABLE_STATUSES: ReadonlySet<RunStatus> = new Set(['stopped', 'cancelled', 'timeout']);
+
 // ============================================================================
 // HELPERS
 // ============================================================================
@@ -196,7 +212,10 @@ export const TERMINAL_STATUSES: ReadonlySet<RunStatus> = new Set(['completed', '
  * `workDurationMs` MUST be compared: while an epoch executes it is the only field
  * that moves (`startedAt` is fixed and `endedAt` stays null until the close), so
  * omitting it makes every in-flight poll look like "no change" and freezes the
- * duration the UI is showing.
+ * duration the UI is showing. `status` moves for the same reason: a node failing
+ * mid-epoch flips the epoch's outcome from COMPLETED to FAILED with every other
+ * field unchanged, so skipping it would leave a stale badge on screen until some
+ * unrelated write happened to let the array through.
  */
 type EpochTimestampEntry = RunState['epochTimestamps'][number];
 
@@ -210,7 +229,8 @@ function isEpochTimestampsContentEqual(
     const x = a[i];
     const y = b[i];
     if (x.epoch !== y.epoch || x.startedAt !== y.startedAt || x.endedAt !== y.endedAt
-        || (x.workDurationMs ?? null) !== (y.workDurationMs ?? null)) {
+        || (x.workDurationMs ?? null) !== (y.workDurationMs ?? null)
+        || (x.status ?? null) !== (y.status ?? null)) {
       return false;
     }
   }
@@ -977,7 +997,16 @@ export class RunStateStore {
         if (!stepId) continue;
         const sc = step.statusCounts;
 
-        if (status === 'COMPLETED' || status === 'SUCCESS') {
+        // PARTIAL_SUCCESS is a COMPLETED node carrying a failure in its tally. It belongs here:
+        // the node DID finish, and `canRerunStep` tests `completedSteps || failedSteps ||
+        // skippedSteps`, so matching nothing left it in neither set and an aggregate with a few
+        // failed items had no rerun button while every other node on the run had one. This is
+        // the REST path (/runs/{id}/state, StateReconstructor -> StepStateBuilder); the WS
+        // snapshot emits the same value and is bucketed identically in
+        // WorkflowRunManager.deriveTrackingSetsFromSteps, so a node keeps its button whichever
+        // channel delivered it. The node still renders amber: its colour comes from
+        // `data.status`, not from this set.
+        if (status === 'COMPLETED' || status === 'SUCCESS' || status === 'PARTIAL_SUCCESS') {
           completedStepIds.push(stepId);
         } else if (status === 'FAILED' || status === 'ERROR' || status === 'FAILURE') {
           failedStepIds.push(stepId);

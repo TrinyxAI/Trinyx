@@ -220,6 +220,7 @@ export type InspectorNodeType =
   | 'download_file'
   | 'public_link'
   | 'media'
+  | 'generate'
   | 'http_request'
   | 'data_input'
   | 'response'
@@ -306,6 +307,7 @@ export function detectNodeType(node: Node<BuilderNodeData> | null): InspectorNod
   if (nodeRegistry.isDownloadFileNode(node)) return 'download_file';
   if (nodeRegistry.isPublicLinkNode(node)) return 'public_link';
   if (nodeRegistry.isMediaNode(node)) return 'media';
+  if (nodeRegistry.isGenerateNode(node)) return 'generate';
   if (nodeRegistry.isHttpRequestNode(node)) return 'http_request';
   if (nodeRegistry.isDataInputNode(node)) return 'data_input';
   if (nodeRegistry.isResponseNode(node)) return 'response';

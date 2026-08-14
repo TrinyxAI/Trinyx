@@ -484,7 +484,7 @@ export default function WorkflowTable({
                       {w.nodeIcons && w.nodeIcons.length > 0 ? (
                         <WorkflowNodeIcons nodeIcons={w.nodeIcons} totalNodeCount={nodeCount} />
                       ) : (
-                        <div className="w-12 h-12 bg-theme-secondary rounded-full flex items-center justify-center">
+                        <div className="w-12 h-12 bg-theme-secondary rounded-xl flex items-center justify-center">
                           <WorkflowIcon className="w-6 h-6 text-theme-primary" />
                         </div>
                       )}

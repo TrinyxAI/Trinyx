@@ -109,6 +109,45 @@ public class UnifiedExecutionEngine {
         }
     }
 
+    // Out-of-credit gate applied before EVERY node body, trigger nodes included, in
+    // both dispatch paths (executeSingleNode = SBS + the trigger fire, and
+    // executeNodeWithSplitAwareness = AUTO traversal). Denying here rather than
+    // before the epoch opens is what makes a zero-balance run visible: the node is
+    // persisted FAILED and the ordinary failure cascade skips everything downstream.
+    // Optional: plain unit-test construction leaves it null and executes unchanged.
+    private com.apimarketplace.orchestrator.services.credit.NodeCreditGate nodeCreditGate;
+
+    @Autowired(required = false)
+    public void setNodeCreditGate(
+            com.apimarketplace.orchestrator.services.credit.NodeCreditGate nodeCreditGate) {
+        this.nodeCreditGate = nodeCreditGate;
+    }
+
+    /**
+     * Null-safe delegation to the credit gate - returns the FAILED result to use
+     * instead of executing {@code nodeId}, or {@code null} to execute normally.
+     */
+    private NodeExecutionResult creditDenialOrNull(String nodeId, String tenantId) {
+        return nodeCreditGate != null ? nodeCreditGate.denyOrNull(nodeId, tenantId) : null;
+    }
+
+    /**
+     * Run owner for credit decisions.
+     *
+     * <p>The plan's tenant comes FIRST deliberately: that is what the local budget
+     * mirror below has always charged, and the balance gate must ask about the same
+     * tenant it will bill. The context is the fallback for paths where the execution
+     * carries no plan (step-by-step / trigger-fire dispatch).
+     */
+    private String resolveTenantId(ExecutionContext context, WorkflowExecution execution) {
+        String planTenant = execution != null && execution.getPlan() != null
+                ? execution.getPlan().getTenantId() : null;
+        if (planTenant != null && !planTenant.isBlank()) {
+            return planTenant;
+        }
+        return context != null ? context.tenantId() : null;
+    }
+
     // Root nodes per runId for back-edge node lookup (populated during executeItem)
     private final java.util.concurrent.ConcurrentHashMap<String, List<ExecutionNode>> rootNodesByRunId = new java.util.concurrent.ConcurrentHashMap<>();
 
@@ -374,7 +413,21 @@ public class UnifiedExecutionEngine {
         //    shared DistributedBudgetCache - each consume is atomic, and each node executes
         //    exactly once across branches (merge claim registry), so concurrent branches
         //    cannot double-spend. No per-branch reservation is needed.
-        String tenantId = execution.getPlan() != null ? execution.getPlan().getTenantId() : null;
+        String tenantId = resolveTenantId(context, execution);
+
+        // 0a. Real balance gate - asks auth-service whether the tenant still has
+        //     credit at all (30 s cached, so an epoch costs at most one round-trip).
+        //     The local mirror below only knows what THIS run has spent since it
+        //     started; a tenant drained by another run, by chat, or by a top-up that
+        //     ran out mid-run is only visible here.
+        NodeExecutionResult balanceDenial = creditDenialOrNull(nodeId, tenantId);
+        if (balanceDenial != null) {
+            ExecutionContext failCtx = context.withStart(nodeId).withResult(nodeId, balanceDenial);
+            return NodeExecutionOutcome.completed(failCtx, balanceDenial);
+        }
+
+        // 0b. Local budget mirror - flat per-node fee decremented from the balance
+        //     fetched at run start.
         if (creditBudgetService != null && tenantId != null) {
             java.math.BigDecimal nodeCost = (node instanceof AgentNode)
                     ? java.math.BigDecimal.valueOf(2) // estimated minimum LLM call cost
@@ -382,8 +435,8 @@ public class UnifiedExecutionEngine {
             if (!creditBudgetService.tryConsume(tenantId, nodeCost)) {
                 logger.warn("⛔ Credit budget exhausted for user {}, failing node: nodeId={}, runId={}, cost={}",
                         tenantId, nodeId, runId, nodeCost);
-                NodeExecutionResult insufficientResult = NodeExecutionResult.failure(
-                        nodeId, "Insufficient credits - execution stopped", 0);
+                NodeExecutionResult insufficientResult = com.apimarketplace.orchestrator.services.credit
+                        .NodeCreditGate.exhaustedResult(nodeId);
                 ExecutionContext failCtx = context.withStart(nodeId).withResult(nodeId, insufficientResult);
                 return NodeExecutionOutcome.completed(failCtx, insufficientResult);
             }
@@ -1116,8 +1169,18 @@ public class UnifiedExecutionEngine {
         NodeExecutionResult result;
         long engineStartMs = System.currentTimeMillis();
 
+        // Out-of-credit gate: substitute a FAILED result for the node body. Placed
+        // after emitNodeStart so the node still lights up before turning red, and
+        // before every dispatch branch so no node type can bypass it - the trigger
+        // node itself comes through here on every fire.
+        NodeExecutionResult creditDenial = creditDenialOrNull(
+            nodeId, resolveTenantId(contextWithStart, execution));
+
         // === NEW SIMPLIFIED SPLIT HANDLING ===
-        if (node.isSplitNode()) {
+        if (creditDenial != null) {
+            result = creditDenial;
+
+        } else if (node.isSplitNode()) {
             // Check for nested split (split inside another split scope)
             String parentScopeKey = SplitContextManager.extractParentScopeKey(contextWithStart);
 

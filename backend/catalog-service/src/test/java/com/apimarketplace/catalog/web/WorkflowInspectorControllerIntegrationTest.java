@@ -57,7 +57,8 @@ class WorkflowInspectorControllerIntegrationTest {
                 Collections.emptyList(), Collections.emptyList(), Collections.emptyList(),
                 null,
                 null,
-                null
+                null,
+                false
         );
     }
 

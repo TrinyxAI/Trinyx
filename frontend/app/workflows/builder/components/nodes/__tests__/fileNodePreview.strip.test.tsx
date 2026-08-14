@@ -124,4 +124,14 @@ describe('FileNodePreview strip integration', () => {
     await waitFor(() => expect(c.container.firstChild).toBeNull());
     expect(setCurrentFile).toHaveBeenLastCalledWith(null);
   });
+
+  it('keeps the preview for a partial_success node - it DID finish and produce its file', async () => {
+    // A node that failed once and was re-run successfully keeps that failure in its accumulated
+    // tally forever, so its status stays partial_success. Treating that as "not completed" made
+    // the thumbnail vanish on every later load of a media node that had ever failed - the file
+    // is right there, and the amber border is the only thing the failure should change.
+    const c = render(preview('partial_success'));
+    await waitFor(() => expect(c.queryByText(FILE_REF.name)).not.toBeNull());
+    expect(c.container.firstChild).not.toBeNull();
+  });
 });

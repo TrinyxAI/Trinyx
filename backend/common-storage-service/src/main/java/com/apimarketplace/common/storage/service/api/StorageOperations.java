@@ -4,6 +4,7 @@ import com.apimarketplace.common.storage.domain.StorageEntity;
 import com.apimarketplace.common.storage.service.StorageSourceTypes;
 
 import java.time.Instant;
+import java.util.Collection;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
@@ -99,6 +100,29 @@ public interface StorageOperations {
     UUID saveS3FileIndex(String tenantId, String workflowId, String runId, String stepKey,
                          String s3Key, String fileName, String mimeType, long sizeBytes, int epoch,
                          int spawn, Integer itemIndex, String sourceType);
+
+    /**
+     * Attach a workflow run context to files that were stored WITHOUT one.
+     *
+     * <p>Some producers cannot supply the context at write time. A catalog API that answers with
+     * binary (text-to-speech, image generation, …) is uploaded from catalog-service, which knows the
+     * tenant and nothing else: no workflow, no run, no step. The row lands with
+     * {@code workflow_id IS NULL}, and the Files browser groups its workflow folders purely from
+     * those columns, so the file shows at the root instead of inside the run that produced it. The
+     * step that called the tool DOES know the context, and adopts its files here once the call
+     * returns.</p>
+     *
+     * <p>Adoption is one-way and never overwrites: a row that already carries a {@code workflow_id}
+     * is left untouched, so replaying a step or handing back a file another run produced cannot
+     * re-home it. Unknown ids and ids belonging to another tenant are skipped, not rejected -
+     * a step must never fail because of where its output is filed.</p>
+     *
+     * @param epoch     run epoch to stamp; the caller resolves the sentinel 0 to the run's real epoch
+     * @param itemIndex loop/split item index, or null when not item-scoped
+     * @return how many rows were actually adopted (≤ {@code ids.size()})
+     */
+    int adoptRunContext(String tenantId, Collection<UUID> ids, String workflowId, String runId,
+                        String stepKey, int epoch, int spawn, Integer itemIndex);
 
     /**
      * Sauvegarde des donnees texte.

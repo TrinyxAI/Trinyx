@@ -482,7 +482,7 @@ export function DataTableGrid({ controller, workflowContext, jsonPath, dataSourc
                     <Button
                       variant="default"
                       onClick={() => setShowAddColumnModal(true)}
-                      className="w-5 h-5 p-0 rounded-full"
+                      className="w-5 h-5 p-0 rounded-lg"
                       title={t('addColumn')}
                     >
                       <Plus className="w-4 h-4" />

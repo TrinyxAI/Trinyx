@@ -139,7 +139,7 @@ export interface WorkflowPlan {
   }>;
   cores?: Array<{
     id: string;
-    type: 'decision' | 'switch' | 'loop' | 'split' | 'merge' | 'fork' | 'transform' | 'wait' | 'download_file' | 'public_link' | 'media' | 'aggregate' | 'exit' | 'response' | 'option' | 'http_request' | 'data_input' | 'approval'
+    type: 'decision' | 'switch' | 'loop' | 'split' | 'merge' | 'fork' | 'transform' | 'wait' | 'download_file' | 'public_link' | 'media' | 'generate' | 'aggregate' | 'exit' | 'response' | 'option' | 'http_request' | 'data_input' | 'approval'
       | 'filter' | 'sort' | 'limit' | 'remove_duplicates' | 'summarize'
       | 'date_time' | 'crypto_jwt' | 'xml' | 'compression' | 'rss'
       | 'convert_to_file' | 'extract_from_file' | 'compare_datasets'

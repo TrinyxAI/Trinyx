@@ -281,13 +281,6 @@ websearch:
   public:
     ws-base: ${WEBSEARCH_PUBLIC_WS_BASE:}
 
-# Image generation tool (OpenAI gpt-image-1.5/mini, Google Gemini 2.5 Flash Image / 3 Pro Image)
-# Routes through the platform API catalog (CatalogToolsGateway). Requires
-# `orchestrator.catalog.enabled=true` and platform_credentials llm_openai /
-# llm_google to be configured (or BYOK via user-side credentials).
-image-generation:
-  enabled: ${IMAGE_GENERATION_ENABLED:true}
-
 # Credential Encryption Configuration
 # Used to encrypt sensitive credential data (OAuth secrets, tokens) before storing in database
 # IMPORTANT: Set these environment variables in production with strong values

@@ -66,10 +66,10 @@ export const TemplateBrowser: React.FC<TemplateBrowserProps> = ({ onSelect }) =>
                     {template.description}
                   </p>
                   <div className="flex flex-wrap gap-1 mb-3">
-                    <span className="inline-block px-2 py-1 text-xs bg-blue-500/20 text-blue-600 dark:text-blue-400 rounded-full">
+                    <span className="inline-block px-2 py-1 text-xs bg-blue-500/20 text-blue-600 dark:text-blue-400 rounded-md">
                       {LOCAL_MCP_CATEGORIES.find(c => c.id === template.category)?.name}
                     </span>
-                    <span className="inline-block px-2 py-1 text-xs bg-gray-500/20 text-gray-600 dark:text-gray-400 rounded-full">
+                    <span className="inline-block px-2 py-1 text-xs bg-gray-500/20 text-gray-600 dark:text-gray-400 rounded-md">
                       {template.toolType.replace('LOCAL_', '')}
                     </span>
                   </div>

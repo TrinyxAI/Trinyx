@@ -205,47 +205,47 @@ class StorageExplorerControllerTest {
     @Test
     @DisplayName("search forwards filesOnly=true to the service - full-page Files browser lists real files only (file_name not null)")
     void searchForwardsFilesOnlyTrue() {
-        when(explorerService.search(any(), any(), any(), any(), any(), any(), any(), any(), any(), anyBoolean(), anyBoolean(), any(), any(), any()))
+        when(explorerService.search(any(), any(), any(), any(), any(), any(), any(), any(), any(), anyBoolean(), anyBoolean(), any(), any(), any(), any()))
                 .thenReturn(Page.empty());
 
         ResponseEntity<Page<com.apimarketplace.common.storage.dto.StorageExplorerDto>> resp =
-                controller.search("1", "org-1", "MEMBER", 0, 50, null, null, null, null, null, null, null, null, true, false, null, false);
+                controller.search("1", "org-1", "MEMBER", 0, 50, null, null, null, null, null, null, null, null, true, false, null, false, null, null);
 
         assertThat(resp.getStatusCode().value()).isEqualTo(200);
-        verify(explorerService).search(eq("1"), eq("org-1"), any(), any(), any(), any(), any(), any(), any(), eq(true), anyBoolean(), any(), any(), any());
+        verify(explorerService).search(eq("1"), eq("org-1"), any(), any(), any(), any(), any(), any(), any(), eq(true), anyBoolean(), any(), any(), any(), any());
     }
 
     @Test
     @DisplayName("search forwards filesOnly=false (the @RequestParam default) - side-panel explorer keeps its legacy all-rows behaviour")
     void searchForwardsFilesOnlyFalse() {
-        when(explorerService.search(any(), any(), any(), any(), any(), any(), any(), any(), any(), anyBoolean(), anyBoolean(), any(), any(), any()))
+        when(explorerService.search(any(), any(), any(), any(), any(), any(), any(), any(), any(), anyBoolean(), anyBoolean(), any(), any(), any(), any()))
                 .thenReturn(Page.empty());
 
-        controller.search("1", "org-1", "MEMBER", 0, 20, null, null, null, null, null, null, null, null, false, false, null, false);
+        controller.search("1", "org-1", "MEMBER", 0, 20, null, null, null, null, null, null, null, null, false, false, null, false, null, null);
 
-        verify(explorerService).search(eq("1"), eq("org-1"), any(), any(), any(), any(), any(), any(), any(), eq(false), anyBoolean(), any(), any(), any());
+        verify(explorerService).search(eq("1"), eq("org-1"), any(), any(), any(), any(), any(), any(), any(), eq(false), anyBoolean(), any(), any(), any(), any());
     }
 
     @Test
     @DisplayName("search forwards s3Only=true to the service - full-page Files browser shows ONLY real object-storage files (s3_key not null), hiding DB-resident pseudo-files")
     void searchForwardsS3OnlyTrue() {
-        when(explorerService.search(any(), any(), any(), any(), any(), any(), any(), any(), any(), anyBoolean(), anyBoolean(), any(), any(), any()))
+        when(explorerService.search(any(), any(), any(), any(), any(), any(), any(), any(), any(), anyBoolean(), anyBoolean(), any(), any(), any(), any()))
                 .thenReturn(Page.empty());
 
-        controller.search("1", "org-1", "MEMBER", 0, 50, null, null, null, null, null, null, null, null, true, true, null, false);
+        controller.search("1", "org-1", "MEMBER", 0, 50, null, null, null, null, null, null, null, null, true, true, null, false, null, null);
 
-        verify(explorerService).search(eq("1"), eq("org-1"), any(), any(), any(), any(), any(), any(), any(), anyBoolean(), eq(true), any(), any(), any());
+        verify(explorerService).search(eq("1"), eq("org-1"), any(), any(), any(), any(), any(), any(), any(), anyBoolean(), eq(true), any(), any(), any(), any());
     }
 
     @Test
     @DisplayName("search forwards s3Only=false - non-Files surfaces keep DB-resident rows")
     void searchForwardsS3OnlyFalse() {
-        when(explorerService.search(any(), any(), any(), any(), any(), any(), any(), any(), any(), anyBoolean(), anyBoolean(), any(), any(), any()))
+        when(explorerService.search(any(), any(), any(), any(), any(), any(), any(), any(), any(), anyBoolean(), anyBoolean(), any(), any(), any(), any()))
                 .thenReturn(Page.empty());
 
-        controller.search("1", "org-1", "MEMBER", 0, 20, null, null, null, null, null, null, null, null, false, false, null, false);
+        controller.search("1", "org-1", "MEMBER", 0, 20, null, null, null, null, null, null, null, null, false, false, null, false, null, null);
 
-        verify(explorerService).search(eq("1"), eq("org-1"), any(), any(), any(), any(), any(), any(), any(), anyBoolean(), eq(false), any(), any(), any());
+        verify(explorerService).search(eq("1"), eq("org-1"), any(), any(), any(), any(), any(), any(), any(), anyBoolean(), eq(false), any(), any(), any(), any());
     }
 
     @Test
@@ -254,15 +254,15 @@ class StorageExplorerControllerTest {
         UUID restricted = UUID.randomUUID();
         when(orgAccessGuard.getRestrictedResourceIds("org-1", "1", "file", "MEMBER"))
                 .thenReturn(Set.of(restricted.toString(), "not-a-uuid"));
-        when(explorerService.search(any(), any(), any(), any(), any(), any(), any(), any(), any(), anyBoolean(), anyBoolean(), any(), any(), any()))
+        when(explorerService.search(any(), any(), any(), any(), any(), any(), any(), any(), any(), anyBoolean(), anyBoolean(), any(), any(), any(), any()))
                 .thenReturn(Page.empty());
 
-        controller.search("1", "org-1", "MEMBER", 0, 20, null, null, null, null, null, null, null, null, true, false, null, false);
+        controller.search("1", "org-1", "MEMBER", 0, 20, null, null, null, null, null, null, null, null, true, false, null, false, null, null);
 
         @SuppressWarnings("unchecked")
         ArgumentCaptor<Collection<UUID>> excluded = ArgumentCaptor.forClass(Collection.class);
         verify(explorerService).search(eq("1"), eq("org-1"), any(), any(), any(), any(), any(), any(), any(),
-                eq(true), anyBoolean(), any(), excluded.capture(), any());
+                eq(true), anyBoolean(), any(), excluded.capture(), any(), any());
         assertThat(excluded.getValue()).containsExactly(restricted);
     }
 
@@ -810,18 +810,18 @@ class StorageExplorerControllerTest {
     @DisplayName("listing: parentFolderId=root routes to the folder-aware service with null parent")
     void listingRootRoutesToFolderScope() {
         when(explorerService.searchFolderScope(eq("1"), eq("org-1"), eq(null), any(), any(), any(), any(),
-                any(), any(), any(), anyBoolean(), anyBoolean(), any(), any(), any()))
+                any(), any(), any(), anyBoolean(), anyBoolean(), any(), any(), any(), any()))
                 .thenReturn(Page.empty());
 
         ResponseEntity<Page<com.apimarketplace.common.storage.dto.StorageExplorerDto>> resp =
-                controller.search("1", "org-1", "MEMBER", 0, 20, null, null, null, null, null, null, null, null, true, true, "root", false);
+                controller.search("1", "org-1", "MEMBER", 0, 20, null, null, null, null, null, null, null, null, true, true, "root", false, null, null);
 
         assertThat(resp.getStatusCode().value()).isEqualTo(200);
         verify(explorerService).searchFolderScope(eq("1"), eq("org-1"), eq(null), any(), any(), any(), any(),
-                any(), any(), any(), anyBoolean(), anyBoolean(), any(), any(), any());
+                any(), any(), any(), anyBoolean(), anyBoolean(), any(), any(), any(), any());
         // legacy flat search is NOT used in folder-aware mode
         verify(explorerService, org.mockito.Mockito.never())
-                .search(any(), any(), any(), any(), any(), any(), any(), any(), any(), anyBoolean(), anyBoolean(), any(), any(), any());
+                .search(any(), any(), any(), any(), any(), any(), any(), any(), any(), anyBoolean(), anyBoolean(), any(), any(), any(), any());
     }
 
     @Test
@@ -831,15 +831,15 @@ class StorageExplorerControllerTest {
         when(storageService.getEntityByIdForScope(eq(folderId), any(), any()))
                 .thenReturn(Optional.of(folderEntity(folderId, "F", null)));
         when(explorerService.searchFolderScope(eq("1"), eq("org-1"), eq(folderId), any(), any(), any(), any(),
-                any(), any(), any(), anyBoolean(), anyBoolean(), any(), any(), any()))
+                any(), any(), any(), anyBoolean(), anyBoolean(), any(), any(), any(), any()))
                 .thenReturn(Page.empty());
 
         ResponseEntity<Page<com.apimarketplace.common.storage.dto.StorageExplorerDto>> resp =
-                controller.search("1", "org-1", "MEMBER", 0, 20, null, null, null, null, null, null, null, null, true, true, folderId.toString(), false);
+                controller.search("1", "org-1", "MEMBER", 0, 20, null, null, null, null, null, null, null, null, true, true, folderId.toString(), false, null, null);
 
         assertThat(resp.getStatusCode().value()).isEqualTo(200);
         verify(explorerService).searchFolderScope(eq("1"), eq("org-1"), eq(folderId), any(), any(), any(), any(),
-                any(), any(), any(), anyBoolean(), anyBoolean(), any(), any(), any());
+                any(), any(), any(), anyBoolean(), anyBoolean(), any(), any(), any(), any());
     }
 
     @Test
@@ -849,24 +849,24 @@ class StorageExplorerControllerTest {
         when(storageService.getEntityByIdForScope(eq(notAFolder), any(), any())).thenReturn(Optional.empty());
 
         ResponseEntity<Page<com.apimarketplace.common.storage.dto.StorageExplorerDto>> resp =
-                controller.search("1", "org-1", "MEMBER", 0, 20, null, null, null, null, null, null, null, null, true, true, notAFolder.toString(), false);
+                controller.search("1", "org-1", "MEMBER", 0, 20, null, null, null, null, null, null, null, null, true, true, notAFolder.toString(), false, null, null);
 
         assertThat(resp.getStatusCode().value()).isEqualTo(200);
         assertThat(resp.getBody().getTotalElements()).isZero();
         verify(explorerService, org.mockito.Mockito.never()).searchFolderScope(any(), any(), any(), any(), any(), any(),
-                any(), any(), any(), any(), anyBoolean(), anyBoolean(), any(), any(), any());
+                any(), any(), any(), any(), anyBoolean(), anyBoolean(), any(), any(), any(), any());
     }
 
     @Test
     @DisplayName("listing: malformed parentFolderId (not 'root', not a UUID) → empty page")
     void listingMalformedParentReturnsEmptyPage() {
         ResponseEntity<Page<com.apimarketplace.common.storage.dto.StorageExplorerDto>> resp =
-                controller.search("1", "org-1", "MEMBER", 0, 20, null, null, null, null, null, null, null, null, true, true, "garbage", false);
+                controller.search("1", "org-1", "MEMBER", 0, 20, null, null, null, null, null, null, null, null, true, true, "garbage", false, null, null);
 
         assertThat(resp.getStatusCode().value()).isEqualTo(200);
         assertThat(resp.getBody().getTotalElements()).isZero();
         verify(explorerService, org.mockito.Mockito.never()).searchFolderScope(any(), any(), any(), any(), any(), any(),
-                any(), any(), any(), any(), anyBoolean(), anyBoolean(), any(), any(), any());
+                any(), any(), any(), any(), anyBoolean(), anyBoolean(), any(), any(), any(), any());
     }
 
     @Test
@@ -892,13 +892,13 @@ class StorageExplorerControllerTest {
                 "wf:" + wfId, "WORKFLOW", wfId.toString(), /* name */ null,
                 null, null, null, 5, List.of(), Instant.parse("2026-06-08T00:00:00Z"));
         when(explorerService.searchVirtualScope(eq("1"), eq("org-1"), eq(null), any(), any(), any(),
-                anyBoolean(), anyBoolean(), any(), any(), any(), any(), any()))
+                anyBoolean(), anyBoolean(), any(), any(), any(), any(), any(), any()))
                 .thenReturn(new PageImpl<>(List.of(wfFolder), PageRequest.of(0, 20), 1));
         when(workflowRepository.findIdNamePairs(any()))
                 .thenReturn(List.<Object[]>of(new Object[]{wfId, "My Workflow"}));
 
         ResponseEntity<Page<StorageExplorerDto>> resp =
-                controller.search("1", "org-1", "MEMBER", 0, 20, null, null, null, null, null, null, null, null, true, true, "root", true);
+                controller.search("1", "org-1", "MEMBER", 0, 20, null, null, null, null, null, null, null, null, true, true, "root", true, null, null);
 
         assertThat(resp.getStatusCode().value()).isEqualTo(200);
         StorageExplorerDto resolved = resp.getBody().getContent().get(0);
@@ -906,9 +906,9 @@ class StorageExplorerControllerTest {
         assertThat(resolved.workflowName()).isEqualTo("My Workflow");
         // The legacy flat search and the V313 folder scope are NOT used in virtual mode.
         verify(explorerService, org.mockito.Mockito.never())
-                .search(any(), any(), any(), any(), any(), any(), any(), any(), any(), anyBoolean(), anyBoolean(), any(), any(), any());
+                .search(any(), any(), any(), any(), any(), any(), any(), any(), any(), anyBoolean(), anyBoolean(), any(), any(), any(), any());
         verify(explorerService, org.mockito.Mockito.never())
-                .searchFolderScope(any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), anyBoolean(), anyBoolean(), any(), any(), any());
+                .searchFolderScope(any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), anyBoolean(), anyBoolean(), any(), any(), any(), any());
     }
 
     @Test
@@ -919,12 +919,12 @@ class StorageExplorerControllerTest {
                 "wf:" + wfId, "WORKFLOW", wfId.toString(), null,
                 null, null, null, 1, List.of(), Instant.parse("2026-06-08T00:00:00Z"));
         when(explorerService.searchVirtualScope(eq("1"), eq("org-1"), eq(null), any(), any(), any(),
-                anyBoolean(), anyBoolean(), any(), any(), any(), any(), any()))
+                anyBoolean(), anyBoolean(), any(), any(), any(), any(), any(), any()))
                 .thenReturn(new PageImpl<>(List.of(wfFolder), PageRequest.of(0, 20), 1));
         when(workflowRepository.findIdNamePairs(any())).thenReturn(List.of()); // deleted / cross-org
 
         ResponseEntity<Page<StorageExplorerDto>> resp =
-                controller.search("1", "org-1", "MEMBER", 0, 20, null, null, null, null, null, null, null, null, true, true, "root", true);
+                controller.search("1", "org-1", "MEMBER", 0, 20, null, null, null, null, null, null, null, null, true, true, "root", true, null, null);
 
         assertThat(resp.getStatusCode().value()).isEqualTo(200);
         // The orphaned folder is dropped from the page content (no blank folder rendered).
@@ -943,14 +943,14 @@ class StorageExplorerControllerTest {
                 "wf:" + deletedId, "WORKFLOW", deletedId.toString(), null,
                 null, null, null, 1, List.of(), Instant.parse("2026-06-08T00:00:00Z"));
         when(explorerService.searchVirtualScope(eq("1"), eq("org-1"), eq(null), any(), any(), any(),
-                anyBoolean(), anyBoolean(), any(), any(), any(), any(), any()))
+                anyBoolean(), anyBoolean(), any(), any(), any(), any(), any(), any()))
                 .thenReturn(new PageImpl<>(List.of(live, orphan), PageRequest.of(0, 20), 2));
         // Only the live workflow resolves; the deleted one returns no pair.
         when(workflowRepository.findIdNamePairs(any()))
                 .thenReturn(List.<Object[]>of(new Object[]{liveId, "Live Workflow"}));
 
         ResponseEntity<Page<StorageExplorerDto>> resp =
-                controller.search("1", "org-1", "MEMBER", 0, 20, null, null, null, null, null, null, null, null, true, true, "root", true);
+                controller.search("1", "org-1", "MEMBER", 0, 20, null, null, null, null, null, null, null, null, true, true, "root", true, null, null);
 
         assertThat(resp.getStatusCode().value()).isEqualTo(200);
         assertThat(resp.getBody().getContent()).hasSize(1);
@@ -964,17 +964,17 @@ class StorageExplorerControllerTest {
     void virtualNestedAddressRoutes() {
         UUID wfId = UUID.randomUUID();
         when(explorerService.searchVirtualScope(eq("1"), eq("org-1"), any(), any(), any(), any(),
-                anyBoolean(), anyBoolean(), any(), any(), any(), any(), any()))
+                anyBoolean(), anyBoolean(), any(), any(), any(), any(), any(), any()))
                 .thenReturn(Page.empty());
 
         ResponseEntity<Page<StorageExplorerDto>> resp =
-                controller.search("1", "org-1", "MEMBER", 0, 20, null, null, null, null, null, null, null, null, true, true, "wf:" + wfId + "/e0", true);
+                controller.search("1", "org-1", "MEMBER", 0, 20, null, null, null, null, null, null, null, null, true, true, "wf:" + wfId + "/e0", true, null, null);
 
         assertThat(resp.getStatusCode().value()).isEqualTo(200);
         ArgumentCaptor<com.apimarketplace.common.storage.dto.VirtualFolderAddress> addr =
                 ArgumentCaptor.forClass(com.apimarketplace.common.storage.dto.VirtualFolderAddress.class);
         verify(explorerService).searchVirtualScope(eq("1"), eq("org-1"), addr.capture(), any(), any(), any(),
-                anyBoolean(), anyBoolean(), any(), any(), any(), any(), any());
+                anyBoolean(), anyBoolean(), any(), any(), any(), any(), any(), any());
         assertThat(addr.getValue()).isNotNull();
         assertThat(addr.getValue().workflowId()).isEqualTo(wfId.toString());
         assertThat(addr.getValue().epoch()).isEqualTo(0);
@@ -987,33 +987,33 @@ class StorageExplorerControllerTest {
         when(storageService.getEntityByIdForScope(eq(folderId), any(), any()))
                 .thenReturn(Optional.of(folderEntity(folderId, "F", null)));
         when(explorerService.searchFolderScope(eq("1"), eq("org-1"), eq(folderId), any(), any(), any(), any(),
-                any(), any(), any(), anyBoolean(), anyBoolean(), any(), any(), any()))
+                any(), any(), any(), anyBoolean(), anyBoolean(), any(), any(), any(), any()))
                 .thenReturn(Page.empty());
 
         ResponseEntity<Page<StorageExplorerDto>> resp =
-                controller.search("1", "org-1", "MEMBER", 0, 20, null, null, null, null, null, null, null, null, true, true, folderId.toString(), true);
+                controller.search("1", "org-1", "MEMBER", 0, 20, null, null, null, null, null, null, null, null, true, true, folderId.toString(), true, null, null);
 
         assertThat(resp.getStatusCode().value()).isEqualTo(200);
         // UUID is not a virtual token → virtual scope is never called; the V313 branch handles it.
         verify(explorerService, org.mockito.Mockito.never())
-                .searchVirtualScope(any(), any(), any(), any(), any(), any(), anyBoolean(), anyBoolean(), any(), any(), any(), any(), any());
+                .searchVirtualScope(any(), any(), any(), any(), any(), any(), anyBoolean(), anyBoolean(), any(), any(), any(), any(), any(), any());
         verify(explorerService).searchFolderScope(eq("1"), eq("org-1"), eq(folderId), any(), any(), any(), any(),
-                any(), any(), any(), anyBoolean(), anyBoolean(), any(), any(), any());
+                any(), any(), any(), anyBoolean(), anyBoolean(), any(), any(), any(), any());
     }
 
     @Test
     @DisplayName("virtualWorkflowFolders=false keeps legacy behaviour: a 'root' token still routes to the V313 folder scope, never the virtual scope")
     void flagOffKeepsLegacyBehaviour() {
         when(explorerService.searchFolderScope(eq("1"), eq("org-1"), eq(null), any(), any(), any(), any(),
-                any(), any(), any(), anyBoolean(), anyBoolean(), any(), any(), any()))
+                any(), any(), any(), anyBoolean(), anyBoolean(), any(), any(), any(), any()))
                 .thenReturn(Page.empty());
 
-        controller.search("1", "org-1", "MEMBER", 0, 20, null, null, null, null, null, null, null, null, true, true, "root", false);
+        controller.search("1", "org-1", "MEMBER", 0, 20, null, null, null, null, null, null, null, null, true, true, "root", false, null, null);
 
         verify(explorerService, org.mockito.Mockito.never())
-                .searchVirtualScope(any(), any(), any(), any(), any(), any(), anyBoolean(), anyBoolean(), any(), any(), any(), any(), any());
+                .searchVirtualScope(any(), any(), any(), any(), any(), any(), anyBoolean(), anyBoolean(), any(), any(), any(), any(), any(), any());
         verify(explorerService).searchFolderScope(eq("1"), eq("org-1"), eq(null), any(), any(), any(), any(),
-                any(), any(), any(), anyBoolean(), anyBoolean(), any(), any(), any());
+                any(), any(), any(), anyBoolean(), anyBoolean(), any(), any(), any(), any());
     }
 
     @Test
@@ -1022,10 +1022,10 @@ class StorageExplorerControllerTest {
         StorageExplorerDto epochFolder = StorageExplorerDto.virtualFolder(
                 "wf:abc/e0", "EPOCH", "abc", null, 0, null, null, 2, List.of(), Instant.parse("2026-06-08T00:00:00Z"));
         when(explorerService.searchVirtualScope(eq("1"), eq("org-1"), any(), any(), any(), any(),
-                anyBoolean(), anyBoolean(), any(), any(), any(), any(), any()))
+                anyBoolean(), anyBoolean(), any(), any(), any(), any(), any(), any()))
                 .thenReturn(new PageImpl<>(List.of(epochFolder), PageRequest.of(0, 20), 1));
 
-        controller.search("1", "org-1", "MEMBER", 0, 20, null, null, null, null, null, null, null, null, true, true, "wf:abc", true);
+        controller.search("1", "org-1", "MEMBER", 0, 20, null, null, null, null, null, null, null, null, true, true, "wf:abc", true, null, null);
 
         verify(workflowRepository, org.mockito.Mockito.never()).findIdNamePairs(any());
     }

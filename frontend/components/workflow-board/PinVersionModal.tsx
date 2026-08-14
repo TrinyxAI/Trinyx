@@ -82,7 +82,7 @@ export const PinVersionModal: React.FC<PinVersionModalProps> = ({ card, onCancel
       >
         {/* Header */}
         <div className="text-center mb-6 flex-shrink-0">
-          <div className="w-14 h-14 bg-amber-100 dark:bg-amber-900/30 rounded-full flex items-center justify-center mx-auto mb-4">
+          <div className="w-14 h-14 bg-amber-100 dark:bg-amber-900/30 rounded-xl flex items-center justify-center mx-auto mb-4">
             <Pin className="w-7 h-7 text-amber-600 dark:text-amber-400" />
           </div>
           <h3 className="text-lg font-semibold text-theme-primary">

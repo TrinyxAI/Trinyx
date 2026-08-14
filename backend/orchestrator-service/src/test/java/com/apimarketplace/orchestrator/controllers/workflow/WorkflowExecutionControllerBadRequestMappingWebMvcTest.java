@@ -1,7 +1,6 @@
 package com.apimarketplace.orchestrator.controllers.workflow;
 
 import com.apimarketplace.auth.client.access.OrgAccessGuard;
-import com.apimarketplace.common.credit.CreditConsumptionClient;
 import com.apimarketplace.orchestrator.controllers.dto.WorkflowResponseFactory;
 import com.apimarketplace.orchestrator.domain.WorkflowEntity;
 import com.apimarketplace.orchestrator.domain.workflow.WorkflowPlan;
@@ -46,7 +45,6 @@ class WorkflowExecutionControllerBadRequestMappingWebMvcTest {
 
     @Mock private WorkflowRepository workflowRepository;
     @Mock private WorkflowControllerHelper helper;
-    @Mock private CreditConsumptionClient creditClient;
     @Mock private EditorRunResolver editorRunResolver;
     @Mock private WorkflowPlanVersionService versionService;
     @Mock private OrgAccessGuard orgAccessGuard;
@@ -61,7 +59,6 @@ class WorkflowExecutionControllerBadRequestMappingWebMvcTest {
         ReflectionTestUtils.setField(controller, "workflowRepository", workflowRepository);
         ReflectionTestUtils.setField(controller, "responseFactory", responseFactory);
         ReflectionTestUtils.setField(controller, "helper", helper);
-        ReflectionTestUtils.setField(controller, "creditClient", creditClient);
         ReflectionTestUtils.setField(controller, "editorRunResolver", editorRunResolver);
         ReflectionTestUtils.setField(controller, "versionService", versionService);
         ReflectionTestUtils.setField(controller, "orgAccessGuard", orgAccessGuard);
@@ -81,7 +78,6 @@ class WorkflowExecutionControllerBadRequestMappingWebMvcTest {
         lenient().when(plan.getOriginalPlan()).thenReturn(Map.of());
         when(helper.parseWorkflowPlan(any(), anyString(), anyString())).thenReturn(plan);
 
-        when(creditClient.checkCredits(CALLER)).thenReturn(true);
         // Auto-save short-circuit: canvas equals stored plan, nothing to write.
         lenient().when(versionService.plansAreEqual(any(), any())).thenReturn(true);
 

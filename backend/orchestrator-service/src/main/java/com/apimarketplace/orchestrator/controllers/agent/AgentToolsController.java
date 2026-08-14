@@ -1,5 +1,6 @@
 package com.apimarketplace.orchestrator.controllers.agent;
 
+import com.apimarketplace.agent.config.AgentModuleResolver;
 import com.apimarketplace.agent.registry.AgentToolDefinition;
 import com.apimarketplace.agent.registry.AgentToolRegistry;
 import com.apimarketplace.agent.registry.ToolCategory;
@@ -49,6 +50,12 @@ public class AgentToolsController {
         }
         if (request.get("agentId") != null) {
             credentials.put("__agentId__", request.get("agentId"));
+        }
+        // The grant travels WITH the id. This map is rebuilt key by key, so a
+        // key not copied here is simply gone, and a tool at the other end then
+        // sees a caller with no stated permissions, which reads as allowed.
+        if (request.get("enabledModules") != null) {
+            credentials.put(AgentModuleResolver.ENABLED_MODULES_CREDENTIAL_KEY, request.get("enabledModules"));
         }
         if (request.get("messageId") != null) {
             credentials.put("__messageId__", request.get("messageId"));
@@ -282,6 +289,12 @@ public class AgentToolsController {
 
         if (request.get("agentId") != null) {
             credentials.put("__agentId__", request.get("agentId"));
+        }
+        // The grant travels WITH the id. This map is rebuilt key by key, so a
+        // key not copied here is simply gone, and a tool at the other end then
+        // sees a caller with no stated permissions, which reads as allowed.
+        if (request.get("enabledModules") != null) {
+            credentials.put(AgentModuleResolver.ENABLED_MODULES_CREDENTIAL_KEY, request.get("enabledModules"));
         }
         if (request.get("messageId") != null) {
             credentials.put("__messageId__", request.get("messageId"));

@@ -179,7 +179,14 @@ public class AdminPlanService {
         // Grant the base credits for the freshly-anchored cycle: resets the sub bucket to 0
         // then grants the plan base (comp Starter/Pro/Team -> 5K tier-0, FREE -> 1K). The
         // PAYG bucket is left untouched. Idempotent via sourceIds derived from periodStart.
-        creditAttributionService.attributeOnRenewal(targetUserId, saved);
+        CreditAttributionService.RenewalOutcome creditOutcome =
+                creditAttributionService.attributeOnRenewal(targetUserId, saved);
+        if (creditOutcome != CreditAttributionService.RenewalOutcome.RENEWED) {
+            // The plan tier is applied either way; only the credits did not land. Say so, rather
+            // than letting the success log below imply the grant happened.
+            log.warn("Comp plan {} assigned to user {} but credits were NOT attributed: {}",
+                    planCode, targetUserId, creditOutcome);
+        }
 
         // Best-effort: bust the gateway user-resolution cache so the new tier applies on the
         // next request instead of after the 5-min TTL. Same fan-out pipe as the Stripe flow -

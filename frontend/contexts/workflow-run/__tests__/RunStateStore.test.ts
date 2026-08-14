@@ -1267,6 +1267,35 @@ describe('RunStateStore', () => {
       expect(store.getState().epochTimestamps[0].workDurationMs).toBe(9_000);
     });
 
+    it('writes a new array when only the epoch status moved', () => {
+      // A node failing mid-epoch flips the epoch's outcome with every other field
+      // unchanged (startedAt fixed, endedAt still null, the window unchanged if the
+      // failure was instant). Ignoring it in the equality check leaves a green badge
+      // on screen for a failed epoch until some unrelated write lets the array through.
+      const a = [{ epoch: 1, startedAt: '2026-05-12T10:00:00Z', endedAt: null, status: 'COMPLETED' }];
+      store.setEpochData(1, a);
+      const firstRef = store.getState().epochTimestamps;
+
+      const b = [{ epoch: 1, startedAt: '2026-05-12T10:00:00Z', endedAt: null, status: 'FAILED' }];
+      store.setEpochData(1, b);
+
+      expect(store.getState().epochTimestamps).not.toBe(firstRef);
+      expect(store.getState().epochTimestamps[0].status).toBe('FAILED');
+    });
+
+    it('treats an absent status and an explicit null as the same value', () => {
+      // An epoch that has executed nothing carries no status at all; a payload that
+      // spells it out as null says the same thing. Treating them as different would
+      // rewrite the array on every poll of an armed run.
+      const a = [{ epoch: 1, startedAt: '2026-05-12T10:00:00Z', endedAt: null }];
+      store.setEpochData(1, a);
+      const firstRef = store.getState().epochTimestamps;
+
+      store.setEpochData(1, [{ epoch: 1, startedAt: '2026-05-12T10:00:00Z', endedAt: null, status: null }]);
+
+      expect(store.getState().epochTimestamps).toBe(firstRef);
+    });
+
     it('treats an absent workDurationMs and an explicit null as the same value', () => {
       // The field is optional on the wire; a payload that omits it must not read as a
       // change against one that sent null, or the short-circuit never fires again.

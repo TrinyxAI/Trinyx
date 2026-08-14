@@ -345,16 +345,19 @@ export function ChatConfigPanel({
             />
           </SettingRow>
 
-          {/* Image generation - opt-in (default off). */}
-          <SettingRow title={t('imageGenerationLabel')} info={t('imageGenerationInfo')}>
+          {/* Generation (image, video, audio, voice, music) - opt-in, and kept
+              separate from the image toggle above on purpose: a per-second video
+              model spends an order of magnitude more per call, so granting
+              images must not silently grant it. */}
+          <SettingRow title={t('generationLabel')} info={t('generationInfo')}>
             <Switch
-              checked={config.imageGeneration?.enabled ?? false}
+              checked={config.generation?.enabled ?? false}
               onCheckedChange={(checked) =>
                 updateConfig({
-                  imageGeneration: { ...(config.imageGeneration ?? {}), enabled: checked },
+                  generation: { ...(config.generation ?? {}), enabled: checked },
                 })
               }
-              aria-label={t('imageGenerationLabel')}
+              aria-label={t('generationLabel')}
             />
           </SettingRow>
 
@@ -546,25 +549,23 @@ export function ChatConfigPanel({
               <Switch checked={config.webSearch !== false} presentational />
             </button>
           </div>
-          {/* Image generation - opt-in (default off; cost per image varies 5-134 credits).
-              Agentic catalog calls (chat, image-gen) try the user's credential first and
-              fall back to the platform credential when the user has none - a user with
-              their own OpenAI/Gemini key burns 0 credits, platform-key calls are billed.
-              The dispatcher handles the trace either way. */}
+          {/* Generation covers image, video, audio, voice and music through one
+              tool. Opt-in on its own: a per-second video model spends an order of
+              magnitude more per call. */}
           <div>
             <label className="flex items-center gap-1.5 text-sm font-medium text-theme-primary mb-2">
-              {t('imageGenerationLabel')}
-              <InfoTooltip text={t('imageGenerationInfo')} />
+              {t('generationLabel')}
+              <InfoTooltip text={t('generationInfo')} />
             </label>
             <button
               type="button"
               onClick={() => updateConfig({
-                imageGeneration: { ...(config.imageGeneration ?? {}), enabled: !(config.imageGeneration?.enabled ?? false) },
+                generation: { ...(config.generation ?? {}), enabled: !(config.generation?.enabled ?? false) },
               })}
               className="flex h-9 w-full items-center justify-between rounded-xl border border-theme bg-[var(--bg-primary)] px-3 text-sm text-theme-primary hover:bg-[var(--bg-secondary)] transition-colors"
             >
-              <span>{config.imageGeneration?.enabled ? t('enabled') : t('disabled')}</span>
-              <Switch checked={config.imageGeneration?.enabled ?? false} presentational />
+              <span>{config.generation?.enabled ? t('enabled') : t('disabled')}</span>
+              <Switch checked={config.generation?.enabled ?? false} presentational />
             </button>
           </div>
           {/* Auto-authorize sensitive actions - general-chat scopes (conversation + the

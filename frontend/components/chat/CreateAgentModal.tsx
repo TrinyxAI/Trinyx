@@ -7,7 +7,7 @@ import {
   Bot, ChevronDown, ChevronRight, Check, Search, X, Loader2, Info, Workflow,
   Webhook, Copy, Pencil, ArrowRight, ArrowLeft, User, Settings,
   Puzzle, MessageCircle, Code, ExternalLink, Palette, Clock, Globe, Zap, Plus,
-  AppWindow, Table, Monitor, FileText, Image as ImageIcon, ShieldCheck
+  AppWindow, Table, Monitor, FileText, ShieldCheck, Sparkles
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -26,7 +26,7 @@ import { useVisibleModels, getModelsCache, isEmptySelectedModel, toNonBridgeSele
 import { ModelPicker } from '@/components/ai/ModelPicker';
 import { useMcpApis, fetchApiTools, ApiTool } from '@/app/workflows/builder/hooks/useMcpData';
 import { apiClient } from '@/lib/api/api-client';
-import { getAllowedIds, buildToolsConfigPayload, isImageGenerationEnabled, getGrant, getFileAccessMode, GRANT_FAMILIES, type ResourceGrant } from '@/lib/agents/toolsConfigAccess';
+import { getAllowedIds, buildToolsConfigPayload, isGenerationEnabled, getGrant, getFileAccessMode, GRANT_FAMILIES, type ResourceGrant } from '@/lib/agents/toolsConfigAccess';
 import { initialTurnLimits, buildChangedTurnLimits } from '@/lib/agents/agentTurnLimits';
 import { initialCompaction, buildChangedCompaction } from '@/lib/agents/agentCompaction';
 import { Switch } from '@/components/ui/switch';
@@ -51,6 +51,7 @@ import { getProviderIconSrc, getProviderDisplayName } from '@/lib/ai-providers/p
 import { REASONING_EFFORT_LEVELS, supportsReasoningEffort } from '@/lib/ai-providers/reasoningEffort';
 import { useAuth } from '@/lib/providers/smart-providers';
 import { useCanMutateInCurrentOrg } from '@/lib/stores/current-org-store';
+import { ModalStepIndicator } from '@/components/ui/ModalStepIndicator';
 
 /** Fallback: synthetic Skill objects for defaults not yet seeded in DB */
 const DEFAULT_SKILLS_FALLBACK: Skill[] = DEFAULT_SKILLS.map(ds => ({
@@ -219,52 +220,21 @@ interface StepIndicatorProps {
 }
 
 const StepIndicator: React.FC<StepIndicatorProps> = ({ currentStep, totalSteps, onStepClick, allowAll }) => {
-  const steps = [
-    { number: 1, icon: User, label: 'Basic Info' },
-    { number: 2, icon: Settings, label: 'Configuration' },
-    { number: 3, icon: Puzzle, label: 'Integration' },
-  ];
-
   return (
-    <div className="flex items-center justify-center gap-2 mb-6">
-      {steps.slice(0, totalSteps).map((step, index) => {
-        const isActive = step.number === currentStep;
-        const isCompleted = step.number < currentStep;
-        const clickable = allowAll || step.number <= currentStep;
-        const Icon = step.icon;
-
-        return (
-          <React.Fragment key={step.number}>
-            <button
-              type="button"
-              onClick={() => onStepClick?.(step.number)}
-              disabled={!clickable}
-              className={`flex items-center gap-2 px-3 py-1.5 rounded-full transition-all ${
-                isActive
-                  ? 'bg-[var(--accent-primary)] text-[var(--accent-foreground)]'
-                  : isCompleted
-                  ? 'bg-emerald-500/20 text-emerald-600 dark:text-emerald-400 cursor-pointer hover:bg-emerald-500/30'
-                  : clickable
-                  ? 'bg-theme-tertiary text-theme-secondary cursor-pointer hover:bg-theme-secondary/70'
-                  : 'bg-theme-tertiary text-theme-secondary cursor-not-allowed'
-              }`}
-            >
-              {isCompleted ? (
-                <Check className="h-4 w-4" />
-              ) : (
-                <Icon className="h-4 w-4" />
-              )}
-              <span className="text-sm font-medium hidden sm:inline">{step.label}</span>
-            </button>
-            {index < totalSteps - 1 && (
-              <div className={`w-8 h-0.5 rounded-full ${
-                step.number < currentStep ? 'bg-emerald-500' : 'bg-theme-tertiary'
-              }`} />
-            )}
-          </React.Fragment>
-        );
-      })}
-    </div>
+    <ModalStepIndicator
+      currentStep={currentStep}
+      onStepClick={onStepClick}
+      // Creating an agent builds forward, so only the steps already reached are
+      // reachable; EDITING one has all three filled in already, and `allowAll`
+      // is what lets the fleet canvas deep-link straight into Configuration or
+      // Integration.
+      isStepEnabled={(step) => allowAll || step <= currentStep}
+      steps={[
+        { number: 1, icon: User, label: 'Basic Info' },
+        { number: 2, icon: Settings, label: 'Configuration' },
+        { number: 3, icon: Puzzle, label: 'Integration' },
+      ].slice(0, totalSteps)}
+    />
   );
 };
 
@@ -348,7 +318,7 @@ const WidgetPreview: React.FC<WidgetPreviewProps> = ({ config, agentName, avatar
             {/* Input */}
             <div className="px-4 pb-4">
               <div
-                className={`flex items-center gap-2 px-3 py-2 rounded-full border ${
+                className={`flex items-center gap-2 px-3 py-2 rounded-md border ${
                   isDark
                     ? 'bg-[var(--bg-secondary)] border-[var(--border-color)]'
                     : 'bg-gray-50 border-gray-200'
@@ -365,6 +335,11 @@ const WidgetPreview: React.FC<WidgetPreviewProps> = ({ config, agentName, avatar
         ) : (
           <button
             onClick={() => setIsOpen(true)}
+            // Exempt from the app's square radius ladder ON PURPOSE: this is a
+            // PREVIEW of the launcher drawn by the external widget.js on the
+            // customer's own site, so its shape has to match that script, not
+            // this app's chrome. Squaring the preview alone would show users a
+            // widget they will not get.
             className="w-14 h-14 rounded-full shadow-lg flex items-center justify-center transition-transform hover:scale-105"
             style={{ backgroundColor: config.primaryColor }}
           >
@@ -472,8 +447,10 @@ export const CreateAgentModal: React.FC<CreateAgentModalProps> = ({
   const [filesInitialized, setFilesInitialized] = useState(false);
   const [webSearchEnabled, setWebSearchEnabled] = useState(true);
   // Image generation - opt-in (default off; cost per image varies). Hydrated from
-  // the agent's toolsConfig.imageGeneration on edit (tolerates boolean/object shapes).
-  const [imageGenerationEnabled, setImageGenerationEnabled] = useState(() => isImageGenerationEnabled(agent?.toolsConfig));
+  // Unified generation grant (image, video, audio, voice, music) - opt-in, and its OWN
+  // toggle: an image grant must never widen into a per-second video model, which spends
+  // an order of magnitude more per call. Hydrated from toolsConfig.generation on edit.
+  const [generationEnabled, setGenerationEnabled] = useState(() => isGenerationEnabled(agent?.toolsConfig));
   // Per-family access GRANT (axis 1): "none" | "all" | "custom". Hydrated from the
   // agent's toolsConfig.<family>Grant on edit (absent ⇒ 'none' - deny by default,
   // matching the backend). 'custom' scopes to the family's selected id list below.
@@ -1409,7 +1386,7 @@ export const CreateAgentModal: React.FC<CreateAgentModalProps> = ({
         agents: Array.from(selectedSubAgents),
         files: Array.from(selectedFiles),
         webSearch: webSearchEnabled,
-        imageGeneration: imageGenerationEnabled,
+        generation: generationEnabled,
         // Axis 1 - per-family grant (none|all|custom). The selected id lists above
         // are only emitted as the scope when the family's grant is 'custom'.
         workflowsGrant,
@@ -2049,7 +2026,7 @@ export const CreateAgentModal: React.FC<CreateAgentModalProps> = ({
                                   <div key={apiSlug}>
                                     <div className="flex items-center gap-2 px-3 py-2 cursor-pointer hover:bg-[var(--bg-secondary)] transition-colors" onClick={() => toggleCategory(apiSlug)}>
                                       {api.iconSlug ? (
-                                        <Image src={`/icons/services/${api.iconSlug}.svg`} alt={api.apiName} width={16} height={16} className="w-4 h-4 flex-shrink-0 rounded-full p-0.5 dark:bg-slate-100/10" onError={(e) => { (e.target as HTMLImageElement).src = '/mcp_black.png'; (e.target as HTMLImageElement).classList.add('dark:invert'); }} />
+                                        <Image src={`/icons/services/${api.iconSlug}.svg`} alt={api.apiName} width={16} height={16} className="w-4 h-4 flex-shrink-0 rounded-md p-0.5 dark:bg-slate-100/10" onError={(e) => { (e.target as HTMLImageElement).src = '/mcp_black.png'; (e.target as HTMLImageElement).classList.add('dark:invert'); }} />
                                       ) : (
                                         <Image src="/mcp_black.png" alt="MCP" width={16} height={16} className="w-4 h-4 dark:invert flex-shrink-0" />
                                       )}
@@ -2642,32 +2619,34 @@ export const CreateAgentModal: React.FC<CreateAgentModalProps> = ({
                         </div>
                       </div>
 
-                      {/* Image Generation toggle - opt-in (default off). Persists to
-                          toolsConfig.imageGeneration; read by AgentModuleResolver. */}
+                      {/* Generation toggle - opt-in (default off). Persists to
+                          toolsConfig.generation; read by AgentModuleResolver. Opt-in on
+                          its own: it covers video, audio, voice and music too, which cost
+                          an order of magnitude more per call than an image. */}
                       <div>
                         <label className="flex items-center gap-1.5 text-sm font-medium text-theme-primary mb-2">
-                          {tc('imageGenerationLabel')}
+                          {tc('generationLabel')}
                           <TooltipProvider delayDuration={0}>
                             <Tooltip>
                               <TooltipTrigger asChild>
                                 <Info className="h-3.5 w-3.5 text-theme-secondary cursor-help" />
                               </TooltipTrigger>
                               <TooltipContent side="top" className="max-w-xs">
-                                <p className="text-xs">{tc('imageGenerationInfo')}</p>
+                                <p className="text-xs">{tc('generationInfo')}</p>
                               </TooltipContent>
                             </Tooltip>
                           </TooltipProvider>
                         </label>
                         <button
                           type="button"
-                          onClick={() => setImageGenerationEnabled(!imageGenerationEnabled)}
+                          onClick={() => setGenerationEnabled(!generationEnabled)}
                           className="flex h-auto min-h-[44px] w-full items-center justify-between rounded-xl border border-theme bg-[var(--bg-primary)] px-4 py-3 text-sm text-[var(--text-primary)] hover:bg-[var(--bg-secondary)] transition-colors"
                         >
                           <div className="flex items-center gap-2">
-                            <ImageIcon className="w-4 h-4 text-theme-secondary" />
-                            <span>{imageGenerationEnabled ? t('enabled') : t('disabled')}</span>
+                            <Sparkles className="w-4 h-4 text-theme-secondary" />
+                            <span>{generationEnabled ? t('enabled') : t('disabled')}</span>
                           </div>
-                          <Switch checked={imageGenerationEnabled} presentational />
+                          <Switch checked={generationEnabled} presentational />
                         </button>
                       </div>
 
@@ -2866,7 +2845,7 @@ export const CreateAgentModal: React.FC<CreateAgentModalProps> = ({
                     className={`w-full flex items-center justify-between p-4 transition-colors ${webhookEnabled ? 'bg-[var(--accent-primary)]/10' : 'hover:bg-theme-secondary'}`}
                   >
                     <div className="flex items-center gap-3">
-                      <div className={`w-10 h-10 rounded-full flex items-center justify-center ${webhookEnabled ? 'bg-[var(--accent-primary)]' : 'bg-theme-tertiary'}`}>
+                      <div className={`w-10 h-10 rounded-xl flex items-center justify-center ${webhookEnabled ? 'bg-[var(--accent-primary)]' : 'bg-theme-tertiary'}`}>
                         <Webhook className={`h-5 w-5 ${webhookEnabled ? 'text-[var(--bg-primary)]' : 'text-theme-secondary'}`} />
                       </div>
                       <div className="text-left">
@@ -2948,7 +2927,7 @@ export const CreateAgentModal: React.FC<CreateAgentModalProps> = ({
                     className={`w-full flex items-center justify-between p-4 transition-colors ${scheduleEnabled ? 'bg-[var(--accent-primary)]/10' : 'hover:bg-theme-secondary'}`}
                   >
                     <div className="flex items-center gap-3">
-                      <div className={`w-10 h-10 rounded-full flex items-center justify-center ${scheduleEnabled ? 'bg-[var(--accent-primary)]' : 'bg-theme-tertiary'}`}>
+                      <div className={`w-10 h-10 rounded-xl flex items-center justify-center ${scheduleEnabled ? 'bg-[var(--accent-primary)]' : 'bg-theme-tertiary'}`}>
                         <Clock className={`h-5 w-5 ${scheduleEnabled ? 'text-[var(--bg-primary)]' : 'text-theme-secondary'}`} />
                       </div>
                       <div className="text-left">
@@ -3135,7 +3114,7 @@ export const CreateAgentModal: React.FC<CreateAgentModalProps> = ({
                     className={`w-full flex items-center justify-between p-4 transition-colors ${widgetConfig.enabled ? 'bg-[var(--accent-primary)]/10' : 'hover:bg-theme-secondary'}`}
                   >
                     <div className="flex items-center gap-3">
-                      <div className={`w-10 h-10 rounded-full flex items-center justify-center ${widgetConfig.enabled ? 'bg-[var(--accent-primary)]' : 'bg-theme-tertiary'}`}>
+                      <div className={`w-10 h-10 rounded-xl flex items-center justify-center ${widgetConfig.enabled ? 'bg-[var(--accent-primary)]' : 'bg-theme-tertiary'}`}>
                         <MessageCircle className={`h-5 w-5 ${widgetConfig.enabled ? 'text-[var(--bg-primary)]' : 'text-theme-secondary'}`} />
                       </div>
                       <div className="text-left">
@@ -3196,7 +3175,7 @@ export const CreateAgentModal: React.FC<CreateAgentModalProps> = ({
                                 key={color}
                                 type="button"
                                 onClick={() => updateWidgetConfig('primaryColor', color)}
-                                className={`w-7 h-7 rounded-full transition-transform ${widgetConfig.primaryColor === color ? 'ring-2 ring-offset-2 ring-[var(--accent-primary)] scale-110' : 'hover:scale-105'}`}
+                                className={`w-7 h-7 rounded-xl transition-transform ${widgetConfig.primaryColor === color ? 'ring-2 ring-offset-2 ring-[var(--accent-primary)] scale-110' : 'hover:scale-105'}`}
                                 style={{ backgroundColor: color }}
                               />
                             ))}

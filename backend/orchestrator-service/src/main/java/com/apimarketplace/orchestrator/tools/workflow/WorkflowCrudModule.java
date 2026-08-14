@@ -68,6 +68,8 @@ public class WorkflowCrudModule implements ToolModule {
     private final ApplicationShowcaseResolver showcaseResolver;
     private final AgentCancellationProbe cancellationProbe;
     private final com.apimarketplace.orchestrator.tools.common.RunStopToolHandler runStopToolHandler;
+    private final com.apimarketplace.orchestrator.services.resume.StepRerunService stepRerunService;
+    private final com.apimarketplace.orchestrator.services.resume.AutoRestartExecutionService autoRestartExecutionService;
 
     /** wait_run bounds. The max (default 240s) must stay under the tightest hop that
      *  tolerates a silent in-flight tool call: the bridge kills a CLI session after
@@ -88,7 +90,7 @@ public class WorkflowCrudModule implements ToolModule {
 
     private static final Set<String> HANDLED_ACTIONS = Set.of(
         "get", "list", "delete", "runs", "get_run", "wait_run", "stop_run", "get_node_output", "pin", "unpin",
-        "publish", "unpublish"
+        "publish", "unpublish", "restart_from_node"
     );
 
     @Override
@@ -119,6 +121,7 @@ public class WorkflowCrudModule implements ToolModule {
             case "get_run" -> executeGetRun(parameters, tenantId, context);
             case "wait_run" -> executeWaitRun(parameters, tenantId, context);
             case "stop_run" -> executeStopRun(parameters, tenantId, context);
+            case "restart_from_node" -> executeRestartFromNode(parameters, tenantId, context);
             case "get_node_output" -> executeGetNodeOutput(parameters, tenantId, context);
             case "pin" -> executePin(parameters, tenantId, context);
             case "unpin" -> executeUnpin(parameters, tenantId, context);
@@ -1029,6 +1032,98 @@ public class WorkflowCrudModule implements ToolModule {
             return ToolExecutionResult.failure(ToolErrorCode.EXECUTION_FAILED,
                     "Failed to stop run: " + e.getMessage());
         }
+    }
+
+    /**
+     * Re-run one node of an existing run and continue from there, keeping everything the run
+     * already produced upstream of it.
+     *
+     * <p>Params: {@code run_id} (required), {@code node} (required, the node key as it appears
+     * in {@code get_run}, e.g. {@code mcp:fetch_data}).
+     */
+    private ToolExecutionResult executeRestartFromNode(Map<String, Object> parameters, String tenantId,
+                                                       ToolExecutionContext context) {
+        String runId = asTrimmedString(parameters.get("run_id"));
+        if (runId == null) {
+            return ToolExecutionResult.failure(ToolErrorCode.MISSING_PARAMETER,
+                    "run_id is required. Use workflow(action='runs', workflow_id='<workflow-uuid>') to list runs.");
+        }
+        String nodeId = asTrimmedString(parameters.get("node"));
+        if (nodeId == null) nodeId = asTrimmedString(parameters.get("node_id"));
+        if (nodeId == null) {
+            return ToolExecutionResult.failure(ToolErrorCode.MISSING_PARAMETER,
+                    "node is required: the node to restart from, exactly as it appears in "
+                    + "workflow(action='get_run') (for example 'mcp:fetch_data').");
+        }
+
+        try {
+            Optional<WorkflowRunEntity> runOpt = workflowRunRepository.findByRunIdPublic(runId);
+            if (runOpt.isEmpty()) {
+                return ToolExecutionResult.failure(ToolErrorCode.RESOURCE_NOT_FOUND, "Run not found: " + runId);
+            }
+            WorkflowRunEntity run = runOpt.get();
+            String orgId = TenantResolver.currentRequestOrganizationId();
+            if (!ScopeGuard.isInStrictScope(tenantId, orgId, run.getTenantId(), run.getOrganizationId())) {
+                return ToolExecutionResult.failure(ToolErrorCode.RESOURCE_NOT_FOUND, "Run not found: " + runId);
+            }
+            WorkflowEntity workflow = run.getWorkflow();
+            var workflowDenied = denyIfWorkflowNotAllowed(context,
+                    workflow != null && workflow.getId() != null ? workflow.getId().toString() : null);
+            if (workflowDenied.isPresent()) return workflowDenied.get();
+
+            var result = stepRerunService.rerunFromStep(runId, nodeId);
+            var outcome = autoRestartExecutionService.resumeAfterRerun(
+                    runId, result.readySteps(), result.ownerTriggerId(), result.epoch());
+
+            Map<String, Object> payload = new LinkedHashMap<>();
+            payload.put("run_id", result.runId());
+            payload.put("restarted_from", result.stepId());
+            payload.put("replayed_nodes", result.resetSteps());
+            payload.put("epoch", result.epoch());
+            payload.put("attempt", result.spawn());
+            payload.put("outcome", outcome.name());
+            payload.put("status", workflowRunRepository.findByRunIdPublic(runId)
+                    .map(r -> r.getStatus().getValue()).orElse(result.status()));
+            payload.put("summary", restartSummary(outcome, result.resetSteps().size(), result.stepId()));
+            return ToolExecutionResult.success(payload);
+        } catch (IllegalStateException e) {
+            // The node is not in a state a restart can start from (still pending, or never ran).
+            return ToolExecutionResult.failure(ToolErrorCode.INVALID_PARAMETER_VALUE, e.getMessage());
+        } catch (IllegalArgumentException e) {
+            return ToolExecutionResult.failure(ToolErrorCode.INVALID_PARAMETER_VALUE, e.getMessage());
+        } catch (Exception e) {
+            log.error("Failed to restart run {} from node {}: {}", runId, nodeId, e.getMessage(), e);
+            return ToolExecutionResult.failure(ToolErrorCode.EXECUTION_FAILED,
+                    "Failed to restart from node: " + e.getMessage());
+        }
+    }
+
+    /** One sentence telling the agent what happened and whether it still has to do something. */
+    private static String restartSummary(
+            com.apimarketplace.orchestrator.services.resume.AutoRestartExecutionService.Outcome outcome,
+            int replayedCount, String nodeId) {
+        return switch (outcome) {
+            case QUIESCED -> "Replayed " + replayedCount + " node(s) from " + nodeId
+                    + " and the run settled. Read the new outputs with workflow(action='get_run').";
+            case YIELDED -> "Replayed from " + nodeId + " until a node started waiting (an approval, a timer, "
+                    + "an interface, or an agent still working). Poll with workflow(action='get_run'); resolve an "
+                    + "approval with workflow(action='resolve_approval') and an interface with "
+                    + "workflow(action='continue_interface').";
+            case STEP_BY_STEP -> "This run is stepped, so nothing was executed: " + nodeId
+                    + " is now the next node waiting for the user to run it.";
+            case NOTHING_TO_RUN -> "Reset " + nodeId + ", but no node became runnable. Check "
+                    + "workflow(action='get_run') for what the run is waiting on.";
+            case WAVE_CAP -> "Stopped after the safety limit with work still pending, so the replay is INCOMPLETE. "
+                    + "Inspect workflow(action='get_run') before restarting again.";
+            case UNAVAILABLE -> "Reset " + nodeId + ", but the run could not be advanced. Read "
+                    + "workflow(action='get_run') to see its current state.";
+        };
+    }
+
+    private static String asTrimmedString(Object value) {
+        if (!(value instanceof String s)) return null;
+        String trimmed = s.trim();
+        return trimmed.isEmpty() ? null : trimmed;
     }
 
     /** In-flight = still worth blocking on. Everything else needs the agent's (or user's) attention. */

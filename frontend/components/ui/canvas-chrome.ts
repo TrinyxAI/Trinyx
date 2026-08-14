@@ -57,6 +57,24 @@ export function canvasChromeButtonClass(active = false, className?: string): str
 }
 
 /**
+ * The ONE accent-filled square a canvas puts in its top-right corner: "add node"
+ * on the workflow canvas, "edit" on the agent-fleet canvas (both the full-page
+ * fleet and the agent side-panel, which render the same canvas).
+ *
+ * It is the only canvas control that carries the accent fill, because it is the
+ * only one that is the primary action of the surface - everything else in the
+ * chrome is a ghost control. Both callers were round FABs of two different sizes
+ * (36px and 44px); sharing this class is what keeps "the edit button looks like
+ * the add-node button" true after the next edit to either one.
+ *
+ * Sized from the Button `icon` variant, so it lands on the same h-9/36px as the
+ * mode toggle and the run bar it shares the top edge with.
+ */
+export function canvasChromePrimaryButtonClass(className?: string): string {
+  return cn(buttonVariants({ variant: "default", size: "icon" }), "shrink-0", className)
+}
+
+/**
  * A control nested INSIDE a chrome card: the two mode-toggle buttons and every
  * bottom-toolbar control.
  *

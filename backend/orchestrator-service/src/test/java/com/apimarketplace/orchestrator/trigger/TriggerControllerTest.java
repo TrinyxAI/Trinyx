@@ -52,7 +52,7 @@ class TriggerControllerTest {
     @BeforeEach
     void setUp() {
         lenient().when(creditClient.checkCredits(any())).thenReturn(true);
-        controller = new TriggerController(runRepository, triggerService, resumeService, creditClient);
+        controller = new TriggerController(runRepository, triggerService, resumeService);
     }
 
     @Nested
@@ -479,6 +479,43 @@ class TriggerControllerTest {
             verify(triggerService).executeTrigger(eq(run), any(), eq(TriggerType.MANUAL), any());
             verify(triggerService, never())
                 .executeTriggerAsync(eq(run), any(), eq(TriggerType.MANUAL), any());
+        }
+
+        @Test
+        @DisplayName("Sync fire refused for lack of credits answers 402 (keeps the Insufficient credits modal)")
+        void creditExhaustedFireAnswers402() {
+            WorkflowRunEntity run = sbsRun("run-broke");
+            when(runRepository.findByRunIdPublic("run-broke")).thenReturn(Optional.of(run));
+            // What the engine now reports once the trigger node hits the credit gate.
+            when(triggerService.executeTrigger(eq(run), any(), eq(TriggerType.MANUAL), any()))
+                .thenReturn(TriggerExecutionResult.failure(
+                    "run-broke", "trigger:manual_trigger", TriggerType.MANUAL,
+                    com.apimarketplace.orchestrator.services.credit.CreditExhaustion.MESSAGE));
+
+            ResponseEntity<TriggerController.TriggerResponse> response =
+                controller.triggerManual("run-broke", null, null, CALLER, null);
+
+            assertThat(response.getStatusCode().value())
+                .as("the frontend modal keys on the status code, not the message")
+                .isEqualTo(402);
+            assertThat(response.getBody()).isNotNull();
+            assertThat(response.getBody().message())
+                .contains(com.apimarketplace.orchestrator.services.credit.CreditExhaustion.MESSAGE);
+        }
+
+        @Test
+        @DisplayName("Any other sync failure stays 400 - only the credit case is promoted to 402")
+        void otherFailuresStay400() {
+            WorkflowRunEntity run = sbsRun("run-noplan");
+            when(runRepository.findByRunIdPublic("run-noplan")).thenReturn(Optional.of(run));
+            when(triggerService.executeTrigger(eq(run), any(), eq(TriggerType.MANUAL), any()))
+                .thenReturn(TriggerExecutionResult.failure(
+                    "run-noplan", "trigger:manual_trigger", TriggerType.MANUAL, "Run has no plan"));
+
+            ResponseEntity<TriggerController.TriggerResponse> response =
+                controller.triggerManual("run-noplan", null, null, CALLER, null);
+
+            assertThat(response.getStatusCode().value()).isEqualTo(400);
         }
 
         @Test

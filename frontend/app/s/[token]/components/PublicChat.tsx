@@ -199,7 +199,7 @@ export default function PublicChat({ resourceToken, title }: PublicChatProps) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-theme-primary px-4">
         <div className="text-center">
-          <div className="h-12 w-12 rounded-full bg-theme-secondary flex items-center justify-center mx-auto mb-4">
+          <div className="h-12 w-12 rounded-xl bg-theme-secondary flex items-center justify-center mx-auto mb-4">
             <svg className="h-5 w-5 text-theme-muted" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
               <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v3.75m9-.75a9 9 0 1 1-18 0 9 9 0 0 1 18 0Zm-9 3.75h.008v.008H12v-.008Z" />
             </svg>
@@ -302,7 +302,7 @@ export default function PublicChat({ resourceToken, title }: PublicChatProps) {
                 <button
                   onClick={handleSend}
                   disabled={!input.trim() || sending || !sessionId}
-                  className="h-9 w-9 rounded-full bg-theme-inverted text-theme-inverted flex items-center justify-center disabled:opacity-50 disabled:cursor-not-allowed transition-colors hover:opacity-90"
+                  className="h-9 w-9 rounded-xl bg-theme-inverted text-theme-inverted flex items-center justify-center disabled:opacity-50 disabled:cursor-not-allowed transition-colors hover:opacity-90"
                   aria-label={t('chat.sendMessage')}
                 >
                   <ArrowUp className="w-5 h-5" />

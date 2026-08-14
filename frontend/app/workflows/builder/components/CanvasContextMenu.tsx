@@ -258,7 +258,13 @@ export function NodeContextMenu({
   // Run-action group (run mode), edit-mode trigger launcher, and the trigger
   // pin/unpin affordance - the menu mirrors the buttons that render under the
   // node, gated per node type / mode exactly like NodeBottomBar.
-  const hasRunActions = exec.canExecute || exec.canRerun || exec.pendingSignalCount > 0;
+  // Mirrors the bottom-bar gate (FlowNode.showPlay + NodeBottomBar): a rerun resets the node
+  // AND everything downstream, so it must not be offered on a read-only surface, outside run
+  // mode, on an interface node, or on a trigger (where "restart from here" is the whole DAG).
+  // canRerun alone stopped being sufficient once it was no longer gated on step-by-step mode.
+  const showRerun = exec.canRerun && isRunMode && !isPreviewOnly
+    && !flags.isTriggerNode && !flags.isInterfaceNode;
+  const hasRunActions = exec.canExecute || showRerun || exec.pendingSignalCount > 0;
   const showLauncher = editable && flags.isTriggerNode && canMutate;
   const showPin = !isPreviewOnly && flags.isTriggerNode && !!workflowId && pinDisplay.shouldRender;
   // Hidden in isApplicationMode: inside an application the app is already the
@@ -273,8 +279,14 @@ export function NodeContextMenu({
       {exec.canExecute && (
         <ContextMenuItem icon={<Play className="h-3.5 w-3.5" fill="currentColor" />} label={t('executeStep')} onClick={run(exec.executeStep)} />
       )}
-      {exec.canRerun && (
-        <ContextMenuItem icon={<RotateCcw className="h-3.5 w-3.5" />} label={t('rerunStep')} onClick={run(() => exec.rerunStep())} />
+      {showRerun && (
+        <ContextMenuItem
+          icon={<RotateCcw className="h-3.5 w-3.5" />}
+          // isSteppedRun, not isStepByStepMode: the latter is false on a FINISHED stepped run,
+          // which would promise unattended re-execution on the one run where nothing runs.
+          label={t(exec.isSteppedRun ? 'rerunStep' : 'rerunStepAuto')}
+          onClick={run(() => exec.rerunStep())}
+        />
       )}
       {exec.pendingSignalCount > 0 && (
         <>

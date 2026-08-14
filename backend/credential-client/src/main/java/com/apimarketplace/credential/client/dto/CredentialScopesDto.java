@@ -19,6 +19,8 @@ public class CredentialScopesDto {
 
     private String type;
     private List<String> scopes;
+    private String integration;
+    private String name;
 
     public CredentialScopesDto() {}
 
@@ -32,4 +34,10 @@ public class CredentialScopesDto {
 
     public List<String> getScopes() { return scopes; }
     public void setScopes(List<String> scopes) { this.scopes = scopes; }
+
+    public String getIntegration() { return integration; }
+    public void setIntegration(String integration) { this.integration = integration; }
+
+    public String getName() { return name; }
+    public void setName(String name) { this.name = name; }
 }

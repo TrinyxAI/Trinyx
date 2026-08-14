@@ -516,7 +516,7 @@ export function MyCredentialsList({
                         iconUrl={credential.icon_url}
                         size="lg"
                         fallbackIcon={
-                          <div className="h-8 w-8 rounded-full bg-theme-tertiary flex items-center justify-center">
+                          <div className="h-8 w-8 rounded-xl bg-theme-tertiary flex items-center justify-center">
                             <span className="text-sm font-bold text-theme-secondary">
                               {credential.name?.charAt(0) || "?"}
                             </span>
@@ -535,7 +535,7 @@ export function MyCredentialsList({
                   </td>
                   <td className="px-4 py-3">
                     <div className="flex items-center gap-1.5 flex-wrap">
-                      <span className="text-xs px-2 py-1 bg-theme-tertiary rounded-full text-theme-secondary">
+                      <span className="text-xs px-2 py-1 bg-theme-tertiary rounded-md text-theme-secondary">
                         {credential.type}
                       </span>
                       {/* V166: granted-scopes badge for OAuth2 credentials. */}
@@ -559,7 +559,7 @@ export function MyCredentialsList({
                       {credential.status === "needs_reauth" && (
                         <>
                           <span
-                            className="text-xs px-2 py-1 bg-red-100 dark:bg-red-950/40 text-red-700 dark:text-red-400 rounded-full font-medium"
+                            className="text-xs px-2 py-1 bg-red-100 dark:bg-red-950/40 text-red-700 dark:text-red-400 rounded-md font-medium"
                             title={resolveReconnectHint(credential, t)}
                           >
                             {t("reconnectRequired")}
@@ -582,7 +582,7 @@ export function MyCredentialsList({
                       )}
                       {credential.status === "error" && (
                         <span
-                          className="text-xs px-2 py-1 bg-red-100 dark:bg-red-950/40 text-red-700 dark:text-red-400 rounded-full font-medium"
+                          className="text-xs px-2 py-1 bg-red-100 dark:bg-red-950/40 text-red-700 dark:text-red-400 rounded-md font-medium"
                           title={t("connectionErrorHint")}
                         >
                           {t("connectionError")}
@@ -604,7 +604,7 @@ export function MyCredentialsList({
                         <button
                           onClick={(e) => handleToggleDefault(credential, e)}
                           disabled={isDisabled}
-                          className={`p-1 rounded-full transition-colors ${
+                          className={`p-1 rounded-md transition-colors ${
                             isOnlyDefault
                               ? "text-amber-500 cursor-not-allowed opacity-60"
                               : credential.is_default

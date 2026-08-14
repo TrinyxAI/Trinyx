@@ -8,6 +8,7 @@ import com.apimarketplace.agent.loop.AgentLoopResult;
 import com.apimarketplace.agent.loop.AgentLoopService;
 import com.apimarketplace.agent.loop.CallPurpose;
 import com.apimarketplace.agent.loop.PreIterationGuard;
+import com.apimarketplace.agent.config.AgentModuleResolver;
 import com.apimarketplace.agent.prompt.DefaultSystemPrompts;
 import com.apimarketplace.agent.service.ModelExecutionLinkService;
 import com.apimarketplace.agent.service.budget.GuardChainFactory;
@@ -619,17 +620,20 @@ public class AgentRemoteExecutionService {
             // tool SCHEMA on every iteration. The module set is resolved upstream by
             // AgentModuleResolver and travels on the DTO; we rebuild the filtered core tool
             // names via the SAME canonical DefaultSystemPrompts.build(modules) the chat path
-            // uses, then ask the cache for only those. enabledModules == null ⇒ unrestricted
-            // (legacy "all core tools" fallback, e.g. agents with no toolsConfig).
-            List<String> enabledModules = request.enabledModules();
-            if (enabledModules != null) {
-                Set<String> coreToolNames = DefaultSystemPrompts
-                    .build(new LinkedHashSet<>(enabledModules), false)
-                    .coreToolNames();
-                tools = coreToolsCache.getCoreTools(coreToolNames);
-            } else {
-                tools = coreToolsCache.getCoreTools();
-            }
+            // uses, then ask the cache for only those.
+            //
+            // enabledModules == null ⇒ the producer decided nothing, NOT "everything": fall
+            // back to AgentModuleResolver.NO_CONFIG_MODULES (= resolveEnabledModules(null)),
+            // which is the platform's own definition of unrestricted and deliberately leaves
+            // out the credit-spending opt-in (generation). The previous
+            // unfiltered coreToolsCache.getCoreTools() fallback handed the generation tool to
+            // any agent row with no toolsConfig, so it could spend the customer's credits with
+            // no grant set anywhere.
+            Set<String> modules = request.enabledModules() != null
+                ? new LinkedHashSet<>(request.enabledModules())
+                : new LinkedHashSet<>(AgentModuleResolver.NO_CONFIG_MODULES);
+            Set<String> coreToolNames = DefaultSystemPrompts.build(modules, false).coreToolNames();
+            tools = coreToolsCache.getCoreTools(coreToolNames);
             // CE→cloud web-search relay: hide web_search from workflow agents whose
             // tenant cannot use it (local engine disabled AND not cloud-linked).
             if (webSearchRelayGate != null) {

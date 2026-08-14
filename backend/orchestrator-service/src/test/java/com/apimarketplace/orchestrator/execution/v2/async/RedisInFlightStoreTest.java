@@ -283,66 +283,95 @@ class RedisInFlightStoreTest {
     // A typo here (wrong key, wrong member, no index at all) leaves the readers permanently
     // blind while every read-side test stays green, so the write is pinned explicitly.
 
-    @Test
-    @DisplayName("stageIndexesTheEntryUnderItsRunBeforeWritingTheValue: index first, so a value is never queryable without being findable")
-    void stageWritesIndexBeforeValue() {
-        StringRedisTemplate template = mock(StringRedisTemplate.class);
-        @SuppressWarnings("unchecked")
-        org.springframework.data.redis.core.SetOperations<String, String> setOps =
+    /**
+     * Runs the {@code SessionCallback} that {@code stage} submits, against a recording
+     * {@code RedisOperations}, the way a real MULTI/EXEC connection would: every command is
+     * queued on that one connection, and {@code exec()} returns one result per queued command.
+     *
+     * @param execResult what {@code exec()} returns - a 3-element list is a transaction that
+     *                   applied; {@code null} is a discarded one
+     */
+    @SuppressWarnings({"unchecked", "rawtypes"})
+    private static org.springframework.data.redis.core.RedisOperations<String, String> stubTransaction(
+            StringRedisTemplate template, List<Object> execResult) {
+        org.springframework.data.redis.core.RedisOperations<String, String> txOps =
+            mock(org.springframework.data.redis.core.RedisOperations.class);
+        org.springframework.data.redis.core.SetOperations<String, String> txSet =
             mock(org.springframework.data.redis.core.SetOperations.class);
-        @SuppressWarnings("unchecked")
-        org.springframework.data.redis.core.ValueOperations<String, String> valueOps =
+        org.springframework.data.redis.core.ValueOperations<String, String> txValue =
             mock(org.springframework.data.redis.core.ValueOperations.class);
-        org.mockito.Mockito.when(template.opsForSet()).thenReturn(setOps);
-        org.mockito.Mockito.when(template.opsForValue()).thenReturn(valueOps);
+        org.mockito.Mockito.lenient().when(txOps.opsForSet()).thenReturn(txSet);
+        org.mockito.Mockito.lenient().when(txOps.opsForValue()).thenReturn(txValue);
+        org.mockito.Mockito.lenient().when(txOps.exec()).thenReturn(execResult);
+        org.mockito.Mockito.when(template.execute(org.mockito.ArgumentMatchers.any(
+                org.springframework.data.redis.core.SessionCallback.class)))
+            .thenAnswer(inv -> ((org.springframework.data.redis.core.SessionCallback) inv.getArgument(0))
+                .execute(txOps));
+        return txOps;
+    }
+
+    @Test
+    @DisplayName("stageWritesValueIndexAndTtlInOneTransaction: no observer may ever see the index member without its value")
+    void stageWritesEverythingInOneTransaction() {
+        // The whole point. As separate round trips there was an interval in which the member
+        // existed and the value did not; a guard reading in it saw an unresolvable member,
+        // listForRun pruned it, nothing re-added it, and the delivery went permanently
+        // invisible to every per-run guard - so its epoch could be closed mid-delivery and the
+        // node downstream of the agent was never dispatched ("Step not found: <that node>").
+        StringRedisTemplate template = mock(StringRedisTemplate.class);
+        var txOps = stubTransaction(template, List.of("OK", 1L, true));
 
         RedisInFlightStore.InFlightEntry e = entry("cid-w", "run-w", "trigger:ask", 3);
         new RedisInFlightStore(template, new ObjectMapper()).stage(e.pending(), e.result());
 
-        org.mockito.InOrder order = org.mockito.Mockito.inOrder(setOps, valueOps);
-        order.verify(setOps).add(RedisInFlightStore.RUN_INDEX_PREFIX + "run-w", "cid-w");
-        order.verify(valueOps).set(
+        org.mockito.InOrder order = org.mockito.Mockito.inOrder(txOps, txOps.opsForValue(), txOps.opsForSet());
+        order.verify(txOps).multi();
+        order.verify(txOps.opsForValue()).set(
             org.mockito.ArgumentMatchers.eq(RedisInFlightStore.KEY_PREFIX + "cid-w"),
             org.mockito.ArgumentMatchers.anyString(),
             org.mockito.ArgumentMatchers.anyLong(),
             org.mockito.ArgumentMatchers.any());
+        order.verify(txOps.opsForSet()).add(RedisInFlightStore.RUN_INDEX_PREFIX + "run-w", "cid-w");
         // The index must expire with the entries it points at; an index outliving them would
         // keep a run's epoch resets deferred long after every agent finished.
-        org.mockito.Mockito.verify(template).expire(
+        order.verify(txOps).expire(
             org.mockito.ArgumentMatchers.eq(RedisInFlightStore.RUN_INDEX_PREFIX + "run-w"),
             org.mockito.ArgumentMatchers.eq(RedisInFlightStore.DEFAULT_TTL.toMillis()),
             org.mockito.ArgumentMatchers.eq(java.util.concurrent.TimeUnit.MILLISECONDS));
+        order.verify(txOps).exec();
+
+        // Nothing outside the transaction: a stray non-transactional write would reopen the
+        // very window this test exists to close.
+        org.mockito.Mockito.verify(template, org.mockito.Mockito.never()).opsForValue();
+        org.mockito.Mockito.verify(template, org.mockito.Mockito.never()).opsForSet();
     }
 
     @Test
-    @DisplayName("stageStillWritesTheValueWhenTheIndexWriteFails: recovery keeps working, but the guards are told they went blind")
+    @DisplayName("stageStillWritesTheValueWhenTheTransactionIsDiscarded: recovery keeps working, but the guards are told they went blind")
     void stageWritesValueEvenIfIndexFails() {
         StringRedisTemplate template = mock(StringRedisTemplate.class);
         @SuppressWarnings("unchecked")
-        org.springframework.data.redis.core.SetOperations<String, String> setOps =
-            mock(org.springframework.data.redis.core.SetOperations.class);
-        @SuppressWarnings("unchecked")
         org.springframework.data.redis.core.ValueOperations<String, String> valueOps =
             mock(org.springframework.data.redis.core.ValueOperations.class);
-        org.mockito.Mockito.when(template.opsForSet()).thenReturn(setOps);
         org.mockito.Mockito.when(template.opsForValue()).thenReturn(valueOps);
-        org.mockito.Mockito.when(setOps.add(org.mockito.ArgumentMatchers.anyString(),
-                org.mockito.ArgumentMatchers.<String>any()))
-            .thenThrow(new org.springframework.data.redis.RedisConnectionFailureException("down"));
+        // exec() returning null is how Spring Data reports a discarded transaction. Treating
+        // that as success would report protection the guards do not have.
+        stubTransaction(template, null);
 
         RedisInFlightStore.InFlightEntry e = entry("cid-noidx", "run-noidx", "trigger:ask", 1);
         new RedisInFlightStore(template, new ObjectMapper()).stage(e.pending(), e.result());
 
-        // The value is still written: AgentRecoveryService.replayInFlightEntries scans the value
-        // namespace directly, so crash recovery must not be sacrificed for the guards.
+        // The value is still written, outside the transaction: AgentRecoveryService
+        // .replayInFlightEntries scans the value namespace directly, so crash recovery must
+        // not be sacrificed for the guards.
         org.mockito.Mockito.verify(valueOps).set(
             org.mockito.ArgumentMatchers.eq(RedisInFlightStore.KEY_PREFIX + "cid-noidx"),
             org.mockito.ArgumentMatchers.anyString(),
             org.mockito.ArgumentMatchers.anyLong(),
             org.mockito.ArgumentMatchers.any());
         // Retried once before giving up - the caller cannot come back later.
-        org.mockito.Mockito.verify(setOps, org.mockito.Mockito.times(2))
-            .add(RedisInFlightStore.RUN_INDEX_PREFIX + "run-noidx", "cid-noidx");
+        org.mockito.Mockito.verify(template, org.mockito.Mockito.times(2)).execute(
+            org.mockito.ArgumentMatchers.any(org.springframework.data.redis.core.SessionCallback.class));
     }
 
     @Test
@@ -359,22 +388,30 @@ class RedisInFlightStoreTest {
             mock(org.springframework.data.redis.core.ValueOperations.class);
         org.mockito.Mockito.when(template.opsForSet()).thenReturn(setOps);
         org.mockito.Mockito.when(template.opsForValue()).thenReturn(valueOps);
-        org.mockito.Mockito.when(setOps.add(org.mockito.ArgumentMatchers.anyString(),
-                org.mockito.ArgumentMatchers.<String>any()))
-            .thenAnswer(inv -> {
-                index.computeIfAbsent(inv.getArgument(0), k -> new java.util.HashSet<>())
-                     .add(inv.getArgument(1));
-                return 1L;
-            });
-        org.mockito.Mockito.doAnswer(inv -> { values.put(inv.getArgument(0), inv.getArgument(1)); return null; })
-            .when(valueOps).set(org.mockito.ArgumentMatchers.anyString(),
-                org.mockito.ArgumentMatchers.anyString(),
-                org.mockito.ArgumentMatchers.anyLong(),
-                org.mockito.ArgumentMatchers.any());
         org.mockito.Mockito.when(setOps.members(org.mockito.ArgumentMatchers.anyString()))
             .thenAnswer(inv -> index.get(inv.<String>getArgument(0)));
         org.mockito.Mockito.when(valueOps.get(org.mockito.ArgumentMatchers.anyString()))
             .thenAnswer(inv -> values.get(inv.<String>getArgument(0)));
+        // The transaction applies both writes together, which is exactly the guarantee under
+        // test: the guard can never observe one without the other.
+        var txOps = stubTransaction(template, List.of("OK", 1L, true));
+        // Resolve the transactional operation mocks OUTSIDE when()/doAnswer(): a nested
+        // txOps.opsForSet() call inside when(...) is itself a mock invocation, which Mockito
+        // reports as UnfinishedStubbing.
+        var txValue = txOps.opsForValue();
+        var txSet = txOps.opsForSet();
+        org.mockito.Mockito.doAnswer(inv -> { values.put(inv.getArgument(0), inv.getArgument(1)); return null; })
+            .when(txValue).set(org.mockito.ArgumentMatchers.anyString(),
+                org.mockito.ArgumentMatchers.anyString(),
+                org.mockito.ArgumentMatchers.anyLong(),
+                org.mockito.ArgumentMatchers.any());
+        org.mockito.Mockito.when(txSet.add(org.mockito.ArgumentMatchers.anyString(),
+                org.mockito.ArgumentMatchers.<String>any()))
+            .thenAnswer(inv -> {
+                index.computeIfAbsent(inv.getArgument(0), k -> new java.util.HashSet<>())
+                     .add(inv.getArgument(1));
+                return null;
+            });
 
         RedisInFlightStore store = new RedisInFlightStore(template, new ObjectMapper());
         RedisInFlightStore.InFlightEntry e = entry("cid-rt", "run-rt", "trigger:ask", 2);

@@ -846,8 +846,63 @@ public class WorkflowBuilderPlanExporter {
                     default -> errors.add("cores[" + i + "]: unknown media operation '" + mediaOp + "' (expected: probe, mux_audio, mix, extract_audio, concat, frame, overlay)");
                 }
                 break;
+            case "generate":
+                // Only 'model' is checked here. Which parameters the chosen model
+                // accepts, and their limits, live in the generation catalog and are
+                // checked there before the provider is called (so a bad value costs
+                // nothing); duplicating them would give two answers to one question.
+                Object genParams = cn.get("params");
+                if (!(genParams instanceof Map<?, ?> genMap)) {
+                    errors.add("cores[" + i + "]: 'params' with a 'model' is required for generate. " +
+                        "Format: params: {model: 'seedance-2.0-fast', prompt: '...', duration_seconds: 5}");
+                    break;
+                }
+                Object genModel = genMap.get("model");
+                if (!(genModel instanceof String genModelStr) || genModelStr.isBlank()) {
+                    errors.add("cores[" + i + "]: 'params.model' is required for generate. The model decides "
+                        + "the format produced, the parameters accepted and the price; call "
+                        + "generation(action='models') to list the available model ids.");
+                }
+                Object genSource = genMap.get("credential_source");
+                if (genSource != null && !"user".equals(genSource) && !"platform".equals(genSource)) {
+                    errors.add("cores[" + i + "]: 'params.credential_source' must be 'platform' or 'user' "
+                        + "(got '" + genSource + "')");
+                }
+                // The owner's pinned key. Nothing here can choose one, so the
+                // only thing that can go wrong is a value that is not an id at
+                // all - a template that resolved to nothing, or a number
+                // somebody invented. Refusing it at build time is what stops a
+                // run silently using a different key from the one the plan
+                // appears to name: the executor reads an unusable id as "no
+                // pin" and falls back to the account default, without saying so.
+                Object genCredentialId = genMap.get("credential_id");
+                if (genCredentialId != null && !isPositiveWholeNumberId(genCredentialId)) {
+                    errors.add("cores[" + i + "]: 'params.credential_id' must be a positive whole number "
+                        + "identifying one of the workflow owner's own provider keys (got '"
+                        + genCredentialId + "'). You cannot choose one: keep the value a node already has, "
+                        + "or leave it out entirely so the node runs on the owner's default key.");
+                }
+                break;
             default:
-                errors.add("cores[" + i + "]: Unknown type '" + type + "' (expected: decision, switch, loop, split, merge, fork, transform, wait, download_file, public_link, media, aggregate, exit, response, option, http_request, filter, sort, limit, remove_duplicates, summarize, date_time, crypto_jwt, approval, data_input, xml, compression, rss, convert_to_file, extract_from_file, compare_datasets, sub_workflow, respond_to_webhook, send_email, email_inbox, code, set, html_extract, task, stop_on_error, ssh, sftp, database)");
+                errors.add("cores[" + i + "]: Unknown type '" + type + "' (expected: decision, switch, loop, split, merge, fork, transform, wait, download_file, public_link, media, generate, aggregate, exit, response, option, http_request, filter, sort, limit, remove_duplicates, summarize, date_time, crypto_jwt, approval, data_input, xml, compression, rss, convert_to_file, extract_from_file, compare_datasets, sub_workflow, respond_to_webhook, send_email, email_inbox, code, set, html_extract, task, stop_on_error, ssh, sftp, database)");
+        }
+    }
+
+    /**
+     * A value that can be a database id: a whole number above zero, whether it
+     * arrived as a number or as the string a hand-written plan carries.
+     *
+     * <p>Placed here rather than beside its caller so it does not sit between
+     * {@link #isMediaFileParam} and the Javadoc that describes it.
+     */
+    private static boolean isPositiveWholeNumberId(Object value) {
+        if (value instanceof Number number) {
+            return number.longValue() > 0 && number.doubleValue() == number.longValue();
+        }
+        try {
+            return Long.parseLong(String.valueOf(value).trim()) > 0;
+        } catch (NumberFormatException e) {
+            return false;
         }
     }
 

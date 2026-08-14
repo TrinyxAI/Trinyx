@@ -104,6 +104,9 @@ function routeRequest(request: NextRequest) {
     });
   }
 
+  // The ONLY `/api/proxy/*` path that reaches a route handler. Everything else is rewritten
+  // below, so `app/api/proxy/[...path]/route.ts` serves this path and nothing else: this
+  // middleware IS the API proxy. Fix proxy behaviour here, not there (see that file's header).
   if (pathname === '/api/proxy/external-proxy') {
     return NextResponse.next();
   }

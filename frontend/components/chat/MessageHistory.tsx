@@ -455,7 +455,7 @@ export function MessageHistory({
               <div className="flex items-center gap-2 my-6 text-theme-secondary" aria-label={t('chat.compactionDivider')}>
                 <div className="flex-1 h-px bg-theme-tertiary" />
                 <div
-                  className="flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-theme-tertiary/60 text-xs"
+                  className="flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-theme-tertiary/60 text-xs"
                   title={compactionMarker?.model ? t('chat.compactionTooltip', { model: compactionMarker.model }) : undefined}
                 >
                   <Archive className="h-3 w-3" />

@@ -28,6 +28,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.argThat;
+import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.doReturn;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -175,6 +176,94 @@ class PublicationListQueryServiceTest {
 
             assertThat(page.getTotalElements()).isZero();
             assertThat(page.getContent()).isEmpty();
+        }
+    }
+
+    @Nested
+    @DisplayName("Marketplace browse ordering (most-liked first)")
+    class MarketplacePopularityOrdering {
+
+        /**
+         * Captures every SQL string handed to the EntityManager, so a test can
+         * assert on the data query while ignoring the COUNT companion.
+         */
+        private List<String> captureSql(Runnable call) {
+            List<String> sql = new java.util.ArrayList<>();
+            doAnswer(inv -> {
+                sql.add(inv.getArgument(0));
+                return sql.size() == 1 ? dataQuery : countQuery;
+            }).when(em).createNativeQuery(anyString());
+            when(dataQuery.getResultList()).thenReturn(List.of());
+            when(countQuery.getSingleResult()).thenReturn(0L);
+
+            call.run();
+            return sql;
+        }
+
+        private void assertOrdersByPopularity(String dataSql) {
+            // Favorites are the heaviest term and are counted per publication.
+            assertThat(dataSql)
+                    .contains("3 * (SELECT COUNT(*) FROM user_publication_favorites f WHERE f.publication_id = p.id)")
+                    .contains("2 * COALESCE(p.use_count, 0)")
+                    // Rating MASS (avg x count), not the bare average: one 5-star
+                    // vote must not outrank a 4.5 backed by twenty.
+                    .contains("0.4 * COALESCE(p.average_rating, 0) * COALESCE(p.review_count, 0)")
+                    .contains("DESC, p.published_at DESC");
+            // Regression guard: pre-fix this was a plain chronological feed.
+            assertThat(dataSql).doesNotContain("ORDER BY p.published_at DESC");
+        }
+
+        @Test
+        @DisplayName("findMarketplacePublications orders by the popularity score, not by published_at")
+        void marketplaceOrdersByPopularity() {
+            List<String> sql = captureSql(() -> service.findMarketplacePublications(0, 10));
+
+            assertOrdersByPopularity(sql.get(0));
+        }
+
+        @Test
+        @DisplayName("Category-filtered marketplace keeps the same popularity ordering")
+        void categoryMarketplaceOrdersByPopularity() {
+            List<String> sql = captureSql(() -> service.findMarketplacePublicationsByCategory("finance", 0, 10));
+
+            assertOrdersByPopularity(sql.get(0));
+        }
+
+        @Test
+        @DisplayName("Agent marketplace keeps the same popularity ordering")
+        void agentMarketplaceOrdersByPopularity() {
+            List<String> sql = captureSql(() -> service.findMarketplaceAgentPublications(0, 10));
+
+            assertOrdersByPopularity(sql.get(0));
+        }
+
+        @Test
+        @DisplayName("Per-type marketplace keeps the same popularity ordering")
+        void typedMarketplaceOrdersByPopularity() {
+            List<String> sql = captureSql(() -> service.findMarketplaceByType("SKILL", 0, 10));
+
+            assertOrdersByPopularity(sql.get(0));
+        }
+
+        @Test
+        @DisplayName("The COUNT companion query stays free of the ORDER BY (Postgres would reject the non-grouped published_at, and ordering a count is pointless anyway)")
+        void countQueryHasNoOrderBy() {
+            List<String> sql = captureSql(() -> service.findMarketplacePublications(0, 10));
+
+            assertThat(sql).hasSize(2);
+            assertThat(sql.get(1))
+                    .startsWith("SELECT COUNT(*)")
+                    .doesNotContain("ORDER BY");
+        }
+
+        @Test
+        @DisplayName("A publication with no engagement at all still sorts by recency (graceful degradation to the previous behaviour)")
+        void tieBreaksOnRecency() {
+            List<String> sql = captureSql(() -> service.findMarketplacePublications(0, 10));
+
+            // Every zero-engagement row scores 0, so published_at is what actually
+            // orders the (currently large) untouched tail.
+            assertThat(sql.get(0)).endsWith("p.published_at DESC\n");
         }
     }
 

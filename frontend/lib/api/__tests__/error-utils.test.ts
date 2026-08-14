@@ -1,5 +1,9 @@
 import { describe, it, expect } from 'vitest';
-import { isInsufficientCloudCreditError, isModelNotSupportedError } from '@/lib/api/error-utils';
+import {
+  isCreditExhaustedFailure,
+  isInsufficientCloudCreditError,
+  isModelNotSupportedError,
+} from '@/lib/api/error-utils';
 
 /**
  * The CE cloud-relay detectors match a stable machine token the cloud relay emits
@@ -60,5 +64,31 @@ describe('isModelNotSupportedError', () => {
     expect(isModelNotSupportedError('some other failure')).toBe(false);
     expect(isModelNotSupportedError(null)).toBe(false);
     expect(isModelNotSupportedError({})).toBe(false);
+  });
+});
+
+describe('isCreditExhaustedFailure', () => {
+  it('matches the error_code the node credit gate stamps on the failed node', () => {
+    expect(isCreditExhaustedFailure('CREDIT_EXHAUSTED', '')).toBe(true);
+  });
+
+  it('falls back to the node error message when the output was trimmed', () => {
+    expect(isCreditExhaustedFailure(undefined,
+      'Out of credits: this workflow cannot run. Add credits to run it again.')).toBe(true);
+  });
+
+  it('matches an object carrying the message (step payload shape)', () => {
+    expect(isCreditExhaustedFailure(undefined, { message: 'Out of credits: ...' })).toBe(true);
+  });
+
+  it('does not match another node failure', () => {
+    expect(isCreditExhaustedFailure(undefined, 'Connection refused')).toBe(false);
+    expect(isCreditExhaustedFailure('NODE_TIMEOUT', 'timed out')).toBe(false);
+  });
+
+  it('does not match empty inputs', () => {
+    expect(isCreditExhaustedFailure(undefined, undefined)).toBe(false);
+    expect(isCreditExhaustedFailure(null, null)).toBe(false);
+    expect(isCreditExhaustedFailure(undefined, {})).toBe(false);
   });
 });

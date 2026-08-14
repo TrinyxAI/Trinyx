@@ -19,7 +19,6 @@ vi.mock('@/hooks/useChatConfig', () => ({
     config: {
       temperature: 0.7,
       webSearch: true,
-      imageGeneration: { enabled: false },
       autoAuthorizeTools: false,
     },
     updateConfig: h.updateConfig,
@@ -56,7 +55,8 @@ describe('ChatConfigPanel - Chat defaults (user-default) row layout', () => {
 
   it('renders the toggles as platform Switches', () => {
     render(<ChatConfigPanel userDefault />);
-    // web search + image generation + run-sensitive-actions + context-compaction enable.
+    // web search + generation + run-sensitive-actions + context-compaction enable.
+    // (The retired image-generation toggle used to make a 5th.)
     expect(screen.getAllByRole('switch')).toHaveLength(4);
   });
 
@@ -75,10 +75,17 @@ describe('ChatConfigPanel - Chat defaults (user-default) row layout', () => {
     expect(h.updateConfig).toHaveBeenCalledWith({ webSearch: false });
   });
 
-  it('persists the Image-generation enabled flag through updateConfig', () => {
+  it('no longer renders the retired Image-generation toggle', () => {
     render(<ChatConfigPanel userDefault />);
-    fireEvent.click(screen.getByRole('switch', { name: 'imageGenerationLabel' }));
-    expect(h.updateConfig).toHaveBeenCalledWith({ imageGeneration: { enabled: true } });
+    expect(screen.queryByRole('switch', { name: 'imageGenerationLabel' })).toBeNull();
+  });
+
+  it('persists the Generation enabled flag through updateConfig', () => {
+    render(<ChatConfigPanel userDefault />);
+    fireEvent.click(screen.getByRole('switch', { name: 'generationLabel' }));
+    // Its OWN key: granting video/audio never rides on the retired image grant,
+    // which covered a capability costing an order of magnitude less per call.
+    expect(h.updateConfig).toHaveBeenCalledWith({ generation: { enabled: true } });
   });
 
   it('persists the Run-sensitive-actions toggle through updateConfig', () => {
@@ -90,9 +97,10 @@ describe('ChatConfigPanel - Chat defaults (user-default) row layout', () => {
   it('shows ⓘ info tooltips on every row like the numeric fields (no inline description paragraphs)', () => {
     render(<ChatConfigPanel userDefault />);
     // 6 in the top section (system prompt, temperature, tools mode, web search,
-    // image generation, auto-authorize) + 7 NumericInputs (4 main: max tokens,
+    // generation, auto-authorize) + 7 NumericInputs (4 main: max tokens,
     // max iterations, execution timeout, inactivity timeout; + 3 advanced)
     // + the context-compaction enable row (its after-N-turns field is hidden while disabled).
+    // One fewer than before: the retired image-generation row is gone.
     expect(document.querySelectorAll('svg.lucide-info')).toHaveLength(14);
   });
 

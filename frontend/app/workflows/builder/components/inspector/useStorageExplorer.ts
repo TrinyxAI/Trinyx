@@ -1,5 +1,12 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
-import { storageApi, StorageExplorerEntry, StorageExplorerPage, StorageExplorerParams } from '@/lib/api/storage-api';
+import {
+  storageApi,
+  StorageExplorerEntry,
+  StorageExplorerPage,
+  StorageExplorerParams,
+  type ExplorerSortKey,
+  type ExplorerSortDirection,
+} from '@/lib/api/storage-api';
 
 interface UseStorageExplorerReturn {
   entries: StorageExplorerEntry[];
@@ -24,6 +31,11 @@ interface UseStorageExplorerReturn {
    * opts in (legacy flat listing - no parentFolderId sent to the server).
    */
   parentFolderId: string | null | undefined;
+  /** Active ordering key - server-side, so it spans the whole result set, not the page. */
+  sort: ExplorerSortKey;
+  /** Active ordering direction. */
+  direction: ExplorerSortDirection;
+  setSort: (key: ExplorerSortKey, direction: ExplorerSortDirection) => void;
   setSearch: (value: string) => void;
   setSourceTypeFilter: (value: string) => void;
   setStorageTypeFilter: (value: string) => void;
@@ -65,7 +77,20 @@ export function useStorageExplorer(
   workflowId?: string,
   storageTypeDefault?: string,
   sourceTypeDefault?: string,
-  options?: { pageSize?: number; initialPage?: number; initialSearch?: string; filesOnly?: boolean; s3Only?: boolean; folderAware?: boolean; virtualWorkflowFolders?: boolean },
+  options?: {
+    pageSize?: number;
+    initialPage?: number;
+    initialSearch?: string;
+    filesOnly?: boolean;
+    s3Only?: boolean;
+    folderAware?: boolean;
+    virtualWorkflowFolders?: boolean;
+    /** Folder to open on mount (folder-aware callers restoring a folder from the URL). */
+    initialFolderId?: string | null;
+    /** Ordering to start with - the Files page seeds it from the URL / the saved preference. */
+    initialSort?: ExplorerSortKey;
+    initialDirection?: ExplorerSortDirection;
+  },
 ): UseStorageExplorerReturn {
   const filesOnly = options?.filesOnly ?? false;
   const s3Only = options?.s3Only ?? false;
@@ -86,7 +111,9 @@ export function useStorageExplorer(
   const [fileType, setFileType] = useState('_all');
   // V313: null = root, UUID = a folder. Undefined when not folder-aware (the
   // legacy flat listing - never send the param). Seeded to root in folder mode.
-  const [parentFolderId, setParentFolderId] = useState<string | null>(null);
+  const [parentFolderId, setParentFolderId] = useState<string | null>(options?.initialFolderId ?? null);
+  const [sort, setSortKey] = useState<ExplorerSortKey>(options?.initialSort ?? 'date');
+  const [direction, setDirection] = useState<ExplorerSortDirection>(options?.initialDirection ?? 'desc');
   const abortRef = useRef<AbortController | null>(null);
 
   const fetchData = useCallback(async () => {
@@ -119,6 +146,10 @@ export function useStorageExplorer(
       if (folderAware) params.parentFolderId = parentFolderId ?? 'root';
       // Phase 2b: opt into the computed virtual workflow folder tree.
       if (virtualWorkflowFolders) params.virtualWorkflowFolders = true;
+      // Ordering is server-side: it re-orders the FULL result set and re-paginates,
+      // never just the rows already loaded.
+      params.sort = sort;
+      params.direction = direction;
 
       const result: StorageExplorerPage = await storageApi.getExplorerEntries(params);
       setEntries(Array.isArray(result.content) ? result.content : []);
@@ -130,7 +161,7 @@ export function useStorageExplorer(
     } finally {
       setLoading(false);
     }
-  }, [currentPage, pageSize, search, sourceTypeFilter, storageTypeFilter, workflowId, dateFrom, dateTo, fileType, filesOnly, s3Only, folderAware, virtualWorkflowFolders, parentFolderId]);
+  }, [currentPage, pageSize, search, sourceTypeFilter, storageTypeFilter, workflowId, dateFrom, dateTo, fileType, filesOnly, s3Only, folderAware, virtualWorkflowFolders, parentFolderId, sort, direction]);
 
   useEffect(() => {
     fetchData();
@@ -146,7 +177,7 @@ export function useStorageExplorer(
   // Entering/leaving a folder (parentFolderId) likewise re-paginates from page 0.
   useEffect(() => {
     setCurrentPage(0);
-  }, [search, sourceTypeFilter, storageTypeFilter, workflowId, dateFrom, dateTo, fileType, pageSize, parentFolderId]);
+  }, [search, sourceTypeFilter, storageTypeFilter, workflowId, dateFrom, dateTo, fileType, pageSize, parentFolderId, sort, direction]);
 
   const setPage = useCallback((page: number) => {
     setCurrentPage(page);
@@ -155,8 +186,16 @@ export function useStorageExplorer(
   // V313: enter a folder (or return to root). No-op effect on the param when the
   // caller isn't folder-aware (it just won't be sent), but we still track state so
   // the same hook instance can be re-used. Page reset is handled by the effect above.
+  // Re-entering the folder already open is a NO-OP. Without this, a second click on a
+  // folder card (easy while a slow listing is still loading and the old cards are still
+  // on screen) would set the same id again - a new state object every time - and refetch.
   const navigateToFolder = useCallback((folderId: string | null) => {
-    setParentFolderId(folderId);
+    setParentFolderId((prev) => (prev === folderId ? prev : folderId));
+  }, []);
+
+  const setSort = useCallback((key: ExplorerSortKey, dir: ExplorerSortDirection) => {
+    setSortKey(key);
+    setDirection(dir);
   }, []);
 
   return {
@@ -174,6 +213,9 @@ export function useStorageExplorer(
     dateTo,
     fileType,
     parentFolderId: folderAware ? parentFolderId : undefined,
+    sort,
+    direction,
+    setSort,
     setSearch,
     setSourceTypeFilter,
     setStorageTypeFilter,

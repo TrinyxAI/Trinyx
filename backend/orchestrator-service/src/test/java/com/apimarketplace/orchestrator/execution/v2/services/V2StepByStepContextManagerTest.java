@@ -23,6 +23,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.*;
@@ -579,6 +580,131 @@ class V2StepByStepContextManagerTest {
             // Missing override key
             contextManager.applyLoopCoreOutputOverrides(stepOutputs, new HashMap<>());
             assertEquals(1, stepOutputs.size());
+        }
+    }
+
+    /**
+     * Regression: "epoch 2 truncates silently at the first signal-yielding wait"
+     * (prod 2026-08-05, workflow "xAI Video Sequence": epoch 1 ran 36 nodes, epoch 2 ran 10 and
+     * still reported COMPLETED).
+     *
+     * <p>{@code updateGlobalData(runId, epoch, …)} mirrors every entry into a run-level key, and
+     * the epoch-scoped read fell back to that mirror whenever its own epoch had no entry yet.
+     * A loop that terminated in epoch N therefore handed {@code back_edge_state{terminated=true}}
+     * to epoch N+1; {@code BackEdgeHandler.executeBackEdgeIteration} took its
+     * {@code if (state.terminated()) continue} branch, the loop neither iterated nor routed to its
+     * exit, the signal resume found nothing ready, and the epoch closed COMPLETED with everything
+     * downstream never executed.
+     *
+     * <p>The fallback still exists - it just refuses to serve data another epoch wrote.
+     */
+    @Nested
+    @DisplayName("globalData cache - epoch isolation")
+    class GlobalDataEpochIsolation {
+
+        private static final String RUN = "run-epoch-isolation";
+        private static final String BACK_EDGE_KEY = "back_edge_state:e1";
+
+        @Test
+        @DisplayName("A later epoch does not inherit an earlier epoch's back-edge state")
+        void laterEpochDoesNotInheritEarlierEpochState() {
+            contextManager.updateGlobalData(RUN, 1, Map.of(BACK_EDGE_KEY, "terminated-in-epoch-1"));
+
+            Map<String, Object> epochTwo = contextManager.getCachedGlobalData(RUN, 2);
+
+            assertFalse(epochTwo.containsKey(BACK_EDGE_KEY),
+                "Epoch 2 must not see epoch 1's back-edge state. Inheriting a terminated loop makes "
+              + "executeBackEdgeIteration skip the back-edge entirely: no iteration, no exit "
+              + "routing, no ready nodes, and the epoch closes COMPLETED half-executed. Got: " + epochTwo);
+        }
+
+        @Test
+        @DisplayName("The epoch that wrote the data still reads it back")
+        void writingEpochStillReadsItsOwnData() {
+            contextManager.updateGlobalData(RUN, 1, Map.of(BACK_EDGE_KEY, "state-1"));
+
+            assertEquals("state-1", contextManager.getCachedGlobalData(RUN, 1).get(BACK_EDGE_KEY),
+                "Epoch isolation must not cost an epoch its own data");
+        }
+
+        @Test
+        @DisplayName("Each epoch keeps its own value for the same key")
+        void epochsKeepSeparateValues() {
+            contextManager.updateGlobalData(RUN, 1, Map.of(BACK_EDGE_KEY, "state-1"));
+            contextManager.updateGlobalData(RUN, 2, Map.of(BACK_EDGE_KEY, "state-2"));
+
+            assertEquals("state-1", contextManager.getCachedGlobalData(RUN, 1).get(BACK_EDGE_KEY));
+            assertEquals("state-2", contextManager.getCachedGlobalData(RUN, 2).get(BACK_EDGE_KEY));
+        }
+
+        @Test
+        @DisplayName("An epoch-less write stays visible to an epoch-scoped read")
+        void epochLessWriteRemainsVisibleToEpochScopedRead() {
+            // The fallback's original purpose: a writer that did not know its epoch. Only a
+            // write that CLAIMS an epoch may be withheld from a different one.
+            contextManager.updateGlobalData(RUN, Map.of("shared", "value"));
+
+            assertEquals("value", contextManager.getCachedGlobalData(RUN, 7).get("shared"),
+                "Un-attributed data must remain readable, otherwise the fix loses state within an epoch");
+        }
+
+        @Test
+        @DisplayName("An epoch-less write un-attributes only the keys it wrote, not the whole mirror")
+        void epochLessWriteUnattributesOnlyItsOwnKeys() {
+            contextManager.updateGlobalData(RUN, 1, Map.of("a", "1"));
+            contextManager.updateGlobalData(RUN, Map.of("b", "2"));
+
+            Map<String, Object> epochTwo = contextManager.getCachedGlobalData(RUN, 2);
+
+            assertEquals("2", epochTwo.get("b"),
+                "A key written with no epoch belongs to no epoch and must stay readable");
+            assertFalse(epochTwo.containsKey("a"),
+                "Epoch 1's key must NOT ride along. Un-attributing the whole run on any epoch-less "
+              + "write re-admits every entry an earlier epoch wrote - which is the cross-epoch leak "
+              + "itself, reachable from a manual step on a live run. Got: " + epochTwo);
+        }
+
+        @Test
+        @DisplayName("Re-writing a key without an epoch releases that key to every epoch")
+        void epochLessRewriteReleasesThatKey() {
+            contextManager.updateGlobalData(RUN, 1, Map.of("a", "epoch-1"));
+            contextManager.updateGlobalData(RUN, Map.of("a", "un-attributed"));
+
+            assertEquals("un-attributed", contextManager.getCachedGlobalData(RUN, 2).get("a"),
+                "The last writer of 'a' claimed no epoch, so 'a' is no longer epoch 1's to withhold");
+        }
+
+        @Test
+        @DisplayName("A mixed mirror serves the un-attributed keys and withholds the foreign ones")
+        void mixedMirrorIsFilteredPerKey() {
+            contextManager.updateGlobalData(RUN, 1, Map.of(BACK_EDGE_KEY, "terminated", "one", "1"));
+            contextManager.updateGlobalData(RUN, Map.of("shared", "s"));
+            contextManager.updateGlobalData(RUN, 2, Map.of("two", "2"));
+            // Epoch 3 has no entry of its own, so it reads the mirror through the filter.
+            Map<String, Object> epochThree = contextManager.getCachedGlobalData(RUN, 3);
+
+            assertEquals(Set.of("shared"), epochThree.keySet(),
+                "Only the un-attributed key may cross into a foreign epoch. Got: " + epochThree);
+        }
+
+        @Test
+        @DisplayName("cleanup drops the epoch attribution with the data")
+        void cleanupDropsTheAttribution() {
+            contextManager.updateGlobalData(RUN, 1, Map.of("a", "1"));
+            contextManager.cleanup(RUN);
+            contextManager.updateGlobalData(RUN, Map.of("b", "2"));
+
+            assertEquals("2", contextManager.getCachedGlobalData(RUN, 3).get("b"),
+                "A stale attribution surviving cleanup would withhold data from every later epoch");
+        }
+
+        @Test
+        @DisplayName("Reading an epoch that never wrote anything yields nothing, not the previous epoch")
+        void unknownEpochReadsEmpty() {
+            contextManager.updateGlobalData(RUN, 5, Map.of(BACK_EDGE_KEY, "state-5"));
+
+            assertTrue(contextManager.getCachedGlobalData(RUN, 6).isEmpty(),
+                "Epoch 6 wrote nothing and must start clean");
         }
     }
 }

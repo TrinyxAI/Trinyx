@@ -28,8 +28,16 @@ public final class WorkflowBuilderActionConfig {
             "init", "load", "save", "discard", "finish", "execute",
             // Counterpart of execute: end a run that is still going (see stop_run docs)
             "stop_run",
+            // Resume an existing run from one node instead of firing the whole thing again
+            "restart_from_node",
             // Node creation (unified)
             "add_node",
+            // Run ONE node standalone, no workflow, no run. Deliberately NOT in
+            // MODIFYING_ACTIONS (there is no draft to auto-save), NOT in
+            // PLAN_MUTATING_ACTIONS (it mutates no plan, and listing it there would make it
+            // impossible as soon as an application is loaded), and NOT in READ_ONLY_ACTIONS
+            // (it has real side effects).
+            "run_node",
             // Visualization & validation
             "describe", "validate", "search",
             // Connections

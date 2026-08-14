@@ -3,7 +3,7 @@
 import type { Node } from 'reactflow';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { parseUtcAware } from '@/lib/utils/dateFormatters';
-import { getIconSlug, NodeIcon } from '@/app/workflows/builder/components/nodes/shared';
+import { getIconSlug, NodeIcon, nodeIconRadiusClass } from '@/app/workflows/builder/components/nodes/shared';
 import { findNodeClassById } from '@/app/workflows/builder/nodes/nodeClasses';
 import type { BuilderNodeData } from '@/app/workflows/builder/types';
 import { StepRowActions } from '@/components/workflow/StepRowActions';
@@ -77,7 +77,7 @@ export function WaterfallView({ steps, findNodeForStep, showCumulative, workflow
                   size="xs"
                 />
               ) : (
-                <div className="h-4 w-4 rounded-full bg-gray-100 dark:bg-gray-700" />
+                <div className={`h-4 w-4 ${nodeIconRadiusClass('xs')} bg-gray-100 dark:bg-gray-700`} />
               )}
             </div>
             {/* Label - w-[80px] to match epoch label column */}

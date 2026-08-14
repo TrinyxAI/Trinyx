@@ -111,7 +111,7 @@ export function ItemNavigator({
           <button
             onClick={() => hasPrev && onIndexChange(currentIndex - 1)}
             disabled={!hasPrev}
-            className="w-7 h-7 p-0 rounded-full transition-colors inline-flex items-center justify-center text-[var(--text-secondary)] hover:bg-[var(--text-primary)] hover:text-[var(--bg-primary)] disabled:opacity-30 disabled:cursor-not-allowed disabled:hover:bg-transparent disabled:hover:text-[var(--text-secondary)]"
+            className="w-7 h-7 p-0 rounded-xl transition-colors inline-flex items-center justify-center text-[var(--text-secondary)] hover:bg-[var(--text-primary)] hover:text-[var(--bg-primary)] disabled:opacity-30 disabled:cursor-not-allowed disabled:hover:bg-transparent disabled:hover:text-[var(--text-secondary)]"
             aria-label="Previous"
           >
             <ChevronLeft className="h-3.5 w-3.5" />
@@ -142,7 +142,7 @@ export function ItemNavigator({
           <button
             onClick={() => hasNext && onIndexChange(currentIndex + 1)}
             disabled={!hasNext}
-            className="w-7 h-7 p-0 rounded-full transition-colors inline-flex items-center justify-center text-[var(--text-secondary)] hover:bg-[var(--text-primary)] hover:text-[var(--bg-primary)] disabled:opacity-30 disabled:cursor-not-allowed disabled:hover:bg-transparent disabled:hover:text-[var(--text-secondary)]"
+            className="w-7 h-7 p-0 rounded-xl transition-colors inline-flex items-center justify-center text-[var(--text-secondary)] hover:bg-[var(--text-primary)] hover:text-[var(--bg-primary)] disabled:opacity-30 disabled:cursor-not-allowed disabled:hover:bg-transparent disabled:hover:text-[var(--text-secondary)]"
             aria-label="Next"
           >
             <ChevronRight className="h-3.5 w-3.5" />
@@ -158,7 +158,7 @@ export function ItemNavigator({
               aria-label={t('allStatuses')}
               title={t('allStatuses')}
               className={clsx(
-                'relative w-7 h-7 p-0 rounded-full inline-flex items-center justify-center transition-colors',
+                'relative w-7 h-7 p-0 rounded-xl inline-flex items-center justify-center transition-colors',
                 isFilterActive
                   ? 'text-theme-primary bg-gray-100 dark:bg-gray-700'
                   : 'text-theme-muted hover:bg-gray-100 dark:hover:bg-gray-700 hover:text-theme-primary',

@@ -26,7 +26,7 @@ import {
 } from '@modelcontextprotocol/sdk/types.js';
 import { REPO_TOOL_DEF, handleRepoTool, isRepoEnabled } from './repo-tool.mjs';
 import { SHELL_TOOL_DEF, handleShellTool, isShellEnabled } from './shell-tool.mjs';
-import { buildSuccessContent, withBridgeMeta } from './bridge/lib/toolContent.mjs';
+import { buildSuccessContent, buildFailureContent, withBridgeMeta } from './bridge/lib/toolContent.mjs';
 import { Agent, setGlobalDispatcher } from 'undici';
 
 // --- Global fetch timeout for tool calls ---
@@ -201,8 +201,9 @@ async function startSession() {
     body.isNewConversation = IS_NEW_CONVERSATION;
   }
   // Scope the core tool set to the agent's toolsConfig modules when the bridge supplied them
-  // (parity with the direct loop). Omitted ⇒ CliAgentService.resolveModules(null) ⇒ all
-  // modules (legacy unrestricted behaviour, e.g. agents with no toolsConfig).
+  // (parity with the direct loop). Omitted ⇒ CliAgentService.resolveModules(null) ⇒ the
+  // NO-CONFIG module set: everything EXCEPT the credit-spending opt-ins (image_generation,
+  // generation). "Nobody scoped this session" is not "this session may spend credits".
   if (ENABLED_MODULES) {
     body.enabledModules = ENABLED_MODULES;
   }
@@ -303,6 +304,10 @@ function log(msg) {
 // media key live in ./bridge/lib/toolContent.mjs - kept dependency-free so they can be
 // unit-tested with `node --test` without loading the MCP SDK.
 
+// buildFailureContent lives in ./bridge/lib/toolContent.mjs, next to buildSuccessContent and
+// the marker definition, so both producers share one shape and one test file. Keeping it
+// private here is what let the extractor in server.mjs drift until it lost all metadata.
+
 // --- MCP Server Setup ---
 
 const server = new Server(
@@ -383,22 +388,19 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       return { content: buildSuccessContent(result) };
     } else {
       // Check if error response indicates expired session
-      if (result.error && result.error.includes('Session not found')) {
+      // `typeof` guard: a backend that returns a non-string `error` would otherwise throw
+      // here, the outer catch would swallow it, and the tool would come back with a bogus
+      // "result.error.includes is not a function" - losing the real error AND its metadata.
+      if (typeof result.error === 'string' && result.error.includes('Session not found')) {
         log(`Session expired (error response), recreating...`);
         await startSession();
         const retryResult = await callTool();
         if (retryResult.success) {
           return { content: buildSuccessContent(retryResult) };
         }
-        return {
-          content: [{ type: 'text', text: retryResult.error || 'Tool execution failed after session recovery' }],
-          isError: true,
-        };
+        return buildFailureContent(retryResult, 'Tool execution failed after session recovery');
       }
-      return {
-        content: [{ type: 'text', text: result.error || 'Tool execution failed' }],
-        isError: true,
-      };
+      return buildFailureContent(result, 'Tool execution failed');
     }
   } catch (e) {
     return {

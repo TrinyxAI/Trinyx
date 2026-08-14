@@ -965,7 +965,8 @@
     "dashboard": {
       "storageOverview": "存储概览"
     },
-    "openInSidePanel": "在侧边面板中打开"
+    "openInSidePanel": "在侧边面板中打开",
+    "generateAsset": "生成图片、视频或音频"
   },
   "resourceCarousel": {
     "resourcesCreated": "{count, plural, one {# 资源} other {# 资源}}",
@@ -1028,12 +1029,9 @@
       "loadingMoreRows": "正在加载更多行…",
       "scrollForMoreRows": "滚动以加载更多",
       "epochTooltip": {
-        "completed": "已完成",
         "duration": "持续时间",
         "ended": "已结束",
         "epoch": "Epoch #{epoch}",
-        "pending": "待处理",
-        "running": "运行中",
         "started": "已开始",
         "stillRunning": "仍在运行"
       },
@@ -1470,6 +1468,16 @@
     "continueWorkflow": "继续",
     "itemAlreadyResolved": "此项目已被继续",
     "continueItemRemaining": "继续此项目（{count} 个待处理）",
+    "loadTemplateValues": "加载示例值",
+    "loadTemplateValuesHint": "用原应用的示例值填充表单。在你提交之前不会发送任何内容。",
+    "templateValuesEmpty": "此应用未提供示例值",
+    "templateValuesFailed": "无法加载示例值",
+    "resetData": "重置数据",
+    "resetDataHint": "将此应用的数据表恢复为随附的初始行",
+    "resetDataConfirm": "将此应用的数据表恢复为随附的初始行？你添加或修改的行将被替换。你的工作流及其运行记录不受影响。",
+    "resetDataSuccess": "已恢复 {tables} 个表，写入 {rows} 行",
+    "resetDataPartial": "已恢复 {tables} 个表，写入 {rows} 行。未改动：{skipped}",
+    "resetDataFailed": "无法重置数据",
     "workflows": {
       "title": "Workflows",
       "subtitle": "发现并使用社区提供的预制工作流",
@@ -1580,6 +1588,30 @@
     "emptyWorkflows": "尚无已分享的工作流",
     "emptyWorkflowsHint": "成为第一个分享工作流的人！",
     "filterAgents": "代理",
+    "filterByType": "按类型筛选",
+    "sortBy": "排序方式",
+    "sortPopular": "最受喜爱",
+    "sortRating": "评分最高",
+    "sortRecent": "最新发布",
+    "sortInstalls": "安装最多",
+    "filterByRating": "按评分筛选",
+    "ratingAny": "全部评分",
+    "ratingRated": "有评价",
+    "rating4Plus": "4 星及以上",
+    "rating3Plus": "3 星及以上",
+    "filterByDate": "按日期筛选",
+    "dateAny": "全部日期",
+    "date7Days": "最近 7 天",
+    "date30Days": "最近 30 天",
+    "date90Days": "最近 3 个月",
+    "dateYear": "最近一年",
+    "filterByPrice": "按价格筛选",
+    "priceAny": "全部价格",
+    "priceFree": "免费",
+    "pricePaid": "付费",
+    "resetFilters": "重置筛选",
+    "noFilterResults": "没有应用符合这些筛选条件",
+    "noFilterResultsHint": "放宽评分、日期或价格筛选条件即可看到更多应用。",
     "filterSkills": "Skills",
     "filterTables": "表格",
     "noLandingPreview": "无可用预览",
@@ -1795,6 +1827,21 @@
     "workflowSteps": "工作流步骤"
   },
   "modals": {
+    "accountRestore": {
+      "title": "您的账户已排入删除队列",
+      "checkingTitle": "正在检查您的账户",
+      "checkingDescription": "请稍候，我们正在查询您的账户状态。",
+      "description": "账户将于 {date} 被永久删除。在此之前，您可以将其原样恢复。",
+      "blockedTitle": "您的账户已停用",
+      "blockedDescription": "此账户目前无法使用。如果这不是您预期的情况，请联系支持团队。",
+      "whatHappens": "如果您恢复账户",
+      "keepEverything": "您的工作流、智能体、数据表和文件将原样恢复",
+      "untilThenNothingLost": "目前尚未删除任何内容，账户仅被停用",
+      "afterThatPermanent": "一旦超过该日期，删除将不可撤销",
+      "reactivate": "恢复我的账户",
+      "signOut": "退出登录",
+      "restoreFailed": "无法恢复您的账户，请重试。"
+    },
     "agentError": {
       "title": "出了点问题",
       "description": "运行时发生错误。请稍后重试。",
@@ -2924,10 +2971,11 @@
       "defaultMarkupLabel": "默认",
       "errors": {
         "credentialNotFound": "未找到凭据",
-        "duplicateTool": "每个工具只能出现一次",
+        "duplicateTool": "每个端点和模型的组合只能出现一次",
         "fetchFailed": "加载定价失败",
         "invalidDefault": "默认加价必须为非负数",
         "invalidOverride": "工具 {tool} 的加价无效",
+        "loadFailed": "无法加载已发布的定价。此时发布会用空列表替换正在生效的定价，因此在加载成功之前无法发布。",
         "publishFailed": "发布定价失败"
       },
       "history": "版本历史",
@@ -2941,12 +2989,34 @@
       "publishNew": "发布新版本",
       "publishedVersion": "版本 v{version} 已发布",
       "publishing": "正在发布……",
+      "retry": "重试",
       "selectTool": "选择一个工具……",
       "subtitle": "为此凭据发布新的定价版本。现有的工作流执行将保留它们所固定的版本。",
       "success": "已保存",
       "title": "加价定价",
       "unknownTool": "未知工具",
-      "warningInFlightRuns": "发布会创建版本 N+1。已在进行中的工作流执行将保留它们所固定的版本 - 只有新执行才会采用此版本。"
+      "warningInFlightRuns": "发布会创建版本 N+1。已在进行中的工作流执行将保留它们所固定的版本 - 只有新执行才会采用此版本。",
+      "model": "模型",
+      "modelAny": "所有模型（整个端点）",
+      "modelHint": "将模型留空即为整个端点定价。当同一个端点以不同费率运行多个模型时，请选择具体模型。",
+      "unit": "计费单位",
+      "baseCredits": "基础费用",
+      "unitCredits": "每单位费用",
+      "minCredits": "下限",
+      "maxCredits": "上限",
+      "removePrice": "删除此价格",
+      "units": {
+        "call": "次调用",
+        "second": "秒",
+        "minute": "分钟",
+        "image": "张图片",
+        "character": "个字符"
+      },
+      "summaryFlat": "每次调用 {amount} 积分",
+      "summaryPerUnit": "每 {unit} {rate} 积分",
+      "summaryBasePlusUnit": "{base} 积分 + 每 {unit} {rate} 积分",
+      "floorNote": "最低 {min} 积分",
+      "ceilingNote": "最高 {max} 积分"
     }
   },
   "aiProviders": {
@@ -3119,10 +3189,6 @@
         "browser_agent": {
           "label": "浏览器代理",
           "hint": "可用于浏览器代理的模型。排名决定默认顺序；停用后该模型将从浏览器代理运行中移除。"
-        },
-        "image_generation": {
-          "label": "图像生成",
-          "hint": "图像生成提供商。排序控制选择器中的默认顺序；禁用会从图像生成工具中移除该模型。"
         }
       },
       "allProviders": "所有提供商",
@@ -3223,10 +3289,11 @@
       "local": "本地密钥",
       "cloudHint": "集成调用通过您关联的 LiveContext Cloud 账户执行，并使用其平台凭据。请求经由云端传输，每次调用会在该账户上计收少量积分加价。",
       "localHint": "集成凭据在此实例上本地配置并使用。",
-      "subscriptionRequired": "使用 Cloud 需要您关联的云账户拥有有效的付费订阅。",
+      "subscriptionRequired": "使用云端需要已关联的云账户拥有有效的付费订阅。免费账户无法支付转发的调用。",
       "viewPlans": "查看套餐",
       "linkRequired": "切换到 Cloud 之前请先关联一个 Cloud 账户。",
-      "saveError": "更新集成凭据来源失败。"
+      "saveError": "更新集成凭据来源失败。",
+      "cloudCovers": "这同样涵盖生成：图像、视频、音效、语音和音乐都使用云账户的服务商密钥运行，并在云端按积分计费，按秒或按文件，价格为各模型的公布价。"
     },
     "cloudSource": {
       "apiKeys": "API 密钥",
@@ -3583,6 +3650,13 @@
         "scopesPlaceholder": "例如 read write（以空格分隔）",
         "tokenUrl": "Token URL",
         "tokenUrlPlaceholder": "https://provider.com/oauth/token"
+      },
+      "platformKey": {
+        "title": "您不必添加密钥",
+        "explanation": "此服务可使用平台密钥，按调用以积分计费。若改用您自己的密钥，则由您直接向服务商付费，平台不向您收取任何费用。",
+        "explanationPriced": "此服务可使用平台密钥，每次调用 {credits} 积分。若改用您自己的密钥，则由您直接向服务商付费，平台不向您收取任何费用。",
+        "use": "使用平台密钥",
+        "orOwn": "或在下方添加您自己的密钥。"
       }
     },
     "options": "选项",
@@ -3594,6 +3668,16 @@
       "label": "凭据来源",
       "markupNote": "此步骤将使用共享的平台凭据。每次调用会收取少量加价。",
       "markupNoteWithRate": "此步骤将使用共享的平台凭据。每次调用收取 {rate} 积分作为加价。",
+      "markupNoteNotSold": "此步骤已设为使用共享的平台凭据，但该生成不通过此凭据出售：此模型没有已发布的价格，只有凭据的全局默认价，而生成从不继承该默认价。请切换到您自己的密钥来运行它。",
+      "markupNoteWithUnitRate": "此步骤将使用共享的平台凭据。按每{unit} {unitRate} 积分计费，请求越大费用越高。",
+      "markupNoteWithUnitRateAndTotal": "此步骤将使用共享的平台凭据。每{unit} {unitRate} 积分，{quantity} {unit} = 本次运行 {total} 积分。",
+      "priceUnits": {
+        "call": "次调用",
+        "second": "秒",
+        "minute": "分钟",
+        "image": "张图片",
+        "character": "个字符"
+      },
       "notAvailable": "未为此服务配置任何平台凭据",
       "platform": "平台",
       "platformExplanation": "无需个人设置 - 平台拥有 API 密钥。您只需在基础节点费用之上支付每次调用的加价。",
@@ -4940,6 +5024,13 @@
     "noMatches": "没有文件符合您的筛选条件",
     "viewGrid": "网格视图",
     "viewList": "列表视图",
+    "sortBy": "排序方式",
+    "sortByDate": "日期",
+    "sortByName": "名称",
+    "sortBySize": "大小",
+    "sortByType": "类型",
+    "sortAscending": "升序",
+    "sortDescending": "降序",
     "dateFrom": "从",
     "dateTo": "至",
     "typeColumn": "类型",
@@ -4986,7 +5077,8 @@
     "moveToRoot": "顶层（根目录）",
     "moveHere": "移动到此处",
     "noFoldersYet": "暂无文件夹--请先创建一个，或移动到顶层。",
-    "backToParent": "返回上一级"
+    "backToParent": "返回上一级",
+    "generate": "生成"
   },
   "fileDetail": {
     "download": "下载 {name}",
@@ -5408,17 +5500,17 @@
     },
     "advanced": {
       "deleteTitle": "删除账户",
-      "deleteWarning": "此操作不可逆。您的所有数据、订阅和配置将被永久删除。",
+      "deleteWarning": "您的账户会立即停用，并在宽限期结束后被永久删除。届时您的数据、订阅和配置将永久丢失。",
       "deleteButton": "删除我的账户"
     },
     "deleteDialog": {
       "title": "删除账户？",
-      "description": "此操作不可逆。您的所有数据将永久丢失。",
+      "description": "您的账户会立即停用，并在 {days} 天后被永久删除。在此期间，您重新登录即可取消。",
       "whatHappens": "会发生什么？",
       "dataDeleted": "您的所有数据将被删除",
       "subscriptionCancelled": "您的订阅将被取消",
       "toolsDeleted": "您的MCP工具将被删除",
-      "cannotUndo": "此操作无法撤销",
+      "cannotUndo": "{days} 天后，此操作将无法撤销",
       "confirmInstruction": "要确认，请输入",
       "typePlaceholder": "输入 删除",
       "deletePermanently": "永久删除"
@@ -5939,8 +6031,9 @@
       "executing": "Executing...",
       "executeStep": "执行步骤",
       "waitingDependencies": "等待依赖项",
-      "rerunning": "Re-running...",
+      "rerunning": "正在重新运行...",
       "rerunTooltip": "重新运行此步骤及所有下游步骤",
+      "rerunTooltipAuto": "重新运行此步骤，其余流程将自动重新执行",
       "fixValidationErrors": "运行前请修复验证错误",
       "startStepByStep": "以分步模式启动工作流",
       "onlyTriggersCanStart": "只有触发器才能启动分步执行",
@@ -6654,6 +6747,8 @@
       "autoLayout": "自动布局（重新排列节点）",
       "expandAllFiles": "展开所有文件预览",
       "collapseAllFiles": "收起所有文件预览",
+      "expandFilesByDefault": "默认展开文件预览",
+      "collapseFilesByDefault": "默认收起文件预览",
       "disableInteractivity": "禁用交互",
       "enableInteractivity": "启用交互",
       "cursorMode": "光标模式",
@@ -6693,6 +6788,7 @@
       "waitingSchedule": "等待计划时间...",
       "executeStep": "执行此步骤",
       "rerunStep": "从此步骤重新运行",
+      "rerunStepAuto": "从此步骤重新开始（其余部分将自动重新执行）",
       "waitingDependencies": "等待依赖项",
       "previous": "Previous",
       "next": "Next",
@@ -6955,6 +7051,44 @@
         "disposition": "处理方式",
         "dispositionInline": "内联(在浏览器中显示)",
         "dispositionAttachment": "附件(提示下载)"
+      },
+      "generate": {
+        "title": "生成",
+        "description": "根据提示生成一个资源：图片、视频、音频、语音或音乐。所选模型决定生成的格式、可接受的参数以及每次运行的费用。",
+        "model": "模型",
+        "modelPlaceholder": "选择模型",
+        "modelsLoading": "正在加载模型...",
+        "modelHint": "更换模型会清除新模型不接受的参数。",
+        "noModels": "此安装中没有可用的生成模型。",
+        "selectValue": "选择一个值",
+        "filePlaceholder": "例如 {{core:download.output.file}}",
+        "limitRange": "允许范围：{min} 到 {max}",
+        "params": {
+          "prompt": "提示词",
+          "negative_prompt": "反向提示词",
+          "duration_seconds": "时长（秒）",
+          "n": "数量",
+          "aspect_ratio": "宽高比",
+          "resolution": "分辨率",
+          "quality": "质量",
+          "style": "风格",
+          "voice": "语音",
+          "language": "语言",
+          "seed": "随机种子",
+          "input_image": "参考图片",
+          "input_audio": "参考音频",
+          "input_video": "参考视频"
+        },
+        "placeholders": {
+          "prompt": "描述要生成的内容",
+          "negative_prompt": "要避免的内容",
+          "aspect_ratio": "例如 16:9",
+          "resolution": "例如 720p",
+          "quality": "例如 high",
+          "style": "例如 cinematic",
+          "voice": "语音 ID",
+          "language": "例如 zh"
+        }
       },
       "media": {
         "title": "媒体",
@@ -8972,8 +9106,8 @@
     "inactivityTimeoutLabel": "无响应超时（秒）",
     "inactivityTimeoutInfo": "如果代理在这么多秒内没有任何输出（没有 token、工具调用或结果），则强制停止。0 表示禁用；范围 10-7200 秒。与总运行预算（超时）相互独立。",
     "executionTimeoutLabel": "超时（秒）",
-    "imageGenerationInfo": "允许代理通过 OpenAI gpt-image-1.5/mini 或 Google Gemini 2.5 Flash Image（nano-banana）/ 3 Pro Image 生成图像。按返回的每张图像计费（根据模型和质量为 5-134 积分）。如果您配置了自己的提供商 API 密钥，则使用该密钥（无内部积分扣费）；否则使用平台密钥并扣除积分。",
-    "imageGenerationLabel": "图像生成",
+    "generationLabel": "生成",
+    "generationInfo": "允许助手创建图像、视频、音频、语音和音乐。每次生成按平台费率扣除积分；更长的视频或更长的文本费用更高。",
     "loopConsecutiveStopInfo": "在这么多次连续的模型步骤后停止，以防止失控的链条。",
     "compactionEnabledLabel": "上下文压缩",
     "compactionEnabledInfo": "当对话变长时总结较早的轮次，以保持在模型的上下文窗口内。默认关闭；保持不变时沿用平台设置。",
@@ -9135,16 +9269,13 @@
     "infoTooltip": "查看模型详情",
     "maxOutputLabel": "最大输出",
     "notSet": "-",
-    "perImage": "每张图像",
     "perMillion": "每 1M token",
     "perTenantSuffix": "（每租户）",
     "priceBatchLabel": "批量价格",
     "priceCacheLabel": "缓存输入",
-    "priceImageLabel": "每张图像",
     "priceInputLabel": "输入价格",
     "priceOutputLabel": "输出价格",
     "priceShort": "{input}/{output} 每 1M",
-    "priceShortPerImage": "{input} / 图像",
     "providerKind": {
       "bridge": "桥接（CLI）",
       "byok": "BYOK",
@@ -10041,6 +10172,90 @@
           "link": "链接"
         }
       }
+    }
+  },
+  "generationModal": {
+    "title": "生成文件",
+    "subtitle": {
+      "format": "您想生成什么？",
+      "prompt": "选择模型并描述",
+      "result": "您的文件"
+    },
+    "steps": {
+      "format": "格式",
+      "prompt": "提示词",
+      "result": "结果"
+    },
+    "formats": {
+      "image": "图像",
+      "video": "视频",
+      "audio": "音效",
+      "voice": "语音",
+      "music": "音乐"
+    },
+    "params": {
+      "negative_prompt": "避免出现",
+      "voice": "音色",
+      "language": "语言",
+      "style": "风格",
+      "aspect_ratio": "画面比例",
+      "resolution": "分辨率",
+      "quality": "质量",
+      "duration_seconds": "时长（秒）",
+      "n": "数量",
+      "seed": "随机种子",
+      "input_image": "参考图片",
+      "input_audio": "参考音频",
+      "input_video": "参考视频"
+    },
+    "price": {
+      "perUnit": "每 {unit} {rate} 积分",
+      "plusBase": "另加 {base} 起步",
+      "flat": "{credits} 积分",
+      "min": "最低 {credits}",
+      "max": "上限 {credits}",
+      "total": "本次请求 {credits} 积分",
+      "unpriced": "平台密钥不提供此模型"
+    },
+    "fields": {
+      "model": "模型",
+      "modelPlaceholder": "选择一个模型",
+      "prompt": "提示词",
+      "promptPlaceholder": "描述您想要的内容",
+      "options": "选项",
+      "unset": "交由模型决定",
+      "uploading": "正在上传...",
+      "uploadFailed": "该文件上传失败：{error}",
+      "provider": "服务商",
+      "providerPlaceholder": "选择服务商",
+      "chooseFile": "选择文件",
+      "replaceFile": "更换",
+      "noFile": "未选择文件"
+    },
+    "modelCount": "{count} 个模型",
+    "empty": "目前还没有可用的生成模型。",
+    "running": "正在生成。视频可能需要较长时间。",
+    "done": "完成",
+    "billedOn": "按 {quantity} {unit} 计费",
+    "download": "下载",
+    "generate": "生成",
+    "again": "修改",
+    "back": "返回",
+    "cancel": "取消",
+    "close": "关闭",
+    "errors": {
+      "unexpected": "无法启动生成。",
+      "stillRunning": "连接已中断，但生成仍在服务器上继续，并会计费。完成后，您的文件将出现在文件列表中。",
+      "unreadable": "本次生成被拒绝，未产出任何内容，但拒绝原因返回的格式无法在此页面显示。请换一个模型，或稍后重试。"
+    },
+    "payer": {
+      "monthlyCreditsOnly": "您的每月积分用于工作流运行，不能用于生成。请使用自己的密钥，或订阅、充值后以积分支付。"
+    },
+    "assetRoles": {
+      "source": "源图片",
+      "first_frame": "首帧",
+      "reference": "参考图片",
+      "mask": "蒙版"
     }
   }
 }

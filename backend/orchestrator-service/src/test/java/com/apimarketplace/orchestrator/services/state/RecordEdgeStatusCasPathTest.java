@@ -68,7 +68,8 @@ class RecordEdgeStatusCasPathTest {
         WorkflowMetrics workflowMetrics = new WorkflowMetrics(meterRegistry);
         TxScopedSnapshotCache txCache = new TxScopedSnapshotCache(runRepository, meterRegistry);
         service = new StateSnapshotService(runRepository, mapper, workflowEpochService,
-                eventPublisher, breakdownService, txCache, workflowMetrics);
+                eventPublisher, breakdownService, txCache, workflowMetrics,
+            org.mockito.Mockito.mock(com.apimarketplace.orchestrator.services.state.ClaimRefusalRegistry.class));
         setField("useJsonbPatch", true);
         setField("casEnabled", true);
         setField("patchExecutor", patchExecutor);

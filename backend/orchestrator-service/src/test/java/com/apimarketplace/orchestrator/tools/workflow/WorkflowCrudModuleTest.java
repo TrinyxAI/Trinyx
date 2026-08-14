@@ -57,7 +57,9 @@ class WorkflowCrudModuleTest {
                 agentWorkflowFireService, planVersionService, pinService, publicationClient,
                 credentialClient, workflowRepository, new ApplicationShowcaseResolver(workflowRunRepository),
                 cancellationProbe,
-                mock(com.apimarketplace.orchestrator.tools.common.RunStopToolHandler.class));
+                mock(com.apimarketplace.orchestrator.tools.common.RunStopToolHandler.class),
+                mock(com.apimarketplace.orchestrator.services.resume.StepRerunService.class),
+                mock(com.apimarketplace.orchestrator.services.resume.AutoRestartExecutionService.class));
     }
 
     private WorkflowRunSummaryProjection mockProjection(String runId, RunStatus status, int planVersion) {

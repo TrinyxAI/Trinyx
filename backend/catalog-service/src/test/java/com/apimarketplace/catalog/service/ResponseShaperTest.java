@@ -570,4 +570,94 @@ class ResponseShaperTest {
             assertTrue(hasManifesto, "manifesto leaf truncation must surface as pattern");
         }
     }
+
+    // ========================================================================
+    // Whether an expand survives the SIZE passes, and who may ask for that
+    // ========================================================================
+
+    @Nested
+    @DisplayName("expand past the total budget")
+    class ExpandPastTheBudget {
+
+        /** Comfortably over MAX_TOTAL_RESPONSE_SIZE once serialised. */
+        private Map<String, Object> oversizeTree() {
+            Map<String, Object> row = new LinkedHashMap<>();
+            row.put("b64_json", "A".repeat(90_000));
+            row.put("revised_prompt", "a paper boat");
+            Map<String, Object> tree = new LinkedHashMap<>();
+            tree.put("created", 1);
+            tree.put("data", List.of(row));
+            return tree;
+        }
+
+        @SuppressWarnings("unchecked")
+        private String leafOf(Object shaped) {
+            Object data = ((Map<String, Object>) shaped).get("data");
+            if (!(data instanceof List<?> list) || list.isEmpty()) return null;
+            return (String) ((Map<String, Object>) list.get(0)).get("b64_json");
+        }
+
+        @Test
+        @DisplayName("a CALLER's expand does NOT lift the ceiling, or an agent could uncap its own context")
+        void aCallerExpandStillHitsTheCeiling() {
+            // The whole reason the trust flag exists. `expand` is free-form and
+            // agent-chosen, so honouring it past the budget would let the agent
+            // pull a multi-megabyte payload into the model's input by naming the
+            // subtree it lives in.
+            ShapingResult result = shaper.shape(oversizeTree(), List.of("data"), null, Mode.AGENT);
+
+            assertTrue(result.shapedBytes() <= 64 * 1024,
+                    "a caller-supplied expand must stay inside the total budget");
+            assertNotEquals(Action.UNTOUCHED, result.action());
+        }
+
+        @Test
+        @DisplayName("a TRUSTED expand keeps the subtree, and keeps it where the caller addressed it")
+        void aTrustedExpandSurvivesInPlace() {
+            // The generation path: the platform named the path itself, reads the
+            // asset out of it, and prunes it from the reply before anyone sees
+            // it. The shape matters as much as the bytes, because the reader
+            // looks the value up at the path it asked for.
+            ShapingResult result =
+                    shaper.shape(oversizeTree(), List.of("data"), null, Mode.AGENT, true);
+
+            assertEquals("A".repeat(90_000), leafOf(result.data()),
+                    "the trusted subtree must survive every size pass, intact");
+        }
+
+        @Test
+        @DisplayName("with no expand at all the ceiling still holds, exactly as before")
+        void noExpandStillHitsTheCeiling() {
+            // The regression guard for every existing caller: none of them pass
+            // expand, and none of their behaviour may have moved. Asserted on
+            // the GUARANTEE rather than on which pass delivers it, because with
+            // one big leaf pass 1 alone is enough and pass 2 never runs; the
+            // skeleton path has its own test above.
+            ShapingResult result = shaper.shape(oversizeTree(), null, null, Mode.AGENT);
+
+            assertTrue(result.shapedBytes() <= 64 * 1024,
+                    "no expand means the total budget is absolute");
+            assertNotEquals("A".repeat(90_000), leafOf(result.data()),
+                    "the oversize leaf must not survive when nothing asked for it");
+        }
+
+        @Test
+        @DisplayName("a trusted expand shields only what it names: another oversize array is still digested")
+        void aTrustedExpandDoesNotShieldTheWholeResponse() {
+            Map<String, Object> tree = oversizeTree();
+            List<Map<String, Object>> noise = new ArrayList<>();
+            for (int i = 0; i < 400; i++) {
+                noise.add(Map.of("id", i, "text", "x".repeat(300)));
+            }
+            tree.put("logs", noise);
+
+            ShapingResult result = shaper.shape(tree, List.of("data"), null, Mode.AGENT, true);
+
+            assertEquals("A".repeat(90_000), leafOf(result.data()));
+            @SuppressWarnings("unchecked")
+            Object logs = ((Map<String, Object>) result.data()).get("logs");
+            assertTrue(logs instanceof Map<?, ?> m && "array_digest".equals(m.get("_shape")),
+                    "an array outside the named subtree must still be digested, got: " + logs);
+        }
+    }
 }

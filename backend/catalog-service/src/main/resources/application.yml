@@ -242,3 +242,11 @@ ce-catalog-relay:
 # The catalog-import Job presents the same token (importer.catalog.admin-token).
 catalog:
   admin-token: ${CATALOG_ADMIN_TOKEN:}
+
+# Generation tool (image / video / audio / voice / music, resolved per model by
+# the generation registry). Every create debits the customer's credits, so the
+# tool is an optional component: the provider is only registered when this is
+# true. Agents still have to opt in per agent (toolsConfig generation=true) on
+# top of this flag.
+generation:
+  enabled: ${GENERATION_ENABLED:true}

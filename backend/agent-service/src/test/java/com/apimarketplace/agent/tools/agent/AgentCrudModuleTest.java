@@ -326,6 +326,57 @@ class AgentCrudModuleTest {
             assertThat(tc).doesNotContainKey("workflowsGrant");      // 'bogus' dropped, not persisted
             assertThat(tc).containsEntry("tablesGrant", "all");      // valid sibling still honored
         }
+
+        @Test
+        @DisplayName("the generation grant reaches toolsConfig, so an agent can be given the tool that makes assets")
+        void createWithGenerationGrant() {
+            // The execution surface has read this grant since the generation
+            // tool shipped, and the app has offered a toggle for it, but the
+            // agent tool had no parameter to write it: an agent building
+            // another agent could not hand over the ability to produce an
+            // image, and had no way to find out why.
+            AgentEntity created = mockAgent(AGENT_ID, "Illustrator");
+            when(agentService.createAgent(any(), any(), any(), any(), any(), any(), any(), any(),
+                any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any()))
+                .thenReturn(created);
+
+            Map<String, Object> params = new HashMap<>(Map.of(
+                "action", "create", "name", "Illustrator", "system_prompt", "hello",
+                "generation", true));
+            module.execute("create", params, TENANT, ctx());
+
+            @SuppressWarnings("unchecked")
+            ArgumentCaptor<Map<String, Object>> toolsConfig = ArgumentCaptor.forClass(Map.class);
+            verify(agentService).createAgent(any(), any(), any(), any(), any(), any(), any(), any(),
+                any(), any(), toolsConfig.capture(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any());
+            assertThat(toolsConfig.getValue()).containsEntry("generation", true);
+        }
+
+        @Test
+        @DisplayName("no generation grant is written when none was asked for: it is opt-in, and it spends credits")
+        void createWithoutGenerationLeavesTheKeyAbsent() {
+            // Deliberately unlike web_search beside it, which defaults to true.
+            // Every create the generation tool exposes debits the account, so
+            // an agent that never mentioned it must not come out able to spend.
+            AgentEntity created = mockAgent(AGENT_ID, "Plain");
+            when(agentService.createAgent(any(), any(), any(), any(), any(), any(), any(), any(),
+                any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any()))
+                .thenReturn(created);
+
+            Map<String, Object> params = new HashMap<>(Map.of(
+                "action", "create", "name", "Plain", "system_prompt", "hello"));
+            module.execute("create", params, TENANT, ctx());
+
+            @SuppressWarnings("unchecked")
+            ArgumentCaptor<Map<String, Object>> toolsConfig = ArgumentCaptor.forClass(Map.class);
+            verify(agentService).createAgent(any(), any(), any(), any(), any(), any(), any(), any(),
+                any(), any(), toolsConfig.capture(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any());
+            Map<String, Object> tc = toolsConfig.getValue();
+            assertThat(tc).doesNotContainKey("generation");
+            // The sibling that DOES default is still defaulted, so this proves
+            // the two are treated differently on purpose rather than by accident.
+            assertThat(tc).containsEntry("webSearch", true);
+        }
     }
 
     @Nested
@@ -558,6 +609,111 @@ class AgentCrudModuleTest {
             assertThat(echoed).containsEntry("workflows_count", 25);
             assertThat(echoed).doesNotContainKey("workflows");
             assertThat(echoed.toString()).doesNotContain(manyIds.get(0));
+        }
+
+        @Test
+        @DisplayName("REVOKING the generation grant reaches the patch, which is the direction that stops spending")
+        @SuppressWarnings("unchecked")
+        void updateCanRevokeTheGenerationGrant() {
+            // Granting is the direction everyone tests. This is the one that
+            // matters when something goes wrong: an agent producing assets
+            // nobody wants has to be stoppable, and `false` has to survive the
+            // patch rather than being read as "not stated" and dropped.
+            AgentEntity existing = mockAgent(AGENT_ID, "Illustrator");
+            when(agentService.getAgent(AGENT_ID, TENANT)).thenReturn(Optional.of(existing));
+
+            AgentEntity updated = mockAgent(AGENT_ID, "Illustrator");
+            Map<String, Object> stored = new java.util.LinkedHashMap<>();
+            stored.put("generation", false);
+            updated.setToolsConfig(stored);
+            when(agentService.updateAgent(eq(AGENT_ID), eq(TENANT), any(), any(), any(), any(), any(),
+                any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any(),
+                any(), any(), any(), any()))
+                .thenReturn(updated);
+
+            Map<String, Object> params = new HashMap<>(Map.of(
+                "action", "update", "agent_id", AGENT_ID.toString(), "generation", false));
+            Optional<ToolExecutionResult> result = module.execute("update", params, TENANT, ctx());
+
+            ArgumentCaptor<Map<String, Object>> patch = ArgumentCaptor.forClass(Map.class);
+            verify(agentService).updateAgent(eq(AGENT_ID), eq(TENANT),
+                any(), any(), any(), any(), any(), any(), any(), any(), any(),
+                patch.capture(),
+                any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any());
+            assertThat(patch.getValue()).containsEntry("generation", false);
+
+            // And the caller is told what it now is, rather than having to
+            // re-read the agent to find out whether the revoke took.
+            Map<String, Object> data = (Map<String, Object>) result.get().toMap().get("data");
+            Map<String, Object> echoed = (Map<String, Object>) data.get("tools_config");
+            assertThat(echoed).containsEntry("generation", false);
+        }
+
+        @Test
+        @DisplayName("a grant sent as the STRING a model emits is honoured, not thrown on")
+        void updateAcceptsATextualGenerationGrant() {
+            // Tool arguments come from a language model, and one told "boolean"
+            // routinely sends "true". A bare cast threw a ClassCastException on
+            // the parameter that authorises spending - and "false" crashed just
+            // as hard, so the grant could not even be turned off that way.
+            AgentEntity existing = mockAgent(AGENT_ID, "Illustrator");
+            when(agentService.getAgent(AGENT_ID, TENANT)).thenReturn(Optional.of(existing));
+            when(agentService.updateAgent(eq(AGENT_ID), eq(TENANT), any(), any(), any(), any(), any(),
+                any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any(),
+                any(), any(), any(), any()))
+                .thenReturn(mockAgent(AGENT_ID, "Illustrator"));
+
+            Map<String, Object> params = new HashMap<>(Map.of(
+                "action", "update", "agent_id", AGENT_ID.toString(), "generation", "true"));
+            Optional<ToolExecutionResult> result = module.execute("update", params, TENANT, ctx());
+
+            assertThat(result).isPresent();
+            assertThat(result.get().success()).isTrue();
+            @SuppressWarnings("unchecked")
+            ArgumentCaptor<Map<String, Object>> patch = ArgumentCaptor.forClass(Map.class);
+            verify(agentService).updateAgent(eq(AGENT_ID), eq(TENANT),
+                any(), any(), any(), any(), any(), any(), any(), any(), any(),
+                patch.capture(),
+                any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any());
+            assertThat(patch.getValue()).containsEntry("generation", true);
+        }
+
+        @Test
+        @DisplayName("a grant that is neither a boolean nor 'true'/'false' is REFUSED, so the caller learns instead of guessing")
+        void updateIgnoresAnUnusableGenerationGrant() {
+            // Reading it as "not stated" was safe for the config but hid the
+            // mistake: the call reported success and changed nothing, and the
+            // caller had no way to know its grant had not been applied.
+            // No stubs: the refusal happens before the agent is even looked
+            // up, which is part of what makes it a clean no-op.
+            Map<String, Object> params = new HashMap<>(Map.of(
+                "action", "update", "agent_id", AGENT_ID.toString(), "generation", "yes please"));
+            Optional<ToolExecutionResult> result = module.execute("update", params, TENANT, ctx());
+
+            assertThat(result).isPresent();
+            assertThat(result.get().success()).isFalse();
+            assertThat(result.get().error()).contains("generation").contains("true or false");
+            // And nothing was touched: a refusal that half-applied the call
+            // would be worse than either reading of the value.
+            verify(agentService, never()).updateAgent(any(), any(), any(), any(), any(), any(),
+                any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any(),
+                any(), any(), any(), any(), any(), any());
+        }
+
+        @Test
+        @DisplayName("the SIBLING grant is refused the same way, since a bad value there used to grant web search")
+        void updateRefusesAnUnusableWebSearchGrant() {
+            // The behaviour of web_search changed with the shared boolean
+            // reader, so it needs its own case: reading "no" as "not stated"
+            // on create fell through to the default, which is TRUE. A caller
+            // trying to turn web search OFF would have turned it on.
+            Map<String, Object> params = new HashMap<>(Map.of(
+                "action", "update", "agent_id", AGENT_ID.toString(), "web_search", "no"));
+            Optional<ToolExecutionResult> result = module.execute("update", params, TENANT, ctx());
+
+            assertThat(result).isPresent();
+            assertThat(result.get().success()).isFalse();
+            assertThat(result.get().error()).contains("web_search").contains("true or false");
         }
 
         @Test

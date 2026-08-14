@@ -137,7 +137,7 @@ export default function PublishResourceModal({
       <div className="fixed inset-0 bg-black/20 backdrop-blur-sm z-[9999] flex items-center justify-center p-4" onClick={handleClose}>
         <div className="max-w-md w-full max-h-[calc(100vh-2rem)] overflow-y-auto bg-theme-primary rounded-2xl shadow-[0_16px_48px_rgba(0,0,0,0.16)] p-6 animate-in fade-in-0 zoom-in-95 duration-200 border border-theme" onClick={(e) => e.stopPropagation()}>
           <div className="text-center">
-            <div className="w-16 h-16 bg-theme-secondary rounded-full flex items-center justify-center mx-auto mb-5">
+            <div className="w-16 h-16 bg-theme-secondary rounded-2xl flex items-center justify-center mx-auto mb-5">
               <LoadingSpinner size="md" />
             </div>
             <h2 className="text-xl font-semibold text-theme-primary mb-2">{t('publishing')}</h2>
@@ -154,7 +154,7 @@ export default function PublishResourceModal({
       <div className="fixed inset-0 bg-black/20 backdrop-blur-sm z-[9999] flex items-center justify-center p-4" onClick={handleClose}>
         <div className="max-w-md w-full max-h-[calc(100vh-2rem)] overflow-y-auto bg-theme-primary rounded-2xl shadow-[0_16px_48px_rgba(0,0,0,0.16)] p-6 animate-in fade-in-0 zoom-in-95 duration-200 border border-theme" onClick={(e) => e.stopPropagation()}>
           <div className="text-center">
-            <div className="w-16 h-16 bg-theme-secondary rounded-full flex items-center justify-center mx-auto mb-5">
+            <div className="w-16 h-16 bg-theme-secondary rounded-2xl flex items-center justify-center mx-auto mb-5">
               <CheckCircle className="h-8 w-8 text-theme-primary" />
             </div>
             <h2 className="text-xl font-semibold text-theme-primary mb-2">{t('publishSuccess', { type: resourceType })}</h2>
@@ -172,7 +172,7 @@ export default function PublishResourceModal({
       <div className="fixed inset-0 bg-black/20 backdrop-blur-sm z-[9999] flex items-center justify-center p-4" onClick={handleClose}>
         <div className="max-w-md w-full max-h-[calc(100vh-2rem)] overflow-y-auto bg-theme-primary rounded-2xl shadow-[0_16px_48px_rgba(0,0,0,0.16)] p-6 animate-in fade-in-0 zoom-in-95 duration-200 border border-theme" onClick={(e) => e.stopPropagation()}>
           <div className="text-center">
-            <div className="w-16 h-16 bg-theme-secondary rounded-full flex items-center justify-center mx-auto mb-5">
+            <div className="w-16 h-16 bg-theme-secondary rounded-2xl flex items-center justify-center mx-auto mb-5">
               <AlertTriangle className="h-8 w-8 text-theme-primary" />
             </div>
             <h2 className="text-xl font-semibold text-theme-primary mb-2">{t('publishError')}</h2>
@@ -202,7 +202,7 @@ export default function PublishResourceModal({
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex items-start gap-3 mb-5">
-          <div className="w-10 h-10 rounded-full bg-theme-secondary flex items-center justify-center shrink-0">
+          <div className="w-10 h-10 rounded-xl bg-theme-secondary flex items-center justify-center shrink-0">
             <Globe className="h-5 w-5 text-theme-primary" />
           </div>
           <div className="min-w-0 flex-1">

@@ -106,6 +106,8 @@ CREATE TABLE IF NOT EXISTS catalog.api_tools (
     execution_spec JSONB,
     output_schema JSONB,
     execution_mode VARCHAR(20),
+    -- V428: generation descriptor. NULL for an ordinary endpoint.
+    generation_spec JSONB,
     pagination JSONB,
     next_hint TEXT,
     required_scopes JSONB,
@@ -189,3 +191,13 @@ CREATE TABLE IF NOT EXISTS catalog.tool_credentials (
     updated_at BIGINT NOT NULL DEFAULT (EXTRACT(EPOCH FROM NOW()) * 1000),
     CONSTRAINT tool_credentials_tool_name_variant_key UNIQUE (api_tool_id, credential_name, variant)
 );
+
+-- V431: the CE generation-seed marker (single row), read and advanced by
+-- GenerationSeedBootstrap. Restated here for GenerationSeedBootstrapPostgresTest,
+-- which exercises the seed's hand-written SQL against real Postgres.
+CREATE TABLE IF NOT EXISTS catalog.generation_seed_state (
+    id               SMALLINT PRIMARY KEY DEFAULT 1 CHECK (id = 1),
+    applied_version  BIGINT,
+    applied_at       TIMESTAMPTZ
+);
+INSERT INTO catalog.generation_seed_state (id) VALUES (1) ON CONFLICT DO NOTHING;

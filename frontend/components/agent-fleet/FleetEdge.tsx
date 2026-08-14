@@ -97,7 +97,7 @@ export const FleetEdge = React.memo(function FleetEdge({
                 else onEdgeEdit?.(id);
               }}
               title={edgeAction === 'delete' ? t('remove') : t('edit')}
-              className="flex h-6 w-6 items-center justify-center rounded-full bg-[var(--bg-primary)] text-[var(--text-primary)] shadow-md hover:bg-[var(--text-primary)] hover:text-[var(--bg-primary)] transition-colors"
+              className="flex h-6 w-6 items-center justify-center rounded-lg bg-[var(--bg-primary)] text-[var(--text-primary)] shadow-md hover:bg-[var(--text-primary)] hover:text-[var(--bg-primary)] transition-colors"
             >
               {edgeAction === 'delete' ? <Trash2 className="h-3 w-3" /> : <Pencil className="h-3 w-3" />}
             </button>
@@ -123,7 +123,7 @@ export const FleetEdge = React.memo(function FleetEdge({
               />
             )}
             {totalCalls !== undefined && totalCalls > 0 && (
-              <span className="text-[10px] text-slate-500 dark:text-slate-400 bg-white/90 dark:bg-gray-800/90 rounded-full px-1.5 py-0.5 font-medium backdrop-blur">
+              <span className="text-[10px] text-slate-500 dark:text-slate-400 bg-white/90 dark:bg-gray-800/90 rounded-md px-1.5 py-0.5 font-medium backdrop-blur">
                 {totalCalls} call{totalCalls !== 1 ? 's' : ''}
               </span>
             )}

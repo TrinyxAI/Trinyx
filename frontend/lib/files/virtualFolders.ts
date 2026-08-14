@@ -14,8 +14,26 @@ import type { StorageExplorerEntry } from '@/lib/api/storage-api';
 /** A next-intl translator (the {@code files} namespace) with optional ICU values. */
 type Translator = (key: string, values?: Record<string, unknown>) => string;
 
+/**
+ * The minimum a row needs to be treated as a folder by these helpers.
+ *
+ * <p>Both a full listing row and a breadcrumb ({@code FolderCrumb}) satisfy it, which is the
+ * point: the crumb "Run 12" in the breadcrumb and the tile "Run 12" in the grid are labelled by
+ * the SAME code, so they cannot drift apart.</p>
+ */
+export interface FolderLike {
+  id?: string | null;
+  virtualId?: string | null;
+  virtualKind?: 'WORKFLOW' | 'RUN' | 'EPOCH' | 'SPAWN' | 'ITERATION' | null;
+  fileName?: string | null;
+  workflowName?: string | null;
+  epoch?: number | null;
+  spawn?: number | null;
+  itemIndex?: number | null;
+}
+
 /** True when this entry is a computed virtual folder (has a {@code virtualId}). */
-export function isVirtualEntry(e: StorageExplorerEntry): boolean {
+export function isVirtualEntry(e: FolderLike): boolean {
   return !!e.virtualId;
 }
 
@@ -23,7 +41,7 @@ export function isVirtualEntry(e: StorageExplorerEntry): boolean {
  * Navigation key: virtual folders navigate by {@code virtualId}, real folders by
  * {@code id}. Null when neither is present (a malformed row - caller no-ops).
  */
-export function folderNavKey(e: StorageExplorerEntry): string | null {
+export function folderNavKey(e: FolderLike): string | null {
   return e.virtualId ?? e.id ?? null;
 }
 
@@ -44,7 +62,7 @@ export function entryKey(e: StorageExplorerEntry): string {
  * {@code spawn}/{@code itemIndex} are 0-based in the data and shown 1-based.
  * {@code t} is the next-intl {@code files} translator.
  */
-export function virtualFolderLabel(e: StorageExplorerEntry, t: Translator): string {
+export function virtualFolderLabel(e: FolderLike, t: Translator): string {
   switch (e.virtualKind) {
     case 'WORKFLOW':
       return e.workflowName || t('workflowFallback');
@@ -72,6 +90,6 @@ export function virtualFolderLabel(e: StorageExplorerEntry, t: Translator): stri
  * The label to show for ANY folder card: a manual folder shows its stored name,
  * a virtual folder shows the localised grouping label.
  */
-export function folderLabel(e: StorageExplorerEntry, t: Translator): string {
+export function folderLabel(e: FolderLike, t: Translator): string {
   return isVirtualEntry(e) ? virtualFolderLabel(e, t) : (e.fileName || t('workflowFallback'));
 }

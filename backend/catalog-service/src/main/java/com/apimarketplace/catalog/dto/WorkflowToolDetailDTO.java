@@ -34,6 +34,19 @@ public record WorkflowToolDetailDTO(
      * Required because iconSlug is brand-shared (e.g. googlecloud covers GCS,
      * Translate, Vision...) and cannot disambiguate the user's credential.
      */
-    String integrationName
+    String integrationName,
+    /**
+     * True when this endpoint carries a generation descriptor, i.e. every call
+     * produces a paid asset on the platform owner's provider key.
+     *
+     * <p>Carried so the inspector can state it when it asks auth-service for a
+     * price. That service decides whether the credential-wide default may be
+     * quoted, refuses it for a generation exactly as the billing path does, and
+     * cannot read {@code catalog.api_tools} to find out on its own. Without it
+     * an {@code mcp:} step bound to a generation endpoint (which names no
+     * model) was quoted the catch-all default and shown as sellable, while
+     * execution refused that very call.
+     */
+    boolean generation
 ) {}
 

@@ -23,6 +23,15 @@ export interface FilesExplorerBodyProps {
   entries: StorageExplorerEntry[];
   /** Split folder rows out and show them first. Off → every entry is a file (flat listing). */
   enableFolders: boolean;
+  /**
+   * Group the files into collapsible per-day sections (default true - the historical layout).
+   *
+   * <p>Turn it OFF when the listing is ordered by something other than date: the day sections
+   * ARE a date ordering, so keeping them under a name/size/type sort would chop that order into
+   * date buckets and honour neither. The entries then render as one flat block, in exactly the
+   * order the server returned.</p>
+   */
+  groupByDay?: boolean;
   /** next-intl {@code files} translator - resolves folder labels + the "N items" count. */
   tFiles: Translator;
 
@@ -77,6 +86,7 @@ export function FilesExplorerBody({
   variant,
   entries,
   enableFolders,
+  groupByDay = true,
   tFiles,
   onOpenFolder,
   onDeleteVirtualFolder,
@@ -102,8 +112,12 @@ export function FilesExplorerBody({
     [entries, enableFolders],
   );
   // Folders + files share ONE per-day timeline: a folder lands in the day of its last
-  // activity (createdAt = MAX child date), rendered above that day's files.
-  const dayGroups = React.useMemo(() => groupEntriesByDay(folders, files), [folders, files]);
+  // activity (createdAt = MAX child date), rendered above that day's files. Skipped when
+  // the caller sorts by something other than date - see `groupByDay`.
+  const dayGroups = React.useMemo(
+    () => (groupByDay ? groupEntriesByDay(folders, files) : []),
+    [groupByDay, folders, files],
+  );
 
   // Day-collapse is purely presentational → owned here so every surface gets it for free.
   const [collapsedDays, setCollapsedDays] = React.useState<Set<string>>(new Set());
@@ -198,6 +212,18 @@ export function FilesExplorerBody({
       />
     );
   };
+
+  // Sorted by something other than date: one flat block in the server's order. Folders
+  // still lead (the backend orders them first), so the only thing dropped is the date
+  // bucketing that would have fought the chosen order.
+  if (!groupByDay) {
+    return (
+      <div className={isGrid ? `${gridClass} pb-2` : 'divide-y divide-theme'}>
+        {folders.map(renderFolder)}
+        {files.map(renderFile)}
+      </div>
+    );
+  }
 
   return (
     <div className={isGrid ? 'space-y-3 pb-2' : ''}>

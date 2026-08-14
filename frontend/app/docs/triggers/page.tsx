@@ -342,8 +342,9 @@ export default function TriggersPage() {
         </p>
         <Callout variant="warn">
           The dispatch hard-gates on the parent&apos;s status being exactly <code>COMPLETED</code>,
-          it does <strong>not</strong> branch on failure or cancellation. To react to a failed or
-          partially-succeeded parent, use the separate <strong>Error</strong> trigger below.
+          it does <strong>not</strong> branch on failure or cancellation. To react to a failed
+          parent, use the separate <strong>Error</strong> trigger below (it also fires for older
+          runs recorded as partially successful).
         </Callout>
         <p>Outputs:</p>
         <DocsTable

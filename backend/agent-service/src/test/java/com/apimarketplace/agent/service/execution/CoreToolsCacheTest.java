@@ -236,8 +236,7 @@ class CoreToolsCacheTest {
             mockResponse(List.of(
                 Map.of("name", "catalog", "description", "Catalog", "id", "catalog-1"),
                 Map.of("name", "workflow", "description", "Workflow", "id", "workflow-1"),
-                Map.of("name", "web_search", "description", "Web search", "id", "web-1"),
-                Map.of("name", "image_generation", "description", "Image generation", "id", "image-1")
+                Map.of("name", "web_search", "description", "Web search", "id", "web-1")
             ));
 
             cache.refreshCoreTools();
@@ -246,7 +245,51 @@ class CoreToolsCacheTest {
             assertThat(cache.getMissingTools()).doesNotContain("web_search");
             assertThat(cache.getCoreTools().stream().map(ToolDefinition::name))
                 .doesNotContain("web_search")
-                .contains("catalog", "workflow", "image_generation");
+                .contains("catalog", "workflow");
+        }
+
+        /**
+         * generation debits credits on every create, so the install-level flag has to
+         * reach this cache too: with the flag off catalog-service never registers the
+         * provider, and a cache that still expected the tool would chase it forever and
+         * hand it out the moment anything else advertised the name.
+         */
+        @Test
+        @DisplayName("spend gate off: generation is neither expected nor cached, even when a source advertises it")
+        void disabledGenerationIsNotExpectedOrCached() {
+            cache = new CoreToolsCache(restTemplate, objectMapper, "http://localhost:8099",
+                "http://localhost:8090", "http://localhost:8088", "http://localhost:8089", "http://localhost:8081",
+                true, false, null);
+            mockResponse(List.of(
+                Map.of("name", "catalog", "description", "Catalog", "id", "catalog-1"),
+                Map.of("name", "generation", "description", "Generation", "id", "gen-1")
+            ));
+
+            cache.refreshCoreTools();
+
+            assertThat(cache.activeCoreToolNames()).doesNotContain("generation");
+            assertThat(cache.getMissingTools()).doesNotContain("generation");
+            assertThat(cache.getCoreTools().stream().map(ToolDefinition::name))
+                .doesNotContain("generation")
+                .contains("catalog");
+        }
+
+        @Test
+        @DisplayName("spend gate on: generation is expected and cached from catalog-service")
+        void enabledGenerationIsExpectedAndCached() {
+            mockResponse(List.of(
+                Map.of("name", "catalog", "description", "Catalog", "id", "catalog-1"),
+                Map.of("name", "generation", "description", "Generation", "id", "gen-1")
+            ));
+
+            cache.refreshCoreTools();
+
+            assertThat(cache.activeCoreToolNames()).contains("generation");
+            assertThat(cache.getCoreTools().stream().map(ToolDefinition::name))
+                .contains("generation", "catalog");
+            // Granting only the generation module hands the agent that tool and nothing else
+            assertThat(cache.getCoreTools(Set.of("generation")).stream().map(ToolDefinition::name))
+                .containsExactly("generation");
         }
 
         @Test
@@ -307,12 +350,12 @@ class CoreToolsCacheTest {
             + "and re-queries ONLY the source that owns the missing tools")
         void periodicRefreshRecoversMissingToolsWithoutClearingExistingCache() {
             // Given: on the initial load orchestrator is down (returns an empty tool list)
-            // so its tools (workflow/application/web_search/image_generation/files) never
+            // so its tools (workflow/application/web_search/files) never
             // land in the cache, while every other source loads fine. On the SECOND call
             // orchestrator is back and advertises its tools.
             when(restTemplate.exchange(eq(ORCH), eq(HttpMethod.GET), any(HttpEntity.class), eq(Map.class)))
                 .thenReturn(toolsFor()) // initial: orchestrator unreachable -> no tools
-                .thenReturn(toolsFor("workflow", "application", "web_search", "image_generation", "files", "wait"));
+                .thenReturn(toolsFor("workflow", "application", "web_search", "files", "wait"));
             when(restTemplate.exchange(eq(AGENT), eq(HttpMethod.GET), any(HttpEntity.class), eq(Map.class)))
                 .thenReturn(toolsFor("agent", "skill"));
             when(restTemplate.exchange(eq(DATASOURCE), eq(HttpMethod.GET), any(HttpEntity.class), eq(Map.class)))
@@ -320,15 +363,15 @@ class CoreToolsCacheTest {
             when(restTemplate.exchange(eq(INTERFACE), eq(HttpMethod.GET), any(HttpEntity.class), eq(Map.class)))
                 .thenReturn(toolsFor("interface"));
             when(restTemplate.exchange(eq(CATALOG), eq(HttpMethod.GET), any(HttpEntity.class), eq(Map.class)))
-                .thenReturn(toolsFor("catalog"));
+                .thenReturn(toolsFor("catalog", "generation"));
 
             cache.refreshCoreTools();
 
             // Sanity: only orchestrator-owned tools are missing after the initial load.
             assertThat(cache.getMissingTools())
-                .containsExactlyInAnyOrder("workflow", "application", "web_search", "image_generation", "files", "wait");
+                .containsExactlyInAnyOrder("workflow", "application", "web_search", "files", "wait");
             assertThat(cache.getCoreTools().stream().map(ToolDefinition::name))
-                .containsExactlyInAnyOrder("agent", "skill", "table", "interface", "catalog");
+                .containsExactlyInAnyOrder("agent", "skill", "table", "interface", "catalog", "generation");
 
             // When: the 5-minute safety net runs.
             cache.scheduledRefreshIfIncomplete();
@@ -336,12 +379,12 @@ class CoreToolsCacheTest {
             // Then: the missing orchestrator tools are recovered...
             assertThat(cache.getMissingTools()).isEmpty();
             assertThat(cache.getCoreTools().stream().map(ToolDefinition::name))
-                .containsExactlyInAnyOrder("catalog", "table", "interface", "agent", "skill",
-                    "workflow", "application", "web_search", "image_generation", "files", "wait");
+                .containsExactlyInAnyOrder("catalog", "generation", "table", "interface", "agent", "skill",
+                    "workflow", "application", "web_search", "files", "wait");
             // ...and the originally-loaded tools were preserved (the cache was NOT cleared,
             // unlike refreshCoreTools()), so no consumer ever sees them disappear.
             assertThat(cache.getCoreTools().stream().map(ToolDefinition::name))
-                .contains("agent", "skill", "table", "interface", "catalog");
+                .contains("agent", "skill", "table", "interface", "catalog", "generation");
 
             // And: only orchestrator is re-queried on the periodic pass (2 calls total =
             // initial + periodic); the sources whose tools already loaded are NOT re-hit
@@ -358,7 +401,7 @@ class CoreToolsCacheTest {
         void periodicRefreshIsNoOpWhenCacheAlreadyComplete() {
             // Given: every source loads its tools so the cache is complete.
             when(restTemplate.exchange(eq(ORCH), eq(HttpMethod.GET), any(HttpEntity.class), eq(Map.class)))
-                .thenReturn(toolsFor("workflow", "application", "web_search", "image_generation", "files", "wait"));
+                .thenReturn(toolsFor("workflow", "application", "web_search", "files", "wait"));
             when(restTemplate.exchange(eq(AGENT), eq(HttpMethod.GET), any(HttpEntity.class), eq(Map.class)))
                 .thenReturn(toolsFor("agent", "skill"));
             when(restTemplate.exchange(eq(DATASOURCE), eq(HttpMethod.GET), any(HttpEntity.class), eq(Map.class)))
@@ -366,7 +409,7 @@ class CoreToolsCacheTest {
             when(restTemplate.exchange(eq(INTERFACE), eq(HttpMethod.GET), any(HttpEntity.class), eq(Map.class)))
                 .thenReturn(toolsFor("interface"));
             when(restTemplate.exchange(eq(CATALOG), eq(HttpMethod.GET), any(HttpEntity.class), eq(Map.class)))
-                .thenReturn(toolsFor("catalog"));
+                .thenReturn(toolsFor("catalog", "generation"));
 
             cache.refreshCoreTools();
             assertThat(cache.getMissingTools()).isEmpty();
@@ -378,6 +421,41 @@ class CoreToolsCacheTest {
             // Then: no source is contacted and the cache is untouched.
             verify(restTemplate, never()).exchange(anyString(), eq(HttpMethod.GET), any(), eq(Map.class));
             assertThat(cache.getCoreTools()).hasSize(11);
+        }
+
+        /**
+         * generation is owned by catalog-service, not orchestrator. If the periodic
+         * refresh did not know that, a generation-only gap would re-query orchestrator
+         * forever and the tool would never appear.
+         */
+        @Test
+        @DisplayName("a missing generation re-queries catalog-service, the service that owns it")
+        void periodicRefreshRecoversGenerationFromCatalogService() {
+            // Given: everything loads except catalog-service, which is down at first.
+            when(restTemplate.exchange(eq(ORCH), eq(HttpMethod.GET), any(HttpEntity.class), eq(Map.class)))
+                .thenReturn(toolsFor("workflow", "application", "web_search", "files", "wait"));
+            when(restTemplate.exchange(eq(AGENT), eq(HttpMethod.GET), any(HttpEntity.class), eq(Map.class)))
+                .thenReturn(toolsFor("agent", "skill"));
+            when(restTemplate.exchange(eq(DATASOURCE), eq(HttpMethod.GET), any(HttpEntity.class), eq(Map.class)))
+                .thenReturn(toolsFor("table"));
+            when(restTemplate.exchange(eq(INTERFACE), eq(HttpMethod.GET), any(HttpEntity.class), eq(Map.class)))
+                .thenReturn(toolsFor("interface"));
+            when(restTemplate.exchange(eq(CATALOG), eq(HttpMethod.GET), any(HttpEntity.class), eq(Map.class)))
+                .thenReturn(toolsFor("catalog"))            // initial: generation not served yet
+                .thenReturn(toolsFor("catalog", "generation"));
+
+            cache.refreshCoreTools();
+            assertThat(cache.getMissingTools()).containsExactly("generation");
+
+            // When: the safety net runs with only generation missing.
+            cache.scheduledRefreshIfIncomplete();
+
+            // Then: it is recovered, and ONLY its owning service was re-queried.
+            assertThat(cache.getMissingTools()).isEmpty();
+            assertThat(cache.getCoreTools().stream().map(ToolDefinition::name)).contains("generation");
+            verify(restTemplate, times(2)).exchange(eq(CATALOG), eq(HttpMethod.GET), any(HttpEntity.class), eq(Map.class));
+            verify(restTemplate, times(1)).exchange(eq(ORCH), eq(HttpMethod.GET), any(HttpEntity.class), eq(Map.class));
+            verify(restTemplate, times(1)).exchange(eq(AGENT), eq(HttpMethod.GET), any(HttpEntity.class), eq(Map.class));
         }
 
         @Test

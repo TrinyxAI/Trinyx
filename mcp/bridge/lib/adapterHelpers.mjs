@@ -9,6 +9,10 @@ export function synthIdFor(providerKey) {
   return `${providerKey}_${Date.now()}_${_synthIdCounter}`;
 }
 
+// The single error renderer, shared with the producer side (buildFailureContent) so the same
+// error value cannot come out differently at the two ends of the channel.
+import { errorToText } from './toolContent.mjs';
+
 /**
  * Shared helpers used by every CLI adapter (claude, codex, gemini, mistral).
  *
@@ -96,7 +100,8 @@ export async function dispatchToolCall(ctx, { toolId, toolName, argsStr, extras 
  *
  * @param {object} ctx
  * @param {object} result - { toolId, isError, content, errorMsg?, metadata?, fallbackToolName? }
- *   `errorMsg` is used as the error string when `isError` is true.
+ *   `errorMsg` is the CLI's own reason; on failure it is combined with `content` (see the
+ *   fallback policy below), never used alone.
  *   `fallbackToolName` is used if the pending entry is missing (race / unknown id).
  *   `metadata` is shallow-merged into the published metadata; helpers will also
  *   set `label`/`toolName` from the pending entry's `attachmentFileName` if
@@ -119,17 +124,124 @@ export async function dispatchToolResult(ctx, { toolId, isError, content, errorM
     enrichedMetadata.toolName = 'view_attachment';
   }
 
+  // SINGLE fallback policy for every call site that reaches here. Call sites pass the raw
+  // CLI's own message and nothing else, so two branches handling the same event can no
+  // longer disagree on what the model reads (they did: one published the reason, the other
+  // an empty string). On failure prefer the CLI message, then the payload text - which
+  // carries the backend's actionable guidance, e.g. "retry with force=true" - then a
+  // generic label, because `success:false` with an empty `error` renders a failure with no
+  // message at all.
+  const errorText = isError
+    ? (errorMsg || content || 'Tool call failed (no message returned by the CLI)')
+    : null;
+  // Keep BOTH signals when the CLI gives both, IN THE SAME FIELD. Only one crosses the wire:
+  // publishToolResult takes the content, and redis-publisher then derives `event.error` from
+  // it, so anything left only in `error` reaches neither the frontend nor the model history.
+  // Concatenating is what stops the choice between the transport reason and the backend's
+  // actionable guidance from losing one of them. When the payload is empty the error text
+  // stands in for it, so a failure is never published as a blank result.
+  const publishedContent = !isError
+    ? content
+    : (content && errorMsg && content !== errorMsg ? `${errorMsg}\n\n${content}` : (content || errorText));
+
   ctx.toolResults.push({
     toolCall: { id: toolId, toolName, arguments: pending?.arguments || '{}' },
     success: !isError,
-    content,
-    error: isError ? (errorMsg || content) : null,
+    content: publishedContent,
+    error: errorText,
     durationMs,
     metadata: enrichedMetadata,
   });
 
-  await ctx.publisher.publishToolResult(toolId, toolName, !isError, durationMs, content, enrichedMetadata);
+  await ctx.publisher.publishToolResult(toolId, toolName, !isError, durationMs, publishedContent, enrichedMetadata);
   ctx.pendingToolCalls.delete(toolId);
+}
+
+/**
+ * The payload a CLI item carries for a finished tool call.
+ *
+ * Codex-style CLIs put it under `result`, the *_result / *_output events under `output` or
+ * `content` or `text`. Returned RAW: `extractToolResultAndMetadata` owns every shape
+ * (string, MCP block array, whole CallToolResult envelope) and serialising here is what
+ * destroyed the trusted `__BRIDGE_META__` metadata on the codex/gemini/mistral paths.
+ */
+// One order per event shape, each matching what its branch read before this change.
+// `result` is only ever APPENDED where it was absent, never promoted above a field that
+// already won. Not strictly behaviour-preserving: an EMPTY leading field no longer wins
+// (`{result:'', output:'X'}` used to yield '' on the codex branch and now yields 'X'),
+// which is the point of picking the first MEANINGFUL field.
+export const CODEX_PAYLOAD_FIELDS = ['result', 'output', 'content', 'text'];
+export const FLAT_PAYLOAD_FIELDS = ['output', 'content', 'result', 'text'];
+export const RESULT_EVENT_PAYLOAD_FIELDS = ['output', 'content', 'text', 'result'];
+
+export function resolveItemPayload(item, fields = CODEX_PAYLOAD_FIELDS) {
+  if (!item) return '';
+  // First MEANINGFUL field wins. Neither `||` nor `??` alone is right: `??` keeps an empty
+  // `result` and hides a real `output` beside it, while `||` discards a legitimate `0`.
+  // The field ORDER stays per-branch: codex-style events lead with `result`, the flat
+  // *_result events lead with `output`. Imposing one order on both silently changed which
+  // field wins when a CLI sends several, which is a behaviour change no test asked for.
+  for (const name of fields) {
+    const candidate = item[name];
+    if (candidate !== null && candidate !== undefined && candidate !== '') return candidate;
+  }
+  return '';
+}
+
+/**
+ * Whether a CLI reported an explicit error object/message on the item.
+ *
+ * Deliberately narrower than `!= null`: `error: false`, `error: ''` and `error: 0` are common
+ * "no error" idioms, and treating them as failures would flip successful calls to failed on
+ * the *_result / *_output branches, which never applied this check before.
+ */
+function hasCliError(item) {
+  const err = item.error;
+  if (err === null || err === undefined || err === false || err === '' || err === 0) return false;
+  if (typeof err === 'number' && Number.isNaN(err)) return false;
+  // An Error instance has no enumerable own keys, so the object test below would call it
+  // "empty" while resolveItemErrorMessage happily returns its message. Decide it here.
+  if (err instanceof Error) return true;
+  // An EMPTY object or array is the same "no error" idiom, emitted by Go/protobuf-style
+  // serialisers. Treating it as a failure flips a successful call to failed AND, through the
+  // fallback policy, turns its own success payload into the error message the model reads.
+  if (Array.isArray(err)) return err.length > 0;
+  if (typeof err === 'object') return Object.keys(err).length > 0;
+  return true;
+}
+
+/**
+ * Whether a CLI item reports a failed tool call.
+ *
+ * The envelope check is the load-bearing one: Codex can report a failure with
+ * `status: 'completed'` and no `item.error`, carrying it only as `isError` on the
+ * CallToolResult. Without it the bridge publishes SUCCESS for a failed tool and the agent
+ * reads an error body as a normal result - a correctness bug, not a display one.
+ * Strict `=== true` so a string/array/null payload can never be mistaken for an envelope.
+ */
+const FAILED_STATUSES = new Set(['failed', 'error', 'cancelled', 'canceled', 'aborted', 'timeout']);
+
+export function resolveItemError(item, fields = CODEX_PAYLOAD_FIELDS) {
+  if (!item) return false;
+  // The envelope flag is read from the payload that was actually SELECTED, not from any
+  // field that happens to carry one: `{output:'everything is fine', result:{isError:true}}`
+  // otherwise publishes that success text with success=false.
+  const payload = resolveItemPayload(item, fields);
+  return FAILED_STATUSES.has(item.status)
+    || item.is_error === true
+    || hasCliError(item)
+    || payload?.isError === true;
+}
+
+/**
+ * The CLI's own error message, when it provides one.
+ *
+ * Falls back to a serialisation for a structured error such as `{code: 500}`: returning null
+ * there sent the model a generic label and dropped the only diagnostic the CLI gave.
+ */
+export function resolveItemErrorMessage(item) {
+  if (!item) return null;
+  return errorToText(item.error) || null;
 }
 
 /**
@@ -210,15 +322,17 @@ export async function handleFlatCliMessage(msg, ctx, opts) {
   // Tool result
   if (msg.type === 'tool_result' || msg.type === 'function_response' || msg.type === 'tool_call_result') {
     const toolId = msg.call_id || msg.tool_use_id || msg.id;
-    const isError = msg.is_error === true || msg.status === 'error';
-    const rawContent = msg.output || msg.content || msg.result || msg.text || '';
+    // Same resolvers as the codex-style branches: this path used to hand-roll both the field
+    // priority and the error test, so an envelope reporting `isError` was published as a
+    // SUCCESS here while the very same envelope was correctly failed elsewhere.
     const { content: cleanContent, metadata } = ctx.extractToolResultAndMetadata(
-      typeof rawContent === 'string' ? rawContent : JSON.stringify(rawContent)
+      resolveItemPayload(msg, FLAT_PAYLOAD_FIELDS)
     );
     await dispatchToolResult(ctx, {
       toolId,
-      isError,
+      isError: resolveItemError(msg, FLAT_PAYLOAD_FIELDS),
       content: cleanContent,
+      errorMsg: resolveItemErrorMessage(msg),
       metadata,
       fallbackToolName: msg.name || 'unknown',
     });
@@ -367,14 +481,23 @@ export async function handleCodexStyleItemEvent(msg, ctx, opts) {
       const argsStr = typeof item.arguments === 'string'
         ? item.arguments
         : JSON.stringify(item.arguments || item.function?.arguments || {});
-      const isError = item.status === 'failed' || item.error != null;
-      const errorMsg = item.error?.message || null;
-      const resultContent = item.result || '';
+      const isError = resolveItemError(item);
+      const errorMsg = resolveItemErrorMessage(item);
 
+      // Gate left EXACTLY as it was. Two pre-existing lifecycle quirks live here and are
+      // deliberately NOT addressed by this change, which is about the metadata channel:
+      //   - a terminal status with no result (any of FAILED_STATUSES except 'failed':
+      //     error, cancelled, canceled, aborted, timeout) leaves a pendingToolCalls entry
+      //     that nothing resolves (nothing else deletes from that map);
+      //   - `status:'failed'` followed by a late *_result event for the same toolId
+      //     dispatches twice.
+      // Both predate this fix. Widening the gate, or making dispatch idempotent per toolId,
+      // was tried and each attempt LOST legitimate results (a first partial event then the
+      // real payload) or leaked a different pending entry. Fixing them properly needs a
+      // per-call lifecycle, which is its own change with its own tests.
       if (item.status === 'failed' || item.result != null) {
-        const { content: cleanContent, metadata } = ctx.extractToolResultAndMetadata(
-          typeof resultContent === 'string' ? resultContent : JSON.stringify(resultContent)
-        );
+        // Raw value, never serialised - see the note on the other call site.
+        const { content: cleanContent, metadata } = ctx.extractToolResultAndMetadata(resolveItemPayload(item));
         const alreadyStarted = pendingToolCalls.has(toolId);
         if (!alreadyStarted) {
           // Record the call so the replay log + UI see it before the result.
@@ -385,8 +508,10 @@ export async function handleCodexStyleItemEvent(msg, ctx, opts) {
         await dispatchToolResult(ctx, {
           toolId,
           isError,
-          content: isError ? errorMsg : cleanContent,
-          errorMsg: isError ? errorMsg : null,
+          // Raw values only: dispatchToolResult owns the failure fallback for BOTH `content`
+          // and `error`, so this branch and its sibling below cannot drift apart again.
+          content: cleanContent,
+          errorMsg,
           metadata,
           fallbackToolName: toolName,
         });
@@ -402,13 +527,17 @@ export async function handleCodexStyleItemEvent(msg, ctx, opts) {
     case 'mcp_tool_call_result':
     case 'function_call_output': {
       const toolId = item.call_id || item.tool_use_id || item.id;
-      const isError = item.is_error === true || item.status === 'error';
-      const rawContent = item.output || item.content || item.text || '';
-      const { content: cleanContent, metadata } = ctx.extractToolResultAndMetadata(rawContent);
+      // Same resolvers as the mcp_tool_call branch above: this sibling used to read a
+      // narrower field list and ignore the envelope's isError, so the same class of bug
+      // survived here after the first one was fixed.
+      const { content: cleanContent, metadata } = ctx.extractToolResultAndMetadata(
+        resolveItemPayload(item, RESULT_EVENT_PAYLOAD_FIELDS)
+      );
       await dispatchToolResult(ctx, {
         toolId,
-        isError,
+        isError: resolveItemError(item, RESULT_EVENT_PAYLOAD_FIELDS),
         content: cleanContent,
+        errorMsg: resolveItemErrorMessage(item),
         metadata,
         fallbackToolName: item.name || 'unknown',
       });

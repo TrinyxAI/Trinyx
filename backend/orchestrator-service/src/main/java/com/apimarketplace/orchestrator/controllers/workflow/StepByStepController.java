@@ -8,9 +8,9 @@ import com.apimarketplace.orchestrator.execution.v2.scheduler.V2StepByStepSchedu
 import com.apimarketplace.orchestrator.execution.v2.services.V2StepByStepService;
 import com.apimarketplace.orchestrator.repository.WorkflowRunRepository;
 
-import com.apimarketplace.common.credit.CreditConsumptionClient;
 import com.apimarketplace.orchestrator.services.resume.WorkflowResumeService;
 import com.apimarketplace.orchestrator.services.resume.WorkflowRunState;
+import com.apimarketplace.orchestrator.services.state.ClaimRefusalRegistry;
 import com.apimarketplace.orchestrator.services.state.StateSnapshotService;
 import com.apimarketplace.orchestrator.utils.LabelNormalizer;
 import org.slf4j.Logger;
@@ -51,9 +51,6 @@ public class StepByStepController {
     private StateSnapshotService stateSnapshotService;
 
     @Autowired
-    private CreditConsumptionClient creditClient;
-
-    @Autowired
     private WorkflowRunRepository runRepository;
 
     /**
@@ -89,9 +86,9 @@ public class StepByStepController {
             ResponseEntity<?> scopeBlock = guardRunScope(runId, userId, orgId);
             if (scopeBlock != null) return scopeBlock;
 
-            if (!creditClient.checkCredits(userId)) {
-                return ResponseEntity.status(402).body(Map.of("error", "Insufficient credits to execute step"));
-            }
+            // No credit pre-check: the step executes and NodeCreditGate fails the node
+            // with the out-of-credit message, so the run shows WHERE it stopped and the
+            // downstream nodes are marked SKIPPED.
 
             logger.info("Executing single step: {} for run: {}", stepId, runId);
             StepExecutionResult result = resumeService.executeSingleStep(runId, stepId);
@@ -293,9 +290,9 @@ public class StepByStepController {
         try {
             ResponseEntity<?> scopeBlock = guardRunScope(runId, userId, orgId);
             if (scopeBlock != null) return scopeBlock;
-            if (!creditClient.checkCredits(userId)) {
-                return ResponseEntity.status(402).body(Map.of("error", "Insufficient credits to execute step"));
-            }
+            // No credit pre-check: the step executes and NodeCreditGate fails the node
+            // with the out-of-credit message, so the run shows WHERE it stopped and the
+            // downstream nodes are marked SKIPPED.
 
             updatePlanIfPresent(runId, requestBody);
 
@@ -367,10 +364,9 @@ public class StepByStepController {
         try {
             ResponseEntity<?> scopeBlock = guardRunScope(runId, userId, orgId);
             if (scopeBlock != null) return scopeBlock;
-            // Credit pre-check
-            if (!creditClient.checkCredits(userId)) {
-                return ResponseEntity.status(402).body(Map.of("error", "Insufficient credits to execute step"));
-            }
+            // No credit pre-check: the step executes and NodeCreditGate fails the node
+            // with the out-of-credit message, so the run shows WHERE it stopped and the
+            // downstream nodes are marked SKIPPED.
 
             updatePlanIfPresent(runId, inputData);
 
@@ -393,13 +389,17 @@ public class StepByStepController {
             boolean useV2 = v2StepByStepService != null;
 
             if (useV2 && !stateSnapshotService.claimNodeForExecution(runId, stepId)) {
-                logger.warn("[StepByStep] Node not ready, rejecting: runId={}, stepId={}", runId, stepId);
-                return ResponseEntity.status(HttpStatus.CONFLICT).body(Map.of(
-                    "success", false,
-                    "error", "NODE_NOT_READY",
-                    "message", "Node is not in READY state (already executing or not yet ready)",
-                    "stepId", stepId
-                ));
+                // Carry the refusal's actual reason, not a sentence covering four opposite
+                // causes: a caller (or a failing test) that only learns "not ready" cannot tell
+                // an already-running node from one whose predecessors never settled.
+                var refusal = stateSnapshotService.lastClaimRefusal(runId, stepId);
+                Map<String, Object> body = new java.util.LinkedHashMap<>();
+                body.put("success", false);
+                body.put("error", "NODE_NOT_READY");
+                body.put("stepId", stepId);
+                String message = ClaimRefusalRegistry.describeInto(body, refusal, stepId);
+                logger.warn("[StepByStep] Rejecting execute: runId={}, {}", runId, message);
+                return ResponseEntity.status(HttpStatus.CONFLICT).body(body);
             }
 
             // Check for pending Split items when itemId is "0" (parent item).

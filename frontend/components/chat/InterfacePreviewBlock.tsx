@@ -206,7 +206,7 @@ export function InterfacePreviewBlock({ interfaceId, onError, onDelete }: Interf
       {/* Active tab overlay */}
       {isTabActive && (
         <div className="absolute inset-0 z-20 bg-black/5 backdrop-blur-[3px] flex items-center justify-center rounded-xl cursor-pointer">
-          <div className="flex items-center gap-2 px-4 py-2 bg-white/90 dark:bg-slate-800/90 rounded-full">
+          <div className="flex items-center gap-2 px-4 py-2 bg-white/90 dark:bg-slate-800/90 rounded-md">
             <X className="w-4 h-4 text-theme-primary" />
             <span className="text-sm font-medium text-theme-primary">{t('clickToClose')}</span>
           </div>
@@ -265,7 +265,7 @@ export function InterfacePreviewBlock({ interfaceId, onError, onDelete }: Interf
                   <button
                     onClick={handleOlder}
                     disabled={currentPage >= totalPages - 1}
-                    className={`p-1 rounded-full hover:bg-theme-secondary transition-colors ${currentPage >= totalPages - 1 ? 'opacity-30 cursor-not-allowed' : ''}`}
+                    className={`p-1 rounded-md hover:bg-theme-secondary transition-colors ${currentPage >= totalPages - 1 ? 'opacity-30 cursor-not-allowed' : ''}`}
                   >
                     <ChevronLeft className="w-3.5 h-3.5" />
                   </button>
@@ -275,7 +275,7 @@ export function InterfacePreviewBlock({ interfaceId, onError, onDelete }: Interf
                   <button
                     onClick={handleNewer}
                     disabled={currentPage === 0}
-                    className={`p-1 rounded-full hover:bg-theme-secondary transition-colors ${currentPage === 0 ? 'opacity-30 cursor-not-allowed' : ''}`}
+                    className={`p-1 rounded-md hover:bg-theme-secondary transition-colors ${currentPage === 0 ? 'opacity-30 cursor-not-allowed' : ''}`}
                   >
                     <ChevronRight className="w-3.5 h-3.5" />
                   </button>

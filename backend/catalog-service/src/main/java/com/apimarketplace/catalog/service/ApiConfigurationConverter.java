@@ -225,6 +225,17 @@ public class ApiConfigurationConverter {
                 toolData.put("requiredScopes", tool.requiredScopes());
             }
 
+            // V428: the generation descriptor, forwarded exactly like the scopes
+            // above so ApiSubmissionOrchestrator persists it onto
+            // api_tools.generation_spec. This map is rebuilt field by field, so
+            // a field that is not copied here is simply gone by the time the
+            // orchestrator reads it: the endpoint then stores no descriptor, the
+            // generation surface never sees it, and every billing guard that
+            // asks "is this a generation" answers no.
+            if (tool.generationSpec() != null && !tool.generationSpec().isNull()) {
+                toolData.put("generationSpec", tool.generationSpec());
+            }
+
             tools.add(toolData);
         }
         return tools;

@@ -1,0 +1,336 @@
+package com.apimarketplace.catalog.web;
+
+import com.apimarketplace.agent.tools.ToolsProvider.ToolExecutionContext;
+import com.apimarketplace.agent.tools.ToolsProvider.ToolExecutionResult;
+import com.apimarketplace.catalog.service.generation.GenerationRegistry;
+import com.apimarketplace.catalog.tools.CatalogExecuteModule;
+import com.apimarketplace.catalog.service.generation.GenerationSpec;
+import com.apimarketplace.catalog.tools.generation.GenerationModule;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
+import org.springframework.http.ResponseEntity;
+import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.RequestBody;
+import org.springframework.web.bind.annotation.RequestHeader;
+import org.springframework.web.bind.annotation.RequestParam;
+import org.springframework.web.bind.annotation.RestController;
+
+import java.math.BigDecimal;
+import java.util.ArrayList;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.Optional;
+import java.util.TreeSet;
+
+/**
+ * HTTP face of the generation surface, for the two callers that are not agents:
+ * the workflow builder (which has to show a model list and a price before the
+ * user runs anything) and the {@code core:generate} node in orchestrator-service
+ * (which has to actually run one).
+ *
+ * <p><b>Why the node goes through HTTP instead of calling the catalog tool by
+ * slug.</b> Running a generation is four steps, not one: resolve a public model
+ * id to an endpoint, project the unified parameters onto that provider's request
+ * shape, execute with the right credential and billing, then make the returned
+ * asset durable. Only the third step is a catalog tool call. If orchestrator
+ * reached {@code /catalog/v1/tools/{slug}/execute} directly it would have to own
+ * the other three, which means a second copy of {@link GenerationRegistry} and
+ * {@link com.apimarketplace.catalog.service.generation.GenerationRequestBuilder}
+ * living in a service that cannot read {@code catalog.api_tools} at all. Worse,
+ * it would have to compute the billable quantity itself and send it, and a
+ * quantity that travels from a caller is a quantity a caller can set to zero.
+ *
+ * <p>So the node posts a model id and unified parameters, and this endpoint hands
+ * them to {@link GenerationModule} unchanged. The quantity stays derived on this
+ * side, from parameters already validated here, exactly as it is for the chat
+ * tool. There is one generation implementation and both surfaces call it.
+ */
+@Slf4j
+@RestController
+@ConditionalOnProperty(name = "generation.enabled", havingValue = "true", matchIfMissing = false)
+public class GenerationController {
+
+    private final GenerationRegistry registry;
+    private final GenerationModule module;
+
+    public GenerationController(GenerationRegistry registry, GenerationModule module) {
+        this.registry = registry;
+        this.module = module;
+    }
+
+    /**
+     * Model catalog for the workflow builder's inspector.
+     *
+     * <p>Deliberately a different projection from the agent's
+     * {@code generation(action='models')}: the inspector additionally needs
+     * {@code apiToolId} and {@code integrationName}, which are what the platform
+     * price quote is keyed on. The agent never sees those because it has no
+     * quote endpoint to call them against.
+     */
+    @GetMapping("/api/generation/models")
+    public ResponseEntity<Map<String, Object>> models(
+            @RequestParam(value = "kind", required = false) String kind) {
+        List<Map<String, Object>> rows = new ArrayList<>();
+        for (GenerationRegistry.GenerationModel m : registry.list(kind)) {
+            rows.add(describeModel(m));
+        }
+        Map<String, Object> out = new LinkedHashMap<>();
+        out.put("models", rows);
+        out.put("count", rows.size());
+        out.put("kinds", registry.kinds());
+        return ResponseEntity.ok(out);
+    }
+
+    /**
+     * Run one generation on behalf of a workflow node.
+     *
+     * <p>Body: {@code {model, params:{...unified params...}, credential_source,
+     * credential_id}}.
+     * The billing scope headers are the same ones {@code CatalogToolsGateway}
+     * already sends for an ordinary workflow tool call, so the credit debit lands
+     * on the run rather than on nothing.
+     */
+    @PostMapping("/api/internal/catalog/generation/execute")
+    public ResponseEntity<Map<String, Object>> execute(
+            @RequestBody(required = false) Map<String, Object> body,
+            @RequestHeader(value = "X-User-ID", required = false) String userId,
+            @RequestHeader(value = "X-Organization-ID", required = false) String orgId,
+            @RequestHeader(value = "X-Lc-Billing-Scope-Kind", required = false) String scopeKind,
+            @RequestHeader(value = "X-Lc-Billing-Scope-Id", required = false) String scopeId,
+            @RequestHeader(value = "X-Lc-Billing-Step-Id", required = false) String stepId) {
+
+        Map<String, Object> parameters = body == null ? Map.of() : body;
+
+        // The billing scope travels in the SAME shape CatalogExecuteModule
+        // already reads it in, so the credit debit is scoped identically whether
+        // a generation was started from the chat or from a workflow node.
+        Map<String, Object> credentials = new LinkedHashMap<>();
+        if (scopeId != null && !scopeId.isBlank()) {
+            if ("STREAM".equalsIgnoreCase(scopeKind)) {
+                credentials.put("__streamId__", scopeId);
+            } else {
+                credentials.put("__workflowRunId__", scopeId);
+            }
+        }
+        if (stepId != null && !stepId.isBlank()) {
+            credentials.put("__nodeId__", stepId);
+        }
+        putPinnedCredential(credentials, parameters);
+
+        ToolExecutionContext context = new ToolExecutionContext(
+                userId, credentials, Map.of(), java.util.Set.of(), null, null, orgId, null);
+
+        Optional<ToolExecutionResult> result = module.execute("create", parameters, userId, context);
+        if (result.isEmpty()) {
+            return ResponseEntity.ok(Map.of(
+                    "success", false,
+                    "error", "Generation dispatch failed"));
+        }
+        ToolExecutionResult r = result.get();
+        Map<String, Object> out = new LinkedHashMap<>();
+        out.put("success", r.success());
+        if (r.success()) {
+            out.put("data", r.data());
+        } else {
+            out.put("error", r.error());
+            if (r.errorCode() != null) {
+                out.put("errorCode", r.errorCode().name());
+            }
+            // A FAILED generation can still carry data, and dropping it here is
+            // how a paid asset went missing: billing commits before the asset is
+            // fetched, so a transient fetch failure comes back with the
+            // provider's own (short-lived) link under asset_url. The caller has
+            // already been charged; it needs that link, not only a sentence.
+            if (r.data() != null) {
+                out.put("data", r.data());
+            }
+        }
+        return ResponseEntity.ok(out);
+    }
+
+    /**
+     * Run a generation the USER asked for directly, from the app.
+     *
+     * <p>Body: {@code {model, params:{...unified params...}, credential_source,
+     * credential_id}}.
+     * Same shape as the internal endpoint above and the same module underneath,
+     * so a generation started from a button is priced, reserved and committed
+     * exactly like one started by an agent or a workflow node.
+     *
+     * <p>The billing scope is minted HERE, server side, and never read from the
+     * request. A generation that carries no scope is refused on purpose,
+     * because a charge nobody can trace back is worse than a refusal; but that
+     * rule exists to stop an UNTRACEABLE charge, not to ban a person from
+     * buying something. A direct action by an authenticated user is traceable:
+     * this endpoint gives it its own scope so the ledger row has an owner and a
+     * reference, and a client that tried to supply one would be choosing where
+     * its own charge lands. The gateway strips those headers on the way in for
+     * the same reason.
+     */
+    @PostMapping("/api/generation/execute")
+    public ResponseEntity<Map<String, Object>> executeForUser(
+            @RequestBody(required = false) Map<String, Object> body,
+            @RequestHeader(value = "X-User-ID", required = false) String userId,
+            @RequestHeader(value = "X-Organization-ID", required = false) String orgId) {
+
+        if (userId == null || userId.isBlank()) {
+            return ResponseEntity.status(401).body(Map.of(
+                    "success", false,
+                    "error", "Sign in to run a generation."));
+        }
+
+        Map<String, Object> credentials = new LinkedHashMap<>();
+        // One scope per request, minted here. It is a STREAM scope because this
+        // is an interactive call with no workflow run behind it, which is the
+        // same shape a chat generation already bills under.
+        credentials.put("__streamId__", "ui-" + java.util.UUID.randomUUID());
+        putPinnedCredential(credentials, body);
+
+        ToolExecutionContext context = new ToolExecutionContext(
+                userId, credentials, Map.of(), java.util.Set.of(), null, null, orgId, null);
+
+        Optional<ToolExecutionResult> result =
+                module.execute("create", body == null ? Map.of() : body, userId, context);
+        if (result.isEmpty()) {
+            return ResponseEntity.ok(Map.of("success", false, "error", "Generation dispatch failed"));
+        }
+        ToolExecutionResult r = result.get();
+        Map<String, Object> out = new LinkedHashMap<>();
+        out.put("success", r.success());
+        if (r.success()) {
+            out.put("data", r.data());
+        } else {
+            out.put("error", r.error());
+            if (r.errorCode() != null) {
+                out.put("errorCode", r.errorCode().name());
+            }
+            // A FAILED generation can still carry data, and dropping it here is
+            // how a paid asset went missing: billing commits before the asset is
+            // fetched, so a transient fetch failure comes back with the
+            // provider's own (short-lived) link under asset_url. The caller has
+            // already been charged; it needs that link, not only a sentence.
+            if (r.data() != null) {
+                out.put("data", r.data());
+            }
+        }
+        return ResponseEntity.ok(out);
+    }
+
+    /**
+     * Lift the caller's pinned key out of the request body and onto the
+     * execution context.
+     *
+     * <p>Both callers of this are surfaces that KNOW the account's credentials:
+     * the app dialog, whose picker only ever offers keys of the chosen model's
+     * provider, and the {@code core:generate} node, whose id was chosen in the
+     * builder by the workflow's owner. Moving it here is what keeps it out of
+     * the parameter map an agent controls: the generation tool reads the same
+     * module, and an agent has no way to learn a credential id, so it must not
+     * be able to state one either.
+     *
+     * <p>A blank or absent value is simply not carried, which the executor
+     * reads as "run on the account's default key for the provider".
+     */
+    private static void putPinnedCredential(Map<String, Object> credentials, Map<String, Object> body) {
+        Object pinned = body == null ? null : body.get(CatalogExecuteModule.CREDENTIAL_ID_KEY);
+        if (pinned != null && !String.valueOf(pinned).isBlank()) {
+            credentials.put(CatalogExecuteModule.CREDENTIAL_ID_CONTEXT_KEY, pinned);
+        }
+    }
+
+    // ── projection ──────────────────────────────────────────────────────────
+
+    private static Map<String, Object> describeModel(GenerationRegistry.GenerationModel m) {
+        Map<String, Object> row = new LinkedHashMap<>();
+        row.put("model", m.modelId());
+        row.put("kind", m.kind());
+        row.put("label", m.label());
+        row.put("provider", m.apiName());
+        row.put("iconSlug", m.iconSlug());
+        // The two keys a price quote needs. The endpoint carries the published
+        // rate; the integration name is the platform credential the rate hangs off.
+        row.put("apiToolId", m.apiToolId() == null ? null : m.apiToolId().toString());
+        row.put("integrationName", m.platformCredentialName());
+        row.put("accepts", new TreeSet<>(m.model().capabilities()));
+        row.put("required", new TreeSet<>(m.model().required()));
+        // Which parameter the price multiplies, and what it becomes when the
+        // inspector leaves it empty. Without the second one the estimate has to
+        // fall silent on the most common state of the form (nothing typed yet),
+        // even though that call has a perfectly knowable price.
+        row.put("billedOn", m.model().measuringParam());
+        // What a call on this model is COUNTED in, which is not the same thing
+        // as what it is SOLD by: a model measured in seconds can be published
+        // per minute. A surface asking for a quote has to send this, or the
+        // quote cannot notice that a rate published per image can never price a
+        // call counted in seconds, and it would show an amount that every run
+        // is then refused for.
+        row.put("measuredUnit", m.model().platformUnit());
+        BigDecimal defaultQuantity = m.model().defaultMeasurement();
+        row.put("defaultQuantity", defaultQuantity == null ? null : defaultQuantity.toPlainString());
+
+        // The same shape the agent's action='models' reports, deliberately: two
+        // surfaces describing one model differently is how a builder shows a
+        // limit the tool does not enforce, or hides one it does.
+        Map<String, Object> limits = new LinkedHashMap<>();
+        m.model().constraints().forEach((param, c) -> {
+            Map<String, Object> lim = new LinkedHashMap<>();
+            if (!c.allowed().isEmpty()) lim.put("allowed", c.allowed());
+            if (c.min() != null) lim.put("min", c.min());
+            if (c.max() != null) lim.put("max", c.max());
+            if (c.maxLength() != null) lim.put("maxLength", c.maxLength());
+            // An empty entry claims a restriction and names none.
+            if (!lim.isEmpty()) limits.put(param, lim);
+        });
+        row.put("limits", limits);
+
+            // What each FILE this model takes actually IS, and how many of them.
+            // The slot name alone ("input_image") says an image goes here; it
+            // does not say whether the image comes back changed, becomes the
+            // first frame of a clip, or only lends its style. A surface cannot
+            // label the field without that, and labelling it wrong costs a paid
+            // call.
+            Map<String, Object> inputs = new LinkedHashMap<>();
+            m.model().capabilities().stream()
+                    .filter(GenerationSpec.ASSET_PARAMS::contains)
+                    .forEach(param -> {
+                        GenerationSpec.ParamBinding binding = m.spec().paramMap().get(param);
+                        if (binding == null || binding.role() == null) return;
+                        Map<String, Object> shape = new LinkedHashMap<>();
+                        shape.put("role", binding.role().wire());
+                        shape.put("maxItems", binding.maxItems());
+                        inputs.put(param, shape);
+                    });
+            if (!inputs.isEmpty()) row.put("inputs", inputs);
+        row.put("price", describePrice(m.seedPrice()));
+        row.put("async", m.isAsync());
+        return row;
+    }
+
+    /**
+     * The seed price, as components rather than a formula, so the inspector can
+     * say "60 credits per second" instead of only stating a total. This is the
+     * STARTING rate; the number actually charged comes from the platform quote,
+     * which an admin can have overridden.
+     */
+    private static Map<String, Object> describePrice(GenerationSpec.Price price) {
+        Map<String, Object> out = new LinkedHashMap<>();
+        if (price == null) {
+            out.put("unit", "call");
+            out.put("baseCredits", BigDecimal.ZERO.toPlainString());
+            out.put("unitCredits", BigDecimal.ZERO.toPlainString());
+            return out;
+        }
+        out.put("unit", price.unit());
+        out.put("baseCredits", plain(price.base()));
+        out.put("unitCredits", plain(price.perUnit()));
+        if (price.min() != null) out.put("minCredits", plain(price.min()));
+        if (price.max() != null) out.put("maxCredits", plain(price.max()));
+        return out;
+    }
+
+    private static String plain(BigDecimal value) {
+        return value == null ? "0" : value.toPlainString();
+    }
+}

@@ -119,7 +119,13 @@ public class CloudCatalogRelayController {
             @RequestHeader(value = "X-User-ID", required = false) Long cloudUserId,
             @RequestHeader(INSTALL_HEADER) String installId,
             @PathVariable String integrationName,
-            @RequestParam(value = "apiToolId", required = false) UUID apiToolId) {
+            @RequestParam(value = "apiToolId", required = false) UUID apiToolId,
+            // V428: a generation is priced per model and per call size. Without
+            // these the probe can only resolve an endpoint-wide row, which a
+            // seeded generation never has, so it answered "not sold" for a
+            // model the relay then executed and charged.
+            @RequestParam(value = "modelId", required = false) String modelId,
+            @RequestParam(value = "quantity", required = false) java.math.BigDecimal quantity) {
         ResponseEntity<Map<String, Object>> authFailure = authorize(cloudUserId, installId);
         if (authFailure != null) {
             return authFailure;
@@ -134,7 +140,8 @@ public class CloudCatalogRelayController {
         }
         CeLinkEntitlementsResult entitlements =
                 authClient.ceLinkEntitlements(String.valueOf(cloudUserId), installId);
-        CeCatalogRelayService.PlatformInfo info = relayService.platformInfo(integrationName, apiToolId);
+        CeCatalogRelayService.PlatformInfo info =
+                relayService.platformInfo(integrationName, apiToolId, modelId, quantity);
         log.info("CE catalog relay platform-info cloudUser={} install={} integration={} available={} relayEligible={} subscriptionActive={}",
                 cloudUserId, installId, integrationName, info.available(), info.relayEligible(),
                 entitlements.hasSubscription());

@@ -86,6 +86,10 @@ beforeEach(() => {
   mockObjectUrl = { url: 'blob:media', loading: false, error: false };
   useAuthedObjectUrlMock.mockClear();
   openFilesPanelMock.mockClear();
+  // expandAll now records a standing preference, so a case that calls it leaves
+  // that choice behind for the next one exactly as it would for the next visit.
+  // Without this, a later case opens on a canvas that is already expanded.
+  window.localStorage.clear();
 });
 
 describe('FileResultStrip v2 - collapsed pill', () => {
@@ -344,7 +348,7 @@ describe('FileResultStrip v4 - canvas-wide expand/collapse (toolbar toggle-all)'
     expect(sink.current?.expandedCount).toBe(0);
   });
 
-  it('unregisters when it leaves the canvas so the toolbar control disappears with the last strip', () => {
+  it('survives ReactFlow virtualization: a strip scrolled off-canvas and back is still expanded', () => {
     const sink: { current: FileStripExpansionContextValue | null } = { current: null };
     const tree = (files: ReturnType<typeof makeFile>[]) => (
       <FileStripExpansionProvider>
@@ -352,13 +356,17 @@ describe('FileResultStrip v4 - canvas-wide expand/collapse (toolbar toggle-all)'
         {files.map((f) => <FileResultStrip key={f.id} file={f} />)}
       </FileStripExpansionProvider>
     );
-    const { rerender } = render(tree([imageFile, videoFile]));
-    expect(sink.current?.stripCount).toBe(2);
+    const { rerender, container } = render(tree([imageFile, videoFile]));
+    act(() => { sink.current?.expandAll(); });
+    expect(container.querySelectorAll('[data-testid="file-preview-card"]').length).toBe(2);
 
-    // A rerun puts the nodes back to "running": their strips unmount.
-    rerender(tree([]));
+    // The canvas mounts nodes only while they are in the viewport, so panning
+    // unmounts them. Pre-fix this pruned their expanded flag and the previews
+    // came back folded.
+    rerender(tree([videoFile]));
+    rerender(tree([imageFile, videoFile]));
 
-    expect(sink.current?.stripCount).toBe(0);
+    expect(container.querySelectorAll('[data-testid="file-preview-card"]').length).toBe(2);
   });
 
   it('expandAll unfolds EVERY strip into a real preview card in one go', () => {

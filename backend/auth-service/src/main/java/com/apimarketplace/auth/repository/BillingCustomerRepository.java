@@ -25,4 +25,17 @@ public interface BillingCustomerRepository extends JpaRepository<BillingCustomer
      * Verifie si un utilisateur a deja un client de facturation
      */
     boolean existsByUserId(Long userId);
+
+    /**
+     * PESSIMISTIC_WRITE on a user's billing-customer row, used to serialise
+     * subscription provisioning for that user.
+     *
+     * <p>There is exactly one billing_customer per user (unique index on {@code user_id}),
+     * so locking it is a per-user mutex that works ACROSS pods - which matters, because
+     * the duplicate-subscription race this exists to close is driven by concurrent
+     * {@code resolveUser} calls that can land on different auth replicas.
+     */
+    @org.springframework.data.jpa.repository.Lock(jakarta.persistence.LockModeType.PESSIMISTIC_WRITE)
+    @Query("SELECT bc FROM BillingCustomer bc WHERE bc.user.id = :userId")
+    Optional<BillingCustomer> findByUserIdForUpdate(@Param("userId") Long userId);
 }

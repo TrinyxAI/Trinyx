@@ -150,7 +150,7 @@ class StateReconstructorHelperTest {
             when(entity.getStatus()).thenReturn(RunStatus.PAUSED);
 
             assertEquals(RunStatus.PAUSED,
-                helper.determineOverallStatus(entity, Set.of(), Set.of(), Set.of(), mock(WorkflowPlan.class)));
+                helper.determineOverallStatus(entity, Set.of(), Set.of(), Set.of(), Set.of(), mock(WorkflowPlan.class)));
         }
 
         @Test
@@ -160,7 +160,7 @@ class StateReconstructorHelperTest {
             when(entity.getStatus()).thenReturn(RunStatus.WAITING_TRIGGER);
 
             assertEquals(RunStatus.WAITING_TRIGGER,
-                helper.determineOverallStatus(entity, Set.of(), Set.of(), Set.of(), mock(WorkflowPlan.class)));
+                helper.determineOverallStatus(entity, Set.of(), Set.of(), Set.of(), Set.of(), mock(WorkflowPlan.class)));
         }
 
         @Test
@@ -170,7 +170,7 @@ class StateReconstructorHelperTest {
             when(entity.getStatus()).thenReturn(RunStatus.CANCELLED);
 
             assertEquals(RunStatus.CANCELLED,
-                helper.determineOverallStatus(entity, Set.of(), Set.of(), Set.of(), mock(WorkflowPlan.class)));
+                helper.determineOverallStatus(entity, Set.of(), Set.of(), Set.of(), Set.of(), mock(WorkflowPlan.class)));
         }
 
         @Test
@@ -180,7 +180,7 @@ class StateReconstructorHelperTest {
             when(entity.getStatus()).thenReturn(RunStatus.COMPLETED);
 
             assertEquals(RunStatus.COMPLETED,
-                helper.determineOverallStatus(entity, Set.of(), Set.of(), Set.of(), mock(WorkflowPlan.class)));
+                helper.determineOverallStatus(entity, Set.of(), Set.of(), Set.of(), Set.of(), mock(WorkflowPlan.class)));
         }
 
         @Test
@@ -190,7 +190,109 @@ class StateReconstructorHelperTest {
             when(entity.getStatus()).thenReturn(RunStatus.RUNNING);
 
             assertEquals(RunStatus.RUNNING,
-                helper.determineOverallStatus(entity, Set.of(), Set.of(), Set.of("mcp:next"), mock(WorkflowPlan.class)));
+                helper.determineOverallStatus(entity, Set.of(), Set.of(), Set.of(), Set.of("mcp:next"), mock(WorkflowPlan.class)));
+        }
+
+        // The five cases above only exercise the early-return ladder. The DERIVED branch,
+        // which is where the defect lived, had zero coverage, which is why nothing caught it.
+        // A bare mock(WorkflowPlan.class) returns an empty set from getAllStepIds() under
+        // Mockito's default answer, and containsAll(emptySet) is trivially true, so every test
+        // below stubs the plan explicitly. A future test that forgets to would silently pass.
+
+        private WorkflowPlan planWith(String... stepIds) {
+            WorkflowPlan plan = mock(WorkflowPlan.class);
+            when(plan.getAllStepIds()).thenReturn(new java.util.LinkedHashSet<>(java.util.Arrays.asList(stepIds)));
+            return plan;
+        }
+
+        @Test
+        @DisplayName("A core node that has not run keeps the run out of COMPLETED")
+        void coreNodeMustSettleBeforeCompleted() {
+            // The defect, in its smallest form: plan = one trigger + one core node. The old
+            // code counted only mcps + triggers, so allStepIds was {trigger:start}, size 1,
+            // and completed={trigger:start} satisfied "completed + failed >= 1". The run was
+            // reported COMPLETED while core:stamp had not executed.
+            WorkflowRunEntity entity = mock(WorkflowRunEntity.class);
+            when(entity.getStatus()).thenReturn(RunStatus.RUNNING);
+
+            assertEquals(RunStatus.RUNNING,
+                helper.determineOverallStatus(entity,
+                    Set.of("trigger:start"), Set.of(), Set.of(), Set.of(),
+                    planWith("trigger:start", "core:stamp")),
+                "a plan node that has not settled must not be absorbed by a cardinality threshold");
+        }
+
+        @Test
+        @DisplayName("A run parked on an approval is not COMPLETED")
+        void awaitingSignalIsNotCompleted() {
+            // The user-visible half. A node parked on a blocking signal is removed from the
+            // ready set (EpochState.markNodeAwaitingSignal) and no code writes AWAITING_SIGNAL
+            // to workflow_runs, so ready is empty and dbStatus is RUNNING. Pre-fix this
+            // rendered COMPLETED while a human was still being asked to approve.
+            WorkflowRunEntity entity = mock(WorkflowRunEntity.class);
+            when(entity.getStatus()).thenReturn(RunStatus.RUNNING);
+
+            assertEquals(RunStatus.RUNNING,
+                helper.determineOverallStatus(entity,
+                    Set.of("trigger:start"), Set.of(), Set.of(), Set.of(),
+                    planWith("trigger:start", "core:approve")));
+        }
+
+        @Test
+        @DisplayName("A skipped branch still lets the run reach COMPLETED")
+        void skippedBranchStillCompletes() {
+            // The direction this change could have taken something away. Decision, switch,
+            // loop-exit and fork plans settle their untaken branch as SKIPPED, never as
+            // completed or failed, so skipped has to count or the derived verdict becomes
+            // unreachable for that whole family.
+            WorkflowRunEntity entity = mock(WorkflowRunEntity.class);
+            when(entity.getStatus()).thenReturn(RunStatus.RUNNING);
+
+            assertEquals(RunStatus.COMPLETED,
+                helper.determineOverallStatus(entity,
+                    Set.of("trigger:start", "core:decide", "mcp:taken"), Set.of(), Set.of("mcp:untaken"), Set.of(),
+                    planWith("trigger:start", "core:decide", "mcp:taken", "mcp:untaken")));
+        }
+
+        @Test
+        @DisplayName("Ids the plan does not contain cannot satisfy completion")
+        void foreignIdsCannotSatisfyCompletion() {
+            // Why containment rather than a corrected count. The settled sets come from the
+            // snapshot's flat views and legitimately carry ids absent from the plan, notably
+            // interface: nodes. Under a >= comparison those inflate the left-hand side and can
+            // satisfy the threshold on their own; under containment they are simply ignored.
+            WorkflowRunEntity entity = mock(WorkflowRunEntity.class);
+            when(entity.getStatus()).thenReturn(RunStatus.RUNNING);
+
+            assertEquals(RunStatus.RUNNING,
+                helper.determineOverallStatus(entity,
+                    Set.of("interface:page_a", "interface:page_b"), Set.of(), Set.of(), Set.of(),
+                    planWith("trigger:start", "core:stamp")),
+                "two foreign ids must not stand in for two unsettled plan nodes");
+        }
+
+        @Test
+        @DisplayName("Every plan node settled still yields COMPLETED")
+        void allSettledCompletes() {
+            WorkflowRunEntity entity = mock(WorkflowRunEntity.class);
+            when(entity.getStatus()).thenReturn(RunStatus.RUNNING);
+
+            assertEquals(RunStatus.COMPLETED,
+                helper.determineOverallStatus(entity,
+                    Set.of("trigger:start", "core:stamp"), Set.of(), Set.of(), Set.of(),
+                    planWith("trigger:start", "core:stamp")));
+        }
+
+        @Test
+        @DisplayName("A failed plan node yields FAILED once everything settled")
+        void failedNodeYieldsFailed() {
+            WorkflowRunEntity entity = mock(WorkflowRunEntity.class);
+            when(entity.getStatus()).thenReturn(RunStatus.RUNNING);
+
+            assertEquals(RunStatus.FAILED,
+                helper.determineOverallStatus(entity,
+                    Set.of("trigger:start"), Set.of("core:stamp"), Set.of(), Set.of(),
+                    planWith("trigger:start", "core:stamp")));
         }
     }
 

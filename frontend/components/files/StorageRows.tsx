@@ -105,7 +105,7 @@ export const StorageEntryRow = React.memo(function StorageEntryRow({
             {entry.formattedSize}
           </span>
           {entry.sourceType && (
-            <span className={`text-[10px] leading-tight px-1.5 py-0.5 rounded-full font-medium flex-shrink-0 ${STORAGE_SOURCE_STYLES[entry.sourceType] ?? 'bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-400'}`}>
+            <span className={`text-[10px] leading-tight px-1.5 py-0.5 rounded-md font-medium flex-shrink-0 ${STORAGE_SOURCE_STYLES[entry.sourceType] ?? 'bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-400'}`}>
               {STORAGE_SOURCE_LABELS[entry.sourceType] ?? entry.sourceType}
             </span>
           )}

@@ -17,7 +17,7 @@ public enum ToolCategory {
     UTILITY("utility", "Utility tools", "File operations, data transformation, and other utilities"),
     APPLICATION("application", "Application management tools", "Browse, acquire, and display marketplace applications"),
     WEB_SEARCH("websearch", "Web search and fetching tools", "Search the web and extract content from pages"),
-    IMAGE_GENERATION("imagegeneration", "Image generation tools", "Generate images from text prompts via OpenAI gpt-image-1.5/mini or Google Gemini 2.5 Flash Image / 3 Pro Image");
+    GENERATION("generation", "Generation tools", "Generate an asset of any kind (image, video, audio, voice, music) from a prompt, priced per model");
 
     private final String slug;
     private final String displayName;

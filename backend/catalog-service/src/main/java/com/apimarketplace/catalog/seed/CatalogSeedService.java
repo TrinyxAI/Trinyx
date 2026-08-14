@@ -18,6 +18,7 @@ import io.swagger.v3.parser.core.models.ParseOptions;
 import io.swagger.v3.parser.core.models.SwaggerParseResult;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.boot.context.event.ApplicationReadyEvent;
 import org.springframework.context.event.EventListener;
@@ -52,31 +53,52 @@ public class CatalogSeedService {
     private final ObjectMapper objectMapper;
     private final CatalogDataBootstrapService dataBootstrapService;
     private final StructureSkeletonService structureSkeletonService;
+    /**
+     * Present only on a self-hosted install (the bean is gated on
+     * {@code catalog.generation.seed.enabled}); the cloud gets its generation
+     * descriptors and prices from the importer instead.
+     */
+    private final ObjectProvider<GenerationSeedBootstrap> generationSeed;
 
     @EventListener(ApplicationReadyEvent.class)
     public void onApplicationReady() {
-        Thread.ofVirtual().name("catalog-seed-import").start(() -> {
-            try {
-                // First: load SQL dump if catalog is empty (bulk import of 500+ APIs)
-                dataBootstrapService.bootstrapIfNeeded();
+        Thread.ofVirtual().name("catalog-seed-import").start(this::runSeedPipeline);
+    }
 
-                // Then: process YAML-based seeds (can override/augment)
-                SeedImportResult result = importAll();
-                log.info("Catalog seed import complete: imported={}, skipped={}, failed={}, userModified={}",
-                        result.imported(), result.skipped(), result.failed(), result.userModified());
-                if (!result.errors().isEmpty()) {
-                    result.errors().forEach(err -> log.warn("Seed import error: {}", err));
-                }
+    /**
+     * The whole boot-time seed, in order, on one thread. Package-private and
+     * separate from the listener so the order itself is testable: every step
+     * below depends on the rows the step before it wrote.
+     */
+    void runSeedPipeline() {
+        try {
+            // First: load SQL dump if catalog is empty (bulk import of 500+ APIs)
+            dataBootstrapService.bootstrapIfNeeded();
 
-                // Generate structure_skeleton for any tool_responses missing it
-                int skeletonCount = structureSkeletonService.runMigrationBatch(1000);
-                if (skeletonCount > 0) {
-                    log.info("Generated structure_skeleton for {} tool responses", skeletonCount);
-                }
-            } catch (Exception e) {
-                log.error("Catalog seed import failed: {}", e.getMessage(), e);
+            // Then: process YAML-based seeds (can override/augment)
+            SeedImportResult result = importAll();
+            log.info("Catalog seed import complete: imported={}, skipped={}, failed={}, userModified={}",
+                    result.imported(), result.skipped(), result.failed(), result.userModified());
+            if (!result.errors().isEmpty()) {
+                result.errors().forEach(err -> log.warn("Seed import error: {}", err));
             }
-        });
+
+            // Generate structure_skeleton for any tool_responses missing it
+            int skeletonCount = structureSkeletonService.runMigrationBatch(1000);
+            if (skeletonCount > 0) {
+                log.info("Generated structure_skeleton for {} tool responses", skeletonCount);
+            }
+
+            // Finally: the generation descriptors + their starting prices.
+            // Called from HERE, not from its own ApplicationReadyEvent listener,
+            // because the dump above loads on this same thread: a listener would
+            // race it, find no api_tools rows to attach a descriptor to, and
+            // still burn its version marker - leaving the install with no
+            // generation models until the next release bumps that version.
+            generationSeed.ifAvailable(GenerationSeedBootstrap::seedOnStartup);
+        } catch (Exception e) {
+            log.error("Catalog seed import failed: {}", e.getMessage(), e);
+        }
     }
 
     public SeedImportResult importAll() {

@@ -249,16 +249,27 @@ public class ApiService {
         // and fails for custom auth types (e.g. Telegram bot_token_in_url stores "token").
         String explicitSource = com.apimarketplace.catalog.service.http.CredentialModeContext.getExplicitSource();
         Long selectedCredentialId = com.apimarketplace.catalog.service.http.CredentialModeContext.getSelectedCredentialId();
-        // When a plan pins a specific user credential (selectedCredentialId) we accept
-        // EITHER that exact credential OR - when it has been deleted/reconnected - the
-        // user's default credential for this integration. This "take pinned, else
-        // default" mirrors HttpExecutionService's resolution so a pinned plan whose
-        // credential was removed still runs (instead of failing credentials_required).
-        boolean hasUserCredentials = userId != null && userCredentialService != null &&
-                ("user".equals(explicitSource) && selectedCredentialId != null
-                        ? (!userCredentialService.getCredentialDataMapById(userId, selectedCredentialId).isEmpty()
-                                || !userCredentialService.getCredentialDataMap(userId, credReq.credentialName()).isEmpty())
-                        : !userCredentialService.getCredentialDataMap(userId, credReq.credentialName()).isEmpty());
+        // "Will the executor find a key to run this on?" - and it has to be the
+        // SAME question the executor answers, or this refuses calls that would
+        // have worked.
+        //
+        // It briefly asked only about the integration's default key, on the
+        // reasoning that the executor validates a pinned credential anyway. The
+        // two do not match a credential the same way: this lookup compares
+        // names EXACTLY, while the executor's scope check compares canonical
+        // slugs, so a credential whose integration is 'stability-ai' against a
+        // requirement of 'stabilityai' was pinned, resolvable, and refused here
+        // before the executor ever saw it. That is a live refusal on every
+        // workflow step and every generation, not a theoretical one.
+        //
+        // So the pinned credential counts again. Accepting one that turns out
+        // to belong to a different provider is not a way in: the executor
+        // refuses it there and falls back to the integration's default, which
+        // is what this line's other half is asking about.
+        boolean hasUserCredentials = userId != null && userCredentialService != null
+                && (!userCredentialService.getCredentialDataMap(userId, credReq.credentialName()).isEmpty()
+                    || ("user".equals(explicitSource) && selectedCredentialId != null
+                        && !userCredentialService.getCredentialDataMapById(userId, selectedCredentialId).isEmpty()));
         boolean hasPlatformCredentials = platformCredName != null && userCredentialService != null &&
                 userCredentialService.getAccessToken(PLATFORM_TENANT_ID, platformCredName).isPresent();
 

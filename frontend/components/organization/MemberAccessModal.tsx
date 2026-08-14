@@ -360,7 +360,7 @@ export default function MemberAccessModal({ orgId, member, onClose }: MemberAcce
         {/* Header */}
         <div className="p-6">
           <div className="flex flex-col items-center text-center">
-            <div className="w-16 h-16 bg-theme-secondary rounded-full flex items-center justify-center mb-4">
+            <div className="w-16 h-16 bg-theme-secondary rounded-2xl flex items-center justify-center mb-4">
               <Shield className="h-7 w-7 text-theme-primary" />
             </div>
             <h2 className="text-2xl font-semibold text-theme-primary">
@@ -427,7 +427,7 @@ export default function MemberAccessModal({ orgId, member, onClose }: MemberAcce
                       <span className="text-xs text-theme-secondary">({resources[type].length})</span>
                     </div>
                     {restrictedCount > 0 ? (
-                      <span className="text-xs px-2 py-0.5 bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-400 rounded-full">
+                      <span className="text-xs px-2 py-0.5 bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-400 rounded-md">
                         {t("organization.restrictionCount", { count: restrictedCount })}
                       </span>
                     ) : (

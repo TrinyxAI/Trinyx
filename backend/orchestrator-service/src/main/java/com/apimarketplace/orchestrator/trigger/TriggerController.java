@@ -6,7 +6,7 @@ import com.apimarketplace.orchestrator.domain.workflow.RunStatus;
 import com.apimarketplace.orchestrator.domain.workflow.Trigger;
 import com.apimarketplace.orchestrator.domain.workflow.WorkflowPlan;
 import com.apimarketplace.orchestrator.repository.WorkflowRunRepository;
-import com.apimarketplace.common.credit.CreditConsumptionClient;
+import com.apimarketplace.orchestrator.services.credit.CreditExhaustion;
 import com.apimarketplace.orchestrator.services.resume.WorkflowResumeService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -39,16 +39,13 @@ public class TriggerController {
     private final WorkflowRunRepository runRepository;
     private final ReusableTriggerService triggerService;
     private final WorkflowResumeService resumeService;
-    private final CreditConsumptionClient creditClient;
 
     public TriggerController(WorkflowRunRepository runRepository,
                             ReusableTriggerService triggerService,
-                            WorkflowResumeService resumeService,
-                            CreditConsumptionClient creditClient) {
+                            WorkflowResumeService resumeService) {
         this.runRepository = runRepository;
         this.triggerService = triggerService;
         this.resumeService = resumeService;
-        this.creditClient = creditClient;
     }
 
     /**
@@ -288,14 +285,10 @@ public class TriggerController {
             return scopeError;
         }
 
-        // 1b. Credit check before trigger execution
-        if (!creditClient.checkCredits(run.getTenantId())) {
-            logger.warn("[TriggerController] Insufficient credits for user {}, blocking specific trigger for run {}",
-                    run.getTenantId(), runId);
-            return ResponseEntity.status(402).body(
-                TriggerResponse.error(runId, "Insufficient credits to execute trigger")
-            );
-        }
+        // 1b. No pre-execution credit gate. The fire proceeds so the trigger node
+        // records the out-of-credit failure and the downstream nodes are SKIPPED;
+        // a synchronous fire still answers 402 (see creditAwareFailure below) so the
+        // "Insufficient credits" modal keeps popping for the interactive caller.
 
         // 2. Check status - only non-terminal states accept trigger fires:
         //   - WAITING_TRIGGER: the proper between-cycle state. resetForNextCycle (line ~1289
@@ -408,9 +401,7 @@ public class TriggerController {
             } else {
                 logger.error("[TriggerController] Trigger {} execution failed for run {}: {}",
                             triggerId, runId, result.message());
-                return ResponseEntity.badRequest().body(
-                    TriggerResponse.error(runId, result.message())
-                );
+                return creditAwareFailure(runId, result.message());
             }
         } catch (Exception e) {
             logger.error("[TriggerController] Error executing trigger {} for run {}: {}",
@@ -419,6 +410,23 @@ public class TriggerController {
                 TriggerResponse.error(runId, "Internal error: " + e.getMessage())
             );
         }
+    }
+
+    /**
+     * Map a failed trigger fire to a response. A fire the credit gate refused
+     * answers 402 so the frontend keeps showing its "Insufficient credits" modal
+     * (it keys on the status code); every other failure stays 400 as before.
+     *
+     * <p>Only reachable for a SYNCHRONOUS fire. An AUTOMATIC-mode fire is dispatched
+     * to the worker pool and answered 202 before the trigger node runs, so its
+     * out-of-credit failure surfaces on the canvas through the run's node status
+     * instead of the HTTP status.
+     */
+    private ResponseEntity<TriggerResponse> creditAwareFailure(String runId, String message) {
+        if (CreditExhaustion.isCreditExhausted(message)) {
+            return ResponseEntity.status(402).body(TriggerResponse.error(runId, message));
+        }
+        return ResponseEntity.badRequest().body(TriggerResponse.error(runId, message));
     }
 
     /**
@@ -493,14 +501,7 @@ public class TriggerController {
             return scopeError;
         }
 
-        // 1b. Credit check before trigger execution
-        if (!creditClient.checkCredits(run.getTenantId())) {
-            logger.warn("[TriggerController] Insufficient credits for user {}, blocking trigger for run {}",
-                    run.getTenantId(), runId);
-            return ResponseEntity.status(402).body(
-                TriggerResponse.error(runId, "Insufficient credits to execute trigger")
-            );
-        }
+        // 1b. No pre-execution credit gate - see executeSpecificTrigger above.
 
         // 2. Check status - only non-terminal states accept trigger fires.
         // Mirrors the executeSpecificTrigger gate above: terminal runs (FAILED, COMPLETED,
@@ -576,9 +577,7 @@ public class TriggerController {
             } else {
                 logger.error("[TriggerController] {} trigger execution failed for run {}: {}",
                             triggerType, runId, result.message());
-                return ResponseEntity.badRequest().body(
-                    TriggerResponse.error(runId, result.message())
-                );
+                return creditAwareFailure(runId, result.message());
             }
         } catch (Exception e) {
             logger.error("[TriggerController] Error executing {} trigger for run {}: {}",

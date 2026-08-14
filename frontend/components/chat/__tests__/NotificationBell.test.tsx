@@ -423,6 +423,58 @@ describe('NotificationBell - tabs Inbox/Activity', () => {
     expect(screen.getByText('About to fire')).toBeTruthy();
   });
 
+  it('opening while the inbox is still loading stays on Inbox (no bounce to Activity)', () => {
+    // While the first fetch is in flight the hook reports items: [] / unreadCount: 0,
+    // which is indistinguishable from a genuinely empty inbox. Falling back then sent
+    // the user to Activity and hid rows that landed one tick later - the CE approval
+    // and org-invitation bell specs both failed exactly this way.
+    inboxMock.current = { ...inboxMock.current, items: [], unreadCount: 0, isLoading: true };
+    homeStatusMock.current = { ...homeStatusMock.current, unreadCount: 0, automations: [] };
+
+    const view = render(<NotificationBell />);
+    fireEvent.click(screen.getByRole('button', { name: 'title' }));
+
+    // Rows arrive a tick later; because we stayed on Inbox they are visible.
+    inboxMock.current = {
+      ...inboxMock.current,
+      isLoading: false,
+      unreadCount: 1,
+      items: [
+        {
+          subjectId: 'wf-late',
+          subjectName: 'Landed after the click',
+          subjectType: 'WORKFLOW' as const,
+          runIdPublic: 'run_late',
+          category: 'APPROVAL_PENDING' as const,
+          severity: 'warning' as const,
+          count: 1,
+          firstEventAt: '2026-05-08T08:00:00Z',
+          lastEventAt: '2026-05-08T09:00:00Z',
+          unread: true,
+        },
+      ] as NotificationItem[],
+    };
+    view.rerender(<NotificationBell />);
+
+    expect(screen.getByText('Landed after the click')).toBeTruthy();
+    expect(screen.queryByTestId('inbox-approval-open')).toBeTruthy();
+  });
+
+  it('opening a settled, genuinely empty inbox still falls back to Activity', () => {
+    // The fallback must survive the loading guard: an inbox that has ANSWERED with
+    // nothing should not open onto a blank tab.
+    inboxMock.current = { ...inboxMock.current, items: [], unreadCount: 0, isLoading: false };
+    homeStatusMock.current = { ...homeStatusMock.current, unreadCount: 0, automations: [] };
+
+    recentActivityMock.current = { ...recentActivityMock.current, items: [], peerScopeCount: 0 };
+
+    render(<NotificationBell />);
+    fireEvent.click(screen.getByRole('button', { name: 'title' }));
+
+    // Landing on Activity: its empty state, not the Inbox's.
+    expect(screen.getByText(/emptyFirstRun/)).toBeTruthy();
+  });
+
   it('Activity tab (Part 2) renders recent-edit rows when populated', () => {
     // Switch to the new Activity tab and verify the row from useRecentActivity
     // mock renders. Validates: 3rd tab is wired, RecentActivityList consumes

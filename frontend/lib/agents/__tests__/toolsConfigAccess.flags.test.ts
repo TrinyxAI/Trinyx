@@ -1,13 +1,13 @@
 import { describe, it, expect } from 'vitest';
-import { buildToolsConfigPayload, isImageGenerationEnabled } from '../toolsConfigAccess';
+import { buildToolsConfigPayload, isGenerationEnabled } from '../toolsConfigAccess';
 
 /**
- * Image generation is an opt-in agent flag persisted on toolsConfig.imageGeneration.
- * The reader mirrors the backend (opt-in, tolerates boolean + object shapes), and the
- * payload builder must emit BOTH true and false so the merge-on-update backend can be
- * switched off - the original `=== true` filter silently dropped the off state.
+ * Generation is an opt-in agent flag persisted on toolsConfig.generation. The reader
+ * mirrors the backend (opt-in, tolerates boolean + object shapes), and the payload
+ * builder must emit BOTH true and false so the merge-on-update backend can be switched
+ * off - the original `=== true` filter silently dropped the off state.
  */
-describe('toolsConfigAccess - imageGeneration / webSearch flags', () => {
+describe('toolsConfigAccess - generation / webSearch flags', () => {
   const base = {
     mode: 'all' as const,
     workflows: [],
@@ -17,39 +17,18 @@ describe('toolsConfigAccess - imageGeneration / webSearch flags', () => {
     applications: [],
   };
 
-  describe('isImageGenerationEnabled (opt-in, both shapes)', () => {
-    it('defaults to false when absent or toolsConfig is null', () => {
-      expect(isImageGenerationEnabled(null)).toBe(false);
-      expect(isImageGenerationEnabled(undefined)).toBe(false);
-      expect(isImageGenerationEnabled({})).toBe(false);
-    });
-
-    it('reads the boolean shape', () => {
-      expect(isImageGenerationEnabled({ imageGeneration: true })).toBe(true);
-      expect(isImageGenerationEnabled({ imageGeneration: false })).toBe(false);
-    });
-
-    it('reads the object shape and treats an object without `enabled` as enabled', () => {
-      expect(isImageGenerationEnabled({ imageGeneration: { enabled: true } })).toBe(true);
-      expect(isImageGenerationEnabled({ imageGeneration: { enabled: false } })).toBe(false);
-      expect(isImageGenerationEnabled({ imageGeneration: { provider: 'openai' } })).toBe(true);
-    });
-  });
-
   describe('buildToolsConfigPayload emits flags so OFF persists through the backend merge', () => {
-    it('emits imageGeneration: true when enabled', () => {
-      const payload = buildToolsConfigPayload({ ...base, imageGeneration: true });
-      expect(payload.imageGeneration).toBe(true);
-    });
-
-    it('emits imageGeneration: false when disabled (so turning it off persists)', () => {
-      const payload = buildToolsConfigPayload({ ...base, imageGeneration: false });
-      expect(payload.imageGeneration).toBe(false);
-    });
-
-    it('omits imageGeneration entirely when the caller does not pass it', () => {
-      const payload = buildToolsConfigPayload({ ...base });
-      expect('imageGeneration' in payload).toBe(false);
+    /**
+     * The legacy imageGeneration grant is retired: the builder must not carry it, even
+     * when a stale caller still passes it. Emitting it would re-persist a key nothing
+     * honours, keeping a dead grant alive in the row forever.
+     */
+    it('never emits the retired imageGeneration key, whatever the caller passes', () => {
+      // @ts-expect-error - the key is gone from the input type on purpose
+      expect('imageGeneration' in buildToolsConfigPayload({ ...base, imageGeneration: true })).toBe(false);
+      // @ts-expect-error - same, for the off state
+      expect('imageGeneration' in buildToolsConfigPayload({ ...base, imageGeneration: false })).toBe(false);
+      expect('imageGeneration' in buildToolsConfigPayload({ ...base })).toBe(false);
     });
 
     it('emits webSearch for both true and false (re-enable must persist too)', () => {
@@ -57,5 +36,41 @@ describe('toolsConfigAccess - imageGeneration / webSearch flags', () => {
       expect(buildToolsConfigPayload({ ...base, webSearch: false }).webSearch).toBe(false);
       expect('webSearch' in buildToolsConfigPayload({ ...base })).toBe(false);
     });
+  });
+});
+
+describe('isGenerationEnabled (opt-in, independent of the image grant)', () => {
+  it('defaults to disabled when absent, because it spends the customer credits', () => {
+    expect(isGenerationEnabled(null)).toBe(false);
+    expect(isGenerationEnabled(undefined)).toBe(false);
+    expect(isGenerationEnabled({})).toBe(false);
+    expect(isGenerationEnabled({ generation: false })).toBe(false);
+  });
+
+  it('accepts both the boolean and the object shape', () => {
+    expect(isGenerationEnabled({ generation: true })).toBe(true);
+    expect(isGenerationEnabled({ generation: { enabled: true } })).toBe(true);
+    // An object without an explicit flag means enabled, matching the backend.
+    expect(isGenerationEnabled({ generation: {} })).toBe(true);
+    expect(isGenerationEnabled({ generation: { enabled: false } })).toBe(false);
+  });
+
+  it('is NOT inherited from the retired image grant', () => {
+    // A row still carrying the retired grant must not silently gain video: a
+    // per-second video model spends an order of magnitude more per call.
+    expect(isGenerationEnabled({ imageGeneration: true })).toBe(false);
+    expect(isGenerationEnabled({ imageGeneration: { enabled: true } })).toBe(false);
+  });
+
+  it('sends an explicit false so a grant can actually be revoked', () => {
+    // The backend MERGES toolsConfig on update, so omitting the flag would keep
+    // the stored value and an agent that had it on could never be switched off.
+    const base = {
+      mode: 'all' as const,
+      workflows: [], tables: [], interfaces: [], agents: [], applications: [],
+    };
+    expect(buildToolsConfigPayload({ ...base, generation: false }).generation).toBe(false);
+    expect(buildToolsConfigPayload({ ...base, generation: true }).generation).toBe(true);
+    expect('generation' in buildToolsConfigPayload({ ...base })).toBe(false);
   });
 });

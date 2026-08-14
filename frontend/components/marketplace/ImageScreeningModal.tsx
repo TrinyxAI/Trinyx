@@ -171,7 +171,7 @@ export function ImageScreeningModal({
             >
                 {/* Header */}
                 <div className="px-6 py-4 border-b border-theme flex items-start gap-3">
-                    <div className="h-9 w-9 rounded-full bg-amber-100 dark:bg-amber-900/40 flex items-center justify-center shrink-0">
+                    <div className="h-9 w-9 rounded-xl bg-amber-100 dark:bg-amber-900/40 flex items-center justify-center shrink-0">
                         <AlertTriangle className="h-5 w-5 text-amber-600 dark:text-amber-400" />
                     </div>
                     <div className="flex-1 min-w-0">

@@ -10,6 +10,14 @@ import { useWorkflowMode } from '@/contexts/WorkflowModeContext';
 export interface StepByStepContextValue {
   // Mode
   isStepByStepMode: boolean;
+  /**
+   * The run's persisted execution mode, WITHOUT folding in terminality the way
+   * {@link isStepByStepMode} does. A finished step-by-step run has
+   * {@code isStepByStepMode === false} but is still stepped, so anything describing what a
+   * rerun will DO (the backend keys off the persisted mode) must read this instead: on a
+   * stepped run a rerun executes nothing and waits for the user.
+   */
+  isSteppedRun: boolean;
   isPaused: boolean;
 
   // State
@@ -69,6 +77,11 @@ interface StepByStepProviderProps {
   isEnabled: boolean;
   isPaused: boolean;
   isRunTerminal?: boolean;
+  /**
+   * The run was deliberately put down (stopped/cancelled) or timed out. Distinct from
+   * {@link isRunTerminal}, which also covers runs that simply FINISHED and stay rerunnable.
+   */
+  isRunUnrevivable?: boolean;
   readySteps: Set<string>;
   completedSteps: Set<string>;
   failedSteps: Set<string>;
@@ -99,6 +112,7 @@ export function StepByStepProvider({
   isEnabled,
   isPaused,
   isRunTerminal = false,
+  isRunUnrevivable = false,
   readySteps,
   completedSteps,
   failedSteps,
@@ -197,11 +211,24 @@ export function StepByStepProvider({
   // NOTE: In the simplified split system, split completes immediately after spawning items,
   // so split nodes will be in completedSteps, not runningSteps.
   // Triggers use the same rerun logic as other nodes (selective reset).
+  //
+  // NOT gated on step-by-step mode: the backend rerun path is mode-blind, and in AUTOMATIC
+  // mode it reruns the target then drives the rest of the chain itself. Gating here was what
+  // made "restart from a node" unreachable outside step-by-step.
+  //
+  // Still refused on a run the user (or a timeout) put down: reviving one is a re-trigger
+  // decision, not a rerun. A run that merely FINISHED stays rerunnable, which is the whole
+  // point - restarting mid-graph on a completed run is the common case.
   const canRerunStep = React.useCallback((stepId: string): boolean => {
-    if (isRunTerminal) return false;
-    if (!isEnabled) return false;
-    return completedSteps.has(stepId) || failedSteps.has(stepId) || runningSteps.has(stepId);
-  }, [isEnabled, isRunTerminal, completedSteps, failedSteps, runningSteps]);
+    if (isRunUnrevivable) return false;
+    if (completedSteps.has(stepId) || failedSteps.has(stepId)) return true;
+    // A node still RUNNING is only an escape hatch for a run the user drives by hand (a stuck
+    // while-loop, a long agent). On an automatic run the invocation is genuinely in flight and
+    // will write its own completion, and the backend accepts the rerun anyway when an EARLIER
+    // epoch completed the node - so offering it here buys a double execution and a lost write,
+    // not a clean refusal.
+    return isEnabled && runningSteps.has(stepId);
+  }, [isEnabled, isRunUnrevivable, completedSteps, failedSteps, runningSteps]);
 
   // Resolve a user approval signal
   const resolveApproval = React.useCallback(async (nodeId: string, resolution: 'APPROVED' | 'REJECTED', epoch?: number, itemId?: string) => {
@@ -251,6 +278,7 @@ export function StepByStepProvider({
 
   const value: StepByStepContextValue = React.useMemo(() => ({
     isStepByStepMode: isEnabled && !isRunTerminal,
+    isSteppedRun: isEnabled,
     isPaused,
     readySteps,
     completedSteps,
@@ -348,6 +376,7 @@ export function useNodeExecutionStatus(nodeId: string, nodeData?: { label?: stri
   if (!ctx) {
     return {
       isStepByStepMode: false,
+      isSteppedRun: false,
       canExecute: false,
       isReady: false,
       canExecuteRaw: false,
@@ -395,6 +424,7 @@ export function useNodeExecutionStatus(nodeId: string, nodeData?: { label?: stri
     // Only true if explicitly in step-by-step mode AND interactive.
     // Historical epoch viewing disables all controls - epoch data determines visuals.
     isStepByStepMode: ctx.isStepByStepMode && isInteractive,
+    isSteppedRun: ctx.isSteppedRun,
     canExecute: isInteractive && (isControl ? ctx.canExecuteCore(normalizedId) : ctx.canExecuteStep(normalizedId)),
     isReady: isInteractive && isReady,
     /**

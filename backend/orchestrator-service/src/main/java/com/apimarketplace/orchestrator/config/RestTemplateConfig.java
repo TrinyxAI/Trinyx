@@ -35,6 +35,23 @@ public class RestTemplateConfig {
     @Value("${http.client.timeout.video-read:540000}")
     private int videoReadTimeout;
 
+    /**
+     * Read timeout for a generation call ({@code core:generate}). The catalog waits for the
+     * provider to finish before it answers, and an async video model legitimately takes
+     * minutes. Kept separate so no other HTTP call inherits a window this long.
+     *
+     * <p>1500000 ms = 25 min, which is NOT a round number: catalog's own worst
+     * case is a 10 min synchronous submit plus a 10 min poll loop
+     * ({@code ToolExecutionManager.GENERATION_CALLER_BUDGET_MS}, the single
+     * place that arithmetic lives), and this must not be shorter. At the
+     * previous 600000 ms this node abandoned the call at 10 minutes while
+     * catalog went on to finish it, store the asset and COMMIT the charge: the
+     * customer was billed for a generation the run reported as unreachable, and
+     * nothing released it because from catalog's side nothing had failed.
+     */
+    @Value("${http.client.timeout.generation-read:1500000}")
+    private int generationReadTimeout;
+
     @Bean
     public RestTemplate restTemplate() {
         RestTemplate restTemplate = new RestTemplate();
@@ -60,6 +77,47 @@ public class RestTemplateConfig {
         NoRedirectSimpleClientHttpRequestFactory factory = new NoRedirectSimpleClientHttpRequestFactory();
         factory.setConnectTimeout(connectTimeout);
         factory.setReadTimeout(videoReadTimeout);
+        RestTemplate restTemplate = new RestTemplate();
+        restTemplate.setRequestFactory(factory);
+        return restTemplate;
+    }
+
+    /**
+     * Dedicated RestTemplate for the {@code core:generate} node's call into catalog-service.
+     *
+     * <p><b>Built on the JDK HTTP client, NOT on {@code HttpURLConnection}, and
+     * that is the whole point of this bean.</b> Every other template here uses
+     * {@link NoRedirectSimpleClientHttpRequestFactory}, which wraps
+     * {@code HttpURLConnection}: on an {@code IOException} from a pooled
+     * connection the peer closed while idle (a rolling deploy, a pod restart,
+     * an idle reaper) that client SILENTLY RE-SENDS the POST once, because
+     * {@code sun.net.http.retryPost} defaults to true.
+     *
+     * <p>For an ordinary call a duplicate is noise. For this one it is money.
+     * The billing layer mints a fresh call reference PER DISPATCH so that a
+     * second dispatch is deliberately a second charge, on the stated reasoning
+     * that one HTTP execute is one dispatch to the provider. That premise is
+     * false for a transport that re-sends by itself: two submissions become two
+     * reservations, two commits and two provider generations, of which the run
+     * keeps one. The browser leg of this same feature already refuses to retry
+     * for exactly this reason.
+     *
+     * <p>{@code java.net.http} does not retry a non-idempotent method
+     * ({@code jdk.httpclient.enableAllMethodRetry} is false by default), so the
+     * duplicate cannot originate in the transport. Redirects are disabled here
+     * too, keeping the property the replaced factory existed to provide.
+     *
+     * @see #generationReadTimeout
+     */
+    @Bean(name = "generationRestTemplate")
+    public RestTemplate generationRestTemplate() {
+        java.net.http.HttpClient httpClient = java.net.http.HttpClient.newBuilder()
+                .followRedirects(java.net.http.HttpClient.Redirect.NEVER)
+                .connectTimeout(java.time.Duration.ofMillis(connectTimeout))
+                .build();
+        org.springframework.http.client.JdkClientHttpRequestFactory factory =
+                new org.springframework.http.client.JdkClientHttpRequestFactory(httpClient);
+        factory.setReadTimeout(java.time.Duration.ofMillis(generationReadTimeout));
         RestTemplate restTemplate = new RestTemplate();
         restTemplate.setRequestFactory(factory);
         return restTemplate;

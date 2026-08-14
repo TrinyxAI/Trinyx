@@ -374,6 +374,7 @@ public class WorkflowInspectorService {
             sql = """
                 SELECT at.id, at.api_id, at.description, at.method, at.tool_name_id, at.tool_slug,
                        at.required_scopes, a.platform_credential_name,
+                       (at.generation_spec IS NOT NULL) AS is_generation,
                        tn.name as tool_name, a.api_slug, COALESCE(a.icon_slug, 'mcp') as icon_slug, a.icon_url
                 FROM api_tools at
                 LEFT JOIN tool_names tn ON at.tool_name_id = tn.id::text
@@ -387,6 +388,7 @@ public class WorkflowInspectorService {
             sql = """
                 SELECT at.id, at.api_id, at.description, at.method, at.tool_name_id, at.tool_slug,
                        at.required_scopes, a.platform_credential_name,
+                       (at.generation_spec IS NOT NULL) AS is_generation,
                        tn.name as tool_name, a.api_slug, COALESCE(a.icon_slug, 'mcp') as icon_slug, a.icon_url
                 FROM api_tools at
                 LEFT JOIN tool_names tn ON at.tool_name_id = tn.id::text
@@ -550,7 +552,12 @@ public class WorkflowInspectorService {
             credentialDTOs,
             toolId == null ? null : toolId.toString(),
             requiredScopes,
-            integrationName
+            integrationName,
+            // Whether this endpoint resells a generated asset. Read as a
+            // boolean in SQL rather than by shipping the descriptor: the
+            // inspector only has to state WHAT the endpoint is when it asks for
+            // a price, never how it generates.
+            Boolean.TRUE.equals(toolRow.get("is_generation"))
         ));
     }
 
@@ -770,6 +777,7 @@ public class WorkflowInspectorService {
         String toolsSql = """
             SELECT at.id, at.api_id, at.description, at.method, at.tool_name_id, at.tool_slug,
                    at.required_scopes, a.platform_credential_name,
+                   (at.generation_spec IS NOT NULL) AS is_generation,
                    tn.name as tool_name, a.api_slug, COALESCE(a.icon_slug, 'mcp') as icon_slug, a.icon_url
             FROM api_tools at
             LEFT JOIN tool_names tn ON at.tool_name_id = tn.id::text
@@ -819,7 +827,8 @@ public class WorkflowInspectorService {
                 credentialsByToolId.getOrDefault(toolId, new ArrayList<>()),
                 toolId == null ? null : toolId.toString(),
                 parseRequiredScopesJsonb(toolRow.get("required_scopes")),
-                (String) toolRow.get("platform_credential_name")
+                (String) toolRow.get("platform_credential_name"),
+                Boolean.TRUE.equals(toolRow.get("is_generation"))
             );
 
             // Key by tool_slug (back-compat: slug-referencing callers look up by slug).

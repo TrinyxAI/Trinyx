@@ -1822,4 +1822,53 @@ class WorkflowErrorCheckerTest {
                     .hasSize(1);
         }
     }
+
+    @Nested
+    @DisplayName("generate node: the pinned provider key")
+    class GeneratePinnedKey {
+
+        private WorkflowErrorChecker.CheckResult check(Object credentialId) {
+            Map<String, Object> params = new LinkedHashMap<>();
+            params.put("model", "seedance-2.0-fast");
+            params.put("credential_source", "user");
+            if (credentialId != null) params.put("credential_id", credentialId);
+            Map<String, Object> core = new LinkedHashMap<>();
+            core.put("id", "core:make_clip");
+            core.put("type", "generate");
+            core.put("label", "Make Clip");
+            core.put("params", params);
+
+            stubValidSession(List.of());
+            lenient().when(session.getCores()).thenReturn(List.of(core));
+            return checker.checkForErrors(session);
+        }
+
+        @Test
+        @DisplayName("a value that is not an id is refused HERE, because a node built with add_node never sees set_plan")
+        void anUnusableIdIsRefused() {
+            // set_plan validates this too, but add_node -> validate -> finish
+            // never passes through it. Left unchecked, the run reads the value
+            // as "no pin", uses the owner's default key, and the plan goes on
+            // naming a key nothing used.
+            WorkflowErrorChecker.CheckResult result = check("{{trigger:chat.output.key}}");
+
+            assertThat(result.errors()).anySatisfy(e ->
+                    assertThat(String.valueOf(e.get("message"))).contains("credential_id"));
+            assertThat(result.canCreate()).isFalse();
+        }
+
+        @Test
+        @DisplayName("a real id passes, so an agent can carry the owner's choice through a rewrite")
+        void aRealIdPasses() {
+            assertThat(check(42).errors()).noneSatisfy(e ->
+                    assertThat(String.valueOf(e.get("message"))).contains("credential_id"));
+        }
+
+        @Test
+        @DisplayName("no pin at all passes: the node then runs on the owner's default key")
+        void noPinPasses() {
+            assertThat(check(null).errors()).noneSatisfy(e ->
+                    assertThat(String.valueOf(e.get("message"))).contains("credential_id"));
+        }
+    }
 }

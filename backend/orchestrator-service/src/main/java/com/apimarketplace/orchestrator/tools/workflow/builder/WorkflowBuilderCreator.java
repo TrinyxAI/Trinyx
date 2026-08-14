@@ -229,6 +229,14 @@ public class WorkflowBuilderCreator {
         return coreCreator.executeAddMedia(session, parameters);
     }
 
+    /**
+     * Generates ONE asset from a prompt (image, video, audio, voice, music).
+     * Delegates to ControlNodeCreator for the actual implementation.
+     */
+    public ToolExecutionResult executeAddGenerate(WorkflowBuilderSession session, Map<String, Object> parameters) {
+        return coreCreator.executeAddGenerate(session, parameters);
+    }
+
     // ==================== Add HTTP Request ====================
 
     /**

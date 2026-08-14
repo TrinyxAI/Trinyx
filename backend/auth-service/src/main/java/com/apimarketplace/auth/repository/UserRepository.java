@@ -68,6 +68,27 @@ public interface UserRepository extends JpaRepository<User, Long> {
                                @Param("now") LocalDateTime now,
                                @Param("threshold") LocalDateTime threshold);
 
-    @Query("SELECT u FROM User u WHERE u.enabled = false AND u.deactivatedAt IS NOT NULL AND u.deactivatedAt < :cutoff")
+    /**
+     * Accounts whose grace period has expired and which are therefore due for hard-deletion.
+     *
+     * <p>Selection is the deactivation date and nothing else, deliberately. An earlier version also
+     * excluded anyone whose {@code lastLoginAt} was newer than their {@code deactivatedAt}, reading
+     * that as "they came back, do not delete them". That signal does not mean what it looks like:
+     * {@code lastLoginAt} is written by {@code UserResolutionService} on gateway user-resolution
+     * whenever it is more than {@code LOGIN_DEDUP_MINUTES} old, BEFORE the gateway checks
+     * {@code canMakeRequest()}, and a blocked account is re-resolved on EVERY request because
+     * {@code AuthenticationFilter} drops its cache entry for anyone who cannot make requests. The
+     * restore interstitial itself issues one of those requests. So merely following the e-mail's
+     * instruction to sign in, looking at the screen and signing out again moved the deletion, while
+     * {@code getDeletionStatus} kept reporting {@code deactivatedAt + grace} to that same person.
+     * Showing a date we do not honour is worse than the risk the clause was guarding against.
+     *
+     * <p>What protects a returning person now is the thing built for it: they are told the date on
+     * every blocked request and can cancel in one click, which clears {@code deactivatedAt} and
+     * removes the row from this query. Someone who sees that screen and does not act is having
+     * their original request honoured, on the day they were given.
+     */
+    @Query("SELECT u FROM User u WHERE u.enabled = false AND u.deactivatedAt IS NOT NULL " +
+           "AND u.deactivatedAt < :cutoff")
     List<User> findAccountsPastGracePeriod(@Param("cutoff") LocalDateTime cutoff);
 }

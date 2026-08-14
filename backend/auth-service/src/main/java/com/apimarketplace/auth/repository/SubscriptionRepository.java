@@ -146,6 +146,21 @@ public interface SubscriptionRepository extends JpaRepository<Subscription, Long
     }
 
     /**
+     * PESSIMISTIC_WRITE on ONE subscription row, addressed by primary key.
+     *
+     * <p>Unlike {@link #findActiveByUserIdForUpdate} (which resolves the wallet by
+     * picking the user's most-recent active row), this targets the exact row the
+     * caller names. Credit-attribution paths that receive a {@link Subscription}
+     * from outside their own transaction use it to obtain a MANAGED instance
+     * carrying the row's LIVE column values: a detached copy handed across a
+     * transaction boundary may already be stale, and writing through it merges
+     * every stale column back over the row.
+     */
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("SELECT s FROM Subscription s WHERE s.id = :id")
+    Optional<Subscription> findByIdForUpdate(@Param("id") Long id);
+
+    /**
      * Expired non-Stripe subscriptions due for an internal monthly renewal.
      *
      * <p>Keyed on {@code provider='internal'} (NOT {@code plan.code='FREE'}) so it covers

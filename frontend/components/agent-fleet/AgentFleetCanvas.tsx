@@ -17,7 +17,12 @@ import 'reactflow/dist/style.css';
 
 import { ZoomIn, ZoomOut, Focus, Settings, X, Wand2, UnfoldVertical, FoldVertical, Pencil } from 'lucide-react';
 import LoadingSpinner from '@/components/LoadingSpinner';
-import { Button } from '@/components/ui/button';
+import {
+  canvasChromeChipRadiusClass,
+  canvasChromeCompactButtonClass,
+  canvasChromePrimaryButtonClass,
+  canvasChromeSurfaceClass,
+} from '@/components/ui/canvas-chrome';
 import { useThemeSafely } from '@/hooks/useThemeSafely';
 import { useSvgSafeId } from '@/hooks/useSvgSafeId';
 import { nodeTypes } from '@/app/workflows/builder/constants/graphTypes';
@@ -211,55 +216,39 @@ function FleetToolbar({
   onToggleEditMode?: () => void;
   editLabel?: string;
 }) {
+  // Same separator the workflow toolbar uses between its control groups: a
+  // hairline in the border token, not a hardcoded slate.
+  const separator = <div className="mx-0.5 h-5 w-px bg-[var(--border-color)]" />;
+
   return (
     <Panel position="bottom-center" className="mb-6">
-      <div className="flex items-center gap-1 rounded-full bg-white/95 dark:bg-gray-800/95 px-3 py-2 backdrop-blur border-0">
-        <Button
-          onClick={onZoomIn}
-          variant="ghost"
-          size="sm"
-          className="h-8 w-8 p-0 rounded-full shadow-none border-0 focus-visible:ring-2 focus-visible:ring-theme-tertiary"
-          title="Zoom in"
-        >
+      {/* The fleet toolbar is the same object as the workflow canvas toolbar, so
+          it takes the same chrome: a square card at the one chrome height (36px),
+          holding 28px controls (36 - p-1 top - p-1 bottom). It was the last
+          pill-shaped island left, with a hardcoded bg-white/gray-800 that ignored
+          the palette. */}
+      <div className={`flex items-center gap-0.5 p-1 ${canvasChromeSurfaceClass}`}>
+        <button type="button" onClick={onZoomIn} className={canvasChromeCompactButtonClass()} title="Zoom in">
           <ZoomIn className="h-4 w-4" />
-        </Button>
-        <Button
-          onClick={onZoomOut}
-          variant="ghost"
-          size="sm"
-          className="h-8 w-8 p-0 rounded-full shadow-none border-0 focus-visible:ring-2 focus-visible:ring-theme-tertiary"
-          title="Zoom out"
-        >
+        </button>
+        <button type="button" onClick={onZoomOut} className={canvasChromeCompactButtonClass()} title="Zoom out">
           <ZoomOut className="h-4 w-4" />
-        </Button>
-        <div className="w-px h-5 bg-slate-200 dark:bg-slate-700 mx-0.5" />
-        <Button
-          onClick={onFitView}
-          variant="ghost"
-          size="sm"
-          className="h-8 w-8 p-0 rounded-full shadow-none border-0 focus-visible:ring-2 focus-visible:ring-theme-tertiary"
-          title="Fit view"
-        >
+        </button>
+        {separator}
+        <button type="button" onClick={onFitView} className={canvasChromeCompactButtonClass()} title="Fit view">
           <Focus className="h-4 w-4" />
-        </Button>
-        <div className="w-px h-5 bg-slate-200 dark:bg-slate-700 mx-0.5" />
-        <Button
-          onClick={onAutoLayout}
-          variant="ghost"
-          size="sm"
-          className="h-8 w-8 p-0 rounded-full shadow-none border-0 focus-visible:ring-2 focus-visible:ring-theme-tertiary"
-          title="Auto-layout"
-        >
+        </button>
+        {separator}
+        <button type="button" onClick={onAutoLayout} className={canvasChromeCompactButtonClass()} title="Auto-layout">
           <Wand2 className="h-4 w-4" />
-        </Button>
+        </button>
         {hasCollapsible && onToggleCollapseAll && (
           <>
-            <div className="w-px h-5 bg-slate-200 dark:bg-slate-700 mx-0.5" />
-            <Button
+            {separator}
+            <button
+              type="button"
               onClick={onToggleCollapseAll}
-              variant="ghost"
-              size="sm"
-              className="h-8 w-8 p-0 rounded-full shadow-none border-0 focus-visible:ring-2 focus-visible:ring-theme-tertiary"
+              className={canvasChromeCompactButtonClass()}
               title={isAllCollapsed ? 'Expand all' : 'Collapse all'}
             >
               {isAllCollapsed ? (
@@ -267,33 +256,36 @@ function FleetToolbar({
               ) : (
                 <FoldVertical className="h-4 w-4" />
               )}
-            </Button>
+            </button>
           </>
         )}
         {showEditToggle && onToggleEditMode && (
           <>
-            <div className="w-px h-5 bg-slate-200 dark:bg-slate-700 mx-0.5" />
-            <Button
+            {separator}
+            {/* aria-pressed, because the active state is now carried by the same
+                surface ladder as every other chrome control rather than by the
+                accent fill - colour alone should not be the only signal. */}
+            <button
+              type="button"
               onClick={onToggleEditMode}
-              variant={isEditMode ? 'default' : 'ghost'}
-              size="sm"
-              className="h-8 w-8 p-0 rounded-full shadow-none border-0 focus-visible:ring-2 focus-visible:ring-theme-tertiary"
+              aria-pressed={!!isEditMode}
+              className={canvasChromeCompactButtonClass(!!isEditMode)}
               title={editLabel}
             >
               <Pencil className="h-4 w-4" />
-            </Button>
+            </button>
           </>
         )}
-        <div className="w-px h-5 bg-slate-200 dark:bg-slate-700 mx-0.5" />
-        <Button
+        {separator}
+        <button
+          type="button"
           onClick={onToggleSettings}
-          variant={isSettingsOpen ? 'default' : 'ghost'}
-          size="sm"
-          className="h-8 w-8 p-0 rounded-full shadow-none border-0 focus-visible:ring-2 focus-visible:ring-theme-tertiary"
+          aria-pressed={isSettingsOpen}
+          className={canvasChromeCompactButtonClass(isSettingsOpen)}
           title="Settings"
         >
           <Settings className="h-4 w-4" />
-        </Button>
+        </button>
       </div>
     </Panel>
   );
@@ -976,13 +968,19 @@ export function AgentFleetCanvas({ singleAgentId, snapshot, snapshotMode = false
                 {/* Edit button (top-right) - hidden in snapshot/preview/read-only mode
                     and for read-only VIEWERs (canEdit folds all three in). */}
                 {canEdit && !isSettingsOpen && !isAgentPickerOpen && (
-                  <Button
+                  // The same corner control as the workflow canvas' add-node
+                  // button, from the same class: both are the one accent action
+                  // of their canvas, so they are the two shapes a user compares
+                  // when moving between them. It was a 44px circle here and a
+                  // 36px square there.
+                  <button
+                    type="button"
                     onClick={handleEditClick}
-                    className="absolute top-4 right-4 z-10 w-11 h-11 rounded-full p-0 shadow-none"
+                    className={canvasChromePrimaryButtonClass('absolute top-4 right-4 z-10')}
                     title={t('edit')}
                   >
-                    <Pencil className="w-[18px] h-[18px]" />
-                  </Button>
+                    <Pencil className="w-5 h-5" />
+                  </button>
                 )}
 
                 {/* Agent picker panel - used in fleet mode and in single-agent
@@ -1013,23 +1011,22 @@ export function AgentFleetCanvas({ singleAgentId, snapshot, snapshotMode = false
                 {/* Settings Panel */}
                 {isSettingsOpen && (
                   <Panel position="top-right" className="m-4 relative z-[200]">
-                    <div className={`${isSingleAgent ? 'w-64' : 'w-72'} rounded-[32px] bg-white/80 dark:bg-gray-800/80 backdrop-blur overflow-hidden`}>
-                      <div className="flex items-center justify-between px-5 pt-5 pb-3">
-                        <span className="text-sm font-semibold text-slate-900 dark:text-slate-100">Settings</span>
-                        <Button
+                    <div className={`${isSingleAgent ? 'w-64' : 'w-72'} overflow-hidden ${canvasChromeSurfaceClass}`}>
+                      <div className="flex items-center justify-between px-5 pt-4 pb-3">
+                        <span className="text-sm font-semibold text-[var(--text-primary)]">Settings</span>
+                        <button
+                          type="button"
                           onClick={() => setIsSettingsOpen(false)}
-                          variant="ghost"
-                          size="icon"
-                          className="h-8 w-8 p-0 rounded-full shadow-none border-0 focus-visible:ring-2 focus-visible:ring-theme-tertiary"
+                          className={canvasChromeCompactButtonClass()}
                           title="Close settings"
                         >
                           <X className="h-4 w-4" />
-                        </Button>
+                        </button>
                       </div>
                       <div className="px-5 pb-5 space-y-4">
                         {/* Connection style selector */}
                         <div className="space-y-2">
-                          <span className="text-sm font-medium text-slate-700 dark:text-slate-300 block">
+                          <span className="text-sm font-medium text-[var(--text-secondary)] block">
                             Connection Style
                           </span>
                           <ConnectionTypeSelector
@@ -1038,11 +1035,11 @@ export function AgentFleetCanvas({ singleAgentId, snapshot, snapshotMode = false
                           />
                         </div>
 
-                        <div className="h-px bg-slate-200 dark:bg-slate-700" />
+                        <div className="h-px bg-[var(--border-color)]" />
 
                         {/* Connection type visibility */}
                         <div className="space-y-2">
-                          <span className="text-sm font-medium text-slate-700 dark:text-slate-300 block">
+                          <span className="text-sm font-medium text-[var(--text-secondary)] block">
                             {tEdit('connectionTypes')}
                           </span>
                           <div className="flex flex-wrap gap-1.5">
@@ -1050,10 +1047,10 @@ export function AgentFleetCanvas({ singleAgentId, snapshot, snapshotMode = false
                               <button
                                 key={cat}
                                 onClick={() => handleToggleCategory(cat)}
-                                className={`px-2.5 py-1 rounded-full text-xs font-medium transition-colors ${
+                                className={`px-2.5 py-1 ${canvasChromeChipRadiusClass} text-xs font-medium transition-colors ${
                                   visibleCategories.has(cat)
-                                    ? 'bg-slate-900 text-white dark:bg-white dark:text-slate-900'
-                                    : 'bg-slate-100 text-slate-600 hover:bg-slate-200 dark:bg-slate-700 dark:text-slate-300 dark:hover:bg-slate-600'
+                                    ? 'bg-[var(--accent-primary)] text-[var(--accent-foreground)]'
+                                    : 'bg-[var(--bg-tertiary)] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]'
                                 }`}
                               >
                                 {tEdit(EDGE_CATEGORY_I18N_KEYS[cat])}
@@ -1065,8 +1062,8 @@ export function AgentFleetCanvas({ singleAgentId, snapshot, snapshotMode = false
                         {/* Fleet Plan Generator (fleet mode only) */}
                         {!isSingleAgent && workflowNames && interfaceNames && dataSourceNames && (
                           <>
-                            <div className="h-px bg-slate-200 dark:bg-slate-700" />
-                            <span className="text-sm font-medium text-slate-700 dark:text-slate-300 block">
+                            <div className="h-px bg-[var(--border-color)]" />
+                            <span className="text-sm font-medium text-[var(--text-secondary)] block">
                               Developer Tools
                             </span>
                             <FleetPlanGenerator

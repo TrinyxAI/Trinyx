@@ -245,12 +245,12 @@ public class ExecutionContextManager {
     public void checkAndCompleteWorkflow(String runId, WorkflowExecution execution, WorkflowRunState state) {
         // Check if all steps are done (no more ready steps and all processed)
         if (state.readySteps().isEmpty()) {
-            Set<String> allStepIds = getAllStepIds(execution.getPlan());
-            int totalProcessed = state.completedStepIds().size() +
-                                state.failedStepIds().size() +
-                                state.skippedStepIds().size();
-
-            if (totalProcessed >= allStepIds.size()) {
+            // This WRITES workflow_runs.status, so a premature verdict is not a wrong badge,
+            // it is a persisted lie the read side will then faithfully report. See
+            // RunCompletionPredicate: the count-vs-size form this replaced could not see
+            // core/agent/table nodes at all.
+            if (RunCompletionPredicate.allPlanNodesSettled(execution.getPlan(),
+                    state.completedStepIds(), state.failedStepIds(), state.skippedStepIds())) {
                 RunStatus finalStatus = state.failedStepIds().isEmpty()
                     ? RunStatus.COMPLETED
                     : RunStatus.FAILED;
@@ -278,14 +278,9 @@ public class ExecutionContextManager {
      * Gets all step IDs from a plan.
      */
     public Set<String> getAllStepIds(WorkflowPlan plan) {
-        Set<String> ids = new HashSet<>();
-        for (Step step : plan.getMcps()) {
-            ids.add(step.getNormalizedKey());
-        }
-        for (Trigger trigger : plan.getTriggers()) {
-            ids.add(trigger.getNormalizedKey());
-        }
-        return ids;
+        // Delegates rather than re-enumerating. The local copy counted only mcps + triggers,
+        // so core/agent/table nodes were invisible to every caller of this method.
+        return plan.getAllStepIds();
     }
 
     /**

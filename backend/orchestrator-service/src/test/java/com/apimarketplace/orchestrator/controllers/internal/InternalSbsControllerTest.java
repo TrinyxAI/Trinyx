@@ -3,7 +3,6 @@ package com.apimarketplace.orchestrator.controllers.internal;
 import com.apimarketplace.orchestrator.domain.WorkflowRunEntity;
 import com.apimarketplace.orchestrator.execution.v2.scheduler.V2StepByStepScheduler;
 import com.apimarketplace.orchestrator.execution.v2.services.V2StepByStepService;
-import com.apimarketplace.common.credit.CreditConsumptionClient;
 import com.apimarketplace.common.web.TenantResolver;
 import com.apimarketplace.orchestrator.repository.WorkflowRunRepository;
 import com.apimarketplace.orchestrator.services.resume.WorkflowResumeService;
@@ -48,9 +47,6 @@ class InternalSbsControllerTest {
     private SnapshotService snapshotService;
 
     @Mock
-    private CreditConsumptionClient creditClient;
-
-    @Mock
     private WorkflowRunRepository runRepository;
 
     // Use SyncTaskExecutor so async tasks run inline in tests
@@ -66,12 +62,9 @@ class InternalSbsControllerTest {
                 resumeService,
                 stateSnapshotService,
                 snapshotService,
-                creditClient,
                 sbsExecutor,
                 runRepository
         );
-        // Default: allow credits
-        lenient().when(creditClient.checkCredits(any())).thenReturn(true);
         // Mock the claim check to succeed by default (prevents 409 early return)
         lenient().when(stateSnapshotService.claimNodeForExecution(anyString(), anyString()))
                 .thenReturn(true);
@@ -88,21 +81,6 @@ class InternalSbsControllerTest {
     @Nested
     @DisplayName("executeNode()")
     class ExecuteNodeTests {
-
-        @Test
-        @DisplayName("Should return 402 when user has insufficient credits")
-        void shouldReturn402WhenInsufficientCredits() {
-            when(creditClient.checkCredits("user-1")).thenReturn(false);
-
-            ResponseEntity<Map<String, Object>> response = controller.executeNode(
-                    "run-1", "mcp:step1", "user-1", "org-1", Map.of());
-
-            assertThat(response.getStatusCode().value()).isEqualTo(402);
-            assertThat(response.getBody()).containsEntry("accepted", false);
-            assertThat(response.getBody()).containsEntry("error", "INSUFFICIENT_CREDITS");
-            verify(v2StepByStepService, never()).executeNode(any(), any(), any());
-            verify(stateSnapshotService, never()).claimNodeForExecution(any(), any());
-        }
 
         @Test
         @DisplayName("Should return accepted ack immediately")
@@ -304,7 +282,6 @@ class InternalSbsControllerTest {
                     "run-1", "mcp:step1", null, "org-1", Map.of());
 
             assertThat(response.getStatusCode().value()).isEqualTo(401);
-            verify(creditClient, never()).checkCredits(any());
             verify(v2StepByStepService, never()).executeNode(any(), any(), any());
         }
 
@@ -378,6 +355,54 @@ class InternalSbsControllerTest {
 
             verify(v2StepByStepService).executeSplitItems("run-1", "mcp:step1", pendingItems);
             verify(v2StepByStepService, never()).executeNode(anyString(), anyString(), anyString());
+        }
+    }
+
+    @org.junit.jupiter.api.Nested
+    @DisplayName("Refused claim")
+    class RefusedClaim {
+
+        /**
+         * The WS path is the one a user actually drives, so it is where a useless refusal costs
+         * the most. Same body contract as the REST twin.
+         */
+        @Test
+        @DisplayName("The 409 carries the recorded diagnosis instead of a generic sentence")
+        void conflictBodyCarriesTheDiagnosis() {
+            when(stateSnapshotService.claimNodeForExecution("run-1", "mcp:step1")).thenReturn(false);
+            when(stateSnapshotService.lastClaimRefusal("run-1", "mcp:step1")).thenReturn(
+                    java.util.Optional.of(new com.apimarketplace.orchestrator.services.state
+                            .ClaimRefusalRegistry.ClaimRefusal(
+                            "mcp:step1", "awaiting_signal", java.util.Set.of("mcp:step2"))));
+
+            ResponseEntity<Map<String, Object>> response =
+                    controller.executeNode("run-1", "mcp:step1", "user-1", "org-1", Map.of());
+
+            assertThat(response.getStatusCode().value()).isEqualTo(409);
+            assertThat(response.getBody())
+                    .containsEntry("accepted", false)
+                    .containsEntry("error", "NODE_NOT_READY")
+                    .containsEntry("nodeId", "mcp:step1")
+                    .containsEntry("nodeState", "awaiting_signal");
+            assertThat((String) response.getBody().get("message"))
+                    .contains("mcp:step1")
+                    .contains("waiting for a signal")
+                    .contains("mcp:step2");
+            verify(v2StepByStepService, never()).executeNode(anyString(), anyString(), anyString());
+        }
+
+        @Test
+        @DisplayName("With no recorded reason the 409 still names the node it refused")
+        void conflictBodyFallsBackToANamedMessage() {
+            when(stateSnapshotService.claimNodeForExecution("run-1", "mcp:step1")).thenReturn(false);
+            when(stateSnapshotService.lastClaimRefusal("run-1", "mcp:step1"))
+                    .thenReturn(java.util.Optional.empty());
+
+            ResponseEntity<Map<String, Object>> response =
+                    controller.executeNode("run-1", "mcp:step1", "user-1", "org-1", Map.of());
+
+            assertThat((String) response.getBody().get("message")).contains("mcp:step1");
+            assertThat(response.getBody()).doesNotContainKeys("nodeState", "readyNow");
         }
     }
 }

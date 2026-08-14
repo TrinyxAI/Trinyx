@@ -91,6 +91,7 @@ import type {
   WorkflowCategory,
   CategoriesListResponse,
   AcquirePublicationResponse,
+  ResetApplicationDataResponse,
   AcquiredApplication,
   AcquiredApplicationsResponse,
   PurchasesResponse,
@@ -500,6 +501,20 @@ export class PublicationService {
    */
   async acquirePublication(publicationId: string): Promise<AcquirePublicationResponse> {
     return apiClient.post<AcquirePublicationResponse>(`/publications/${publicationId}/acquire`);
+  }
+
+  /**
+   * Restore the acquired application's tables to the rows frozen in the publication
+   * snapshot (the "reset to the downloaded template" action).
+   *
+   * <p>Destructive: the rows the user added to those tables are replaced. The backend
+   * only ever touches the CALLER's own clone, and leaves the plan, the interfaces and
+   * every workflow run untouched.
+   */
+  async resetApplicationData(publicationId: string): Promise<ResetApplicationDataResponse> {
+    return apiClient.post<ResetApplicationDataResponse>(
+      `/publications/${publicationId}/reset-data`
+    );
   }
 
   /**

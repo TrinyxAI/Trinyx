@@ -137,6 +137,55 @@ class UserChatDefaultsServiceTest {
     }
 
     @Test
+    @DisplayName("save keeps the generation grant so a per-workspace default can actually enable the tool")
+    void saveKeepsGenerationGrant() {
+        when(repository.findByUserIdAndOrganizationId("u1", "orgA")).thenReturn(Optional.empty());
+        when(repository.save(any(UserChatDefaults.class))).thenAnswer(inv -> inv.getArgument(0));
+
+        Map<String, Object> incoming = new LinkedHashMap<>();
+        incoming.put("generation", Map.of("enabled", true));
+
+        Map<String, Object> saved = service.save("u1", "orgA", incoming);
+
+        // Regression for the ALLOWED_KEYS gap: pre-fix sanitize() dropped `generation`,
+        // so the toggle reverted to OFF on every reload and no agent ever got the tool.
+        assertThat(saved).containsEntry("generation", Map.of("enabled", true));
+    }
+
+    @Test
+    @DisplayName("save keeps generation disabled:false verbatim (turning the grant OFF must persist)")
+    void saveKeepsDisabledGenerationGrant() {
+        when(repository.findByUserIdAndOrganizationId("u1", "orgA")).thenReturn(Optional.empty());
+        when(repository.save(any(UserChatDefaults.class))).thenAnswer(inv -> inv.getArgument(0));
+
+        Map<String, Object> incoming = new LinkedHashMap<>();
+        incoming.put("generation", Map.of("enabled", false));
+
+        Map<String, Object> saved = service.save("u1", "orgA", incoming);
+
+        assertThat(saved).containsEntry("generation", Map.of("enabled", false));
+    }
+
+    @Test
+    @DisplayName("save drops the RETIRED imageGeneration key and never lets it imply generation")
+    void saveDropsRetiredImageGenerationKey() {
+        when(repository.findByUserIdAndOrganizationId("u1", "orgA")).thenReturn(Optional.empty());
+        when(repository.save(any(UserChatDefaults.class))).thenAnswer(inv -> inv.getArgument(0));
+
+        Map<String, Object> incoming = new LinkedHashMap<>();
+        incoming.put("imageGeneration", Map.of("enabled", true));
+        incoming.put("generation", Map.of("enabled", false));
+
+        Map<String, Object> saved = service.save("u1", "orgA", incoming);
+
+        // The retired grant is dropped like any other unknown key, and it does NOT bleed
+        // into generation: a per-second video model spends an order of magnitude more per
+        // call than the images that grant was given for.
+        assertThat(saved).doesNotContainKey("imageGeneration");
+        assertThat(saved).containsEntry("generation", Map.of("enabled", false));
+    }
+
+    @Test
     @DisplayName("save keeps compactionModelProvider/compactionModelName (whitelisted) and still drops unknown keys")
     void saveKeepsCompactionModelKeys() {
         when(repository.findByUserIdAndOrganizationId("u1", "orgA")).thenReturn(Optional.empty());

@@ -2,6 +2,8 @@ package com.apimarketplace.auth.credential.web;
 
 import com.apimarketplace.auth.credential.domain.PlatformCredentialModels.CreatePlatformCredentialRequest;
 import com.apimarketplace.auth.credential.domain.PlatformCredentialPricingVersion;
+import com.apimarketplace.auth.credential.domain.PriceSpec;
+import com.apimarketplace.auth.credential.domain.PriceUnit;
 import com.apimarketplace.auth.credential.domain.WorkflowRunPricingPin;
 import com.apimarketplace.auth.credential.service.CredentialService;
 import com.apimarketplace.auth.credential.service.InternalCredentialService;
@@ -17,6 +19,7 @@ import org.springframework.web.bind.annotation.*;
 
 import java.util.HashMap;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
@@ -213,6 +216,12 @@ public class InternalCredentialController {
                     // an empty array as "credential has zero scopes."
                     boolean isOauth2 = c.type() != null && "oauth2".equalsIgnoreCase(c.type().name());
                     body.put("scopes", isOauth2 ? c.scopes() : null);
+                    // WHICH credential this is, carrying nothing OF it. Lets a
+                    // caller check that a pinned credential belongs to the
+                    // endpoint it is about to be sent to without pulling the
+                    // record, whose fields come back decrypted.
+                    body.put("integration", c.integration());
+                    body.put("name", c.name());
                     return ResponseEntity.ok(body);
                 })
                 .orElse(ResponseEntity.notFound().build());
@@ -229,6 +238,12 @@ public class InternalCredentialController {
                     body.put("type", c.type() != null ? c.type().name() : null);
                     boolean isOauth2 = c.type() != null && "oauth2".equalsIgnoreCase(c.type().name());
                     body.put("scopes", isOauth2 ? c.scopes() : null);
+                    // WHICH credential this is, carrying nothing OF it. Lets a
+                    // caller check that a pinned credential belongs to the
+                    // endpoint it is about to be sent to without pulling the
+                    // record, whose fields come back decrypted.
+                    body.put("integration", c.integration());
+                    body.put("name", c.name());
                     return ResponseEntity.ok(body);
                 })
                 .orElse(ResponseEntity.notFound().build());
@@ -431,7 +446,12 @@ public class InternalCredentialController {
     @GetMapping("/resolve-markup")
     public ResponseEntity<Map<String, Object>> resolveMarkup(
             @RequestParam("pricingVersionId") Long pricingVersionId,
-            @RequestParam("apiToolId") String apiToolIdStr) {
+            @RequestParam("apiToolId") String apiToolIdStr,
+            // V428: a generation names its model and the size of the call. Both
+            // optional, because every pre-existing caller is a flat per-call
+            // debit and must keep behaving identically.
+            @RequestParam(value = "modelId", required = false) String modelId,
+            @RequestParam(value = "quantity", required = false) java.math.BigDecimal quantity) {
         UUID apiToolId;
         try {
             apiToolId = UUID.fromString(apiToolIdStr);
@@ -439,9 +459,14 @@ public class InternalCredentialController {
             return ResponseEntity.badRequest()
                     .body(Map.of("error", "apiToolId must be a UUID"));
         }
+        if (quantity != null && quantity.signum() < 0) {
+            // Never bill a negative amount, and never guess what was meant.
+            return ResponseEntity.badRequest()
+                    .body(Map.of("error", "quantity must not be negative"));
+        }
 
         Optional<FrozenMarkup> frozen =
-                pricingVersionService.resolveFrozenMarkup(pricingVersionId, apiToolId);
+                pricingVersionService.resolveFrozenMarkup(pricingVersionId, apiToolId, modelId, quantity);
         if (frozen.isEmpty()) {
             return ResponseEntity.ok(Map.of("found", false));
         }
@@ -453,6 +478,16 @@ public class InternalCredentialController {
         response.put("credentialId", f.credentialId());
         response.put("version", f.version());
         response.put("effectiveMarkup", f.effectiveMarkup());
+        // The row SHAPE, not just the amount. This path carries no quantity, so a
+        // per-unit row yields the price of ONE unit; a caller given only the
+        // number would charge a ten second video as one second.
+        response.put("priceUnit", f.priceUnit());
+        response.put("unitCredits", f.unitCredits());
+        // Whether the owner priced THIS endpoint or the amount fell back to the
+        // credential-wide default. A default reports "call" and zero unit
+        // credits, so without this it is indistinguishable from a flat price
+        // chosen on purpose.
+        response.put("pricedByPublishedRow", f.pricedByPublishedRow());
         return ResponseEntity.ok(response);
     }
 
@@ -495,6 +530,16 @@ public class InternalCredentialController {
         response.put("credentialId", f.credentialId());
         response.put("version", f.version());
         response.put("effectiveMarkup", f.effectiveMarkup());
+        // The row SHAPE, not just the amount. This path carries no quantity, so a
+        // per-unit row yields the price of ONE unit; a caller given only the
+        // number would charge a ten second video as one second.
+        response.put("priceUnit", f.priceUnit());
+        response.put("unitCredits", f.unitCredits());
+        // Whether the owner priced THIS endpoint or the amount fell back to the
+        // credential-wide default. A default reports "call" and zero unit
+        // credits, so without this it is indistinguishable from a flat price
+        // chosen on purpose.
+        response.put("pricedByPublishedRow", f.pricedByPublishedRow());
         return ResponseEntity.ok(response);
     }
 
@@ -507,6 +552,13 @@ public class InternalCredentialController {
      * effectiveMarkup)}. Creates the pin lazily on first call (idempotent -
      * subsequent calls touch {@code last_used_at}). Returns {@code found=false}
      * when the credential has no published pricing version (caller fail-closes).
+     *
+     * <p><b>{@code quantity} is a PLATFORM measurement</b> (seconds, assets,
+     * characters), never a count of the published unit: the caller cannot know
+     * what the row is charged per, and pre-converting against the unit it
+     * assumes is how a per-minute rate came to be multiplied by 60 seconds. The
+     * {@code quantity} echoed back IS in the published unit, because by then it
+     * has been converted here.
      */
     @GetMapping("/markup/scope-rate")
     public ResponseEntity<Map<String, Object>> resolveScopeMarkupRate(
@@ -514,7 +566,9 @@ public class InternalCredentialController {
             @RequestParam("scopeId") String scopeId,
             @RequestParam("userId") Long userId,
             @RequestParam("platformCredentialId") Long platformCredentialId,
-            @RequestParam("apiToolId") String apiToolIdStr) {
+            @RequestParam("apiToolId") String apiToolIdStr,
+            @RequestParam(value = "modelId", required = false) String modelId,
+            @RequestParam(value = "quantity", required = false) java.math.BigDecimal quantity) {
         if (!"RUN".equals(scopeKind) && !"STREAM".equals(scopeKind)) {
             return ResponseEntity.badRequest()
                     .body(Map.of("error", "scopeKind must be RUN or STREAM"));
@@ -526,10 +580,14 @@ public class InternalCredentialController {
             return ResponseEntity.badRequest()
                     .body(Map.of("error", "apiToolId must be a UUID"));
         }
+        if (quantity != null && quantity.signum() < 0) {
+            return ResponseEntity.badRequest()
+                    .body(Map.of("error", "quantity must be >= 0"));
+        }
 
         Optional<PlatformCredentialPricingService.ResolvedMarkup> resolved =
                 pricingService.resolveScopeMarkup(scopeKind, scopeId, userId,
-                        platformCredentialId, apiToolId);
+                        platformCredentialId, apiToolId, modelId, quantity);
         if (resolved.isEmpty()) {
             return ResponseEntity.ok(Map.of("found", false));
         }
@@ -539,15 +597,42 @@ public class InternalCredentialController {
         response.put("pinId", r.pinId());
         response.put("pricingVersionId", r.pricingVersionId());
         response.put("effectiveMarkup", r.effectiveMarkup());
+        // V428: the components the amount came from, so a surface can explain
+        // the price rather than only state it. Absent when the version default
+        // applied (there is no row to describe).
+        // Say outright which of the two the amount came from. A caller that
+        // must not sell an endpoint the owner never priced deliberately reads
+        // this; everyone else ignores it, which is what the default is for.
+        response.put("pricedByPublishedRow", r.entry() != null);
+        if (r.entry() != null) {
+            response.put("priceUnit", r.entry().getPriceUnit());
+            response.put("baseCredits", r.entry().getMarkupCredits());
+            response.put("unitCredits", r.entry().getUnitCredits());
+            response.put("minCredits", r.entry().getMinCredits());
+            response.put("maxCredits", r.entry().getMaxCredits());
+        }
+        if (r.quantity() != null) {
+            response.put("quantity", r.quantity());
+        }
         return ResponseEntity.ok(response);
     }
 
     /**
      * V148+ pricing-version bootstrap. Idempotent: if the credential already
      * has any published version, returns it; else publishes v1 with the supplied
-     * default + per-tool overrides. Called by catalog-service's
-     * {@code ApiMigrationImporter} after api_tools seed completes (migration-
-     * service can't do it because Flyway runs before catalog seed).
+     * default + prices. Called by catalog-service's {@code ApiMigrationImporter}
+     * after api_tools seed completes (migration-service can't do it because
+     * Flyway runs before catalog seed).
+     *
+     * <p><b>Never overwrites.</b> A caller re-running the import after the
+     * platform owner has tuned prices in the admin screens gets the existing
+     * version back, unchanged. The seed only ever proposes a starting price.
+     *
+     * <p>Two ways to express a price, both accepted in the same request:
+     * {@code perToolOverrides} is the pre-V428 flat {@code {toolId: credits}}
+     * map, and {@code entries} carries the full V428 shape (model, unit, base,
+     * per-unit rate, clamps). They are merged into one price list, so a caller
+     * that only knows the old field keeps working verbatim.
      */
     @PostMapping("/pricing-versions/bootstrap")
     public ResponseEntity<Map<String, Object>> bootstrapPricingVersion(
@@ -555,21 +640,33 @@ public class InternalCredentialController {
         if (request.credentialId() == null) {
             return ResponseEntity.badRequest().body(Map.of("error", "credentialId required"));
         }
-        Map<UUID, java.math.BigDecimal> overrides = new java.util.LinkedHashMap<>();
+        List<PriceSpec> prices = new java.util.ArrayList<>();
         if (request.perToolOverrides() != null) {
             for (var e : request.perToolOverrides().entrySet()) {
-                try {
-                    overrides.put(UUID.fromString(e.getKey()), e.getValue());
-                } catch (IllegalArgumentException nfe) {
-                    log.warn("bootstrapPricingVersion: skipping non-UUID tool key {}", e.getKey());
+                UUID toolId = parseToolId(e.getKey());
+                if (toolId != null) {
+                    prices.add(PriceSpec.flat(toolId, e.getValue()));
                 }
+            }
+        }
+        if (request.entries() != null) {
+            for (BootstrapPriceEntry e : request.entries()) {
+                if (e == null) continue;
+                UUID toolId = parseToolId(e.apiToolId());
+                if (toolId == null) continue;
+                // Strict on the way IN, exactly as the admin API is. This is the
+                // seed import, so a typo here would ship a mispriced generation
+                // to every install rather than to one credential.
+                prices.add(new PriceSpec(toolId, e.modelId(),
+                        PriceUnit.parseStrict(e.priceUnit()).wire(),
+                        e.baseCredits(), e.unitCredits(), e.minCredits(), e.maxCredits()));
             }
         }
         try {
             PlatformCredentialPricingVersion v = pricingService.bootstrapV1IfAbsent(
                     request.credentialId(),
                     request.defaultMarkupCredits(),
-                    overrides,
+                    prices,
                     request.createdBy() != null ? request.createdBy() : "ApiMigrationImporter");
             Map<String, Object> resp = new LinkedHashMap<>();
             resp.put("pricingVersionId", v.getId());
@@ -583,11 +680,281 @@ public class InternalCredentialController {
         }
     }
 
+    /**
+     * A tool key that is not a UUID is catalog drift, never a reason to fail the
+     * whole bootstrap: the remaining prices still deserve to be published.
+     */
+    /**
+     * The wire unit of a bundle price row, or null when this build cannot price
+     * by it and the row must therefore be left alone.
+     *
+     * <p>Absent means flat, which is a real answer and not an unknown one: a row
+     * that names no unit is charged per call, so it publishes normally.
+     */
+    private static String normalisedBundleUnit(String rawUnit) {
+        if (rawUnit == null || rawUnit.isBlank()) {
+            return PriceUnit.CALL.wire();
+        }
+        try {
+            return PriceUnit.parseStrict(rawUnit).wire();
+        } catch (RuntimeException unknownToThisBuild) {
+            return null;
+        }
+    }
+
+    private UUID parseToolId(String raw) {
+        if (raw == null || raw.isBlank()) {
+            log.warn("bootstrapPricingVersion: skipping price with no apiToolId");
+            return null;
+        }
+        try {
+            return UUID.fromString(raw);
+        } catch (IllegalArgumentException nfe) {
+            log.warn("bootstrapPricingVersion: skipping non-UUID tool key {}", raw);
+            return null;
+        }
+    }
+
     public record BootstrapPricingRequest(
             Long credentialId,
             java.math.BigDecimal defaultMarkupCredits,
             Map<String, java.math.BigDecimal> perToolOverrides,
+            List<BootstrapPriceEntry> entries,
             String createdBy
+    ) {
+    }
+
+    /**
+     * V428 wire form of one price row. {@code modelId} null = the endpoint-wide
+     * price; {@code priceUnit} null = {@code call}, i.e. a flat amount.
+     */
+    public record BootstrapPriceEntry(
+            String apiToolId,
+            String modelId,
+            String priceUnit,
+            java.math.BigDecimal baseCredits,
+            java.math.BigDecimal unitCredits,
+            java.math.BigDecimal minCredits,
+            java.math.BigDecimal maxCredits
+    ) {
+    }
+
+    // ===== V430: generation prices travelling in the signed API-catalog bundle =====
+
+    /**
+     * PUBLISHER half. The prices the platform owner has published for a set of
+     * generation endpoints, keyed by INTEGRATION NAME rather than by credential
+     * id.
+     *
+     * <p>The id is a serial that means something different on every install, so
+     * it cannot travel; the integration name is the same key
+     * {@code /platform/by-name} resolves and the same one the catalog stores on
+     * {@code apis.platform_credential_name}, which is what makes the price
+     * re-attachable on the far side.
+     *
+     * <p>The caller states BOTH what it is asking about (the endpoints it found
+     * carrying a generation descriptor) and where to look (the integrations
+     * those endpoints belong to). Neither is inferred here: a request that
+     * named nothing would otherwise be answered with the platform owner's whole
+     * price list, and the whole list is not what a catalog bundle distributes.
+     */
+    @PostMapping("/pricing-versions/published-prices")
+    public ResponseEntity<Map<String, Object>> publishedPrices(
+            @RequestBody PublishedPricesRequest request) {
+        java.util.Set<UUID> toolIds = new java.util.LinkedHashSet<>();
+        if (request != null && request.apiToolIds() != null) {
+            for (String raw : request.apiToolIds()) {
+                UUID id = parseToolId(raw);
+                if (id != null) toolIds.add(id);
+            }
+        }
+        List<Map<String, Object>> prices = new java.util.ArrayList<>();
+        if (request != null && request.integrationNames() != null && !toolIds.isEmpty()) {
+            for (String integrationName : new java.util.LinkedHashSet<>(request.integrationNames())) {
+                if (integrationName == null || integrationName.isBlank()) continue;
+                Optional<com.apimarketplace.auth.credential.domain.PlatformCredentialModels.PlatformCredential>
+                        credential = platformCredentialService.getRawCredential(integrationName);
+                if (credential.isEmpty()) continue;
+                for (var e : pricingService.findLatestPublishedPrices(credential.get().id(), toolIds)) {
+                    prices.add(priceRow(integrationName, e));
+                }
+            }
+        }
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("prices", prices);
+        return ResponseEntity.ok(body);
+    }
+
+    /**
+     * Amounts are emitted as PLAIN STRINGS, never as JSON numbers. The bundle
+     * that carries them is signed byte-for-byte, and a rate that round-trips
+     * through a double is not the rate that was signed.
+     */
+    private static Map<String, Object> priceRow(
+            String integrationName,
+            com.apimarketplace.auth.credential.domain.PricingVersionEntry e) {
+        Map<String, Object> row = new LinkedHashMap<>();
+        row.put("integrationName", integrationName);
+        row.put("apiToolId", String.valueOf(e.getApiToolId()));
+        if (e.getModelId() != null) row.put("modelId", e.getModelId());
+        row.put("priceUnit", e.unit().wire());
+        row.put("baseCredits", plain(e.getMarkupCredits()));
+        row.put("unitCredits", plain(e.getUnitCredits()));
+        if (e.getMinCredits() != null) row.put("minCredits", plain(e.getMinCredits()));
+        if (e.getMaxCredits() != null) row.put("maxCredits", plain(e.getMaxCredits()));
+        return row;
+    }
+
+    private static String plain(java.math.BigDecimal value) {
+        return value == null ? "0" : value.toPlainString();
+    }
+
+    /**
+     * CONSUMER half. Apply the prices a verified API-catalog bundle carried.
+     *
+     * <p>Grouped by integration name and applied one credential at a time, so
+     * an integration this install has no platform key for (nothing to hang a
+     * price off) and a bundle row that contradicts a live unit both cost their
+     * own credential only, never the rest of the catalog's prices.
+     *
+     * <p>Idempotent by construction: {@code applyBundlePrices} publishes nothing
+     * when nothing changed, so the caller may re-offer the same prices on every
+     * sync tick. That is what eventually prices an integration whose platform
+     * key the operator pastes long after the bundle carrying its price landed.
+     */
+    @PostMapping("/pricing-versions/apply-catalog-bundle")
+    public ResponseEntity<Map<String, Object>> applyCatalogBundlePrices(
+            @RequestBody ApplyBundlePricesRequest request) {
+        if (request == null || request.prices() == null || request.prices().isEmpty()) {
+            return ResponseEntity.ok(applyResponse(0, 0, 0, 0, List.of()));
+        }
+        // The label the pricing history shows. Two producers write bundle-owned
+        // prices: the signed bundle (no origin, the default) and the boot-time
+        // generation seed shipped inside a self-hosted image, which names itself
+        // so an operator is not sent looking for a bundle version that never
+        // existed. The row's source is BUNDLE either way - that is the statement
+        // "not decided here", and it is what lets an admin edit survive.
+        String origin = request.origin() == null || request.origin().isBlank()
+                ? "api-catalog-bundle"
+                : request.origin().trim();
+        String createdBy = origin
+                + (request.bundleVersion() == null ? "" : " v" + request.bundleVersion());
+
+        Map<String, List<PriceSpec>> byIntegration = new LinkedHashMap<>();
+        for (BundlePriceEntry e : request.prices()) {
+            if (e == null || e.integrationName() == null || e.integrationName().isBlank()) continue;
+            UUID toolId = parseToolId(e.apiToolId());
+            if (toolId == null) continue;
+            // A unit this build does not know means a NEWER cloud, not a typo:
+            // the payload is signed, so nobody hand-wrote it. That reading is
+            // right, and the conclusion drawn from it was not.
+            //
+            // Degrading the row to a flat 'call' price KEEPS unitCredits while
+            // discarding what it counts, so a per-second row at 60 bills 60
+            // for a ten second clip instead of 600, always in the undercharging
+            // direction, and validateUnitChange accepts "-> CALL"
+            // unconditionally so the degraded row REPLACES the correct live one.
+            // The choice was framed as "degrade or drop the whole integration's
+            // prices", which is a false pair: dropping THIS ROW alone leaves
+            // every sibling published and lets carry-forward keep the row's own
+            // last known-good price, which is the outcome the signed payload
+            // deserves.
+            String unit = normalisedBundleUnit(e.priceUnit());
+            if (unit == null) {
+                log.warn("Skipping bundle price for tool {} (integration {}): price unit '{}' is not one "
+                                + "this build understands, so its previous price is kept rather than "
+                                + "republished at a flat rate.",
+                        toolId, e.integrationName().trim(), e.priceUnit());
+                continue;
+            }
+            byIntegration.computeIfAbsent(e.integrationName().trim(), k -> new java.util.ArrayList<>())
+                    .add(new PriceSpec(toolId, e.modelId(), unit,
+                            e.baseCredits(), e.unitCredits(), e.minCredits(), e.maxCredits(),
+                            com.apimarketplace.auth.credential.domain.PriceSource.BUNDLE));
+        }
+
+        int publishedCredentials = 0;
+        int applied = 0;
+        int preserved = 0;
+        int skipped = 0;
+        List<String> failures = new java.util.ArrayList<>();
+        for (var entry : byIntegration.entrySet()) {
+            Optional<com.apimarketplace.auth.credential.domain.PlatformCredentialModels.PlatformCredential>
+                    credential = platformCredentialService.getRawCredential(entry.getKey());
+            if (credential.isEmpty()) {
+                // Nothing is resold for an integration this install has no key
+                // for, so an unpriced one is not a failure. The next tick tries
+                // again, which is what prices it once the key exists.
+                skipped++;
+                log.debug("Catalog-bundle prices: no platform credential '{}' - {} price(s) not published",
+                        entry.getKey(), entry.getValue().size());
+                continue;
+            }
+            try {
+                var result = pricingService.applyBundlePrices(
+                        credential.get().id(), entry.getValue(), createdBy);
+                if (result.published()) publishedCredentials++;
+                applied += result.applied();
+                preserved += result.preserved();
+            } catch (IllegalArgumentException ex) {
+                failures.add(entry.getKey() + ": " + ex.getMessage());
+                log.warn("Catalog-bundle prices rejected for integration '{}': {}",
+                        entry.getKey(), ex.getMessage());
+            }
+        }
+        return ResponseEntity.ok(
+                applyResponse(publishedCredentials, applied, preserved, skipped, failures));
+    }
+
+    private static Map<String, Object> applyResponse(int publishedCredentials, int applied,
+                                                      int preserved, int skipped, List<String> failures) {
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("publishedCredentials", publishedCredentials);
+        body.put("appliedPrices", applied);
+        body.put("preservedLocalPrices", preserved);
+        body.put("skippedIntegrations", skipped);
+        body.put("failures", failures);
+        return body;
+    }
+
+    /** Endpoints and integrations the caller wants the published prices of. */
+    public record PublishedPricesRequest(List<String> integrationNames, List<String> apiToolIds) {
+    }
+
+    /**
+     * Prices a verified API-catalog bundle carried, plus the version that
+     * carried them.
+     *
+     * @param origin optional author label for the published pricing version.
+     *               Absent (the bundle's own case) reads as
+     *               {@code api-catalog-bundle}. It names the writer only; the
+     *               per-row provenance is BUNDLE for every caller of this
+     *               endpoint, which is what makes an admin-published row
+     *               survive them all.
+     */
+    public record ApplyBundlePricesRequest(Long bundleVersion, List<BundlePriceEntry> prices,
+                                            String origin) {
+
+        /** Back-compat constructor for the signed-bundle caller, which has no origin. */
+        public ApplyBundlePricesRequest(Long bundleVersion, List<BundlePriceEntry> prices) {
+            this(bundleVersion, prices, null);
+        }
+    }
+
+    /**
+     * One price as it travels in the bundle. Identical to
+     * {@link BootstrapPriceEntry} plus {@code integrationName}, which is what
+     * replaces the install-local credential id.
+     */
+    public record BundlePriceEntry(
+            String integrationName,
+            String apiToolId,
+            String modelId,
+            String priceUnit,
+            java.math.BigDecimal baseCredits,
+            java.math.BigDecimal unitCredits,
+            java.math.BigDecimal minCredits,
+            java.math.BigDecimal maxCredits
     ) {
     }
 

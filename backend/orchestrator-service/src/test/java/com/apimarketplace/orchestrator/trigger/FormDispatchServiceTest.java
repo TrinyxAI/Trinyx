@@ -5,7 +5,6 @@ import com.apimarketplace.orchestrator.domain.WorkflowRunEntity;
 import com.apimarketplace.orchestrator.domain.workflow.RunStatus;
 import com.apimarketplace.orchestrator.repository.WorkflowRepository;
 import com.apimarketplace.orchestrator.repository.WorkflowRunRepository;
-import com.apimarketplace.common.credit.CreditConsumptionClient;
 import com.apimarketplace.trigger.client.TriggerClient;
 import com.apimarketplace.trigger.client.dto.StandaloneFormEndpointDto;
 import org.junit.jupiter.api.BeforeEach;
@@ -37,7 +36,6 @@ class FormDispatchServiceTest {
     @Mock private WorkflowRunRepository runRepository;
     @Mock private ReusableTriggerService triggerService;
     @Mock private ProductionRunResolver productionRunResolver;
-    @Mock private CreditConsumptionClient creditClient;
     @Mock private ShareInvocationLimiter shareInvocationLimiter;
 
     private FormDispatchService service;
@@ -54,9 +52,8 @@ class FormDispatchServiceTest {
     void setUp() {
         service = new FormDispatchService(
                 triggerClient, workflowRepository, runRepository,
-                triggerService, productionRunResolver, creditClient, shareInvocationLimiter,
+                triggerService, productionRunResolver, shareInvocationLimiter,
                 new com.apimarketplace.common.storage.url.PublicFileUrlBuilder("https://livecontext.ai"));
-        lenient().when(creditClient.checkCredits(any())).thenReturn(true);
         lenient().when(shareInvocationLimiter.tryAcquire(any(), any())).thenReturn(true);
 
         // Default: ProductionRunResolver delegates to existing repo stubs so the
@@ -286,26 +283,6 @@ class FormDispatchServiceTest {
                     .hasMessageContaining("temporarily not accepting submissions");
 
             verify(triggerClient).logFormSubmission(endpoint.getId(), FORM_DATA, "no_production_run", 0, IP_ADDRESS);
-            verify(triggerService, never()).executeTrigger(any(), any(), any(), any());
-        }
-
-        @Test
-        @DisplayName("Should return accepted when insufficient credits")
-        void shouldReturnAcceptedWhenInsufficientCredits() {
-            StandaloneFormEndpointDto endpoint = createEndpoint(TRIGGER_ID);
-            WorkflowEntity workflow = createWorkflow(null);
-            WorkflowRunEntity run = createRun(RunStatus.WAITING_TRIGGER);
-
-            when(triggerClient.findFormEndpointByToken(TOKEN)).thenReturn(endpoint);
-            when(workflowRepository.findById(WORKFLOW_ID)).thenReturn(Optional.of(workflow));
-            when(runRepository.findFirstByWorkflowIdOrderByStartedAtDesc(WORKFLOW_ID))
-                    .thenReturn(Optional.of(run));
-            when(creditClient.checkCredits(TENANT_ID)).thenReturn(false);
-
-            Map<String, Object> result = service.submitForm(TOKEN, FORM_DATA, IP_ADDRESS);
-
-            assertThat(result.get("status")).isEqualTo("accepted");
-            assertThat(result.get("workflowsTriggered")).isEqualTo(0);
             verify(triggerService, never()).executeTrigger(any(), any(), any(), any());
         }
 

@@ -146,7 +146,7 @@ public class ApplicationHelpModule implements ToolModule {
             "PAUSED", "Step-by-step mode - waiting for the next manual step.",
             "WAITING_TRIGGER", "Reusable run sitting idle waiting for the next trigger fire.",
             "FAILED", "Terminal error in at least one node and no recovery succeeded.",
-            "PARTIAL_SUCCESS", "Some nodes failed but others (often error-handler branches) completed."
+            "PARTIAL_SUCCESS", "A NODE whose items partly failed, not a run verdict. Runs no longer report it: any failed node makes the run FAILED. Runs that finished before that rule may still return it."
         ));
         g.put("data_inputs_schema", Map.of(
             "shape", "{trigger_type, fields?: [{name, required, type?, format?, options?}]}",

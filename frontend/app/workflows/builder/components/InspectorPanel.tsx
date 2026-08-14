@@ -655,7 +655,7 @@ export function InspectorPanel({ node, selectedNodeIds = [], onUpdate, onClose, 
       >
         <div
           data-inspector-panel
-          className="flex items-center gap-2.5 px-3 py-2 bg-white dark:bg-gray-800 rounded-full pointer-events-auto cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-700/50 transition-colors relative inset-auto z-[150]"
+          className="flex items-center gap-2.5 px-3 py-2 bg-white dark:bg-gray-800 rounded-md pointer-events-auto cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-700/50 transition-colors relative inset-auto z-[150]"
           onClick={() => onMinimizedChange?.(false)}
         >
           <NodeIcon
@@ -705,7 +705,10 @@ export function InspectorPanel({ node, selectedNodeIds = [], onUpdate, onClose, 
               ? "lg:w-[900px]"
               : "lg:w-[300px]"
           ),
-          !isFullscreen && "lg:rounded-[32px]",
+          // rounded-2xl, the floating-surface step of the radius ladder: the
+          // inspector sits on the canvas next to the toolbar and the palette,
+          // and rounded-[32px] made it the one capsule among them.
+          !isFullscreen && "lg:rounded-2xl",
           "bg-white dark:bg-gray-800 flex flex-col pointer-events-auto overflow-hidden z-[9999] lg:z-[150]",
           !isFullscreen && "group/inspector",
           draggingFromHandle && "select-none"

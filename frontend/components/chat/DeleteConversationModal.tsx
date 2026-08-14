@@ -49,7 +49,7 @@ export function DeleteConversationModal({
         onClick={(e) => e.stopPropagation()}
       >
         {/* Icon */}
-        <div className={`w-16 h-16 ${clearMode ? 'bg-orange-100 dark:bg-orange-950/40' : 'bg-red-100 dark:bg-red-950/40'} rounded-full flex items-center justify-center mx-auto mb-5`}>
+        <div className={`w-16 h-16 ${clearMode ? 'bg-orange-100 dark:bg-orange-950/40' : 'bg-red-100 dark:bg-red-950/40'} rounded-2xl flex items-center justify-center mx-auto mb-5`}>
           <Icon className={`h-8 w-8 ${clearMode ? 'text-orange-600 dark:text-orange-400' : 'text-red-600 dark:text-red-400'}`} />
         </div>
 

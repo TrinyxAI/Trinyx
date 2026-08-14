@@ -20,10 +20,10 @@ import java.time.Instant;
  *       on {@link ModelConfigOverrideEntity} (legacy behaviour)</li>
  * </ul>
  *
- * <p>Initial categories: {@code chat | browser_agent | image_generation}.
- * The DB shape constraint is permissive ({@code ^[a-z][a-z0-9_]*$}) so future
- * categories (video_generation, file_processing, …) can be added without a
- * schema migration. See V156.
+ * <p>Categories in use: {@code chat | browser_agent}. Rows also exist under
+ * the retired {@code <format>_generation} keys and stay readable. The DB shape
+ * constraint is permissive ({@code ^[a-z][a-z0-9_]*$}) so future categories
+ * (file_processing, …) can be added without a schema migration. See V156.
  */
 @Entity
 @Table(name = "model_category_settings")

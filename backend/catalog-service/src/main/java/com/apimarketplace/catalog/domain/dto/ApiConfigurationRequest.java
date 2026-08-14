@@ -420,8 +420,52 @@ public record ApiConfigurationRequest(
         // api_tools.required_scopes by ApiSubmissionOrchestrator. Read by
         // HttpExecutionService.preflightScopeCheck before credential resolution.
         @com.fasterxml.jackson.annotation.JsonAlias({"required_scopes"})
-        java.util.List<String> requiredScopes
-    ) {}
+        java.util.List<String> requiredScopes,
+
+        // V428: the generation descriptor, when this endpoint produces an asset
+        // (image, video, audio, voice, music). Optional and null for the 600+
+        // ordinary endpoints. Persisted on api_tools.generation_spec by
+        // ApiSubmissionOrchestrator, which is what makes the endpoint visible to
+        // the generation surface and, through ApiToolEntity.isGeneration(), what
+        // every fail-closed billing guard reads.
+        //
+        // It has to be declared HERE, not only emitted by the importer and read
+        // by the orchestrator: this request is bound as a typed record, so a key
+        // with no component is dropped at binding and the converter below
+        // rebuilds the tool map field by field from what survived. Without this
+        // line the descriptor never reaches the database and the whole feature
+        // is inert, with nothing failing anywhere.
+        @com.fasterxml.jackson.annotation.JsonAlias({"generation_spec", "generation"})
+        JsonNode generationSpec
+    ) {
+
+        /**
+         * Pre-V428 arity, kept so the positional call sites that predate the
+         * generation descriptor keep compiling. An endpoint built through it is
+         * an ordinary one, which is what those callers construct.
+         */
+        public McpToolDto(
+                String id, String name, String description, String endpoint, String method,
+                String protocol, JsonNode runtimeMetadata,
+                String toolCategory, String toolCategoryDescription, String toolCategoryIconUrl,
+                String toolNameId, Boolean isCustomCategory, Boolean isCustomToolName,
+                List<HeaderDto> headers, List<PathParameterDto> pathParameters,
+                List<QueryParameterDto> queryParameters, List<BodyParamDto> bodyParams,
+                Map<String, String> defaultHeaders, ResponseDto response,
+                SqlConfigDto sqlConfig, AmqpConfigDto amqpConfig, KafkaConfigDto kafkaConfig,
+                MqttConfigDto mqttConfig, RedisConfigDto redisConfig,
+                JsonNode executionSpec, JsonNode outputSchema, String executionMode,
+                JsonNode synthesis, JsonNode pagination, String nextHint,
+                java.util.List<String> requiredScopes) {
+            this(id, name, description, endpoint, method, protocol, runtimeMetadata,
+                    toolCategory, toolCategoryDescription, toolCategoryIconUrl,
+                    toolNameId, isCustomCategory, isCustomToolName,
+                    headers, pathParameters, queryParameters, bodyParams, defaultHeaders,
+                    response, sqlConfig, amqpConfig, kafkaConfig, mqttConfig, redisConfig,
+                    executionSpec, outputSchema, executionMode,
+                    synthesis, pagination, nextHint, requiredScopes, null);
+        }
+    }
 
     public record SqlConfigDto(
         String dialect,

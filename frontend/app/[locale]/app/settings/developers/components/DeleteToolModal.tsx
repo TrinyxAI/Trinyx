@@ -23,7 +23,7 @@ export default function DeleteToolModal({
     <div className="fixed inset-0 bg-black/20 backdrop-blur-sm flex items-center justify-center p-4 z-[9999]" onClick={onCancel}>
       <div className="max-w-md w-full max-h-[90vh] bg-theme-primary rounded-3xl shadow-2xl p-8 text-center animate-in fade-in-0 zoom-in-95 duration-300 border border-theme overflow-y-auto" onClick={(e) => e.stopPropagation()}>
         {/* Warning icon */}
-        <div className="w-16 h-16 bg-red-100 rounded-full flex items-center justify-center mx-auto mb-4">
+        <div className="w-16 h-16 bg-red-100 rounded-2xl flex items-center justify-center mx-auto mb-4">
           <AlertTriangle className="w-8 h-8 text-red-600" />
         </div>
 

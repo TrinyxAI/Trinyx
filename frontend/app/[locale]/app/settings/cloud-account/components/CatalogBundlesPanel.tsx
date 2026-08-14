@@ -66,7 +66,7 @@ function StatusBadge({
 }) {
   if (!status) {
     return (
-      <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-xs font-medium bg-theme-tertiary text-theme-secondary">
+      <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md text-xs font-medium bg-theme-tertiary text-theme-secondary">
         <Clock className="w-3 h-3" />
         {neverLabel}
       </span>
@@ -81,7 +81,7 @@ function StatusBadge({
       : "bg-red-500/15 text-red-700 dark:text-red-400";
   const Icon = ok ? CheckCircle2 : informational ? Cloud : AlertTriangle;
   return (
-    <span className={cn("inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-xs font-medium", cls)}>
+    <span className={cn("inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md text-xs font-medium", cls)}>
       <Icon className="w-3 h-3" />
       {translateCode(status)}
     </span>
@@ -386,12 +386,12 @@ export default function CatalogBundlesPanel() {
                     <td className="px-4 py-2.5 text-theme-secondary">{formatInstant(b.importedAt)}</td>
                     <td className="px-4 py-2.5">
                       {b.isActive ? (
-                        <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-xs font-medium bg-green-500/15 text-green-700 dark:text-green-400">
+                        <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md text-xs font-medium bg-green-500/15 text-green-700 dark:text-green-400">
                           <CircleCheck className="w-3 h-3" />
                           {tb("statusActive")}
                         </span>
                       ) : (
-                        <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-xs font-medium bg-theme-tertiary text-theme-secondary">
+                        <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md text-xs font-medium bg-theme-tertiary text-theme-secondary">
                           {tb("statusInactive")}
                         </span>
                       )}

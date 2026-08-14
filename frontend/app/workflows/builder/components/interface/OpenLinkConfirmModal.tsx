@@ -45,7 +45,7 @@ export function OpenLinkConfirmModal({ url, onConfirm, onCancel }: OpenLinkConfi
         aria-labelledby={titleId}
       >
         {/* Icon */}
-        <div className="w-16 h-16 bg-blue-100 dark:bg-blue-950/40 rounded-full flex items-center justify-center mx-auto mb-5">
+        <div className="w-16 h-16 bg-blue-100 dark:bg-blue-950/40 rounded-2xl flex items-center justify-center mx-auto mb-5">
           <ExternalLink className="h-8 w-8 text-blue-600 dark:text-blue-400" />
         </div>
 

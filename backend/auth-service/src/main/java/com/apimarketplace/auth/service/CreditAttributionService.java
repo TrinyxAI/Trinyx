@@ -19,6 +19,7 @@ import com.apimarketplace.auth.service.CreditService.CreditConsumeResult;
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
 import java.time.ZoneOffset;
+import java.util.Optional;
 
 /**
  * Centralized service for credit attribution (grants, resets, pack upgrades).
@@ -59,6 +60,15 @@ public class CreditAttributionService {
     private final SubscriptionRepository subscriptionRepository;
     private final PendingCreditUpgradeRepository pendingCreditUpgradeRepository;
 
+    /**
+     * Needed for {@code refresh}: a {@code SELECT ... FOR UPDATE} through Spring Data returns the
+     * first-level-cached instance when the entity is already managed here, so the lock is taken
+     * but the values are whatever the caller loaded. See {@link #resolveManagedForUpdate}.
+     * Optional so the existing 4-arg constructor keeps working in unit tests.
+     */
+    @jakarta.persistence.PersistenceContext
+    private jakarta.persistence.EntityManager entityManager;
+
     public CreditAttributionService(CreditService creditService,
                                      CreditLedgerRepository ledgerRepository,
                                      SubscriptionRepository subscriptionRepository,
@@ -72,6 +82,11 @@ public class CreditAttributionService {
     /**
      * Attribute credits on a new subscription creation.
      * Grants full credit pack credits or plan-included credits.
+     *
+     * <p>No {@link #resolveManagedForUpdate} here, unlike the renewal and pack-change paths:
+     * every caller passes a subscription that is MANAGED in its own transaction (freshly
+     * persisted, or loaded inside it), and the sourceId is keyed on {@code _init} rather than
+     * on a mutable period - there is no stale value to read.
      *
      * @param userId          the user ID
      * @param subscription    the local subscription entity (used for sourceId derivation)
@@ -109,27 +124,133 @@ public class CreditAttributionService {
      * @param subscription the local subscription entity
      */
     @Transactional
-    public void attributeOnRenewal(Long userId, Subscription subscription) {
+    public RenewalOutcome attributeOnRenewal(Long userId, Subscription subscription) {
+        return attributeOnRenewal(userId, subscription, null);
+    }
+
+    /**
+     * What {@link #attributeOnRenewal(Long, Subscription, LocalDateTime)} actually did, so the
+     * caller can log the truth instead of assuming success. The internal scheduler used to
+     * announce "renewed" unconditionally, which is precisely how a renewal that granted nothing
+     * stayed invisible in production for weeks.
+     */
+    public enum RenewalOutcome {
+        /** Period advanced (when asked) and the cycle's credits were attributed. */
+        RENEWED,
+        /** Another actor had already renewed this cycle; deliberately left untouched. */
+        ALREADY_RENEWED,
+        /** The row could not be renewed (not resolvable, no longer eligible, no plan). */
+        SKIPPED
+    }
+
+    /**
+     * Renewal attribution that can also ADVANCE the billing period, atomically with
+     * the reset + re-grant.
+     *
+     * <p>{@code newPeriodStart} is the contract difference between the two renewal
+     * callers:
+     * <ul>
+     *   <li><b>{@code null}</b> - the caller already owns the period (Stripe
+     *       {@code invoice.paid}, where Stripe is the source of truth for the cycle,
+     *       and {@code AdminPlanService.assignPlan}, which anchors the cycle itself
+     *       before calling). The period is left alone. One thing DID change for these
+     *       callers: the row is now re-read under lock, so the plan, the credit quantity,
+     *       the period and the balance are the live values rather than whatever the caller
+     *       loaded. For the Stripe webhook that window is small (it loads the row a few lines
+     *       before calling), so this is defence rather than a bug fix there - but the reload
+     *       is what makes {@code resetBalance}'s write safe for ANY caller, which is the
+     *       point, and it can now return {@link RenewalOutcome#SKIPPED} where the row has
+     *       vanished instead of writing through a detached copy.</li>
+     *   <li><b>non-null</b> - the internal monthly scheduler, which has no external
+     *       source of truth for the cycle. The period is advanced HERE, inside this
+     *       transaction and BEFORE the sourceId is derived from it.</li>
+     * </ul>
+     *
+     * <p>Doing the advance here (instead of in the scheduler, after this call) fixes
+     * two production defects that between them made every internal renewal wrong:
+     * <ol>
+     *   <li><b>Lost update.</b> The scheduler used to write the subscription row again
+     *       AFTER this method committed. Its {@link Subscription} is detached (a
+     *       {@code @Scheduled} thread has no persistence context), and the grant lands
+     *       on a re-resolved managed instance, so that trailing {@code save} merged a
+     *       pre-grant copy back over the fresh balance. Silent: the ledger showed the
+     *       grant, the wallet showed zero.</li>
+     *   <li><b>Period-key reuse.</b> The sourceId embeds {@code currentPeriodStart}.
+     *       Attributing BEFORE advancing it re-mints the previous cycle's key, which
+     *       the {@code existsBySourceId} guards then skip - the renewal silently
+     *       granted nothing at all.</li>
+     * </ol>
+     * Advancing first also makes the pair crash-safe: period and credits commit
+     * together, so a failure leaves the subscription expired and the next hourly pass
+     * retries it cleanly.
+     *
+     * @return what actually happened, so a caller can log the truth rather than assume success
+     */
+    @Transactional
+    public RenewalOutcome attributeOnRenewal(Long userId, Subscription subscription, LocalDateTime newPeriodStart) {
         try {
-            Plan plan = subscription.getPlan();
-            if (plan == null) {
-                log.error("Cannot attribute renewal credits: subscription {} has no plan. userId={}",
-                        subscription.getId(), userId);
-                return;
+            // Work on a MANAGED instance holding the row's live values; the caller's object
+            // may be detached and stale (see resolveManagedForUpdate).
+            // No fall-back to the caller's instance, for EITHER overload. This method always
+            // writes through the entity it works on - resetBalance zeroes the balance and saves
+            // it - so continuing on a detached copy would merge every stale column back over the
+            // row (defect 3), and if the row is genuinely gone the merge would re-insert it as a
+            // brand-new subscription. There is nothing safe to do without the live row.
+            Subscription sub = resolveManagedForUpdate(subscription).orElse(null);
+            if (sub == null) {
+                log.error("Cannot attribute renewal credits: subscription row {} is not resolvable for update. userId={}",
+                        subscription == null ? null : subscription.getId(), userId);
+                return RenewalOutcome.SKIPPED;
             }
 
-            int creditQuantity = subscription.getCreditQuantity() != null ? subscription.getCreditQuantity() : 0;
-            String subKey = "sub_" + subscription.getId();
-            String periodSuffix = periodKey(subscription.getCurrentPeriodStart());
+            if (newPeriodStart != null) {
+                // Re-validate UNDER the lock everything the unlocked selection query matched on.
+                // Between that READ COMMITTED select and acquiring this lock, another actor may
+                // have renewed the row (concurrent admin comp grant, or an overlapping pass once
+                // one exceeds lockAtMostFor) or made it ineligible (a Stripe upgrade cancels the
+                // internal sibling). Acting on a stale match grants the same cycle twice.
+                // NOTE what this does NOT protect: grantCredits resolves the wallet by user
+                // (most-recent active row), so on an account that holds both an active internal
+                // row and a newer active Stripe row, the reset and the grant still land on
+                // different rows. Sibling-cancellation in SubscriptionService is what keeps that
+                // shape from existing; this guard only stops us acting on a row that already
+                // moved on.
+                if (sub.getCurrentPeriodEnd() != null && sub.getCurrentPeriodEnd().isAfter(newPeriodStart)) {
+                    log.info("Subscription {} was already renewed by a concurrent actor (period ends {}), skipping",
+                            sub.getId(), sub.getCurrentPeriodEnd());
+                    return RenewalOutcome.ALREADY_RENEWED;
+                }
+                if (!isInternalRenewalEligible(sub)) {
+                    log.info("Subscription {} is no longer eligible for internal renewal (provider={}, status={}), skipping",
+                            sub.getId(), sub.getProvider(), sub.getStatus());
+                    return RenewalOutcome.SKIPPED;
+                }
+                // Advance BEFORE the plan check: a row we refuse to attribute must still
+                // leave the expired window, otherwise every hourly pass re-picks it forever.
+                sub.setCurrentPeriodStart(newPeriodStart);
+                sub.setCurrentPeriodEnd(newPeriodStart.plusMonths(1));
+                // updatedAt is deliberately NOT set here - @PreUpdate stamps it at flush.
+            }
+
+            Plan plan = sub.getPlan();
+            if (plan == null) {
+                log.error("Cannot attribute renewal credits: subscription {} has no plan. userId={}",
+                        sub.getId(), userId);
+                return RenewalOutcome.SKIPPED;
+            }
+
+            int creditQuantity = sub.getCreditQuantity() != null ? sub.getCreditQuantity() : 0;
+            String subKey = "sub_" + sub.getId();
+            String periodSuffix = periodKey(sub.getCurrentPeriodStart());
 
             log.info("Attributing credits for renewal: userId={}, plan={}, creditQty={}, subId={}, period={}",
-                    userId, plan.getCode(), creditQuantity, subscription.getId(), periodSuffix);
+                    userId, plan.getCode(), creditQuantity, sub.getId(), periodSuffix);
 
             // Reset balance to zero
-            resetBalance(userId, "reset_" + subKey + "_" + periodSuffix, subscription);
+            resetBalance(userId, "reset_" + subKey + "_" + periodSuffix, sub);
 
             // Re-grant credits
-            if (grantsBasePack(subscription, creditQuantity)) {
+            if (grantsBasePack(sub, creditQuantity)) {
                 // Paid plans AND admin-granted comp plans (internal, non-FREE): grant the
                 // tier-0 base pack (5K at $0 when creditQuantity=0). Keeps a comp Starter/Pro/Team
                 // renewing at the 5K base every cycle - never the plan's larger allowance.
@@ -138,10 +259,69 @@ public class CreditAttributionService {
                 // Internal FREE plan: grant plan-included credits (1K)
                 grantPlanCredits(userId, "plan_" + subKey + "_" + periodSuffix, plan);
             }
+            return RenewalOutcome.RENEWED;
         } catch (DataIntegrityViolationException e) {
             log.info("Duplicate renewal credit attribution detected for subId={}, treating as idempotent skip",
-                    subscription.getId());
+                    subscription == null ? null : subscription.getId());
+            return RenewalOutcome.SKIPPED;
         }
+    }
+
+    /**
+     * Statuses {@code findExpiredInternalSubscriptions} matches on. Re-checked under the lock
+     * because that selection query is unlocked: a Stripe upgrade cancels the internal sibling
+     * row, and renewing a canceled comp row would grant its 5K onto the wallet the user has
+     * meanwhile started paying for.
+     */
+    private static final java.util.Set<String> INTERNAL_RENEWABLE_STATUSES =
+            java.util.Set.of("active", "trialing");
+
+    private static boolean isInternalRenewalEligible(Subscription sub) {
+        return "internal".equalsIgnoreCase(sub.getProvider())
+                && sub.getStatus() != null
+                && INTERNAL_RENEWABLE_STATUSES.contains(sub.getStatus().toLowerCase());
+    }
+
+    /**
+     * Re-read {@code subscription} by primary key under {@code PESSIMISTIC_WRITE} so the
+     * rest of the attribution works on live column values inside this transaction.
+     *
+     * <p>Callers hand us a {@link Subscription} loaded elsewhere. When that elsewhere is
+     * another transaction (the internal renewal scheduler, the Stripe webhook handler)
+     * the object is DETACHED, and two things go wrong if we trust it: the balance we read
+     * for the {@code PLAN_RESET} audit amount may not be the row's current balance, and
+     * any {@code save} through it merges every stale column back over the row. A caller
+     * that is already inside a transaction (admin comp grant) gets its own managed
+     * instance straight back from the persistence context, so this is a no-op there.
+     *
+     * <p>Returns EMPTY when there is no row to address (null argument, unsaved entity) or the
+     * row has vanished. Whether empty is fatal is the CALLER's decision, and the rule is simply
+     * whether that caller WRITES through the entity:
+     * <ul>
+     *   <li>{@link #attributeOnRenewal} always writes (at minimum {@code resetBalance} zeroes
+     *       the balance and saves), so it MUST abort on empty - regardless of whether it was
+     *       also asked to advance the period.</li>
+     *   <li>{@link #handleCreditPackChange} only READS the live plan and period to key an
+     *       idempotent grant, so it degrades to the caller's instance: nothing is written
+     *       through it, and aborting would drop a grant Stripe has already charged for.</li>
+     * </ul>
+     */
+    private Optional<Subscription> resolveManagedForUpdate(Subscription subscription) {
+        if (subscription == null || subscription.getId() == null) {
+            return Optional.empty();
+        }
+        Optional<Subscription> managed = subscriptionRepository.findByIdForUpdate(subscription.getId());
+        // The lock alone does NOT guarantee fresh values. When the caller's entity is already in
+        // this persistence context - which it is for every caller that shares a transaction or
+        // an open-in-view EntityManager with us, i.e. the Stripe webhook and the admin grant -
+        // the query returns that same first-level-cached instance, unrefreshed, however stale it
+        // is. Verified empirically: a value committed by another connection after the caller's
+        // load was still invisible after the FOR UPDATE. refresh() is what actually re-reads the
+        // row, and it is safe on the row we now hold the lock on.
+        if (entityManager != null) {
+            managed.ifPresent(entityManager::refresh);
+        }
+        return managed;
     }
 
     /**
@@ -149,16 +329,30 @@ public class CreditAttributionService {
      * With billing_cycle_anchor:NOW, Stripe starts a new cycle and charges full price.
      * We grant the full new pack credits. User keeps their remaining balance.
      *
-     * @param userId             the user ID
-     * @param subscription       the local subscription entity
-     * @param oldCreditQuantity  previous Stripe quantity (kept for logging)
-     * @param newCreditQuantity  new Stripe quantity (tier cost)
+     * @param userId              the user ID
+     * @param callerSubscription  the local subscription entity, possibly detached
+     * @param oldCreditQuantity   previous Stripe quantity (kept for logging)
+     * @param newCreditQuantity   new Stripe quantity (tier cost)
      */
     @Transactional
-    public void handleCreditPackChange(Long userId, Subscription subscription,
+    public void handleCreditPackChange(Long userId, Subscription callerSubscription,
                                         int oldCreditQuantity, int newCreditQuantity) {
         try {
-            String planCode = subscription.getPlan().getCode();
+            // periodSuffix keys this grant's idempotency, so read it off the live row. Today's
+            // only production caller (SubscriptionService, @Transactional at class level) hands
+            // us a MANAGED entity, so this resolves to the same instance and buys nothing but
+            // the lock; it is here so a future caller reaching this method with a detached row
+            // does not silently key the grant on a stale period. Unlike the renewal path this
+            // one never WRITES through the entity, so an unresolvable row degrades safely to
+            // the caller's copy rather than aborting a grant Stripe has already charged for.
+            Subscription subscription = resolveManagedForUpdate(callerSubscription).orElse(callerSubscription);
+            Plan plan = subscription.getPlan();
+            if (plan == null) {
+                log.error("Cannot grant pack-change credits: subscription {} has no plan. userId={}",
+                        subscription.getId(), userId);
+                return;
+            }
+            String planCode = plan.getCode();
             String subKey = "sub_" + subscription.getId();
             String periodSuffix = periodKey(subscription.getCurrentPeriodStart());
 
@@ -174,7 +368,7 @@ public class CreditAttributionService {
             grantPackCredits(userId, "pack_" + subKey + "_upgrade_" + periodSuffix, newCreditQuantity, planCode);
         } catch (DataIntegrityViolationException e) {
             log.info("Duplicate pack change credit attribution detected for subId={}, treating as idempotent skip",
-                    subscription.getId());
+                    callerSubscription.getId());
         }
     }
 
@@ -384,6 +578,14 @@ public class CreditAttributionService {
     /**
      * Reset balance to zero before renewal re-grant.
      * Creates a PLAN_RESET ledger entry for audit trail.
+     *
+     * <p><b>Contract: {@code subscription} MUST be a managed instance carrying the row's
+     * live values</b> - callers get one from {@link #resolveManagedForUpdate}. This method
+     * both reads the balance (to record how much the reset absorbed) and zeroes it, so a
+     * detached or stale instance produces a {@code PLAN_RESET} row whose amount does not
+     * match what was actually absorbed, and permanently mis-states the ledger. That is not
+     * hypothetical: it happened in production on an account whose wallet had moved between
+     * load and reset.
      */
     private void resetBalance(Long userId, String sourceId, Subscription subscription) {
         if (ledgerRepository.existsBySourceId(sourceId)) {

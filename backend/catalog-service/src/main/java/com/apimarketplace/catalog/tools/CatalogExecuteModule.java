@@ -43,10 +43,91 @@ public class CatalogExecuteModule implements ToolModule {
      * instead of nesting them under {@code params}). Kept in sync with the
      * {@code catalog} tool schema in {@code CatalogToolsProvider}.
      */
+    /**
+     * Reserved so a caller cannot smuggle a price-determining value into the
+     * tool's inputs. These keys are IGNORED, never read: the generation model
+     * and the billable quantity reach billing through the typed
+     * {@link GenerationBilling} argument of {@link #executeGeneration}, which
+     * agent input cannot reach. Keeping them reserved means an agent that does
+     * send them simply has them dropped rather than forwarded upstream as a
+     * bogus parameter.
+     */
+    public static final String GENERATION_MODEL_KEY = "__generationModelId__";
+
+    /** @see #GENERATION_MODEL_KEY */
+    public static final String GENERATION_QUANTITY_KEY = "__generationQuantity__";
+
+    /**
+     * Which credential pool to use, when the caller made an explicit choice
+     * ({@code "user"} or {@code "platform"}). It is a control key, not a tool
+     * input: forwarding it upstream would send a provider a parameter it never
+     * declared, and treating it as absent would silently ignore the choice.
+     */
+    public static final String CREDENTIAL_SOURCE_KEY = "credential_source";
+
+    /**
+     * WHICH of the caller's own keys runs the call, when it holds more than one
+     * for the provider.
+     *
+     * <p>Only meaningful beside {@code credential_source='user'}: the catalog
+     * reads the pinned id exclusively on that branch
+     * ({@code HttpExecutionService.selectedUserCredentialId}), and a pinned id
+     * whose credential has since been deleted falls back to the integration's
+     * default rather than failing, so a saved choice survives a reconnection.
+     *
+     * <p>A control key like the source beside it: it names an account object,
+     * never a provider parameter, so it must never reach the upstream request.
+     */
+    public static final String CREDENTIAL_ID_KEY = "credential_id";
+
+    /**
+     * Where a pinned credential id is read FROM: the execution context, not the
+     * caller's parameters.
+     *
+     * <p>Deliberately the same kind of channel the billing scope travels on.
+     * Only the surfaces that know the account's credentials put a value here -
+     * the app dialog and the {@code core:generate} node, through
+     * {@code GenerationController} - and the tool arguments of a chat agent
+     * never reach it. That is what makes the generation tool's help TRUE when
+     * it says the account's default key runs: an agent calling that tool
+     * cannot learn an id, and cannot state one either.
+     *
+     * <p>An agent BUILDING a workflow is a different caller and does reach it,
+     * through the node's params, which is what lets it carry a pin it found
+     * when rewriting a node. It is bounded rather than trusted: the value must
+     * be a real id (refused at build time by both validation paths) and the
+     * key it names must belong to the endpoint's own provider (refused at run
+     * time by {@code HttpExecutionService}), so the worst a guessed number can
+     * do is name another of the owner's keys for the same provider.
+     */
+    public static final String CREDENTIAL_ID_CONTEXT_KEY = "__credentialId__";
+
+    /**
+     * Stable codes that LEAD a refusal message on this path.
+     *
+     * <p>They are part of the message and not only of {@code errorCode} because
+     * the message is the only channel that reaches an agent: the MCP bridge
+     * forwards a failed tool result as its {@code error} text alone, and the
+     * direct-API loop appends {@code "Error: " + error} to the conversation.
+     * {@code errorCode} and {@code metadata} survive only on the REST surfaces.
+     * Leading with a code is also what the billing refusals on this same path
+     * already do ({@code PLATFORM_NOT_AVAILABLE}, {@code GENERATION_SIZE_UNKNOWN}),
+     * so a caller learns one vocabulary rather than three.
+     */
+    public static final String CREDENTIALS_REQUIRED_CODE = "CREDENTIALS_REQUIRED";
+
+    /** @see #CREDENTIALS_REQUIRED_CODE */
+    public static final String UPSTREAM_REJECTED_CODE = "UPSTREAM_REJECTED";
+
+    /** @see #CREDENTIALS_REQUIRED_CODE */
+    public static final String TOOL_CALL_FAILED_CODE = "TOOL_CALL_FAILED";
+
     private static final Set<String> RESERVED_EXECUTE_KEYS = Set.of(
             "action", "tool_id", "params", "parameters", "input", "inputs",
             "expand", "max_items", "topics", "query", "api", "apis", "limit",
-            "api_definition", "api_id");
+            "api_definition", "api_id", CREDENTIAL_SOURCE_KEY, CREDENTIAL_ID_KEY,
+            // V428 generation context: pricing metadata, never tool inputs.
+            GENERATION_MODEL_KEY, GENERATION_QUANTITY_KEY);
 
     public CatalogExecuteModule(ObjectMapper objectMapper, CredentialClient credentialClient) {
         this.restTemplate = new RestTemplate();
@@ -75,11 +156,57 @@ public class CatalogExecuteModule implements ToolModule {
                 context != null ? context.credentials() : null, "catalog", toolName);
         if (accessDenied.isPresent()) return Optional.of(ToolExecutionResult.failure(ToolErrorCode.PERMISSION_DENIED, accessDenied.get()));
 
-        return Optional.of(executeCatalogExecute(parameters, context));
+        return Optional.of(executeCatalogExecute(parameters, context, null));
     }
 
+    /**
+     * Execute a catalog tool with server-derived generation pricing context.
+     *
+     * <p>The generation model and the billable quantity are what DECIDE the
+     * amount charged, so they must never be readable from caller input. They
+     * arrive here as an explicit argument, computed by {@code GenerationModule}
+     * from parameters it has already validated, and they are deliberately not
+     * carried in the {@code parameters} map: an agent can put anything it likes
+     * in there, and a caller-supplied quantity of zero would be a free
+     * generation.
+     */
+    public Optional<ToolExecutionResult> executeGeneration(Map<String, Object> parameters,
+                                                            ToolExecutionContext context,
+                                                            GenerationBilling billing) {
+        var accessDenied = ToolAccessControl.checkWriteAccess(
+                context != null ? context.credentials() : null, "catalog", "execute");
+        if (accessDenied.isPresent()) {
+            return Optional.of(ToolExecutionResult.failure(ToolErrorCode.PERMISSION_DENIED, accessDenied.get()));
+        }
+        return Optional.of(executeCatalogExecute(parameters, context, billing));
+    }
+
+    /**
+     * Server-derived pricing context for one generation call.
+     *
+     * @param modelId  generation model whose published price applies
+     * @param quantity size of the call in PLATFORM units (seconds, assets,
+     *                 characters), never the provider's and never pre-converted
+     *                 into the price's unit: the published rate is what converts
+     *                 it, so the two cannot be scaled differently
+     */
+    /**
+     * What the generation surface measured about this call, for pricing.
+     *
+     * @param quantityUnit the PLATFORM unit {@code quantity} is counted in
+     *        (call, second, image, character). Carried alongside the number
+     *        because a quantity without its unit cannot be checked against the
+     *        published rate: a row priced per image and a call measured in
+     *        seconds both arrive as a bare 10, and multiplying them charges a
+     *        ten second clip ten times the per-image rate with nothing able to
+     *        notice.
+     */
+    public record GenerationBilling(String modelId, java.math.BigDecimal quantity, String quantityUnit) {}
+
     @SuppressWarnings("unchecked")
-    private ToolExecutionResult executeCatalogExecute(Map<String, Object> parameters, ToolExecutionContext context) {
+    private ToolExecutionResult executeCatalogExecute(Map<String, Object> parameters,
+                                                      ToolExecutionContext context,
+                                                      GenerationBilling billing) {
         String toolId = (String) parameters.get("tool_id");
         if (toolId == null || toolId.isBlank()) {
             return ToolExecutionResult.failure(ToolErrorCode.MISSING_PARAMETER, "tool_id is required");
@@ -99,22 +226,7 @@ public class CatalogExecuteModule implements ToolModule {
         // path/query/body param supplied any legitimate way still reaches catalog.
         // Unknown keys are harmless: filterParametersByToolDefinition on the
         // catalog side keeps only names declared in api_tool_parameters.
-        Map<String, Object> input = new LinkedHashMap<>();
-        Map<String, Object> nested = firstMapValue(parameters, "params", "parameters", "input", "inputs");
-        if (nested != null) {
-            input.putAll(nested);
-        }
-        // Merge stray top-level params (agent flattened them). Reserved control
-        // keys are never treated as tool inputs; an explicit nested value wins
-        // over a top-level stray of the same name.
-        for (Map.Entry<String, Object> entry : parameters.entrySet()) {
-            if (entry.getValue() == null || RESERVED_EXECUTE_KEYS.contains(entry.getKey())) {
-                continue;
-            }
-            if (input.putIfAbsent(entry.getKey(), entry.getValue()) == null) {
-                log.debug("catalog_execute: Treating top-level '{}' as a tool input parameter", entry.getKey());
-            }
-        }
+        Map<String, Object> input = toolInputsFor(parameters);
 
         String tenantId = context != null ? context.tenantId() : null;
         log.info("JIT executing tool {} for tenant {} with input: {}", toolId, tenantId, input.keySet());
@@ -124,7 +236,8 @@ public class CatalogExecuteModule implements ToolModule {
             return restrictionCheck;
         }
 
-        ToolExecutionResult approvalCheck = checkServiceApproval(toolId, context);
+        ToolExecutionResult approvalCheck =
+                checkServiceApproval(toolId, context, normalizedCredentialSource(parameters));
         if (approvalCheck != null) {
             return approvalCheck;
         }
@@ -137,7 +250,8 @@ public class CatalogExecuteModule implements ToolModule {
 
             // V148+ chat-scope billing headers. Pull __streamId__ from agent
             // execution context credentials. ToolExecutionManager reads these
-            // and feeds CatalogToolBillingService.billImmediate after success.
+            // and feeds CatalogToolBillingService.preflightReserve BEFORE the
+            // call, then commitOnSuccess / releaseOnFailure after it.
             // RUN-priority precedence still applies: if the chat agent runs
             // INSIDE a workflow (embedded agent), __workflowRunId__ wins and
             // we set scopeKind=RUN instead. CatalogToolBillingService.BillingScope.of
@@ -156,6 +270,26 @@ public class CatalogExecuteModule implements ToolModule {
             } else if (streamId != null) {
                 headers.set("X-Lc-Billing-Scope-Kind", "STREAM");
                 headers.set("X-Lc-Billing-Scope-Id", String.valueOf(streamId));
+            }
+
+            // V428 generation pricing context, taken from the SERVER-DERIVED
+            // argument and never from `parameters`. These two values decide the
+            // amount charged, so reading them from caller input would let an
+            // agent send a quantity of zero and generate for free.
+            if (billing != null) {
+                if (billing.modelId() != null) {
+                    headers.set("X-Lc-Generation-Model", billing.modelId());
+                }
+                if (billing.quantity() != null) {
+                    headers.set("X-Lc-Generation-Quantity", billing.quantity().toPlainString());
+                }
+                // The unit that quantity is counted in. Without it the number is
+                // uncheckable: a per-image row and a call measured in seconds
+                // both arrive as a bare 10, and the price would be the product
+                // of two amounts that describe different things.
+                if (billing.quantityUnit() != null && !billing.quantityUnit().isBlank()) {
+                    headers.set("X-Lc-Generation-Unit", billing.quantityUnit());
+                }
             }
 
             Map<String, Object> requestBody = new LinkedHashMap<>();
@@ -178,31 +312,44 @@ public class CatalogExecuteModule implements ToolModule {
                 requestBody.put("max_items", shaping.maxItems());
                 log.info("catalog_call: Including max_items: {}", shaping.maxItems());
             }
-            // No credentialSource on the request → catalog applies the
-            // implicit fallback-if-priced rule (try user, fall back to platform
-            // when pricing is published for the endpoint). This module IS the
-            // chat-agent's catalog dispatcher; agentic semantics are the
-            // default, no marker needed.
+            // Credential source. Absent → the catalog applies the implicit
+            // fallback-if-priced rule (try user, fall back to platform when
+            // pricing is published for the endpoint), which is the agentic
+            // default this module was written for.
+            //
+            // Present → the caller made an explicit design-time choice and the
+            // catalog honours it strictly, with no fallback to the other pool.
+            // GenerationModule has always forwarded the caller's
+            // credential_source here, and the `core:generate` node surfaces it
+            // as a toggle; without this branch the value was silently dropped
+            // and a workflow that asked for its OWN key was billed the platform
+            // price instead.
+            String credentialSource = normalizedCredentialSource(parameters);
+            applyCredentialChoice(requestBody, parameters, context);
 
             HttpEntity<Map<String, Object>> entity = new HttpEntity<>(requestBody, headers);
             ResponseEntity<String> response = restTemplate.exchange(url, HttpMethod.POST, entity, String.class);
 
             if (response.getStatusCode() == HttpStatus.OK && response.getBody() != null) {
-                // V148+ unified billing: catalog-service runs the post-success hook
-                // (ToolExecutionManager → CatalogToolBillingService.billImmediate).
+                // V148+ unified billing: catalog-service ran the reserve → call →
+                // commit/release lifecycle (ToolExecutionManager →
+                // CatalogToolBillingService). A 200 here means the reservation was
+                // taken and committed; a refusal never reaches this branch, it
+                // arrives as the 402 handled in handleHttpClientError.
                 // Scope context is propagated via X-Lc-Billing-Scope-* headers above.
-                return handleSuccessResponse(response.getBody(), toolId);
+                return handleSuccessResponse(response.getBody(), toolId, credentialSource);
             } else if (response.getStatusCode() == HttpStatus.UNAUTHORIZED ||
                        response.getStatusCode() == HttpStatus.FORBIDDEN) {
-                return ToolExecutionResult.failure(
-                    ToolErrorCode.CREDENTIALS_REQUIRED,
-                    "{\"error\": \"credentials_required\", \"tool_id\": \"" + toolId + "\"}"
-                );
+                return credentialsRequired(
+                    toolId, Map.of(), extractMetadataFromResponse(response.getBody()),
+                    credentialSource);
             } else {
                 Map<String, Object> errorMetadata = extractMetadataFromResponse(response.getBody());
                 return ToolExecutionResult.failure(
                     ToolErrorCode.EXECUTION_FAILED,
-                    "Tool execution failed with status: " + response.getStatusCode(),
+                    UPSTREAM_REJECTED_CODE + ": the call was refused with HTTP "
+                        + response.getStatusCode().value() + ", so nothing ran and nothing was charged. "
+                        + "Change the call before sending it again: the same call is refused the same way.",
                     errorMetadata
                 );
             }
@@ -211,15 +358,276 @@ public class CatalogExecuteModule implements ToolModule {
             return handleHttpClientError(e, toolId);
         } catch (Exception e) {
             log.error("Error executing tool {}: {}", toolId, e.getMessage(), e);
+            // The exception message names the internal host it could not reach,
+            // or carries an upstream 5xx body inline. Neither is something a
+            // caller can act on, and this text is rendered verbatim to a person
+            // by the generation dialog, so the detail rides on metadata (and in
+            // the log line above) while the caller gets a sentence.
             return ToolExecutionResult.failure(
                 ToolErrorCode.EXECUTION_FAILED,
-                "Failed to execute tool: " + e.getMessage()
+                TOOL_CALL_FAILED_CODE + ": this call could not be completed, so nothing ran and nothing "
+                    + "was charged. Nothing in the call itself causes this. Send it once more, and if it "
+                    + "fails the same way report it to the account owner rather than retrying further.",
+                e.getMessage() == null ? Map.of() : Map.of("failureDetail", e.getMessage())
             );
         }
     }
 
+    /**
+     * The refusal a caller is shown when no key of the tool's provider is
+     * available for the credential pool the call asked for.
+     *
+     * <p>This used to hand back {@code objectMapper.writeValueAsString(resultMap)},
+     * the WHOLE upstream envelope, as the error message: internal ids, an
+     * endpoint path, a request id. Two readers see that string and neither can
+     * use it. An agent reads the message text and nothing else (the bridge and
+     * the direct-API loop both drop {@code metadata} and {@code errorCode} on a
+     * failure, forwarding only {@code error}), and a person reads it verbatim in
+     * the generation dialog, which renders {@code result.error} as the refusal.
+     *
+     * <p>So the message is a sentence naming the remedy, and it is led by a
+     * STABLE CODE, exactly like the sibling refusals on this path
+     * ({@code PLATFORM_NOT_AVAILABLE}, {@code GENERATION_SIZE_UNKNOWN}). The
+     * code is what an agent branches on without parsing prose; it is the only
+     * discriminator that survives to the model, which is why it is in the text
+     * and not only in {@code errorCode}. The structured detail an interface
+     * needs stays on {@code metadata}, in the same vocabulary the credential
+     * pre-flight already uses ({@code serviceType} / {@code serviceName} /
+     * {@code credential}), so a card can still be drawn from it.
+     *
+     * <p>The remedy is chosen from the pool the CALL asked for, because that is
+     * what upstream refused, and naming a remedy the account does not have is
+     * worse than naming none. An explicit {@code platform} was refused for want
+     * of a platform key, an explicit {@code user} for want of the caller's own,
+     * and an unstated source only when NEITHER pool could answer.
+     */
+    private ToolExecutionResult credentialsRequired(String toolId,
+                                                     Map<String, Object> upstreamResult,
+                                                     Map<String, Object> upstreamMetadata,
+                                                     String requestedSource) {
+        String integration = firstNonBlank(
+                text(upstreamResult, "credential_name"),
+                text(upstreamMetadata, "iconSlug"));
+        String service = integration == null ? "provider" : integration.toLowerCase(Locale.ROOT);
+        String display = displayName(integration);
+
+        String remedy;
+        if ("platform".equals(requestedSource)) {
+            remedy = "this call asked for the platform's " + display + " key and this platform has none "
+                    + "configured, so it could not run and nothing was charged. Run it on your own "
+                    + display + " key instead (credential_source='user'), or ask the account owner to "
+                    + "configure the platform key.";
+        } else if ("user".equals(requestedSource)) {
+            remedy = "this call asked for your own " + display + " key and this account has none "
+                    + "configured, so it could not run and nothing was charged. Add your " + display
+                    + " key to this account, or run it on the platform's key instead "
+                    + "(credential_source='platform'), which works only where the platform sells this "
+                    + "integration.";
+        } else {
+            remedy = "no " + display + " key is available, on this account or on this platform, so the "
+                    + "call could not run and nothing was charged. Add your " + display + " key to this "
+                    + "account to run it. Whether the platform sells this integration is the account "
+                    + "owner's decision, and nothing you send changes it.";
+        }
+
+        Map<String, Object> metadata = new LinkedHashMap<>(upstreamMetadata);
+        metadata.put("credentialNeeded", true);
+        metadata.put("serviceType", service);
+        metadata.put("serviceName", display);
+        if (!metadata.containsKey("iconSlug")) {
+            metadata.put("iconSlug", service);
+        }
+        String credentialType = text(upstreamResult, "credential_type");
+        if (credentialType != null) {
+            metadata.put("credential", Map.of("type", credentialType));
+        }
+        // Which pool was asked for. Two different remedies hang off it, so an
+        // interface that wants to offer one has to be able to tell them apart
+        // without re-reading the sentence.
+        metadata.put("credentialSource", requestedSource == null ? "unspecified" : requestedSource);
+        metadata.put("toolId", toolId);
+        metadata.put("visualization", Map.of(
+                "type", "credential",
+                "id", toolId,
+                "title", display,
+                "iconSlug", service,
+                "serviceName", display));
+
+        log.info("Tool {} requires {} credentials (requested source: {})",
+                toolId, service, requestedSource == null ? "unspecified" : requestedSource);
+        return ToolExecutionResult.failure(
+                ToolErrorCode.CREDENTIALS_REQUIRED,
+                CREDENTIALS_REQUIRED_CODE + ": " + remedy,
+                metadata);
+    }
+
+    /** First non-blank of the given values, or null when they are all blank. */
+    private static String firstNonBlank(String... values) {
+        for (String value : values) {
+            if (value != null && !value.isBlank()) return value;
+        }
+        return null;
+    }
+
+    /**
+     * One quotable line of an upstream complaint, or null when there is none.
+     *
+     * <p>Bounded, and dropped entirely when it turns out to be a document
+     * rather than a sentence. An upstream that answers with a nested JSON body
+     * under its own {@code message} would otherwise put the envelope straight
+     * back into the text this whole change exists to keep out of it.
+     */
+    private static String shortDetail(String detail) {
+        if (detail == null) return null;
+        String trimmed = detail.trim();
+        if (trimmed.startsWith("{") || trimmed.startsWith("[")) return null;
+        return trimmed.length() <= 200 ? trimmed : trimmed.substring(0, 200) + "...";
+    }
+
+    /** A map entry as a trimmed string, or null when absent or blank. */
+    private static String text(Map<String, Object> source, String key) {
+        Object value = source == null ? null : source.get(key);
+        if (value == null) return null;
+        String s = String.valueOf(value).trim();
+        return s.isEmpty() ? null : s;
+    }
+
+    /**
+     * An integration name as a reader would write it. The catalog stores it
+     * lowercase ({@code elevenlabs}), and a sentence that names a company in
+     * lowercase reads as a typo rather than as the brand the user has to go
+     * and connect.
+     */
+    private static String displayName(String integration) {
+        if (integration == null || integration.isBlank()) return "provider";
+        String trimmed = integration.trim();
+        return trimmed.substring(0, 1).toUpperCase(Locale.ROOT) + trimmed.substring(1);
+    }
+
+    /**
+     * The caller's explicit credential choice, or null when it did not make one.
+     * Only the two values the catalog understands are forwarded: anything else
+     * is treated as "no choice" rather than as a third mode, so a typo falls
+     * back to the safe agentic default instead of pinning an unknown pool.
+     */
+    static String normalizedCredentialSource(Map<String, Object> parameters) {
+        Object raw = parameters == null ? null : parameters.get(CREDENTIAL_SOURCE_KEY);
+        if (raw == null) return null;
+        String value = String.valueOf(raw).trim().toLowerCase(Locale.ROOT);
+        return "user".equals(value) || "platform".equals(value) ? value : null;
+    }
+
+    /**
+     * The parameters that are meant for the PROVIDER, gathered from every shape
+     * a caller legitimately uses.
+     *
+     * <p>Reserved control keys are excluded here and nowhere else, which is what
+     * makes this the one place the distinction between "a dimension of the call"
+     * and "an instruction to the platform" is drawn. A control key that slipped
+     * through would reach the upstream request as a field the provider never
+     * declared, and a correctly configured call would be refused for something
+     * the caller never wrote.
+     *
+     * <p>An explicitly nested value wins over a top-level stray of the same
+     * name: the nested form is the documented one, so it is the one the caller
+     * meant.
+     */
+    static Map<String, Object> toolInputsFor(Map<String, Object> parameters) {
+        Map<String, Object> input = new LinkedHashMap<>();
+        if (parameters == null) return input;
+        Map<String, Object> nested = firstMapValue(parameters, "params", "parameters", "input", "inputs");
+        if (nested != null) {
+            input.putAll(nested);
+        }
+        for (Map.Entry<String, Object> entry : parameters.entrySet()) {
+            if (entry.getValue() == null || RESERVED_EXECUTE_KEYS.contains(entry.getKey())) {
+                continue;
+            }
+            if (input.putIfAbsent(entry.getKey(), entry.getValue()) == null) {
+                log.debug("catalog_execute: Treating top-level '{}' as a tool input parameter", entry.getKey());
+            }
+        }
+        return input;
+    }
+
+    /**
+     * Write the caller's credential choice into the request the catalog route
+     * will read.
+     *
+     * <p>Extracted so the WIRE NAMES are pinned by a test. They are the joint
+     * between two services and they are not the names used on this side:
+     * {@code credential_source} becomes {@code credentialSource} and
+     * {@code credential_id} becomes {@code selectedCredentialId}, because those
+     * are what {@code ToolExecutionRequest} declares. Mistype either and
+     * nothing fails - the field is simply absent, the catalog applies its
+     * default, and the surface that offered the choice goes back to deciding
+     * nothing while still showing the control.
+     */
+    static void applyCredentialChoice(Map<String, Object> requestBody, Map<String, Object> parameters,
+                                       ToolExecutionContext context) {
+        String credentialSource = normalizedCredentialSource(parameters);
+        if (credentialSource != null) {
+            requestBody.put("credentialSource", credentialSource);
+        }
+        Long pinnedCredentialId = pinnedUserCredentialId(parameters, context);
+        if (pinnedCredentialId != null) {
+            requestBody.put("selectedCredentialId", pinnedCredentialId);
+        }
+    }
+
+    /**
+     * The own-key id to send upstream, or null when none should be.
+     *
+     * <p>Only the {@code 'user'} branch reads a pinned id: the catalog resolves
+     * it exclusively there ({@code HttpExecutionService.selectedUserCredentialId}
+     * returns null for any other source), so emitting it beside
+     * {@code 'platform'} - or beside no source at all, where the catalog is free
+     * to answer from either pool - would state a choice the run cannot honour.
+     * The same one-sided rule {@code CatalogToolsGateway} already applies to
+     * workflow steps, expressed once here so both callers obey one sentence.
+     *
+     * <p>Until this existed the id never left this process, so the picker on the
+     * generation surfaces chose a key that was then ignored: the account's
+     * default ran instead, and nothing on screen said so.
+     */
+    static Long pinnedUserCredentialId(Map<String, Object> parameters, ToolExecutionContext context) {
+        if (!"user".equals(normalizedCredentialSource(parameters))) {
+            return null;
+        }
+        Map<String, Object> credentials = context == null ? null : context.credentials();
+        return normalizedCredentialId(credentials == null ? null : credentials.get(CREDENTIAL_ID_CONTEXT_KEY));
+    }
+
+    /**
+     * The caller's pinned own-key id, or null when it pinned none.
+     *
+     * <p>Anything that is not a positive whole number is read as "no choice",
+     * never as an id of its own. A blank string, a template that resolved to
+     * nothing or a malformed value would otherwise travel upstream as a
+     * credential nobody owns, and the call would be refused for a reason that
+     * has nothing to do with what the caller got wrong. Falling back to the
+     * account's default key is both the safe answer and the one the catalog
+     * already applies when a pinned credential has been deleted.
+     */
+    static Long normalizedCredentialId(Object raw) {
+        if (raw == null) return null;
+        if (raw instanceof Number number) {
+            long value = number.longValue();
+            return value > 0 ? value : null;
+        }
+        String text = String.valueOf(raw).trim();
+        if (text.isEmpty()) return null;
+        try {
+            long value = Long.parseLong(text);
+            return value > 0 ? value : null;
+        } catch (NumberFormatException e) {
+            return null;
+        }
+    }
+
     @SuppressWarnings("unchecked")
-    private ToolExecutionResult handleSuccessResponse(String responseBody, String toolId) throws Exception {
+    private ToolExecutionResult handleSuccessResponse(String responseBody, String toolId,
+                                                       String requestedCredentialSource) throws Exception {
         Object parsed = objectMapper.readValue(responseBody, Object.class);
 
         if (parsed instanceof Map) {
@@ -235,26 +643,15 @@ public class CatalogExecuteModule implements ToolModule {
 
             if (resultMap.containsKey("error") &&
                 "credentials_required".equals(resultMap.get("error"))) {
-                log.info("Tool {} requires credentials", toolId);
-
-                String iconSlug = metadata.get("iconSlug") != null ? metadata.get("iconSlug").toString() : null;
-                String serviceName = metadata.get("toolName") != null ? metadata.get("toolName").toString() :
-                                   (iconSlug != null ? iconSlug.substring(0, 1).toUpperCase() + iconSlug.substring(1) : "Service");
-
-                Map<String, Object> enrichedMetadata = new LinkedHashMap<>(metadata);
-                enrichedMetadata.put("visualization", Map.of(
-                    "type", "credential",
-                    "id", toolId,
-                    "title", serviceName,
-                    "iconSlug", iconSlug != null ? iconSlug : "",
-                    "serviceName", serviceName
-                ));
-
-                return ToolExecutionResult.failure(
-                    ToolErrorCode.CREDENTIALS_REQUIRED,
-                    objectMapper.writeValueAsString(resultMap),
-                    enrichedMetadata
-                );
+                // The upstream envelope is a MACHINE answer: it carries the
+                // credential name and type this refusal needs, alongside ids, an
+                // endpoint path and a request id that no reader can act on.
+                // Read the useful fields out of it, and never re-emit the
+                // envelope itself as the message.
+                Object upstream = resultMap.get("result");
+                Map<String, Object> detail = upstream instanceof Map
+                        ? (Map<String, Object>) upstream : resultMap;
+                return credentialsRequired(toolId, detail, metadata, requestedCredentialSource);
             }
 
             return ToolExecutionResult.success(resultMap, metadata);
@@ -266,6 +663,49 @@ public class CatalogExecuteModule implements ToolModule {
     @SuppressWarnings("unchecked")
     private ToolExecutionResult handleHttpClientError(HttpClientErrorException e, String toolId) {
         Map<String, Object> errorBody = extractErrorBodyAsMap(e.getResponseBodyAsString());
+
+        if (e.getStatusCode() == HttpStatus.PAYMENT_REQUIRED) {
+            // The pre-flight reservation was refused, so the tool never ran and
+            // nothing was charged. Retrying changes nothing until the balance
+            // does, which is why the message says so instead of inviting a
+            // retry loop.
+            boolean delinquent = Boolean.TRUE.equals(errorBody.get("delinquent"));
+            Object detail = errorBody.get("message");
+            String message = detail == null ? "" : String.valueOf(detail);
+            log.info("💳 [BILLING] 402 for tool {} - delinquent={}", toolId, delinquent);
+
+            // Not every refusal is a money problem, and the lead sentence is
+            // what an agent acts on. Telling it to top up when the real cause is
+            // an unstated call size, or a generation the platform does not sell,
+            // sends it to a remedy that cannot work. The upstream message
+            // already names the cause and the fix; when it does, lead with it.
+            String lead;
+            // PLAN_EXCLUDES_THIS belongs on this list for a sharper reason than
+            // the other two. It is minted precisely to STOP the balance
+            // sentence being said: the account has credits, they are the
+            // monthly grant, and that grant funds workflow runs and never a
+            // generation. Demoting it to a Detail: made the generic lead say
+            // "not enough credits" to a user whose screen shows several hundred,
+            // which is how a correct rule reads as a bug, and it sends the agent
+            // to a remedy (top up) that is not the one that works (subscribe, or
+            // use your own key).
+            if (message.startsWith("GENERATION_SIZE_UNKNOWN")
+                    || message.startsWith("PLATFORM_NOT_AVAILABLE")
+                    || message.startsWith("PLAN_EXCLUDES_THIS")) {
+                lead = message + " The tool was NOT executed and nothing was charged.";
+            } else if (delinquent) {
+                lead = "This account is delinquent, so paid calls are paused until the balance is settled. "
+                        + "The tool was NOT executed and nothing was charged. Tell the user to settle the "
+                        + "balance; retrying now will be refused again."
+                        + (message.isEmpty() ? "" : " Detail: " + message);
+            } else {
+                lead = "This account does not have enough credits to run this tool. "
+                        + "The tool was NOT executed and nothing was charged. Tell the user to top up; "
+                        + "retrying now will be refused again."
+                        + (message.isEmpty() ? "" : " Detail: " + message);
+            }
+            return ToolExecutionResult.failure(ToolErrorCode.QUOTA_EXCEEDED, lead, errorBody);
+        }
 
         if (e.getStatusCode() == HttpStatus.UNAUTHORIZED || e.getStatusCode() == HttpStatus.FORBIDDEN) {
             String service = errorBody.get("service") != null ? errorBody.get("service").toString() : null;
@@ -299,16 +739,67 @@ public class CatalogExecuteModule implements ToolModule {
             );
         } else {
             log.error("HTTP error executing tool {}: {} - {}", toolId, e.getStatusCode(), e.getMessage());
+            // NOT `e.getMessage()`: RestTemplate builds that from the status line
+            // PLUS the raw upstream body, so putting it in `error` publishes a
+            // machine envelope to a reader who cannot use it - the same defect
+            // the credentials refusal above had. The body is kept as structured
+            // metadata, and one short field of it is quoted in the sentence when
+            // upstream wrote a human one.
+            int status = e.getStatusCode().value();
+            String detail = shortDetail(firstNonBlank(text(errorBody, "message"), text(errorBody, "error")));
+            String lead = status == 429
+                ? UPSTREAM_REJECTED_CODE + ": this call is being rate limited (HTTP 429), so nothing ran "
+                    + "and nothing was charged. Wait before sending it again; sending it again now is "
+                    + "refused the same way."
+                : UPSTREAM_REJECTED_CODE + ": the call was refused with HTTP " + status + ", so nothing "
+                    + "ran and nothing was charged. Change the call before sending it again: the same "
+                    + "call is refused the same way.";
             return ToolExecutionResult.failure(
                 ToolErrorCode.EXECUTION_FAILED,
-                "Tool execution failed: " + e.getMessage()
+                detail == null ? lead : lead + " The service said: " + detail,
+                errorBody.isEmpty() ? Map.of() : Map.of("upstreamError", errorBody)
             );
         }
     }
 
+    /**
+     * Soft warning for "you have no key of your own for this service".
+     *
+     * <p><b>It asks about ONE pool, so it must not answer for the other.</b> The
+     * lookup below reads the caller's own credentials (their row, then a
+     * workspace-shared one) and never the platform's. A caller running on the
+     * PLATFORM key therefore has nothing this gate can find, and warning them is
+     * not a nuisance: this returns a result, so the tool is never dispatched.
+     * On the generation surface that is the whole product, since the platform
+     * key is what it resells and what the node and the app modal both ask for
+     * by default.
+     *
+     * <p>Two skips, for two different reasons:
+     * <ul>
+     *   <li>the caller pinned {@code platform}: their own key is irrelevant to a
+     *       call that will not use it;</li>
+     *   <li>the caller said nothing, and a platform key exists: absent means
+     *       "own key first, platform second", so a missing own key is not a
+     *       dead end, it is the second branch. Warning here would refuse a call
+     *       the platform can serve and would tell an agent to connect a key it
+     *       does not need.</li>
+     * </ul>
+     *
+     * <p>What is NOT skipped: a caller who pinned {@code user}. That is the case
+     * this gate was written for, and it still answers it.
+     *
+     * <p>Suppressing the warning never grants anything. Whether the platform
+     * will actually sell this call (a published price, an eligible plan, a
+     * balance) is decided downstream, and the refusal from there names the real
+     * cause instead of a key the caller was not asking to use.
+     */
     @SuppressWarnings("unchecked")
-    private ToolExecutionResult checkServiceApproval(String toolId, ToolExecutionContext context) {
+    private ToolExecutionResult checkServiceApproval(String toolId, ToolExecutionContext context,
+                                                      String requestedCredentialSource) {
         if (context == null || context.tenantId() == null) {
+            return null;
+        }
+        if ("platform".equals(requestedCredentialSource)) {
             return null;
         }
 
@@ -358,6 +849,24 @@ public class CatalogExecuteModule implements ToolModule {
                 return null;
             }
 
+            // Whether the OTHER pool has anything, asked once and REPORTED, not
+            // merely used to decide. A refusal that does not know which pools
+            // were empty can only guess at the remedy, and guessing here sends
+            // the caller to a pool that is also empty: they retry, are refused
+            // again by a different guard, and are pointed back at the first.
+            boolean platformKeyAvailable = credentialClient.findPlatformCredentialByName(serviceType)
+                    .filter(dto -> dto.isFound())
+                    .isPresent();
+
+            // No own key, and the caller did not insist on one. If the platform
+            // sells this service, the call has a second pool to fall back on and
+            // this is not the dead end the warning describes.
+            if (requestedCredentialSource == null && platformKeyAvailable) {
+                log.debug("No own key for service {} (tool {}), but a platform key exists and the "
+                        + "caller did not pin a pool - letting the call fall back to it", serviceType, toolId);
+                return null;
+            }
+
             log.info("User has no default credential for service {} (tool {}) - returning soft warning", serviceType, toolId);
 
             String serviceName = iconSlug.substring(0, 1).toUpperCase() + iconSlug.substring(1);
@@ -378,6 +887,11 @@ public class CatalogExecuteModule implements ToolModule {
             softWarning.put("toolName", toolName != null ? toolName : "API Tool");
             softWarning.put("description", description != null ? description : "Access to " + serviceName);
             softWarning.put("credential", credential);
+            // WHICH POOLS WERE EMPTY, stated rather than left to be assumed. A
+            // reader of this payload cannot otherwise tell "you have no key of
+            // your own, buy it on the platform's" from "neither pool has
+            // anything, connect a key", and those need opposite advice.
+            softWarning.put("platformKeyAvailable", platformKeyAvailable);
             softWarning.put("message", "Credential required for " + serviceName);
             softWarning.put("action", String.format(
                 "credential(action=\"require\", services=[\"%s\"], reason=\"...\")",

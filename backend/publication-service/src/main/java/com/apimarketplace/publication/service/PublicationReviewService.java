@@ -1,5 +1,6 @@
 package com.apimarketplace.publication.service;
 
+import com.apimarketplace.common.auth.UserSummaryDto;
 import com.apimarketplace.publication.domain.PublicationReviewEntity;
 import com.apimarketplace.publication.domain.WorkflowPublicationEntity;
 import com.apimarketplace.publication.repository.PublicationReviewRepository;
@@ -10,6 +11,7 @@ import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.util.StringUtils;
 
 import java.util.*;
 
@@ -28,11 +30,14 @@ public class PublicationReviewService {
 
     private final PublicationReviewRepository reviewRepository;
     private final WorkflowPublicationRepository publicationRepository;
+    private final ReviewerIdentityResolver reviewerIdentityResolver;
 
     public PublicationReviewService(PublicationReviewRepository reviewRepository,
-                                    WorkflowPublicationRepository publicationRepository) {
+                                    WorkflowPublicationRepository publicationRepository,
+                                    ReviewerIdentityResolver reviewerIdentityResolver) {
         this.reviewRepository = reviewRepository;
         this.publicationRepository = publicationRepository;
+        this.reviewerIdentityResolver = reviewerIdentityResolver;
     }
 
     // ========================================================================
@@ -87,9 +92,12 @@ public class PublicationReviewService {
      * Submit or update a review (upsert by publication_id + reviewer_id for top-level).
      * Rating and comment are independent - either or both can be provided.
      * Publisher cannot review their own publication.
+     *
+     * <p>The author's display name and avatar are resolved server-side from
+     * {@code reviewerId} (see {@link ReviewerIdentityResolver}); the caller does
+     * not supply them.
      */
     public PublicationReviewEntity submitReview(UUID publicationId, String reviewerId,
-                                                String reviewerName, String reviewerAvatarUrl,
                                                 Short rating, String comment) {
         WorkflowPublicationEntity publication = publicationRepository.findById(publicationId)
                 .orElseThrow(() -> new IllegalArgumentException("Publication not found: " + publicationId));
@@ -114,8 +122,7 @@ public class PublicationReviewService {
                     return newReview;
                 });
 
-        review.setReviewerName(reviewerName);
-        review.setReviewerAvatarUrl(reviewerAvatarUrl);
+        applyReviewerIdentity(review, reviewerId);
         // Only update rating if provided (allows comment-only updates)
         if (rating != null) {
             review.setRating(rating);
@@ -227,6 +234,18 @@ public class PublicationReviewService {
     // ========================================================================
 
     /**
+     * Live author identities for the reviews about to be rendered, keyed by
+     * reviewer id. Only rows whose stored {@code reviewerName} is blank are
+     * looked up: those were written before the identity was resolved
+     * server-side, and without this the whole feed rendered as "Anonymous".
+     * One batched call per page; an empty map when nothing needs filling.
+     */
+    @Transactional(readOnly = true)
+    public Map<String, UserSummaryDto> resolveAuthorIdentities(Collection<PublicationReviewEntity> reviews) {
+        return reviewerIdentityResolver.resolveMissingFor(reviews);
+    }
+
+    /**
      * Get replies for a given top-level review, sorted by createdAt ASC.
      */
     @Transactional(readOnly = true)
@@ -254,9 +273,11 @@ public class PublicationReviewService {
     /**
      * Submit a reply to a top-level review.
      * Replies cannot be nested (no reply-to-reply).
+     *
+     * <p>Author identity is resolved server-side, exactly like
+     * {@link #submitReview(UUID, String, Short, String)}.
      */
     public PublicationReviewEntity submitReply(UUID parentReviewId, String reviewerId,
-                                               String reviewerName, String reviewerAvatarUrl,
                                                String comment) {
         PublicationReviewEntity parentReview = reviewRepository.findById(parentReviewId)
                 .orElseThrow(() -> new IllegalArgumentException("Parent review not found: " + parentReviewId));
@@ -275,8 +296,7 @@ public class PublicationReviewService {
         reply.setPublicationId(parentReview.getPublicationId());
         reply.setParentId(parentReviewId);
         reply.setReviewerId(reviewerId);
-        reply.setReviewerName(reviewerName);
-        reply.setReviewerAvatarUrl(reviewerAvatarUrl);
+        applyReviewerIdentity(reply, reviewerId);
         reply.setRating(null); // replies have no rating
         reply.setComment(sanitizedComment);
 
@@ -332,6 +352,27 @@ public class PublicationReviewService {
         int count = reviewRepository.countTopLevelByPublicationId(publicationId);
         double average = count > 0 ? reviewRepository.computeAverageRating(publicationId) : 0.0;
         publicationRepository.updateReviewStats(publicationId, average, count);
+    }
+
+    /**
+     * Stamp the author's current display name / avatar onto a review row.
+     *
+     * <p>Each field is only overwritten when the resolver actually returned one:
+     * an auth-service failure while EDITING an existing review must not blank a
+     * name that was already stored. A brand new row simply keeps its nulls and
+     * the read path fills them in from the live identity.
+     */
+    private void applyReviewerIdentity(PublicationReviewEntity review, String reviewerId) {
+        UserSummaryDto identity = reviewerIdentityResolver.resolve(reviewerId);
+        if (identity == null) {
+            return;
+        }
+        if (StringUtils.hasText(identity.displayName())) {
+            review.setReviewerName(identity.displayName());
+        }
+        if (StringUtils.hasText(identity.avatarUrl())) {
+            review.setReviewerAvatarUrl(identity.avatarUrl());
+        }
     }
 
     private String truncateComment(String comment) {

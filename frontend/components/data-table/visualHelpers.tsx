@@ -267,10 +267,10 @@ export const renderPresetPreview = (preset: ColumnStylePreset) => {
     case 'sentiment':
       return (
         <div className="flex items-center gap-3">
-          <span className="flex h-9 w-9 items-center justify-center rounded-full bg-emerald-100 dark:bg-emerald-900/40 ring-2 ring-black/30 dark:ring-white/30">
+          <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-emerald-100 dark:bg-emerald-900/40 ring-2 ring-black/30 dark:ring-white/30">
             <ThumbsUp className="h-5 w-5 text-black dark:text-white" />
           </span>
-          <span className="flex h-9 w-9 items-center justify-center rounded-full bg-slate-100 dark:bg-slate-800 opacity-40">
+          <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-slate-100 dark:bg-slate-800 opacity-40">
             <ThumbsDown className="h-5 w-5 text-slate-400 dark:text-slate-500" />
           </span>
         </div>
@@ -302,7 +302,7 @@ export const renderPresetPreview = (preset: ColumnStylePreset) => {
         <div className="inline-flex items-center gap-2 rounded-xl border border-theme bg-[var(--bg-primary)] px-4 py-2.5 min-w-[160px]">
           {active && (
             <span
-              className="rounded-full px-2.5 py-0.5 text-xs font-semibold text-white"
+              className="rounded-md px-2.5 py-0.5 text-xs font-semibold text-white"
               style={{ backgroundColor: active.color || '#0ea5e9' }}
             >
               {active.label}
@@ -319,7 +319,7 @@ export const renderPresetPreview = (preset: ColumnStylePreset) => {
           {msOptions.map(option => (
             <span
               key={option.value}
-              className="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-medium text-white"
+              className="inline-flex items-center gap-1 rounded-md px-2 py-0.5 text-xs font-medium text-white"
               style={{ backgroundColor: option.color || '#8b5cf6' }}
             >
               {option.label}
@@ -334,7 +334,7 @@ export const renderPresetPreview = (preset: ColumnStylePreset) => {
       return (
         <div className="flex w-full flex-col items-center gap-1">
           <div className="h-2 w-full rounded-full bg-slate-200 dark:bg-slate-700">
-            <div className="h-full w-2/3 rounded-full bg-lime-500 transition-all" />
+            <div className="h-full w-2/3 rounded-md bg-lime-500 transition-all" />
           </div>
           <span className="text-[10px] font-semibold text-theme-secondary">67%</span>
         </div>

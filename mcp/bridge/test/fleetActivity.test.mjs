@@ -16,6 +16,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { RedisPublisher } from '../redis-publisher.mjs';
 import { dispatchToolCall, dispatchToolResult, handleCodexStyleItemEvent } from '../lib/adapterHelpers.mjs';
+import { extractToolResultAndMetadata } from '../lib/toolContent.mjs';
 
 function fakeRedis() {
   const published = [];
@@ -46,7 +47,7 @@ function codexCtx(publisher) {
     thinkingSections: [],
     toolResults: [],
     stripMcpPrefix: (n) => n,
-    extractToolResultAndMetadata: (c) => ({ content: c, metadata: {} }),
+    extractToolResultAndMetadata,
     updateState: () => {},
     getContent: () => '',
   };

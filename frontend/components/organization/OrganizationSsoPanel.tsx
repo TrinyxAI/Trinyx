@@ -214,7 +214,7 @@ export default function OrganizationSsoPanel({ orgId, currentUserRole, supportsT
     return (
       <section className="rounded-xl border border-theme bg-theme-secondary p-6">
         <div className="flex items-start gap-4">
-          <div className="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-full bg-theme-tertiary">
+          <div className="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-xl bg-theme-tertiary">
             <Lock className="h-5 w-5 text-theme-primary" />
           </div>
           <div className="min-w-0">
@@ -230,7 +230,7 @@ export default function OrganizationSsoPanel({ orgId, currentUserRole, supportsT
     return (
       <section className="rounded-xl border border-theme bg-theme-secondary p-6">
         <div className="flex items-start gap-4">
-          <div className="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-full bg-theme-tertiary">
+          <div className="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-xl bg-theme-tertiary">
             <Lock className="h-5 w-5 text-theme-primary" />
           </div>
           <div className="min-w-0">
@@ -246,7 +246,7 @@ export default function OrganizationSsoPanel({ orgId, currentUserRole, supportsT
     return (
       <section className="rounded-xl border border-theme bg-theme-secondary p-6">
         <div className="flex items-start gap-4">
-          <div className="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-full bg-theme-tertiary">
+          <div className="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-xl bg-theme-tertiary">
             <ShieldCheck className="h-5 w-5 text-theme-primary" />
           </div>
           <div className="min-w-0">
@@ -273,13 +273,13 @@ export default function OrganizationSsoPanel({ orgId, currentUserRole, supportsT
             aria-expanded={expanded}
           >
             <div className="flex min-w-0 items-center gap-3">
-              <div className="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-full bg-theme-secondary">
+              <div className="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-xl bg-theme-secondary">
                 <KeyRound className="h-5 w-5 text-theme-primary" />
               </div>
               <div className="min-w-0">
                 <div className="flex flex-wrap items-center gap-2">
                   <h2 className="text-lg font-semibold text-theme-primary">{t("title")}</h2>
-                  <span className={cn("inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium", STATUS_STYLES[status])}>
+                  <span className={cn("inline-flex items-center rounded-md px-2 py-0.5 text-xs font-medium", STATUS_STYLES[status])}>
                     {statusLabel}
                   </span>
                 </div>

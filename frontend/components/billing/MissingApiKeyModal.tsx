@@ -53,7 +53,7 @@ export default function MissingApiKeyModal() {
 
         {/* Icon */}
         <div className="flex justify-center mb-4">
-          <div className="w-14 h-14 rounded-full bg-amber-500/10 flex items-center justify-center">
+          <div className="w-14 h-14 rounded-xl bg-amber-500/10 flex items-center justify-center">
             <KeyRound className="h-7 w-7 text-amber-500" />
           </div>
         </div>

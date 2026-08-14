@@ -69,7 +69,9 @@ export function PaginationBar({
         <span className="text-xs text-theme-muted tabular-nums">
           {t('rangeInfo', { from, to: to < from ? from : to, total: totalCount })}
         </span>
-        <div className="flex items-center gap-3">
+        {/* Page size and the pager are two independent groups, so on a narrow
+            screen they stack instead of pushing each other off the side. */}
+        <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-2">
           <div className="flex items-center gap-2 text-xs text-theme-muted">
             <span>{t('pageSize')}</span>
             <Select
@@ -88,27 +90,37 @@ export function PaginationBar({
               </SelectContent>
             </Select>
           </div>
+          {/* Below `sm` the two pager buttons keep their arrow and drop their
+              word: "Previous" and "Next" are wide, `whitespace-nowrap`, and the
+              arrow already says which way it goes. The word stays as the
+              accessible name, so nothing is lost to a screen reader. */}
           <div className="flex items-center gap-1">
             <Button
               variant="outline"
               size="sm"
+              className="px-2 sm:px-3.5"
+              aria-label={t('prev')}
+              title={t('prev')}
               onClick={() => onPageChange(Math.max(0, safePage - 1))}
               disabled={safePage === 0 || loading}
             >
-              <ChevronLeft className="h-3.5 w-3.5 mr-1" />
-              {t('prev')}
+              <ChevronLeft className="h-3.5 w-3.5 sm:mr-1" />
+              <span className="hidden sm:inline">{t('prev')}</span>
             </Button>
-            <span className="text-xs text-theme-muted tabular-nums px-2">
+            <span className="whitespace-nowrap text-xs text-theme-muted tabular-nums px-1 sm:px-2">
               {t('pageInfo', { current: safePage + 1, total: totalPages })}
             </span>
             <Button
               variant="outline"
               size="sm"
+              className="px-2 sm:px-3.5"
+              aria-label={t('next')}
+              title={t('next')}
               onClick={() => onPageChange(Math.min(totalPages - 1, safePage + 1))}
               disabled={safePage >= totalPages - 1 || loading}
             >
-              {t('next')}
-              <ChevronRight className="h-3.5 w-3.5 ml-1" />
+              <span className="hidden sm:inline">{t('next')}</span>
+              <ChevronRight className="h-3.5 w-3.5 sm:ml-1" />
             </Button>
           </div>
         </div>

@@ -36,7 +36,7 @@ They look similar and they are not the same artifact. A dashboard is read by its
 | Can it change later | Yes, by design | No, append only |
 | Failure mode | You debug slower | You cannot answer the question |
 
-![A LiveContext workflow run in observability view: the executed graph with a green check on every node, beside a run inspector listing the epoch, its start and end timestamps, and each node's status, duration and cost.](/blog/ai-agent-audit-trail-run.png)
+![A Trinyx workflow run in observability view: the executed graph with a green check on every node, beside a run inspector listing the epoch, its start and end timestamps, and each node's status, duration and cost.](/blog/ai-agent-audit-trail-run.png)
 
 *A run in the observability view: every step, its status, its timing, its cost. Genuinely useful, and still a dashboard rather than the durable record the rest of this article describes.*
 

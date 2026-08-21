@@ -25,7 +25,7 @@ Sie sehen ähnlich aus und sind nicht dasselbe. Ein Dashboard liest sein Autor, 
 | Kann es sich später ändern | Ja, by Design | Nein, nur anfügen |
 | Fehlerbild | Sie debuggen langsamer | Sie können die Frage nicht beantworten |
 
-![Ein LiveContext-Workflow-Lauf in der Observability-Ansicht: der ausgeführte Graph mit einem grünen Haken an jeder Node, daneben ein Lauf-Inspektor mit Epoch, Start- und Endzeitstempeln sowie Status, Dauer und Kosten jeder Node.](/blog/ai-agent-audit-trail-run.png)
+![Ein Trinyx-Workflow-Lauf in der Observability-Ansicht: der ausgeführte Graph mit einem grünen Haken an jeder Node, daneben ein Lauf-Inspektor mit Epoch, Start- und Endzeitstempeln sowie Status, Dauer und Kosten jeder Node.](/blog/ai-agent-audit-trail-run.png)
 
 *Ein Lauf in der Observability-Ansicht: jeder Schritt, sein Status, seine Dauer, seine Kosten. Sehr nützlich, und trotzdem ein Dashboard und nicht die dauerhafte Aufzeichnung, die der Rest dieses Artikels beschreibt.*
 

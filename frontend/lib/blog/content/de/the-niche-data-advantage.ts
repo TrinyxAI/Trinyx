@@ -45,7 +45,7 @@ Lesen Sie die letzte Spalte genau, denn hier drehen die meisten es um. Langsame 
 
 Eine ehrliche Einschränkung zur Tabelle: Der Rhythmus unterstellt gleichmäßiges Altern. Webquellen verfallen vor allem im ersten Jahr, also frischen Sie alles, was Sie nicht kontrollieren, früher auf als angegeben.
 
-![Eine LiveContext-Tabelle mit einem kleinen Nischendatensatz: sechs beobachtete Wettbewerber-SKUs, je eine Zeile mit den Spalten SKU, Preis, Titel, Währung und Zeitstempel der letzten Sichtung.](/blog/the-niche-data-advantage-dataset.png)
+![Eine Trinyx-Tabelle mit einem kleinen Nischendatensatz: sechs beobachtete Wettbewerber-SKUs, je eine Zeile mit den Spalten SKU, Preis, Titel, Währung und Zeitstempel der letzten Sichtung.](/blog/the-niche-data-advantage-dataset.png)
 
 *Ein tauglicher Nischendatensatz ist klein genug, um ihn Zeile für Zeile zu lesen. Sechs beobachtete Produkte, je ein Preis, und ein Zeitstempel, mit dem sich das Veralten messen lässt.*
 

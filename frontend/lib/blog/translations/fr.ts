@@ -21,9 +21,9 @@ export const frBlog: BlogTranslation = {
     by: "Par",
     and: "et",
     ctaTitle: "Transformez vos données de niche en une automatisation qui fonctionne",
-    ctaText: "Décrivez la tâche en discutant et LiveContext construit le workflow sous vos yeux.",
+    ctaText: "Décrivez la tâche en discutant et Trinyx construit le workflow sous vos yeux.",
     startFree: "Commencer gratuitement",
-    metaTitle: "Blog - LiveContext",
+    metaTitle: "Blog - Trinyx",
     metaDescription: "Des guides pratiques sur l'automatisation IA et les données de niche : ce que coûtent vraiment les agents, quoi journaliser, et comment transformer un jeu de données en un workflow qui tourne tout seul.",
   },
   posts: {

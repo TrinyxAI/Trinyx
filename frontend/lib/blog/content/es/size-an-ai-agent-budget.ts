@@ -39,7 +39,7 @@ La razón es que cada resultado de herramienta se arrastra a todas las llamadas 
 
 La conclusión práctica es la misma en todos los casos: "subimos un poco el máximo de iteraciones" no es un cambio pequeño. Es la decisión de cuadruplicar aproximadamente el techo.
 
-![La vista de métricas de agentes de LiveContext: una fila de resumen con ejecuciones totales, tokens, llamadas a herramientas y tasa de éxito, sobre una tabla por agente con ejecuciones, tokens, llamadas a herramientas, créditos gastados, modelo, duración y tasa de éxito.](/blog/cap-ai-agent-cost-budgets-metrics.png)
+![La vista de métricas de agentes de Trinyx: una fila de resumen con ejecuciones totales, tokens, llamadas a herramientas y tasa de éxito, sobre una tabla por agente con ejecuciones, tokens, llamadas a herramientas, créditos gastados, modelo, duración y tasa de éxito.](/blog/cap-ai-agent-cost-budgets-metrics.png)
 
 *Gasto, tokens y llamadas a herramientas por agente, con ejecuciones reales. Esta es la entrada del dimensionado: la cifra que fijes debe salir de tu propia distribución, no de una intuición.*
 

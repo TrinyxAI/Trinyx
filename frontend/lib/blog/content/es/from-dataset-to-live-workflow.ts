@@ -23,7 +23,7 @@ El ejemplo que recorre todo el artículo es una vigilancia de precios: seguir un
 | 5. Decisión | ¿Se ha movido más de un 5 %? | La pregunta de verdad |
 | 6. Aprobar y actuar | Una persona confirma, y entonces salen el aviso y la escritura | La parte irreversible, controlada |
 
-![El constructor de flujos de LiveContext mostrando en el lienzo el grafo de vigilancia de precios con ocho nodos: un disparador horario, una llamada HTTP, un nodo de código, una búsqueda en tabla y una decisión que separa un SKU nuevo de uno conocido, después una decisión de movimiento de precio, una puerta de aprobación y la escritura protegida.](/blog/from-dataset-to-live-workflow-builder.png)
+![El constructor de flujos de Trinyx mostrando en el lienzo el grafo de vigilancia de precios con ocho nodos: un disparador horario, una llamada HTTP, un nodo de código, una búsqueda en tabla y una decisión que separa un SKU nuevo de uno conocido, después una decisión de movimiento de precio, una puerta de aprobación y la escritura protegida.](/blog/from-dataset-to-live-workflow-builder.png)
 
 *Toda la construcción en un solo lienzo: del disparador horario de la izquierda a la escritura con aprobación de la derecha.*
 

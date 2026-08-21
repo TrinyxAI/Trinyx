@@ -22,7 +22,7 @@ Partez du résultat. Une phrase suffit :
 
 Cela décrit un objectif et la forme du travail. Le déclencheur, la boucle, la recherche et l'écriture en retour sont de la tuyauterie, et la tuyauterie est précisément ce que l'outil prend en charge.
 
-![Un chat LiveContext : à gauche une demande en langage courant, « chaque matin, trouver les nouvelles inscriptions dans ma table et envoyer à chacune un message de bienvenue Slack », et à droite le workflow généré sur le canvas : un déclencheur matinal, une étape qui trouve les nouvelles inscriptions, les parcourt une à une, envoie le message Slack et les marque comme accueillies.](/blog/chat-to-workflow-no-code-generated.png)
+![Un chat Trinyx : à gauche une demande en langage courant, « chaque matin, trouver les nouvelles inscriptions dans ma table et envoyer à chacune un message de bienvenue Slack », et à droite le workflow généré sur le canvas : un déclencheur matinal, une étape qui trouve les nouvelles inscriptions, les parcourt une à une, envoie le message Slack et les marque comme accueillies.](/blog/chat-to-workflow-no-code-generated.png)
 
 *Une phrase en entrée, un workflow lisible en sortie. La demande à gauche, les étapes générées à droite.*
 

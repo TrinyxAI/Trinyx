@@ -25,7 +25,7 @@ Se parecen y no son lo mismo. Un panel lo lee su autor, minutos después, con el
 | ¿Puede cambiar después? | Sí, por diseño | No, solo se añade |
 | Modo de fallo | Depuras más lento | No puedes responder a la pregunta |
 
-![Una ejecución de flujo de LiveContext en vista de observabilidad: el grafo ejecutado con una marca verde en cada nodo, junto a un inspector que lista la época, sus marcas de inicio y fin, y el estado, la duración y el coste de cada nodo.](/blog/ai-agent-audit-trail-run.png)
+![Una ejecución de flujo de Trinyx en vista de observabilidad: el grafo ejecutado con una marca verde en cada nodo, junto a un inspector que lista la época, sus marcas de inicio y fin, y el estado, la duración y el coste de cada nodo.](/blog/ai-agent-audit-trail-run.png)
 
 *Una ejecución en la vista de observabilidad: cada paso, su estado, su duración, su coste. Muy útil, y aun así un panel y no el registro duradero que describe el resto del artículo.*
 

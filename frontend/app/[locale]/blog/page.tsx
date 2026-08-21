@@ -11,7 +11,7 @@ import { BLOG_LOCALES } from '@/lib/blog/i18n';
 import { getLocalizedPosts, getLocalizedUi, isBlogLocale, blogHreflang } from '@/lib/blog/localized';
 import { IS_CE } from '@/lib/edition';
 
-const SITE_URL = process.env.NEXT_PUBLIC_SITE_URL ?? 'https://livecontext.ai';
+const SITE_URL = process.env.NEXT_PUBLIC_SITE_URL ?? 'https://trinyx.fr';
 
 interface LocaleParams {
   params: Promise<{ locale: string }>;
@@ -35,13 +35,13 @@ export async function generateMetadata({ params }: LocaleParams): Promise<Metada
     description: ui.metaDescription,
     alternates: { canonical: url, languages: blogHreflang(SITE_URL, '') },
     openGraph: {
-      siteName: 'LiveContext',
+      siteName: 'Trinyx',
       title: ui.metaTitle,
       description: ui.metaDescription,
       url,
       type: 'website',
       images: [
-        { url: '/og-image.jpg', width: 1200, height: 630, alt: 'LiveContext: one message in, a working automation out.' },
+        { url: '/og-image.jpg', width: 1200, height: 630, alt: 'Trinyx: one message in, a working automation out.' },
       ],
     },
     robots: IS_CE ? { index: false, follow: false } : undefined,
@@ -58,7 +58,7 @@ export default async function LocalizedBlogIndexPage({ params }: LocaleParams) {
   const blogJsonLd = {
     '@context': 'https://schema.org',
     '@type': 'Blog',
-    name: 'LiveContext Blog',
+    name: 'Trinyx Blog',
     description: ui.metaDescription,
     url: `${SITE_URL}/${locale}/blog`,
     inLanguage: locale,

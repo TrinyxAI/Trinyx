@@ -23,7 +23,7 @@ O exemplo que percorre o artigo é uma vigilância de preços: seguir alguns pro
 | 5. Decisão | Mexeu-se mais de 5 %? | A pergunta a sério |
 | 6. Aprovar e agir | Uma pessoa confirma e só então saem o alerta e a escrita | A parte irreversível, controlada |
 
-![O construtor de workflows do LiveContext a mostrar na tela o grafo de vigilância de preços com oito nós: um gatilho horário, uma chamada HTTP, um nó de código, uma consulta em tabela e uma decisão que separa um SKU novo de um conhecido, depois uma decisão de variação de preço, uma porta de aprovação e a escrita protegida.](/blog/from-dataset-to-live-workflow-builder.png)
+![O construtor de workflows do Trinyx a mostrar na tela o grafo de vigilância de preços com oito nós: um gatilho horário, uma chamada HTTP, um nó de código, uma consulta em tabela e uma decisão que separa um SKU novo de um conhecido, depois uma decisão de variação de preço, uma porta de aprovação e a escrita protegida.](/blog/from-dataset-to-live-workflow-builder.png)
 
 *A construção toda numa só tela: do gatilho horário à esquerda à escrita com aprovação à direita.*
 

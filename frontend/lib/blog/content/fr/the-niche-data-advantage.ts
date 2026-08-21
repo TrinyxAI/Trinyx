@@ -46,7 +46,7 @@ Lisez bien la dernière colonne, c'est la partie que tout le monde prend à l'en
 
 Une réserve honnête sur ce tableau : la cadence suppose un vieillissement régulier. Les sources web pourrissent surtout la première année, donc rafraîchissez plus tôt que ne l'indique le tableau pour tout ce que vous ne contrôlez pas.
 
-![Une table LiveContext contenant un petit jeu de données de niche : six SKU concurrents suivis, chacun une ligne avec les colonnes sku, prix, titre, devise et horodatage de dernière observation.](/blog/the-niche-data-advantage-dataset.png)
+![Une table Trinyx contenant un petit jeu de données de niche : six SKU concurrents suivis, chacun une ligne avec les colonnes sku, prix, titre, devise et horodatage de dernière observation.](/blog/the-niche-data-advantage-dataset.png)
 
 *Un jeu de données de niche qualifié est assez petit pour être lu ligne à ligne. Six produits suivis, un prix chacun, et un horodatage de dernière observation qui permet de mesurer la vitesse de péremption.*
 

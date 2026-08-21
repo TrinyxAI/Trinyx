@@ -45,7 +45,7 @@ Lee bien la última columna, porque es la parte que todo el mundo entiende al re
 
 Una salvedad honesta sobre la tabla: la cadencia supone que tus datos envejecen de forma constante. Las fuentes web se degradan sobre todo el primer año, así que refresca antes de lo que indica la tabla en todo lo que no controles.
 
-![Una tabla de LiveContext con un pequeño conjunto de datos de nicho: seis SKU de la competencia, cada uno una fila con columnas de sku, precio, título, moneda y marca de tiempo de última observación.](/blog/the-niche-data-advantage-dataset.png)
+![Una tabla de Trinyx con un pequeño conjunto de datos de nicho: seis SKU de la competencia, cada uno una fila con columnas de sku, precio, título, moneda y marca de tiempo de última observación.](/blog/the-niche-data-advantage-dataset.png)
 
 *Un conjunto de datos de nicho válido es lo bastante pequeño como para leerlo fila a fila. Seis productos seguidos, un precio cada uno, y una marca de tiempo que permite medir a qué velocidad caduca.*
 

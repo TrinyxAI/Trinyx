@@ -25,7 +25,7 @@ Un moniteur tourne une fois l'argent parti. Une limite tourne avant l'appel suiv
 
 Voici un test réalisable aujourd'hui, et il ne demande aucun seuil : sortez les refus enregistrés par votre plafond actuel. A-t-il déjà refusé quelque chose ? Un chiffre qui n'a jamais refusé un seul appel n'est pas un contrôle, c'est un commentaire.
 
-![La vue des métriques d'agents LiveContext : une ligne de synthèse (exécutions totales, tokens, appels d'outils, taux de succès) au-dessus d'un tableau par agent montrant, pour chacun, les exécutions, tokens, appels d'outils, crédits dépensés, modèle, durée et taux de succès.](/blog/cap-ai-agent-cost-budgets-metrics.png)
+![La vue des métriques d'agents Trinyx : une ligne de synthèse (exécutions totales, tokens, appels d'outils, taux de succès) au-dessus d'un tableau par agent montrant, pour chacun, les exécutions, tokens, appels d'outils, crédits dépensés, modèle, durée et taux de succès.](/blog/cap-ai-agent-cost-budgets-metrics.png)
 
 *La dépense par agent, après coup. Exactement la bonne vue pour décider d'un plafond, et exactement la mauvaise chose sur laquelle compter pour arrêter une exécution.*
 

@@ -45,7 +45,7 @@ Leia bem a última coluna, porque é a parte que toda a gente inverte. Dados len
 
 Uma ressalva honesta sobre a tabela: a cadência assume um envelhecimento constante. As fontes web degradam-se sobretudo no primeiro ano, por isso atualize mais cedo do que a tabela indica em tudo o que não controla.
 
-![Uma tabela do LiveContext com um pequeno conjunto de dados de nicho: seis SKU de concorrentes acompanhados, cada um numa linha com colunas de sku, preço, título, moeda e data da última observação.](/blog/the-niche-data-advantage-dataset.png)
+![Uma tabela do Trinyx com um pequeno conjunto de dados de nicho: seis SKU de concorrentes acompanhados, cada um numa linha com colunas de sku, preço, título, moeda e data da última observação.](/blog/the-niche-data-advantage-dataset.png)
 
 *Um conjunto de dados de nicho válido é suficientemente pequeno para ser lido linha a linha. Seis produtos acompanhados, um preço cada, e uma data de última observação que permite medir a que ritmo caduca.*
 

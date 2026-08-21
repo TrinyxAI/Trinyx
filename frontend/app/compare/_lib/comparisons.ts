@@ -4,7 +4,7 @@
 // components/landing/LandingShell.tsx).
 //
 // Editorial rules for this file:
-//  - Claims about LiveContext must match the landing page and the docs.
+//  - Claims about Trinyx must match the landing page and the docs.
 //  - Claims about competitors stay factual, hedged and dated (lastUpdated);
 //    when a competitor does something well, say so (the "honest" section).
 //  - Answers are written to be quotable in isolation: search engines and LLMs
@@ -54,10 +54,10 @@ export interface Comparison {
 const LAST_UPDATED = 'July 2026';
 
 const INTEGRATIONS_ANSWER =
-  'LiveContext ships 700+ built-in API integrations with more than 17,000 ready-to-call operations, plus a generic HTTP request node, a code node, and custom API definitions for anything not in the catalog.';
+  'Trinyx ships 700+ built-in API integrations with more than 17,000 ready-to-call operations, plus a generic HTTP request node, a code node, and custom API definitions for anything not in the catalog.';
 
 const SELF_HOST_ANSWER =
-  'Yes. The LiveContext Community Edition is free and self-hosted: one docker compose up on your own server, with the code public on GitHub (livecontext-ai/livecontext-ce). The cloud edition at livecontext.ai adds managed hosting, SAML SSO, workspaces and platform credits.';
+  'Yes. The Trinyx Community Edition is free and self-hosted: one docker compose up on your own server, with the code public on GitHub (livecontext-ai/livecontext-ce). The cloud edition at livecontext.ai adds managed hosting, SAML SSO, workspaces and platform credits.';
 
 export const COMPARISONS: Comparison[] = [
   {
@@ -68,11 +68,11 @@ export const COMPARISONS: Comparison[] = [
       'The n8n alternative that builds workflows from chat, runs budgeted AI agents and ships them as apps. Cloud or self-hosted, with a free tier.',
     h1: 'The n8n alternative that builds the workflow for you',
     intro:
-      'n8n is a solid workflow engine for technical teams who like wiring nodes by hand. LiveContext starts one step earlier: you describe the job in chat, the workflow assembles itself in front of you, AI agents run it under scoped access and hard credit budgets, and the result ships as an app your team can open. Cloud or self-hosted, both with a free option.',
+      'n8n is a solid workflow engine for technical teams who like wiring nodes by hand. Trinyx starts one step earlier: you describe the job in chat, the workflow assembles itself in front of you, AI agents run it under scoped access and hard credit budgets, and the result ships as an app your team can open. Cloud or self-hosted, both with a free option.',
     verdictCompetitor:
       'Choose n8n if you want a mature, code-friendly workflow engine, you are comfortable wiring nodes and writing JavaScript by hand, and AI is an add-on rather than the core of your automations.',
     verdictLivecontext:
-      'Choose LiveContext if you want to describe a job in plain language and get a running automation, put AI agents in production with scoped tools and credit budgets they cannot exceed, and ship the result as an app for your team or customers.',
+      'Choose Trinyx if you want to describe a job in plain language and get a running automation, put AI agents in production with scoped tools and credit budgets they cannot exceed, and ship the result as an app for your team or customers.',
     rows: [
       {
         feature: 'Build automations by chat',
@@ -106,7 +106,7 @@ export const COMPARISONS: Comparison[] = [
       },
       {
         feature: 'MCP (Model Context Protocol)',
-        livecontext: { state: 'yes', note: 'Use LiveContext as an MCP server from Claude, Cursor and other clients' },
+        livecontext: { state: 'yes', note: 'Use Trinyx as an MCP server from Claude, Cursor and other clients' },
         competitor: { state: 'partial', note: 'Community and beta options' },
       },
       {
@@ -134,7 +134,7 @@ export const COMPARISONS: Comparison[] = [
       {
         title: 'The whole product, not just the pipeline',
         description:
-          'Workflows, AI agents, user-facing apps and data tables live in one platform. With n8n you assemble the rest of the stack yourself; with LiveContext the app your team opens is part of the automation.',
+          'Workflows, AI agents, user-facing apps and data tables live in one platform. With n8n you assemble the rest of the stack yourself; with Trinyx the app your team opens is part of the automation.',
       },
       {
         title: 'Cloud when you want it, self-hosted when you need it',
@@ -154,36 +154,36 @@ export const COMPARISONS: Comparison[] = [
         description: 'For each n8n workflow, write one sentence: when X happens, do Y. That sentence is the migration plan.',
       },
       {
-        title: 'Paste it into LiveContext chat',
+        title: 'Paste it into Trinyx chat',
         description: 'The builder assembles the workflow in front of you. Adjust nodes on the canvas where your process has special cases.',
       },
       {
         title: 'Run both side by side',
-        description: 'Keep n8n live while the LiveContext version runs on real data, compare the runs, then switch the trigger over.',
+        description: 'Keep n8n live while the Trinyx version runs on real data, compare the runs, then switch the trigger over.',
       },
     ],
     faq: [
       {
-        question: 'Is LiveContext a good n8n alternative?',
+        question: 'Is Trinyx a good n8n alternative?',
         answer:
-          'Yes, for teams that want AI at the core of their automations. LiveContext builds workflows from a chat message, runs AI agents with scoped tools and hard credit budgets, ships workflows as apps, and can be self-hosted for free like n8n. n8n remains a strong choice for developers who prefer wiring nodes and code by hand.',
+          'Yes, for teams that want AI at the core of their automations. Trinyx builds workflows from a chat message, runs AI agents with scoped tools and hard credit budgets, ships workflows as apps, and can be self-hosted for free like n8n. n8n remains a strong choice for developers who prefer wiring nodes and code by hand.',
       },
       {
-        question: 'Can I self-host LiveContext like n8n?',
+        question: 'Can I self-host Trinyx like n8n?',
         answer: SELF_HOST_ANSWER,
       },
       {
-        question: 'Can I import my n8n workflows into LiveContext?',
+        question: 'Can I import my n8n workflows into Trinyx?',
         answer:
           'There is no one-click importer. Most teams rebuild by describing each workflow in chat, which typically takes minutes per workflow, then validate the new version side by side with n8n before switching the trigger.',
       },
       {
-        question: 'How does LiveContext pricing compare to n8n?',
+        question: 'How does Trinyx pricing compare to n8n?',
         answer:
-          'LiveContext cloud has a free tier and credit-based paid plans where every agent gets a hard budget it cannot exceed. n8n cloud is priced per execution. Both offer a free self-hosted edition: n8n under its fair-code license, LiveContext as the Community Edition.',
+          'Trinyx cloud has a free tier and credit-based paid plans where every agent gets a hard budget it cannot exceed. n8n cloud is priced per execution. Both offer a free self-hosted edition: n8n under its fair-code license, Trinyx as the Community Edition.',
       },
       {
-        question: 'Does LiveContext have enough integrations to replace n8n?',
+        question: 'Does Trinyx have enough integrations to replace n8n?',
         answer: INTEGRATIONS_ANSWER,
       },
     ],
@@ -197,11 +197,11 @@ export const COMPARISONS: Comparison[] = [
       'The Zapier alternative with real branching, budgeted AI agents, built-in apps and tables, and a free self-hosted edition. No per-task pricing.',
     h1: 'The Zapier alternative that does more than move data',
     intro:
-      'Zapier made connecting two SaaS tools easy. But once you need branching logic, AI agents, a screen for your team, or predictable pricing at volume, stitching zaps and add-ons together gets expensive and hard to read. LiveContext builds the whole automation from one chat message, runs it with budgeted AI agents, and ships it as an app, in one product you can also self-host.',
+      'Zapier made connecting two SaaS tools easy. But once you need branching logic, AI agents, a screen for your team, or predictable pricing at volume, stitching zaps and add-ons together gets expensive and hard to read. Trinyx builds the whole automation from one chat message, runs it with budgeted AI agents, and ships it as an app, in one product you can also self-host.',
     verdictCompetitor:
       'Choose Zapier if you mostly need simple trigger-action links between two SaaS tools, you want the largest possible connector catalog, and per-task pricing fits your volume.',
     verdictLivecontext:
-      'Choose LiveContext if you want multi-step automations with real logic built from a chat message, AI agents with scoped tools and hard credit budgets, apps and data tables included rather than sold as add-ons, and the option to self-host.',
+      'Choose Trinyx if you want multi-step automations with real logic built from a chat message, AI agents with scoped tools and hard credit budgets, apps and data tables included rather than sold as add-ons, and the option to self-host.',
     rows: [
       {
         feature: 'Build automations by chat',
@@ -235,7 +235,7 @@ export const COMPARISONS: Comparison[] = [
       },
       {
         feature: 'MCP (Model Context Protocol)',
-        livecontext: { state: 'yes', note: 'Use LiveContext as an MCP server from Claude, Cursor and other clients' },
+        livecontext: { state: 'yes', note: 'Use Trinyx as an MCP server from Claude, Cursor and other clients' },
         competitor: { state: 'yes', note: 'Zapier MCP exposes its actions to AI clients' },
       },
       {
@@ -253,7 +253,7 @@ export const COMPARISONS: Comparison[] = [
       {
         title: 'Stop paying per task',
         description:
-          'Zapier meters every task, so a busy month means a surprise bill. LiveContext is credit-based with a free tier, and every agent gets a hard budget it cannot exceed, so the spend cap is a setting, not a hope.',
+          'Zapier meters every task, so a busy month means a surprise bill. Trinyx is credit-based with a free tier, and every agent gets a hard budget it cannot exceed, so the spend cap is a setting, not a hope.',
       },
       {
         title: 'One product instead of four add-ons',
@@ -263,7 +263,7 @@ export const COMPARISONS: Comparison[] = [
       {
         title: 'Your data can stay on your servers',
         description:
-          'Zapier is SaaS only. LiveContext offers a free self-hosted Community Edition when compliance or data residency requires it, and a managed cloud with SAML SSO and workspaces when it does not.',
+          'Zapier is SaaS only. Trinyx offers a free self-hosted Community Edition when compliance or data residency requires it, and a managed cloud with SAML SSO and workspaces when it does not.',
       },
       {
         title: 'Automations your team can read',
@@ -284,35 +284,35 @@ export const COMPARISONS: Comparison[] = [
       },
       {
         title: 'Rebuild each process in chat',
-        description: 'Paste the sentence into LiveContext. Several related zaps usually collapse into one workflow with branches.',
+        description: 'Paste the sentence into Trinyx. Several related zaps usually collapse into one workflow with branches.',
       },
       {
         title: 'Run both side by side',
-        description: 'Keep the zap on while the LiveContext version runs on real data, compare results, then turn the zap off.',
+        description: 'Keep the zap on while the Trinyx version runs on real data, compare results, then turn the zap off.',
       },
     ],
     faq: [
       {
-        question: 'Is LiveContext a good Zapier alternative?',
+        question: 'Is Trinyx a good Zapier alternative?',
         answer:
-          'Yes, for teams that outgrew simple trigger-action zaps. LiveContext builds multi-step workflows from a chat message, runs AI agents with scoped tools and credit budgets, includes apps and data tables instead of selling them as add-ons, and can be self-hosted for free. Zapier remains a fine choice for one-step links between two SaaS tools.',
+          'Yes, for teams that outgrew simple trigger-action zaps. Trinyx builds multi-step workflows from a chat message, runs AI agents with scoped tools and credit budgets, includes apps and data tables instead of selling them as add-ons, and can be self-hosted for free. Zapier remains a fine choice for one-step links between two SaaS tools.',
       },
       {
-        question: 'Can I self-host LiveContext? Zapier cannot be self-hosted.',
+        question: 'Can I self-host Trinyx? Zapier cannot be self-hosted.',
         answer: SELF_HOST_ANSWER,
       },
       {
-        question: 'Can I import my Zaps into LiveContext?',
+        question: 'Can I import my Zaps into Trinyx?',
         answer:
           'There is no one-click importer. Most teams rebuild by describing each zap in chat, which typically takes minutes, and several related zaps often merge into a single workflow with branches.',
       },
       {
-        question: 'How does LiveContext pricing compare to Zapier?',
+        question: 'How does Trinyx pricing compare to Zapier?',
         answer:
-          'Zapier charges per task, so cost grows with volume. LiveContext has a free tier and credit-based plans where every agent gets a hard budget it cannot exceed; the self-hosted Community Edition is free.',
+          'Zapier charges per task, so cost grows with volume. Trinyx has a free tier and credit-based plans where every agent gets a hard budget it cannot exceed; the self-hosted Community Edition is free.',
       },
       {
-        question: 'Does LiveContext connect to as many apps as Zapier?',
+        question: 'Does Trinyx connect to as many apps as Zapier?',
         answer:
           "Zapier's connector catalog is larger. " + INTEGRATIONS_ANSWER + ' In practice this covers most business stacks; check the integrations you need before switching.',
       },
@@ -327,11 +327,11 @@ export const COMPARISONS: Comparison[] = [
       'The Make (Integromat) alternative that builds scenarios from chat, runs budgeted AI agents and ships them as apps. Free tier and free self-hosting.',
     h1: 'The Make alternative that builds the scenario for you',
     intro:
-      'Make (formerly Integromat) gives power users a deep visual scenario builder, priced per operation. LiveContext starts from the other end: you describe the job in chat and the workflow assembles itself, AI agents run it under scoped access and hard credit budgets, and the result ships as an app. All in one product, cloud or self-hosted.',
+      'Make (formerly Integromat) gives power users a deep visual scenario builder, priced per operation. Trinyx starts from the other end: you describe the job in chat and the workflow assembles itself, AI agents run it under scoped access and hard credit budgets, and the result ships as an app. All in one product, cloud or self-hosted.',
     verdictCompetitor:
       'Choose Make if you enjoy assembling detailed scenarios module by module, per-operation pricing fits your volume, and you do not need self-hosting or apps on top of your automations.',
     verdictLivecontext:
-      'Choose LiveContext if you want automations built from a plain-language description, AI agents with scoped tools and budgets they cannot exceed, user-facing apps and data tables included, and a free self-hosted edition.',
+      'Choose Trinyx if you want automations built from a plain-language description, AI agents with scoped tools and budgets they cannot exceed, user-facing apps and data tables included, and a free self-hosted edition.',
     rows: [
       {
         feature: 'Build automations by chat',
@@ -365,7 +365,7 @@ export const COMPARISONS: Comparison[] = [
       },
       {
         feature: 'MCP (Model Context Protocol)',
-        livecontext: { state: 'yes', note: 'Use LiveContext as an MCP server from Claude, Cursor and other clients' },
+        livecontext: { state: 'yes', note: 'Use Trinyx as an MCP server from Claude, Cursor and other clients' },
         competitor: { state: 'partial', note: 'Early options' },
       },
       {
@@ -383,12 +383,12 @@ export const COMPARISONS: Comparison[] = [
       {
         title: 'Describe it instead of assembling it',
         description:
-          'A Make scenario is built module by module. In LiveContext you type what you want done and the workflow assembles itself; the canvas is for refining, not for starting from zero.',
+          'A Make scenario is built module by module. In Trinyx you type what you want done and the workflow assembles itself; the canvas is for refining, not for starting from zero.',
       },
       {
         title: 'Predictable spend, capped per agent',
         description:
-          'Per-operation pricing punishes chatty scenarios. LiveContext is credit-based with a free tier, and each agent has a hard budget it cannot exceed.',
+          'Per-operation pricing punishes chatty scenarios. Trinyx is credit-based with a free tier, and each agent has a hard budget it cannot exceed.',
       },
       {
         title: 'Apps and tables are part of the product',
@@ -398,13 +398,13 @@ export const COMPARISONS: Comparison[] = [
       {
         title: 'Self-host when compliance asks for it',
         description:
-          'Make is SaaS only. The LiveContext Community Edition runs on your own servers for free, with the same builder as the cloud.',
+          'Make is SaaS only. The Trinyx Community Edition runs on your own servers for free, with the same builder as the cloud.',
       },
     ],
     honestTitle: 'Where Make is the better fit',
     honest: [
       'You like building intricate scenarios by hand and the router/iterator model fits how you think.',
-      'You rely on a specific Make app module that has no LiveContext equivalent.',
+      'You rely on a specific Make app module that has no Trinyx equivalent.',
       'Your volumes are small and per-operation pricing stays cheap for you.',
     ],
     migration: [
@@ -414,35 +414,35 @@ export const COMPARISONS: Comparison[] = [
       },
       {
         title: 'Rebuild it in chat',
-        description: 'Paste the sentence into LiveContext and watch the workflow assemble. Fine-tune branching and error paths on the canvas.',
+        description: 'Paste the sentence into Trinyx and watch the workflow assemble. Fine-tune branching and error paths on the canvas.',
       },
       {
         title: 'Run both side by side',
-        description: 'Keep the Make scenario on while the LiveContext version runs on real data, compare, then switch the trigger.',
+        description: 'Keep the Make scenario on while the Trinyx version runs on real data, compare, then switch the trigger.',
       },
     ],
     faq: [
       {
-        question: 'Is LiveContext a good Make (Integromat) alternative?',
+        question: 'Is Trinyx a good Make (Integromat) alternative?',
         answer:
-          'Yes, for teams that want AI-native automation. LiveContext builds workflows from a chat message, runs AI agents with scoped tools and hard credit budgets, ships workflows as apps with built-in tables, and offers a free self-hosted edition. Make remains a capable visual builder for hands-on scenario assembly.',
+          'Yes, for teams that want AI-native automation. Trinyx builds workflows from a chat message, runs AI agents with scoped tools and hard credit budgets, ships workflows as apps with built-in tables, and offers a free self-hosted edition. Make remains a capable visual builder for hands-on scenario assembly.',
       },
       {
-        question: 'Can I self-host LiveContext? Make cannot be self-hosted.',
+        question: 'Can I self-host Trinyx? Make cannot be self-hosted.',
         answer: SELF_HOST_ANSWER,
       },
       {
-        question: 'Can I import my Make scenarios into LiveContext?',
+        question: 'Can I import my Make scenarios into Trinyx?',
         answer:
           'There is no one-click importer. Most teams rebuild by describing each scenario in chat, which typically takes minutes per scenario, then validate side by side before switching triggers.',
       },
       {
-        question: 'How does LiveContext pricing compare to Make?',
+        question: 'How does Trinyx pricing compare to Make?',
         answer:
-          'Make charges per operation, so busy scenarios cost more each month. LiveContext has a free tier and credit-based plans where every agent gets a hard budget it cannot exceed; the self-hosted Community Edition is free.',
+          'Make charges per operation, so busy scenarios cost more each month. Trinyx has a free tier and credit-based plans where every agent gets a hard budget it cannot exceed; the self-hosted Community Edition is free.',
       },
       {
-        question: 'Does LiveContext have enough integrations to replace Make?',
+        question: 'Does Trinyx have enough integrations to replace Make?',
         answer: INTEGRATIONS_ANSWER,
       },
     ],

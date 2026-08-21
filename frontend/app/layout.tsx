@@ -19,18 +19,18 @@ const outfit = Outfit({
   display: 'swap'
 })
 
-const SITE_TITLE = 'LiveContext: The AI automation platform. Chat, workflows, agents, apps.';
+const SITE_TITLE = 'Trinyx: The AI automation platform. Chat, workflows, agents, apps.';
 const SITE_DESCRIPTION = 'Build AI agents, automate workflows and ship interactive apps without code. 700+ integrations, custom APIs, data tables, marketplace and AI chat in one platform.';
-const SITE_URL = 'https://livecontext.ai';
+const SITE_URL = 'https://trinyx.fr';
 
 export const metadata: Metadata = {
   metadataBase: new URL(SITE_URL),
   title: {
     default: SITE_TITLE,
-    template: '%s - LiveContext',
+    template: '%s - Trinyx',
   },
   description: SITE_DESCRIPTION,
-  applicationName: 'LiveContext',
+  applicationName: 'Trinyx',
   keywords: [
     'AI agents',
     'no-code automation',
@@ -49,7 +49,7 @@ export const metadata: Metadata = {
     'Make alternative',
     'self-hosted automation',
   ],
-  authors: [{ name: 'LiveContext' }],
+  authors: [{ name: 'Trinyx' }],
   // No global `alternates` here on purpose: a root-level canonical is inherited
   // by every page that does not override it, which used to tell Google that
   // /about, /contact, /changelog, /compare/* and the locale landing pages were
@@ -57,7 +57,7 @@ export const metadata: Metadata = {
   // proper canonical tag"). Each public page now declares its own canonical.
   openGraph: {
     type: 'website',
-    siteName: 'LiveContext',
+    siteName: 'Trinyx',
     url: SITE_URL,
     title: SITE_TITLE,
     description: SITE_DESCRIPTION,
@@ -66,7 +66,7 @@ export const metadata: Metadata = {
         url: '/og-image.jpg',
         width: 1200,
         height: 630,
-        alt: 'LiveContext: one message in, a working automation out.',
+        alt: 'Trinyx: one message in, a working automation out.',
       },
     ],
   },

@@ -29,7 +29,7 @@ The example throughout is a price watch: track a handful of products, notice whe
 | 5. Decide | Has it moved more than 5%? | The actual question |
 | 6. Approve, then act | A person confirms, then the alert and the write happen | The irreversible bit, gated |
 
-![The LiveContext workflow builder showing the eight-node price-watch graph on the canvas: an hourly schedule trigger flows into an HTTP fetch, a code normalizer, a baseline table lookup and a decision that splits a never-seen SKU from a known one, then a material-move decision, a user-approval gate, and the guarded row update.](/blog/from-dataset-to-live-workflow-builder.png)
+![The Trinyx workflow builder showing the eight-node price-watch graph on the canvas: an hourly schedule trigger flows into an HTTP fetch, a code normalizer, a baseline table lookup and a decision that splits a never-seen SKU from a known one, then a material-move decision, a user-approval gate, and the guarded row update.](/blog/from-dataset-to-live-workflow-builder.png)
 
 *The whole build on one canvas: from the hourly trigger on the left to the approval-gated write on the right.*
 

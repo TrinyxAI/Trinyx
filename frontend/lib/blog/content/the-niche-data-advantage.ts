@@ -54,7 +54,7 @@ Read the last column carefully, because it is the part people get backwards. Slo
 
 There is one honest caveat on the whole table: the refresh cadence assumes your data ages steadily. Web sources tend to rot fastest in the first year, so refresh sooner than the table suggests on anything you do not control.
 
-![A LiveContext table holding a small niche dataset: six tracked competitor SKUs, each a row with columns for sku, price, title, currency and a last-seen timestamp.](/blog/the-niche-data-advantage-dataset.png)
+![A Trinyx table holding a small niche dataset: six tracked competitor SKUs, each a row with columns for sku, price, title, currency and a last-seen timestamp.](/blog/the-niche-data-advantage-dataset.png)
 
 *A qualified niche dataset is small enough to read row by row. Six tracked products, one price each, and a last-seen timestamp so you can measure how fast it goes stale.*
 

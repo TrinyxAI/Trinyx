@@ -1,6 +1,6 @@
-# LiveContext
+# Trinyx
 
-> LiveContext is an AI automation platform: describe a job in chat and it builds the workflow in front of you, runs it with AI agents that have scoped tool access and hard credit budgets, and ships the result as an app your team or customers can use. It combines a visual workflow builder (60+ block types), 700+ API integrations (14,000+ operations), built-in data tables, a browser-use agent, MCP (Model Context Protocol) support, and a marketplace of forkable automations. Available as a managed cloud (livecontext.ai, free tier) and as a free self-hosted Community Edition (docker compose, code at github.com/livecontext-ai/livecontext-ce).
+> Trinyx is an AI automation platform: describe a job in chat and it builds the workflow in front of you, runs it with AI agents that have scoped tool access and hard credit budgets, and ships the result as an app your team or customers can use. It combines a visual workflow builder (60+ block types), 700+ API integrations (14,000+ operations), built-in data tables, a browser-use agent, MCP (Model Context Protocol) support, and a marketplace of forkable automations. Available as a managed cloud (trinyx.fr, free tier) and as a free self-hosted Community Edition (docker compose, code at github.com/livecontext-ai/livecontext-ce).
 
 Key facts:
 - Build automations by chat: one plain-language message produces a running workflow, editable on a visual canvas.
@@ -31,13 +31,13 @@ Key facts:
 
 ## Compare
 
-- [LiveContext vs Zapier](https://livecontext.ai/compare/zapier-alternative): the AI-native Zapier alternative
-- [LiveContext vs n8n](https://livecontext.ai/compare/n8n-alternative): the AI-native n8n alternative
-- [LiveContext vs Make](https://livecontext.ai/compare/make-alternative): the AI-native Make (Integromat) alternative
+- [Trinyx vs Zapier](https://trinyx.fr/compare/zapier-alternative): the AI-native Zapier alternative
+- [Trinyx vs n8n](https://trinyx.fr/compare/n8n-alternative): the AI-native n8n alternative
+- [Trinyx vs Make](https://trinyx.fr/compare/make-alternative): the AI-native Make (Integromat) alternative
 
 ## Company
 
-- [Landing page](https://livecontext.ai/): product overview and pricing
-- [Changelog](https://livecontext.ai/changelog): shipped releases with notes
-- [About](https://livecontext.ai/about): company and team
+- [Landing page](https://trinyx.fr/): product overview and pricing
+- [Changelog](https://trinyx.fr/changelog): shipped releases with notes
+- [About](https://trinyx.fr/about): company and team
 - [Self-hosted edition on GitHub](https://github.com/livecontext-ai/livecontext-ce): Community Edition source and releases

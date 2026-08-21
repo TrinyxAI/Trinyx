@@ -57,9 +57,9 @@ export const EN_BLOG_UI: BlogUi = {
   by: 'By',
   and: 'and',
   ctaTitle: 'Turn your niche data into a working automation',
-  ctaText: 'Describe the job in chat and LiveContext builds the workflow in front of you.',
+  ctaText: 'Describe the job in chat and Trinyx builds the workflow in front of you.',
   startFree: 'Start free',
-  metaTitle: 'Blog - LiveContext',
+  metaTitle: 'Blog - Trinyx',
   metaDescription:
     'Practical guides to AI automation and niche data: what AI agents really cost, what to log for every run, and how to turn a dataset into a workflow that runs itself.',
 };

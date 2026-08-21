@@ -45,7 +45,7 @@ De onde vem a diferença? O agente dá cerca de oito voltas para terminar e cada
 
 Uma nota justa antes de contar com essas oito vezes: as duas abordagens têm na mesma de escrever a resposta final, e escrever custa o mesmo nos dois casos. Esse rascunho final é boa parte dos 2 cêntimos do workflow, e é por isso que a diferença é de cerca de oito vezes e não de cerca de oitenta.
 
-![Uma execução de workflow do LiveContext na vista de observabilidade: o grafo executado com um visto verde em cada nó, ao lado de um inspetor que lista a época, as marcas de início e fim, e o estado, a duração e o custo de cada nó.](/blog/ai-agent-audit-trail-run.png)
+![Uma execução de workflow do Trinyx na vista de observabilidade: o grafo executado com um visto verde em cada nó, ao lado de um inspetor que lista a época, as marcas de início e fim, e o estado, a duração e o custo de cada nó.](/blog/ai-agent-audit-trail-run.png)
 
 *Uma execução concluída, passo a passo, com a duração e o custo de cada um. É essa vista por passo que torna a fatura explicável em vez de uma soma única.*
 

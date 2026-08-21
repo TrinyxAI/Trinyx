@@ -5,18 +5,18 @@ import { LandingShell } from '@/components/landing/LandingShell';
 import { IS_CE } from '@/lib/edition';
 import { COMPARISONS } from './_lib/comparisons';
 
-const SITE_URL = process.env.NEXT_PUBLIC_SITE_URL ?? 'https://livecontext.ai';
+const SITE_URL = process.env.NEXT_PUBLIC_SITE_URL ?? 'https://trinyx.fr';
 
 export const metadata: Metadata = {
-  title: 'Compare LiveContext vs Zapier, n8n and Make',
+  title: 'Compare Trinyx vs Zapier, n8n and Make',
   description:
-    'How LiveContext compares to Zapier, n8n and Make (Integromat): honest feature-by-feature tables, pricing models, self-hosting, AI agents and migration guides.',
+    'How Trinyx compares to Zapier, n8n and Make (Integromat): honest feature-by-feature tables, pricing models, self-hosting, AI agents and migration guides.',
   alternates: { canonical: `${SITE_URL}/compare` },
   openGraph: {
-    siteName: 'LiveContext',
-    title: 'Compare LiveContext vs Zapier, n8n and Make',
+    siteName: 'Trinyx',
+    title: 'Compare Trinyx vs Zapier, n8n and Make',
     description:
-      'How LiveContext compares to Zapier, n8n and Make (Integromat): honest feature-by-feature tables, pricing models, self-hosting, AI agents and migration guides.',
+      'How Trinyx compares to Zapier, n8n and Make (Integromat): honest feature-by-feature tables, pricing models, self-hosting, AI agents and migration guides.',
     url: `${SITE_URL}/compare`,
     type: 'website',
     images: [
@@ -24,7 +24,7 @@ export const metadata: Metadata = {
         url: '/og-image.jpg',
         width: 1200,
         height: 630,
-        alt: 'LiveContext: one message in, a working automation out.',
+        alt: 'Trinyx: one message in, a working automation out.',
       },
     ],
   },
@@ -39,7 +39,7 @@ export default function CompareIndexPage() {
           className="text-4xl md:text-5xl font-bold tracking-tight"
           style={{ color: 'var(--text-primary)', fontFamily: 'var(--font-outfit), Outfit, sans-serif', letterSpacing: '-0.02em', lineHeight: 1.1 }}
         >
-          How LiveContext compares
+          How Trinyx compares
         </h1>
         <p className="mt-6 text-lg leading-relaxed max-w-2xl" style={{ color: 'var(--text-secondary)' }}>
           Feature-by-feature comparisons with the automation tools teams evaluate most,
@@ -55,7 +55,7 @@ export default function CompareIndexPage() {
             >
               <div>
                 <h2 className="text-lg font-semibold" style={{ color: 'var(--text-primary)' }}>
-                  LiveContext vs {comparison.competitor}
+                  Trinyx vs {comparison.competitor}
                 </h2>
                 <p className="mt-1 text-sm leading-relaxed" style={{ color: 'var(--text-secondary)' }}>
                   {comparison.metaDescription}

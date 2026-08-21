@@ -12,7 +12,7 @@ import { EN_BLOG_UI } from '@/lib/blog/i18n';
 import { blogHreflang } from '@/lib/blog/localized';
 import { IS_CE } from '@/lib/edition';
 
-const SITE_URL = process.env.NEXT_PUBLIC_SITE_URL ?? 'https://livecontext.ai';
+const SITE_URL = process.env.NEXT_PUBLIC_SITE_URL ?? 'https://trinyx.fr';
 
 interface BlogArticleParams {
   params: Promise<{ slug: string }>;
@@ -29,16 +29,16 @@ export async function generateMetadata({ params }: BlogArticleParams): Promise<M
   const { slug } = await params;
   const post = getPostBySlug(slug);
   if (!post) {
-    return { title: { absolute: 'Post not found - LiveContext' } };
+    return { title: { absolute: 'Post not found - Trinyx' } };
   }
   const url = `${SITE_URL}/blog/${post.slug}`;
   return {
-    title: { absolute: `${post.title} - LiveContext` },
+    title: { absolute: `${post.title} - Trinyx` },
     description: post.excerpt,
     alternates: { canonical: url, languages: blogHreflang(SITE_URL, `/${post.slug}`) },
     openGraph: {
-      siteName: 'LiveContext',
-      title: `${post.title} - LiveContext`,
+      siteName: 'Trinyx',
+      title: `${post.title} - Trinyx`,
       description: post.excerpt,
       url,
       type: 'article',
@@ -71,7 +71,7 @@ export default async function BlogArticlePage({ params }: BlogArticleParams) {
     author: post.authors.map((name) => ({ '@type': 'Person', name: personaName(name) })),
     publisher: {
       '@type': 'Organization',
-      name: 'LiveContext',
+      name: 'Trinyx',
       logo: { '@type': 'ImageObject', url: `${SITE_URL}/og-image.jpg` },
     },
     mainEntityOfPage: { '@type': 'WebPage', '@id': url },

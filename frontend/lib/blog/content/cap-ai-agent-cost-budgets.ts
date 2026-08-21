@@ -34,7 +34,7 @@ A monitor runs after the money is gone. A limit runs before the next call and sa
 
 Here is a test you can run today, and it needs no threshold: pull the denial records for your configured cap. Has it ever refused anything? A number that has never denied a single call is not a control, it is a comment.
 
-![The LiveContext agent metrics view: an overview row of total executions, tokens, tool calls and success rate, above a per-agent table showing each agent's executions, tokens, tool calls, credits spent, model, duration and success rate.](/blog/cap-ai-agent-cost-budgets-metrics.png)
+![The Trinyx agent metrics view: an overview row of total executions, tokens, tool calls and success rate, above a per-agent table showing each agent's executions, tokens, tool calls, credits spent, model, duration and success rate.](/blog/cap-ai-agent-cost-budgets-metrics.png)
 
 *Spend per agent, after the fact. Exactly the right view for deciding what a cap should be, and exactly the wrong thing to rely on for stopping a run.*
 

@@ -63,7 +63,7 @@ export default function ComparePageContent({ comparison }: { comparison: Compari
             <span className="mx-1.5">/</span>
             <Link href="/compare" className="hover:opacity-80">Compare</Link>
             <span className="mx-1.5">/</span>
-            <span>LiveContext vs {comparison.competitor}</span>
+            <span>Trinyx vs {comparison.competitor}</span>
           </nav>
           <h1
             className="mt-4 text-4xl md:text-5xl font-bold tracking-tight"
@@ -89,7 +89,7 @@ export default function ComparePageContent({ comparison }: { comparison: Compari
             <p className="mt-2 text-sm leading-relaxed" style={{ color: 'var(--text-secondary)' }}>{comparison.verdictCompetitor}</p>
           </div>
           <div className="rounded-2xl p-6" style={{ background: 'var(--landing-highlight-row)', border: '1px solid var(--border-color)' }}>
-            <h2 className="text-sm font-semibold" style={{ color: 'var(--text-primary)' }}>When LiveContext fits</h2>
+            <h2 className="text-sm font-semibold" style={{ color: 'var(--text-primary)' }}>When Trinyx fits</h2>
             <p className="mt-2 text-sm leading-relaxed" style={{ color: 'var(--text-secondary)' }}>{comparison.verdictLivecontext}</p>
           </div>
         </section>
@@ -100,14 +100,14 @@ export default function ComparePageContent({ comparison }: { comparison: Compari
             className="text-2xl md:text-3xl font-bold tracking-tight"
             style={{ color: 'var(--text-primary)', fontFamily: 'var(--font-outfit), Outfit, sans-serif', letterSpacing: '-0.02em' }}
           >
-            LiveContext vs {comparison.competitor}, feature by feature
+            Trinyx vs {comparison.competitor}, feature by feature
           </h2>
           <div className="mt-8 overflow-x-auto rounded-2xl" style={{ background: 'var(--bg-tertiary)', border: '1px solid var(--border-color)' }}>
             <table className="w-full text-sm" style={{ minWidth: 640 }}>
               <thead>
                 <tr style={{ background: 'var(--bg-secondary)', borderBottom: '1px solid var(--border-color)' }}>
                   <th className="text-left p-4 text-[11px] uppercase tracking-wider font-semibold w-1/3" style={{ color: 'var(--text-muted)' }}>Capability</th>
-                  <th className="text-left p-4 text-[11px] uppercase tracking-wider font-semibold w-1/3" style={{ color: 'var(--text-primary)' }}>LiveContext</th>
+                  <th className="text-left p-4 text-[11px] uppercase tracking-wider font-semibold w-1/3" style={{ color: 'var(--text-primary)' }}>Trinyx</th>
                   <th className="text-left p-4 text-[11px] uppercase tracking-wider font-semibold w-1/3" style={{ color: 'var(--text-muted)' }}>{comparison.competitor}</th>
                 </tr>
               </thead>
@@ -218,7 +218,7 @@ export default function ComparePageContent({ comparison }: { comparison: Compari
               <span key={other.slug}>
                 {idx > 0 && ' · '}
                 <Link href={`/compare/${other.slug}`} className="underline underline-offset-2 hover:opacity-80">
-                  LiveContext vs {other.competitor}
+                  Trinyx vs {other.competitor}
                 </Link>
               </span>
             ))}

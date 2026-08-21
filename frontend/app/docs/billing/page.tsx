@@ -5,7 +5,7 @@ import { DocsHero, DocsProse, DocsTable, Callout, CardGrid, Card } from '../_com
 export const metadata = docsMetadata({
   title: 'Plans, credits & billing',
   description:
-    'How LiveContext Cloud bills usage: the Free/Starter/Pro/Team/Enterprise plans, the two-bucket credit wallet (subscription + pay-as-you-go) and its drain order, what actually consumes credits, subscription management, owner-pays team billing, BYOK, reward codes, delinquency, agent credit budgets, and the CE unlimited mode.',
+    'How Trinyx Cloud bills usage: the Free/Starter/Pro/Team/Enterprise plans, the two-bucket credit wallet (subscription + pay-as-you-go) and its drain order, what actually consumes credits, subscription management, owner-pays team billing, BYOK, reward codes, delinquency, agent credit budgets, and the CE unlimited mode.',
   path: '/docs/billing',
 });
 
@@ -15,7 +15,7 @@ export default function BillingPage() {
       <DocsHero
         eyebrow="Reference"
         title="Plans, credits & billing"
-        lead="LiveContext Cloud bills usage in credits drawn from a two-bucket wallet: a monthly subscription bucket plus a persistent pay-as-you-go bucket. This page covers the plans, what actually consumes credits, how the wallet drains, and how billing is managed."
+        lead="Trinyx Cloud bills usage in credits drawn from a two-bucket wallet: a monthly subscription bucket plus a persistent pay-as-you-go bucket. This page covers the plans, what actually consumes credits, how the wallet drains, and how billing is managed."
       />
 
       <DocsProse>

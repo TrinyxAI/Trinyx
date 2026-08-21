@@ -5,7 +5,7 @@ import { DocsHero, DocsProse, DocsTable, Callout, CodeBlock, Steps, Step, CardGr
 export const metadata = docsMetadata({
   title: 'Tables & data',
   description:
-    'Built-in tables in LiveContext: the CRUD operations, how filters and comparisons actually work (textual, not numeric), pagination limits, the delete-all idiom, idempotent inserts, column types, and vector similarity search.',
+    'Built-in tables in Trinyx: the CRUD operations, how filters and comparisons actually work (textual, not numeric), pagination limits, the delete-all idiom, idempotent inserts, column types, and vector similarity search.',
   path: '/docs/tables',
 });
 

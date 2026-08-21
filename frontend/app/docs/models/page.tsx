@@ -5,7 +5,7 @@ import { DocsHero, DocsProse, DocsTable, Callout, CardGrid, Card } from '../_com
 export const metadata = docsMetadata({
   title: 'Models & providers',
   description:
-    'How LiveContext sources and configures models: BYOK API-key providers, CLI bridge providers (Claude Code, Codex, Gemini CLI, Mistral Vibe), the six reasoning-effort levels and who honors them, the admin model catalog, model categories, cloud-only execution links, and the CE cloud-vs-BYOK toggle.',
+    'How Trinyx sources and configures models: BYOK API-key providers, CLI bridge providers (Claude Code, Codex, Gemini CLI, Mistral Vibe), the six reasoning-effort levels and who honors them, the admin model catalog, model categories, cloud-only execution links, and the CE cloud-vs-BYOK toggle.',
   path: '/docs/models',
 });
 
@@ -79,7 +79,7 @@ export default function ModelsPage() {
           Bridge model turns are priced like any other model, at the underlying cloud model&apos;s
           published list price, and debit ledger credits at the same per-token rate as the direct API
           route. The CLI subscription itself is a cost the admin pays externally; it doesn&apos;t make
-          turns free inside LiveContext.
+          turns free inside Trinyx.
         </Callout>
         <p>
           Because CLI providers are local bridges the cloud can never provide on your behalf, the
@@ -323,7 +323,7 @@ export default function ModelsPage() {
         <CardGrid cols={3}>
           <Card icon={Bot} title="Agents" href="/agents">Temperature, tool scope, and credit budgets per agent.</Card>
           <Card icon={Workflow} title="Workflows" href="/workflows">Where agent nodes sit in the graph.</Card>
-          <Card icon={Server} title="Self-hosting" href="/self-host">Running LiveContext yourself, and what cloud-linking unlocks.</Card>
+          <Card icon={Server} title="Self-hosting" href="/self-host">Running Trinyx yourself, and what cloud-linking unlocks.</Card>
         </CardGrid>
       </DocsProse>
     </>

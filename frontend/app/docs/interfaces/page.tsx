@@ -5,7 +5,7 @@ import { DocsHero, DocsProse, DocsTable, Callout, CodeBlock, Steps, Step, CardGr
 export const metadata = docsMetadata({
   title: 'Interfaces & apps',
   description:
-    'Interfaces turn a LiveContext workflow into a real web app: variable mapping feeds data into the page, action mapping sends user input back, __continue and navigate control the run, and Split turns a page into a carousel.',
+    'Interfaces turn a Trinyx workflow into a real web app: variable mapping feeds data into the page, action mapping sends user input back, __continue and navigate control the run, and Split turns a page into a carousel.',
   path: '/docs/interfaces',
 });
 

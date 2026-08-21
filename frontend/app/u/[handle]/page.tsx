@@ -5,7 +5,7 @@ import { IS_CE } from '@/lib/edition';
 import { fetchPublicProfile, fetchPublicationsByPublisher } from '@/lib/marketplace/publicProfiles';
 import PublicationCardSsr from '@/app/marketplace/_components/PublicationCardSsr';
 
-const SITE_URL = process.env.NEXT_PUBLIC_SITE_URL ?? 'https://livecontext.ai';
+const SITE_URL = process.env.NEXT_PUBLIC_SITE_URL ?? 'https://trinyx.fr';
 
 // Same window as the listing pages: a profile changes about as often as the
 // listings it shows.
@@ -21,15 +21,15 @@ export async function generateMetadata({
   if (!profile) return {};
 
   const name = profile.displayName ?? `@${profile.handle}`;
-  const title = `${name} - LiveContext`;
-  const description = profile.bio ?? `Apps and automations published by ${name} on LiveContext.`;
+  const title = `${name} - Trinyx`;
+  const description = profile.bio ?? `Apps and automations published by ${name} on Trinyx.`;
 
   return {
     title,
     description,
     alternates: { canonical: `${SITE_URL}/u/${profile.handle}` },
     openGraph: {
-      siteName: 'LiveContext',
+      siteName: 'Trinyx',
       title,
       description,
       url: `${SITE_URL}/u/${profile.handle}`,

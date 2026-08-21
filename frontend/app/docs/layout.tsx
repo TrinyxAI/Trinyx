@@ -16,10 +16,10 @@ import { IS_CE } from '@/lib/edition';
 // outside `app/[locale]`, so nothing here may call next-intl hooks.
 export const metadata: Metadata = {
   title: {
-    template: '%s · LiveContext Docs',
-    default: 'Documentation · LiveContext',
+    template: '%s · Trinyx Docs',
+    default: 'Documentation · Trinyx',
   },
-  description: 'Guides and reference for LiveContext - the AI automation platform.',
+  description: 'Guides and reference for Trinyx - the AI automation platform.',
 };
 
 export default function DocsLayout({ children }: { children: ReactNode }) {

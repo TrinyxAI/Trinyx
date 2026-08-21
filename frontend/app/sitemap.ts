@@ -8,7 +8,7 @@ import { fetchAllPublicPublications } from '@/lib/marketplace/publicPublications
 import { isIndexable, marketplacePath } from '@/lib/marketplace/indexability';
 
 // Configurable at deploy time; falls back to the production domain.
-const SITE_URL = process.env.NEXT_PUBLIC_SITE_URL ?? 'https://livecontext.ai';
+const SITE_URL = process.env.NEXT_PUBLIC_SITE_URL ?? 'https://trinyx.fr';
 
 /**
  * Public-indexable surface of livecontext.ai (native Next.js sitemap).

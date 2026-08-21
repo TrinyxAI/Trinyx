@@ -57,7 +57,7 @@ const INTEGRATIONS_ANSWER =
   'Trinyx ships 700+ built-in API integrations with more than 17,000 ready-to-call operations, plus a generic HTTP request node, a code node, and custom API definitions for anything not in the catalog.';
 
 const SELF_HOST_ANSWER =
-  'Yes. The Trinyx Community Edition is free and self-hosted: one docker compose up on your own server, with the code public on GitHub (livecontext-ai/livecontext-ce). The cloud edition at livecontext.ai adds managed hosting, SAML SSO, workspaces and platform credits.';
+  'Yes. The Trinyx Community Edition is free and self-hosted: one docker compose up on your own server, with the code public on GitHub (livecontext-ai/livecontext-ce). The cloud edition at trinyx.fr adds managed hosting, SAML SSO, workspaces and platform credits.';
 
 export const COMPARISONS: Comparison[] = [
   {

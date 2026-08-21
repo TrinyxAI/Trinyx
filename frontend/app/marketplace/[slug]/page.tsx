@@ -7,7 +7,7 @@ import { IS_CE } from '@/lib/edition';
 import { fetchPublicationBySlug } from '@/lib/marketplace/publicPublications';
 import { isIndexable, marketplacePath, metaDescription } from '@/lib/marketplace/indexability';
 
-const SITE_URL = process.env.NEXT_PUBLIC_SITE_URL ?? 'https://livecontext.ai';
+const SITE_URL = process.env.NEXT_PUBLIC_SITE_URL ?? 'https://trinyx.fr';
 
 /**
  * Public listing page, addressed by its URL slug.
@@ -34,7 +34,7 @@ export async function generateMetadata({
 
   const url = `${SITE_URL}${marketplacePath(slug)}`;
   const description = metaDescription(publication);
-  const title = `${publication.title} - LiveContext Marketplace`;
+  const title = `${publication.title} - Trinyx Marketplace`;
 
   // Thin listings render normally but stay out of the index, and out of the
   // sitemap, which reads the same predicate. Enough near-empty pages drag down
@@ -51,7 +51,7 @@ export async function generateMetadata({
     // the file-based `opengraph-image.tsx` next to this page, and every shared
     // listing would fall back to the one generic site-wide card again.
     openGraph: {
-      siteName: 'LiveContext',
+      siteName: 'Trinyx',
       title,
       description,
       url,

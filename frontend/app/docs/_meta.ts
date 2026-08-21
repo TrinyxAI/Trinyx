@@ -16,7 +16,7 @@ export function docsMetadata(opts: { title: string; description: string; path: s
     description: opts.description,
     alternates: { canonical: url },
     openGraph: {
-      title: `${opts.title} · LiveContext Docs`,
+      title: `${opts.title} · Trinyx Docs`,
       description: opts.description,
       url,
       type: 'article',

@@ -5,7 +5,7 @@ import { DocsHero, DocsProse, DocsTable, Callout, CodeBlock, CardGrid, Card } fr
 export const metadata = docsMetadata({
   title: 'Workflows',
   description:
-    'How LiveContext workflows are structured and executed: nodes, edges and ports, label normalization, data flow, branching and parallelism, loops, joins, pausing, per-step reliability, and execution modes.',
+    'How Trinyx workflows are structured and executed: nodes, edges and ports, label normalization, data flow, branching and parallelism, loops, joins, pausing, per-step reliability, and execution modes.',
   path: '/docs/workflows',
 });
 

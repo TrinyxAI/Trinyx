@@ -16,13 +16,13 @@ import { metaDescription } from '@/lib/marketplace/indexability';
  */
 export const size = { width: 1200, height: 630 };
 export const contentType = 'image/png';
-export const alt = 'LiveContext marketplace listing';
+export const alt = 'Trinyx marketplace listing';
 
 export default async function OpengraphImage({ params }: { params: Promise<{ slug: string }> }) {
   const { slug } = await params;
   const publication = await fetchPublicationBySlug(slug);
 
-  const title = publication?.title ?? 'LiveContext Marketplace';
+  const title = publication?.title ?? 'Trinyx Marketplace';
   const description = publication
     ? metaDescription(publication, 120)
     : 'Ready-made AI agents, workflows and apps.';
@@ -43,7 +43,7 @@ export default async function OpengraphImage({ params }: { params: Promise<{ slu
       >
         <div style={{ display: 'flex', flexDirection: 'column', gap: '28px' }}>
           <div style={{ fontSize: 28, color: '#9aa4b8', letterSpacing: '0.08em' }}>
-            LIVECONTEXT MARKETPLACE
+            TRINYX MARKETPLACE
           </div>
           <div style={{ fontSize: 68, color: '#ffffff', lineHeight: 1.1, fontWeight: 700 }}>
             {title}

@@ -260,7 +260,7 @@ export default function HeroPhotoStack({ photos }: { photos: HeroPhoto[] }) {
   return (
     <div
       className={`hero-stack-shell${isPaused ? ' is-paused' : ''}`}
-      aria-label="LiveContext product photos"
+      aria-label="Trinyx product photos"
       onMouseEnter={pause}
       onMouseLeave={resume}
       onFocusCapture={pause}

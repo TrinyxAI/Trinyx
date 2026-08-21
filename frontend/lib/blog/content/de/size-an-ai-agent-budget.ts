@@ -39,7 +39,7 @@ Der Grund: Jedes Werkzeugergebnis wird in alle späteren Aufrufe mitgeschleppt, 
 
 Die praktische Schlussfolgerung ist immer dieselbe: "Wir heben die maximalen Iterationen etwas an" ist keine kleine Änderung. Es ist die Entscheidung, die Decke ungefähr zu vervierfachen.
 
-![Die LiveContext-Agentenmetriken: eine Übersichtszeile mit Gesamtausführungen, Tokens, Tool-Aufrufen und Erfolgsquote über einer Tabelle pro Agent mit Ausführungen, Tokens, Tool-Aufrufen, verbrauchten Credits, Modell, Dauer und Erfolgsquote.](/blog/cap-ai-agent-cost-budgets-metrics.png)
+![Die Trinyx-Agentenmetriken: eine Übersichtszeile mit Gesamtausführungen, Tokens, Tool-Aufrufen und Erfolgsquote über einer Tabelle pro Agent mit Ausführungen, Tokens, Tool-Aufrufen, verbrauchten Credits, Modell, Dauer und Erfolgsquote.](/blog/cap-ai-agent-cost-budgets-metrics.png)
 
 *Ausgaben, Tokens und Werkzeugaufrufe je Agent aus echten Läufen. Das ist die Eingangsgröße fürs Dimensionieren: Die Zahl, die Sie setzen, sollte aus Ihrer eigenen Verteilung stammen, nicht aus einem Bauchgefühl.*
 

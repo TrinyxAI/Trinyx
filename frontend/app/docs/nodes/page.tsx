@@ -5,7 +5,7 @@ import { DocsHero, DocsProse, DocsTable, Callout, CodeBlock, CardGrid, Card } fr
 export const metadata = docsMetadata({
   title: 'Node reference',
   description:
-    'The full catalog of LiveContext workflow nodes: triggers, integration/MCP steps, AI nodes, control flow, data & transform, files & formats, communication, remote & database, utilities, table CRUD, and the interface node - with every port and gotcha.',
+    'The full catalog of Trinyx workflow nodes: triggers, integration/MCP steps, AI nodes, control flow, data & transform, files & formats, communication, remote & database, utilities, table CRUD, and the interface node - with every port and gotcha.',
   path: '/docs/nodes',
 });
 

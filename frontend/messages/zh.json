@@ -153,8 +153,8 @@
   },
   "contact": {
     "metadata": {
-      "title": "联系 - LiveContext",
-      "description": "联系 LiveContext，获取支持、报告安全问题、商务合作或媒体咨询。"
+      "title": "联系 - Trinyx",
+      "description": "联系 Trinyx，获取支持、报告安全问题、商务合作或媒体咨询。"
     },
     "layout": {
       "copyright": "© {year} LiveContext. 保留所有权利。",
@@ -273,7 +273,7 @@
     "invalidBody": "此邀请链接无效、已过期或已被使用。"
   },
   "metadata": {
-    "title": "LiveContext - MCP工具中心",
+    "title": "Trinyx - MCP工具中心",
     "description": "发现并使用强大的MCP（模型上下文协议）工具，用于您的开发和自动化项目。"
   },
   "common": {
@@ -474,8 +474,8 @@
       "passwordTooShort": "密码必须至少为 8 个字符",
       "signIn": "登录",
       "submit": "创建账户",
-      "subtitle": "在一分钟内开始使用 LiveContext。",
-      "firstRunTitle": "设置您的 LiveContext",
+      "subtitle": "在一分钟内开始使用 Trinyx。",
+      "firstRunTitle": "设置您的 Trinyx",
       "firstRunSubtitle": "这是一个全新的实例。创建管理员账户即可开始使用。",
       "title": "创建您的账户"
     }
@@ -1577,7 +1577,7 @@
     "emptyMarketplaceHint": "当社区分享时，发布将出现在这里。",
     "cloudConnect": {
       "title": "连接您的云账户",
-      "body": "将此安装连接到您的 LiveContext 云账户，即可浏览并安装社区共享的应用。",
+      "body": "将此安装连接到您的 Trinyx 云账户，即可浏览并安装社区共享的应用。",
       "button": "连接到云",
       "error": "无法启动云连接，请重试。"
     },
@@ -1849,7 +1849,7 @@
     },
     "ceCloudCredit": {
       "title": "云端额度已用尽",
-      "description": "您关联的 LiveContext Cloud 账户额度已用尽。请在云端充值或升级套餐，以继续使用对话、智能体和工作流。",
+      "description": "您关联的 Trinyx Cloud 账户额度已用尽。请在云端充值或升级套餐，以继续使用对话、智能体和工作流。",
       "topUp": "打开云端账单",
       "close": "关闭"
     },
@@ -1904,7 +1904,7 @@
       "errorTitle": "出了些问题",
       "errorMessage": "安装此应用失败，请重试。",
       "linkRequired": "需要云账户",
-      "linkRequiredDescription": "在设置中关联您的 LiveContext 云账户以购买付费应用。",
+      "linkRequiredDescription": "在设置中关联您的 Trinyx 云账户以购买付费应用。",
       "goToSettings": "前往设置",
       "insufficientCredits": "积分不足",
       "creditsRequired": "需要 {required} 积分，可用 {balance}",
@@ -2801,7 +2801,7 @@
   },
   "myOAuthApps": {
     "title": "你的自定义 OAuth 连接",
-    "subtitle": "你自己注册的 OAuth 应用,当 LiveContext 标准连接不够用时使用。",
+    "subtitle": "你自己注册的 OAuth 应用,当 Trinyx 标准连接不够用时使用。",
     "addNew": "添加连接",
     "delete": "删除",
     "deleteAriaLabel": "删除 {name}",
@@ -3025,9 +3025,9 @@
     "noProviderCta": {
       "noModels": "无模型",
       "title": "暂无可用的 AI 模型",
-      "body": "将此安装连接到 LiveContext Cloud 以使用托管模型，或添加您自己的提供商 API 密钥。",
-      "bodyMember": "此安装尚未配置任何 AI 提供商。请联系管理员连接 LiveContext Cloud 或添加提供商 API 密钥。",
-      "connectCloud": "连接 LiveContext Cloud",
+      "body": "将此安装连接到 Trinyx Cloud 以使用托管模型，或添加您自己的提供商 API 密钥。",
+      "bodyMember": "此安装尚未配置任何 AI 提供商。请联系管理员连接 Trinyx Cloud 或添加提供商 API 密钥。",
+      "connectCloud": "连接 Trinyx Cloud",
       "addApiKey": "添加 API 密钥",
       "connectError": "无法启动云连接，请重试。"
     },
@@ -3287,7 +3287,7 @@
       "label": "集成凭据",
       "cloud": "Cloud",
       "local": "本地密钥",
-      "cloudHint": "集成调用通过您关联的 LiveContext Cloud 账户执行，并使用其平台凭据。请求经由云端传输，每次调用会在该账户上计收少量积分加价。",
+      "cloudHint": "集成调用通过您关联的 Trinyx Cloud 账户执行，并使用其平台凭据。请求经由云端传输，每次调用会在该账户上计收少量积分加价。",
       "localHint": "集成凭据在此实例上本地配置并使用。",
       "subscriptionRequired": "使用云端需要已关联的云账户拥有有效的付费订阅。免费账户无法支付转发的调用。",
       "viewPlans": "查看套餐",
@@ -3299,7 +3299,7 @@
       "apiKeys": "API 密钥",
       "byokHint": "API 模型调用使用此实例上配置的密钥。",
       "cloud": "Cloud",
-      "cloudHint": "API 模型调用使用您关联的 LiveContext Cloud 账户。工具和跟踪仍在本地运行。",
+      "cloudHint": "API 模型调用使用您关联的 Trinyx Cloud 账户。工具和跟踪仍在本地运行。",
       "connectedAs": "已连接为 {username}",
       "label": "LLM 来源",
       "linkRequired": "切换到 Cloud 之前请先关联一个 Cloud 账户。",
@@ -3726,7 +3726,7 @@
         "title": "分类",
         "description": "在市场中组织您的API",
         "infoTitle": "分类组织",
-        "infoText1": "分类和子分类允许您在LiveContext市场中组织您的API。",
+        "infoText1": "分类和子分类允许您在Trinyx市场中组织您的API。",
         "infoText2": "您可以使用现有分类或创建新分类以更好地代表您的API。",
         "mainCategory": "主分类",
         "mainCategoryDescription": "选择最匹配您API的分类",
@@ -3896,7 +3896,7 @@
           "title": "AI集成：",
           "description": "集成到聊天中的工具，具有AI发现和自动积分跟踪功能。",
           "cardTitle": "AI集成",
-          "cardDescription": "集成到LiveContext聊天",
+          "cardDescription": "集成到Trinyx聊天",
           "features": {
             "zeroFriction": "零摩擦用户体验",
             "aiDiscovery": "AI驱动的工具发现",
@@ -4102,7 +4102,7 @@
   },
   "mcpServer": {
     "title": "MCP 服务器",
-    "subtitle": "将 Claude Code、Cursor、Codex 等 MCP 客户端连接到您的 LiveContext 工具",
+    "subtitle": "将 Claude Code、Cursor、Codex 等 MCP 客户端连接到您的 Trinyx 工具",
     "copy": "复制",
     "errors": {
       "fetchFailed": "无法加载 MCP 服务器信息"
@@ -4341,7 +4341,7 @@
       },
       "aiIntegration": {
         "title": "AI集成",
-        "subtitle": "集成到LiveContext聊天",
+        "subtitle": "集成到Trinyx聊天",
         "features": {
           "zeroFriction": "零摩擦用户体验",
           "aiPowered": "AI驱动的工具发现",
@@ -4747,7 +4747,7 @@
         "versioning": "工作流版本控制",
         "apiAccess": "API 访问",
         "cePlatformCreds": "托管集成凭据",
-        "cePlatformCredsTooltip": "与云关联的自托管实例可使用 LiveContext 平台凭据运行第三方集成，无需自备 API 密钥。每次调用收取少量积分加价。",
+        "cePlatformCredsTooltip": "与云关联的自托管实例可使用 Trinyx 平台凭据运行第三方集成，无需自备 API 密钥。每次调用收取少量积分加价。",
         "priorityExecution": "优先执行",
         "executionSearch": "执行记录搜索",
         "analyticsBasic": "基础分析",
@@ -4824,7 +4824,7 @@
     },
     "cta": {
       "title": "准备开始了吗？",
-      "description": "加入数千名已经使用LiveContext提高生产力的开发者",
+      "description": "加入数千名已经使用Trinyx提高生产力的开发者",
       "tryFree": "免费试用",
       "talkToExpert": "与专家交谈"
     },
@@ -4877,12 +4877,12 @@
     "cePricing": {
       "manageOnCloud": "套餐通过您关联的云账户进行管理。",
       "footer": {
-        "note": "面向自托管实例的 Team 和 Enterprise 套餐即将推出。请访问 <link>livecontext.ai</link> 了解更新。"
+        "note": "面向自托管实例的 Team 和 Enterprise 套餐即将推出。请访问 <link>trinyx.fr</link> 了解更新。"
       },
       "header": {
         "body1": "您正在使用 <ce>社区版</ce> - 无限本地使用，按美元显示成本，单用户。",
         "body2": "通过 PAYG 解锁托管模型使用，或升级到 Cloud 以进行团队协作。",
-        "title": "升级您的 LiveContext"
+        "title": "升级您的 Trinyx"
       },
       "payg": {
         "note": "PAYG 充值一次性收费，并在续订周期内持续可用。",
@@ -5339,7 +5339,7 @@
         "connectButton": "连接到 Cloud",
         "connected": "已连接到 {username}",
         "connectedAt": "已连接 {date}",
-        "description": "将此安装连接到您的 LiveContext 云账户，使其可以从市场购买付费应用。",
+        "description": "将此安装连接到您的 Trinyx 云账户，使其可以从市场购买付费应用。",
         "disconnectButton": "断开连接",
         "notConnected": "此安装尚未连接到云账户。",
         "title": "云连接"
@@ -5350,7 +5350,7 @@
         "description": "连接到您账户的自托管社区版实例。断开任何您不再识别的实例。",
         "disconnectButton": "断开连接",
         "empty": {
-          "body": "社区版是您在自己的服务器上运行的 LiveContext 自托管版本。安装它，然后从自托管端将其连接到您的账户 - 它将出现在这里，以便您可以从该实例购买付费应用。如果您只在浏览器中使用 LiveContext，可以放心忽略此页面。",
+          "body": "社区版是您在自己的服务器上运行的 Trinyx 自托管版本。安装它，然后从自托管端将其连接到您的账户 - 它将出现在这里，以便您可以从该实例购买付费应用。如果您只在浏览器中使用 Trinyx，可以放心忽略此页面。",
           "cta": "了解社区版",
           "title": "尚未连接任何内容"
         },
@@ -5604,7 +5604,7 @@
         "title": "SAML SSO",
         "description": "Connect this workspace to an enterprise identity provider. SAML users are added as workspace members on first login.",
         "lockedDescription": "SAML SSO 在 Team 和 Enterprise 工作区中可用。",
-        "ceUnavailable": "SAML SSO 仅在 LiveContext Cloud 上提供。自托管部署无法启用 SSO。",
+        "ceUnavailable": "SAML SSO 仅在 Trinyx Cloud 上提供。自托管部署无法启用 SSO。",
         "ownerOnly": "只有工作区所有者和管理员才能管理 SAML SSO。",
         "displayName": "提供商名称",
         "displayNamePlaceholder": "公司 SSO",
@@ -5718,7 +5718,7 @@
     },
     "cloudLink": {
       "cancel": "取消",
-      "confirmRevokeBody": "{label} 将无法再使用此 LiveContext 账户。任何进行中的会话都将被注销。此操作无法撤销 - 如果您改变主意，需要从自托管端重新链接。",
+      "confirmRevokeBody": "{label} 将无法再使用此 Trinyx 账户。任何进行中的会话都将被注销。此操作无法撤销 - 如果您改变主意，需要从自托管端重新链接。",
       "confirmRevokeButton": "撤销",
       "confirmRevokeTitle": "撤销自托管实例？",
       "createdAtLabel": "已链接",
@@ -5740,7 +5740,7 @@
         "title": "重置云链接"
       },
       "revokeButton": "撤销",
-      "subtitle": "绑定到此 LiveContext 账户的自托管社区版实例。撤销任何您不再识别的实例。",
+      "subtitle": "绑定到此 Trinyx 账户的自托管社区版实例。撤销任何您不再识别的实例。",
       "title": "自托管实例"
     },
     "marketplaceHighlights": {
@@ -8101,7 +8101,7 @@
     "role": "您的角色是什么？",
     "customRolePlaceholder": "输入您的角色...",
     "companySize": "公司规模",
-    "useCasesLabel": "您将使用LiveContext做什么？",
+    "useCasesLabel": "您将使用Trinyx做什么？",
     "experienceLevel": "经验级别",
     "loginRequired": "需要登录",
     "loginRequiredDescription": "请登录以完成您的个人资料设置",
@@ -9030,14 +9030,14 @@
   },
   "ceSetup": {
     "cloudStep": {
-      "title": "连接到 LiveContext Cloud",
+      "title": "连接到 Trinyx Cloud",
       "subtitle": "推荐，最简单的入门方式",
-      "intro": "将此实例与您的 LiveContext 账户关联，体验完整功能：",
+      "intro": "将此实例与您的 Trinyx 账户关联，体验完整功能：",
       "benefitModels": "立即使用云端 AI，无需设置或管理 API 密钥",
       "benefitMarketplace": "一键从应用市场安装现成的应用",
       "benefitCommunity": "与社区保持连接，发现热门内容",
       "benefitUpdates": "自动获取最新的 AI 模型，始终保持最新",
-      "connectHint": "您将登录您的 LiveContext 账户，然后返回此处完成设置。"
+      "connectHint": "您将登录您的 Trinyx 账户，然后返回此处完成设置。"
     },
     "providerOptional": "可选。仅当您希望使用自己的 API 密钥而非云端时才需要。",
     "skip": "跳过",
@@ -9045,7 +9045,7 @@
     "bridgeOptional": "可选 - 使用您的 CLI 订阅而非 API 密钥",
     "cliDescription": "使用 CLI 代理（Claude Code、Codex、Gemini CLI 或 Mistral Vibe）而非 API 密钥。",
     "cliOptional": "可选 - 使用您现有的 CLI 工具作为 API 密钥的替代方案",
-    "cloudLinkBody": "将此 CE 安装连接到您的 LiveContext cloud 账户，以便 API 模型调用默认使用 Cloud，而工具、跟踪和本地桥接调用仍保留在此实例上。",
+    "cloudLinkBody": "将此 CE 安装连接到您的 Trinyx cloud 账户，以便 API 模型调用默认使用 Cloud，而工具、跟踪和本地桥接调用仍保留在此实例上。",
     "cloudLinkCloudUser": "Cloud",
     "cloudLinkConnect": "连接到 Cloud",
     "cloudLinkConnectError": "连接到 Cloud 失败。",
@@ -9059,7 +9059,7 @@
     },
     "cloudLinkConnected": "已连接到 {username}",
     "cloudLinkConnectedButton": "已连接",
-    "cloudLinkTitle": "关联到 LiveContext cloud（可选）",
+    "cloudLinkTitle": "关联到 Trinyx cloud（可选）",
     "configureProvider": "配置提供商",
     "configured": "已配置",
     "continueAnyway": "仍然继续",
@@ -9092,7 +9092,7 @@
     "stepIntegrations": "平台集成",
     "stepProviders": "API 提供商",
     "subtitle": "让我们设置您的实例 - AI 提供商、CLI 工具和集成。",
-    "title": "欢迎使用 LiveContext"
+    "title": "欢迎使用 Trinyx"
   },
   "chatConfig": {
     "advancedSectionDescription": "每回合的安全限制，防止代理失控循环。",
@@ -9284,7 +9284,7 @@
     "providerKindTooltip": {
       "bridge": "通过您的本地 CLI 路由（Claude Code、Codex……）",
       "byok": "使用您在 AI 提供商中配置的自己的 API 密钥",
-      "cloud": "通过 LiveContext cloud 托管 - 无需 API 密钥"
+      "cloud": "通过 Trinyx cloud 托管 - 无需 API 密钥"
     },
     "rateLimitsTitle": "速率限制",
     "recommended": "推荐",
@@ -9809,7 +9809,7 @@
     "releaseNotes": "版本说明",
     "lastChecked": "检查于 {date}",
     "updateIntro": "获取最新版本并重启您的服务栈。Compose 文件固定了该版本的镜像标签，请先运行 git pull。您的数据会被保留，数据库迁移会在启动时自动执行。",
-    "updateRunFrom": "在您克隆的 LiveContext 目录中运行以下命令：",
+    "updateRunFrom": "在您克隆的 Trinyx 目录中运行以下命令：",
     "copy": "复制",
     "copied": "已复制"
   },

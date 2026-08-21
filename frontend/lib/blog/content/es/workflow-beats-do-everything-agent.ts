@@ -45,7 +45,7 @@ Construido como un único agente, ese ticket cuesta unos 19 céntimos. Construid
 
 Una nota justa antes de dar por buenas esas ocho veces: los dos enfoques tienen que escribir igualmente la respuesta final, y escribir cuesta lo mismo en ambos casos. Ese borrador final es buena parte de los 2 céntimos del flujo, y por eso la diferencia es de unas ocho veces y no de unas ochenta.
 
-![Una ejecución de flujo de LiveContext en vista de observabilidad: el grafo ejecutado con una marca verde en cada nodo, junto a un inspector que lista la época, sus marcas de inicio y fin, y el estado, la duración y el coste de cada nodo.](/blog/ai-agent-audit-trail-run.png)
+![Una ejecución de flujo de Trinyx en vista de observabilidad: el grafo ejecutado con una marca verde en cada nodo, junto a un inspector que lista la época, sus marcas de inicio y fin, y el estado, la duración y el coste de cada nodo.](/blog/ai-agent-audit-trail-run.png)
 
 *Una ejecución terminada, paso a paso, con la duración y el coste de cada uno. Esa vista por pasos es lo que hace explicable la factura en vez de una suma única.*
 

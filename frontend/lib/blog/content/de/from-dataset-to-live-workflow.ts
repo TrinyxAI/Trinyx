@@ -23,7 +23,7 @@ Das durchgehende Beispiel ist eine Preisüberwachung: ein paar Produkte verfolge
 | 5. Entscheiden | Hat er sich um mehr als 5 % bewegt? | Die eigentliche Frage |
 | 6. Freigeben, dann handeln | Ein Mensch bestätigt, dann gehen Warnung und Schreibvorgang raus | Der unumkehrbare Teil, abgesichert |
 
-![Der LiveContext-Workflow-Builder mit dem achtknotigen Preisüberwachungs-Graphen auf dem Canvas: ein stündlicher Trigger, ein HTTP-Abruf, eine Code-Node, ein Tabellen-Lookup und eine Entscheidung, die einen neuen SKU von einem bekannten trennt, dann eine Preisbewegungs-Entscheidung, ein Genehmigungs-Gate und der abgesicherte Schreibvorgang.](/blog/from-dataset-to-live-workflow-builder.png)
+![Der Trinyx-Workflow-Builder mit dem achtknotigen Preisüberwachungs-Graphen auf dem Canvas: ein stündlicher Trigger, ein HTTP-Abruf, eine Code-Node, ein Tabellen-Lookup und eine Entscheidung, die einen neuen SKU von einem bekannten trennt, dann eine Preisbewegungs-Entscheidung, ein Genehmigungs-Gate und der abgesicherte Schreibvorgang.](/blog/from-dataset-to-live-workflow-builder.png)
 
 *Der ganze Aufbau auf einem Canvas: vom stündlichen Auslöser links bis zum freigegebenen Schreibvorgang rechts.*
 

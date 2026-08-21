@@ -4,7 +4,7 @@ import { DocsHero, DocsProse, DocsTable, Callout, CodeBlock } from '../_componen
 export const metadata = docsMetadata({
   title: 'Core concepts',
   description:
-    'The mental model behind LiveContext: workflows and runs, nodes and edges, triggers, control flow, agents, interfaces, tables, execution modes, run statuses, signals, and credits.',
+    'The mental model behind Trinyx: workflows and runs, nodes and edges, triggers, control flow, agents, interfaces, tables, execution modes, run statuses, signals, and credits.',
   path: '/docs/concepts',
 });
 
@@ -14,12 +14,12 @@ export default function ConceptsPage() {
       <DocsHero
         eyebrow="Get started"
         title="Core concepts"
-        lead="A handful of terms show up everywhere in LiveContext. Learn these once and the rest of the docs read easily."
+        lead="A handful of terms show up everywhere in Trinyx. Learn these once and the rest of the docs read easily."
       />
 
       <DocsProse>
         <p>
-          At its core, a LiveContext automation is a <strong>workflow</strong>: a directed graph of{' '}
+          At its core, a Trinyx automation is a <strong>workflow</strong>: a directed graph of{' '}
           <strong>nodes</strong> connected by <strong>edges</strong>. A <strong>trigger</strong>{' '}
           starts a <strong>run</strong>, nodes execute in dependency order, and data flows forward
           through template expressions. Everything else, agents, interfaces, tables, is a kind of

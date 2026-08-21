@@ -5,7 +5,7 @@ import { DocsHero, DocsProse, DocsTable, Callout, Steps, Step, CardGrid, Card } 
 export const metadata = docsMetadata({
   title: 'Skills',
   description:
-    'Skills in LiveContext: reusable instruction packages for agents, nestable folders, additive assignment up to 10 per agent, default-active with per-user override, global vs personal/org skills, marketplace publishing, and cloud-to-CE signed skill bundles.',
+    'Skills in Trinyx: reusable instruction packages for agents, nestable folders, additive assignment up to 10 per agent, default-active with per-user override, global vs personal/org skills, marketplace publishing, and cloud-to-CE signed skill bundles.',
   path: '/docs/skills',
 });
 

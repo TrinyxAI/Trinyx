@@ -10,7 +10,7 @@ import aiAgentAuditLogRetention from '../content/zh/ai-agent-audit-log-retention
 
 export const zhBlog: BlogTranslation = {
   ui: {
-    eyebrow: "实战手记", blogTitle: "Blog", lead: "AI 自动化的实用指南：智能体到底要花多少钱、该记录些什么，以及如何把一个数据集变成能自行运行的工作流。", latest: "最新", readThePost: "阅读文章", readMore: "阅读更多", allPosts: "全部文章", minRead: "分钟阅读", by: "作者", and: "和", ctaTitle: "把你的利基数据变成一个能用的自动化", ctaText: "在聊天里描述这份任务，LiveContext 就在你眼前构建出工作流。", startFree: "免费开始", metaTitle: "Blog - LiveContext", metaDescription: "AI 自动化与利基数据的实用指南：AI 智能体到底要花多少钱、每次运行该记录些什么，以及如何把一个数据集变成能自行运行的工作流。",
+    eyebrow: "实战手记", blogTitle: "Blog", lead: "AI 自动化的实用指南：智能体到底要花多少钱、该记录些什么，以及如何把一个数据集变成能自行运行的工作流。", latest: "最新", readThePost: "阅读文章", readMore: "阅读更多", allPosts: "全部文章", minRead: "分钟阅读", by: "作者", and: "和", ctaTitle: "把你的利基数据变成一个能用的自动化", ctaText: "在聊天里描述这份任务，Trinyx 就在你眼前构建出工作流。", startFree: "免费开始", metaTitle: "Blog - Trinyx", metaDescription: "AI 自动化与利基数据的实用指南：AI 智能体到底要花多少钱、每次运行该记录些什么，以及如何把一个数据集变成能自行运行的工作流。",
   },
   posts: {
     "the-niche-data-advantage": { title: "利基数据：小数据集什么时候能胜过大数据集", excerpt: "拥有数据本身不是护城河，把它保持最新才更接近。用五个问题分辨哪份利基数据集值得投入。", coverAlt: "一台笔记本电脑展示着带有图表、地图和指标的分析仪表盘", content: theNicheDataAdvantage },

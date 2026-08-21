@@ -9,7 +9,7 @@
 // keeps the corresponding sections hidden until every entry has been replaced
 // with real, authorized data - replacing them is what makes the sections appear.
 
-/** Customer logos shown in the "They automate with LiveContext" strip.
+/** Customer logos shown in the "They automate with Trinyx" strip.
  *  `src` is an image under /public (SVG or transparent PNG); when omitted the
  *  name renders as a wordmark, which is fine for brands without a usable logo. */
 export type CustomerLogo = { name: string; src?: string };

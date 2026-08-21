@@ -6,7 +6,7 @@ import { fetchMarketplacePage } from '@/lib/marketplace/publicPublications';
 import { marketplacePath } from '@/lib/marketplace/indexability';
 import PublicationCardSsr from './_components/PublicationCardSsr';
 
-const SITE_URL = process.env.NEXT_PUBLIC_SITE_URL ?? 'https://livecontext.ai';
+const SITE_URL = process.env.NEXT_PUBLIC_SITE_URL ?? 'https://trinyx.fr';
 
 /**
  * Public marketplace index: the crawlable entry point into the listing tree.
@@ -33,7 +33,7 @@ export const dynamic = 'force-dynamic';
 
 const TITLE = 'Marketplace - ready-made AI automations';
 const DESCRIPTION =
-  'Browse AI agents, workflows and apps published by the LiveContext community. '
+  'Browse AI agents, workflows and apps published by the Trinyx community. '
   + 'Install one in a click, or start from it and make it yours.';
 
 export const metadata: Metadata = {
@@ -43,8 +43,8 @@ export const metadata: Metadata = {
   // Full openGraph block: Next merges metadata shallowly per top-level field,
   // so a partial override here would DROP the root layout's og:image.
   openGraph: {
-    siteName: 'LiveContext',
-    title: `${TITLE} - LiveContext`,
+    siteName: 'Trinyx',
+    title: `${TITLE} - Trinyx`,
     description: DESCRIPTION,
     url: `${SITE_URL}/marketplace`,
     type: 'website',
@@ -53,13 +53,13 @@ export const metadata: Metadata = {
         url: '/og-image.jpg',
         width: 1200,
         height: 630,
-        alt: 'LiveContext: one message in, a working automation out.',
+        alt: 'Trinyx: one message in, a working automation out.',
       },
     ],
   },
   twitter: {
     card: 'summary_large_image',
-    title: `${TITLE} - LiveContext`,
+    title: `${TITLE} - Trinyx`,
     description: DESCRIPTION,
     images: ['/og-image.jpg'],
   },

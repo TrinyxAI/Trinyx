@@ -40,7 +40,7 @@ La raison : chaque résultat d'outil est réinjecté dans tous les appels suivan
 
 La conclusion pratique est la même dans tous les cas : « on monte un peu le nombre max d'itérations » n'est pas un petit changement. C'est la décision de quadrupler à peu près le plafond.
 
-![La vue des métriques d'agents LiveContext : une ligne de synthèse (exécutions totales, tokens, appels d'outils, taux de succès) au-dessus d'un tableau par agent montrant, pour chacun, les exécutions, tokens, appels d'outils, crédits dépensés, modèle, durée et taux de succès.](/blog/cap-ai-agent-cost-budgets-metrics.png)
+![La vue des métriques d'agents Trinyx : une ligne de synthèse (exécutions totales, tokens, appels d'outils, taux de succès) au-dessus d'un tableau par agent montrant, pour chacun, les exécutions, tokens, appels d'outils, crédits dépensés, modèle, durée et taux de succès.](/blog/cap-ai-agent-cost-budgets-metrics.png)
 
 *Dépense, tokens et appels d'outils par agent, sur de vraies exécutions. C'est l'entrée du dimensionnement : le chiffre que vous posez doit venir de votre propre distribution, pas d'une intuition.*
 

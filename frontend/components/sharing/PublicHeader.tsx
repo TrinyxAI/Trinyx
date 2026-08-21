@@ -9,7 +9,7 @@ interface PublicHeaderProps {
 
 /**
  * Shared header for public pages (chat, form, conversation).
- * Shows LiveContext branding on the left, clicking redirects to the app.
+ * Shows Trinyx branding on the left, clicking redirects to the app.
  * Applications use full-screen mode without this header.
  */
 export default function PublicHeader({ title, children }: PublicHeaderProps) {
@@ -22,7 +22,7 @@ export default function PublicHeader({ title, children }: PublicHeaderProps) {
         >
           <LogoAnimate size="sm" className="text-theme-primary" />
           <span className="text-base font-light text-theme-primary livecontext-title">
-            LiveContext
+            Trinyx
           </span>
         </a>
         {title && (

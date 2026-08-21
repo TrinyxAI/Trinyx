@@ -5,7 +5,7 @@ import { DocsHero, DocsProse, DocsTable, Callout, CodeBlock, CardGrid, Card } fr
 export const metadata = docsMetadata({
   title: 'Agents',
   description:
-    'Agents in LiveContext: scoped tool access, model and reasoning-effort selection, limits and timeouts, cascading credit budgets, the ten stop reasons, task delegation, and built-in metrics.',
+    'Agents in Trinyx: scoped tool access, model and reasoning-effort selection, limits and timeouts, cascading credit budgets, the ten stop reasons, task delegation, and built-in metrics.',
   path: '/docs/agents',
 });
 

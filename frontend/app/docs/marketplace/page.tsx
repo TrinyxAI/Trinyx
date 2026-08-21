@@ -5,7 +5,7 @@ import { DocsHero, DocsProse, DocsTable, Callout, CardGrid, Card } from '../_com
 export const metadata = docsMetadata({
   title: 'Marketplace',
   description:
-    'Publish and acquire workflows, agents, tables, interfaces, and skills on the LiveContext marketplace: visibility modes, showcase runs, moderation, credential stripping, receipts and free re-acquisition, ratings and reviews, private share links, and the remote marketplace for self-hosted CE.',
+    'Publish and acquire workflows, agents, tables, interfaces, and skills on the Trinyx marketplace: visibility modes, showcase runs, moderation, credential stripping, receipts and free re-acquisition, ratings and reviews, private share links, and the remote marketplace for self-hosted CE.',
   path: '/docs/marketplace',
 });
 
@@ -310,7 +310,7 @@ export default function MarketplacePage() {
             Run your own instance, optionally linked to the cloud marketplace.
           </Card>
           <Card icon={Store} title="Getting started" href="/getting-started">
-            New to LiveContext? Start here.
+            New to Trinyx? Start here.
           </Card>
         </CardGrid>
       </DocsProse>

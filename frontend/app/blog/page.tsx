@@ -11,7 +11,7 @@ import { EN_BLOG_UI } from '@/lib/blog/i18n';
 import { blogHreflang } from '@/lib/blog/localized';
 import { IS_CE } from '@/lib/edition';
 
-const SITE_URL = process.env.NEXT_PUBLIC_SITE_URL ?? 'https://livecontext.ai';
+const SITE_URL = process.env.NEXT_PUBLIC_SITE_URL ?? 'https://trinyx.fr';
 
 /**
  * Public blog index (English, canonical at `/blog`). Localized versions live at
@@ -24,13 +24,13 @@ export const metadata: Metadata = {
   description: EN_BLOG_UI.metaDescription,
   alternates: { canonical: `${SITE_URL}/blog`, languages: blogHreflang(SITE_URL, '') },
   openGraph: {
-    siteName: 'LiveContext',
-    title: 'LiveContext Blog: niche data and the automations built on it',
+    siteName: 'Trinyx',
+    title: 'Trinyx Blog: niche data and the automations built on it',
     description: EN_BLOG_UI.metaDescription,
     url: `${SITE_URL}/blog`,
     type: 'website',
     images: [
-      { url: '/og-image.jpg', width: 1200, height: 630, alt: 'LiveContext: one message in, a working automation out.' },
+      { url: '/og-image.jpg', width: 1200, height: 630, alt: 'Trinyx: one message in, a working automation out.' },
     ],
   },
   robots: IS_CE ? { index: false, follow: false } : undefined,
@@ -42,7 +42,7 @@ export default function BlogIndexPage() {
   const blogJsonLd = {
     '@context': 'https://schema.org',
     '@type': 'Blog',
-    name: 'LiveContext Blog',
+    name: 'Trinyx Blog',
     description: EN_BLOG_UI.metaDescription,
     url: `${SITE_URL}/blog`,
     blogPost: posts.map((post) => ({

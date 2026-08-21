@@ -5,7 +5,7 @@ import { DocsHero, DocsProse, DocsTable, Callout, CodeBlock, CardGrid, Card } fr
 export const metadata = docsMetadata({
   title: 'Chat',
   description:
-    'Chat is the conversational builder in LiveContext: build, run, and edit workflows in one thread, with a model picker, per-conversation reasoning effort, attachments, skills, tool-authorization cards, and a live execution Activity view.',
+    'Chat is the conversational builder in Trinyx: build, run, and edit workflows in one thread, with a model picker, per-conversation reasoning effort, attachments, skills, tool-authorization cards, and a live execution Activity view.',
   path: '/docs/chat',
 });
 

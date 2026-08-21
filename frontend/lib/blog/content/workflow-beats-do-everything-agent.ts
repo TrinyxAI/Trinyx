@@ -57,7 +57,7 @@ Where does the gap come from? The agent loops about eight times to get through t
 
 A fair note before you bank the eight times: both approaches still have to write the actual reply, and writing costs the same either way. That final draft is a big chunk of the workflow's two cents, and it is why the gap is about eight times, not about eighty.
 
-![A LiveContext workflow run in observability view: the executed graph with a green check on every node, beside a run inspector listing the epoch, its start and end timestamps, and each node's status, duration and cost.](/blog/ai-agent-audit-trail-run.png)
+![A Trinyx workflow run in observability view: the executed graph with a green check on every node, beside a run inspector listing the epoch, its start and end timestamps, and each node's status, duration and cost.](/blog/ai-agent-audit-trail-run.png)
 
 *A finished workflow run, step by step, with timing and cost against each one. The same per-step view is what makes the bill explainable instead of one lump sum.*
 

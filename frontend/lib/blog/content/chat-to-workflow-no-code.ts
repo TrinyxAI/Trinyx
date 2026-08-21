@@ -31,7 +31,7 @@ Start from the outcome instead. One sentence is enough:
 
 That describes a goal and the shape of the work. The trigger, the loop, the lookup and the write-back are plumbing, and plumbing is what the tool is for.
 
-![A LiveContext chat with a plain-language request on the left, "every morning, find new signups in my table and send each one a Slack welcome message", and the workflow it generated on the canvas on the right: a morning trigger into a step that finds new signups, iterates over each one, sends a Slack welcome, and marks them welcomed.](/blog/chat-to-workflow-no-code-generated.png)
+![A Trinyx chat with a plain-language request on the left, "every morning, find new signups in my table and send each one a Slack welcome message", and the workflow it generated on the canvas on the right: a morning trigger into a step that finds new signups, iterates over each one, sends a Slack welcome, and marks them welcomed.](/blog/chat-to-workflow-no-code-generated.png)
 
 *One sentence in, a readable workflow out. The request on the left, the generated steps on the right.*
 

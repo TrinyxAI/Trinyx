@@ -23,7 +23,7 @@ L'exemple tout au long est une veille de prix : suivre quelques produits, repér
 | 5. Décision | A-t-il bougé de plus de 5 % ? | La vraie question |
 | 6. Validation, puis action | Une personne confirme, puis l'alerte et l'écriture partent | La partie irréversible, sous contrôle |
 
-![Le générateur de workflow LiveContext affichant le graphe de veille de prix à huit nœuds sur le canvas : un déclencheur horaire, un appel HTTP, un nœud de code, une recherche en table et une décision qui sépare un SKU inédit d'un SKU connu, puis une décision de mouvement de prix, une porte d'approbation et l'écriture gardée.](/blog/from-dataset-to-live-workflow-builder.png)
+![Le générateur de workflow Trinyx affichant le graphe de veille de prix à huit nœuds sur le canvas : un déclencheur horaire, un appel HTTP, un nœud de code, une recherche en table et une décision qui sépare un SKU inédit d'un SKU connu, puis une décision de mouvement de prix, une porte d'approbation et l'écriture gardée.](/blog/from-dataset-to-live-workflow-builder.png)
 
 *Toute la construction sur un seul canvas : du déclencheur horaire à gauche à l'écriture sous validation à droite.*
 

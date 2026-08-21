@@ -5,7 +5,7 @@ import { DocsHero, DocsProse, DocsTable, Callout, CodeBlock, CardGrid, Card } fr
 export const metadata = docsMetadata({
   title: 'Triggers',
   description:
-    'The eight ways a LiveContext run starts: webhook, schedule, manual, chat, form, table (row change), workflow chain, and error - the parameters each accepts, the outputs it exposes, and how pinning, epochs, and reusable triggers work.',
+    'The eight ways a Trinyx run starts: webhook, schedule, manual, chat, form, table (row change), workflow chain, and error - the parameters each accepts, the outputs it exposes, and how pinning, epochs, and reusable triggers work.',
   path: '/docs/triggers',
 });
 

@@ -5,7 +5,7 @@ import { DocsHero, DocsProse, DocsTable, Callout, CodeBlock, CardGrid, Card, Ste
 export const metadata = docsMetadata({
   title: 'Integrations',
   description:
-    'Connect external tools in LiveContext: the ~700+ pre-built integrations, how tools and reusable credentials work, OAuth (platform-shared vs bring-your-own, PKCE, scope preflight, auto-refresh), custom private APIs, sending files to a tool, and connecting external MCP clients to your own registry.',
+    'Connect external tools in Trinyx: the ~700+ pre-built integrations, how tools and reusable credentials work, OAuth (platform-shared vs bring-your-own, PKCE, scope preflight, auto-refresh), custom private APIs, sending files to a tool, and connecting external MCP clients to your own registry.',
   path: '/docs/integrations',
 });
 
@@ -15,7 +15,7 @@ export default function IntegrationsPage() {
       <DocsHero
         eyebrow="Data"
         title="Integrations"
-        lead="LiveContext ships a catalog of ~700+ pre-built third-party API integrations. Every endpoint of every integration is exposed as exactly one tool - connect a service once, then drop its tools into any workflow or give them to an agent."
+        lead="Trinyx ships a catalog of ~700+ pre-built third-party API integrations. Every endpoint of every integration is exposed as exactly one tool - connect a service once, then drop its tools into any workflow or give them to an agent."
       />
 
       <DocsProse>
@@ -50,7 +50,7 @@ export default function IntegrationsPage() {
           <li>
             <strong>The app registration</strong> (shared) - the OAuth client or key configuration for
             an integration. For the built-in catalog this is already set up for you; it&apos;s the
-            &ldquo;LiveContext is allowed to talk to this provider at all&rdquo; layer.
+            &ldquo;Trinyx is allowed to talk to this provider at all&rdquo; layer.
           </li>
           <li>
             <strong>Your credential</strong> (private) - the actual secret: an OAuth access/refresh
@@ -112,7 +112,7 @@ export default function IntegrationsPage() {
         <h3>Standard vs Advanced (BYOK)</h3>
         <ul>
           <li>
-            <strong>Standard (platform-shared)</strong> - uses LiveContext&apos;s own OAuth client for
+            <strong>Standard (platform-shared)</strong> - uses Trinyx&apos;s own OAuth client for
             that integration. It can only grant the catalog&apos;s standard scope list for that API.
           </li>
           <li>
@@ -157,7 +157,7 @@ export default function IntegrationsPage() {
           OAuth2 has a refresh path. If a key is rotated or revoked, update it yourself in Settings.
         </Callout>
         <p>
-          LiveContext stores the scopes actually <strong>granted</strong> by the provider (not just
+          Trinyx stores the scopes actually <strong>granted</strong> by the provider (not just
           the ones requested), so unchecking an optional scope on the provider&apos;s consent screen
           doesn&apos;t cause a phantom permission error later. The consent screen itself renders in
           your app&apos;s language when the provider supports it.

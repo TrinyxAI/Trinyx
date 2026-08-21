@@ -2,7 +2,7 @@ import type { MetadataRoute } from 'next';
 import { routing } from '@/i18n/routing';
 import { IS_CE } from '@/lib/edition';
 
-const SITE_URL = process.env.NEXT_PUBLIC_SITE_URL ?? 'https://livecontext.ai';
+const SITE_URL = process.env.NEXT_PUBLIC_SITE_URL ?? 'https://trinyx.fr';
 
 // Private surfaces that live under the `app/[locale]` tree. With
 // `localePrefix: 'as-needed'` they are reachable both bare (default locale)

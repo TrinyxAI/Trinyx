@@ -24,7 +24,7 @@ Ein Monitor läuft, wenn das Geld weg ist. Ein Limit läuft vor dem nächsten Au
 
 Hier ein Test, den Sie heute machen können und der keine Schwelle braucht: Holen Sie die verzeichneten Ablehnungen Ihres aktuellen Limits. Hat es je etwas verweigert? Eine Zahl, die nie einen einzigen Aufruf abgelehnt hat, ist keine Kontrolle, sondern ein Kommentar.
 
-![Die LiveContext-Agentenmetriken: eine Übersichtszeile mit Gesamtausführungen, Tokens, Tool-Aufrufen und Erfolgsquote über einer Tabelle pro Agent mit Ausführungen, Tokens, Tool-Aufrufen, verbrauchten Credits, Modell, Dauer und Erfolgsquote.](/blog/cap-ai-agent-cost-budgets-metrics.png)
+![Die Trinyx-Agentenmetriken: eine Übersichtszeile mit Gesamtausführungen, Tokens, Tool-Aufrufen und Erfolgsquote über einer Tabelle pro Agent mit Ausführungen, Tokens, Tool-Aufrufen, verbrauchten Credits, Modell, Dauer und Erfolgsquote.](/blog/cap-ai-agent-cost-budgets-metrics.png)
 
 *Ausgaben je Agent, im Nachhinein. Genau die richtige Sicht, um ein Limit festzulegen, und genau das Falsche, um damit einen Lauf zu stoppen.*
 

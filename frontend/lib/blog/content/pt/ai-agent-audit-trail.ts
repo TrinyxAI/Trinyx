@@ -25,7 +25,7 @@ São parecidos e não são a mesma coisa. Um painel é lido pelo seu autor, minu
 | Pode mudar depois | Sim, por desenho | Não, só se acrescenta |
 | Modo de falha | Depura mais devagar | Não consegue responder à pergunta |
 
-![Uma execução de workflow do LiveContext na vista de observabilidade: o grafo executado com um visto verde em cada nó, ao lado de um inspetor que lista a época, as marcas de início e fim, e o estado, a duração e o custo de cada nó.](/blog/ai-agent-audit-trail-run.png)
+![Uma execução de workflow do Trinyx na vista de observabilidade: o grafo executado com um visto verde em cada nó, ao lado de um inspetor que lista a época, as marcas de início e fim, e o estado, a duração e o custo de cada nó.](/blog/ai-agent-audit-trail-run.png)
 
 *Uma execução na vista de observabilidade: cada passo, o seu estado, a sua duração, o seu custo. Muito útil e, ainda assim, um painel e não o registo duradouro que o resto do artigo descreve.*
 

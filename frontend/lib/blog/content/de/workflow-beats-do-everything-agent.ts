@@ -45,7 +45,7 @@ Woher kommt der Abstand? Der Agent dreht etwa acht Runden und liest in jeder ein
 
 Eine faire Anmerkung, bevor Sie den Faktor acht einplanen: Beide Ansätze müssen die eigentliche Antwort schreiben, und Schreiben kostet in beiden Fällen gleich viel. Dieser Entwurf ist ein guter Teil der 2 Cent des Workflows, und deshalb ist der Abstand etwa achtfach und nicht etwa achtzigfach.
 
-![Ein LiveContext-Workflow-Lauf in der Observability-Ansicht: der ausgeführte Graph mit einem grünen Haken an jeder Node, daneben ein Lauf-Inspektor mit Epoch, Start- und Endzeitstempeln sowie Status, Dauer und Kosten jeder Node.](/blog/ai-agent-audit-trail-run.png)
+![Ein Trinyx-Workflow-Lauf in der Observability-Ansicht: der ausgeführte Graph mit einem grünen Haken an jeder Node, daneben ein Lauf-Inspektor mit Epoch, Start- und Endzeitstempeln sowie Status, Dauer und Kosten jeder Node.](/blog/ai-agent-audit-trail-run.png)
 
 *Ein abgeschlossener Lauf, Schritt für Schritt, mit Dauer und Kosten je Schritt. Genau diese Sicht macht die Rechnung erklärbar statt zu einer einzigen Summe.*
 

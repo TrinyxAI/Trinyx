@@ -5,7 +5,7 @@ import { DocsHero, DocsProse, DocsTable, Callout, CodeBlock, CardGrid, Card } fr
 export const metadata = docsMetadata({
   title: 'REST API & webhooks',
   description:
-    'How external systems talk to LiveContext: webhook trigger URLs and the Respond to Webhook node, outbound calls with the HTTP Request node, public share links, chat over the API, and the official MCP Streamable HTTP server authenticated by a personal lc_live_ key.',
+    'How external systems talk to Trinyx: webhook trigger URLs and the Respond to Webhook node, outbound calls with the HTTP Request node, public share links, chat over the API, and the official MCP Streamable HTTP server authenticated by a personal lc_live_ key.',
   path: '/docs/rest-api',
 });
 
@@ -21,7 +21,7 @@ export default function RestApiPage() {
       <DocsProse>
         <h2>Overview</h2>
         <p>
-          External systems reach LiveContext through the <strong>Gateway</strong>, which registers
+          External systems reach Trinyx through the <strong>Gateway</strong>, which registers
           the webhook, chat, form, and share surfaces as public, token-based routes. Three patterns
           exist: a <strong>webhook trigger</strong> starts a workflow from an incoming HTTP call, the{' '}
           <strong>HTTP Request node</strong> makes the workflow the caller of an external API, and{' '}
@@ -253,7 +253,7 @@ export default function RestApiPage() {
 
         <h2>Official MCP server</h2>
         <p>
-          LiveContext ships a standard <strong>MCP Streamable HTTP</strong> server, speaking JSON-RPC
+          Trinyx ships a standard <strong>MCP Streamable HTTP</strong> server, speaking JSON-RPC
           2.0, at a single endpoint: <code>POST {'{base}'}/mcp</code>. It is connectable from any MCP
           client (Claude Code, Cursor, Claude Desktop, and others) and available in both the cloud
           edition and self-hosted Community Edition.
@@ -297,7 +297,7 @@ Authorization: Bearer lc_live_...`}</CodeBlock>
 }`}</CodeBlock>
         <p>
           Connecting this way gives the MCP client access to your own tool registry, the same tools
-          available inside LiveContext&apos;s own agents and workflows: see{' '}
+          available inside Trinyx&apos;s own agents and workflows: see{' '}
           <a href="/agents">Agents</a> and <a href="/integrations">Integrations</a> for what those
           tools cover.
         </p>

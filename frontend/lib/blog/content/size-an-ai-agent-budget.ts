@@ -50,7 +50,7 @@ The reason is that each tool result gets carried into every later call, so cost 
 
 The practical takeaway is the same either way: "let us bump max iterations a bit" is not a small change. It is a decision to roughly quadruple the ceiling.
 
-![The LiveContext agent metrics view: an overview row of total executions, tokens, tool calls and success rate, above a per-agent table showing each agent's executions, tokens, tool calls, credits spent, model, duration and success rate.](/blog/cap-ai-agent-cost-budgets-metrics.png)
+![The Trinyx agent metrics view: an overview row of total executions, tokens, tool calls and success rate, above a per-agent table showing each agent's executions, tokens, tool calls, credits spent, model, duration and success rate.](/blog/cap-ai-agent-cost-budgets-metrics.png)
 
 *Per-agent spend, tokens and tool calls from real runs. This is the input to sizing: the number you set should come from your own distribution, not from a guess.*
 

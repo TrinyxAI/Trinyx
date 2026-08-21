@@ -32,9 +32,9 @@ const faqCategories: FaqCategory[] = [
     icon: Zap,
     faqs: [
       {
-        question: 'What is LiveContext?',
+        question: 'What is Trinyx?',
         answer:
-          'LiveContext is an AI-powered platform that lets you chat with intelligent agents, build automated workflows, connect hundreds of MCP tools, and create interactive web applications - all from one place.',
+          'Trinyx is an AI-powered platform that lets you chat with intelligent agents, build automated workflows, connect hundreds of MCP tools, and create interactive web applications - all from one place.',
       },
       {
         question: 'How do I get started?',
@@ -42,7 +42,7 @@ const faqCategories: FaqCategory[] = [
           'Sign in with your account, then start a conversation in the Chat. Describe what you want to accomplish and our AI will select the right tools and agents to help you. You can also explore the Marketplace to discover available integrations.',
       },
       {
-        question: 'Can I try LiveContext for free?',
+        question: 'Can I try Trinyx for free?',
         answer:
           'Yes! We offer a free plan with access to core features including chat, basic workflows, and a selection of MCP tools. You can start immediately without a credit card.',
       },
@@ -134,17 +134,17 @@ export default function AboutInformationContent() {
         </div>
 
         <p className="text-sm text-theme-secondary leading-relaxed mb-4">
-          LiveContext makes it easy to get things done with AI. Just describe what you need in plain
+          Trinyx makes it easy to get things done with AI. Just describe what you need in plain
           language, and our platform takes care of the rest - whether it{"'"}s answering questions,
           automating repetitive tasks, or building complete applications.
         </p>
         <p className="text-sm text-theme-secondary leading-relaxed mb-4">
           No coding required to get started. Connect your favorite tools, let our AI agents handle
           the heavy lifting, and focus on what matters most. From simple chat interactions to
-          full-blown automated workflows, LiveContext adapts to your needs.
+          full-blown automated workflows, Trinyx adapts to your needs.
         </p>
         <p className="text-sm text-theme-secondary leading-relaxed mb-6">
-          We believe AI should be in everyone{"'"}s hands. That{"'"}s why LiveContext also ships as
+          We believe AI should be in everyone{"'"}s hands. That{"'"}s why Trinyx also ships as
           a community edition: every user can build their own workflows, manage their own agents,
           and shape the platform to fit their needs. Our mission is to democratize AI automation -
           making it accessible to creators, teams, and organizations of any size, with the freedom

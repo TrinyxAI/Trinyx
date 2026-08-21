@@ -21,7 +21,7 @@ Gehen Sie vom Ergebnis aus. Ein Satz reicht:
 
 Das beschreibt ein Ziel und die Form der Arbeit. Auslöser, Schleife, Nachschlagen und Zurückschreiben sind Verkabelung, und Verkabelung ist genau das, wofür das Werkzeug da ist.
 
-![Ein LiveContext-Chat: links eine Anfrage in Alltagssprache, „jeden Morgen neue Anmeldungen in meiner Tabelle finden und jeder eine Slack-Willkommensnachricht senden“, und rechts der auf dem Canvas generierte Workflow: ein Morgen-Trigger, ein Schritt, der neue Anmeldungen findet, jede einzeln durchläuft, die Slack-Nachricht sendet und sie als begrüßt markiert.](/blog/chat-to-workflow-no-code-generated.png)
+![Ein Trinyx-Chat: links eine Anfrage in Alltagssprache, „jeden Morgen neue Anmeldungen in meiner Tabelle finden und jeder eine Slack-Willkommensnachricht senden“, und rechts der auf dem Canvas generierte Workflow: ein Morgen-Trigger, ein Schritt, der neue Anmeldungen findet, jede einzeln durchläuft, die Slack-Nachricht sendet und sie als begrüßt markiert.](/blog/chat-to-workflow-no-code-generated.png)
 
 *Ein Satz hinein, ein lesbarer Workflow heraus. Die Anfrage links, die erzeugten Schritte rechts.*
 

@@ -146,7 +146,7 @@ export default function BrowserAgentPage() {
 
         <h2>Live view &amp; takeover</h2>
         <p>
-          While a session runs, LiveContext streams a live view of the actual browser: the same
+          While a session runs, Trinyx streams a live view of the actual browser: the same
           Chromium window the agent is driving, updated in real time as it navigates. Sensitive fields
           (passwords, card numbers, CVV/CVC) are masked in every screenshot and live frame before you
           ever see them.

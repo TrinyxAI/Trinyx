@@ -298,7 +298,7 @@ export const AppSidebar = memo(function AppSidebar({
                     ? 'opacity-0 scale-95 w-0 overflow-hidden'
                     : 'opacity-100 scale-100 w-auto'
                     }`}>
-                    LiveContext
+                    Trinyx
                   </span>
                 </button>
 
@@ -334,7 +334,7 @@ export const AppSidebar = memo(function AppSidebar({
                 >
                   <LogoAnimate size="md" className="text-theme-primary" />
                   <span className="text-xl font-light text-theme-primary transition-colors duration-300 livecontext-title">
-                    LiveContext
+                    Trinyx
                   </span>
                 </button>
                 <Button

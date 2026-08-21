@@ -5,7 +5,7 @@ import { IS_CE } from '@/lib/edition';
 import ComparePageContent from '../_components/ComparePageContent';
 import { COMPARISONS, getComparison } from '../_lib/comparisons';
 
-const SITE_URL = process.env.NEXT_PUBLIC_SITE_URL ?? 'https://livecontext.ai';
+const SITE_URL = process.env.NEXT_PUBLIC_SITE_URL ?? 'https://trinyx.fr';
 
 // Statically render one page per comparison; unknown slugs 404.
 export const dynamicParams = false;
@@ -28,8 +28,8 @@ export async function generateMetadata({ params }: { params: Promise<{ slug: str
     // field, so overriding `openGraph` here would otherwise DROP the root
     // layout's og:image and siteName on these share-critical pages.
     openGraph: {
-      siteName: 'LiveContext',
-      title: `${comparison.metaTitle} - LiveContext`,
+      siteName: 'Trinyx',
+      title: `${comparison.metaTitle} - Trinyx`,
       description: comparison.metaDescription,
       url,
       type: 'article',
@@ -38,7 +38,7 @@ export async function generateMetadata({ params }: { params: Promise<{ slug: str
           url: '/og-image.jpg',
           width: 1200,
           height: 630,
-          alt: 'LiveContext: one message in, a working automation out.',
+          alt: 'Trinyx: one message in, a working automation out.',
         },
       ],
     },
@@ -71,7 +71,7 @@ export default async function ComparePage({ params }: { params: Promise<{ slug: 
     itemListElement: [
       { '@type': 'ListItem', position: 1, name: 'Home', item: SITE_URL },
       { '@type': 'ListItem', position: 2, name: 'Compare', item: `${SITE_URL}/compare` },
-      { '@type': 'ListItem', position: 3, name: `LiveContext vs ${comparison.competitor}`, item: url },
+      { '@type': 'ListItem', position: 3, name: `Trinyx vs ${comparison.competitor}`, item: url },
     ],
   };
 

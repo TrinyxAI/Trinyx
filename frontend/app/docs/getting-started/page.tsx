@@ -5,7 +5,7 @@ import { DocsHero, DocsProse, DocsTable, Steps, Step, Callout, CodeBlock, CardGr
 export const metadata = docsMetadata({
   title: 'Getting started',
   description:
-    'Sign up, get through onboarding, and build your first LiveContext automation by describing it in chat. The assistant assembles the workflow in front of you - you review it, run it, and ship it.',
+    'Sign up, get through onboarding, and build your first Trinyx automation by describing it in chat. The assistant assembles the workflow in front of you - you review it, run it, and ship it.',
   path: '/docs/getting-started',
 });
 
@@ -15,14 +15,14 @@ export default function GettingStartedPage() {
       <DocsHero
         eyebrow="Get started"
         title="Getting started"
-        lead="The fastest way to build something in LiveContext is to describe it in chat. You say what you want done, the assistant builds the workflow step by step in front of you, and you run it - all in the same conversation. First, a short setup gets you there."
+        lead="The fastest way to build something in Trinyx is to describe it in chat. You say what you want done, the assistant builds the workflow step by step in front of you, and you run it - all in the same conversation. First, a short setup gets you there."
       />
 
       <DocsProse>
         <h2>Sign up and land in chat</h2>
         <p>
           Visiting a protected page while signed out sends you to log in. Once you&apos;re
-          authenticated, LiveContext checks whether you still need onboarding, meaning a new
+          authenticated, Trinyx checks whether you still need onboarding, meaning a new
           account, an incomplete profile, or an unverified email, and routes you through it before
           you ever see chat. Whether you complete the flow or skip it, it always ends in the same
           place: your chat.
@@ -30,7 +30,7 @@ export default function GettingStartedPage() {
 
         <h3>Cloud: email code, profile, then a welcome gift</h3>
         <p>
-          On LiveContext Cloud, onboarding is a short sequence. A step 0 only appears if your
+          On Trinyx Cloud, onboarding is a short sequence. A step 0 only appears if your
           email isn&apos;t verified yet:
         </p>
         <DocsTable
@@ -44,7 +44,7 @@ export default function GettingStartedPage() {
               '1. Profile',
               'Display name, role, and company/team size.',
             ],
-            ['2. Interests', 'What you’re interested in using LiveContext for.'],
+            ['2. Interests', 'What you’re interested in using Trinyx for.'],
             [
               '3. Goals',
               'Your intended use cases and experience level.',
@@ -92,7 +92,7 @@ export default function GettingStartedPage() {
         <DocsTable
           head={['Step', 'What it configures']}
           rows={[
-            ['1. Cloud connection', 'Linking to LiveContext Cloud is the recommended default; you can also skip it.'],
+            ['1. Cloud connection', 'Linking to Trinyx Cloud is the recommended default; you can also skip it.'],
             ['2. AI providers', 'Bring your own API keys for model providers. Optional.'],
             ['3. CLI providers', 'Connect CLI-based coding agents (Claude Code, Codex, Gemini CLI, Mistral Vibe). Optional.'],
             ['4. Platform credentials', 'Credentials for third-party platforms your workflows will call. Optional.'],

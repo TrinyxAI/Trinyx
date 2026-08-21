@@ -24,7 +24,7 @@ Un monitor actúa cuando el dinero ya se ha ido. Un límite actúa antes de la s
 
 Aquí tienes una prueba que puedes hacer hoy y que no necesita ningún umbral: saca los rechazos registrados por tu límite actual. ¿Ha rechazado algo alguna vez? Una cifra que no ha rechazado ni una sola llamada no es un control, es un comentario.
 
-![La vista de métricas de agentes de LiveContext: una fila de resumen con ejecuciones totales, tokens, llamadas a herramientas y tasa de éxito, sobre una tabla por agente con ejecuciones, tokens, llamadas a herramientas, créditos gastados, modelo, duración y tasa de éxito.](/blog/cap-ai-agent-cost-budgets-metrics.png)
+![La vista de métricas de agentes de Trinyx: una fila de resumen con ejecuciones totales, tokens, llamadas a herramientas y tasa de éxito, sobre una tabla por agente con ejecuciones, tokens, llamadas a herramientas, créditos gastados, modelo, duración y tasa de éxito.](/blog/cap-ai-agent-cost-budgets-metrics.png)
 
 *El gasto por agente, a posteriori. Justo la vista adecuada para decidir un límite, y justo lo que no debe usarse para detener una ejecución.*
 

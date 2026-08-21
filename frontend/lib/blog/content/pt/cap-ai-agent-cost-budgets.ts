@@ -24,7 +24,7 @@ Um monitor corre depois de o dinheiro sair. Um limite corre antes da chamada seg
 
 Aqui vai um teste que pode fazer hoje e que não precisa de limiar nenhum: consulte as recusas registadas pelo seu limite atual. Alguma vez recusou algo? Um número que nunca recusou uma única chamada não é um controlo, é um comentário.
 
-![A vista de métricas de agentes do LiveContext: uma linha de resumo com execuções totais, tokens, chamadas a ferramentas e taxa de sucesso, sobre uma tabela por agente com execuções, tokens, chamadas a ferramentas, créditos gastos, modelo, duração e taxa de sucesso.](/blog/cap-ai-agent-cost-budgets-metrics.png)
+![A vista de métricas de agentes do Trinyx: uma linha de resumo com execuções totais, tokens, chamadas a ferramentas e taxa de sucesso, sobre uma tabela por agente com execuções, tokens, chamadas a ferramentas, créditos gastos, modelo, duração e taxa de sucesso.](/blog/cap-ai-agent-cost-budgets-metrics.png)
 
 *A despesa por agente, a posteriori. É exatamente a vista certa para decidir um limite e exatamente a errada para parar uma execução.*
 

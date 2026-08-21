@@ -153,8 +153,8 @@
   },
   "contact": {
     "metadata": {
-      "title": "Contato - LiveContext",
-      "description": "Entre em contato com a LiveContext para suporte, comunicados de seguranca, parcerias e imprensa."
+      "title": "Contato - Trinyx",
+      "description": "Entre em contato com a Trinyx para suporte, comunicados de seguranca, parcerias e imprensa."
     },
     "layout": {
       "copyright": "© {year} LiveContext. Todos os direitos reservados.",
@@ -273,7 +273,7 @@
     "invalidBody": "Este link de convite é inválido, expirou ou já foi usado."
   },
   "metadata": {
-    "title": "LiveContext - MCP Tools Hub",
+    "title": "Trinyx - MCP Tools Hub",
     "description": "Descubra e use ferramentas MCP (Model Context Protocol) poderosas para seus projetos de desenvolvimento e automacao."
   },
   "common": {
@@ -474,8 +474,8 @@
       "passwordTooShort": "A senha deve ter pelo menos 8 caracteres",
       "signIn": "Entrar",
       "submit": "Criar conta",
-      "subtitle": "Comece com o LiveContext em menos de um minuto.",
-      "firstRunTitle": "Configure o seu LiveContext",
+      "subtitle": "Comece com o Trinyx em menos de um minuto.",
+      "firstRunTitle": "Configure o seu Trinyx",
       "firstRunSubtitle": "Esta instância é totalmente nova. Crie a conta de administrador para começar.",
       "title": "Crie sua conta"
     }
@@ -1577,7 +1577,7 @@
     "emptyMarketplaceHint": "As publicações aparecerão aqui quando compartilhadas pela comunidade.",
     "cloudConnect": {
       "title": "Conecte sua conta na nuvem",
-      "body": "Conecte esta instalação à sua conta na nuvem do LiveContext para explorar e instalar aplicativos compartilhados pela comunidade.",
+      "body": "Conecte esta instalação à sua conta na nuvem do Trinyx para explorar e instalar aplicativos compartilhados pela comunidade.",
       "button": "Conectar à nuvem",
       "error": "Não foi possível iniciar a conexão com a nuvem. Tente novamente."
     },
@@ -1849,7 +1849,7 @@
     },
     "ceCloudCredit": {
       "title": "Créditos da nuvem esgotados",
-      "description": "A sua conta vinculada do LiveContext Cloud ficou sem créditos. Recarregue ou faça upgrade do seu plano na nuvem para continuar a usar o chat, os agentes e os fluxos de trabalho.",
+      "description": "A sua conta vinculada do Trinyx Cloud ficou sem créditos. Recarregue ou faça upgrade do seu plano na nuvem para continuar a usar o chat, os agentes e os fluxos de trabalho.",
       "topUp": "Abrir faturação na nuvem",
       "close": "Fechar"
     },
@@ -1904,7 +1904,7 @@
       "errorTitle": "Algo deu errado",
       "errorMessage": "Falha ao instalar esta aplicação. Por favor, tente novamente.",
       "linkRequired": "Conta cloud necessária",
-      "linkRequiredDescription": "Vincule sua conta LiveContext cloud nas Configurações para comprar aplicações pagas.",
+      "linkRequiredDescription": "Vincule sua conta Trinyx cloud nas Configurações para comprar aplicações pagas.",
       "goToSettings": "Ir para Configurações",
       "insufficientCredits": "Créditos insuficientes",
       "creditsRequired": "{required} créditos necessários, {balance} disponíveis",
@@ -2801,7 +2801,7 @@
   },
   "myOAuthApps": {
     "title": "Suas conexoes OAuth personalizadas",
-    "subtitle": "Aplicativos OAuth que voce mesmo registrou, usados quando a conexao padrao do LiveContext nao basta.",
+    "subtitle": "Aplicativos OAuth que voce mesmo registrou, usados quando a conexao padrao do Trinyx nao basta.",
     "addNew": "Adicionar conexao",
     "delete": "Excluir",
     "deleteAriaLabel": "Excluir {name}",
@@ -3025,9 +3025,9 @@
     "noProviderCta": {
       "noModels": "Sem modelos",
       "title": "Nenhum modelo de IA disponível",
-      "body": "Conecte esta instalação ao LiveContext Cloud para usar modelos gerenciados, ou adicione sua própria chave de API de provedor.",
-      "bodyMember": "Nenhum provedor de IA está configurado nesta instalação. Peça ao seu administrador para conectar o LiveContext Cloud ou adicionar uma chave de API de provedor.",
-      "connectCloud": "Conectar ao LiveContext Cloud",
+      "body": "Conecte esta instalação ao Trinyx Cloud para usar modelos gerenciados, ou adicione sua própria chave de API de provedor.",
+      "bodyMember": "Nenhum provedor de IA está configurado nesta instalação. Peça ao seu administrador para conectar o Trinyx Cloud ou adicionar uma chave de API de provedor.",
+      "connectCloud": "Conectar ao Trinyx Cloud",
       "addApiKey": "Adicionar uma chave de API",
       "connectError": "Não foi possível iniciar a conexão com a nuvem. Tente novamente."
     },
@@ -3287,7 +3287,7 @@
       "label": "Credenciais de integração",
       "cloud": "Cloud",
       "local": "Chaves locais",
-      "cloudHint": "As chamadas de integração passam pela sua conta vinculada do LiveContext Cloud e usam as credenciais de plataforma dela. As solicitações transitam pela nuvem e uma pequena margem em créditos é cobrada lá a cada chamada.",
+      "cloudHint": "As chamadas de integração passam pela sua conta vinculada do Trinyx Cloud e usam as credenciais de plataforma dela. As solicitações transitam pela nuvem e uma pequena margem em créditos é cobrada lá a cada chamada.",
       "localHint": "As credenciais de integração são configuradas e usadas localmente nesta instalação.",
       "subscriptionRequired": "Usar a nuvem exige uma subscrição paga ativa na sua conta na nuvem associada. Uma conta gratuita não pode pagar as chamadas retransmitidas.",
       "viewPlans": "Ver planos",
@@ -3299,7 +3299,7 @@
       "apiKeys": "Chaves de API",
       "byokHint": "As chamadas a modelos de API usam as chaves configuradas nesta instância.",
       "cloud": "Cloud",
-      "cloudHint": "As chamadas a modelos de API usam sua conta vinculada do LiveContext Cloud. Ferramentas e rastros continuam rodando localmente.",
+      "cloudHint": "As chamadas a modelos de API usam sua conta vinculada do Trinyx Cloud. Ferramentas e rastros continuam rodando localmente.",
       "connectedAs": "Conectado como {username}",
       "label": "Origem do LLM",
       "linkRequired": "Vincule uma conta Cloud antes de mudar para Cloud.",
@@ -3726,7 +3726,7 @@
         "title": "Categorias",
         "description": "Organize sua API no marketplace",
         "infoTitle": "Organizacao de categorias",
-        "infoText1": "Categorias e subcategorias permitem que voce organize sua API no marketplace do LiveContext.",
+        "infoText1": "Categorias e subcategorias permitem que voce organize sua API no marketplace do Trinyx.",
         "infoText2": "Voce pode usar categorias existentes ou criar novas para melhor representar sua API.",
         "mainCategory": "Categoria principal",
         "mainCategoryDescription": "Selecione a categoria que melhor corresponde a sua API",
@@ -3896,7 +3896,7 @@
           "title": "Integracao com IA:",
           "description": "Ferramentas integradas ao chat com descoberta por IA e rastreamento automatico de creditos.",
           "cardTitle": "Integracao com IA",
-          "cardDescription": "Integrado ao chat do LiveContext",
+          "cardDescription": "Integrado ao chat do Trinyx",
           "features": {
             "zeroFriction": "Experiencia sem atrito",
             "aiDiscovery": "Descoberta de ferramentas por IA",
@@ -4102,7 +4102,7 @@
   },
   "mcpServer": {
     "title": "Servidor MCP",
-    "subtitle": "Conecte clientes MCP como Claude Code, Cursor ou Codex às suas ferramentas LiveContext",
+    "subtitle": "Conecte clientes MCP como Claude Code, Cursor ou Codex às suas ferramentas Trinyx",
     "copy": "Copiar",
     "errors": {
       "fetchFailed": "Não foi possível carregar as informações do servidor MCP"
@@ -4341,7 +4341,7 @@
       },
       "aiIntegration": {
         "title": "Integracao com IA",
-        "subtitle": "Integrado ao chat do LiveContext",
+        "subtitle": "Integrado ao chat do Trinyx",
         "features": {
           "zeroFriction": "Experiencia sem atrito",
           "aiPowered": "Descoberta de ferramentas por IA",
@@ -4747,7 +4747,7 @@
         "versioning": "Versionamento de workflows",
         "apiAccess": "Acesso à API",
         "cePlatformCreds": "Credenciais de integração gerenciadas",
-        "cePlatformCredsTooltip": "Uma instalação auto-hospedada vinculada à nuvem pode executar integrações de terceiros com as credenciais de plataforma do LiveContext, sem precisar de suas próprias chaves de API. Uma pequena margem em créditos é aplicada a cada chamada.",
+        "cePlatformCredsTooltip": "Uma instalação auto-hospedada vinculada à nuvem pode executar integrações de terceiros com as credenciais de plataforma do Trinyx, sem precisar de suas próprias chaves de API. Uma pequena margem em créditos é aplicada a cada chamada.",
         "priorityExecution": "Execução prioritária",
         "executionSearch": "Busca de execuções",
         "analyticsBasic": "Análises básicas",
@@ -4824,7 +4824,7 @@
     },
     "cta": {
       "title": "Pronto para comecar?",
-      "description": "Junte-se a milhares de desenvolvedores que ja usam o LiveContext para aumentar sua produtividade",
+      "description": "Junte-se a milhares de desenvolvedores que ja usam o Trinyx para aumentar sua produtividade",
       "tryFree": "Experimentar gratis",
       "talkToExpert": "Falar com um especialista"
     },
@@ -4877,12 +4877,12 @@
     "cePricing": {
       "manageOnCloud": "Os planos são geridos através da sua conta cloud associada.",
       "footer": {
-        "note": "Os planos Team e Enterprise para instâncias auto-hospedadas chegam em breve. Visite <link>livecontext.ai</link> para novidades."
+        "note": "Os planos Team e Enterprise para instâncias auto-hospedadas chegam em breve. Visite <link>trinyx.fr</link> para novidades."
       },
       "header": {
         "body1": "Você está na <ce>Community Edition</ce> - uso local ilimitado com exibição de custos em dólares, um único usuário.",
         "body2": "Desbloqueie o uso de modelos hospedados com PAYG, ou faça upgrade para o Cloud para colaboração em equipe.",
-        "title": "Faça upgrade do seu LiveContext"
+        "title": "Faça upgrade do seu Trinyx"
       },
       "payg": {
         "note": "As recargas PAYG são cobradas uma vez e permanecem disponíveis entre os ciclos de renovação.",
@@ -5339,7 +5339,7 @@
         "connectButton": "Conectar ao Cloud",
         "connected": "Conectado a {username}",
         "connectedAt": "Conectado {date}",
-        "description": "Conecte esta instalação à sua conta do LiveContext cloud para que ela possa comprar Aplicações pagas do marketplace.",
+        "description": "Conecte esta instalação à sua conta do Trinyx cloud para que ela possa comprar Aplicações pagas do marketplace.",
         "disconnectButton": "Desconectar",
         "notConnected": "Esta instalação ainda não está conectada a uma conta de cloud.",
         "title": "Conexão de Cloud"
@@ -5350,7 +5350,7 @@
         "description": "Instâncias auto-hospedadas da Community Edition conectadas à sua conta. Desconecte qualquer uma que você não reconheça mais.",
         "disconnectButton": "Desconectar",
         "empty": {
-          "body": "A Community Edition é a versão auto-hospedada do LiveContext que você executa no seu próprio servidor. Instale-a e depois conecte-a à sua conta pelo lado auto-hospedado - ela aparecerá aqui para que você possa comprar Aplicações pagas a partir daquela instância. Se você usa o LiveContext apenas no navegador, pode ignorar esta página com segurança.",
+          "body": "A Community Edition é a versão auto-hospedada do Trinyx que você executa no seu próprio servidor. Instale-a e depois conecte-a à sua conta pelo lado auto-hospedado - ela aparecerá aqui para que você possa comprar Aplicações pagas a partir daquela instância. Se você usa o Trinyx apenas no navegador, pode ignorar esta página com segurança.",
           "cta": "Saiba mais sobre a Community Edition",
           "title": "Nada conectado ainda"
         },
@@ -5604,7 +5604,7 @@
         "title": "SAML SSO",
         "description": "Connect this workspace to an enterprise identity provider. SAML users are added as workspace members on first login.",
         "lockedDescription": "O SSO SAML está disponível nos espaços de trabalho Team e Enterprise.",
-        "ceUnavailable": "O SSO SAML está disponível apenas no LiveContext Cloud. As instalações auto-hospedadas não podem ativar o SSO.",
+        "ceUnavailable": "O SSO SAML está disponível apenas no Trinyx Cloud. As instalações auto-hospedadas não podem ativar o SSO.",
         "ownerOnly": "Apenas proprietários e administradores do espaço de trabalho podem gerenciar o SSO SAML.",
         "displayName": "Nome do provedor",
         "displayNamePlaceholder": "SSO da empresa",
@@ -5718,7 +5718,7 @@
     },
     "cloudLink": {
       "cancel": "Cancelar",
-      "confirmRevokeBody": "{label} deixará de poder usar esta conta do LiveContext. Todas as sessões em andamento serão desconectadas. Isso não pode ser desfeito - você precisará revincular pelo lado auto-hospedado se mudar de ideia.",
+      "confirmRevokeBody": "{label} deixará de poder usar esta conta do Trinyx. Todas as sessões em andamento serão desconectadas. Isso não pode ser desfeito - você precisará revincular pelo lado auto-hospedado se mudar de ideia.",
       "confirmRevokeButton": "Revogar",
       "confirmRevokeTitle": "Revogar a instância auto-hospedada?",
       "createdAtLabel": "Vinculada",
@@ -5740,7 +5740,7 @@
         "title": "Redefinir o cloud-link"
       },
       "revokeButton": "Revogar",
-      "subtitle": "Instâncias auto-hospedadas da Community Edition vinculadas a esta conta do LiveContext. Revogue qualquer uma que você não reconheça mais.",
+      "subtitle": "Instâncias auto-hospedadas da Community Edition vinculadas a esta conta do Trinyx. Revogue qualquer uma que você não reconheça mais.",
       "title": "Instâncias auto-hospedadas"
     },
     "marketplaceHighlights": {
@@ -8101,7 +8101,7 @@
     "role": "Qual e sua funcao?",
     "customRolePlaceholder": "Digite sua funcao...",
     "companySize": "Tamanho da Empresa",
-    "useCasesLabel": "Para que voce usara o LiveContext?",
+    "useCasesLabel": "Para que voce usara o Trinyx?",
     "experienceLevel": "Nivel de Experiencia",
     "loginRequired": "Login Necessario",
     "loginRequiredDescription": "Por favor, faca login para completar a configuracao do seu perfil",
@@ -9030,14 +9030,14 @@
   },
   "ceSetup": {
     "cloudStep": {
-      "title": "Conectar ao LiveContext Cloud",
+      "title": "Conectar ao Trinyx Cloud",
       "subtitle": "Recomendado, a forma mais simples de começar",
-      "intro": "Vincule esta instância à sua conta LiveContext para aproveitar toda a experiência:",
+      "intro": "Vincule esta instância à sua conta Trinyx para aproveitar toda a experiência:",
       "benefitModels": "Use a IA na nuvem imediatamente, sem chaves de API para configurar ou gerir",
       "benefitMarketplace": "Instale aplicações prontas a usar a partir do marketplace com um clique",
       "benefitCommunity": "Mantenha-se ligado à comunidade e descubra as novidades",
       "benefitUpdates": "Receba automaticamente os modelos de IA mais recentes, sempre atualizados",
-      "connectHint": "Vai iniciar sessão na sua conta LiveContext e depois voltar aqui para concluir."
+      "connectHint": "Vai iniciar sessão na sua conta Trinyx e depois voltar aqui para concluir."
     },
     "providerOptional": "Opcional. Só é necessário se preferir usar as suas próprias chaves de API em vez da nuvem.",
     "skip": "Ignorar",
@@ -9045,7 +9045,7 @@
     "bridgeOptional": "Opcional - Use sua assinatura de CLI em vez de chaves de API",
     "cliDescription": "Use agentes CLI (Claude Code, Codex, Gemini CLI ou Mistral Vibe) em vez de chaves de API.",
     "cliOptional": "Opcional - Use suas ferramentas CLI existentes como alternativa às chaves de API",
-    "cloudLinkBody": "Conecte esta instalação CE à sua conta do LiveContext cloud para que as chamadas a modelos de API usem o Cloud por padrão, enquanto ferramentas, rastros e chamadas à ponte local permanecem nesta instância.",
+    "cloudLinkBody": "Conecte esta instalação CE à sua conta do Trinyx cloud para que as chamadas a modelos de API usem o Cloud por padrão, enquanto ferramentas, rastros e chamadas à ponte local permanecem nesta instância.",
     "cloudLinkCloudUser": "Cloud",
     "cloudLinkConnect": "Conectar ao Cloud",
     "cloudLinkConnectError": "Falha ao conectar ao Cloud.",
@@ -9059,7 +9059,7 @@
     },
     "cloudLinkConnected": "Conectado a {username}",
     "cloudLinkConnectedButton": "Conectado",
-    "cloudLinkTitle": "Vincular ao LiveContext cloud (opcional)",
+    "cloudLinkTitle": "Vincular ao Trinyx cloud (opcional)",
     "configureProvider": "Configurar um provedor",
     "configured": "configurado",
     "continueAnyway": "Continuar mesmo assim",
@@ -9092,7 +9092,7 @@
     "stepIntegrations": "Integrações de plataforma",
     "stepProviders": "Provedores de API",
     "subtitle": "Vamos configurar sua instância - provedores de IA, ferramentas CLI e integrações.",
-    "title": "Bem-vindo ao LiveContext"
+    "title": "Bem-vindo ao Trinyx"
   },
   "chatConfig": {
     "advancedSectionDescription": "Limites de segurança por turno que evitam loops descontrolados do agente.",
@@ -9284,7 +9284,7 @@
     "providerKindTooltip": {
       "bridge": "Roteado pela sua CLI local (Claude Code, Codex, …)",
       "byok": "Usa sua própria chave de API configurada em Provedores de IA",
-      "cloud": "Hospedado pelo LiveContext cloud - nenhuma chave de API necessária"
+      "cloud": "Hospedado pelo Trinyx cloud - nenhuma chave de API necessária"
     },
     "rateLimitsTitle": "Limites de taxa",
     "recommended": "Recomendado",
@@ -9809,7 +9809,7 @@
     "releaseNotes": "Notas da versão",
     "lastChecked": "Verificado {date}",
     "updateIntro": "Obtenha a versão mais recente e reinicie sua stack. O arquivo Compose fixa a tag de imagem da versão, então execute git pull primeiro. Seus dados são mantidos e as migrações de banco de dados são executadas automaticamente na inicialização.",
-    "updateRunFrom": "Execute estes comandos na sua pasta clonada do LiveContext:",
+    "updateRunFrom": "Execute estes comandos na sua pasta clonada do Trinyx:",
     "copy": "Copiar",
     "copied": "Copiado"
   },

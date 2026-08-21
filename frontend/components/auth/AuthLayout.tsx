@@ -28,7 +28,7 @@ export function AuthLayout({ children, metaText, metaLinkText, metaLinkHref }: A
       <header className="absolute inset-x-0 top-0 z-10 flex items-center justify-between px-9 py-7">
         <Link
           href="/"
-          aria-label="LiveContext home"
+          aria-label="Trinyx home"
           className="inline-flex items-center text-[var(--text-primary)] transition-opacity hover:opacity-80"
         >
           <LogoMark className="h-12 w-12" />

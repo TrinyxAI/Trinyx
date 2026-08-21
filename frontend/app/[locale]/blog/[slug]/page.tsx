@@ -12,7 +12,7 @@ import { BLOG_LOCALES } from '@/lib/blog/i18n';
 import { getLocalizedPost, getLocalizedUi, isBlogLocale, blogHreflang } from '@/lib/blog/localized';
 import { IS_CE } from '@/lib/edition';
 
-const SITE_URL = process.env.NEXT_PUBLIC_SITE_URL ?? 'https://livecontext.ai';
+const SITE_URL = process.env.NEXT_PUBLIC_SITE_URL ?? 'https://trinyx.fr';
 
 interface LocalizedArticleParams {
   params: Promise<{ locale: string; slug: string }>;
@@ -30,16 +30,16 @@ export async function generateMetadata({ params }: LocalizedArticleParams): Prom
   const { locale, slug } = await params;
   if (!isBlogLocale(locale)) return {};
   const post = getLocalizedPost(locale, slug);
-  if (!post) return { title: { absolute: 'Post not found - LiveContext' } };
+  if (!post) return { title: { absolute: 'Post not found - Trinyx' } };
 
   const url = `${SITE_URL}/${locale}/blog/${post.slug}`;
   return {
-    title: { absolute: `${post.title} - LiveContext` },
+    title: { absolute: `${post.title} - Trinyx` },
     description: post.excerpt,
     alternates: { canonical: url, languages: blogHreflang(SITE_URL, `/${post.slug}`) },
     openGraph: {
-      siteName: 'LiveContext',
-      title: `${post.title} - LiveContext`,
+      siteName: 'Trinyx',
+      title: `${post.title} - Trinyx`,
       description: post.excerpt,
       url,
       type: 'article',
@@ -73,7 +73,7 @@ export default async function LocalizedBlogArticlePage({ params }: LocalizedArti
     author: post.authors.map((name) => ({ '@type': 'Person', name: personaName(name) })),
     publisher: {
       '@type': 'Organization',
-      name: 'LiveContext',
+      name: 'Trinyx',
       logo: { '@type': 'ImageObject', url: `${SITE_URL}/og-image.jpg` },
     },
     mainEntityOfPage: { '@type': 'WebPage', '@id': url },

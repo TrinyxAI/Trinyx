@@ -6,7 +6,7 @@ import { DocsHero, DocsProse, DocsTable, Callout, CardGrid, Card, Steps, Step, C
 export const metadata = docsMetadata({
   title: 'Self-hosting',
   description:
-    'Run LiveContext Community Edition on your own infrastructure: how it differs from cloud, the required infra, the first-run setup wizard, bring-your-own-key and CLI bridge models, optionally linking a cloud account for signed catalog and skill bundle sync, and staying up to date.',
+    'Run Trinyx Community Edition on your own infrastructure: how it differs from cloud, the required infra, the first-run setup wizard, bring-your-own-key and CLI bridge models, optionally linking a cloud account for signed catalog and skill bundle sync, and staying up to date.',
   path: '/docs/self-host',
 });
 
@@ -16,7 +16,7 @@ export default function SelfHostPage() {
       <DocsHero
         eyebrow="Share & host"
         title="Self-hosting"
-        lead="Community Edition (CE) is the free, open-source build of LiveContext you run yourself. It packs every backend service plus the web app into one process, keeps all your data in your own database, and can optionally link to a LiveContext cloud account for hosted models, the marketplace, and fresh catalogs."
+        lead="Community Edition (CE) is the free, open-source build of Trinyx you run yourself. It packs every backend service plus the web app into one process, keeps all your data in your own database, and can optionally link to a Trinyx cloud account for hosted models, the marketplace, and fresh catalogs."
       />
 
       <DocsProse>
@@ -25,7 +25,7 @@ export default function SelfHostPage() {
         <DocsTable
           head={['', 'Cloud', 'Community Edition']}
           rows={[
-            ['Hosting', 'Managed by LiveContext', 'You run it on your own infrastructure, as one process'],
+            ['Hosting', 'Managed by Trinyx', 'You run it on your own infrastructure, as one process'],
             [
               'Sign-in',
               'Keycloak: email/password or social login. SAML SSO is an optional add-on for Team/Enterprise organizations, not the base mechanism.',
@@ -105,7 +105,7 @@ export default function SelfHostPage() {
         </p>
         <Steps>
           <Step n={1} title="Cloud connection (recommended)">
-            Connect a LiveContext cloud account through an OAuth flow, or explicitly skip it. This is
+            Connect a Trinyx cloud account through an OAuth flow, or explicitly skip it. This is
             the recommended path because it unlocks hosted model relay, the shared marketplace,
             community skills, and automatic catalog updates (see below); skipping keeps the install
             fully self-contained on bring-your-own-key models only.
@@ -179,7 +179,7 @@ export default function SelfHostPage() {
 
         <h2>Linking to a cloud account (optional)</h2>
         <p>
-          Community Edition runs fully on its own. Linking it to a LiveContext cloud account is
+          Community Edition runs fully on its own. Linking it to a Trinyx cloud account is
           optional, done through the same OAuth wizard as step 1 above (also reachable later from
           settings), and unlocks:
         </p>
@@ -268,7 +268,7 @@ export default function SelfHostPage() {
           </li>
         </ul>
         <Callout variant="info">
-          LiveContext never auto-updates itself. The in-app &ldquo;how to update&rdquo; guidance walks
+          Trinyx never auto-updates itself. The in-app &ldquo;how to update&rdquo; guidance walks
           through pulling the new image and restarting the stack yourself, the same way you&apos;d
           update any other self-hosted app.
         </Callout>
@@ -321,7 +321,7 @@ docker compose up -d`}
                 Unlimited: there is no ceiling on usage. Consumption is nonetheless still tracked in
                 the ledger, at the true provider cost with no markup, so you retain full visibility
                 into what you&apos;re spending even though nothing is capped or billed through
-                LiveContext.
+                Trinyx.
               </>,
             ],
           ]}
@@ -330,7 +330,7 @@ docker compose up -d`}
         <h2>Running it</h2>
         <p>
           The public repository ships a ready-to-use Docker Compose file. It runs Postgres, Redis,
-          MinIO (plus a one-shot job that creates the storage bucket), the CLI bridge, the LiveContext
+          MinIO (plus a one-shot job that creates the storage bucket), the CLI bridge, the Trinyx
           monolith, and the frontend as separate containers, wired together with sensible defaults. An
           optional web-search sidecar for the browser agent is off unless you opt into that profile.
         </p>

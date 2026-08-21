@@ -41,12 +41,12 @@ import LandingThemeProvider from '@/components/landing/LandingThemeProvider';
 import JsonLd from '@/components/seo/JsonLd';
 import Link from 'next/link';
 
-const SITE_URL = process.env.NEXT_PUBLIC_SITE_URL ?? 'https://livecontext.ai';
+const SITE_URL = process.env.NEXT_PUBLIC_SITE_URL ?? 'https://trinyx.fr';
 
 export const metadata = {
-  title: { absolute: 'LiveContext: The AI automation platform. Chat, workflows, agents, apps.' },
+  title: { absolute: 'Trinyx: The AI automation platform. Chat, workflows, agents, apps.' },
   description:
-    'Describe the job in chat and LiveContext builds the automation and its app in front of you, runs it on schedule, and lets you share the result as a link, a PDF or an export. Every step visible, budgets per agent, cloud or self-hosted.',
+    'Describe the job in chat and Trinyx builds the automation and its app in front of you, runs it on schedule, and lets you share the result as a link, a PDF or an export. Every step visible, budgets per agent, cloud or self-hosted.',
   // The landing content is hardcoded English on every locale URL (/, /fr, /es, ...),
   // so all locale variants canonicalize to the apex: Google indexes ONE landing
   // page instead of flagging 5 duplicates. Give each locale its own canonical +
@@ -57,9 +57,9 @@ export const metadata = {
 
 const LANDING_FAQ = [
   {
-    question: 'What is LiveContext?',
+    question: 'What is Trinyx?',
     answer:
-      'LiveContext is an AI automation platform. You describe a job in chat, the workflow builds itself in front of you, AI agents run it with scoped tool access and hard credit budgets, and the result ships as an app your team or customers can use. It includes 700+ API integrations, built-in data tables, a browser-use agent and a marketplace of forkable automations.',
+      'Trinyx is an AI automation platform. You describe a job in chat, the workflow builds itself in front of you, AI agents run it with scoped tool access and hard credit budgets, and the result ships as an app your team or customers can use. It includes 700+ API integrations, built-in data tables, a browser-use agent and a marketplace of forkable automations.',
   },
   {
     question: 'Do I need to know how to code?',
@@ -67,14 +67,14 @@ const LANDING_FAQ = [
       'No. You build by describing the job in chat and refining on a visual canvas. When you want them, power tools are there: a code node, raw HTTP requests, database queries and custom API definitions.',
   },
   {
-    question: 'Can I self-host LiveContext?',
+    question: 'Can I self-host Trinyx?',
     answer:
       'Yes. The Community Edition is free and self-hosted: one docker compose up on your own server, with the code public on GitHub. The cloud edition adds managed hosting, SAML SSO, workspaces and platform credits.',
   },
   {
-    question: 'How is LiveContext different from Zapier, n8n or Make?',
+    question: 'How is Trinyx different from Zapier, n8n or Make?',
     answer:
-      'Those tools focus on the pipeline; LiveContext covers the whole loop: the chat that builds the workflow, the agents that run it under budgets and scoped access, the app your team opens, and the tables that hold the data. See the detailed comparisons at livecontext.ai/compare.',
+      'Those tools focus on the pipeline; Trinyx covers the whole loop: the chat that builds the workflow, the agents that run it under budgets and scoped access, the app your team opens, and the tables that hold the data. See the detailed comparisons at trinyx.fr/compare.',
   },
   {
     question: 'How does pricing work?',
@@ -92,7 +92,7 @@ const LANDING_JSON_LD = [
   {
     '@context': 'https://schema.org',
     '@type': 'Organization',
-    name: 'LiveContext',
+    name: 'Trinyx',
     url: SITE_URL,
     logo: `${SITE_URL}/liveContext-logo.png`,
     sameAs: [
@@ -106,13 +106,13 @@ const LANDING_JSON_LD = [
   {
     '@context': 'https://schema.org',
     '@type': 'WebSite',
-    name: 'LiveContext',
+    name: 'Trinyx',
     url: SITE_URL,
   },
   {
     '@context': 'https://schema.org',
     '@type': 'SoftwareApplication',
-    name: 'LiveContext',
+    name: 'Trinyx',
     applicationCategory: 'BusinessApplication',
     operatingSystem: 'Web',
     url: SITE_URL,
@@ -138,40 +138,40 @@ const LANDING_JSON_LD = [
 
 const HERO_PHOTOS = [
   {
-    url: 'livecontext.ai/app/chat',
+    url: 'trinyx.fr/app/chat',
     src: '/landing/screenshots/builder-built-by-chat.webp',
     video: '/landing/videos/builder-built-by-chat.mp4',
     webm: '/landing/videos/builder-built-by-chat.webm',
     durationMs: 17000,
-    alt: 'LiveContext building a support triage workflow from one chat message',
+    alt: 'Trinyx building a support triage workflow from one chat message',
     label: 'Built by chat',
     description: 'Real footage. You type what you want done and the workflow builds itself in front of you: here, a support inbox where every email gets classified, tickets logged, and refunds prepped for approval.',
   },
   {
-    url: 'livecontext.ai/app/workflow',
+    url: 'trinyx.fr/app/workflow',
     src: '/landing/hero-stack/workflow-app.webp',
-    alt: 'LiveContext workflow builder and the app it drives',
+    alt: 'Trinyx workflow builder and the app it drives',
     label: 'Workflow + App',
     description: 'The workflow and the app it drives, in one view. Draw the automation as a readable graph, then wrap it in a real interface: forms, dashboards and live approval screens your team or an agent can act on.',
   },
   {
-    url: 'livecontext.ai/app/agent',
+    url: 'trinyx.fr/app/agent',
     src: '/landing/hero-stack/agent.webp',
-    alt: 'LiveContext agent roster',
+    alt: 'Trinyx agent roster',
     label: 'Agent',
     description: 'A roster of always-on agents, one per job. Each gets its own model, its own workflow, a scoped set of tools and files you can restrict at any time, a credit budget it cannot exceed, and a full audit trail. Schedule them, call them from the chat, or let them delegate.',
   },
   {
-    url: 'livecontext.ai/app/tables',
+    url: 'trinyx.fr/app/tables',
     src: '/landing/hero-stack/table.webp',
-    alt: 'LiveContext data tables',
+    alt: 'Trinyx data tables',
     label: 'Table',
     description: 'Built-in data tables your workflows and agents read, write and enrich. Filter, search and export straight from the grid, with no external database to wire up.',
   },
   {
-    url: 'livecontext.ai/app/agents/metrics',
+    url: 'trinyx.fr/app/agents/metrics',
     src: '/landing/hero-stack/data-metrics.webp',
-    alt: 'LiveContext data metrics dashboard',
+    alt: 'Trinyx data metrics dashboard',
     label: 'Data metrics',
     description: 'Every run charted. Calls, tokens, success rate, average duration, all sliced per agent and per tool. Spot a regression in the daily bar chart and drill straight into the tool that slowed everything down.',
   },
@@ -294,7 +294,7 @@ function SocialProofStrip() {
         {hasLogos && (
           <>
             <p className="text-center text-[11px] uppercase tracking-wider mb-6" style={{ color: 'var(--text-muted)' }}>
-              They automate with LiveContext
+              They automate with Trinyx
             </p>
             <div className="flex flex-wrap items-center justify-center gap-x-10 gap-y-6">
               {CUSTOMER_LOGOS.map((logo) =>
@@ -630,7 +630,7 @@ function BuilderSection() {
       </SectionLead>
 
       <div className="mt-12">
-        <BrowserFrame url="livecontext.ai/app/workflow">
+        <BrowserFrame url="trinyx.fr/app/workflow">
           <MediaSlot
             src="/landing/screenshots/form-workflow.webp"
             alt="Visual workflow builder running live"

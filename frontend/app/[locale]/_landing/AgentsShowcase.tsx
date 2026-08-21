@@ -5,7 +5,7 @@
  * built from the real app building blocks (AVATAR_PRESETS svgs, gradient
  * recoloring, tool badges, the real card markup and tab bar geometry) inside a
  * browser window framed like the hero showcase: same left icon rail with the
- * LiveContext logo on top and the account circle at the bottom. Not a
+ * Trinyx logo on top and the account circle at the bottom. Not a
  * screenshot: favorite stars reorder and cards select, like in the product.
  * One deliberate demo deviation: card click toggles SELECTION here (in-app it
  * opens the agent side panel, which has no landing equivalent), so visitors

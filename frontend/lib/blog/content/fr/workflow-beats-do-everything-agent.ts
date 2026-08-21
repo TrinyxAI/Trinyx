@@ -46,7 +46,7 @@ D'où vient l'écart ? L'agent boucle environ huit fois pour venir à bout du tr
 
 Une précision loyale avant d'encaisser ce facteur huit : les deux approches doivent quand même écrire la réponse finale, et écrire coûte la même chose des deux côtés. Ce brouillon final représente une bonne part des 2 centimes du workflow, et c'est pourquoi l'écart est d'environ huit fois, pas d'environ quatre-vingts.
 
-![Une exécution de workflow LiveContext en vue observabilité : le graphe exécuté avec une coche verte sur chaque nœud, à côté d'un inspecteur listant l'epoch, ses horodatages de début et de fin, et le statut, la durée et le coût de chaque nœud.](/blog/ai-agent-audit-trail-run.png)
+![Une exécution de workflow Trinyx en vue observabilité : le graphe exécuté avec une coche verte sur chaque nœud, à côté d'un inspecteur listant l'epoch, ses horodatages de début et de fin, et le statut, la durée et le coût de chaque nœud.](/blog/ai-agent-audit-trail-run.png)
 
 *Une exécution terminée, étape par étape, avec la durée et le coût en face de chacune. C'est cette vue par étape qui rend la facture explicable au lieu d'une somme unique.*
 

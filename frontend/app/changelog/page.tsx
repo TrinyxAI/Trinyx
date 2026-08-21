@@ -26,7 +26,7 @@ import { IS_CE } from '@/lib/edition/edition';
 export const revalidate = 1800;
 
 export const metadata = {
-  title: 'Changelog - LiveContext',
+  title: 'Changelog - Trinyx',
   description: 'What we shipped, when. Product updates and release notes.',
   alternates: { canonical: '/changelog' },
   robots: IS_CE ? { index: false, follow: false } : undefined,

@@ -16,7 +16,7 @@ import { DocsHero, DocsProse, DocsTable, CardGrid, Card, Steps, Step, Callout } 
 export const metadata = docsMetadata({
   title: 'Overview',
   description:
-    'LiveContext is one AI automation platform that is chat, workflow, app, and agent at once. Describe a job and it builds the automation in front of you, runs it with scoped, budgeted agents, and ships it as an app.',
+    'Trinyx is one AI automation platform that is chat, workflow, app, and agent at once. Describe a job and it builds the automation in front of you, runs it with scoped, budgeted agents, and ships it as an app.',
   path: '/docs',
 });
 
@@ -25,14 +25,14 @@ export default function DocsOverviewPage() {
     <>
       <DocsHero
         eyebrow="Get started"
-        title="What is LiveContext?"
-        lead="LiveContext is one platform that is four things at once: a chat, a workflow builder, an app builder, and a fleet of agents. You describe a job in plain language, the automation builds itself in front of you, and you ship it as something your team, or your customers, can actually use."
+        title="What is Trinyx?"
+        lead="Trinyx is one platform that is four things at once: a chat, a workflow builder, an app builder, and a fleet of agents. You describe a job in plain language, the automation builds itself in front of you, and you ship it as something your team, or your customers, can actually use."
       />
 
       <DocsProse>
         <p>
           Most teams stitch a job together across several tools: one product to chat with an AI, another
-          to draw a workflow, a third to build the app, a fourth to run agents. LiveContext collapses
+          to draw a workflow, a third to build the app, a fourth to run agents. Trinyx collapses
           that stack. You build once, and the same thing runs as a chat, a visual workflow, a shareable
           app, and a scheduled agent, with every step visible, every agent scoped and budgeted, and a
           full audit trail.
@@ -98,7 +98,7 @@ export default function DocsOverviewPage() {
           <Step n={1} title="Describe the job in chat">
             Say what you want done in plain language.
           </Step>
-          <Step n={2} title="LiveContext drafts a workflow">
+          <Step n={2} title="Trinyx drafts a workflow">
             A graph of connected nodes appears, ready to run, branch, or extend.
           </Step>
           <Step n={3} title="Wire an interface">
@@ -128,14 +128,14 @@ export default function DocsOverviewPage() {
 
         <h2>Cloud or self-hosted</h2>
         <p>
-          LiveContext runs as a managed cloud service or as a self-hostable{' '}
+          Trinyx runs as a managed cloud service or as a self-hostable{' '}
           <strong>Community Edition (CE)</strong> you run on your own infrastructure. Both run the exact
           same workflow engine; what differs is how you run and operate it:
         </p>
         <DocsTable
           head={['', 'Cloud', 'Community Edition']}
           rows={[
-            ['Hosting', 'Managed by LiveContext', 'You run it on your own infrastructure'],
+            ['Hosting', 'Managed by Trinyx', 'You run it on your own infrastructure'],
             ['Sign-in', 'Keycloak sign-in (email or social); SAML SSO optional for orgs', 'Built-in email / social login'],
             ['Tenancy', 'Multi-organization', 'Single organization per instance'],
             ['Integrations', 'Full catalog, always current', 'Hundreds included out of the box; cloud link keeps the model catalog fresh'],
@@ -187,7 +187,7 @@ export default function DocsOverviewPage() {
         </CardGrid>
 
         <h2>Map of the docs</h2>
-        <p>These guides are organized the same way LiveContext is built, from first run to sharing it:</p>
+        <p>These guides are organized the same way Trinyx is built, from first run to sharing it:</p>
         <DocsTable
           head={['Section', 'Pages']}
           rows={[

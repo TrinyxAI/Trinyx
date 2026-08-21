@@ -21,7 +21,7 @@ Parte del resultado. Basta una frase:
 
 Eso describe un objetivo y la forma del trabajo. El disparador, el bucle, la búsqueda y la escritura de vuelta son fontanería, y la fontanería es justo lo que hace la herramienta.
 
-![Un chat de LiveContext con una petición en lenguaje corriente a la izquierda, "cada mañana, busca los nuevos registros en mi tabla y envía a cada uno un mensaje de bienvenida por Slack", y a la derecha el flujo generado en el lienzo: un disparador matinal, un paso que busca los nuevos registros, los recorre uno a uno, envía el mensaje de Slack y los marca como bienvenidos.](/blog/chat-to-workflow-no-code-generated.png)
+![Un chat de Trinyx con una petición en lenguaje corriente a la izquierda, "cada mañana, busca los nuevos registros en mi tabla y envía a cada uno un mensaje de bienvenida por Slack", y a la derecha el flujo generado en el lienzo: un disparador matinal, un paso que busca los nuevos registros, los recorre uno a uno, envía el mensaje de Slack y los marca como bienvenidos.](/blog/chat-to-workflow-no-code-generated.png)
 
 *Una frase de entrada, un flujo legible de salida. La petición a la izquierda, los pasos generados a la derecha.*
 

@@ -21,7 +21,7 @@ Parta do resultado. Uma frase chega:
 
 Isso descreve um objetivo e a forma do trabalho. O gatilho, o ciclo, a consulta e a escrita de volta são canalização, e é para isso que a ferramenta existe.
 
-![Um chat do LiveContext com um pedido em linguagem corrente à esquerda, "todas as manhãs, encontra os novos registos na minha tabela e envia a cada um uma mensagem de boas-vindas no Slack", e à direita o workflow gerado na tela: um gatilho matinal, um passo que encontra os novos registos, percorre-os um a um, envia a mensagem de Slack e marca-os como recebidos.](/blog/chat-to-workflow-no-code-generated.png)
+![Um chat do Trinyx com um pedido em linguagem corrente à esquerda, "todas as manhãs, encontra os novos registos na minha tabela e envia a cada um uma mensagem de boas-vindas no Slack", e à direita o workflow gerado na tela: um gatilho matinal, um passo que encontra os novos registos, percorre-os um a um, envia a mensagem de Slack e marca-os como recebidos.](/blog/chat-to-workflow-no-code-generated.png)
 
 *Uma frase à entrada, um workflow legível à saída. O pedido à esquerda, os passos gerados à direita.*
 

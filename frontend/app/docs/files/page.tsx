@@ -5,7 +5,7 @@ import { DocsHero, DocsProse, DocsTable, Callout, CodeBlock, CardGrid, Card } fr
 export const metadata = docsMetadata({
   title: 'Files & storage',
   description:
-    'How LiveContext stores and moves files: the 50 MB upload limit and storage quota, the canonical FileRef object, the file-producing nodes, files inside interfaces, sending files to integration tools, document extraction and vision in chat, the workspace file browser, and access control.',
+    'How Trinyx stores and moves files: the 50 MB upload limit and storage quota, the canonical FileRef object, the file-producing nodes, files inside interfaces, sending files to integration tools, document extraction and vision in chat, the workspace file browser, and access control.',
   path: '/docs/files',
 });
 

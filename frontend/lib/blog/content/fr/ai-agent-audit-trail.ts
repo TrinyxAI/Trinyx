@@ -26,7 +26,7 @@ Ils se ressemblent et ce n'est pas le même objet. Un tableau de bord est lu par
 | Peut-il changer ensuite | Oui, par conception | Non, ajout seul |
 | Mode de défaillance | Vous déboguez plus lentement | Vous ne pouvez pas répondre à la question |
 
-![Une exécution de workflow LiveContext en vue observabilité : le graphe exécuté avec une coche verte sur chaque nœud, à côté d'un inspecteur listant l'epoch, ses horodatages de début et de fin, et le statut, la durée et le coût de chaque nœud.](/blog/ai-agent-audit-trail-run.png)
+![Une exécution de workflow Trinyx en vue observabilité : le graphe exécuté avec une coche verte sur chaque nœud, à côté d'un inspecteur listant l'epoch, ses horodatages de début et de fin, et le statut, la durée et le coût de chaque nœud.](/blog/ai-agent-audit-trail-run.png)
 
 *Une exécution en vue observabilité : chaque étape, son statut, sa durée, son coût. Vraiment utile, et malgré tout un tableau de bord plutôt que l'enregistrement durable décrit dans la suite.*
 

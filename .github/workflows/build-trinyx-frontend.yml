@@ -65,3 +65,33 @@ jobs:
             NEXT_PUBLIC_AUTH_MODE=oidc
           cache-from: type=gha,scope=landing
           cache-to: type=gha,mode=max,scope=landing
+
+  deploy:
+    needs: build-and-push
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Configure SSH
+        shell: bash
+        run: |
+          mkdir -p ~/.ssh
+          printf '%s\n' "${{ secrets.EC2_SSH_KEY }}" > ~/.ssh/trinyx_deploy
+          chmod 600 ~/.ssh/trinyx_deploy
+          ssh-keyscan -H "${{ secrets.EC2_HOST }}" >> ~/.ssh/known_hosts
+
+      - name: Deploy frontends to EC2
+        shell: bash
+        run: |
+          ssh -i ~/.ssh/trinyx_deploy "${{ secrets.EC2_USER }}@${{ secrets.EC2_HOST }}" <<'EOF'
+            set -e
+            cd ~/Trinyx
+            docker compose --env-file docker/.env.ce pull frontend landing
+            docker compose --env-file docker/.env.ce up -d frontend landing
+            docker compose ps frontend landing
+          EOF
+
+      - name: Verify deployment
+        shell: bash
+        run: |
+          curl --fail --silent --show-error --retry 10 --retry-delay 3 https://trinyx.fr/ > /dev/null
+          curl --fail --silent --show-error --retry 10 --retry-delay 3 https://app.trinyx.fr/ > /dev/null

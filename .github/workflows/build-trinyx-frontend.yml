@@ -1,4 +1,4 @@
-name: Build Trinyx Frontend
+name: Build Trinyx Frontends
 
 on:
   push:
@@ -13,7 +13,8 @@ permissions:
   packages: write
 
 env:
-  IMAGE_NAME: ghcr.io/eddinerabii/trinyx-frontend
+  APP_IMAGE: ghcr.io/eddinerabii/trinyx-frontend
+  LANDING_IMAGE: ghcr.io/eddinerabii/trinyx-landing
 
 jobs:
   build-and-push:
@@ -33,7 +34,7 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Build and push Trinyx frontend
+      - name: Build and push Trinyx app
         uses: docker/build-push-action@v6
         with:
           context: ./frontend
@@ -41,10 +42,26 @@ jobs:
           platforms: linux/amd64
           push: true
           tags: |
-            ${{ env.IMAGE_NAME }}:latest
-            ${{ env.IMAGE_NAME }}:${{ github.sha }}
+            ${{ env.APP_IMAGE }}:latest
+            ${{ env.APP_IMAGE }}:${{ github.sha }}
           build-args: |
             NEXT_PUBLIC_APP_EDITION=ce
             NEXT_PUBLIC_AUTH_MODE=embedded
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          cache-from: type=gha,scope=app
+          cache-to: type=gha,mode=max,scope=app
+
+      - name: Build and push Trinyx landing
+        uses: docker/build-push-action@v6
+        with:
+          context: ./frontend
+          file: ./frontend/Dockerfile
+          platforms: linux/amd64
+          push: true
+          tags: |
+            ${{ env.LANDING_IMAGE }}:latest
+            ${{ env.LANDING_IMAGE }}:${{ github.sha }}
+          build-args: |
+            NEXT_PUBLIC_APP_EDITION=cloud
+            NEXT_PUBLIC_AUTH_MODE=oidc
+          cache-from: type=gha,scope=landing
+          cache-to: type=gha,mode=max,scope=landing

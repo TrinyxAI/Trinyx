@@ -152,7 +152,7 @@ export function LandingHeader({ extra, siteBaseUrl }: { extra?: React.ReactNode;
             <LogoAnimate size="md" className="text-theme-primary" />
           </div>
           <span className="text-xl font-light text-theme-primary transition-colors duration-300 livecontext-title opacity-100 scale-100 w-auto">
-            LiveContext
+            Trinyx
           </span>
         </Link>
         <nav className="hidden md:flex items-center gap-8 text-sm" style={{ color: 'var(--text-secondary)' }}>
@@ -200,7 +200,7 @@ export function LandingFooter({ siteBaseUrl }: { siteBaseUrl?: string } = {}) {
               <LogoAnimate size="md" className="text-theme-primary" />
             </div>
             <span className="text-xl font-light text-theme-primary transition-colors duration-300 livecontext-title opacity-100 scale-100 w-auto">
-              LiveContext
+              Trinyx
             </span>
           </div>
           <p className="mt-3 max-w-xs leading-relaxed" style={{ color: 'var(--text-muted)' }}>

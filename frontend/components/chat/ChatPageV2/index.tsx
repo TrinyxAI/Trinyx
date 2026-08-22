@@ -43,6 +43,7 @@ import { resolveConversationAgentId } from '@/lib/chat/linkedAgent';
 import { useLinkedAgentLoader } from '@/hooks/chat/useLinkedAgentLoader';
 import { useSidePanelSafe } from '@/contexts/SidePanelContext';
 import { buildAgentConfigPanelTab } from '@/lib/sidePanel/agentConfigPanelTab';
+import { useChatHandoff } from '@/hooks/chat/useChatHandoff';
 import { PROVIDER_ICON_MAP } from '@/lib/ai-providers/providerIcons';
 
 export interface ChatPageV2Props {
@@ -160,6 +161,12 @@ export function ChatPageV2({ conversationIdFromParams, enableDataSource = false 
     agentConfigPanelWidth,
     setAgentConfigPanelWidth,
   } = state;
+
+  useChatHandoff({
+    authLoading,
+    setInputValue,
+    sendMessage: handlers.handleSendMessage,
+  });
 
   const {
     messages: conversationMessages,

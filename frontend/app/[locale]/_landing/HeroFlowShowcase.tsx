@@ -21,8 +21,9 @@ export default function HeroFlowShowcase() {
   const { theme } = useLandingTheme();
   // Frozen initial src: a stored dark preference is restored by the provider
   // before this mounts on the client's first paint of interest; subsequent
-  // toggles go through postMessage only.
-  const [src] = useState(() => `/hero-flow.html${theme === 'dark' ? '?theme=dark' : ''}`);
+  // toggles go through postMessage only. The version query intentionally busts
+  // stale browser/CDN copies of hero-flow.html after the Trinyx branding update.
+  const [src] = useState(() => `/hero-flow.html?v=trinyx-20260823${theme === 'dark' ? '&theme=dark' : ''}`);
 
   // Measure the content WRAPPER (hero-flow.html's single root element), not
   // `body`: `body.scrollHeight` is at least the iframe's own viewport height, so

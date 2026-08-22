@@ -4,7 +4,7 @@ import { createContext, useCallback, useContext, useEffect, useState } from 'rea
 
 // Self-contained light/dark theme for the PUBLIC site (landing + /about, /contact,
 // /legal/*, /changelog, /docs). It is deliberately DECOUPLED from the app-wide
-// `ThemeProvider`: the public site DEFAULTS TO LIGHT (warm white, the reassurance
+// `ThemeProvider`: the public site DEFAULTS TO DARK (the Trinyx brand palette
 // theme) for every visitor and persists its own choice under a localStorage key,
 // while the logged-in app keeps following the user's OS/preference untouched. The
 // theme is expressed as a `dark` class on the `.landing-root` wrapper (palette +
@@ -12,7 +12,7 @@ import { createContext, useCallback, useContext, useEffect, useState } from 'rea
 // `landingChromeStyles`), so it never touches <body> and never collides with the
 // app theme.
 //
-// The landing/marketing pages default to light and restore the visitor's choice
+// The landing/marketing pages default to dark and restore the visitor's choice
 // (footer `LandingThemeToggle`, persisted under 'landing-theme'). The docs
 // section keeps its OWN `storageKey` ('docs-theme'), so a docs light/dark choice
 // is independent of the landing and never changes it.
@@ -29,10 +29,10 @@ interface LandingThemeContextValue {
 
 const LandingThemeContext = createContext<LandingThemeContextValue | null>(null);
 
-// Safe accessor: falls back to the light default (and a no-op toggle) when used
+// Safe accessor: falls back to the dark default (and a no-op toggle) when used
 // outside the provider, mirroring `useThemeSafely`.
 export function useLandingTheme(): LandingThemeContextValue {
-  return useContext(LandingThemeContext) ?? { theme: 'light', toggle: () => {} };
+  return useContext(LandingThemeContext) ?? { theme: 'dark', toggle: () => {} };
 }
 
 interface LandingThemeProviderProps {
@@ -51,7 +51,7 @@ export default function LandingThemeProvider({
   className = '',
   storageKey = 'landing-theme',
   respectStored = false,
-  defaultTheme = 'light',
+  defaultTheme = 'dark',
 }: LandingThemeProviderProps) {
   // Start from the default on the server and the first client render (so SSR markup
   // matches and there is no hydration mismatch); a post-mount effect then restores

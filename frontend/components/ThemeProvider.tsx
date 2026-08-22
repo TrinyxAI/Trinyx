@@ -13,6 +13,7 @@ interface ThemeContextType {
 }
 
 const ThemeContext = createContext<ThemeContextType | undefined>(undefined);
+const THEME_STORAGE_KEY = 'trinyx-theme-v1';
 
 export function useOptionalTheme() {
   return useContext(ThemeContext);
@@ -47,7 +48,9 @@ function getStoredThemePreference(): ThemePreference {
     return 'dark';
   }
 
-  const savedTheme = localStorage.getItem('theme');
+  // Use a Trinyx-specific key so legacy LiveContext `theme=light/auto`
+  // preferences cannot override the new brand default on first visit.
+  const savedTheme = localStorage.getItem(THEME_STORAGE_KEY);
   return isThemePreference(savedTheme) ? savedTheme : 'dark';
 }
 
@@ -75,7 +78,7 @@ export function ThemeProvider({ children }: ThemeProviderProps) {
   const [themePreference, setThemePreference] = useState<ThemePreference>(getStoredThemePreference);
   const [systemTheme, setSystemTheme] = useState<Theme>(getSystemTheme);
   // Trinyx defaults to its dark brand theme during SSR/hydration and for visitors
-  // with no saved preference. Explicit light/auto choices are still respected.
+  // with no Trinyx-specific saved preference. Explicit choices remain supported.
   const effectivePreference: ThemePreference = isClient ? themePreference : 'dark';
   const effectiveSystemTheme: Theme = isClient ? systemTheme : 'dark';
   const theme: Theme = effectivePreference === 'auto' ? effectiveSystemTheme : effectivePreference;
@@ -85,7 +88,7 @@ export function ThemeProvider({ children }: ThemeProviderProps) {
     if (!isClient) return;
 
     applyThemeClasses(theme);
-    localStorage.setItem('theme', themePreference);
+    localStorage.setItem(THEME_STORAGE_KEY, themePreference);
   }, [theme, themePreference, isClient]);
 
   // Keep auto mode synchronized with the OS preference.

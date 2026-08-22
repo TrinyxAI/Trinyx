@@ -27,33 +27,32 @@ import { docsHref } from '@/lib/docs/docsHostRewrite';
 // (DEFAULT LIGHT, persisted under `landing-theme`), NOT by the app-wide ThemeProvider
 // on <body>. This lets the public site default to a warm light theme for every
 // visitor while the logged-in app keeps following the user's OS/preference. The
-// LIGHT palette is deliberately WARM (cream whites, amber glows) as the light
-// counterpart of the warm-neutral dark palette below; it intentionally diverges
-// from `globals.css` `:root`, which stays cool for the app.
+// LIGHT palette is warm/off-white while the DARK palette keeps the original
+// LiveContext warm-neutral surfaces with Trinyx violet accents.
 export const landingChromeStyles = `
   .landing-root {
-    /* light palette - cool neutral (matches the app's light palette, no beige) */
-    --bg-primary: #ffffff;
-    --bg-secondary: #f5f6f8;
-    --bg-tertiary: #eceff3;
-    --bg-hover: #e5e7eb;
-    --text-primary: #111827;
-    --text-secondary: #4b5563;
-    --text-muted: #6b7280;
-    --border-color: #d5dbe4;
-    --accent-primary: #0b0d16;
+    /* light palette - warm off-white surfaces with Trinyx accents */
+    --bg-primary: #F5F5F0;
+    --bg-secondary: #EEEEEA;
+    --bg-tertiary: #E7E7E1;
+    --bg-hover: #DFDFD8;
+    --text-primary: #1C1B1A;
+    --text-secondary: #5F5D57;
+    --text-muted: #7D7971;
+    --border-color: #D8D6CE;
+    --accent-primary: #9D14FF;
     --accent-secondary: #1d2330;
-    --accent-hover: #151927;
-    --accent-foreground: #f6f7f9;
+    --accent-hover: #B52CFF;
+    --accent-foreground: #FFFFFF;
     --expression-color: #1d4ed8;
 
-    /* light decorative tokens - cool neutral (no amber/beige) */
-    --landing-header-bg: rgba(255, 255, 255, 0.85);
-    --landing-hero-glow: radial-gradient(ellipse 800px 400px at 50% 0%, rgba(17, 24, 39, 0.05) 0%, rgba(255, 255, 255, 0) 70%);
-    --landing-cta-glow: radial-gradient(ellipse 720px 380px at 50% 0%, rgba(17, 24, 39, 0.05) 0%, rgba(245, 246, 248, 0) 70%);
-    --landing-highlight-row: rgba(202, 158, 88, 0.12);
+    /* light decorative tokens - restrained violet */
+    --landing-header-bg: rgba(245, 245, 240, 0.88);
+    --landing-hero-glow: radial-gradient(ellipse 800px 400px at 50% 0%, rgba(157, 20, 255, 0.08) 0%, rgba(245, 245, 240, 0) 70%);
+    --landing-cta-glow: radial-gradient(ellipse 720px 380px at 50% 0%, rgba(157, 20, 255, 0.10) 0%, rgba(238, 238, 234, 0) 70%);
+    --landing-highlight-row: rgba(157, 20, 255, 0.07);
     --landing-dash-track: rgba(28, 26, 23, 0.14);
-    --landing-dash-track-active: rgba(28, 26, 23, 0.22);
+    --landing-dash-track-active: rgba(157, 20, 255, 0.24);
     --landing-card-shadow: 0 8px 32px rgba(28, 26, 23, 0.07);
     --landing-frame-shadow: 0 20px 60px rgba(28, 26, 23, 0.10);
     --landing-frame-shadow-strong: 0 30px 80px rgba(28, 26, 23, 0.14), 0 8px 18px rgba(28, 26, 23, 0.08);
@@ -66,8 +65,7 @@ export const landingChromeStyles = `
   }
 
   .landing-root.dark {
-    /* dark palette - the PLATFORM's dark theme (mirrors globals.css .dark, warm
-       neutral), so the public dark mode matches the app the visitor signs into */
+    /* dark palette - original LiveContext warm neutral + Trinyx violet accents */
     --bg-primary: #171614;
     --bg-secondary: #1f1e1b;
     --bg-tertiary: #2a2925;
@@ -76,19 +74,19 @@ export const landingChromeStyles = `
     --text-secondary: #a39f97;
     --text-muted: #736f67;
     --border-color: #5e5a54;
-    --accent-primary: #edecea;
+    --accent-primary: #9D14FF;
     --accent-secondary: #c7c4bd;
-    --accent-hover: #d7d4ce;
-    --accent-foreground: #171614;
+    --accent-hover: #B52CFF;
+    --accent-foreground: #F7F5FA;
     --expression-color: #38bdf8;
 
-    /* dark decorative tokens */
+    /* dark decorative tokens - original surfaces with subtle violet emphasis */
     --landing-header-bg: rgba(23, 22, 20, 0.85);
-    --landing-hero-glow: radial-gradient(ellipse 800px 400px at 50% 0%, rgba(58, 46, 31, 0.55) 0%, rgba(23, 22, 20, 0) 70%);
-    --landing-cta-glow: radial-gradient(ellipse 720px 380px at 50% 0%, rgba(58, 46, 31, 0.6) 0%, rgba(31, 30, 27, 0) 70%);
-    --landing-highlight-row: rgba(58, 46, 31, 0.25);
+    --landing-hero-glow: radial-gradient(ellipse 800px 400px at 50% 0%, rgba(157, 20, 255, 0.12) 0%, rgba(23, 22, 20, 0) 70%);
+    --landing-cta-glow: radial-gradient(ellipse 720px 380px at 50% 0%, rgba(157, 20, 255, 0.16) 0%, rgba(31, 30, 27, 0) 70%);
+    --landing-highlight-row: rgba(157, 20, 255, 0.08);
     --landing-dash-track: rgba(237, 236, 234, 0.16);
-    --landing-dash-track-active: rgba(237, 236, 234, 0.22);
+    --landing-dash-track-active: rgba(157, 20, 255, 0.32);
     --landing-card-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
     --landing-frame-shadow: 0 20px 60px rgba(0, 0, 0, 0.4);
     --landing-frame-shadow-strong: 0 30px 80px rgba(0, 0, 0, 0.48), 0 8px 18px rgba(0, 0, 0, 0.35);
@@ -109,18 +107,18 @@ export const landingChromeStyles = `
      vars it consumes (bg-theme-* / text-theme-* / border-theme / button accents) to
      the landing light palette so the banner matches the page. */
   div.cookie-consent-banner {
-    --bg-primary: #ffffff;
-    --bg-secondary: #f8f6f2;
-    --bg-tertiary: #f0ede7;
-    --bg-hover: #e7e3da;
-    --text-primary: #1c1a17;
-    --text-secondary: #55504a;
-    --text-muted: #7d776e;
-    --border-color: #ddd7cd;
-    --accent-primary: #171614;
+    --bg-primary: #F5F5F0;
+    --bg-secondary: #EEEEEA;
+    --bg-tertiary: #E7E7E1;
+    --bg-hover: #DFDFD8;
+    --text-primary: #1C1B1A;
+    --text-secondary: #5F5D57;
+    --text-muted: #7D7971;
+    --border-color: #D8D6CE;
+    --accent-primary: #9D14FF;
     --accent-secondary: #2a2925;
-    --accent-hover: #33312c;
-    --accent-foreground: #faf9f7;
+    --accent-hover: #B52CFF;
+    --accent-foreground: #FFFFFF;
   }
 `;
 

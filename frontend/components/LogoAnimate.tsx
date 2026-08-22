@@ -100,7 +100,7 @@ const LogoAnimate = React.memo<LogoAnimateProps>(({ size = 'md', className = '',
           {/* Partie centrale - pulsation au hover ou en permanence avec transition */}
           <path
             d="M4970 5795 c-86 -20 -211 -82 -282 -142 -162 -135 -242 -311 -242 -528 0 -175 50 -319 153 -443 240 -289 690 -326 965 -80 207 185 288 479 202 733 -71 208 -239 376 -440 441 -101 33 -256 41 -356 19z"
-            className={`transition-all duration-300 ease-in-out ${(isHovered || alwaysPulse) ? 'text-red-600' : 'text-current'}`}
+            className="text-[var(--brand-glow,#C858C6)] transition-all duration-300 ease-in-out"
             style={{
               animation: (isHovered || alwaysPulse) ? 'redToTransparentPulse 1.5s ease-in-out infinite' : 'none'
             }}

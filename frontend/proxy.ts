@@ -157,6 +157,20 @@ function routeRequest(request: NextRequest) {
   const locale = getPathLocale(pathname);
   const pathnameWithoutLocale = locale ? pathname.slice(locale.length + 1) || '/' : pathname;
 
+  // trinyx.fr is the public landing container; authentication belongs to the
+  // app container. Keep the exact locale/path/query while handing login off.
+  const hostname = request.nextUrl.hostname.toLowerCase();
+  if (
+    pathnameWithoutLocale === '/login'
+    && (hostname === 'trinyx.fr' || hostname === 'www.trinyx.fr')
+  ) {
+    const newUrl = request.nextUrl.clone();
+    newUrl.protocol = 'https:';
+    newUrl.hostname = 'app.trinyx.fr';
+    newUrl.port = '';
+    return NextResponse.redirect(newUrl);
+  }
+
   if (IS_CE && pathnameWithoutLocale === '/') {
     const target = locale ? `/${locale}/app/chat` : '/app/chat';
     const newUrl = new URL(target, request.url);

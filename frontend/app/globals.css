@@ -193,7 +193,7 @@ code[class*="language-"] {
   height: 1.125rem !important;
   cursor: pointer !important;
   border: 2px solid var(--border-color) !important;
-  border-radius: 0.25rem !important;
+  border-radius: 0.25em !important;
   background-color: var(--bg-primary) !important;
   transition: all 0.2s ease !important;
   appearance: none !important;
@@ -390,19 +390,19 @@ code[class*="language-"] {
 @layer base {
   :root {
     /* Variables for light mode */
-    --bg-primary: #ffffff;
-    --bg-secondary: #f5f6f8;
-    --bg-tertiary: #eceff3;
-    --text-primary: #111827;
-    --text-secondary: #4b5563;
-    --text-muted: #6b7280;
-    --border-color: #d5dbe4;
-    --accent-primary: #0b0d16;
+    --bg-primary: #F5F5F0;
+    --bg-secondary: #EEEEEA;
+    --bg-tertiary: #E7E7E1;
+    --text-primary: #1C1B1A;
+    --text-secondary: #5F5D57;
+    --text-muted: #7D7971;
+    --border-color: #D8D6CE;
+    --accent-primary: #9D14FF;
     --accent-secondary: #1d2330;
-    --accent-hover: #151927;
-    --accent-foreground: #f6f7f9;
-    --shadow-color: rgba(11, 13, 22, 0.14);
-    --bg-hover: #e5e7eb;
+    --accent-hover: #B52CFF;
+    --accent-foreground: #FFFFFF;
+    --shadow-color: rgba(28, 27, 26, 0.12);
+    --bg-hover: #DFDFD8;
     --expression-bg: rgba(191, 219, 254, 0.5);
     --expression-color: #1d4ed8;
     --shimmer-color: rgba(255, 255, 255, 0.3);
@@ -418,10 +418,10 @@ code[class*="language-"] {
     --text-secondary: #a39f97;
     --text-muted: #736f67;
     --border-color: #5e5a54;
-    --accent-primary: #edecea;
+    --accent-primary: #9D14FF;
     --accent-secondary: #c7c4bd;
-    --accent-hover: #d7d4ce;
-    --accent-foreground: #171614;
+    --accent-hover: #B52CFF;
+    --accent-foreground: #F7F5FA;
     --shadow-color: rgba(0, 0, 0, 0.45);
     --bg-hover: #57534e;
     --expression-bg: rgba(56, 189, 248, 0.25);

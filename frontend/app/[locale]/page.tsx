@@ -23,6 +23,7 @@ import SignInButton from './_landing/SignInButton';
 import MarketplacePreview from './_landing/MarketplacePreview';
 import HeroPhotoStack from './_landing/HeroPhotoStack';
 import HeroFlowShowcase from './_landing/HeroFlowShowcase';
+import HeroPrompt from './_landing/HeroPrompt';
 import AgentsShowcase from './_landing/AgentsShowcase';
 import PersonaTabs, { type Persona } from './_landing/PersonaTabs';
 import {
@@ -215,41 +216,19 @@ export default async function HomePage({ params }: { params: Promise<{ locale: s
 
 function Hero() {
   return (
-    // No .hero-glow halo here: the radial read as a stray shadow behind the
-    // showcase (same reason it was dropped from the agents section).
     <section className="relative overflow-visible">
-      <div className="max-w-7xl mx-auto px-6 pt-14 pb-12 md:pt-20 md:pb-16">
-        <div className="max-w-3xl mx-auto text-center">
-          <span className="eyebrow">The AI Automation platform</span>
-          <h1 className="hero-h1 mt-4">
-            One message <span className="underline underline-offset-8">in</span>.<br />
-            A working automation <span className="underline underline-offset-8">out</span>.
-          </h1>
-          <p className="mt-6 text-lg max-w-2xl mx-auto leading-relaxed" style={{ color: 'var(--text-secondary)' }}>
-            700+ integrations and every major LLM, cloud or self-hosted. Build, deploy, and run
-            your agents visually, in chat, or with code, and add a human in the loop wherever you want.
+      <div className="hero-prompt-stage">
+        <div className="hero-prompt-content">
+          <h1 className="hero-h1 hero-prompt-title">Build something with Trinyx</h1>
+          <p className="hero-prompt-subtitle">
+            Create automations, agents, workflows, and apps by chatting with AI.
           </p>
-          <div className="mt-7 flex flex-wrap justify-center gap-3">
-            <SignInButton
-              variant="primary"
-              className="inline-flex items-center justify-center h-9 px-4 rounded-xl text-sm font-medium transition-colors hover:bg-[var(--accent-hover)] active:scale-[0.98] cursor-pointer"
-            >
-              Start free
-            </SignInButton>
-            <a
-              href={SELF_HOSTED_GITHUB_URL}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="inline-flex items-center gap-2 h-9 px-4 rounded-xl text-sm font-medium border transition-colors hover:bg-[var(--bg-secondary)] cursor-pointer"
-              style={{ borderColor: 'var(--border-color)', color: 'var(--text-primary)' }}
-            >
-              <GithubMark className="w-4 h-4" /> Self-host
-            </a>
-          </div>
+          <HeroPrompt />
         </div>
-        <div className="mt-8">
-          <HeroFlowShowcase />
-        </div>
+      </div>
+
+      <div className="max-w-7xl mx-auto px-6 pt-12 pb-12 md:pt-16 md:pb-16">
+        <HeroFlowShowcase />
       </div>
     </section>
   );
@@ -981,6 +960,179 @@ const landingStyles = `
     line-height: 1.08;
     letter-spacing: -0.025em;
     color: var(--text-primary);
+  }
+
+  .landing-root .hero-prompt-stage {
+    position: relative;
+    display: flex;
+    min-height: clamp(520px, calc(100vh - 80px), 660px);
+    align-items: center;
+    justify-content: center;
+    overflow: hidden;
+    padding: 72px 24px 88px;
+    background:
+      radial-gradient(ellipse 72% 62% at 14% 28%, rgba(157, 20, 255, 0.38) 0%, rgba(157, 20, 255, 0) 70%),
+      radial-gradient(ellipse 68% 58% at 88% 34%, rgba(200, 88, 198, 0.28) 0%, rgba(200, 88, 198, 0) 72%),
+      linear-gradient(180deg, #120917 0%, #1A0F20 58%, #120917 100%);
+    isolation: isolate;
+  }
+
+  .landing-root .hero-prompt-stage::after {
+    position: absolute;
+    inset: auto 0 0;
+    height: 34%;
+    content: '';
+    pointer-events: none;
+    background: linear-gradient(180deg, rgba(18, 9, 23, 0), #120917);
+    z-index: -1;
+  }
+
+  .landing-root .hero-prompt-content {
+    width: min(100%, 900px);
+    margin: 0 auto;
+    text-align: center;
+  }
+
+  .landing-root .hero-prompt-title {
+    color: #F7F5FA;
+    font-size: clamp(42px, 5.2vw, 68px);
+    letter-spacing: -0.04em;
+  }
+
+  .landing-root .hero-prompt-subtitle {
+    max-width: 680px;
+    margin: 18px auto 0;
+    color: #A9A3B0;
+    font-size: clamp(16px, 1.7vw, 21px);
+    line-height: 1.55;
+  }
+
+  .landing-root .hero-prompt-card {
+    width: min(100%, 680px);
+    margin: 42px auto 0;
+    padding: 18px 20px 16px;
+    border: 1px solid rgba(43, 29, 53, 0.88);
+    border-radius: 28px;
+    background: #F7F5FA;
+    box-shadow:
+      0 26px 70px rgba(4, 0, 7, 0.42),
+      0 0 46px rgba(200, 88, 198, 0.18);
+    text-align: left;
+  }
+
+  .landing-root .hero-prompt-input {
+    display: block;
+    width: 100%;
+    min-height: 76px;
+    max-height: 190px;
+    resize: vertical;
+    border: 0;
+    outline: 0;
+    background: transparent;
+    color: #120917;
+    font: inherit;
+    font-size: 16px;
+    line-height: 1.5;
+  }
+
+  .landing-root .hero-prompt-input::placeholder {
+    color: #7C7485;
+  }
+
+  .landing-root .hero-prompt-actions,
+  .landing-root .hero-prompt-actions-end {
+    display: flex;
+    align-items: center;
+  }
+
+  .landing-root .hero-prompt-actions {
+    justify-content: space-between;
+    gap: 12px;
+    margin-top: 10px;
+  }
+
+  .landing-root .hero-prompt-actions-end {
+    gap: 8px;
+  }
+
+  .landing-root .hero-prompt-icon,
+  .landing-root .hero-prompt-build {
+    display: inline-flex;
+    height: 38px;
+    align-items: center;
+    justify-content: center;
+    border: 0;
+    cursor: pointer;
+    transition: background 180ms ease, color 180ms ease, transform 180ms ease, opacity 180ms ease;
+  }
+
+  .landing-root .hero-prompt-icon {
+    width: 38px;
+    border-radius: 999px;
+    background: transparent;
+    color: #120917;
+  }
+
+  .landing-root .hero-prompt-icon:hover {
+    background: rgba(43, 29, 53, 0.10);
+  }
+
+  .landing-root .hero-prompt-icon[aria-pressed='true'] {
+    background: rgba(200, 88, 198, 0.16);
+    color: #9D14FF;
+  }
+
+  .landing-root .hero-prompt-icon svg {
+    width: 19px;
+    height: 19px;
+  }
+
+  .landing-root .hero-prompt-build {
+    gap: 8px;
+    padding: 0 16px;
+    border-radius: 999px;
+    background: #9D14FF;
+    color: #F7F5FA;
+    font-size: 14px;
+    font-weight: 700;
+  }
+
+  .landing-root .hero-prompt-build:hover {
+    background: #B52CFF;
+    transform: translateY(-1px);
+  }
+
+  .landing-root .hero-prompt-build:disabled {
+    cursor: not-allowed;
+    opacity: 0.42;
+    transform: none;
+  }
+
+  .landing-root .hero-prompt-build svg {
+    width: 16px;
+    height: 16px;
+  }
+
+  @media (max-width: 640px) {
+    .landing-root .hero-prompt-stage {
+      min-height: 500px;
+      padding: 64px 18px 72px;
+    }
+
+    .landing-root .hero-prompt-title {
+      font-size: clamp(38px, 12vw, 52px);
+    }
+
+    .landing-root .hero-prompt-subtitle {
+      margin-top: 16px;
+      font-size: 16px;
+    }
+
+    .landing-root .hero-prompt-card {
+      margin-top: 32px;
+      padding: 16px 16px 14px;
+      border-radius: 24px;
+    }
   }
 
   .landing-root .hero-glow {

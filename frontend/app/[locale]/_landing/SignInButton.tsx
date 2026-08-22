@@ -3,6 +3,7 @@
 import { useCallback } from 'react';
 import { useRouter } from 'next/navigation';
 import { useAuth } from '@/lib/providers/smart-providers';
+import { TRINYX_APP_ORIGIN } from '@/lib/navigation/trinyxApp';
 
 type Variant = 'primary' | 'secondary' | 'link';
 
@@ -14,8 +15,6 @@ interface SignInButtonProps {
   /** Explicit app/auth origin for cross-host handoff. */
   baseUrl?: string;
 }
-
-const TRINYX_APP_ORIGIN = 'https://app.trinyx.fr';
 
 export default function SignInButton({
   children,

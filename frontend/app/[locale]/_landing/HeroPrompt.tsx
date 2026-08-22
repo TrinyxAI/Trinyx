@@ -1,18 +1,33 @@
 'use client';
 
-import { useCallback, useState } from 'react';
+import { useCallback, useMemo, useState } from 'react';
 import { HomeSuggestionChips } from '@/components/chat/HomeSuggestionChips';
 import { MessageComposer } from '@/components/chat/MessageComposer';
 import { ModelSelectorDropdown } from '@/components/chat/ModelSelectorDropdown';
+import {
+  getEffectiveDefaultSelectedModel,
+  modelMatches,
+  useVisibleModels,
+} from '@/hooks/useModels';
+import { PROVIDER_ICON_MAP } from '@/lib/ai-providers/providerIcons';
 import {
   buildTrinyxChatHref,
   type TrinyxChatHandoffIntent,
 } from '@/lib/navigation/trinyxApp';
 
-const EMPTY_LANDING_MODEL = { provider: '', id: '' };
-
 export default function HeroPrompt() {
   const [value, setValue] = useState('');
+  const [showModelSelector, setShowModelSelector] = useState(false);
+  const { models } = useVisibleModels();
+  const availableModels = useMemo(
+    () => models.map((model) => ({
+      ...model,
+      iconSlug: PROVIDER_ICON_MAP[model.provider.toLowerCase()] || model.provider.toLowerCase(),
+    })),
+    [models],
+  );
+  const selectedModel = getEffectiveDefaultSelectedModel();
+  const selectedModelData = availableModels.find((model) => modelMatches(model, selectedModel));
 
   const openChat = useCallback((text: string, intent: TrinyxChatHandoffIntent) => {
     if (intent === 'prompt' && !text.trim()) return;
@@ -38,12 +53,12 @@ export default function HeroPrompt() {
         onDeferredAction={openDraft}
         leadingControl={
           <ModelSelectorDropdown
-            showModelSelector={false}
-            setShowModelSelector={() => openDraft(value)}
-            selectedModel={EMPTY_LANDING_MODEL}
-            selectedModelData={{ id: '', name: 'Choose model' }}
-            availableModels={[]}
-            setSelectedModel={() => {}}
+            showModelSelector={showModelSelector}
+            setShowModelSelector={setShowModelSelector}
+            selectedModel={selectedModel}
+            selectedModelData={selectedModelData}
+            availableModels={availableModels}
+            setSelectedModel={() => openDraft(value)}
             changeModelTitle="Choose a model in Trinyx"
           />
         }

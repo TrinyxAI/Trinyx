@@ -67,6 +67,7 @@ jobs:
           build-args: |
             NEXT_PUBLIC_APP_EDITION=cloud
             NEXT_PUBLIC_AUTH_MODE=oidc
+            NEXT_PUBLIC_SPRING_BASE_URL=http://livecontext-app:8080
           cache-from: type=gha,scope=landing
           cache-to: type=gha,mode=max,scope=landing
 

@@ -368,7 +368,7 @@ export default function BillingPage() {
         </p>
         <p>
           CE has no local Stripe subscription of its own. Instead, its governing plan comes from the{' '}
-          <a href="/self-host">cloud account it is linked to</a>: the pricing page mirrors the linked
+          <a href="/docs/self-host">cloud account it is linked to</a>: the pricing page mirrors the linked
           cloud subscription&apos;s plan, credit tier, and billing cadence, and pricing-page actions on
           CE either open the linked cloud account&apos;s pricing page or, if no cloud account is linked
           yet, route to connecting one first.
@@ -382,9 +382,9 @@ export default function BillingPage() {
 
         <h2>Where to go next</h2>
         <CardGrid cols={3}>
-          <Card icon={Bot} title="Agents" href="/agents">Credit budgets, tool scope, and reasoning effort per agent.</Card>
-          <Card icon={Store} title="Marketplace" href="/marketplace">Buying and selling automations with credits.</Card>
-          <Card icon={Server} title="Self-hosting" href="/self-host">Running CE and what cloud-linking unlocks for billing.</Card>
+          <Card icon={Bot} title="Agents" href="/docs/agents">Credit budgets, tool scope, and reasoning effort per agent.</Card>
+          <Card icon={Store} title="Marketplace" href="/docs/marketplace">Buying and selling automations with credits.</Card>
+          <Card icon={Server} title="Self-hosting" href="/docs/self-host">Running CE and what cloud-linking unlocks for billing.</Card>
         </CardGrid>
       </DocsProse>
     </>

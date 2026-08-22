@@ -8,10 +8,8 @@ import { Sparkles, Workflow, Bot, Database, Store, BookOpen } from 'lucide-react
 // English-only: the whole `/docs` surface lives OUTSIDE `app/[locale]/`, so it has
 // no next-intl context - never import `@/i18n/navigation` here or in any consumer.
 //
-// Hrefs are CLEAN (`/`, `/agents`, ...): the docs are the home of
-// docs.livecontext.ai, where the proxy serves these clean paths off the `/docs`
-// routes. On the apex, `/docs/*` 308-redirects to the subdomain, so these clean
-// links only ever render there.
+// Every href is canonical on the public Trinyx site under `/docs`. Keeping
+// the full route here makes the sidebar, pagination and sitemap agree.
 
 export interface DocsNavItem {
   title: string;
@@ -32,58 +30,58 @@ export const DOCS_NAV: DocsNavSection[] = [
     title: 'Get started',
     icon: Sparkles,
     items: [
-      { title: 'Overview', href: '/' },
-      { title: 'Getting started', href: '/getting-started' },
-      { title: 'Core concepts', href: '/concepts' },
+      { title: 'Overview', href: '/docs' },
+      { title: 'Getting started', href: '/docs/getting-started' },
+      { title: 'Core concepts', href: '/docs/concepts' },
     ],
   },
   {
     title: 'Build',
     icon: Workflow,
     items: [
-      { title: 'Chat', href: '/chat' },
-      { title: 'Workflows', href: '/workflows' },
-      { title: 'Node reference', href: '/nodes' },
-      { title: 'Triggers', href: '/triggers' },
-      { title: 'Interfaces & apps', href: '/interfaces' },
-      { title: 'Runs & execution', href: '/runs' },
+      { title: 'Chat', href: '/docs/chat' },
+      { title: 'Workflows', href: '/docs/workflows' },
+      { title: 'Node reference', href: '/docs/nodes' },
+      { title: 'Triggers', href: '/docs/triggers' },
+      { title: 'Interfaces & apps', href: '/docs/interfaces' },
+      { title: 'Runs & execution', href: '/docs/runs' },
     ],
   },
   {
     title: 'AI',
     icon: Bot,
     items: [
-      { title: 'Agents', href: '/agents' },
-      { title: 'Models & providers', href: '/models' },
-      { title: 'Browser Agent', href: '/browser-agent' },
-      { title: 'Skills', href: '/skills' },
+      { title: 'Agents', href: '/docs/agents' },
+      { title: 'Models & providers', href: '/docs/models' },
+      { title: 'Browser Agent', href: '/docs/browser-agent' },
+      { title: 'Skills', href: '/docs/skills' },
     ],
   },
   {
     title: 'Data',
     icon: Database,
     items: [
-      { title: 'Tables & data', href: '/tables' },
-      { title: 'Integrations', href: '/integrations' },
-      { title: 'Files & storage', href: '/files' },
+      { title: 'Tables & data', href: '/docs/tables' },
+      { title: 'Integrations', href: '/docs/integrations' },
+      { title: 'Files & storage', href: '/docs/files' },
     ],
   },
   {
     title: 'Share & host',
     icon: Store,
     items: [
-      { title: 'Marketplace', href: '/marketplace' },
-      { title: 'Self-hosting', href: '/self-host' },
-      { title: 'Organizations & roles', href: '/organizations' },
-      { title: 'Plans & billing', href: '/billing' },
+      { title: 'Marketplace', href: '/docs/marketplace' },
+      { title: 'Self-hosting', href: '/docs/self-host' },
+      { title: 'Organizations & roles', href: '/docs/organizations' },
+      { title: 'Plans & billing', href: '/docs/billing' },
     ],
   },
   {
     title: 'Reference',
     icon: BookOpen,
     items: [
-      { title: 'Expressions & variables', href: '/expressions' },
-      { title: 'REST API & webhooks', href: '/rest-api' },
+      { title: 'Expressions & variables', href: '/docs/expressions' },
+      { title: 'REST API & webhooks', href: '/docs/rest-api' },
     ],
   },
 ];
@@ -120,25 +118,11 @@ export function getAdjacentPages(href: string): { prev: DocsPage | null; next: D
  */
 export function isActiveDocPath(pathname: string | null | undefined, href: string): boolean {
   if (!pathname) return false;
-  if (href === '/') return pathname === '/';
+  if (href === '/docs') return pathname === '/docs';
   return pathname === href || pathname.startsWith(href + '/');
 }
 
-/**
- * Normalize a pathname to the clean docs IA form used by `DOCS_PAGES` hrefs
- * (`/docs/agents` and `/agents` both become `/agents`; `/docs` becomes `/`).
- *
- * Needed because the docs routes live at `/docs/*` but are SERVED at clean
- * paths on the docs subdomain via a middleware rewrite: at build time (SSG)
- * `usePathname()` reports the internal `/docs/...` route, while in the browser
- * it reports the clean URL. Components that render pathname-dependent markup
- * (sidebar active state, prev/next) MUST normalize through this helper or the
- * server HTML and the client render disagree - a React #418 hydration mismatch
- * on every docs page.
- */
+/** Keep pathname handling explicit and stable for the on-site /docs tree. */
 export function cleanDocsPathname(pathname: string | null | undefined): string {
-  if (!pathname) return '/';
-  if (pathname === '/docs') return '/';
-  if (pathname.startsWith('/docs/')) return pathname.slice('/docs'.length);
-  return pathname;
+  return pathname || '/docs';
 }

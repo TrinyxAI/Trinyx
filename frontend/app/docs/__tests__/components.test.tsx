@@ -24,7 +24,7 @@ describe('DocsNav', () => {
   // "No intl context found" (no provider is mounted here) - so a passing render
   // is itself the regression guard for the i18n-free constraint.
   it('renders the sections and links from the IA', () => {
-    nav.path = '/';
+    nav.path = '/docs';
     render(<DocsNav />);
     expect(screen.getByText('Get started')).toBeInTheDocument();
     // AI and Data are separate sections.
@@ -35,14 +35,14 @@ describe('DocsNav', () => {
   });
 
   it('marks the current page active and leaves others inactive', () => {
-    nav.path = '/agents';
+    nav.path = '/docs/agents';
     render(<DocsNav />);
     expect(screen.getByRole('link', { name: 'Agents' })).toHaveAttribute('aria-current', 'page');
     expect(screen.getByRole('link', { name: 'Workflows' })).not.toHaveAttribute('aria-current');
   });
 
   it('renders the pages added in the docs rebuild as real links', () => {
-    nav.path = '/';
+    nav.path = '/docs';
     render(<DocsNav />);
     // The former "Soon" roadmap stubs are now live pages, alongside the new
     // subject pages, so each resolves to a navigable link (not muted stub text).
@@ -53,7 +53,7 @@ describe('DocsNav', () => {
   });
 
   it('filters the visible pages as the user types', () => {
-    nav.path = '/';
+    nav.path = '/docs';
     render(<DocsNav />);
     fireEvent.change(screen.getByRole('searchbox', { name: 'Filter documentation' }), {
       target: { value: 'agent' },

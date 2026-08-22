@@ -7,7 +7,6 @@ import { DocsMobileNav } from './_components/DocsMobileNav';
 import { DocsToc } from './_components/DocsToc';
 import { DocsPrevNext } from './_components/DocsPrevNext';
 import { DocsThemeToggle } from './_components/DocsThemeToggle';
-import { IS_CE } from '@/lib/edition';
 
 // Docs shell. Reuses the public `LandingShell` chrome (header, footer, light-by-
 // default decoupled theme; the toggle below persists a docs-only choice under
@@ -23,17 +22,13 @@ export const metadata: Metadata = {
 };
 
 export default function DocsLayout({ children }: { children: ReactNode }) {
-  // On the cloud the docs render on the docs.* subdomain, so the shared chrome's
-  // links (privacy, about, marketplace, sign-in, ...) must point at the main site
-  // (livecontext.ai). On CE there is no subdomain → relative links (undefined).
-  const siteBaseUrl = IS_CE ? undefined : (process.env.NEXT_PUBLIC_SITE_URL ?? 'https://livecontext.ai');
+  // Documentation shares the public Trinyx origin, so chrome links stay relative.
   return (
     <LandingShell
       extraStyles={docsStyles}
       headerExtra={<DocsThemeToggle />}
       themeStorageKey="docs-theme"
       themeRespectStored
-      siteBaseUrl={siteBaseUrl}
     >
       <div className="docs-layout">
         <aside className="docs-sidebar">

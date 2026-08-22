@@ -62,7 +62,7 @@ export default function NodesPage() {
           There is no separate &ldquo;Workflow&rdquo; trigger tile in the palette; one workflow
           starts another via the <strong>Sub-Workflow</strong> node (see Remote &amp; database
           below), and the child reacts to the parent&apos;s completion the way the{' '}
-          <a href="/triggers">Triggers</a> page describes.
+          <a href="/docs/triggers">Triggers</a> page describes.
         </p>
 
         <h2>Integration / MCP step nodes</h2>
@@ -70,7 +70,7 @@ export default function NodesPage() {
           These call out to connected tools. An <strong>integration step</strong> calls one
           operation of a connected catalog integration, exposed as an <code>mcp:</code> tool - this
           is the node the builder creates when you pick an API action (see{' '}
-          <a href="/integrations">Integrations</a>).
+          <a href="/docs/integrations">Integrations</a>).
         </p>
         <DocsTable
           head={['Node', 'What it does']}
@@ -83,7 +83,7 @@ export default function NodesPage() {
         />
 
         <h2>AI nodes</h2>
-        <p><code>agent:</code> nodes call a model. See <a href="/agents">Agents</a> for models, tools, and budgets.</p>
+        <p><code>agent:</code> nodes call a model. See <a href="/docs/agents">Agents</a> for models, tools, and budgets.</p>
         <DocsTable
           head={['Node', 'What it does', 'Ports']}
           rows={[
@@ -103,7 +103,7 @@ export default function NodesPage() {
         <h2>Control flow</h2>
         <p>
           <code>core:</code> nodes route, repeat, parallelize, and join. Branching ones expose
-          ports; see <a href="/workflows">Workflows</a> for the full branching/parallelism
+          ports; see <a href="/docs/workflows">Workflows</a> for the full branching/parallelism
           semantics.
         </p>
         <DocsTable
@@ -273,7 +273,7 @@ export default function NodesPage() {
         <h2>Table CRUD nodes</h2>
         <p>
           All under Core &rarr; Tables in the palette; they read and write the built-in
-          spreadsheets. See <a href="/tables">Tables &amp; data</a> for the full column and query
+          spreadsheets. See <a href="/docs/tables">Tables &amp; data</a> for the full column and query
           model.
         </p>
         <DocsTable
@@ -295,7 +295,7 @@ export default function NodesPage() {
           expected, but <code>&gt;</code>, <code>&lt;</code>, <code>&gt;=</code>, and{' '}
           <code>&lt;=</code> compare lexicographically, not numerically - a column value of{' '}
           <code>&apos;100&apos;</code> is considered less than <code>&apos;9&apos;</code>. See{' '}
-          <a href="/tables">Tables &amp; data</a> for the workaround.
+          <a href="/docs/tables">Tables &amp; data</a> for the workaround.
         </Callout>
 
         <h2>Interface node</h2>
@@ -306,7 +306,7 @@ export default function NodesPage() {
           ]}
         />
         <p>
-          See <a href="/interfaces">Interfaces &amp; apps</a> for signals, the{' '}
+          See <a href="/docs/interfaces">Interfaces &amp; apps</a> for signals, the{' '}
           <code>{'{{variable|default}}'}</code> templating syntax, and{' '}
           <code>window.__RESOLVED_DATA__</code>.
         </p>
@@ -326,12 +326,12 @@ export default function NodesPage() {
 
         <h2>Go deeper</h2>
         <CardGrid cols={3}>
-          <Card icon={Webhook} title="Triggers" href="/triggers">Entry points in detail.</Card>
-          <Card icon={GitBranch} title="Workflows" href="/workflows">Ports, branching, parallelism.</Card>
-          <Card icon={Bot} title="Agents" href="/agents">Configure the AI nodes.</Card>
-          <Card icon={Table2} title="Tables &amp; data" href="/tables">CRUD and query semantics.</Card>
-          <Card icon={Plug} title="Integrations" href="/integrations">Connect tools and APIs.</Card>
-          <Card icon={LayoutPanelLeft} title="Interfaces" href="/interfaces">Build interactive pages.</Card>
+          <Card icon={Webhook} title="Triggers" href="/docs/triggers">Entry points in detail.</Card>
+          <Card icon={GitBranch} title="Workflows" href="/docs/workflows">Ports, branching, parallelism.</Card>
+          <Card icon={Bot} title="Agents" href="/docs/agents">Configure the AI nodes.</Card>
+          <Card icon={Table2} title="Tables &amp; data" href="/docs/tables">CRUD and query semantics.</Card>
+          <Card icon={Plug} title="Integrations" href="/docs/integrations">Connect tools and APIs.</Card>
+          <Card icon={LayoutPanelLeft} title="Interfaces" href="/docs/interfaces">Build interactive pages.</Card>
         </CardGrid>
       </DocsProse>
     </>

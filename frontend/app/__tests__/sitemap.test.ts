@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { DOCS_PAGES } from '../docs/_nav';
 
-const SITE = 'https://livecontext.ai';
+const SITE = 'https://trinyx.fr';
 
 /** A marketplace listing shaped like the public read path returns it. */
 function listing(overrides: Record<string, unknown> = {}) {
@@ -46,14 +46,13 @@ describe('sitemap - cloud edition', () => {
     const entries = await sitemap();
     const urls = entries.map((e) => e.url);
 
-    // Docs live on the subdomain at clean paths; every IA page is in the sitemap.
-    const DOCS = 'https://docs.livecontext.ai';
+    // Docs stay on the Trinyx origin under /docs; every IA page is included.
     for (const page of DOCS_PAGES) {
-      expect(urls).toContain(`${DOCS}${page.href === '/' ? '' : page.href}`);
+      expect(urls).toContain(`${SITE}${page.href}`);
     }
     // Overview is prioritised above its sub-pages.
-    expect(entries.find((e) => e.url === DOCS)?.priority).toBe(0.6);
-    expect(entries.find((e) => e.url === `${DOCS}/agents`)?.priority).toBe(0.5);
+    expect(entries.find((e) => e.url === `${SITE}/docs`)?.priority).toBe(0.6);
+    expect(entries.find((e) => e.url === `${SITE}/docs/agents`)?.priority).toBe(0.5);
     // The apex landing root is still emitted alongside the docs.
     expect(urls).toContain(SITE);
   });

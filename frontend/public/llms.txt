@@ -1,6 +1,6 @@
 # Trinyx
 
-> Trinyx is an AI automation platform: describe a job in chat and it builds the workflow in front of you, runs it with AI agents that have scoped tool access and hard credit budgets, and ships the result as an app your team or customers can use. It combines a visual workflow builder (60+ block types), 700+ API integrations (14,000+ operations), built-in data tables, a browser-use agent, MCP (Model Context Protocol) support, and a marketplace of forkable automations. Available as a managed cloud (trinyx.fr, free tier) and as a free self-hosted Community Edition (docker compose, code at github.com/livecontext-ai/livecontext-ce).
+> Trinyx is an AI automation platform: describe a job in chat and it builds the workflow in front of you, runs it with AI agents that have scoped tool access and hard credit budgets, and ships the result as an app your team or customers can use. It combines a visual workflow builder (60+ block types), 700+ API integrations (14,000+ operations), built-in data tables, a browser-use agent, MCP (Model Context Protocol) support, and a marketplace of forkable automations. Available as a managed cloud (trinyx.fr, free tier) and as a free self-hosted Community Edition (docker compose, code at github.com/eddinerabii/Trinyx).
 
 Key facts:
 - Build automations by chat: one plain-language message produces a running workflow, editable on a visual canvas.
@@ -12,22 +12,22 @@ Key facts:
 
 ## Docs
 
-- [Documentation home](https://docs.livecontext.ai/): product documentation overview
-- [Getting started](https://docs.livecontext.ai/getting-started): first automation in minutes
-- [Core concepts](https://docs.livecontext.ai/concepts): workflows, agents, interfaces, tables, runs
-- [Workflows](https://docs.livecontext.ai/workflows): the visual builder and how chat builds workflows
-- [Nodes](https://docs.livecontext.ai/nodes): the 60+ building blocks
-- [Triggers](https://docs.livecontext.ai/triggers): webhooks, schedules, chat, forms, table changes
-- [AI agents](https://docs.livecontext.ai/agents): scoped tools, credit budgets, audit
-- [Models](https://docs.livecontext.ai/models): supported AI providers and model configuration
-- [Browser agent](https://docs.livecontext.ai/browser-agent): the agent that operates real web pages
-- [Interfaces](https://docs.livecontext.ai/interfaces): shipping workflows as apps
-- [Tables](https://docs.livecontext.ai/tables): built-in data tables
-- [Integrations](https://docs.livecontext.ai/integrations): the 700+ API catalog
-- [Marketplace](https://docs.livecontext.ai/marketplace): forking and publishing automations
-- [Self-hosting](https://docs.livecontext.ai/self-host): running the free Community Edition
-- [Expressions](https://docs.livecontext.ai/expressions): the template language
-- [REST API](https://docs.livecontext.ai/rest-api): programmatic access
+- [Documentation home](https://trinyx.fr/docs/): product documentation overview
+- [Getting started](https://trinyx.fr/docs/getting-started): first automation in minutes
+- [Core concepts](https://trinyx.fr/docs/concepts): workflows, agents, interfaces, tables, runs
+- [Workflows](https://trinyx.fr/docs/workflows): the visual builder and how chat builds workflows
+- [Nodes](https://trinyx.fr/docs/nodes): the 60+ building blocks
+- [Triggers](https://trinyx.fr/docs/triggers): webhooks, schedules, chat, forms, table changes
+- [AI agents](https://trinyx.fr/docs/agents): scoped tools, credit budgets, audit
+- [Models](https://trinyx.fr/docs/models): supported AI providers and model configuration
+- [Browser agent](https://trinyx.fr/docs/browser-agent): the agent that operates real web pages
+- [Interfaces](https://trinyx.fr/docs/interfaces): shipping workflows as apps
+- [Tables](https://trinyx.fr/docs/tables): built-in data tables
+- [Integrations](https://trinyx.fr/docs/integrations): the 700+ API catalog
+- [Marketplace](https://trinyx.fr/docs/marketplace): forking and publishing automations
+- [Self-hosting](https://trinyx.fr/docs/self-host): running the free Community Edition
+- [Expressions](https://trinyx.fr/docs/expressions): the template language
+- [REST API](https://trinyx.fr/docs/rest-api): programmatic access
 
 ## Compare
 
@@ -40,4 +40,4 @@ Key facts:
 - [Landing page](https://trinyx.fr/): product overview and pricing
 - [Changelog](https://trinyx.fr/changelog): shipped releases with notes
 - [About](https://trinyx.fr/about): company and team
-- [Self-hosted edition on GitHub](https://github.com/livecontext-ai/livecontext-ce): Community Edition source and releases
+- [Self-hosted edition on GitHub](https://github.com/eddinerabii/Trinyx): Community Edition source and releases

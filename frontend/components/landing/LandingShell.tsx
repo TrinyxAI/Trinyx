@@ -28,7 +28,7 @@ import { docsHref } from '@/lib/docs/docsHostRewrite';
 // on <body>. This lets the public site default to a warm light theme for every
 // visitor while the logged-in app keeps following the user's OS/preference. The
 // LIGHT palette is warm/off-white while the DARK palette keeps the original
-// LiveContext warm-neutral surfaces with Trinyx violet accents.
+// legacy warm-neutral surfaces with Trinyx violet accents.
 export const landingChromeStyles = `
   .landing-root {
     /* light palette - warm off-white surfaces with Trinyx accents */
@@ -65,7 +65,7 @@ export const landingChromeStyles = `
   }
 
   .landing-root.dark {
-    /* dark palette - original LiveContext warm neutral + Trinyx violet accents */
+    /* dark palette - legacy warm neutral + Trinyx violet accents */
     --bg-primary: #171614;
     --bg-secondary: #1f1e1b;
     --bg-tertiary: #2a2925;
@@ -123,9 +123,8 @@ export const landingChromeStyles = `
 `;
 
 // Prefix an in-app path with the main-site origin so the shared header/footer
-// link to livecontext.ai when this chrome renders on a sub-host (the docs
-// subdomain). `base` is passed only by the docs layout; elsewhere it is
-// undefined → the path stays relative (unchanged behaviour).
+// optionally prefix an in-app path with the configured public origin.
+// Without a base, links stay relative to the current Trinyx origin.
 function withBase(base: string | undefined, path: string): string {
   return base ? `${base}${path}` : path;
 }
@@ -160,7 +159,7 @@ export function LandingHeader({ extra, siteBaseUrl }: { extra?: React.ReactNode;
           <Link href={withBase(siteBaseUrl, '/changelog')} className="hover:opacity-80 transition-opacity">Changelog</Link>
           <Link href={docsHref(siteBaseUrl)} prefetch={false} className="hover:opacity-80 transition-opacity">Docs</Link>
           <a
-            href="https://github.com/livecontext-ai"
+            href="https://github.com/eddinerabii/Trinyx"
             target="_blank"
             rel="noopener noreferrer"
             aria-label="Self-hosted (GitHub)"
@@ -208,7 +207,7 @@ export function LandingFooter({ siteBaseUrl }: { siteBaseUrl?: string } = {}) {
 
           <div className="mt-5 flex items-center justify-start gap-2">
             <a
-              href="https://www.linkedin.com/company/livecontext/"
+              href="https://www.linkedin.com/in/trinyx-ai-5bb4a5430/"
               target="_blank"
               rel="noopener noreferrer"
               aria-label="LinkedIn"
@@ -218,7 +217,7 @@ export function LandingFooter({ siteBaseUrl }: { siteBaseUrl?: string } = {}) {
               <svg className="w-4 h-4" viewBox="0 0 24 24" fill="currentColor"><path d="M20.447 20.452h-3.554v-5.569c0-1.328-.027-3.037-1.852-3.037-1.853 0-2.136 1.445-2.136 2.939v5.667H9.351V9h3.414v1.561h.046c.477-.9 1.637-1.85 3.37-1.85 3.601 0 4.267 2.37 4.267 5.455v6.286zM5.337 7.433a2.062 2.062 0 0 1-2.063-2.065 2.064 2.064 0 1 1 2.063 2.065zm1.782 13.019H3.555V9h3.564v11.452zM22.225 0H1.771C.792 0 0 .774 0 1.729v20.542C0 23.227.792 24 1.771 24h20.451C23.2 24 24 23.227 24 22.271V1.729C24 .774 23.2 0 22.222 0h.003z" /></svg>
             </a>
             <a
-              href="https://x.com/livecontextai"
+              href="https://x.com/Trinyxai"
               target="_blank"
               rel="noopener noreferrer"
               aria-label="X"
@@ -228,7 +227,7 @@ export function LandingFooter({ siteBaseUrl }: { siteBaseUrl?: string } = {}) {
               <svg className="w-4 h-4" viewBox="0 0 24 24" fill="currentColor"><path d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-5.214-6.817L4.99 21.75H1.68l7.73-8.835L1.254 2.25H8.08l4.713 6.231zm-1.161 17.52h1.833L7.084 4.126H5.117z" /></svg>
             </a>
             <a
-              href="https://www.instagram.com/livecontext.ai/"
+              href="https://www.instagram.com/trinyx.ai/"
               target="_blank"
               rel="noopener noreferrer"
               aria-label="Instagram"
@@ -238,7 +237,7 @@ export function LandingFooter({ siteBaseUrl }: { siteBaseUrl?: string } = {}) {
               <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect width="20" height="20" x="2" y="2" rx="5" ry="5" /><path d="M16 11.37A4 4 0 1 1 12.63 8 4 4 0 0 1 16 11.37z" /><line x1="17.5" x2="17.51" y1="6.5" y2="6.5" /></svg>
             </a>
             <a
-              href="https://github.com/livecontext-ai"
+              href="https://github.com/eddinerabii/Trinyx"
               target="_blank"
               rel="noopener noreferrer"
               aria-label="GitHub"
@@ -248,7 +247,7 @@ export function LandingFooter({ siteBaseUrl }: { siteBaseUrl?: string } = {}) {
               <GithubMark className="w-4 h-4" />
             </a>
             <a
-              href="https://www.tiktok.com/@livecontextai"
+              href="https://www.tiktok.com/@trinyx.ai"
               target="_blank"
               rel="noopener noreferrer"
               aria-label="TikTok"
@@ -258,7 +257,7 @@ export function LandingFooter({ siteBaseUrl }: { siteBaseUrl?: string } = {}) {
               <svg className="w-4 h-4" viewBox="0 0 24 24" fill="currentColor"><path d="M19.59 6.69a4.83 4.83 0 0 1-3.77-4.25V2h-3.45v13.67a2.89 2.89 0 0 1-2.88 2.5 2.89 2.89 0 0 1-2.89-2.89 2.89 2.89 0 0 1 2.89-2.89c.28 0 .54.04.79.1V9.01a6.27 6.27 0 0 0-.79-.05 6.34 6.34 0 0 0-6.34 6.34 6.34 6.34 0 0 0 6.34 6.34 6.34 6.34 0 0 0 6.34-6.34V8.75a8.18 8.18 0 0 0 4.76 1.52V6.84a4.84 4.84 0 0 1-1-.15z" /></svg>
             </a>
             <a
-              href="https://discord.gg/5gTuUwhkJ"
+              href="https://discord.gg/EykNSkEvM6"
               target="_blank"
               rel="noopener noreferrer"
               aria-label="Discord"
@@ -303,7 +302,7 @@ export function LandingFooter({ siteBaseUrl }: { siteBaseUrl?: string } = {}) {
             <li><Link href={withBase(siteBaseUrl, '/changelog')}>Changelog</Link></li>
             <li><Link href={docsHref(siteBaseUrl)} prefetch={false}>Docs</Link></li>
             <li>
-              <a href="https://github.com/livecontext-ai" target="_blank" rel="noopener noreferrer">
+              <a href="https://github.com/eddinerabii/Trinyx" target="_blank" rel="noopener noreferrer">
                 Self-hosted
               </a>
             </li>

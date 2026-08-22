@@ -45,19 +45,19 @@ export default function DocsOverviewPage() {
         </p>
 
         <CardGrid cols={2}>
-          <Card icon={MessageSquare} title="Chat" href="/chat">
+          <Card icon={MessageSquare} title="Chat" href="/docs/chat">
             Describe what you want done. The assistant builds and edits the workflow for you, runs it, and
             shows you the results, you iterate by talking to it.
           </Card>
-          <Card icon={Workflow} title="Workflow" href="/workflows">
+          <Card icon={Workflow} title="Workflow" href="/docs/workflows">
             The same automation, drawn. Branch, loop, fan out in parallel, call agents and tools, a
             readable graph you can grow from five steps to fifty.
           </Card>
-          <Card icon={LayoutPanelLeft} title="App / Interface" href="/interfaces">
+          <Card icon={LayoutPanelLeft} title="App / Interface" href="/docs/interfaces">
             Wrap the workflow in a real web page: search, forms, cards, buttons. Share the link with your
             team or customers, or let an agent open it and click on its own.
           </Card>
-          <Card icon={Bot} title="Agent" href="/agents">
+          <Card icon={Bot} title="Agent" href="/docs/agents">
             Always-on workers, one per job. Each gets its own model, a scoped set of tools, a credit
             budget it cannot exceed, and a full audit trail.
           </Card>
@@ -89,8 +89,8 @@ export default function DocsOverviewPage() {
           ]}
         />
         <p>
-          <a href="/concepts">Core concepts</a> covers the full mental model (runs, edges, ports, signals,
-          credits); <a href="/nodes">Node reference</a> is the catalog of every node type.
+          <a href="/docs/concepts">Core concepts</a> covers the full mental model (runs, edges, ports, signals,
+          credits); <a href="/docs/nodes">Node reference</a> is the catalog of every node type.
         </p>
 
         <h2>How a build flows</h2>
@@ -115,13 +115,13 @@ export default function DocsOverviewPage() {
 
         <h2>Start here</h2>
         <CardGrid cols={3}>
-          <Card icon={Rocket} title="Getting started" href="/getting-started">
+          <Card icon={Rocket} title="Getting started" href="/docs/getting-started">
             Build and run your first workflow from a single chat message.
           </Card>
-          <Card icon={BookOpen} title="Core concepts" href="/concepts">
+          <Card icon={BookOpen} title="Core concepts" href="/docs/concepts">
             The mental model: workflows, runs, nodes, triggers, agents, interfaces, tables, credits.
           </Card>
-          <Card icon={Boxes} title="Node reference" href="/nodes">
+          <Card icon={Boxes} title="Node reference" href="/docs/nodes">
             The catalog of building blocks, triggers, control flow, AI, data, integrations.
           </Card>
         </CardGrid>
@@ -148,7 +148,7 @@ export default function DocsOverviewPage() {
           Community Edition bundles every backend service into a single process plus the web app. It
           needs a PostgreSQL database (all your data), Redis (coordination and caching), and
           S3-compatible object storage such as MinIO for files. See{' '}
-          <a href="/self-host">Self-hosting</a> for how to run it, including the{' '}
+          <a href="/docs/self-host">Self-hosting</a> for how to run it, including the{' '}
           <a href={SELF_HOSTED_GITHUB_URL} target="_blank" rel="noopener noreferrer">
             open-source repository
           </a>
@@ -178,10 +178,10 @@ export default function DocsOverviewPage() {
           link to it to browse and acquire, or keep its own local marketplace.
         </p>
         <CardGrid cols={2}>
-          <Card icon={Store} title="Marketplace" href="/marketplace">
+          <Card icon={Store} title="Marketplace" href="/docs/marketplace">
             Fork automations others built, the whole stack comes with it, and publish your own.
           </Card>
-          <Card icon={Server} title="Self-hosting" href="/self-host">
+          <Card icon={Server} title="Self-hosting" href="/docs/self-host">
             Run the Community Edition yourself, and optionally link it to a cloud account.
           </Card>
         </CardGrid>
@@ -201,7 +201,7 @@ export default function DocsOverviewPage() {
         />
 
         <Callout variant="info">
-          New here? Read <a href="/concepts">Core concepts</a> first, it defines the handful of terms
+          New here? Read <a href="/docs/concepts">Core concepts</a> first, it defines the handful of terms
           (run, node, trigger, agent, interface, credit) used throughout these guides.
         </Callout>
       </DocsProse>

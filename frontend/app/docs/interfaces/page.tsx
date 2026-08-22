@@ -223,7 +223,7 @@ export default function InterfacesPage() {
             Use <code>navigate</code> so pages share the same run state without advancing the workflow.
           </Step>
           <Step n={3} title="Carousel over a Split">
-            Put an interface right after a <a href="/workflows">Split</a> node and it runs once per
+            Put an interface right after a <a href="/docs/workflows">Split</a> node and it runs once per
             item, each item gets its own signal, and the page renders as a paginated carousel. If the
             interface blocks, every item&apos;s signal must resolve before the run advances past it.
           </Step>
@@ -349,7 +349,7 @@ export default function InterfacesPage() {
           call, up to ten patches per call, all-or-nothing), and delete.
         </p>
         <p>
-          Publish an interface to the <a href="/marketplace">marketplace</a> with a title and a
+          Publish an interface to the <a href="/docs/marketplace">marketplace</a> with a title and a
           visibility of private (default, not listed), unlisted (reachable by link, not listed), or
           public (goes through platform review before appearing). An interface is its own landing
           page, there is no separate listing page to create. You can charge credits per use, or leave
@@ -359,9 +359,9 @@ export default function InterfacesPage() {
 
         <h2>Where to go next</h2>
         <CardGrid cols={3}>
-          <Card icon={Workflow} title="Workflows" href="/workflows">Split, signals, and how a run pauses.</Card>
-          <Card icon={Table2} title="Tables &amp; data" href="/tables">Store what your app collects.</Card>
-          <Card icon={Store} title="Marketplace" href="/marketplace">Publish your app for others to fork.</Card>
+          <Card icon={Workflow} title="Workflows" href="/docs/workflows">Split, signals, and how a run pauses.</Card>
+          <Card icon={Table2} title="Tables &amp; data" href="/docs/tables">Store what your app collects.</Card>
+          <Card icon={Store} title="Marketplace" href="/docs/marketplace">Publish your app for others to fork.</Card>
         </CardGrid>
       </DocsProse>
     </>

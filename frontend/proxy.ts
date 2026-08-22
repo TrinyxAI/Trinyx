@@ -3,7 +3,6 @@ import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
 import { routing } from './i18n/routing';
 import { IS_CE } from './lib/edition';
-import { resolveDocsRoute } from './lib/docs/docsHostRewrite';
 import { isJwtShapedToken } from './lib/utils/jwtShape';
 
 const intlMiddleware = createMiddleware(routing);
@@ -153,22 +152,6 @@ function routeRequest(request: NextRequest) {
 
   if (pathname.startsWith('/app/public/')) {
     return NextResponse.next();
-  }
-
-  // Documentation subdomain. The docs are the home of docs.livecontext.ai (clean
-  // paths), backed by the /docs routes. API / _next / asset paths were handled
-  // above, and this is a no-op for every non-docs host except the apex /docs/*
-  // redirect. See resolveDocsRoute for the full mapping.
-  const docsRoute = resolveDocsRoute(request.headers.get('host'), pathname);
-  if (docsRoute) {
-    if (docsRoute.kind === 'redirect') {
-      const dest = new URL(docsRoute.url, request.url);
-      dest.search = request.nextUrl.search;
-      return NextResponse.redirect(dest, 308);
-    }
-    const docsUrl = request.nextUrl.clone();
-    docsUrl.pathname = docsRoute.pathname;
-    return NextResponse.rewrite(docsUrl);
   }
 
   const locale = getPathLocale(pathname);

@@ -172,7 +172,7 @@ export default function SelfHostPage() {
           ]}
         />
         <p>
-          See <a href="/models">Models &amp; providers</a> for the full picture: reasoning effort,
+          See <a href="/docs/models">Models &amp; providers</a> for the full picture: reasoning effort,
           the admin model catalog, and model categories all work identically on CE once a provider is
           available.
         </p>
@@ -336,7 +336,7 @@ docker compose up -d`}
         </p>
         <CodeBlock language="bash">
 {`git clone ${SELF_HOSTED_GITHUB_URL}
-cd livecontext-ce
+cd Trinyx
 docker compose up -d
 # open http://localhost:3000`}
         </CodeBlock>
@@ -384,19 +384,19 @@ docker compose up -d
 
         <h2>Where to go next</h2>
         <CardGrid cols={3}>
-          <Card icon={KeyRound} title="Models & providers" href="/models">
+          <Card icon={KeyRound} title="Models & providers" href="/docs/models">
             Bring-your-own-key providers, the CLI bridge, and the admin model catalog in full.
           </Card>
-          <Card icon={Store} title="Marketplace" href="/marketplace">
+          <Card icon={Store} title="Marketplace" href="/docs/marketplace">
             What linking to cloud unlocks: browsing, acquiring, and publishing.
           </Card>
-          <Card icon={Workflow} title="Workflows" href="/workflows">
+          <Card icon={Workflow} title="Workflows" href="/docs/workflows">
             Everything you build works the same on a self-hosted install.
           </Card>
-          <Card icon={RefreshCw} title="Integrations" href="/integrations">
+          <Card icon={RefreshCw} title="Integrations" href="/docs/integrations">
             The catalog of third-party APIs kept fresh by bundle sync.
           </Card>
-          <Card icon={Server} title="Getting started" href="/getting-started">
+          <Card icon={Server} title="Getting started" href="/docs/getting-started">
             The broader tour of building your first agent or workflow.
           </Card>
           <Card icon={Github} title="Get the code" href={SELF_HOSTED_GITHUB_URL}>

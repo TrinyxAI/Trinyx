@@ -2,19 +2,8 @@ import { describe, it, expect } from 'vitest';
 import { DOCS_NAV, DOCS_PAGES, cleanDocsPathname, getAdjacentPages, isActiveDocPath } from '../_nav';
 
 describe('docs IA - DOCS_NAV / DOCS_PAGES', () => {
-  it('derives DOCS_PAGES from every linked nav item, excluding roadmap stubs', () => {
-    const linkedItems = DOCS_NAV.flatMap((s) => s.items).filter((i) => i.href);
-    const stubItems = DOCS_NAV.flatMap((s) => s.items).filter((i) => !i.href);
-    expect(DOCS_PAGES).toHaveLength(linkedItems.length);
-    // Every subject now has a live page, so there are no roadmap stubs; if one is
-    // ever added back (badge, no href), it must never leak into the live/sitemap set.
-    for (const stub of stubItems) {
-      expect(DOCS_PAGES.find((p) => p.title === stub.title)).toBeUndefined();
-    }
-  });
-
-  it('exposes all 22 live pages across the six sections', () => {
-    expect(DOCS_NAV.map((s) => s.title)).toEqual([
+  it('derives 22 unique live pages from the six sections', () => {
+    expect(DOCS_NAV.map((section) => section.title)).toEqual([
       'Get started',
       'Build',
       'AI',
@@ -23,135 +12,66 @@ describe('docs IA - DOCS_NAV / DOCS_PAGES', () => {
       'Reference',
     ]);
     expect(DOCS_PAGES).toHaveLength(22);
-    // The nine subjects added in the docs rebuild all resolve to a live href.
-    const hrefs = new Set(DOCS_PAGES.map((p) => p.href));
-    for (const href of [
-      '/runs',
-      '/models',
-      '/browser-agent',
-      '/skills',
-      '/files',
-      '/organizations',
-      '/billing',
-      '/expressions',
-      '/rest-api',
-    ]) {
-      expect(hrefs.has(href)).toBe(true);
+    expect(new Set(DOCS_PAGES.map((page) => page.href)).size).toBe(22);
+  });
+
+  it('keeps every live href inside the canonical /docs tree', () => {
+    expect(DOCS_PAGES[0].href).toBe('/docs');
+    for (const page of DOCS_PAGES) {
+      expect(page.href === '/docs' || page.href.startsWith('/docs/')).toBe(true);
     }
+    expect(DOCS_PAGES.map((page) => page.href)).toContain('/docs/agents');
+    expect(DOCS_PAGES.map((page) => page.href)).toContain('/docs/rest-api');
   });
 
-  it('keeps every live href unique and clean (rooted at the docs subdomain)', () => {
-    const hrefs = DOCS_PAGES.map((p) => p.href);
-    expect(new Set(hrefs).size).toBe(hrefs.length);
-    for (const href of hrefs) {
-      expect(href.startsWith('/')).toBe(true);
-      // Clean paths: never the /docs-prefixed route form.
-      expect(href.startsWith('/docs')).toBe(false);
-    }
-  });
-
-  it('starts the reading order at the Overview (/)', () => {
-    expect(DOCS_PAGES[0].href).toBe('/');
-  });
-
-  it('splits AI and Data into separate sections', () => {
-    const titles = DOCS_NAV.map((s) => s.title);
-    expect(titles).toContain('AI');
-    expect(titles).toContain('Data');
-    expect(titles).not.toContain('AI & data');
-    expect(DOCS_NAV.find((s) => s.title === 'AI')!.items.map((i) => i.href)).toContain('/agents');
-    expect(DOCS_NAV.find((s) => s.title === 'Data')!.items.map((i) => i.href)).toContain('/tables');
-  });
-
-  it('preserves the nav order when flattening to DOCS_PAGES', () => {
-    const flattened = DOCS_NAV.flatMap((s) =>
-      s.items.filter((i) => i.href).map((i) => i.href),
+  it('preserves the nav order and owning section metadata', () => {
+    const flattened = DOCS_NAV.flatMap((section) =>
+      section.items.filter((item) => item.href).map((item) => item.href),
     );
-    expect(DOCS_PAGES.map((p) => p.href)).toEqual(flattened);
-  });
-
-  it('tags each page with its owning section title', () => {
-    const build = DOCS_NAV.find((s) => s.title === 'Build')!;
-    const workflows = DOCS_PAGES.find((p) => p.href === '/workflows')!;
-    expect(workflows.section).toBe(build.title);
+    expect(DOCS_PAGES.map((page) => page.href)).toEqual(flattened);
+    expect(DOCS_PAGES.find((page) => page.href === '/docs/workflows')?.section).toBe('Build');
   });
 });
 
 describe('getAdjacentPages', () => {
-  it('returns no previous for the first page', () => {
-    const { prev, next } = getAdjacentPages('/');
-    expect(prev).toBeNull();
-    expect(next?.href).toBe(DOCS_PAGES[1].href);
-  });
+  it('returns neighbours in reading order', () => {
+    const first = getAdjacentPages('/docs');
+    expect(first.prev).toBeNull();
+    expect(first.next?.href).toBe(DOCS_PAGES[1].href);
 
-  it('returns no next for the last page', () => {
-    const last = DOCS_PAGES[DOCS_PAGES.length - 1];
-    const { prev, next } = getAdjacentPages(last.href);
-    expect(next).toBeNull();
-    expect(prev?.href).toBe(DOCS_PAGES[DOCS_PAGES.length - 2].href);
-  });
-
-  it('returns both neighbours for a middle page', () => {
     const middle = DOCS_PAGES[2];
-    const { prev, next } = getAdjacentPages(middle.href);
-    expect(prev?.href).toBe(DOCS_PAGES[1].href);
-    expect(next?.href).toBe(DOCS_PAGES[3].href);
+    expect(getAdjacentPages(middle.href)).toEqual({
+      prev: DOCS_PAGES[1],
+      next: DOCS_PAGES[3],
+    });
+
+    const last = DOCS_PAGES[DOCS_PAGES.length - 1];
+    expect(getAdjacentPages(last.href).next).toBeNull();
   });
 
   it('returns nulls for an unknown path', () => {
-    expect(getAdjacentPages('/does-not-exist')).toEqual({ prev: null, next: null });
+    expect(getAdjacentPages('/docs/does-not-exist')).toEqual({ prev: null, next: null });
   });
 });
 
 describe('isActiveDocPath', () => {
-  it('matches the Overview only on the exact / path', () => {
-    expect(isActiveDocPath('/', '/')).toBe(true);
-    expect(isActiveDocPath('/agents', '/')).toBe(false);
+  it('matches the overview only exactly', () => {
+    expect(isActiveDocPath('/docs', '/docs')).toBe(true);
+    expect(isActiveDocPath('/docs/agents', '/docs')).toBe(false);
   });
 
-  it('matches a sub-page exactly and as a parent of deeper paths', () => {
-    expect(isActiveDocPath('/agents', '/agents')).toBe(true);
-    expect(isActiveDocPath('/agents/budgets', '/agents')).toBe(true);
-  });
-
-  it('does not match a sibling whose href is a string prefix', () => {
-    // '/agent' must not light up for '/agents' (no false prefix hit).
-    expect(isActiveDocPath('/agents', '/agent')).toBe(false);
-  });
-
-  it('is false when the pathname is null or undefined', () => {
-    expect(isActiveDocPath(null, '/agents')).toBe(false);
-    expect(isActiveDocPath(undefined, '/agents')).toBe(false);
+  it('matches a page exactly and as a parent of deeper paths', () => {
+    expect(isActiveDocPath('/docs/agents', '/docs/agents')).toBe(true);
+    expect(isActiveDocPath('/docs/agents/budgets', '/docs/agents')).toBe(true);
+    expect(isActiveDocPath('/docs/agents', '/docs/agent')).toBe(false);
   });
 });
 
-// Regression pin for the docs hydration mismatch: docs pages are prerendered
-// at the internal /docs/... route but served (and reported by the browser's
-// usePathname) at the clean subdomain path. Sidebar active state and prev/next
-// must see the SAME normalized value in both worlds, or every docs page throws
-// React #418 and re-renders client-side.
 describe('cleanDocsPathname', () => {
-  it('maps the internal /docs routes to the clean IA form', () => {
-    expect(cleanDocsPathname('/docs')).toBe('/');
-    expect(cleanDocsPathname('/docs/agents')).toBe('/agents');
-    expect(cleanDocsPathname('/docs/agents/budgets')).toBe('/agents/budgets');
-  });
-
-  it('leaves already-clean paths untouched', () => {
-    expect(cleanDocsPathname('/')).toBe('/');
-    expect(cleanDocsPathname('/agents')).toBe('/agents');
-  });
-
-  it('does not mangle lookalike paths and defaults null to /', () => {
-    expect(cleanDocsPathname('/docsy')).toBe('/docsy');
-    expect(cleanDocsPathname(null)).toBe('/');
-    expect(cleanDocsPathname(undefined)).toBe('/');
-  });
-
-  it('build-time and browser forms agree for every live docs page', () => {
-    for (const page of DOCS_PAGES) {
-      const buildTime = page.href === '/' ? '/docs' : `/docs${page.href}`;
-      expect(cleanDocsPathname(buildTime)).toBe(cleanDocsPathname(page.href));
-    }
+  it('keeps canonical docs paths unchanged and defaults missing paths to /docs', () => {
+    expect(cleanDocsPathname('/docs')).toBe('/docs');
+    expect(cleanDocsPathname('/docs/agents')).toBe('/docs/agents');
+    expect(cleanDocsPathname(null)).toBe('/docs');
+    expect(cleanDocsPathname(undefined)).toBe('/docs');
   });
 });

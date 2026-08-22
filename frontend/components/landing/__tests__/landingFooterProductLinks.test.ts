@@ -6,8 +6,7 @@ import { DOCS_PAGES } from '@/app/docs/_nav';
 // The footer's Product column lists what the product does and sends each entry to
 // the docs page that explains it. Two things can silently break that: a docs page
 // renamed or removed under `app/docs/`, and a stray hard-coded `/docs/...` href
-// that would 404 when the chrome renders ON the docs subdomain (where the clean
-// path is the one that resolves). Both are checked here.
+// that must keep resolving under the canonical on-site /docs tree. Both are checked here.
 //
 // Source-level, like landingFooterSocialLinks.test.ts: the footer renders on public
 // pages that have no intl context, so it is not mounted in a test.
@@ -38,7 +37,7 @@ describe('landing footer Product column', () => {
     });
 
     it(`the ${page} docs page it links to exists in the docs nav`, () => {
-      expect(DOCS_PAGES.map((p) => p.href)).toContain(`/${page}`);
+      expect(DOCS_PAGES.map((p) => p.href)).toContain(`/docs/${page}`);
     });
   }
 
@@ -48,8 +47,7 @@ describe('landing footer Product column', () => {
   });
 
   it('never hard-codes a docs path, so the links work on the docs host too', () => {
-    // A literal href="/docs/..." or href="/workflows" would break on one of the
-    // two hosts; every docs link has to go through the helper.
+    // Every shared-chrome docs link goes through the canonical helper.
     expect(productColumn).not.toMatch(/href="\/docs\//);
     expect(productColumn).not.toMatch(/href="\/(workflows|agents|interfaces|tables|integrations)"/);
   });

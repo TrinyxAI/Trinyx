@@ -90,7 +90,7 @@ export default function ComparePageContent({ comparison }: { comparison: Compari
           </div>
           <div className="rounded-2xl p-6" style={{ background: 'var(--landing-highlight-row)', border: '1px solid var(--border-color)' }}>
             <h2 className="text-sm font-semibold" style={{ color: 'var(--text-primary)' }}>When Trinyx fits</h2>
-            <p className="mt-2 text-sm leading-relaxed" style={{ color: 'var(--text-secondary)' }}>{comparison.verdictLivecontext}</p>
+            <p className="mt-2 text-sm leading-relaxed" style={{ color: 'var(--text-secondary)' }}>{comparison.verdictTrinyx}</p>
           </div>
         </section>
 
@@ -116,7 +116,7 @@ export default function ComparePageContent({ comparison }: { comparison: Compari
                   <tr key={row.feature} style={{ borderBottom: idx < comparison.rows.length - 1 ? '1px solid var(--border-color)' : 'none' }}>
                     <td className="p-4 align-top font-semibold" style={{ color: 'var(--text-primary)' }}>{row.feature}</td>
                     <td className="p-4 align-top" style={{ background: 'var(--landing-highlight-row)' }}>
-                      <CellContent cell={row.livecontext} />
+                      <CellContent cell={row.trinyx} />
                     </td>
                     <td className="p-4 align-top">
                       <CellContent cell={row.competitor} />
@@ -223,7 +223,7 @@ export default function ComparePageContent({ comparison }: { comparison: Compari
               </span>
             ))}
             {' · '}
-            <a href="https://docs.livecontext.ai" className="underline underline-offset-2 hover:opacity-80">Documentation</a>
+            <a href="/docs" className="underline underline-offset-2 hover:opacity-80">Documentation</a>
           </p>
         </section>
       </article>

@@ -53,7 +53,7 @@ export default function ExpressionsPage() {
         />
         <Callout variant="info">
           These seven prefixes are the single source of truth used to build every node key. See the{' '}
-          <a href="/nodes">Node reference</a> for what each node type actually puts under <code>.output.</code>.
+          <a href="/docs/nodes">Node reference</a> for what each node type actually puts under <code>.output.</code>.
         </Callout>
 
         <h2>Label normalization</h2>
@@ -130,7 +130,7 @@ export default function ExpressionsPage() {
           A CRUD <strong>Find</strong> operation spawns per matched row the same way: the current row is{' '}
           <code>{'{{table:find.output.current_item.field}}'}</code>, its index is{' '}
           <code>{'{{table:find.output.current_index}}'}</code>. See{' '}
-          <a href="/tables">Tables &amp; data</a> for the CRUD node set.
+          <a href="/docs/tables">Tables &amp; data</a> for the CRUD node set.
         </p>
         <Callout variant="info">
           Legacy short forms without <code>.output.</code>, such as <code>{'{{core:label.item}}'}</code> or{' '}
@@ -333,7 +333,7 @@ export default function ExpressionsPage() {
           A file reference resolved into an interface template (a value shaped like{' '}
           <code>{'{path, mimeType}'}</code>) is rendered as just its storage path, so{' '}
           <code>{'<img src="{{photo}}">'}</code> gets a usable URL fragment directly. See{' '}
-          <a href="/interfaces">Interfaces &amp; apps</a> for the full templating model.
+          <a href="/docs/interfaces">Interfaces &amp; apps</a> for the full templating model.
         </p>
 
         <h2>Gotchas</h2>
@@ -356,7 +356,7 @@ export default function ExpressionsPage() {
           <code>{'{{ }}'}</code> expression, <code>{'{{amount > 9}}'}</code> compares numerically as you&apos;d
           expect. This is a different rule from a Table CRUD <code>where</code> filter, which compares
           lexicographically as text, don&apos;t conflate the two. See{' '}
-          <a href="/tables">Tables &amp; data</a> for CRUD filter semantics.
+          <a href="/docs/tables">Tables &amp; data</a> for CRUD filter semantics.
         </p>
 
         <h2>The in-builder expression editor</h2>
@@ -371,9 +371,9 @@ export default function ExpressionsPage() {
 
         <h2>Where to go next</h2>
         <CardGrid cols={3}>
-          <Card icon={Workflow} title="Workflows" href="/workflows">Where node labels and outputs come from.</Card>
-          <Card icon={Database} title="Tables & data" href="/tables">CRUD nodes, Find item aliases, and where filters differ from expressions.</Card>
-          <Card icon={LayoutPanelLeft} title="Interfaces & apps" href="/interfaces">The pipe-default template model used inside a page.</Card>
+          <Card icon={Workflow} title="Workflows" href="/docs/workflows">Where node labels and outputs come from.</Card>
+          <Card icon={Database} title="Tables & data" href="/docs/tables">CRUD nodes, Find item aliases, and where filters differ from expressions.</Card>
+          <Card icon={LayoutPanelLeft} title="Interfaces & apps" href="/docs/interfaces">The pipe-default template model used inside a page.</Card>
         </CardGrid>
       </DocsProse>
     </>

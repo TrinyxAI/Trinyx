@@ -311,7 +311,7 @@ export default function AgentsPage() {
           <code>skill(action=&apos;assign&apos;)</code> instead to add without replacing. Skill
           access itself follows the same read/write convention as other resources:{' '}
           <code>write</code> (default) or <code>read</code> (get/list only). See{' '}
-          <a href="/skills">Skills</a>.
+          <a href="/docs/skills">Skills</a>.
         </p>
 
         <h2>Built-in tool modules</h2>
@@ -367,7 +367,7 @@ export default function AgentsPage() {
             ['Classify', 'Classifies input into one predefined category using AI.', <><code key="c">selected_category</code> (alias category), <code key="c2">selected_category_index</code> (drives port/branch routing), <code key="c3">confidence</code>, <code key="c4">reasoning</code>, <code key="c5">tokens_used</code></>],
           ]}
         />
-        <p>See the <a href="/nodes">Node reference</a> for the full parameter and output list of both.</p>
+        <p>See the <a href="/docs/nodes">Node reference</a> for the full parameter and output list of both.</p>
 
         <h2>Metrics &amp; audit</h2>
         <p>
@@ -379,11 +379,11 @@ export default function AgentsPage() {
 
         <h2>Where to go next</h2>
         <CardGrid cols={3}>
-          <Card icon={Workflow} title="Workflows" href="/workflows">How agent nodes sit in the graph.</Card>
-          <Card icon={ShieldCheck} title="Node reference" href="/nodes">Guardrail, Classify, and the rest.</Card>
-          <Card icon={LayoutPanelLeft} title="Interfaces" href="/interfaces">Let agents drive or hand off to a UI.</Card>
-          <Card icon={Table2} title="Tables & data" href="/tables">Give an agent a table as scoped memory.</Card>
-          <Card icon={Plug} title="Integrations" href="/integrations">The catalog tools an agent can call.</Card>
+          <Card icon={Workflow} title="Workflows" href="/docs/workflows">How agent nodes sit in the graph.</Card>
+          <Card icon={ShieldCheck} title="Node reference" href="/docs/nodes">Guardrail, Classify, and the rest.</Card>
+          <Card icon={LayoutPanelLeft} title="Interfaces" href="/docs/interfaces">Let agents drive or hand off to a UI.</Card>
+          <Card icon={Table2} title="Tables & data" href="/docs/tables">Give an agent a table as scoped memory.</Card>
+          <Card icon={Plug} title="Integrations" href="/docs/integrations">The catalog tools an agent can call.</Card>
         </CardGrid>
       </DocsProse>
     </>

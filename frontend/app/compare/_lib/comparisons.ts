@@ -19,7 +19,7 @@ export interface CompareCell {
 
 export interface CompareRow {
   feature: string;
-  livecontext: CompareCell;
+  trinyx: CompareCell;
   competitor: CompareCell;
 }
 
@@ -41,7 +41,7 @@ export interface Comparison {
   h1: string;
   intro: string;
   verdictCompetitor: string;
-  verdictLivecontext: string;
+  verdictTrinyx: string;
   rows: CompareRow[];
   reasons: SwitchReason[];
   honestTitle: string;
@@ -57,7 +57,7 @@ const INTEGRATIONS_ANSWER =
   'Trinyx ships 700+ built-in API integrations with more than 17,000 ready-to-call operations, plus a generic HTTP request node, a code node, and custom API definitions for anything not in the catalog.';
 
 const SELF_HOST_ANSWER =
-  'Yes. The Trinyx Community Edition is free and self-hosted: one docker compose up on your own server, with the code public on GitHub (livecontext-ai/livecontext-ce). The cloud edition at trinyx.fr adds managed hosting, SAML SSO, workspaces and platform credits.';
+  'Yes. The Trinyx Community Edition is free and self-hosted: one docker compose up on your own server, with the code public on GitHub (eddinerabii/Trinyx). The cloud edition at trinyx.fr adds managed hosting, SAML SSO, workspaces and platform credits.';
 
 export const COMPARISONS: Comparison[] = [
   {
@@ -71,52 +71,52 @@ export const COMPARISONS: Comparison[] = [
       'n8n is a solid workflow engine for technical teams who like wiring nodes by hand. Trinyx starts one step earlier: you describe the job in chat, the workflow assembles itself in front of you, AI agents run it under scoped access and hard credit budgets, and the result ships as an app your team can open. Cloud or self-hosted, both with a free option.',
     verdictCompetitor:
       'Choose n8n if you want a mature, code-friendly workflow engine, you are comfortable wiring nodes and writing JavaScript by hand, and AI is an add-on rather than the core of your automations.',
-    verdictLivecontext:
+    verdictTrinyx:
       'Choose Trinyx if you want to describe a job in plain language and get a running automation, put AI agents in production with scoped tools and credit budgets they cannot exceed, and ship the result as an app for your team or customers.',
     rows: [
       {
         feature: 'Build automations by chat',
-        livecontext: { state: 'yes', note: 'Describe the job; the workflow builds itself in front of you' },
+        trinyx: { state: 'yes', note: 'Describe the job; the workflow builds itself in front of you' },
         competitor: { state: 'partial', note: 'AI assistant helps, but node wiring stays manual' },
       },
       {
         feature: 'Visual workflow builder',
-        livecontext: { state: 'yes', note: '60+ blocks: branches, loops, parallel fan-out, code, HTTP, files' },
+        trinyx: { state: 'yes', note: '60+ blocks: branches, loops, parallel fan-out, code, HTTP, files' },
         competitor: { state: 'yes', note: 'Mature node editor aimed at developers' },
       },
       {
         feature: 'AI agents in production',
-        livecontext: { state: 'yes', note: 'Per-agent tool scoping, credit budget and full audit trail' },
+        trinyx: { state: 'yes', note: 'Per-agent tool scoping, credit budget and full audit trail' },
         competitor: { state: 'partial', note: 'AI nodes exist; guardrails and spend limits are do-it-yourself' },
       },
       {
         feature: 'Ship workflows as apps',
-        livecontext: { state: 'yes', note: 'Search pages, dashboards and approval screens on top of the workflow' },
+        trinyx: { state: 'yes', note: 'Search pages, dashboards and approval screens on top of the workflow' },
         competitor: { state: 'no', note: 'Forms only; a separate front-end is needed' },
       },
       {
         feature: 'Built-in data tables',
-        livecontext: { state: 'yes', note: 'Spreadsheet-style tables your automations create, find and update' },
+        trinyx: { state: 'yes', note: 'Spreadsheet-style tables your automations create, find and update' },
         competitor: { state: 'no', note: 'Bring your own database' },
       },
       {
         feature: 'Browser-use agent',
-        livecontext: { state: 'yes', note: 'An agent that opens real web pages, clicks and extracts' },
+        trinyx: { state: 'yes', note: 'An agent that opens real web pages, clicks and extracts' },
         competitor: { state: 'no', note: 'Not built in' },
       },
       {
         feature: 'MCP (Model Context Protocol)',
-        livecontext: { state: 'yes', note: 'Use Trinyx as an MCP server from Claude, Cursor and other clients' },
+        trinyx: { state: 'yes', note: 'Use Trinyx as an MCP server from Claude, Cursor and other clients' },
         competitor: { state: 'partial', note: 'Community and beta options' },
       },
       {
         feature: 'Self-hosting',
-        livecontext: { state: 'yes', note: 'Free Community Edition, one docker compose up' },
+        trinyx: { state: 'yes', note: 'Free Community Edition, one docker compose up' },
         competitor: { state: 'yes', note: 'Fair-code license, self-hosting supported' },
       },
       {
         feature: 'Marketplace',
-        livecontext: { state: 'yes', note: 'Fork the whole stack: workflow, agents, pages and tables together' },
+        trinyx: { state: 'yes', note: 'Fork the whole stack: workflow, agents, pages and tables together' },
         competitor: { state: 'partial', note: 'Workflow templates' },
       },
     ],
@@ -200,52 +200,52 @@ export const COMPARISONS: Comparison[] = [
       'Zapier made connecting two SaaS tools easy. But once you need branching logic, AI agents, a screen for your team, or predictable pricing at volume, stitching zaps and add-ons together gets expensive and hard to read. Trinyx builds the whole automation from one chat message, runs it with budgeted AI agents, and ships it as an app, in one product you can also self-host.',
     verdictCompetitor:
       'Choose Zapier if you mostly need simple trigger-action links between two SaaS tools, you want the largest possible connector catalog, and per-task pricing fits your volume.',
-    verdictLivecontext:
+    verdictTrinyx:
       'Choose Trinyx if you want multi-step automations with real logic built from a chat message, AI agents with scoped tools and hard credit budgets, apps and data tables included rather than sold as add-ons, and the option to self-host.',
     rows: [
       {
         feature: 'Build automations by chat',
-        livecontext: { state: 'yes', note: 'Describe the job; the workflow builds itself in front of you' },
+        trinyx: { state: 'yes', note: 'Describe the job; the workflow builds itself in front of you' },
         competitor: { state: 'partial', note: 'Copilot drafts zaps; editing stays step-by-step' },
       },
       {
         feature: 'Multi-branch visual workflows',
-        livecontext: { state: 'yes', note: 'Branches, loops and parallel fan-out on one readable canvas' },
+        trinyx: { state: 'yes', note: 'Branches, loops and parallel fan-out on one readable canvas' },
         competitor: { state: 'partial', note: 'Linear zaps with paths; complex flows get hard to follow' },
       },
       {
         feature: 'AI agents in production',
-        livecontext: { state: 'yes', note: 'Per-agent tool scoping, credit budget and full audit trail' },
+        trinyx: { state: 'yes', note: 'Per-agent tool scoping, credit budget and full audit trail' },
         competitor: { state: 'partial', note: 'Zapier Agents exist; fine-grained scoping and spend caps are limited' },
       },
       {
         feature: 'Ship workflows as apps',
-        livecontext: { state: 'yes', note: 'Included: search pages, dashboards, approval screens' },
+        trinyx: { state: 'yes', note: 'Included: search pages, dashboards, approval screens' },
         competitor: { state: 'partial', note: 'Interfaces is a separate add-on product' },
       },
       {
         feature: 'Built-in data tables',
-        livecontext: { state: 'yes', note: 'Included: tables your automations create, find and update' },
+        trinyx: { state: 'yes', note: 'Included: tables your automations create, find and update' },
         competitor: { state: 'partial', note: 'Tables is a separate add-on product' },
       },
       {
         feature: 'Browser-use agent',
-        livecontext: { state: 'yes', note: 'An agent that opens real web pages, clicks and extracts' },
+        trinyx: { state: 'yes', note: 'An agent that opens real web pages, clicks and extracts' },
         competitor: { state: 'no', note: 'Not built in' },
       },
       {
         feature: 'MCP (Model Context Protocol)',
-        livecontext: { state: 'yes', note: 'Use Trinyx as an MCP server from Claude, Cursor and other clients' },
+        trinyx: { state: 'yes', note: 'Use Trinyx as an MCP server from Claude, Cursor and other clients' },
         competitor: { state: 'yes', note: 'Zapier MCP exposes its actions to AI clients' },
       },
       {
         feature: 'Self-hosting',
-        livecontext: { state: 'yes', note: 'Free Community Edition, one docker compose up' },
+        trinyx: { state: 'yes', note: 'Free Community Edition, one docker compose up' },
         competitor: { state: 'no', note: 'SaaS only' },
       },
       {
         feature: 'Marketplace',
-        livecontext: { state: 'yes', note: 'Fork the whole stack: workflow, agents, pages and tables together' },
+        trinyx: { state: 'yes', note: 'Fork the whole stack: workflow, agents, pages and tables together' },
         competitor: { state: 'partial', note: 'Zap templates' },
       },
     ],
@@ -330,52 +330,52 @@ export const COMPARISONS: Comparison[] = [
       'Make (formerly Integromat) gives power users a deep visual scenario builder, priced per operation. Trinyx starts from the other end: you describe the job in chat and the workflow assembles itself, AI agents run it under scoped access and hard credit budgets, and the result ships as an app. All in one product, cloud or self-hosted.',
     verdictCompetitor:
       'Choose Make if you enjoy assembling detailed scenarios module by module, per-operation pricing fits your volume, and you do not need self-hosting or apps on top of your automations.',
-    verdictLivecontext:
+    verdictTrinyx:
       'Choose Trinyx if you want automations built from a plain-language description, AI agents with scoped tools and budgets they cannot exceed, user-facing apps and data tables included, and a free self-hosted edition.',
     rows: [
       {
         feature: 'Build automations by chat',
-        livecontext: { state: 'yes', note: 'Describe the job; the workflow builds itself in front of you' },
+        trinyx: { state: 'yes', note: 'Describe the job; the workflow builds itself in front of you' },
         competitor: { state: 'partial', note: 'AI assistant helps; module wiring stays manual' },
       },
       {
         feature: 'Visual workflow builder',
-        livecontext: { state: 'yes', note: '60+ blocks: branches, loops, parallel fan-out, code, HTTP, files' },
+        trinyx: { state: 'yes', note: '60+ blocks: branches, loops, parallel fan-out, code, HTTP, files' },
         competitor: { state: 'yes', note: 'Deep scenario builder with routers and iterators' },
       },
       {
         feature: 'AI agents in production',
-        livecontext: { state: 'yes', note: 'Per-agent tool scoping, credit budget and full audit trail' },
+        trinyx: { state: 'yes', note: 'Per-agent tool scoping, credit budget and full audit trail' },
         competitor: { state: 'partial', note: 'AI agents exist; fine-grained scoping and spend caps are limited' },
       },
       {
         feature: 'Ship workflows as apps',
-        livecontext: { state: 'yes', note: 'Search pages, dashboards and approval screens on top of the workflow' },
+        trinyx: { state: 'yes', note: 'Search pages, dashboards and approval screens on top of the workflow' },
         competitor: { state: 'no', note: 'Forms only; a separate front-end is needed' },
       },
       {
         feature: 'Built-in data tables',
-        livecontext: { state: 'yes', note: 'Spreadsheet-style tables your automations create, find and update' },
+        trinyx: { state: 'yes', note: 'Spreadsheet-style tables your automations create, find and update' },
         competitor: { state: 'partial', note: 'Data stores, with modest limits' },
       },
       {
         feature: 'Browser-use agent',
-        livecontext: { state: 'yes', note: 'An agent that opens real web pages, clicks and extracts' },
+        trinyx: { state: 'yes', note: 'An agent that opens real web pages, clicks and extracts' },
         competitor: { state: 'no', note: 'Not built in' },
       },
       {
         feature: 'MCP (Model Context Protocol)',
-        livecontext: { state: 'yes', note: 'Use Trinyx as an MCP server from Claude, Cursor and other clients' },
+        trinyx: { state: 'yes', note: 'Use Trinyx as an MCP server from Claude, Cursor and other clients' },
         competitor: { state: 'partial', note: 'Early options' },
       },
       {
         feature: 'Self-hosting',
-        livecontext: { state: 'yes', note: 'Free Community Edition, one docker compose up' },
+        trinyx: { state: 'yes', note: 'Free Community Edition, one docker compose up' },
         competitor: { state: 'no', note: 'SaaS only' },
       },
       {
         feature: 'Marketplace',
-        livecontext: { state: 'yes', note: 'Fork the whole stack: workflow, agents, pages and tables together' },
+        trinyx: { state: 'yes', note: 'Fork the whole stack: workflow, agents, pages and tables together' },
         competitor: { state: 'partial', note: 'Scenario templates' },
       },
     ],

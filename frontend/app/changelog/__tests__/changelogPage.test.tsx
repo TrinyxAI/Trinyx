@@ -17,9 +17,9 @@ import ChangelogPage from '../page';
 
 const newer = {
   tag_name: 'v0.1.6',
-  name: 'LiveContext CE v0.1.6',
+  name: 'Trinyx CE v0.1.6',
   published_at: '2026-07-04T09:00:00Z',
-  html_url: 'https://github.com/livecontext-ai/livecontext-ce/releases/tag/v0.1.6',
+  html_url: 'https://github.com/eddinerabii/Trinyx/releases/tag/v0.1.6',
   body: '## Highlights\n\n- Branch-port overflow fix',
   draft: false,
   prerelease: false,
@@ -27,9 +27,9 @@ const newer = {
 
 const older = {
   tag_name: 'v0.1.5',
-  name: 'LiveContext CE v0.1.5',
+  name: 'Trinyx CE v0.1.5',
   published_at: '2026-07-02T12:30:00Z',
-  html_url: 'https://github.com/livecontext-ai/livecontext-ce/releases/tag/v0.1.5',
+  html_url: 'https://github.com/eddinerabii/Trinyx/releases/tag/v0.1.5',
   body: '## What is new\n\n- Rerun cycle fix',
   draft: false,
   prerelease: false,
@@ -45,7 +45,7 @@ describe('ChangelogPage timeline', () => {
 
     render(await ChangelogPage());
 
-    expect(screen.getByRole('heading', { name: 'LiveContext CE v0.1.5' })).toBeTruthy();
+    expect(screen.getByRole('heading', { name: 'Trinyx CE v0.1.5' })).toBeTruthy();
     // Locale-neutral, timezone-safe human date (not the raw ISO string).
     expect(screen.getByText('Jul 2, 2026')).toBeTruthy();
     // Version tag pill.
@@ -66,8 +66,8 @@ describe('ChangelogPage timeline', () => {
     const titles = screen
       .getAllByRole('heading', { level: 2 })
       .map((h) => h.textContent);
-    expect(titles[0]).toBe('LiveContext CE v0.1.6');
-    expect(titles[1]).toBe('LiveContext CE v0.1.5');
+    expect(titles[0]).toBe('Trinyx CE v0.1.6');
+    expect(titles[1]).toBe('Trinyx CE v0.1.5');
 
     // Exactly one "Latest" badge, and it sits on the newest entry.
     const latest = screen.getAllByText('Latest');
@@ -82,7 +82,7 @@ describe('ChangelogPage timeline', () => {
     expect(screen.getByText(/momentarily unavailable/)).toBeTruthy();
     const links = screen.getAllByRole('link') as HTMLAnchorElement[];
     expect(
-      links.some((l) => l.href === 'https://github.com/livecontext-ai/livecontext-ce/releases'),
+      links.some((l) => l.href === 'https://github.com/eddinerabii/Trinyx/releases'),
     ).toBe(true);
   });
 });

@@ -321,9 +321,9 @@ export default function ModelsPage() {
 
         <h2>Where to go next</h2>
         <CardGrid cols={3}>
-          <Card icon={Bot} title="Agents" href="/agents">Temperature, tool scope, and credit budgets per agent.</Card>
-          <Card icon={Workflow} title="Workflows" href="/workflows">Where agent nodes sit in the graph.</Card>
-          <Card icon={Server} title="Self-hosting" href="/self-host">Running Trinyx yourself, and what cloud-linking unlocks.</Card>
+          <Card icon={Bot} title="Agents" href="/docs/agents">Temperature, tool scope, and credit budgets per agent.</Card>
+          <Card icon={Workflow} title="Workflows" href="/docs/workflows">Where agent nodes sit in the graph.</Card>
+          <Card icon={Server} title="Self-hosting" href="/docs/self-host">Running Trinyx yourself, and what cloud-linking unlocks.</Card>
         </CardGrid>
       </DocsProse>
     </>

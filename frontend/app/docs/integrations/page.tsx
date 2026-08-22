@@ -30,7 +30,7 @@ export default function IntegrationsPage() {
         <p>
           Add a tool as a workflow step and reference its result downstream like any other node.
           Agents use the exact same tools: an agent with a tool in scope can call it on its own (see{' '}
-          <a href="/agents">Agents</a>). Agents discover what&apos;s available with the catalog search
+          <a href="/docs/agents">Agents</a>). Agents discover what&apos;s available with the catalog search
           action, and narrow that down to what your account has actually connected with{' '}
           <code>get_connected_services</code> (below).
         </p>
@@ -246,15 +246,15 @@ export default function IntegrationsPage() {
           the standard MCP Streamable HTTP transport at <code>POST /mcp</code>, authenticated with a
           personal <code>lc_live_</code> API key. Once connected, the client can list and call every
           tool your account has access to, exactly as an in-app agent would. Full endpoint, auth, and
-          transport details live on the <a href="/rest-api">REST API</a> page.
+          transport details live on the <a href="/docs/rest-api">REST API</a> page.
         </p>
 
         <h2>Where to go next</h2>
         <CardGrid cols={2}>
-          <Card icon={Bot} title="Agents" href="/agents">Scope which tools an agent may call.</Card>
-          <Card icon={Workflow} title="Node reference" href="/nodes">Integration step, HTTP Request, and more.</Card>
-          <Card icon={Plug} title="Tables & data" href="/tables">Persist what your integrations return.</Card>
-          <Card icon={Server} title="REST API" href="/rest-api">Connect an external MCP client with an lc_live_ key.</Card>
+          <Card icon={Bot} title="Agents" href="/docs/agents">Scope which tools an agent may call.</Card>
+          <Card icon={Workflow} title="Node reference" href="/docs/nodes">Integration step, HTTP Request, and more.</Card>
+          <Card icon={Plug} title="Tables & data" href="/docs/tables">Persist what your integrations return.</Card>
+          <Card icon={Server} title="REST API" href="/docs/rest-api">Connect an external MCP client with an lc_live_ key.</Card>
         </CardGrid>
       </DocsProse>
     </>

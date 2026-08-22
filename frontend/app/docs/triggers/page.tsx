@@ -155,7 +155,7 @@ export default function TriggersPage() {
         </p>
         <p>
           The full HTTP surface (routes, headers, and the &ldquo;Respond to Webhook&rdquo; node) is
-          covered in the <a href="/rest-api">REST API &amp; webhooks</a> reference.
+          covered in the <a href="/docs/rest-api">REST API &amp; webhooks</a> reference.
         </p>
 
         <h2>Schedule</h2>
@@ -331,7 +331,7 @@ export default function TriggersPage() {
           When fired via <code>workflow(action=&apos;execute&apos;)</code> without a real row event
           (a batch-scan run), the trigger instead emits <code>data</code> (an array of{' '}
           <code>{'{id, data: {<columns>}}'}</code> rows, like <code>find_rows</code>) and{' '}
-          <code>count</code>. Chain a <a href="/workflows">Split</a> over <code>output.data</code> to
+          <code>count</code>. Chain a <a href="/docs/workflows">Split</a> over <code>output.data</code> to
           process every row.
         </p>
 
@@ -427,10 +427,10 @@ export default function TriggersPage() {
 
         <h2>Where to go next</h2>
         <CardGrid cols={3}>
-          <Card icon={Workflow} title="Workflows" href="/workflows">How runs execute once a trigger fires.</Card>
-          <Card icon={Table2} title="Tables &amp; data" href="/tables">Row events, filters, and CRUD nodes.</Card>
-          <Card icon={GitBranch} title="Node reference" href="/nodes">All node types at a glance.</Card>
-          <Card icon={Bot} title="Agents" href="/agents">Put AI in the loop, scoped and budgeted.</Card>
+          <Card icon={Workflow} title="Workflows" href="/docs/workflows">How runs execute once a trigger fires.</Card>
+          <Card icon={Table2} title="Tables &amp; data" href="/docs/tables">Row events, filters, and CRUD nodes.</Card>
+          <Card icon={GitBranch} title="Node reference" href="/docs/nodes">All node types at a glance.</Card>
+          <Card icon={Bot} title="Agents" href="/docs/agents">Put AI in the loop, scoped and budgeted.</Card>
         </CardGrid>
       </DocsProse>
     </>

@@ -225,16 +225,16 @@ export default function SkillsPage() {
 
         <h2>Where to go next</h2>
         <CardGrid cols={3}>
-          <Card icon={Bot} title="Agents" href="/agents">
+          <Card icon={Bot} title="Agents" href="/docs/agents">
             Attach skills via skill_ids and the skill tool module.
           </Card>
-          <Card icon={Store} title="Marketplace" href="/marketplace">
+          <Card icon={Store} title="Marketplace" href="/docs/marketplace">
             Publishing, visibility, and how forking works for any resource.
           </Card>
-          <Card icon={Workflow} title="Workflows" href="/workflows">
+          <Card icon={Workflow} title="Workflows" href="/docs/workflows">
             Where agent nodes carrying skills sit in a graph.
           </Card>
-          <Card icon={FolderTree} title="Self-hosting" href="/self-host">
+          <Card icon={FolderTree} title="Self-hosting" href="/docs/self-host">
             How Community Edition installs link to cloud for bundles.
           </Card>
         </CardGrid>

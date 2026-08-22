@@ -27,7 +27,7 @@ export default function BrowserAgentPage() {
           <li>
             <strong>Workflow node</strong> (<code>Browser Agent</code>, category Agent) - runs exactly
             one browsing session per execution, as a step in a graph. See{' '}
-            <a href="/workflows">Workflows</a> for how nodes connect.
+            <a href="/docs/workflows">Workflows</a> for how nodes connect.
           </li>
           <li>
             <strong>Chat tool</strong> - a chat agent can call <code>agent_browse</code> directly, and
@@ -245,9 +245,9 @@ export default function BrowserAgentPage() {
 
         <h2>Where to go next</h2>
         <CardGrid cols={3}>
-          <Card icon={Bot} title="Agents" href="/agents">Model selection, budgets, and the general agent stop reasons.</Card>
-          <Card icon={Globe} title="Workflows" href="/workflows">How the Browser Agent node sits in a graph.</Card>
-          <Card icon={MessagesSquare} title="Chat" href="/chat">Calling tools like agent_browse from a conversation.</Card>
+          <Card icon={Bot} title="Agents" href="/docs/agents">Model selection, budgets, and the general agent stop reasons.</Card>
+          <Card icon={Globe} title="Workflows" href="/docs/workflows">How the Browser Agent node sits in a graph.</Card>
+          <Card icon={MessagesSquare} title="Chat" href="/docs/chat">Calling tools like agent_browse from a conversation.</Card>
         </CardGrid>
       </DocsProse>
     </>

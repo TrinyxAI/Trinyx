@@ -66,7 +66,7 @@ export default function RunsPage() {
           <em>inactivity</em> stop reason. The run status <code>TIMEOUT</code> means the run was
           actively working but ran over its overall time budget; an agent that goes silent past its
           watchdog window instead stops with a distinct, agent-level reason shown as
-          &ldquo;Stopped (inactivity)&rdquo;. See <a href="/agents">Agents</a> for stop reasons.
+          &ldquo;Stopped (inactivity)&rdquo;. See <a href="/docs/agents">Agents</a> for stop reasons.
         </Callout>
 
         <h2>Epochs vs spawns</h2>
@@ -112,7 +112,7 @@ export default function RunsPage() {
           <code>WAITING_TRIGGER</code> if only triggers remain (the epoch is effectively done). The
           run history list marks a Step-by-step run with its own badge so you can tell the two modes
           apart at a glance. For how nodes, ports, and branching actually behave, see{' '}
-          <a href="/workflows">Workflows</a>.
+          <a href="/docs/workflows">Workflows</a>.
         </p>
 
         <h2>Run controls</h2>
@@ -334,16 +334,16 @@ export default function RunsPage() {
 
         <h2>Where to go next</h2>
         <CardGrid cols={3}>
-          <Card icon={Workflow} title="Workflows" href="/workflows">
+          <Card icon={Workflow} title="Workflows" href="/docs/workflows">
             Nodes, ports, branching, and parallelism, the graph a run executes.
           </Card>
-          <Card icon={Bot} title="Agents" href="/agents">
+          <Card icon={Bot} title="Agents" href="/docs/agents">
             Models, tools, budgets, and the full set of agent stop reasons.
           </Card>
-          <Card icon={LayoutPanelLeft} title="Interfaces" href="/interfaces">
+          <Card icon={LayoutPanelLeft} title="Interfaces" href="/docs/interfaces">
             How an interface page can pause a run on a user action.
           </Card>
-          <Card icon={Webhook} title="Triggers" href="/triggers">
+          <Card icon={Webhook} title="Triggers" href="/docs/triggers">
             Every way a run can start, and what makes a trigger reusable.
           </Card>
         </CardGrid>

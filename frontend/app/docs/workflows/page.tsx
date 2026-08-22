@@ -385,7 +385,7 @@ export default function WorkflowsPage() {
           Some nodes <strong>pause</strong> the run on a signal - a wait timer, a user approval, a
           webhook wait, or a blocking interface - and resume automatically once the signal resolves;
           those nodes report an <code>AWAITING_SIGNAL</code> result while paused. See{' '}
-          <a href="/concepts">Core concepts</a> for how runs, epochs, and signals fit together.
+          <a href="/docs/concepts">Core concepts</a> for how runs, epochs, and signals fit together.
         </p>
         <p>Every node in a run carries one of these statuses:</p>
         <DocsTable
@@ -409,13 +409,13 @@ export default function WorkflowsPage() {
 
         <h2>Where to go next</h2>
         <CardGrid cols={3}>
-          <Card icon={Boxes} title="Node reference" href="/nodes">
+          <Card icon={Boxes} title="Node reference" href="/docs/nodes">
             The full catalog of node types, grouped, with their ports.
           </Card>
-          <Card icon={Webhook} title="Triggers" href="/triggers">
+          <Card icon={Webhook} title="Triggers" href="/docs/triggers">
             Every way a run can start.
           </Card>
-          <Card icon={Bot} title="Agents" href="/agents">
+          <Card icon={Bot} title="Agents" href="/docs/agents">
             The AI nodes: models, tools, budgets, guardrails.
           </Card>
         </CardGrid>

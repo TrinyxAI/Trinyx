@@ -1007,112 +1007,6 @@ const landingStyles = `
     line-height: 1.55;
   }
 
-  .landing-root .hero-prompt-card {
-    width: min(100%, 680px);
-    margin: 42px auto 0;
-    padding: 18px 20px 16px;
-    border: 1px solid rgba(43, 29, 53, 0.88);
-    border-radius: 28px;
-    background: #F7F5FA;
-    box-shadow:
-      0 26px 70px rgba(4, 0, 7, 0.42),
-      0 0 46px rgba(200, 88, 198, 0.18);
-    text-align: left;
-  }
-
-  .landing-root .hero-prompt-input {
-    display: block;
-    width: 100%;
-    min-height: 76px;
-    max-height: 190px;
-    resize: vertical;
-    border: 0;
-    outline: 0;
-    background: transparent;
-    color: #120917;
-    font: inherit;
-    font-size: 16px;
-    line-height: 1.5;
-  }
-
-  .landing-root .hero-prompt-input::placeholder {
-    color: #7C7485;
-  }
-
-  .landing-root .hero-prompt-actions,
-  .landing-root .hero-prompt-actions-end {
-    display: flex;
-    align-items: center;
-  }
-
-  .landing-root .hero-prompt-actions {
-    justify-content: space-between;
-    gap: 12px;
-    margin-top: 10px;
-  }
-
-  .landing-root .hero-prompt-actions-end {
-    gap: 8px;
-  }
-
-  .landing-root .hero-prompt-icon,
-  .landing-root .hero-prompt-build {
-    display: inline-flex;
-    height: 38px;
-    align-items: center;
-    justify-content: center;
-    border: 0;
-    cursor: pointer;
-    transition: background 180ms ease, color 180ms ease, transform 180ms ease, opacity 180ms ease;
-  }
-
-  .landing-root .hero-prompt-icon {
-    width: 38px;
-    border-radius: 999px;
-    background: transparent;
-    color: #120917;
-  }
-
-  .landing-root .hero-prompt-icon:hover {
-    background: rgba(43, 29, 53, 0.10);
-  }
-
-  .landing-root .hero-prompt-icon[aria-pressed='true'] {
-    background: rgba(200, 88, 198, 0.16);
-    color: #9D14FF;
-  }
-
-  .landing-root .hero-prompt-icon svg {
-    width: 19px;
-    height: 19px;
-  }
-
-  .landing-root .hero-prompt-build {
-    gap: 8px;
-    padding: 0 16px;
-    border-radius: 999px;
-    background: #9D14FF;
-    color: #F7F5FA;
-    font-size: 14px;
-    font-weight: 700;
-  }
-
-  .landing-root .hero-prompt-build:hover {
-    background: #B52CFF;
-    transform: translateY(-1px);
-  }
-
-  .landing-root .hero-prompt-build:disabled {
-    cursor: not-allowed;
-    opacity: 0.42;
-    transform: none;
-  }
-
-  .landing-root .hero-prompt-build svg {
-    width: 16px;
-    height: 16px;
-  }
-
   @media (max-width: 640px) {
     .landing-root .hero-prompt-stage {
       min-height: 500px;
@@ -1126,12 +1020,6 @@ const landingStyles = `
     .landing-root .hero-prompt-subtitle {
       margin-top: 16px;
       font-size: 16px;
-    }
-
-    .landing-root .hero-prompt-card {
-      margin-top: 32px;
-      padding: 16px 16px 14px;
-      border-radius: 24px;
     }
   }
 

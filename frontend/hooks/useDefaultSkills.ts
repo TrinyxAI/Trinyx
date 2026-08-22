@@ -10,6 +10,10 @@ type ConversationConfigProjection = {
   chatConfig?: Record<string, unknown> | null;
 } | null;
 
+type UseDefaultSkillsOptions = {
+  enabled?: boolean;
+};
+
 type UseDefaultSkillsResult = {
   activeSkillIds: Set<string>;
   setActiveSkillIds: (ids: Set<string>) => void;
@@ -46,7 +50,10 @@ function mergeSkillIdsIntoChatConfig(
  * when a conversation exists, or kept only in memory until the first send
  * creates a persisted conversation.
  */
-export function useDefaultSkills(conversationId?: string): UseDefaultSkillsResult {
+export function useDefaultSkills(
+  conversationId?: string,
+  { enabled = true }: UseDefaultSkillsOptions = {},
+): UseDefaultSkillsResult {
   const queryClient = useQueryClient();
   const [pendingExplicitIds, setPendingExplicitIds] = useState<string[] | null>(null);
 
@@ -57,7 +64,7 @@ export function useDefaultSkills(conversationId?: string): UseDefaultSkillsResul
         ? ((await conversationApi.getConversation(conversationId)) as ConversationConfigProjection)
         : null
     ),
-    enabled: !!conversationId,
+    enabled: enabled && !!conversationId,
     staleTime: 30_000,
   });
 
@@ -65,6 +72,7 @@ export function useDefaultSkills(conversationId?: string): UseDefaultSkillsResul
     queryKey: ['skills', 'default-active-summary'],
     queryFn: () => orchestratorApi.getDefaultActiveSkillsSummary(),
     staleTime: 30_000,
+    enabled,
   });
 
   useEffect(() => {

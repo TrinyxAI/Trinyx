@@ -7,6 +7,14 @@ interface LogoAnimateProps {
   alwaysPulse?: boolean;
 }
 
+const markSources: Record<NonNullable<LogoAnimateProps['size']>, string> = {
+  sm: '/branding/trinyx-mark-48.png',
+  md: '/branding/trinyx-mark-96.png',
+  lg: '/branding/trinyx-mark-96.png',
+  xl: '/branding/trinyx-mark-96.png',
+  xxl: '/branding/trinyx-mark-192.png',
+};
+
 const pulseAnimation = `
   @keyframes trinyxMarkPulse {
     0%, 100% { opacity: 1; }
@@ -38,7 +46,7 @@ const LogoAnimate = React.memo<LogoAnimateProps>(({ size = 'md', className = '',
         style={{ imageRendering: 'auto' }}
       >
         <img
-          src="/branding/trinyx-mark.png"
+          src={markSources[size]}
           alt="Trinyx"
           width={160}
           height={160}

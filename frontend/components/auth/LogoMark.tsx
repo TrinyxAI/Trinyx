@@ -4,10 +4,10 @@
 export function LogoMark({ className = '' }: { className?: string }) {
   return (
     <img
-      src="/branding/trinyx-mark.png"
+      src="/branding/trinyx-mark-96.png"
       alt=""
-      width={160}
-      height={160}
+      width={96}
+      height={96}
       draggable={false}
       className={`${className} object-contain`}
       aria-hidden="true"

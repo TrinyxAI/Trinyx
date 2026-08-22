@@ -7,6 +7,14 @@ interface LoadingSpinnerProps {
   text?: string;
 }
 
+const markSources: Record<NonNullable<LoadingSpinnerProps['size']>, string> = {
+  xs: '/branding/trinyx-mark-32.png',
+  sm: '/branding/trinyx-mark-48.png',
+  md: '/branding/trinyx-mark-48.png',
+  lg: '/branding/trinyx-mark-96.png',
+  xl: '/branding/trinyx-mark-96.png',
+};
+
 const LoadingSpinner = React.memo<LoadingSpinnerProps>(({
   size = 'md',
   className = '',
@@ -24,7 +32,7 @@ const LoadingSpinner = React.memo<LoadingSpinnerProps>(({
     <div className={`flex items-center ${className}`}>
       <div className={`${sizeClasses[size]} animate-spin`}>
         <img
-          src="/branding/trinyx-mark.png"
+          src={markSources[size]}
           alt="Loading"
           width={160}
           height={160}

@@ -95,7 +95,7 @@ const LANDING_JSON_LD = [
     '@type': 'Organization',
     name: 'Trinyx',
     url: SITE_URL,
-    logo: `${SITE_URL}/liveContext-logo.png`,
+    logo: `${SITE_URL}/branding/trinyx-logo.png`,
     sameAs: [
       'https://www.linkedin.com/company/livecontext/',
       'https://x.com/livecontextai',

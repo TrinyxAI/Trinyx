@@ -15,14 +15,16 @@ import LoadingSpinner from '../LoadingSpinner';
 describe('marketing chrome components server rendering', () => {
   it('LogoAnimate renders without any styled-jsx artifact', () => {
     const html = renderToString(<LogoAnimate />);
-    expect(html).toContain('<svg');
+    expect(html).toContain('<img');
+    expect(html).toContain('/branding/trinyx-mark-96.png');
     expect(html).not.toMatch(/<style[^>]*\sjsx/);
     expect(html).not.toContain('jsx-undefined');
   });
 
   it('LoadingSpinner renders without any styled-jsx artifact', () => {
     const html = renderToString(<LoadingSpinner />);
-    expect(html).toContain('<svg');
+    expect(html).toContain('<img');
+    expect(html).toContain('/branding/trinyx-mark-48.png');
     expect(html).not.toMatch(/<style[^>]*\sjsx/);
     expect(html).not.toContain('jsx-undefined');
   });

@@ -110,7 +110,7 @@ public class AccountDeactivationMailer {
                   <tr><td align="center" style="padding:40px 16px;">
                     <table role="presentation" width="560" cellpadding="0" cellspacing="0" border="0" style="max-width:560px;width:100%;background:#ffffff;border:1px solid #e7e5e4;border-radius:12px;">
                       <tr><td align="left" style="padding:32px 40px 24px 40px;border-bottom:1px solid #e7e5e4;">
-                        <img src="{{LOGO}}" alt="LiveContext" height="32" style="display:block;height:32px;width:auto;border:0;text-decoration:none;">
+                        <img src="{{LOGO}}" alt="Trinyx" height="32" style="display:block;height:32px;width:auto;border:0;text-decoration:none;">
                       </td></tr>
                       <tr><td style="padding:32px 40px;font-size:15px;line-height:1.6;color:#111827;">
                         <h1 style="margin:0 0 16px 0;font-size:22px;font-weight:600;color:#111827;">Account restored</h1>
@@ -130,7 +130,7 @@ public class AccountDeactivationMailer {
                 </body></html>
                 """
                 .replace("{{NAME}}", name)
-                .replace("{{LOGO}}", frontendUrl + "/liveContext-logo-light.png?v=2");
+                .replace("{{LOGO}}", frontendUrl + "/branding/trinyx-mark-96.png?v=3");
     }
 
     public void sendPurgeConfirmationEmail(String email, String displayName) {
@@ -183,7 +183,7 @@ public class AccountDeactivationMailer {
                   <tr><td align="center" style="padding:40px 16px;">
                     <table role="presentation" width="560" cellpadding="0" cellspacing="0" border="0" style="max-width:560px;width:100%;background:#ffffff;border:1px solid #e7e5e4;border-radius:12px;">
                       <tr><td align="left" style="padding:32px 40px 24px 40px;border-bottom:1px solid #e7e5e4;">
-                        <img src="{{LOGO}}" alt="LiveContext" height="32" style="display:block;height:32px;width:auto;border:0;text-decoration:none;">
+                        <img src="{{LOGO}}" alt="Trinyx" height="32" style="display:block;height:32px;width:auto;border:0;text-decoration:none;">
                       </td></tr>
                       <tr><td style="padding:32px 40px;font-size:15px;line-height:1.6;color:#111827;">
                         <h1 style="margin:0 0 16px 0;font-size:22px;font-weight:600;color:#111827;">Account deactivated</h1>
@@ -205,7 +205,7 @@ public class AccountDeactivationMailer {
                 """
                 .replace("{{NAME}}", name)
                 .replace("{{FRONTEND}}", frontendUrl)
-                .replace("{{LOGO}}", frontendUrl + "/liveContext-logo-light.png?v=2");
+                .replace("{{LOGO}}", frontendUrl + "/branding/trinyx-mark-96.png?v=3");
     }
 
     private String buildPurgeHtml(String name) {
@@ -219,7 +219,7 @@ public class AccountDeactivationMailer {
                   <tr><td align="center" style="padding:40px 16px;">
                     <table role="presentation" width="560" cellpadding="0" cellspacing="0" border="0" style="max-width:560px;width:100%;background:#ffffff;border:1px solid #e7e5e4;border-radius:12px;">
                       <tr><td align="left" style="padding:32px 40px 24px 40px;border-bottom:1px solid #e7e5e4;">
-                        <img src="{{LOGO}}" alt="LiveContext" height="32" style="display:block;height:32px;width:auto;border:0;text-decoration:none;">
+                        <img src="{{LOGO}}" alt="Trinyx" height="32" style="display:block;height:32px;width:auto;border:0;text-decoration:none;">
                       </td></tr>
                       <tr><td style="padding:32px 40px;font-size:15px;line-height:1.6;color:#111827;">
                         <h1 style="margin:0 0 16px 0;font-size:22px;font-weight:600;color:#111827;">Your data has been deleted</h1>
@@ -248,6 +248,6 @@ public class AccountDeactivationMailer {
                 """
                 .replace("{{NAME}}", name)
                 .replace("{{URL}}", frontendUrl)
-                .replace("{{LOGO}}", frontendUrl + "/liveContext-logo-light.png?v=2");
+                .replace("{{LOGO}}", frontendUrl + "/branding/trinyx-mark-96.png?v=3");
     }
 }

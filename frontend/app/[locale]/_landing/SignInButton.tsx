@@ -11,10 +11,11 @@ interface SignInButtonProps {
   variant?: Variant;
   className?: string;
   returnTo?: string;
-  /** Main-site origin. When set (docs subdomain), the button hands off to the
-   *  apex app/auth with a full navigation instead of routing locally. */
+  /** Explicit app/auth origin for cross-host handoff. */
   baseUrl?: string;
 }
+
+const TRINYX_APP_ORIGIN = 'https://app.trinyx.fr';
 
 export default function SignInButton({
   children,
@@ -29,12 +30,16 @@ export default function SignInButton({
   const handleClick = useCallback(
     async (e: React.MouseEvent) => {
       e.preventDefault();
-      if (baseUrl) {
-        // Off the main host (e.g. the docs subdomain): hand off to the apex,
-        // which owns the app + auth, with a full navigation.
-        window.location.assign(`${baseUrl}${returnTo}`);
+
+      // trinyx.fr and app.trinyx.fr are deployed as two separate frontend
+      // containers. Marketing CTAs must therefore hand off to the app host
+      // instead of trying to run the landing container's auth flow locally.
+      const appOrigin = baseUrl ?? TRINYX_APP_ORIGIN;
+      if (typeof window !== 'undefined' && window.location.origin !== appOrigin) {
+        window.location.assign(`${appOrigin}${returnTo}`);
         return;
       }
+
       if (isLoading) return;
       if (isAuthenticated) {
         router.push(returnTo);
@@ -45,6 +50,9 @@ export default function SignInButton({
     [baseUrl, isAuthenticated, isLoading, loginWithRedirect, returnTo, router]
   );
 
+  const appOrigin = baseUrl ?? TRINYX_APP_ORIGIN;
+  const href = `${appOrigin}${returnTo}`;
+
   const variantStyle: React.CSSProperties =
     variant === 'primary'
       ? { background: 'var(--accent-primary)', color: 'var(--accent-foreground)' }
@@ -54,7 +62,7 @@ export default function SignInButton({
 
   return (
     <a
-      href={baseUrl ? `${baseUrl}${returnTo}` : returnTo}
+      href={href}
       onClick={handleClick}
       className={className}
       style={variantStyle}

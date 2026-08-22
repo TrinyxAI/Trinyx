@@ -8,8 +8,8 @@ import { useLandingTheme } from '@/components/landing/LandingThemeProvider';
 // a live run panel. A segmented control floating on the card switches persona
 // (Support, Creator, Sales, Marketing, Recruiting), each a distinct workflow with its
 // own interface (approval phone, vertical video, deal dashboard, post preview,
-// candidate scorecard). It is same-origin static HTML, so we measure its own content
-// height (a pure function of width) and size the iframe to it, with no cropping.
+// candidate scorecard). It is same-origin static HTML, so we can safely keep its
+// branding aligned with the landing without changing the animation itself.
 //
 // The iframe follows the landing theme: the theme at mount travels as ?theme=dark
 // on the src (the src is FROZEN after mount so a later toggle never reloads and
@@ -41,6 +41,62 @@ export default function HeroFlowShowcase() {
     }
   }, []);
 
+  const applyTrinyxBranding = useCallback(() => {
+    try {
+      const doc = ref.current?.contentDocument;
+      if (!doc) return;
+
+      let style = doc.getElementById('trinyx-hero-branding') as HTMLStyleElement | null;
+      if (!style) {
+        style = doc.createElement('style');
+        style.id = 'trinyx-hero-branding';
+        doc.head.appendChild(style);
+      }
+
+      style.textContent = `
+        :root {
+          --paper: #F5F5F0;
+          --sunk: #EEEEEA;
+          --accent: #9D14FF;
+        }
+        .wrap {
+          background:
+            radial-gradient(120% 62% at 50% -8%, color-mix(in srgb, #9D14FF 5%, var(--paper)), var(--paper) 52%),
+            var(--paper);
+        }
+        .btn.primary,
+        .ptab.active {
+          background: #9D14FF;
+          color: #FFFFFF;
+        }
+        .btn.primary:hover {
+          background: #B52CFF;
+        }
+        .logo img,
+        .lcmark img,
+        .pava.lclogo img {
+          width: 100%;
+          height: 100%;
+          display: block;
+          object-fit: contain;
+        }
+        .pava.lclogo img {
+          width: 76%;
+          height: 76%;
+        }
+      `;
+
+      const replaceLegacyMark = (node: Element) => {
+        if (node.querySelector('img[data-trinyx-mark]')) return;
+        node.innerHTML = '<img data-trinyx-mark src="/branding/trinyx-mark.png" alt="Trinyx" />';
+      };
+
+      doc.querySelectorAll('.logo, .lcmark, .pava.lclogo').forEach(replaceLegacyMark);
+    } catch {
+      /* same-origin static asset: only fails before the document exists */
+    }
+  }, []);
+
   // The card re-fits to the iframe width, so the content height changes with width:
   // re-measure on load, a few frames after (fonts/scale settle) and on every resize.
   useEffect(() => {
@@ -61,10 +117,11 @@ export default function HeroFlowShowcase() {
   useEffect(() => {
     try {
       ref.current?.contentWindow?.postMessage({ type: 'lc-theme', theme }, window.location.origin);
+      applyTrinyxBranding();
     } catch {
       /* iframe not ready yet - the onLoad push below covers it */
     }
-  }, [theme]);
+  }, [applyTrinyxBranding, theme]);
 
   const pushTheme = useCallback(() => {
     try {
@@ -85,6 +142,7 @@ export default function HeroFlowShowcase() {
         onLoad={() => {
           measure();
           pushTheme();
+          applyTrinyxBranding();
         }}
         style={{ width: '100%', height, border: 0, display: 'block', overflow: 'hidden' }}
       />

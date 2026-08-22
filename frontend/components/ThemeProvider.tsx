@@ -36,7 +36,7 @@ function isThemePreference(value: string | null): value is ThemePreference {
 
 function getSystemTheme(): Theme {
   if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') {
-    return 'light';
+    return 'dark';
   }
 
   return window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
@@ -44,11 +44,11 @@ function getSystemTheme(): Theme {
 
 function getStoredThemePreference(): ThemePreference {
   if (typeof window === 'undefined') {
-    return 'auto';
+    return 'dark';
   }
 
   const savedTheme = localStorage.getItem('theme');
-  return isThemePreference(savedTheme) ? savedTheme : 'auto';
+  return isThemePreference(savedTheme) ? savedTheme : 'dark';
 }
 
 function applyThemeClasses(theme: Theme) {
@@ -74,14 +74,10 @@ export function ThemeProvider({ children }: ThemeProviderProps) {
   const isClient = useIsClient();
   const [themePreference, setThemePreference] = useState<ThemePreference>(getStoredThemePreference);
   const [systemTheme, setSystemTheme] = useState<Theme>(getSystemTheme);
-  // Until the client snapshot resolves (server render + the hydration pass),
-  // pin the context to the server defaults so the SSR markup and the hydration
-  // render are byte-identical; the persisted preference kicks in on the very
-  // next render. NEVER return null here instead: this provider wraps the whole
-  // app, and returning null on the server used to strip every page (including
-  // the SEO-critical landing/marketing pages) out of the server HTML entirely.
-  const effectivePreference: ThemePreference = isClient ? themePreference : 'auto';
-  const effectiveSystemTheme: Theme = isClient ? systemTheme : 'light';
+  // Trinyx defaults to its dark brand theme during SSR/hydration and for visitors
+  // with no saved preference. Explicit light/auto choices are still respected.
+  const effectivePreference: ThemePreference = isClient ? themePreference : 'dark';
+  const effectiveSystemTheme: Theme = isClient ? systemTheme : 'dark';
   const theme: Theme = effectivePreference === 'auto' ? effectiveSystemTheme : effectivePreference;
 
   // Apply the resolved theme to the document and persist the selected preference.

@@ -1,0 +1,74 @@
+name: Fix hero flow branding once
+
+on:
+  push:
+    branches:
+      - fix-hero-flow-branding-cleanup
+
+permissions:
+  contents: write
+
+jobs:
+  patch-hero-flow:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: fix-hero-flow-branding-cleanup
+          fetch-depth: 0
+
+      - name: Apply minimal static branding replacements
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          path = Path('frontend/public/hero-flow.html')
+          text = path.read_text(encoding='utf-8')
+
+          replacements = [
+              ('--paper:#fbfbfd; --card:#ffffff; --sunk:#f6f7f9;', '--paper:#F5F5F0; --card:#ffffff; --sunk:#EEEEEA;'),
+              ('--edge:#aab3c2; --edge-skip:#d3d8e0; --run:#3b82f6; --accent:#2457e6;', '--edge:#aab3c2; --edge-skip:#d3d8e0; --run:#3b82f6; --accent:#9D14FF;'),
+              ('color-mix(in srgb,#2457e6 5%, var(--paper))', 'color-mix(in srgb,#9D14FF 5%, var(--paper))'),
+              ('.btn.primary{ background:#171614; color:#faf9f7; }', '.btn.primary{ background:#9D14FF; color:#FFFFFF; }'),
+              ('.btn.primary:hover{ background:#33312c; }', '.btn.primary:hover{ background:#B52CFF; }'),
+              ('.ptab.active{ color:#fff; background:var(--ink); }', '.ptab.active{ color:#FFFFFF; background:#9D14FF; }'),
+              ('.hd-mark svg{ width:100%; height:100%; }', '.hd-mark svg,.hd-mark img{ width:100%; height:100%; object-fit:contain; display:block; }'),
+              ('.pauthor .pava.lclogo svg{ width:76%; height:76%; }', '.pauthor .pava.lclogo svg,.pauthor .pava.lclogo img{ width:76%; height:76%; object-fit:contain; display:block; }'),
+              ('.logo svg{ width:27px; height:27px; display:block; overflow:visible; }', '.logo svg,.logo img{ width:27px; height:27px; display:block; object-fit:contain; }'),
+          ]
+
+          for old, new in replacements:
+              count = text.count(old)
+              if count != 1:
+                  raise SystemExit(f'Expected exactly one occurrence of {old!r}, found {count}')
+              text = text.replace(old, new, 1)
+
+          lines = text.splitlines(keepends=True)
+          logo_indexes = [i for i, line in enumerate(lines) if 'var LC_LOGO =' in line]
+          if len(logo_indexes) != 1:
+              raise SystemExit(f'Expected exactly one LC_LOGO definition, found {len(logo_indexes)}')
+          i = logo_indexes[0]
+          newline = '\n' if lines[i].endswith('\n') else ''
+          lines[i] = '  var LC_LOGO = \'<img src="/branding/trinyx-mark.png" alt="Trinyx" />\';' + newline
+          text = ''.join(lines)
+
+          path.write_text(text, encoding='utf-8')
+          PY
+
+      - name: Verify scope and commit cleanup
+        shell: bash
+        run: |
+          grep -F -- '--paper:#F5F5F0' frontend/public/hero-flow.html
+          grep -F -- '--accent:#9D14FF' frontend/public/hero-flow.html
+          grep -F -- '.btn.primary{ background:#9D14FF; color:#FFFFFF; }' frontend/public/hero-flow.html
+          grep -F -- '.ptab.active{ color:#FFFFFF; background:#9D14FF; }' frontend/public/hero-flow.html
+          grep -F -- 'var LC_LOGO = '\''<img src="/branding/trinyx-mark.png" alt="Trinyx" />'\''' frontend/public/hero-flow.html
+
+          rm .github/workflows/fix-hero-flow-branding-once.yml
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -A
+          git commit -m 'Apply Trinyx branding directly to hero flow'
+          git push origin HEAD:fix-hero-flow-branding-cleanup

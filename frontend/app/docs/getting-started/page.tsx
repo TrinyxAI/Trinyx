@@ -100,7 +100,7 @@ export default function GettingStartedPage() {
           ]}
         />
         <p>
-          See <a href="/self-host">Self-hosting</a> for what each of these steps unlocks in a CE
+          See <a href="/docs/self-host">Self-hosting</a> for what each of these steps unlocks in a CE
           install.
         </p>
 
@@ -167,7 +167,7 @@ export default function GettingStartedPage() {
           Expressions are resolved <strong>at run time</strong>, when each step actually executes - and
           a step can only read data from steps that ran <strong>before</strong> it on its path. If you
           reference a step that hasn&apos;t run yet, the value is simply empty, so build your flow so
-          data moves forward. See <a href="/workflows">Workflows</a> for how branching and merging
+          data moves forward. See <a href="/docs/workflows">Workflows</a> for how branching and merging
           change what &ldquo;ran before it&rdquo; means.
         </p>
 
@@ -188,13 +188,13 @@ export default function GettingStartedPage() {
 
         <h2>Where to go next</h2>
         <CardGrid cols={3}>
-          <Card icon={BookOpen} title="Core concepts" href="/concepts">
+          <Card icon={BookOpen} title="Core concepts" href="/docs/concepts">
             The handful of terms - run, node, trigger, agent, interface, credit - used everywhere.
           </Card>
-          <Card icon={MessageSquare} title="Chat" href="/chat">
+          <Card icon={MessageSquare} title="Chat" href="/docs/chat">
             How the conversational builder works, and what you can ask it to do.
           </Card>
-          <Card icon={Workflow} title="Workflows" href="/workflows">
+          <Card icon={Workflow} title="Workflows" href="/docs/workflows">
             The builder in depth: structure, branching, loops, and parallel execution.
           </Card>
         </CardGrid>

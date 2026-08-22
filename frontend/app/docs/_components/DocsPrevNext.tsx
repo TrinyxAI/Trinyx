@@ -7,8 +7,7 @@ import { cleanDocsPathname, getAdjacentPages } from '../_nav';
 
 /** Previous / next page links derived from the docs IA and the current path. */
 export function DocsPrevNext() {
-  // Normalized: at build time usePathname() is the internal /docs/... route,
-  // in the browser it is the clean subdomain URL (see cleanDocsPathname).
+  // Canonical on-site path used for reading-order pagination.
   const pathname = cleanDocsPathname(usePathname());
   const { prev, next } = getAdjacentPages(pathname);
   if (!prev && !next) return null;

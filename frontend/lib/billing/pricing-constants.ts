@@ -17,7 +17,7 @@
  * surface (landing, settings, insufficient-credits modal). The CE tree is published
  * by `export-ce.sh --push <giturl>`; update this constant to the final public repo URL.
  */
-export const SELF_HOSTED_GITHUB_URL = 'https://github.com/livecontext-ai/livecontext-ce';
+export const SELF_HOSTED_GITHUB_URL = 'https://github.com/eddinerabii/Trinyx';
 
 /**
  * Canonical credits→USD "list" scale: 1 credit = $0.001 USD. Defined backend-side

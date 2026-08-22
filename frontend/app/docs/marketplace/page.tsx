@@ -92,7 +92,7 @@ export default function MarketplacePage() {
           ]}
         />
         <Callout variant="info">
-          Standalone <a href="/skills">skill</a> and <a href="/interfaces">interface</a> publications
+          Standalone <a href="/docs/skills">skill</a> and <a href="/docs/interfaces">interface</a> publications
           review only Public listings: their Private and Unlisted publications activate immediately,
           and they default to Private.
         </Callout>
@@ -285,7 +285,7 @@ export default function MarketplacePage() {
 
         <h2>Remote cloud marketplace for CE</h2>
         <p>
-          A self-hosted <a href="/self-host">Community Edition</a> instance can link to a cloud
+          A self-hosted <a href="/docs/self-host">Community Edition</a> instance can link to a cloud
           account and, from that link, browse and acquire from the shared cloud marketplace,
           exactly as a cloud user would. Linking uses OAuth against the cloud identity provider, and
           a heartbeat keeps the cloud side aware of which CE version is connected. CE can also run
@@ -294,22 +294,22 @@ export default function MarketplacePage() {
 
         <h2>Where to go next</h2>
         <CardGrid cols={3}>
-          <Card icon={LayoutPanelLeft} title="Interfaces & apps" href="/interfaces">
+          <Card icon={LayoutPanelLeft} title="Interfaces & apps" href="/docs/interfaces">
             Package a workflow as a shareable, interactive app.
           </Card>
-          <Card icon={Workflow} title="Workflows" href="/workflows">
+          <Card icon={Workflow} title="Workflows" href="/docs/workflows">
             Build the thing you&apos;ll publish.
           </Card>
-          <Card icon={Bot} title="Agents" href="/agents">
+          <Card icon={Bot} title="Agents" href="/docs/agents">
             Publish an agent, scoped to just the tools it needs.
           </Card>
-          <Card icon={Table2} title="Tables & data" href="/tables">
+          <Card icon={Table2} title="Tables & data" href="/docs/tables">
             Publish a table alongside the workflows that use it.
           </Card>
-          <Card icon={ShieldCheck} title="Self-hosting" href="/self-host">
+          <Card icon={ShieldCheck} title="Self-hosting" href="/docs/self-host">
             Run your own instance, optionally linked to the cloud marketplace.
           </Card>
-          <Card icon={Store} title="Getting started" href="/getting-started">
+          <Card icon={Store} title="Getting started" href="/docs/getting-started">
             New to Trinyx? Start here.
           </Card>
         </CardGrid>

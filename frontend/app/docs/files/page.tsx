@@ -282,13 +282,13 @@ export default function FilesPage() {
 
         <h2>Where to go next</h2>
         <CardGrid cols={3}>
-          <Card icon={Workflow} title="Workflows" href="/workflows">
+          <Card icon={Workflow} title="Workflows" href="/docs/workflows">
             Wire file-producing nodes into a run.
           </Card>
-          <Card icon={MessageSquare} title="Chat" href="/chat">
+          <Card icon={MessageSquare} title="Chat" href="/docs/chat">
             Upload attachments and let an agent read or see them.
           </Card>
-          <Card icon={Store} title="Marketplace" href="/marketplace">
+          <Card icon={Store} title="Marketplace" href="/docs/marketplace">
             Publish an app whose previews use signed file links.
           </Card>
         </CardGrid>

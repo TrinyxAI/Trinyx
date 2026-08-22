@@ -317,13 +317,13 @@ ORG_SAML_SSO_CONFIGURED · ORG_SAML_SSO_DELETED · ORG_SAML_SSO_MEMBER_JOINED`}<
 
         <h2>Where to go next</h2>
         <CardGrid cols={3}>
-          <Card icon={Users} title="Chat" href="/chat">
+          <Card icon={Users} title="Chat" href="/docs/chat">
             Conversations and agent chats live inside a workspace too.
           </Card>
-          <Card icon={Workflow} title="Workflows" href="/workflows">
+          <Card icon={Workflow} title="Workflows" href="/docs/workflows">
             The automations your members build, run, and share.
           </Card>
-          <Card icon={Store} title="Marketplace" href="/marketplace">
+          <Card icon={Store} title="Marketplace" href="/docs/marketplace">
             Publish from a workspace, or acquire into one.
           </Card>
         </CardGrid>

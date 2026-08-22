@@ -304,13 +304,13 @@ Assistant:  ✓ Contact form received  {email: "test@acme.com"}
 
         <h2>Where to go next</h2>
         <CardGrid cols={3}>
-          <Card icon={Workflow} title="Workflows" href="/workflows">
+          <Card icon={Workflow} title="Workflows" href="/docs/workflows">
             What the assistant is building under the hood: structure, branching, parallelism.
           </Card>
-          <Card icon={Boxes} title="Node reference" href="/nodes">
+          <Card icon={Boxes} title="Node reference" href="/docs/nodes">
             The catalog of building blocks the assistant can place.
           </Card>
-          <Card icon={Bot} title="Agents" href="/agents">
+          <Card icon={Bot} title="Agents" href="/docs/agents">
             Configure the AI steps: model, tools, budget, and guardrails.
           </Card>
         </CardGrid>

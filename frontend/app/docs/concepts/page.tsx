@@ -73,7 +73,7 @@ export default function ConceptsPage() {
           a <strong>schedule</strong> (a recurring time), a <strong>chat</strong> message, a{' '}
           <strong>form</strong> submission, a <strong>manual</strong> click, or a{' '}
           <strong>table</strong> row change. A workflow needs at least one trigger, and each trigger
-          runs its own graph. See <a href="/triggers">Triggers</a> for the full list.
+          runs its own graph. See <a href="/docs/triggers">Triggers</a> for the full list.
         </p>
 
         <h2>Control flow</h2>
@@ -124,18 +124,18 @@ export default function ConceptsPage() {
           <strong>Agent</strong> - an AI node that calls a model to reason, decide, or generate, with
           a scoped set of tools and a credit budget it can&apos;t exceed. Variants include{' '}
           <strong>Guardrail</strong> (validate/filter) and <strong>Classify</strong> (route by
-          category). See <a href="/agents">Agents</a>.
+          category). See <a href="/docs/agents">Agents</a>.
         </p>
         <p>
           <strong>Interface</strong> - a web page (rendered in an iframe) that displays workflow data
           and collects input. It can <em>block</em> the run (a wizard that waits for the user to
           continue) or just display and let the run proceed. See{' '}
-          <a href="/interfaces">Interfaces &amp; apps</a>.
+          <a href="/docs/interfaces">Interfaces &amp; apps</a>.
         </p>
         <p>
           <strong>Table</strong> - a built-in spreadsheet your workflow reads, searches, and writes.
           Rows have a flexible schema; a table can also be a trigger (run when a row changes) or
-          shared memory between steps. See <a href="/tables">Tables &amp; data</a>.
+          shared memory between steps. See <a href="/docs/tables">Tables &amp; data</a>.
         </p>
 
         <h2>Execution modes</h2>
@@ -219,7 +219,7 @@ export default function ConceptsPage() {
           <strong>credits</strong>. Every agent can be given a <strong>budget</strong> it cannot
           exceed. When an agent spawns sub-agents, their budgets are reserved from the parent&apos;s,
           so the total spend of a whole agent tree is capped by the top budget. See{' '}
-          <a href="/agents">Agents</a> for the full model.
+          <a href="/docs/agents">Agents</a> for the full model.
         </p>
         <p>
           When a budget is hit, the agent stops for reason <code>BUDGET_EXHAUSTED</code>, and which
@@ -243,7 +243,7 @@ export default function ConceptsPage() {
         <p>
           Everywhere a node reads another step&apos;s output, it uses the same template form:{' '}
           <code>{'{{prefix:label.output.field}}'}</code>. See{' '}
-          <a href="/workflows">Workflows</a> for the full expressions reference.
+          <a href="/docs/workflows">Workflows</a> for the full expressions reference.
         </p>
         <CodeBlock language="text">{`{{trigger:webhook.output.body}}        → the payload a webhook received
 {{core:check_amount.output.result}}    → a core node's result

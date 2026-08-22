@@ -6,7 +6,7 @@ import { generateMetadata, generateStaticParams } from '../[slug]/page';
 import { metadata as hubMetadata } from '../page';
 import { COMPARISONS } from '../_lib/comparisons';
 
-const SITE = 'https://livecontext.ai';
+const SITE = 'https://trinyx.fr';
 
 describe('/compare/[slug] metadata (cloud edition)', () => {
   it('statically generates exactly one page per comparison', () => {
@@ -28,7 +28,7 @@ describe('/compare/[slug] metadata (cloud edition)', () => {
     const meta = await generateMetadata({ params: Promise.resolve({ slug: 'n8n-alternative' }) });
     const og = meta.openGraph as { images?: unknown[]; siteName?: string; url?: string };
     expect(og?.images?.length).toBeGreaterThan(0);
-    expect(og?.siteName).toBe('LiveContext');
+    expect(og?.siteName).toBe('Trinyx');
     expect(og?.url).toBe(`${SITE}/compare/n8n-alternative`);
   });
 

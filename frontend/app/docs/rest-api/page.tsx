@@ -215,8 +215,8 @@ export default function RestApiPage() {
           ]}
         />
         <p>
-          None of these need a login. See <a href="/interfaces">Interfaces &amp; apps</a> and{' '}
-          <a href="/marketplace">Marketplace</a> for how publishing and sharing produce these links.
+          None of these need a login. See <a href="/docs/interfaces">Interfaces &amp; apps</a> and{' '}
+          <a href="/docs/marketplace">Marketplace</a> for how publishing and sharing produce these links.
         </p>
 
         <h2>Chat over the API</h2>
@@ -286,9 +286,9 @@ Authorization: Bearer lc_live_...`}</CodeBlock>
         <h3>Client configuration example</h3>
         <CodeBlock language="json">{`{
   "mcpServers": {
-    "livecontext": {
+    "trinyx": {
       "type": "http",
-      "url": "https://livecontext.ai/mcp",
+      "url": "https://trinyx.fr/mcp",
       "headers": {
         "X-API-Key": "lc_live_..."
       }
@@ -298,16 +298,16 @@ Authorization: Bearer lc_live_...`}</CodeBlock>
         <p>
           Connecting this way gives the MCP client access to your own tool registry, the same tools
           available inside Trinyx&apos;s own agents and workflows: see{' '}
-          <a href="/agents">Agents</a> and <a href="/integrations">Integrations</a> for what those
+          <a href="/docs/agents">Agents</a> and <a href="/docs/integrations">Integrations</a> for what those
           tools cover.
         </p>
 
         <h2>Where to go next</h2>
         <CardGrid cols={3}>
-          <Card icon={Workflow} title="Triggers" href="/triggers">All eight ways a run can start, including the webhook trigger.</Card>
-          <Card icon={Table2} title="Tables & data" href="/tables">Row-level CRUD backing the Table trigger and datasources.</Card>
-          <Card icon={Bot} title="Agents" href="/agents">Agents, tools, and how the same registry is exposed over MCP.</Card>
-          <Card icon={Server} title="Self-hosting" href="/self-host">Run your own instance; the MCP server works the same in CE.</Card>
+          <Card icon={Workflow} title="Triggers" href="/docs/triggers">All eight ways a run can start, including the webhook trigger.</Card>
+          <Card icon={Table2} title="Tables & data" href="/docs/tables">Row-level CRUD backing the Table trigger and datasources.</Card>
+          <Card icon={Bot} title="Agents" href="/docs/agents">Agents, tools, and how the same registry is exposed over MCP.</Card>
+          <Card icon={Server} title="Self-hosting" href="/docs/self-host">Run your own instance; the MCP server works the same in CE.</Card>
         </CardGrid>
       </DocsProse>
     </>

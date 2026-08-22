@@ -13,8 +13,7 @@ import { DOCS_NAV, cleanDocsPathname, isActiveDocPath } from '../_nav';
  * `next/navigation`, never `@/i18n/navigation`.
  */
 export function DocsNav({ onNavigate }: { onNavigate?: () => void }) {
-  // Normalized: at build time usePathname() is the internal /docs/... route,
-  // in the browser it is the clean subdomain URL (see cleanDocsPathname).
+  // Canonical on-site path used for active-state matching.
   const pathname = cleanDocsPathname(usePathname());
   const [query, setQuery] = useState('');
   const q = query.trim().toLowerCase();

@@ -204,17 +204,17 @@ Update "Mark done":
         <h2>When a row changes</h2>
         <p>
           Every insert, update, and delete fires a row-changed event once it commits. This is what
-          powers a <a href="/triggers">datasource trigger</a>: a workflow that starts automatically
+          powers a <a href="/docs/triggers">datasource trigger</a>: a workflow that starts automatically
           whenever a row in a chosen table is created, updated, or deleted. An update event also carries
           the row's previous values, so a trigger can compare before/after state.
         </p>
 
         <h2>Where to go next</h2>
         <CardGrid cols={3}>
-          <Card icon={Workflow} title="Workflows" href="/workflows">Process rows in parallel with Find + Split.</Card>
-          <Card icon={Zap} title="Triggers" href="/triggers">Start a workflow when a row changes.</Card>
-          <Card icon={Plug} title="Integrations" href="/integrations">Pull data in from outside tools.</Card>
-          <Card icon={Bot} title="Agents" href="/agents">Give an agent a table as scoped memory.</Card>
+          <Card icon={Workflow} title="Workflows" href="/docs/workflows">Process rows in parallel with Find + Split.</Card>
+          <Card icon={Zap} title="Triggers" href="/docs/triggers">Start a workflow when a row changes.</Card>
+          <Card icon={Plug} title="Integrations" href="/docs/integrations">Pull data in from outside tools.</Card>
+          <Card icon={Bot} title="Agents" href="/docs/agents">Give an agent a table as scoped memory.</Card>
         </CardGrid>
       </DocsProse>
     </>

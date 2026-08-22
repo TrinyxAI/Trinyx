@@ -11,7 +11,7 @@ import { isIndexable, marketplacePath } from '@/lib/marketplace/indexability';
 const SITE_URL = process.env.NEXT_PUBLIC_SITE_URL ?? 'https://trinyx.fr';
 
 /**
- * Public-indexable surface of livecontext.ai (native Next.js sitemap).
+ * Public-indexable surface of trinyx.fr (native Next.js sitemap).
  *
  * Included:
  *  - Landing `/` - ONE entry, the apex URL. The landing lives under
@@ -95,14 +95,12 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
     { url: `${SITE_URL}/legal/mentions`, lastModified: now, changeFrequency: 'yearly', priority: 0.3 },
   ];
 
-  // Documentation pages live on the docs.livecontext.ai subdomain at clean paths
-  // (the apex /docs/* redirects there). Enumerated from the docs IA so they never
-  // drift. `_nav.ts` hrefs are already clean ('/', '/agents', ...).
+  // Documentation is canonical on the same public origin under /docs.
   const docs: MetadataRoute.Sitemap = DOCS_PAGES.map((page) => ({
-    url: `https://docs.livecontext.ai${page.href === '/' ? '' : page.href}`,
+    url: `${SITE_URL}${page.href}`,
     lastModified: now,
     changeFrequency: 'monthly',
-    priority: page.href === '/' ? 0.6 : 0.5,
+    priority: page.href === '/docs' ? 0.6 : 0.5,
   }));
 
   // Blog: en canonical URLs, each with the full hreflang cluster so Google

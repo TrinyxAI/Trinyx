@@ -2,20 +2,16 @@ import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
 
-// The public landing footer (LandingFooter in LandingShell) carries the company
-// social links. It renders OUTSIDE the [locale] tree on several public sub-pages,
-// so it must stay intl-context-free; we lock its link set at the source level
-// (same approach as landingChromeTheme.test.ts) rather than rendering it.
 const shellSrc = readFileSync(path.resolve(__dirname, '../LandingShell.tsx'), 'utf8');
 
 describe('public landing footer social links', () => {
   const expectedHrefs = [
-    'https://www.linkedin.com/company/livecontext/',
-    'https://x.com/livecontextai',
-    'https://www.instagram.com/livecontext.ai/',
-    'https://github.com/livecontext-ai',
-    'https://www.tiktok.com/@livecontextai',
-    'https://discord.gg/5gTuUwhkJ',
+    'https://www.linkedin.com/in/trinyx-ai-5bb4a5430/',
+    'https://x.com/Trinyxai',
+    'https://www.instagram.com/trinyx.ai/',
+    'https://github.com/eddinerabii/Trinyx',
+    'https://www.tiktok.com/@trinyx.ai',
+    'https://discord.gg/EykNSkEvM6',
   ];
 
   for (const href of expectedHrefs) {
@@ -24,11 +20,23 @@ describe('public landing footer social links', () => {
     });
   }
 
+  it('does not publish legacy social-profile URLs', () => {
+    const legacyBrand = ['live', 'context'].join('');
+    const obsoleteUrls = [
+      `linkedin.com/company/${legacyBrand}`,
+      `x.com/${legacyBrand}ai`,
+      `instagram.com/${legacyBrand}`,
+      `tiktok.com/@${legacyBrand}ai`,
+      `github.com/${legacyBrand}-ai`,
+    ];
+    for (const obsoleteUrl of obsoleteUrls) {
+      expect(shellSrc.toLowerCase()).not.toContain(obsoleteUrl);
+    }
+  });
+
   it('labels the Discord community invite for accessibility', () => {
-    // The Discord entry must ship an aria-label so it is reachable by name,
-    // mirroring the other footer social icons.
     expect(shellSrc).toMatch(
-      /href="https:\/\/discord\.gg\/5gTuUwhkJ"[\s\S]*?aria-label="Discord"/,
+      /href="https:\/\/discord\.gg\/EykNSkEvM6"[\s\S]*?aria-label="Discord"/,
     );
   });
 });

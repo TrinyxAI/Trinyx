@@ -97,11 +97,11 @@ const LANDING_JSON_LD = [
     url: SITE_URL,
     logo: `${SITE_URL}/branding/trinyx-logo.png`,
     sameAs: [
-      'https://www.linkedin.com/company/livecontext/',
-      'https://x.com/livecontextai',
-      'https://www.instagram.com/livecontext.ai/',
-      'https://github.com/livecontext-ai',
-      'https://www.tiktok.com/@livecontextai',
+      'https://www.linkedin.com/in/trinyx-ai-5bb4a5430/',
+      'https://x.com/Trinyxai',
+      'https://www.instagram.com/trinyx.ai/',
+      'https://github.com/eddinerabii/Trinyx',
+      'https://www.tiktok.com/@trinyx.ai',
     ],
   },
   {
@@ -554,7 +554,7 @@ function FaqSection() {
       </div>
       <p className="mt-8 text-sm text-center" style={{ color: 'var(--text-muted)' }}>
         More detail in the{' '}
-        <a href="https://docs.livecontext.ai" className="underline underline-offset-2 hover:opacity-80">documentation</a>
+        <a href="/docs" className="underline underline-offset-2 hover:opacity-80">documentation</a>
         {' '}or the{' '}
         <Link href="/compare" className="underline underline-offset-2 hover:opacity-80">comparison pages</Link>.
       </p>

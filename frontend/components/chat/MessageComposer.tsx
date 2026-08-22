@@ -51,6 +51,10 @@ export interface MessageComposerProps {
   fullWidth?: boolean;
   /** When true, disables the textarea and send button */
   disabled?: boolean;
+  /** Intercept actions that require an authenticated application context. */
+  onDeferredAction?: (currentValue: string) => void;
+  /** Prevent loading backend skill defaults when the composer is rendered publicly. */
+  defaultSkillsEnabled?: boolean;
   /** Minimal/DM mode: render the same composer as a plain text+send box, hiding the
    *  AI-only controls (tools & skills) and skipping the per-conversation agent lookup.
    *  Attachments, voice dictation and the generate action stay: a DM carries real files,
@@ -87,6 +91,8 @@ export function MessageComposer({
   sidebarWidth = 256,
   fullWidth = false,
   disabled = false,
+  onDeferredAction,
+  defaultSkillsEnabled = true,
   minimal = false,
   conversationId,
   queuedMessages = [],
@@ -106,7 +112,7 @@ export function MessageComposer({
     setActiveSkillIds,
     initializeDefaults,
     hasExplicitSkillSelection,
-  } = useDefaultSkills(conversationId);
+  } = useDefaultSkills(conversationId, { enabled: defaultSkillsEnabled });
   const activeSkillIdsRef = useRef(activeSkillIds);
   const hasExplicitSkillSelectionRef = useRef(hasExplicitSkillSelection);
   const pendingConfigurationSavesRef = useRef<Set<Promise<unknown>>>(new Set());
@@ -588,7 +594,10 @@ export function MessageComposer({
                 <Button
                   variant="ghost"
                   size="icon"
-                  onClick={() => fileInputRef.current?.click()}
+                  onClick={() => {
+                    if (onDeferredAction) return onDeferredAction(localValue);
+                    fileInputRef.current?.click();
+                  }}
                   className="h-9 w-9"
                   title={t('chat.attachFiles')}
                 >
@@ -609,7 +618,10 @@ export function MessageComposer({
                 <Button
                   variant="ghost"
                   size="icon"
-                  onClick={() => setOpenPanel(openPanel ? null : 'tools')}
+                  onClick={() => {
+                    if (onDeferredAction) return onDeferredAction(localValue);
+                    setOpenPanel(openPanel ? null : 'tools');
+                  }}
                   className={`h-9 w-9 ${openPanel ? 'bg-gray-100 dark:bg-gray-800' : ''}`}
                   title={t('credentials.toolsAndSkills')}
                 >
@@ -634,7 +646,10 @@ export function MessageComposer({
                 <GenerateEntryButton
                   variant="icon"
                   label={t('chat.generateAsset')}
-                  onOpen={() => setGenerationOpen(true)}
+                  onOpen={() => {
+                    if (onDeferredAction) return onDeferredAction(localValue);
+                    setGenerationOpen(true);
+                  }}
                 />
 
                 {/* Notification bell relocated to AppHeader (next to the
@@ -727,7 +742,7 @@ export function MessageComposer({
           </div>
 
           {/* Tools/Skills panel */}
-          {!minimal && (
+          {!minimal && !onDeferredAction && (
             <div ref={menuContainerRef}>
               <AttachmentHandler
                 isOpen={!!openPanel}
@@ -749,7 +764,7 @@ export function MessageComposer({
         </div>
       </div>
 
-      {generationOpen && (
+      {!onDeferredAction && generationOpen && (
         <React.Suspense fallback={null}>
           <CreateGenerationModal
             isOpen

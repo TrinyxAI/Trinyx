@@ -89,30 +89,30 @@ export const metadata: Metadata = {
   icons: {
     icon: [
       {
-        url: '/liveContext-logo.png',
+        url: '/branding/trinyx-mark-32.png',
         sizes: '32x32',
         type: 'image/png',
       },
       {
-        url: '/liveContext-logo.png',
+        url: '/branding/trinyx-mark-48.png',
         sizes: '48x48',
         type: 'image/png',
       },
       {
-        url: '/liveContext-logo.png',
+        url: '/branding/trinyx-mark-96.png',
         sizes: '96x96',
         type: 'image/png',
       },
       {
-        url: '/liveContext-logo.png',
+        url: '/branding/trinyx-mark-192.png',
         sizes: '192x192',
         type: 'image/png',
       },
     ],
-    shortcut: '/liveContext-logo.png',
+    shortcut: '/favicon.ico',
     apple: [
       {
-        url: '/liveContext-logo.png',
+        url: '/branding/trinyx-mark-180.png',
         sizes: '180x180',
         type: 'image/png',
       }
@@ -127,10 +127,7 @@ export default function RootLayout({
 }) {
   return (
     <html lang="en" suppressHydrationWarning className="h-full">
-        <head>
-          <link rel="icon" type="image/png" sizes="32x32" href="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAACAAAAAgCAMAAABEpIrGAAAAMFBMVEVMaXEAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAACbsZG/AAAAD3RSTlMAAhrD7g5yJZ354DGtYpWxLVWdAAAACXBIWXMAAAsTAAALEwEAmpwYAAAAqklEQVR42tVS0Q7EIAhTENTp5P//9pjbcrnJ3OuOGEmsthVw7g/D+yn6k0wYSqE7Gu/8iiHngOsNHlGOQBhlFF9ElsScgmYwGPR96udQRepIsCrejeqqWEaGuvGqUNSNaMQpSFOIc+aD5qJQsrDKq8FgfOH5QodmEhq4mwSwTV6/Ge1Ctf6SklGos9SNuW05ms34NitaLtXb2W5yfjIw8DBTE3if2fnUvjQ+dFcGEfmguF4AAAAASUVORK5CYII=" />
-        </head>
-        <body className={`${inter.className} ${inter.variable} ${outfit.variable} h-full`}>
+<body className={`${inter.className} ${inter.variable} ${outfit.variable} h-full`}>
           <Providers>
             <NavigationLoader />
             <div className="h-full flex flex-col">

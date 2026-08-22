@@ -1,0 +1,54 @@
+name: Fix remaining hero logo once
+
+on:
+  push:
+    branches:
+      - fix-remaining-hero-livecontext-logo
+
+permissions:
+  contents: write
+
+jobs:
+  patch-logo:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: fix-remaining-hero-livecontext-logo
+          fetch-depth: 0
+
+      - name: Replace hardcoded sidebar LiveContext logo
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import re
+
+          path = Path('frontend/public/hero-flow.html')
+          text = path.read_text(encoding='utf-8')
+
+          pattern = r'<div class="logo"><svg\b.*?</svg></div>'
+          replacement = '<div class="logo"><img src="/branding/trinyx-mark.png" alt="Trinyx" /></div>'
+          text, count = re.subn(pattern, replacement, text, count=1, flags=re.S)
+          if count != 1:
+              raise SystemExit(f'Expected exactly one hardcoded sidebar logo, found {count}')
+
+          path.write_text(text, encoding='utf-8')
+          PY
+
+      - name: Verify and commit
+        shell: bash
+        run: |
+          grep -F -- '<div class="logo"><img src="/branding/trinyx-mark.png" alt="Trinyx" /></div>' frontend/public/hero-flow.html
+          if grep -F -- '<div class="logo"><svg' frontend/public/hero-flow.html; then
+            echo 'Legacy sidebar SVG still present'
+            exit 1
+          fi
+
+          rm .github/workflows/fix-remaining-hero-logo-once.yml
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -A
+          git commit -m 'Replace remaining LiveContext hero logo'
+          git push origin HEAD:fix-remaining-hero-livecontext-logo

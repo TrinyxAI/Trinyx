@@ -1,8 +1,7 @@
 'use client';
 
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { getClientLocale } from '@/lib/utils/locale';
-import { Paperclip, ArrowUp, Square, X, FileIcon, ImageIcon, Loader2, Mic, MicOff, Settings2 } from 'lucide-react';
+import { Paperclip, ArrowUp, Square, X, FileIcon, ImageIcon, Loader2, Mic, Settings2 } from 'lucide-react';
 import { useQuery } from '@tanstack/react-query';
 import { AttachmentHandler, type AttachmentView } from './AttachmentHandler';
 import { ImageLightbox } from './ImageLightbox';
@@ -18,6 +17,7 @@ import { GenerateEntryButton } from '@/components/chat/GenerateEntryButton';
 import { MAX_QUEUE_SIZE, type QueuedMessage } from '@/lib/stores/message-queue-store';
 import { readDraft, writeDraft, clearDraft } from '@/lib/chat/draftStorage';
 import { fetchLinkedAgent, canFetchLinkedAgent } from '@/lib/chat/linkedAgent';
+import { useSpeechDictation } from '@/hooks/useSpeechDictation';
 
 export interface AnalyzeBadge {
   id: string;
@@ -188,10 +188,13 @@ export function MessageComposer({
   }, [agentIdForConversation, conversationId, linkedAgentQuery.isPending, setActiveSkillIds]);
 
   const [localValue, setLocalValue] = useState(inputValue);
+  const { speechSupported, isListening, toggleDictation } = useSpeechDictation({
+    value: localValue,
+    onChange: setLocalValue,
+  });
   const [openPanel, setOpenPanel] = useState<AttachmentView | null>(null);
   const [generationOpen, setGenerationOpen] = useState(false);
   const [pendingAttachments, setPendingAttachments] = useState<PendingAttachment[]>([]);
-  const [isListening, setIsListening] = useState(false);
   // Pre-send image preview shown enlarged in the lightbox (null = closed). Uses the local
   // object URL, so it needs no auth and isn't downloadable (the user already has the file).
   const [lightboxPreview, setLightboxPreview] = useState<{ src: string; fileName: string } | null>(null);
@@ -199,9 +202,6 @@ export function MessageComposer({
   const panelAnchorRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
-  const recognitionRef = useRef<SpeechRecognition | null>(null);
-  // Tracks the confirmed text before the current interim result
-  const confirmedTranscriptRef = useRef('');
 
   // Close panel on outside click
   useEffect(() => {
@@ -322,64 +322,6 @@ export function MessageComposer({
           attachmentApi.revokePreviewUrl(a.preview);
         }
       });
-    };
-  }, []);
-
-  // Speech recognition support
-  const speechSupported = typeof window !== 'undefined' &&
-    ('SpeechRecognition' in window || 'webkitSpeechRecognition' in window);
-
-  const toggleDictation = useCallback(() => {
-    if (!speechSupported) return;
-
-    if (isListening && recognitionRef.current) {
-      recognitionRef.current.stop();
-      return;
-    }
-
-    const SpeechRecognitionApi = window.SpeechRecognition || window.webkitSpeechRecognition;
-    const recognition = new SpeechRecognitionApi();
-    recognition.continuous = true;
-    recognition.interimResults = true;
-    recognition.lang = getClientLocale();
-
-    // Save current text as the base before dictation starts
-    confirmedTranscriptRef.current = localValue;
-
-    recognition.onresult = (event: SpeechRecognitionEvent) => {
-      // event.results is cumulative - rebuild full transcript each time
-      let transcript = '';
-      for (let i = 0; i < event.results.length; i++) {
-        transcript += event.results[i][0].transcript;
-      }
-
-      const base = confirmedTranscriptRef.current;
-      const separator = base && !base.endsWith(' ') && transcript ? ' ' : '';
-      setLocalValue(base + separator + transcript);
-    };
-
-    recognition.onend = () => {
-      setIsListening(false);
-      recognitionRef.current = null;
-    };
-
-    recognition.onerror = (event: SpeechRecognitionErrorEvent) => {
-      console.error('Speech recognition error:', event.error);
-      setIsListening(false);
-      recognitionRef.current = null;
-    };
-
-    recognitionRef.current = recognition;
-    recognition.start();
-    setIsListening(true);
-  }, [speechSupported, isListening, localValue]);
-
-  // Cleanup recognition on unmount
-  useEffect(() => {
-    return () => {
-      if (recognitionRef.current) {
-        recognitionRef.current.stop();
-      }
     };
   }, []);
 

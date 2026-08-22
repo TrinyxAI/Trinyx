@@ -193,7 +193,7 @@ code[class*="language-"] {
   height: 1.125rem !important;
   cursor: pointer !important;
   border: 2px solid var(--border-color) !important;
-  border-radius: 0.25em !important;
+  border-radius: 0.25rem !important;
   background-color: var(--bg-primary) !important;
   transition: all 0.2s ease !important;
   appearance: none !important;

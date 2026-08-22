@@ -127,7 +127,7 @@ export default function RootLayout({
 }) {
   return (
     <html lang="en" suppressHydrationWarning className="h-full">
-<body className={`${inter.className} ${inter.variable} ${outfit.variable} h-full`}>
+        <body className={`${inter.className} ${inter.variable} ${outfit.variable} h-full`}>
           <Providers>
             <NavigationLoader />
             <div className="h-full flex flex-col">

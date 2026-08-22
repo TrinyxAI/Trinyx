@@ -13,7 +13,6 @@ interface ThemeContextType {
 }
 
 const ThemeContext = createContext<ThemeContextType | undefined>(undefined);
-const THEME_STORAGE_KEY = 'trinyx-theme-v1';
 
 export function useOptionalTheme() {
   return useContext(ThemeContext);
@@ -37,7 +36,7 @@ function isThemePreference(value: string | null): value is ThemePreference {
 
 function getSystemTheme(): Theme {
   if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') {
-    return 'dark';
+    return 'light';
   }
 
   return window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
@@ -45,13 +44,11 @@ function getSystemTheme(): Theme {
 
 function getStoredThemePreference(): ThemePreference {
   if (typeof window === 'undefined') {
-    return 'dark';
+    return 'auto';
   }
 
-  // Use a Trinyx-specific key so legacy LiveContext `theme=light/auto`
-  // preferences cannot override the new brand default on first visit.
-  const savedTheme = localStorage.getItem(THEME_STORAGE_KEY);
-  return isThemePreference(savedTheme) ? savedTheme : 'dark';
+  const savedTheme = localStorage.getItem('theme');
+  return isThemePreference(savedTheme) ? savedTheme : 'auto';
 }
 
 function applyThemeClasses(theme: Theme) {
@@ -77,10 +74,14 @@ export function ThemeProvider({ children }: ThemeProviderProps) {
   const isClient = useIsClient();
   const [themePreference, setThemePreference] = useState<ThemePreference>(getStoredThemePreference);
   const [systemTheme, setSystemTheme] = useState<Theme>(getSystemTheme);
-  // Trinyx defaults to its dark brand theme during SSR/hydration and for visitors
-  // with no Trinyx-specific saved preference. Explicit choices remain supported.
-  const effectivePreference: ThemePreference = isClient ? themePreference : 'dark';
-  const effectiveSystemTheme: Theme = isClient ? systemTheme : 'dark';
+  // Until the client snapshot resolves (server render + the hydration pass),
+  // pin the context to the server defaults so the SSR markup and the hydration
+  // render are byte-identical; the persisted preference kicks in on the very
+  // next render. NEVER return null here instead: this provider wraps the whole
+  // app, and returning null on the server used to strip every page (including
+  // the SEO-critical landing/marketing pages) out of the server HTML entirely.
+  const effectivePreference: ThemePreference = isClient ? themePreference : 'auto';
+  const effectiveSystemTheme: Theme = isClient ? systemTheme : 'light';
   const theme: Theme = effectivePreference === 'auto' ? effectiveSystemTheme : effectivePreference;
 
   // Apply the resolved theme to the document and persist the selected preference.
@@ -88,7 +89,7 @@ export function ThemeProvider({ children }: ThemeProviderProps) {
     if (!isClient) return;
 
     applyThemeClasses(theme);
-    localStorage.setItem(THEME_STORAGE_KEY, themePreference);
+    localStorage.setItem('theme', themePreference);
   }, [theme, themePreference, isClient]);
 
   // Keep auto mode synchronized with the OS preference.

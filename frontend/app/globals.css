@@ -389,7 +389,7 @@ code[class*="language-"] {
 
 @layer base {
   :root {
-    /* Variables for light mode: neutral surfaces, branded actions */
+    /* Variables for light mode */
     --bg-primary: #ffffff;
     --bg-secondary: #f5f6f8;
     --bg-tertiary: #eceff3;
@@ -397,11 +397,10 @@ code[class*="language-"] {
     --text-secondary: #4b5563;
     --text-muted: #6b7280;
     --border-color: #d5dbe4;
-    --accent-primary: #9D14FF;
+    --accent-primary: #0b0d16;
     --accent-secondary: #1d2330;
-    --accent-hover: #B52CFF;
-    --brand-glow: #C858C6;
-    --accent-foreground: #F7F5FA;
+    --accent-hover: #151927;
+    --accent-foreground: #f6f7f9;
     --shadow-color: rgba(11, 13, 22, 0.14);
     --bg-hover: #e5e7eb;
     --expression-bg: rgba(191, 219, 254, 0.5);
@@ -411,25 +410,24 @@ code[class*="language-"] {
   }
 
   .dark {
-    /* Variables for dark mode - Trinyx 80/15/5 palette */
-    --bg-primary: #120917;
-    --bg-secondary: #1A0F20;
-    --bg-tertiary: #23132B;
-    --text-primary: #F7F5FA;
-    --text-secondary: #A9A3B0;
-    --text-muted: #7C7485;
-    --border-color: #2B1D35;
-    --accent-primary: #9D14FF;
+    /* Variables for dark mode - warm neutral */
+    --bg-primary: #171614;
+    --bg-secondary: #1f1e1b;
+    --bg-tertiary: #2a2925;
+    --text-primary: #edecea;
+    --text-secondary: #a39f97;
+    --text-muted: #736f67;
+    --border-color: #5e5a54;
+    --accent-primary: #edecea;
     --accent-secondary: #c7c4bd;
-    --accent-hover: #B52CFF;
-    --brand-glow: #C858C6;
-    --accent-foreground: #F7F5FA;
-    --shadow-color: rgba(4, 0, 7, 0.55);
-    --bg-hover: #2A1834;
+    --accent-hover: #d7d4ce;
+    --accent-foreground: #171614;
+    --shadow-color: rgba(0, 0, 0, 0.45);
+    --bg-hover: #57534e;
     --expression-bg: rgba(56, 189, 248, 0.25);
     --expression-color: #38bdf8;
-    --shimmer-color: rgba(18, 9, 23, 0.25);
-    --shimmer-color-strong: rgba(18, 9, 23, 0.4);
+    --shimmer-color: rgba(23, 22, 20, 0.25);
+    --shimmer-color-strong: rgba(23, 22, 20, 0.4);
 
     /* Override Tailwind grays with warm stone in dark mode only */
     --color-gray-50: #fafaf9;

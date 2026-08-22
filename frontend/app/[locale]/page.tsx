@@ -971,9 +971,8 @@ const landingStyles = `
     overflow: hidden;
     padding: 72px 24px 88px;
     background:
-      radial-gradient(ellipse 72% 62% at 14% 28%, rgba(157, 20, 255, 0.38) 0%, rgba(157, 20, 255, 0) 70%),
-      radial-gradient(ellipse 68% 58% at 88% 34%, rgba(200, 88, 198, 0.28) 0%, rgba(200, 88, 198, 0) 72%),
-      linear-gradient(180deg, #120917 0%, #1A0F20 58%, #120917 100%);
+      var(--landing-hero-glow),
+      linear-gradient(180deg, var(--bg-primary) 0%, var(--bg-secondary) 58%, var(--bg-primary) 100%);
     isolation: isolate;
   }
 
@@ -983,7 +982,7 @@ const landingStyles = `
     height: 34%;
     content: '';
     pointer-events: none;
-    background: linear-gradient(180deg, rgba(18, 9, 23, 0), #120917);
+    background: linear-gradient(180deg, transparent, var(--bg-primary));
     z-index: -1;
   }
 
@@ -994,7 +993,7 @@ const landingStyles = `
   }
 
   .landing-root .hero-prompt-title {
-    color: #F7F5FA;
+    color: var(--text-primary);
     font-size: clamp(42px, 5.2vw, 68px);
     letter-spacing: -0.04em;
   }
@@ -1002,7 +1001,7 @@ const landingStyles = `
   .landing-root .hero-prompt-subtitle {
     max-width: 680px;
     margin: 18px auto 0;
-    color: #A9A3B0;
+    color: var(--text-secondary);
     font-size: clamp(16px, 1.7vw, 21px);
     line-height: 1.55;
   }

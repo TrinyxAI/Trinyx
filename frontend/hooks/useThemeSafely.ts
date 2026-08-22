@@ -1,8 +1,8 @@
 import { useOptionalTheme } from '../components/ThemeProvider';
 
 const DEFAULT_THEME_CONTEXT = {
-  theme: 'dark' as const,
-  themePreference: 'dark' as const,
+  theme: 'light' as const,
+  themePreference: 'light' as const,
   toggleTheme: () => {},
   setTheme: () => {}
 };

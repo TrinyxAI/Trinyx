@@ -24,15 +24,15 @@ import { docsHref } from '@/lib/docs/docsHostRewrite';
 // palette (`--bg-*`, `--text-*`, `--border-color`, `--accent-*`, `--expression-color`)
 // AND the decorative tokens are defined here for `.landing-root` (LIGHT) and
 // `.landing-root.dark` (DARK). The `dark` class is driven by `LandingThemeProvider`
-// (DEFAULT DARK, persisted under `landing-theme`), NOT by the app-wide ThemeProvider
-// on <body>. This lets the public site default to the Trinyx dark theme for every
+// (DEFAULT LIGHT, persisted under `landing-theme`), NOT by the app-wide ThemeProvider
+// on <body>. This lets the public site default to a warm light theme for every
 // visitor while the logged-in app keeps following the user's OS/preference. The
 // LIGHT palette is deliberately WARM (cream whites, amber glows) as the light
 // counterpart of the warm-neutral dark palette below; it intentionally diverges
 // from `globals.css` `:root`, which stays cool for the app.
 export const landingChromeStyles = `
   .landing-root {
-    /* light palette - neutral surfaces with restrained Trinyx actions */
+    /* light palette - cool neutral (matches the app's light palette, no beige) */
     --bg-primary: #ffffff;
     --bg-secondary: #f5f6f8;
     --bg-tertiary: #eceff3;
@@ -41,20 +41,19 @@ export const landingChromeStyles = `
     --text-secondary: #4b5563;
     --text-muted: #6b7280;
     --border-color: #d5dbe4;
-    --accent-primary: #9D14FF;
+    --accent-primary: #0b0d16;
     --accent-secondary: #1d2330;
-    --accent-hover: #B52CFF;
-    --brand-glow: #C858C6;
-    --accent-foreground: #F7F5FA;
+    --accent-hover: #151927;
+    --accent-foreground: #f6f7f9;
     --expression-color: #1d4ed8;
 
-    /* light decorative tokens - subtle violet, never structural */
+    /* light decorative tokens - cool neutral (no amber/beige) */
     --landing-header-bg: rgba(255, 255, 255, 0.85);
-    --landing-hero-glow: radial-gradient(ellipse 800px 400px at 50% 0%, rgba(200, 88, 198, 0.09) 0%, rgba(255, 255, 255, 0) 70%);
-    --landing-cta-glow: radial-gradient(ellipse 720px 380px at 50% 0%, rgba(157, 20, 255, 0.10) 0%, rgba(245, 246, 248, 0) 70%);
-    --landing-highlight-row: rgba(157, 20, 255, 0.08);
+    --landing-hero-glow: radial-gradient(ellipse 800px 400px at 50% 0%, rgba(17, 24, 39, 0.05) 0%, rgba(255, 255, 255, 0) 70%);
+    --landing-cta-glow: radial-gradient(ellipse 720px 380px at 50% 0%, rgba(17, 24, 39, 0.05) 0%, rgba(245, 246, 248, 0) 70%);
+    --landing-highlight-row: rgba(202, 158, 88, 0.12);
     --landing-dash-track: rgba(28, 26, 23, 0.14);
-    --landing-dash-track-active: rgba(157, 20, 255, 0.24);
+    --landing-dash-track-active: rgba(28, 26, 23, 0.22);
     --landing-card-shadow: 0 8px 32px rgba(28, 26, 23, 0.07);
     --landing-frame-shadow: 0 20px 60px rgba(28, 26, 23, 0.10);
     --landing-frame-shadow-strong: 0 30px 80px rgba(28, 26, 23, 0.14), 0 8px 18px rgba(28, 26, 23, 0.08);
@@ -67,29 +66,29 @@ export const landingChromeStyles = `
   }
 
   .landing-root.dark {
-    /* dark palette - Trinyx 80% neutral / 15% violet surfaces / 5% electric */
-    --bg-primary: #120917;
-    --bg-secondary: #1A0F20;
-    --bg-tertiary: #23132B;
-    --bg-hover: #2A1834;
-    --text-primary: #F7F5FA;
-    --text-secondary: #A9A3B0;
-    --text-muted: #7C7485;
-    --border-color: #2B1D35;
-    --accent-primary: #9D14FF;
+    /* dark palette - the PLATFORM's dark theme (mirrors globals.css .dark, warm
+       neutral), so the public dark mode matches the app the visitor signs into */
+    --bg-primary: #171614;
+    --bg-secondary: #1f1e1b;
+    --bg-tertiary: #2a2925;
+    --bg-hover: #57534e;
+    --text-primary: #edecea;
+    --text-secondary: #a39f97;
+    --text-muted: #736f67;
+    --border-color: #5e5a54;
+    --accent-primary: #edecea;
     --accent-secondary: #c7c4bd;
-    --accent-hover: #B52CFF;
-    --brand-glow: #C858C6;
-    --accent-foreground: #F7F5FA;
+    --accent-hover: #d7d4ce;
+    --accent-foreground: #171614;
     --expression-color: #38bdf8;
 
-    /* dark decorative tokens - restrained brand glow */
-    --landing-header-bg: rgba(18, 9, 23, 0.88);
-    --landing-hero-glow: radial-gradient(ellipse 800px 400px at 50% 0%, rgba(200, 88, 198, 0.16) 0%, rgba(18, 9, 23, 0) 70%);
-    --landing-cta-glow: radial-gradient(ellipse 720px 380px at 50% 0%, rgba(157, 20, 255, 0.20) 0%, rgba(18, 9, 23, 0) 70%);
-    --landing-highlight-row: rgba(157, 20, 255, 0.10);
-    --landing-dash-track: rgba(247, 245, 250, 0.14);
-    --landing-dash-track-active: rgba(157, 20, 255, 0.40);
+    /* dark decorative tokens */
+    --landing-header-bg: rgba(23, 22, 20, 0.85);
+    --landing-hero-glow: radial-gradient(ellipse 800px 400px at 50% 0%, rgba(58, 46, 31, 0.55) 0%, rgba(23, 22, 20, 0) 70%);
+    --landing-cta-glow: radial-gradient(ellipse 720px 380px at 50% 0%, rgba(58, 46, 31, 0.6) 0%, rgba(31, 30, 27, 0) 70%);
+    --landing-highlight-row: rgba(58, 46, 31, 0.25);
+    --landing-dash-track: rgba(237, 236, 234, 0.16);
+    --landing-dash-track-active: rgba(237, 236, 234, 0.22);
     --landing-card-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
     --landing-frame-shadow: 0 20px 60px rgba(0, 0, 0, 0.4);
     --landing-frame-shadow-strong: 0 30px 80px rgba(0, 0, 0, 0.48), 0 8px 18px rgba(0, 0, 0, 0.35);
@@ -118,11 +117,10 @@ export const landingChromeStyles = `
     --text-secondary: #55504a;
     --text-muted: #7d776e;
     --border-color: #ddd7cd;
-    --accent-primary: #9D14FF;
+    --accent-primary: #171614;
     --accent-secondary: #2a2925;
-    --accent-hover: #B52CFF;
-    --brand-glow: #C858C6;
-    --accent-foreground: #F7F5FA;
+    --accent-hover: #33312c;
+    --accent-foreground: #faf9f7;
   }
 `;
 
@@ -370,7 +368,7 @@ interface LandingShellProps {
   extraStyles?: string;
   /** Optional element rendered in the header's right cluster (e.g. the docs theme toggle). */
   headerExtra?: React.ReactNode;
-  /** Theme persistence for this surface. The public site defaults to dark on
+  /** Theme persistence for this surface. The public site defaults to light on
    *  first visit and restores the visitor's footer-toggle choice afterwards. */
   themeStorageKey?: string;
   themeRespectStored?: boolean;

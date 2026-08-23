@@ -80,6 +80,12 @@ x-java-service: &java-service
     WEBSEARCH_CDP_JWT_SECRET: ${WEBSEARCH_CDP_JWT_SECRET:?set WEBSEARCH_CDP_JWT_SECRET}
     CONVERSATION_BRIDGE_ENABLED: "false"
     POSTHOG_ENABLED: "false"
+    OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+    ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+    GOOGLE_API_KEY: ${GOOGLE_API_KEY:-}
+    GEMINI_API_KEY: ${GEMINI_API_KEY:-}
+    MISTRAL_API_KEY: ${MISTRAL_API_KEY:-}
+    DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY:-}
     OAUTH2_FRONTEND_URL: https://cloud.trinyx.fr
     OAUTH2_CALLBACK_URL: https://cloud.trinyx.fr/api/credentials/oauth2/callback
   depends_on: &java-dependencies

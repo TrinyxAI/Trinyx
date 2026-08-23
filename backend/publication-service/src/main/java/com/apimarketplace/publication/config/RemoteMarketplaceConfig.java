@@ -25,13 +25,13 @@ import org.springframework.context.annotation.Configuration;
 @ConditionalOnProperty(name = "marketplace.mode", havingValue = "remote")
 public class RemoteMarketplaceConfig {
 
-    @Value("${marketplace.cloud-api-url:https://livecontext.ai/api}")
+    @Value("${marketplace.cloud-api-url:https://cloud.trinyx.fr/api}")
     private String cloudApiUrl;
 
-    @Value("${cloud-link.keycloak-url:https://auth.livecontext.ai/realms/livecontext}")
+    @Value("${cloud-link.keycloak-url:https://auth.trinyx.fr/realms/trinyx}")
     private String keycloakUrl;
 
-    @Value("${cloud-link.client-id:livecontext-frontend}")
+    @Value("${cloud-link.client-id:trinyx-frontend}")
     private String clientId;
 
     @Value("${cloud-link.redirect-uri:http://localhost:8080/api/cloud-link/callback}")

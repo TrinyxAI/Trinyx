@@ -177,12 +177,16 @@ public class ApiCatalogMergeService {
         List<UUID> bundleToolIds = new ArrayList<>(tools.size());
         int applied = 0;
         for (Map<String, Object> toolMap : tools) {
-            UUID toolId = UUID.fromString(str(toolMap, "id"));
-            bundleToolIds.add(toolId);
-            upsertTool(apiId, toolId, toolMap);
-            replaceParameters(toolId, list(toolMap, "parameters"));
-            replaceResponses(toolId, list(toolMap, "responses"));
-            replaceToolCredentials(toolId, list(toolMap, "toolCredentials"));
+            UUID bundleToolId = UUID.fromString(str(toolMap, "id"));
+            UUID effectiveToolId = upsertTool(apiId, bundleToolId, toolMap);
+            // A logical-key conflict may preserve an install-local UUID. Every
+            // child replacement and the deprecation sweep must follow that
+            // effective id, otherwise children would target the bundle UUID
+            // and the live local row would be immediately soft-deprecated.
+            bundleToolIds.add(effectiveToolId);
+            replaceParameters(effectiveToolId, list(toolMap, "parameters"));
+            replaceResponses(effectiveToolId, list(toolMap, "responses"));
+            replaceToolCredentials(effectiveToolId, list(toolMap, "toolCredentials"));
             applied++;
         }
 
@@ -254,7 +258,7 @@ public class ApiCatalogMergeService {
                     :platformCredentialName, :iconUrl, :apiVersion, :documentation,
                     :rateLimits::jsonb, 'bundle', NULL,
                     EXTRACT(EPOCH FROM NOW()) * 1000, EXTRACT(EPOCH FROM NOW()) * 1000)
-                ON CONFLICT (id) DO UPDATE SET
+                ON CONFLICT """ + conflictTarget + """ DO UPDATE SET
                     api_name = EXCLUDED.api_name,
                     api_slug = EXCLUDED.api_slug,
                     description = EXCLUDED.description,
@@ -285,7 +289,14 @@ public class ApiCatalogMergeService {
                 """, p);
     }
 
-    private void upsertTool(UUID apiId, UUID toolId, Map<String, Object> tool) {
+    /**
+     * Upsert a logical tool and return the UUID that remains authoritative on
+     * this install. For normal rows, {@code (api_id, tool_name_id)} is the
+     * database identity. A conflict on that key deliberately leaves the
+     * existing primary key untouched so every child/consumer FK remains valid.
+     * Tools without a logical name retain the legacy UUID conflict target.
+     */
+    private UUID upsertTool(UUID apiId, UUID toolId, Map<String, Object> tool) {
         MapSqlParameterSource p = new MapSqlParameterSource()
                 .addValue("id", toolId)
                 .addValue("apiId", apiId)
@@ -309,7 +320,11 @@ public class ApiCatalogMergeService {
                 .addValue("isActive", bool(tool, "isActive", true))
                 .addValue("version", str(tool, "version"));
 
-        jdbc.update("""
+        String conflictTarget = str(tool, "toolNameId") == null
+                ? "(id)"
+                : "(api_id, tool_name_id)";
+
+        UUID effectiveToolId = jdbc.queryForObject("""
                 INSERT INTO catalog.api_tools (
                     id, api_id, tool_slug, description, tool_name_id, method, endpoint,
                     protocol, default_headers, runtime_metadata, execution_spec, output_schema,
@@ -345,7 +360,10 @@ public class ApiCatalogMergeService {
                     version = EXCLUDED.version,
                     deprecated_at = NULL,
                     updated_at = EXTRACT(EPOCH FROM NOW()) * 1000
-                """, p);
+                RETURNING id
+                """, p, UUID.class);
+        return Objects.requireNonNull(effectiveToolId,
+                "api_tools upsert did not return an effective id");
     }
 
     private void replaceParameters(UUID toolId, List<Map<String, Object>> parameters) {

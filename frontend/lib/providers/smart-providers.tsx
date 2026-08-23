@@ -30,13 +30,12 @@ import { SessionGate } from '../../components/auth/SessionGate';
 // UnifiedApiProvider removed - replaced by React Query
 
 // No need to import old providers - everything is managed by Resource Managers
-import { IS_CE } from '@/lib/edition';
+import { IS_CE, IS_EMBEDDED_AUTH } from '@/lib/edition';
 import { resetAnalytics } from '@/lib/analytics/analytics';
 import { isPublicMarketingPath } from './publicMarketingPath';
 
 // CE deployments use embedded auth; cloud uses OIDC. Single source of truth from
 // `lib/edition` (built-in build-time resolution + dual-read shim, see edition.ts).
-const IS_EMBEDDED_AUTH = IS_CE;
 const SSO_ORG_ID_PATTERN = /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/;
 
 function getConfiguredOidcStorageKey(): string {

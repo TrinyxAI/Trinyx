@@ -169,4 +169,18 @@ class CreditAttributionGrantPaygTopupTest {
                 SESSION_ID + ":clawback:dispute:ch_1", "PAYG DISPUTED for checkout " + SESSION_ID);
     }
 
+
+    @Test
+    @DisplayName("refund before checkout grant remains retryable")
+    void refundBeforeCheckoutGrantThrows() {
+        when(ledgerRepository.findBySourceId(SESSION_ID)).thenReturn(Optional.empty());
+
+        assertThatThrownBy(() -> attributionService.clawbackPaygTopup(
+                SESSION_ID, BigDecimal.ONE, "refund:ch_early", "REFUNDED"))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("top-up grant not found yet");
+
+        verify(creditService, never()).grantCredits(any(), any(), any(), any(), any());
+    }
+
 }

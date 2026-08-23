@@ -116,15 +116,3 @@ export function formatCostCompact(value: number | null | undefined): string {
   const body = abs.toLocaleString(getClientLocale(), { minimumFractionDigits: 2, maximumFractionDigits: maxFractionDigits });
   return `${sign}${prefix}${body}`;
 }
- : '';
-  const sign = display < 0 ? '-' : '';
-  const abs = Math.abs(display);
-  if (abs >= 1_000_000_000) return `${sign}${prefix}${(abs / 1_000_000_000).toFixed(1)}B`;
-  if (abs >= 1_000_000) return `${sign}${prefix}${(abs / 1_000_000).toFixed(1)}M`;
-  if (abs >= 1_000) return `${sign}${prefix}${(abs / 1_000).toFixed(1)}K`;
-  // Below 1000 no abbreviation is needed; sub-unit amounts keep up to 4 decimals
-  // (same adaptive precision as the CE dollar path).
-  const maxFractionDigits = abs > 0 && abs < 1 ? 4 : 2;
-  const body = abs.toLocaleString(getClientLocale(), { minimumFractionDigits: 2, maximumFractionDigits: maxFractionDigits });
-  return `${sign}${prefix}${body}`;
-}

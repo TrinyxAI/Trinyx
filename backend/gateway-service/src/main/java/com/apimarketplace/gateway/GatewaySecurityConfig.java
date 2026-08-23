@@ -24,7 +24,7 @@ public class GatewaySecurityConfig {
                         .pathMatchers("/actuator/health", "/healthz").permitAll()
                         .pathMatchers("/webhooks/**", "/cdp/**").permitAll()
                         .pathMatchers("/api/catalog/public/bundles/**").permitAll()
-                        .pathMatchers("/api/internal/**").denyAll()
+                        .pathMatchers("/api/internal/**", "/internal/**").denyAll()
                         .anyExchange().authenticated())
                 .oauth2ResourceServer(oauth -> oauth.jwt(jwt -> {}))
                 .build();

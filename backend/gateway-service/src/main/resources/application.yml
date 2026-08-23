@@ -1,0 +1,56 @@
+server:
+  port: 8086
+
+spring:
+  application:
+    name: trinyx-gateway
+  security:
+    oauth2:
+      resourceserver:
+        jwt:
+          jwk-set-uri: ${KEYCLOAK_JWK_SET_URI:http://keycloak:8080/realms/trinyx/protocol/openid-connect/certs}
+  data:
+    redis:
+      host: ${REDIS_HOST:cloud-redis}
+      port: ${REDIS_PORT:6379}
+      password: ${REDIS_PASSWORD:}
+  cloud:
+    gateway:
+      server:
+        webflux:
+          routes:
+            - id: auth-ce-link
+              uri: ${AUTH_SERVICE_URL:http://auth-service:8083}
+              predicates: [ Path=/api/ce-link/** ]
+            - id: auth-webhooks
+              uri: ${AUTH_SERVICE_URL:http://auth-service:8083}
+              predicates: [ Path=/webhooks/** ]
+            - id: catalog-public-bundles
+              uri: ${CATALOG_SERVICE_URL:http://catalog-service:8081}
+              predicates: [ Path=/api/catalog/public/bundles/** ]
+            - id: catalog-ce
+              uri: ${CATALOG_SERVICE_URL:http://catalog-service:8081}
+              predicates: [ Path=/api/ce-catalog/** ]
+            - id: agent-bundles
+              uri: ${AGENT_SERVICE_URL:http://agent-service:8090}
+              predicates: [ Path=/api/catalog-bundles/**,/api/skill-bundles/**,/api/ce-llm/** ]
+            - id: orchestrator-ce
+              uri: ${ORCHESTRATOR_SERVICE_URL:http://orchestrator-service:8099}
+              predicates: [ Path=/api/ce-websearch/** ]
+            - id: conversation-websocket
+              uri: ${CONVERSATION_WS_URL:ws://conversation-service:8087}
+              predicates: [ Path=/ws/** ]
+
+trinyx:
+  gateway:
+    jwt:
+      issuer: ${KEYCLOAK_ISSUER:https://auth.trinyx.fr/realms/trinyx}
+      audience: ${KEYCLOAK_AUDIENCE:trinyx-frontend}
+    auth-service-url: ${AUTH_SERVICE_URL:http://auth-service:8083}
+    hmac-secret: ${GATEWAY_SECRET_KEY:}
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info

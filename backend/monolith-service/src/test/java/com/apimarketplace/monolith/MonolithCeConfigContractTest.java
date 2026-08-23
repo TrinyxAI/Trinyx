@@ -294,7 +294,7 @@ class MonolithCeConfigContractTest {
             .isEqualTo("${CLOUD_KEYCLOAK_URL:https://auth.trinyx.fr/realms/trinyx}");
         assertThat(nestedValue(root, "cloud-link", "client-id"))
             .as("The cloud realm config extends the existing public PKCE client")
-            .isEqualTo("${CLOUD_LINK_CLIENT_ID:livecontext-frontend}");
+            .isEqualTo("${CLOUD_LINK_CLIENT_ID:trinyx-frontend}");
         assertThat(nestedValue(root, "cloud-link", "redirect-uri"))
             .as("OAuth codes must return to the CE backend callback, not a frontend URL with code= in the query string")
             .isEqualTo("${CLOUD_LINK_REDIRECT_URI:http://localhost:8080/api/cloud-link/callback}");

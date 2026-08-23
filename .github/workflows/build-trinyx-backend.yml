@@ -48,7 +48,7 @@ jobs:
           mvn -B -Pce
           -pl common-lib,auth-service,monolith-service
           -Dsurefire.failIfNoSpecifiedTests=false
-          -Dtest=AppEditionProviderTest,AppEditionAutoConfigurationTest,MonolithCeConfigContractTest,WebhookControllerTest,StripeBillingServiceTest,StripeScheduleServiceTest,SubscriptionServiceTest,FreeSubscriptionProvisionerTest,FreeSubscriptionRenewalSchedulerTest,CreditAttributionGrantPaygTopupTest,CreditLedgerRepositoryLockIntegrationTest,CreditServiceTest,CreditControllerTest,CreditConsumptionClientTest,GatewayAuthenticationFilterTest,ModelPricingServiceTest,PlanLimitServiceTest,BillingControllerTest,BillingControllerIntegrationTest,StripeHealthIndicatorTest
+          -Dtest=AppEditionProviderTest,AppEditionAutoConfigurationTest,MonolithCeConfigContractTest,WebhookControllerTest,StripeBillingServiceTest,StripeScheduleServiceTest,SubscriptionServiceTest,SubscriptionCacheBusterTest,PlanStorageQuotaSyncerTest,WebhookControllerReferralTest,CreditAttributionServiceTest,FreeSubscriptionProvisionerTest,FreeSubscriptionRenewalSchedulerTest,CreditAttributionGrantPaygTopupTest,CreditLedgerRepositoryLockIntegrationTest,CreditServiceTest,CreditControllerTest,CreditConsumptionClientTest,GatewayAuthenticationFilterTest,ModelPricingServiceTest,PlanLimitServiceTest,BillingControllerTest,BillingControllerIntegrationTest,StripeHealthIndicatorTest
           test
 
   frontend-test:
@@ -93,6 +93,8 @@ jobs:
           npx vitest run
           __tests__/lib/edition/edition.test.ts
           __tests__/components/settings/settingsNavItems.test.ts
+          components/billing/__tests__/CancellationModal.test.tsx
+          components/settings/__tests__/VersionCard.test.tsx
       - name: Build frontend (${{ matrix.mode }})
         run: npm run build
 

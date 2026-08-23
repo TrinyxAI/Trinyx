@@ -44,9 +44,10 @@ public class CloudIdentityController {
     @PostMapping("/revoke")
     public ResponseEntity<Map<String, String>> revoke(
             @RequestParam UUID installId,
+            @RequestParam UUID organizationId,
             @RequestParam UUID principalId,
             @RequestParam long bindingRevision) {
-        bindings.revoke(installId, principalId, bindingRevision);
+        bindings.revoke(installId, organizationId, principalId, bindingRevision);
         return ResponseEntity.ok(Map.of("status", "REVOKED"));
     }
 

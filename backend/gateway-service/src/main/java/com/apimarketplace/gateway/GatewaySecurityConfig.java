@@ -22,7 +22,7 @@ public class GatewaySecurityConfig {
                 .csrf(ServerHttpSecurity.CsrfSpec::disable)
                 .authorizeExchange(exchange -> exchange
                         .pathMatchers("/actuator/health", "/healthz").permitAll()
-                        .pathMatchers("/webhooks/**").permitAll()
+                        .pathMatchers("/webhooks/**", "/cdp/**").permitAll()
                         .pathMatchers("/api/catalog/public/bundles/**").permitAll()
                         .pathMatchers("/api/internal/**").denyAll()
                         .anyExchange().authenticated())

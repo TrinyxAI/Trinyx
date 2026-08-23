@@ -47,6 +47,9 @@ public class BillingEvent {
     @Column(name = "attempt_count", nullable = false)
     private int attemptCount = 0;
 
+    @Column(name = "processing_started_at")
+    private LocalDateTime processingStartedAt;
+
     @Column(name = "processed_at")
     private LocalDateTime processedAt;
 
@@ -90,6 +93,9 @@ public class BillingEvent {
 
     public int getAttemptCount() { return attemptCount; }
     public void setAttemptCount(int attemptCount) { this.attemptCount = attemptCount; }
+
+    public LocalDateTime getProcessingStartedAt() { return processingStartedAt; }
+    public void setProcessingStartedAt(LocalDateTime processingStartedAt) { this.processingStartedAt = processingStartedAt; }
 
     public LocalDateTime getProcessedAt() { return processedAt; }
     public void setProcessedAt(LocalDateTime processedAt) { this.processedAt = processedAt; }

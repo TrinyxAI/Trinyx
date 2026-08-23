@@ -10,7 +10,7 @@ import { IS_CE } from './edition';
  * mailbox. Mirrors the `CE_API_BASE` constant used for cloud category reads in
  * `CategoryFilter`.
  */
-export const CLOUD_WEB_BASE_URL = 'https://livecontext.ai';
+export const CLOUD_WEB_BASE_URL = 'https://app.trinyx.fr';
 
 /**
  * In CE, rewrite an app-relative path or a same-origin URL onto

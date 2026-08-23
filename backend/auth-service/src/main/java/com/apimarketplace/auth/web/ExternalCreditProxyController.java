@@ -66,6 +66,25 @@ public class ExternalCreditProxyController {
                         estimated, maximum, command.provider(), command.model()));
     }
 
+
+    @PostMapping("/{operationId}/commit-llm")
+    public ResponseEntity<ExternalCreditProxyService.SettlementResult> commitLlm(
+            @PathVariable UUID operationId,
+            @Valid @RequestBody LlmCommitCommand command) {
+        if (!pricing.hasPricing(command.provider(), command.model())) {
+            throw new org.springframework.web.server.ResponseStatusException(
+                    org.springframework.http.HttpStatus.CONFLICT, "MODEL_PRICING_UNKNOWN_AT_SETTLEMENT");
+        }
+        BigDecimal actual = pricing.calculateCost(command.provider(), command.model(),
+                Math.max(0, command.promptTokens()), Math.max(0, command.completionTokens()));
+        var result = proxy.commit(operationId, new ExternalCreditProxyService.CommitCommand(
+                actual, command.provider(), command.model(), command.providerRequestId(),
+                (long) Math.max(0, command.promptTokens()),
+                (long) Math.max(0, command.completionTokens()), command.requestHash()));
+        return result.queued() ? ResponseEntity.accepted().body(result)
+                : ResponseEntity.ok(result);
+    }
+
     @PostMapping("/{operationId}/commit")
     public ResponseEntity<ExternalCreditProxyService.SettlementResult> commit(
             @PathVariable UUID operationId,
@@ -91,4 +110,12 @@ public class ExternalCreditProxyController {
             String model,
             int estimatedPromptTokens,
             int maximumCompletionTokens) {}
+
+    public record LlmCommitCommand(
+            String provider,
+            String model,
+            String providerRequestId,
+            int promptTokens,
+            int completionTokens,
+            String requestHash) {}
 }

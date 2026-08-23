@@ -127,7 +127,7 @@ public class AppEditionProvider {
             new FlagSpec("credit.unlimited", "true", "false", "false", "false", "false", true),
             new FlagSpec("credit.consumption.enabled", "true", "true", "true", "true", "true", false),
             new FlagSpec("plan-limits.enabled", "false", "true", "true", "true", "true", true),
-            new FlagSpec("billing.provider", "none", "stripe", "none", "stripe", "stripe", false),
+            new FlagSpec("billing.provider", "none", "stripe", "none", "stripe", "stripe", true),
             new FlagSpec("marketplace.mode", "remote", "remote", "remote", "local", "local", false)
     );
 

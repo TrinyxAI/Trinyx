@@ -248,10 +248,14 @@ public class GatewayAuthenticationFilter implements Filter {
     }
 
     private boolean timestampWithinAbsoluteSkew(String value, long maximumSkewMs) {
+        if (maximumSkewMs < 0) {
+            return false;
+        }
         try {
             long parsed = Long.parseLong(value);
-            return Math.abs(System.currentTimeMillis() - parsed) <= maximumSkewMs;
-        } catch (NumberFormatException e) {
+            long delta = Math.subtractExact(System.currentTimeMillis(), parsed);
+            return delta >= -maximumSkewMs && delta <= maximumSkewMs;
+        } catch (NumberFormatException | ArithmeticException e) {
             return false;
         }
     }

@@ -114,6 +114,7 @@ jobs:
           mvn -B -Pce
           -pl common-lib,gateway-service -am
           -Dtest=AppEditionProviderTest,AppEditionAutoConfigurationTest,GatewayAuthenticationFilterTest,GatewayAuthenticationFilterV2Test,GatewaySignatureV2Test,GatewaySignatureV2ParityTest
+          -Dsurefire.failIfNoSpecifiedTests=false
           test
 
       - name: Ensure paid-monolith files are untouched

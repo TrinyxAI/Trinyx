@@ -447,7 +447,8 @@ class WebhookControllerTest {
 
         private void assertRawScheduleDispatch(String eventId, String type, String rawJson) throws Exception {
             Event event = createMockEvent(eventId, type, null);
-            when(event.getData().getObject()).thenReturn(createRawStripeObject(rawJson));
+            StripeObject rawObject = createRawStripeObject(rawJson);
+            when(event.getData().getObject()).thenReturn(rawObject);
             when(billingEventRepository.existsByEventId(eventId)).thenReturn(false);
             when(billingEventRepository.save(any(BillingEvent.class))).thenAnswer(inv -> inv.getArgument(0));
 

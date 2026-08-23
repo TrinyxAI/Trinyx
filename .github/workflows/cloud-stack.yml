@@ -61,6 +61,8 @@ jobs:
           grep -q 'CATALOG_SERVICE_URL: http://catalog-service:8081' "${rendered}"
           grep -q 'STORAGE_SERVICE_URL: http://storage-service:8082' "${rendered}"
           grep -q 'ORCHESTRATOR_SERVICE_URL: http://orchestrator-service:8099' "${rendered}"
+          grep -q 'published: 127.0.0.1' "${rendered}"
+          grep -q 'target: 8443' "${rendered}"
 
       - name: Verify external image manifests
         shell: bash
@@ -83,6 +85,9 @@ jobs:
         run: |
           set -euo pipefail
           python -m json.tool docker/cloud/keycloak/trinyx-realm.json >/dev/null
+          grep -q '/internal/v1/entitlement-projections' docker/cloud/Caddyfile
+          grep -q '/internal/v1/identity-bindings/revocations' docker/cloud/Caddyfile
+          ! grep -q 'reverse_proxy auth-service:8083' docker/cloud/Caddyfile || true
           docker run --rm             -v "${PWD}/docker/cloud/Caddyfile:/etc/caddy/Caddyfile:ro"             caddy:2.11.4-alpine             caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile
 
       - name: Reject legacy runtime URLs and committed secrets

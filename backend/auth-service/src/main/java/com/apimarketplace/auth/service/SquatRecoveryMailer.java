@@ -39,7 +39,7 @@ public class SquatRecoveryMailer {
 
     public SquatRecoveryMailer(
             JavaMailSender mailSender,
-            @Value("${app.mail.from:noreply@livecontext.ai}") String mailFrom,
+            @Value("${app.mail.from:noreply@trinyx.fr}") String mailFrom,
             @Value("${app.mail.from-name:LiveContext}") String mailFromName,
             @Value("${oauth2.frontend-url:http://localhost:3000}") String frontendUrl) {
         this.mailSender = mailSender;

@@ -7,6 +7,7 @@ import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Service;
 
 import java.security.PublicKey;
+import java.security.PrivateKey;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.LinkedHashMap;
@@ -21,16 +22,42 @@ public class WorkloadAuthenticationService {
     private final StringRedisTemplate redis;
     private final String issuer;
     private final String audience;
+    private final String signingKid;
+    private final PrivateKey signingKey;
 
     public WorkloadAuthenticationService(
             StringRedisTemplate redis,
             @Value("${trinyx.s2s.verification-keys:}") String encodedKeys,
             @Value("${trinyx.s2s.issuer:trinyx-cloud}") String issuer,
-            @Value("${trinyx.s2s.audience:trinyx-billing-authority}") String audience) {
+            @Value("${trinyx.s2s.audience:trinyx-billing-authority}") String audience,
+            @Value("${trinyx.s2s.signing-kid:}") String signingKid,
+            @Value("${trinyx.s2s.signing-key:}") String encodedSigningKey) {
         this.redis = redis;
         this.verificationKeys = parseKeys(encodedKeys);
         this.issuer = issuer;
         this.audience = audience;
+        this.signingKid = signingKid;
+        this.signingKey = encodedSigningKey == null || encodedSigningKey.isBlank()
+                ? null : Ed25519Jws.privateKeyFromPkcs8Base64(encodedSigningKey);
+    }
+
+    public String issue(String serviceId) {
+        if (serviceId == null || !serviceId.matches("[A-Za-z0-9._:-]{1,128}")) {
+            throw new IllegalArgumentException("Invalid workload service identity");
+        }
+        if (signingKid == null || signingKid.isBlank() || signingKey == null) {
+            throw new IllegalStateException("No active workload signing key configured");
+        }
+        Instant now = Instant.now();
+        var claims = new com.fasterxml.jackson.databind.ObjectMapper().createObjectNode();
+        claims.put("iss", issuer);
+        claims.put("aud", audience);
+        claims.put("serviceId", serviceId);
+        claims.put("jti", UUID.randomUUID().toString());
+        claims.put("iat", now.getEpochSecond());
+        claims.put("nbf", now.minusSeconds(2).getEpochSecond());
+        claims.put("exp", now.plusSeconds(60).getEpochSecond());
+        return Ed25519Jws.sign(claims, signingKid, signingKey);
     }
 
     public WorkloadIdentity authenticate(String authorization) {

@@ -3,12 +3,14 @@ package com.apimarketplace.auth.web;
 import com.apimarketplace.auth.service.EntitlementProjectionService;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotBlank;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.UUID;
 
 /** Internal S2S endpoint; the edge gateway never exposes /api/internal/**. */
 @RestController
+@ConditionalOnProperty(name = "billing.authority.mode", havingValue = "external-paid-monolith", matchIfMissing = false)
 @RequestMapping("/api/internal/v1/entitlement-projections")
 public class EntitlementProjectionController {
 

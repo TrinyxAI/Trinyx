@@ -16,7 +16,18 @@ public final class InMemoryGatewayNonceStore implements GatewayNonceStore {
         }
         String key = (providerId == null ? "" : providerId) + ":" + nonce;
         long expiresAt = now + Math.max(1, ttl.toMillis());
-        return expirations.compute(key, (ignored, existing) ->
-                existing == null || existing <= now ? expiresAt : existing) == expiresAt;
+        for (;;) {
+            Long existing = expirations.get(key);
+            if (existing != null && existing > now) {
+                return false;
+            }
+            if (existing == null) {
+                if (expirations.putIfAbsent(key, expiresAt) == null) {
+                    return true;
+                }
+            } else if (expirations.replace(key, existing, expiresAt)) {
+                return true;
+            }
+        }
     }
 }

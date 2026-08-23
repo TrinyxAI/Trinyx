@@ -1,10 +1,15 @@
 package com.apimarketplace.auth.repository;
 
 import com.apimarketplace.auth.domain.CreditLedgerEntry;
+import io.micrometer.core.instrument.MeterRegistry;
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.jdbc.AutoConfigureTestDatabase;
 import org.springframework.boot.test.autoconfigure.orm.jpa.DataJpaTest;
+import org.springframework.boot.test.context.TestConfiguration;
+import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Import;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
@@ -29,6 +34,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
         "spring.jpa.properties.hibernate.default_schema=auth"
 })
 @AutoConfigureTestDatabase(replace = AutoConfigureTestDatabase.Replace.NONE)
+@Import(CreditLedgerRepositoryLockIntegrationTest.MetricsConfig.class)
 @Testcontainers
 class CreditLedgerRepositoryLockIntegrationTest {
 
@@ -47,6 +53,14 @@ class CreditLedgerRepositoryLockIntegrationTest {
         registry.add("spring.datasource.url", POSTGRES::getJdbcUrl);
         registry.add("spring.datasource.username", POSTGRES::getUsername);
         registry.add("spring.datasource.password", POSTGRES::getPassword);
+    }
+
+    @TestConfiguration(proxyBeanMethods = false)
+    static class MetricsConfig {
+        @Bean
+        MeterRegistry meterRegistry() {
+            return new SimpleMeterRegistry();
+        }
     }
 
     @Autowired

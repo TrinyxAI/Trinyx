@@ -30,6 +30,8 @@ export interface SettingsNavItem {
   icon: ComponentType<SVGProps<SVGSVGElement>>;
   adminOnly?: boolean;
   hiddenInCE?: boolean;
+  /** Only visible when the billing API is enabled for this deployment. */
+  requiresBilling?: boolean;
   /** Only visible in CE mode */
   ceOnly?: boolean;
   /** Temporarily hidden from all modes */
@@ -54,11 +56,11 @@ export const settingsNavItems: SettingsNavItem[] = [
 
   // ── Billing & usage ──────────────────────────────
   { href: '/app/settings/pricing', label: 'Pricing', icon: CreditCard, groupStart: true },
-  { href: '/app/settings/billing', label: 'Billing', icon: ScrollText, hiddenInCE: true },
+  { href: '/app/settings/billing', label: 'Billing', icon: ScrollText, requiresBilling: true },
   { href: '/app/settings/quota', label: 'Quota & Usage', icon: Coins },
   { href: '/app/settings/storage', label: 'Storage', icon: HardDrive },
   { href: '/app/settings/rewards', label: 'Refer & earn', icon: Gift },
-  { href: '/app/settings/admin-credits', label: 'Credits & Plans', icon: Crown, adminOnly: true, hiddenInCE: true },
+  { href: '/app/settings/admin-credits', label: 'Credits & Plans', icon: Crown, adminOnly: true, requiresBilling: true },
 
   // ── Access & sharing ─────────────────────────────
   { href: '/app/settings/public-access', label: 'Public Access', icon: Globe, groupStart: true },

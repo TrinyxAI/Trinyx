@@ -25,17 +25,26 @@ public interface BillingEventRepository extends JpaRepository<BillingEvent, Long
             UPDATE BillingEvent be
                SET be.status = 'PROCESSING',
                    be.attemptCount = be.attemptCount + 1,
+                   be.processingStartedAt = :startedAt,
                    be.lastError = NULL
              WHERE be.eventId = :eventId
-               AND be.status IN ('RECEIVED', 'FAILED')
+               AND (
+                    be.status IN ('RECEIVED', 'FAILED')
+                    OR (be.status = 'PROCESSING'
+                        AND (be.processingStartedAt IS NULL
+                             OR be.processingStartedAt < :staleBefore))
+               )
             """)
-    int claimForProcessing(@Param("eventId") String eventId);
+    int claimForProcessing(@Param("eventId") String eventId,
+                           @Param("startedAt") LocalDateTime startedAt,
+                           @Param("staleBefore") LocalDateTime staleBefore);
 
     @Modifying(clearAutomatically = true, flushAutomatically = true)
     @Transactional
     @Query("""
             UPDATE BillingEvent be
                SET be.status = 'PROCESSED',
+                   be.processingStartedAt = NULL,
                    be.processedAt = :processedAt,
                    be.lastError = NULL
              WHERE be.eventId = :eventId
@@ -49,6 +58,7 @@ public interface BillingEventRepository extends JpaRepository<BillingEvent, Long
     @Query("""
             UPDATE BillingEvent be
                SET be.status = 'FAILED',
+                   be.processingStartedAt = NULL,
                    be.lastError = :lastError
              WHERE be.eventId = :eventId
                AND be.status = 'PROCESSING'

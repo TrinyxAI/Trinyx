@@ -86,8 +86,15 @@ final class GatewayIdentityClient {
     }
 
     private GatewayUserContext merge(UserResolution user, BindingContext binding) {
+        String boundRole = user.memberships() == null ? null : user.memberships().stream()
+                .filter(membership -> binding.organizationId().equals(membership.orgId()))
+                .map(GatewayUserContext.Membership::role)
+                .findFirst().orElse(null);
+        if (boundRole == null) {
+            throw new IllegalStateException("Bound organization membership is missing");
+        }
         return new GatewayUserContext(user.userId(), user.providerId(), user.roles(),
-                user.defaultOrganizationId(), user.defaultOrganizationRole(), user.memberships(),
+                binding.organizationId(), boundRole, user.memberships(),
                 binding.principalId(), binding.billingSubjectId(), binding.installId());
     }
 

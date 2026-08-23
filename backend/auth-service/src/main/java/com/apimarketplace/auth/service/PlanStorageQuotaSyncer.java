@@ -84,8 +84,8 @@ public class PlanStorageQuotaSyncer {
      * StorageClient bean for file operations, so bean presence alone cannot decide
      * whether quota writes should leave the JVM.
      */
-    @Value("${deployment.mode:microservice}")
-    private String deploymentMode = "microservice";
+    @Value("${deployment.mode:}")
+    private String deploymentMode = "";
 
     /**
      * In-process (monolith) path only: forces each {@link QuotaService} write into its OWN
@@ -220,7 +220,15 @@ public class PlanStorageQuotaSyncer {
     }
 
     private boolean usesStorageHttp() {
-        return "microservice".equalsIgnoreCase(deploymentMode);
+        if ("microservice".equalsIgnoreCase(deploymentMode)) {
+            return true;
+        }
+        if ("monolith".equalsIgnoreCase(deploymentMode)) {
+            return false;
+        }
+        // Backward-compatible fallback for profiles that predate deployment.mode:
+        // preserve the previous topology selection by bean presence.
+        return storageClient != null;
     }
 
     private String writePath() {

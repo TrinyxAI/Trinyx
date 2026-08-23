@@ -27,7 +27,8 @@ final class AuthenticatedGatewayFilter implements GlobalFilter, Ordered {
             "x-gateway-secret", "x-gateway-signature-version", "x-gateway-timestamp",
             "x-gateway-nonce", "x-gateway-body-sha256", "x-provider-id", "x-user-id",
             "x-principal-id", "x-billing-subject-id", "x-organization-id",
-            "x-organization-role", "x-user-roles", "x-install-id");
+            "x-organization-role", "x-user-roles", "x-install-id",
+            "x-trinyx-identity-binding", "x-trinyx-entitlement-projection");
 
     private final GatewayIdentityClient identityClient;
 

@@ -254,6 +254,44 @@ class SubscriptionServiceTest {
         }
 
         @Test
+        @DisplayName("STARTER to PRO keeps the selected 5K credit tier and repeated updates do not grant again")
+        void starterToProPreservesCreditsAcrossRepeatedWebhookUpdates() throws Exception {
+            User user = createTestUser(1L);
+            BillingCustomer bc = createBillingCustomer(1L, user);
+            Plan starterPlan = createPlan(2L, "STARTER");
+            Plan proPlan = createPlan(3L, "PRO");
+            com.apimarketplace.auth.domain.Subscription existing =
+                    createExistingSubscription(10L, bc, starterPlan, "active");
+            existing.setProviderSubscriptionId("sub_starter_pro");
+            existing.setCreditQuantity(0); // tier 0 = 5K on every paid plan
+            existing.setRemainingCredits(new java.math.BigDecimal("5000"));
+
+            com.stripe.model.Subscription stripeSub =
+                    createStripeSubscription("sub_starter_pro", "cus_test_1", false, 1);
+            setupStripeRetrieve(stripeSub);
+            when(billingCustomerRepository.findByUserId(1L)).thenReturn(Optional.of(bc));
+            when(planRepository.findById(3L)).thenReturn(Optional.of(proPlan));
+            when(subscriptionRepository.findByProviderSubscriptionId("sub_starter_pro"))
+                    .thenReturn(Optional.of(existing));
+            when(subscriptionRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+            when(billingEventRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+
+            LocalDateTime start = LocalDateTime.now();
+            LocalDateTime end = start.plusYears(1);
+            subscriptionService.onSubscriptionUpsert("evt_upgrade_1", "sub_starter_pro", "active",
+                    3L, null, start, end, 1L, null, 0, null);
+            subscriptionService.onSubscriptionUpsert("evt_upgrade_retry", "sub_starter_pro", "active",
+                    3L, null, start, end, 1L, null, 0, null);
+
+            assertThat(existing.getPlan()).isEqualTo(proPlan);
+            assertThat(existing.getRemainingCredits()).isEqualByComparingTo("5000");
+            verify(creditAttributionService, never())
+                    .attributeOnSubscription(anyLong(), any(), anyInt());
+            verify(creditAttributionService, never())
+                    .handleCreditPackChange(anyLong(), any(), anyInt(), anyInt());
+        }
+
+        @Test
         @DisplayName("V198 regression: plan change delegates to PlanStorageQuotaSyncer with the new plan")
         void planChangeDelegatesToSyncer() throws Exception {
             User user = createTestUser(1L);

@@ -67,10 +67,12 @@ public class WorkloadAuthenticationService {
         JsonNode claims = Ed25519Jws.verify(authorization.substring(7), verificationKeys).claims();
         Instant now = Instant.now();
         Instant issued = Instant.ofEpochSecond(claims.path("iat").asLong());
+        Instant notBefore = Instant.ofEpochSecond(claims.path("nbf").asLong());
         Instant expires = Instant.ofEpochSecond(claims.path("exp").asLong());
         if (!issuer.equals(claims.path("iss").asText())
                 || !audience.equals(claims.path("aud").asText())
-                || now.isBefore(issued.minusSeconds(5)) || !now.isBefore(expires)
+                || now.isBefore(issued.minusSeconds(5)) || now.isBefore(notBefore)
+                || !now.isBefore(expires)
                 || Duration.between(issued, expires).compareTo(Duration.ofMinutes(2)) > 0) {
             throw new SecurityException("Invalid workload token claims");
         }

@@ -21,7 +21,7 @@ public class AccountDeactivationMailer {
 
     public AccountDeactivationMailer(
             JavaMailSender mailSender,
-            @Value("${app.mail.from:noreply@livecontext.ai}") String mailFrom,
+            @Value("${app.mail.from:noreply@trinyx.fr}") String mailFrom,
             @Value("${app.mail.from-name:LiveContext}") String mailFromName,
             @Value("${oauth2.frontend-url:http://localhost:3000}") String frontendUrl) {
         this.mailSender = mailSender;
@@ -48,7 +48,7 @@ public class AccountDeactivationMailer {
                             + "will be permanently deleted.%n%n"
                             + "If you change your mind, simply sign in again within 30 days and "
                             + "we will offer to restore your account. You can also reach us at "
-                            + "support@livecontext.ai.%n%n"
+                            + "support@trinyx.fr.%n%n"
                             + "- The LiveContext Team",
                     safeName);
 
@@ -84,7 +84,7 @@ public class AccountDeactivationMailer {
                             + "deletion has been cancelled. Nothing was deleted, and everything "
                             + "(workflows, agents, conversations, files, credentials, and "
                             + "publications) is exactly as you left it.%n%n"
-                            + "If this was not you, contact us at support@livecontext.ai "
+                            + "If this was not you, contact us at support@trinyx.fr "
                             + "immediately.%n%n"
                             + "- The LiveContext Team",
                     safeName);
@@ -119,7 +119,7 @@ public class AccountDeactivationMailer {
                           <p style="margin:0;font-size:14px;color:#166534;font-weight:600;">Your account is active again and the scheduled deletion is cancelled.</p>
                           <p style="margin:8px 0 0 0;font-size:13px;color:#166534;">Nothing was deleted. Your workflows, agents, conversations, files, credentials and publications are exactly as you left them.</p>
                         </div>
-                        <p style="margin:16px 0 0 0;">If this was not you, contact us at <a href="mailto:support@livecontext.ai" style="color:#2563eb;text-decoration:underline;">support@livecontext.ai</a> immediately.</p>
+                        <p style="margin:16px 0 0 0;">If this was not you, contact us at <a href="mailto:support@trinyx.fr" style="color:#2563eb;text-decoration:underline;">support@trinyx.fr</a> immediately.</p>
                       </td></tr>
                       <tr><td style="padding:24px 40px 32px 40px;border-top:1px solid #e7e5e4;font-size:12px;line-height:1.5;color:#6b7280;">
                         Welcome back. Thank you for using LiveContext.<br><br>&copy; LiveContext
@@ -193,7 +193,7 @@ public class AccountDeactivationMailer {
                           <p style="margin:0;font-size:14px;color:#92400e;font-weight:600;">&#9888; Your data will be retained for 30 days.</p>
                           <p style="margin:8px 0 0 0;font-size:13px;color:#92400e;">After this period, all your data - workflows, agents, conversations, files, credentials, and marketplace publications - will be <strong>permanently deleted</strong>.</p>
                         </div>
-                        <p style="margin:16px 0 0 0;">Changed your mind? Just <a href="{{FRONTEND}}" style="color:#2563eb;text-decoration:underline;">sign in again</a> within 30 days and we will offer to restore your account. You can also reach us at <a href="mailto:support@livecontext.ai" style="color:#2563eb;text-decoration:underline;">support@livecontext.ai</a>.</p>
+                        <p style="margin:16px 0 0 0;">Changed your mind? Just <a href="{{FRONTEND}}" style="color:#2563eb;text-decoration:underline;">sign in again</a> within 30 days and we will offer to restore your account. You can also reach us at <a href="mailto:support@trinyx.fr" style="color:#2563eb;text-decoration:underline;">support@trinyx.fr</a>.</p>
                       </td></tr>
                       <tr><td style="padding:24px 40px 32px 40px;border-top:1px solid #e7e5e4;font-size:12px;line-height:1.5;color:#6b7280;">
                         We're sorry to see you go. Thank you for using LiveContext.<br><br>&copy; LiveContext

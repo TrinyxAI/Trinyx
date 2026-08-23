@@ -937,8 +937,11 @@ public class CreditConsumptionClient {
                 balance = new BigDecimal(authority.get("authoritativeBalance").toString());
             }
             return new ScopeReserveResult(true, null, false, balance);
-        } catch (org.springframework.web.client.HttpClientErrorException.PaymentRequired denied) {
-            return new ScopeReserveResult(false, "insufficient credits", true, BigDecimal.ZERO);
+        } catch (org.springframework.web.client.HttpClientErrorException denied) {
+            return new ScopeReserveResult(false,
+                    denied.getStatusCode().value() == 402
+                            ? "insufficient credits" : denied.getMessage(),
+                    denied.getStatusCode().value() == 402, BigDecimal.ZERO);
         } catch (Exception failure) {
             log.warn("External scope reservation failed closed for {}: {}",
                     sourceId, failure.getMessage());

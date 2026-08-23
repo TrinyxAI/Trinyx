@@ -74,11 +74,7 @@ public class ExternalBillingAuthorityService {
     @Transactional
     public Projection revoke(long actorUserId, UUID installId, UUID organizationId) {
         AuthorityScope scope = validateScope(actorUserId, installId, organizationId);
-        jdbc.update("""
-                UPDATE auth.identity_binding_authority_state
-                SET status='REVOKED', updated_at=now()
-                WHERE install_id=? AND organization_id=? AND principal_id=?
-                """, installId, organizationId, scope.actor().getPrincipalId());
+        issueIdentityRevocation(scope.actor(), scope.payer(), installId, organizationId);
         return issueProjection(scope.actor(), scope.payer(), installId, organizationId,
                 "REVOKE", "REVOKED");
     }
@@ -111,6 +107,7 @@ public class ExternalBillingAuthorityService {
         claims.put("nbf", now.minusSeconds(5).getEpochSecond());
         claims.put("exp", expires.getEpochSecond());
         claims.put("bindingRevision", revision);
+        claims.put("status", "ACTIVE");
         claims.put("principalId", actor.getPrincipalId().toString());
         claims.put("billingSubjectId", payer.getBillingSubjectId().toString());
         claims.put("keycloakSubject", keycloakSubject);
@@ -137,6 +134,58 @@ public class ExternalBillingAuthorityService {
                     Timestamp.from(expires), installId, organizationId, actor.getPrincipalId());
         }
         return assertion;
+    }
+
+    private void issueIdentityRevocation(User actor, User payer, UUID installId,
+                                         UUID organizationId) {
+        String aggregateKey = installId + "|" + organizationId + "|" + actor.getPrincipalId();
+        lock(aggregateKey);
+        var current = jdbc.query("""
+                SELECT binding_revision, keycloak_subject, billing_subject_id
+                FROM auth.identity_binding_authority_state
+                WHERE install_id=? AND organization_id=? AND principal_id=? FOR UPDATE
+                """, (rs, row) -> new Object[]{rs.getLong(1), rs.getString(2),
+                rs.getObject(3, UUID.class)}, installId, organizationId, actor.getPrincipalId());
+        if (current.isEmpty()) {
+            throw new ResponseStatusException(HttpStatus.NOT_FOUND, "IDENTITY_BINDING_NOT_FOUND");
+        }
+        long revision = ((Long) current.getFirst()[0]) + 1L;
+        String keycloakSubject = (String) current.getFirst()[1];
+        UUID billingSubjectId = (UUID) current.getFirst()[2];
+        if (!billingSubjectId.equals(payer.getBillingSubjectId())) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT, "BILLING_SUBJECT_CHANGED");
+        }
+        Instant now = Instant.now();
+        Instant expires = now.plus(Duration.ofMinutes(5));
+        UUID eventId = UUID.randomUUID();
+        ObjectNode claims = json.createObjectNode();
+        claims.put("schemaVersion", 2);
+        claims.put("iss", "https://app.trinyx.fr");
+        claims.put("aud", "trinyx-cloud");
+        claims.put("jti", eventId.toString());
+        claims.put("iat", now.getEpochSecond());
+        claims.put("nbf", now.minusSeconds(5).getEpochSecond());
+        claims.put("exp", expires.getEpochSecond());
+        claims.put("bindingRevision", revision);
+        claims.put("status", "REVOKED");
+        claims.put("principalId", actor.getPrincipalId().toString());
+        claims.put("billingSubjectId", billingSubjectId.toString());
+        claims.put("keycloakSubject", keycloakSubject);
+        claims.put("organizationId", organizationId.toString());
+        claims.put("installId", installId.toString());
+        String assertion = assertions.signIdentity(claims);
+        jdbc.update("""
+                UPDATE auth.identity_binding_authority_state
+                SET binding_revision=?, assertion_jti=?, assertion_jws=?, status='REVOKED',
+                    expires_at=?, updated_at=now()
+                WHERE install_id=? AND organization_id=? AND principal_id=?
+                """, revision, eventId, assertion, Timestamp.from(expires),
+                installId, organizationId, actor.getPrincipalId());
+        jdbc.update("""
+                INSERT INTO auth.identity_binding_outbox
+                (event_id, aggregate_key, binding_revision, event_type, signed_jws)
+                VALUES (?,?,?,'REVOKE',?)
+                """, eventId, aggregateKey, revision, assertion);
     }
 
     private Projection issueProjection(User actor, User payer, UUID installId, UUID organizationId,

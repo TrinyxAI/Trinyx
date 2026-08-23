@@ -40,6 +40,17 @@ export interface SettingsNavItem {
   groupStart?: boolean;
 }
 
+export function isSettingsNavItemVisible(
+  item: SettingsNavItem,
+  context: { isAdmin: boolean; isCe: boolean; billingEnabled: boolean },
+): boolean {
+  return !item.hidden
+    && (!item.adminOnly || context.isAdmin)
+    && (!item.hiddenInCE || !context.isCe)
+    && (!item.ceOnly || context.isCe)
+    && (!item.requiresBilling || context.billingEnabled);
+}
+
 /**
  * Navigation items for /app/settings routes, grouped by concern:
  *  1. Account (overview, organization, information)

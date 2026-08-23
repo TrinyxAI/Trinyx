@@ -114,7 +114,9 @@ export default function VersionCard() {
           </div>
 
           {/* Update status: self-hosted editions only (managed cloud auto-updates). */}
-          {version.selfHosted && (version.updateAvailable || version.latestVersion) && (
+          {/* paid-monolith is a Trinyx fork: never advertise the upstream LiveContext feed. */}
+          {version.selfHosted && version.edition !== 'paid-monolith'
+            && (version.updateAvailable || version.latestVersion) && (
             <div className="mt-5">
               {version.updateAvailable ? (
                 <div

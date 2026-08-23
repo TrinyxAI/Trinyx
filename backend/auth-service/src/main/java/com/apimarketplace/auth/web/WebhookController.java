@@ -479,6 +479,12 @@ public class WebhookController {
         logger.info("Checkout completed: session={}, customer={}, subscription={}",
                     session.getId(), session.getCustomer(), session.getSubscription());
 
+        java.util.Map<String, String> metadata = session.getMetadata();
+        if (metadata != null && "payg_topup".equals(metadata.get("kind"))) {
+            verifyAndGrantPaygTopup(session.getId());
+            return;
+        }
+
         // Decode the nonce from client_reference_id to retrieve the userId
         String nonce = session.getClientReferenceId();
         if (nonce != null && !nonce.isEmpty()) {
@@ -507,17 +513,6 @@ public class WebhookController {
                     logger.warn("Failed to save checkout completed event: {}", e.getMessage());
                 }
 
-                // V250/PR3 - PAYG one-time top-up dispatch.
-                // Stripe mode=PAYMENT checkouts (createPaygCheckoutSession) carry
-                // metadata.kind="payg_topup". Subscription checkouts (mode=SUBSCRIPTION)
-                // have no "kind" metadata and fall through to the standard
-                // customer.subscription.* provisioning path.
-                java.util.Map<String, String> metadata = session.getMetadata();
-                if (metadata != null && "payg_topup".equals(metadata.get("kind"))) {
-                    parseAndGrantPaygTopup(userId, session.getId(),
-                            metadata.get("credit_amount"), metadata.get("tier"));
-                    return;  // do NOT wait for customer.subscription.* - none will fire for mode=PAYMENT
-                }
             } else {
                 logger.warn("Failed to decode nonce from checkout session: {}", nonce);
             }
@@ -529,64 +524,26 @@ public class WebhookController {
     }
 
     /**
-     * V250/PR3 - Shared PAYG one-time top-up grant path used by BOTH the typed
-     * {@link #handleCheckoutCompleted(Session)} branch and the RAW
-     * {@link #handleCheckoutCompletedRaw(Event)} fallback. Previously these
-     * two paths each inlined the same credit_amount blank-check / BigDecimal
-     * parse / signum-check / grant / catch sequence - the duplicate was a
-     * silent drift vector (audit M4: a fix on the typed side could fail to
-     * land on the RAW side and one Stripe SDK deserialization quirk away from
-     * money loss).
-     *
-     * <p>Reads {@code credit_amount} (raw string from session metadata) and
-     * {@code tier}, validates, and delegates to
-     * {@code CreditAttributionService.grantPaygTopup} which routes the grant
-     * onto {@code subscription.payg_remaining_credits}.
-     *
-     * <p>Idempotent via the underlying {@code credit_ledger.source_id} unique
-     * constraint - a Stripe replay (same session id) is a no-op skip.
-     *
-     * <p>On successful grant, fans out the gateway-cache invalidation for the
-     * user and every org they own (PR9). Without this the user's wallet may
-     * stay stale-up-to-5min after a top-up that just cleared a delinquency,
-     * blocking new reservations until the cache TTL elapses.
+     * Re-read a PAYG checkout from Stripe, validate its paid state and configured
+     * server-side price, then grant only the canonical credits for that tier.
      */
-    private void parseAndGrantPaygTopup(Long userId, String sessionId,
-                                         String creditAmountStr, String tier) {
-        if (creditAmountStr == null || creditAmountStr.isBlank()) {
-            logger.warn("PAYG top-up session {} missing credit_amount metadata - skipping grant",
-                    sessionId);
-            return;
-        }
-        java.math.BigDecimal amount;
+    private void verifyAndGrantPaygTopup(String sessionId) {
         try {
-            amount = new java.math.BigDecimal(creditAmountStr);
-        } catch (NumberFormatException e) {
-            logger.error("PAYG top-up session {} has invalid credit_amount metadata: {}",
-                    sessionId, creditAmountStr);
-            return;
-        }
-        if (amount.signum() <= 0) {
-            logger.warn("PAYG top-up session {} has non-positive credit_amount={} - skipping",
-                    sessionId, amount);
-            return;
-        }
+            StripeBillingService.VerifiedPaygTopup verified =
+                    stripeBillingService.verifyPaygTopup(sessionId);
+            Long userId = nonceUtil.decodeNonce(verified.clientReferenceId());
+            if (userId == null) {
+                throw new IllegalStateException("PAYG checkout has an invalid client nonce");
+            }
 
-        try {
-            creditAttributionService.grantPaygTopup(userId, amount, sessionId, tier);
-            logger.info("PAYG top-up granted: user={}, tier={}, amount={}, session={}",
-                    userId, tier, amount, sessionId);
-            // PR9 - bust the gateway cache so a freshly-topped-up user whose
-            // delinquency just cleared sees their balance on the next call
-            // instead of waiting for the 5min TTL.
+            creditAttributionService.grantPaygTopup(
+                    userId, verified.credits(), sessionId, verified.tier());
+            logger.info("Verified PAYG top-up granted: user={}, tier={}, amount={}, session={}",
+                    userId, verified.tier(), verified.credits(), sessionId);
             fanOutCacheBustForSubscriptionChange(userId, "checkout.payg_topup");
         } catch (Exception e) {
-            // Defensive log - grantPaygTopup itself catches the unique-constraint
-            // duplicate case via existsBySourceId before insert. Any exception here
-            // is unexpected (DB outage, etc.) and we want it visible without
-            // failing the whole webhook (Stripe would retry the entire event).
-            logger.error("PAYG top-up grant failed: user={}, tier={}, session={}, error={}",
-                    userId, tier, sessionId, e.getMessage(), e);
+            throw new IllegalStateException(
+                    "PAYG top-up verification or grant failed for session=" + sessionId, e);
         }
     }
 
@@ -626,19 +583,15 @@ public class WebhookController {
             // webhook. The pre-helper version inlined the validation and was a
             // copy-paste drift vector (audit M4): fixing one path without the
             // other was one bad commit away from real money loss.
-            if ("payg_topup".equals(kind) && nonce != null && !nonce.isBlank()) {
-                Long userId = nonceUtil.decodeNonce(nonce);
-                if (userId == null) {
-                    logger.warn("PAYG top-up RAW session {} has invalid nonce - skipping grant", sessionId);
-                    return;
-                }
-                parseAndGrantPaygTopup(userId, sessionId, creditAmountStr, tier);
+            if ("payg_topup".equals(kind)) {
+                verifyAndGrantPaygTopup(sessionId);
                 return;  // mode=PAYMENT: no customer.subscription.* event will follow
             }
 
             // We wait for customer.subscription.* to provision
         } catch (Exception e) {
             logger.error("Error in handleCheckoutCompletedRaw: {}", e.getMessage(), e);
+            throw new IllegalStateException("Unable to process raw checkout completion", e);
         }
     }
 

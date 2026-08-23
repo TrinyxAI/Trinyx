@@ -103,6 +103,7 @@ gateway:
       - /actuator/
       - /api/internal/
       - /internal/v1/credit-reservations
+      - /internal/v1/entitlement-projections
       - /api/users/health
       - /api/auth/health
       - /public/
@@ -136,6 +137,7 @@ gateway:
       # in-cluster defense-in-depth only.
       - /api/internal/auth/workspace/
       - /api/internal/cloud-identity/
+      - /api/internal/cloud-credit-proxy/
       - /api/internal/v1/entitlement-projections
 
 oauth2:
@@ -309,8 +311,10 @@ trinyx:
       signing-kid: ${TRINYX_ENTITLEMENT_SIGNING_KID:}
       signing-key: ${TRINYX_ENTITLEMENT_SIGNING_KEY:}
   s2s:
-    issuer: ${TRINYX_S2S_ISSUER:trinyx-cloud}
-    audience: ${TRINYX_S2S_AUDIENCE:trinyx-billing-authority}
+    verification-issuer: ${TRINYX_S2S_VERIFICATION_ISSUER:trinyx-cloud}
+    verification-audience: ${TRINYX_S2S_VERIFICATION_AUDIENCE:trinyx-billing-authority}
     verification-keys: ${TRINYX_S2S_VERIFICATION_KEYS:}
+    signing-issuer: ${TRINYX_S2S_SIGNING_ISSUER:trinyx-cloud}
+    signing-audience: ${TRINYX_S2S_SIGNING_AUDIENCE:trinyx-billing-authority}
     signing-kid: ${TRINYX_S2S_SIGNING_KID:}
     signing-key: ${TRINYX_S2S_SIGNING_KEY:}

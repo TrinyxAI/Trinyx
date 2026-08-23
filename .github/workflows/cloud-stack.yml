@@ -61,7 +61,7 @@ jobs:
           grep -q 'CATALOG_SERVICE_URL: http://catalog-service:8081' "${rendered}"
           grep -q 'STORAGE_SERVICE_URL: http://storage-service:8082' "${rendered}"
           grep -q 'ORCHESTRATOR_SERVICE_URL: http://orchestrator-service:8099' "${rendered}"
-          grep -q 'published: 127.0.0.1' "${rendered}"
+          grep -q 'host_ip: 127.0.0.1' "${rendered}"
           grep -q 'target: 8443' "${rendered}"
 
       - name: Verify external image manifests

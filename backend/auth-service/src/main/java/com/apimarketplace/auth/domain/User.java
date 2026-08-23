@@ -11,6 +11,7 @@ import java.time.LocalDateTime;
 import java.util.Collection;
 import java.util.HashSet;
 import java.util.Set;
+import java.util.UUID;
 
 @Entity
 @Table(name = "users")
@@ -43,6 +44,12 @@ public class User implements UserDetails {
 
     @Column(name = "provider_id")
     private String providerId;
+
+    @Column(name = "principal_id", nullable = false, unique = true)
+    private UUID principalId;
+
+    @Column(name = "billing_subject_id", nullable = false)
+    private UUID billingSubjectId;
 
     @ElementCollection(fetch = FetchType.EAGER)
     @CollectionTable(name = "user_roles", joinColumns = @JoinColumn(name = "user_id"))
@@ -111,6 +118,16 @@ public class User implements UserDetails {
         this.authProvider = authProvider;
         this.providerId = providerId;
         this.roles = new java.util.HashSet<>(Set.of("USER"));
+    }
+
+    @PrePersist
+    void initializeStableIdentities() {
+        if (principalId == null) {
+            principalId = UUID.randomUUID();
+        }
+        if (billingSubjectId == null) {
+            billingSubjectId = UUID.randomUUID();
+        }
     }
 
     // Methodes UserDetails
@@ -204,6 +221,22 @@ public class User implements UserDetails {
 
     public void setProviderId(String providerId) {
         this.providerId = providerId;
+    }
+
+    public UUID getPrincipalId() {
+        return principalId;
+    }
+
+    public void setPrincipalId(UUID principalId) {
+        this.principalId = principalId;
+    }
+
+    public UUID getBillingSubjectId() {
+        return billingSubjectId;
+    }
+
+    public void setBillingSubjectId(UUID billingSubjectId) {
+        this.billingSubjectId = billingSubjectId;
     }
 
     public Set<String> getRoles() {

@@ -46,7 +46,7 @@ jobs:
       run:
         working-directory: frontend
     env:
-      NEXT_PUBLIC_APP_EDITION: ce
+      NEXT_PUBLIC_APP_EDITION: paid-monolith
       NEXT_PUBLIC_AUTH_MODE: embedded
       NEXT_PUBLIC_BILLING_ENABLED: 'true'
       NEXT_PUBLIC_SPRING_BASE_URL: http://livecontext-app:8080

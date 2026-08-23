@@ -63,7 +63,7 @@ export const IS_CLOUD = EDITION === 'cloud';
 const SELF_HOSTED_VALUES = new Set([
     'ce', 'ce-free', 'community', 'community-edition',
     'self-hosted-enterprise', 'self-hosted', 'selfhosted-enterprise', 'selfhosted',
-    'enterprise-self-hosted',
+    'enterprise-self-hosted', 'paid-monolith', 'monolith-paid', 'paid-self-hosted',
 ]);
 
 /** Values that mean managed cloud (`AppEditionProvider.isManagedCloud()`). */

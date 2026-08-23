@@ -36,6 +36,14 @@ describe('edition resolver - precedence', () => {
         expect(warnSpy).not.toHaveBeenCalled();
     });
 
+    it('APP_EDITION=paid-monolith + AUTH_MODE=embedded → ce, no warn', async () => {
+        vi.stubEnv('NEXT_PUBLIC_APP_EDITION', 'paid-monolith');
+        vi.stubEnv('NEXT_PUBLIC_AUTH_MODE', 'embedded');
+        const { EDITION } = await importEdition();
+        expect(EDITION).toBe('ce');
+        expect(warnSpy).not.toHaveBeenCalled();
+    });
+
     it('APP_EDITION=cloud + AUTH_MODE=oidc → cloud, no warn', async () => {
         vi.stubEnv('NEXT_PUBLIC_APP_EDITION', 'cloud');
         vi.stubEnv('NEXT_PUBLIC_AUTH_MODE', 'oidc');
@@ -209,7 +217,7 @@ describe('billing capability', () => {
     });
 
     it('keeps embedded authentication while enabling paid-monolith billing', async () => {
-        vi.stubEnv('NEXT_PUBLIC_APP_EDITION', 'ce');
+        vi.stubEnv('NEXT_PUBLIC_APP_EDITION', 'paid-monolith');
         vi.stubEnv('NEXT_PUBLIC_AUTH_MODE', 'embedded');
         vi.stubEnv('NEXT_PUBLIC_BILLING_ENABLED', 'true');
 

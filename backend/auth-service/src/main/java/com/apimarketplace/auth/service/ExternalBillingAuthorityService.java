@@ -71,6 +71,18 @@ public class ExternalBillingAuthorityService {
         return issueProjection(scope.actor(), scope.payer(), installId, organizationId, "REFRESH");
     }
 
+    @Transactional
+    public Projection revoke(long actorUserId, UUID installId, UUID organizationId) {
+        AuthorityScope scope = validateScope(actorUserId, installId, organizationId);
+        jdbc.update("""
+                UPDATE auth.identity_binding_authority_state
+                SET status='REVOKED', updated_at=now()
+                WHERE install_id=? AND organization_id=? AND principal_id=?
+                """, installId, organizationId, scope.actor().getPrincipalId());
+        return issueProjection(scope.actor(), scope.payer(), installId, organizationId,
+                "REVOKE", "REVOKED");
+    }
+
     private String issueIdentity(User actor, User payer, UUID installId, UUID organizationId,
                                  String keycloakSubject) {
         if (keycloakSubject == null || keycloakSubject.isBlank()) {
@@ -129,6 +141,11 @@ public class ExternalBillingAuthorityService {
 
     private Projection issueProjection(User actor, User payer, UUID installId, UUID organizationId,
                                        String eventType) {
+        return issueProjection(actor, payer, installId, organizationId, eventType, null);
+    }
+
+    private Projection issueProjection(User actor, User payer, UUID installId, UUID organizationId,
+                                       String eventType, String forcedAccessState) {
         String scope = "https://app.trinyx.fr|" + installId + "|" + organizationId
                 + "|" + payer.getBillingSubjectId();
         lock(scope);
@@ -151,7 +168,8 @@ public class ExternalBillingAuthorityService {
         PlanResolutionService.ActiveOrgEntitlement governing = resolved.get();
         String planCode = governing.planCode() == null ? "FREE" : governing.planCode();
         Plan plan = plans.findByCode(planCode).orElse(null);
-        String accessState = accessState(subscription);
+        String accessState = forcedAccessState == null
+                ? accessState(subscription) : forcedAccessState;
 
         Instant now = Instant.now();
         Instant expires = now.plus(Duration.ofMinutes(15));

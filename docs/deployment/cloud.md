@@ -77,7 +77,9 @@ balance. It contains plan/cadence/subscription state, typed features and limits,
 Paid-monolith computes `ACTIVE`, `GRACE`, `DENIED` or `REVOKED`.
 The initial `past_due` grace is configurable and defaults to 72 hours.
 Projection refresh defaults to five minutes; expiration is never treated as
-infinite last-known-good authorization.
+infinite last-known-good authorization. Unlink increments `bindingRevision`, signs
+a `REVOKED` identity tombstone, and delivers it through a separate durable outbox.
+Cloud retains that row and refuses any stale active assertion.
 
 ## Wallet protocol
 
@@ -225,7 +227,7 @@ Before staging, paid-monolith must receive external secrets/configuration for
 the opposite direction:
 
 ```text
-BILLING_AUTHORITY_MODE=native-cloud
+BILLING_AUTHORITY_MODE=paid-monolith-authority
 TRINYX_IDENTITY_SIGNING_KID=<active kid>
 TRINYX_IDENTITY_SIGNING_KEY=<PKCS8 private key>
 TRINYX_ENTITLEMENT_SIGNING_KID=<active kid>
@@ -238,6 +240,7 @@ TRINYX_S2S_VERIFICATION_ISSUER=trinyx-cloud
 TRINYX_S2S_VERIFICATION_AUDIENCE=trinyx-billing-authority
 TRINYX_S2S_VERIFICATION_KEYS=<Cloud workload public ring>
 TRINYX_ENTITLEMENT_CLOUD_INGEST_URL=https://cloud.trinyx.fr/internal/v1/entitlement-projections
+TRINYX_IDENTITY_CLOUD_REVOCATION_URL=https://cloud.trinyx.fr/internal/v1/identity-bindings/revocations
 ```
 
 Cloud uses:
@@ -272,7 +275,7 @@ wildcard. Never expose Keycloak management port 9000.
 ## Database and startup
 
 Flyway migration `V436__external_billing_authority.sql` is backward-compatible.
-It adds stable UUID identities, binding/projection state, authority/outbox state
+It adds stable UUID identities, binding/projection state, entitlement and identity-tombstone outbox state
 and reservation idempotency. Native subscription, wallet, PAYG and ledger
 tables are not removed or replaced.
 

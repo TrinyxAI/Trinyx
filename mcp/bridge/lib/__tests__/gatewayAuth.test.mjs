@@ -11,7 +11,7 @@ import assert from 'node:assert/strict';
 import { readFileSync, existsSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { gatewaySignedHeaders, internalSignedHeaders } from '../gatewayAuth.mjs';
+import { gatewaySignedHeaders, internalSignedHeaders, gatewaySignedHeadersV2, gatewayV2CanonicalPayload, bodySha256 } from '../gatewayAuth.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -111,4 +111,57 @@ test('internalSignedHeaders: no secret → still sends X-User-ID + provider-id, 
   assert.equal(h['X-User-ID'], '42');
   assert.equal(h['X-Provider-ID'], 'internal-credit-client');
   assert.equal(h['X-Gateway-Secret'], undefined);
+});
+
+test('v2 binds method, target, body and canonical role context', () => {
+  const base = {
+    secretKey: 'v2-secret',
+    providerId: 'sub',
+    userId: '42',
+    principalId: 'principal',
+    billingSubjectId: 'billing',
+    organizationId: 'org',
+    organizationRole: 'owner',
+    userRoles: 'user,ADMIN',
+    installId: 'install',
+    method: 'POST',
+    requestTarget: '/api/ce-link/register?x=1',
+    body: Buffer.from('{"a":1}'),
+    timestampMs: 1700000000000,
+    nonce: 'nonce-1',
+  };
+  const signed = gatewaySignedHeadersV2(base);
+  assert.equal(signed['X-Gateway-Signature-Version'], '2');
+  assert.equal(signed['X-User-Roles'], 'ADMIN,USER');
+  assert.equal(signed['X-Organization-Role'], 'OWNER');
+  assert.equal(signed['X-Gateway-Body-SHA256'], bodySha256(base.body));
+
+  for (const mutation of [
+    { method: 'PUT' },
+    { requestTarget: '/api/ce-link/other?x=1' },
+    { body: Buffer.from('{"a":2}') },
+    { nonce: 'nonce-2' },
+    { billingSubjectId: 'other-billing' },
+    { userRoles: 'USER' },
+  ]) {
+    const changed = gatewaySignedHeadersV2({ ...base, ...mutation });
+    assert.notEqual(changed['X-Gateway-Secret'], signed['X-Gateway-Secret']);
+  }
+});
+
+test('v2 canonical payload is byte-stable and empty fields remain positional', () => {
+  const payload = gatewayV2CanonicalPayload({
+    timestamp: '1', nonce: 'n', method: 'get', requestTarget: '/x',
+    bodySha256: 'ABC', providerId: 'p', userId: '', principalId: '',
+    billingSubjectId: '', organizationId: '', organizationRole: '',
+    userRoles: '', installId: '',
+  });
+  assert.equal(payload,
+    'TRINYX-HMAC-V2\\n1\\nn\\nGET\\n/x\\nabc\\np\\n\\n\\n\\n\\n\\n\\n');
+});
+
+test('v2 refuses to run without a secret', () => {
+  assert.throws(() => gatewaySignedHeadersV2({
+    secretKey: '', providerId: 'p', method: 'GET', requestTarget: '/'
+  }), /secret is required/);
 });

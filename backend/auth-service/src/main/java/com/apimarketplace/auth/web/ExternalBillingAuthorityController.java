@@ -11,7 +11,7 @@ import java.util.UUID;
 
 /** Paid-monolith API used by the linked installation to obtain short-lived signed Cloud state. */
 @RestController
-@ConditionalOnProperty(name = "billing.authority.mode", havingValue = "native-cloud", matchIfMissing = true)
+@ConditionalOnProperty(name = "billing.authority.mode", havingValue = "paid-monolith-authority", matchIfMissing = false)
 @RequestMapping("/api/cloud-authority/v2")
 public class ExternalBillingAuthorityController {
 

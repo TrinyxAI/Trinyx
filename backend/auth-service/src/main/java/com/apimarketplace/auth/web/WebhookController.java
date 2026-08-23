@@ -314,6 +314,7 @@ public class WebhookController {
             }
         } catch (Exception e) {
             logger.error("Error in handleSubscriptionDeletedRaw: {}", e.getMessage(), e);
+            throw new IllegalStateException("Unable to process raw subscription deletion", e);
         }
     }
 
@@ -400,6 +401,7 @@ public class WebhookController {
 
         } catch (Exception e) {
             logger.error("Error in handleRawInvoiceLike: {}", e.getMessage(), e);
+            throw new IllegalStateException("Unable to process raw invoice event", e);
         }
     }
 
@@ -480,6 +482,7 @@ public class WebhookController {
 
         } catch (Exception e) {
             logger.error("Error in handleCustomerDeletedRaw: {}", e.getMessage(), e);
+            throw new IllegalStateException("Unable to process raw customer deletion", e);
         }
     }
 
@@ -611,6 +614,7 @@ public class WebhookController {
             }
         } catch (Exception e) {
             logger.error("Error in handleSubscriptionUpsertRaw: {}", e.getMessage(), e);
+            throw new IllegalStateException("Unable to process raw subscription update", e);
         }
     }
 
@@ -634,6 +638,7 @@ public class WebhookController {
             handleInvoicePaid(inv);
         } catch (Exception e) {
             logger.error("Error in handleInvoicePaidRaw: {}", e.getMessage(), e);
+            throw new IllegalStateException("Unable to process raw paid invoice", e);
         }
     }
 
@@ -874,6 +879,7 @@ public class WebhookController {
                 }
             } catch (Exception e) {
                 logger.error("Failed to attribute renewal credits for invoice {}: {}", invoice.getId(), e.getMessage(), e);
+                throw new IllegalStateException("Unable to attribute renewal credits", e);
             }
         }
 
@@ -1111,7 +1117,7 @@ public class WebhookController {
         } catch (Exception e) {
             logger.error("Failed to grant credit-upgrade for invoice {}: {}",
                     invoice.getId(), e.getMessage(), e);
-            // Don't rethrow: webhook will retry; idempotence on ledger source_id protects us.
+            throw new IllegalStateException("Unable to grant paid credit upgrade", e);
         }
         return true;
     }
@@ -1341,6 +1347,7 @@ public class WebhookController {
 
         } catch (Exception e) {
             logger.error("Error in handleCustomerDeleted: {}", e.getMessage(), e);
+            throw new IllegalStateException("Unable to process customer deletion", e);
         }
     }
 
@@ -1374,6 +1381,7 @@ public class WebhookController {
             }
         } catch (Exception e) {
             logger.error("Error handling subscription_schedule.created: {}", e.getMessage(), e);
+            throw new IllegalStateException("Unable to process subscription schedule creation", e);
         }
     }
 
@@ -1396,6 +1404,7 @@ public class WebhookController {
             }
         } catch (Exception e) {
             logger.error("Error handling subscription_schedule.updated: {}", e.getMessage(), e);
+            throw new IllegalStateException("Unable to process subscription schedule update", e);
         }
     }
 
@@ -1419,6 +1428,7 @@ public class WebhookController {
             }
         } catch (Exception e) {
             logger.error("Error handling subscription_schedule.released: {}", e.getMessage(), e);
+            throw new IllegalStateException("Unable to process subscription schedule release", e);
         }
     }
 
@@ -1440,6 +1450,7 @@ public class WebhookController {
             }
         } catch (Exception e) {
             logger.error("Error handling subscription_schedule.completed: {}", e.getMessage(), e);
+            throw new IllegalStateException("Unable to process subscription schedule completion", e);
         }
     }
 
@@ -1463,6 +1474,7 @@ public class WebhookController {
             }
         } catch (Exception e) {
             logger.error("Error handling subscription_schedule.canceled: {}", e.getMessage(), e);
+            throw new IllegalStateException("Unable to process subscription schedule cancellation", e);
         }
     }
 }

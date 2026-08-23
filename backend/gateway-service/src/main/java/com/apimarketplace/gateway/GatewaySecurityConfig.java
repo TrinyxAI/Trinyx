@@ -37,11 +37,15 @@ public class GatewaySecurityConfig {
             @Value("${trinyx.gateway.jwt.audience}") String audience) {
         NimbusReactiveJwtDecoder decoder = NimbusReactiveJwtDecoder.withJwkSetUri(jwkSetUri).build();
         OAuth2TokenValidator<Jwt> issuerValidator = JwtValidators.createDefaultWithIssuer(issuer);
-        OAuth2TokenValidator<Jwt> audienceValidator = jwt -> jwt.getAudience().contains(audience)
+        OAuth2TokenValidator<Jwt> audienceValidator = audienceValidator(audience);
+        decoder.setJwtValidator(new DelegatingOAuth2TokenValidator<>(issuerValidator, audienceValidator));
+        return decoder;
+    }
+
+    static OAuth2TokenValidator<Jwt> audienceValidator(String audience) {
+        return jwt -> jwt.getAudience().contains(audience)
                 ? OAuth2TokenValidatorResult.success()
                 : OAuth2TokenValidatorResult.failure(new OAuth2Error(
                         "invalid_token", "Required audience is missing", null));
-        decoder.setJwtValidator(new DelegatingOAuth2TokenValidator<>(issuerValidator, audienceValidator));
-        return decoder;
     }
 }

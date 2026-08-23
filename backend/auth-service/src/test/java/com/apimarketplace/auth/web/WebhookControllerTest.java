@@ -927,7 +927,8 @@ class WebhookControllerTest {
             // Simulate service throwing
             doThrow(new RuntimeException("DB connection lost"))
                     .when(subscriptionService).onSubscriptionUpsert(
-                            any(), any(), any(), any(), any(), any(), any(), any(), any());
+                            any(), any(), any(), any(), any(), any(),
+                            any(), any(), any(), anyInt(), any());
 
             Event event = createMockEvent("evt_28", "customer.subscription.created", sub);
             when(billingEventRepository.existsByEventId("evt_28")).thenReturn(false);

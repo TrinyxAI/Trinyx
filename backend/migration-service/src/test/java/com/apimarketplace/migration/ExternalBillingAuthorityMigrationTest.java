@@ -19,6 +19,7 @@ class ExternalBillingAuthorityMigrationTest {
         assertThat(sql).contains("auth.cloud_identity_binding")
                 .contains("auth.entitlement_projection")
                 .contains("auth.entitlement_outbox")
+                .contains("auth.identity_binding_outbox")
                 .contains("auth.cloud_credit_operation")
                 .contains("auth.cloud_settlement_outbox")
                 .contains("UNIQUE(operation_id, action, request_hash)");
@@ -49,6 +50,7 @@ class ExternalBillingAuthorityMigrationTest {
                 .contains("settlement_hash CHAR(64)")
                 .contains("next_attempt_at TIMESTAMPTZ NOT NULL DEFAULT now()")
                 .contains("UNIQUE (aggregate_key, sequence)")
+                .contains("UNIQUE (aggregate_key, binding_revision)")
                 .contains("late_settlement_until TIMESTAMPTZ");
     }
 }

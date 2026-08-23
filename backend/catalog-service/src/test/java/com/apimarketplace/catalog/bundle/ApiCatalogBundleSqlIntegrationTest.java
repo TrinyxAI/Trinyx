@@ -288,8 +288,8 @@ class ApiCatalogBundleSqlIntegrationTest {
     }
 
     @Test
-    @DisplayName("(b3) REAL primary-key collision rekeys the referenced UUID in place and reapplies idempotently")
-    void primaryKeyCollisionRekeysExistingToolInPlace() {
+    @DisplayName("(b3) REAL primary-key identity conflict rolls back without changing the tool or its semantic FKs")
+    void primaryKeyIdentityConflictIsRejectedWithoutMutation() {
         UUID categoryId = seedCategory("Surveys", "surveys");
         UUID subcategoryId = seedSubcategory(categoryId, "Collectors", "collectors");
         UUID apiId = UUID.randomUUID();
@@ -312,35 +312,46 @@ class ApiCatalogBundleSqlIntegrationTest {
                 apiPayload(apiId, "SurveyMonkey", List.of(bundleTool)));
 
         ApiCatalogMergeService.MergeResult first = mergeService.merge(payload, List.of());
-
-        assertThat(first.failedApis()).isZero();
-        assertThat(first.upsertedApis()).isEqualTo(1);
-        assertThat(first.upsertedTools()).isEqualTo(1);
-        assertThat(count("catalog.api_tools")).isEqualTo(1);
-        assertThat(jdbc.queryForObject(
-                "SELECT tool_name_id FROM catalog.api_tools WHERE id = ?",
-                String.class, bundleId)).isEqualTo("surveymonkey-create-survey");
-        assertThat(jdbc.queryForObject(
-                "SELECT endpoint FROM catalog.api_tools WHERE id = ?",
-                String.class, bundleId)).isEqualTo("/v2/surveys");
-        assertThat(jdbc.queryForObject(
-                "SELECT tool_id FROM catalog.tool_signals WHERE action = 'send'",
-                UUID.class)).isEqualTo(bundleId);
-        assertThat(jdbc.queryForObject(
-                "SELECT api_tool_id FROM catalog.api_tool_parameters WHERE id = ?",
-                UUID.class, parameterId)).isEqualTo(bundleId);
-
         ApiCatalogMergeService.MergeResult second = mergeService.merge(payload, List.of());
 
-        assertThat(second.failedApis()).isZero();
-        assertThat(second.upsertedApis()).isEqualTo(1);
+        for (ApiCatalogMergeService.MergeResult result : List.of(first, second)) {
+            assertThat(result.failedApis()).isEqualTo(1);
+            assertThat(result.upsertedApis()).isZero();
+            assertThat(result.upsertedTools()).isZero();
+            assertThat(result.errors()).singleElement().satisfies(error ->
+                    assertThat(error)
+                            .contains("PrimaryKeyToolIdentityConflictException")
+                            .contains(bundleId.toString())
+                            .contains("send-collector-message")
+                            .contains("surveymonkey-send-collector-message")
+                            .contains("/v1/messages")
+                            .contains("create-survey")
+                            .contains("surveymonkey-create-survey")
+                            .contains("/v2/surveys")
+                            .contains("refusing to requalify a referenced tool"));
+        }
+
         assertThat(count("catalog.api_tools")).isEqualTo(1);
         assertThat(jdbc.queryForObject(
-                "SELECT tool_id FROM catalog.tool_signals WHERE action = 'send'",
-                UUID.class)).isEqualTo(bundleId);
+                "SELECT tool_slug FROM catalog.api_tools WHERE id = ?",
+                String.class, bundleId)).isEqualTo("send-collector-message");
         assertThat(jdbc.queryForObject(
-                "SELECT COUNT(*) FROM catalog.api_tool_parameters WHERE api_tool_id = ?",
-                Integer.class, bundleId)).isEqualTo(1);
+                "SELECT tool_name_id FROM catalog.api_tools WHERE id = ?",
+                String.class, bundleId)).isEqualTo("surveymonkey-send-collector-message");
+        assertThat(jdbc.queryForObject(
+                "SELECT endpoint FROM catalog.api_tools WHERE id = ?",
+                String.class, bundleId)).isEqualTo("/v1/messages");
+        assertThat(jdbc.queryForMap(
+                "SELECT action, tool_id FROM catalog.tool_signals WHERE tool_id = ?",
+                bundleId)).containsEntry("action", "send")
+                        .containsEntry("tool_id", bundleId);
+        assertThat(jdbc.queryForObject(
+                "SELECT COUNT(*) FROM catalog.api_tool_parameters WHERE id = ?",
+                Integer.class, parameterId)).isZero();
+        assertThat(jdbc.queryForObject("""
+                SELECT COUNT(*) FROM catalog.api_tools
+                 WHERE api_id = ? AND tool_name_id = 'surveymonkey-create-survey'
+                """, Integer.class, apiId)).isZero();
     }
 
     @Test

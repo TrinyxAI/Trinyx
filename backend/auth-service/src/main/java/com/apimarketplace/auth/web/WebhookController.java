@@ -31,6 +31,7 @@ import com.stripe.net.RequestOptions;
 import com.stripe.param.SubscriptionListParams;
 import com.stripe.param.SubscriptionRetrieveParams;
 import com.stripe.param.SubscriptionUpdateParams;
+import com.stripe.param.checkout.SessionListParams;
 import com.apimarketplace.auth.service.util.StripeSubscriptionPeriod;
 import com.apimarketplace.auth.service.util.BillingMDC;
 import jakarta.servlet.http.HttpServletRequest;
@@ -920,31 +921,30 @@ public class WebhookController {
         }
     }
 
-    /** Full refund of a converting charge claws back the referral reward. */
+    /** Refund PAYG proportionally; full refunds also claw back referral rewards. */
     private void handleChargeRefunded(com.stripe.model.Charge charge) {
         try {
-            if (rewardService == null || charge == null) return;
+            if (charge == null) return;
             Long amount = charge.getAmount();
             Long refunded = charge.getAmountRefunded();
-            if (amount == null || amount <= 0 || refunded == null || refunded < amount) {
-                logger.info("Charge {} not fully refunded (amount={}, refunded={}); no clawback",
-                        charge.getId(), amount, refunded);
+            if (amount == null || amount <= 0 || refunded == null || refunded <= 0) {
                 return;
             }
-            clawbackByCustomer(charge.getCustomer(), "REFUNDED");
+
+            clawbackPaygByCharge(charge, "REFUNDED");
+            if (refunded >= amount && rewardService != null) {
+                clawbackByCustomer(charge.getCustomer(), "REFUNDED");
+            }
         } catch (Exception e) {
             logger.error("Error in handleChargeRefunded: {}", e.getMessage(), e);
+            throw new IllegalStateException("Unable to process Stripe refund", e);
         }
     }
 
-    /** A chargeback (dispute) on a converting charge claws back the referral reward. */
+    /** A chargeback revokes the full PAYG grant and any referral reward. */
     private void handleDisputeCreated(com.stripe.model.Dispute dispute) {
-        try {
-            if (rewardService == null || dispute == null) return;
-            clawbackByDisputedCharge(dispute.getCharge(), "DISPUTED");
-        } catch (Exception e) {
-            logger.error("Error in handleDisputeCreated: {}", e.getMessage(), e);
-        }
+        if (dispute == null || dispute.getCharge() == null) return;
+        handleDisputedChargeId(dispute.getCharge());
     }
 
     private void handleChargeRefundedRaw(Event event) {
@@ -957,6 +957,7 @@ public class WebhookController {
             handleChargeRefunded(stripeClient.charges().retrieve(chargeId));
         } catch (Exception e) {
             logger.error("Error in handleChargeRefundedRaw: {}", e.getMessage(), e);
+            throw new IllegalStateException("Unable to process raw Stripe refund", e);
         }
     }
 
@@ -965,20 +966,73 @@ public class WebhookController {
             var raw = event.getData().getObject();
             if (raw == null) return;
             var json = objectMapper.readTree(raw.toJson());
-            clawbackByDisputedCharge(json.path("charge").asText(null), "DISPUTED");
+            handleDisputedChargeId(json.path("charge").asText(null));
         } catch (Exception e) {
             logger.error("Error in handleDisputeCreatedRaw: {}", e.getMessage(), e);
+            throw new IllegalStateException("Unable to process raw Stripe dispute", e);
         }
     }
 
-    private void clawbackByDisputedCharge(String chargeId, String reason) {
-        if (rewardService == null || chargeId == null || chargeId.isBlank()) return;
+    private void handleDisputedChargeId(String chargeId) {
+        if (chargeId == null || chargeId.isBlank()) return;
         try {
             com.stripe.model.Charge charge = stripeClient.charges().retrieve(chargeId);
-            clawbackByCustomer(charge.getCustomer(), reason);
+            clawbackPaygByCharge(charge, "DISPUTED");
+            if (rewardService != null) {
+                clawbackByCustomer(charge.getCustomer(), "DISPUTED");
+            }
         } catch (Exception e) {
             logger.error("Dispute clawback resolve failed for charge {}: {}", chargeId, e.getMessage(), e);
+            throw new IllegalStateException("Unable to process Stripe dispute", e);
         }
+    }
+
+    /**
+     * Resolve a Stripe charge back to its PAYG Checkout Session and apply the
+     * cumulative refund/dispute target. Subscription charges have no
+     * payg_topup session metadata and are left to the subscription handlers.
+     */
+    private void clawbackPaygByCharge(com.stripe.model.Charge charge, String reason)
+            throws StripeException {
+        if (charge == null || charge.getPaymentIntent() == null
+                || charge.getPaymentIntent().isBlank()) {
+            return;
+        }
+
+        var sessions = stripeClient.checkout().sessions().list(
+                SessionListParams.builder()
+                        .setPaymentIntent(charge.getPaymentIntent())
+                        .setLimit(10L)
+                        .build());
+        Session paygSession = sessions.getData().stream()
+                .filter(s -> s.getMetadata() != null
+                        && "payg_topup".equals(s.getMetadata().get("kind")))
+                .findFirst()
+                .orElse(null);
+        if (paygSession == null) {
+            return;
+        }
+
+        java.math.BigDecimal fraction;
+        String eventKey;
+        if ("DISPUTED".equals(reason)) {
+            fraction = java.math.BigDecimal.ONE;
+            eventKey = "dispute:" + charge.getId();
+        } else {
+            Long amount = charge.getAmount();
+            Long refunded = charge.getAmountRefunded();
+            if (amount == null || amount <= 0 || refunded == null || refunded <= 0) {
+                return;
+            }
+            fraction = java.math.BigDecimal.valueOf(refunded)
+                    .divide(java.math.BigDecimal.valueOf(amount), 8,
+                            java.math.RoundingMode.HALF_UP)
+                    .min(java.math.BigDecimal.ONE);
+            eventKey = "refund:" + charge.getId() + ":" + refunded;
+        }
+
+        creditAttributionService.clawbackPaygTopup(
+                paygSession.getId(), fraction, eventKey, reason);
     }
 
     /** Resolve the referee from the Stripe customer and claw back their referral reward. */

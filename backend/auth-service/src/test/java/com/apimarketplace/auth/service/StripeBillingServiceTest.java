@@ -4,6 +4,7 @@ import com.apimarketplace.auth.domain.*;
 import com.apimarketplace.auth.enums.PlanCode;
 import com.apimarketplace.auth.repository.BillingCustomerRepository;
 import com.apimarketplace.auth.repository.PlanRepository;
+import com.apimarketplace.auth.repository.PriceRepository;
 import com.apimarketplace.auth.repository.SubscriptionRepository;
 import com.apimarketplace.auth.repository.UserRepository;
 import com.apimarketplace.auth.util.NonceUtil;
@@ -11,6 +12,8 @@ import com.stripe.StripeClient;
 import com.stripe.exception.InvalidRequestException;
 import com.stripe.exception.StripeException;
 import com.stripe.model.Customer;
+import com.stripe.model.LineItem;
+import com.stripe.model.StripeCollection;
 import com.stripe.model.SubscriptionItem;
 import com.stripe.model.SubscriptionItemCollection;
 import com.stripe.model.checkout.Session;
@@ -22,6 +25,7 @@ import com.stripe.service.CustomerService;
 import com.stripe.service.PaymentMethodService;
 import com.stripe.service.PriceService;
 import com.stripe.service.SubscriptionService;
+import com.stripe.service.checkout.SessionLineItemService;
 import com.stripe.service.checkout.SessionService;
 import org.springframework.test.util.ReflectionTestUtils;
 import org.junit.jupiter.api.BeforeEach;
@@ -34,6 +38,7 @@ import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
+import java.math.BigDecimal;
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Optional;
@@ -75,6 +80,9 @@ class StripeBillingServiceTest {
     private PlanRepository planRepository;
 
     @Mock
+    private PriceRepository priceRepository;
+
+    @Mock
     private PriceCacheService priceCacheService;
 
     @Mock
@@ -110,6 +118,9 @@ class StripeBillingServiceTest {
 
     @Mock
     private SessionService sessionService;
+
+    @Mock
+    private SessionLineItemService sessionLineItemService;
 
     @Mock
     private PaymentMethodService paymentMethodService;
@@ -1453,4 +1464,67 @@ class StripeBillingServiceTest {
             verifyNoInteractions(paymentMethodService);
         }
     }
+
+    @Nested
+    @DisplayName("verifyPaygTopup")
+    class VerifyPaygTopup {
+
+        @BeforeEach
+        void setUp() throws StripeException {
+            setupStripeServiceChain();
+        }
+
+        @Test
+        void rejectsCheckoutWhosePaymentIsNotPaid() throws Exception {
+            Session session = mock(Session.class);
+            when(session.getMetadata()).thenReturn(Map.of("kind", "payg_topup", "tier", "small"));
+            when(session.getPaymentStatus()).thenReturn("unpaid");
+            when(sessionService.retrieve("cs_unpaid")).thenReturn(session);
+
+            assertThatThrownBy(() -> stripeBillingService.verifyPaygTopup("cs_unpaid"))
+                    .isInstanceOf(IllegalStateException.class)
+                    .hasMessageContaining("not paid");
+            verify(priceRepository, never()).findAllPaygTiersOrderedByPrice();
+        }
+
+        @Test
+        void returnsCanonicalCreditsAfterPriceAmountCurrencyAndLineItemMatch() throws Exception {
+            Session session = mock(Session.class);
+            when(session.getMetadata()).thenReturn(Map.of(
+                    "kind", "payg_topup", "tier", "small", "credit_amount", "999999"));
+            when(session.getPaymentStatus()).thenReturn("paid");
+            when(session.getAmountTotal()).thenReturn(1000L);
+            when(session.getCurrency()).thenReturn("eur");
+            when(session.getClientReferenceId()).thenReturn("nonce_1");
+            when(session.getPaymentIntent()).thenReturn("pi_1");
+            when(sessionService.retrieve("cs_paid")).thenReturn(session);
+
+            Price configured = new Price();
+            configured.setCadence("payg_small");
+            configured.setAmountCents(1000);
+            configured.setCurrency("eur");
+            configured.setProviderPriceId("price_payg_small");
+            when(priceRepository.findAllPaygTiersOrderedByPrice())
+                    .thenReturn(List.of(configured));
+
+            LineItem lineItem = mock(LineItem.class);
+            com.stripe.model.Price stripePrice = mock(com.stripe.model.Price.class);
+            when(stripePrice.getId()).thenReturn("price_payg_small");
+            when(lineItem.getQuantity()).thenReturn(1L);
+            when(lineItem.getPrice()).thenReturn(stripePrice);
+            @SuppressWarnings("unchecked")
+            StripeCollection<LineItem> lineItems = mock(StripeCollection.class);
+            when(lineItems.getData()).thenReturn(List.of(lineItem));
+            when(sessionService.lineItems()).thenReturn(sessionLineItemService);
+            when(sessionLineItemService.list("cs_paid")).thenReturn(lineItems);
+
+            StripeBillingService.VerifiedPaygTopup verified =
+                    stripeBillingService.verifyPaygTopup("cs_paid");
+
+            assertThat(verified.tier()).isEqualTo("small");
+            assertThat(verified.credits()).isEqualByComparingTo(new BigDecimal("8000"));
+            assertThat(verified.clientReferenceId()).isEqualTo("nonce_1");
+        }
+    }
+
 }

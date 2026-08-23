@@ -40,6 +40,19 @@ public class BillingEvent {
     @Column(name = "received_at", nullable = false)
     private LocalDateTime receivedAt;
 
+    @NotBlank
+    @Column(nullable = false, length = 24)
+    private String status = "RECEIVED";
+
+    @Column(name = "attempt_count", nullable = false)
+    private int attemptCount = 0;
+
+    @Column(name = "processed_at")
+    private LocalDateTime processedAt;
+
+    @Column(name = "last_error", length = 2000)
+    private String lastError;
+
     public BillingEvent() {}
 
     public BillingEvent(String provider, String eventId, String type, JsonNode payload) {
@@ -71,6 +84,18 @@ public class BillingEvent {
 
     public LocalDateTime getReceivedAt() { return receivedAt; }
     public void setReceivedAt(LocalDateTime receivedAt) { this.receivedAt = receivedAt; }
+
+    public String getStatus() { return status; }
+    public void setStatus(String status) { this.status = status; }
+
+    public int getAttemptCount() { return attemptCount; }
+    public void setAttemptCount(int attemptCount) { this.attemptCount = attemptCount; }
+
+    public LocalDateTime getProcessedAt() { return processedAt; }
+    public void setProcessedAt(LocalDateTime processedAt) { this.processedAt = processedAt; }
+
+    public String getLastError() { return lastError; }
+    public void setLastError(String lastError) { this.lastError = lastError; }
 
     @Override
     public boolean equals(Object o) {

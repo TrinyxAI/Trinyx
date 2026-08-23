@@ -14,7 +14,7 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 
-const CE_API_BASE = 'https://livecontext.ai/api';
+const CE_API_BASE = 'https://cloud.trinyx.fr/api';
 
 interface CategoryFilterProps {
   selectedCategory?: string;

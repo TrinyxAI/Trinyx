@@ -29,6 +29,7 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.test.util.ReflectionTestUtils;
 import org.springframework.web.servlet.mvc.method.annotation.StreamingResponseBody;
 
 import java.io.ByteArrayOutputStream;
@@ -39,6 +40,7 @@ import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
@@ -615,6 +617,59 @@ class CloudLlmRelayControllerTest {
         verify(creditClient).consumeCredits(eq("42"), eq("CE_LLM_RELAY"), any(),
                 eq(PROVIDER), eq(MODEL), eq(11), eq(7), any(LlmCacheTokens.class));
         verify(accrualStore, never()).accrue(any(), any(), any(), any(), any(), anyLong());
+    }
+
+    @Test
+    @DisplayName("external authority reserves before provider and commits actual usage")
+    void externalAuthorityReservesBeforeProviderAndCommitsActualUsage() {
+        ReflectionTestUtils.setField(controller, "billingAuthorityMode", "external-paid-monolith");
+        CompletionResponse llmResponse = response("done", 11, 7);
+        when(authClient.userOwnsActiveCeLink("42", INSTALL_ID)).thenReturn(true);
+        when(providerFactory.getProvider(PROVIDER)).thenReturn(provider);
+        when(provider.getProviderName()).thenReturn(PROVIDER);
+        when(creditClient.reserveExternalLlm(eq(42L), any(UUID.class),
+                eq("cloudLlmRelay"), eq("CE_LLM_RELAY"), eq(PROVIDER), eq(MODEL),
+                anyInt(), eq(256)))
+                .thenReturn(new CreditConsumptionClient.ExternalReservationResult(true, "hash", null));
+        when(provider.complete(any())).thenReturn(llmResponse);
+        when(creditClient.commitExternalLlm(any(UUID.class), eq("hash"), eq(PROVIDER), eq(MODEL),
+                any(), eq(11), eq(7))).thenReturn(true);
+
+        ResponseEntity<?> result = controller.complete(
+                CLOUD_USER_ID, INSTALL_ID, new CloudLlmRelayRequest(PROVIDER, request(false)));
+
+        assertThat(result.getStatusCode()).isEqualTo(HttpStatus.OK);
+        var order = org.mockito.Mockito.inOrder(creditClient, provider);
+        order.verify(creditClient).reserveExternalLlm(eq(42L), any(UUID.class),
+                eq("cloudLlmRelay"), eq("CE_LLM_RELAY"), eq(PROVIDER), eq(MODEL),
+                anyInt(), eq(256));
+        order.verify(provider).complete(any());
+        order.verify(creditClient).commitExternalLlm(any(UUID.class), eq("hash"),
+                eq(PROVIDER), eq(MODEL), any(), eq(11), eq(7));
+        verify(creditClient, never()).consumeCredits(any(), any(), any(), any(), any(),
+                anyInt(), anyInt(), any(LlmCacheTokens.class));
+    }
+
+    @Test
+    @DisplayName("external authority failure is fail-closed before provider dispatch")
+    void externalAuthorityFailurePreventsProviderDispatch() {
+        ReflectionTestUtils.setField(controller, "billingAuthorityMode", "external-paid-monolith");
+        when(authClient.userOwnsActiveCeLink("42", INSTALL_ID)).thenReturn(true);
+        when(providerFactory.getProvider(PROVIDER)).thenReturn(provider);
+        when(provider.getProviderName()).thenReturn(PROVIDER);
+        when(creditClient.reserveExternalLlm(eq(42L), any(UUID.class),
+                eq("cloudLlmRelay"), eq("CE_LLM_RELAY"), eq(PROVIDER), eq(MODEL),
+                anyInt(), eq(256)))
+                .thenReturn(new CreditConsumptionClient.ExternalReservationResult(
+                        false, null, "authority unavailable"));
+
+        ResponseEntity<?> result = controller.complete(
+                CLOUD_USER_ID, INSTALL_ID, new CloudLlmRelayRequest(PROVIDER, request(false)));
+
+        assertThat(result.getStatusCode()).isEqualTo(HttpStatus.PAYMENT_REQUIRED);
+        verify(provider, never()).complete(any());
+        verify(creditClient, never()).commitExternalLlm(any(), any(), any(), any(), any(),
+                anyInt(), anyInt());
     }
 
     /** Like {@link #request(boolean)} but with a caller-chosen model id (for the unmanaged-model guard). */

@@ -524,8 +524,9 @@ class WebhookControllerTest {
             performWebhookPost("{\"type\":\"checkout.session.completed\"}", event, 200);
 
             verify(nonceUtil).decodeNonce("n_validNonce");
-            // Should save the checkout event with userId
-            verify(billingEventRepository, atLeast(2)).save(any(BillingEvent.class));
+            verify(billingEventRepository).save(any(BillingEvent.class));
+            verify(billingEventRepository).markProcessed(
+                    eq("evt_13"), any(LocalDateTime.class));
         }
 
         @Test

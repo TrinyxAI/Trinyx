@@ -19,32 +19,42 @@ spring:
       server:
         webflux:
           routes:
-        - id: websearch-cdp
-          uri: ${trinyx.gateway.websearch-service-url:http://websearch-service:8085}
-          predicates:
-            - Path=/cdp/**
-
+            - id: websearch-cdp
+              uri: ${WEBSEARCH_SERVICE_URL:http://websearch-service:8085}
+              predicates:
+                - Path=/cdp/**
             - id: auth-ce-link
               uri: ${AUTH_SERVICE_URL:http://auth-service:8083}
-              predicates: [ Path=/api/ce-link/** ]
+              predicates:
+                - Path=/api/ce-link/**
+            - id: auth-user-billing
+              uri: ${AUTH_SERVICE_URL:http://auth-service:8083}
+              predicates:
+                - Path=/api/users/**,/api/billing/**,/api/credits/**,/api/organizations/**,/api/credentials/**
             - id: auth-webhooks
               uri: ${AUTH_SERVICE_URL:http://auth-service:8083}
-              predicates: [ Path=/webhooks/** ]
+              predicates:
+                - Path=/webhooks/**
             - id: catalog-public-bundles
               uri: ${CATALOG_SERVICE_URL:http://catalog-service:8081}
-              predicates: [ Path=/api/catalog/public/bundles/** ]
+              predicates:
+                - Path=/api/catalog/public/bundles/**
             - id: catalog-ce
               uri: ${CATALOG_SERVICE_URL:http://catalog-service:8081}
-              predicates: [ Path=/api/ce-catalog/** ]
+              predicates:
+                - Path=/api/ce-catalog/**
             - id: agent-bundles
               uri: ${AGENT_SERVICE_URL:http://agent-service:8090}
-              predicates: [ Path=/api/catalog-bundles/**,/api/skill-bundles/**,/api/ce-llm/** ]
+              predicates:
+                - Path=/api/catalog-bundles/**,/api/skill-bundles/**,/api/ce-llm/**
             - id: orchestrator-ce
               uri: ${ORCHESTRATOR_SERVICE_URL:http://orchestrator-service:8099}
-              predicates: [ Path=/api/ce-websearch/** ]
+              predicates:
+                - Path=/api/ce-websearch/**
             - id: conversation-websocket
               uri: ${CONVERSATION_WS_URL:ws://conversation-service:8087}
-              predicates: [ Path=/ws/** ]
+              predicates:
+                - Path=/ws/**
 
 trinyx:
   gateway:

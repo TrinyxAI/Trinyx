@@ -106,6 +106,7 @@ CREATE TABLE IF NOT EXISTS auth.cloud_credit_operation (
     operation_id UUID PRIMARY KEY,
     reservation_id UUID,
     request_hash CHAR(64) NOT NULL,
+    settlement_hash CHAR(64),
     principal_id UUID NOT NULL,
     billing_subject_id UUID NOT NULL,
     organization_id UUID NOT NULL,

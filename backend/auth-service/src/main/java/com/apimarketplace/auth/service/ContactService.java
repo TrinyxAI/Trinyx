@@ -55,7 +55,7 @@ public class ContactService {
     @Value("${app.mail.from-name}")
     private String mailFromName;
 
-    @Value("${contact.recipient-email:contact@livecontext.ai}")
+    @Value("${contact.recipient-email:contact@trinyx.fr}")
     private String recipientEmail;
 
     @Value("${recaptcha.secret-key:}")
@@ -167,7 +167,7 @@ public class ContactService {
                     + "Email:    " + email + "\n\n"
                     + "Message:\n"
                     + message + "\n\n"
-                    + "- Sent via livecontext.ai/contact\n";
+                    + "- Sent via trinyx.fr/contact\n";
 
             String html = buildHtml(name, email, category, message);
             helper.setText(plain, html);

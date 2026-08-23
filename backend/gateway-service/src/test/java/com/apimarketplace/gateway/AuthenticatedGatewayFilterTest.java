@@ -31,6 +31,19 @@ class AuthenticatedGatewayFilterTest {
     }
 
     @Test
+    void workloadInternalApisAreNeverExposedAtTheEdge() {
+        AuthenticatedGatewayFilter filter = new AuthenticatedGatewayFilter(null, 1024);
+        MockServerWebExchange exchange = MockServerWebExchange.from(
+                MockServerHttpRequest.put("/internal/v1/identity-bindings/revocations").build());
+
+        StepVerifier.create(filter.filter(exchange, ignored -> Mono.error(
+                        new AssertionError("chain must not run"))))
+                .verifyComplete();
+
+        assertThat(exchange.getResponse().getStatusCode()).isEqualTo(HttpStatus.NOT_FOUND);
+    }
+
+    @Test
     void publicRoutesStripEverySpoofableIdentityHeader() {
         AuthenticatedGatewayFilter filter = new AuthenticatedGatewayFilter(null, 1024);
         MockServerWebExchange exchange = MockServerWebExchange.from(

@@ -102,6 +102,7 @@ gateway:
     public-paths:
       - /actuator/
       - /api/internal/
+      - /internal/v1/credit-reservations
       - /api/users/health
       - /api/auth/health
       - /public/
@@ -134,6 +135,8 @@ gateway:
       # External access is already blocked (gateway does not route /api/internal/**); this is
       # in-cluster defense-in-depth only.
       - /api/internal/auth/workspace/
+      - /api/internal/cloud-identity/
+      - /api/internal/v1/entitlement-projections
 
 oauth2:
   callback-url: ${OAUTH2_CALLBACK_URL:http://localhost:8083/api/credentials/oauth2/callback}
@@ -183,6 +186,10 @@ credit:
 
 # Configuration de facturation
 billing:
+  authority:
+    mode: ${BILLING_AUTHORITY_MODE:native-cloud}
+  external:
+    reservation-sweep-ms: ${BILLING_EXTERNAL_RESERVATION_SWEEP_MS:60000}
   provider: stripe
   # --- Unit-economics levers: internal pricing configuration ---
   # 1 credit = $0.001 of provider LIST price; every LLM call is billed
@@ -283,3 +290,25 @@ org:
     rate-limit:
       per-inviter-per-hour: ${ORG_INVITE_PER_INVITER:20}
       per-org-per-hour: ${ORG_INVITE_PER_ORG:50}
+
+# Trinyx v2 persistent assertion and workload key rings.
+# Format for verification rings: kid=base64-x509-public-key;kid2=base64-x509-public-key.
+# Private PKCS#8 keys are optional on verifier-only deployments and must come from a secret store.
+trinyx:
+  assertions:
+    identity:
+      issuer: ${TRINYX_IDENTITY_ISSUER:https://app.trinyx.fr}
+      audience: ${TRINYX_IDENTITY_AUDIENCE:trinyx-cloud}
+      verification-keys: ${TRINYX_IDENTITY_VERIFICATION_KEYS:}
+      signing-kid: ${TRINYX_IDENTITY_SIGNING_KID:}
+      signing-key: ${TRINYX_IDENTITY_SIGNING_KEY:}
+    entitlement:
+      issuer: ${TRINYX_ENTITLEMENT_ISSUER:https://app.trinyx.fr}
+      audience: ${TRINYX_ENTITLEMENT_AUDIENCE:trinyx-cloud}
+      verification-keys: ${TRINYX_ENTITLEMENT_VERIFICATION_KEYS:}
+      signing-kid: ${TRINYX_ENTITLEMENT_SIGNING_KID:}
+      signing-key: ${TRINYX_ENTITLEMENT_SIGNING_KEY:}
+  s2s:
+    issuer: ${TRINYX_S2S_ISSUER:trinyx-cloud}
+    audience: ${TRINYX_S2S_AUDIENCE:trinyx-billing-authority}
+    verification-keys: ${TRINYX_S2S_VERIFICATION_KEYS:}

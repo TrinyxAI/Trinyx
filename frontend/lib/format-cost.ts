@@ -104,7 +104,7 @@ export function formatCreditsCompact(value: number | null | undefined): string {
 export function formatCostCompact(value: number | null | undefined): string {
   if (value == null) return '-';
   const display = showsDollarCost ? creditsToUsd(value) : value; // dollars in CE, credits in Cloud
-  const prefix = showsDollarCost ? '
+  const prefix = showsDollarCost ? '$' : '';
   const sign = display < 0 ? '-' : '';
   const abs = Math.abs(display);
   if (abs >= 1_000_000_000) return `${sign}${prefix}${(abs / 1_000_000_000).toFixed(1)}B`;

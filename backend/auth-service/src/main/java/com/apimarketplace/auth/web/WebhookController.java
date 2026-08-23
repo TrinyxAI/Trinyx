@@ -141,25 +141,56 @@ public class WebhookController {
             return ResponseEntity.status(HttpStatus.BAD_REQUEST).body("Invalid event");
         }
 
+        BillingEvent storedEvent;
         try {
-            if (billingEventRepository.existsByEventId(event.getId())) {
-                logger.info("Event {} already processed, skipping", event.getId());
-                return ResponseEntity.ok("OK");
+            storedEvent = billingEventRepository.findByEventId(event.getId()).orElse(null);
+            if (storedEvent == null) {
+                var jsonNode = objectMapper.readTree(payload);
+                try {
+                    storedEvent = billingEventRepository.saveAndFlush(
+                            new BillingEvent("stripe", event.getId(), event.getType(), jsonNode));
+                } catch (Exception insertRace) {
+                    // Another delivery may have inserted the unique event id first.
+                    storedEvent = billingEventRepository.findByEventId(event.getId())
+                            .orElseThrow(() -> insertRace);
+                }
             }
-            var jsonNode = objectMapper.readTree(payload);
-            billingEventRepository.save(new BillingEvent("stripe", event.getId(), event.getType(), jsonNode));
         } catch (Exception e) {
-            logger.warn("Race on billing event insert for id {}", event.getId(), e);
+            logger.error("Unable to persist Stripe event {} before dispatch", event.getId(), e);
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
+                    .body("Webhook persistence failed");
+        }
+
+        if ("PROCESSED".equals(storedEvent.getStatus())) {
+            logger.info("Event {} already processed, skipping", event.getId());
             return ResponseEntity.ok("OK");
+        }
+
+        if (billingEventRepository.claimForProcessing(event.getId()) != 1) {
+            logger.warn("Event {} is already being processed; asking Stripe to retry", event.getId());
+            return ResponseEntity.status(HttpStatus.CONFLICT).body("Event already processing");
         }
 
         try {
             dispatch(event);
+            if (billingEventRepository.markProcessed(event.getId(), LocalDateTime.now()) != 1) {
+                throw new IllegalStateException("Unable to mark webhook event as processed");
+            }
+            return ResponseEntity.ok("OK");
         } catch (Exception e) {
-            logger.error("Error while processing event {}", event.getId(), e);
+            logger.error("Error while processing event {}; Stripe will retry", event.getId(), e);
+            String message = e.getMessage() == null ? e.getClass().getSimpleName() : e.getMessage();
+            if (message.length() > 2000) {
+                message = message.substring(0, 2000);
+            }
+            try {
+                billingEventRepository.markFailed(event.getId(), message);
+            } catch (Exception stateError) {
+                logger.error("Unable to mark failed webhook event {}", event.getId(), stateError);
+            }
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
+                    .body("Webhook dispatch failed");
         }
-
-        return ResponseEntity.ok("OK");
     }
 
     private void dispatch(Event event) {

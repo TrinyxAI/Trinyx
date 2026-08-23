@@ -83,6 +83,9 @@ public class CloudLlmRelayController {
      */
     private final boolean centralizedBillingEnabled;
 
+    @Value("${billing.authority.mode:native-cloud}")
+    private String billingAuthorityMode;
+
     public CloudLlmRelayController(AuthClient authClient,
                                    CreditConsumptionClient creditClient,
                                    LLMProviderFactory providerFactory,
@@ -125,17 +128,23 @@ public class CloudLlmRelayController {
         CompletionRequest request = withCloudTenant(
                 relayRequest.completionRequest(), userId, billedModel, false);
         BudgetEstimate estimate = estimateBudget(request);
-        if (!gate(userId, billedProvider.getProviderName(), billedModel, estimate, centralized, relayRequest.executionId())) {
+        BillingTarget target = billingTarget(userId, relayRequest.executionId(), centralized,
+                billedProvider.getProviderName(), billedModel, estimate);
+        if (target == null) {
             return ResponseEntity.status(HttpStatus.PAYMENT_REQUIRED)
                     .body(Map.of("error", "INSUFFICIENT_CREDITS"));
         }
 
-        BillingTarget target = new BillingTarget(centralized, userId, relayRequest.executionId(),
-                "ce-llm-" + UUID.randomUUID(), billedProvider.getProviderName(), billedModel);
-        CompletionResponse response = billedProvider.complete(request);
-        TokenUsage usage = usageFrom(response, estimate, response != null ? response.content() : null);
-        recordUsageOnce(new AtomicBoolean(false), target, usage);
-        return ResponseEntity.ok(response);
+        try {
+            CompletionResponse response = billedProvider.complete(request);
+            TokenUsage usage = usageFrom(response, estimate,
+                    response != null ? response.content() : null);
+            recordUsageOnce(new AtomicBoolean(false), target, usage);
+            return ResponseEntity.ok(response);
+        } catch (RuntimeException failure) {
+            releaseBeforeProviderResult(target, "provider-call-failed");
+            throw failure;
+        }
     }
 
     @PostMapping(value = "/stream", produces = "application/x-ndjson")
@@ -167,15 +176,14 @@ public class CloudLlmRelayController {
         CompletionRequest request = withCloudTenant(
                 relayRequest.completionRequest(), userId, billedModel, true);
         BudgetEstimate estimate = estimateBudget(request);
-        if (!gate(userId, billedProvider.getProviderName(), billedModel, estimate, centralized, relayRequest.executionId())) {
+        BillingTarget target = billingTarget(userId, relayRequest.executionId(), centralized,
+                billedProvider.getProviderName(), billedModel, estimate);
+        if (target == null) {
             return ResponseEntity.status(HttpStatus.PAYMENT_REQUIRED)
                     .contentType(MediaType.APPLICATION_JSON)
                     .body(outputStream -> writeEvent(outputStream,
                             CloudLlmStreamEvent.error("INSUFFICIENT_CREDITS")));
         }
-
-        BillingTarget target = new BillingTarget(centralized, userId, relayRequest.executionId(),
-                "ce-llm-" + UUID.randomUUID(), billedProvider.getProviderName(), billedModel);
         StreamingResponseBody body = outputStream -> {
             AtomicInteger streamedContentChars = new AtomicInteger(0);
             AtomicBoolean recorded = new AtomicBoolean(false);
@@ -320,12 +328,53 @@ public class CloudLlmRelayController {
         if (!recorded.compareAndSet(false, true)) {
             return;
         }
-        if (target.centralized()) {
+        if (target.externalOperationId() != null) {
+            boolean acknowledged = creditClient.commitExternalLlm(
+                    target.externalOperationId(), target.externalRequestHash(),
+                    target.provider(), target.model(), null,
+                    usage.promptTokens(), usage.completionTokens());
+            if (!acknowledged) {
+                log.error("External wallet settlement not acknowledged for operation {}",
+                        target.externalOperationId());
+            }
+        } else if (target.centralized()) {
             accrualStore.accrue(target.executionId(), target.userId(), target.provider(), target.model(),
                     toAccruedDelta(usage), System.currentTimeMillis());
         } else {
             consumeOrPersist(target.userId(), target.sourceId(), target.provider(), target.model(), usage);
         }
+    }
+
+    private BillingTarget billingTarget(String userId, String executionId, boolean centralized,
+                                        String provider, String model, BudgetEstimate estimate) {
+        String sourceId = "ce-llm-" + UUID.randomUUID();
+        if (isExternalAuthority()) {
+            UUID operationId = UUID.randomUUID();
+            var reserve = creditClient.reserveExternalLlm(
+                    Long.valueOf(userId), operationId, "cloudLlmRelay", SOURCE_TYPE,
+                    provider, model, estimate.promptTokens(), estimate.completionTokens());
+            if (!reserve.success()) {
+                return null;
+            }
+            return new BillingTarget(false, userId, executionId, sourceId, provider, model,
+                    operationId, reserve.requestHash());
+        }
+        if (!gate(userId, provider, model, estimate, centralized, executionId)) {
+            return null;
+        }
+        return new BillingTarget(centralized, userId, executionId, sourceId, provider, model,
+                null, null);
+    }
+
+    private void releaseBeforeProviderResult(BillingTarget target, String reason) {
+        if (target.externalOperationId() != null) {
+            creditClient.releaseExternal(target.externalOperationId(),
+                    target.externalRequestHash(), reason);
+        }
+    }
+
+    private boolean isExternalAuthority() {
+        return "external-paid-monolith".equalsIgnoreCase(billingAuthorityMode);
     }
 
     private static CeRelayAccrualStore.AccruedUsage toAccruedDelta(TokenUsage u) {
@@ -568,7 +617,8 @@ public class CloudLlmRelayController {
 
     /** Per-request billing context: where this call's usage goes (accrual vs per-call ledger). */
     private record BillingTarget(boolean centralized, String userId, String executionId,
-                                 String sourceId, String provider, String model) {
+                                 String sourceId, String provider, String model,
+                                 UUID externalOperationId, String externalRequestHash) {
     }
 
     private record TokenUsage(int promptTokens, int completionTokens,

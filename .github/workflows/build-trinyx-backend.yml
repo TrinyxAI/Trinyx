@@ -14,6 +14,10 @@ on:
       - '.github/workflows/build-trinyx-backend.yml'
   workflow_dispatch:
 
+concurrency:
+  group: trinyx-backend-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
 permissions:
   contents: read
   packages: write

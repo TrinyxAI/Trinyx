@@ -17,7 +17,7 @@ import java.util.concurrent.ThreadLocalRandom;
 
 @Service
 @ConditionalOnProperty(name = "billing.authority.mode",
-        havingValue = "native-cloud", matchIfMissing = true)
+        havingValue = "paid-monolith-authority", matchIfMissing = false)
 public class EntitlementOutboxDispatcher {
 
     private final JdbcTemplate jdbc;

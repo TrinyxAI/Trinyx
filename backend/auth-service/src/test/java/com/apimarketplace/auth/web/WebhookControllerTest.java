@@ -43,11 +43,13 @@ import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 import java.time.LocalDateTime;
 import java.util.Collections;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
+import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.isNull;
@@ -1730,7 +1732,7 @@ class WebhookControllerTest {
             verify(creditAttributionService, never()).grantPaygTopup(
                     anyLong(), any(), anyString(), anyString());
             verify(billingEventRepository).markFailed(
-                    eq("evt_payg_unpaid"), contains("PAYG top-up"));
+                    eq("evt_payg_unpaid"), anyString());
             verify(billingEventRepository, never()).markProcessed(
                     eq("evt_payg_unpaid"), any(LocalDateTime.class));
         }

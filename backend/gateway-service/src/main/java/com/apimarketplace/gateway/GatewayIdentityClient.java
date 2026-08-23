@@ -30,7 +30,8 @@ final class GatewayIdentityClient {
         this.secret = secret;
     }
 
-    Mono<GatewayUserContext> resolve(String bearerToken, String providerId, String bindingJws) {
+    Mono<GatewayUserContext> resolve(String bearerToken, String providerId, String bindingJws,
+                                     String entitlementJws) {
         String target = "/api/users/resolve?providerId="
                 + URLEncoder.encode(providerId, StandardCharsets.UTF_8);
         HttpHeaders signed = signed("GET", target, new byte[0], providerId,
@@ -42,7 +43,9 @@ final class GatewayIdentityClient {
                 })
                 .retrieve()
                 .bodyToMono(UserResolution.class)
-                .flatMap(user -> resolveBinding(user, providerId, bindingJws));
+                .flatMap(user -> resolveBinding(user, providerId, bindingJws))
+                .flatMap(context -> applyProjection(context, providerId, entitlementJws)
+                        .thenReturn(context));
     }
 
     private Mono<GatewayUserContext> resolveBinding(
@@ -80,6 +83,30 @@ final class GatewayIdentityClient {
                     .retrieve()
                     .bodyToMono(BindingContext.class)
                     .map(binding -> merge(user, binding));
+        } catch (Exception e) {
+            return Mono.error(e);
+        }
+    }
+
+    private Mono<Void> applyProjection(GatewayUserContext context, String providerId,
+                                       String entitlementJws) {
+        if (entitlementJws == null || entitlementJws.isBlank()) {
+            return Mono.empty();
+        }
+        try {
+            byte[] body = mapper.writeValueAsBytes(java.util.Map.of("assertion", entitlementJws));
+            String target = "/api/internal/v1/entitlement-projections";
+            HttpHeaders headers = signed("PUT", target, body, providerId,
+                    String.valueOf(context.userId()), context.principalId(),
+                    context.billingSubjectId(), context.defaultOrganizationId(),
+                    context.defaultOrganizationRole(), canonicalRoles(context.roles()),
+                    context.installId());
+            return auth.put().uri(target)
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .headers(out -> out.addAll(headers))
+                    .bodyValue(body)
+                    .retrieve()
+                    .bodyToMono(Void.class);
         } catch (Exception e) {
             return Mono.error(e);
         }

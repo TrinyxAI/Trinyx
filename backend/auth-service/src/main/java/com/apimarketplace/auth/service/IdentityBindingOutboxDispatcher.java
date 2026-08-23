@@ -29,7 +29,7 @@ public class IdentityBindingOutboxDispatcher {
             JdbcTemplate jdbc,
             WorkloadAuthenticationService workloads,
             RestTemplateBuilder builder,
-            @Value("${trinyx.identity.cloud-revocation-url:https://cloud.trinyx.fr/internal/v1/identity-bindings/revocations}")
+            @Value("${trinyx.identity.cloud-revocation-url:https://cloud-internal.trinyx.private:8443/internal/v1/identity-bindings/revocations}")
             String endpoint) {
         this.jdbc = jdbc;
         this.workloads = workloads;

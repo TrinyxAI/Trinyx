@@ -241,6 +241,19 @@ class AppEditionProviderTest {
         }
 
         @Test
+        @DisplayName("Paid monolith refuses disabled billing")
+        void paidMonolithRejectsDisabledBilling() {
+            MockEnvironment env = new MockEnvironment();
+            env.setProperty("app.edition", "paid-monolith");
+            env.setProperty("billing.provider", "none");
+
+            assertThatThrownBy(() -> new AppEditionProvider(env).logSummary())
+                    .isInstanceOf(IllegalStateException.class)
+                    .hasMessageContaining("Refusing to start PAID_MONOLITH")
+                    .hasMessageContaining("billing.provider=none");
+        }
+
+        @Test
         @DisplayName("CE Free refuses Stripe billing activation")
         void ceFreeRejectsStripeBilling() {
             MockEnvironment env = new MockEnvironment();

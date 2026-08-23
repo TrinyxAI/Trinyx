@@ -158,12 +158,19 @@ public class CloudCreditAuthorityService {
                 SELECT actor.id
                 FROM auth.users actor
                 JOIN auth.organization_member member ON member.user_id=actor.id
-                WHERE actor.principal_id=? AND actor.billing_subject_id=?
-                  AND member.organization_id=?
-                """, (rs, row) -> rs.getLong(1), request.principalId(),
-                request.billingSubjectId(), request.organizationId());
-        if (users.size() != 1) throw new ResponseStatusException(HttpStatus.FORBIDDEN, "PAYER_BINDING_INVALID");
+                WHERE actor.principal_id=? AND member.organization_id=?
+                """, (rs, row) -> rs.getLong(1), request.principalId(), request.organizationId());
+        if (users.size() != 1) throw new ResponseStatusException(HttpStatus.FORBIDDEN, "ACTOR_BINDING_INVALID");
         long userId = users.getFirst();
+
+        Integer payer = jdbc.queryForObject("""
+                SELECT count(*) FROM auth.organization organization_row
+                JOIN auth.users owner_row ON owner_row.id=organization_row.owner_id
+                WHERE organization_row.id=? AND owner_row.billing_subject_id=?
+                """, Integer.class, request.organizationId(), request.billingSubjectId());
+        if (payer == null || payer != 1) {
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "PAYER_BINDING_INVALID");
+        }
 
         Integer linked = jdbc.queryForObject("""
                 SELECT count(*) FROM publication.ce_cloud_links

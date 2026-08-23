@@ -302,6 +302,9 @@ gateway:
   filter:
     verification-enabled: false
     secret-key: not-used-in-monolith
+    # Stripe signs the raw request body; keep this exact route anonymous.
+    public-paths:
+      - /webhooks/stripe
 
 # Plan limits: disabled in CE (all resources are unlimited)
 plan-limits:

@@ -4,6 +4,7 @@
 ALTER TABLE auth.billing_event
     ADD COLUMN IF NOT EXISTS status VARCHAR(24) NOT NULL DEFAULT 'PROCESSED',
     ADD COLUMN IF NOT EXISTS attempt_count INTEGER NOT NULL DEFAULT 1,
+    ADD COLUMN IF NOT EXISTS processing_started_at TIMESTAMP,
     ADD COLUMN IF NOT EXISTS processed_at TIMESTAMP,
     ADD COLUMN IF NOT EXISTS last_error VARCHAR(2000);
 
@@ -21,3 +22,6 @@ ALTER TABLE auth.billing_event
 
 CREATE INDEX IF NOT EXISTS idx_be_status_received
     ON auth.billing_event (status, received_at);
+
+CREATE INDEX IF NOT EXISTS idx_be_processing_lease
+    ON auth.billing_event (status, processing_started_at);

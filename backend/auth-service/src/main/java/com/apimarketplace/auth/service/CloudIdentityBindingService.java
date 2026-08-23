@@ -171,8 +171,8 @@ public class CloudIdentityBindingService {
     }
 
     @Transactional
-    public void revoke(UUID installId, UUID principalId, long revision) {
-        BindingRow current = findLatestForUpdate(installId, null, principalId);
+    public void revoke(UUID installId, UUID organizationId, UUID principalId, long revision) {
+        BindingRow current = findLatestForUpdate(installId, organizationId, principalId);
         if (current == null || revision <= current.revision()) {
             throw new ResponseStatusException(HttpStatus.CONFLICT, "STALE_OR_MISSING_BINDING");
         }

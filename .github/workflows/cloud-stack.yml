@@ -60,6 +60,22 @@ jobs:
           grep -q 'STORAGE_SERVICE_URL: http://storage-service:8082' "${rendered}"
           grep -q 'ORCHESTRATOR_SERVICE_URL: http://orchestrator-service:8099' "${rendered}"
 
+      - name: Verify external image manifests
+        shell: bash
+        run: |
+          set -euo pipefail
+          for image in \
+            pgvector/pgvector:pg16 \
+            redis:7-alpine \
+            minio/minio:RELEASE.2025-07-23T15-54-02Z \
+            minio/mc:RELEASE.2025-07-21T05-28-08Z \
+            quay.io/keycloak/keycloak:26.7.1 \
+            searxng/searxng:2026.8.17-374939b88 \
+            caddy:2.11.4-alpine
+          do
+            docker buildx imagetools inspect "${image}" >/dev/null
+          done
+
       - name: Validate Keycloak realm and Caddy
         shell: bash
         run: |

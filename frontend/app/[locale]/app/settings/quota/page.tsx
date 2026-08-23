@@ -9,7 +9,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { quotaApi, CreditSummary, CreditHistoryPage } from '@/lib/api';
 import { useAuth } from '@/lib/providers/smart-providers';
 import UsageAnalyticsPanel from './components/UsageAnalyticsPanel';
-import { isCeMode, showsDollarCost, creditsToUsd } from '@/lib/format-cost';
+import { showsDollarCost, creditsToUsd } from '@/lib/format-cost';
 import { formatUtcDateTime } from '@/lib/utils/dateFormatters';
 import { BalanceBreakdownCard, TopUpModal } from '@/components/billing';
 import { useSubscription, useCreditBalance, usePaygTiers } from '@/lib/hooks/smart-hooks-complete';

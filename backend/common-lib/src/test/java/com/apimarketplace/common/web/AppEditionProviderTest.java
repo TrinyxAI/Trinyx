@@ -85,6 +85,23 @@ class AppEditionProviderTest {
         }
 
         @Test
+        @DisplayName("app.edition=paid-monolith keeps embedded auth with enforced billing")
+        void paidMonolith() {
+            MockEnvironment env = new MockEnvironment();
+            env.setActiveProfiles("ce");
+            env.setProperty("app.edition", "paid-monolith");
+
+            AppEditionProvider provider = new AppEditionProvider(env);
+
+            assertThat(provider.get()).isEqualTo(AppEditionProvider.AppEdition.PAID_MONOLITH);
+            assertThat(provider.isPaidMonolith()).isTrue();
+            assertThat(provider.isSelfHosted()).isTrue();
+            assertThat(provider.isCeFree()).isFalse();
+            assertThat(provider.isManagedCloud()).isFalse();
+            assertThat(provider.hasCeFreeUnlimitedLocalResources()).isFalse();
+        }
+
+        @Test
         @DisplayName("app.edition=self-hosted-enterprise resolves to Self-Hosted Enterprise")
         void selfHostedEnterprise() {
             MockEnvironment env = new MockEnvironment();
@@ -179,6 +196,48 @@ class AppEditionProviderTest {
                             .contains("deployment.mode=monolith")
                             .contains("billing.provider=none")
                             .contains("marketplace.mode=remote"));
+        }
+
+        @Test
+        @DisplayName("Paid monolith accepts embedded auth, Stripe, finite credits and plan limits")
+        void paidMonolithSummary() {
+            MockEnvironment env = new MockEnvironment();
+            env.setActiveProfiles("ce");
+            env.setProperty("app.edition", "paid-monolith");
+            env.setProperty("deployment.mode", "monolith");
+            env.setProperty("auth.mode", "embedded");
+            env.setProperty("credit.unlimited", "false");
+            env.setProperty("credit.consumption.enabled", "true");
+            env.setProperty("plan-limits.enabled", "true");
+            env.setProperty("billing.provider", "stripe");
+            env.setProperty("marketplace.mode", "remote");
+
+            new AppEditionProvider(env).logSummary();
+
+            assertThat(appender.list).filteredOn(e -> e.getLevel() == Level.WARN).isEmpty();
+            assertThat(appender.list)
+                    .filteredOn(e -> e.getLevel() == Level.INFO)
+                    .hasSize(1)
+                    .first()
+                    .satisfies(evt -> assertThat(evt.getFormattedMessage())
+                            .contains("[edition] PAID_MONOLITH")
+                            .contains("auth.mode=embedded")
+                            .contains("credit.unlimited=false")
+                            .contains("plan-limits.enabled=true")
+                            .contains("billing.provider=stripe"));
+        }
+
+        @Test
+        @DisplayName("Paid monolith refuses unlimited credits")
+        void paidMonolithRejectsUnlimitedCredits() {
+            MockEnvironment env = new MockEnvironment();
+            env.setProperty("app.edition", "paid-monolith");
+            env.setProperty("credit.unlimited", "true");
+
+            assertThatThrownBy(() -> new AppEditionProvider(env).logSummary())
+                    .isInstanceOf(IllegalStateException.class)
+                    .hasMessageContaining("Refusing to start PAID_MONOLITH")
+                    .hasMessageContaining("credit.unlimited=true");
         }
 
         @Test

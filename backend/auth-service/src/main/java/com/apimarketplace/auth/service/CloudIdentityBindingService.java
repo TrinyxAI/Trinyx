@@ -72,8 +72,8 @@ public class CloudIdentityBindingService {
         }
 
         // Cross-system identity is authoritative only after signature + scope validation.
-        jdbc.update("UPDATE auth.users SET principal_id=?, billing_subject_id=?, updated_at=now() WHERE id=?",
-                principalId, billingSubjectId, cloudUserId);
+        jdbc.update("UPDATE auth.users SET principal_id=?, updated_at=now() WHERE id=?",
+                principalId, cloudUserId);
         try {
             UUID id = UUID.randomUUID();
             jdbc.update("""

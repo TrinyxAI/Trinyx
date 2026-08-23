@@ -312,3 +312,5 @@ trinyx:
     issuer: ${TRINYX_S2S_ISSUER:trinyx-cloud}
     audience: ${TRINYX_S2S_AUDIENCE:trinyx-billing-authority}
     verification-keys: ${TRINYX_S2S_VERIFICATION_KEYS:}
+    signing-kid: ${TRINYX_S2S_SIGNING_KID:}
+    signing-key: ${TRINYX_S2S_SIGNING_KEY:}

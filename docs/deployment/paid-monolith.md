@@ -41,7 +41,7 @@ provider, OAuth callback, and optional web-search variables. Do not rotate
 Frontend build-time configuration:
 
 ```dotenv
-NEXT_PUBLIC_APP_EDITION=ce
+NEXT_PUBLIC_APP_EDITION=paid-monolith
 NEXT_PUBLIC_AUTH_MODE=embedded
 NEXT_PUBLIC_BILLING_ENABLED=true
 NEXT_PUBLIC_SPRING_BASE_URL=http://livecontext-app:8080
@@ -131,7 +131,7 @@ deleted.
    ```bash
    docker build --platform linux/amd64 \
      -t ghcr.io/eddinerabii/trinyx-frontend:paid-<tested-sha> \
-     --build-arg NEXT_PUBLIC_APP_EDITION=ce \
+     --build-arg NEXT_PUBLIC_APP_EDITION=paid-monolith \
      --build-arg NEXT_PUBLIC_AUTH_MODE=embedded \
      --build-arg NEXT_PUBLIC_BILLING_ENABLED=true \
      --build-arg NEXT_PUBLIC_SPRING_BASE_URL=http://livecontext-app:8080 \

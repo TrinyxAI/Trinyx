@@ -1,0 +1,40 @@
+{
+  "_comment": "Gateway HMAC v2 golden fixtures. Canonical payload is newline-delimited and includes the exact final downstream request target and body hash.",
+  "secretKey": "test-gateway-hmac-key-for-unit-tests",
+  "cases": [
+    {
+      "name": "GET with organization context",
+      "timestamp": "1700000000000",
+      "nonce": "nonce-123",
+      "method": "GET",
+      "requestTarget": "/api/ce-link/abc/entitlements?view=full",
+      "bodySha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "providerId": "keycloak-sub",
+      "userId": "42",
+      "principalId": "11111111-1111-1111-1111-111111111111",
+      "billingSubjectId": "22222222-2222-2222-2222-222222222222",
+      "organizationId": "33333333-3333-3333-3333-333333333333",
+      "organizationRole": "OWNER",
+      "userRoles": "ADMIN,USER",
+      "installId": "44444444-4444-4444-4444-444444444444",
+      "expectedSignature": "GENERATE_IN_TEST"
+    },
+    {
+      "name": "POST empty optional context",
+      "timestamp": "1700000000001",
+      "nonce": "nonce-456",
+      "method": "POST",
+      "requestTarget": "/api/users/resolve",
+      "bodySha256": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+      "providerId": "service-cloud-gateway",
+      "userId": "",
+      "principalId": "",
+      "billingSubjectId": "",
+      "organizationId": "",
+      "organizationRole": "",
+      "userRoles": "",
+      "installId": "",
+      "expectedSignature": "GENERATE_IN_TEST"
+    }
+  ]
+}

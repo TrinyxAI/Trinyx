@@ -244,7 +244,9 @@ public class CloudLlmRelayController {
                     writeQuietly(outputStream, CloudLlmStreamEvent.error(e.getMessage()), streamClosed);
                 }
             } finally {
-                if (streamedContentChars.get() > 0) {
+                if (target.externalOperationId() != null || streamedContentChars.get() > 0) {
+                    // For an external reservation, settle even a prompt-only/error response:
+                    // the upstream may have incurred cost before producing the first chunk.
                     recordUsageOnce(recorded, target,
                             usageFrom(null, estimate, streamedContentChars.get()));
                 }

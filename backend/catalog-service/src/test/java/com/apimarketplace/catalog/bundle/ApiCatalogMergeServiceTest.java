@@ -60,7 +60,12 @@ class ApiCatalogMergeServiceTest {
     private final List<UUID> failingApiInserts = new ArrayList<>();
     /** apiIds whose apis-upsert reports 0 rows (ON CONFLICT … WHERE source guard fired). */
     private final List<UUID> suppressedApiUpserts = new ArrayList<>();
-    private record ExistingTool(UUID id, UUID apiId, String toolNameId) {}
+    private record ExistingTool(UUID id, UUID apiId, String toolNameId,
+                                String toolSlug, String endpoint) {
+        private ExistingTool(UUID id, UUID apiId, String toolNameId) {
+            this(id, apiId, toolNameId, toolNameId, "/existing");
+        }
+    }
     /** Rows returned by the dual-identity SELECT ... FOR UPDATE. */
     private final List<ExistingTool> existingTools = new ArrayList<>();
     /** What the orphan-sweep SELECT returns (APIs to deprecate in this sweep). */
@@ -141,6 +146,8 @@ class ApiCatalogMergeServiceTest {
                                 row.put("id", tool.id());
                                 row.put("api_id", tool.apiId());
                                 row.put("tool_name_id", tool.toolNameId());
+                                row.put("tool_slug", tool.toolSlug());
+                                row.put("endpoint", tool.endpoint());
                                 return row;
                             })
                             .toList();
@@ -435,11 +442,13 @@ class ApiCatalogMergeServiceTest {
     }
 
     @Test
-    @DisplayName("Primary-key match with a different logical key reuses the referenced UUID deterministically")
-    void primaryKeyConflictRekeysExistingToolInPlace() {
+    @DisplayName("Primary-key match with a different logical key fails before any tool or child write")
+    void primaryKeyIdentityConflictIsRejectedWithoutMutation() {
         UUID apiId = UUID.randomUUID();
         UUID bundleId = UUID.randomUUID();
-        existingTools.add(new ExistingTool(bundleId, apiId, "surveymonkey-send-collector-message"));
+        existingTools.add(new ExistingTool(
+                bundleId, apiId, "surveymonkey-send-collector-message",
+                "send-collector-message", "/v1/messages"));
 
         Map<String, Object> tool = toolMap(bundleId, "create-survey");
         tool.put("toolNameId", "surveymonkey-create-survey");
@@ -447,17 +456,24 @@ class ApiCatalogMergeServiceTest {
         ApiCatalogMergeService.MergeResult result = service.merge(
                 List.of(apiMap(apiId, "SurveyMonkey", List.of(tool))), List.of());
 
-        assertThat(result.failedApis()).isZero();
-        assertThat(result.upsertedTools()).isEqualTo(1);
-        Statement upsert = matching(sql -> sql.contains("INSERT INTO catalog.api_tools")).get(0);
-        assertThat(upsert.params().getValue("id")).isEqualTo(bundleId);
-        assertThat(upsert.params().getValue("toolNameId"))
-                .isEqualTo("surveymonkey-create-survey");
-        assertThat(upsert.sql()).contains("ON CONFLICT (id) DO UPDATE");
-        assertThat(matching(sql -> sql.contains("DELETE FROM catalog.api_tool_parameters")))
-                .singleElement()
-                .satisfies(statement ->
-                        assertThat(statement.params().getValue("toolId")).isEqualTo(bundleId));
+        assertThat(result.failedApis()).isEqualTo(1);
+        assertThat(result.upsertedApis()).isZero();
+        assertThat(result.upsertedTools()).isZero();
+        assertThat(result.errors()).singleElement().satisfies(error ->
+                assertThat(error)
+                        .contains("PrimaryKeyToolIdentityConflictException")
+                        .contains(bundleId.toString())
+                        .contains("send-collector-message")
+                        .contains("surveymonkey-send-collector-message")
+                        .contains("/v1/messages")
+                        .contains("create-survey")
+                        .contains("surveymonkey-create-survey")
+                        .contains("/v1/create-survey")
+                        .contains("refusing to requalify a referenced tool"));
+        assertThat(matching(sql -> sql.contains("INSERT INTO catalog.api_tools"))).isEmpty();
+        assertThat(matching(sql -> sql.contains("DELETE FROM catalog.api_tool_parameters"))).isEmpty();
+        assertThat(matching(sql -> sql.contains("DELETE FROM catalog.tool_responses"))).isEmpty();
+        assertThat(matching(sql -> sql.contains("DELETE FROM catalog.tool_credentials"))).isEmpty();
     }
 
     @Test

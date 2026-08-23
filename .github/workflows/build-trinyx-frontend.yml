@@ -89,7 +89,7 @@ jobs:
           set -euo pipefail
 
           PARAMETERS=$(jq -n \
-            --arg command "sudo -u ubuntu -H bash -lc 'set -e; cd /home/ubuntu/Trinyx; docker compose --env-file docker/.env.ce pull frontend landing; docker compose --env-file docker/.env.ce up -d frontend landing; docker compose ps frontend landing'" \
+            --arg command "sudo -u ubuntu -H bash -lc 'set -e; cd /home/ubuntu/Trinyx; docker compose --env-file docker/.env.ce pull frontend landing; docker compose --env-file docker/.env.ce up -d --no-deps frontend landing; docker compose ps frontend landing'" \
             '{commands: [$command]}')
 
           COMMAND_ID=$(aws ssm send-command \

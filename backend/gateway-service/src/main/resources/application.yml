@@ -23,6 +23,10 @@ spring:
               uri: ${WEBSEARCH_SERVICE_URL:http://websearch-service:8085}
               predicates:
                 - Path=/cdp/**
+            - id: auth-public-release
+              uri: ${AUTH_SERVICE_URL:http://auth-service:8083}
+              predicates:
+                - Path=/api/ce/releases/latest
             - id: auth-ce-link
               uri: ${AUTH_SERVICE_URL:http://auth-service:8083}
               predicates:

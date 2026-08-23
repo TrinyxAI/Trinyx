@@ -144,11 +144,19 @@ public class WebhookController {
 
         BillingEvent storedEvent;
         try {
-            storedEvent = billingEventRepository.findByEventId(event.getId()).orElse(null);
+            boolean eventAlreadyExists = billingEventRepository.existsByEventId(event.getId());
+            storedEvent = eventAlreadyExists
+                    ? billingEventRepository.findByEventId(event.getId()).orElse(null)
+                    : null;
+            if (eventAlreadyExists && storedEvent == null) {
+                // Defensive compatibility for a legacy row that cannot be read.
+                logger.warn("Event {} exists but could not be loaded; skipping duplicate", event.getId());
+                return ResponseEntity.ok("OK");
+            }
             if (storedEvent == null) {
                 var jsonNode = objectMapper.readTree(payload);
                 try {
-                    storedEvent = billingEventRepository.saveAndFlush(
+                    storedEvent = billingEventRepository.save(
                             new BillingEvent("stripe", event.getId(), event.getType(), jsonNode));
                 } catch (Exception insertRace) {
                     // Another delivery may have inserted the unique event id first.

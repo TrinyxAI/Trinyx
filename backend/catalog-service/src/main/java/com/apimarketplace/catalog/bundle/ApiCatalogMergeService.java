@@ -27,11 +27,13 @@ import java.util.UUID;
  *       collision with a pre-existing local row under a different UUID) never
  *       rolls back the rest of the catalog.</li>
  *   <li><b>UPSERT in-place, never TRUNCATE/DELETE of apis/tools</b> -
- *       APIs merge by UUID. Tools merge by {@code (api_id, tool_name_id)}
- *       when that logical key is present and retain an existing install-local
- *       UUID, keeping every external FK valid; unnamed tools fall back to UUID.
- *       Leaf children (parameters, responses, tool-credential links) ARE
- *       replaced wholesale against the effective tool UUID.</li>
+ *       APIs merge by UUID. Tools first resolve both their bundle UUID and
+ *       {@code (api_id, tool_name_id)} under a row lock. A single matching row
+ *       keeps its primary key and every external FK; two different matching
+ *       rows are rejected as an explicit crossed-identity conflict. Unnamed
+ *       tools resolve by UUID only. Leaf children (parameters, responses,
+ *       tool-credential links) ARE replaced wholesale against the effective
+ *       tool UUID.</li>
  *   <li><b>Custom-API protection</b> - an existing row whose {@code source}
  *       is NOT {@code import}/{@code bundle} (i.e. {@code custom},
  *       tenant-created) is never updated, deprecated, or overwritten. Checked
@@ -311,11 +313,11 @@ public class ApiCatalogMergeService {
     }
 
     /**
-     * Upsert a logical tool and return the UUID that remains authoritative on
-     * this install. For normal rows, {@code (api_id, tool_name_id)} is the
-     * database identity. A conflict on that key deliberately leaves the
-     * existing primary key untouched so every child/consumer FK remains valid.
-     * Tools without a logical name retain the legacy UUID conflict target.
+     * Upsert a tool after reconciling its two database identities. A primary-key
+     * match wins when it is the only match; a logical-key match preserves its
+     * install-local UUID when the bundle UUID is unused. If both identities
+     * point to distinct rows, resolution fails before any tool/child write.
+     * Tools without a logical name resolve by UUID only.
      */
     private UUID upsertTool(UUID apiId, UUID toolId, Map<String, Object> tool) {
         String toolNameId = str(tool, "toolNameId");

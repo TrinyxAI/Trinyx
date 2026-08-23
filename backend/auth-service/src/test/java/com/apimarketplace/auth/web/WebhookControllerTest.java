@@ -127,7 +127,8 @@ class WebhookControllerTest {
                 WEBHOOK_SECRET
         );
         mockMvc = MockMvcBuilders.standaloneSetup(controller).build();
-        lenient().when(billingEventRepository.claimForProcessing(anyString())).thenReturn(1);
+        lenient().when(billingEventRepository.claimForProcessing(
+                anyString(), any(LocalDateTime.class), any(LocalDateTime.class))).thenReturn(1);
         lenient().when(billingEventRepository.markProcessed(anyString(), any(LocalDateTime.class)))
                 .thenReturn(1);
         lenient().when(billingEventRepository.markFailed(anyString(), anyString())).thenReturn(1);

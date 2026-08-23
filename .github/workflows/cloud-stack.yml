@@ -100,6 +100,18 @@ jobs:
             exit 1
           fi
 
+      - name: Inventory legacy LiveContext domains
+        shell: bash
+        run: |
+          set -euo pipefail
+          grep -RniE --include='*.java' --include='*.kt' --include='*.ts' --include='*.tsx' \
+            --include='*.js' --include='*.mjs' --include='*.yml' --include='*.yaml' \
+            --include='*.properties' --include='*.json' \
+            '(^|[^A-Za-z0-9.-])(auth\.)?livecontext\.ai' \
+            backend frontend mcp websearch-service docker 2>/dev/null \
+            | grep -vE 'target/|node_modules/|docs/|__tests__/|/test/|schema|example' \
+            | head -n 300 || true
+
       - name: Set up Java
         uses: actions/setup-java@v4
         with:

@@ -7,7 +7,9 @@ import org.springframework.cloud.gateway.filter.GlobalFilter;
 import org.springframework.core.Ordered;
 import org.springframework.core.io.buffer.DataBuffer;
 import org.springframework.core.io.buffer.DataBufferUtils;
+import org.springframework.core.io.buffer.DataBufferLimitException;
 import org.springframework.http.HttpStatus;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.server.reactive.ServerHttpRequest;
 import org.springframework.http.server.reactive.ServerHttpRequestDecorator;
 import org.springframework.security.oauth2.server.resource.authentication.JwtAuthenticationToken;
@@ -17,8 +19,11 @@ import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 
 import java.nio.charset.StandardCharsets;
+import java.net.URI;
 import java.util.List;
 import java.util.Set;
+
+import static org.springframework.cloud.gateway.support.ServerWebExchangeUtils.GATEWAY_REQUEST_URL_ATTR;
 
 @Component
 final class AuthenticatedGatewayFilter implements GlobalFilter, Ordered {
@@ -28,12 +33,17 @@ final class AuthenticatedGatewayFilter implements GlobalFilter, Ordered {
             "x-gateway-nonce", "x-gateway-body-sha256", "x-provider-id", "x-user-id",
             "x-principal-id", "x-billing-subject-id", "x-organization-id",
             "x-organization-role", "x-user-roles", "x-install-id",
-            "x-trinyx-identity-binding", "x-trinyx-entitlement-projection");
+            "x-trinyx-identity-binding", "x-trinyx-entitlement-projection",
+            "x-trinyx-organization-id");
 
     private final GatewayIdentityClient identityClient;
+    private final int maxBodyBytes;
 
-    AuthenticatedGatewayFilter(GatewayIdentityClient identityClient) {
+    AuthenticatedGatewayFilter(
+            GatewayIdentityClient identityClient,
+            @Value("${trinyx.gateway.max-body-bytes:10485760}") int maxBodyBytes) {
         this.identityClient = identityClient;
+        this.maxBodyBytes = Math.max(1, maxBodyBytes);
     }
 
     @Override
@@ -73,7 +83,7 @@ final class AuthenticatedGatewayFilter implements GlobalFilter, Ordered {
 
     private Mono<Void> withBody(ServerWebExchange exchange, GatewayFilterChain chain,
                                 String providerId, GatewayUserContext context) {
-        return DataBufferUtils.join(exchange.getRequest().getBody())
+        return DataBufferUtils.join(exchange.getRequest().getBody(), maxBodyBytes)
                 .defaultIfEmpty(exchange.getResponse().bufferFactory().wrap(new byte[0]))
                 .flatMap(buffer -> {
                     byte[] body = new byte[buffer.readableByteCount()];
@@ -89,8 +99,12 @@ final class AuthenticatedGatewayFilter implements GlobalFilter, Ordered {
                         return forbidden(exchange, "organization_membership_required");
                     }
 
-                    String rawPath = exchange.getRequest().getURI().getRawPath();
-                    String rawQuery = exchange.getRequest().getURI().getRawQuery();
+                    URI downstream = exchange.getAttribute(GATEWAY_REQUEST_URL_ATTR);
+                    if (downstream == null) {
+                        downstream = exchange.getRequest().getURI();
+                    }
+                    String rawPath = downstream.getRawPath();
+                    String rawQuery = downstream.getRawQuery();
                     String target = rawPath + (rawQuery == null ? "" : "?" + rawQuery);
                     String roles = GatewaySignatureV2.canonicalRoles(
                             context.roles() == null ? "" : String.join(",", context.roles()));
@@ -125,6 +139,10 @@ final class AuthenticatedGatewayFilter implements GlobalFilter, Ordered {
                         }
                     };
                     return chain.filter(exchange.mutate().request(request).build());
+                })
+                .onErrorResume(DataBufferLimitException.class, error -> {
+                    exchange.getResponse().setStatusCode(HttpStatus.PAYLOAD_TOO_LARGE);
+                    return exchange.getResponse().setComplete();
                 });
     }
 

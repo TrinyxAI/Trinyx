@@ -149,6 +149,7 @@ final class AuthenticatedGatewayFilter implements GlobalFilter, Ordered {
     private boolean isPublic(String path) {
         return path.equals("/healthz")
                 || path.startsWith("/actuator/health")
+                || path.startsWith("/cdp/")
                 || path.startsWith("/webhooks/")
                 || path.startsWith("/api/catalog/public/bundles/");
     }

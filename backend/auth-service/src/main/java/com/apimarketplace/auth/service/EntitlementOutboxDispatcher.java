@@ -7,7 +7,6 @@ import org.springframework.http.*;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
-import org.springframework.transaction.annotation.Transactional;
 
 import java.sql.Timestamp;
 import java.time.Duration;
@@ -39,14 +38,18 @@ public class EntitlementOutboxDispatcher {
     }
 
     @Scheduled(fixedDelayString = "${trinyx.entitlement.outbox-delay-ms:3000}")
-    @Transactional
     public void dispatch() {
         var events = jdbc.query("""
-                SELECT event_id, signed_jws, attempt_count
-                FROM auth.entitlement_outbox
-                WHERE status IN ('PENDING','FAILED') AND next_attempt_at <= now()
-                ORDER BY created_at
-                FOR UPDATE SKIP LOCKED LIMIT 25
+                UPDATE auth.entitlement_outbox
+                SET status='PROCESSING', processing_started_at=now(),
+                    next_attempt_at=now() + interval '60 seconds'
+                WHERE event_id IN (
+                    SELECT event_id FROM auth.entitlement_outbox
+                    WHERE status IN ('PENDING','FAILED')
+                       OR (status='PROCESSING' AND next_attempt_at <= now())
+                    ORDER BY created_at FOR UPDATE SKIP LOCKED LIMIT 25
+                )
+                RETURNING event_id, signed_jws, attempt_count
                 """, (rs, row) -> new Event(
                 rs.getObject("event_id", UUID.class),
                 rs.getString("signed_jws"),

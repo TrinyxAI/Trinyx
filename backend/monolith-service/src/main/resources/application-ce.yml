@@ -209,7 +209,7 @@ generation:
 # Marketplace: remote mode fetches publications from cloud, clones locally
 marketplace:
   mode: ${MARKETPLACE_MODE:remote}
-  cloud-api-url: ${MARKETPLACE_CLOUD_API_URL:https://livecontext.ai/api}
+  cloud-api-url: ${MARKETPLACE_CLOUD_API_URL:https://cloud.trinyx.fr/api}
   # CE CONSUMES the cloud's /api/ce-marketplace/** endpoints (snapshot +
   # acquire-with-auth) - it never serves them. The cloud default (publication-
   # service application.yml) is true; pin OFF here so the CeDownloadController
@@ -225,7 +225,7 @@ ce-catalog-relay:
 
 # Cloud account linking (OAuth to LiveContext cloud for paid marketplace operations)
 cloud-link:
-  keycloak-url: ${CLOUD_KEYCLOAK_URL:https://auth.livecontext.ai/realms/livecontext}
+  keycloak-url: ${CLOUD_KEYCLOAK_URL:https://auth.trinyx.fr/realms/trinyx}
   client-id: ${CLOUD_LINK_CLIENT_ID:livecontext-frontend}
   redirect-uri: ${CLOUD_LINK_REDIRECT_URI:http://localhost:8080/api/cloud-link/callback}
   encryption-key: ${CLOUD_LINK_ENCRYPTION_KEY:}
@@ -463,7 +463,7 @@ catalog:
     # install is not linked (records NOT_LINKED) - catalog freshness is a benefit of being
     # connected, never an anonymous fetch. Safe to enable for every CE: an unlinked install
     # simply keeps its seeded catalog. The cloud itself never runs this (default disabled).
-    cloud-url: ${CATALOG_BUNDLE_CLOUD_URL:https://livecontext.ai}
+    cloud-url: ${CATALOG_BUNDLE_CLOUD_URL:https://cloud.trinyx.fr}
     sync:
       enabled: ${CATALOG_BUNDLE_SYNC_ENABLED:true}
       cron: ${CATALOG_BUNDLE_SYNC_CRON:0 */15 * * * *}
@@ -475,7 +475,7 @@ catalog:
 # in the service itself (cloud never syncs); enabled here for CE installs.
 api-catalog:
   bundle:
-    cloud-url: ${API_CATALOG_BUNDLE_CLOUD_URL:https://livecontext.ai}
+    cloud-url: ${API_CATALOG_BUNDLE_CLOUD_URL:https://cloud.trinyx.fr}
     sync:
       enabled: ${API_CATALOG_BUNDLE_SYNC_ENABLED:true}
       cron: ${API_CATALOG_BUNDLE_SYNC_CRON:0 */15 * * * *}
@@ -490,7 +490,7 @@ api-catalog:
 # disabled in agent-service); enabled here for CE installs.
 skill:
   bundle:
-    cloud-url: ${SKILL_BUNDLE_CLOUD_URL:https://livecontext.ai}
+    cloud-url: ${SKILL_BUNDLE_CLOUD_URL:https://cloud.trinyx.fr}
     sync:
       enabled: ${SKILL_BUNDLE_SYNC_ENABLED:true}
       cron: ${SKILL_BUNDLE_SYNC_CRON:0 */15 * * * *}

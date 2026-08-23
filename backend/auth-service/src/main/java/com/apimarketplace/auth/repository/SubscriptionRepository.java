@@ -105,6 +105,20 @@ public interface SubscriptionRepository extends JpaRepository<Subscription, Long
     @Lock(LockModeType.NONE)
     Optional<Subscription> findByProviderSubscriptionId(@Param("providerSubscriptionId") String providerSubscriptionId);
 
+    /**
+     * Referral qualification read model. The webhook runs outside an open persistence
+     * context, so eagerly load exactly the Plan and User associations it evaluates.
+     */
+    @Query("""
+           SELECT s FROM Subscription s
+           JOIN FETCH s.plan p
+           JOIN FETCH s.billingCustomer bc
+           JOIN FETCH bc.user u
+           WHERE s.providerSubscriptionId = :providerSubscriptionId
+           """)
+    Optional<Subscription> findByProviderSubscriptionIdWithPlanAndUser(
+            @Param("providerSubscriptionId") String providerSubscriptionId);
+
     @Lock(LockModeType.NONE)
     boolean existsByProviderSubscriptionId(@Param("providerSubscriptionId") String providerSubscriptionId);
 

@@ -13,7 +13,7 @@ import java.util.UUID;
 
 /** Paid-monolith-only authority surface. It is never routed through the public Cloud edge. */
 @RestController
-@ConditionalOnProperty(name = "billing.authority.mode", havingValue = "native-cloud", matchIfMissing = true)
+@ConditionalOnProperty(name = "billing.authority.mode", havingValue = "paid-monolith-authority", matchIfMissing = false)
 @RequestMapping("/internal/v1/credit-reservations")
 public class CloudCreditAuthorityController {
 

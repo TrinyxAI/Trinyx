@@ -26,6 +26,8 @@ import com.stripe.model.EventDataObjectDeserializer;
 import com.stripe.model.Invoice;
 import com.stripe.model.StripeObject;
 import com.stripe.model.checkout.Session;
+import ch.qos.logback.classic.spi.ILoggingEvent;
+import ch.qos.logback.core.read.ListAppender;
 import com.stripe.net.Webhook;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -410,26 +412,46 @@ class WebhookControllerTest {
         }
 
         @Test
-        @DisplayName("8. subscription_schedule.released event dispatches to handleSubscriptionScheduleReleased")
-        void subscriptionScheduleReleased_dispatchesCorrectly() throws Exception {
-            // Schedule events use raw handler since deserializer may not produce typed object
-            String rawJson = "{\"id\":\"sub_sched_123\",\"object\":\"subscription_schedule\"," +
-                    "\"released_subscription\":\"sub_rel_456\"}";
-            StripeObject rawObj = createRawStripeObject(rawJson);
+        @DisplayName("8. raw subscription schedule created/updated/released payloads bypass typed deserialization safely")
+        void rawSubscriptionSchedules_dispatchWithoutDeserializerWarnings() throws Exception {
+            var logger = (ch.qos.logback.classic.Logger) org.slf4j.LoggerFactory
+                    .getLogger(WebhookController.class);
+            ListAppender<ILoggingEvent> appender = new ListAppender<>();
+            appender.start();
+            logger.addAppender(appender);
+            try {
+                assertRawScheduleDispatch("evt_sched_created", "subscription_schedule.created",
+                        "{\"id\":\"sub_sched_1\",\"object\":\"subscription_schedule\"," +
+                                "\"subscription\":\"sub_1\",\"status\":\"not_started\"}");
+                assertRawScheduleDispatch("evt_sched_updated", "subscription_schedule.updated",
+                        "{\"id\":\"sub_sched_1\",\"object\":\"subscription_schedule\"," +
+                                "\"status\":\"active\",\"phases\":[{},{}]}");
+                assertRawScheduleDispatch("evt_sched_released", "subscription_schedule.released",
+                        "{\"id\":\"sub_sched_1\",\"object\":\"subscription_schedule\"," +
+                                "\"released_subscription\":\"sub_1\",\"subscription\":null," +
+                                "\"status\":\"released\"}");
 
-            Event event = createMockEvent("evt_8", "subscription_schedule.released", null);
-            Event.Data eventData = event.getData();
-            when(eventData.getObject()).thenReturn(rawObj);
+                assertThat(appender.list).noneMatch(log ->
+                        log.getFormattedMessage().contains("Deserializer empty for subscription_schedule"));
+                assertThat(appender.list).anyMatch(log ->
+                        log.getFormattedMessage().contains("Subscription schedule created"));
+                assertThat(appender.list).anyMatch(log ->
+                        log.getFormattedMessage().contains("Subscription schedule updated"));
+                assertThat(appender.list).anyMatch(log ->
+                        log.getFormattedMessage().contains("Subscription schedule released"));
+            } finally {
+                logger.detachAppender(appender);
+                appender.stop();
+            }
+        }
 
-            // Override deserializer to return empty (triggers raw handler path)
-            EventDataObjectDeserializer deser = event.getDataObjectDeserializer();
-            when(deser.getObject()).thenReturn(Optional.empty());
-
-            when(billingEventRepository.existsByEventId("evt_8")).thenReturn(false);
+        private void assertRawScheduleDispatch(String eventId, String type, String rawJson) throws Exception {
+            Event event = createMockEvent(eventId, type, null);
+            when(event.getData().getObject()).thenReturn(createRawStripeObject(rawJson));
+            when(billingEventRepository.existsByEventId(eventId)).thenReturn(false);
             when(billingEventRepository.save(any(BillingEvent.class))).thenAnswer(inv -> inv.getArgument(0));
 
-            performWebhookPost("{\"type\":\"subscription_schedule.released\"}", event, 200);
-            // Just logs info, no service calls required
+            performWebhookPost("{\"type\":\"" + type + "\"}", event, 200);
         }
 
         @Test

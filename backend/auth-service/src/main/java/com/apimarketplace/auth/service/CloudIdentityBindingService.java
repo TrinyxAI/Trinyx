@@ -186,7 +186,7 @@ public class CloudIdentityBindingService {
     private BindingRow findByJti(UUID jti) {
         var rows = jdbc.query("""
                 SELECT id, cloud_user_id, keycloak_subject, principal_id, billing_subject_id,
-                       organization_id, install_id, binding_revision, assertion_jws
+                       organization_id, install_id, binding_revision, assertion_jws, status
                 FROM auth.cloud_identity_binding WHERE assertion_jti=?
                 """, (rs, row) -> new BindingRow(
                 rs.getObject("id", UUID.class), rs.getLong("cloud_user_id"),
@@ -197,20 +197,24 @@ public class CloudIdentityBindingService {
         return rows.isEmpty() ? null : rows.getFirst();
     }
 
-    private BindingRow findCurrentForUpdate(UUID installId, UUID organizationId, UUID principalId) {
-        var rows = jdbc.query("""
+    private BindingRow findLatestForUpdate(UUID installId, UUID organizationId, UUID principalId) {
+        String sql = """
                 SELECT id, cloud_user_id, keycloak_subject, principal_id, billing_subject_id,
-                       organization_id, install_id, binding_revision, assertion_jws
+                       organization_id, install_id, binding_revision, assertion_jws, status
                 FROM auth.cloud_identity_binding
-                WHERE issuer=? AND install_id=? AND organization_id=? AND principal_id=? AND status='ACTIVE'
-                FOR UPDATE
-                """, (rs, row) -> new BindingRow(
+                WHERE issuer=? AND install_id=? AND principal_id=?
+                """ + (organizationId == null ? "" : " AND organization_id=?")
+                + " ORDER BY binding_revision DESC LIMIT 1 FOR UPDATE";
+        Object[] arguments = organizationId == null
+                ? new Object[]{issuer, installId, principalId}
+                : new Object[]{issuer, installId, principalId, organizationId};
+        var rows = jdbc.query(sql, (rs, row) -> new BindingRow(
                 rs.getObject("id", UUID.class), rs.getLong("cloud_user_id"),
                 rs.getString("keycloak_subject"), rs.getObject("principal_id", UUID.class),
                 rs.getObject("billing_subject_id", UUID.class),
                 rs.getObject("organization_id", UUID.class), rs.getObject("install_id", UUID.class),
-                rs.getLong("binding_revision"), rs.getString("assertion_jws")),
-                issuer, installId, organizationId, principalId);
+                rs.getLong("binding_revision"), rs.getString("assertion_jws"),
+                rs.getString("status")), arguments);
         return rows.isEmpty() ? null : rows.getFirst();
     }
 

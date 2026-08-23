@@ -394,15 +394,21 @@ public class ApiCatalogMergeService {
                 .addValue("id", bundleToolId)
                 .addValue("apiId", apiId)
                 .addValue("toolNameId", toolNameId);
-        List<Map<String, Object>> rows = jdbc.queryForList("""
-                SELECT id, api_id, tool_name_id
-                  FROM catalog.api_tools
-                 WHERE id = :id
-                    OR (:toolNameId IS NOT NULL
-                        AND api_id = :apiId
-                        AND tool_name_id = :toolNameId)
-                 FOR UPDATE
-                """, p);
+        String identitySql = toolNameId == null
+                ? """
+                  SELECT id, api_id, tool_name_id
+                    FROM catalog.api_tools
+                   WHERE id = :id
+                   FOR UPDATE
+                  """
+                : """
+                  SELECT id, api_id, tool_name_id
+                    FROM catalog.api_tools
+                   WHERE id = :id
+                      OR (api_id = :apiId AND tool_name_id = :toolNameId)
+                   FOR UPDATE
+                  """;
+        List<Map<String, Object>> rows = jdbc.queryForList(identitySql, p);
 
         ToolIdentity idMatch = null;
         ToolIdentity logicalMatch = null;

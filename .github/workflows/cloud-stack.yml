@@ -87,7 +87,7 @@ jobs:
           python -m json.tool docker/cloud/keycloak/trinyx-realm.json >/dev/null
           grep -q '/internal/v1/entitlement-projections' docker/cloud/Caddyfile
           grep -q '/internal/v1/identity-bindings/revocations' docker/cloud/Caddyfile
-          ! grep -q 'reverse_proxy auth-service:8083' docker/cloud/Caddyfile || true
+          grep -q '@billing_ingest' docker/cloud/Caddyfile
           docker run --rm             -v "${PWD}/docker/cloud/Caddyfile:/etc/caddy/Caddyfile:ro"             caddy:2.11.4-alpine             caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile
 
       - name: Reject legacy runtime URLs and committed secrets

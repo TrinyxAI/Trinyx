@@ -1,0 +1,451 @@
+name: trinyx-cloud
+
+x-java-service: &java-service
+  restart: unless-stopped
+  networks: [cloud]
+  environment: &cloud-environment
+    TZ: UTC
+    SPRING_PROFILES_ACTIVE: prod
+    APP_EDITION: cloud
+    DEPLOYMENT_MODE: microservice
+    AUTH_MODE: keycloak
+    MARKETPLACE_MODE: local
+    BILLING_PROVIDER: stripe
+    CREDIT_UNLIMITED: "false"
+    CREDIT_CONSUMPTION_ENABLED: "true"
+    PLAN_LIMITS_ENABLED: "true"
+    WORKFLOW_NODE_BILLING_ENABLED: "true"
+    CREDENTIALS_PLATFORM_MARKUP_ENABLED: "true"
+    MARKETPLACE_CE_DOWNLOAD_ENABLED: "true"
+    APP_PUBLIC_URL: https://cloud.trinyx.fr
+    AUTH_SERVICE_URL: http://auth-service:8083
+    CATALOG_SERVICE_URL: http://catalog-service:8081
+    STORAGE_SERVICE_URL: http://storage-service:8082
+    CONVERSATION_SERVICE_URL: http://conversation-service:8087
+    DATASOURCE_SERVICE_URL: http://datasource-service:8088
+    INTERFACE_SERVICE_URL: http://interface-service:8089
+    AGENT_SERVICE_URL: http://agent-service:8090
+    TRIGGER_SERVICE_URL: http://trigger-service:8091
+    PUBLICATION_SERVICE_URL: http://publication-service:8092
+    ORCHESTRATOR_SERVICE_URL: http://orchestrator-service:8099
+    GATEWAY_URL: http://cloud-edge:8080
+    GATEWAY_SECRET_KEY: ${CLOUD_GATEWAY_SECRET_KEY:?set CLOUD_GATEWAY_SECRET_KEY}
+    GATEWAY_VERIFICATION_ENABLED: "true"
+    SPRING_DATASOURCE_USERNAME: ${CLOUD_DB_USERNAME:?set CLOUD_DB_USERNAME}
+    SPRING_DATASOURCE_PASSWORD: ${CLOUD_DB_PASSWORD:?set CLOUD_DB_PASSWORD}
+    SPRING_DATASOURCE_HIKARI_MAXIMUM_POOL_SIZE: ${CLOUD_DB_POOL_MAX:-10}
+    SPRING_DATASOURCE_HIKARI_MINIMUM_IDLE: ${CLOUD_DB_POOL_MIN:-1}
+    SPRING_FLYWAY_ENABLED: "false"
+    REDIS_HOST: cloud-redis
+    REDIS_PORT: "6379"
+    SPRING_DATA_REDIS_PASSWORD: ${CLOUD_REDIS_PASSWORD:?set CLOUD_REDIS_PASSWORD}
+    KEYCLOAK_ISSUER_URI: https://auth.trinyx.fr/realms/${KEYCLOAK_REALM_NAME:-trinyx}
+    SPRING_SECURITY_OAUTH2_RESOURCESERVER_JWT_ISSUER_URI: https://auth.trinyx.fr/realms/${KEYCLOAK_REALM_NAME:-trinyx}
+    SPRING_SECURITY_OAUTH2_RESOURCESERVER_JWT_JWK_SET_URI: http://keycloak:8080/realms/${KEYCLOAK_REALM_NAME:-trinyx}/protocol/openid-connect/certs
+    KEYCLOAK_AUDIENCE: ${KEYCLOAK_FRONTEND_CLIENT_ID:-trinyx-frontend}
+    KEYCLOAK_REALM: ${KEYCLOAK_REALM_NAME:-trinyx}
+    KEYCLOAK_ADMIN_URL: http://keycloak:8080
+    KEYCLOAK_ADMIN_USERNAME: ${KEYCLOAK_BOOTSTRAP_ADMIN_USERNAME:?set KEYCLOAK_BOOTSTRAP_ADMIN_USERNAME}
+    KEYCLOAK_ADMIN_PASSWORD: ${KEYCLOAK_BOOTSTRAP_ADMIN_PASSWORD:?set KEYCLOAK_BOOTSTRAP_ADMIN_PASSWORD}
+    KC_ADMIN_CLIENT_ID: ${KEYCLOAK_ADMIN_CLIENT_ID:-trinyx-admin-api}
+    KC_ADMIN_CLIENT_SECRET: ${KEYCLOAK_ADMIN_CLIENT_SECRET:?set KEYCLOAK_ADMIN_CLIENT_SECRET}
+    STORAGE_S3_ENDPOINT: http://cloud-minio:9000
+    STORAGE_S3_ACCESS_KEY: ${CLOUD_MINIO_ROOT_USER:?set CLOUD_MINIO_ROOT_USER}
+    STORAGE_S3_SECRET_KEY: ${CLOUD_MINIO_ROOT_PASSWORD:?set CLOUD_MINIO_ROOT_PASSWORD}
+    STORAGE_S3_BUCKET: ${CLOUD_MINIO_BUCKET:-trinyx-cloud-files}
+    STORAGE_S3_PATH_STYLE_ACCESS: "true"
+    AUDIT_HMAC_KEY: ${AUDIT_HMAC_KEY:?set AUDIT_HMAC_KEY}
+    AUDIT_UA_PEPPER: ${AUDIT_UA_PEPPER:?set AUDIT_UA_PEPPER}
+    CREDENTIAL_ENCRYPTION_PASSWORD: ${CREDENTIAL_ENCRYPTION_PASSWORD:?set CREDENTIAL_ENCRYPTION_PASSWORD}
+    CREDENTIAL_ENCRYPTION_SALT: ${CREDENTIAL_ENCRYPTION_SALT:?set CREDENTIAL_ENCRYPTION_SALT}
+    STORAGE_SHOWCASE_HMAC_SECRET: ${STORAGE_SHOWCASE_HMAC_SECRET:?set STORAGE_SHOWCASE_HMAC_SECRET}
+    STRIPE_SECRET_KEY: ${STRIPE_SECRET_KEY:?set STRIPE_SECRET_KEY}
+    STRIPE_WEBHOOK_SECRET: ${STRIPE_WEBHOOK_SECRET:?set STRIPE_WEBHOOK_SECRET}
+    STRIPE_SUCCESS_URL: ${STRIPE_SUCCESS_URL:?set STRIPE_SUCCESS_URL}
+    STRIPE_CANCEL_URL: ${STRIPE_CANCEL_URL:?set STRIPE_CANCEL_URL}
+    SMTP_HOST: ${SMTP_HOST:?set SMTP_HOST}
+    SMTP_PORT: ${SMTP_PORT:-587}
+    SMTP_USER: ${SMTP_USER:?set SMTP_USER}
+    SMTP_PASSWORD: ${SMTP_PASSWORD:?set SMTP_PASSWORD}
+    SMTP_AUTH: "true"
+    SMTP_STARTTLS: "true"
+    SMTP_FROM: ${SMTP_FROM:-noreply@trinyx.fr}
+    CATALOG_BUNDLE_SIGNING_KEY_PEM: ${CATALOG_BUNDLE_SIGNING_KEY_PEM:?set CATALOG_BUNDLE_SIGNING_KEY_PEM}
+    CATALOG_BUNDLE_SIGNING_PUBLIC_KEY: ${CATALOG_BUNDLE_SIGNING_PUBLIC_KEY:?set CATALOG_BUNDLE_SIGNING_PUBLIC_KEY}
+    CATALOG_BUNDLE_SIGNING_KEY_ID: ${CATALOG_BUNDLE_SIGNING_KEY_ID:-trinyx-cloud-1}
+    CATALOG_BUNDLE_ISSUER: ${CATALOG_BUNDLE_ISSUER:-trinyx-cloud}
+    WEBSEARCH_SERVICE_URL: http://websearch-service:8085
+    WEBSEARCH_ENABLED: "true"
+    WEBSEARCH_GATEWAY_SECRET: ${WEBSEARCH_GATEWAY_SECRET:?set WEBSEARCH_GATEWAY_SECRET}
+    WEBSEARCH_CDP_JWT_SECRET: ${WEBSEARCH_CDP_JWT_SECRET:?set WEBSEARCH_CDP_JWT_SECRET}
+    CONVERSATION_BRIDGE_ENABLED: "false"
+    POSTHOG_ENABLED: "false"
+    OAUTH2_FRONTEND_URL: https://cloud.trinyx.fr
+    OAUTH2_CALLBACK_URL: https://cloud.trinyx.fr/api/credentials/oauth2/callback
+  depends_on: &java-dependencies
+    migration-service:
+      condition: service_completed_successfully
+    cloud-redis:
+      condition: service_healthy
+  healthcheck: &java-healthcheck
+    interval: 20s
+    timeout: 5s
+    retries: 10
+    start_period: 120s
+
+services:
+  cloud-postgres:
+    image: pgvector/pgvector:pg16
+    restart: unless-stopped
+    networks: [cloud]
+    command: ["postgres", "-c", "max_connections=250"]
+    environment:
+      POSTGRES_DB: ${CLOUD_DB_NAME:-trinyx_cloud}
+      POSTGRES_USER: ${CLOUD_DB_USERNAME:?set CLOUD_DB_USERNAME}
+      POSTGRES_PASSWORD: ${CLOUD_DB_PASSWORD:?set CLOUD_DB_PASSWORD}
+      TZ: UTC
+      PGTZ: UTC
+    volumes:
+      - cloud-postgres-data:/var/lib/postgresql/data
+      - ./cloud/postgres/00-keycloak-schema.sql:/docker-entrypoint-initdb.d/00-keycloak-schema.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
+
+  cloud-redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    networks: [cloud]
+    command: ["redis-server", "--appendonly", "yes", "--maxmemory", "512mb", "--maxmemory-policy", "noeviction", "--requirepass", "${CLOUD_REDIS_PASSWORD:?set CLOUD_REDIS_PASSWORD}"]
+    volumes:
+      - cloud-redis-data:/data
+    environment:
+      CLOUD_REDIS_PASSWORD: ${CLOUD_REDIS_PASSWORD:?set CLOUD_REDIS_PASSWORD}
+    healthcheck:
+      test: ["CMD-SHELL", "redis-cli -a '$$CLOUD_REDIS_PASSWORD' ping | grep PONG"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  cloud-minio:
+    image: minio/minio:RELEASE.2025-07-23T15-54-02Z
+    restart: unless-stopped
+    networks: [cloud]
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: ${CLOUD_MINIO_ROOT_USER:?set CLOUD_MINIO_ROOT_USER}
+      MINIO_ROOT_PASSWORD: ${CLOUD_MINIO_ROOT_PASSWORD:?set CLOUD_MINIO_ROOT_PASSWORD}
+    volumes:
+      - cloud-minio-data:/data
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 20s
+      timeout: 10s
+      retries: 10
+      start_period: 30s
+
+  cloud-minio-init:
+    image: minio/mc:RELEASE.2025-07-21T05-28-08Z
+    restart: "no"
+    networks: [cloud]
+    depends_on:
+      cloud-minio:
+        condition: service_healthy
+    environment:
+      MINIO_ROOT_USER: ${CLOUD_MINIO_ROOT_USER:?set CLOUD_MINIO_ROOT_USER}
+      MINIO_ROOT_PASSWORD: ${CLOUD_MINIO_ROOT_PASSWORD:?set CLOUD_MINIO_ROOT_PASSWORD}
+      MINIO_BUCKET: ${CLOUD_MINIO_BUCKET:-trinyx-cloud-files}
+    entrypoint: ["/bin/sh", "-ec"]
+    command:
+      - |
+        mc alias set cloud http://cloud-minio:9000 "$${MINIO_ROOT_USER}" "$${MINIO_ROOT_PASSWORD}"
+        mc mb --ignore-existing "cloud/$${MINIO_BUCKET}"
+        mc anonymous set none "cloud/$${MINIO_BUCKET}"
+
+  keycloak:
+    build:
+      context: ./cloud/keycloak
+      dockerfile: Dockerfile
+      args:
+        KEYCLOAK_IMAGE: ${KEYCLOAK_IMAGE:-quay.io/keycloak/keycloak:26.7.1}
+    image: trinyx-cloud/keycloak:${TRINYX_CLOUD_IMAGE_TAG:-local}
+    restart: unless-stopped
+    networks: [cloud]
+    command: ["start", "--optimized", "--import-realm"]
+    depends_on:
+      cloud-postgres:
+        condition: service_healthy
+    environment:
+      KC_DB: postgres
+      KC_DB_URL: jdbc:postgresql://cloud-postgres:5432/${CLOUD_DB_NAME:-trinyx_cloud}
+      KC_DB_SCHEMA: keycloak
+      KC_DB_USERNAME: ${CLOUD_DB_USERNAME:?set CLOUD_DB_USERNAME}
+      KC_DB_PASSWORD: ${CLOUD_DB_PASSWORD:?set CLOUD_DB_PASSWORD}
+      KC_HTTP_ENABLED: "true"
+      KC_HOSTNAME: https://auth.trinyx.fr
+      KC_HOSTNAME_BACKCHANNEL_DYNAMIC: "true"
+      KC_PROXY_HEADERS: xforwarded
+      KC_HEALTH_ENABLED: "true"
+      KC_METRICS_ENABLED: "true"
+      KC_BOOTSTRAP_ADMIN_USERNAME: ${KEYCLOAK_BOOTSTRAP_ADMIN_USERNAME:?set KEYCLOAK_BOOTSTRAP_ADMIN_USERNAME}
+      KC_BOOTSTRAP_ADMIN_PASSWORD: ${KEYCLOAK_BOOTSTRAP_ADMIN_PASSWORD:?set KEYCLOAK_BOOTSTRAP_ADMIN_PASSWORD}
+      KEYCLOAK_REALM_NAME: ${KEYCLOAK_REALM_NAME:-trinyx}
+      KEYCLOAK_FRONTEND_CLIENT_ID: ${KEYCLOAK_FRONTEND_CLIENT_ID:-trinyx-frontend}
+      KEYCLOAK_ADMIN_CLIENT_ID: ${KEYCLOAK_ADMIN_CLIENT_ID:-trinyx-admin-api}
+      KEYCLOAK_ADMIN_CLIENT_SECRET: ${KEYCLOAK_ADMIN_CLIENT_SECRET:?set KEYCLOAK_ADMIN_CLIENT_SECRET}
+      SMTP_HOST: ${SMTP_HOST:?set SMTP_HOST}
+      SMTP_PORT: ${SMTP_PORT:-587}
+      SMTP_USER: ${SMTP_USER:?set SMTP_USER}
+      SMTP_PASSWORD: ${SMTP_PASSWORD:?set SMTP_PASSWORD}
+      SMTP_FROM: ${SMTP_FROM:-noreply@trinyx.fr}
+    volumes:
+      - ./cloud/keycloak/trinyx-realm.json:/opt/keycloak/data/import/trinyx-realm.json:ro
+    healthcheck:
+      test: ["CMD-SHELL", "bash -c 'exec 3<>/dev/tcp/127.0.0.1/9000; printf \"GET /health/ready HTTP/1.1\\r\\nHost: localhost\\r\\nConnection: close\\r\\n\\r\\n\" >&3; grep -q \"200 OK\" <&3'"]
+      interval: 15s
+      timeout: 5s
+      retries: 20
+      start_period: 60s
+
+  migration-service:
+    build:
+      context: ../backend
+      dockerfile: migration-service/Dockerfile
+    image: trinyx-cloud/migration-service:${TRINYX_CLOUD_IMAGE_TAG:-local}
+    restart: "no"
+    networks: [cloud]
+    depends_on:
+      cloud-postgres:
+        condition: service_healthy
+    environment:
+      TZ: UTC
+      APP_EDITION: cloud
+      DEPLOYMENT_MODE: microservice
+      AUTH_MODE: keycloak
+      DB_HOST: cloud-postgres
+      DB_PORT: "5432"
+      DB_NAME: ${CLOUD_DB_NAME:-trinyx_cloud}
+      DB_USERNAME: ${CLOUD_DB_USERNAME:?set CLOUD_DB_USERNAME}
+      DB_PASSWORD: ${CLOUD_DB_PASSWORD:?set CLOUD_DB_PASSWORD}
+      SPRING_DATASOURCE_URL: jdbc:postgresql://cloud-postgres:5432/${CLOUD_DB_NAME:-trinyx_cloud}?currentSchema=orchestrator&options=-c%20lc.migration.source_timezone%3DUTC
+
+  auth-service:
+    <<: *java-service
+    build: {context: ../backend, dockerfile: auth-service/Dockerfile}
+    image: trinyx-cloud/auth-service:${TRINYX_CLOUD_IMAGE_TAG:-local}
+    environment:
+      <<: *cloud-environment
+      PORT: "8083"
+      SPRING_DATASOURCE_URL: jdbc:postgresql://cloud-postgres:5432/${CLOUD_DB_NAME:-trinyx_cloud}?currentSchema=auth
+    depends_on:
+      <<: *java-dependencies
+      keycloak: {condition: service_healthy}
+      cloud-minio-init: {condition: service_completed_successfully}
+    healthcheck:
+      <<: *java-healthcheck
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8083/actuator/health"]
+
+  catalog-service:
+    <<: *java-service
+    build: {context: ../backend, dockerfile: catalog-service/Dockerfile}
+    image: trinyx-cloud/catalog-service:${TRINYX_CLOUD_IMAGE_TAG:-local}
+    environment:
+      <<: *cloud-environment
+      PORT: "8081"
+      SPRING_DATASOURCE_URL: jdbc:postgresql://cloud-postgres:5432/${CLOUD_DB_NAME:-trinyx_cloud}?currentSchema=catalog
+      CATALOG_HIKARI_MAX: ${CLOUD_DB_POOL_MAX:-10}
+    healthcheck:
+      <<: *java-healthcheck
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8081/actuator/health"]
+
+  storage-service:
+    <<: *java-service
+    build: {context: ../backend, dockerfile: storage-service/Dockerfile}
+    image: trinyx-cloud/storage-service:${TRINYX_CLOUD_IMAGE_TAG:-local}
+    environment:
+      <<: *cloud-environment
+      PORT: "8082"
+      SPRING_DATASOURCE_URL: jdbc:postgresql://cloud-postgres:5432/${CLOUD_DB_NAME:-trinyx_cloud}?currentSchema=storage
+    depends_on:
+      <<: *java-dependencies
+      cloud-minio-init: {condition: service_completed_successfully}
+    healthcheck:
+      <<: *java-healthcheck
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8082/actuator/health"]
+
+  conversation-service:
+    <<: *java-service
+    build: {context: ../backend, dockerfile: conversation-service/Dockerfile}
+    image: trinyx-cloud/conversation-service:${TRINYX_CLOUD_IMAGE_TAG:-local}
+    environment:
+      <<: *cloud-environment
+      PORT: "8087"
+      SPRING_DATASOURCE_URL: jdbc:postgresql://cloud-postgres:5432/${CLOUD_DB_NAME:-trinyx_cloud}?currentSchema=conversation
+    healthcheck:
+      <<: *java-healthcheck
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8087/actuator/health"]
+
+  datasource-service:
+    <<: *java-service
+    build: {context: ../backend, dockerfile: datasource-service/Dockerfile}
+    image: trinyx-cloud/datasource-service:${TRINYX_CLOUD_IMAGE_TAG:-local}
+    environment:
+      <<: *cloud-environment
+      PORT: "8088"
+      SPRING_DATASOURCE_URL: jdbc:postgresql://cloud-postgres:5432/${CLOUD_DB_NAME:-trinyx_cloud}?currentSchema=datasource
+    healthcheck:
+      <<: *java-healthcheck
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8088/actuator/health"]
+
+  interface-service:
+    <<: *java-service
+    build: {context: ../backend, dockerfile: interface-service/Dockerfile}
+    image: trinyx-cloud/interface-service:${TRINYX_CLOUD_IMAGE_TAG:-local}
+    environment:
+      <<: *cloud-environment
+      PORT: "8089"
+      SPRING_DATASOURCE_URL: jdbc:postgresql://cloud-postgres:5432/${CLOUD_DB_NAME:-trinyx_cloud}?currentSchema=interface
+    healthcheck:
+      <<: *java-healthcheck
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8089/actuator/health"]
+
+  agent-service:
+    <<: *java-service
+    build: {context: ../backend, dockerfile: agent-service/Dockerfile}
+    image: trinyx-cloud/agent-service:${TRINYX_CLOUD_IMAGE_TAG:-local}
+    environment:
+      <<: *cloud-environment
+      PORT: "8090"
+      SPRING_DATASOURCE_URL: jdbc:postgresql://cloud-postgres:5432/${CLOUD_DB_NAME:-trinyx_cloud}?currentSchema=agent
+      MODEL_AUDIT_HMAC_KEY: ${MODEL_AUDIT_HMAC_KEY:?set MODEL_AUDIT_HMAC_KEY}
+    healthcheck:
+      <<: *java-healthcheck
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8090/actuator/health"]
+
+  trigger-service:
+    <<: *java-service
+    build: {context: ../backend, dockerfile: trigger-service/Dockerfile}
+    image: trinyx-cloud/trigger-service:${TRINYX_CLOUD_IMAGE_TAG:-local}
+    environment:
+      <<: *cloud-environment
+      PORT: "8091"
+      SPRING_DATASOURCE_URL: jdbc:postgresql://cloud-postgres:5432/${CLOUD_DB_NAME:-trinyx_cloud}?currentSchema=trigger
+      ORCHESTRATOR_CHAT_ENDPOINT_BASE_URL: https://cloud.trinyx.fr
+      ORCHESTRATOR_FORM_ENDPOINT_BASE_URL: https://cloud.trinyx.fr
+    healthcheck:
+      <<: *java-healthcheck
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8091/actuator/health"]
+
+  publication-service:
+    <<: *java-service
+    build: {context: ../backend, dockerfile: publication-service/Dockerfile}
+    image: trinyx-cloud/publication-service:${TRINYX_CLOUD_IMAGE_TAG:-local}
+    environment:
+      <<: *cloud-environment
+      PORT: "8092"
+      SPRING_DATASOURCE_URL: jdbc:postgresql://cloud-postgres:5432/${CLOUD_DB_NAME:-trinyx_cloud}?currentSchema=publication
+    healthcheck:
+      <<: *java-healthcheck
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8092/actuator/health"]
+
+  orchestrator-service:
+    <<: *java-service
+    build: {context: ../backend, dockerfile: orchestrator-service/Dockerfile}
+    image: trinyx-cloud/orchestrator-service:${TRINYX_CLOUD_IMAGE_TAG:-local}
+    environment:
+      <<: *cloud-environment
+      PORT: "8099"
+      SPRING_DATASOURCE_URL: jdbc:postgresql://cloud-postgres:5432/${CLOUD_DB_NAME:-trinyx_cloud}?currentSchema=orchestrator
+      CODE_NODE_SERVICE_URL: ${CODE_NODE_SERVICE_URL:-}
+    depends_on:
+      <<: *java-dependencies
+      websearch-service: {condition: service_healthy}
+    healthcheck:
+      <<: *java-healthcheck
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8099/actuator/health"]
+
+  websearch-service:
+    build:
+      context: ../websearch-service
+      dockerfile: Dockerfile
+    image: trinyx-cloud/websearch-service:${TRINYX_CLOUD_IMAGE_TAG:-local}
+    restart: unless-stopped
+    networks: [cloud]
+    security_opt: [seccomp:unconfined]
+    shm_size: 2gb
+    depends_on:
+      cloud-redis: {condition: service_healthy}
+      cloud-minio-init: {condition: service_completed_successfully}
+      searxng: {condition: service_healthy}
+    environment:
+      WEBSEARCH_REDIS_URL: redis://:${CLOUD_REDIS_PASSWORD:?set CLOUD_REDIS_PASSWORD}@cloud-redis:6379/0
+      WEBSEARCH_MINIO_ENDPOINT: cloud-minio:9000
+      WEBSEARCH_MINIO_ACCESS_KEY: ${CLOUD_MINIO_ROOT_USER:?set CLOUD_MINIO_ROOT_USER}
+      WEBSEARCH_MINIO_SECRET_KEY: ${CLOUD_MINIO_ROOT_PASSWORD:?set CLOUD_MINIO_ROOT_PASSWORD}
+      WEBSEARCH_MINIO_BUCKET: ${CLOUD_MINIO_BUCKET:-trinyx-cloud-files}
+      WEBSEARCH_MINIO_SECURE: "false"
+      WEBSEARCH_GATEWAY_SECRET: ${WEBSEARCH_GATEWAY_SECRET:?set WEBSEARCH_GATEWAY_SECRET}
+      WEBSEARCH_CDP_JWT_SECRET: ${WEBSEARCH_CDP_JWT_SECRET:?set WEBSEARCH_CDP_JWT_SECRET}
+      WEBSEARCH_SEARXNG_URL: http://searxng:8080
+      BROWSER_HEADLESS: "true"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8085/health').status == 200 else 1)"]
+      interval: 20s
+      timeout: 5s
+      retries: 10
+      start_period: 60s
+
+  searxng:
+    image: searxng/searxng:2026.8.17-374939b88
+    restart: unless-stopped
+    networks: [cloud]
+    environment:
+      SEARXNG_SETTINGS_PATH: /etc/searxng/settings.yml
+      SEARXNG_SECRET: ${SEARXNG_SECRET:?set SEARXNG_SECRET}
+    volumes:
+      - ./cloud/searxng/settings.yml:/etc/searxng/settings.yml:ro
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8080/healthz"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+
+  cloud-edge:
+    image: caddy:2.11.4-alpine
+    restart: unless-stopped
+    networks: [cloud]
+    ports:
+      - "${CLOUD_EDGE_BIND:-127.0.0.1}:${CLOUD_EDGE_PORT:-8188}:8080"
+      - "${KEYCLOAK_EDGE_BIND:-127.0.0.1}:${KEYCLOAK_EDGE_PORT:-8280}:8180"
+    volumes:
+      - ./cloud/Caddyfile:/etc/caddy/Caddyfile:ro
+    depends_on:
+      keycloak: {condition: service_healthy}
+      auth-service: {condition: service_healthy}
+      catalog-service: {condition: service_healthy}
+      storage-service: {condition: service_healthy}
+      conversation-service: {condition: service_healthy}
+      datasource-service: {condition: service_healthy}
+      interface-service: {condition: service_healthy}
+      agent-service: {condition: service_healthy}
+      trigger-service: {condition: service_healthy}
+      publication-service: {condition: service_healthy}
+      orchestrator-service: {condition: service_healthy}
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8080/healthz"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+
+networks:
+  cloud:
+    driver: bridge
+
+volumes:
+  cloud-postgres-data:
+  cloud-redis-data:
+  cloud-minio-data:

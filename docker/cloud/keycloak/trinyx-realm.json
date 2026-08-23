@@ -1,0 +1,88 @@
+{
+  "realm": "${KEYCLOAK_REALM_NAME}",
+  "enabled": true,
+  "displayName": "Trinyx Cloud",
+  "sslRequired": "external",
+  "registrationAllowed": true,
+  "registrationEmailAsUsername": true,
+  "verifyEmail": true,
+  "resetPasswordAllowed": true,
+  "loginWithEmailAllowed": true,
+  "duplicateEmailsAllowed": false,
+  "smtpServer": {
+    "host": "${SMTP_HOST}",
+    "port": "${SMTP_PORT}",
+    "from": "${SMTP_FROM}",
+    "fromDisplayName": "Trinyx",
+    "auth": "true",
+    "starttls": "true",
+    "user": "${SMTP_USER}",
+    "password": "${SMTP_PASSWORD}"
+  },
+  "clients": [
+    {
+      "clientId": "${KEYCLOAK_FRONTEND_CLIENT_ID}",
+      "name": "Trinyx Frontend",
+      "enabled": true,
+      "publicClient": true,
+      "standardFlowEnabled": true,
+      "directAccessGrantsEnabled": false,
+      "implicitFlowEnabled": false,
+      "serviceAccountsEnabled": false,
+      "redirectUris": [
+        "https://app.trinyx.fr/api/cloud-link/callback",
+        "https://cloud.trinyx.fr/*"
+      ],
+      "webOrigins": [
+        "https://app.trinyx.fr",
+        "https://cloud.trinyx.fr"
+      ],
+      "attributes": {
+        "pkce.code.challenge.method": "S256",
+        "post.logout.redirect.uris": "https://app.trinyx.fr/*##https://cloud.trinyx.fr/*"
+      },
+      "protocolMappers": [
+        {
+          "name": "trinyx-frontend-audience",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-audience-mapper",
+          "consentRequired": false,
+          "config": {
+            "included.client.audience": "${KEYCLOAK_FRONTEND_CLIENT_ID}",
+            "id.token.claim": "false",
+            "access.token.claim": "true"
+          }
+        }
+      ]
+    },
+    {
+      "clientId": "${KEYCLOAK_ADMIN_CLIENT_ID}",
+      "name": "Trinyx Admin API",
+      "enabled": true,
+      "publicClient": false,
+      "bearerOnly": false,
+      "standardFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "serviceAccountsEnabled": true,
+      "clientAuthenticatorType": "client-secret",
+      "secret": "${KEYCLOAK_ADMIN_CLIENT_SECRET}"
+    }
+  ],
+  "users": [
+    {
+      "username": "service-account-${KEYCLOAK_ADMIN_CLIENT_ID}",
+      "enabled": true,
+      "serviceAccountClientId": "${KEYCLOAK_ADMIN_CLIENT_ID}",
+      "clientRoles": {
+        "realm-management": [
+          "manage-users",
+          "view-users",
+          "query-users",
+          "manage-identity-providers",
+          "view-identity-providers",
+          "view-clients"
+        ]
+      }
+    }
+  ]
+}

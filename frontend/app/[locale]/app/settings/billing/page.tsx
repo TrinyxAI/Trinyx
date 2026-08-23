@@ -51,10 +51,9 @@ import type {
  * {@code requireActiveOrgOwner} guard server-side. A single info banner
  * explains the "switch to your personal workspace" path for non-owners.
  *
- * Billing capability: the page stays absent in free CE and is enabled in paid monolith
- * user landing on the route directly (nav entry is already hidden by
- * {@code hiddenInCE: true}) sees nothing - defense in depth alongside the
- * controller's {@code billing.provider=stripe} gate.
+ * Billing capability: the page stays absent in free CE and is enabled in paid monolith.
+ * A user landing on the route directly while billing is disabled sees nothing - defense in
+ * depth alongside the controller's {@code billing.provider=stripe} condition.
  */
 export default function BillingPage() {
   if (!IS_BILLING_ENABLED) {

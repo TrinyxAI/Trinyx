@@ -16,3 +16,15 @@
 	# Keycloak remains externally reachable only through auth.trinyx.fr.
 	reverse_proxy keycloak:8080
 }
+
+https://{$CLOUD_INTERNAL_HOST:cloud-internal.trinyx.private}:8443 {
+	tls internal
+
+	# Private VPC-only S2S surface. Workload JWT validation remains mandatory
+	# in auth-service; every other internal path is rejected here.
+	@billing_ingest path /internal/v1/entitlement-projections /internal/v1/identity-bindings/revocations
+	handle @billing_ingest {
+		reverse_proxy auth-service:8083
+	}
+	respond 404
+}

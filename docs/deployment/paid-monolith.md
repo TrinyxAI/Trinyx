@@ -80,7 +80,7 @@ historical TEST-mode PAYG IDs without deleting any price, subscription, or
 ledger row:
 
 ```bash
-docker compose exec -T postgres psql -U "$DB_USERNAME" -d livecontext   -v starter_monthly="$STRIPE_PRICE_STARTER_MONTHLY"   -v starter_yearly="$STRIPE_PRICE_STARTER_YEARLY"   -v pro_monthly="$STRIPE_PRICE_PRO_MONTHLY"   -v pro_yearly="$STRIPE_PRICE_PRO_YEARLY"   -v team_monthly="$STRIPE_PRICE_TEAM_MONTHLY"   -v team_yearly="$STRIPE_PRICE_TEAM_YEARLY"   -v credit_pack_monthly="$STRIPE_PRICE_CREDIT_PACK_MONTHLY"   -v credit_pack_yearly="$STRIPE_PRICE_CREDIT_PACK_YEARLY"   -v payg_small="$STRIPE_PRICE_PAYG_SMALL"   -v payg_medium="$STRIPE_PRICE_PAYG_MEDIUM"   -v payg_large="$STRIPE_PRICE_PAYG_LARGE"   -f /path/to/trinyx_stripe_price_ids.template.sql
+docker compose exec -T postgres psql -U "$DB_USERNAME" -d livecontext   -v starter_monthly="$STRIPE_PRICE_STARTER_MONTHLY"   -v starter_yearly="$STRIPE_PRICE_STARTER_YEARLY"   -v pro_monthly="$STRIPE_PRICE_PRO_MONTHLY"   -v pro_yearly="$STRIPE_PRICE_PRO_YEARLY"   -v team_monthly="$STRIPE_PRICE_TEAM_MONTHLY"   -v team_yearly="$STRIPE_PRICE_TEAM_YEARLY"   -v credit_pack_monthly="$STRIPE_PRICE_CREDIT_PACK_MONTHLY"   -v credit_pack_yearly="$STRIPE_PRICE_CREDIT_PACK_YEARLY"   -v payg_small="$STRIPE_PRICE_PAYG_SMALL"   -v payg_medium="$STRIPE_PRICE_PAYG_MEDIUM"   -v payg_large="$STRIPE_PRICE_PAYG_LARGE"   < backend/migration-service/src/main/resources/db/manual/trinyx_stripe_price_ids.template.sql
 ```
 
 The template is
@@ -131,6 +131,11 @@ deleted.
    validate the resolved Compose model:
 
    ```bash
+   docker build --platform linux/amd64 \
+     -t ghcr.io/eddinerabii/trinyx-backend:<tested-sha> \
+     -f backend/monolith-service/Dockerfile backend
+   docker push ghcr.io/eddinerabii/trinyx-backend:<tested-sha>
+
    docker build --platform linux/amd64 \
      -t ghcr.io/eddinerabii/trinyx-frontend:paid-<tested-sha> \
      --build-arg NEXT_PUBLIC_APP_EDITION=paid-monolith \

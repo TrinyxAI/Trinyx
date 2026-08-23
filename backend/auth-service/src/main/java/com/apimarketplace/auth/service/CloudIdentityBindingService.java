@@ -43,6 +43,10 @@ public class CloudIdentityBindingService {
         UUID jti = uuid(claims, "jti");
         String keycloakSubject = required(claims, "keycloakSubject");
         long revision = claims.path("bindingRevision").asLong();
+        String assertionStatus = claims.path("status").asText("ACTIVE");
+        if (!"ACTIVE".equals(assertionStatus)) {
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "ACTIVE_IDENTITY_BINDING_REQUIRED");
+        }
         if (revision <= 0 || !keycloakSubject.equals(expectedKeycloakSubject)) {
             throw new ResponseStatusException(HttpStatus.FORBIDDEN, "IDENTITY_BINDING_MISMATCH");
         }
@@ -55,20 +59,24 @@ public class CloudIdentityBindingService {
             throw new ResponseStatusException(HttpStatus.CONFLICT, "IDENTITY_JTI_REPLAY");
         }
 
-        BindingRow current = findCurrentForUpdate(installId, organizationId, principalId);
+        BindingRow current = findLatestForUpdate(installId, organizationId, principalId);
         if (current != null) {
-            if (!current.keycloakSubject().equals(keycloakSubject)) {
-                throw new ResponseStatusException(HttpStatus.CONFLICT, "EXPLICIT_REBIND_REQUIRED");
-            }
             if (revision < current.revision()) {
                 throw new ResponseStatusException(HttpStatus.CONFLICT, "STALE_BINDING_REVISION");
             }
             if (revision == current.revision()) {
-                if (current.assertionJws().equals(compactJws)) return current.context();
+                if (current.assertionJws().equals(compactJws) && "ACTIVE".equals(current.status())) {
+                    return current.context();
+                }
                 throw new ResponseStatusException(HttpStatus.CONFLICT, "BINDING_EQUIVOCATION");
             }
-            jdbc.update("UPDATE auth.cloud_identity_binding SET status='REVOKED', revoked_at=now(), updated_at=now() WHERE id=?",
-                    current.id());
+            if (!current.keycloakSubject().equals(keycloakSubject) && !"REVOKED".equals(current.status())) {
+                throw new ResponseStatusException(HttpStatus.CONFLICT, "EXPLICIT_REBIND_REQUIRED");
+            }
+            if ("ACTIVE".equals(current.status())) {
+                jdbc.update("UPDATE auth.cloud_identity_binding SET status='REVOKED', revoked_at=now(), updated_at=now() WHERE id=?",
+                        current.id());
+            }
         }
 
         // Cross-system identity is authoritative only after signature + scope validation.
@@ -96,7 +104,7 @@ public class CloudIdentityBindingService {
     public BindingContext context(String keycloakSubject) {
         var rows = jdbc.query("""
                 SELECT id, cloud_user_id, keycloak_subject, principal_id, billing_subject_id,
-                       organization_id, install_id, binding_revision, assertion_jws
+                       organization_id, install_id, binding_revision, assertion_jws, status
                 FROM auth.cloud_identity_binding
                 WHERE issuer=? AND keycloak_subject=? AND status='ACTIVE'
                 """, (rs, row) -> new BindingRow(
@@ -104,7 +112,7 @@ public class CloudIdentityBindingService {
                 rs.getString("keycloak_subject"), rs.getObject("principal_id", UUID.class),
                 rs.getObject("billing_subject_id", UUID.class),
                 rs.getObject("organization_id", UUID.class), rs.getObject("install_id", UUID.class),
-                rs.getLong("binding_revision"), rs.getString("assertion_jws")), issuer, keycloakSubject);
+                rs.getLong("binding_revision"), rs.getString("assertion_jws"), rs.getString("status")), issuer, keycloakSubject);
         if (rows.size() != 1) {
             throw new ResponseStatusException(HttpStatus.NOT_FOUND, "IDENTITY_NOT_BOUND");
         }
@@ -112,16 +120,67 @@ public class CloudIdentityBindingService {
     }
 
     @Transactional
-    public void revoke(UUID installId, UUID principalId, long revision) {
-        int updated = jdbc.update("""
+    public BindingContext applyRevocation(String compactJws) {
+        JsonNode claims = assertions.verifyIdentity(compactJws, issuer, audience);
+        if (!"REVOKED".equals(claims.path("status").asText())) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "IDENTITY_TOMBSTONE_REQUIRED");
+        }
+        UUID installId = uuid(claims, "installId");
+        UUID organizationId = uuid(claims, "organizationId");
+        UUID principalId = uuid(claims, "principalId");
+        UUID billingSubjectId = uuid(claims, "billingSubjectId");
+        UUID jti = uuid(claims, "jti");
+        String keycloakSubject = required(claims, "keycloakSubject");
+        long revision = claims.path("bindingRevision").asLong();
+        if (revision <= 0) throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "INVALID_BINDING_REVISION");
+
+        BindingRow replay = findByJti(jti);
+        if (replay != null) {
+            if (replay.assertionJws().equals(compactJws) && "REVOKED".equals(replay.status())) {
+                return replay.context();
+            }
+            throw new ResponseStatusException(HttpStatus.CONFLICT, "IDENTITY_JTI_REPLAY");
+        }
+
+        BindingRow current = findLatestForUpdate(installId, organizationId, principalId);
+        if (current == null) {
+            throw new ResponseStatusException(HttpStatus.NOT_FOUND, "IDENTITY_BINDING_NOT_FOUND");
+        }
+        if (!current.keycloakSubject().equals(keycloakSubject)
+                || !current.billingSubjectId().equals(billingSubjectId)) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT, "IDENTITY_TOMBSTONE_SCOPE_MISMATCH");
+        }
+        if (revision < current.revision()) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT, "STALE_BINDING_REVISION");
+        }
+        if (revision == current.revision()) {
+            if (current.assertionJws().equals(compactJws) && "REVOKED".equals(current.status())) {
+                return current.context();
+            }
+            throw new ResponseStatusException(HttpStatus.CONFLICT, "BINDING_EQUIVOCATION");
+        }
+        jdbc.update("""
                 UPDATE auth.cloud_identity_binding
-                SET status='REVOKED', binding_revision=?, revoked_at=now(), updated_at=now()
-                WHERE issuer=? AND install_id=? AND principal_id=? AND status='ACTIVE'
-                  AND binding_revision < ?
-                """, revision, issuer, installId, principalId, revision);
-        if (updated == 0) {
+                SET status='REVOKED', binding_revision=?, assertion_jti=?, assertion_jws=?,
+                    issued_at=?, not_before=?, expires_at=?, revoked_at=now(), updated_at=now()
+                WHERE id=?
+                """, revision, jti, compactJws, timestamp(claims, "iat"),
+                timestamp(claims, "nbf"), timestamp(claims, "exp"), current.id());
+        return new BindingContext(current.cloudUserId(), keycloakSubject, principalId,
+                billingSubjectId, organizationId, installId, revision, "REVOKED");
+    }
+
+    @Transactional
+    public void revoke(UUID installId, UUID principalId, long revision) {
+        BindingRow current = findLatestForUpdate(installId, null, principalId);
+        if (current == null || revision <= current.revision()) {
             throw new ResponseStatusException(HttpStatus.CONFLICT, "STALE_OR_MISSING_BINDING");
         }
+        jdbc.update("""
+                UPDATE auth.cloud_identity_binding
+                SET status='REVOKED', binding_revision=?, revoked_at=now(), updated_at=now()
+                WHERE id=?
+                """, revision, current.id());
     }
 
     private BindingRow findByJti(UUID jti) {
@@ -134,7 +193,7 @@ public class CloudIdentityBindingService {
                 rs.getString("keycloak_subject"), rs.getObject("principal_id", UUID.class),
                 rs.getObject("billing_subject_id", UUID.class),
                 rs.getObject("organization_id", UUID.class), rs.getObject("install_id", UUID.class),
-                rs.getLong("binding_revision"), rs.getString("assertion_jws")), jti);
+                rs.getLong("binding_revision"), rs.getString("assertion_jws"), rs.getString("status")), jti);
         return rows.isEmpty() ? null : rows.getFirst();
     }
 
@@ -171,10 +230,10 @@ public class CloudIdentityBindingService {
 
     private record BindingRow(UUID id, long cloudUserId, String keycloakSubject,
                               UUID principalId, UUID billingSubjectId, UUID organizationId,
-                              UUID installId, long revision, String assertionJws) {
+                              UUID installId, long revision, String assertionJws, String status) {
         BindingContext context() {
             return new BindingContext(cloudUserId, keycloakSubject, principalId, billingSubjectId,
-                    organizationId, installId, revision, "ACTIVE");
+                    organizationId, installId, revision, status);
         }
     }
 

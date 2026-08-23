@@ -28,7 +28,7 @@ public class EntitlementOutboxDispatcher {
             JdbcTemplate jdbc,
             WorkloadAuthenticationService workloads,
             RestTemplateBuilder builder,
-            @Value("${trinyx.entitlement.cloud-ingest-url:https://cloud.trinyx.fr/internal/v1/entitlement-projections}")
+            @Value("${trinyx.entitlement.cloud-ingest-url:https://cloud-internal.trinyx.private:8443/internal/v1/entitlement-projections}")
             String endpoint) {
         this.jdbc = jdbc;
         this.workloads = workloads;

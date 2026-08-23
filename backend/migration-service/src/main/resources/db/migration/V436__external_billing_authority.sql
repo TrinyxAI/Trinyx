@@ -84,6 +84,24 @@ CREATE TABLE IF NOT EXISTS auth.identity_binding_authority_state (
     UNIQUE (install_id, organization_id, principal_id)
 );
 
+CREATE TABLE IF NOT EXISTS auth.identity_binding_outbox (
+    event_id UUID PRIMARY KEY,
+    aggregate_key VARCHAR(512) NOT NULL,
+    binding_revision BIGINT NOT NULL CHECK (binding_revision > 0),
+    event_type VARCHAR(32) NOT NULL CHECK (event_type IN ('REVOKE')),
+    signed_jws TEXT NOT NULL,
+    status VARCHAR(16) NOT NULL DEFAULT 'PENDING'
+        CHECK (status IN ('PENDING', 'PROCESSING', 'DELIVERED', 'FAILED')),
+    attempt_count INTEGER NOT NULL DEFAULT 0,
+    next_attempt_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    delivered_at TIMESTAMPTZ,
+    last_error VARCHAR(2000),
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    UNIQUE (aggregate_key, binding_revision)
+);
+CREATE INDEX IF NOT EXISTS idx_identity_binding_outbox_dispatch
+    ON auth.identity_binding_outbox(status, next_attempt_at);
+
 CREATE TABLE IF NOT EXISTS auth.entitlement_authority_state (
     projection_id UUID PRIMARY KEY,
     issuer VARCHAR(255) NOT NULL,

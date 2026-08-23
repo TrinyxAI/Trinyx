@@ -3,6 +3,7 @@ package com.apimarketplace.auth.web;
 import com.apimarketplace.auth.service.CloudCreditAuthorityService;
 import com.apimarketplace.auth.service.WorkloadAuthenticationService;
 import jakarta.validation.Valid;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.*;
@@ -12,6 +13,7 @@ import java.util.UUID;
 
 /** Paid-monolith-only authority surface. It is never routed through the public Cloud edge. */
 @RestController
+@ConditionalOnProperty(name = "billing.authority.mode", havingValue = "native-cloud", matchIfMissing = true)
 @RequestMapping("/internal/v1/credit-reservations")
 public class CloudCreditAuthorityController {
 

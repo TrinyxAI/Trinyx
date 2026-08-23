@@ -144,13 +144,15 @@ deleted.
    docker compose --env-file docker/.env.paid-monolith config --quiet
    ```
 
-3. Start only the existing backend container. Flyway applies additive migrations
-   against the current `livecontext` database:
+3. Start only the two existing application containers. Flyway applies additive
+   migrations against the current `livecontext` database; PostgreSQL, Redis,
+   MinIO, and bridge remain running unchanged:
 
    ```bash
-   docker compose --env-file docker/.env.paid-monolith up -d --no-deps livecontext
-   docker compose ps livecontext
+   docker compose --env-file docker/.env.paid-monolith up -d --no-deps livecontext frontend
+   docker compose ps livecontext frontend
    curl --fail http://127.0.0.1:8080/actuator/health
+   curl --fail http://127.0.0.1:3000/
    ```
 
 4. Wire LIVE Price IDs with the template, restart the backend to refresh price
@@ -175,13 +177,15 @@ compatible, so do not restore or downgrade the database.
 
 ```bash
 export BACKEND_IMAGE=ghcr.io/livecontext-ai/livecontext-ce:v0.2.12
+export FRONTEND_IMAGE=ghcr.io/livecontext-ai/livecontext-ce-frontend:v0.2.12
 export APP_EDITION=ce
 export BILLING_PROVIDER=none
 export CREDIT_UNLIMITED=true
 export PLAN_LIMITS_ENABLED=false
 export WORKFLOW_NODE_BILLING_ENABLED=false
-docker compose --env-file docker/.env.paid-monolith up -d --no-deps livecontext
+docker compose --env-file docker/.env.paid-monolith up -d --no-deps livecontext frontend
 curl --fail http://127.0.0.1:8080/actuator/health
+curl --fail http://127.0.0.1:3000/
 ```
 
 Immediately disable new Checkout entry points during rollback. Stripe retains

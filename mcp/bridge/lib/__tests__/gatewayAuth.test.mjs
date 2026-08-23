@@ -165,3 +165,43 @@ test('v2 refuses to run without a secret', () => {
     secretKey: '', providerId: 'p', method: 'GET', requestTarget: '/'
   }), /secret is required/);
 });
+
+function locateV2Fixture() {
+  let here = __dirname;
+  for (let i = 0; i < 7; i++) {
+    const candidate = resolve(here, 'shared/contracts/gateway-signature-v2-fixtures.json');
+    if (existsSync(candidate)) return candidate;
+    const parent = dirname(here);
+    if (parent === here) break;
+    here = parent;
+  }
+  throw new Error(`gateway-signature-v2-fixtures.json not found from ${__dirname}`);
+}
+
+const v2Fixture = JSON.parse(readFileSync(locateV2Fixture(), 'utf8'));
+
+test('cross-language parity: v2 canonical payload matches the shared fixture', () => {
+  for (const item of v2Fixture.cases) {
+    const actual = gatewayV2CanonicalPayload({
+      timestamp: item.timestamp,
+      nonce: item.nonce,
+      method: item.method,
+      requestTarget: item.requestTarget,
+      bodySha256: item.bodySha256,
+      providerId: item.providerId,
+      userId: item.userId,
+      principalId: item.principalId,
+      billingSubjectId: item.billingSubjectId,
+      organizationId: item.organizationId,
+      organizationRole: item.organizationRole,
+      userRoles: item.userRoles,
+      installId: item.installId,
+    });
+    assert.equal(actual, item.expectedCanonicalPayload, item.name);
+    assert.match(gatewaySignedHeadersV2({
+      secretKey: v2Fixture.secretKey,
+      ...item,
+      bodySha256Override: item.bodySha256,
+    })['X-Gateway-Secret'], /^gw_[A-Za-z0-9_-]+$/);
+  }
+});

@@ -45,8 +45,8 @@ public class EntitlementOutboxDispatcher {
                     next_attempt_at=now() + interval '60 seconds'
                 WHERE event_id IN (
                     SELECT event_id FROM auth.entitlement_outbox
-                    WHERE status IN ('PENDING','FAILED')
-                       OR (status='PROCESSING' AND next_attempt_at <= now())
+                    WHERE status IN ('PENDING','FAILED','PROCESSING')
+                      AND next_attempt_at <= now()
                     ORDER BY created_at FOR UPDATE SKIP LOCKED LIMIT 25
                 )
                 RETURNING event_id, signed_jws, attempt_count

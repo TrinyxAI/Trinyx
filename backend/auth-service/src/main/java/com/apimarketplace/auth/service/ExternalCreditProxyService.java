@@ -9,6 +9,7 @@ import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.server.ResponseStatusException;
 
 import java.math.BigDecimal;
+import java.math.RoundingMode;
 import java.sql.Timestamp;
 import java.time.Duration;
 import java.time.Instant;
@@ -25,15 +26,42 @@ public class ExternalCreditProxyService {
     private final PaidMonolithCreditClient authority;
     private final JdbcTemplate jdbc;
     private final ObjectMapper json;
+    private final ModelPricingService pricing;
 
     public ExternalCreditProxyService(EntitlementProjectionService entitlements,
                                       PaidMonolithCreditClient authority,
                                       JdbcTemplate jdbc,
-                                      ObjectMapper json) {
+                                      ObjectMapper json,
+                                      ModelPricingService pricing) {
         this.entitlements = entitlements;
         this.authority = authority;
         this.jdbc = jdbc;
         this.json = json;
+        this.pricing = pricing;
+    }
+
+    public ReserveResult reserveLlm(Context context, LlmReserveCommand command) {
+        if (!pricing.hasPricing(command.provider(), command.model())) {
+            throw new ResponseStatusException(HttpStatus.PAYMENT_REQUIRED, "MODEL_PRICING_UNKNOWN");
+        }
+        int prompt = Math.max(0, command.estimatedPromptTokens());
+        int completion = Math.max(0, command.maximumCompletionTokens());
+        BigDecimal estimated = pricing.calculateCost(command.provider(), command.model(), prompt, completion);
+        BigDecimal maximum = estimated.multiply(new BigDecimal("1.25")).setScale(6, RoundingMode.UP);
+        if (maximum.signum() <= 0) maximum = new BigDecimal("0.000001");
+        return reserve(context, new ReserveCommand(command.operationId(), command.feature(),
+                command.sourceType(), estimated, maximum, command.provider(), command.model()));
+    }
+
+    public SettlementResult commitLlm(UUID operationId, LlmCommitCommand command) {
+        if (!pricing.hasPricing(command.provider(), command.model())) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT, "MODEL_PRICING_UNKNOWN_AT_SETTLEMENT");
+        }
+        int prompt = Math.max(0, command.promptTokens());
+        int completion = Math.max(0, command.completionTokens());
+        BigDecimal actual = pricing.calculateCost(command.provider(), command.model(), prompt, completion);
+        return commit(operationId, new CommitCommand(actual, command.provider(), command.model(),
+                command.providerRequestId(), (long) prompt, (long) completion, command.requestHash()));
     }
 
     @Transactional
@@ -174,6 +202,11 @@ public class ExternalCreditProxyService {
                                String sourceType, BigDecimal estimatedCredits,
                                BigDecimal maximumCredits, String provider, String model) {}
 
+    public record LlmReserveCommand(UUID operationId, String feature, String sourceType,
+                                    String provider, String model, int estimatedPromptTokens,
+                                    int maximumCompletionTokens) {}
+    public record LlmCommitCommand(String provider, String model, String providerRequestId,
+                                   int promptTokens, int completionTokens, String requestHash) {}
     public record Context(UUID principalId, UUID billingSubjectId,
                           UUID organizationId, UUID installId) {}
     public record ReserveCommand(UUID operationId, String feature, String sourceType,

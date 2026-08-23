@@ -42,10 +42,10 @@ public class IdentityBindingOutboxDispatcher {
     public void dispatch() {
         var events = jdbc.query("""
                 UPDATE auth.identity_binding_outbox
-                SET status='PROCESSING'
+                SET status='PROCESSING', next_attempt_at=now() + interval '60 seconds'
                 WHERE event_id IN (
                     SELECT event_id FROM auth.identity_binding_outbox
-                    WHERE status IN ('PENDING','FAILED') AND next_attempt_at <= now()
+                    WHERE status IN ('PENDING','FAILED','PROCESSING') AND next_attempt_at <= now()
                     ORDER BY created_at FOR UPDATE SKIP LOCKED LIMIT 25
                 )
                 RETURNING event_id, signed_jws, attempt_count

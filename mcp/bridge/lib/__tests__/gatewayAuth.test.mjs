@@ -157,7 +157,7 @@ test('v2 canonical payload is byte-stable and empty fields remain positional', (
     userRoles: '', installId: '',
   });
   assert.equal(payload,
-    'TRINYX-HMAC-V2\\n1\\nn\\nGET\\n/x\\nabc\\np\\n\\n\\n\\n\\n\\n\\n');
+    'TRINYX-HMAC-V2\n1\nn\nGET\n/x\nabc\np\n\n\n\n\n\n\n');
 });
 
 test('v2 refuses to run without a secret', () => {

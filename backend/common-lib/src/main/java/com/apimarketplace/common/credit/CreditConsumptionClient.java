@@ -801,6 +801,9 @@ public class CreditConsumptionClient {
         if (!enabled || userId == null) {
             return new ScopeReserveResult(true, null, false, BigDecimal.valueOf(999_999_999L));
         }
+        if (usesExternalAuthority()) {
+            return externalScopeReserve(userId, sourceId, provider, model, projected, scopeKind);
+        }
         String url = authServiceUrl + "/api/credits/markup/scope-reserve";
         HttpHeaders headers = userHeaders(String.valueOf(userId), MediaType.APPLICATION_JSON);
 
@@ -855,6 +858,9 @@ public class CreditConsumptionClient {
     /** Post-flight commit. Returns the outcome enum name (COMMITTED, ALREADY_COMMITTED, RESERVATION_EXPIRED, COMMITTED_PARTIAL, COMMITTED_FLOORED). */
     public String scopeCommit(String sourceId, BigDecimal actualAmount, String provider, String model) {
         if (!enabled) return "COMMITTED";
+        if (usesExternalAuthority()) {
+            return externalScopeCommit(sourceId, actualAmount, provider, model);
+        }
         String url = authServiceUrl + "/api/credits/markup/scope-commit";
         HttpHeaders headers = userHeaders(null, MediaType.APPLICATION_JSON);
         Map<String, Object> body = new HashMap<>();
@@ -876,6 +882,9 @@ public class CreditConsumptionClient {
     /** Release. Returns the outcome enum name (RELEASED, ALREADY_RELEASED, ALREADY_COMMITTED). */
     public String scopeRelease(String sourceId, String reason) {
         if (!enabled) return "RELEASED";
+        if (usesExternalAuthority()) {
+            return externalScopeRelease(sourceId, reason);
+        }
         String url = authServiceUrl + "/api/credits/markup/scope-release";
         HttpHeaders headers = userHeaders(null, MediaType.APPLICATION_JSON);
         Map<String, Object> body = new HashMap<>();
@@ -892,6 +901,107 @@ public class CreditConsumptionClient {
         }
     }
 
+
+
+    private ScopeReserveResult externalScopeReserve(
+            Long userId, String sourceId, String provider, String model,
+            BigDecimal projected, String scopeKind) {
+        if (sourceId == null || sourceId.isBlank() || projected == null
+                || projected.signum() <= 0) {
+            return new ScopeReserveResult(false, "invalid external reservation", false,
+                    BigDecimal.ZERO);
+        }
+        UUID operationId = externalOperationId(sourceId);
+        String url = authServiceUrl + "/api/internal/cloud-credit-proxy/reserve";
+        HttpHeaders headers = userHeaders(String.valueOf(userId), MediaType.APPLICATION_JSON);
+        Map<String, Object> body = new HashMap<>();
+        body.put("operationId", operationId);
+        body.put("feature", externalFeature(provider, model));
+        body.put("sourceType", scopeKind == null || scopeKind.isBlank()
+                ? "PLATFORM_MARKUP" : scopeKind);
+        body.put("estimatedCredits", projected);
+        body.put("maximumCredits", projected);
+        body.put("provider", provider);
+        body.put("model", model);
+        try {
+            ResponseEntity<Map> response = restTemplate.exchange(
+                    url, HttpMethod.POST, new HttpEntity<>(body, headers), Map.class);
+            if (!response.getStatusCode().is2xxSuccessful()) {
+                return new ScopeReserveResult(false, "external reservation rejected", false,
+                        BigDecimal.ZERO);
+            }
+            BigDecimal balance = BigDecimal.ZERO;
+            if (response.getBody() != null
+                    && response.getBody().get("authority") instanceof Map<?, ?> authority
+                    && authority.get("authoritativeBalance") != null) {
+                balance = new BigDecimal(authority.get("authoritativeBalance").toString());
+            }
+            return new ScopeReserveResult(true, null, false, balance);
+        } catch (org.springframework.web.client.HttpClientErrorException.PaymentRequired denied) {
+            return new ScopeReserveResult(false, "insufficient credits", true, BigDecimal.ZERO);
+        } catch (Exception failure) {
+            log.warn("External scope reservation failed closed for {}: {}",
+                    sourceId, failure.getMessage());
+            return new ScopeReserveResult(false, failure.getMessage(), false, BigDecimal.ZERO);
+        }
+    }
+
+    private String externalScopeCommit(
+            String sourceId, BigDecimal actualAmount, String provider, String model) {
+        UUID operationId = externalOperationId(sourceId);
+        String url = authServiceUrl + "/api/internal/cloud-credit-proxy/"
+                + operationId + "/commit-amount";
+        HttpHeaders headers = userHeaders(null, MediaType.APPLICATION_JSON);
+        Map<String, Object> body = new HashMap<>();
+        body.put("actualCredits", actualAmount);
+        body.put("provider", provider);
+        body.put("model", model);
+        body.put("providerRequestId", "");
+        try {
+            ResponseEntity<Map> response = restTemplate.exchange(
+                    url, HttpMethod.POST, new HttpEntity<>(body, headers), Map.class);
+            return response.getStatusCode().is2xxSuccessful() ? "COMMITTED" : "RETRY";
+        } catch (Exception failure) {
+            log.error("External scope commit not acknowledged for {}: {}",
+                    sourceId, failure.getMessage());
+            return "RETRY";
+        }
+    }
+
+    private String externalScopeRelease(String sourceId, String reason) {
+        UUID operationId = externalOperationId(sourceId);
+        String url = authServiceUrl + "/api/internal/cloud-credit-proxy/"
+                + operationId + "/release-local";
+        HttpHeaders headers = userHeaders(null, MediaType.APPLICATION_JSON);
+        try {
+            ResponseEntity<Map> response = restTemplate.exchange(
+                    url, HttpMethod.POST,
+                    new HttpEntity<>(Map.of("reason", reason == null ? "provider-not-called" : reason),
+                            headers),
+                    Map.class);
+            return response.getStatusCode().is2xxSuccessful() ? "RELEASED" : "RETRY";
+        } catch (Exception failure) {
+            log.error("External scope release not acknowledged for {}: {}",
+                    sourceId, failure.getMessage());
+            return "RETRY";
+        }
+    }
+
+    private static UUID externalOperationId(String sourceId) {
+        return UUID.nameUUIDFromBytes(
+                ("trinyx-external-credit:" + sourceId).getBytes(StandardCharsets.UTF_8));
+    }
+
+    private static String externalFeature(String provider, String model) {
+        String value = (value(provider) + ":" + value(model)).toLowerCase(java.util.Locale.ROOT);
+        return value.contains("web") || value.contains("search")
+                ? "cloudWebSearchRelay" : "";
+    }
+
+    private static boolean usesExternalAuthority() {
+        return "external-paid-monolith".equalsIgnoreCase(
+                System.getenv("BILLING_AUTHORITY_MODE"));
+    }
 
     public record ExternalReservationResult(boolean success, String requestHash, String error) {}
 

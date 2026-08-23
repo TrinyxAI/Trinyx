@@ -97,7 +97,7 @@ public class ExternalBillingAuthorityService {
         claims.put("exp", expires.getEpochSecond());
         claims.put("bindingRevision", revision);
         claims.put("principalId", actor.getPrincipalId().toString());
-        claims.put("billingSubjectId", actor.getBillingSubjectId().toString());
+        claims.put("billingSubjectId", payer.getBillingSubjectId().toString());
         claims.put("keycloakSubject", keycloakSubject);
         claims.put("organizationId", organizationId.toString());
         claims.put("installId", installId.toString());
@@ -110,7 +110,7 @@ public class ExternalBillingAuthorityService {
                      status, expires_at)
                     VALUES (?,?,?,?,?,?,?,?,?,'ACTIVE',?)
                     """, UUID.randomUUID(), installId, organizationId, actor.getPrincipalId(),
-                    actor.getBillingSubjectId(), keycloakSubject, revision, jti, assertion,
+                    payer.getBillingSubjectId(), keycloakSubject, revision, jti, assertion,
                     Timestamp.from(expires));
         } else {
             jdbc.update("""
@@ -118,7 +118,7 @@ public class ExternalBillingAuthorityService {
                     SET billing_subject_id=?, binding_revision=?, assertion_jti=?,
                         assertion_jws=?, status='ACTIVE', expires_at=?, updated_at=now()
                     WHERE install_id=? AND organization_id=? AND principal_id=?
-                    """, actor.getBillingSubjectId(), revision, jti, assertion,
+                    """, payer.getBillingSubjectId(), revision, jti, assertion,
                     Timestamp.from(expires), installId, organizationId, actor.getPrincipalId());
         }
         return assertion;
@@ -127,20 +127,20 @@ public class ExternalBillingAuthorityService {
     private Projection issueProjection(User actor, User payer, UUID installId, UUID organizationId,
                                        String eventType) {
         String scope = "https://app.trinyx.fr|" + installId + "|" + organizationId
-                + "|" + actor.getBillingSubjectId();
+                + "|" + payer.getBillingSubjectId();
         lock(scope);
         var current = jdbc.query("""
                 SELECT projection_id, sequence FROM auth.entitlement_authority_state
                 WHERE issuer='https://app.trinyx.fr' AND install_id=? AND organization_id=?
                   AND billing_subject_id=? FOR UPDATE
                 """, (rs, row) -> new Object[]{rs.getObject(1, UUID.class), rs.getLong(2)},
-                installId, organizationId, actor.getBillingSubjectId());
+                installId, organizationId, payer.getBillingSubjectId());
         UUID projectionId = current.isEmpty() ? UUID.randomUUID() : (UUID) current.getFirst()[0];
         long sequence = current.isEmpty() ? 1L : ((Long) current.getFirst()[1]) + 1L;
 
         long payerUserId = jdbc.queryForObject(
                 "SELECT id FROM auth.users WHERE billing_subject_id=? ORDER BY id LIMIT 1",
-                Long.class, actor.getBillingSubjectId());
+                Long.class, payer.getBillingSubjectId());
         Subscription subscription = subscriptions.findByBillingCustomer_User_Id(payerUserId).orElse(null);
         PlanResolutionService.ActiveOrgEntitlement governing =
                 planResolution.resolveActiveOrgEntitlement(actor.getId());
@@ -161,7 +161,7 @@ public class ExternalBillingAuthorityService {
         claims.put("sequence", sequence);
         claims.put("installId", installId.toString());
         claims.put("organizationId", organizationId.toString());
-        claims.put("billingSubjectId", actor.getBillingSubjectId().toString());
+        claims.put("billingSubjectId", payer.getBillingSubjectId().toString());
         claims.put("accessState", accessState);
         claims.put("planCode", planCode);
         claims.put("creditTierIndex", governing.creditTierIndex());
@@ -180,7 +180,7 @@ public class ExternalBillingAuthorityService {
                     (projection_id, issuer, install_id, organization_id, billing_subject_id,
                      sequence, access_state, canonical_payload, signed_jws, expires_at)
                     VALUES (?,'https://app.trinyx.fr',?,?,?,?,?,CAST(? AS jsonb),?,?)
-                    """, projectionId, installId, organizationId, actor.getBillingSubjectId(),
+                    """, projectionId, installId, organizationId, payer.getBillingSubjectId(),
                     sequence, accessState, payload, assertion, Timestamp.from(expires));
         } else {
             jdbc.update("""

@@ -3,6 +3,7 @@ package com.apimarketplace.auth.web;
 import com.apimarketplace.auth.service.CloudIdentityBindingService;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotBlank;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
@@ -11,6 +12,7 @@ import java.util.UUID;
 
 /** HMAC-authenticated internal identity materialization API. Never routed at the public edge. */
 @RestController
+@ConditionalOnProperty(name = "billing.authority.mode", havingValue = "external-paid-monolith", matchIfMissing = false)
 @RequestMapping("/api/internal/cloud-identity")
 public class CloudIdentityController {
 

@@ -258,7 +258,7 @@ public class ApiCatalogMergeService {
                     :platformCredentialName, :iconUrl, :apiVersion, :documentation,
                     :rateLimits::jsonb, 'bundle', NULL,
                     EXTRACT(EPOCH FROM NOW()) * 1000, EXTRACT(EPOCH FROM NOW()) * 1000)
-                ON CONFLICT """ + conflictTarget + """ DO UPDATE SET
+                ON CONFLICT (id) DO UPDATE SET
                     api_name = EXCLUDED.api_name,
                     api_slug = EXCLUDED.api_slug,
                     description = EXCLUDED.description,
@@ -337,7 +337,7 @@ public class ApiCatalogMergeService {
                     :requiredScopes::jsonb, :generationSpec::jsonb, :nextHint, :status, :testStatus,
                     :isActive, :version, NULL,
                     EXTRACT(EPOCH FROM NOW()) * 1000, EXTRACT(EPOCH FROM NOW()) * 1000)
-                ON CONFLICT (id) DO UPDATE SET
+                ON CONFLICT """ + conflictTarget + """ DO UPDATE SET
                     api_id = EXCLUDED.api_id,
                     tool_slug = EXCLUDED.tool_slug,
                     description = EXCLUDED.description,

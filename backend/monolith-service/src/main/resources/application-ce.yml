@@ -389,8 +389,10 @@ credit:
       - { provider: deepseek, model: deepseek-coder,    inputRate: 0.28, outputRate: 0.42 }
       - { provider: deepseek, model: deepseek-reasoner, inputRate: 0.28, outputRate: 0.42 }
 
-# Billing: disabled in CE (no Stripe). A self-hosted CE install bills at the REAL
-# provider price - NO gross margin. The managed-cloud 1.8x LLM multiplier
+# Billing remains disabled in free CE by default. Paid monolith opts into Stripe,
+# finite credits and an explicit LLM multiplier without changing auth topology.
+# A default self-hosted CE install bills at the REAL provider price - NO gross margin.
+# The managed-cloud 1.8x LLM multiplier
 # (billing.llm.cloud-multiplier, ModelPricingService) and the platform-credential
 # markup are cloud REVENUE levers; they must NOT apply to a self-hosted install, so
 # here they default to neutral (1.0 / off) and the recorded/displayed consumption is
@@ -413,11 +415,13 @@ billing:
       FREE: ""
       STARTER: ""
       PRO: ""
+      TEAM: ""
       ENTERPRISE: ""
       PAYG: ""
 
-# Platform-credential markup OFF in CE: no reseller margin on platform-provided
-# credentials (mirrors billing.llm.cloud-multiplier=1.0 above - real cost only).
+# Platform-credential markup stays off in free CE. Paid monolith may opt in so
+# image generation, web tools and other platform-key calls use the existing
+# reservation/commit billing lifecycle.
 credentials:
   platform:
     markup:

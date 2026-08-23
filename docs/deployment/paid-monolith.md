@@ -29,7 +29,7 @@ STRIPE_SECRET_KEY=<aws-secret>
 STRIPE_WEBHOOK_SECRET=<aws-secret>
 STRIPE_SUCCESS_URL=https://app.trinyx.fr/app/settings/billing?checkout=success
 STRIPE_CANCEL_URL=https://app.trinyx.fr/app/settings/pricing?checkout=cancelled
-STRIPE_CURRENCY=eur
+STRIPE_CURRENCY=usd
 ```
 
 Keep the existing database, Redis, MinIO, JWT/encryption, storage, bridge, LLM

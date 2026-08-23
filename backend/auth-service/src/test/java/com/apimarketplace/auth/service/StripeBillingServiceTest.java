@@ -1495,7 +1495,6 @@ class StripeBillingServiceTest {
                     "kind", "payg_topup", "tier", "small", "credit_amount", "999999"));
             when(session.getPaymentStatus()).thenReturn("paid");
             when(session.getAmountSubtotal()).thenReturn(1000L);
-            when(session.getAmountTotal()).thenReturn(1200L); // includes automatic tax
             when(session.getCurrency()).thenReturn("eur");
             when(session.getClientReferenceId()).thenReturn("nonce_1");
             when(session.getPaymentIntent()).thenReturn("pi_1");

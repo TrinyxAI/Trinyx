@@ -1,15 +1,15 @@
 package com.apimarketplace.auth.repository;
 
 import com.apimarketplace.auth.domain.CreditLedgerEntry;
-import io.micrometer.core.instrument.MeterRegistry;
-import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
+import jakarta.persistence.EntityManager;
+import jakarta.persistence.LockModeType;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.jdbc.AutoConfigureTestDatabase;
+import org.springframework.boot.autoconfigure.domain.EntityScan;
 import org.springframework.boot.test.autoconfigure.orm.jpa.DataJpaTest;
 import org.springframework.boot.test.context.TestConfiguration;
-import org.springframework.context.annotation.Bean;
-import org.springframework.context.annotation.Import;
+import org.springframework.test.context.ContextConfiguration;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
@@ -30,11 +30,12 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 @DataJpaTest(properties = {
         "spring.flyway.enabled=false",
+        "spring.data.jpa.repositories.enabled=false",
         "spring.jpa.hibernate.ddl-auto=none",
         "spring.jpa.properties.hibernate.default_schema=auth"
 })
 @AutoConfigureTestDatabase(replace = AutoConfigureTestDatabase.Replace.NONE)
-@Import(CreditLedgerRepositoryLockIntegrationTest.MetricsConfig.class)
+@ContextConfiguration(classes = CreditLedgerRepositoryLockIntegrationTest.JpaConfig.class)
 @Testcontainers
 class CreditLedgerRepositoryLockIntegrationTest {
 
@@ -56,15 +57,12 @@ class CreditLedgerRepositoryLockIntegrationTest {
     }
 
     @TestConfiguration(proxyBeanMethods = false)
-    static class MetricsConfig {
-        @Bean
-        MeterRegistry meterRegistry() {
-            return new SimpleMeterRegistry();
-        }
+    @EntityScan(basePackageClasses = CreditLedgerEntry.class)
+    static class JpaConfig {
     }
 
     @Autowired
-    private CreditLedgerRepository ledgerRepository;
+    private EntityManager entityManager;
 
     @Autowired
     private PlatformTransactionManager transactionManager;
@@ -81,7 +79,8 @@ class CreditLedgerRepositoryLockIntegrationTest {
             topup.setBalanceAfter(new BigDecimal("8000"));
             topup.setSourceType("PAYG_TOPUP");
             topup.setSourceId(SESSION_ID);
-            ledgerRepository.saveAndFlush(topup);
+            entityManager.persist(topup);
+            entityManager.flush();
         });
 
         CountDownLatch firstLocked = new CountDownLatch(1);
@@ -91,7 +90,7 @@ class CreditLedgerRepositoryLockIntegrationTest {
 
         try {
             var first = executor.submit(() -> transaction.executeWithoutResult(status -> {
-                ledgerRepository.findFirstBySourceIdForUpdate(SESSION_ID).orElseThrow();
+                lockTopupRow();
                 firstLocked.countDown();
                 await(releaseFirst);
             }));
@@ -101,7 +100,7 @@ class CreditLedgerRepositoryLockIntegrationTest {
 
             var second = executor.submit(() -> transaction.executeWithoutResult(status -> {
                 secondStarted.countDown();
-                ledgerRepository.findFirstBySourceIdForUpdate(SESSION_ID).orElseThrow();
+                lockTopupRow();
             }));
             if (!secondStarted.await(5, TimeUnit.SECONDS)) {
                 throw new AssertionError("Second transaction did not start");
@@ -117,6 +116,15 @@ class CreditLedgerRepositoryLockIntegrationTest {
             releaseFirst.countDown();
             executor.shutdownNow();
         }
+    }
+
+    private void lockTopupRow() {
+        entityManager.createQuery(
+                        "SELECT e FROM CreditLedgerEntry e WHERE e.sourceId = :sourceId",
+                        CreditLedgerEntry.class)
+                .setParameter("sourceId", SESSION_ID)
+                .setLockMode(LockModeType.PESSIMISTIC_WRITE)
+                .getSingleResult();
     }
 
     private static void await(CountDownLatch latch) {

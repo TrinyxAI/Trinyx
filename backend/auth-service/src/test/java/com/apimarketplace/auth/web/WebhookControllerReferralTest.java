@@ -68,7 +68,7 @@ class WebhookControllerReferralTest {
         Subscription sub = mock(Subscription.class);
         lenient().when(sub.getPlan()).thenReturn(plan);
         lenient().when(sub.getBillingCustomer()).thenReturn(bc);
-        lenient().when(subscriptionRepository.findByProviderSubscriptionId(subId)).thenReturn(Optional.of(sub));
+        lenient().when(subscriptionRepository.findByProviderSubscriptionIdWithPlanAndUser(subId)).thenReturn(Optional.of(sub));
     }
 
     private Invoice paidInvoice(long amountPaid) {
@@ -89,6 +89,8 @@ class WebhookControllerReferralTest {
         mockLocalSub("sub_1", "STARTER", 7L);
         qualify(paidInvoice(2000L), "sub_1");
         verify(rewardService).qualifyOnPaidConversion(7L, "sub_1");
+        verify(subscriptionRepository).findByProviderSubscriptionIdWithPlanAndUser("sub_1");
+        verify(subscriptionRepository, never()).findByProviderSubscriptionId(anyString());
     }
 
     @Test
@@ -122,7 +124,7 @@ class WebhookControllerReferralTest {
     @Test
     @DisplayName("does NOT qualify before the local subscription is provisioned (sweeper backstop)")
     void noQualifyWhenLocalSubMissing() {
-        when(subscriptionRepository.findByProviderSubscriptionId("sub_x")).thenReturn(Optional.empty());
+        when(subscriptionRepository.findByProviderSubscriptionIdWithPlanAndUser("sub_x")).thenReturn(Optional.empty());
         qualify(paidInvoice(2000L), "sub_x");
         verify(rewardService, never()).qualifyOnPaidConversion(anyLong(), anyString());
     }

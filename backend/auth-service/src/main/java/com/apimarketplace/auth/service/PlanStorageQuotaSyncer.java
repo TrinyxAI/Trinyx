@@ -9,6 +9,7 @@ import jakarta.annotation.PostConstruct;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.TransactionDefinition;
@@ -79,6 +80,14 @@ public class PlanStorageQuotaSyncer {
     private StorageClient storageClient;
 
     /**
+     * Selects the write topology explicitly. Other monolith modules also expose a
+     * StorageClient bean for file operations, so bean presence alone cannot decide
+     * whether quota writes should leave the JVM.
+     */
+    @Value("${deployment.mode:}")
+    private String deploymentMode = "";
+
+    /**
      * In-process (monolith) path only: forces each {@link QuotaService} write into its OWN
      * committed transaction. Without it, a write performed inside a {@code afterCommit} hook joins
      * the already-committed caller transaction and is SILENTLY LOST (no exception). Null in slim
@@ -139,9 +148,10 @@ public class PlanStorageQuotaSyncer {
     }
 
     private boolean isSyncRequired(Long userId, Plan plan) {
-        if (quotaService == null && storageClient == null) {
-            log.debug("No storage quota write path wired (neither StorageClient nor QuotaService) - "
-                    + "skipping storage quota sync for user {}", userId);
+        if ((usesStorageHttp() && storageClient == null)
+                || (!usesStorageHttp() && quotaService == null)) {
+            log.debug("No storage quota write path wired for deployment.mode={} - "
+                    + "skipping storage quota sync for user {}", deploymentMode, userId);
             return false;
         }
         if (userId == null) {
@@ -209,8 +219,20 @@ public class PlanStorageQuotaSyncer {
         }
     }
 
+    private boolean usesStorageHttp() {
+        if ("microservice".equalsIgnoreCase(deploymentMode)) {
+            return true;
+        }
+        if ("monolith".equalsIgnoreCase(deploymentMode)) {
+            return false;
+        }
+        // Backward-compatible fallback for profiles that predate deployment.mode:
+        // preserve the previous topology selection by bean presence.
+        return storageClient != null;
+    }
+
     private String writePath() {
-        return storageClient != null ? "storage-service(http)" : "in-process";
+        return usesStorageHttp() ? "storage-service(http)" : "in-process";
     }
 
     /**
@@ -219,7 +241,7 @@ public class PlanStorageQuotaSyncer {
      * afterCommit write actually commits. Throws on a non-ack so the caller logs + continues.
      */
     private void writeTenantLimit(String tenantId, long maxBytes, double ratio) {
-        if (storageClient != null) {
+        if (usesStorageHttp()) {
             if (!storageClient.updateTenantStorageLimits(tenantId, maxBytes, ratio)) {
                 throw new IllegalStateException("storage-service did not acknowledge tenant limit update");
             }
@@ -229,7 +251,7 @@ public class PlanStorageQuotaSyncer {
     }
 
     private void writeOrgLimit(String organizationId, long maxBytes, double ratio) {
-        if (storageClient != null) {
+        if (usesStorageHttp()) {
             if (!storageClient.updateOrganizationStorageLimits(organizationId, maxBytes, ratio)) {
                 throw new IllegalStateException("storage-service did not acknowledge org limit update");
             }
@@ -257,13 +279,12 @@ public class PlanStorageQuotaSyncer {
      */
     @PostConstruct
     void logQuotaServiceWiring() {
-        if (quotaService == null) {
-            log.warn("QuotaService bean is NOT wired into PlanStorageQuotaSyncer - " +
-                    "storage quota sync will no-op for every plan change. Check that " +
-                    "common-storage-service module is on the classpath and JPA scans " +
-                    "include storage.tenant_storage_quota.");
+        if (usesStorageHttp() && storageClient == null) {
+            log.warn("StorageClient is not wired in microservice mode - storage quota sync will no-op.");
+        } else if (!usesStorageHttp() && quotaService == null) {
+            log.warn("QuotaService is not wired in monolith mode - storage quota sync will no-op.");
         } else {
-            log.info("PlanStorageQuotaSyncer ready - storage quota will sync to plan allowance.");
+            log.info("PlanStorageQuotaSyncer ready via {} for deployment.mode={}.", writePath(), deploymentMode);
         }
     }
 }

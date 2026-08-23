@@ -65,7 +65,7 @@ export default function CancellationModal({
     };
 
     const handleConfirmCancellation = async () => {
-        if (!reason) return;
+        if (!reason || isLoading) return;
         try {
             setIsLoading(true);
             setError(null);
@@ -125,7 +125,7 @@ export default function CancellationModal({
 
     return (
         <Dialog open={isOpen} onOpenChange={(o) => !o && !isLoading && handleClose()}>
-            <DialogContent className="max-w-sm p-0 gap-0 overflow-hidden">
+            <DialogContent className="max-w-sm max-h-[calc(100vh-2rem)] p-0 gap-0 overflow-y-auto">
                 <div className="p-8 text-center">
                     {step === 'success' ? (
                         <>
@@ -172,6 +172,7 @@ export default function CancellationModal({
                             <div className="space-y-2 mb-4 text-left">
                                 {reasons.map((r) => (
                                     <button
+                                        type="button"
                                         key={r.key}
                                         onClick={() => setReason(r.key)}
                                         className={`w-full text-left px-4 py-3 rounded-lg border text-sm transition-colors ${
@@ -262,6 +263,7 @@ export default function CancellationModal({
                                     {t('back')}
                                 </Button>
                                 <button
+                                    type="button"
                                     onClick={() => setStep('confirm')}
                                     className="flex-1 text-sm text-theme-muted hover:text-theme-primary underline underline-offset-2"
                                 >

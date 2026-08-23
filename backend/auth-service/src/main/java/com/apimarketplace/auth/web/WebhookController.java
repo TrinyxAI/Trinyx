@@ -281,6 +281,14 @@ public class WebhookController {
                 case "invoice.payment_succeeded", "invoice_payment.paid" -> handleRawInvoiceLike(event);
                 case "charge.refunded" -> handleChargeRefundedRaw(event);
                 case "charge.dispute.created" -> handleDisputeCreatedRaw(event);
+                // Stripe SDK versions can legitimately lack a typed model for schedule payloads.
+                // These handlers already consume Event.Data.object as raw JSON, so route both the
+                // typed and empty-deserializer paths through the same idempotent audit logic.
+                case "subscription_schedule.created" -> handleSubscriptionScheduleCreated(event);
+                case "subscription_schedule.updated" -> handleSubscriptionScheduleUpdated(event);
+                case "subscription_schedule.released" -> handleSubscriptionScheduleReleased(event);
+                case "subscription_schedule.completed" -> handleSubscriptionScheduleCompleted(event);
+                case "subscription_schedule.canceled" -> handleSubscriptionScheduleCanceled(event);
                 default -> logger.warn("Deserializer empty for {}. Raw: {}", type, event.getData().getObject());
             }
         });
@@ -906,7 +914,9 @@ public class WebhookController {
             if (!"paid".equalsIgnoreCase(invoice.getStatus())) return;
             Long amountPaid = invoice.getAmountPaid();
             if (amountPaid == null || amountPaid <= 0) return;
-            var localSub = subscriptionRepository.findByProviderSubscriptionId(subId).orElse(null);
+            var localSub = subscriptionRepository
+                    .findByProviderSubscriptionIdWithPlanAndUser(subId)
+                    .orElse(null);
             if (localSub == null) return; // sweeper backstop
             var plan = localSub.getPlan();
             if (plan != null && "FREE".equalsIgnoreCase(plan.getCode())) return;

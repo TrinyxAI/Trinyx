@@ -1,8 +1,5 @@
 package com.apimarketplace.auth.service;
 
-import com.apimarketplace.auth.domain.Organization;
-import com.apimarketplace.auth.domain.OrganizationMember;
-import com.apimarketplace.auth.domain.User;
 import com.apimarketplace.auth.repository.OrganizationMemberRepository;
 import com.apimarketplace.auth.repository.OrganizationRepository;
 import com.apimarketplace.auth.repository.UserRepository;
@@ -61,34 +58,26 @@ public class SubscriptionCacheBuster {
             return;
         }
         try {
-            // 1. Bust the owner's own cache.
-            userRepository.findById(ownerUserId).ifPresent(u -> {
-                String providerId = u.getProviderId();
-                if (providerId != null && !providerId.isBlank()) {
-                    gatewayCacheClient.invalidateUserCache(providerId);
-                }
-            });
+            // Scalar projections deliberately avoid dereferencing User proxies after the
+            // subscription transaction has closed (webhook and PAYG callbacks run here).
+            userRepository.findProviderIdByUserId(ownerUserId)
+                    .filter(providerId -> !providerId.isBlank())
+                    .ifPresent(gatewayCacheClient::invalidateUserCache);
 
-            // 2. Bust every member of every org the owner owns. Iteration is bounded by
-            //    member count × owned-org count - typically < 100.
-            if (organizationRepository != null && organizationMemberRepository != null) {
+            // One projection query replaces the previous org/member entity traversal and its
+            // N+1 lazy-load window. DISTINCT also avoids invalidating the same member twice when
+            // they belong to more than one workspace owned by this user.
+            if (organizationMemberRepository != null) {
+                var memberProviderIds = organizationMemberRepository
+                        .findProviderIdsForOrganizationsOwnedBy(ownerUserId);
                 int memberCount = 0;
-                var ownedOrgs = organizationRepository.findByOwnerId(ownerUserId);
-                for (Organization org : ownedOrgs) {
-                    if (org.isDeleted()) continue;
-                    var members = organizationMemberRepository.findByOrganization_Id(org.getId());
-                    for (OrganizationMember m : members) {
-                        User memberUser = m.getUser();
-                        if (memberUser == null) continue;
-                        String providerId = memberUser.getProviderId();
-                        if (providerId != null && !providerId.isBlank()) {
-                            gatewayCacheClient.invalidateUserCache(providerId);
-                            memberCount++;
-                        }
-                    }
+                for (String providerId : memberProviderIds) {
+                    if (providerId == null || providerId.isBlank()) continue;
+                    gatewayCacheClient.invalidateUserCache(providerId);
+                    memberCount++;
                 }
-                log.info("Cache fan-out: invalidated {} member caches across {} orgs owned by user {} (reason={})",
-                        memberCount, ownedOrgs.size(), ownerUserId, reason);
+                log.info("Cache fan-out: invalidated {} member caches for orgs owned by user {} (reason={})",
+                        memberCount, ownerUserId, reason);
             }
         } catch (Exception e) {
             log.warn("Cache fan-out failed for user {} (reason={}): {}", ownerUserId, reason, e.getMessage());

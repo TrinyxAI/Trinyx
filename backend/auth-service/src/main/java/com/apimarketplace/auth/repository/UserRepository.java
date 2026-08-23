@@ -22,6 +22,13 @@ public interface UserRepository extends JpaRepository<User, Long> {
     Optional<User> findByProviderId(String providerId);
 
     /**
+     * Scalar provider-id lookup for post-transaction cache invalidation.
+     * Returning the value directly avoids exposing a lazy User proxy to callers.
+     */
+    @Query("SELECT u.providerId FROM User u WHERE u.id = :userId")
+    Optional<String> findProviderIdByUserId(@Param("userId") Long userId);
+
+    /**
      * Batch lookup by Keycloak/local provider ids. Sibling to the inherited
      * {@code findAllById} (numeric ids). Used by
      * {@code OnboardingService.resolveUserSummaries} to derive a fallback

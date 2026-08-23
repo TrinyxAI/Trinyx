@@ -1,6 +1,7 @@
 package com.apimarketplace.auth.service;
 
 import com.apimarketplace.common.security.CanonicalJson;
+import com.apimarketplace.common.web.TenantResolver;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.springframework.http.HttpStatus;
@@ -14,6 +15,7 @@ import java.sql.Timestamp;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.UUID;
+import java.util.concurrent.atomic.AtomicReference;
 
 /**
  * Idempotent external wallet protocol layered on the existing authoritative CreditService ledger.
@@ -45,9 +47,7 @@ public class CloudCreditAuthorityService {
         }
 
         long executorUserId = validateAuthorityContext(request);
-        var result = credits.tryReserveMarkup(
-                executorUserId, sourceId(request.operationId()), request.provider(), request.model(),
-                request.maximumCredits(), null, 1440, "CLOUD", request.operationId().toString(), false);
+        var result = reserveForOrganization(executorUserId, request);
         if (!result.success()) {
             throw new ResponseStatusException(HttpStatus.PAYMENT_REQUIRED,
                     result.delinquent() ? "WALLET_DELINQUENT" : "INSUFFICIENT_CREDITS");
@@ -101,7 +101,7 @@ public class CloudCreditAuthorityService {
         boolean delinquent = outcome == CreditService.CommitOutcome.COMMITTED_PARTIAL
                 || outcome == CreditService.CommitOutcome.COMMITTED_FLOORED;
         String state = delinquent ? "COMMITTED_DELINQUENT" : "COMMITTED";
-        BigDecimal balance = credits.getBalance(operation.executorUserId());
+        BigDecimal balance = balanceForOrganization(operation.executorUserId(), operation.organizationId());
         SettlementResponse response = new SettlementResponse(operationId, state,
                 request.actualCredits(), balance, delinquent, outcome.name());
         jdbc.update("""
@@ -129,7 +129,8 @@ public class CloudCreditAuthorityService {
         CreditService.ReleaseOutcome outcome = credits.releaseReservation(
                 sourceId(operationId), "cloud-release:" + safeReason(request.reason()));
         SettlementResponse response = new SettlementResponse(operationId, "RELEASED",
-                BigDecimal.ZERO, credits.getBalance(operation.executorUserId()), false, outcome.name());
+                BigDecimal.ZERO, balanceForOrganization(operation.executorUserId(),
+                        operation.organizationId()), false, outcome.name());
         jdbc.update("""
                 UPDATE auth.cloud_credit_operation
                 SET state='RELEASED', settlement_hash=?, response_payload=CAST(? AS jsonb), updated_at=now()
@@ -219,7 +220,8 @@ public class CloudCreditAuthorityService {
     private Existing existing(UUID id) {
         var rows = jdbc.query("""
                 SELECT o.operation_id, o.request_hash, o.settlement_hash, o.state,
-                       o.response_payload::text, o.late_settlement_until, u.id AS executor_user_id
+                       o.response_payload::text, o.late_settlement_until, o.organization_id,
+                       u.id AS executor_user_id
                 FROM auth.cloud_credit_operation o
                 JOIN auth.users u ON u.principal_id=o.principal_id
                 WHERE o.operation_id=? FOR UPDATE
@@ -228,8 +230,25 @@ public class CloudCreditAuthorityService {
                 rs.getString("response_payload"),
                 rs.getTimestamp("late_settlement_until") == null ? null
                         : rs.getTimestamp("late_settlement_until").toInstant(),
-                rs.getLong("executor_user_id")), id);
+                rs.getLong("executor_user_id"), rs.getObject("organization_id", UUID.class)), id);
         return rows.isEmpty() ? null : rows.getFirst();
+    }
+
+    private CreditService.CreditConsumeResult reserveForOrganization(
+            long executorUserId, ReserveRequest request) {
+        AtomicReference<CreditService.CreditConsumeResult> result = new AtomicReference<>();
+        TenantResolver.runWithOrgScope(request.organizationId().toString(), () -> result.set(
+                credits.tryReserveMarkup(executorUserId, sourceId(request.operationId()),
+                        request.provider(), request.model(), request.maximumCredits(), null,
+                        1440, "CLOUD", request.operationId().toString(), false)));
+        return result.get();
+    }
+
+    private BigDecimal balanceForOrganization(long executorUserId, UUID organizationId) {
+        AtomicReference<BigDecimal> result = new AtomicReference<>();
+        TenantResolver.runWithOrgScope(organizationId.toString(),
+                () -> result.set(credits.getBalance(executorUserId)));
+        return result.get();
     }
 
     private ReserveResponse reserveResponse(Existing existing) {
@@ -261,7 +280,7 @@ public class CloudCreditAuthorityService {
 
     private record Existing(UUID operationId, String requestHash, String settlementHash,
                             String state, String responsePayload, Instant lateSettlementUntil,
-                            long executorUserId) {}
+                            long executorUserId, UUID organizationId) {}
 
     public record ReserveRequest(UUID operationId, UUID principalId, UUID billingSubjectId,
                                  UUID organizationId, UUID installId, long entitlementSequence,

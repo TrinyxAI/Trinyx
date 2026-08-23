@@ -1287,7 +1287,8 @@ public class StripeBillingService {
         if (expectedPriceId == null || expectedPriceId.isBlank()) {
             throw new IllegalStateException("PAYG Stripe price is not configured for tier=" + tier);
         }
-        if (!java.util.Objects.equals(configuredPrice.getAmountCents(), session.getAmountTotal())) {
+        if (configuredPrice.getAmountCents() == null || session.getAmountTotal() == null
+                || configuredPrice.getAmountCents().longValue() != session.getAmountTotal()) {
             throw new IllegalStateException("PAYG amount mismatch for tier=" + tier);
         }
         if (configuredPrice.getCurrency() == null || session.getCurrency() == null

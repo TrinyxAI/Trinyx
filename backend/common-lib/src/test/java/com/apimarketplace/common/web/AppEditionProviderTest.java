@@ -241,6 +241,19 @@ class AppEditionProviderTest {
         }
 
         @Test
+        @DisplayName("CE Free refuses Stripe billing activation")
+        void ceFreeRejectsStripeBilling() {
+            MockEnvironment env = new MockEnvironment();
+            env.setActiveProfiles("ce");
+            env.setProperty("billing.provider", "stripe");
+
+            assertThatThrownBy(() -> new AppEditionProvider(env).logSummary())
+                    .isInstanceOf(IllegalStateException.class)
+                    .hasMessageContaining("Refusing to start CE_FREE")
+                    .hasMessageContaining("billing.provider=stripe");
+        }
+
+        @Test
         @DisplayName("Self-Hosted Enterprise summary uses enterprise defaults and no CE drift WARN")
         void selfHostedEnterpriseSummary() {
             MockEnvironment env = new MockEnvironment();

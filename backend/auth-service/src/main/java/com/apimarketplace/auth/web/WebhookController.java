@@ -46,6 +46,7 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
 import java.io.IOException;
+import java.time.Duration;
 import java.time.Instant;
 import java.time.LocalDateTime;
 import java.time.ZoneId;
@@ -58,6 +59,7 @@ import java.util.Optional;
 public class WebhookController {
 
     private static final Logger logger = LoggerFactory.getLogger(WebhookController.class);
+    private static final Duration WEBHOOK_CLAIM_LEASE = Duration.ofMinutes(10);
 
     private final ObjectMapper objectMapper;
     private final BillingEventRepository billingEventRepository;
@@ -175,8 +177,10 @@ public class WebhookController {
             return ResponseEntity.ok("OK");
         }
 
-        if (billingEventRepository.claimForProcessing(event.getId()) != 1) {
-            logger.warn("Event {} is already being processed; asking Stripe to retry", event.getId());
+        LocalDateTime claimStartedAt = LocalDateTime.now();
+        if (billingEventRepository.claimForProcessing(
+                event.getId(), claimStartedAt, claimStartedAt.minus(WEBHOOK_CLAIM_LEASE)) != 1) {
+            logger.warn("Event {} has a live processing claim; asking Stripe to retry", event.getId());
             return ResponseEntity.status(HttpStatus.CONFLICT).body("Event already processing");
         }
 

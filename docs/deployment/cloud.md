@@ -27,8 +27,8 @@ auth.trinyx.fr -> Caddy :8280 -> Keycloak :8080
 Cloud -- short Ed25519 workload JWT --> app.trinyx.fr
        reserve / commit / release       (sole wallet + ledger authority)
 
-app.trinyx.fr -- signed Ed25519 projections --> Cloud auth-service
-               sequence + expiry + tombstone
+app.trinyx.fr -- private TLS + workload JWT --> Cloud auth-service
+               signed projections + identity tombstones
 ```
 
 The gateway authenticates and routes. It does not calculate plans, interpret
@@ -170,6 +170,7 @@ Cloud application traffic to gateway-service.
 | External path | Destination | Policy |
 |---|---|---|
 | `/healthz`, `/actuator/health` | gateway | public |
+| `/api/ce/releases/latest` | auth-service | public release metadata only |
 | `/webhooks/**` | auth-service | provider signature, no browser JWT |
 | `/api/catalog/public/bundles/**` | catalog-service | explicit public allowlist |
 | `/api/ce-link/**` | auth-service | JWT + identity + entitlement |
@@ -239,8 +240,8 @@ TRINYX_S2S_SIGNING_KEY=<paid workload private key>
 TRINYX_S2S_VERIFICATION_ISSUER=trinyx-cloud
 TRINYX_S2S_VERIFICATION_AUDIENCE=trinyx-billing-authority
 TRINYX_S2S_VERIFICATION_KEYS=<Cloud workload public ring>
-TRINYX_ENTITLEMENT_CLOUD_INGEST_URL=https://cloud.trinyx.fr/internal/v1/entitlement-projections
-TRINYX_IDENTITY_CLOUD_REVOCATION_URL=https://cloud.trinyx.fr/internal/v1/identity-bindings/revocations
+TRINYX_ENTITLEMENT_CLOUD_INGEST_URL=https://cloud-internal.trinyx.private:8443/internal/v1/entitlement-projections
+TRINYX_IDENTITY_CLOUD_REVOCATION_URL=https://cloud-internal.trinyx.private:8443/internal/v1/identity-bindings/revocations
 ```
 
 Cloud uses:
@@ -306,6 +307,14 @@ auth.trinyx.fr {
 Do not change `app.trinyx.fr`. Preserve Host and forwarded-protocol/client-IP
 headers. Never proxy database, Redis, MinIO, service or Keycloak-management
 ports.
+
+The Compose stack also publishes port 8443 only on `CLOUD_INTERNAL_BIND`.
+Set that value to the Cloud EC2 private VPC address, create private DNS
+`cloud-internal.trinyx.private`, and allow the port only from the paid-monolith
+security group. Caddy uses a persisted internal CA; export its root certificate
+into the paid-monolith JVM trust store before enabling dispatch. The public
+host never routes `/internal/**`. Workload JWT remains mandatory in addition
+to TLS and the network allowlist.
 
 ## Validation and deployment commands
 

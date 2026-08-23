@@ -54,7 +54,9 @@ final class AuthenticatedGatewayFilter implements GlobalFilter, Ordered {
                     String subject = authentication.getToken().getSubject();
                     String binding = exchange.getRequest().getHeaders()
                             .getFirst("X-Trinyx-Identity-Binding");
-                    return identityClient.resolve(token, subject, binding)
+                    String entitlement = exchange.getRequest().getHeaders()
+                            .getFirst("X-Trinyx-Entitlement-Projection");
+                    return identityClient.resolve(token, subject, binding, entitlement)
                             .flatMap(context -> withBody(exchange, chain, subject, context));
                 })
                 .onErrorResume(error -> {
@@ -105,6 +107,7 @@ final class AuthenticatedGatewayFilter implements GlobalFilter, Ordered {
                             exchange.getRequest().getHeaders().forEach((name, values) -> {
                                 if (!STRIPPED.contains(name.toLowerCase())
                                         && !name.equalsIgnoreCase("X-Trinyx-Identity-Binding")
+                                        && !name.equalsIgnoreCase("X-Trinyx-Entitlement-Projection")
                                         && !name.equalsIgnoreCase("X-Trinyx-Organization-ID")) {
                                     headers.put(name, values);
                                 }

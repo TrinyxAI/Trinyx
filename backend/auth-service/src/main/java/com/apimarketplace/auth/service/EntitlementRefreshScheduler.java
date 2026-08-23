@@ -11,7 +11,7 @@ import java.util.UUID;
 
 @Service
 @ConditionalOnProperty(name = "billing.authority.mode",
-        havingValue = "native-cloud", matchIfMissing = true)
+        havingValue = "paid-monolith-authority", matchIfMissing = false)
 public class EntitlementRefreshScheduler {
 
     private static final Logger log = LoggerFactory.getLogger(EntitlementRefreshScheduler.class);

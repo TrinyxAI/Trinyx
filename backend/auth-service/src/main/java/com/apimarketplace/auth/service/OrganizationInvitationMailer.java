@@ -41,7 +41,7 @@ public class OrganizationInvitationMailer {
 
     public OrganizationInvitationMailer(
             JavaMailSender mailSender,
-            @Value("${app.mail.from:noreply@livecontext.ai}") String mailFrom,
+            @Value("${app.mail.from:noreply@trinyx.fr}") String mailFrom,
             @Value("${app.mail.from-name:LiveContext}") String mailFromName,
             // Aligns with the actual key used everywhere else (EmailVerificationService:49,
             // OAuth2Controller:36, OAuth2Service:119, application.yml:112). The earlier

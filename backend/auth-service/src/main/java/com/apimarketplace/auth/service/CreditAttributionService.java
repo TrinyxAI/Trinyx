@@ -532,8 +532,10 @@ public class CreditAttributionService {
 
         var original = ledgerRepository.findBySourceId(sessionId).orElse(null);
         if (original == null || !"PAYG_TOPUP".equals(original.getSourceType())) {
-            log.debug("No PAYG ledger grant found for sessionId={}; nothing to claw back", sessionId);
-            return;
+            // Stripe may deliver a refund/dispute before checkout.completed. Fail
+            // retryably so this event cannot be acknowledged before the grant exists.
+            throw new IllegalStateException(
+                    "PAYG top-up grant not found yet for checkout " + sessionId);
         }
 
         String prefix = sessionId + ":clawback:";

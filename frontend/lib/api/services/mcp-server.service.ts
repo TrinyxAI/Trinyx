@@ -18,7 +18,7 @@ export interface McpScopeOption {
 }
 
 export interface McpConnectionInfo {
-  /** Externally reachable MCP endpoint, e.g. https://livecontext.ai/mcp */
+  /** Externally reachable MCP endpoint, e.g. https://app.trinyx.fr/mcp */
   url: string;
   serverName: string;
   /** Canonical auth header expected by the endpoint (X-API-Key). */

@@ -193,3 +193,60 @@ describe('useEdition hook', () => {
         expect(useEdition()).toBe('ce');
     });
 });
+
+
+describe('billing capability', () => {
+    let warnSpy: ReturnType<typeof vi.spyOn>;
+
+    beforeEach(() => {
+        vi.resetModules();
+        warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    });
+
+    afterEach(() => {
+        vi.unstubAllEnvs();
+        warnSpy.mockRestore();
+    });
+
+    it('keeps embedded authentication while enabling paid-monolith billing', async () => {
+        vi.stubEnv('NEXT_PUBLIC_APP_EDITION', 'ce');
+        vi.stubEnv('NEXT_PUBLIC_AUTH_MODE', 'embedded');
+        vi.stubEnv('NEXT_PUBLIC_BILLING_ENABLED', 'true');
+
+        const {
+            IS_BILLING_ENABLED,
+            IS_COMMUNITY_EDITION,
+            IS_EMBEDDED_AUTH,
+            IS_PAID_MONOLITH,
+        } = await importEdition();
+
+        expect(IS_EMBEDDED_AUTH).toBe(true);
+        expect(IS_BILLING_ENABLED).toBe(true);
+        expect(IS_PAID_MONOLITH).toBe(true);
+        expect(IS_COMMUNITY_EDITION).toBe(false);
+    });
+
+    it('keeps free CE billing disabled by default', async () => {
+        vi.stubEnv('NEXT_PUBLIC_APP_EDITION', 'ce');
+        vi.stubEnv('NEXT_PUBLIC_AUTH_MODE', 'embedded');
+        vi.stubEnv('NEXT_PUBLIC_BILLING_ENABLED', '');
+
+        const { IS_BILLING_ENABLED, IS_COMMUNITY_EDITION, IS_PAID_MONOLITH } =
+            await importEdition();
+
+        expect(IS_BILLING_ENABLED).toBe(false);
+        expect(IS_PAID_MONOLITH).toBe(false);
+        expect(IS_COMMUNITY_EDITION).toBe(true);
+    });
+
+    it('keeps managed cloud billing enabled when no explicit flag is provided', async () => {
+        vi.stubEnv('NEXT_PUBLIC_APP_EDITION', 'cloud');
+        vi.stubEnv('NEXT_PUBLIC_AUTH_MODE', 'oidc');
+        vi.stubEnv('NEXT_PUBLIC_BILLING_ENABLED', '');
+
+        const { IS_BILLING_ENABLED, IS_PAID_MONOLITH } = await importEdition();
+
+        expect(IS_BILLING_ENABLED).toBe(true);
+        expect(IS_PAID_MONOLITH).toBe(false);
+    });
+});

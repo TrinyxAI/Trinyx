@@ -1,196 +1,294 @@
-# Trinyx Cloud Docker deployment
+# Trinyx Cloud deployment
 
-> **Status: infrastructure-complete, edge fail-closed.** The repository contains
-> the Cloud microservices but does not contain the authenticated gateway they
-> expect. Do not expose this stack to production until the gateway contract in
-> [Authenticated gateway blocker](#authenticated-gateway-blocker) is implemented
-> and tested. The Caddy edge deliberately returns HTTP 503 for authenticated
-> routes instead of weakening service authentication.
-
-This stack is separate from the paid-monolith stack. It uses a distinct Compose
-project, network, database, Redis, MinIO, Keycloak and volumes. It does not read
-or modify the existing paid-monolith environment files.
+> **Status:** dependent draft implementation. Do not deploy or merge before the
+> staging checklist and capacity review are complete. This stack never modifies
+> the existing paid-monolith Compose project.
 
 ## Architecture
 
 ```text
-Internet
-   |
-   +-- cloud.trinyx.fr -- TLS proxy -- 127.0.0.1:8188 --+
-   |                                                     |
-   |                                               cloud-edge (Caddy)
-   |                                                     |
-   |                      +------------------------------+------------------+
-   |                      | authenticated API: 503 until gateway exists     |
-   |                      | public catalog bundles / health / CDP only      |
-   |                      +------------------------------+------------------+
-   |                                                     |
-   |   catalog  storage  auth  conversation  datasource  interface
-   |    :8081    :8082  :8083      :8087        :8088      :8089
-   |   agent  trigger  publication  orchestrator  websearch  SearXNG
-   |   :8090   :8091      :8092        :8099       :8085     :8080
-   |                      |
-   |       PostgreSQL/pgvector :5432 (app schemas + keycloak schema)
-   |       Redis :6379          MinIO :9000
-   |
-   +-- auth.trinyx.fr -- TLS proxy -- 127.0.0.1:8280
-                                               |
-                                        Keycloak :8080
-                                   management/health :9000 internal only
+Browser / linked paid-monolith
+        |
+        | OIDC JWT (issuer auth.trinyx.fr, audience trinyx-frontend)
+        v
+cloud.trinyx.fr -> Caddy :8188 -> gateway-service :8086
+                                      |
+                                      | strips client identity headers
+                                      | HMAC-SHA256 v2, exact body + target
+                                      v
+ auth :8083  catalog :8081  agent :8090  orchestrator :8099
+ storage :8082  conversation :8087  datasource :8088
+ interface :8089  trigger :8091  publication :8092
+        |
+        +-- dedicated PostgreSQL/pgvector, Redis and MinIO
+
+auth.trinyx.fr -> Caddy :8280 -> Keycloak :8080
+
+Cloud -- short Ed25519 workload JWT --> app.trinyx.fr
+       reserve / commit / release       (sole wallet + ledger authority)
+
+app.trinyx.fr -- signed Ed25519 projections --> Cloud auth-service
+               sequence + expiry + tombstone
 ```
 
-No application, database, cache, object-storage, SearXNG or Keycloak management
-port is published. Only the two loopback edge listeners are published.
+The gateway authenticates and routes. It does not calculate plans, interpret
+Stripe status, or own a wallet. `app.trinyx.fr` remains authoritative for
+Stripe, subscription, plan, subscription/PAYG buckets, delinquency and ledger.
 
-## Services and ports
+Cloud stores:
 
-| Compose service | Internal port | Purpose |
-|---|---:|---|
-| catalog-service | 8081 | API catalog and catalog bundles |
-| storage-service | 8082 | files and storage quotas |
-| auth-service | 8083 | users, billing, Cloud link and entitlements |
-| migration-service | 8084 (non-web runner) | the only Flyway runner |
-| websearch-service | 8085 | web search/browser relay |
-| conversation-service | 8087 | conversations and realtime APIs |
-| datasource-service | 8088 | datasource operations |
-| interface-service | 8089 | generated interfaces |
-| agent-service | 8090 | agents, model/skill bundles and LLM relay |
-| trigger-service | 8091 | public triggers |
-| publication-service | 8092 | marketplace/publications |
-| orchestrator-service | 8099 | workflows and websearch relay |
-| cloud-postgres | 5432 | dedicated Cloud PostgreSQL/pgvector |
-| cloud-redis | 6379 | dedicated Cloud Redis |
-| cloud-minio | 9000/9001 | dedicated object storage/console (internal) |
-| keycloak | 8080/9000 | OIDC and internal management health |
-| searxng | 8080 | internal metasearch |
-| cloud-edge | 8080/8180 | Cloud fail-closed edge / Keycloak edge |
+- a persistent actor identity binding;
+- a signed, monotonic, expiring entitlement projection scoped by
+  `issuer + installId + organizationId + billingSubjectId`;
+- technical reservation and settlement delivery state, never a spendable
+  balance.
 
-Every Java service receives the service-DNS URLs requested by the Cloud runtime.
-No service URL uses localhost.
+## Identity and entitlement contracts
 
-## Environment
+Identity fields remain distinct:
 
-Copy `docker/.env.cloud.example` to the untracked
-`docker/.env.cloud`. Replace every `replace-*` value.
+- `keycloakSubject`: Keycloak JWT `sub`;
+- `principalId`: stable actor UUID;
+- `billingSubjectId`: payer/wallet UUID;
+- `organizationId`: selected workspace;
+- `installId`: linked installation.
 
-Required secret groups:
+Email is never used to reconcile identities. The numeric `X-User-ID` is a
+Cloud-local compatibility value only.
 
-- PostgreSQL: `CLOUD_DB_USERNAME`, `CLOUD_DB_PASSWORD`.
-- Redis/MinIO: `CLOUD_REDIS_PASSWORD`, `CLOUD_MINIO_ROOT_USER`,
-  `CLOUD_MINIO_ROOT_PASSWORD`.
-- Keycloak: `KEYCLOAK_ADMIN_CLIENT_SECRET`,
-  `KEYCLOAK_BOOTSTRAP_ADMIN_USERNAME`,
-  `KEYCLOAK_BOOTSTRAP_ADMIN_PASSWORD`.
-- request/audit security: `CLOUD_GATEWAY_SECRET_KEY`, `AUDIT_HMAC_KEY`,
-  `AUDIT_UA_PEPPER`, `MODEL_AUDIT_HMAC_KEY`,
-  `STORAGE_SHOWCASE_HMAC_SECRET`.
-- credential encryption: `CREDENTIAL_ENCRYPTION_PASSWORD`,
-  `CREDENTIAL_ENCRYPTION_SALT`.
-- bundle signing: `CATALOG_BUNDLE_SIGNING_KEY_PEM`,
-  `CATALOG_BUNDLE_SIGNING_PUBLIC_KEY`,
-  `CATALOG_BUNDLE_SIGNING_KEY_ID`.
-- websearch: `WEBSEARCH_GATEWAY_SECRET`, `WEBSEARCH_CDP_JWT_SECRET`,
-  `SEARXNG_SECRET`.
-- external services: `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET`,
-  `STRIPE_SUCCESS_URL`, `STRIPE_CANCEL_URL`, and the `SMTP_*` values.
+IdentityBinding v2 is a five-minute Ed25519 JWS. It includes issuer, audience,
+JTI, time claims, monotonic `bindingRevision` and all five identifiers. A
+subject change requires explicit revoke/rebind. The gateway requires the JWT
+`sub` to equal the signed `keycloakSubject`.
 
-Non-secret deployment values include `TRINYX_CLOUD_IMAGE_TAG`, the two edge
-bind/port pairs, `CLOUD_DB_NAME`, pool sizes, `CLOUD_MINIO_BUCKET`,
-`KEYCLOAK_REALM_NAME`, the two Keycloak client IDs, and
-`CATALOG_BUNDLE_ISSUER`.
+EntitlementProjection v2 deliberately excludes actor identity and spendable
+balance. It contains plan/cadence/subscription state, typed features and limits,
+`accessState`, sequence, event ID and 15-minute validity. Cloud semantics are:
 
-Provider keys (`OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `GOOGLE_API_KEY`,
-`GEMINI_API_KEY`, `MISTRAL_API_KEY`, `DEEPSEEK_API_KEY`) are optional and
-must come from an external secret store. `PISTON_URL` must point to a separately operated compatible code-execution service; no such implementation exists in this repository.
+| Incoming state | Result |
+|---|---|
+| higher sequence | apply |
+| same sequence and same canonical hash | idempotent success |
+| same sequence and different hash | `409 EQUIVOCATION_DETECTED` |
+| lower sequence | `409 STALE_PROJECTION` |
+| invalid/expired assertion | reject/fail closed |
+| `REVOKED` | retain tombstone until a higher signed sequence |
 
-The Compose file pins the required edition flags:
+Paid-monolith computes `ACTIVE`, `GRACE`, `DENIED` or `REVOKED`.
+The initial `past_due` grace is configurable and defaults to 72 hours.
+Projection refresh defaults to five minutes; expiration is never treated as
+infinite last-known-good authorization.
+
+## Wallet protocol
+
+The sole authority endpoints on paid-monolith are not edge-routed:
+
+```text
+POST /internal/v1/credit-reservations
+POST /internal/v1/credit-reservations/{operationId}/commit
+POST /internal/v1/credit-reservations/{operationId}/release
+```
+
+A provider call must not begin before reserve succeeds. `operationId` and
+`requestHash` are stable idempotency identities. The authority locks the
+native wallet and preserves the subscription/PAYG split. Commit converts the
+hold to actual usage and releases the difference. Overrun is accounted even
+when it creates delinquency. Release is terminal and idempotent. Reservation
+TTL is ten minutes; actual incurred cost may settle for 24 hours after expiry.
+
+Cloud persists failed commit/release delivery in
+`auth.cloud_settlement_outbox` with jittered exponential retry. It never falls
+back to a local balance when the authority is unavailable.
+
+LLM relays reserve a conservative amount before dispatch and retain the
+provider's `maxTokens` limit. Flat-price scope reservations used by web search
+are also delegated in external-authority mode. Provider-specific output,
+iteration, timeout and concurrency limits must remain enabled at each provider
+adapter; the wallet hold is the final monetary boundary, not a substitute for
+those operational limits.
+
+## Gateway HMAC v2
+
+Cloud sets `GATEWAY_FILTER_ACCEPT_V1=false`. A controlled rolling migration
+can temporarily enable v1 on downstream services and set
+`GATEWAY_SIGNATURE_VERSION=1` on a legacy Java signer. Remove both after all
+producers are v2.
+
+Headers:
+
+```text
+X-Gateway-Signature-Version: 2
+X-Gateway-Timestamp
+X-Gateway-Nonce
+X-Gateway-Body-SHA256
+X-Gateway-Secret
+X-Provider-ID
+X-User-ID
+X-Principal-ID
+X-Billing-Subject-ID
+X-Organization-ID
+X-Organization-Role
+X-User-Roles
+X-Install-ID
+```
+
+Canonical UTF-8 payload:
+
+```text
+TRINYX-HMAC-V2
+timestamp
+nonce
+HTTP_METHOD
+FINAL_DOWNSTREAM_REQUEST_TARGET
+bodySha256
+providerId
+userId
+principalId
+billingSubjectId
+organizationId
+organizationRole
+userRoles
+installId
+```
+
+The request target includes the raw query. Roles are uppercase, de-duplicated
+and lexicographically sorted. Empty fields remain empty lines. Timestamp skew
+is ±60 seconds. Redis consumes each nonce once for five minutes. The servlet
+and reactive gateway wrappers hash the exact bytes later read by controllers
+and reject bodies above 10 MiB by default.
+
+All externally supplied identity, role, assertion and HMAC headers are removed
+before trusted values are added.
+
+## Routing
+
+Only `cloud-edge` publishes a loopback application port. It forwards all
+Cloud application traffic to gateway-service.
+
+| External path | Destination | Policy |
+|---|---|---|
+| `/healthz`, `/actuator/health` | gateway | public |
+| `/webhooks/**` | auth-service | provider signature, no browser JWT |
+| `/api/catalog/public/bundles/**` | catalog-service | explicit public allowlist |
+| `/api/ce-link/**` | auth-service | JWT + identity + entitlement |
+| `/api/users/**`, `/api/billing/**`, `/api/credits/**` | auth-service | JWT + projection |
+| `/api/ce-catalog/**` | catalog-service | `catalogBundle` |
+| `/api/catalog-bundles/**` | agent-service | `catalogBundle` |
+| `/api/skill-bundles/**` | agent-service | `skillBundle` |
+| `/api/ce-llm/**` | agent-service | `cloudLlmRelay` + reserve |
+| `/api/ce-websearch/**` | orchestrator-service | `cloudWebSearchRelay` + reserve |
+| `/ws/**` | conversation-service | authenticated upgrade |
+| `/cdp/**` | websearch-service | CDP's dedicated token |
+| `/api/internal/**`, `/internal/**` | none | never edge-routed |
+
+The downstream service URLs use Docker DNS names; no service uses localhost.
+Keycloak is externally reachable only through `auth.trinyx.fr`.
+
+## Key material and required environment
+
+No private key belongs in Git. Use a secret manager and separate Ed25519 key
+pairs for identity assertions, entitlement assertions and workload
+authentication. Verification rings use
+`kid=base64-X509;kid2=base64-X509`; signers use base64 PKCS#8 plus an active
+kid. Keep previous public keys during rotation.
+
+Cloud requires all placeholders in `docker/.env.cloud.example`, notably:
+
+```text
+CLOUD_DB_USERNAME
+CLOUD_DB_PASSWORD
+CLOUD_REDIS_PASSWORD
+CLOUD_MINIO_ROOT_USER
+CLOUD_MINIO_ROOT_PASSWORD
+KEYCLOAK_ADMIN_CLIENT_SECRET
+KEYCLOAK_BOOTSTRAP_ADMIN_USERNAME
+KEYCLOAK_BOOTSTRAP_ADMIN_PASSWORD
+CLOUD_GATEWAY_SECRET_KEY
+TRINYX_IDENTITY_VERIFICATION_KEYS
+TRINYX_ENTITLEMENT_VERIFICATION_KEYS
+TRINYX_S2S_SIGNING_KID
+TRINYX_S2S_SIGNING_KEY
+TRINYX_S2S_VERIFICATION_KEYS
+PAID_MONOLITH_BILLING_URL=https://app.trinyx.fr
+```
+
+Cloud S2S direction is fixed by Compose:
+
+```text
+signing issuer=trinyx-cloud
+signing audience=trinyx-billing-authority
+verification issuer=trinyx-paid-authority
+verification audience=trinyx-cloud-internal
+```
+
+Before staging, paid-monolith must receive external secrets/configuration for
+the opposite direction:
+
+```text
+BILLING_AUTHORITY_MODE=native-cloud
+TRINYX_IDENTITY_SIGNING_KID=<active kid>
+TRINYX_IDENTITY_SIGNING_KEY=<PKCS8 private key>
+TRINYX_ENTITLEMENT_SIGNING_KID=<active kid>
+TRINYX_ENTITLEMENT_SIGNING_KEY=<PKCS8 private key>
+TRINYX_S2S_SIGNING_ISSUER=trinyx-paid-authority
+TRINYX_S2S_SIGNING_AUDIENCE=trinyx-cloud-internal
+TRINYX_S2S_SIGNING_KID=<paid workload kid>
+TRINYX_S2S_SIGNING_KEY=<paid workload private key>
+TRINYX_S2S_VERIFICATION_ISSUER=trinyx-cloud
+TRINYX_S2S_VERIFICATION_AUDIENCE=trinyx-billing-authority
+TRINYX_S2S_VERIFICATION_KEYS=<Cloud workload public ring>
+TRINYX_ENTITLEMENT_CLOUD_INGEST_URL=https://cloud.trinyx.fr/internal/v1/entitlement-projections
+```
+
+Cloud uses:
 
 ```text
 APP_EDITION=cloud
 DEPLOYMENT_MODE=microservice
 AUTH_MODE=keycloak
 MARKETPLACE_MODE=local
-BILLING_PROVIDER=stripe
-CREDIT_UNLIMITED=false
-CREDIT_CONSUMPTION_ENABLED=true
-PLAN_LIMITS_ENABLED=true
-WORKFLOW_NODE_BILLING_ENABLED=true
+BILLING_PROVIDER=none
+BILLING_AUTHORITY_MODE=external-paid-monolith
 ```
+
+There is no Cloud Stripe requirement, Price ID, customer, subscription or
+wallet for linked users. Native billing code is retained for other modes.
 
 ## Keycloak
 
-The repository had no production Keycloak provisioning script or realm export to
-reuse. The new stack therefore builds an optimized Keycloak image and imports
-`docker/cloud/keycloak/trinyx-realm.json` on first start.
+The imported realm is `trinyx`. It provides public PKCE client
+`trinyx-frontend` and confidential service-account client
+`trinyx-admin-api`. The public issuer is:
 
-The imported realm is `trinyx`; application configuration already makes the
-realm, issuer and audience configurable, so retaining the legacy realm name is
-not required. The import creates:
+```text
+https://auth.trinyx.fr/realms/trinyx
+```
 
-- public PKCE client `trinyx-frontend`;
-- confidential service-account client `trinyx-admin-api`;
-- an audience mapper for `trinyx-frontend`;
-- the minimum repository-observed realm-management roles for user and identity
-  provider administration;
-- the known callback `https://app.trinyx.fr/api/cloud-link/callback`.
+The gateway requires audience `trinyx-frontend`. Internal JWK retrieval uses
+the Keycloak Docker name but issuer validation always uses the public URL.
+Register arbitrary self-hosted callback origins explicitly; do not use a broad
+wildcard. Never expose Keycloak management port 9000.
 
-Keycloak startup import skips a realm that already exists. Subsequent client
-secret or redirect changes must be applied through Keycloak administration, not
-by expecting a container restart to overwrite the realm.
+## Database and startup
 
-Self-hosted CE installations can have arbitrary callback origins. They cannot be
-safely covered by a universal redirect wildcard. Register each additional CE
-callback exactly, or provision a dedicated client for that installation.
+Flyway migration `V436__external_billing_authority.sql` is backward-compatible.
+It adds stable UUID identities, binding/projection state, authority/outbox state
+and reservation idempotency. Native subscription, wallet, PAYG and ledger
+tables are not removed or replaced.
 
-The public issuer is
-`https://auth.trinyx.fr/realms/trinyx`. Services use the internal Keycloak DNS
-name only for JWK retrieval, while validating the public issuer. Never publish
-Keycloak port 9000.
+Startup order:
 
-## Authenticated gateway blocker
+1. dedicated PostgreSQL, Redis and MinIO;
+2. MinIO initialization and Keycloak;
+3. migration-service (sole Flyway runner, must exit 0);
+4. auth-service and remaining microservices;
+5. gateway-service;
+6. cloud-edge.
 
-The microservices do not accept a browser bearer token directly. Their common
-filter expects an authenticated gateway to:
+Back up an existing Cloud volume before Flyway. Keycloak's schema bootstrap SQL
+runs only on a new PostgreSQL volume.
 
-1. validate the Keycloak JWT and its `trinyx-frontend` audience;
-2. call auth-service's user-resolution endpoint to map Keycloak `sub` to the
-   local numeric user ID;
-3. inject `X-User-ID` and, where applicable, organization/role context;
-4. generate the repository's timestamped HMAC headers
-   (`X-Gateway-Secret`, `X-Gateway-Timestamp`, `providerId`);
-5. route the request to the owning service.
-
-No module or Dockerfile implementing that contract exists in this repository.
-A plain Caddy/nginx router cannot perform the user mapping and signing safely.
-Setting `GATEWAY_VERIFICATION_ENABLED=false` would permit identity/header
-spoofing and is explicitly forbidden.
-
-Consequently the edge exposes only service health, the catalog controller's
-explicit public bundle route, and the separately JWT-protected CDP path.
-Authenticated paths return `authenticated_gateway_missing` with HTTP 503.
-
-This blocks end-to-end CE/paid-monolith registration, heartbeat, entitlements,
-authenticated catalog/skill/model bundles, LLM relay and websearch relay even
-though their controllers are present. The relevant implemented API families are:
-
-- auth-service: `/api/ce-link/**`;
-- catalog-service: `/api/ce-catalog/**` and
-  `/api/catalog/public/bundles/**`;
-- agent-service: `/api/ce-llm/**`, `/api/catalog-bundles/**`,
-  `/api/skill-bundles/**`;
-- orchestrator-service: `/api/ce-websearch/**`.
-
-Do not replace the 503 rule with direct reverse proxies. Supply and test the
-missing gateway, then update `docker/cloud/Caddyfile` to proxy to that single
-gateway only.
-
-## Reverse proxy and DNS
-
-Create A/AAAA records for `cloud.trinyx.fr` and `auth.trinyx.fr` pointing to
-the Cloud host. The existing `app.trinyx.fr` record and deployment are not
-changed.
-
-On the host TLS proxy:
+## DNS and host proxy
 
 ```caddyfile
 cloud.trinyx.fr {
@@ -202,72 +300,24 @@ auth.trinyx.fr {
 }
 ```
 
-Preserve `X-Forwarded-For`, `X-Forwarded-Proto` and `Host`. Do not proxy
-Keycloak's management port.
+Do not change `app.trinyx.fr`. Preserve Host and forwarded-protocol/client-IP
+headers. Never proxy database, Redis, MinIO, service or Keycloak-management
+ports.
 
-After the missing gateway is delivered, the existing paid-monolith Cloud-link
-client would need these external runtime values (do not change production during
-this PR):
+## Validation and deployment commands
 
-```text
-MARKETPLACE_CLOUD_API_URL=https://cloud.trinyx.fr/api
-CLOUD_LINK_KEYCLOAK_URL=https://auth.trinyx.fr/realms/trinyx
-CLOUD_LINK_CLIENT_ID=trinyx-frontend
-CLOUD_LINK_REDIRECT_URI=https://app.trinyx.fr/api/cloud-link/callback
-```
-
-## Database and startup order
-
-The migration service is the sole Flyway runner. It applies all ten application
-schemas to the dedicated `trinyx_cloud` database. PostgreSQL initialization
-creates a separate `keycloak` schema in the same dedicated Cloud database.
-Application services set `SPRING_FLYWAY_ENABLED=false`.
-
-Startup order is:
-
-1. PostgreSQL, Redis and MinIO;
-2. MinIO bucket initialization and Keycloak;
-3. migration-service (must exit 0);
-4. Java services, websearch and SearXNG;
-5. cloud-edge after service health checks.
-
-For an existing volume, back it up before migrations. The PostgreSQL
-initialization SQL only runs when the data directory is empty; create the
-`keycloak` schema manually before first Keycloak start if attaching an existing
-database.
-
-## Frontend and Stripe audit
-
-A frontend is not required for the CE/paid-monolith Cloud-link control-plane
-calls; those clients already own their UI. A standalone Cloud console would
-require a separately built Cloud frontend and the missing authenticated gateway.
-Neither is invented by this stack.
-
-Cloud billing code lives in auth-service. This stack requires credentials and
-redirect URLs externally but contains no Stripe Price ID and does not reuse the
-paid-monolith credentials. Before enabling billing traffic, create Cloud-specific
-Stripe TEST products/prices, configure the Cloud plan records, register
-`https://cloud.trinyx.fr/webhooks/stripe` through the eventual gateway, and
-complete a full TEST-mode webhook/idempotency validation. Do not use LIVE mode.
-
-## Validation and commands
-
-From the repository root:
+These commands are documentation only; this PR does not run them:
 
 ```bash
 cp docker/.env.cloud.example docker/.env.cloud
-# Replace every placeholder in docker/.env.cloud.
+# Replace every placeholder using the secret manager.
 
 docker compose --env-file docker/.env.cloud \
   -f docker/docker-compose.cloud.yml config --quiet
 
 docker compose --env-file docker/.env.cloud \
   -f docker/docker-compose.cloud.yml build
-```
 
-Local/staging startup sequence (not a production deployment):
-
-```bash
 docker compose --env-file docker/.env.cloud \
   -f docker/docker-compose.cloud.yml up -d \
   cloud-postgres cloud-redis cloud-minio cloud-minio-init keycloak searxng
@@ -276,32 +326,24 @@ docker compose --env-file docker/.env.cloud \
   -f docker/docker-compose.cloud.yml run --rm migration-service
 
 docker compose --env-file docker/.env.cloud \
-  -f docker/docker-compose.cloud.yml up -d \
-  auth-service catalog-service storage-service conversation-service \
-  datasource-service interface-service agent-service trigger-service \
-  publication-service websearch-service orchestrator-service cloud-edge
+  -f docker/docker-compose.cloud.yml up -d
 ```
 
-Confirm the fail-closed state:
+Before production: generate/rotate keys, configure the paid authority, run
+migration backups/restores, complete the provider-stub E2E, test revoke and
+late settlement, validate WebSocket/CDP behavior, install metrics/alerts and
+capacity-test Chromium.
 
-```bash
-curl -fsS http://127.0.0.1:8188/healthz
-curl -i http://127.0.0.1:8188/api/ce-link/mine
-# Expected: HTTP 503 authenticated_gateway_missing
-```
+## Capacity and remaining external dependencies
 
-Do not run these commands on the paid-monolith host without capacity planning
-and an explicit deployment change. This pull request performs no deployment,
-DNS, Stripe, Keycloak, database or production mutation.
+Do not run this stack on the current 2-vCPU/7.6-GiB/27-GiB-free host.
 
-## Known missing capabilities and risks
+- minimal Cloud without Chromium: 4 vCPU, 16 GiB RAM, 100 GiB disk;
+- full Cloud with websearch/Chromium: 8 vCPU, 32 GiB RAM, 150 GiB disk after a
+  real load test.
 
-- authenticated gateway: hard blocker for production and Cloud-link;
-- no standalone Cloud frontend/control-plane UI;
-- no code-node/Piston-compatible service in the repository; `PISTON_URL` is an external dependency;
-- Stripe Cloud products/prices and webhook registration remain external;
-- Keycloak redirect URIs for arbitrary CE hosts require explicit provisioning;
-- websearch/Chromium is resource-heavy and needs host capacity validation;
-- container tags should be updated only through reviewed dependency maintenance;
-- production backups, observability, alerting and secret-manager integration are
-  operator responsibilities outside this Compose-only change.
+A compatible Piston/code-execution service is not present in this repository
+and remains externally operated. Provider API keys, SMTP, TLS/DNS, backups,
+observability and production secret injection are operator responsibilities.
+No standalone Cloud frontend is required for linked paid-monolith control-plane
+flows.

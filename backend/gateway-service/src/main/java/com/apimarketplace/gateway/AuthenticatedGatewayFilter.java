@@ -49,7 +49,7 @@ final class AuthenticatedGatewayFilter implements GlobalFilter, Ordered {
     @Override
     public Mono<Void> filter(ServerWebExchange exchange, GatewayFilterChain chain) {
         String path = exchange.getRequest().getURI().getPath();
-        if (path.startsWith("/api/internal/")) {
+        if (path.startsWith("/api/internal/") || path.startsWith("/internal/")) {
             exchange.getResponse().setStatusCode(HttpStatus.NOT_FOUND);
             return exchange.getResponse().setComplete();
         }

@@ -1,0 +1,274 @@
+package com.apimarketplace.auth.service;
+
+import com.apimarketplace.common.security.CanonicalJson;
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import org.springframework.http.HttpStatus;
+import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+import org.springframework.web.server.ResponseStatusException;
+
+import java.math.BigDecimal;
+import java.sql.Timestamp;
+import java.time.Duration;
+import java.time.Instant;
+import java.util.UUID;
+
+/**
+ * Idempotent external wallet protocol layered on the existing authoritative CreditService ledger.
+ * No balance is copied to Cloud.
+ */
+@Service
+public class CloudCreditAuthorityService {
+
+    private static final Duration RESERVATION_TTL = Duration.ofMinutes(10);
+    private static final Duration LATE_SETTLEMENT = Duration.ofHours(24);
+    private final JdbcTemplate jdbc;
+    private final CreditService credits;
+    private final ObjectMapper json;
+
+    public CloudCreditAuthorityService(JdbcTemplate jdbc, CreditService credits, ObjectMapper json) {
+        this.jdbc = jdbc;
+        this.credits = credits;
+        this.json = json;
+    }
+
+    @Transactional
+    public ReserveResponse reserve(ReserveRequest request) {
+        validateReserve(request);
+        lock(request.operationId());
+        Existing existing = existing(request.operationId());
+        if (existing != null) {
+            requireSame(existing.requestHash(), request.requestHash(), "OPERATION_ID_CONFLICT");
+            return reserveResponse(existing);
+        }
+
+        long executorUserId = validateAuthorityContext(request);
+        var result = credits.tryReserveMarkup(
+                executorUserId, sourceId(request.operationId()), request.provider(), request.model(),
+                request.maximumCredits(), null, 1440, "CLOUD", request.operationId().toString(), false);
+        if (!result.success()) {
+            throw new ResponseStatusException(HttpStatus.PAYMENT_REQUIRED,
+                    result.delinquent() ? "WALLET_DELINQUENT" : "INSUFFICIENT_CREDITS");
+        }
+
+        Instant now = Instant.now();
+        ReserveResponse response = new ReserveResponse(request.operationId(), request.operationId(),
+                "RESERVED", now.plus(RESERVATION_TTL), result.remainingCredits(), false);
+        jdbc.update("""
+                INSERT INTO auth.cloud_credit_operation
+                (operation_id, reservation_id, request_hash, principal_id, billing_subject_id,
+                 organization_id, install_id, entitlement_sequence, source_type,
+                 estimated_credits, maximum_credits, provider, model, state,
+                 response_payload, expires_at, late_settlement_until)
+                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,'RESERVED',CAST(? AS jsonb),?,?)
+                """, request.operationId(), request.operationId(), request.requestHash(),
+                request.principalId(), request.billingSubjectId(), request.organizationId(),
+                request.installId(), request.entitlementSequence(), request.sourceType(),
+                request.estimatedCredits(), request.maximumCredits(), request.provider(), request.model(),
+                write(response), Timestamp.from(response.expiresAt()),
+                Timestamp.from(response.expiresAt().plus(LATE_SETTLEMENT)));
+        return response;
+    }
+
+    @Transactional
+    public SettlementResponse commit(UUID operationId, CommitRequest request) {
+        lock(operationId);
+        Existing operation = required(operationId);
+        requireSame(operation.requestHash(), request.requestHash(), "REQUEST_HASH_MISMATCH");
+        String settlementHash = CanonicalJson.sha256(json.valueToTree(request));
+
+        if (operation.state().startsWith("COMMITTED")) {
+            requireSame(operation.settlementHash(), settlementHash, "COMMIT_PAYLOAD_CONFLICT");
+            return readSettlement(operation.responsePayload());
+        }
+        if ("RELEASED".equals(operation.state())) {
+            throw conflict("COMMIT_AFTER_RELEASE");
+        }
+        boolean late = "EXPIRED".equals(operation.state());
+        if (late && (operation.lateSettlementUntil() == null
+                || !Instant.now().isBefore(operation.lateSettlementUntil()))) {
+            throw conflict("LATE_SETTLEMENT_WINDOW_CLOSED");
+        }
+
+        CreditService.CommitOutcome outcome = credits.settleExternalReservation(
+                sourceId(operationId), request.actualCredits(), request.provider(),
+                request.model(), late);
+        if (outcome == CreditService.CommitOutcome.RESERVATION_EXPIRED) {
+            throw conflict("RESERVATION_NOT_SETTLEABLE");
+        }
+        boolean delinquent = outcome == CreditService.CommitOutcome.COMMITTED_PARTIAL
+                || outcome == CreditService.CommitOutcome.COMMITTED_FLOORED;
+        String state = delinquent ? "COMMITTED_DELINQUENT" : "COMMITTED";
+        BigDecimal balance = credits.getBalance(operation.executorUserId());
+        SettlementResponse response = new SettlementResponse(operationId, state,
+                request.actualCredits(), balance, delinquent, outcome.name());
+        jdbc.update("""
+                UPDATE auth.cloud_credit_operation
+                SET state=?, actual_credits=?, provider=?, model=?, provider_request_id=?,
+                    settlement_hash=?, response_payload=CAST(? AS jsonb), updated_at=now()
+                WHERE operation_id=?
+                """, state, request.actualCredits(), request.provider(), request.model(),
+                request.providerRequestId(), settlementHash, write(response), operationId);
+        return response;
+    }
+
+    @Transactional
+    public SettlementResponse release(UUID operationId, ReleaseRequest request) {
+        lock(operationId);
+        Existing operation = required(operationId);
+        requireSame(operation.requestHash(), request.requestHash(), "REQUEST_HASH_MISMATCH");
+        String settlementHash = CanonicalJson.sha256(json.valueToTree(request));
+
+        if ("RELEASED".equals(operation.state())) {
+            requireSame(operation.settlementHash(), settlementHash, "RELEASE_PAYLOAD_CONFLICT");
+            return readSettlement(operation.responsePayload());
+        }
+        if (operation.state().startsWith("COMMITTED")) throw conflict("RELEASE_AFTER_COMMIT");
+        CreditService.ReleaseOutcome outcome = credits.releaseReservation(
+                sourceId(operationId), "cloud-release:" + safeReason(request.reason()));
+        SettlementResponse response = new SettlementResponse(operationId, "RELEASED",
+                BigDecimal.ZERO, credits.getBalance(operation.executorUserId()), false, outcome.name());
+        jdbc.update("""
+                UPDATE auth.cloud_credit_operation
+                SET state='RELEASED', settlement_hash=?, response_payload=CAST(? AS jsonb), updated_at=now()
+                WHERE operation_id=?
+                """, settlementHash, write(response), operationId);
+        return response;
+    }
+
+    @Transactional
+    public int expireDueReservations() {
+        var ids = jdbc.query("""
+                SELECT operation_id FROM auth.cloud_credit_operation
+                WHERE state='RESERVED' AND expires_at <= now() FOR UPDATE SKIP LOCKED
+                LIMIT 100
+                """, (rs, row) -> rs.getObject(1, UUID.class));
+        for (UUID id : ids) {
+            credits.releaseReservation(sourceId(id), "auto-release-timeout:cloud");
+            jdbc.update("UPDATE auth.cloud_credit_operation SET state='EXPIRED', updated_at=now() WHERE operation_id=?",
+                    id);
+        }
+        return ids.size();
+    }
+
+    private long validateAuthorityContext(ReserveRequest request) {
+        var users = jdbc.query("""
+                SELECT actor.id
+                FROM auth.users actor
+                JOIN auth.organization_member member ON member.user_id=actor.id
+                WHERE actor.principal_id=? AND actor.billing_subject_id=?
+                  AND member.organization_id=?
+                """, (rs, row) -> rs.getLong(1), request.principalId(),
+                request.billingSubjectId(), request.organizationId());
+        if (users.size() != 1) throw new ResponseStatusException(HttpStatus.FORBIDDEN, "PAYER_BINDING_INVALID");
+        long userId = users.getFirst();
+
+        Integer linked = jdbc.queryForObject("""
+                SELECT count(*) FROM publication.ce_cloud_links
+                WHERE install_id=? AND tenant_id=?
+                """, Integer.class, request.installId(), userId);
+        if (linked == null || linked != 1) {
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "INSTALL_BINDING_INVALID");
+        }
+
+        Integer entitled = jdbc.queryForObject("""
+                SELECT count(*) FROM auth.entitlement_authority_state
+                WHERE issuer='https://app.trinyx.fr' AND install_id=? AND organization_id=?
+                  AND billing_subject_id=? AND sequence=?
+                  AND access_state IN ('ACTIVE','GRACE') AND expires_at > now()
+                """, Integer.class, request.installId(), request.organizationId(),
+                request.billingSubjectId(), request.entitlementSequence());
+        if (entitled == null || entitled != 1) {
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "ENTITLEMENT_SEQUENCE_INVALID");
+        }
+        return userId;
+    }
+
+    private void validateReserve(ReserveRequest request) {
+        if (request == null || request.operationId() == null || request.principalId() == null
+                || request.billingSubjectId() == null || request.organizationId() == null
+                || request.installId() == null || request.entitlementSequence() <= 0
+                || request.requestHash() == null || !request.requestHash().matches("[0-9a-f]{64}")
+                || request.maximumCredits() == null || request.maximumCredits().signum() <= 0
+                || request.estimatedCredits() == null || request.estimatedCredits().signum() < 0
+                || request.estimatedCredits().compareTo(request.maximumCredits()) > 0) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "INVALID_RESERVATION");
+        }
+    }
+
+    private void lock(UUID operationId) {
+        jdbc.query("SELECT pg_advisory_xact_lock(hashtext(?))",
+                (org.springframework.jdbc.core.RowCallbackHandler) rs -> { }, operationId.toString());
+    }
+
+    private Existing required(UUID id) {
+        Existing row = existing(id);
+        if (row == null) throw new ResponseStatusException(HttpStatus.NOT_FOUND, "RESERVATION_NOT_FOUND");
+        return row;
+    }
+
+    private Existing existing(UUID id) {
+        var rows = jdbc.query("""
+                SELECT o.operation_id, o.request_hash, o.settlement_hash, o.state,
+                       o.response_payload::text, o.late_settlement_until, u.id AS executor_user_id
+                FROM auth.cloud_credit_operation o
+                JOIN auth.users u ON u.principal_id=o.principal_id
+                WHERE o.operation_id=? FOR UPDATE
+                """, (rs, row) -> new Existing(rs.getObject("operation_id", UUID.class),
+                rs.getString("request_hash"), rs.getString("settlement_hash"), rs.getString("state"),
+                rs.getString("response_payload"),
+                rs.getTimestamp("late_settlement_until") == null ? null
+                        : rs.getTimestamp("late_settlement_until").toInstant(),
+                rs.getLong("executor_user_id")), id);
+        return rows.isEmpty() ? null : rows.getFirst();
+    }
+
+    private ReserveResponse reserveResponse(Existing existing) {
+        try { return json.readValue(existing.responsePayload(), ReserveResponse.class); }
+        catch (Exception e) { throw new IllegalStateException("Stored reservation response is invalid", e); }
+    }
+
+    private SettlementResponse readSettlement(String value) {
+        try { return json.readValue(value, SettlementResponse.class); }
+        catch (Exception e) { throw new IllegalStateException("Stored settlement response is invalid", e); }
+    }
+
+    private String write(Object value) {
+        try { return json.writeValueAsString(value); }
+        catch (Exception e) { throw new IllegalStateException("Could not serialize wallet response", e); }
+    }
+
+    private static void requireSame(String existing, String incoming, String code) {
+        if (existing == null || !existing.equals(incoming)) throw conflict(code);
+    }
+    private static ResponseStatusException conflict(String code) {
+        return new ResponseStatusException(HttpStatus.CONFLICT, code);
+    }
+    private static String sourceId(UUID id) { return "cloud-reservation:" + id; }
+    private static String safeReason(String reason) {
+        if (reason == null) return "client";
+        return reason.replaceAll("[^A-Za-z0-9._:-]", "_").substring(0, Math.min(reason.length(), 64));
+    }
+
+    private record Existing(UUID operationId, String requestHash, String settlementHash,
+                            String state, String responsePayload, Instant lateSettlementUntil,
+                            long executorUserId) {}
+
+    public record ReserveRequest(UUID operationId, UUID principalId, UUID billingSubjectId,
+                                 UUID organizationId, UUID installId, long entitlementSequence,
+                                 String sourceType, BigDecimal estimatedCredits,
+                                 BigDecimal maximumCredits, String provider, String model,
+                                 String requestHash) {}
+    public record CommitRequest(BigDecimal actualCredits, String provider, String model,
+                                String providerRequestId, Long promptTokens, Long completionTokens,
+                                String requestHash) {}
+    public record ReleaseRequest(String reason, String requestHash) {}
+    public record ReserveResponse(UUID operationId, UUID reservationId, String state,
+                                  Instant expiresAt, BigDecimal authoritativeBalance,
+                                  boolean delinquent) {}
+    public record SettlementResponse(UUID operationId, String state, BigDecimal actualCredits,
+                                     BigDecimal authoritativeBalance, boolean delinquent,
+                                     String outcome) {}
+}

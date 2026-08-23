@@ -38,6 +38,27 @@ class AppEditionAutoConfigurationTest {
     }
 
     @Test
+    @DisplayName("app.edition=paid-monolith registers paid embedded monolith")
+    void explicitPaidMonolithEdition() {
+        contextRunner
+                .withPropertyValues(
+                        "spring.profiles.active=ce",
+                        "app.edition=paid-monolith",
+                        "deployment.mode=monolith",
+                        "auth.mode=embedded",
+                        "credit.unlimited=false",
+                        "plan-limits.enabled=true",
+                        "billing.provider=stripe")
+                .run(context -> {
+                    AppEditionProvider provider = context.getBean(AppEditionProvider.class);
+                    assertThat(context).hasNotFailed();
+                    assertThat(provider.get()).isEqualTo(AppEditionProvider.AppEdition.PAID_MONOLITH);
+                    assertThat(provider.isPaidMonolith()).isTrue();
+                    assertThat(provider.isSelfHosted()).isTrue();
+                });
+    }
+
+    @Test
     @DisplayName("app.edition=self-hosted-enterprise registers Self-Hosted Enterprise")
     void explicitSelfHostedEnterpriseEdition() {
         contextRunner

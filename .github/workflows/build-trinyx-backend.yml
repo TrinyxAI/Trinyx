@@ -1,0 +1,123 @@
+name: Build Trinyx Backend
+
+on:
+  pull_request:
+    paths:
+      - 'backend/**'
+      - 'docker-compose.yml'
+      - '.github/workflows/build-trinyx-backend.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'backend/**'
+      - 'docker-compose.yml'
+      - '.github/workflows/build-trinyx-backend.yml'
+  workflow_dispatch:
+
+concurrency:
+  group: trinyx-backend-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  packages: write
+
+env:
+  BACKEND_IMAGE: ghcr.io/eddinerabii/trinyx-backend
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+          cache: maven
+      - name: Compile and install the required reactor graph
+        run: >-
+          mvn -B -Pce -DskipTests
+          -pl common-lib,auth-service,monolith-service
+          -am install
+      - name: Run paid-monolith affected tests
+        run: >-
+          mvn -B -Pce
+          -pl common-lib,auth-service,monolith-service
+          -Dsurefire.failIfNoSpecifiedTests=false
+          -Dtest=AppEditionProviderTest,AppEditionAutoConfigurationTest,MonolithCeConfigContractTest,WebhookControllerTest,StripeBillingServiceTest,StripeScheduleServiceTest,SubscriptionServiceTest,FreeSubscriptionProvisionerTest,FreeSubscriptionRenewalSchedulerTest,CreditAttributionGrantPaygTopupTest,CreditLedgerRepositoryLockIntegrationTest,CreditServiceTest,CreditControllerTest,CreditConsumptionClientTest,GatewayAuthenticationFilterTest,ModelPricingServiceTest,PlanLimitServiceTest,BillingControllerTest,BillingControllerIntegrationTest,StripeHealthIndicatorTest
+          test
+
+  frontend-test:
+    name: frontend-test (${{ matrix.mode }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - mode: ce
+            app-edition: ce
+            auth-mode: ''
+            billing-enabled: ''
+          - mode: paid-monolith
+            app-edition: paid-monolith
+            auth-mode: embedded
+            billing-enabled: 'true'
+          - mode: cloud
+            app-edition: cloud
+            auth-mode: oidc
+            billing-enabled: ''
+    defaults:
+      run:
+        working-directory: frontend
+    env:
+      NEXT_PUBLIC_APP_EDITION: ${{ matrix.app-edition }}
+      NEXT_PUBLIC_AUTH_MODE: ${{ matrix.auth-mode }}
+      NEXT_PUBLIC_BILLING_ENABLED: ${{ matrix.billing-enabled }}
+      NEXT_PUBLIC_SPRING_BASE_URL: http://livecontext-app:8080
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22.13'
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - run: npm ci
+      - name: Restore npm optional native binding
+        run: npm install --no-save @rolldown/binding-linux-x64-gnu
+      - name: Run edition frontend tests
+        run: >-
+          npx vitest run
+          __tests__/lib/edition/edition.test.ts
+          __tests__/components/settings/settingsNavItems.test.ts
+      - name: Build frontend (${{ matrix.mode }})
+        run: npm run build
+
+  build:
+    needs: [test, frontend-test]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - name: Log in to GHCR
+        if: github.event_name != 'pull_request'
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Build backend monolith image
+        uses: docker/build-push-action@v6
+        with:
+          context: ./backend
+          file: ./backend/monolith-service/Dockerfile
+          platforms: linux/amd64
+          push: ${{ github.event_name != 'pull_request' }}
+          tags: |
+            ${{ env.BACKEND_IMAGE }}:${{ github.sha }}
+            ${{ env.BACKEND_IMAGE }}:latest
+          cache-from: type=gha,scope=trinyx-backend
+          cache-to: type=gha,mode=max,scope=trinyx-backend

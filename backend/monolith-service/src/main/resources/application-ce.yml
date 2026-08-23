@@ -116,6 +116,7 @@ spring:
 
 # App configuration (auth-service needs these)
 app:
+  edition: ${APP_EDITION:ce}
   mail:
     from: ${MAIL_FROM:noreply@livecontext.local}
     from-name: LiveContext
@@ -170,11 +171,11 @@ oauth2:
 
 # Monolith mode: disables GatewayAuthenticationFilter, enables MonolithSecurityFilter
 deployment:
-  mode: monolith
+  mode: ${DEPLOYMENT_MODE:monolith}
 
 # Embedded auth: enables JwtKeyPairManager, PasswordAuthService, EmbeddedAuthController
 auth:
-  mode: embedded
+  mode: ${AUTH_MODE:embedded}
   jwt:
     issuer: ${AUTH_JWT_ISSUER:livecontext}
     keys-path: ${AUTH_JWT_KEYS_PATH:./data/keys}
@@ -301,10 +302,13 @@ gateway:
   filter:
     verification-enabled: false
     secret-key: not-used-in-monolith
+    # Stripe signs the raw request body; keep this exact route anonymous.
+    public-paths:
+      - /webhooks/stripe
 
 # Plan limits: disabled in CE (all resources are unlimited)
 plan-limits:
-  enabled: false
+  enabled: ${PLAN_LIMITS_ENABLED:false}
 
 # Rate limit: disabled in CE. RateLimitConfig defaults to true; without this
 # override a CE deployer who configures a provider limit env var would
@@ -319,13 +323,13 @@ rate-limit:
 # credit.consumption below, so users still see their real $ spend; only the per-node fee is off.
 workflow:
   node-billing:
-    enabled: false
+    enabled: ${WORKFLOW_NODE_BILLING_ENABLED:false}
 
 # Credits: unlimited in CE (consumption is tracked for metrics/analytics but balance is always infinite)
 credit:
   consumption:
-    enabled: true
-  unlimited: true
+    enabled: ${CREDIT_CONSUMPTION_ENABLED:true}
+  unlimited: ${CREDIT_UNLIMITED:true}
   # Model pricing seed - same as auth-service.
   # Rate = USD per 1M tokens. Formula: credits = rate × tokens / 1000 (1 credit = $0.001).
   pricing:
@@ -385,8 +389,10 @@ credit:
       - { provider: deepseek, model: deepseek-coder,    inputRate: 0.28, outputRate: 0.42 }
       - { provider: deepseek, model: deepseek-reasoner, inputRate: 0.28, outputRate: 0.42 }
 
-# Billing: disabled in CE (no Stripe). A self-hosted CE install bills at the REAL
-# provider price - NO gross margin. The managed-cloud 1.8x LLM multiplier
+# Billing remains disabled in free CE by default. Paid monolith opts into Stripe,
+# finite credits and an explicit LLM multiplier without changing auth topology.
+# A default self-hosted CE install bills at the REAL provider price - NO gross margin.
+# The managed-cloud 1.8x LLM multiplier
 # (billing.llm.cloud-multiplier, ModelPricingService) and the platform-credential
 # markup are cloud REVENUE levers; they must NOT apply to a self-hosted install, so
 # here they default to neutral (1.0 / off) and the recorded/displayed consumption is
@@ -396,24 +402,26 @@ credit:
 # true cache-weighted provider cost, not a flat per-token approximation. Both levers
 # stay env-overridable for a CE operator who deliberately resells with a margin.
 billing:
-  provider: none
+  provider: ${BILLING_PROVIDER:none}
   llm:
     cloud-multiplier: ${BILLING_LLM_CLOUD_MULTIPLIER:1.0}
   stripe:
-    secretKey: ""
-    webhookSecret: ""
-    successUrl: http://localhost:8080
-    cancelUrl: http://localhost:8080
-    currency: usd
+    secretKey: ${STRIPE_SECRET_KEY:}
+    webhookSecret: ${STRIPE_WEBHOOK_SECRET:}
+    successUrl: ${STRIPE_SUCCESS_URL:${APP_PUBLIC_URL:http://localhost:3000}/app/settings/pricing?checkout=success}
+    cancelUrl: ${STRIPE_CANCEL_URL:${APP_PUBLIC_URL:http://localhost:3000}/app/settings/pricing?checkout=cancelled}
+    currency: ${STRIPE_CURRENCY:usd}
     prices:
       FREE: ""
       STARTER: ""
       PRO: ""
+      TEAM: ""
       ENTERPRISE: ""
       PAYG: ""
 
-# Platform-credential markup OFF in CE: no reseller margin on platform-provided
-# credentials (mirrors billing.llm.cloud-multiplier=1.0 above - real cost only).
+# Platform-credential markup stays off in free CE. Paid monolith may opt in so
+# image generation, web tools and other platform-key calls use the existing
+# reservation/commit billing lifecycle.
 credentials:
   platform:
     markup:

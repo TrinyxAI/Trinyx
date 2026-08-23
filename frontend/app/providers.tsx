@@ -6,7 +6,7 @@ import FirstLoginGuard from '../components/security/FirstLoginGuard';
 import { AppDataProvider, LOGIN_SIGNIN_AT_KEY, LOGIN_REDIRECT_LOG_KEY } from '../lib/providers/smart-providers';
 import { EmbeddedAuthProvider } from '../lib/providers/embedded-auth-provider';
 import AnalyticsProvider from '../components/analytics/AnalyticsProvider';
-import { IS_CE } from '../lib/edition';
+import { IS_CE, IS_EMBEDDED_AUTH } from '../lib/edition';
 
 // Persist OIDC user in localStorage (vs default sessionStorage) so that opening the app
 // in a new tab - or closing/reopening the tab - finds the previously stored user and can
@@ -49,7 +49,7 @@ export default function Providers({ children }: { children: React.ReactNode }) {
     </ThemeProvider>
   );
 
-  if (IS_CE) {
+  if (IS_EMBEDDED_AUTH) {
     return (
       <EmbeddedAuthProvider>
         {inner}

@@ -36,6 +36,14 @@ describe('edition resolver - precedence', () => {
         expect(warnSpy).not.toHaveBeenCalled();
     });
 
+    it('APP_EDITION=paid-monolith + AUTH_MODE=embedded → ce, no warn', async () => {
+        vi.stubEnv('NEXT_PUBLIC_APP_EDITION', 'paid-monolith');
+        vi.stubEnv('NEXT_PUBLIC_AUTH_MODE', 'embedded');
+        const { EDITION } = await importEdition();
+        expect(EDITION).toBe('ce');
+        expect(warnSpy).not.toHaveBeenCalled();
+    });
+
     it('APP_EDITION=cloud + AUTH_MODE=oidc → cloud, no warn', async () => {
         vi.stubEnv('NEXT_PUBLIC_APP_EDITION', 'cloud');
         vi.stubEnv('NEXT_PUBLIC_AUTH_MODE', 'oidc');
@@ -191,5 +199,77 @@ describe('useEdition hook', () => {
         vi.stubEnv('NEXT_PUBLIC_AUTH_MODE', '');
         const { useEdition } = await import('../../../lib/edition/useEdition');
         expect(useEdition()).toBe('ce');
+    });
+});
+
+
+describe('billing capability', () => {
+    let warnSpy: ReturnType<typeof vi.spyOn>;
+
+    beforeEach(() => {
+        vi.resetModules();
+        warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    });
+
+    afterEach(() => {
+        vi.unstubAllEnvs();
+        warnSpy.mockRestore();
+    });
+
+    it('keeps legacy CE on embedded auth when AUTH_MODE is absent', async () => {
+        vi.stubEnv('NEXT_PUBLIC_APP_EDITION', 'ce');
+        vi.stubEnv('NEXT_PUBLIC_AUTH_MODE', '');
+        vi.stubEnv('NEXT_PUBLIC_BILLING_ENABLED', '');
+
+        const { IS_CE, IS_EMBEDDED_AUTH, IS_COMMUNITY_EDITION } =
+            await importEdition();
+
+        expect(IS_CE).toBe(true);
+        expect(IS_EMBEDDED_AUTH).toBe(true);
+        expect(IS_COMMUNITY_EDITION).toBe(true);
+    });
+
+    it('keeps embedded authentication while enabling paid-monolith billing', async () => {
+        vi.stubEnv('NEXT_PUBLIC_APP_EDITION', 'paid-monolith');
+        vi.stubEnv('NEXT_PUBLIC_AUTH_MODE', 'embedded');
+        vi.stubEnv('NEXT_PUBLIC_BILLING_ENABLED', 'true');
+
+        const {
+            IS_BILLING_ENABLED,
+            IS_COMMUNITY_EDITION,
+            IS_EMBEDDED_AUTH,
+            IS_PAID_MONOLITH,
+        } = await importEdition();
+
+        expect(IS_EMBEDDED_AUTH).toBe(true);
+        expect(IS_BILLING_ENABLED).toBe(true);
+        expect(IS_PAID_MONOLITH).toBe(true);
+        expect(IS_COMMUNITY_EDITION).toBe(false);
+    });
+
+    it('keeps free CE billing disabled by default', async () => {
+        vi.stubEnv('NEXT_PUBLIC_APP_EDITION', 'ce');
+        vi.stubEnv('NEXT_PUBLIC_AUTH_MODE', 'embedded');
+        vi.stubEnv('NEXT_PUBLIC_BILLING_ENABLED', '');
+
+        const { IS_BILLING_ENABLED, IS_COMMUNITY_EDITION, IS_PAID_MONOLITH } =
+            await importEdition();
+
+        expect(IS_BILLING_ENABLED).toBe(false);
+        expect(IS_PAID_MONOLITH).toBe(false);
+        expect(IS_COMMUNITY_EDITION).toBe(true);
+    });
+
+    it('keeps managed cloud billing enabled when no explicit flag is provided', async () => {
+        vi.stubEnv('NEXT_PUBLIC_APP_EDITION', 'cloud');
+        vi.stubEnv('NEXT_PUBLIC_AUTH_MODE', 'oidc');
+        vi.stubEnv('NEXT_PUBLIC_BILLING_ENABLED', '');
+
+        const { IS_BILLING_ENABLED, IS_EMBEDDED_AUTH, IS_PAID_MONOLITH } =
+            await importEdition();
+
+        expect(IS_EMBEDDED_AUTH).toBe(false);
+        expect(IS_BILLING_ENABLED).toBe(true);
+        expect(IS_PAID_MONOLITH).toBe(false);
     });
 });

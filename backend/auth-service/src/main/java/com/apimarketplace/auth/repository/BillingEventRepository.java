@@ -2,9 +2,11 @@ package com.apimarketplace.auth.repository;
 
 import com.apimarketplace.auth.domain.BillingEvent;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
 import java.util.List;
@@ -16,6 +18,53 @@ public interface BillingEventRepository extends JpaRepository<BillingEvent, Long
     Optional<BillingEvent> findByEventId(String eventId);
 
     boolean existsByEventId(String eventId);
+
+    @Modifying(clearAutomatically = true, flushAutomatically = true)
+    @Transactional
+    @Query("""
+            UPDATE BillingEvent be
+               SET be.status = 'PROCESSING',
+                   be.attemptCount = be.attemptCount + 1,
+                   be.processingStartedAt = :startedAt,
+                   be.lastError = NULL
+             WHERE be.eventId = :eventId
+               AND (
+                    be.status IN ('RECEIVED', 'FAILED')
+                    OR (be.status = 'PROCESSING'
+                        AND (be.processingStartedAt IS NULL
+                             OR be.processingStartedAt < :staleBefore))
+               )
+            """)
+    int claimForProcessing(@Param("eventId") String eventId,
+                           @Param("startedAt") LocalDateTime startedAt,
+                           @Param("staleBefore") LocalDateTime staleBefore);
+
+    @Modifying(clearAutomatically = true, flushAutomatically = true)
+    @Transactional
+    @Query("""
+            UPDATE BillingEvent be
+               SET be.status = 'PROCESSED',
+                   be.processingStartedAt = NULL,
+                   be.processedAt = :processedAt,
+                   be.lastError = NULL
+             WHERE be.eventId = :eventId
+               AND be.status = 'PROCESSING'
+            """)
+    int markProcessed(@Param("eventId") String eventId,
+                      @Param("processedAt") LocalDateTime processedAt);
+
+    @Modifying(clearAutomatically = true, flushAutomatically = true)
+    @Transactional
+    @Query("""
+            UPDATE BillingEvent be
+               SET be.status = 'FAILED',
+                   be.processingStartedAt = NULL,
+                   be.lastError = :lastError
+             WHERE be.eventId = :eventId
+               AND be.status = 'PROCESSING'
+            """)
+    int markFailed(@Param("eventId") String eventId,
+                   @Param("lastError") String lastError);
 
     List<BillingEvent> findByType(String type);
 

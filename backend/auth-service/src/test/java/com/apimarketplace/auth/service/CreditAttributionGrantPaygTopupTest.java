@@ -1,5 +1,6 @@
 package com.apimarketplace.auth.service;
 
+import com.apimarketplace.auth.domain.CreditLedgerEntry;
 import com.apimarketplace.auth.repository.CreditLedgerRepository;
 import com.apimarketplace.auth.repository.SubscriptionRepository;
 import com.apimarketplace.auth.service.CreditService.CreditConsumeResult;
@@ -12,6 +13,7 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
 import java.math.BigDecimal;
+import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -113,4 +115,90 @@ class CreditAttributionGrantPaygTopupTest {
         verify(creditService).grantCredits(any(), any(), any(), any(), descCaptor.capture());
         assertThat(descCaptor.getValue()).contains("?");  // null tier rendered as "?"
     }
+    @Test
+    @DisplayName("partial refunds claw back only the cumulative outstanding PAYG delta")
+    void partialRefundsDoNotOverRevoke() {
+        CreditLedgerEntry original = new CreditLedgerEntry();
+        original.setUserId(USER_ID);
+        original.setAmount(new BigDecimal("8000"));
+        original.setSourceType("PAYG_TOPUP");
+        original.setSourceId(SESSION_ID);
+
+        when(ledgerRepository.findFirstBySourceIdForUpdate(SESSION_ID)).thenReturn(Optional.of(original));
+        when(ledgerRepository.sumPaygClawbacks(SESSION_ID + ":clawback:"))
+                .thenReturn(BigDecimal.ZERO)
+                .thenReturn(new BigDecimal("-4000"));
+        when(ledgerRepository.existsBySourceId(any())).thenReturn(false);
+        when(creditService.grantCredits(any(), any(), any(), any(), any()))
+                .thenReturn(CreditConsumeResult.success(BigDecimal.ZERO, BigDecimal.ZERO));
+
+        attributionService.clawbackPaygTopup(
+                SESSION_ID, new BigDecimal("0.5"), "refund:ch_1:500", "REFUNDED");
+        attributionService.clawbackPaygTopup(
+                SESSION_ID, BigDecimal.ONE, "refund:ch_1:1000", "REFUNDED");
+
+        ArgumentCaptor<BigDecimal> amountCaptor = ArgumentCaptor.forClass(BigDecimal.class);
+        verify(creditService, org.mockito.Mockito.times(2)).grantCredits(
+                eq(USER_ID), amountCaptor.capture(), eq("PAYG_REFUND"),
+                any(), any());
+        assertThat(amountCaptor.getAllValues())
+                .containsExactly(new BigDecimal("-4000.0"), new BigDecimal("-4000"));
+    }
+
+    @Test
+    @DisplayName("a dispute revokes the full original PAYG grant")
+    void disputeRevokesFullGrant() {
+        CreditLedgerEntry original = new CreditLedgerEntry();
+        original.setUserId(USER_ID);
+        original.setAmount(new BigDecimal("8000"));
+        original.setSourceType("PAYG_TOPUP");
+        original.setSourceId(SESSION_ID);
+
+        when(ledgerRepository.findFirstBySourceIdForUpdate(SESSION_ID)).thenReturn(Optional.of(original));
+        when(ledgerRepository.sumPaygClawbacks(SESSION_ID + ":clawback:"))
+                .thenReturn(BigDecimal.ZERO);
+        when(ledgerRepository.existsBySourceId(any())).thenReturn(false);
+        when(creditService.grantCredits(any(), any(), any(), any(), any()))
+                .thenReturn(CreditConsumeResult.success(BigDecimal.ZERO, BigDecimal.ZERO));
+
+        attributionService.clawbackPaygTopup(
+                SESSION_ID, BigDecimal.ONE, "dispute:ch_1", "DISPUTED");
+
+        verify(creditService).grantCredits(
+                USER_ID, new BigDecimal("-8000"), "PAYG_DISPUTE",
+                SESSION_ID + ":clawback:dispute:ch_1", "PAYG DISPUTED for checkout " + SESSION_ID);
+    }
+
+
+    @Test
+    @DisplayName("refund before checkout grant remains retryable")
+    void refundBeforeCheckoutGrantThrows() {
+        when(ledgerRepository.findFirstBySourceIdForUpdate(SESSION_ID)).thenReturn(Optional.empty());
+
+        assertThatThrownBy(() -> attributionService.clawbackPaygTopup(
+                SESSION_ID, BigDecimal.ONE, "refund:ch_early", "REFUNDED"))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("top-up grant not found yet");
+
+        verify(creditService, never()).grantCredits(any(), any(), any(), any(), any());
+    }
+
+    @Test
+    @DisplayName("PAYG clawback is transactionally serialized on the original top-up row")
+    void clawbackUsesPostgresPessimisticLock() throws Exception {
+        var serviceMethod = CreditAttributionService.class.getMethod(
+                "clawbackPaygTopup", String.class, BigDecimal.class,
+                String.class, String.class);
+        assertThat(serviceMethod.isAnnotationPresent(
+                org.springframework.transaction.annotation.Transactional.class)).isTrue();
+
+        var repositoryMethod = CreditLedgerRepository.class.getMethod(
+                "findFirstBySourceIdForUpdate", String.class);
+        var lock = repositoryMethod.getAnnotation(
+                org.springframework.data.jpa.repository.Lock.class);
+        assertThat(lock).isNotNull();
+        assertThat(lock.value()).isEqualTo(
+                jakarta.persistence.LockModeType.PESSIMISTIC_WRITE);
+    }
+
 }

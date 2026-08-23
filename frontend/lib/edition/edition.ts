@@ -10,6 +10,7 @@
  *   APP_EDITION  AUTH_MODE         Result
  *   -----------  ----------------  ------
  *   ce           any               ce
+ *   paid-monolith embedded         ce + explicit billing capability
  *   cloud        oidc / empty      cloud
  *   cloud        embedded          ce      (warn - auth path wins defensively)
  *   unset/empty  embedded          ce      (legacy shim - kept for one release)
@@ -25,6 +26,11 @@ export type Edition = 'ce' | 'cloud';
 function resolve(): Edition {
     const explicit = (process.env.NEXT_PUBLIC_APP_EDITION ?? '').trim().toLowerCase();
     const auth = (process.env.NEXT_PUBLIC_AUTH_MODE ?? '').trim().toLowerCase();
+
+    if (explicit === 'paid-monolith' || explicit === 'monolith-paid'
+            || explicit === 'paid-self-hosted') {
+        return 'ce';
+    }
 
     if (explicit === 'ce' || explicit === 'cloud') {
         if (explicit === 'cloud' && auth === 'embedded') {
@@ -63,7 +69,7 @@ export const IS_CLOUD = EDITION === 'cloud';
 const SELF_HOSTED_VALUES = new Set([
     'ce', 'ce-free', 'community', 'community-edition',
     'self-hosted-enterprise', 'self-hosted', 'selfhosted-enterprise', 'selfhosted',
-    'enterprise-self-hosted',
+    'enterprise-self-hosted', 'paid-monolith', 'monolith-paid', 'paid-self-hosted',
 ]);
 
 /** Values that mean managed cloud (`AppEditionProvider.isManagedCloud()`). */
@@ -100,3 +106,34 @@ function resolveManagedCloud(): boolean {
 }
 
 export const IS_MANAGED_CLOUD = resolveManagedCloud();
+
+
+/**
+ * Authentication topology is independent from commercial capabilities.
+ * Paid monolith keeps the CE embedded JWT flow while enabling local Stripe billing.
+ */
+function resolveEmbeddedAuth(): boolean {
+    const configured = (process.env.NEXT_PUBLIC_AUTH_MODE ?? '').trim().toLowerCase();
+    if (configured) return configured === 'embedded';
+    // Backward compatibility: legacy CE builds often only set APP_EDITION=ce.
+    // Paid monolith also resolves through the CE binary edition and therefore
+    // keeps its required embedded auth when the backend uses its embedded default.
+    return IS_CE;
+}
+
+export const IS_EMBEDDED_AUTH = resolveEmbeddedAuth();
+
+/**
+ * Local billing capability. Managed Cloud always has billing; a self-hosted build
+ * opts in explicitly for the paid-monolith deployment.
+ */
+function resolveBillingEnabled(): boolean {
+    const configured = (process.env.NEXT_PUBLIC_BILLING_ENABLED ?? '').trim().toLowerCase();
+    if (configured === 'true') return true;
+    if (configured === 'false') return false;
+    return IS_CLOUD;
+}
+
+export const IS_BILLING_ENABLED = resolveBillingEnabled();
+export const IS_PAID_MONOLITH = IS_CE && IS_EMBEDDED_AUTH && IS_BILLING_ENABLED;
+export const IS_COMMUNITY_EDITION = IS_CE && !IS_BILLING_ENABLED;

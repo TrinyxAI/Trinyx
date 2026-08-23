@@ -515,6 +515,59 @@ public class CreditAttributionService {
     }
 
     /**
+     * Claw back PAYG credits after a Stripe refund or dispute. The target is
+     * cumulative, while the ledger write is only the outstanding delta, so
+     * repeated partial-refund events cannot over-revoke a purchase.
+     */
+    @Transactional
+    public void clawbackPaygTopup(String sessionId,
+                                  BigDecimal cumulativeFraction,
+                                  String eventKey,
+                                  String reason) {
+        if (sessionId == null || sessionId.isBlank()) {
+            throw new IllegalArgumentException("PAYG session id required for clawback");
+        }
+        BigDecimal fraction = cumulativeFraction == null
+                ? BigDecimal.ZERO
+                : cumulativeFraction.max(BigDecimal.ZERO).min(BigDecimal.ONE);
+
+        // Serialize every cumulative refund/dispute for this checkout on its
+        // immutable PAYG_TOPUP ledger row. The surrounding transaction keeps
+        // this PostgreSQL row lock until the delta and wallet ledger entry commit.
+        var original = ledgerRepository.findFirstBySourceIdForUpdate(sessionId).orElse(null);
+        if (original == null || !"PAYG_TOPUP".equals(original.getSourceType())) {
+            // Stripe may deliver a refund/dispute before checkout.completed. Fail
+            // retryably so this event cannot be acknowledged before the grant exists.
+            throw new IllegalStateException(
+                    "PAYG top-up grant not found yet for checkout " + sessionId);
+        }
+
+        String prefix = sessionId + ":clawback:";
+        BigDecimal target = original.getAmount().multiply(fraction);
+        BigDecimal alreadyRevoked = ledgerRepository.sumPaygClawbacks(prefix).negate();
+        BigDecimal delta = target.subtract(alreadyRevoked);
+        if (delta.signum() <= 0) {
+            log.info("PAYG clawback already current for sessionId={} target={}", sessionId, target);
+            return;
+        }
+
+        String sourceId = prefix + eventKey;
+        if (ledgerRepository.existsBySourceId(sourceId)) {
+            return;
+        }
+        String sourceType = "DISPUTED".equalsIgnoreCase(reason)
+                ? "PAYG_DISPUTE" : "PAYG_REFUND";
+        CreditConsumeResult result = creditService.grantCredits(
+                original.getUserId(), delta.negate(), sourceType, sourceId,
+                "PAYG " + reason + " for checkout " + sessionId);
+        if (!result.success()) {
+            throw new IllegalStateException("PAYG clawback failed: " + result.error());
+        }
+        log.warn("Revoked {} PAYG credits from userId={} sessionId={} reason={}",
+                delta, original.getUserId(), sessionId, reason);
+    }
+
+    /**
      * Grant plan-included credits for plans that have includedLlmTokens (e.g. FREE plan).
      * Used when no credit pack is attached (creditQuantity = 0).
      */

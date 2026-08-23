@@ -9,7 +9,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { quotaApi, CreditSummary, CreditHistoryPage } from '@/lib/api';
 import { useAuth } from '@/lib/providers/smart-providers';
 import UsageAnalyticsPanel from './components/UsageAnalyticsPanel';
-import { isCeMode, creditsToUsd } from '@/lib/format-cost';
+import { showsDollarCost, creditsToUsd } from '@/lib/format-cost';
 import { formatUtcDateTime } from '@/lib/utils/dateFormatters';
 import { BalanceBreakdownCard, TopUpModal } from '@/components/billing';
 import { useSubscription, useCreditBalance, usePaygTiers } from '@/lib/hooks/smart-hooks-complete';
@@ -90,7 +90,7 @@ const FILTER_SOURCE_TYPES = [
  * Quota & Usage page.
  */
 export default function QuotaPage() {
-  if (isCeMode) {
+  if (showsDollarCost) {
     return <CeQuotaPage />;
   }
   return <QuotaPageInner />;
@@ -462,7 +462,7 @@ function QuotaPageInner() {
     // Format the magnitude, then put the sign BEFORE the "$" - "-$0.0086", never "$-0.0086".
     const formatted = abs.toLocaleString(getClientLocale(), { minimumFractionDigits: 2, maximumFractionDigits: fractionDigits });
     const sign = value < 0 ? '-' : '';
-    return isCeMode ? `${sign}$${formatted}` : `${sign}${formatted}`;
+    return showsDollarCost ? `${sign}$${formatted}` : `${sign}${formatted}`;
   };
 
   const formatDate = (dateStr: string) => {
@@ -660,7 +660,7 @@ function QuotaPageInner() {
                 <th className="px-4 py-2.5 font-medium text-left text-theme-secondary text-sm">{t('history.type')}</th>
                 <th className="px-4 py-2.5 font-medium text-left text-theme-secondary text-sm">{t('history.providerModel')}</th>
                 <th className="px-4 py-2.5 font-medium text-left text-theme-secondary text-sm">{t('history.tokens')}</th>
-                <th className="px-4 py-2.5 font-medium text-right text-theme-secondary text-sm">{isCeMode ? t('history.cost') : t('history.credits')}</th>
+                <th className="px-4 py-2.5 font-medium text-right text-theme-secondary text-sm">{showsDollarCost ? t('history.cost') : t('history.credits')}</th>
                 <th className="px-4 py-2.5 font-medium text-left text-theme-secondary text-sm">{t('history.description')}</th>
               </tr>
             </thead>

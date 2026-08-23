@@ -111,7 +111,6 @@ gateway:
       - /api/billing/plans
       - /api/billing/checkout/finalize
       - /api/billing/checkout/success
-      - /api/credits/
       - /api/credentials/oauth2/callback
       - /api/contact
       - /api/auth/register

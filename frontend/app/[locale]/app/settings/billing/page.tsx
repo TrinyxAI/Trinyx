@@ -25,7 +25,7 @@ import { useIsCurrentOrgOwner } from '@/lib/stores/current-org-store';
 import { Button } from '@/components/ui/button';
 import { TooltipProvider } from '@/components/ui/tooltip';
 import { formatUtcDate } from '@/lib/utils/dateFormatters';
-import { isCeMode } from '@/lib/format-cost';
+import { IS_BILLING_ENABLED } from '@/lib/edition';
 import type {
   BillingInvoice,
   InvoiceListResponse,
@@ -51,13 +51,12 @@ import type {
  * {@code requireActiveOrgOwner} guard server-side. A single info banner
  * explains the "switch to your personal workspace" path for non-owners.
  *
- * CE/Cloud: page early-returns {@code null} when {@link isCeMode} so a CE
- * user landing on the route directly (nav entry is already hidden by
- * {@code hiddenInCE: true}) sees nothing - defense in depth alongside the
- * controller's {@code billing.provider=stripe} gate.
+ * Billing capability: the page stays absent in free CE and is enabled in paid monolith.
+ * A user landing on the route directly while billing is disabled sees nothing - defense in
+ * depth alongside the controller's {@code billing.provider=stripe} condition.
  */
 export default function BillingPage() {
-  if (isCeMode) {
+  if (!IS_BILLING_ENABLED) {
     return null;
   }
   return <BillingPageInner />;

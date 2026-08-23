@@ -223,7 +223,8 @@ public class CreditService {
      * workflow nodes while PAYG funds everything.
      */
     private static final java.util.Set<String> PAYG_BUCKET_SOURCE_TYPES =
-            java.util.Set.of("PAYG_TOPUP", "REWARD_REFERRAL", "REWARD_CLAWBACK", "MANUAL_ADJUSTMENT");
+            java.util.Set.of("PAYG_TOPUP", "PAYG_REFUND", "PAYG_DISPUTE",
+                    "REWARD_REFERRAL", "REWARD_CLAWBACK", "MANUAL_ADJUSTMENT");
 
     /** Plan code whose monthly (sub) bucket is restricted to workflow orchestration. */
     private static final String WORKFLOW_CREDITS_ONLY_PLAN_CODE = "FREE";
@@ -739,7 +740,11 @@ public class CreditService {
         } else {
             sub.setRemainingCredits(sub.getRemainingCredits().add(amount));
         }
-        clearDelinquentIfPositive(sub);
+        if (isPaygBucket && sub.getPaygRemainingCredits().signum() < 0) {
+            sub.setDelinquent(true);
+        } else {
+            clearDelinquentIfPositive(sub);
+        }
         subscriptionRepository.save(sub);
 
         BigDecimal newTotal = sub.getTotalBalance();

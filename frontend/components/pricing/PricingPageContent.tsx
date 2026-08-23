@@ -7,7 +7,7 @@ import { Zap, Database, Clock, Check, ArrowRight } from 'lucide-react';
 import PlanSelector from '@/components/pricing/PlanSelector';
 import TopUpModal from '@/components/billing/TopUpModal';
 import { usePaygTiers } from '@/lib/hooks/smart-hooks-complete';
-import { isCeMode } from '@/lib/format-cost';
+import { IS_BILLING_ENABLED, IS_CE } from '@/lib/edition';
 import Notification from '@/components/common/Notification';
 import { useSubscription } from '@/lib/hooks/smart-hooks-complete';
 import { useAuthGuard } from '@/hooks/useAuthGuard';
@@ -29,6 +29,7 @@ import { cloudLinkService, type CloudLinkStatus, CLOUD_NO_SUBSCRIPTION } from '@
 // CE installs manage billing on the LINKED LiveContext Cloud account; the cloud web app lives
 // here (matches the hardcoded cloud host used elsewhere in CE, e.g. marketplace CategoryFilter).
 const CLOUD_WEB_BASE = 'https://livecontext.ai';
+const DELEGATES_BILLING_TO_CLOUD = IS_CE && !IS_BILLING_ENABLED;
 
 
 export default function PricingPage() {
@@ -89,7 +90,7 @@ export default function PricingPage() {
   // Determine if the credit slider matches the subscription's credit tier
   // Baseline credit tier the current plan sits on: in CE it's the LINKED cloud subscription's tier
   // (cloudCreditTierIndex), so the slider syncs to it and "changed" is detected against the cloud.
-  const subscriptionCreditTierIndex = isCeMode
+  const subscriptionCreditTierIndex = DELEGATES_BILLING_TO_CLOUD
     ? (cloudLinkStatus?.cloudCreditTierIndex ?? 0)
     : (typedSubscription?.subscription?.creditTierIndex ?? 0);
   const localPlanCode = typedSubscription?.subscription?.planCode || 'FREE';
@@ -100,7 +101,7 @@ export default function PricingPage() {
   const governingCloudPlan = cloudLinkStatus?.cloudPlanCode && cloudLinkStatus.cloudPlanCode !== CLOUD_NO_SUBSCRIPTION
     ? cloudLinkStatus.cloudPlanCode
     : null;
-  const currentPlanCode = isCeMode ? (governingCloudPlan ?? localPlanCode) : localPlanCode;
+  const currentPlanCode = DELEGATES_BILLING_TO_CLOUD ? (governingCloudPlan ?? localPlanCode) : localPlanCode;
   // Slider moved off the governing subscription's credit tier → no paid plan is "current" (mirrors
   // cloud): the card de-highlights and its CTA routes the change to the cloud (CE) / checkout (cloud).
   const isCreditTierChanged = currentPlanCode !== 'FREE' && creditTierIndex !== subscriptionCreditTierIndex;
@@ -108,7 +109,7 @@ export default function PricingPage() {
   const effectiveCurrentPlan = isCreditTierChanged ? 'NONE' : currentPlanCode;
   // Current cadence: in CE it's the LINKED cloud subscription's cadence (so toggling the billing
   // cycle away from it de-highlights "current"); falls back to the visible toggle when unknown.
-  const effectiveCurrentCadence: 'monthly' | 'yearly' = isCeMode
+  const effectiveCurrentCadence: 'monthly' | 'yearly' = DELEGATES_BILLING_TO_CLOUD
     ? ((cloudLinkStatus?.cloudCadence as 'monthly' | 'yearly') || billingCycle)
     : ((typedSubscription?.subscription?.cadence as 'monthly' | 'yearly') || 'yearly');
 
@@ -132,7 +133,7 @@ export default function PricingPage() {
   // CE only: pull the linked cloud account's governing plan so the grid reflects it (Problem 1).
   // Not linked / unreachable → stays null → falls back to FREE.
   useEffect(() => {
-    if (!isCeMode || !isAuthenticated) return;
+    if (!DELEGATES_BILLING_TO_CLOUD || !isAuthenticated) return;
     let cancelled = false;
     cloudLinkService.getStatus()
       .then((s) => { if (!cancelled) setCloudLinkStatus(s); })
@@ -304,7 +305,7 @@ export default function PricingPage() {
   useEffect(() => {
     // CE: sync the slider + billing toggle from the LINKED cloud subscription (its tier/cadence) so
     // the pricing page opens aligned with what the cloud account is actually on.
-    if (isCeMode) {
+    if (DELEGATES_BILLING_TO_CLOUD) {
       if (cloudLinkStatus?.cloudCadence) {
         setBillingCycle(cloudLinkStatus.cloudCadence as 'monthly' | 'yearly');
       }
@@ -667,8 +668,8 @@ export default function PricingPage() {
       // CE (#15): the plan that governs this install comes from the LINKED CLOUD ACCOUNT - there is
       // no local subscription checkout (the CE billing endpoint returns 503). Plan actions are
       // delegated to the cloud (open its pricing page) when linked, or to cloud-account to connect
-      // first when not. No-op for Cloud (isCeMode is false), so its checkout flow is unchanged.
-      if (isCeMode) {
+      // first when not. No-op for Cloud (DELEGATES_BILLING_TO_CLOUD is false), so its checkout flow is unchanged.
+      if (DELEGATES_BILLING_TO_CLOUD) {
         showToast(t('cePricing.manageOnCloud'), 'info');
         // Billing lives on the linked cloud account (Problem 2). If linked, open the cloud pricing
         // page in a NEW tab to manage/pay there (CE stays open); if not yet linked, send to
@@ -945,7 +946,7 @@ export default function PricingPage() {
 
       {/* Mode toggle - Subscription vs Pay-as-you-go. Hidden in CE
           (no Stripe wiring, PAYG checkout endpoint returns 503). */}
-      {!isCeMode && (
+      {!DELEGATES_BILLING_TO_CLOUD && (
         <section className="pt-6 pb-2 transition-colors duration-300">
           <div className="w-full flex justify-center">
             <div className="relative inline-flex items-center gap-1 p-1.5 bg-theme-tertiary rounded-2xl" ref={modeTabContainerRef}>
@@ -1145,7 +1146,7 @@ export default function PricingPage() {
           out in the same PlanSelector style (centered, rounded-2xl, Check
           features, full-width CTA) for visual coherence with the rest of the
           page. Click any card → TopUpModal pre-selected on that tier. */}
-      {!isCeMode && pricingMode === 'payg' && (
+      {!DELEGATES_BILLING_TO_CLOUD && pricingMode === 'payg' && (
         <section className="py-6 lg:py-10 transition-colors duration-300">
           <div className="container mx-auto px-4">
             {paygTiersLoading ? (

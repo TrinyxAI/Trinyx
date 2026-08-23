@@ -31,6 +31,7 @@ import com.stripe.net.RequestOptions;
 import com.stripe.param.SubscriptionListParams;
 import com.stripe.param.SubscriptionRetrieveParams;
 import com.stripe.param.SubscriptionUpdateParams;
+import com.stripe.param.checkout.SessionListParams;
 import com.apimarketplace.auth.service.util.StripeSubscriptionPeriod;
 import com.apimarketplace.auth.service.util.BillingMDC;
 import jakarta.servlet.http.HttpServletRequest;
@@ -45,6 +46,7 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
 import java.io.IOException;
+import java.time.Duration;
 import java.time.Instant;
 import java.time.LocalDateTime;
 import java.time.ZoneId;
@@ -57,6 +59,7 @@ import java.util.Optional;
 public class WebhookController {
 
     private static final Logger logger = LoggerFactory.getLogger(WebhookController.class);
+    private static final Duration WEBHOOK_CLAIM_LEASE = Duration.ofMinutes(10);
 
     private final ObjectMapper objectMapper;
     private final BillingEventRepository billingEventRepository;
@@ -141,25 +144,66 @@ public class WebhookController {
             return ResponseEntity.status(HttpStatus.BAD_REQUEST).body("Invalid event");
         }
 
+        BillingEvent storedEvent;
         try {
-            if (billingEventRepository.existsByEventId(event.getId())) {
-                logger.info("Event {} already processed, skipping", event.getId());
+            boolean eventAlreadyExists = billingEventRepository.existsByEventId(event.getId());
+            storedEvent = eventAlreadyExists
+                    ? billingEventRepository.findByEventId(event.getId()).orElse(null)
+                    : null;
+            if (eventAlreadyExists && storedEvent == null) {
+                // Defensive compatibility for a legacy row that cannot be read.
+                logger.warn("Event {} exists but could not be loaded; skipping duplicate", event.getId());
                 return ResponseEntity.ok("OK");
             }
-            var jsonNode = objectMapper.readTree(payload);
-            billingEventRepository.save(new BillingEvent("stripe", event.getId(), event.getType(), jsonNode));
+            if (storedEvent == null) {
+                var jsonNode = objectMapper.readTree(payload);
+                try {
+                    storedEvent = billingEventRepository.save(
+                            new BillingEvent("stripe", event.getId(), event.getType(), jsonNode));
+                } catch (Exception insertRace) {
+                    // Another delivery may have inserted the unique event id first.
+                    storedEvent = billingEventRepository.findByEventId(event.getId())
+                            .orElseThrow(() -> insertRace);
+                }
+            }
         } catch (Exception e) {
-            logger.warn("Race on billing event insert for id {}", event.getId(), e);
+            logger.error("Unable to persist Stripe event {} before dispatch", event.getId(), e);
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
+                    .body("Webhook persistence failed");
+        }
+
+        if ("PROCESSED".equals(storedEvent.getStatus())) {
+            logger.info("Event {} already processed, skipping", event.getId());
             return ResponseEntity.ok("OK");
+        }
+
+        LocalDateTime claimStartedAt = LocalDateTime.now();
+        if (billingEventRepository.claimForProcessing(
+                event.getId(), claimStartedAt, claimStartedAt.minus(WEBHOOK_CLAIM_LEASE)) != 1) {
+            logger.warn("Event {} has a live processing claim; asking Stripe to retry", event.getId());
+            return ResponseEntity.status(HttpStatus.CONFLICT).body("Event already processing");
         }
 
         try {
             dispatch(event);
+            if (billingEventRepository.markProcessed(event.getId(), LocalDateTime.now()) != 1) {
+                throw new IllegalStateException("Unable to mark webhook event as processed");
+            }
+            return ResponseEntity.ok("OK");
         } catch (Exception e) {
-            logger.error("Error while processing event {}", event.getId(), e);
+            logger.error("Error while processing event {}; Stripe will retry", event.getId(), e);
+            String message = e.getMessage() == null ? e.getClass().getSimpleName() : e.getMessage();
+            if (message.length() > 2000) {
+                message = message.substring(0, 2000);
+            }
+            try {
+                billingEventRepository.markFailed(event.getId(), message);
+            } catch (Exception stateError) {
+                logger.error("Unable to mark failed webhook event {}", event.getId(), stateError);
+            }
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
+                    .body("Webhook dispatch failed");
         }
-
-        return ResponseEntity.ok("OK");
     }
 
     private void dispatch(Event event) {
@@ -274,6 +318,7 @@ public class WebhookController {
             }
         } catch (Exception e) {
             logger.error("Error in handleSubscriptionDeletedRaw: {}", e.getMessage(), e);
+            throw new IllegalStateException("Unable to process raw subscription deletion", e);
         }
     }
 
@@ -360,6 +405,7 @@ public class WebhookController {
 
         } catch (Exception e) {
             logger.error("Error in handleRawInvoiceLike: {}", e.getMessage(), e);
+            throw new IllegalStateException("Unable to process raw invoice event", e);
         }
     }
 
@@ -440,6 +486,7 @@ public class WebhookController {
 
         } catch (Exception e) {
             logger.error("Error in handleCustomerDeletedRaw: {}", e.getMessage(), e);
+            throw new IllegalStateException("Unable to process raw customer deletion", e);
         }
     }
 
@@ -448,6 +495,12 @@ public class WebhookController {
         logger.info("Checkout completed: session={}, customer={}, subscription={}",
                     session.getId(), session.getCustomer(), session.getSubscription());
 
+        java.util.Map<String, String> metadata = session.getMetadata();
+        if (metadata != null && "payg_topup".equals(metadata.get("kind"))) {
+            verifyAndGrantPaygTopup(session.getId());
+            return;
+        }
+
         // Decode the nonce from client_reference_id to retrieve the userId
         String nonce = session.getClientReferenceId();
         if (nonce != null && !nonce.isEmpty()) {
@@ -455,38 +508,6 @@ public class WebhookController {
             if (userId != null) {
                 logger.info("Checkout completed for user {} (decoded from nonce: {})", userId, nonce);
 
-                // Record the checkout event with the decoded userId
-                try {
-                    ObjectNode checkoutEventPayload = objectMapper.createObjectNode();
-                    checkoutEventPayload.put("sessionId", session.getId());
-                    checkoutEventPayload.put("customerId", session.getCustomer());
-                    checkoutEventPayload.put("subscriptionId", session.getSubscription());
-                    checkoutEventPayload.put("userId", userId);
-                    checkoutEventPayload.put("nonce", nonce);
-                    checkoutEventPayload.put("action", "checkout_session_completed");
-
-                    BillingEvent checkoutEvent = new BillingEvent(
-                        "stripe",
-                        "checkout_completed_" + session.getId(),
-                        "checkout.session.completed",
-                        checkoutEventPayload
-                    );
-                    billingEventRepository.save(checkoutEvent);
-                } catch (Exception e) {
-                    logger.warn("Failed to save checkout completed event: {}", e.getMessage());
-                }
-
-                // V250/PR3 - PAYG one-time top-up dispatch.
-                // Stripe mode=PAYMENT checkouts (createPaygCheckoutSession) carry
-                // metadata.kind="payg_topup". Subscription checkouts (mode=SUBSCRIPTION)
-                // have no "kind" metadata and fall through to the standard
-                // customer.subscription.* provisioning path.
-                java.util.Map<String, String> metadata = session.getMetadata();
-                if (metadata != null && "payg_topup".equals(metadata.get("kind"))) {
-                    parseAndGrantPaygTopup(userId, session.getId(),
-                            metadata.get("credit_amount"), metadata.get("tier"));
-                    return;  // do NOT wait for customer.subscription.* - none will fire for mode=PAYMENT
-                }
             } else {
                 logger.warn("Failed to decode nonce from checkout session: {}", nonce);
             }
@@ -498,64 +519,26 @@ public class WebhookController {
     }
 
     /**
-     * V250/PR3 - Shared PAYG one-time top-up grant path used by BOTH the typed
-     * {@link #handleCheckoutCompleted(Session)} branch and the RAW
-     * {@link #handleCheckoutCompletedRaw(Event)} fallback. Previously these
-     * two paths each inlined the same credit_amount blank-check / BigDecimal
-     * parse / signum-check / grant / catch sequence - the duplicate was a
-     * silent drift vector (audit M4: a fix on the typed side could fail to
-     * land on the RAW side and one Stripe SDK deserialization quirk away from
-     * money loss).
-     *
-     * <p>Reads {@code credit_amount} (raw string from session metadata) and
-     * {@code tier}, validates, and delegates to
-     * {@code CreditAttributionService.grantPaygTopup} which routes the grant
-     * onto {@code subscription.payg_remaining_credits}.
-     *
-     * <p>Idempotent via the underlying {@code credit_ledger.source_id} unique
-     * constraint - a Stripe replay (same session id) is a no-op skip.
-     *
-     * <p>On successful grant, fans out the gateway-cache invalidation for the
-     * user and every org they own (PR9). Without this the user's wallet may
-     * stay stale-up-to-5min after a top-up that just cleared a delinquency,
-     * blocking new reservations until the cache TTL elapses.
+     * Re-read a PAYG checkout from Stripe, validate its paid state and configured
+     * server-side price, then grant only the canonical credits for that tier.
      */
-    private void parseAndGrantPaygTopup(Long userId, String sessionId,
-                                         String creditAmountStr, String tier) {
-        if (creditAmountStr == null || creditAmountStr.isBlank()) {
-            logger.warn("PAYG top-up session {} missing credit_amount metadata - skipping grant",
-                    sessionId);
-            return;
-        }
-        java.math.BigDecimal amount;
+    private void verifyAndGrantPaygTopup(String sessionId) {
         try {
-            amount = new java.math.BigDecimal(creditAmountStr);
-        } catch (NumberFormatException e) {
-            logger.error("PAYG top-up session {} has invalid credit_amount metadata: {}",
-                    sessionId, creditAmountStr);
-            return;
-        }
-        if (amount.signum() <= 0) {
-            logger.warn("PAYG top-up session {} has non-positive credit_amount={} - skipping",
-                    sessionId, amount);
-            return;
-        }
+            StripeBillingService.VerifiedPaygTopup verified =
+                    stripeBillingService.verifyPaygTopup(sessionId);
+            Long userId = nonceUtil.decodeNonce(verified.clientReferenceId());
+            if (userId == null) {
+                throw new IllegalStateException("PAYG checkout has an invalid client nonce");
+            }
 
-        try {
-            creditAttributionService.grantPaygTopup(userId, amount, sessionId, tier);
-            logger.info("PAYG top-up granted: user={}, tier={}, amount={}, session={}",
-                    userId, tier, amount, sessionId);
-            // PR9 - bust the gateway cache so a freshly-topped-up user whose
-            // delinquency just cleared sees their balance on the next call
-            // instead of waiting for the 5min TTL.
+            creditAttributionService.grantPaygTopup(
+                    userId, verified.credits(), sessionId, verified.tier());
+            logger.info("Verified PAYG top-up granted: user={}, tier={}, amount={}, session={}",
+                    userId, verified.tier(), verified.credits(), sessionId);
             fanOutCacheBustForSubscriptionChange(userId, "checkout.payg_topup");
         } catch (Exception e) {
-            // Defensive log - grantPaygTopup itself catches the unique-constraint
-            // duplicate case via existsBySourceId before insert. Any exception here
-            // is unexpected (DB outage, etc.) and we want it visible without
-            // failing the whole webhook (Stripe would retry the entire event).
-            logger.error("PAYG top-up grant failed: user={}, tier={}, session={}, error={}",
-                    userId, tier, sessionId, e.getMessage(), e);
+            throw new IllegalStateException(
+                    "PAYG top-up verification or grant failed for session=" + sessionId, e);
         }
     }
 
@@ -595,19 +578,15 @@ public class WebhookController {
             // webhook. The pre-helper version inlined the validation and was a
             // copy-paste drift vector (audit M4): fixing one path without the
             // other was one bad commit away from real money loss.
-            if ("payg_topup".equals(kind) && nonce != null && !nonce.isBlank()) {
-                Long userId = nonceUtil.decodeNonce(nonce);
-                if (userId == null) {
-                    logger.warn("PAYG top-up RAW session {} has invalid nonce - skipping grant", sessionId);
-                    return;
-                }
-                parseAndGrantPaygTopup(userId, sessionId, creditAmountStr, tier);
+            if ("payg_topup".equals(kind)) {
+                verifyAndGrantPaygTopup(sessionId);
                 return;  // mode=PAYMENT: no customer.subscription.* event will follow
             }
 
             // We wait for customer.subscription.* to provision
         } catch (Exception e) {
             logger.error("Error in handleCheckoutCompletedRaw: {}", e.getMessage(), e);
+            throw new IllegalStateException("Unable to process raw checkout completion", e);
         }
     }
 
@@ -639,6 +618,7 @@ public class WebhookController {
             }
         } catch (Exception e) {
             logger.error("Error in handleSubscriptionUpsertRaw: {}", e.getMessage(), e);
+            throw new IllegalStateException("Unable to process raw subscription update", e);
         }
     }
 
@@ -662,6 +642,7 @@ public class WebhookController {
             handleInvoicePaid(inv);
         } catch (Exception e) {
             logger.error("Error in handleInvoicePaidRaw: {}", e.getMessage(), e);
+            throw new IllegalStateException("Unable to process raw paid invoice", e);
         }
     }
 
@@ -902,6 +883,7 @@ public class WebhookController {
                 }
             } catch (Exception e) {
                 logger.error("Failed to attribute renewal credits for invoice {}: {}", invoice.getId(), e.getMessage(), e);
+                throw new IllegalStateException("Unable to attribute renewal credits", e);
             }
         }
 
@@ -936,31 +918,30 @@ public class WebhookController {
         }
     }
 
-    /** Full refund of a converting charge claws back the referral reward. */
+    /** Refund PAYG proportionally; full refunds also claw back referral rewards. */
     private void handleChargeRefunded(com.stripe.model.Charge charge) {
         try {
-            if (rewardService == null || charge == null) return;
+            if (charge == null) return;
             Long amount = charge.getAmount();
             Long refunded = charge.getAmountRefunded();
-            if (amount == null || amount <= 0 || refunded == null || refunded < amount) {
-                logger.info("Charge {} not fully refunded (amount={}, refunded={}); no clawback",
-                        charge.getId(), amount, refunded);
+            if (amount == null || amount <= 0 || refunded == null || refunded <= 0) {
                 return;
             }
-            clawbackByCustomer(charge.getCustomer(), "REFUNDED");
+
+            clawbackPaygByCharge(charge, "REFUNDED");
+            if (refunded >= amount && rewardService != null) {
+                clawbackByCustomer(charge.getCustomer(), "REFUNDED");
+            }
         } catch (Exception e) {
             logger.error("Error in handleChargeRefunded: {}", e.getMessage(), e);
+            throw new IllegalStateException("Unable to process Stripe refund", e);
         }
     }
 
-    /** A chargeback (dispute) on a converting charge claws back the referral reward. */
+    /** A chargeback revokes the full PAYG grant and any referral reward. */
     private void handleDisputeCreated(com.stripe.model.Dispute dispute) {
-        try {
-            if (rewardService == null || dispute == null) return;
-            clawbackByDisputedCharge(dispute.getCharge(), "DISPUTED");
-        } catch (Exception e) {
-            logger.error("Error in handleDisputeCreated: {}", e.getMessage(), e);
-        }
+        if (dispute == null || dispute.getCharge() == null) return;
+        handleDisputedChargeId(dispute.getCharge());
     }
 
     private void handleChargeRefundedRaw(Event event) {
@@ -973,6 +954,7 @@ public class WebhookController {
             handleChargeRefunded(stripeClient.charges().retrieve(chargeId));
         } catch (Exception e) {
             logger.error("Error in handleChargeRefundedRaw: {}", e.getMessage(), e);
+            throw new IllegalStateException("Unable to process raw Stripe refund", e);
         }
     }
 
@@ -981,20 +963,73 @@ public class WebhookController {
             var raw = event.getData().getObject();
             if (raw == null) return;
             var json = objectMapper.readTree(raw.toJson());
-            clawbackByDisputedCharge(json.path("charge").asText(null), "DISPUTED");
+            handleDisputedChargeId(json.path("charge").asText(null));
         } catch (Exception e) {
             logger.error("Error in handleDisputeCreatedRaw: {}", e.getMessage(), e);
+            throw new IllegalStateException("Unable to process raw Stripe dispute", e);
         }
     }
 
-    private void clawbackByDisputedCharge(String chargeId, String reason) {
-        if (rewardService == null || chargeId == null || chargeId.isBlank()) return;
+    private void handleDisputedChargeId(String chargeId) {
+        if (chargeId == null || chargeId.isBlank()) return;
         try {
             com.stripe.model.Charge charge = stripeClient.charges().retrieve(chargeId);
-            clawbackByCustomer(charge.getCustomer(), reason);
+            clawbackPaygByCharge(charge, "DISPUTED");
+            if (rewardService != null) {
+                clawbackByCustomer(charge.getCustomer(), "DISPUTED");
+            }
         } catch (Exception e) {
             logger.error("Dispute clawback resolve failed for charge {}: {}", chargeId, e.getMessage(), e);
+            throw new IllegalStateException("Unable to process Stripe dispute", e);
         }
+    }
+
+    /**
+     * Resolve a Stripe charge back to its PAYG Checkout Session and apply the
+     * cumulative refund/dispute target. Subscription charges have no
+     * payg_topup session metadata and are left to the subscription handlers.
+     */
+    private void clawbackPaygByCharge(com.stripe.model.Charge charge, String reason)
+            throws StripeException {
+        if (charge == null || charge.getPaymentIntent() == null
+                || charge.getPaymentIntent().isBlank()) {
+            return;
+        }
+
+        var sessions = stripeClient.checkout().sessions().list(
+                SessionListParams.builder()
+                        .setPaymentIntent(charge.getPaymentIntent())
+                        .setLimit(10L)
+                        .build());
+        Session paygSession = sessions.getData().stream()
+                .filter(s -> s.getMetadata() != null
+                        && "payg_topup".equals(s.getMetadata().get("kind")))
+                .findFirst()
+                .orElse(null);
+        if (paygSession == null) {
+            return;
+        }
+
+        java.math.BigDecimal fraction;
+        String eventKey;
+        if ("DISPUTED".equals(reason)) {
+            fraction = java.math.BigDecimal.ONE;
+            eventKey = "dispute:" + charge.getId();
+        } else {
+            Long amount = charge.getAmount();
+            Long refunded = charge.getAmountRefunded();
+            if (amount == null || amount <= 0 || refunded == null || refunded <= 0) {
+                return;
+            }
+            fraction = java.math.BigDecimal.valueOf(refunded)
+                    .divide(java.math.BigDecimal.valueOf(amount), 8,
+                            java.math.RoundingMode.HALF_UP)
+                    .min(java.math.BigDecimal.ONE);
+            eventKey = "refund:" + charge.getId() + ":" + refunded;
+        }
+
+        creditAttributionService.clawbackPaygTopup(
+                paygSession.getId(), fraction, eventKey, reason);
     }
 
     /** Resolve the referee from the Stripe customer and claw back their referral reward. */
@@ -1086,7 +1121,7 @@ public class WebhookController {
         } catch (Exception e) {
             logger.error("Failed to grant credit-upgrade for invoice {}: {}",
                     invoice.getId(), e.getMessage(), e);
-            // Don't rethrow: webhook will retry; idempotence on ledger source_id protects us.
+            throw new IllegalStateException("Unable to grant paid credit upgrade", e);
         }
         return true;
     }
@@ -1316,6 +1351,7 @@ public class WebhookController {
 
         } catch (Exception e) {
             logger.error("Error in handleCustomerDeleted: {}", e.getMessage(), e);
+            throw new IllegalStateException("Unable to process customer deletion", e);
         }
     }
 
@@ -1349,6 +1385,7 @@ public class WebhookController {
             }
         } catch (Exception e) {
             logger.error("Error handling subscription_schedule.created: {}", e.getMessage(), e);
+            throw new IllegalStateException("Unable to process subscription schedule creation", e);
         }
     }
 
@@ -1371,6 +1408,7 @@ public class WebhookController {
             }
         } catch (Exception e) {
             logger.error("Error handling subscription_schedule.updated: {}", e.getMessage(), e);
+            throw new IllegalStateException("Unable to process subscription schedule update", e);
         }
     }
 
@@ -1394,6 +1432,7 @@ public class WebhookController {
             }
         } catch (Exception e) {
             logger.error("Error handling subscription_schedule.released: {}", e.getMessage(), e);
+            throw new IllegalStateException("Unable to process subscription schedule release", e);
         }
     }
 
@@ -1415,6 +1454,7 @@ public class WebhookController {
             }
         } catch (Exception e) {
             logger.error("Error handling subscription_schedule.completed: {}", e.getMessage(), e);
+            throw new IllegalStateException("Unable to process subscription schedule completion", e);
         }
     }
 
@@ -1438,6 +1478,7 @@ public class WebhookController {
             }
         } catch (Exception e) {
             logger.error("Error handling subscription_schedule.canceled: {}", e.getMessage(), e);
+            throw new IllegalStateException("Unable to process subscription schedule cancellation", e);
         }
     }
 }

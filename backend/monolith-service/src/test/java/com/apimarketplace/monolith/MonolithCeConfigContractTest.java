@@ -244,6 +244,25 @@ class MonolithCeConfigContractTest {
     }
 
     @Test
+    @DisplayName("application-ce.yml supports paid monolith through standard billing environment variables")
+    void ceConfigSupportsPaidMonolithOverrides() throws Exception {
+        Map<String, Object> root = loadCeYaml();
+
+        assertThat(nestedValue(root, "app", "edition")).isEqualTo("${APP_EDITION:ce}");
+        assertThat(nestedValue(root, "deployment", "mode")).isEqualTo("${DEPLOYMENT_MODE:monolith}");
+        assertThat(nestedValue(root, "auth", "mode")).isEqualTo("${AUTH_MODE:embedded}");
+        assertThat(nestedValue(root, "credit", "unlimited")).isEqualTo("${CREDIT_UNLIMITED:true}");
+        assertThat(nestedValue(root, "plan-limits", "enabled")).isEqualTo("${PLAN_LIMITS_ENABLED:false}");
+        assertThat(nestedValue(root, "workflow", "node-billing", "enabled"))
+                .isEqualTo("${WORKFLOW_NODE_BILLING_ENABLED:false}");
+        assertThat(nestedValue(root, "billing", "provider")).isEqualTo("${BILLING_PROVIDER:none}");
+        assertThat(nestedValue(root, "billing", "stripe", "secretKey"))
+                .isEqualTo("${STRIPE_SECRET_KEY:}");
+        assertThat(nestedValue(root, "billing", "stripe", "webhookSecret"))
+                .isEqualTo("${STRIPE_WEBHOOK_SECRET:}");
+    }
+
+    @Test
     @DisplayName("application-ce.yml routes monolith-only HTTP clients back to the embedded server")
     void ceInterServiceClientsUseEmbeddedServerUrl() throws Exception {
         Map<String, Object> root = loadCeYaml();

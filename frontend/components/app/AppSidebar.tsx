@@ -37,7 +37,7 @@ import { useSafeNavigate } from '@/contexts/NavigationGuardContext';
 import { triggerSidebarNavigation } from '@/components/NavigationLoader';
 import { memo } from 'react';
 import { LucideIcon } from 'lucide-react';
-import { IS_CE } from '@/lib/edition';
+import { IS_BILLING_ENABLED, IS_CE, IS_COMMUNITY_EDITION } from '@/lib/edition';
 import { cloudLinkService, CLOUD_NO_SUBSCRIPTION } from '@/lib/api/cloud-link.service';
 
 interface AppSidebarProps {
@@ -433,19 +433,19 @@ export const AppSidebar = memo(function AppSidebar({
                 user={user}
                 avatarUrl={avatarUrl}
                 numericUserId={numericUserId}
-                hasActiveSubscription={IS_CE ? false : hasActiveSubscription}
+                hasActiveSubscription={IS_BILLING_ENABLED ? hasActiveSubscription : false}
                 planCode={planCode}
-                isSubscriptionLoading={IS_CE ? false : isSubscriptionLoading}
+                isSubscriptionLoading={IS_BILLING_ENABLED ? isSubscriptionLoading : false}
                 themePreference={themePreference}
                 onThemeChange={setTheme}
                 onSignOut={handleSignOut}
                 onNavigate={handleNavigate}
                 displayName={userProfile?.displayName}
                 isLoadingProfile={isProfileLoading}
-                creditBalance={IS_CE ? null : creditBalance}
-                creditSubBalance={IS_CE ? null : creditSubBalance}
-                creditPaygBalance={IS_CE ? null : creditPaygBalance}
-                isCreditBalanceLoading={IS_CE ? false : isCreditBalanceLoading}
+                creditBalance={IS_BILLING_ENABLED ? creditBalance : null}
+                creditSubBalance={IS_BILLING_ENABLED ? creditSubBalance : null}
+                creditPaygBalance={IS_BILLING_ENABLED ? creditPaygBalance : null}
+                isCreditBalanceLoading={IS_BILLING_ENABLED ? isCreditBalanceLoading : false}
               />
             ) : (
               <SignInSection
@@ -549,7 +549,7 @@ export const UserSection = memo(function UserSection({
     else if (abs >= 1_000) formatted = `${(abs / 1_000).toFixed(1)}K`;
     else formatted = abs.toFixed(1);
     const sign = balance < 0 ? '-' : '';
-    return IS_CE ? `${sign}$${formatted}` : `${sign}${formatted}`;
+    return IS_BILLING_ENABLED ? `${sign}${formatted}` : `${sign}${formatted}`;
   };
 
   const [showMenu, setShowMenu] = useState(false);
@@ -603,7 +603,7 @@ export const UserSection = memo(function UserSection({
     queryFn: () => cloudLinkService.getStatus(),
     // Always fetch in CE (not only when the menu is open): the governing cloud plan also drives the
     // always-visible plan badge below, not just the in-menu invite / create-workspace gates.
-    enabled: IS_CE,
+    enabled: IS_COMMUNITY_EDITION,
     staleTime: 5 * 60 * 1000,
   });
   // PLAN TIER for THIS user (drives BOTH the badge label AND the create/invite entitlements): the
@@ -612,14 +612,14 @@ export const UserSection = memo(function UserSection({
   // real tier) and get no create-workspace / invite affordance in their own workspace, NOT "CE Team"
   // (the install owner's plan they never paid for - which the backend also 403's). The cloud
   // (!IS_CE) branch is unchanged.
-  const capabilityPlanCode = IS_CE ? (ceLinkStatus?.cloudPlanCode ?? null) : planCode;
+  const capabilityPlanCode = IS_COMMUNITY_EDITION ? (ceLinkStatus?.cloudPlanCode ?? null) : planCode;
   // "Is this install on cloud" DISPLAY flag - INSTALL-global so a non-owner member of an
   // admin-linked install still shows "CE <plan>" (not "Community") and drops the upsell: the member
   // IS cloud-connected (catalog/highlights visible), only their PLAN TIER stays their own.
-  const isInstallCloudLinked = IS_CE && ceLinkStatus?.installLinked === true;
+  const isInstallCloudLinked = IS_COMMUNITY_EDITION && ceLinkStatus?.installLinked === true;
   // While the cloud-link status is still loading on a linked install, hold the badge to avoid
   // flashing the unlinked "Community" state. A resolved status (installLinked false) is NOT pending.
-  const ceLinkPending = IS_CE && ceLinkStatus === undefined;
+  const ceLinkPending = IS_COMMUNITY_EDITION && ceLinkStatus === undefined;
   // Plan badge label: a cloud-linked CE shows "CE <plan>" by the USER'S OWN cloud plan. The cloud's
   // '__NONE__' no-subscription sentinel and an inheriting member (no per-user plan) BOTH resolve to
   // null -> formatPlanName(null) = "Free", so each reads "CE Free" (never "CE None"/"CE Team"). We do
@@ -628,14 +628,14 @@ export const UserSection = memo(function UserSection({
   const ownCloudPlan = capabilityPlanCode && capabilityPlanCode !== CLOUD_NO_SUBSCRIPTION
     ? capabilityPlanCode
     : null;
-  const displayPlanName = !IS_CE
+  const displayPlanName = !IS_COMMUNITY_EDITION
     ? formatPlanName(planCode)
     : isInstallCloudLinked
       ? `CE ${formatPlanName(ownCloudPlan)}`
       : 'Community';
   // Upsell: Cloud → when no active subscription; CE → only when the install is NOT linked (a linked
   // install's billing is on the admin's cloud account, so neither owner nor member sees the upsell).
-  const showUpgrade = IS_CE ? !isInstallCloudLinked : !hasActiveSubscription;
+  const showUpgrade = IS_COMMUNITY_EDITION ? !isInstallCloudLinked : !hasActiveSubscription;
   // Never surface a "paused" (dormant) or soft-deleted org as the active workspace - the
   // owner downgraded below TEAM (paused) or it's pending purge (gateway rejects entering
   // both). Prefer current → default → any active, then anything.
@@ -855,7 +855,7 @@ export const UserSection = memo(function UserSection({
     [
       { icon: User, label: t('settings'), onClick: () => { onNavigate('/app/settings/overview'); setShowMenu(false); } },
       { icon: CreditCard, label: t('pricing'), onClick: () => { onNavigate('/app/settings/pricing'); setShowMenu(false); } },
-      { icon: Coins, label: IS_CE ? t('cost') : t('credits'), onClick: () => { onNavigate('/app/settings/quota'); setShowMenu(false); } },
+      { icon: Coins, label: IS_BILLING_ENABLED ? t('credits') : t('cost'), onClick: () => { onNavigate('/app/settings/quota'); setShowMenu(false); } },
       // Refer & earn: a second entry point (alongside the settings nav) to the rewards page,
       // where the user shares their referral code/link and both parties earn credits.
       { icon: Gift, label: t('referAndEarn'), onClick: () => { onNavigate('/app/settings/rewards'); setShowMenu(false); } },
@@ -1082,7 +1082,7 @@ export const UserSection = memo(function UserSection({
               <button
                 onClick={(e) => { e.stopPropagation(); onNavigate('/app/settings/quota'); }}
                 className="flex items-center gap-0.5 text-xs text-theme-muted hover:text-theme-primary transition-colors cursor-pointer"
-                title={`${IS_CE ? t('cost') : t('credits')}: ${formatCredits(creditBalance)}`}
+                title={`${IS_BILLING_ENABLED ? t('credits') : t('cost')}: ${formatCredits(creditBalance)}`}
               >
                 <Coins className="h-3 w-3" />
                 <span className="text-[10px]">{formatCredits(creditBalance)}</span>

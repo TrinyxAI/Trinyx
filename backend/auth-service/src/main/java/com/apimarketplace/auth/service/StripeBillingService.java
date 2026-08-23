@@ -1254,6 +1254,73 @@ public class StripeBillingService {
     }
 
     /**
+     * Server-side source of truth for a completed PAYG purchase. The webhook
+     * never trusts client/session metadata for credits, amount, currency, or
+     * price identity: it re-reads Stripe and compares the charge to the local
+     * auth.price row before returning the canonical tier grant.
+     */
+    @Transactional(readOnly = true)
+    public VerifiedPaygTopup verifyPaygTopup(String sessionId) throws StripeException {
+        if (sessionId == null || sessionId.isBlank()) {
+            throw new IllegalArgumentException("Stripe checkout session id is required");
+        }
+
+        Session session = stripe.checkout().sessions().retrieve(sessionId);
+        Map<String, String> metadata = session.getMetadata();
+        String tier = metadata == null ? null : metadata.get("tier");
+        if (metadata == null || !"payg_topup".equals(metadata.get("kind"))
+                || tier == null || !PAYG_TIER_CREDITS.containsKey(tier)) {
+            throw new IllegalStateException("Checkout session is not a known PAYG tier");
+        }
+        if (!"paid".equalsIgnoreCase(session.getPaymentStatus())) {
+            throw new IllegalStateException("PAYG checkout payment is not paid");
+        }
+
+        com.apimarketplace.auth.domain.Price configuredPrice =
+                priceRepository.findAllPaygTiersOrderedByPrice().stream()
+                        .filter(p -> ("payg_" + tier).equals(p.getCadence()))
+                        .findFirst()
+                        .orElseThrow(() -> new IllegalStateException(
+                                "PAYG price row is missing for tier=" + tier));
+
+        String expectedPriceId = configuredPrice.getProviderPriceId();
+        if (expectedPriceId == null || expectedPriceId.isBlank()) {
+            throw new IllegalStateException("PAYG Stripe price is not configured for tier=" + tier);
+        }
+        // amount_total includes Stripe automatic tax; the configured Price is
+        // the pre-tax amount, so validate against amount_subtotal.
+        if (configuredPrice.getAmountCents() == null || session.getAmountSubtotal() == null
+                || configuredPrice.getAmountCents().longValue() != session.getAmountSubtotal()) {
+            throw new IllegalStateException("PAYG subtotal mismatch for tier=" + tier);
+        }
+        if (configuredPrice.getCurrency() == null || session.getCurrency() == null
+                || !configuredPrice.getCurrency().equalsIgnoreCase(session.getCurrency())) {
+            throw new IllegalStateException("PAYG currency mismatch for tier=" + tier);
+        }
+
+        var lineItems = stripe.checkout().sessions().lineItems().list(sessionId).getData();
+        if (lineItems == null || lineItems.size() != 1
+                || lineItems.get(0).getQuantity() == null
+                || lineItems.get(0).getQuantity() != 1L
+                || lineItems.get(0).getPrice() == null
+                || !expectedPriceId.equals(lineItems.get(0).getPrice().getId())) {
+            throw new IllegalStateException("PAYG line item does not match configured Stripe price");
+        }
+
+        return new VerifiedPaygTopup(
+                tier,
+                PAYG_TIER_CREDITS.get(tier),
+                session.getClientReferenceId(),
+                session.getPaymentIntent());
+    }
+
+    public record VerifiedPaygTopup(
+            String tier,
+            java.math.BigDecimal credits,
+            String clientReferenceId,
+            String paymentIntentId) {}
+
+    /**
      * V250/PR3 - Create a Stripe Checkout Session in {@code mode=PAYMENT}
      * (one-time) for a PAYG credit top-up.
      *

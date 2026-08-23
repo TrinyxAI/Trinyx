@@ -54,10 +54,11 @@ public class AppEditionProvider {
                     + "Set %s=%s or choose app.edition=ce for Community Edition behavior.";
 
     public static final String INVALID_EDITION_ERROR_FORMAT =
-            "[edition] Invalid app.edition=%s. Valid values: ce, self-hosted-enterprise, cloud, dedicated-cloud.";
+            "[edition] Invalid app.edition=%s. Valid values: ce, paid-monolith, self-hosted-enterprise, cloud, dedicated-cloud.";
 
     public enum AppEdition {
         CE_FREE("ce"),
+        PAID_MONOLITH("paid-monolith"),
         SELF_HOSTED_ENTERPRISE("self-hosted-enterprise"),
         CLOUD("cloud"),
         DEDICATED_CLOUD("dedicated-cloud");
@@ -81,6 +82,7 @@ public class AppEditionProvider {
                     .replace('_', '-');
             return switch (normalized) {
                 case "ce", "ce-free", "community", "community-edition" -> Optional.of(CE_FREE);
+                case "paid-monolith", "monolith-paid", "paid-self-hosted" -> Optional.of(PAID_MONOLITH);
                 case "self-hosted-enterprise", "self-hosted", "selfhosted-enterprise",
                         "selfhosted", "enterprise-self-hosted" -> Optional.of(SELF_HOSTED_ENTERPRISE);
                 case "cloud", "saas" -> Optional.of(CLOUD);
@@ -94,6 +96,7 @@ public class AppEditionProvider {
     private record FlagSpec(
             String name,
             String ceFreeExpected,
+            String paidMonolithExpected,
             String selfHostedEnterpriseExpected,
             String cloudExpected,
             String dedicatedCloudExpected,
@@ -106,6 +109,7 @@ public class AppEditionProvider {
         String expectedFor(AppEdition edition) {
             return switch (edition) {
                 case CE_FREE -> ceFreeExpected;
+                case PAID_MONOLITH -> paidMonolithExpected;
                 case SELF_HOSTED_ENTERPRISE -> selfHostedEnterpriseExpected;
                 case CLOUD -> cloudExpected;
                 case DEDICATED_CLOUD -> dedicatedCloudExpected;
@@ -118,13 +122,13 @@ public class AppEditionProvider {
      * here is the order used in the INFO boot summary.
      */
     private static final List<FlagSpec> FLAGS = List.of(
-            new FlagSpec("deployment.mode", "monolith", "monolith", "microservice", "microservice", false),
-            new FlagSpec("auth.mode", "embedded", "keycloak", "keycloak", "keycloak", true),
-            new FlagSpec("credit.unlimited", "true", "false", "false", "false", true),
-            new FlagSpec("credit.consumption.enabled", "true", "true", "true", "true", false),
-            new FlagSpec("plan-limits.enabled", "false", "true", "true", "true", true),
-            new FlagSpec("billing.provider", "none", "none", "stripe", "stripe", false),
-            new FlagSpec("marketplace.mode", "remote", "remote", "local", "local", false)
+            new FlagSpec("deployment.mode", "monolith", "monolith", "monolith", "microservice", "microservice", false),
+            new FlagSpec("auth.mode", "embedded", "embedded", "keycloak", "keycloak", "keycloak", true),
+            new FlagSpec("credit.unlimited", "true", "false", "false", "false", "false", true),
+            new FlagSpec("credit.consumption.enabled", "true", "true", "true", "true", "true", false),
+            new FlagSpec("plan-limits.enabled", "false", "true", "true", "true", "true", true),
+            new FlagSpec("billing.provider", "none", "stripe", "none", "stripe", "stripe", false),
+            new FlagSpec("marketplace.mode", "remote", "remote", "remote", "local", "local", false)
     );
 
     private final AppEdition edition;
@@ -165,12 +169,16 @@ public class AppEditionProvider {
         return edition == AppEdition.CE_FREE;
     }
 
+    public boolean isPaidMonolith() {
+        return edition == AppEdition.PAID_MONOLITH;
+    }
+
     public boolean isSelfHostedEnterprise() {
         return edition == AppEdition.SELF_HOSTED_ENTERPRISE;
     }
 
     public boolean isSelfHosted() {
-        return edition == AppEdition.CE_FREE || edition == AppEdition.SELF_HOSTED_ENTERPRISE;
+        return edition == AppEdition.CE_FREE || edition == AppEdition.PAID_MONOLITH || edition == AppEdition.SELF_HOSTED_ENTERPRISE;
     }
 
     public boolean isCloud() {
@@ -203,18 +211,21 @@ public class AppEditionProvider {
             if (expected.equalsIgnoreCase(actual)) {
                 continue;
             }
+            boolean failClosed = flag.criticalFailClosed()
+                    || ("billing.provider".equals(flag.name())
+                        && (isCeFree() || isPaidMonolith()));
             if (isCeFree()) {
                 log.warn(String.format(
                         DRIFT_WARN_FORMAT,
                         flag.name(), actual, expected, flag.envVarName(), expected));
-                if (flag.criticalFailClosed()) {
+                if (failClosed) {
                     fatalDrifts.add(flag.name() + "=" + actual + " (expected " + expected + ")");
                 }
-            } else if (flag.criticalFailClosed() || isSelfHostedEnterprise()) {
+            } else if (flag.criticalFailClosed() || isSelfHosted()) {
                 log.warn(String.format(
                         EDITION_DRIFT_WARN_FORMAT,
                         edition.configValue(), flag.name(), actual, expected, flag.envVarName(), expected));
-                if (flag.criticalFailClosed()) {
+                if (failClosed) {
                     fatalDrifts.add(flag.name() + "=" + actual + " (expected " + expected + ")");
                 }
             }

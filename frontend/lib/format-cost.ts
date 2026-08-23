@@ -7,7 +7,7 @@
  * In Cloud mode, "credits" is the billing unit users understand.
  */
 
-import { IS_CE } from '@/lib/edition';
+import { IS_BILLING_ENABLED, IS_CE } from '@/lib/edition';
 import { getClientLocale } from './utils/locale';
 import { CREDIT_LIST_USD } from '@/lib/billing/pricing-constants';
 
@@ -15,6 +15,9 @@ import { CREDIT_LIST_USD } from '@/lib/billing/pricing-constants';
  * Whether we're in CE mode (useful for conditional rendering).
  */
 export const isCeMode = IS_CE;
+
+/** True only for free CE/BYOK surfaces that display provider cost in dollars. */
+export const showsDollarCost = IS_CE && !IS_BILLING_ENABLED;
 
 /**
  * Convert a credit-denominated ledger amount to its USD value at the canonical list
@@ -48,7 +51,7 @@ function formatCeDollars(dollars: number): string {
  */
 export function formatCost(value: number | null | undefined, decimals = 2): string {
   if (value == null) return '-';
-  if (!IS_CE) return value.toLocaleString(getClientLocale(), { minimumFractionDigits: decimals, maximumFractionDigits: decimals });
+  if (!showsDollarCost) return value.toLocaleString(getClientLocale(), { minimumFractionDigits: decimals, maximumFractionDigits: decimals });
   const usd = creditsToUsd(value);
   // Sign before the "$" - "-$0.0086", never "$-0.0086".
   return `${usd < 0 ? '-' : ''}$${formatCeDollars(usd)}`;
@@ -60,7 +63,7 @@ export function formatCost(value: number | null | undefined, decimals = 2): stri
  */
 export function formatCostOrDash(value: number | null | undefined, decimals = 1): string {
   if (value == null || value === 0) return '-';
-  if (!IS_CE) return value.toLocaleString(getClientLocale(), { minimumFractionDigits: decimals, maximumFractionDigits: decimals });
+  if (!showsDollarCost) return value.toLocaleString(getClientLocale(), { minimumFractionDigits: decimals, maximumFractionDigits: decimals });
   const usd = creditsToUsd(value);
   // Sign before the "$" - "-$0.0086", never "$-0.0086".
   return `${usd < 0 ? '-' : ''}$${formatCeDollars(usd)}`;
@@ -100,8 +103,8 @@ export function formatCreditsCompact(value: number | null | undefined): string {
  */
 export function formatCostCompact(value: number | null | undefined): string {
   if (value == null) return '-';
-  const display = IS_CE ? creditsToUsd(value) : value; // dollars in CE, credits in Cloud
-  const prefix = IS_CE ? '$' : '';
+  const display = showsDollarCost ? creditsToUsd(value) : value; // dollars in CE, credits in Cloud
+  const prefix = showsDollarCost ? '$' : '';
   const sign = display < 0 ? '-' : '';
   const abs = Math.abs(display);
   if (abs >= 1_000_000_000) return `${sign}${prefix}${(abs / 1_000_000_000).toFixed(1)}B`;

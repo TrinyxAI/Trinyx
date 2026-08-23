@@ -52,10 +52,20 @@ a commercial-edition flag.
 
 ## Stripe objects and database wiring
 
-Create LIVE-mode recurring prices for Starter, Pro, Team, and the existing
-CREDIT_PACK unit in monthly and yearly cadences, plus the three one-time PAYG
-prices. Team credit tiers reuse CREDIT_PACK with plan-aware quantities; no
-separate Team credit product is needed:
+Stripe test mode and live mode are isolated. A Price ID created in test mode
+cannot be used with a live secret key, and a LIVE Price ID cannot be used with
+a test secret key. Keep the two environments separate throughout staging and
+production rollout.
+
+For staging, create TEST-mode recurring prices for Starter, Pro, Team, and the
+existing CREDIT_PACK unit in monthly and yearly cadences, plus the three
+one-time PAYG prices. Use `sk_test_...`, the TEST webhook secret, and wire only
+TEST Price IDs into the staging database.
+
+For production, create the equivalent LIVE-mode prices, use `sk_live_...`, the
+LIVE webhook secret, and wire only LIVE Price IDs into the production database.
+Team credit tiers reuse CREDIT_PACK with plan-aware quantities; no separate Team
+credit product is needed:
 
 | Database plan/cadence | Amount already expected by the database |
 | --- | ---: |
@@ -63,8 +73,8 @@ separate Team credit product is needed:
 | PAYG / payg_medium | 50.00 |
 | PAYG / payg_large | 100.00 |
 
-Before creating products, query the database for the authoritative subscription
-amounts and currency:
+Before creating products, query the target database for the authoritative
+subscription amounts and currency:
 
 ```bash
 docker compose exec -T postgres psql -U "$DB_USERNAME" -d livecontext -c "
@@ -75,9 +85,9 @@ WHERE pl.code IN ('STARTER','PRO','TEAM','CREDIT_PACK','PAYG')
 ORDER BY pl.code, pr.amount_cents, pr.cadence;"
 ```
 
-Wire the returned LIVE Price IDs with the manual template. This overwrites the
-historical TEST-mode PAYG IDs without deleting any price, subscription, or
-ledger row:
+Wire the Price IDs for the Stripe environment currently in use with the manual
+template. In staging, pass TEST IDs. In production, pass LIVE IDs. This updates
+the provider mappings without deleting any price, subscription, or ledger row:
 
 ```bash
 docker compose exec -T postgres psql -U "$DB_USERNAME" -d livecontext   -v starter_monthly="$STRIPE_PRICE_STARTER_MONTHLY"   -v starter_yearly="$STRIPE_PRICE_STARTER_YEARLY"   -v pro_monthly="$STRIPE_PRICE_PRO_MONTHLY"   -v pro_yearly="$STRIPE_PRICE_PRO_YEARLY"   -v team_monthly="$STRIPE_PRICE_TEAM_MONTHLY"   -v team_yearly="$STRIPE_PRICE_TEAM_YEARLY"   -v credit_pack_monthly="$STRIPE_PRICE_CREDIT_PACK_MONTHLY"   -v credit_pack_yearly="$STRIPE_PRICE_CREDIT_PACK_YEARLY"   -v payg_small="$STRIPE_PRICE_PAYG_SMALL"   -v payg_medium="$STRIPE_PRICE_PAYG_MEDIUM"   -v payg_large="$STRIPE_PRICE_PAYG_LARGE"   < backend/migration-service/src/main/resources/db/manual/trinyx_stripe_price_ids.template.sql
@@ -183,20 +193,25 @@ deleted.
    curl --fail http://127.0.0.1:3000/
    ```
 
-4. Wire LIVE Price IDs with the template, restart the backend to refresh price
-   caches/health, then add the exact Caddy route and Stripe endpoint:
+4. Configure staging with Stripe TEST credentials and TEST Price IDs. Use a TEST
+   webhook endpoint/secret, wire the TEST IDs with the template, restart the
+   backend to refresh price caches/health, then exercise Free provisioning,
+   monthly and yearly Checkout, portal, upgrade/downgrade, cancel/reactivate,
+   renewal, each PAYG tier, partial/full refund, dispute, insufficient credits,
+   LLM/chat/agent, workflow node, web tool, and image-generation usage. Compare
+   every case to `auth.subscription`, `auth.credit_ledger`, and
+   `auth.billing_event.status`.
 
    ```bash
    docker compose --env-file docker/.env.paid-monolith restart livecontext
    curl --fail http://127.0.0.1:8080/actuator/health
    ```
 
-5. In Stripe test mode first, exercise Free provisioning, monthly and yearly
-   Checkout, portal, upgrade/downgrade, cancel/reactivate, renewal, each PAYG
-   tier, partial/full refund, dispute, insufficient credits, LLM/chat/agent,
-   workflow node, web tool, and image-generation usage. Compare every case to
-   `auth.subscription`, `auth.credit_ledger`, and
-   `auth.billing_event.status` before enabling LIVE Checkout.
+5. Only after staging passes, prepare production separately with the LIVE Stripe
+   secret key, LIVE webhook secret, and LIVE Price IDs. Wire the LIVE IDs into
+   the production database, verify the direct Caddy webhook route, restart the
+   backend, and run a controlled internal LIVE checkout before enabling paid
+   beta access. Never reuse TEST Price IDs or TEST webhook secrets in production.
 
 ## Rollback
 

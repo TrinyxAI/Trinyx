@@ -1,6 +1,8 @@
 package com.apimarketplace.auth.web;
 
 import com.apimarketplace.auth.service.EntitlementProjectionService;
+import jakarta.validation.Valid;
+import jakarta.validation.constraints.NotBlank;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.web.bind.annotation.*;
 
@@ -18,6 +20,12 @@ public class EntitlementProjectionController {
         this.projections = projections;
     }
 
+    @PutMapping("/repair")
+    public EntitlementProjectionService.ApplyResult repair(
+            @Valid @RequestBody ProjectionRequest request) {
+        return projections.apply(request.assertion());
+    }
+
     @GetMapping("/decision")
     public EntitlementProjectionService.Decision decision(
             @RequestParam UUID installId,
@@ -27,4 +35,5 @@ public class EntitlementProjectionController {
             @RequestParam(defaultValue = "false") boolean paidOperation) {
         return projections.authorize(installId, organizationId, billingSubjectId, feature, paidOperation);
     }
+    public record ProjectionRequest(@NotBlank String assertion) {}
 }

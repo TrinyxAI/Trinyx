@@ -136,7 +136,7 @@ services:
           memory: 512M
 
   livecontext:
-    image: ghcr.io/livecontext-ai/livecontext-ce:v0.2.12
+    image: ${BACKEND_IMAGE:-ghcr.io/livecontext-ai/livecontext-ce:v0.2.12}
     container_name: livecontext-app
     restart: unless-stopped
     depends_on:
@@ -152,6 +152,21 @@ services:
       - "${BACKEND_PORT:-8080}:8080"
     environment:
       PORT: 8080
+      # Free CE remains the default. Paid monolith opts in only through env.
+      APP_EDITION: ${APP_EDITION:-ce}
+      AUTH_MODE: ${AUTH_MODE:-embedded}
+      DEPLOYMENT_MODE: ${DEPLOYMENT_MODE:-monolith}
+      BILLING_PROVIDER: ${BILLING_PROVIDER:-none}
+      CREDIT_UNLIMITED: ${CREDIT_UNLIMITED:-true}
+      CREDIT_CONSUMPTION_ENABLED: ${CREDIT_CONSUMPTION_ENABLED:-true}
+      PLAN_LIMITS_ENABLED: ${PLAN_LIMITS_ENABLED:-false}
+      WORKFLOW_NODE_BILLING_ENABLED: ${WORKFLOW_NODE_BILLING_ENABLED:-false}
+      BILLING_LLM_CLOUD_MULTIPLIER: ${BILLING_LLM_CLOUD_MULTIPLIER:-1.0}
+      APP_PUBLIC_URL: ${APP_PUBLIC_URL:-http://localhost:${FRONTEND_PORT:-3000}}
+      STRIPE_SECRET_KEY: ${STRIPE_SECRET_KEY:-}
+      STRIPE_WEBHOOK_SECRET: ${STRIPE_WEBHOOK_SECRET:-}
+      STRIPE_SUCCESS_URL: ${STRIPE_SUCCESS_URL:-}
+      STRIPE_CANCEL_URL: ${STRIPE_CANCEL_URL:-}
       DB_HOST: postgres
       DB_PORT: 5432
       DB_NAME: livecontext

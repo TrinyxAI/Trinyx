@@ -60,8 +60,14 @@ class ApiCatalogMergeServiceTest {
     private final List<UUID> failingApiInserts = new ArrayList<>();
     /** apiIds whose apis-upsert reports 0 rows (ON CONFLICT … WHERE source guard fired). */
     private final List<UUID> suppressedApiUpserts = new ArrayList<>();
-    /** Logical tool key → install-local id returned by INSERT ... RETURNING. */
-    private final Map<String, UUID> existingLogicalToolIds = new HashMap<>();
+    private record ExistingTool(UUID id, UUID apiId, String toolNameId,
+                                String toolSlug, String endpoint) {
+        private ExistingTool(UUID id, UUID apiId, String toolNameId) {
+            this(id, apiId, toolNameId, toolNameId, "/existing");
+        }
+    }
+    /** Rows returned by the dual-identity SELECT ... FOR UPDATE. */
+    private final List<ExistingTool> existingTools = new ArrayList<>();
     /** What the orphan-sweep SELECT returns (APIs to deprecate in this sweep). */
     private final List<UUID> orphanApiIds = new ArrayList<>();
     /** Update count returned by the orphan TOOL sweep statement. */
@@ -78,7 +84,7 @@ class ApiCatalogMergeServiceTest {
         existingSources.clear();
         failingApiInserts.clear();
         suppressedApiUpserts.clear();
-        existingLogicalToolIds.clear();
+        existingTools.clear();
         orphanApiIds.clear();
         orphanToolSweepCount = 1;
 
@@ -120,16 +126,39 @@ class ApiCatalogMergeServiceTest {
                     return sql.contains("api_subcategories")
                             ? List.of(SUBCATEGORY_ID) : List.of(CATEGORY_ID);
                 });
+        when(jdbc.queryForList(anyString(), any(SqlParameterSource.class)))
+                .thenAnswer(inv -> {
+                    String sql = inv.getArgument(0);
+                    SqlParameterSource p = inv.getArgument(1);
+                    if (!sql.contains("FROM catalog.api_tools") || !sql.contains("FOR UPDATE")) {
+                        return List.of();
+                    }
+                    UUID bundleId = (UUID) p.getValue("id");
+                    UUID apiId = (UUID) p.getValue("apiId");
+                    String toolNameId = (String) p.getValue("toolNameId");
+                    return existingTools.stream()
+                            .filter(tool -> tool.id().equals(bundleId)
+                                    || (toolNameId != null
+                                        && tool.apiId().equals(apiId)
+                                        && tool.toolNameId().equals(toolNameId)))
+                            .map(tool -> {
+                                Map<String, Object> row = new HashMap<>();
+                                row.put("id", tool.id());
+                                row.put("api_id", tool.apiId());
+                                row.put("tool_name_id", tool.toolNameId());
+                                row.put("tool_slug", tool.toolSlug());
+                                row.put("endpoint", tool.endpoint());
+                                return row;
+                            })
+                            .toList();
+                });
         when(jdbc.queryForObject(anyString(), any(SqlParameterSource.class), eq(UUID.class)))
                 .thenAnswer(inv -> {
                     String sql = inv.getArgument(0);
                     SqlParameterSource p = inv.getArgument(1);
                     if (sql.contains("INSERT INTO catalog.api_tools")) {
                         updates.add(new Statement(sql, p));
-                        String key = logicalToolKey(
-                                (UUID) p.getValue("apiId"),
-                                (String) p.getValue("toolNameId"));
-                        return existingLogicalToolIds.getOrDefault(key, (UUID) p.getValue("id"));
+                        return p.getValue("id");
                     }
                     return UUID.randomUUID();
                 });
@@ -163,10 +192,6 @@ class ApiCatalogMergeServiceTest {
         tool.put("toolCredentials", List.of(Map.of(
                 "credentialName", "slack", "variant", "oauth2")));
         return tool;
-    }
-
-    private static String logicalToolKey(UUID apiId, String toolNameId) {
-        return apiId + "|" + toolNameId;
     }
 
     private List<Statement> matching(Predicate<String> sqlMatch) {
@@ -384,7 +409,7 @@ class ApiCatalogMergeServiceTest {
         UUID oldLocalId = UUID.randomUUID();
         UUID newBundleId = UUID.randomUUID();
         String toolNameId = "surveymonkey-create-survey";
-        existingLogicalToolIds.put(logicalToolKey(apiId, toolNameId), oldLocalId);
+        existingTools.add(new ExistingTool(oldLocalId, apiId, toolNameId));
 
         Map<String, Object> tool = toolMap(newBundleId, "create-survey");
         tool.put("toolNameId", toolNameId);
@@ -396,9 +421,9 @@ class ApiCatalogMergeServiceTest {
         assertThat(result.upsertedTools()).isEqualTo(1);
 
         Statement upsert = matching(sql -> sql.contains("INSERT INTO catalog.api_tools")).get(0);
-        assertThat(upsert.params().getValue("id")).isEqualTo(newBundleId);
+        assertThat(upsert.params().getValue("id")).isEqualTo(oldLocalId);
         assertThat(upsert.sql())
-                .contains("ON CONFLICT (api_id, tool_name_id) DO UPDATE")
+                .contains("ON CONFLICT (id) DO UPDATE")
                 .contains("RETURNING id");
 
         for (String table : List.of("catalog.api_tool_parameters", "catalog.tool_responses",
@@ -414,6 +439,72 @@ class ApiCatalogMergeServiceTest {
                         && sql.contains("api_id = :apiId")).get(0);
         assertThat((List<Object>) sweep.params().getValue("toolIds"))
                 .containsExactly(oldLocalId);
+    }
+
+    @Test
+    @DisplayName("Primary-key match with a different logical key fails before any tool or child write")
+    void primaryKeyIdentityConflictIsRejectedWithoutMutation() {
+        UUID apiId = UUID.randomUUID();
+        UUID bundleId = UUID.randomUUID();
+        existingTools.add(new ExistingTool(
+                bundleId, apiId, "surveymonkey-send-collector-message",
+                "send-collector-message", "/v1/messages"));
+
+        Map<String, Object> tool = toolMap(bundleId, "create-survey");
+        tool.put("toolNameId", "surveymonkey-create-survey");
+
+        ApiCatalogMergeService.MergeResult result = service.merge(
+                List.of(apiMap(apiId, "SurveyMonkey", List.of(tool))), List.of());
+
+        assertThat(result.failedApis()).isEqualTo(1);
+        assertThat(result.upsertedApis()).isZero();
+        assertThat(result.upsertedTools()).isZero();
+        assertThat(result.errors()).singleElement().satisfies(error ->
+                assertThat(error)
+                        .contains("PrimaryKeyToolIdentityConflictException")
+                        .contains(bundleId.toString())
+                        .contains("send-collector-message")
+                        .contains("surveymonkey-send-collector-message")
+                        .contains("/v1/messages")
+                        .contains("create-survey")
+                        .contains("surveymonkey-create-survey")
+                        .contains("/v1/create-survey")
+                        .contains("refusing to requalify a referenced tool"));
+        assertThat(matching(sql -> sql.contains("INSERT INTO catalog.api_tools"))).isEmpty();
+        assertThat(matching(sql -> sql.contains("DELETE FROM catalog.api_tool_parameters"))).isEmpty();
+        assertThat(matching(sql -> sql.contains("DELETE FROM catalog.tool_responses"))).isEmpty();
+        assertThat(matching(sql -> sql.contains("DELETE FROM catalog.tool_credentials"))).isEmpty();
+    }
+
+    @Test
+    @DisplayName("Crossed PK/logical identities fail explicitly before any tool or child write")
+    void crossedToolIdentitiesAreRejectedWithoutMutation() {
+        UUID apiId = UUID.randomUUID();
+        UUID logicalId = UUID.randomUUID();
+        UUID bundleId = UUID.randomUUID();
+        existingTools.add(new ExistingTool(
+                logicalId, apiId, "surveymonkey-create-survey"));
+        existingTools.add(new ExistingTool(
+                bundleId, apiId, "surveymonkey-send-collector-message"));
+
+        Map<String, Object> tool = toolMap(bundleId, "create-survey");
+        tool.put("toolNameId", "surveymonkey-create-survey");
+
+        ApiCatalogMergeService.MergeResult result = service.merge(
+                List.of(apiMap(apiId, "SurveyMonkey", List.of(tool))), List.of());
+
+        assertThat(result.failedApis()).isEqualTo(1);
+        assertThat(result.upsertedApis()).isZero();
+        assertThat(result.errors()).singleElement().satisfies(error ->
+                assertThat(error)
+                        .contains("CrossedToolIdentityException")
+                        .contains(bundleId.toString())
+                        .contains(logicalId.toString())
+                        .contains("refusing an automatic merge"));
+        assertThat(matching(sql -> sql.contains("INSERT INTO catalog.api_tools"))).isEmpty();
+        assertThat(matching(sql -> sql.contains("DELETE FROM catalog.api_tool_parameters"))).isEmpty();
+        assertThat(matching(sql -> sql.contains("DELETE FROM catalog.tool_responses"))).isEmpty();
+        assertThat(matching(sql -> sql.contains("DELETE FROM catalog.tool_credentials"))).isEmpty();
     }
 
     @Test

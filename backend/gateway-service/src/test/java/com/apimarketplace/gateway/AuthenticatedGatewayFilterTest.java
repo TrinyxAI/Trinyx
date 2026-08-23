@@ -5,6 +5,7 @@ import org.springframework.cloud.gateway.filter.GatewayFilterChain;
 import org.springframework.http.HttpStatus;
 import org.springframework.mock.http.server.reactive.MockServerHttpRequest;
 import org.springframework.mock.web.server.MockServerWebExchange;
+import org.springframework.web.server.ServerWebExchange;
 import reactor.core.publisher.Mono;
 import reactor.test.StepVerifier;
 
@@ -42,9 +43,9 @@ class AuthenticatedGatewayFilterTest {
                         .header("X-User-Roles", "ADMIN")
                         .header("X-Gateway-Secret", "forged")
                         .build());
-        AtomicReference<MockServerWebExchange> forwarded = new AtomicReference<>();
+        AtomicReference<ServerWebExchange> forwarded = new AtomicReference<>();
         GatewayFilterChain chain = candidate -> {
-            forwarded.set((MockServerWebExchange) candidate);
+            forwarded.set(candidate);
             return Mono.empty();
         };
 

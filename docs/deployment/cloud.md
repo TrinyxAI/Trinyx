@@ -101,8 +101,7 @@ bind/port pairs, `CLOUD_DB_NAME`, pool sizes, `CLOUD_MINIO_BUCKET`,
 
 Provider keys (`OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `GOOGLE_API_KEY`,
 `GEMINI_API_KEY`, `MISTRAL_API_KEY`, `DEEPSEEK_API_KEY`) are optional and
-must come from an external secret store. `CODE_NODE_SERVICE_URL` remains empty
-unless an operator supplies a compatible service.
+must come from an external secret store. `PISTON_URL` must point to a separately operated compatible code-execution service; no such implementation exists in this repository.
 
 The Compose file pins the required edition flags:
 
@@ -299,7 +298,7 @@ DNS, Stripe, Keycloak, database or production mutation.
 
 - authenticated gateway: hard blocker for production and Cloud-link;
 - no standalone Cloud frontend/control-plane UI;
-- no code-node/Piston-compatible service in the repository;
+- no code-node/Piston-compatible service in the repository; `PISTON_URL` is an external dependency;
 - Stripe Cloud products/prices and webhook registration remain external;
 - Keycloak redirect URIs for arbitrary CE hosts require explicit provisioning;
 - websearch/Chromium is resource-heavy and needs host capacity validation;

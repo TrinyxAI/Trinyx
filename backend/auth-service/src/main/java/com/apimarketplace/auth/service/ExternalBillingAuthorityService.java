@@ -53,20 +53,22 @@ public class ExternalBillingAuthorityService {
     @Transactional
     public AuthorityBundle issue(long actorUserId, UUID installId, UUID organizationId,
                                  String keycloakSubject) {
-        User actor = validateScope(actorUserId, installId, organizationId);
-        String identityBinding = issueIdentity(actor, installId, organizationId, keycloakSubject);
-        Projection projection = issueProjection(actor, installId, organizationId, "UPSERT");
+        AuthorityScope scope = validateScope(actorUserId, installId, organizationId);
+        String identityBinding = issueIdentity(scope.actor(), scope.payer(), installId,
+                organizationId, keycloakSubject);
+        Projection projection = issueProjection(scope.actor(), scope.payer(), installId,
+                organizationId, "UPSERT");
         return new AuthorityBundle(identityBinding, projection.assertion(), projection.sequence(),
                 projection.expiresAt());
     }
 
     @Transactional
     public Projection refresh(long actorUserId, UUID installId, UUID organizationId) {
-        User actor = validateScope(actorUserId, installId, organizationId);
-        return issueProjection(actor, installId, organizationId, "REFRESH");
+        AuthorityScope scope = validateScope(actorUserId, installId, organizationId);
+        return issueProjection(scope.actor(), scope.payer(), installId, organizationId, "REFRESH");
     }
 
-    private String issueIdentity(User actor, UUID installId, UUID organizationId,
+    private String issueIdentity(User actor, User payer, UUID installId, UUID organizationId,
                                  String keycloakSubject) {
         if (keycloakSubject == null || keycloakSubject.isBlank()) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "KEYCLOAK_SUBJECT_REQUIRED");
@@ -122,7 +124,7 @@ public class ExternalBillingAuthorityService {
         return assertion;
     }
 
-    private Projection issueProjection(User actor, UUID installId, UUID organizationId,
+    private Projection issueProjection(User actor, User payer, UUID installId, UUID organizationId,
                                        String eventType) {
         String scope = "https://app.trinyx.fr|" + installId + "|" + organizationId
                 + "|" + actor.getBillingSubjectId();
@@ -242,7 +244,7 @@ public class ExternalBillingAuthorityService {
         }
     }
 
-    private User validateScope(long userId, UUID installId, UUID organizationId) {
+    private AuthorityScope validateScope(long userId, UUID installId, UUID organizationId) {
         User user = users.findById(userId)
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "USER_NOT_FOUND"));
         Integer membership = jdbc.queryForObject(
@@ -254,7 +256,11 @@ public class ExternalBillingAuthorityService {
         if (membership == null || membership != 1 || installation == null || installation != 1) {
             throw new ResponseStatusException(HttpStatus.FORBIDDEN, "AUTHORITY_SCOPE_INVALID");
         }
-        return user;
+        Long ownerId = jdbc.queryForObject(
+                "SELECT owner_id FROM auth.organization WHERE id=?", Long.class, organizationId);
+        User payer = users.findById(ownerId)
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "PAYER_NOT_FOUND"));
+        return new AuthorityScope(user, payer);
     }
 
     private void lock(String scope) {
@@ -265,6 +271,8 @@ public class ExternalBillingAuthorityService {
     private static void putLimit(ObjectNode limits, String name, Number value) {
         if (value != null) limits.put(name, value.longValue());
     }
+
+    private record AuthorityScope(User actor, User payer) {}
 
     public record AuthorityBundle(String identityBinding, String entitlementProjection,
                                   long entitlementSequence, Instant entitlementExpiresAt) {}

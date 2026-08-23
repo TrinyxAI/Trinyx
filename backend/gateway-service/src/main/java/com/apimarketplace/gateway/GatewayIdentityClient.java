@@ -11,6 +11,8 @@ import reactor.core.publisher.Mono;
 
 import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
+import java.util.List;
+import java.util.Set;
 import java.util.UUID;
 
 @Component
@@ -20,8 +22,7 @@ final class GatewayIdentityClient {
     private final ObjectMapper mapper;
     private final String secret;
 
-    GatewayIdentityClient(WebClient.Builder builder,
-                          ObjectMapper mapper,
+    GatewayIdentityClient(WebClient.Builder builder, ObjectMapper mapper,
                           @Value("${trinyx.gateway.auth-service-url}") String authServiceUrl,
                           @Value("${trinyx.gateway.hmac-secret}") String secret) {
         this.auth = builder.baseUrl(authServiceUrl).build();
@@ -32,28 +33,31 @@ final class GatewayIdentityClient {
     Mono<GatewayUserContext> resolve(String bearerToken, String providerId, String bindingJws) {
         String target = "/api/users/resolve?providerId="
                 + URLEncoder.encode(providerId, StandardCharsets.UTF_8);
-        HttpHeaders signed = signed("GET", target, new byte[0], providerId, "", "", "", "", "", "", "");
+        HttpHeaders signed = signed("GET", target, new byte[0], providerId,
+                "", "", "", "", "", "", "");
         return auth.get().uri(target)
                 .headers(headers -> {
                     headers.addAll(signed);
                     headers.setBearerAuth(bearerToken);
                 })
                 .retrieve()
-                .bodyToMono(GatewayUserContext.class)
+                .bodyToMono(UserResolution.class)
                 .flatMap(user -> resolveBinding(user, providerId, bindingJws));
     }
 
     private Mono<GatewayUserContext> resolveBinding(
-            GatewayUserContext user, String providerId, String bindingJws) {
+            UserResolution user, String providerId, String bindingJws) {
         String target = "/api/internal/cloud-identity/context?keycloakSubject="
                 + URLEncoder.encode(providerId, StandardCharsets.UTF_8);
-        HttpHeaders headers = signed("GET", target, new byte[0], "trinyx-cloud-gateway",
-                String.valueOf(user.userId()), "", "", user.defaultOrganizationId(),
-                user.defaultOrganizationRole(), canonicalRoles(user.roles()), "");
+        HttpHeaders headers = signed("GET", target, new byte[0], providerId,
+                String.valueOf(user.userId()), user.principalId(), user.billingSubjectId(),
+                user.defaultOrganizationId(), user.defaultOrganizationRole(),
+                canonicalRoles(user.roles()), "");
         return auth.get().uri(target)
                 .headers(out -> out.addAll(headers))
                 .retrieve()
-                .bodyToMono(GatewayUserContext.class)
+                .bodyToMono(BindingContext.class)
+                .map(binding -> merge(user, binding))
                 .onErrorResume(org.springframework.web.reactive.function.client.WebClientResponseException.NotFound.class,
                         missing -> bindingJws == null || bindingJws.isBlank()
                                 ? Mono.error(new UnboundIdentityException())
@@ -61,22 +65,30 @@ final class GatewayIdentityClient {
     }
 
     private Mono<GatewayUserContext> bind(
-            GatewayUserContext user, String providerId, String bindingJws) {
+            UserResolution user, String providerId, String bindingJws) {
         try {
             byte[] body = mapper.writeValueAsBytes(java.util.Map.of("identityBinding", bindingJws));
             String target = "/api/internal/cloud-identity/bind";
-            HttpHeaders headers = signed("POST", target, body, "trinyx-cloud-gateway",
-                    String.valueOf(user.userId()), "", "", user.defaultOrganizationId(),
-                    user.defaultOrganizationRole(), canonicalRoles(user.roles()), "");
+            HttpHeaders headers = signed("POST", target, body, providerId,
+                    String.valueOf(user.userId()), user.principalId(), user.billingSubjectId(),
+                    user.defaultOrganizationId(), user.defaultOrganizationRole(),
+                    canonicalRoles(user.roles()), "");
             return auth.post().uri(target)
                     .contentType(MediaType.APPLICATION_JSON)
                     .headers(out -> out.addAll(headers))
                     .bodyValue(body)
                     .retrieve()
-                    .bodyToMono(GatewayUserContext.class);
+                    .bodyToMono(BindingContext.class)
+                    .map(binding -> merge(user, binding));
         } catch (Exception e) {
             return Mono.error(e);
         }
+    }
+
+    private GatewayUserContext merge(UserResolution user, BindingContext binding) {
+        return new GatewayUserContext(user.userId(), user.providerId(), user.roles(),
+                user.defaultOrganizationId(), user.defaultOrganizationRole(), user.memberships(),
+                binding.principalId(), binding.billingSubjectId(), binding.installId());
     }
 
     HttpHeaders signed(String method, String target, byte[] body,
@@ -114,6 +126,15 @@ final class GatewayIdentityClient {
     private static void set(HttpHeaders headers, String name, String value) {
         if (value != null && !value.isBlank()) headers.set(name, value);
     }
+
+    private record UserResolution(Long userId, String providerId, Set<String> roles,
+                                  String defaultOrganizationId, String defaultOrganizationRole,
+                                  List<GatewayUserContext.Membership> memberships,
+                                  String principalId, String billingSubjectId) {}
+
+    private record BindingContext(Long userId, String providerId, String principalId,
+                                  String billingSubjectId, String organizationId,
+                                  String installId, long bindingRevision, String status) {}
 
     static final class UnboundIdentityException extends RuntimeException {
         UnboundIdentityException() { super("Cloud identity is not bound"); }

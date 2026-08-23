@@ -68,7 +68,14 @@ final class AuthenticatedGatewayFilter implements GlobalFilter, Ordered {
                     String entitlement = exchange.getRequest().getHeaders()
                             .getFirst("X-Trinyx-Entitlement-Projection");
                     return identityClient.resolve(token, subject, binding, entitlement)
-                            .flatMap(context -> withBody(exchange, chain, subject, context));
+                            .flatMap(context -> {
+                                EntitlementPolicy policy = policyFor(path);
+                                return identityClient.authorize(
+                                                context, policy.feature(), policy.paidOperation())
+                                        .flatMap(decision -> decision.allowed()
+                                                ? withBody(exchange, chain, subject, context)
+                                                : forbidden(exchange, decision.reason()));
+                            });
                 })
                 .onErrorResume(error -> {
                     exchange.getResponse().setStatusCode(
@@ -92,8 +99,11 @@ final class AuthenticatedGatewayFilter implements GlobalFilter, Ordered {
 
                     String requestedOrg = exchange.getRequest().getHeaders()
                             .getFirst("X-Trinyx-Organization-ID");
-                    String organizationId = requestedOrg == null || requestedOrg.isBlank()
-                            ? context.defaultOrganizationId() : requestedOrg;
+                    if (requestedOrg != null && !requestedOrg.isBlank()
+                            && !requestedOrg.equals(context.defaultOrganizationId())) {
+                        return forbidden(exchange, "identity_binding_scope_mismatch");
+                    }
+                    String organizationId = context.defaultOrganizationId();
                     String organizationRole = context.roleFor(organizationId);
                     if (organizationId != null && organizationRole == null) {
                         return forbidden(exchange, "organization_membership_required");
@@ -171,6 +181,25 @@ final class AuthenticatedGatewayFilter implements GlobalFilter, Ordered {
                 || path.startsWith("/webhooks/")
                 || path.startsWith("/api/catalog/public/bundles/");
     }
+
+    private EntitlementPolicy policyFor(String path) {
+        if (path.startsWith("/api/ce-llm/")) {
+            return new EntitlementPolicy("cloudLlmRelay", true);
+        }
+        if (path.startsWith("/api/ce-websearch/") || path.startsWith("/cdp/")) {
+            return new EntitlementPolicy("cloudWebSearchRelay", true);
+        }
+        if (path.startsWith("/api/skill-bundles/")) {
+            return new EntitlementPolicy("skillBundle", false);
+        }
+        if (path.startsWith("/api/catalog-bundles/")
+                || path.startsWith("/api/ce-catalog/")) {
+            return new EntitlementPolicy("catalogBundle", false);
+        }
+        return new EntitlementPolicy(null, false);
+    }
+
+    private record EntitlementPolicy(String feature, boolean paidOperation) {}
 
     @Override
     public int getOrder() {

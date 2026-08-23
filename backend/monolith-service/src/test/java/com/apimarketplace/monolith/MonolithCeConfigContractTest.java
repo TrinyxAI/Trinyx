@@ -291,7 +291,7 @@ class MonolithCeConfigContractTest {
 
         assertThat(nestedValue(root, "cloud-link", "keycloak-url"))
             .as("CE Cloud Link must use the public Keycloak hostname configured for the cloud realm")
-            .isEqualTo("${CLOUD_KEYCLOAK_URL:https://auth.livecontext.ai/realms/livecontext}");
+            .isEqualTo("${CLOUD_KEYCLOAK_URL:https://auth.trinyx.fr/realms/trinyx}");
         assertThat(nestedValue(root, "cloud-link", "client-id"))
             .as("The cloud realm config extends the existing public PKCE client")
             .isEqualTo("${CLOUD_LINK_CLIENT_ID:livecontext-frontend}");

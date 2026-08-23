@@ -10,6 +10,7 @@
  *   APP_EDITION  AUTH_MODE         Result
  *   -----------  ----------------  ------
  *   ce           any               ce
+ *   paid-monolith embedded         ce + explicit billing capability
  *   cloud        oidc / empty      cloud
  *   cloud        embedded          ce      (warn - auth path wins defensively)
  *   unset/empty  embedded          ce      (legacy shim - kept for one release)
@@ -25,6 +26,11 @@ export type Edition = 'ce' | 'cloud';
 function resolve(): Edition {
     const explicit = (process.env.NEXT_PUBLIC_APP_EDITION ?? '').trim().toLowerCase();
     const auth = (process.env.NEXT_PUBLIC_AUTH_MODE ?? '').trim().toLowerCase();
+
+    if (explicit === 'paid-monolith' || explicit === 'monolith-paid'
+            || explicit === 'paid-self-hosted') {
+        return 'ce';
+    }
 
     if (explicit === 'ce' || explicit === 'cloud') {
         if (explicit === 'cloud' && auth === 'embedded') {

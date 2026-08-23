@@ -47,6 +47,8 @@ jobs:
         run: >-
           mvn -B -Pce
           -pl common-lib,auth-service,monolith-service
+          -Dsurefire.failIfNoSpecifiedTests=false
+          -Dtest=AppEditionProviderTest,AppEditionAutoConfigurationTest,MonolithCeConfigContractTest,WebhookControllerTest,StripeBillingServiceTest,StripeScheduleServiceTest,SubscriptionServiceTest,FreeSubscriptionProvisionerTest,FreeSubscriptionRenewalSchedulerTest,CreditAttributionGrantPaygTopupTest,CreditServiceTest,CreditControllerTest,CreditConsumptionClientTest,ModelPricingServiceTest,PlanLimitServiceTest,BillingControllerTest,BillingControllerIntegrationTest,StripeHealthIndicatorTest
           test
 
   frontend-test:

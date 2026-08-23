@@ -19,6 +19,11 @@ spring:
       server:
         webflux:
           routes:
+        - id: websearch-cdp
+          uri: ${trinyx.gateway.websearch-service-url:http://websearch-service:8085}
+          predicates:
+            - Path=/cdp/**
+
             - id: auth-ce-link
               uri: ${AUTH_SERVICE_URL:http://auth-service:8083}
               predicates: [ Path=/api/ce-link/** ]

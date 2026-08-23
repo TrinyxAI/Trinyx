@@ -44,7 +44,7 @@ class GatewaySecurityConfigTest {
                 .header("alg", "RS256")
                 .subject("subject")
                 .issuer(issuer)
-                .audience(values -> values.addAll(audience))
+                .audience(audience)
                 .issuedAt(issuedAt)
                 .expiresAt(expiresAt)
                 .build();

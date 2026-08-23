@@ -11,7 +11,7 @@ import { triggerSidebarNavigation } from '@/components/NavigationLoader';
 import { organizationApi } from '@/lib/api';
 import type { OrganizationRole } from '@/lib/api';
 import { useAuth } from '@/lib/providers/smart-providers';
-import { IS_CE } from '@/lib/edition';
+import { IS_BILLING_ENABLED, IS_CE } from '@/lib/edition';
 import { useAppVersion } from '@/hooks/useAppVersion';
 import { useHorizontalScrollHint } from '@/hooks/useHorizontalScrollHint';
 
@@ -59,7 +59,7 @@ export function SettingsNav() {
     // Filter items based on admin role and CE mode
     const visibleItems = React.useMemo(() => {
         return settingsNavItems.filter(item =>
-            !item.hidden && (!item.adminOnly || isAdmin) && (!item.hiddenInCE || !IS_CE) && (!item.ceOnly || IS_CE)
+            !item.hidden && (!item.adminOnly || isAdmin) && (!item.hiddenInCE || !IS_CE) && (!item.ceOnly || IS_CE) && (!item.requiresBilling || IS_BILLING_ENABLED)
         );
     }, [isAdmin]);
 

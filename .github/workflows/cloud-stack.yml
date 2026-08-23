@@ -82,6 +82,22 @@ jobs:
             exit 1
           fi
 
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+          cache: maven
+
+      - name: Test Cloud edition and gateway contracts
+        working-directory: backend
+        shell: bash
+        run: >-
+          mvn -B -Pce
+          -pl common-lib -am
+          -Dtest=AppEditionProviderTest,AppEditionAutoConfigurationTest,GatewayAuthenticationFilterTest
+          test
+
       - name: Ensure paid-monolith files are untouched
         if: github.event_name == 'pull_request'
         shell: bash

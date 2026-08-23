@@ -180,6 +180,16 @@ public interface CreditLedgerRepository extends JpaRepository<CreditLedgerEntry,
 
     boolean existsBySourceId(String sourceId);
 
+    Optional<CreditLedgerEntry> findBySourceId(String sourceId);
+
+    @Query("""
+            SELECT COALESCE(SUM(e.amount), 0)
+              FROM CreditLedgerEntry e
+             WHERE e.sourceId LIKE CONCAT(:prefix, '%')
+               AND e.sourceType IN ('PAYG_REFUND', 'PAYG_DISPUTE')
+            """)
+    BigDecimal sumPaygClawbacks(@Param("prefix") String prefix);
+
     @Query("SELECT CAST(e.createdAt AS date), e.sourceType, COUNT(e), SUM(ABS(e.amount)), " +
            "COALESCE(SUM(e.promptTokens),0) + COALESCE(SUM(e.completionTokens),0) " +
            "FROM CreditLedgerEntry e WHERE e.userId = :userId AND e.amount < 0 " +

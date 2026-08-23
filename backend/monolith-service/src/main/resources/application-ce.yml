@@ -226,7 +226,7 @@ ce-catalog-relay:
 # Cloud account linking (OAuth to LiveContext cloud for paid marketplace operations)
 cloud-link:
   keycloak-url: ${CLOUD_KEYCLOAK_URL:https://auth.trinyx.fr/realms/trinyx}
-  client-id: ${CLOUD_LINK_CLIENT_ID:livecontext-frontend}
+  client-id: ${CLOUD_LINK_CLIENT_ID:trinyx-frontend}
   redirect-uri: ${CLOUD_LINK_REDIRECT_URI:http://localhost:8080/api/cloud-link/callback}
   encryption-key: ${CLOUD_LINK_ENCRYPTION_KEY:}
   ip-hash:

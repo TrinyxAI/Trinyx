@@ -892,6 +892,89 @@ public class CreditConsumptionClient {
         }
     }
 
+
+    public record ExternalReservationResult(boolean success, String requestHash, String error) {}
+
+    /**
+     * External-authority LLM hold. Must complete successfully before a provider call starts.
+     */
+    public ExternalReservationResult reserveExternalLlm(
+            Long userId, java.util.UUID operationId, String feature, String sourceType,
+            String provider, String model, int estimatedPromptTokens,
+            int maximumCompletionTokens) {
+        if (!enabled || userId == null) {
+            return new ExternalReservationResult(false, null, "external credit authority unavailable");
+        }
+        String url = authServiceUrl + "/api/internal/cloud-credit-proxy/reserve-llm";
+        HttpHeaders headers = userHeaders(String.valueOf(userId), MediaType.APPLICATION_JSON);
+        Map<String, Object> body = new HashMap<>();
+        body.put("operationId", operationId);
+        body.put("feature", feature);
+        body.put("sourceType", sourceType);
+        body.put("provider", provider);
+        body.put("model", model);
+        body.put("estimatedPromptTokens", Math.max(0, estimatedPromptTokens));
+        body.put("maximumCompletionTokens", Math.max(0, maximumCompletionTokens));
+        try {
+            ResponseEntity<Map> response = restTemplate.exchange(
+                    url, HttpMethod.POST, new HttpEntity<>(body, headers), Map.class);
+            Object requestHash = response.getBody() == null
+                    ? null : response.getBody().get("requestHash");
+            if (!response.getStatusCode().is2xxSuccessful() || requestHash == null) {
+                return new ExternalReservationResult(false, null, "reservation rejected");
+            }
+            return new ExternalReservationResult(true, requestHash.toString(), null);
+        } catch (Exception failure) {
+            log.warn("External credit reservation failed closed for {}: {}",
+                    operationId, failure.getMessage());
+            return new ExternalReservationResult(false, null, failure.getMessage());
+        }
+    }
+
+    public boolean commitExternalLlm(
+            java.util.UUID operationId, String requestHash, String provider, String model,
+            String providerRequestId, int promptTokens, int completionTokens) {
+        String url = authServiceUrl + "/api/internal/cloud-credit-proxy/"
+                + operationId + "/commit-llm";
+        HttpHeaders headers = userHeaders(null, MediaType.APPLICATION_JSON);
+        Map<String, Object> body = new HashMap<>();
+        body.put("requestHash", requestHash);
+        body.put("provider", provider);
+        body.put("model", model);
+        body.put("providerRequestId", providerRequestId == null ? "" : providerRequestId);
+        body.put("promptTokens", Math.max(0, promptTokens));
+        body.put("completionTokens", Math.max(0, completionTokens));
+        try {
+            ResponseEntity<Map> response = restTemplate.exchange(
+                    url, HttpMethod.POST, new HttpEntity<>(body, headers), Map.class);
+            // 202 means the durable Cloud outbox owns the retry.
+            return response.getStatusCode().is2xxSuccessful();
+        } catch (Exception failure) {
+            log.error("External settlement was not acknowledged for operation {}: {}",
+                    operationId, failure.getMessage());
+            return false;
+        }
+    }
+
+    public boolean releaseExternal(
+            java.util.UUID operationId, String requestHash, String reason) {
+        String url = authServiceUrl + "/api/internal/cloud-credit-proxy/"
+                + operationId + "/release";
+        HttpHeaders headers = userHeaders(null, MediaType.APPLICATION_JSON);
+        Map<String, Object> body = new HashMap<>();
+        body.put("requestHash", requestHash);
+        body.put("reason", reason == null ? "provider-not-called" : reason);
+        try {
+            ResponseEntity<Map> response = restTemplate.exchange(
+                    url, HttpMethod.POST, new HttpEntity<>(body, headers), Map.class);
+            return response.getStatusCode().is2xxSuccessful();
+        } catch (Exception failure) {
+            log.error("External release was not acknowledged for operation {}: {}",
+                    operationId, failure.getMessage());
+            return false;
+        }
+    }
+
     private static String stripTrailingSlash(String url) {
         if (url != null && url.endsWith("/")) {
             return url.substring(0, url.length() - 1);

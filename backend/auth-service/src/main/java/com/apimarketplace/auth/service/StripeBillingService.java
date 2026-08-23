@@ -1287,9 +1287,11 @@ public class StripeBillingService {
         if (expectedPriceId == null || expectedPriceId.isBlank()) {
             throw new IllegalStateException("PAYG Stripe price is not configured for tier=" + tier);
         }
-        if (configuredPrice.getAmountCents() == null || session.getAmountTotal() == null
-                || configuredPrice.getAmountCents().longValue() != session.getAmountTotal()) {
-            throw new IllegalStateException("PAYG amount mismatch for tier=" + tier);
+        // amount_total includes Stripe automatic tax; the configured Price is
+        // the pre-tax amount, so validate against amount_subtotal.
+        if (configuredPrice.getAmountCents() == null || session.getAmountSubtotal() == null
+                || configuredPrice.getAmountCents().longValue() != session.getAmountSubtotal()) {
+            throw new IllegalStateException("PAYG subtotal mismatch for tier=" + tier);
         }
         if (configuredPrice.getCurrency() == null || session.getCurrency() == null
                 || !configuredPrice.getCurrency().equalsIgnoreCase(session.getCurrency())) {

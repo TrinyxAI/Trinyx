@@ -55,7 +55,8 @@ public class EntitlementProjectionService {
         String scope = issuer + "|" + installId + "|" + organizationId + "|" + billingSubjectId;
 
         // Serializes the empty-row case across Cloud instances as well as normal updates.
-        jdbc.queryForObject("SELECT pg_advisory_xact_lock(hashtext(?))", Long.class, scope);
+        jdbc.query("SELECT pg_advisory_xact_lock(hashtext(?))",
+                (org.springframework.jdbc.core.RowCallbackHandler) rs -> { }, scope);
         Current current = currentForUpdate(installId, organizationId, billingSubjectId);
         if (current != null) {
             if (!current.projectionId().equals(projectionId)) {

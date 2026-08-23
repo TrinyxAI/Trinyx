@@ -1,26 +1,14 @@
 package com.apimarketplace.auth.repository;
 
-import com.apimarketplace.auth.domain.CreditLedgerEntry;
-import jakarta.persistence.EntityManager;
-import jakarta.persistence.LockModeType;
 import org.junit.jupiter.api.Test;
-import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.boot.test.autoconfigure.jdbc.AutoConfigureTestDatabase;
-import org.springframework.boot.autoconfigure.domain.EntityScan;
-import org.springframework.boot.test.autoconfigure.orm.jpa.DataJpaTest;
-import org.springframework.boot.test.context.TestConfiguration;
-import org.springframework.test.context.ContextConfiguration;
-import org.springframework.transaction.PlatformTransactionManager;
-import org.springframework.transaction.annotation.Propagation;
-import org.springframework.transaction.annotation.Transactional;
-import org.springframework.transaction.support.TransactionTemplate;
 import org.testcontainers.containers.PostgreSQLContainer;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
-import org.springframework.test.context.DynamicPropertyRegistry;
-import org.springframework.test.context.DynamicPropertySource;
 
-import java.math.BigDecimal;
+import java.sql.Connection;
+import java.sql.DriverManager;
+import java.sql.PreparedStatement;
+import java.sql.ResultSet;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
@@ -28,14 +16,6 @@ import java.util.concurrent.TimeoutException;
 
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
-@DataJpaTest(properties = {
-        "spring.flyway.enabled=false",
-        "spring.data.jpa.repositories.enabled=false",
-        "spring.jpa.hibernate.ddl-auto=none",
-        "spring.jpa.properties.hibernate.default_schema=auth"
-})
-@AutoConfigureTestDatabase(replace = AutoConfigureTestDatabase.Replace.NONE)
-@ContextConfiguration(classes = CreditLedgerRepositoryLockIntegrationTest.JpaConfig.class)
 @Testcontainers
 class CreditLedgerRepositoryLockIntegrationTest {
 
@@ -49,39 +29,9 @@ class CreditLedgerRepositoryLockIntegrationTest {
                     .withPassword("test")
                     .withInitScript("db/test/credit-ledger-lock.sql");
 
-    @DynamicPropertySource
-    static void postgresProperties(DynamicPropertyRegistry registry) {
-        registry.add("spring.datasource.url", POSTGRES::getJdbcUrl);
-        registry.add("spring.datasource.username", POSTGRES::getUsername);
-        registry.add("spring.datasource.password", POSTGRES::getPassword);
-    }
-
-    @TestConfiguration(proxyBeanMethods = false)
-    @EntityScan(basePackageClasses = CreditLedgerEntry.class)
-    static class JpaConfig {
-    }
-
-    @Autowired
-    private EntityManager entityManager;
-
-    @Autowired
-    private PlatformTransactionManager transactionManager;
-
     @Test
-    @Transactional(propagation = Propagation.NOT_SUPPORTED)
     void pessimisticTopupLockSerializesConcurrentClawbackTransactions() throws Exception {
-        TransactionTemplate transaction = new TransactionTemplate(transactionManager);
-        transaction.executeWithoutResult(status -> {
-            CreditLedgerEntry topup = new CreditLedgerEntry();
-            topup.setUserId(42L);
-            topup.setExecutorUserId(42L);
-            topup.setAmount(new BigDecimal("8000"));
-            topup.setBalanceAfter(new BigDecimal("8000"));
-            topup.setSourceType("PAYG_TOPUP");
-            topup.setSourceId(SESSION_ID);
-            entityManager.persist(topup);
-            entityManager.flush();
-        });
+        insertTopup();
 
         CountDownLatch firstLocked = new CountDownLatch(1);
         CountDownLatch releaseFirst = new CountDownLatch(1);
@@ -89,19 +39,29 @@ class CreditLedgerRepositoryLockIntegrationTest {
         var executor = Executors.newFixedThreadPool(2);
 
         try {
-            var first = executor.submit(() -> transaction.executeWithoutResult(status -> {
-                lockTopupRow();
-                firstLocked.countDown();
-                await(releaseFirst);
-            }));
+            var first = executor.submit(() -> {
+                try (Connection connection = newConnection()) {
+                    connection.setAutoCommit(false);
+                    lockTopupRow(connection);
+                    firstLocked.countDown();
+                    await(releaseFirst);
+                    connection.commit();
+                }
+                return null;
+            });
             if (!firstLocked.await(5, TimeUnit.SECONDS)) {
                 throw new AssertionError("First transaction did not acquire the PAYG row lock");
             }
 
-            var second = executor.submit(() -> transaction.executeWithoutResult(status -> {
-                secondStarted.countDown();
-                lockTopupRow();
-            }));
+            var second = executor.submit(() -> {
+                try (Connection connection = newConnection()) {
+                    connection.setAutoCommit(false);
+                    secondStarted.countDown();
+                    lockTopupRow(connection);
+                    connection.commit();
+                }
+                return null;
+            });
             if (!secondStarted.await(5, TimeUnit.SECONDS)) {
                 throw new AssertionError("Second transaction did not start");
             }
@@ -118,13 +78,40 @@ class CreditLedgerRepositoryLockIntegrationTest {
         }
     }
 
-    private void lockTopupRow() {
-        entityManager.createQuery(
-                        "SELECT e FROM CreditLedgerEntry e WHERE e.sourceId = :sourceId",
-                        CreditLedgerEntry.class)
-                .setParameter("sourceId", SESSION_ID)
-                .setLockMode(LockModeType.PESSIMISTIC_WRITE)
-                .getSingleResult();
+    private void insertTopup() throws Exception {
+        try (Connection connection = newConnection();
+             PreparedStatement statement = connection.prepareStatement("""
+                     INSERT INTO auth.credit_ledger
+                         (user_id, executor_user_id, amount, balance_after, source_type, source_id, created_at)
+                     VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+                     """)) {
+            statement.setLong(1, 42L);
+            statement.setLong(2, 42L);
+            statement.setBigDecimal(3, new java.math.BigDecimal("8000"));
+            statement.setBigDecimal(4, new java.math.BigDecimal("8000"));
+            statement.setString(5, "PAYG_TOPUP");
+            statement.setString(6, SESSION_ID);
+            statement.executeUpdate();
+        }
+    }
+
+    private Connection newConnection() throws Exception {
+        return DriverManager.getConnection(
+                POSTGRES.getJdbcUrl(),
+                POSTGRES.getUsername(),
+                POSTGRES.getPassword());
+    }
+
+    private void lockTopupRow(Connection connection) throws Exception {
+        try (PreparedStatement statement = connection.prepareStatement(
+                "SELECT id FROM auth.credit_ledger WHERE source_id = ? FOR UPDATE")) {
+            statement.setString(1, SESSION_ID);
+            try (ResultSet result = statement.executeQuery()) {
+                if (!result.next()) {
+                    throw new AssertionError("PAYG top-up row not found");
+                }
+            }
+        }
     }
 
     private static void await(CountDownLatch latch) {

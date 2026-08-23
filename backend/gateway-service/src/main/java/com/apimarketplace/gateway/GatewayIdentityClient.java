@@ -95,7 +95,7 @@ final class GatewayIdentityClient {
         }
         try {
             byte[] body = mapper.writeValueAsBytes(java.util.Map.of("assertion", entitlementJws));
-            String target = "/api/internal/v1/entitlement-projections";
+            String target = "/api/internal/v1/entitlement-projections/repair";
             HttpHeaders headers = signed("PUT", target, body, providerId,
                     String.valueOf(context.userId()), context.principalId(),
                     context.billingSubjectId(), context.defaultOrganizationId(),
@@ -110,6 +110,32 @@ final class GatewayIdentityClient {
         } catch (Exception e) {
             return Mono.error(e);
         }
+    }
+
+    Mono<EntitlementDecision> authorize(GatewayUserContext context, String feature,
+                                         boolean paidOperation) {
+        StringBuilder target = new StringBuilder("/api/internal/v1/entitlement-projections/decision")
+                .append("?installId=").append(encode(context.installId()))
+                .append("&organizationId=").append(encode(context.defaultOrganizationId()))
+                .append("&billingSubjectId=").append(encode(context.billingSubjectId()))
+                .append("&paidOperation=").append(paidOperation);
+        if (feature != null && !feature.isBlank()) {
+            target.append("&feature=").append(encode(feature));
+        }
+        String requestTarget = target.toString();
+        HttpHeaders headers = signed("GET", requestTarget, new byte[0], context.providerId(),
+                String.valueOf(context.userId()), context.principalId(),
+                context.billingSubjectId(), context.defaultOrganizationId(),
+                context.defaultOrganizationRole(), canonicalRoles(context.roles()),
+                context.installId());
+        return auth.get().uri(requestTarget)
+                .headers(out -> out.addAll(headers))
+                .retrieve()
+                .bodyToMono(EntitlementDecision.class);
+    }
+
+    private static String encode(String value) {
+        return URLEncoder.encode(value == null ? "" : value, StandardCharsets.UTF_8);
     }
 
     private GatewayUserContext merge(UserResolution user, BindingContext binding) {
@@ -169,6 +195,9 @@ final class GatewayIdentityClient {
     private record BindingContext(Long userId, String providerId, String principalId,
                                   String billingSubjectId, String organizationId,
                                   String installId, long bindingRevision, String status) {}
+
+    record EntitlementDecision(boolean allowed, String reason, long sequence,
+                               java.time.Instant expiresAt) {}
 
     static final class UnboundIdentityException extends RuntimeException {
         UnboundIdentityException() { super("Cloud identity is not bound"); }

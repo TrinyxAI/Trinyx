@@ -74,6 +74,17 @@ public class ExternalCreditProxyService {
         return new ReserveResult(response, requestHash, decision.sequence());
     }
 
+
+    @Transactional(readOnly = true)
+    public String requestHash(UUID operationId) {
+        var values = jdbc.query("SELECT request_hash FROM auth.cloud_credit_operation WHERE operation_id=?",
+                (rs, row) -> rs.getString(1), operationId);
+        if (values.size() != 1) {
+            throw new ResponseStatusException(HttpStatus.NOT_FOUND, "EXTERNAL_RESERVATION_NOT_FOUND");
+        }
+        return values.getFirst();
+    }
+
     @Transactional
     public SettlementResult commit(UUID operationId, CommitCommand command) {
         var request = new CloudCreditAuthorityService.CommitRequest(

@@ -1,0 +1,157 @@
+package com.apimarketplace.gateway;
+
+import com.apimarketplace.common.web.GatewaySignatureV2;
+import org.reactivestreams.Publisher;
+import org.springframework.cloud.gateway.filter.GatewayFilterChain;
+import org.springframework.cloud.gateway.filter.GlobalFilter;
+import org.springframework.core.Ordered;
+import org.springframework.core.io.buffer.DataBuffer;
+import org.springframework.core.io.buffer.DataBufferUtils;
+import org.springframework.http.HttpStatus;
+import org.springframework.http.server.reactive.ServerHttpRequest;
+import org.springframework.http.server.reactive.ServerHttpRequestDecorator;
+import org.springframework.security.oauth2.server.resource.authentication.JwtAuthenticationToken;
+import org.springframework.stereotype.Component;
+import org.springframework.web.server.ServerWebExchange;
+import reactor.core.publisher.Flux;
+import reactor.core.publisher.Mono;
+
+import java.nio.charset.StandardCharsets;
+import java.util.List;
+import java.util.Set;
+
+@Component
+final class AuthenticatedGatewayFilter implements GlobalFilter, Ordered {
+
+    private static final Set<String> STRIPPED = Set.of(
+            "x-gateway-secret", "x-gateway-signature-version", "x-gateway-timestamp",
+            "x-gateway-nonce", "x-gateway-body-sha256", "x-provider-id", "x-user-id",
+            "x-principal-id", "x-billing-subject-id", "x-organization-id",
+            "x-organization-role", "x-user-roles", "x-install-id");
+
+    private final GatewayIdentityClient identityClient;
+
+    AuthenticatedGatewayFilter(GatewayIdentityClient identityClient) {
+        this.identityClient = identityClient;
+    }
+
+    @Override
+    public Mono<Void> filter(ServerWebExchange exchange, GatewayFilterChain chain) {
+        String path = exchange.getRequest().getURI().getPath();
+        if (path.startsWith("/api/internal/")) {
+            exchange.getResponse().setStatusCode(HttpStatus.NOT_FOUND);
+            return exchange.getResponse().setComplete();
+        }
+        if (isPublic(path)) {
+            return chain.filter(stripSpoofable(exchange));
+        }
+
+        return exchange.getPrincipal()
+                .cast(JwtAuthenticationToken.class)
+                .switchIfEmpty(Mono.error(new IllegalStateException("JWT principal missing")))
+                .flatMap(authentication -> {
+                    String token = authentication.getToken().getTokenValue();
+                    String subject = authentication.getToken().getSubject();
+                    String binding = exchange.getRequest().getHeaders()
+                            .getFirst("X-Trinyx-Identity-Binding");
+                    return identityClient.resolve(token, subject, binding)
+                            .flatMap(context -> withBody(exchange, chain, subject, context));
+                })
+                .onErrorResume(error -> {
+                    exchange.getResponse().setStatusCode(
+                            error instanceof GatewayIdentityClient.UnboundIdentityException
+                                    ? HttpStatus.FORBIDDEN : HttpStatus.UNAUTHORIZED);
+                    byte[] body = ("{\"error\":\"gateway_identity_rejected\"}")
+                            .getBytes(StandardCharsets.UTF_8);
+                    return exchange.getResponse().writeWith(Mono.just(
+                            exchange.getResponse().bufferFactory().wrap(body)));
+                });
+    }
+
+    private Mono<Void> withBody(ServerWebExchange exchange, GatewayFilterChain chain,
+                                String providerId, GatewayUserContext context) {
+        return DataBufferUtils.join(exchange.getRequest().getBody())
+                .defaultIfEmpty(exchange.getResponse().bufferFactory().wrap(new byte[0]))
+                .flatMap(buffer -> {
+                    byte[] body = new byte[buffer.readableByteCount()];
+                    buffer.read(body);
+                    DataBufferUtils.release(buffer);
+
+                    String requestedOrg = exchange.getRequest().getHeaders()
+                            .getFirst("X-Trinyx-Organization-ID");
+                    String organizationId = requestedOrg == null || requestedOrg.isBlank()
+                            ? context.defaultOrganizationId() : requestedOrg;
+                    String organizationRole = context.roleFor(organizationId);
+                    if (organizationId != null && organizationRole == null) {
+                        return forbidden(exchange, "organization_membership_required");
+                    }
+
+                    String rawPath = exchange.getRequest().getURI().getRawPath();
+                    String rawQuery = exchange.getRequest().getURI().getRawQuery();
+                    String target = rawPath + (rawQuery == null ? "" : "?" + rawQuery);
+                    String roles = GatewaySignatureV2.canonicalRoles(
+                            context.roles() == null ? "" : String.join(",", context.roles()));
+                    var signed = identityClient.signed(
+                            exchange.getRequest().getMethod().name(), target, body, providerId,
+                            String.valueOf(context.userId()), context.principalId(),
+                            context.billingSubjectId(), organizationId, organizationRole,
+                            roles, context.installId());
+
+                    ServerHttpRequest request = new ServerHttpRequestDecorator(exchange.getRequest()) {
+                        @Override
+                        public org.springframework.http.HttpHeaders getHeaders() {
+                            org.springframework.http.HttpHeaders headers =
+                                    new org.springframework.http.HttpHeaders();
+                            exchange.getRequest().getHeaders().forEach((name, values) -> {
+                                if (!STRIPPED.contains(name.toLowerCase())
+                                        && !name.equalsIgnoreCase("X-Trinyx-Identity-Binding")
+                                        && !name.equalsIgnoreCase("X-Trinyx-Organization-ID")) {
+                                    headers.put(name, values);
+                                }
+                            });
+                            headers.putAll(signed);
+                            headers.setContentLength(body.length);
+                            return headers;
+                        }
+
+                        @Override
+                        public Flux<DataBuffer> getBody() {
+                            return Flux.defer(() -> Flux.just(
+                                    exchange.getResponse().bufferFactory().wrap(body)));
+                        }
+                    };
+                    return chain.filter(exchange.mutate().request(request).build());
+                });
+    }
+
+    private Mono<Void> forbidden(ServerWebExchange exchange, String code) {
+        exchange.getResponse().setStatusCode(HttpStatus.FORBIDDEN);
+        return exchange.getResponse().writeWith(Mono.just(exchange.getResponse()
+                .bufferFactory().wrap(("{\"error\":\"" + code + "\"}")
+                        .getBytes(StandardCharsets.UTF_8))));
+    }
+
+    private ServerWebExchange stripSpoofable(ServerWebExchange exchange) {
+        ServerHttpRequest request = exchange.getRequest().mutate()
+                .headers(headers -> {
+                    List<String> names = List.copyOf(headers.keySet());
+                    names.stream().filter(name -> STRIPPED.contains(name.toLowerCase()))
+                            .forEach(headers::remove);
+                })
+                .build();
+        return exchange.mutate().request(request).build();
+    }
+
+    private boolean isPublic(String path) {
+        return path.equals("/healthz")
+                || path.startsWith("/actuator/health")
+                || path.startsWith("/webhooks/")
+                || path.startsWith("/api/catalog/public/bundles/");
+    }
+
+    @Override
+    public int getOrder() {
+        // After route rewrite filters and before NettyRoutingFilter.
+        return 10_050;
+    }
+}

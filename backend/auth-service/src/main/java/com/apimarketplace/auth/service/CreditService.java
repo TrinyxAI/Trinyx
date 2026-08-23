@@ -1929,6 +1929,53 @@ public class CreditService {
         return ReleaseOutcome.RELEASED;
     }
 
+    /**
+     * Cloud-authority settlement variant. A provider result may arrive after the
+     * ten-minute external reservation expired and was released. Within the
+     * separately enforced late-settlement window, the real cost is still written
+     * exactly once and may put the authoritative wallet into delinquency.
+     */
+    @Transactional
+    public CommitOutcome settleExternalReservation(String sourceId, BigDecimal actualAmount,
+                                                    String provider, String model,
+                                                    boolean allowLateSettlement) {
+        Optional<CreditLedgerEntry> rowOpt = findLedgerBySourceIdForLifecycleUpdate(sourceId);
+        if (rowOpt.isEmpty()) return CommitOutcome.RESERVATION_EXPIRED;
+        CreditLedgerEntry row = rowOpt.get();
+        String state = row.getSourceType();
+        if ("PLATFORM_MARKUP".equals(state)) return CommitOutcome.ALREADY_COMMITTED;
+        if ("PLATFORM_MARKUP_RESERVE".equals(state)) {
+            return commitReservation(sourceId, actualAmount, provider, model);
+        }
+        if (!allowLateSettlement || state == null
+                || !state.startsWith("PLATFORM_MARKUP_RELEASED")) {
+            return CommitOutcome.RESERVATION_EXPIRED;
+        }
+        if (actualAmount == null || actualAmount.signum() < 0) {
+            return CommitOutcome.RESERVATION_EXPIRED;
+        }
+
+        Subscription sub = findSubscriptionForUpdate(row.getUserId());
+        if (sub == null) return CommitOutcome.RESERVATION_EXPIRED;
+        if (!unlimited && actualAmount.signum() > 0) {
+            applyDebit(sub, actualAmount, subBucketEligible(sub, "PLATFORM_MARKUP"));
+            if (sub.getTotalBalance().signum() < 0) {
+                sub.setDelinquent(true);
+            }
+            subscriptionRepository.save(sub);
+        }
+        row.setSourceType("PLATFORM_MARKUP");
+        row.setAmount(actualAmount.negate());
+        row.setBalanceAfter(unlimited ? UNLIMITED_BALANCE : sub.getTotalBalance());
+        row.setProvider(provider);
+        row.setModel(model);
+        row.setExpiresAt(null);
+        row.setDescription(truncateDescription("Late Cloud settlement: " + provider + "/" + model));
+        ledgerRepository.save(row);
+        return !unlimited && sub.getTotalBalance().signum() < 0
+                ? CommitOutcome.COMMITTED_PARTIAL : CommitOutcome.COMMITTED;
+    }
+
     private Optional<CreditLedgerEntry> findLedgerBySourceIdForLifecycleUpdate(String sourceId) {
         Optional<CreditLedgerEntry> locked = ledgerRepository.findFirstBySourceIdForUpdate(sourceId);
         if (locked == null || locked.isEmpty()) {

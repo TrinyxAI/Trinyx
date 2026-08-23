@@ -21,7 +21,7 @@ import static org.mockito.Mockito.*;
 class CloudCreditAuthorityServiceTest {
 
     private final CreditService credits = mock(CreditService.class);
-    private final ObjectMapper json = new ObjectMapper();
+    private final ObjectMapper json = new ObjectMapper().findAndRegisterModules();
     private final FakeJdbc jdbc = new FakeJdbc();
     private final CloudCreditAuthorityService service =
             new CloudCreditAuthorityService(jdbc, credits, json);

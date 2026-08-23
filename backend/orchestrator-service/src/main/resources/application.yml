@@ -274,7 +274,7 @@ websearch:
       read: 60000
   # Public base URL the user's browser uses to upgrade
   # `wss://<base>/cdp/{sid}?token=...` for the live-view bridge. In prod
-  # this points at the public site (e.g. https://livecontext.ai) where
+  # this points at the public site (e.g. https://app.trinyx.fr) where
   # Caddy's `/cdp/*` route reverse-proxies into the VLAN-only websearch.
   # When unset, the backend falls back to `service.url` so dev/local
   # setups (where service URL = host URL) keep working unchanged.
@@ -340,7 +340,7 @@ state-snapshot:
   use-jsonb-patch: ${STATE_SNAPSHOT_USE_JSONB_PATCH:true}
 
 # Public frontend origin for user-facing links (absolute, opaque file URLs).
-# Same APP_PUBLIC_URL the agent/trigger services use (e.g. https://livecontext.ai).
+# Same APP_PUBLIC_URL the agent/trigger services use (e.g. https://app.trinyx.fr).
 app:
   base-url: ${APP_PUBLIC_URL:${WEBHOOK_BASE_URL:http://localhost:3000}}
 

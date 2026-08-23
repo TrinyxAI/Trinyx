@@ -214,7 +214,7 @@ billing:
     secretKey: ${STRIPE_SECRET_KEY}
     webhookSecret: ${STRIPE_WEBHOOK_SECRET}
     # Fall back to APP_PUBLIC_URL (the value the k3s helm chart already injects for every
-    # public link, e.g. https://livecontext.ai) when STRIPE_SUCCESS_URL/STRIPE_CANCEL_URL
+    # public link, e.g. https://app.trinyx.fr) when STRIPE_SUCCESS_URL/STRIPE_CANCEL_URL
     # are not set explicitly - otherwise prod checkout redirects leak http://localhost:3000.
     # Mirrors the orchestrator.{chat,form}-endpoint.base-url pattern in trigger-service.
     successUrl: ${STRIPE_SUCCESS_URL:${APP_PUBLIC_URL:http://localhost:3000}/app/settings/pricing?checkout=success}

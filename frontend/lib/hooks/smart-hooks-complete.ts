@@ -170,7 +170,9 @@ export function useSubscription() {
     staleTime: 2 * 60 * 1000,
     // Configuration coherente pour eviter les requetes multiples
     refetchOnMount: false,
-    refetchOnWindowFocus: false,
+    // Stripe Portal can mutate cancel_at_period_end while this tab is hidden.
+    // Refresh on return so Billing/Pricing never keep showing "Next billing".
+    refetchOnWindowFocus: true,
     retry: 3,
   });
 

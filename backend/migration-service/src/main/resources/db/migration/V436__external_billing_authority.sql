@@ -68,6 +68,21 @@ CREATE TABLE IF NOT EXISTS auth.entitlement_projection (
 CREATE INDEX IF NOT EXISTS idx_entitlement_projection_expiry
     ON auth.entitlement_projection(access_state, expires_at);
 
+CREATE TABLE IF NOT EXISTS auth.entitlement_authority_state (
+    projection_id UUID PRIMARY KEY,
+    issuer VARCHAR(255) NOT NULL,
+    install_id UUID NOT NULL,
+    organization_id UUID NOT NULL,
+    billing_subject_id UUID NOT NULL,
+    sequence BIGINT NOT NULL CHECK (sequence > 0),
+    access_state VARCHAR(16) NOT NULL CHECK (access_state IN ('ACTIVE','GRACE','DENIED','REVOKED')),
+    canonical_payload JSONB NOT NULL,
+    signed_jws TEXT NOT NULL,
+    expires_at TIMESTAMPTZ NOT NULL,
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    UNIQUE (issuer, install_id, organization_id, billing_subject_id)
+);
+
 CREATE TABLE IF NOT EXISTS auth.entitlement_outbox (
     event_id UUID PRIMARY KEY,
     aggregate_key VARCHAR(512) NOT NULL,

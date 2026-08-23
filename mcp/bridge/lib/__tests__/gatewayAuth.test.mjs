@@ -198,10 +198,13 @@ test('cross-language parity: v2 canonical payload matches the shared fixture', (
       installId: item.installId,
     });
     assert.equal(actual, item.expectedCanonicalPayload, item.name);
+    const body = item.method === 'POST' ? Buffer.from('{}') : Buffer.alloc(0);
+    assert.equal(bodySha256(body), item.bodySha256, `${item.name} body fixture`);
     assert.match(gatewaySignedHeadersV2({
       secretKey: v2Fixture.secretKey,
       ...item,
-      bodySha256Override: item.bodySha256,
+      body,
+      timestampMs: Number(item.timestamp),
     })['X-Gateway-Secret'], /^gw_[A-Za-z0-9_-]+$/);
   }
 });

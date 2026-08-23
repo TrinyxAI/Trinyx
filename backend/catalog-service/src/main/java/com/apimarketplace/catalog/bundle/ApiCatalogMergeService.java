@@ -26,10 +26,12 @@ import java.util.UUID;
  *       TX; one failing API (e.g. a {@code UNIQUE(created_by, api_name)}
  *       collision with a pre-existing local row under a different UUID) never
  *       rolls back the rest of the catalog.</li>
- *   <li><b>UPSERT in-place by UUID, never TRUNCATE/DELETE of apis/tools</b> -
- *       the execution path ({@code ToolContextService.loadToolContext}) always
- *       finds its row. Leaf children (parameters, responses, tool-credential
- *       links) ARE replaced wholesale per tool: nothing references them by id.</li>
+ *   <li><b>UPSERT in-place, never TRUNCATE/DELETE of apis/tools</b> -
+ *       APIs merge by UUID. Tools merge by {@code (api_id, tool_name_id)}
+ *       when that logical key is present and retain an existing install-local
+ *       UUID, keeping every external FK valid; unnamed tools fall back to UUID.
+ *       Leaf children (parameters, responses, tool-credential links) ARE
+ *       replaced wholesale against the effective tool UUID.</li>
  *   <li><b>Custom-API protection</b> - an existing row whose {@code source}
  *       is NOT {@code import}/{@code bundle} (i.e. {@code custom},
  *       tenant-created) is never updated, deprecated, or overwritten. Checked
@@ -174,7 +176,7 @@ public class ApiCatalogMergeService {
         }
 
         List<Map<String, Object>> tools = list(apiMap, "tools");
-        List<UUID> bundleToolIds = new ArrayList<>(tools.size());
+        List<UUID> effectiveToolIds = new ArrayList<>(tools.size());
         int applied = 0;
         for (Map<String, Object> toolMap : tools) {
             UUID bundleToolId = UUID.fromString(str(toolMap, "id"));
@@ -183,7 +185,7 @@ public class ApiCatalogMergeService {
             // child replacement and the deprecation sweep must follow that
             // effective id, otherwise children would target the bundle UUID
             // and the live local row would be immediately soft-deprecated.
-            bundleToolIds.add(effectiveToolId);
+            effectiveToolIds.add(effectiveToolId);
             replaceParameters(effectiveToolId, list(toolMap, "parameters"));
             replaceResponses(effectiveToolId, list(toolMap, "responses"));
             replaceToolCredentials(effectiveToolId, list(toolMap, "toolCredentials"));
@@ -195,9 +197,9 @@ public class ApiCatalogMergeService {
         MapSqlParameterSource params = new MapSqlParameterSource()
                 .addValue("apiId", apiId);
         String notIn = "";
-        if (!bundleToolIds.isEmpty()) {
+        if (!effectiveToolIds.isEmpty()) {
             notIn = " AND id NOT IN (:toolIds)";
-            params.addValue("toolIds", bundleToolIds);
+            params.addValue("toolIds", effectiveToolIds);
         }
         int deprecated = jdbc.update("""
                 UPDATE catalog.api_tools

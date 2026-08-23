@@ -501,27 +501,6 @@ public class WebhookController {
             if (userId != null) {
                 logger.info("Checkout completed for user {} (decoded from nonce: {})", userId, nonce);
 
-                // Record the checkout event with the decoded userId
-                try {
-                    ObjectNode checkoutEventPayload = objectMapper.createObjectNode();
-                    checkoutEventPayload.put("sessionId", session.getId());
-                    checkoutEventPayload.put("customerId", session.getCustomer());
-                    checkoutEventPayload.put("subscriptionId", session.getSubscription());
-                    checkoutEventPayload.put("userId", userId);
-                    checkoutEventPayload.put("nonce", nonce);
-                    checkoutEventPayload.put("action", "checkout_session_completed");
-
-                    BillingEvent checkoutEvent = new BillingEvent(
-                        "stripe",
-                        "checkout_completed_" + session.getId(),
-                        "checkout.session.completed",
-                        checkoutEventPayload
-                    );
-                    billingEventRepository.save(checkoutEvent);
-                } catch (Exception e) {
-                    logger.warn("Failed to save checkout completed event: {}", e.getMessage());
-                }
-
             } else {
                 logger.warn("Failed to decode nonce from checkout session: {}", nonce);
             }

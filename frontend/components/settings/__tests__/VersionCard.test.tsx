@@ -161,6 +161,22 @@ describe('VersionCard', () => {
     expect(screen.queryByText('How to update')).toBeNull();
   });
 
+  it('never advertises the upstream feed to a paid-monolith Trinyx build', () => {
+    show(v({
+      edition: 'paid-monolith',
+      selfHosted: true,
+      updateAvailable: true,
+      latestVersion: '0.2.12',
+      releaseUrl: 'https://github.com/livecontext-ai/livecontext/releases/tag/v0.2.12',
+    }));
+
+    expect(screen.getByText('paid-monolith')).toBeTruthy();
+    expect(screen.queryByText('Update available')).toBeNull();
+    expect(screen.queryByText('Version 0.2.12 is available')).toBeNull();
+    expect(screen.queryByText('How to update')).toBeNull();
+    expect(screen.queryByText('Release notes')).toBeNull();
+  });
+
   it('shows no update section before the feed is known', () => {
     show(v({ updateAvailable: false, latestVersion: null }));
 

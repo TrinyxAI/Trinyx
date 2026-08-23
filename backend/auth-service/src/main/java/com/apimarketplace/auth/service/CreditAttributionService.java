@@ -519,6 +519,7 @@ public class CreditAttributionService {
      * cumulative, while the ledger write is only the outstanding delta, so
      * repeated partial-refund events cannot over-revoke a purchase.
      */
+    @Transactional
     public void clawbackPaygTopup(String sessionId,
                                   BigDecimal cumulativeFraction,
                                   String eventKey,
@@ -530,7 +531,10 @@ public class CreditAttributionService {
                 ? BigDecimal.ZERO
                 : cumulativeFraction.max(BigDecimal.ZERO).min(BigDecimal.ONE);
 
-        var original = ledgerRepository.findBySourceId(sessionId).orElse(null);
+        // Serialize every cumulative refund/dispute for this checkout on its
+        // immutable PAYG_TOPUP ledger row. The surrounding transaction keeps
+        // this PostgreSQL row lock until the delta and wallet ledger entry commit.
+        var original = ledgerRepository.findFirstBySourceIdForUpdate(sessionId).orElse(null);
         if (original == null || !"PAYG_TOPUP".equals(original.getSourceType())) {
             // Stripe may deliver a refund/dispute before checkout.completed. Fail
             // retryably so this event cannot be acknowledged before the grant exists.

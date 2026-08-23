@@ -454,15 +454,18 @@ class WebhookControllerTest {
     class Idempotency {
 
         @Test
-        @DisplayName("10. Duplicate event is skipped when BillingEvent already exists")
-        void duplicateEvent_isSkipped() throws Exception {
+        @DisplayName("10. PROCESSED duplicate is acknowledged without a second dispatch")
+        void processedDuplicate_isSkipped() throws Exception {
             Event event = createMockEvent("evt_dup", "checkout.session.completed", mock(Session.class));
+            BillingEvent stored = storedEvent("evt_dup", "PROCESSED");
             when(billingEventRepository.existsByEventId("evt_dup")).thenReturn(true);
+            when(billingEventRepository.findByEventId("evt_dup")).thenReturn(Optional.of(stored));
 
             performWebhookPost("{\"type\":\"checkout.session.completed\"}", event, 200);
 
-            // Should not save any new BillingEvent or dispatch
             verify(billingEventRepository, never()).save(any(BillingEvent.class));
+            verify(billingEventRepository, never()).claimForProcessing(
+                    anyString(), any(LocalDateTime.class), any(LocalDateTime.class));
             verify(subscriptionService, never()).onSubscriptionUpsert(
                     any(), any(), any(), any(), any(), any(), any(), any(), any(), anyInt(), any());
         }
@@ -501,6 +504,83 @@ class WebhookControllerTest {
                     "stripe".equals(be.getProvider()) &&
                     "checkout.session.completed".equals(be.getType())
             ));
+        }
+        @Test
+        @DisplayName("RECEIVED event is claimed and marked PROCESSED")
+        void receivedEvent_isProcessed() throws Exception {
+            Event event = createMockEvent(
+                    "evt_received", "checkout.session.completed", mock(Session.class));
+            when(billingEventRepository.existsByEventId("evt_received")).thenReturn(true);
+            when(billingEventRepository.findByEventId("evt_received"))
+                    .thenReturn(Optional.of(storedEvent("evt_received", "RECEIVED")));
+
+            performWebhookPost("{}", event, 200);
+
+            verify(billingEventRepository).claimForProcessing(
+                    eq("evt_received"), any(LocalDateTime.class), any(LocalDateTime.class));
+            verify(billingEventRepository).markProcessed(
+                    eq("evt_received"), any(LocalDateTime.class));
+        }
+
+        @Test
+        @DisplayName("FAILED event is retryable and becomes PROCESSED")
+        void failedEvent_isRetried() throws Exception {
+            Event event = createMockEvent(
+                    "evt_failed_retry", "checkout.session.completed", mock(Session.class));
+            when(billingEventRepository.existsByEventId("evt_failed_retry")).thenReturn(true);
+            when(billingEventRepository.findByEventId("evt_failed_retry"))
+                    .thenReturn(Optional.of(storedEvent("evt_failed_retry", "FAILED")));
+
+            performWebhookPost("{}", event, 200);
+
+            verify(billingEventRepository).claimForProcessing(
+                    eq("evt_failed_retry"), any(LocalDateTime.class), any(LocalDateTime.class));
+            verify(billingEventRepository).markProcessed(
+                    eq("evt_failed_retry"), any(LocalDateTime.class));
+        }
+
+        @Test
+        @DisplayName("live PROCESSING claim returns 409 without dispatch")
+        void liveProcessingClaim_returnsConflict() throws Exception {
+            Event event = createMockEvent(
+                    "evt_processing_live", "checkout.session.completed", mock(Session.class));
+            when(billingEventRepository.existsByEventId("evt_processing_live")).thenReturn(true);
+            when(billingEventRepository.findByEventId("evt_processing_live"))
+                    .thenReturn(Optional.of(storedEvent("evt_processing_live", "PROCESSING")));
+            when(billingEventRepository.claimForProcessing(
+                    eq("evt_processing_live"), any(LocalDateTime.class), any(LocalDateTime.class)))
+                    .thenReturn(0);
+
+            performWebhookPost("{}", event, 409);
+
+            verify(billingEventRepository, never()).markProcessed(
+                    eq("evt_processing_live"), any(LocalDateTime.class));
+        }
+
+        @Test
+        @DisplayName("stale PROCESSING claim is reclaimed and marked PROCESSED")
+        void staleProcessingClaim_isReclaimed() throws Exception {
+            Event event = createMockEvent(
+                    "evt_processing_stale", "checkout.session.completed", mock(Session.class));
+            when(billingEventRepository.existsByEventId("evt_processing_stale")).thenReturn(true);
+            when(billingEventRepository.findByEventId("evt_processing_stale"))
+                    .thenReturn(Optional.of(storedEvent("evt_processing_stale", "PROCESSING")));
+            when(billingEventRepository.claimForProcessing(
+                    eq("evt_processing_stale"), any(LocalDateTime.class), any(LocalDateTime.class)))
+                    .thenReturn(1);
+
+            performWebhookPost("{}", event, 200);
+
+            verify(billingEventRepository).markProcessed(
+                    eq("evt_processing_stale"), any(LocalDateTime.class));
+        }
+
+        private BillingEvent storedEvent(String eventId, String status) {
+            BillingEvent event = new BillingEvent(
+                    "stripe", eventId, "checkout.session.completed",
+                    objectMapper.createObjectNode());
+            event.setStatus(status);
+            return event;
         }
     }
 

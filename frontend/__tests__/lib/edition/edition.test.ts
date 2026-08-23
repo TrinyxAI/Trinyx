@@ -216,6 +216,19 @@ describe('billing capability', () => {
         warnSpy.mockRestore();
     });
 
+    it('keeps legacy CE on embedded auth when AUTH_MODE is absent', async () => {
+        vi.stubEnv('NEXT_PUBLIC_APP_EDITION', 'ce');
+        vi.stubEnv('NEXT_PUBLIC_AUTH_MODE', '');
+        vi.stubEnv('NEXT_PUBLIC_BILLING_ENABLED', '');
+
+        const { IS_CE, IS_EMBEDDED_AUTH, IS_COMMUNITY_EDITION } =
+            await importEdition();
+
+        expect(IS_CE).toBe(true);
+        expect(IS_EMBEDDED_AUTH).toBe(true);
+        expect(IS_COMMUNITY_EDITION).toBe(true);
+    });
+
     it('keeps embedded authentication while enabling paid-monolith billing', async () => {
         vi.stubEnv('NEXT_PUBLIC_APP_EDITION', 'paid-monolith');
         vi.stubEnv('NEXT_PUBLIC_AUTH_MODE', 'embedded');
@@ -252,8 +265,10 @@ describe('billing capability', () => {
         vi.stubEnv('NEXT_PUBLIC_AUTH_MODE', 'oidc');
         vi.stubEnv('NEXT_PUBLIC_BILLING_ENABLED', '');
 
-        const { IS_BILLING_ENABLED, IS_PAID_MONOLITH } = await importEdition();
+        const { IS_BILLING_ENABLED, IS_EMBEDDED_AUTH, IS_PAID_MONOLITH } =
+            await importEdition();
 
+        expect(IS_EMBEDDED_AUTH).toBe(false);
         expect(IS_BILLING_ENABLED).toBe(true);
         expect(IS_PAID_MONOLITH).toBe(false);
     });

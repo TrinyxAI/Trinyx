@@ -119,11 +119,32 @@ deleted.
 
 ## Staging deployment
 
-1. Back up the unchanged database and record the current image:
+1. Back up the unchanged database and capture the immutable digests of
+   the two application images that are actually running. Do not substitute a
+   historical LiveContext frontend tag for the deployed Trinyx frontend.
 
    ```bash
-   export ROLLBACK_BACKEND_IMAGE=ghcr.io/livecontext-ai/livecontext-ce:v0.2.12
-   docker compose exec -T postgres pg_dump -U "$DB_USERNAME" -d livecontext      --format=custom > "trinyx-pre-paid-monolith-$(date +%Y%m%d%H%M%S).dump"
+   export ROLLBACK_BACKEND_IMAGE="$(docker image inspect "$(docker inspect --format '{{.Image}}' livecontext-app)" --format '{{index .RepoDigests 0}}')"
+   export ROLLBACK_FRONTEND_IMAGE="$(docker image inspect "$(docker inspect --format '{{.Image}}' livecontext-frontend)" --format '{{index .RepoDigests 0}}')"
+   printf 'BACKEND_IMAGE=%s\nFRONTEND_IMAGE=%s\n' \
+     "$ROLLBACK_BACKEND_IMAGE" "$ROLLBACK_FRONTEND_IMAGE" \
+     > trinyx-paid-monolith.rollback.env
+   docker compose exec -T postgres pg_dump -U "$DB_USERNAME" -d livecontext \
+     --format=custom > "trinyx-pre-paid-monolith-$(date +%Y%m%d%H%M%S).dump"
+   ```
+
+   Before any production `up`, render both the Compose model currently used on
+   EC2 and the candidate model, then compare them. Confirm explicitly that the
+   existing `trinyx-landing` container, its image, ports, volumes and network
+   remain present and unchanged. Never use `--remove-orphans` during this
+   migration, and do not continue while the comparison is unexplained.
+
+   ```bash
+   docker compose config > ec2-compose-before-paid-monolith.yml
+   docker compose --env-file docker/.env.paid-monolith config \
+     > candidate-compose-paid-monolith.yml
+   diff -u ec2-compose-before-paid-monolith.yml candidate-compose-paid-monolith.yml
+   docker inspect trinyx-landing --format '{{.Name}} {{.Config.Image}} {{.Image}}'
    ```
 
 2. Build the paid frontend explicitly (the existing AWS frontend workflow is
@@ -183,8 +204,9 @@ Application rollback is image/config-only; V435 is additive and backward
 compatible, so do not restore or downgrade the database.
 
 ```bash
-export BACKEND_IMAGE=ghcr.io/livecontext-ai/livecontext-ce:v0.2.12
-export FRONTEND_IMAGE=ghcr.io/livecontext-ai/livecontext-ce-frontend:v0.2.12
+set -a
+. ./trinyx-paid-monolith.rollback.env
+set +a
 export APP_EDITION=ce
 export BILLING_PROVIDER=none
 export CREDIT_UNLIMITED=true
@@ -193,7 +215,13 @@ export WORKFLOW_NODE_BILLING_ENABLED=false
 docker compose --env-file docker/.env.paid-monolith up -d --no-deps livecontext frontend
 curl --fail http://127.0.0.1:8080/actuator/health
 curl --fail http://127.0.0.1:3000/
+docker inspect livecontext-app livecontext-frontend \
+  --format '{{.Name}} {{.Config.Image}} {{.Image}}'
 ```
+
+The two restored image digests must match
+`trinyx-paid-monolith.rollback.env`. Re-check that `trinyx-landing` is still
+running with the pre-migration image and configuration.
 
 Immediately disable new Checkout entry points during rollback. Stripe retains
 failed webhook deliveries and retries them; do not delete events or ledger rows.

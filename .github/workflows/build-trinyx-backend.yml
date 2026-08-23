@@ -48,18 +48,35 @@ jobs:
           mvn -B -Pce
           -pl common-lib,auth-service,monolith-service
           -Dsurefire.failIfNoSpecifiedTests=false
-          -Dtest=AppEditionProviderTest,AppEditionAutoConfigurationTest,MonolithCeConfigContractTest,WebhookControllerTest,StripeBillingServiceTest,StripeScheduleServiceTest,SubscriptionServiceTest,FreeSubscriptionProvisionerTest,FreeSubscriptionRenewalSchedulerTest,CreditAttributionGrantPaygTopupTest,CreditServiceTest,CreditControllerTest,CreditConsumptionClientTest,ModelPricingServiceTest,PlanLimitServiceTest,BillingControllerTest,BillingControllerIntegrationTest,StripeHealthIndicatorTest
+          -Dtest=AppEditionProviderTest,AppEditionAutoConfigurationTest,MonolithCeConfigContractTest,WebhookControllerTest,StripeBillingServiceTest,StripeScheduleServiceTest,SubscriptionServiceTest,FreeSubscriptionProvisionerTest,FreeSubscriptionRenewalSchedulerTest,CreditAttributionGrantPaygTopupTest,CreditServiceTest,CreditControllerTest,CreditConsumptionClientTest,GatewayAuthenticationFilterTest,ModelPricingServiceTest,PlanLimitServiceTest,BillingControllerTest,BillingControllerIntegrationTest,StripeHealthIndicatorTest
           test
 
   frontend-test:
+    name: frontend-test (${{ matrix.mode }})
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - mode: ce
+            app-edition: ce
+            auth-mode: ''
+            billing-enabled: ''
+          - mode: paid-monolith
+            app-edition: paid-monolith
+            auth-mode: embedded
+            billing-enabled: 'true'
+          - mode: cloud
+            app-edition: cloud
+            auth-mode: oidc
+            billing-enabled: ''
     defaults:
       run:
         working-directory: frontend
     env:
-      NEXT_PUBLIC_APP_EDITION: paid-monolith
-      NEXT_PUBLIC_AUTH_MODE: embedded
-      NEXT_PUBLIC_BILLING_ENABLED: 'true'
+      NEXT_PUBLIC_APP_EDITION: ${{ matrix.app-edition }}
+      NEXT_PUBLIC_AUTH_MODE: ${{ matrix.auth-mode }}
+      NEXT_PUBLIC_BILLING_ENABLED: ${{ matrix.billing-enabled }}
       NEXT_PUBLIC_SPRING_BASE_URL: http://livecontext-app:8080
     steps:
       - uses: actions/checkout@v4
@@ -71,12 +88,12 @@ jobs:
       - run: npm ci
       - name: Restore npm optional native binding
         run: npm install --no-save @rolldown/binding-linux-x64-gnu
-      - name: Run paid-monolith frontend tests
+      - name: Run edition frontend tests
         run: >-
           npx vitest run
           __tests__/lib/edition/edition.test.ts
           __tests__/components/settings/settingsNavItems.test.ts
-      - name: Build paid-monolith frontend
+      - name: Build frontend (${{ matrix.mode }})
         run: npm run build
 
   build:

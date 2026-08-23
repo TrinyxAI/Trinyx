@@ -124,7 +124,7 @@ class CreditAttributionGrantPaygTopupTest {
         original.setSourceType("PAYG_TOPUP");
         original.setSourceId(SESSION_ID);
 
-        when(ledgerRepository.findBySourceId(SESSION_ID)).thenReturn(Optional.of(original));
+        when(ledgerRepository.findFirstBySourceIdForUpdate(SESSION_ID)).thenReturn(Optional.of(original));
         when(ledgerRepository.sumPaygClawbacks(SESSION_ID + ":clawback:"))
                 .thenReturn(BigDecimal.ZERO)
                 .thenReturn(new BigDecimal("-4000"));
@@ -154,7 +154,7 @@ class CreditAttributionGrantPaygTopupTest {
         original.setSourceType("PAYG_TOPUP");
         original.setSourceId(SESSION_ID);
 
-        when(ledgerRepository.findBySourceId(SESSION_ID)).thenReturn(Optional.of(original));
+        when(ledgerRepository.findFirstBySourceIdForUpdate(SESSION_ID)).thenReturn(Optional.of(original));
         when(ledgerRepository.sumPaygClawbacks(SESSION_ID + ":clawback:"))
                 .thenReturn(BigDecimal.ZERO);
         when(ledgerRepository.existsBySourceId(any())).thenReturn(false);
@@ -173,7 +173,7 @@ class CreditAttributionGrantPaygTopupTest {
     @Test
     @DisplayName("refund before checkout grant remains retryable")
     void refundBeforeCheckoutGrantThrows() {
-        when(ledgerRepository.findBySourceId(SESSION_ID)).thenReturn(Optional.empty());
+        when(ledgerRepository.findFirstBySourceIdForUpdate(SESSION_ID)).thenReturn(Optional.empty());
 
         assertThatThrownBy(() -> attributionService.clawbackPaygTopup(
                 SESSION_ID, BigDecimal.ONE, "refund:ch_early", "REFUNDED"))
@@ -181,6 +181,24 @@ class CreditAttributionGrantPaygTopupTest {
                 .hasMessageContaining("top-up grant not found yet");
 
         verify(creditService, never()).grantCredits(any(), any(), any(), any(), any());
+    }
+
+    @Test
+    @DisplayName("PAYG clawback is transactionally serialized on the original top-up row")
+    void clawbackUsesPostgresPessimisticLock() throws Exception {
+        var serviceMethod = CreditAttributionService.class.getMethod(
+                "clawbackPaygTopup", String.class, BigDecimal.class,
+                String.class, String.class);
+        assertThat(serviceMethod.isAnnotationPresent(
+                org.springframework.transaction.annotation.Transactional.class)).isTrue();
+
+        var repositoryMethod = CreditLedgerRepository.class.getMethod(
+                "findFirstBySourceIdForUpdate", String.class);
+        var lock = repositoryMethod.getAnnotation(
+                org.springframework.data.jpa.repository.Lock.class);
+        assertThat(lock).isNotNull();
+        assertThat(lock.value()).isEqualTo(
+                jakarta.persistence.LockModeType.PESSIMISTIC_WRITE);
     }
 
 }

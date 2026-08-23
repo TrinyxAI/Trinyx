@@ -112,8 +112,16 @@ export const IS_MANAGED_CLOUD = resolveManagedCloud();
  * Authentication topology is independent from commercial capabilities.
  * Paid monolith keeps the CE embedded JWT flow while enabling local Stripe billing.
  */
-export const IS_EMBEDDED_AUTH =
-    (process.env.NEXT_PUBLIC_AUTH_MODE ?? '').trim().toLowerCase() === 'embedded';
+function resolveEmbeddedAuth(): boolean {
+    const configured = (process.env.NEXT_PUBLIC_AUTH_MODE ?? '').trim().toLowerCase();
+    if (configured) return configured === 'embedded';
+    // Backward compatibility: legacy CE builds often only set APP_EDITION=ce.
+    // Paid monolith also resolves through the CE binary edition and therefore
+    // keeps its required embedded auth when the backend uses its embedded default.
+    return IS_CE;
+}
+
+export const IS_EMBEDDED_AUTH = resolveEmbeddedAuth();
 
 /**
  * Local billing capability. Managed Cloud always has billing; a self-hosted build

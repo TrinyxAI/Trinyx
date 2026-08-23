@@ -95,7 +95,7 @@ describe('CancellationModal', () => {
       target: { value: 'Missing a smaller paid tier' },
     });
     reachConfirmation();
-    fireEvent.click(screen.getByText('Confirm cancellation'));
+    fireEvent.click(screen.getByRole('button', { name: 'Confirm cancellation' }));
 
     await waitFor(() => expect(screen.getByText('Cancellation scheduled')).toBeTruthy());
     expect(cancelSubscription).toHaveBeenCalledOnce();
@@ -114,9 +114,9 @@ describe('CancellationModal', () => {
     cancelSubscription.mockRejectedValue(new Error('Stripe unavailable'));
     renderModal();
     reachConfirmation();
-    fireEvent.click(screen.getByText('Confirm cancellation'));
+    fireEvent.click(screen.getByRole('button', { name: 'Confirm cancellation' }));
 
     await waitFor(() => expect(screen.getByText('Stripe unavailable')).toBeTruthy());
-    expect(screen.getByText('Confirm cancellation')).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Confirm cancellation' })).toBeTruthy();
   });
 });

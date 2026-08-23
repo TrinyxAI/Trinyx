@@ -127,7 +127,7 @@ public class AppEditionProvider {
             new FlagSpec("credit.unlimited", "true", "false", "false", "false", "false", true),
             new FlagSpec("credit.consumption.enabled", "true", "true", "true", "true", "true", false),
             new FlagSpec("plan-limits.enabled", "false", "true", "true", "true", "true", true),
-            new FlagSpec("billing.provider", "none", "stripe", "none", "stripe", "stripe", true),
+            new FlagSpec("billing.provider", "none", "stripe", "none", "stripe", "stripe", false),
             new FlagSpec("marketplace.mode", "remote", "remote", "remote", "local", "local", false)
     );
 
@@ -211,18 +211,22 @@ public class AppEditionProvider {
             if (expected.equalsIgnoreCase(actual)) {
                 continue;
             }
+            boolean failClosed = flag.criticalFailClosed()
+                    || (isCeFree()
+                        && "billing.provider".equals(flag.name())
+                        && "stripe".equalsIgnoreCase(actual));
             if (isCeFree()) {
                 log.warn(String.format(
                         DRIFT_WARN_FORMAT,
                         flag.name(), actual, expected, flag.envVarName(), expected));
-                if (flag.criticalFailClosed()) {
+                if (failClosed) {
                     fatalDrifts.add(flag.name() + "=" + actual + " (expected " + expected + ")");
                 }
             } else if (flag.criticalFailClosed() || isSelfHosted()) {
                 log.warn(String.format(
                         EDITION_DRIFT_WARN_FORMAT,
                         edition.configValue(), flag.name(), actual, expected, flag.envVarName(), expected));
-                if (flag.criticalFailClosed()) {
+                if (failClosed) {
                     fatalDrifts.add(flag.name() + "=" + actual + " (expected " + expected + ")");
                 }
             }

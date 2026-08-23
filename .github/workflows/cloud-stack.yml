@@ -54,7 +54,9 @@ jobs:
           grep -q 'DEPLOYMENT_MODE: microservice' "${rendered}"
           grep -q 'AUTH_MODE: keycloak' "${rendered}"
           grep -q 'MARKETPLACE_MODE: local' "${rendered}"
-          grep -q 'BILLING_PROVIDER: stripe' "${rendered}"
+          grep -q 'BILLING_PROVIDER: none' "${rendered}"
+          grep -q 'BILLING_AUTHORITY_MODE: external-paid-monolith' "${rendered}"
+          grep -q 'GATEWAY_FILTER_ACCEPT_V1: "false"' "${rendered}"
           grep -q 'AUTH_SERVICE_URL: http://auth-service:8083' "${rendered}"
           grep -q 'CATALOG_SERVICE_URL: http://catalog-service:8081' "${rendered}"
           grep -q 'STORAGE_SERVICE_URL: http://storage-service:8082' "${rendered}"
@@ -110,8 +112,8 @@ jobs:
         shell: bash
         run: >-
           mvn -B -Pce
-          -pl common-lib -am
-          -Dtest=AppEditionProviderTest,AppEditionAutoConfigurationTest,GatewayAuthenticationFilterTest
+          -pl common-lib,gateway-service -am
+          -Dtest=AppEditionProviderTest,AppEditionAutoConfigurationTest,GatewayAuthenticationFilterTest,GatewayAuthenticationFilterV2Test,GatewaySignatureV2Test,GatewaySignatureV2ParityTest
           test
 
       - name: Ensure paid-monolith files are untouched

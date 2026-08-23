@@ -95,6 +95,16 @@ public interface OrganizationMemberRepository extends JpaRepository<Organization
     List<Long> findMemberUserIdsByOrganizationId(@Param("organizationId") UUID organizationId);
 
     /**
+     * Provider ids for members of every live organization owned by a user.
+     * This scalar projection is safe after the webhook transaction has closed and
+     * replaces traversal of the lazy OrganizationMember.user association.
+     */
+    @Query("SELECT DISTINCT m.user.providerId FROM OrganizationMember m " +
+           "JOIN m.organization o WHERE o.owner.id = :ownerUserId " +
+           "AND o.deletedAt IS NULL AND m.user.providerId IS NOT NULL")
+    List<String> findProviderIdsForOrganizationsOwnedBy(@Param("ownerUserId") Long ownerUserId);
+
+    /**
      * Check if a user is a member of an organization.
      */
     boolean existsByOrganization_IdAndUser_Id(UUID organizationId, Long userId);

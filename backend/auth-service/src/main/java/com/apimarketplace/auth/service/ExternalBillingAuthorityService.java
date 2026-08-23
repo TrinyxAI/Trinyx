@@ -7,6 +7,7 @@ import com.apimarketplace.auth.repository.PlanRepository;
 import com.apimarketplace.auth.repository.SubscriptionRepository;
 import com.apimarketplace.auth.repository.UserRepository;
 import com.apimarketplace.common.security.CanonicalJson;
+import com.apimarketplace.common.web.TenantResolver;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import org.springframework.beans.factory.annotation.Value;
@@ -21,6 +22,8 @@ import java.time.Duration;
 import java.time.Instant;
 import java.time.ZoneOffset;
 import java.util.UUID;
+import java.util.List;
+import java.util.concurrent.atomic.AtomicReference;
 
 /** Paid-monolith issuer for identity bindings and non-spendable Cloud entitlement projections. */
 @Service
@@ -138,12 +141,14 @@ public class ExternalBillingAuthorityService {
         UUID projectionId = current.isEmpty() ? UUID.randomUUID() : (UUID) current.getFirst()[0];
         long sequence = current.isEmpty() ? 1L : ((Long) current.getFirst()[1]) + 1L;
 
-        long payerUserId = jdbc.queryForObject(
-                "SELECT id FROM auth.users WHERE billing_subject_id=? ORDER BY id LIMIT 1",
-                Long.class, payer.getBillingSubjectId());
-        Subscription subscription = subscriptions.findByBillingCustomer_User_Id(payerUserId).orElse(null);
-        PlanResolutionService.ActiveOrgEntitlement governing =
-                planResolution.resolveActiveOrgEntitlement(actor.getId());
+        List<Subscription> payerSubscriptions =
+                subscriptions.findByBillingCustomer_User_IdAndStatusInOrderByCreatedAtDesc(
+                        payer.getId(), List.of("trialing", "active", "past_due", "canceled"));
+        Subscription subscription = payerSubscriptions.isEmpty() ? null : payerSubscriptions.getFirst();
+        AtomicReference<PlanResolutionService.ActiveOrgEntitlement> resolved = new AtomicReference<>();
+        TenantResolver.runWithOrgScope(organizationId.toString(),
+                () -> resolved.set(planResolution.resolveActiveOrgEntitlement(actor.getId())));
+        PlanResolutionService.ActiveOrgEntitlement governing = resolved.get();
         String planCode = governing.planCode() == null ? "FREE" : governing.planCode();
         Plan plan = plans.findByCode(planCode).orElse(null);
         String accessState = accessState(subscription);
@@ -206,7 +211,10 @@ public class ExternalBillingAuthorityService {
             return "ACTIVE";
         }
         if ("past_due".equals(subscription.getStatus())) {
-            Instant graceEnd = subscription.getUpdatedAt().toInstant(ZoneOffset.UTC).plus(pastDueGrace);
+            Instant changedAt = subscription.getUpdatedAt() == null
+                    ? Instant.EPOCH
+                    : subscription.getUpdatedAt().toInstant(ZoneOffset.UTC);
+            Instant graceEnd = changedAt.plus(pastDueGrace);
             return Instant.now().isBefore(graceEnd) ? "GRACE" : "DENIED";
         }
         return "DENIED";
@@ -216,8 +224,18 @@ public class ExternalBillingAuthorityService {
         claims.put("subscriptionStatus", sub == null ? "none" : sub.getStatus());
         claims.put("cancelAtPeriodEnd", sub != null && Boolean.TRUE.equals(sub.getCancelAtPeriodEnd()));
         if (sub != null) {
-            claims.put("currentPeriodStart", sub.getCurrentPeriodStart().toInstant(ZoneOffset.UTC).toString());
-            claims.put("currentPeriodEnd", sub.getCurrentPeriodEnd().toInstant(ZoneOffset.UTC).toString());
+            if (sub.getCurrentPeriodStart() != null) {
+                claims.put("currentPeriodStart", sub.getCurrentPeriodStart()
+                        .toInstant(ZoneOffset.UTC).toString());
+            } else {
+                claims.putNull("currentPeriodStart");
+            }
+            if (sub.getCurrentPeriodEnd() != null) {
+                claims.put("currentPeriodEnd", sub.getCurrentPeriodEnd()
+                        .toInstant(ZoneOffset.UTC).toString());
+            } else {
+                claims.putNull("currentPeriodEnd");
+            }
             claims.put("delinquent", Boolean.TRUE.equals(sub.getDelinquent()));
         } else {
             claims.putNull("currentPeriodStart");

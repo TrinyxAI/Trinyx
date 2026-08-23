@@ -10,7 +10,8 @@ x-java-service: &java-service
     DEPLOYMENT_MODE: microservice
     AUTH_MODE: keycloak
     MARKETPLACE_MODE: local
-    BILLING_PROVIDER: stripe
+    BILLING_PROVIDER: none
+    BILLING_AUTHORITY_MODE: external-paid-monolith
     CREDIT_UNLIMITED: "false"
     CREDIT_CONSUMPTION_ENABLED: "true"
     PLAN_LIMITS_ENABLED: "true"
@@ -35,9 +36,13 @@ x-java-service: &java-service
     TRIGGER_SERVICE_URL: http://trigger-service:8091
     PUBLICATION_SERVICE_URL: http://publication-service:8092
     ORCHESTRATOR_SERVICE_URL: http://orchestrator-service:8099
-    GATEWAY_URL: http://cloud-edge:8080
+    GATEWAY_URL: http://gateway-service:8086
     GATEWAY_SECRET_KEY: ${CLOUD_GATEWAY_SECRET_KEY:?set CLOUD_GATEWAY_SECRET_KEY}
     GATEWAY_VERIFICATION_ENABLED: "true"
+    GATEWAY_FILTER_ACCEPT_V1: "false"
+    GATEWAY_FILTER_REQUIRE_DISTRIBUTED_NONCE_STORE: "true"
+    GATEWAY_FILTER_V2_TIMESTAMP_SKEW_MS: "60000"
+    GATEWAY_FILTER_NONCE_TTL_MS: "300000"
     SPRING_DATASOURCE_USERNAME: ${CLOUD_DB_USERNAME:?set CLOUD_DB_USERNAME}
     SPRING_DATASOURCE_PASSWORD: ${CLOUD_DB_PASSWORD:?set CLOUD_DB_PASSWORD}
     SPRING_DATASOURCE_HIKARI_MAXIMUM_POOL_SIZE: ${CLOUD_DB_POOL_MAX:-10}
@@ -66,10 +71,6 @@ x-java-service: &java-service
     CREDENTIAL_ENCRYPTION_PASSWORD: ${CREDENTIAL_ENCRYPTION_PASSWORD:?set CREDENTIAL_ENCRYPTION_PASSWORD}
     CREDENTIAL_ENCRYPTION_SALT: ${CREDENTIAL_ENCRYPTION_SALT:?set CREDENTIAL_ENCRYPTION_SALT}
     STORAGE_SHOWCASE_HMAC_SECRET: ${STORAGE_SHOWCASE_HMAC_SECRET:?set STORAGE_SHOWCASE_HMAC_SECRET}
-    STRIPE_SECRET_KEY: ${STRIPE_SECRET_KEY:?set STRIPE_SECRET_KEY}
-    STRIPE_WEBHOOK_SECRET: ${STRIPE_WEBHOOK_SECRET:?set STRIPE_WEBHOOK_SECRET}
-    STRIPE_SUCCESS_URL: ${STRIPE_SUCCESS_URL:?set STRIPE_SUCCESS_URL}
-    STRIPE_CANCEL_URL: ${STRIPE_CANCEL_URL:?set STRIPE_CANCEL_URL}
     SMTP_HOST: ${SMTP_HOST:?set SMTP_HOST}
     SMTP_PORT: ${SMTP_PORT:-587}
     SMTP_USER: ${SMTP_USER:?set SMTP_USER}
@@ -81,6 +82,15 @@ x-java-service: &java-service
     CATALOG_BUNDLE_SIGNING_PUBLIC_KEY: ${CATALOG_BUNDLE_SIGNING_PUBLIC_KEY:?set CATALOG_BUNDLE_SIGNING_PUBLIC_KEY}
     CATALOG_BUNDLE_SIGNING_KEY_ID: ${CATALOG_BUNDLE_SIGNING_KEY_ID:-trinyx-cloud-1}
     CATALOG_BUNDLE_ISSUER: ${CATALOG_BUNDLE_ISSUER:-trinyx-cloud}
+    TRINYX_IDENTITY_ISSUER: https://app.trinyx.fr
+    TRINYX_IDENTITY_AUDIENCE: trinyx-cloud
+    TRINYX_IDENTITY_VERIFICATION_KEYS: ${TRINYX_IDENTITY_VERIFICATION_KEYS:?set TRINYX_IDENTITY_VERIFICATION_KEYS}
+    TRINYX_ENTITLEMENT_ISSUER: https://app.trinyx.fr
+    TRINYX_ENTITLEMENT_AUDIENCE: trinyx-cloud
+    TRINYX_ENTITLEMENT_VERIFICATION_KEYS: ${TRINYX_ENTITLEMENT_VERIFICATION_KEYS:?set TRINYX_ENTITLEMENT_VERIFICATION_KEYS}
+    PAID_MONOLITH_BILLING_URL: ${PAID_MONOLITH_BILLING_URL:-https://app.trinyx.fr}
+    TRINYX_S2S_SIGNING_KID: ${TRINYX_S2S_SIGNING_KID:-cloud-runtime-1}
+    TRINYX_S2S_SIGNING_KEY: ${TRINYX_S2S_SIGNING_KEY:?set TRINYX_S2S_SIGNING_KEY}
     WEBSEARCH_SERVICE_URL: http://websearch-service:8085
     WEBSEARCH_ENABLED: "true"
     WEBSEARCH_GATEWAY_SECRET: ${WEBSEARCH_GATEWAY_SECRET:?set WEBSEARCH_GATEWAY_SECRET}
@@ -427,6 +437,40 @@ services:
       retries: 10
       start_period: 30s
 
+  gateway-service:
+    restart: unless-stopped
+    networks: [cloud]
+    build: {context: ../backend, dockerfile: gateway-service/Dockerfile}
+    image: trinyx-cloud/gateway-service:${TRINYX_CLOUD_IMAGE_TAG:-local}
+    depends_on:
+      keycloak: {condition: service_healthy}
+      auth-service: {condition: service_healthy}
+      cloud-redis: {condition: service_healthy}
+    environment:
+      TZ: UTC
+      APP_EDITION: cloud
+      DEPLOYMENT_MODE: microservice
+      AUTH_MODE: keycloak
+      AUTH_SERVICE_URL: http://auth-service:8083
+      CATALOG_SERVICE_URL: http://catalog-service:8081
+      AGENT_SERVICE_URL: http://agent-service:8090
+      ORCHESTRATOR_SERVICE_URL: http://orchestrator-service:8099
+      CONVERSATION_WS_URL: ws://conversation-service:8087
+      WEBSEARCH_SERVICE_URL: http://websearch-service:8085
+      GATEWAY_SECRET_KEY: ${CLOUD_GATEWAY_SECRET_KEY:?set CLOUD_GATEWAY_SECRET_KEY}
+      KEYCLOAK_JWK_SET_URI: http://keycloak:8080/realms/${KEYCLOAK_REALM_NAME:-trinyx}/protocol/openid-connect/certs
+      KEYCLOAK_ISSUER: https://auth.trinyx.fr/realms/${KEYCLOAK_REALM_NAME:-trinyx}
+      KEYCLOAK_AUDIENCE: ${KEYCLOAK_FRONTEND_CLIENT_ID:-trinyx-frontend}
+      REDIS_HOST: cloud-redis
+      REDIS_PORT: "6379"
+      REDIS_PASSWORD: ${CLOUD_REDIS_PASSWORD:?set CLOUD_REDIS_PASSWORD}
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8086/healthz"]
+      interval: 15s
+      timeout: 5s
+      retries: 15
+      start_period: 60s
+
   cloud-edge:
     image: caddy:2.11.4-alpine
     restart: unless-stopped
@@ -437,17 +481,8 @@ services:
     volumes:
       - ./cloud/Caddyfile:/etc/caddy/Caddyfile:ro
     depends_on:
+      gateway-service: {condition: service_healthy}
       keycloak: {condition: service_healthy}
-      auth-service: {condition: service_healthy}
-      catalog-service: {condition: service_healthy}
-      storage-service: {condition: service_healthy}
-      conversation-service: {condition: service_healthy}
-      datasource-service: {condition: service_healthy}
-      interface-service: {condition: service_healthy}
-      agent-service: {condition: service_healthy}
-      trigger-service: {condition: service_healthy}
-      publication-service: {condition: service_healthy}
-      orchestrator-service: {condition: service_healthy}
     healthcheck:
       test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8080/healthz"]
       interval: 15s

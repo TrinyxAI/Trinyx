@@ -158,6 +158,25 @@ public class ApiCatalogMergeService {
         }
     }
 
+    private record ToolIdentity(UUID id, UUID apiId, String toolNameId) {}
+
+    /**
+     * Raised when the bundle UUID and logical key resolve to two different
+     * existing rows. Neither row is a safe automatic winner: updating the UUID
+     * row would violate the logical unique key, while updating the logical row
+     * would silently repurpose an already-referenced bundle UUID.
+     */
+    private static final class CrossedToolIdentityException extends RuntimeException {
+        CrossedToolIdentityException(UUID bundleId, UUID apiId, String toolNameId,
+                                     ToolIdentity idMatch, ToolIdentity logicalMatch) {
+            super("crossed api_tools identity: bundle id=" + bundleId
+                    + " resolves to (" + idMatch.apiId() + ", " + idMatch.toolNameId() + ")"
+                    + " while logical key=(" + apiId + ", " + toolNameId + ")"
+                    + " resolves to id=" + logicalMatch.id()
+                    + "; refusing an automatic merge");
+        }
+    }
+
     // ─────────────────────────────────────────────────────────────────────────
     // Per-API tree upsert (runs inside one TX per API)
     // ─────────────────────────────────────────────────────────────────────────
@@ -299,12 +318,15 @@ public class ApiCatalogMergeService {
      * Tools without a logical name retain the legacy UUID conflict target.
      */
     private UUID upsertTool(UUID apiId, UUID toolId, Map<String, Object> tool) {
+        String toolNameId = str(tool, "toolNameId");
+        UUID effectiveToolId = resolveEffectiveToolId(apiId, toolId, toolNameId);
+
         MapSqlParameterSource p = new MapSqlParameterSource()
-                .addValue("id", toolId)
+                .addValue("id", effectiveToolId)
                 .addValue("apiId", apiId)
                 .addValue("toolSlug", str(tool, "toolSlug"))
                 .addValue("description", Objects.requireNonNullElse(str(tool, "description"), ""))
-                .addValue("toolNameId", str(tool, "toolNameId"))
+                .addValue("toolNameId", toolNameId)
                 .addValue("method", Objects.requireNonNullElse(str(tool, "method"), "GET"))
                 .addValue("endpoint", Objects.requireNonNullElse(str(tool, "endpoint"), ""))
                 .addValue("protocol", Objects.requireNonNullElse(str(tool, "protocol"), "HTTP"))
@@ -322,10 +344,6 @@ public class ApiCatalogMergeService {
                 .addValue("isActive", bool(tool, "isActive", true))
                 .addValue("version", str(tool, "version"));
 
-        String conflictTarget = str(tool, "toolNameId") == null
-                ? "(id)"
-                : "(api_id, tool_name_id)";
-
         String upsertSql = """
                 INSERT INTO catalog.api_tools (
                     id, api_id, tool_slug, description, tool_name_id, method, endpoint,
@@ -339,7 +357,7 @@ public class ApiCatalogMergeService {
                     :requiredScopes::jsonb, :generationSpec::jsonb, :nextHint, :status, :testStatus,
                     :isActive, :version, NULL,
                     EXTRACT(EPOCH FROM NOW()) * 1000, EXTRACT(EPOCH FROM NOW()) * 1000)
-                ON CONFLICT %s DO UPDATE SET
+                ON CONFLICT (id) DO UPDATE SET
                     api_id = EXCLUDED.api_id,
                     tool_slug = EXCLUDED.tool_slug,
                     description = EXCLUDED.description,
@@ -363,10 +381,56 @@ public class ApiCatalogMergeService {
                     deprecated_at = NULL,
                     updated_at = EXTRACT(EPOCH FROM NOW()) * 1000
                 RETURNING id
-                """.formatted(conflictTarget);
-        UUID effectiveToolId = jdbc.queryForObject(upsertSql, p, UUID.class);
-        return Objects.requireNonNull(effectiveToolId,
+                """;
+        UUID persistedToolId = jdbc.queryForObject(upsertSql, p, UUID.class);
+        return Objects.requireNonNull(persistedToolId,
                 "api_tools upsert did not return an effective id");
+    }
+
+    private UUID resolveEffectiveToolId(UUID apiId, UUID bundleToolId, String toolNameId) {
+        MapSqlParameterSource p = new MapSqlParameterSource()
+                .addValue("id", bundleToolId)
+                .addValue("apiId", apiId)
+                .addValue("toolNameId", toolNameId);
+        List<Map<String, Object>> rows = jdbc.queryForList("""
+                SELECT id, api_id, tool_name_id
+                  FROM catalog.api_tools
+                 WHERE id = :id
+                    OR (:toolNameId IS NOT NULL
+                        AND api_id = :apiId
+                        AND tool_name_id = :toolNameId)
+                 FOR UPDATE
+                """, p);
+
+        ToolIdentity idMatch = null;
+        ToolIdentity logicalMatch = null;
+        for (Map<String, Object> row : rows) {
+            ToolIdentity candidate = new ToolIdentity(
+                    (UUID) row.get("id"),
+                    (UUID) row.get("api_id"),
+                    (String) row.get("tool_name_id"));
+            if (bundleToolId.equals(candidate.id())) {
+                idMatch = candidate;
+            }
+            if (toolNameId != null
+                    && apiId.equals(candidate.apiId())
+                    && toolNameId.equals(candidate.toolNameId())) {
+                logicalMatch = candidate;
+            }
+        }
+
+        if (idMatch != null && logicalMatch != null
+                && !idMatch.id().equals(logicalMatch.id())) {
+            throw new CrossedToolIdentityException(
+                    bundleToolId, apiId, toolNameId, idMatch, logicalMatch);
+        }
+        if (idMatch != null) {
+            return idMatch.id();
+        }
+        if (logicalMatch != null) {
+            return logicalMatch.id();
+        }
+        return bundleToolId;
     }
 
     private void replaceParameters(UUID toolId, List<Map<String, Object>> parameters) {

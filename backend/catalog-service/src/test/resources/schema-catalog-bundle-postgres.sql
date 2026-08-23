@@ -118,6 +118,14 @@ CREATE TABLE IF NOT EXISTS catalog.api_tools (
     UNIQUE(api_id, tool_name_id)
 );
 
+-- Representative non-bundle child: verifies that preserving an install-local
+-- api_tools.id keeps external FK references valid across a logical-key merge.
+CREATE TABLE IF NOT EXISTS catalog.tool_signals (
+    tool_id UUID PRIMARY KEY REFERENCES catalog.api_tools(id) ON DELETE CASCADE,
+    action VARCHAR(40),
+    updated_at BIGINT NOT NULL DEFAULT EXTRACT(EPOCH FROM NOW()) * 1000
+);
+
 CREATE TABLE IF NOT EXISTS catalog.api_tool_parameters (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     api_tool_id UUID NOT NULL REFERENCES catalog.api_tools(id) ON DELETE CASCADE,

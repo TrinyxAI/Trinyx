@@ -60,6 +60,8 @@ class ApiCatalogMergeServiceTest {
     private final List<UUID> failingApiInserts = new ArrayList<>();
     /** apiIds whose apis-upsert reports 0 rows (ON CONFLICT … WHERE source guard fired). */
     private final List<UUID> suppressedApiUpserts = new ArrayList<>();
+    /** Logical tool key → install-local id returned by INSERT ... RETURNING. */
+    private final Map<String, UUID> existingLogicalToolIds = new HashMap<>();
     /** What the orphan-sweep SELECT returns (APIs to deprecate in this sweep). */
     private final List<UUID> orphanApiIds = new ArrayList<>();
     /** Update count returned by the orphan TOOL sweep statement. */
@@ -76,6 +78,7 @@ class ApiCatalogMergeServiceTest {
         existingSources.clear();
         failingApiInserts.clear();
         suppressedApiUpserts.clear();
+        existingLogicalToolIds.clear();
         orphanApiIds.clear();
         orphanToolSweepCount = 1;
 
@@ -118,7 +121,18 @@ class ApiCatalogMergeServiceTest {
                             ? List.of(SUBCATEGORY_ID) : List.of(CATEGORY_ID);
                 });
         when(jdbc.queryForObject(anyString(), any(SqlParameterSource.class), eq(UUID.class)))
-                .thenAnswer(inv -> UUID.randomUUID());
+                .thenAnswer(inv -> {
+                    String sql = inv.getArgument(0);
+                    SqlParameterSource p = inv.getArgument(1);
+                    if (sql.contains("INSERT INTO catalog.api_tools")) {
+                        updates.add(new Statement(sql, p));
+                        String key = logicalToolKey(
+                                (UUID) p.getValue("apiId"),
+                                (String) p.getValue("toolNameId"));
+                        return existingLogicalToolIds.getOrDefault(key, (UUID) p.getValue("id"));
+                    }
+                    return UUID.randomUUID();
+                });
     }
 
     private static Map<String, Object> apiMap(UUID id, String name, List<Map<String, Object>> tools) {
@@ -149,6 +163,10 @@ class ApiCatalogMergeServiceTest {
         tool.put("toolCredentials", List.of(Map.of(
                 "credentialName", "slack", "variant", "oauth2")));
         return tool;
+    }
+
+    private static String logicalToolKey(UUID apiId, String toolNameId) {
+        return apiId + "|" + toolNameId;
     }
 
     private List<Statement> matching(Predicate<String> sqlMatch) {
@@ -357,6 +375,45 @@ class ApiCatalogMergeServiceTest {
         assertThat(toolSweep.params().getValue("apiId")).isEqualTo(apiId);
         assertThat(toolSweep.sql()).contains("id NOT IN (:toolIds)");
         assertThat((List<Object>) toolSweep.params().getValue("toolIds")).containsExactly(toolId);
+    }
+
+    @Test
+    @DisplayName("Logical-key conflict preserves the local tool UUID for children and the live-tool sweep")
+    void logicalToolConflictPreservesExistingId() {
+        UUID apiId = UUID.randomUUID();
+        UUID oldLocalId = UUID.randomUUID();
+        UUID newBundleId = UUID.randomUUID();
+        String toolNameId = "surveymonkey-create-survey";
+        existingLogicalToolIds.put(logicalToolKey(apiId, toolNameId), oldLocalId);
+
+        Map<String, Object> tool = toolMap(newBundleId, "create-survey");
+        tool.put("toolNameId", toolNameId);
+
+        ApiCatalogMergeService.MergeResult result = service.merge(
+                List.of(apiMap(apiId, "SurveyMonkey", List.of(tool))), List.of());
+
+        assertThat(result.failedApis()).isZero();
+        assertThat(result.upsertedTools()).isEqualTo(1);
+
+        Statement upsert = matching(sql -> sql.contains("INSERT INTO catalog.api_tools")).get(0);
+        assertThat(upsert.params().getValue("id")).isEqualTo(newBundleId);
+        assertThat(upsert.sql())
+                .contains("ON CONFLICT (api_id, tool_name_id) DO UPDATE")
+                .contains("RETURNING id");
+
+        for (String table : List.of("catalog.api_tool_parameters", "catalog.tool_responses",
+                "catalog.tool_credentials")) {
+            assertThat(matching(sql -> sql.contains("DELETE FROM " + table)))
+                    .singleElement()
+                    .satisfies(statement ->
+                            assertThat(statement.params().getValue("toolId")).isEqualTo(oldLocalId));
+        }
+
+        Statement sweep = matching(sql ->
+                sql.contains("UPDATE catalog.api_tools")
+                        && sql.contains("api_id = :apiId")).get(0);
+        assertThat((List<Object>) sweep.params().getValue("toolIds"))
+                .containsExactly(oldLocalId);
     }
 
     @Test

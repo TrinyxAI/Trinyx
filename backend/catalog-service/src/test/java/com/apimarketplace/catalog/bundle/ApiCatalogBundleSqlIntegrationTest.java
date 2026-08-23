@@ -86,7 +86,7 @@ class ApiCatalogBundleSqlIntegrationTest {
     @BeforeEach
     void cleanTables() {
         jdbc.execute("""
-                TRUNCATE catalog.tool_credentials, catalog.tool_responses,
+                TRUNCATE catalog.tool_signals, catalog.tool_credentials, catalog.tool_responses,
                          catalog.api_tool_parameters, catalog.api_tools, catalog.apis,
                          catalog.api_subcategories, catalog.api_categories,
                          catalog.credentials CASCADE""");
@@ -222,7 +222,73 @@ class ApiCatalogBundleSqlIntegrationTest {
     }
 
     @Test
-    @DisplayName("(b2) Per-API isolation on a REAL unique collision: one API fails, the other lands")
+    @DisplayName("(b2) REAL logical-key collision preserves the local UUID, children and idempotence")
+    void logicalToolCollisionPreservesLocalIdAndForeignKeys() {
+        UUID categoryId = seedCategory("Surveys", "surveys");
+        UUID subcategoryId = seedSubcategory(categoryId, "Forms", "forms");
+        UUID apiId = UUID.randomUUID();
+        UUID oldLocalId = UUID.randomUUID();
+        UUID newBundleId = UUID.randomUUID();
+        UUID parameterId = UUID.randomUUID();
+        String toolNameId = "surveymonkey-create-survey";
+
+        seedApi(apiId, "SurveyMonkey", "bundle", categoryId, subcategoryId, "surveymonkey");
+        seedTool(oldLocalId, apiId, "legacy-create", "/v1/surveys", toolNameId);
+        jdbc.update("UPDATE catalog.api_tools SET deprecated_at = NOW() WHERE id = ?", oldLocalId);
+        jdbc.update("""
+                INSERT INTO catalog.tool_signals (tool_id, action)
+                VALUES (?, 'create')
+                """, oldLocalId);
+
+        Map<String, Object> bundleTool = toolPayload(
+                newBundleId, "create-survey", "/v2/surveys",
+                List.of(paramPayload(parameterId, "title")));
+        bundleTool.put("toolNameId", toolNameId);
+        List<Map<String, Object>> payload = List.of(
+                apiPayload(apiId, "SurveyMonkey", List.of(bundleTool)));
+
+        ApiCatalogMergeService.MergeResult first = mergeService.merge(payload, List.of());
+
+        assertThat(first.failedApis()).isZero();
+        assertThat(first.upsertedApis()).isEqualTo(1);
+        assertThat(first.upsertedTools()).isEqualTo(1);
+        assertThat(count("catalog.api_tools")).isEqualTo(1);
+        assertThat(jdbc.queryForObject("""
+                SELECT id FROM catalog.api_tools
+                 WHERE api_id = ? AND tool_name_id = ?
+                """, UUID.class, apiId, toolNameId)).isEqualTo(oldLocalId);
+        assertThat(jdbc.queryForObject(
+                "SELECT COUNT(*) FROM catalog.api_tools WHERE id = ?",
+                Integer.class, newBundleId)).isZero();
+        assertThat(jdbc.queryForObject(
+                "SELECT endpoint FROM catalog.api_tools WHERE id = ?",
+                String.class, oldLocalId)).isEqualTo("/v2/surveys");
+        assertThat(deprecatedAt("catalog.api_tools", oldLocalId)).isNull();
+
+        // A non-bundle child keeps its FK, while bundle-owned children are
+        // replaced against the effective local id rather than NEW_UUID.
+        assertThat(jdbc.queryForObject(
+                "SELECT tool_id FROM catalog.tool_signals WHERE action = 'create'",
+                UUID.class)).isEqualTo(oldLocalId);
+        assertThat(jdbc.queryForObject(
+                "SELECT api_tool_id FROM catalog.api_tool_parameters WHERE id = ?",
+                UUID.class, parameterId)).isEqualTo(oldLocalId);
+
+        ApiCatalogMergeService.MergeResult second = mergeService.merge(payload, List.of());
+
+        assertThat(second.failedApis()).isZero();
+        assertThat(second.upsertedApis()).isEqualTo(1);
+        assertThat(count("catalog.api_tools")).isEqualTo(1);
+        assertThat(jdbc.queryForObject(
+                "SELECT tool_id FROM catalog.tool_signals WHERE action = 'create'",
+                UUID.class)).isEqualTo(oldLocalId);
+        assertThat(jdbc.queryForObject(
+                "SELECT api_tool_id FROM catalog.api_tool_parameters WHERE id = ?",
+                UUID.class, parameterId)).isEqualTo(oldLocalId);
+    }
+
+    @Test
+    @DisplayName("(b3) Per-API isolation on a REAL unique collision: one API fails, the other lands")
     void perApiIsolationOnRealUniqueCollision() {
         // An import-era row already owns ('SYSTEM', 'Slack') under another UUID
         // → the bundle's INSERT of a NEW UUID with the same name violates

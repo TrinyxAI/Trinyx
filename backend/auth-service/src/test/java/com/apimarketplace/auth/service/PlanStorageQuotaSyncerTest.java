@@ -395,6 +395,19 @@ class PlanStorageQuotaSyncerTest {
 
             verify(storageClient).updateTenantStorageLimits("42", 1_073_741_824L, 0.8);
         }
+
+        @Test
+        @DisplayName("paid monolith ignores unrelated StorageClient beans and writes quota in-process")
+        void paidMonolithUsesInProcessQuotaService() {
+            when(organizationRepository.findByOwnerId(42L)).thenReturn(Collections.emptyList());
+            PlanStorageQuotaSyncer syncer = syncerWithClient();
+            ReflectionTestUtils.setField(syncer, "deploymentMode", "monolith");
+
+            syncer.syncAfterCommit(42L, plan("PRO", 10_737_418_240L));
+
+            verify(quotaService).updateLimits("42", 10_737_418_240L, 0.8);
+            verifyNoInteractions(storageClient);
+        }
     }
 
     @Nested

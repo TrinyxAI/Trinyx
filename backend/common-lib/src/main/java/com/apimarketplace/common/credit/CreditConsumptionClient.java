@@ -2,12 +2,15 @@ package com.apimarketplace.common.credit;
 
 import com.apimarketplace.common.web.OrgContextHeaderForwarder;
 import com.apimarketplace.common.web.TenantResolver;
+import com.apimarketplace.common.web.GatewaySignatureV2;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.boot.web.client.RestTemplateBuilder;
 import org.springframework.http.*;
 import org.springframework.scheduling.annotation.Async;
 import org.springframework.web.client.RestTemplate;
+import org.springframework.web.context.request.RequestContextHolder;
+import org.springframework.web.context.request.ServletRequestAttributes;
 
 import javax.crypto.Mac;
 import javax.crypto.spec.SecretKeySpec;
@@ -17,6 +20,8 @@ import java.security.InvalidKeyException;
 import java.security.NoSuchAlgorithmException;
 import java.time.Duration;
 import java.time.Instant;
+import java.net.URI;
+import java.util.UUID;
 import java.util.Base64;
 import java.util.HashMap;
 import java.util.Map;
@@ -101,7 +106,6 @@ public class CreditConsumptionClient {
             headers.set("X-User-ID", userId);
         }
         OrgContextHeaderForwarder.forward(headers);
-        applyGatewaySignature(headers, userId);
         return headers;
     }
 
@@ -124,6 +128,7 @@ public class CreditConsumptionClient {
             this.restTemplate = new RestTemplateBuilder()
                     .connectTimeout(CONNECT_TIMEOUT)
                     .readTimeout(READ_TIMEOUT)
+                    .additionalInterceptors(this::applyGatewaySignature)
                     .build();
         } else {
             this.restTemplate = null;
@@ -894,22 +899,74 @@ public class CreditConsumptionClient {
         return url;
     }
 
-    private void applyGatewaySignature(HttpHeaders headers, String userId) {
+    private org.springframework.http.client.ClientHttpResponse applyGatewaySignature(
+            org.springframework.http.HttpRequest request, byte[] body,
+            org.springframework.http.client.ClientHttpRequestExecution execution)
+            throws java.io.IOException {
         if (gatewaySecretKey == null || gatewaySecretKey.isBlank()) {
-            return;
+            return execution.execute(request, body);
         }
+        HttpHeaders headers = request.getHeaders();
         String timestamp = String.valueOf(System.currentTimeMillis());
-        String organizationId = headers.getFirst("X-Organization-ID");
+        String userId = value(headers.getFirst("X-User-ID"));
+        String organizationId = value(headers.getFirst("X-Organization-ID"));
+        String configuredVersion = System.getenv().getOrDefault(
+                "GATEWAY_SIGNATURE_VERSION", "2").trim();
+
         headers.set("X-Provider-ID", INTERNAL_PROVIDER_ID);
+        if ("1".equals(configuredVersion)) {
+            headers.set("X-Gateway-Timestamp", timestamp);
+            headers.set("X-Gateway-Secret", computeLegacyGatewaySignature(
+                    INTERNAL_PROVIDER_ID, userId, organizationId, timestamp));
+            return execution.execute(request, body);
+        }
+
+        // Propagate only server-authenticated context. Browser-controlled values were stripped
+        // by the edge gateway before the inbound servlet request was created.
+        copyTrustedInboundHeader(headers, "X-Principal-ID");
+        copyTrustedInboundHeader(headers, "X-Billing-Subject-ID");
+        copyTrustedInboundHeader(headers, "X-Organization-Role");
+        copyTrustedInboundHeader(headers, "X-User-Roles");
+        copyTrustedInboundHeader(headers, "X-Install-ID");
+
+        URI uri = request.getURI();
+        String target = uri.getRawPath()
+                + (uri.getRawQuery() == null ? "" : "?" + uri.getRawQuery());
+        String nonce = UUID.randomUUID().toString();
+        String bodyHash = GatewaySignatureV2.sha256Hex(body);
+        GatewaySignatureV2.Context context = new GatewaySignatureV2.Context(
+                timestamp, nonce, request.getMethod().name(), target, bodyHash,
+                INTERNAL_PROVIDER_ID, userId,
+                value(headers.getFirst("X-Principal-ID")),
+                value(headers.getFirst("X-Billing-Subject-ID")),
+                organizationId,
+                value(headers.getFirst("X-Organization-Role")),
+                value(headers.getFirst("X-User-Roles")),
+                value(headers.getFirst("X-Install-ID")));
+
+        headers.set("X-Gateway-Signature-Version", GatewaySignatureV2.VERSION);
         headers.set("X-Gateway-Timestamp", timestamp);
-        headers.set("X-Gateway-Secret", computeGatewaySignature(
-                INTERNAL_PROVIDER_ID, userId, organizationId, timestamp));
+        headers.set("X-Gateway-Nonce", nonce);
+        headers.set("X-Gateway-Body-SHA256", bodyHash);
+        headers.set("X-Gateway-Secret", GatewaySignatureV2.sign(gatewaySecretKey, context));
+        return execution.execute(request, body);
     }
 
-    private String computeGatewaySignature(String providerId, String userId, String organizationId, String timestamp) {
-        String safeUser = userId != null ? userId : "";
-        String safeOrg = organizationId != null ? organizationId : "";
-        String data = providerId + "|" + safeUser + "|" + safeOrg + "|" + timestamp;
+    private static void copyTrustedInboundHeader(HttpHeaders target, String name) {
+        if (target.containsKey(name)) {
+            return;
+        }
+        if (RequestContextHolder.getRequestAttributes() instanceof ServletRequestAttributes attrs) {
+            String value = attrs.getRequest().getHeader(name);
+            if (value != null && !value.isBlank()) {
+                target.set(name, value);
+            }
+        }
+    }
+
+    private String computeLegacyGatewaySignature(
+            String providerId, String userId, String organizationId, String timestamp) {
+        String data = providerId + "|" + value(userId) + "|" + value(organizationId) + "|" + timestamp;
         try {
             Mac mac = Mac.getInstance(HMAC_ALGO);
             mac.init(new SecretKeySpec(gatewaySecretKey.getBytes(StandardCharsets.UTF_8), HMAC_ALGO));
@@ -919,4 +976,9 @@ public class CreditConsumptionClient {
             throw new IllegalStateException("HmacSHA256 unavailable", e);
         }
     }
+
+    private static String value(String value) {
+        return value == null ? "" : value;
+    }
+
 }

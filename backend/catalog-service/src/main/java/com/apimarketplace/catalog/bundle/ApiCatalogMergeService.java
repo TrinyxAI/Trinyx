@@ -28,12 +28,13 @@ import java.util.UUID;
  *       rolls back the rest of the catalog.</li>
  *   <li><b>UPSERT in-place, never TRUNCATE/DELETE of apis/tools</b> -
  *       APIs merge by UUID. Tools first resolve both their bundle UUID and
- *       {@code (api_id, tool_name_id)} under a row lock. A single matching row
- *       keeps its primary key and every external FK; two different matching
- *       rows are rejected as an explicit crossed-identity conflict. Unnamed
- *       tools resolve by UUID only. Leaf children (parameters, responses,
- *       tool-credential links) ARE replaced wholesale against the effective
- *       tool UUID.</li>
+ *       {@code (api_id, tool_name_id)} under a row lock. A logical-key match
+ *       keeps its install-local primary key. A UUID already owned by a
+ *       different logical tool, and identities split across two rows, are
+ *       rejected before mutation. Unnamed tools may reuse a UUID only for the
+ *       same API when the existing tool is also unnamed. Leaf children
+ *       (parameters, responses, tool-credential links) ARE replaced wholesale
+ *       against the effective tool UUID.</li>
  *   <li><b>Custom-API protection</b> - an existing row whose {@code source}
  *       is NOT {@code import}/{@code bundle} (i.e. {@code custom},
  *       tenant-created) is never updated, deprecated, or overwritten. Checked
@@ -160,23 +161,44 @@ public class ApiCatalogMergeService {
         }
     }
 
-    private record ToolIdentity(UUID id, UUID apiId, String toolNameId) {}
+    private record ToolIdentity(UUID id, UUID apiId, String toolNameId,
+                                String toolSlug, String endpoint) {}
+
+    /**
+     * Raised when a bundle UUID is already owned by a different logical tool.
+     * Keeping the UUID while rewriting its identity would leave external rows
+     * (signals, indexes, credentials, monetization, hints, etc.) attached to a
+     * tool whose meaning changed. The API transaction is rolled back instead.
+     */
+    private static final class PrimaryKeyToolIdentityConflictException extends RuntimeException {
+        PrimaryKeyToolIdentityConflictException(ToolIdentity bundle, ToolIdentity existing) {
+            super("api_tools primary-key identity conflict: bundle id=" + bundle.id()
+                    + " already belongs to " + describe(existing)
+                    + " but bundle proposes " + describe(bundle)
+                    + "; refusing to requalify a referenced tool");
+        }
+    }
 
     /**
      * Raised when the bundle UUID and logical key resolve to two different
-     * existing rows. Neither row is a safe automatic winner: updating the UUID
-     * row would violate the logical unique key, while updating the logical row
-     * would silently repurpose an already-referenced bundle UUID.
+     * existing rows. Neither row is a safe automatic winner.
      */
     private static final class CrossedToolIdentityException extends RuntimeException {
-        CrossedToolIdentityException(UUID bundleId, UUID apiId, String toolNameId,
-                                     ToolIdentity idMatch, ToolIdentity logicalMatch) {
-            super("crossed api_tools identity: bundle id=" + bundleId
-                    + " resolves to (" + idMatch.apiId() + ", " + idMatch.toolNameId() + ")"
-                    + " while logical key=(" + apiId + ", " + toolNameId + ")"
-                    + " resolves to id=" + logicalMatch.id()
+        CrossedToolIdentityException(ToolIdentity bundle, ToolIdentity idMatch,
+                                     ToolIdentity logicalMatch) {
+            super("crossed api_tools identity: bundle " + describe(bundle)
+                    + " has an id owned by " + describe(idMatch)
+                    + " while its logical key is owned by " + describe(logicalMatch)
                     + "; refusing an automatic merge");
         }
+    }
+
+    private static String describe(ToolIdentity identity) {
+        return "{id=" + identity.id()
+                + ", api_id=" + identity.apiId()
+                + ", tool_slug='" + identity.toolSlug()
+                + "', tool_name_id='" + identity.toolNameId()
+                + "', endpoint='" + identity.endpoint() + "'}";
     }
 
     // ─────────────────────────────────────────────────────────────────────────
@@ -313,15 +335,18 @@ public class ApiCatalogMergeService {
     }
 
     /**
-     * Upsert a tool after reconciling its two database identities. A primary-key
-     * match wins when it is the only match; a logical-key match preserves its
-     * install-local UUID when the bundle UUID is unused. If both identities
-     * point to distinct rows, resolution fails before any tool/child write.
-     * Tools without a logical name resolve by UUID only.
+     * Upsert a tool after reconciling its two database identities. A logical-key
+     * match preserves its install-local UUID when the bundle UUID is unused.
+     * A bundle UUID already owned by a different logical tool, or identities
+     * split across two rows, fail before any tool/child write. Tools without a
+     * logical name may reuse a UUID only when the existing row also has no
+     * logical name and belongs to the same API.
      */
     private UUID upsertTool(UUID apiId, UUID toolId, Map<String, Object> tool) {
         String toolNameId = str(tool, "toolNameId");
-        UUID effectiveToolId = resolveEffectiveToolId(apiId, toolId, toolNameId);
+        UUID effectiveToolId = resolveEffectiveToolId(
+                new ToolIdentity(toolId, apiId, toolNameId,
+                        str(tool, "toolSlug"), str(tool, "endpoint")));
 
         MapSqlParameterSource p = new MapSqlParameterSource()
                 .addValue("id", effectiveToolId)
@@ -389,20 +414,20 @@ public class ApiCatalogMergeService {
                 "api_tools upsert did not return an effective id");
     }
 
-    private UUID resolveEffectiveToolId(UUID apiId, UUID bundleToolId, String toolNameId) {
+    private UUID resolveEffectiveToolId(ToolIdentity bundle) {
         MapSqlParameterSource p = new MapSqlParameterSource()
-                .addValue("id", bundleToolId)
-                .addValue("apiId", apiId)
-                .addValue("toolNameId", toolNameId);
-        String identitySql = toolNameId == null
+                .addValue("id", bundle.id())
+                .addValue("apiId", bundle.apiId())
+                .addValue("toolNameId", bundle.toolNameId());
+        String identitySql = bundle.toolNameId() == null
                 ? """
-                  SELECT id, api_id, tool_name_id
+                  SELECT id, api_id, tool_name_id, tool_slug, endpoint
                     FROM catalog.api_tools
                    WHERE id = :id
                    FOR UPDATE
                   """
                 : """
-                  SELECT id, api_id, tool_name_id
+                  SELECT id, api_id, tool_name_id, tool_slug, endpoint
                     FROM catalog.api_tools
                    WHERE id = :id
                       OR (api_id = :apiId AND tool_name_id = :toolNameId)
@@ -416,21 +441,27 @@ public class ApiCatalogMergeService {
             ToolIdentity candidate = new ToolIdentity(
                     (UUID) row.get("id"),
                     (UUID) row.get("api_id"),
-                    (String) row.get("tool_name_id"));
-            if (bundleToolId.equals(candidate.id())) {
+                    (String) row.get("tool_name_id"),
+                    (String) row.get("tool_slug"),
+                    (String) row.get("endpoint"));
+            if (bundle.id().equals(candidate.id())) {
                 idMatch = candidate;
             }
-            if (toolNameId != null
-                    && apiId.equals(candidate.apiId())
-                    && toolNameId.equals(candidate.toolNameId())) {
+            if (bundle.toolNameId() != null
+                    && bundle.apiId().equals(candidate.apiId())
+                    && bundle.toolNameId().equals(candidate.toolNameId())) {
                 logicalMatch = candidate;
             }
         }
 
         if (idMatch != null && logicalMatch != null
                 && !idMatch.id().equals(logicalMatch.id())) {
-            throw new CrossedToolIdentityException(
-                    bundleToolId, apiId, toolNameId, idMatch, logicalMatch);
+            throw new CrossedToolIdentityException(bundle, idMatch, logicalMatch);
+        }
+        if (idMatch != null
+                && (!bundle.apiId().equals(idMatch.apiId())
+                    || !Objects.equals(bundle.toolNameId(), idMatch.toolNameId()))) {
+            throw new PrimaryKeyToolIdentityConflictException(bundle, idMatch);
         }
         if (idMatch != null) {
             return idMatch.id();
@@ -438,7 +469,7 @@ public class ApiCatalogMergeService {
         if (logicalMatch != null) {
             return logicalMatch.id();
         }
-        return bundleToolId;
+        return bundle.id();
     }
 
     private void replaceParameters(UUID toolId, List<Map<String, Object>> parameters) {

@@ -20,22 +20,28 @@ public class WorkloadAuthenticationService {
 
     private final Map<String, PublicKey> verificationKeys;
     private final StringRedisTemplate redis;
-    private final String issuer;
-    private final String audience;
+    private final String verificationIssuer;
+    private final String verificationAudience;
+    private final String signingIssuer;
+    private final String signingAudience;
     private final String signingKid;
     private final PrivateKey signingKey;
 
     public WorkloadAuthenticationService(
             StringRedisTemplate redis,
             @Value("${trinyx.s2s.verification-keys:}") String encodedKeys,
-            @Value("${trinyx.s2s.issuer:trinyx-cloud}") String issuer,
-            @Value("${trinyx.s2s.audience:trinyx-billing-authority}") String audience,
+            @Value("${trinyx.s2s.verification-issuer:trinyx-cloud}") String verificationIssuer,
+            @Value("${trinyx.s2s.verification-audience:trinyx-billing-authority}") String verificationAudience,
+            @Value("${trinyx.s2s.signing-issuer:trinyx-cloud}") String signingIssuer,
+            @Value("${trinyx.s2s.signing-audience:trinyx-billing-authority}") String signingAudience,
             @Value("${trinyx.s2s.signing-kid:}") String signingKid,
             @Value("${trinyx.s2s.signing-key:}") String encodedSigningKey) {
         this.redis = redis;
         this.verificationKeys = parseKeys(encodedKeys);
-        this.issuer = issuer;
-        this.audience = audience;
+        this.verificationIssuer = verificationIssuer;
+        this.verificationAudience = verificationAudience;
+        this.signingIssuer = signingIssuer;
+        this.signingAudience = signingAudience;
         this.signingKid = signingKid;
         this.signingKey = encodedSigningKey == null || encodedSigningKey.isBlank()
                 ? null : Ed25519Jws.privateKeyFromPkcs8Base64(encodedSigningKey);
@@ -50,8 +56,8 @@ public class WorkloadAuthenticationService {
         }
         Instant now = Instant.now();
         var claims = new com.fasterxml.jackson.databind.ObjectMapper().createObjectNode();
-        claims.put("iss", issuer);
-        claims.put("aud", audience);
+        claims.put("iss", signingIssuer);
+        claims.put("aud", signingAudience);
         claims.put("serviceId", serviceId);
         claims.put("jti", UUID.randomUUID().toString());
         claims.put("iat", now.getEpochSecond());
@@ -61,6 +67,11 @@ public class WorkloadAuthenticationService {
     }
 
     public WorkloadIdentity authenticate(String authorization) {
+        return authenticate(authorization, verificationIssuer, verificationAudience);
+    }
+
+    public WorkloadIdentity authenticate(
+            String authorization, String expectedIssuer, String expectedAudience) {
         if (authorization == null || !authorization.startsWith("Bearer ")) {
             throw new SecurityException("Missing workload bearer token");
         }
@@ -69,8 +80,8 @@ public class WorkloadAuthenticationService {
         Instant issued = Instant.ofEpochSecond(claims.path("iat").asLong());
         Instant notBefore = Instant.ofEpochSecond(claims.path("nbf").asLong());
         Instant expires = Instant.ofEpochSecond(claims.path("exp").asLong());
-        if (!issuer.equals(claims.path("iss").asText())
-                || !audience.equals(claims.path("aud").asText())
+        if (!expectedIssuer.equals(claims.path("iss").asText())
+                || !expectedAudience.equals(claims.path("aud").asText())
                 || now.isBefore(issued.minusSeconds(5)) || now.isBefore(notBefore)
                 || !now.isBefore(expires)
                 || Duration.between(issued, expires).compareTo(Duration.ofMinutes(2)) > 0) {

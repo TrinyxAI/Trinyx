@@ -483,8 +483,12 @@ services:
     ports:
       - "${CLOUD_EDGE_BIND:-127.0.0.1}:${CLOUD_EDGE_PORT:-8188}:8080"
       - "${KEYCLOAK_EDGE_BIND:-127.0.0.1}:${KEYCLOAK_EDGE_PORT:-8280}:8180"
+      - "${CLOUD_INTERNAL_BIND:-127.0.0.1}:${CLOUD_INTERNAL_PORT:-8443}:8443"
+    environment:
+      CLOUD_INTERNAL_HOST: ${CLOUD_INTERNAL_HOST:-cloud-internal.trinyx.private}
     volumes:
       - ./cloud/Caddyfile:/etc/caddy/Caddyfile:ro
+      - cloud-caddy-data:/data
     depends_on:
       gateway-service: {condition: service_healthy}
       keycloak: {condition: service_healthy}
@@ -502,3 +506,4 @@ volumes:
   cloud-postgres-data:
   cloud-redis-data:
   cloud-minio-data:
+  cloud-caddy-data:

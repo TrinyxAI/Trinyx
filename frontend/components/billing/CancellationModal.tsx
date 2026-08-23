@@ -263,7 +263,7 @@ export default function CancellationModal({
                                     {t('back')}
                                 </Button>
                                 <button
-                                        type="button"
+                                    type="button"
                                     onClick={() => setStep('confirm')}
                                     className="flex-1 text-sm text-theme-muted hover:text-theme-primary underline underline-offset-2"
                                 >

@@ -89,7 +89,7 @@ spring:
 # Configuration Keycloak
 app:
   mail:
-    from: ${SMTP_FROM:noreply@livecontext.ai}
+    from: ${SMTP_FROM:noreply@trinyx.fr}
     from-name: LiveContext
   security:
     keycloak:

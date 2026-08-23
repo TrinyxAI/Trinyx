@@ -12,6 +12,7 @@ Backend:
 
 ```dotenv
 BACKEND_IMAGE=ghcr.io/eddinerabii/trinyx-backend:<tested-sha>
+FRONTEND_IMAGE=ghcr.io/eddinerabii/trinyx-frontend:<tested-sha>
 APP_EDITION=paid-monolith
 AUTH_MODE=embedded
 DEPLOYMENT_MODE=monolith

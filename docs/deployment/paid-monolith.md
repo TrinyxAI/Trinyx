@@ -12,7 +12,7 @@ Backend:
 
 ```dotenv
 BACKEND_IMAGE=ghcr.io/eddinerabii/trinyx-backend:<tested-sha>
-FRONTEND_IMAGE=ghcr.io/eddinerabii/trinyx-frontend:<tested-sha>
+FRONTEND_IMAGE=ghcr.io/eddinerabii/trinyx-frontend:paid-<tested-sha>
 APP_EDITION=paid-monolith
 AUTH_MODE=embedded
 DEPLOYMENT_MODE=monolith
@@ -124,11 +124,23 @@ deleted.
    docker compose exec -T postgres pg_dump -U "$DB_USERNAME" -d livecontext      --format=custom > "trinyx-pre-paid-monolith-$(date +%Y%m%d%H%M%S).dump"
    ```
 
-2. Pull the immutable candidate and validate the resolved Compose model:
+2. Build the paid frontend explicitly (the existing AWS frontend workflow is
+   intentionally unchanged), then pull the immutable backend candidate and
+   validate the resolved Compose model:
 
    ```bash
+   docker build --platform linux/amd64 \
+     -t ghcr.io/eddinerabii/trinyx-frontend:paid-<tested-sha> \
+     --build-arg NEXT_PUBLIC_APP_EDITION=ce \
+     --build-arg NEXT_PUBLIC_AUTH_MODE=embedded \
+     --build-arg NEXT_PUBLIC_BILLING_ENABLED=true \
+     --build-arg NEXT_PUBLIC_SPRING_BASE_URL=http://livecontext-app:8080 \
+     frontend
+   docker push ghcr.io/eddinerabii/trinyx-frontend:paid-<tested-sha>
+
    export BACKEND_IMAGE=ghcr.io/eddinerabii/trinyx-backend:<tested-sha>
-   docker pull "$BACKEND_IMAGE"
+   export FRONTEND_IMAGE=ghcr.io/eddinerabii/trinyx-frontend:paid-<tested-sha>
+   docker pull "$BACKEND_IMAGE" "$FRONTEND_IMAGE"
    docker compose --env-file docker/.env.paid-monolith config --quiet
    ```
 

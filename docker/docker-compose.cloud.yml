@@ -18,6 +18,13 @@ x-java-service: &java-service
     CREDENTIALS_PLATFORM_MARKUP_ENABLED: "true"
     MARKETPLACE_CE_DOWNLOAD_ENABLED: "true"
     APP_PUBLIC_URL: https://cloud.trinyx.fr
+    WEBHOOK_BASE_URL: https://cloud.trinyx.fr
+    CHAT_ENDPOINT_BASE_URL: https://cloud.trinyx.fr
+    FORM_ENDPOINT_BASE_URL: https://cloud.trinyx.fr
+    AGENT_WEBHOOK_BASE_URL: https://cloud.trinyx.fr
+    WEBSEARCH_PUBLIC_WS_BASE: https://cloud.trinyx.fr
+    ORCHESTRATOR_CATALOG_BASE_URL: http://catalog-service:8081
+    ORCHESTRATOR_CONVERSATION_BASE_URL: http://conversation-service:8087
     AUTH_SERVICE_URL: http://auth-service:8083
     CATALOG_SERVICE_URL: http://catalog-service:8081
     STORAGE_SERVICE_URL: http://storage-service:8082
@@ -365,7 +372,7 @@ services:
       <<: *cloud-environment
       PORT: "8099"
       SPRING_DATASOURCE_URL: jdbc:postgresql://cloud-postgres:5432/${CLOUD_DB_NAME:-trinyx_cloud}?currentSchema=orchestrator
-      CODE_NODE_SERVICE_URL: ${CODE_NODE_SERVICE_URL:-}
+      PISTON_URL: ${PISTON_URL:?set PISTON_URL to a compatible code-execution service}
     depends_on:
       <<: *java-dependencies
       websearch-service: {condition: service_healthy}

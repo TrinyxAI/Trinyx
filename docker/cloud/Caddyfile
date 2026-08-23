@@ -7,9 +7,9 @@
 	encode zstd gzip
 
 	@health path /healthz
-	respond @health `{"status":"UP","component":"trinyx-cloud-edge","authenticatedGateway":"MISSING"}` 200 {
-		close
+	handle @health {
 		header Content-Type application/json
+		respond `{"status":"UP","component":"trinyx-cloud-edge","authenticatedGateway":"MISSING"}` 200
 	}
 
 	handle /health/auth {
@@ -66,15 +66,13 @@
 	}
 
 	@authenticated path /api/* /webhooks/* /ws /ws/*
-	respond @authenticated `{"error":"authenticated_gateway_missing","message":"Authenticated Cloud routes are intentionally disabled; see docs/deployment/cloud.md"}` 503 {
-		close
+	handle @authenticated {
 		header Content-Type application/json
+		respond `{"error":"authenticated_gateway_missing","message":"Authenticated Cloud routes are intentionally disabled; see docs/deployment/cloud.md"}` 503
 	}
 
-	respond `{"error":"not_found"}` 404 {
-		close
-		header Content-Type application/json
-	}
+	header Content-Type application/json
+	respond `{"error":"not_found"}` 404
 }
 
 :8180 {

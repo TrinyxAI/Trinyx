@@ -52,8 +52,10 @@ a commercial-edition flag.
 
 ## Stripe objects and database wiring
 
-Create LIVE-mode recurring prices for Starter, Pro, and Team in monthly and
-yearly cadences, plus the three one-time PAYG prices:
+Create LIVE-mode recurring prices for Starter, Pro, Team, and the existing
+CREDIT_PACK unit in monthly and yearly cadences, plus the three one-time PAYG
+prices. Team credit tiers reuse CREDIT_PACK with plan-aware quantities; no
+separate Team credit product is needed:
 
 | Database plan/cadence | Amount already expected by the database |
 | --- | ---: |
@@ -69,7 +71,7 @@ docker compose exec -T postgres psql -U "$DB_USERNAME" -d livecontext -c "
 SELECT pl.code, pr.cadence, pr.currency, pr.amount_cents
 FROM auth.price pr
 JOIN auth.plan pl ON pl.id = pr.plan_id
-WHERE pl.code IN ('STARTER','PRO','TEAM','PAYG')
+WHERE pl.code IN ('STARTER','PRO','TEAM','CREDIT_PACK','PAYG')
 ORDER BY pl.code, pr.amount_cents, pr.cadence;"
 ```
 
@@ -78,7 +80,7 @@ historical TEST-mode PAYG IDs without deleting any price, subscription, or
 ledger row:
 
 ```bash
-docker compose exec -T postgres psql -U "$DB_USERNAME" -d livecontext   -v starter_monthly="$STRIPE_PRICE_STARTER_MONTHLY"   -v starter_yearly="$STRIPE_PRICE_STARTER_YEARLY"   -v pro_monthly="$STRIPE_PRICE_PRO_MONTHLY"   -v pro_yearly="$STRIPE_PRICE_PRO_YEARLY"   -v team_monthly="$STRIPE_PRICE_TEAM_MONTHLY"   -v team_yearly="$STRIPE_PRICE_TEAM_YEARLY"   -v payg_small="$STRIPE_PRICE_PAYG_SMALL"   -v payg_medium="$STRIPE_PRICE_PAYG_MEDIUM"   -v payg_large="$STRIPE_PRICE_PAYG_LARGE"   -f /path/to/trinyx_stripe_price_ids.template.sql
+docker compose exec -T postgres psql -U "$DB_USERNAME" -d livecontext   -v starter_monthly="$STRIPE_PRICE_STARTER_MONTHLY"   -v starter_yearly="$STRIPE_PRICE_STARTER_YEARLY"   -v pro_monthly="$STRIPE_PRICE_PRO_MONTHLY"   -v pro_yearly="$STRIPE_PRICE_PRO_YEARLY"   -v team_monthly="$STRIPE_PRICE_TEAM_MONTHLY"   -v team_yearly="$STRIPE_PRICE_TEAM_YEARLY"   -v credit_pack_monthly="$STRIPE_PRICE_CREDIT_PACK_MONTHLY"   -v credit_pack_yearly="$STRIPE_PRICE_CREDIT_PACK_YEARLY"   -v payg_small="$STRIPE_PRICE_PAYG_SMALL"   -v payg_medium="$STRIPE_PRICE_PAYG_MEDIUM"   -v payg_large="$STRIPE_PRICE_PAYG_LARGE"   -f /path/to/trinyx_stripe_price_ids.template.sql
 ```
 
 The template is

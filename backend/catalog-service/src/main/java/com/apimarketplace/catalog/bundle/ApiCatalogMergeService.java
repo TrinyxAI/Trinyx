@@ -326,7 +326,7 @@ public class ApiCatalogMergeService {
                 ? "(id)"
                 : "(api_id, tool_name_id)";
 
-        UUID effectiveToolId = jdbc.queryForObject("""
+        String upsertSql = """
                 INSERT INTO catalog.api_tools (
                     id, api_id, tool_slug, description, tool_name_id, method, endpoint,
                     protocol, default_headers, runtime_metadata, execution_spec, output_schema,
@@ -339,7 +339,7 @@ public class ApiCatalogMergeService {
                     :requiredScopes::jsonb, :generationSpec::jsonb, :nextHint, :status, :testStatus,
                     :isActive, :version, NULL,
                     EXTRACT(EPOCH FROM NOW()) * 1000, EXTRACT(EPOCH FROM NOW()) * 1000)
-                ON CONFLICT """ + conflictTarget + """ DO UPDATE SET
+                ON CONFLICT %s DO UPDATE SET
                     api_id = EXCLUDED.api_id,
                     tool_slug = EXCLUDED.tool_slug,
                     description = EXCLUDED.description,
@@ -363,7 +363,8 @@ public class ApiCatalogMergeService {
                     deprecated_at = NULL,
                     updated_at = EXTRACT(EPOCH FROM NOW()) * 1000
                 RETURNING id
-                """, p, UUID.class);
+                """.formatted(conflictTarget);
+        UUID effectiveToolId = jdbc.queryForObject(upsertSql, p, UUID.class);
         return Objects.requireNonNull(effectiveToolId,
                 "api_tools upsert did not return an effective id");
     }

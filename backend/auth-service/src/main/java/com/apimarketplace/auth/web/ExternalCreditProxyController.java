@@ -85,6 +85,30 @@ public class ExternalCreditProxyController {
                 : ResponseEntity.ok(result);
     }
 
+
+    @PostMapping("/{operationId}/commit-amount")
+    public ResponseEntity<ExternalCreditProxyService.SettlementResult> commitAmount(
+            @PathVariable UUID operationId,
+            @Valid @RequestBody AmountCommitCommand command) {
+        String requestHash = proxy.requestHash(operationId);
+        var result = proxy.commit(operationId, new ExternalCreditProxyService.CommitCommand(
+                command.actualCredits(), command.provider(), command.model(),
+                command.providerRequestId(), null, null, requestHash));
+        return result.queued() ? ResponseEntity.accepted().body(result)
+                : ResponseEntity.ok(result);
+    }
+
+    @PostMapping("/{operationId}/release-local")
+    public ResponseEntity<ExternalCreditProxyService.SettlementResult> releaseLocal(
+            @PathVariable UUID operationId,
+            @RequestBody(required = false) ReleaseLocalCommand command) {
+        String requestHash = proxy.requestHash(operationId);
+        var result = proxy.release(operationId, new ExternalCreditProxyService.ReleaseCommand(
+                command == null ? "provider-not-called" : command.reason(), requestHash));
+        return result.queued() ? ResponseEntity.accepted().body(result)
+                : ResponseEntity.ok(result);
+    }
+
     @PostMapping("/{operationId}/commit")
     public ResponseEntity<ExternalCreditProxyService.SettlementResult> commit(
             @PathVariable UUID operationId,
@@ -118,4 +142,12 @@ public class ExternalCreditProxyController {
             int promptTokens,
             int completionTokens,
             String requestHash) {}
+
+    public record AmountCommitCommand(
+            @NotNull BigDecimal actualCredits,
+            String provider,
+            String model,
+            String providerRequestId) {}
+
+    public record ReleaseLocalCommand(String reason) {}
 }

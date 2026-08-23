@@ -901,8 +901,8 @@ class WebhookControllerTest {
         }
 
         @Test
-        @DisplayName("28. SubscriptionService throws exception returns 200 (error logged)")
-        void serviceThrowsException_returns200() throws Exception {
+        @DisplayName("28. SubscriptionService failure returns 500 and remains retryable")
+        void serviceThrowsException_returns500() throws Exception {
             com.stripe.model.Subscription sub = mock(com.stripe.model.Subscription.class);
             when(sub.getId()).thenReturn("sub_err_28");
             when(sub.getStatus()).thenReturn("active");
@@ -932,8 +932,8 @@ class WebhookControllerTest {
             when(billingEventRepository.existsByEventId("evt_28")).thenReturn(false);
             when(billingEventRepository.save(any(BillingEvent.class))).thenAnswer(inv -> inv.getArgument(0));
 
-            // Despite exception in dispatch, returns 200 (error logged)
-            performWebhookPost("{\"type\":\"customer.subscription.created\"}", event, 200);
+            performWebhookPost("{\"type\":\"customer.subscription.created\"}", event, 500);
+            verify(billingEventRepository).markFailed(eq("evt_28"), contains("DB connection lost"));
         }
 
         @Test
@@ -1455,7 +1455,7 @@ class WebhookControllerTest {
     class RaceConditionHandling {
 
         @Test
-        @DisplayName("51. Race condition on billing event insert returns OK")
+        @DisplayName("51. Race condition on billing event insert reuses the winning row")
         void raceOnInsert_returnsOk() throws Exception {
             Session session = mock(Session.class);
             lenient().when(session.getId()).thenReturn("cs_race");
@@ -1466,8 +1466,15 @@ class WebhookControllerTest {
             // Simulate race condition: save throws exception
             when(billingEventRepository.save(any(BillingEvent.class)))
                     .thenThrow(new RuntimeException("Duplicate key"));
+            BillingEvent winner = new BillingEvent(
+                    "stripe", "evt_race", "checkout.session.completed",
+                    objectMapper.createObjectNode());
+            winner.setStatus("RECEIVED");
+            when(billingEventRepository.findByEventId("evt_race"))
+                    .thenReturn(Optional.of(winner));
 
             performWebhookPost("{\"type\":\"checkout.session.completed\"}", event, 200);
+            verify(billingEventRepository).markProcessed(eq("evt_race"), any(LocalDateTime.class));
         }
     }
 

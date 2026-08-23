@@ -10,7 +10,7 @@ import org.springframework.web.bind.annotation.*;
 import java.util.Map;
 
 /**
- * Public endpoint for the marketing-site contact form ({@code livecontext.ai/contact}).
+ * Public endpoint for the marketing-site contact form ({@code trinyx.fr/contact}).
  * No JWT - must be added to the gateway's {@code PUBLIC_PATHS} allowlist.
  */
 @RestController

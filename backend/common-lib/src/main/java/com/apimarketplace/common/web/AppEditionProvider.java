@@ -212,9 +212,8 @@ public class AppEditionProvider {
                 continue;
             }
             boolean failClosed = flag.criticalFailClosed()
-                    || (isCeFree()
-                        && "billing.provider".equals(flag.name())
-                        && "stripe".equalsIgnoreCase(actual));
+                    || ("billing.provider".equals(flag.name())
+                        && (isCeFree() || isPaidMonolith()));
             if (isCeFree()) {
                 log.warn(String.format(
                         DRIFT_WARN_FORMAT,

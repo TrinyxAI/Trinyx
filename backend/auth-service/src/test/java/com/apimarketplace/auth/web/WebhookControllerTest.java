@@ -125,6 +125,10 @@ class WebhookControllerTest {
                 WEBHOOK_SECRET
         );
         mockMvc = MockMvcBuilders.standaloneSetup(controller).build();
+        lenient().when(billingEventRepository.claimForProcessing(anyString())).thenReturn(1);
+        lenient().when(billingEventRepository.markProcessed(anyString(), any(LocalDateTime.class)))
+                .thenReturn(1);
+        lenient().when(billingEventRepository.markFailed(anyString(), anyString())).thenReturn(1);
     }
 
     // ==================== Helper Methods ====================
@@ -223,6 +227,10 @@ class WebhookControllerTest {
                 resultActions.andExpect(status().isOk());
             } else if (expectedStatus == 400) {
                 resultActions.andExpect(status().isBadRequest());
+            } else if (expectedStatus == 409) {
+                resultActions.andExpect(status().isConflict());
+            } else if (expectedStatus == 500) {
+                resultActions.andExpect(status().isInternalServerError());
             }
         }
     }
@@ -1671,271 +1679,85 @@ class WebhookControllerTest {
     // ========================================================================
 
     @Nested
-    @DisplayName("PAYG one-time top-up (V250/PR3)")
+    @DisplayName("PAYG one-time top-up")
     class PaygTopupHandling {
 
         @Test
-        @DisplayName("T1. typed path: payg_topup with valid credit_amount calls grantPaygTopup")
-        void typed_happyPath_callsGrantPaygTopup() throws Exception {
+        @DisplayName("typed checkout grants only Stripe-verified canonical credits")
+        void typedCheckoutUsesVerifiedCanonicalGrant() throws Exception {
             Session session = mock(Session.class);
-            lenient().when(session.getId()).thenReturn("cs_payg_happy");
-            lenient().when(session.getCustomer()).thenReturn("cus_x");
-            lenient().when(session.getSubscription()).thenReturn(null);
-            lenient().when(session.getClientReferenceId()).thenReturn("n_payg");
-            lenient().when(session.getMetadata()).thenReturn(java.util.Map.of(
+            when(session.getId()).thenReturn("cs_payg_verified");
+            when(session.getMetadata()).thenReturn(Map.of(
                     "kind", "payg_topup",
                     "tier", "small",
-                    "credit_amount", "8000"));
-            when(nonceUtil.decodeNonce("n_payg")).thenReturn(7L);
+                    "credit_amount", "999999999"));
+            when(stripeBillingService.verifyPaygTopup("cs_payg_verified"))
+                    .thenReturn(new StripeBillingService.VerifiedPaygTopup(
+                            "small", new java.math.BigDecimal("8000"), "n_verified", "pi_1"));
+            when(nonceUtil.decodeNonce("n_verified")).thenReturn(7L);
 
-            Event event = createMockEvent("evt_payg_1", "checkout.session.completed", session);
-            when(billingEventRepository.existsByEventId("evt_payg_1")).thenReturn(false);
-            when(billingEventRepository.save(any(BillingEvent.class))).thenAnswer(inv -> inv.getArgument(0));
+            Event event = createMockEvent(
+                    "evt_payg_verified", "checkout.session.completed", session);
+            when(billingEventRepository.existsByEventId("evt_payg_verified")).thenReturn(false);
+            when(billingEventRepository.save(any(BillingEvent.class)))
+                    .thenAnswer(inv -> inv.getArgument(0));
 
-            performWebhookPost("{\"type\":\"checkout.session.completed\"}", event, 200);
-
-            verify(creditAttributionService).grantPaygTopup(
-                    eq(7L),
-                    eq(new java.math.BigDecimal("8000")),
-                    eq("cs_payg_happy"),
-                    eq("small"));
-            // Critical: must NOT fall through to subscription provisioning path
-            verify(subscriptionService, never()).onSubscriptionUpsert(
-                    any(), any(), any(), any(), any(), any(), any(), any(), any(), anyInt(), any());
-        }
-
-        @Test
-        @DisplayName("T2. typed path: payg_topup with missing credit_amount metadata is a no-op grant")
-        void typed_missingCreditAmount_skipsGrant() throws Exception {
-            Session session = mock(Session.class);
-            lenient().when(session.getId()).thenReturn("cs_payg_missing");
-            lenient().when(session.getClientReferenceId()).thenReturn("n_payg");
-            lenient().when(session.getMetadata()).thenReturn(java.util.Map.of(
-                    "kind", "payg_topup",
-                    "tier", "small"));  // credit_amount absent
-            when(nonceUtil.decodeNonce("n_payg")).thenReturn(7L);
-
-            Event event = createMockEvent("evt_payg_2", "checkout.session.completed", session);
-            when(billingEventRepository.existsByEventId("evt_payg_2")).thenReturn(false);
-            when(billingEventRepository.save(any(BillingEvent.class))).thenAnswer(inv -> inv.getArgument(0));
-
-            performWebhookPost("{\"type\":\"checkout.session.completed\"}", event, 200);
-
-            verify(creditAttributionService, never()).grantPaygTopup(any(), any(), any(), any());
-        }
-
-        @Test
-        @DisplayName("T3. typed path: payg_topup with non-numeric credit_amount is logged and skipped")
-        void typed_invalidCreditAmount_skipsGrant() throws Exception {
-            Session session = mock(Session.class);
-            lenient().when(session.getId()).thenReturn("cs_payg_nfe");
-            lenient().when(session.getClientReferenceId()).thenReturn("n_payg");
-            lenient().when(session.getMetadata()).thenReturn(java.util.Map.of(
-                    "kind", "payg_topup",
-                    "tier", "medium",
-                    "credit_amount", "not-a-number"));
-            when(nonceUtil.decodeNonce("n_payg")).thenReturn(7L);
-
-            Event event = createMockEvent("evt_payg_3", "checkout.session.completed", session);
-            when(billingEventRepository.existsByEventId("evt_payg_3")).thenReturn(false);
-            when(billingEventRepository.save(any(BillingEvent.class))).thenAnswer(inv -> inv.getArgument(0));
-
-            performWebhookPost("{\"type\":\"checkout.session.completed\"}", event, 200);
-
-            verify(creditAttributionService, never()).grantPaygTopup(any(), any(), any(), any());
-        }
-
-        @Test
-        @DisplayName("T4. typed path: payg_topup with non-positive amount is skipped (defends against -1, 0)")
-        void typed_nonPositiveAmount_skipsGrant() throws Exception {
-            Session session = mock(Session.class);
-            lenient().when(session.getId()).thenReturn("cs_payg_zero");
-            lenient().when(session.getClientReferenceId()).thenReturn("n_payg");
-            lenient().when(session.getMetadata()).thenReturn(java.util.Map.of(
-                    "kind", "payg_topup",
-                    "tier", "small",
-                    "credit_amount", "0"));
-            when(nonceUtil.decodeNonce("n_payg")).thenReturn(7L);
-
-            Event event = createMockEvent("evt_payg_4", "checkout.session.completed", session);
-            when(billingEventRepository.existsByEventId("evt_payg_4")).thenReturn(false);
-            when(billingEventRepository.save(any(BillingEvent.class))).thenAnswer(inv -> inv.getArgument(0));
-
-            performWebhookPost("{\"type\":\"checkout.session.completed\"}", event, 200);
-
-            verify(creditAttributionService, never()).grantPaygTopup(any(), any(), any(), any());
-        }
-
-        @Test
-        @DisplayName("T5. typed path: grantPaygTopup exception is swallowed (Stripe would otherwise retry the whole event)")
-        void typed_grantException_swallowedReturns200() throws Exception {
-            Session session = mock(Session.class);
-            lenient().when(session.getId()).thenReturn("cs_payg_throw");
-            lenient().when(session.getClientReferenceId()).thenReturn("n_payg");
-            lenient().when(session.getMetadata()).thenReturn(java.util.Map.of(
-                    "kind", "payg_topup",
-                    "tier", "large",
-                    "credit_amount", "80000"));
-            when(nonceUtil.decodeNonce("n_payg")).thenReturn(7L);
-            doThrow(new RuntimeException("DB down")).when(creditAttributionService)
-                    .grantPaygTopup(any(), any(), any(), any());
-
-            Event event = createMockEvent("evt_payg_5", "checkout.session.completed", session);
-            when(billingEventRepository.existsByEventId("evt_payg_5")).thenReturn(false);
-            when(billingEventRepository.save(any(BillingEvent.class))).thenAnswer(inv -> inv.getArgument(0));
-
-            // Must still respond 200 - the underlying dispatch wrapper logs+swallows,
-            // and handlePaygTopup itself catches the exception. Stripe should not
-            // see this as a failed event and retry, since the unique-constraint on
-            // credit_ledger.source_id makes any future replay safe.
-            performWebhookPost("{\"type\":\"checkout.session.completed\"}", event, 200);
-
-            verify(creditAttributionService).grantPaygTopup(any(), any(), any(), any());
-        }
-
-        @Test
-        @DisplayName("R1. RAW path: payg_topup parsed from JSON metadata calls grantPaygTopup (deserializer-failure parity)")
-        void raw_happyPath_callsGrantPaygTopup() throws Exception {
-            String rawJson = "{\"id\":\"cs_raw_payg\",\"object\":\"checkout.session\"," +
-                    "\"client_reference_id\":\"n_raw_payg\"," +
-                    "\"metadata\":{\"kind\":\"payg_topup\",\"tier\":\"medium\",\"credit_amount\":\"40000\"}}";
-            StripeObject rawObj = createRawStripeObject(rawJson);
-
-            Event event = createMockEvent("evt_payg_r1", "checkout.session.completed", null);
-            Event.Data eventData = event.getData();
-            when(eventData.getObject()).thenReturn(rawObj);
-            EventDataObjectDeserializer deser = event.getDataObjectDeserializer();
-            when(deser.getObject()).thenReturn(Optional.empty());
-
-            when(nonceUtil.decodeNonce("n_raw_payg")).thenReturn(99L);
-            when(billingEventRepository.existsByEventId("evt_payg_r1")).thenReturn(false);
-            when(billingEventRepository.save(any(BillingEvent.class))).thenAnswer(inv -> inv.getArgument(0));
-
-            performWebhookPost("{\"type\":\"checkout.session.completed\"}", event, 200);
+            performWebhookPost("{}", event, 200);
 
             verify(creditAttributionService).grantPaygTopup(
-                    eq(99L),
-                    eq(new java.math.BigDecimal("40000")),
-                    eq("cs_raw_payg"),
-                    eq("medium"));
+                    7L, new java.math.BigDecimal("8000"), "cs_payg_verified", "small");
+            verify(billingEventRepository).markProcessed(
+                    eq("evt_payg_verified"), any(LocalDateTime.class));
         }
 
         @Test
-        @DisplayName("R2. RAW path: payg_topup with missing credit_amount metadata is a no-op grant")
-        void raw_missingCreditAmount_skipsGrant() throws Exception {
-            String rawJson = "{\"id\":\"cs_raw_payg_missing\",\"object\":\"checkout.session\"," +
-                    "\"client_reference_id\":\"n_raw_payg\"," +
-                    "\"metadata\":{\"kind\":\"payg_topup\",\"tier\":\"small\"}}";  // credit_amount absent
-            StripeObject rawObj = createRawStripeObject(rawJson);
+        @DisplayName("unpaid or invalid PAYG checkout fails the webhook for Stripe retry")
+        void invalidPaymentFailsWebhook() throws Exception {
+            Session session = mock(Session.class);
+            when(session.getId()).thenReturn("cs_payg_unpaid");
+            when(session.getMetadata()).thenReturn(Map.of("kind", "payg_topup", "tier", "small"));
+            when(stripeBillingService.verifyPaygTopup("cs_payg_unpaid"))
+                    .thenThrow(new IllegalStateException("PAYG checkout payment is not paid"));
 
-            Event event = createMockEvent("evt_payg_r2", "checkout.session.completed", null);
-            Event.Data eventData = event.getData();
-            when(eventData.getObject()).thenReturn(rawObj);
-            EventDataObjectDeserializer deser = event.getDataObjectDeserializer();
-            when(deser.getObject()).thenReturn(Optional.empty());
+            Event event = createMockEvent(
+                    "evt_payg_unpaid", "checkout.session.completed", session);
+            when(billingEventRepository.existsByEventId("evt_payg_unpaid")).thenReturn(false);
+            when(billingEventRepository.save(any(BillingEvent.class)))
+                    .thenAnswer(inv -> inv.getArgument(0));
 
-            lenient().when(nonceUtil.decodeNonce("n_raw_payg")).thenReturn(99L);
-            when(billingEventRepository.existsByEventId("evt_payg_r2")).thenReturn(false);
-            when(billingEventRepository.save(any(BillingEvent.class))).thenAnswer(inv -> inv.getArgument(0));
+            performWebhookPost("{}", event, 500);
 
-            performWebhookPost("{\"type\":\"checkout.session.completed\"}", event, 200);
-
-            verify(creditAttributionService, never()).grantPaygTopup(any(), any(), any(), any());
+            verify(creditAttributionService, never()).grantPaygTopup(
+                    anyLong(), any(), anyString(), anyString());
+            verify(billingEventRepository).markFailed(
+                    eq("evt_payg_unpaid"), contains("PAYG top-up"));
+            verify(billingEventRepository, never()).markProcessed(
+                    eq("evt_payg_unpaid"), any(LocalDateTime.class));
         }
 
         @Test
-        @DisplayName("R3. RAW path: payg_topup with non-positive amount is skipped (regression for negative 'free credits' bug)")
-        void raw_nonPositiveAmount_skipsGrant() throws Exception {
-            String rawJson = "{\"id\":\"cs_raw_payg_neg\",\"object\":\"checkout.session\"," +
-                    "\"client_reference_id\":\"n_raw_payg\"," +
-                    "\"metadata\":{\"kind\":\"payg_topup\",\"tier\":\"small\",\"credit_amount\":\"-1\"}}";
+        @DisplayName("RAW checkout fallback uses the same verified payment path")
+        void rawCheckoutUsesVerifiedPaymentPath() throws Exception {
+            String rawJson = "{\"id\":\"cs_raw_verified\",\"object\":\"checkout.session\","
+                    + "\"metadata\":{\"kind\":\"payg_topup\",\"tier\":\"medium\","
+                    + "\"credit_amount\":\"-1\"}}";
             StripeObject rawObj = createRawStripeObject(rawJson);
+            Event event = createMockEvent(
+                    "evt_payg_raw", "checkout.session.completed", null);
+            when(event.getData().getObject()).thenReturn(rawObj);
+            when(stripeBillingService.verifyPaygTopup("cs_raw_verified"))
+                    .thenReturn(new StripeBillingService.VerifiedPaygTopup(
+                            "medium", new java.math.BigDecimal("40000"), "n_raw", "pi_2"));
+            when(nonceUtil.decodeNonce("n_raw")).thenReturn(99L);
+            when(billingEventRepository.existsByEventId("evt_payg_raw")).thenReturn(false);
+            when(billingEventRepository.save(any(BillingEvent.class)))
+                    .thenAnswer(inv -> inv.getArgument(0));
 
-            Event event = createMockEvent("evt_payg_r3", "checkout.session.completed", null);
-            Event.Data eventData = event.getData();
-            when(eventData.getObject()).thenReturn(rawObj);
-            EventDataObjectDeserializer deser = event.getDataObjectDeserializer();
-            when(deser.getObject()).thenReturn(Optional.empty());
+            performWebhookPost("{}", event, 200);
 
-            when(nonceUtil.decodeNonce("n_raw_payg")).thenReturn(99L);
-            when(billingEventRepository.existsByEventId("evt_payg_r3")).thenReturn(false);
-            when(billingEventRepository.save(any(BillingEvent.class))).thenAnswer(inv -> inv.getArgument(0));
-
-            performWebhookPost("{\"type\":\"checkout.session.completed\"}", event, 200);
-
-            verify(creditAttributionService, never()).grantPaygTopup(any(), any(), any(), any());
-        }
-
-        @Test
-        @DisplayName("R4. RAW path: payg_topup with nonce that fails to decode is skipped (no grant on phantom user)")
-        void raw_invalidNonce_skipsGrant() throws Exception {
-            String rawJson = "{\"id\":\"cs_raw_payg_badnonce\",\"object\":\"checkout.session\"," +
-                    "\"client_reference_id\":\"n_corrupted\"," +
-                    "\"metadata\":{\"kind\":\"payg_topup\",\"tier\":\"small\",\"credit_amount\":\"8000\"}}";
-            StripeObject rawObj = createRawStripeObject(rawJson);
-
-            Event event = createMockEvent("evt_payg_r4", "checkout.session.completed", null);
-            Event.Data eventData = event.getData();
-            when(eventData.getObject()).thenReturn(rawObj);
-            EventDataObjectDeserializer deser = event.getDataObjectDeserializer();
-            when(deser.getObject()).thenReturn(Optional.empty());
-
-            when(nonceUtil.decodeNonce("n_corrupted")).thenReturn(null);  // tampered or expired
-            when(billingEventRepository.existsByEventId("evt_payg_r4")).thenReturn(false);
-            when(billingEventRepository.save(any(BillingEvent.class))).thenAnswer(inv -> inv.getArgument(0));
-
-            performWebhookPost("{\"type\":\"checkout.session.completed\"}", event, 200);
-
-            verify(creditAttributionService, never()).grantPaygTopup(any(), any(), any(), any());
-        }
-
-        @Test
-        @DisplayName("R5. RAW path: payg_topup with non-numeric credit_amount is logged and skipped (mirror of T3)")
-        void raw_invalidCreditAmount_skipsGrant() throws Exception {
-            String rawJson = "{\"id\":\"cs_raw_payg_nfe\",\"object\":\"checkout.session\"," +
-                    "\"client_reference_id\":\"n_raw_payg\"," +
-                    "\"metadata\":{\"kind\":\"payg_topup\",\"tier\":\"medium\",\"credit_amount\":\"not-a-number\"}}";
-            StripeObject rawObj = createRawStripeObject(rawJson);
-
-            Event event = createMockEvent("evt_payg_r5", "checkout.session.completed", null);
-            Event.Data eventData = event.getData();
-            when(eventData.getObject()).thenReturn(rawObj);
-            EventDataObjectDeserializer deser = event.getDataObjectDeserializer();
-            when(deser.getObject()).thenReturn(Optional.empty());
-
-            when(nonceUtil.decodeNonce("n_raw_payg")).thenReturn(99L);
-            when(billingEventRepository.existsByEventId("evt_payg_r5")).thenReturn(false);
-            when(billingEventRepository.save(any(BillingEvent.class))).thenAnswer(inv -> inv.getArgument(0));
-
-            performWebhookPost("{\"type\":\"checkout.session.completed\"}", event, 200);
-
-            verify(creditAttributionService, never()).grantPaygTopup(any(), any(), any(), any());
-        }
-
-        @Test
-        @DisplayName("R6. RAW path: grantPaygTopup exception is swallowed (Stripe replay safety via source_id unique index) - mirror of T5")
-        void raw_grantException_swallowedReturns200() throws Exception {
-            String rawJson = "{\"id\":\"cs_raw_payg_throw\",\"object\":\"checkout.session\"," +
-                    "\"client_reference_id\":\"n_raw_payg\"," +
-                    "\"metadata\":{\"kind\":\"payg_topup\",\"tier\":\"large\",\"credit_amount\":\"80000\"}}";
-            StripeObject rawObj = createRawStripeObject(rawJson);
-
-            Event event = createMockEvent("evt_payg_r6", "checkout.session.completed", null);
-            Event.Data eventData = event.getData();
-            when(eventData.getObject()).thenReturn(rawObj);
-            EventDataObjectDeserializer deser = event.getDataObjectDeserializer();
-            when(deser.getObject()).thenReturn(Optional.empty());
-
-            when(nonceUtil.decodeNonce("n_raw_payg")).thenReturn(99L);
-            doThrow(new RuntimeException("DB down")).when(creditAttributionService)
-                    .grantPaygTopup(any(), any(), any(), any());
-
-            when(billingEventRepository.existsByEventId("evt_payg_r6")).thenReturn(false);
-            when(billingEventRepository.save(any(BillingEvent.class))).thenAnswer(inv -> inv.getArgument(0));
-
-            performWebhookPost("{\"type\":\"checkout.session.completed\"}", event, 200);
-
-            verify(creditAttributionService).grantPaygTopup(any(), any(), any(), any());
+            verify(creditAttributionService).grantPaygTopup(
+                    99L, new java.math.BigDecimal("40000"),
+                    "cs_raw_verified", "medium");
         }
     }
 

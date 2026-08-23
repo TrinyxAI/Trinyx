@@ -240,7 +240,7 @@ public class CloudCreditAuthorityService {
         TenantResolver.runWithOrgScope(request.organizationId().toString(), () -> result.set(
                 credits.tryReserveMarkup(executorUserId, sourceId(request.operationId()),
                         request.provider(), request.model(), request.maximumCredits(), null,
-                        1440, "CLOUD", request.operationId().toString(), false)));
+                        10, "CLOUD", request.operationId().toString(), false)));
         return result.get();
     }
 

@@ -288,7 +288,119 @@ class ApiCatalogBundleSqlIntegrationTest {
     }
 
     @Test
-    @DisplayName("(b3) Per-API isolation on a REAL unique collision: one API fails, the other lands")
+    @DisplayName("(b3) REAL primary-key collision rekeys the referenced UUID in place and reapplies idempotently")
+    void primaryKeyCollisionRekeysExistingToolInPlace() {
+        UUID categoryId = seedCategory("Surveys", "surveys");
+        UUID subcategoryId = seedSubcategory(categoryId, "Collectors", "collectors");
+        UUID apiId = UUID.randomUUID();
+        UUID bundleId = UUID.fromString("85d08d24-5a82-4419-92cf-c76976e09216");
+        UUID parameterId = UUID.randomUUID();
+
+        seedApi(apiId, "SurveyMonkey", "bundle", categoryId, subcategoryId, "surveymonkey");
+        seedTool(bundleId, apiId, "send-collector-message", "/v1/messages",
+                "surveymonkey-send-collector-message");
+        jdbc.update("""
+                INSERT INTO catalog.tool_signals (tool_id, action)
+                VALUES (?, 'send')
+                """, bundleId);
+
+        Map<String, Object> bundleTool = toolPayload(
+                bundleId, "create-survey", "/v2/surveys",
+                List.of(paramPayload(parameterId, "title")));
+        bundleTool.put("toolNameId", "surveymonkey-create-survey");
+        List<Map<String, Object>> payload = List.of(
+                apiPayload(apiId, "SurveyMonkey", List.of(bundleTool)));
+
+        ApiCatalogMergeService.MergeResult first = mergeService.merge(payload, List.of());
+
+        assertThat(first.failedApis()).isZero();
+        assertThat(first.upsertedApis()).isEqualTo(1);
+        assertThat(first.upsertedTools()).isEqualTo(1);
+        assertThat(count("catalog.api_tools")).isEqualTo(1);
+        assertThat(jdbc.queryForObject(
+                "SELECT tool_name_id FROM catalog.api_tools WHERE id = ?",
+                String.class, bundleId)).isEqualTo("surveymonkey-create-survey");
+        assertThat(jdbc.queryForObject(
+                "SELECT endpoint FROM catalog.api_tools WHERE id = ?",
+                String.class, bundleId)).isEqualTo("/v2/surveys");
+        assertThat(jdbc.queryForObject(
+                "SELECT tool_id FROM catalog.tool_signals WHERE action = 'send'",
+                UUID.class)).isEqualTo(bundleId);
+        assertThat(jdbc.queryForObject(
+                "SELECT api_tool_id FROM catalog.api_tool_parameters WHERE id = ?",
+                UUID.class, parameterId)).isEqualTo(bundleId);
+
+        ApiCatalogMergeService.MergeResult second = mergeService.merge(payload, List.of());
+
+        assertThat(second.failedApis()).isZero();
+        assertThat(second.upsertedApis()).isEqualTo(1);
+        assertThat(count("catalog.api_tools")).isEqualTo(1);
+        assertThat(jdbc.queryForObject(
+                "SELECT tool_id FROM catalog.tool_signals WHERE action = 'send'",
+                UUID.class)).isEqualTo(bundleId);
+        assertThat(jdbc.queryForObject(
+                "SELECT COUNT(*) FROM catalog.api_tool_parameters WHERE api_tool_id = ?",
+                Integer.class, bundleId)).isEqualTo(1);
+    }
+
+    @Test
+    @DisplayName("(b4) REAL crossed identities are diagnosed and leave both rows and foreign keys untouched")
+    void crossedIdentitiesAreRejectedWithoutMutation() {
+        UUID categoryId = seedCategory("Surveys", "surveys");
+        UUID subcategoryId = seedSubcategory(categoryId, "Collectors", "collectors");
+        UUID apiId = UUID.randomUUID();
+        UUID logicalId = UUID.randomUUID();
+        UUID bundleId = UUID.randomUUID();
+
+        seedApi(apiId, "SurveyMonkey", "bundle", categoryId, subcategoryId, "surveymonkey");
+        seedTool(logicalId, apiId, "create-survey", "/v1/surveys",
+                "surveymonkey-create-survey");
+        seedTool(bundleId, apiId, "send-collector-message", "/v1/messages",
+                "surveymonkey-send-collector-message");
+        jdbc.update("INSERT INTO catalog.tool_signals (tool_id, action) VALUES (?, 'create')",
+                logicalId);
+        jdbc.update("INSERT INTO catalog.tool_signals (tool_id, action) VALUES (?, 'send')",
+                bundleId);
+
+        Map<String, Object> crossedTool = toolPayload(
+                bundleId, "create-survey", "/v2/surveys", List.of());
+        crossedTool.put("toolNameId", "surveymonkey-create-survey");
+
+        ApiCatalogMergeService.MergeResult result = mergeService.merge(
+                List.of(apiPayload(apiId, "SurveyMonkey", List.of(crossedTool))), List.of());
+
+        assertThat(result.failedApis()).isEqualTo(1);
+        assertThat(result.upsertedApis()).isZero();
+        assertThat(result.errors()).singleElement().satisfies(error ->
+                assertThat(error)
+                        .contains("CrossedToolIdentityException")
+                        .contains(bundleId.toString())
+                        .contains(logicalId.toString())
+                        .contains("refusing an automatic merge"));
+
+        assertThat(count("catalog.api_tools")).isEqualTo(2);
+        assertThat(jdbc.queryForObject(
+                "SELECT tool_name_id FROM catalog.api_tools WHERE id = ?",
+                String.class, logicalId)).isEqualTo("surveymonkey-create-survey");
+        assertThat(jdbc.queryForObject(
+                "SELECT tool_name_id FROM catalog.api_tools WHERE id = ?",
+                String.class, bundleId)).isEqualTo("surveymonkey-send-collector-message");
+        assertThat(jdbc.queryForObject(
+                "SELECT endpoint FROM catalog.api_tools WHERE id = ?",
+                String.class, logicalId)).isEqualTo("/v1/surveys");
+        assertThat(jdbc.queryForObject(
+                "SELECT endpoint FROM catalog.api_tools WHERE id = ?",
+                String.class, bundleId)).isEqualTo("/v1/messages");
+        assertThat(jdbc.queryForMap(
+                "SELECT action, tool_id FROM catalog.tool_signals WHERE action = 'create'")
+                .get("tool_id")).isEqualTo(logicalId);
+        assertThat(jdbc.queryForMap(
+                "SELECT action, tool_id FROM catalog.tool_signals WHERE action = 'send'")
+                .get("tool_id")).isEqualTo(bundleId);
+    }
+
+    @Test
+    @DisplayName("(b5) Per-API isolation on a REAL unique collision: one API fails, the other lands")
     void perApiIsolationOnRealUniqueCollision() {
         // An import-era row already owns ('SYSTEM', 'Slack') under another UUID
         // → the bundle's INSERT of a NEW UUID with the same name violates

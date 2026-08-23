@@ -1880,7 +1880,7 @@ export function CredentialWizard({
                 process.env.NEXT_PUBLIC_OAUTH2_CALLBACK_URL ||
                 (typeof window !== 'undefined'
                   ? `${window.location.origin}/api/credentials/oauth2/callback`
-                  : 'https://livecontext.ai/api/credentials/oauth2/callback');
+                  : 'https://app.trinyx.fr/api/credentials/oauth2/callback');
               // Catalog-declared scopes for the "Configure scopes" step. Without this,
               // a BYOK admin reading "Pick the scopes your workflow uses" has no way to
               // know WHICH scopes to enable in their provider console - they would have

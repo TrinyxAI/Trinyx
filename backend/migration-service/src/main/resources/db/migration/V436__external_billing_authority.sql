@@ -20,6 +20,8 @@ CREATE TABLE IF NOT EXISTS auth.cloud_identity_binding (
     audience VARCHAR(100) NOT NULL,
     install_id UUID NOT NULL,
     organization_id UUID NOT NULL,
+    organization_role VARCHAR(16) NOT NULL
+        CHECK (organization_role IN ('OWNER','ADMIN','MEMBER','VIEWER')),
     principal_id UUID NOT NULL,
     billing_subject_id UUID NOT NULL,
     keycloak_subject VARCHAR(255) NOT NULL,

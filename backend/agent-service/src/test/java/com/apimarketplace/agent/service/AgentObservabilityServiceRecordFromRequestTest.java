@@ -97,6 +97,23 @@ class AgentObservabilityServiceRecordFromRequestTest {
         return req;
     }
 
+    @Test
+    @DisplayName("externally managed billing preserves observability without a second local debit")
+    void externallyManagedBillingSkipsLocalWallet() {
+        AgentObservabilityRequest req = buildBaseRequest();
+        req.setCreditExternallyManaged(true);
+
+        service.recordFromRequest(req);
+
+        verify(executionRepository, atLeastOnce()).save(any(AgentExecutionEntity.class));
+        verify(creditClient, never()).consumeCredits(
+                anyString(), anyString(), anyString(), anyString(), anyString(),
+                anyInt(), anyInt(), any());
+        verify(creditClient, never()).persistRejection(
+                anyString(), anyString(), anyString(), anyString(), anyString(),
+                anyInt(), anyInt(), anyString());
+    }
+
     // ==========================================================================
     // Header fields
     // ==========================================================================

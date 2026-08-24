@@ -227,6 +227,33 @@ class CloudCreditAuthorityServiceTest {
     }
 
     @Test
+    void llmReservationIgnoresCloudAmountAndUsesPaidAuthorityPricing() {
+        UUID operationId = UUID.randomUUID();
+        String hash = "5".repeat(64);
+        when(credits.calculateExternalLlmCredits(
+                "openai", "gpt", 100, 50, null, null, null, null))
+                .thenReturn(new BigDecimal("10"));
+        when(credits.tryReserveMarkup(eq(42L), eq("cloud-reservation:" + operationId),
+                eq("openai"), eq("gpt"), eq(new BigDecimal("12.500000")), isNull(), eq(10),
+                eq("CLOUD"), eq(operationId.toString()), eq(false)))
+                .thenReturn(CreditService.CreditConsumeResult.success(
+                        new BigDecimal("12.500000"), new BigDecimal("87.5")));
+
+        var result = service.reserve(new CloudCreditAuthorityService.ReserveRequest(
+                operationId, UUID.randomUUID(), UUID.randomUUID(), UUID.randomUUID(),
+                UUID.randomUUID(), 7, "CE_LLM_RELAY",
+                new BigDecimal("0.000001"), new BigDecimal("0.000001"),
+                "openai", "gpt", hash, 100, 50));
+
+        assertThat(result.state()).isEqualTo("RESERVED");
+        verify(credits).calculateExternalLlmCredits(
+                "openai", "gpt", 100, 50, null, null, null, null);
+        verify(credits).tryReserveMarkup(eq(42L), eq("cloud-reservation:" + operationId),
+                eq("openai"), eq("gpt"), eq(new BigDecimal("12.500000")), isNull(), eq(10),
+                eq("CLOUD"), eq(operationId.toString()), eq(false));
+    }
+
+    @Test
     void llmSettlementUsesPaidAuthorityPricingAndCompleteProviderUsage() {
         UUID operationId = UUID.randomUUID();
         String hash = "2".repeat(64);

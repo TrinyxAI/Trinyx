@@ -377,6 +377,62 @@ public class AuthClient {
     }
 
     /**
+     * Ask the paid-monolith billing authority to issue the short-lived identity binding
+     * and entitlement projection required to bootstrap an authenticated Cloud link.
+     * The caller's numeric id is local compatibility state only; the signed response
+     * carries the stable principal and billing-subject identities.
+     */
+    public CloudAuthorityBundle issueExternalCloudAuthority(
+            String userId, UUID installId, UUID organizationId, String keycloakSubject) {
+        Objects.requireNonNull(installId, "installId");
+        Objects.requireNonNull(organizationId, "organizationId");
+        if (userId == null || userId.isBlank() || keycloakSubject == null || keycloakSubject.isBlank()) {
+            throw new IllegalArgumentException("userId and keycloakSubject are required");
+        }
+        String url = baseUrl + "/api/cloud-authority/v2/link";
+        Map<String, Object> body = Map.of(
+                "installId", installId.toString(),
+                "organizationId", organizationId.toString(),
+                "keycloakSubject", keycloakSubject);
+        HttpEntity<Map<String, Object>> entity = new HttpEntity<>(body, buildHeaders(userId));
+        ResponseEntity<CloudAuthorityBundle> response = restTemplate.exchange(
+                url, HttpMethod.POST, entity, CloudAuthorityBundle.class);
+        if (!response.getStatusCode().is2xxSuccessful() || response.getBody() == null) {
+            throw new IllegalStateException("Paid billing authority did not issue Cloud assertions");
+        }
+        return response.getBody();
+    }
+
+    /**
+     * Revoke a paid-monolith identity/entitlement scope. The authority writes signed
+     * tombstones transactionally; dispatch to Cloud is retried by its outbox.
+     */
+    public CloudAuthorityProjection revokeExternalCloudAuthority(
+            String userId, UUID installId, UUID organizationId) {
+        Objects.requireNonNull(installId, "installId");
+        Objects.requireNonNull(organizationId, "organizationId");
+        String url = baseUrl + "/api/cloud-authority/v2/revoke";
+        Map<String, Object> body = Map.of(
+                "installId", installId.toString(),
+                "organizationId", organizationId.toString());
+        HttpEntity<Map<String, Object>> entity = new HttpEntity<>(body, buildHeaders(userId));
+        ResponseEntity<CloudAuthorityProjection> response = restTemplate.exchange(
+                url, HttpMethod.POST, entity, CloudAuthorityProjection.class);
+        if (!response.getStatusCode().is2xxSuccessful() || response.getBody() == null) {
+            throw new IllegalStateException("Paid billing authority did not revoke Cloud assertions");
+        }
+        return response.getBody();
+    }
+
+    public record CloudAuthorityBundle(
+            String identityBinding, String entitlementProjection,
+            long entitlementSequence, java.time.Instant entitlementExpiresAt) {}
+
+    public record CloudAuthorityProjection(
+            String assertion, long sequence, java.time.Instant expiresAt,
+            String accessState, String stateHash) {}
+
+    /**
      * Resolve the user's platform roles as a CSV string (e.g. {@code "USER,ADMIN"}).
      * Reads the persisted store ({@code auth.user_roles}) server-side - the same
      * source the JWT role claims are built from.

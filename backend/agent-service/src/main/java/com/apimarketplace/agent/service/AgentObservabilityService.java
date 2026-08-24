@@ -169,7 +169,14 @@ public class AgentObservabilityService {
         // ZERO on credit consumption failure → settle refunds the full reservation so the
         // ancestor chain isn't left holding dead reservations.
         BigDecimal actualForSettle = BigDecimal.ZERO;
-        if (request.isCreditExternallyManaged()) {
+        boolean trustedExternalSettlement = request.isCreditExternallyManaged()
+                && creditClient.usesExternalAuthority()
+                && "browser_agent".equalsIgnoreCase(request.getAgentType());
+        if (request.isCreditExternallyManaged() && !trustedExternalSettlement) {
+            logger.warn("Ignoring invalid external-settlement marker: nodeId={}, agentType={}",
+                    request.getNodeId(), request.getAgentType());
+        }
+        if (trustedExternalSettlement) {
             logger.info("Skipping local wallet debit for externally managed execution: nodeId={}, sourceType={}",
                     request.getNodeId(), sourceType);
         } else {

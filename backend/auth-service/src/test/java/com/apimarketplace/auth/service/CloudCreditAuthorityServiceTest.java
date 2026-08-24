@@ -91,7 +91,7 @@ class CloudCreditAuthorityServiceTest {
         UUID operationId = UUID.randomUUID();
         String hash = "d".repeat(64);
         jdbc.row = new ExistingRow(operationId, hash, null, "RELEASED", "{}",
-                Instant.now().plusSeconds(3600), "LLM");
+                Instant.now().plusSeconds(3600), "LLM", "p", "m");
         var commit = new CloudCreditAuthorityService.CommitRequest(
                 BigDecimal.ONE, "p", "m", null, null, null, hash);
         assertThatThrownBy(() -> service.commit(operationId, commit))
@@ -226,6 +226,68 @@ class CloudCreditAuthorityServiceTest {
                 "websearch", "default", false);
     }
 
+    @Test
+    void llmSettlementUsesPaidAuthorityPricingAndCompleteProviderUsage() {
+        UUID operationId = UUID.randomUUID();
+        String hash = "2".repeat(64);
+        jdbc.row = new ExistingRow(operationId, hash, null, "RESERVED", "{}",
+                Instant.now().plusSeconds(3600), "CE_LLM_RELAY", "openai", "gpt");
+        when(credits.calculateExternalLlmCredits(
+                "openai", "gpt", 10, 2, 3, 4, 5, 6))
+                .thenReturn(new BigDecimal("7.50"));
+        when(credits.settleExternalReservation(
+                "cloud-reservation:" + operationId, new BigDecimal("7.50"),
+                "openai", "gpt", false))
+                .thenReturn(CreditService.CommitOutcome.COMMITTED);
+        when(credits.getBalance(42L)).thenReturn(new BigDecimal("92.50"));
+
+        var command = new CloudCreditAuthorityService.CommitRequest(
+                new BigDecimal("999"), "openai", "gpt", "provider-request",
+                10L, 2L, hash, 3, 4, 5, 6);
+        var result = service.commit(operationId, command);
+
+        assertThat(result.actualCredits()).isEqualByComparingTo("7.50");
+        verify(credits).calculateExternalLlmCredits(
+                "openai", "gpt", 10, 2, 3, 4, 5, 6);
+        verify(credits).settleExternalReservation(
+                "cloud-reservation:" + operationId, new BigDecimal("7.50"),
+                "openai", "gpt", false);
+    }
+
+    @Test
+    void settlementCannotSubstituteTheReservedProviderOrModel() {
+        UUID operationId = UUID.randomUUID();
+        String hash = "3".repeat(64);
+        jdbc.row = new ExistingRow(operationId, hash, null, "RESERVED", "{}",
+                Instant.now().plusSeconds(3600), "CE_LLM_RELAY", "openai", "gpt");
+
+        assertThatThrownBy(() -> service.commit(operationId,
+                new CloudCreditAuthorityService.CommitRequest(
+                        BigDecimal.ZERO, "anthropic", "claude", null,
+                        1L, 1L, hash)))
+                .isInstanceOf(ResponseStatusException.class)
+                .hasMessageContaining("INVALID_COMMIT");
+        verify(credits, never()).settleExternalReservation(
+                anyString(), any(), anyString(), anyString(), anyBoolean());
+    }
+
+    @Test
+    void negativeNonLlmSettlementIsRejected() {
+        UUID operationId = UUID.randomUUID();
+        String hash = "4".repeat(64);
+        jdbc.row = new ExistingRow(operationId, hash, null, "RESERVED", "{}",
+                Instant.now().plusSeconds(3600), "PLATFORM_MARKUP", "vendor", "tool");
+
+        assertThatThrownBy(() -> service.commit(operationId,
+                new CloudCreditAuthorityService.CommitRequest(
+                        new BigDecimal("-1"), "vendor", "tool", null,
+                        null, null, hash)))
+                .isInstanceOf(ResponseStatusException.class)
+                .hasMessageContaining("INVALID_ACTUAL_CREDITS");
+        verify(credits, never()).settleExternalReservation(
+                anyString(), any(), anyString(), anyString(), anyBoolean());
+    }
+
     private static CloudCreditAuthorityService.ReserveRequest reserve(UUID id, String hash) {
         return new CloudCreditAuthorityService.ReserveRequest(id, UUID.randomUUID(),
                 UUID.randomUUID(), UUID.randomUUID(), UUID.randomUUID(), 7,
@@ -234,10 +296,17 @@ class CloudCreditAuthorityServiceTest {
 
     private record ExistingRow(UUID operationId, String requestHash, String settlementHash,
                                String state, String response, Instant lateSettlementUntil,
-                               String sourceType) {
+                               String sourceType, String provider, String model) {
+        ExistingRow(UUID operationId, String requestHash, String settlementHash,
+                    String state, String response, Instant lateSettlementUntil,
+                    String sourceType) {
+            this(operationId, requestHash, settlementHash, state, response,
+                    lateSettlementUntil, sourceType, "openai", "gpt");
+        }
+
         static ExistingRow reserved(UUID id, String hash, String response) {
             return new ExistingRow(id, hash, null, "RESERVED", response,
-                    Instant.now().plusSeconds(3600), "LLM");
+                    Instant.now().plusSeconds(3600), "LLM", "openai", "gpt");
         }
     }
 
@@ -271,6 +340,8 @@ class CloudCreditAuthorityServiceTest {
                 when(rs.getLong("executor_user_id")).thenReturn(42L);
                 when(rs.getObject("organization_id", UUID.class)).thenReturn(UUID.randomUUID());
                 when(rs.getString("source_type")).thenReturn(row.sourceType());
+                when(rs.getString("provider")).thenReturn(row.provider());
+                when(rs.getString("model")).thenReturn(row.model());
                 return List.of(mapper.mapRow(rs, 0));
             } catch (Exception failure) {
                 throw new AssertionError(failure);
@@ -288,13 +359,16 @@ class CloudCreditAuthorityServiceTest {
             updates++;
             if (sql.contains("INSERT INTO auth.cloud_credit_operation")) {
                 row = new ExistingRow((UUID) args[0], (String) args[2], null, "RESERVED",
-                        (String) args[13], ((Timestamp) args[15]).toInstant(), (String) args[8]);
+                        (String) args[13], ((Timestamp) args[15]).toInstant(), (String) args[8],
+                        (String) args[11], (String) args[12]);
             } else if (sql.contains("SET state=?")) {
                 row = new ExistingRow(row.operationId(), row.requestHash(), (String) args[5],
-                        (String) args[0], (String) args[6], row.lateSettlementUntil(), row.sourceType());
+                        (String) args[0], (String) args[6], row.lateSettlementUntil(),
+                        row.sourceType(), (String) args[2], (String) args[3]);
             } else if (sql.contains("SET state='RELEASED'")) {
                 row = new ExistingRow(row.operationId(), row.requestHash(), (String) args[0],
-                        "RELEASED", (String) args[1], row.lateSettlementUntil(), row.sourceType());
+                        "RELEASED", (String) args[1], row.lateSettlementUntil(),
+                        row.sourceType(), row.provider(), row.model());
             }
             return 1;
         }

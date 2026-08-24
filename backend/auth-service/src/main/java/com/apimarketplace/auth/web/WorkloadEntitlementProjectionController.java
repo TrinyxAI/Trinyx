@@ -29,12 +29,22 @@ public class WorkloadEntitlementProjectionController {
     public EntitlementProjectionService.ApplyResult apply(
             @RequestHeader("Authorization") String authorization,
             @Valid @RequestBody ProjectionRequest request) {
-        var identity = workloads.authenticate(authorization,
-                "trinyx-paid-authority", "trinyx-cloud-internal");
-        if (!PAID_AUTHORITY.equals(identity.serviceId())) {
-            throw new SecurityException("Unexpected entitlement projection workload");
-        }
+        authenticate(authorization);
         return projections.apply(request.assertion());
+    }
+
+    private void authenticate(String authorization) {
+        try {
+            var identity = workloads.authenticate(authorization,
+                    "trinyx-paid-authority", "trinyx-cloud-internal");
+            if (!PAID_AUTHORITY.equals(identity.serviceId())) {
+                throw new SecurityException("Unexpected entitlement projection workload");
+            }
+        } catch (RuntimeException invalidWorkload) {
+            throw new org.springframework.web.server.ResponseStatusException(
+                    org.springframework.http.HttpStatus.UNAUTHORIZED,
+                    "INVALID_WORKLOAD_IDENTITY", invalidWorkload);
+        }
     }
 
     public record ProjectionRequest(@NotBlank String assertion) {}

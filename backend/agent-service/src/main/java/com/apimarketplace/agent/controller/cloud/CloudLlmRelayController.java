@@ -334,7 +334,9 @@ public class CloudLlmRelayController {
             boolean acknowledged = creditClient.commitExternalLlm(
                     target.externalOperationId(), target.externalRequestHash(),
                     target.provider(), target.model(), null,
-                    usage.promptTokens(), usage.completionTokens());
+                    usage.promptTokens(), usage.completionTokens(),
+                    new LlmCacheTokens(usage.cacheCreationTokens(), usage.cacheReadTokens(),
+                            usage.cachedTokens(), usage.reasoningTokens()));
             if (!acknowledged) {
                 log.error("External wallet settlement not acknowledged for operation {}",
                         target.externalOperationId());

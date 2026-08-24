@@ -11,6 +11,7 @@ import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.server.ResponseStatusException;
 
 import java.math.BigDecimal;
+import java.math.RoundingMode;
 import java.sql.Timestamp;
 import java.time.Duration;
 import java.time.Instant;
@@ -215,7 +216,14 @@ public class CloudCreditAuthorityService {
                 || request.requestHash() == null || !request.requestHash().matches("[0-9a-f]{64}")
                 || request.maximumCredits() == null || request.maximumCredits().signum() <= 0
                 || request.estimatedCredits() == null || request.estimatedCredits().signum() < 0
-                || request.estimatedCredits().compareTo(request.maximumCredits()) > 0) {
+                || request.estimatedCredits().compareTo(request.maximumCredits()) > 0
+                || (isLlmSource(request.sourceType())
+                    && (request.provider() == null || request.provider().isBlank()
+                        || request.model() == null || request.model().isBlank()
+                        || request.estimatedPromptTokens() == null
+                        || request.estimatedPromptTokens() < 0
+                        || request.maximumCompletionTokens() == null
+                        || request.maximumCompletionTokens() < 0))) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "INVALID_RESERVATION");
         }
     }
@@ -262,6 +270,20 @@ public class CloudCreditAuthorityService {
     private BigDecimal authoritativeMaximum(ReserveRequest request) {
         if ("WEB_SEARCH".equalsIgnoreCase(request.sourceType())) {
             return credits.getWebSearchCreditsPerSearch();
+        }
+        if (isLlmSource(request.sourceType())) {
+            try {
+                BigDecimal pricedCeiling = credits.calculateExternalLlmCredits(
+                        request.provider(), request.model(),
+                        request.estimatedPromptTokens(), request.maximumCompletionTokens(),
+                        null, null, null, null);
+                BigDecimal hold = pricedCeiling.multiply(new BigDecimal("1.25"))
+                        .setScale(6, RoundingMode.UP);
+                return hold.signum() > 0 ? hold : new BigDecimal("0.000001");
+            } catch (IllegalArgumentException invalidBudget) {
+                throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
+                        "INVALID_PROVIDER_BUDGET", invalidBudget);
+            }
         }
         return request.maximumCredits();
     }
@@ -365,7 +387,18 @@ public class CloudCreditAuthorityService {
                                  UUID organizationId, UUID installId, long entitlementSequence,
                                  String sourceType, BigDecimal estimatedCredits,
                                  BigDecimal maximumCredits, String provider, String model,
-                                 String requestHash) {}
+                                 String requestHash, Integer estimatedPromptTokens,
+                                 Integer maximumCompletionTokens) {
+        public ReserveRequest(UUID operationId, UUID principalId, UUID billingSubjectId,
+                              UUID organizationId, UUID installId, long entitlementSequence,
+                              String sourceType, BigDecimal estimatedCredits,
+                              BigDecimal maximumCredits, String provider, String model,
+                              String requestHash) {
+            this(operationId, principalId, billingSubjectId, organizationId, installId,
+                    entitlementSequence, sourceType, estimatedCredits, maximumCredits,
+                    provider, model, requestHash, null, null);
+        }
+    }
     public record CommitRequest(BigDecimal actualCredits, String provider, String model,
                                 String providerRequestId, Long promptTokens, Long completionTokens,
                                 String requestHash, Integer cacheCreationTokens,

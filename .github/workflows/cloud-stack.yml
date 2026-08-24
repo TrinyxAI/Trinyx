@@ -111,7 +111,9 @@ jobs:
             grep -RniE \
               --include='*.java' --include='*.kt' --include='*.ts' --include='*.tsx' \
               --include='*.js' --include='*.mjs' --include='*.yml' --include='*.yaml' \
-              --include='*.properties' --include='*.json' \
+              --include='*.properties' --include='*.json' --include='*.xml' \
+              --include='*.sh' --include='*.env' --include='*.example' --include='*.toml' \
+              --include='Dockerfile*' \
               'https?://([A-Za-z0-9-]+\.)*livecontext\.ai' \
               backend frontend mcp websearch-service docker cli \
               --exclude-dir=target --exclude-dir=node_modules --exclude-dir=test \

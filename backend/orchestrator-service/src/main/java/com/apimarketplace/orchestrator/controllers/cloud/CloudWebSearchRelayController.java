@@ -43,7 +43,7 @@ import java.util.Set;
 @ConditionalOnProperty(name = "websearch.enabled", havingValue = "true", matchIfMissing = true)
 public class CloudWebSearchRelayController {
 
-    static final String INSTALL_HEADER = "X-LiveContext-Install-Id";
+    static final String INSTALL_HEADER = "X-Install-ID";
     private static final int MAX_RESULTS_CAP = 50;
 
     private static final Set<String> CONTROL_ACTIONS =

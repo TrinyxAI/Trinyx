@@ -27,9 +27,7 @@ public class GatewaySecurityConfig {
         return http
                 .csrf(ServerHttpSecurity.CsrfSpec::disable)
                 .authorizeExchange(exchange -> exchange
-                        .pathMatchers("/actuator/health", "/healthz").permitAll()
-                        .pathMatchers("/webhooks/stripe", "/cdp/**").permitAll()
-                        .pathMatchers("/api/catalog/public/bundles/**", "/api/ce/releases/latest").permitAll()
+                        .pathMatchers(GatewayPublicRoutes.securityMatchers()).permitAll()
                         .pathMatchers("/api/internal/**", "/internal/**").denyAll()
                         .anyExchange().authenticated())
                 .oauth2ResourceServer(oauth -> oauth

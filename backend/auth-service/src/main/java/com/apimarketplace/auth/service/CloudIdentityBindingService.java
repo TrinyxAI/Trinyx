@@ -115,18 +115,33 @@ public class CloudIdentityBindingService {
 
     @Transactional(readOnly = true)
     public BindingContext context(String keycloakSubject) {
-        var rows = jdbc.query("""
+        return context(keycloakSubject, null);
+    }
+
+    /**
+     * Resolve a persistent binding for a Keycloak subject and, when supplied, an explicit install
+     * selector. The selector is untrusted input: it only narrows an ACTIVE signed binding and never
+     * contributes identity by itself. Without a selector, resolution succeeds only when the subject
+     * has exactly one active installation, avoiding an arbitrary cross-install default.
+     */
+    @Transactional(readOnly = true)
+    public BindingContext context(String keycloakSubject, UUID installId) {
+        String sql = """
                 SELECT id, cloud_user_id, keycloak_subject, principal_id, billing_subject_id,
                        organization_id, organization_role, install_id, binding_revision, assertion_jws, status
                 FROM auth.cloud_identity_binding
                 WHERE issuer=? AND keycloak_subject=? AND status='ACTIVE'
-                """, (rs, row) -> new BindingRow(
+                """ + (installId == null ? "" : " AND install_id=?");
+        Object[] arguments = installId == null
+                ? new Object[]{issuer, keycloakSubject}
+                : new Object[]{issuer, keycloakSubject, installId};
+        var rows = jdbc.query(sql, (rs, row) -> new BindingRow(
                 rs.getObject("id", UUID.class), rs.getLong("cloud_user_id"),
                 rs.getString("keycloak_subject"), rs.getObject("principal_id", UUID.class),
                 rs.getObject("billing_subject_id", UUID.class),
                 rs.getObject("organization_id", UUID.class), rs.getString("organization_role"),
                 rs.getObject("install_id", UUID.class), rs.getLong("binding_revision"),
-                rs.getString("assertion_jws"), rs.getString("status")), issuer, keycloakSubject);
+                rs.getString("assertion_jws"), rs.getString("status")), arguments);
         if (rows.size() != 1) {
             throw new ResponseStatusException(HttpStatus.NOT_FOUND, "IDENTITY_NOT_BOUND");
         }

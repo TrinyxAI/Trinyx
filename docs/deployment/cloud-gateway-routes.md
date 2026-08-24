@@ -18,9 +18,17 @@ and signs the final downstream target. It deliberately has no catch-all `/api/**
 | `/api/files/**`, `/api/storage/**`, `/storage/v1/**` | storage-service:8082 | Storage; explorer/quota facade exceptions route to orchestrator |
 | `/cdp/**` | websearch-service:8085 | CDP upgrade; protected by its session token |
 | `/webhooks/stripe` | auth-service:8083 | Only explicitly public webhook; Stripe signature is verified downstream |
+| `/widget.js`, `/widget/**` | agent-service:8090 | Historical widget loader/runtime; self-authenticated capability |
+| `/share/**` | publication-service:8092 | Historical public share capability |
+| `/c/**` | conversation-service:8087 | Historical shared conversation capability |
+| `/webhook/agent/**` | agent-service:8090 | Agent webhook token; ordered before generic webhook |
+| `/webhook/**` | orchestrator-service:8099 | Workflow webhook token |
+| `/approval-callback/**`, `/chat/**`, `/form/**`, `/app/public/**` | orchestrator-service:8099 | Historical self-authenticated public entrypoints |
 
-The inventory was reconstructed from 205 controller classes (769 composed endpoint
-mappings) across the ten services. Known path collisions are resolved before broad
+The controller inventory was reconstructed from 205 controller classes (769 composed
+endpoint mappings) across the ten services. A separate edge-compatibility inventory
+covers the root paths historically implemented by `ServicePrefixRewriteFilter`;
+controller enumeration alone is not sufficient to preserve those public URLs. Known path collisions are resolved before broad
 families: conversation/admin, orchestrator/admin, publication CE TLS, orchestrator
 interface runtime, orchestrator storage facade, and all `/api/v2/workflows/**`
 routes. The orchestrator owns the public aggregate `/api/agent-tools/**` facade.

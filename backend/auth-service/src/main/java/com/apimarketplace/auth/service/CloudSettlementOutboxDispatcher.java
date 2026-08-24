@@ -5,7 +5,6 @@ import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
-import org.springframework.transaction.annotation.Transactional;
 
 import java.sql.Timestamp;
 import java.time.Duration;
@@ -34,14 +33,20 @@ public class CloudSettlementOutboxDispatcher {
     }
 
     @Scheduled(fixedDelayString = "${billing.external.settlement-retry-ms:5000}")
-    @Transactional
     public void dispatch() {
+        // Claim and commit in one short SQL statement. HTTP delivery happens after
+        // the row locks are released; PROCESSING rows become claimable after the
+        // lease if this process crashes before recording the result.
         var rows = jdbc.query("""
-                SELECT id, operation_id, action, payload::text, attempt_count
-                FROM auth.cloud_settlement_outbox
-                WHERE status IN ('PENDING','FAILED') AND next_attempt_at <= now()
-                ORDER BY created_at
-                FOR UPDATE SKIP LOCKED LIMIT 25
+                UPDATE auth.cloud_settlement_outbox
+                SET status='PROCESSING', next_attempt_at=now() + interval '60 seconds'
+                WHERE id IN (
+                    SELECT id FROM auth.cloud_settlement_outbox
+                    WHERE status IN ('PENDING','FAILED','PROCESSING')
+                      AND next_attempt_at <= now()
+                    ORDER BY created_at FOR UPDATE SKIP LOCKED LIMIT 25
+                )
+                RETURNING id, operation_id, action, payload::text, attempt_count
                 """, (rs, row) -> new Pending(
                 rs.getObject("id", UUID.class),
                 rs.getObject("operation_id", UUID.class),

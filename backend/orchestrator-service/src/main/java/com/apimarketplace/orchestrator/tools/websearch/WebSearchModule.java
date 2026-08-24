@@ -128,7 +128,8 @@ public class WebSearchModule implements ToolModule {
             Map<String, Object> response = restTemplate.postForObject(url, requestBody, Map.class);
 
             if (response == null) {
-                releaseExternalHold(externalAuthority, sourceId, "empty-provider-response");
+                recordAmbiguousExternalOutcome(externalAuthority, sourceId,
+                        "empty-provider-response");
                 return ToolExecutionResult.failure(ToolErrorCode.EXTERNAL_SERVICE_ERROR, "No response from websearch-service");
             }
 
@@ -149,9 +150,18 @@ public class WebSearchModule implements ToolModule {
             return ToolExecutionResult.success(response);
 
         } catch (Exception e) {
-            releaseExternalHold(externalAuthority, sourceId, "provider-failure");
+            recordAmbiguousExternalOutcome(externalAuthority, sourceId,
+                    "provider-outcome-unknown");
             log.error("Web search failed for query '{}': {}", query, e.getMessage(), e);
             return ToolExecutionResult.failure(ToolErrorCode.EXTERNAL_SERVICE_ERROR, "Web search failed: " + e.getMessage());
+        }
+    }
+
+    private void recordAmbiguousExternalOutcome(
+            boolean externalAuthority, String sourceId, String reason) {
+        if (externalAuthority) {
+            creditClient.recordExternalScopeOutcomeUnknown(
+                    sourceId, BILLING_PROVIDER, BILLING_MODEL, reason);
         }
     }
 

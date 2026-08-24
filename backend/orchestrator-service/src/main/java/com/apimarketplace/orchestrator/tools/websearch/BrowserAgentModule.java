@@ -410,7 +410,8 @@ public class BrowserAgentModule extends WebJobModule {
             try {
                 runResult = submitAndAwait(action, parameters, tenantId, executionContext);
             } catch (RuntimeException failure) {
-                releaseExternalBrowserReservation(externalReservation, "provider-dispatch-failure");
+                recordAmbiguousBrowserOutcome(externalReservation,
+                        "provider-outcome-unknown-after-dispatch");
                 throw failure;
             }
             settleExternalBrowserReservation(externalReservation, runResult);
@@ -501,8 +502,19 @@ public class BrowserAgentModule extends WebJobModule {
                         reservation.operationId());
             }
         } else {
-            releaseExternalBrowserReservation(reservation, "provider-not-executed");
+            // A failed/empty runner result does not prove that its upstream LLM was
+            // never invoked. Keep the hold and create a durable reconciliation item.
+            recordAmbiguousBrowserOutcome(reservation,
+                    "browser-result-without-verifiable-provider-usage");
         }
+    }
+
+    private void recordAmbiguousBrowserOutcome(
+            ExternalBrowseReservation reservation, String reason) {
+        if (reservation == null || !reservation.accepted()) return;
+        creditConsumptionClient.recordExternalOutcomeUnknown(
+                reservation.operationId(), reservation.requestHash(),
+                reservation.provider(), reservation.model(), reason);
     }
 
     private void releaseExternalBrowserReservation(

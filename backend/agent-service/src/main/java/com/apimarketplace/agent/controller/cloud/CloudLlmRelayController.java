@@ -143,7 +143,9 @@ public class CloudLlmRelayController {
             recordUsageOnce(new AtomicBoolean(false), target, usage);
             return ResponseEntity.ok(response);
         } catch (RuntimeException failure) {
-            releaseBeforeProviderResult(target, "provider-call-failed");
+            // The request crossed the provider boundary. A transport exception does not
+            // prove the provider rejected it, so never release the authoritative hold.
+            recordAmbiguousProviderOutcome(target, "provider-outcome-unknown");
             throw failure;
         }
     }
@@ -371,10 +373,11 @@ public class CloudLlmRelayController {
                 null, null);
     }
 
-    private void releaseBeforeProviderResult(BillingTarget target, String reason) {
+    private void recordAmbiguousProviderOutcome(BillingTarget target, String reason) {
         if (target.externalOperationId() != null) {
-            creditClient.releaseExternal(target.externalOperationId(),
-                    target.externalRequestHash(), reason);
+            creditClient.recordExternalOutcomeUnknown(
+                    target.externalOperationId(), target.externalRequestHash(),
+                    target.provider(), target.model(), reason);
         }
     }
 

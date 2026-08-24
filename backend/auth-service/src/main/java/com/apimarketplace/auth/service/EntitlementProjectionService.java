@@ -11,6 +11,7 @@ import org.springframework.web.server.ResponseStatusException;
 
 import java.sql.Timestamp;
 import java.time.Instant;
+import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
 
@@ -121,6 +122,45 @@ public class EntitlementProjectionService {
         return new Decision(true, "AUTHORIZED", row.sequence(), row.expiresAt());
     }
 
+    /**
+     * Resolve the actor-free, signed entitlement projection attached to a Cloud-linked
+     * installation. This is the external-authority replacement for reading a local Cloud
+     * subscription. Expired, denied and revoked projections remain stored for audit but are
+     * never returned as effective CE entitlements.
+     */
+    @Transactional(readOnly = true)
+    public Optional<ProjectedCeEntitlement> activeCeEntitlement(long cloudUserId, UUID installId) {
+        var rows = jdbc.query("""
+                SELECT p.sequence, p.expires_at, p.canonical_payload
+                FROM auth.cloud_identity_binding b
+                JOIN auth.entitlement_projection p
+                  ON p.issuer=b.issuer
+                 AND p.install_id=b.install_id
+                 AND p.organization_id=b.organization_id
+                 AND p.billing_subject_id=b.billing_subject_id
+                WHERE b.issuer=? AND b.cloud_user_id=? AND b.install_id=?
+                  AND b.status='ACTIVE'
+                  AND p.access_state IN ('ACTIVE','GRACE')
+                  AND p.expires_at > now()
+                """, (rs, row) -> new ProjectionPayloadRow(
+                rs.getLong("sequence"), rs.getTimestamp("expires_at").toInstant(),
+                rs.getString("canonical_payload")), issuer, cloudUserId, installId);
+        if (rows.size() != 1) return Optional.empty();
+        try {
+            ProjectionPayloadRow row = rows.getFirst();
+            JsonNode payload = new com.fasterxml.jackson.databind.ObjectMapper().readTree(row.payload());
+            String planCode = payload.path("planCode").asText();
+            if (planCode.isBlank()) return Optional.empty();
+            String cadence = payload.path("cadence").asText(null);
+            if (cadence != null && cadence.isBlank()) cadence = null;
+            return Optional.of(new ProjectedCeEntitlement(
+                    planCode, payload.path("creditTierIndex").asInt(0), cadence,
+                    row.sequence(), row.expiresAt()));
+        } catch (Exception invalidProjection) {
+            return Optional.empty();
+        }
+    }
+
     private Current currentForUpdate(UUID installId, UUID organizationId, UUID billingSubjectId) {
         var rows = jdbc.query("""
                 SELECT projection_id, sequence, state_hash FROM auth.entitlement_projection
@@ -176,6 +216,9 @@ public class EntitlementProjectionService {
 
     private record Current(UUID projectionId, long sequence, String hash) {}
     private record DecisionRow(long sequence, String state, Instant expiresAt, String payload) {}
+    private record ProjectionPayloadRow(long sequence, Instant expiresAt, String payload) {}
+    public record ProjectedCeEntitlement(String planCode, int creditTierIndex, String cadence,
+                                         long sequence, Instant expiresAt) {}
     public record ApplyResult(String result, long sequence, String accessState, Instant expiresAt) {}
     public record Decision(boolean allowed, String reason, long sequence, Instant expiresAt) {
         static Decision denied(String reason) { return new Decision(false, reason, 0, null); }

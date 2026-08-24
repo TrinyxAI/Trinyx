@@ -3,6 +3,7 @@ package com.apimarketplace.publication.service;
 import com.apimarketplace.publication.domain.CeCloudLinkEntity;
 import com.apimarketplace.publication.repository.CeCloudLinkRepository;
 import com.apimarketplace.agent.cloud.CloudLlmSource;
+import com.apimarketplace.auth.client.AuthClient;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.slf4j.Logger;
@@ -60,6 +61,8 @@ public class CloudLinkService {
     private final RestTemplate restTemplate;
     private final ObjectMapper objectMapper;
     private final Clock clock;
+    private final AuthClient authClient;
+    private final boolean externalPaidAuthority;
 
     // In-memory PKCE verifier storage (short-lived, keyed by state)
     private final Map<String, PendingAuthFlow> pendingAuthFlows = new LinkedHashMap<>() {
@@ -93,7 +96,24 @@ public class CloudLinkService {
                             String ceVersion,
                             ObjectMapper objectMapper) {
         this(cloudLinkRepository, keycloakUrl, clientId, redirectUri, encryptionKey,
-                cloudApiUrl, ceVersion, objectMapper, new RestTemplate(), Clock.systemUTC());
+                cloudApiUrl, ceVersion, objectMapper, new RestTemplate(), Clock.systemUTC(),
+                null, false);
+    }
+
+    /** Production constructor for the external paid-monolith authority mode. */
+    public CloudLinkService(CeCloudLinkRepository cloudLinkRepository,
+                            String keycloakUrl,
+                            String clientId,
+                            String redirectUri,
+                            String encryptionKey,
+                            String cloudApiUrl,
+                            String ceVersion,
+                            ObjectMapper objectMapper,
+                            AuthClient authClient,
+                            boolean externalPaidAuthority) {
+        this(cloudLinkRepository, keycloakUrl, clientId, redirectUri, encryptionKey,
+                cloudApiUrl, ceVersion, objectMapper, new RestTemplate(), Clock.systemUTC(),
+                authClient, externalPaidAuthority);
     }
 
     /** Test-friendly constructor - allows injecting a mocked RestTemplate. */
@@ -107,7 +127,7 @@ public class CloudLinkService {
                      ObjectMapper objectMapper,
                      RestTemplate restTemplate) {
         this(cloudLinkRepository, keycloakUrl, clientId, redirectUri, encryptionKey,
-                cloudApiUrl, ceVersion, objectMapper, restTemplate, Clock.systemUTC());
+                cloudApiUrl, ceVersion, objectMapper, restTemplate, Clock.systemUTC(), null, false);
     }
 
     /** Test-friendly constructor - allows deterministic pending-state expiry checks. */
@@ -121,6 +141,23 @@ public class CloudLinkService {
                      ObjectMapper objectMapper,
                      RestTemplate restTemplate,
                      Clock clock) {
+        this(cloudLinkRepository, keycloakUrl, clientId, redirectUri, encryptionKey,
+                cloudApiUrl, ceVersion, objectMapper, restTemplate, clock, null, false);
+    }
+
+    /** Full test constructor for external-authority bootstrap and revocation. */
+    CloudLinkService(CeCloudLinkRepository cloudLinkRepository,
+                     String keycloakUrl,
+                     String clientId,
+                     String redirectUri,
+                     String encryptionKey,
+                     String cloudApiUrl,
+                     String ceVersion,
+                     ObjectMapper objectMapper,
+                     RestTemplate restTemplate,
+                     Clock clock,
+                     AuthClient authClient,
+                     boolean externalPaidAuthority) {
         this.cloudLinkRepository = cloudLinkRepository;
         this.keycloakUrl = keycloakUrl;
         this.clientId = clientId;
@@ -131,6 +168,8 @@ public class CloudLinkService {
         this.restTemplate = restTemplate;
         this.objectMapper = objectMapper;
         this.clock = clock;
+        this.authClient = authClient;
+        this.externalPaidAuthority = externalPaidAuthority;
     }
 
     /**
@@ -331,6 +370,12 @@ public class CloudLinkService {
         HttpHeaders headers = new HttpHeaders();
         headers.setBearerAuth(accessToken);
         headers.setContentType(MediaType.APPLICATION_JSON);
+        if (externalPaidAuthority) {
+            AuthClient.CloudAuthorityBundle authority = issueAuthorityBundle(link);
+            headers.set("X-Trinyx-Identity-Binding", authority.identityBinding());
+            headers.set("X-Trinyx-Entitlement-Projection", authority.entitlementProjection());
+            headers.set("X-Trinyx-Organization-ID", requireOrganizationId(link).toString());
+        }
         HttpEntity<Map<String, Object>> request = new HttpEntity<>(body, headers);
         try {
             ResponseEntity<JsonNode> response = restTemplate.postForEntity(url, request, JsonNode.class);
@@ -1084,9 +1129,60 @@ public class CloudLinkService {
      */
     public void unlinkAccount(Long tenantId) {
         cloudLinkRepository.findByTenantId(tenantId).ifPresent(link -> {
+            if (externalPaidAuthority) {
+                revokeCloudRegistry(link);
+                authClient.revokeExternalCloudAuthority(String.valueOf(tenantId),
+                        link.getInstallId(), requireOrganizationId(link));
+            }
             cloudLinkRepository.delete(link);
             logger.info("CE cloud account unlinked for tenant {}", tenantId);
         });
+    }
+
+    private AuthClient.CloudAuthorityBundle issueAuthorityBundle(CeCloudLinkEntity link) {
+        if (authClient == null) {
+            throw new IllegalStateException("External paid authority client is unavailable");
+        }
+        return authClient.issueExternalCloudAuthority(
+                String.valueOf(link.getTenantId()), link.getInstallId(),
+                requireOrganizationId(link), link.getCloudUserId());
+    }
+
+    private UUID requireOrganizationId(CeCloudLinkEntity link) {
+        String value = link.getOrganizationId();
+        if (value == null || value.isBlank()) {
+            if (authClient == null) {
+                throw new IllegalStateException("Cloud link organization is unavailable");
+            }
+            value = authClient.getDefaultOrganizationIdForUser(String.valueOf(link.getTenantId()));
+            if (value != null && !value.isBlank()) {
+                link.setOrganizationId(value);
+                cloudLinkRepository.save(link);
+            }
+        }
+        try {
+            return UUID.fromString(value);
+        } catch (RuntimeException invalid) {
+            throw new IllegalStateException("Cloud link organization is unavailable", invalid);
+        }
+    }
+
+    private void revokeCloudRegistry(CeCloudLinkEntity link) {
+        if (link.getRegisteredAt() == null) {
+            return;
+        }
+        String accessToken = getCloudAccessToken(link.getTenantId());
+        String url = cloudApiUrl + "/ce-link/" + link.getInstallId();
+        HttpHeaders headers = new HttpHeaders();
+        headers.setBearerAuth(accessToken);
+        headers.set("X-Trinyx-Organization-ID", requireOrganizationId(link).toString());
+        try {
+            restTemplate.exchange(url, HttpMethod.DELETE, new HttpEntity<>(headers), Void.class);
+        } catch (org.springframework.web.client.HttpClientErrorException.NotFound
+                 | org.springframework.web.client.HttpClientErrorException.Gone alreadyRevoked) {
+            logger.info("Cloud registry already revoked for tenant={} installId={}",
+                    link.getTenantId(), link.getInstallId());
+        }
     }
 
     /**

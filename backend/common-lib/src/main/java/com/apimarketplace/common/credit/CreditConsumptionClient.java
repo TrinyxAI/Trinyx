@@ -1144,17 +1144,22 @@ public class CreditConsumptionClient {
 
     public void recordExternalOutcomeUnknown(
             UUID operationId, String requestHash, String provider, String model, String reason) {
-        if (settlementIntentStore == null) {
+        if (settlementIntentStore == null || !settlementIntentStore.durable()) {
             log.error("CRITICAL: ambiguous provider outcome has no durable outbox operationId={}",
                     operationId);
             return;
         }
+        Map<String, Object> details = Map.of(
+                "requestHash", value(requestHash),
+                "provider", value(provider),
+                "model", value(model),
+                "reason", value(reason));
         try {
-            settlementIntentStore.recordUnknown(operationId, Map.of(
-                    "requestHash", value(requestHash),
-                    "provider", value(provider),
-                    "model", value(model),
-                    "reason", value(reason)));
+            settlementIntentStore.recordUnknown(operationId, details);
+            String url = authServiceUrl + "/api/internal/cloud-credit-proxy/"
+                    + operationId + "/outcome-unknown";
+            settlementIntentStore.persist(new ExternalSettlementIntentStore.Intent(
+                    "OUTCOME_UNKNOWN", operationId, url, details, 0));
         } catch (RuntimeException persistenceFailure) {
             log.error("CRITICAL: ambiguous provider outcome could not be persisted operationId={}: {}",
                     operationId, persistenceFailure.getMessage());

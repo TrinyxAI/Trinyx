@@ -33,6 +33,7 @@ final class AuthenticatedGatewayFilter implements GlobalFilter, Ordered {
             "x-gateway-nonce", "x-gateway-body-sha256", "x-provider-id", "x-user-id",
             "x-principal-id", "x-billing-subject-id", "x-organization-id",
             "x-organization-role", "x-user-roles", "x-install-id",
+            "x-livecontext-install-id", "x-trinyx-install-id",
             "x-trinyx-identity-binding", "x-trinyx-entitlement-projection",
             "x-trinyx-organization-id");
 
@@ -67,10 +68,16 @@ final class AuthenticatedGatewayFilter implements GlobalFilter, Ordered {
                             .getFirst("X-Trinyx-Identity-Binding");
                     String entitlement = exchange.getRequest().getHeaders()
                             .getFirst("X-Trinyx-Entitlement-Projection");
+                    String installSelector;
+                    try {
+                        installSelector = installSelector(exchange.getRequest().getHeaders());
+                    } catch (IllegalArgumentException conflictingSelector) {
+                        return forbidden(exchange, "conflicting_install_selector");
+                    }
                     EntitlementPolicy policy = policyFor(path);
 
                     Mono<GatewayUserContext> authorized = identityClient
-                            .resolve(token, subject, binding, entitlement)
+                            .resolve(token, subject, binding, entitlement, installSelector)
                             .flatMap(context -> {
                                 if (policy.identityOnly()) {
                                     return Mono.just(context);
@@ -220,6 +227,26 @@ final class AuthenticatedGatewayFilter implements GlobalFilter, Ordered {
                 })
                 .build();
         return exchange.mutate().request(request).build();
+    }
+
+    /**
+     * Treat installation headers only as untrusted selectors. The selected value is resolved
+     * against the actor's ACTIVE signed binding, stripped from the external request, and replaced
+     * downstream by the HMAC-bound X-Install-ID from the resolved context.
+     */
+    private static String installSelector(org.springframework.http.HttpHeaders headers) {
+        java.util.LinkedHashSet<String> values = new java.util.LinkedHashSet<>();
+        for (String name : List.of("X-Install-ID", "X-LiveContext-Install-Id",
+                "X-Trinyx-Install-ID")) {
+            String value = headers.getFirst(name);
+            if (value != null && !value.isBlank()) {
+                values.add(value.trim());
+            }
+        }
+        if (values.size() > 1) {
+            throw new IllegalArgumentException("Conflicting installation selectors");
+        }
+        return values.isEmpty() ? null : values.iterator().next();
     }
 
     private boolean isPublic(String path) {

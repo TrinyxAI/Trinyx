@@ -68,6 +68,16 @@ public class CreditConsumptionClient {
     private final String authServiceUrl;
     private final boolean enabled;
     private final String gatewaySecretKey;
+    private String billingAuthorityMode = "native-cloud";
+
+    /**
+     * Injected from Spring's canonical configuration source. Directly constructed unit-test
+     * clients keep the safe native default and may override it explicitly.
+     */
+    @org.springframework.beans.factory.annotation.Value("${billing.authority.mode:native-cloud}")
+    public void setBillingAuthorityMode(String billingAuthorityMode) {
+        this.billingAuthorityMode = billingAuthorityMode == null ? "native-cloud" : billingAuthorityMode;
+    }
 
     private final ConcurrentHashMap<String, CachedCheck> creditCheckCache = new ConcurrentHashMap<>();
 
@@ -1001,9 +1011,8 @@ public class CreditConsumptionClient {
                 ? "cloudWebSearchRelay" : "";
     }
 
-    private static boolean usesExternalAuthority() {
-        return "external-paid-monolith".equalsIgnoreCase(
-                System.getenv("BILLING_AUTHORITY_MODE"));
+    private boolean usesExternalAuthority() {
+        return "external-paid-monolith".equalsIgnoreCase(billingAuthorityMode);
     }
 
     public record ExternalReservationResult(boolean success, String requestHash, String error) {}

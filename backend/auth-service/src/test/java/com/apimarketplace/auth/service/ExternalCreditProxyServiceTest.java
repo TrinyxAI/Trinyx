@@ -22,9 +22,10 @@ class ExternalCreditProxyServiceTest {
     private final PaidMonolithCreditClient authority =
             mock(PaidMonolithCreditClient.class);
     private final RecordingJdbc jdbc = new RecordingJdbc();
+    private final ModelPricingService pricing = mock(ModelPricingService.class);
     private final ExternalCreditProxyService service = new ExternalCreditProxyService(
             entitlements, authority, jdbc,
-            new ObjectMapper().findAndRegisterModules(), mock(ModelPricingService.class));
+            new ObjectMapper().findAndRegisterModules(), pricing);
 
     @Test
     void permanentAuthorityRejectionPersistsDeadLetterAndPropagatesOriginalStatus() throws Exception {
@@ -64,6 +65,46 @@ class ExternalCreditProxyServiceTest {
         assertThat(result.queued()).isTrue();
         assertThat(jdbc.sql).anyMatch(sql -> sql.contains("'PENDING'"));
         assertThat(jdbc.sql).noneMatch(sql -> sql.contains("'DEAD'"));
+    }
+
+    @Test
+    void llmCommitForwardsCompleteUsageForPaidAuthorityRepricing() {
+        UUID operationId = UUID.randomUUID();
+        String hash = "c".repeat(64);
+        when(pricing.hasPricing("openai", "gpt")).thenReturn(true);
+        when(pricing.calculateCost("openai", "gpt",
+                new LlmTokenBreakdown(10, 2, 3, 4, 5, 6)))
+                .thenReturn(new BigDecimal("7.50"));
+        when(authority.commit(eq(operationId), any()))
+                .thenReturn(new CloudCreditAuthorityService.SettlementResponse(
+                        operationId, "COMMITTED", new BigDecimal("7.50"),
+                        new BigDecimal("92.50"), false, "COMMITTED"));
+
+        service.commitLlm(operationId, new ExternalCreditProxyService.LlmCommitCommand(
+                "openai", "gpt", "provider-request", 10, 2, hash,
+                3, 4, 5, 6));
+
+        var request = org.mockito.ArgumentCaptor.forClass(
+                CloudCreditAuthorityService.CommitRequest.class);
+        verify(authority).commit(eq(operationId), request.capture());
+        assertThat(request.getValue().actualCredits()).isEqualByComparingTo("7.50");
+        assertThat(request.getValue().cacheCreationTokens()).isEqualTo(3);
+        assertThat(request.getValue().cacheReadTokens()).isEqualTo(4);
+        assertThat(request.getValue().cachedTokens()).isEqualTo(5);
+        assertThat(request.getValue().reasoningTokens()).isEqualTo(6);
+    }
+
+    @Test
+    void negativeProviderUsageIsAClientErrorAndNeverReachesAuthority() {
+        when(pricing.hasPricing("openai", "gpt")).thenReturn(true);
+
+        assertThatThrownBy(() -> service.commitLlm(UUID.randomUUID(),
+                new ExternalCreditProxyService.LlmCommitCommand(
+                        "openai", "gpt", null, 1, 1, "d".repeat(64),
+                        -1, null, null, null)))
+                .isInstanceOfSatisfying(ResponseStatusException.class,
+                        failure -> assertThat(failure.getStatusCode().value()).isEqualTo(400));
+        verifyNoInteractions(authority);
     }
 
     private static final class RecordingJdbc extends JdbcTemplate {

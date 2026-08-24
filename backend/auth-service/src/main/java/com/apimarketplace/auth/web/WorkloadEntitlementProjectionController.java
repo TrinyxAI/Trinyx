@@ -40,7 +40,7 @@ public class WorkloadEntitlementProjectionController {
             if (!PAID_AUTHORITY.equals(identity.serviceId())) {
                 throw new SecurityException("Unexpected entitlement projection workload");
             }
-        } catch (RuntimeException invalidWorkload) {
+        } catch (SecurityException | IllegalArgumentException invalidWorkload) {
             throw new org.springframework.web.server.ResponseStatusException(
                     org.springframework.http.HttpStatus.UNAUTHORIZED,
                     "INVALID_WORKLOAD_IDENTITY", invalidWorkload);

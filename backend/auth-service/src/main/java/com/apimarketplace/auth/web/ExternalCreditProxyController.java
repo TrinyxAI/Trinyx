@@ -83,6 +83,18 @@ public class ExternalCreditProxyController {
                 : ResponseEntity.ok(result);
     }
 
+    @PostMapping("/{operationId}/outcome-unknown")
+    public ResponseEntity<ExternalCreditProxyService.SettlementResult> outcomeUnknown(
+            @PathVariable UUID operationId,
+            @Valid @RequestBody OutcomeUnknownCommand command) {
+        var result = proxy.outcomeUnknown(operationId,
+                new ExternalCreditProxyService.OutcomeUnknownCommand(
+                        command.reason(), command.requestHash(),
+                        command.provider(), command.model()));
+        return result.queued() ? ResponseEntity.accepted().body(result)
+                : ResponseEntity.ok(result);
+    }
+
     @PostMapping("/{operationId}/commit")
     public ResponseEntity<ExternalCreditProxyService.SettlementResult> commit(
             @PathVariable UUID operationId,
@@ -128,4 +140,6 @@ public class ExternalCreditProxyController {
             String providerRequestId) {}
 
     public record ReleaseLocalCommand(String reason) {}
+    public record OutcomeUnknownCommand(String reason, String requestHash,
+                                        String provider, String model) {}
 }

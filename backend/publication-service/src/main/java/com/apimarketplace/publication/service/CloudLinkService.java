@@ -262,9 +262,10 @@ public class CloudLinkService {
         // Decode JWT to get user info (sub, preferred_username)
         Map<String, String> userInfo = extractUserInfoFromJwt(accessToken);
 
-        // Delete any existing link for this tenant (re-link scenario)
-        cloudLinkRepository.findByTenantId(tenantId).ifPresent(existing ->
-                cloudLinkRepository.delete(existing));
+        // Re-link is a replacement transaction, never a blind local delete.
+        // Revoke the old Cloud registry and signed authority state first. Any failure
+        // leaves the old row intact and retryable, preventing ghost installations.
+        cloudLinkRepository.findByTenantId(tenantId).ifPresent(this::revokeForReplacement);
 
         // Store the new link
         CeCloudLinkEntity link = new CeCloudLinkEntity();
@@ -1124,13 +1125,24 @@ public class CloudLinkService {
         }
     }
 
+    private void revokeForReplacement(CeCloudLinkEntity existing) {
+        revokeCloudRegistry(existing);
+        if (externalPaidAuthority) {
+            authClient.revokeExternalCloudAuthority(String.valueOf(existing.getTenantId()),
+                    existing.getInstallId(), requireOrganizationId(existing));
+        }
+        cloudLinkRepository.delete(existing);
+        logger.info("Old CE cloud link revoked before replacement tenant={} installId={}",
+                existing.getTenantId(), existing.getInstallId());
+    }
+
     /**
      * Unlink the cloud account.
      */
     public void unlinkAccount(Long tenantId) {
         cloudLinkRepository.findByTenantId(tenantId).ifPresent(link -> {
+            revokeCloudRegistry(link);
             if (externalPaidAuthority) {
-                revokeCloudRegistry(link);
                 authClient.revokeExternalCloudAuthority(String.valueOf(tenantId),
                         link.getInstallId(), requireOrganizationId(link));
             }

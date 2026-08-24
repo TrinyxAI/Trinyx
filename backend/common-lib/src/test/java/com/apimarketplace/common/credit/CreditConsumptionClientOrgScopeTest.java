@@ -1,6 +1,7 @@
 package com.apimarketplace.common.credit;
 
 import com.apimarketplace.common.web.GatewaySignatureV2;
+import com.apimarketplace.common.web.TenantResolver;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -19,6 +20,7 @@ import org.springframework.web.context.request.ServletRequestAttributes;
 
 import java.math.BigDecimal;
 import java.util.Map;
+import java.util.UUID;
 import java.util.concurrent.atomic.AtomicReference;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -77,6 +79,40 @@ class CreditConsumptionClientOrgScopeTest {
                 "deepseek", "deepseek-chat", 100, 50);
 
         assertV2(captured.get(), "POST", "/api/credits/consume", "99", "org-acme", "MEMBER");
+        server.verify();
+    }
+
+    @Test
+    void requestlessWorkflowWorkerSignsUserAndOrganizationForBindingResolution() {
+        CreditConsumptionClient client = new CreditConsumptionClient(
+                "http://auth:8083", true, GATEWAY_SECRET);
+        client.setBillingAuthorityMode("external-paid-monolith");
+        RestTemplate real = (RestTemplate) ReflectionTestUtils.getField(client, "restTemplate");
+        MockRestServiceServer server = MockRestServiceServer.bindTo(real).build();
+        AtomicReference<HttpHeaders> captured = new AtomicReference<>();
+        UUID organizationId = UUID.randomUUID();
+        UUID operationId = UUID.randomUUID();
+        server.expect(requestTo("http://auth:8083/api/internal/cloud-credit-proxy/reserve-llm"))
+                .andExpect(method(HttpMethod.POST))
+                .andExpect(request -> captured.set(request.getHeaders()))
+                .andRespond(withSuccess("{\"requestHash\":\"" + "a".repeat(64) + "\"}",
+                        MediaType.APPLICATION_JSON));
+
+        AtomicReference<CreditConsumptionClient.ExternalReservationResult> result =
+                new AtomicReference<>();
+        TenantResolver.runWithOrgScope(organizationId.toString(), () ->
+                result.set(client.reserveExternalLlm(99L, operationId,
+                        "cloudWebSearchRelay", "BROWSER_AGENT_EXECUTION",
+                        "openai", "gpt", 100, 50)));
+
+        assertThat(result.get().success()).isTrue();
+        assertThat(RequestContextHolder.getRequestAttributes()).isNull();
+        assertThat(captured.get().getFirst("X-User-ID")).isEqualTo("99");
+        assertThat(captured.get().getFirst("X-Organization-ID"))
+                .isEqualTo(organizationId.toString());
+        assertThat(captured.get().getFirst("X-Principal-ID")).isNull();
+        assertV2(captured.get(), "POST", "/api/internal/cloud-credit-proxy/reserve-llm",
+                "99", organizationId.toString(), "");
         server.verify();
     }
 

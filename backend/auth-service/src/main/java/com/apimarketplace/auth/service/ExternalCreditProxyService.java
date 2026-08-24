@@ -230,7 +230,14 @@ public class ExternalCreditProxyService {
     }
 
     private static int nonNegative(Integer value) {
-        return value == null ? 0 : Math.max(0, value);
+        if (value == null) {
+            return 0;
+        }
+        if (value < 0) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
+                    "INVALID_PROVIDER_USAGE");
+        }
+        return value;
     }
 
     private static String bounded(String message) {

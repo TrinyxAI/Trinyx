@@ -51,6 +51,24 @@ class CloudIdentityBindingServiceTest {
     }
 
     @Test
+    void explicitlyRevokedBindingCanRebindPrincipalToANewKeycloakUser() {
+        jdbc.current = row(1, "REVOKED", "revoked-jws", UUID.randomUUID());
+        ObjectNode active = assertion(2, "ACTIVE", UUID.randomUUID());
+        active.put("keycloakSubject", "replacement-subject");
+        when(assertions.verifyIdentity("rebind", "https://app.trinyx.fr", "trinyx-cloud"))
+                .thenReturn(active);
+
+        var rebound = service.bind("rebind", "replacement-subject", 43L);
+
+        assertThat(rebound.userId()).isEqualTo(43L);
+        assertThat(rebound.providerId()).isEqualTo("replacement-subject");
+        assertThat(rebound.principalId()).isEqualTo(PRINCIPAL);
+        assertThat(rebound.billingSubjectId()).isEqualTo(PAYER);
+        assertThat(rebound.organizationRole()).isEqualTo("OWNER");
+        assertThat(jdbc.updates).isGreaterThanOrEqualTo(3);
+    }
+
+    @Test
     void sameTombstoneJtiIsIdempotentButDifferentPayloadIsReplay() {
         UUID jti = UUID.randomUUID();
         jdbc.replay = row(4, "REVOKED", "same", jti);

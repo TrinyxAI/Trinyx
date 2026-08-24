@@ -149,6 +149,34 @@ public class CloudIdentityBindingService {
     }
 
     /**
+     * Resolve the unique ACTIVE binding for a Cloud-local compatibility user in an organization.
+     * Worker threads use this after the HTTP request context is gone; no identity is inferred from
+     * email and ambiguous multi-install state fails closed.
+     */
+    @Transactional(readOnly = true)
+    public BindingContext context(long cloudUserId, UUID organizationId) {
+        var rows = jdbc.query("""
+                SELECT id, cloud_user_id, keycloak_subject, principal_id, billing_subject_id,
+                       organization_id, organization_role, install_id, binding_revision,
+                       assertion_jws, status
+                FROM auth.cloud_identity_binding
+                WHERE issuer=? AND cloud_user_id=? AND organization_id=? AND status='ACTIVE'
+                """, (rs, row) -> new BindingRow(
+                rs.getObject("id", UUID.class), rs.getLong("cloud_user_id"),
+                rs.getString("keycloak_subject"), rs.getObject("principal_id", UUID.class),
+                rs.getObject("billing_subject_id", UUID.class),
+                rs.getObject("organization_id", UUID.class), rs.getString("organization_role"),
+                rs.getObject("install_id", UUID.class), rs.getLong("binding_revision"),
+                rs.getString("assertion_jws"), rs.getString("status")),
+                issuer, cloudUserId, organizationId);
+        if (rows.size() != 1) {
+            throw new ResponseStatusException(HttpStatus.NOT_FOUND,
+                    rows.isEmpty() ? "IDENTITY_NOT_BOUND" : "AMBIGUOUS_IDENTITY_BINDING");
+        }
+        return rows.getFirst().context();
+    }
+
+    /**
      * Authorizes an actor to use an active linked installation through the signed identity scope.
      *
      * <p>The actor does not need to own the historical {@code ce_link} row. Organization members

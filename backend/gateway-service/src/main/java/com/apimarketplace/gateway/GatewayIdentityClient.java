@@ -51,12 +51,9 @@ final class GatewayIdentityClient {
 
     private Mono<GatewayUserContext> resolveBinding(
             UserResolution user, String providerId, String bindingJws, String installSelector) {
-        // A fresh signed binding is the authoritative selector during first link/rebind. Replaying
-        // the identical JTI for the same Cloud user is idempotent in auth-service.
-        if (bindingJws != null && !bindingJws.isBlank()) {
-            return bind(user, providerId, bindingJws);
-        }
-
+        // Resolve persistent state first. A bootstrap assertion is consumed only when that exact
+        // install is not bound yet; retaining an expired bootstrap header therefore cannot break
+        // an already-materialized link.
         String target = "/api/internal/cloud-identity/context?keycloakSubject="
                 + URLEncoder.encode(providerId, StandardCharsets.UTF_8);
         if (installSelector != null && !installSelector.isBlank()) {
@@ -77,7 +74,9 @@ final class GatewayIdentityClient {
                 .bodyToMono(BindingContext.class)
                 .map(binding -> merge(user, binding))
                 .onErrorResume(org.springframework.web.reactive.function.client.WebClientResponseException.NotFound.class,
-                        missing -> Mono.error(new UnboundIdentityException()));
+                        missing -> bindingJws == null || bindingJws.isBlank()
+                                ? Mono.error(new UnboundIdentityException())
+                                : bind(user, providerId, bindingJws));
     }
 
     private Mono<GatewayUserContext> bind(

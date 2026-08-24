@@ -55,6 +55,20 @@ class PaidMonolithCreditClientTest {
     }
 
     @Test
+    void requestTimeoutAndRateLimitRemainRetryable() {
+        for (HttpStatus status : new HttpStatus[]{
+                HttpStatus.REQUEST_TIMEOUT, HttpStatus.TOO_MANY_REQUESTS}) {
+            reset(http);
+            when(http.exchange(anyString(), eq(HttpMethod.POST), any(HttpEntity.class),
+                    eq(CloudCreditAuthorityService.ReserveResponse.class)))
+                    .thenThrow(response(status, "retry later"));
+
+            assertThatThrownBy(() -> client.reserve(reserve()))
+                    .isInstanceOf(PaidMonolithCreditClient.RetryableAuthorityException.class);
+        }
+    }
+
+    @Test
     void serverAndTransportFailuresRemainRetryable() {
         when(http.exchange(anyString(), eq(HttpMethod.POST), any(HttpEntity.class),
                 eq(CloudCreditAuthorityService.ReserveResponse.class)))

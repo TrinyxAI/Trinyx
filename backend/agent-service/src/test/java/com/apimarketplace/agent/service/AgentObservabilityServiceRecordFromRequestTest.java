@@ -123,7 +123,8 @@ class AgentObservabilityServiceRecordFromRequestTest {
         req.setCreditExternallyManaged(true);
         when(creditClient.usesExternalAuthority()).thenReturn(false);
         when(creditClient.consumeCredits(anyString(), anyString(), anyString(),
-                anyString(), anyString(), anyInt(), anyInt(), any()))
+                anyString(), anyString(), anyInt(), anyInt(),
+                any(com.apimarketplace.common.credit.LlmCacheTokens.class)))
                 .thenReturn(Map.of("success", true, "creditsUsed", 1));
 
         service.recordFromRequest(req);
@@ -1058,7 +1059,7 @@ class AgentObservabilityServiceRecordFromRequestTest {
             service.recordFromRequest(req);
 
             verify(creditClient, never()).persistRejection(
-                any(), any(), any(), any(), any(), anyInt(), anyInt(), any(com.apimarketplace.common.credit.LlmCacheTokens.class));
+                any(), any(), any(), any(), any(), anyInt(), anyInt(), anyString());
         }
     }
 

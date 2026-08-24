@@ -1,6 +1,7 @@
 package com.apimarketplace.auth.web;
 
 import com.apimarketplace.auth.service.ExternalCreditProxyService;
+import com.apimarketplace.auth.service.CloudIdentityBindingService;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotNull;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
@@ -17,31 +18,37 @@ import java.math.BigDecimal;
 public class ExternalCreditProxyController {
 
     private final ExternalCreditProxyService proxy;
-    public ExternalCreditProxyController(ExternalCreditProxyService proxy) {
+    private final CloudIdentityBindingService identities;
+
+    public ExternalCreditProxyController(ExternalCreditProxyService proxy,
+                                         CloudIdentityBindingService identities) {
         this.proxy = proxy;
+        this.identities = identities;
     }
 
     @PostMapping("/reserve")
     public ExternalCreditProxyService.ReserveResult reserve(
-            @RequestHeader("X-Principal-ID") UUID principalId,
-            @RequestHeader("X-Billing-Subject-ID") UUID billingSubjectId,
+            @RequestHeader("X-User-ID") long userId,
+            @RequestHeader(value = "X-Principal-ID", required = false) UUID principalId,
+            @RequestHeader(value = "X-Billing-Subject-ID", required = false) UUID billingSubjectId,
             @RequestHeader("X-Organization-ID") UUID organizationId,
-            @RequestHeader("X-Install-ID") UUID installId,
+            @RequestHeader(value = "X-Install-ID", required = false) UUID installId,
             @Valid @RequestBody ExternalCreditProxyService.ReserveCommand command) {
-        return proxy.reserve(new ExternalCreditProxyService.Context(
-                principalId, billingSubjectId, organizationId, installId), command);
+        return proxy.reserve(context(userId, principalId, billingSubjectId,
+                organizationId, installId), command);
     }
 
 
     @PostMapping("/reserve-llm")
     public ExternalCreditProxyService.ReserveResult reserveLlm(
-            @RequestHeader("X-Principal-ID") UUID principalId,
-            @RequestHeader("X-Billing-Subject-ID") UUID billingSubjectId,
+            @RequestHeader("X-User-ID") long userId,
+            @RequestHeader(value = "X-Principal-ID", required = false) UUID principalId,
+            @RequestHeader(value = "X-Billing-Subject-ID", required = false) UUID billingSubjectId,
             @RequestHeader("X-Organization-ID") UUID organizationId,
-            @RequestHeader("X-Install-ID") UUID installId,
+            @RequestHeader(value = "X-Install-ID", required = false) UUID installId,
             @Valid @RequestBody ExternalCreditProxyService.LlmReserveCommand command) {
-        return proxy.reserveLlm(new ExternalCreditProxyService.Context(
-                principalId, billingSubjectId, organizationId, installId), command);
+        return proxy.reserveLlm(context(userId, principalId, billingSubjectId,
+                organizationId, installId), command);
     }
 
     @PostMapping("/{operationId}/commit-llm")
@@ -93,6 +100,27 @@ public class ExternalCreditProxyController {
         return result.queued() ? ResponseEntity.accepted().body(result)
                 : ResponseEntity.ok(result);
     }
+    private ExternalCreditProxyService.Context context(
+            long userId, UUID principalId, UUID billingSubjectId,
+            UUID organizationId, UUID installId) {
+        boolean complete = principalId != null && billingSubjectId != null && installId != null;
+        boolean empty = principalId == null && billingSubjectId == null && installId == null;
+        if (!complete && !empty) {
+            throw new org.springframework.web.server.ResponseStatusException(
+                    org.springframework.http.HttpStatus.BAD_REQUEST,
+                    "PARTIAL_IDENTITY_CONTEXT");
+        }
+        if (complete) {
+            return new ExternalCreditProxyService.Context(
+                    principalId, billingSubjectId, organizationId, installId);
+        }
+        CloudIdentityBindingService.BindingContext binding =
+                identities.context(userId, organizationId);
+        return new ExternalCreditProxyService.Context(
+                binding.principalId(), binding.billingSubjectId(),
+                binding.organizationId(), binding.installId());
+    }
+
     public record AmountCommitCommand(
             @NotNull BigDecimal actualCredits,
             String provider,

@@ -44,7 +44,7 @@ import java.util.UUID;
 @ConditionalOnProperty(name = "ce-catalog-relay.enabled", havingValue = "true", matchIfMissing = true)
 public class CloudCatalogRelayController {
 
-    static final String INSTALL_HEADER = "X-LiveContext-Install-Id";
+    static final String INSTALL_HEADER = "X-Install-ID";
 
     private final AuthClient authClient;
     private final CeCatalogRelayService relayService;

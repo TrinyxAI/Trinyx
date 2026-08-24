@@ -458,10 +458,11 @@ catalog:
   # Shared Ed25519 trust root for ALL signed bundles fetched from the cloud
   # (LLM model bundle AND API catalog bundle). Format: keyId=base64X509;...
   # Trust is provisioned explicitly from the Trinyx Cloud signing-key domain.
-  # Never inherit an upstream trust anchor after changing the bundle origin:
-  # an unconfigured installation records TRUST_UNCONFIGURED and fails closed.
-  # Public verification keys are not secrets, but must match the externally
-  # protected Cloud private signer. Multiple rotation keys are `;`-separated.
+  # Never inherit an upstream trust anchor after changing the bundle origin.
+  # Production must inject the matching Trinyx public ring. With no configured
+  # key, verification stays closed until the existing HTTPS signing-key bootstrap
+  # pins the first key from the configured Trinyx Cloud; no bundle is applied first.
+  # Multiple rotation keys are `;`-separated.
   bundle:
     trusted-keys: ${CATALOG_BUNDLE_TRUSTED_KEYS:}
     # LLM model-catalog bundle sync (cloud -> CE): keeps the CE model catalog (which

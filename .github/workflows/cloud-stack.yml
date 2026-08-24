@@ -212,6 +212,9 @@ jobs:
           node --check cli/bin/trinyx.mjs
           node cli/bin/trinyx.mjs --version
           grep -q '"trinyx": "bin/trinyx.mjs"' cli/package.json
+          POSTGRES_PASSWORD=trinyx-ci docker compose -f cli/assets/docker-compose.yml config > /tmp/trinyx-cli.rendered.yml
+          grep -q 'POSTGRES_PASSWORD: trinyx-ci' /tmp/trinyx-cli.rendered.yml
+          grep -q 'DB_PASSWORD: trinyx-ci' /tmp/trinyx-cli.rendered.yml
           node <<'NODE'
           const fs = require('fs');
           const version = require('./cli/package.json').version;

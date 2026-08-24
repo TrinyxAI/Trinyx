@@ -37,15 +37,20 @@ The following are not runtime network dependencies and are not blindly renamed:
 Changing those identifiers requires a separately versioned protocol/data migration.
 Their preservation does not make a request to a LiveContext host.
 
-## Remaining upstream artifact dependency
+## Trinyx-owned runtime artifacts
 
-The npm CLI's compatibility Compose asset still references prebuilt
-`ghcr.io/livecontext-ai/*` images for the CE backend, frontend, bridge and
-screenshot renderer. This is not a LiveContext control-plane/domain call and changing
-an image name before equivalent Trinyx images are published would break existing CLI
-installs. It is nevertheless a runtime supply-chain dependency and must be removed in
-a dedicated release step: build and publish byte-equivalent Trinyx images, verify
-migration/data compatibility, then change the pinned CLI asset references.
+The npm CLI Compose asset now references only Trinyx-owned image names for the CE
+backend, frontend, MCP bridge, screenshot renderer and websearch service. The
+`Build Trinyx CE runtime images` workflow builds every image on pull requests and
+publishes immutable commit tags plus `latest` only after a push to `main`.
+
+This removes the configured `ghcr.io/livecontext-ai/*` supply-chain dependency, but
+the new manifests do not become deployable merely because their names are present in
+source. Before any CLI release or production deployment, all five images must be
+successfully built, published under `ghcr.io/eddinerabii/*`, pulled by digest in a
+staging installation, and checked for database/volume compatibility. Until that
+external publication and verification succeeds, supply-chain independence remains a
+deployment blocker rather than a completed operational fact.
 
 ## Deployment note
 

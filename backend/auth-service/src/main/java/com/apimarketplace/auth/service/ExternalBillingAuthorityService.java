@@ -58,7 +58,7 @@ public class ExternalBillingAuthorityService {
                                  String keycloakSubject) {
         AuthorityScope scope = validateScope(actorUserId, installId, organizationId);
         String identityBinding = issueIdentity(scope.actor(), scope.payer(), installId,
-                organizationId, keycloakSubject);
+                organizationId, keycloakSubject, scope.organizationRole());
         Projection projection = issueProjection(scope.actor(), scope.payer(), installId,
                 organizationId, "UPSERT");
         return new AuthorityBundle(identityBinding, projection.assertion(), projection.sequence(),
@@ -80,7 +80,7 @@ public class ExternalBillingAuthorityService {
     }
 
     private String issueIdentity(User actor, User payer, UUID installId, UUID organizationId,
-                                 String keycloakSubject) {
+                                 String keycloakSubject, String organizationRole) {
         if (keycloakSubject == null || keycloakSubject.isBlank()) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "KEYCLOAK_SUBJECT_REQUIRED");
         }
@@ -112,6 +112,7 @@ public class ExternalBillingAuthorityService {
         claims.put("billingSubjectId", payer.getBillingSubjectId().toString());
         claims.put("keycloakSubject", keycloakSubject);
         claims.put("organizationId", organizationId.toString());
+        claims.put("organizationRole", organizationRole);
         claims.put("installId", installId.toString());
         String assertion = assertions.signIdentity(claims);
         if (current.isEmpty()) {
@@ -332,20 +333,25 @@ public class ExternalBillingAuthorityService {
     private AuthorityScope validateScope(long userId, UUID installId, UUID organizationId) {
         User user = users.findById(userId)
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "USER_NOT_FOUND"));
-        Integer membership = jdbc.queryForObject(
-                "SELECT count(*) FROM auth.organization_member WHERE user_id=? AND organization_id=?",
-                Integer.class, userId, organizationId);
+        List<String> membershipRoles = jdbc.query(
+                "SELECT role FROM auth.organization_member WHERE user_id=? AND organization_id=?",
+                (rs, row) -> rs.getString(1).toUpperCase(java.util.Locale.ROOT),
+                userId, organizationId);
         Integer installation = jdbc.queryForObject(
                 "SELECT count(*) FROM publication.ce_cloud_links WHERE tenant_id=? AND install_id=?",
                 Integer.class, userId, installId);
-        if (membership == null || membership != 1 || installation == null || installation != 1) {
+        if (membershipRoles.size() != 1 || installation == null || installation != 1) {
             throw new ResponseStatusException(HttpStatus.FORBIDDEN, "AUTHORITY_SCOPE_INVALID");
+        }
+        String organizationRole = membershipRoles.getFirst();
+        if (!java.util.Set.of("OWNER", "ADMIN", "MEMBER", "VIEWER").contains(organizationRole)) {
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "AUTHORITY_ROLE_INVALID");
         }
         Long ownerId = jdbc.queryForObject(
                 "SELECT owner_id FROM auth.organization WHERE id=?", Long.class, organizationId);
         User payer = users.findById(ownerId)
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "PAYER_NOT_FOUND"));
-        return new AuthorityScope(user, payer);
+        return new AuthorityScope(user, payer, organizationRole);
     }
 
     private void lock(String scope) {
@@ -357,7 +363,7 @@ public class ExternalBillingAuthorityService {
         if (value != null) limits.put(name, value.longValue());
     }
 
-    private record AuthorityScope(User actor, User payer) {}
+    private record AuthorityScope(User actor, User payer, String organizationRole) {}
 
     public record AuthorityBundle(String identityBinding, String entitlementProjection,
                                   long entitlementSequence, Instant entitlementExpiresAt) {}

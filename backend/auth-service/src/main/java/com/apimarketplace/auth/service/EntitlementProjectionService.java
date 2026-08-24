@@ -28,15 +28,18 @@ public class EntitlementProjectionService {
 
     private final JdbcTemplate jdbc;
     private final TrinyxAssertionService assertions;
+    private final com.fasterxml.jackson.databind.ObjectMapper json;
     private final String issuer;
     private final String audience;
 
     public EntitlementProjectionService(
             JdbcTemplate jdbc, TrinyxAssertionService assertions,
+            com.fasterxml.jackson.databind.ObjectMapper json,
             @Value("${trinyx.assertions.entitlement.issuer:https://app.trinyx.fr}") String issuer,
             @Value("${trinyx.assertions.entitlement.audience:trinyx-cloud}") String audience) {
         this.jdbc = jdbc;
         this.assertions = assertions;
+        this.json = json;
         this.issuer = issuer;
         this.audience = audience;
     }
@@ -110,8 +113,14 @@ public class EntitlementProjectionService {
         if (!Set.of("ACTIVE", "GRACE").contains(row.state())) {
             return Decision.denied("ENTITLEMENT_" + row.state());
         }
+        if (paidOperation && (feature == null || feature.isBlank())) {
+            return Decision.denied("PAID_FEATURE_REQUIRED");
+        }
+        if (feature != null && !feature.isBlank() && !BOOLEAN_FEATURES.contains(feature)) {
+            return Decision.denied("FEATURE_UNSUPPORTED");
+        }
         try {
-            JsonNode payload = new com.fasterxml.jackson.databind.ObjectMapper().readTree(row.payload());
+            JsonNode payload = json.readTree(row.payload());
             if (feature != null && BOOLEAN_FEATURES.contains(feature)
                     && !payload.path("features").path(feature).asBoolean(false)) {
                 return Decision.denied("FEATURE_NOT_ENTITLED");
@@ -148,7 +157,7 @@ public class EntitlementProjectionService {
         if (rows.size() != 1) return Optional.empty();
         try {
             ProjectionPayloadRow row = rows.getFirst();
-            JsonNode payload = new com.fasterxml.jackson.databind.ObjectMapper().readTree(row.payload());
+            JsonNode payload = json.readTree(row.payload());
             String planCode = payload.path("planCode").asText();
             if (planCode.isBlank()) return Optional.empty();
             String cadence = payload.path("cadence").asText(null);

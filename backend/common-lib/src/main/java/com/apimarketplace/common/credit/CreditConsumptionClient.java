@@ -1149,11 +1149,16 @@ public class CreditConsumptionClient {
                     operationId);
             return;
         }
-        settlementIntentStore.recordUnknown(operationId, Map.of(
-                "requestHash", value(requestHash),
-                "provider", value(provider),
-                "model", value(model),
-                "reason", value(reason)));
+        try {
+            settlementIntentStore.recordUnknown(operationId, Map.of(
+                    "requestHash", value(requestHash),
+                    "provider", value(provider),
+                    "model", value(model),
+                    "reason", value(reason)));
+        } catch (RuntimeException persistenceFailure) {
+            log.error("CRITICAL: ambiguous provider outcome could not be persisted operationId={}: {}",
+                    operationId, persistenceFailure.getMessage());
+        }
     }
 
     private boolean deliverDurably(ExternalSettlementIntentStore.Intent intent, HttpHeaders headers) {

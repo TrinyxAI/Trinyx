@@ -13,7 +13,8 @@ public interface ExternalSettlementIntentStore {
     record Intent(String action, UUID operationId, String url,
                   Map<String, Object> body, int attempts) {
         public Intent {
-            body = body == null ? Map.of() : Map.copyOf(body);
+            body = body == null ? Map.of() : java.util.Collections.unmodifiableMap(
+                    new java.util.LinkedHashMap<>(body));
         }
         public String key() { return action + ":" + operationId; }
     }

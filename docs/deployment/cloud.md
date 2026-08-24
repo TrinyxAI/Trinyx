@@ -228,6 +228,9 @@ KEYCLOAK_ADMIN_CLIENT_SECRET
 KEYCLOAK_BOOTSTRAP_ADMIN_USERNAME
 KEYCLOAK_BOOTSTRAP_ADMIN_PASSWORD
 CLOUD_GATEWAY_SECRET_KEY
+CATALOG_BUNDLE_SIGNING_KEY_PEM
+CATALOG_BUNDLE_SIGNING_PUBLIC_KEY
+CATALOG_BUNDLE_SIGNING_KEY_ID
 TRINYX_IDENTITY_VERIFICATION_KEYS
 TRINYX_ENTITLEMENT_VERIFICATION_KEYS
 TRINYX_S2S_SIGNING_KID
@@ -251,6 +254,7 @@ the opposite direction:
 ```text
 BILLING_AUTHORITY_MODE=paid-monolith-authority
 CLOUD_LINK_ENABLED=true
+CATALOG_BUNDLE_TRUSTED_KEYS=<Cloud catalog signing kid=base64-X509 public key>
 TRINYX_IDENTITY_SIGNING_KID=<active kid>
 TRINYX_IDENTITY_SIGNING_KEY=<PKCS8 private key>
 TRINYX_ENTITLEMENT_SIGNING_KID=<active kid>
@@ -276,6 +280,12 @@ MARKETPLACE_MODE=local
 BILLING_PROVIDER=none
 BILLING_AUTHORITY_MODE=external-paid-monolith
 ```
+
+The catalog trust root is explicit and fail-closed. The public key represented by
+`CATALOG_BUNDLE_TRUSTED_KEYS` must match the externally injected Cloud bundle
+signer; the repository does not inherit or trust the historical LiveContext key.
+Apply the same public ring to every linked CE/paid-monolith before enabling bundle
+sync, and keep the previous Trinyx public key only for a bounded rotation window.
 
 There is no Cloud Stripe requirement, Price ID, customer, subscription or
 wallet for linked users. Native billing code is retained for other modes.

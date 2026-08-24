@@ -133,6 +133,37 @@ public class CloudIdentityBindingService {
         return rows.getFirst().context();
     }
 
+    /**
+     * Authorizes an actor to use an active linked installation through the signed identity scope.
+     *
+     * <p>The actor does not need to own the historical {@code ce_link} row. Organization members
+     * may share the owner's installation and billing subject, but only when both the actor binding
+     * and the link owner's binding are ACTIVE and agree on issuer, install, organization and payer.
+     * This prevents cross-user, cross-organization and cross-payer scope confusion.
+     */
+    @Transactional(readOnly = true)
+    public boolean userMayUseActiveInstall(long cloudUserId, UUID installId) {
+        Integer matches = jdbc.queryForObject("""
+                SELECT count(*)
+                FROM auth.cloud_identity_binding actor_binding
+                JOIN auth.ce_link link
+                  ON link.install_id=actor_binding.install_id
+                 AND link.status='ACTIVE'
+                JOIN auth.cloud_identity_binding owner_binding
+                  ON owner_binding.issuer=actor_binding.issuer
+                 AND owner_binding.install_id=actor_binding.install_id
+                 AND owner_binding.organization_id=actor_binding.organization_id
+                 AND owner_binding.billing_subject_id=actor_binding.billing_subject_id
+                 AND owner_binding.cloud_user_id=link.user_id
+                 AND owner_binding.status='ACTIVE'
+                WHERE actor_binding.issuer=?
+                  AND actor_binding.cloud_user_id=?
+                  AND actor_binding.install_id=?
+                  AND actor_binding.status='ACTIVE'
+                """, Integer.class, issuer, cloudUserId, installId);
+        return matches != null && matches > 0;
+    }
+
     @Transactional
     public BindingContext applyRevocation(String compactJws) {
         JsonNode claims = assertions.verifyIdentity(compactJws, issuer, audience);

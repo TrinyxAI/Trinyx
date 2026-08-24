@@ -54,6 +54,20 @@ class CloudCreditAuthorityServiceTest {
     }
 
     @Test
+    void reserveRetryAfterTerminalSettlementIsRejectedWithoutAnotherHold() {
+        UUID operationId = UUID.randomUUID();
+        String hash = "9".repeat(64);
+        jdbc.row = new ExistingRow(operationId, hash, "settlement", "COMMITTED",
+                "{}", Instant.now().plusSeconds(3600), "LLM");
+
+        assertThatThrownBy(() -> service.reserve(reserve(operationId, hash)))
+                .isInstanceOf(ResponseStatusException.class)
+                .hasMessageContaining("OPERATION_ALREADY_COMMITTED");
+        verifyNoInteractions(credits);
+        assertThat(jdbc.updates).isZero();
+    }
+
+    @Test
     void duplicateIdenticalCommitReturnsStoredResultExactlyOnce() throws Exception {
         UUID operationId = UUID.randomUUID();
         String requestHash = "c".repeat(64);
@@ -64,7 +78,7 @@ class CloudCreditAuthorityServiceTest {
                 new BigDecimal("20"), false, "COMMITTED");
         jdbc.row = new ExistingRow(operationId, requestHash,
                 CanonicalJson.sha256(json.valueToTree(command)), "COMMITTED",
-                json.writeValueAsString(original), Instant.now().plusSeconds(3600));
+                json.writeValueAsString(original), Instant.now().plusSeconds(3600), "LLM");
 
         assertThat(service.commit(operationId, command)).isEqualTo(original);
         verifyNoInteractions(credits);
@@ -76,14 +90,14 @@ class CloudCreditAuthorityServiceTest {
         UUID operationId = UUID.randomUUID();
         String hash = "d".repeat(64);
         jdbc.row = new ExistingRow(operationId, hash, null, "RELEASED", "{}",
-                Instant.now().plusSeconds(3600));
+                Instant.now().plusSeconds(3600), "LLM");
         var commit = new CloudCreditAuthorityService.CommitRequest(
                 BigDecimal.ONE, "p", "m", null, null, null, hash);
         assertThatThrownBy(() -> service.commit(operationId, commit))
                 .hasMessageContaining("COMMIT_AFTER_RELEASE");
 
         jdbc.row = new ExistingRow(operationId, hash, null, "COMMITTED", "{}",
-                Instant.now().plusSeconds(3600));
+                Instant.now().plusSeconds(3600), "LLM");
         var release = new CloudCreditAuthorityService.ReleaseRequest("cancel", hash);
         assertThatThrownBy(() -> service.release(operationId, release))
                 .hasMessageContaining("RELEASE_AFTER_COMMIT");
@@ -147,7 +161,7 @@ class CloudCreditAuthorityServiceTest {
         UUID operationId = UUID.randomUUID();
         String hash = "1".repeat(64);
         jdbc.row = new ExistingRow(operationId, hash, null, "EXPIRED", "{}",
-                Instant.now().plusSeconds(3600));
+                Instant.now().plusSeconds(3600), "LLM");
         when(credits.settleExternalReservation("cloud-reservation:" + operationId,
                 BigDecimal.ONE, "openai", "gpt", true))
                 .thenReturn(CreditService.CommitOutcome.COMMITTED);
@@ -161,6 +175,37 @@ class CloudCreditAuthorityServiceTest {
                 "cloud-reservation:" + operationId, BigDecimal.ONE, "openai", "gpt", true);
     }
 
+    @Test
+    void webSearchUsesPaidAuthorityFixedPriceForHoldAndSettlement() {
+        UUID operationId = UUID.randomUUID();
+        String hash = "8".repeat(64);
+        when(credits.getWebSearchCreditsPerSearch()).thenReturn(new BigDecimal("4.5"));
+        when(credits.tryReserveMarkup(eq(42L), eq("cloud-reservation:" + operationId),
+                eq("websearch"), eq("default"), eq(new BigDecimal("4.5")), isNull(), eq(10),
+                eq("CLOUD"), eq(operationId.toString()), eq(false)))
+                .thenReturn(CreditService.CreditConsumeResult.success(
+                        new BigDecimal("4.5"), new BigDecimal("95.5")));
+        when(credits.settleExternalReservation(eq("cloud-reservation:" + operationId),
+                eq(new BigDecimal("4.5")), eq("websearch"), eq("default"), eq(false)))
+                .thenReturn(CreditService.CommitOutcome.COMMITTED);
+        when(credits.getBalance(42L)).thenReturn(new BigDecimal("95.5"));
+
+        var request = new CloudCreditAuthorityService.ReserveRequest(
+                operationId, UUID.randomUUID(), UUID.randomUUID(), UUID.randomUUID(),
+                UUID.randomUUID(), 7, "WEB_SEARCH", BigDecimal.ONE, BigDecimal.ONE,
+                "websearch", "default", hash);
+        service.reserve(request);
+        var result = service.commit(operationId,
+                new CloudCreditAuthorityService.CommitRequest(
+                        BigDecimal.ONE, "websearch", "default", "search-request",
+                        0L, 0L, hash));
+
+        assertThat(result.actualCredits()).isEqualByComparingTo("4.5");
+        verify(credits).settleExternalReservation(
+                "cloud-reservation:" + operationId, new BigDecimal("4.5"),
+                "websearch", "default", false);
+    }
+
     private static CloudCreditAuthorityService.ReserveRequest reserve(UUID id, String hash) {
         return new CloudCreditAuthorityService.ReserveRequest(id, UUID.randomUUID(),
                 UUID.randomUUID(), UUID.randomUUID(), UUID.randomUUID(), 7,
@@ -168,10 +213,11 @@ class CloudCreditAuthorityServiceTest {
     }
 
     private record ExistingRow(UUID operationId, String requestHash, String settlementHash,
-                               String state, String response, Instant lateSettlementUntil) {
+                               String state, String response, Instant lateSettlementUntil,
+                               String sourceType) {
         static ExistingRow reserved(UUID id, String hash, String response) {
             return new ExistingRow(id, hash, null, "RESERVED", response,
-                    Instant.now().plusSeconds(3600));
+                    Instant.now().plusSeconds(3600), "LLM");
         }
     }
 
@@ -203,6 +249,7 @@ class CloudCreditAuthorityServiceTest {
                         .thenReturn(Timestamp.from(row.lateSettlementUntil()));
                 when(rs.getLong("executor_user_id")).thenReturn(42L);
                 when(rs.getObject("organization_id", UUID.class)).thenReturn(UUID.randomUUID());
+                when(rs.getString("source_type")).thenReturn(row.sourceType());
                 return List.of(mapper.mapRow(rs, 0));
             } catch (Exception failure) {
                 throw new AssertionError(failure);
@@ -219,13 +266,13 @@ class CloudCreditAuthorityServiceTest {
             updates++;
             if (sql.contains("INSERT INTO auth.cloud_credit_operation")) {
                 row = new ExistingRow((UUID) args[0], (String) args[2], null, "RESERVED",
-                        (String) args[13], ((Timestamp) args[15]).toInstant());
+                        (String) args[13], ((Timestamp) args[15]).toInstant(), (String) args[8]);
             } else if (sql.contains("SET state=?")) {
                 row = new ExistingRow(row.operationId(), row.requestHash(), (String) args[5],
-                        (String) args[0], (String) args[6], row.lateSettlementUntil());
+                        (String) args[0], (String) args[6], row.lateSettlementUntil(), row.sourceType());
             } else if (sql.contains("SET state='RELEASED'")) {
                 row = new ExistingRow(row.operationId(), row.requestHash(), (String) args[0],
-                        "RELEASED", (String) args[1], row.lateSettlementUntil());
+                        "RELEASED", (String) args[1], row.lateSettlementUntil(), row.sourceType());
             }
             return 1;
         }

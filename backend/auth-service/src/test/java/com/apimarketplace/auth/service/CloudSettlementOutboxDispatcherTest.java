@@ -64,7 +64,16 @@ class CloudSettlementOutboxDispatcherTest {
         final List<String> sql = new ArrayList<>();
 
         @Override
+        public <T> List<T> query(String statement, RowMapper<T> mapper) {
+            return map(mapper);
+        }
+
+        @Override
         public <T> List<T> query(String statement, RowMapper<T> mapper, Object... args) {
+            return map(mapper);
+        }
+
+        private <T> List<T> map(RowMapper<T> mapper) {
             if (pending == null) return List.of();
             try {
                 ResultSet rs = mock(ResultSet.class);

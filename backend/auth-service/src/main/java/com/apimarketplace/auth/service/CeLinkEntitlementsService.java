@@ -29,12 +29,22 @@ public class CeLinkEntitlementsService {
     private final CeLinkRepository ceLinkRepository;
     private final PlanResolutionService planResolutionService;
     private final EntitlementProjectionService projectionService;
+    private final CloudIdentityBindingService identityBindingService;
     private final boolean externalPaidAuthority;
 
     /** Legacy/native billing constructor retained for focused unit tests and native Cloud mode. */
     public CeLinkEntitlementsService(CeLinkRepository ceLinkRepository,
                                      PlanResolutionService planResolutionService) {
-        this(ceLinkRepository, planResolutionService, null, "native");
+        this(ceLinkRepository, planResolutionService, null, null, "native");
+    }
+
+    /** Compatibility constructor for focused tests and callers that do not need delegated scope. */
+    public CeLinkEntitlementsService(
+            CeLinkRepository ceLinkRepository,
+            PlanResolutionService planResolutionService,
+            EntitlementProjectionService projectionService,
+            String billingAuthorityMode) {
+        this(ceLinkRepository, planResolutionService, projectionService, null, billingAuthorityMode);
     }
 
     @Autowired
@@ -42,10 +52,12 @@ public class CeLinkEntitlementsService {
             CeLinkRepository ceLinkRepository,
             PlanResolutionService planResolutionService,
             EntitlementProjectionService projectionService,
+            CloudIdentityBindingService identityBindingService,
             @Value("${billing.authority.mode:native}") String billingAuthorityMode) {
         this.ceLinkRepository = ceLinkRepository;
         this.planResolutionService = planResolutionService;
         this.projectionService = projectionService;
+        this.identityBindingService = identityBindingService;
         this.externalPaidAuthority = "external-paid-monolith".equalsIgnoreCase(billingAuthorityMode);
     }
 
@@ -53,7 +65,7 @@ public class CeLinkEntitlementsService {
      * Plan entitlements for the cloud account bound to {@code installId}, scoped
      * to {@code callerUserId} so one tenant can never read another's plan.
      * Returns {@link CeLinkEntitlements#none()} when the install is unknown,
-     * revoked, or not owned by the caller.
+     * revoked, or outside the caller's signed install/organization/payer scope.
      */
     @Transactional(readOnly = true)
     public CeLinkEntitlements entitlementsForCaller(Long callerUserId, UUID installId) {
@@ -62,14 +74,19 @@ public class CeLinkEntitlementsService {
         }
         return ceLinkRepository.findById(installId)
                 .filter(CeLink::isActive)
-                .filter(link -> callerUserId.equals(link.getUserId()))
+                .filter(link -> callerUserId.equals(link.getUserId())
+                        || (externalPaidAuthority
+                            && identityBindingService != null
+                            && identityBindingService.userMayUseActiveInstall(callerUserId, installId)))
                 .map(link -> {
                     if (externalPaidAuthority) {
                         if (projectionService == null) return CeLinkEntitlements.none();
-                        return projectionService.activeCeEntitlement(link.getUserId(), installId)
+                        // Resolve through the actor's own binding. The projection itself is
+                        // actor-free and shared by all members in the same payer/workspace scope.
+                        return projectionService.activeCeEntitlement(callerUserId, installId)
                                 .map(projected -> new CeLinkEntitlements(
                                         governingPlanCode(projected.planCode()),
-                                        link.getUserId(), projected.creditTierIndex(),
+                                        callerUserId, projected.creditTierIndex(),
                                         projected.cadence()))
                                 .orElseGet(CeLinkEntitlements::none);
                     }

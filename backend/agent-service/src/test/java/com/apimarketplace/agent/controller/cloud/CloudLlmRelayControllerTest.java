@@ -633,7 +633,8 @@ class CloudLlmRelayControllerTest {
                 .thenReturn(new CreditConsumptionClient.ExternalReservationResult(true, "hash", null));
         when(provider.complete(any())).thenReturn(llmResponse);
         when(creditClient.commitExternalLlm(any(UUID.class), eq("hash"), eq(PROVIDER), eq(MODEL),
-                org.mockito.ArgumentMatchers.isNull(), eq(11), eq(7))).thenReturn(true);
+                org.mockito.ArgumentMatchers.isNull(), eq(11), eq(7),
+                eq(new LlmCacheTokens(null, null, null, null)))).thenReturn(true);
 
         ResponseEntity<?> result = controller.complete(
                 CLOUD_USER_ID, INSTALL_ID, new CloudLlmRelayRequest(PROVIDER, request(false)));
@@ -645,7 +646,8 @@ class CloudLlmRelayControllerTest {
                 anyInt(), eq(256));
         order.verify(provider).complete(any());
         order.verify(creditClient).commitExternalLlm(any(UUID.class), eq("hash"),
-                eq(PROVIDER), eq(MODEL), org.mockito.ArgumentMatchers.isNull(), eq(11), eq(7));
+                eq(PROVIDER), eq(MODEL), org.mockito.ArgumentMatchers.isNull(), eq(11), eq(7),
+                eq(new LlmCacheTokens(null, null, null, null)));
         verify(creditClient, never()).consumeCredits(any(), any(), any(), any(), any(),
                 anyInt(), anyInt(), any(LlmCacheTokens.class));
     }
@@ -669,7 +671,8 @@ class CloudLlmRelayControllerTest {
                 .thenReturn(new CreditConsumptionClient.ExternalReservationResult(true, "hash", null));
         when(provider.complete(any())).thenReturn(response("done", 11, 7));
         when(creditClient.commitExternalLlm(any(UUID.class), eq("hash"), eq(PROVIDER), eq(MODEL),
-                org.mockito.ArgumentMatchers.isNull(), eq(11), eq(7))).thenReturn(true);
+                org.mockito.ArgumentMatchers.isNull(), eq(11), eq(7),
+                eq(new LlmCacheTokens(null, null, null, null)))).thenReturn(true);
 
         controller.complete(CLOUD_USER_ID, INSTALL_ID,
                 new CloudLlmRelayRequest(PROVIDER, uncapped));
@@ -698,7 +701,7 @@ class CloudLlmRelayControllerTest {
         assertThat(result.getStatusCode()).isEqualTo(HttpStatus.PAYMENT_REQUIRED);
         verify(provider, never()).complete(any());
         verify(creditClient, never()).commitExternalLlm(any(), any(), any(), any(), any(),
-                anyInt(), anyInt());
+                anyInt(), anyInt(), any(LlmCacheTokens.class));
     }
 
     /** Like {@link #request(boolean)} but with a caller-chosen model id (for the unmanaged-model guard). */

@@ -37,6 +37,16 @@ The following are not runtime network dependencies and are not blindly renamed:
 Changing those identifiers requires a separately versioned protocol/data migration.
 Their preservation does not make a request to a LiveContext host.
 
+## Remaining upstream artifact dependency
+
+The npm CLI's compatibility Compose asset still references prebuilt
+`ghcr.io/livecontext-ai/*` images for the CE backend, frontend, bridge and
+screenshot renderer. This is not a LiveContext control-plane/domain call and changing
+an image name before equivalent Trinyx images are published would break existing CLI
+installs. It is nevertheless a runtime supply-chain dependency and must be removed in
+a dedicated release step: build and publish byte-equivalent Trinyx images, verify
+migration/data compatibility, then change the pinned CLI asset references.
+
 ## Deployment note
 
 All URL defaults remain externally configurable. Production must still inject and

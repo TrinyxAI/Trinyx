@@ -52,6 +52,15 @@ public class CloudCreditAuthorityController {
         return authority.release(operationId, request);
     }
 
+    @PostMapping("/{operationId}/outcome-unknown")
+    public CloudCreditAuthorityService.SettlementResponse outcomeUnknown(
+            @RequestHeader(HttpHeaders.AUTHORIZATION) String authorization,
+            @PathVariable UUID operationId,
+            @Valid @RequestBody CloudCreditAuthorityService.OutcomeUnknownRequest request) {
+        authenticate(authorization);
+        return authority.outcomeUnknown(operationId, request);
+    }
+
     private void authenticate(String authorization) {
         try {
             var workload = workloadAuthentication.authenticate(authorization);

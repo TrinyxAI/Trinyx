@@ -100,8 +100,9 @@ class AuthenticatedGatewayFilterTest {
                 MockServerHttpRequest.post("/webhooks/unverified").build());
         StepVerifier.create(filter.filter(unknown, ignored -> Mono.error(
                 new AssertionError("unknown webhook must require authentication"))))
-                .verifyComplete();
-        assertThat(unknown.getResponse().getStatusCode()).isEqualTo(HttpStatus.UNAUTHORIZED);
+                .expectErrorMessage("JWT principal missing")
+                .verify();
+        assertThat(unknown.getResponse().getStatusCode()).isNull();
     }
 
     @Test

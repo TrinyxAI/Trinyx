@@ -81,6 +81,32 @@ class CloudIdentityBindingServiceTest {
                 .hasMessageContaining("IDENTITY_JTI_REPLAY");
     }
 
+    @Test
+    void multipleMembersKeepDistinctPrincipalsAndShareOnePayerWorkspace() {
+        UUID principalB = UUID.randomUUID();
+        UUID principalC = UUID.randomUUID();
+        ObjectNode memberB = assertion(1, "ACTIVE", UUID.randomUUID())
+                .put("principalId", principalB.toString())
+                .put("keycloakSubject", "member-b")
+                .put("organizationRole", "MEMBER");
+        ObjectNode memberC = assertion(1, "ACTIVE", UUID.randomUUID())
+                .put("principalId", principalC.toString())
+                .put("keycloakSubject", "member-c")
+                .put("organizationRole", "MEMBER");
+        when(assertions.verifyIdentity(anyString(), anyString(), anyString()))
+                .thenReturn(memberB, memberC);
+
+        var boundB = service.bind("member-b-jws", "member-b", 43L);
+        var boundC = service.bind("member-c-jws", "member-c", 44L);
+
+        assertThat(boundB.principalId()).isNotEqualTo(boundC.principalId());
+        assertThat(boundB.billingSubjectId()).isEqualTo(PAYER);
+        assertThat(boundC.billingSubjectId()).isEqualTo(PAYER);
+        assertThat(boundB.organizationId()).isEqualTo(ORG);
+        assertThat(boundC.organizationId()).isEqualTo(ORG);
+        assertThat(jdbc.membershipWrites).isEqualTo(2);
+    }
+
     private ObjectNode assertion(long revision, String status, UUID jti) {
         Instant now = Instant.now();
         ObjectNode claims = new ObjectMapper().createObjectNode();
@@ -122,6 +148,7 @@ class CloudIdentityBindingServiceTest {
         FakeRow current;
         FakeRow replay;
         int updates;
+        int membershipWrites;
         String lastUpdateSql = "";
 
         @Override
@@ -148,8 +175,14 @@ class CloudIdentityBindingServiceTest {
         }
 
         @Override
+        public <T> T queryForObject(String sql, Class<T> requiredType, Object... args) {
+            return requiredType.cast(1);
+        }
+
+        @Override
         public int update(String sql, Object... args) {
             updates++;
+            if (sql.contains("INSERT INTO auth.organization_member")) membershipWrites++;
             lastUpdateSql = sql;
             return 1;
         }

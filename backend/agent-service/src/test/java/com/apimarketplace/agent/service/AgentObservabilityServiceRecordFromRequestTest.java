@@ -110,7 +110,7 @@ class AgentObservabilityServiceRecordFromRequestTest {
         verify(executionRepository, atLeastOnce()).save(any(AgentExecutionEntity.class));
         verify(creditClient, never()).consumeCredits(
                 anyString(), anyString(), anyString(), anyString(), anyString(),
-                anyInt(), anyInt(), any());
+                anyInt(), anyInt(), any(com.apimarketplace.common.credit.LlmCacheTokens.class));
         verify(creditClient, never()).persistRejection(
                 anyString(), anyString(), anyString(), anyString(), anyString(),
                 anyInt(), anyInt(), anyString());
@@ -129,7 +129,7 @@ class AgentObservabilityServiceRecordFromRequestTest {
         service.recordFromRequest(req);
 
         verify(creditClient).consumeCredits(anyString(), anyString(), anyString(),
-                anyString(), anyString(), anyInt(), anyInt(), any());
+                anyString(), anyString(), anyInt(), anyInt(), any(com.apimarketplace.common.credit.LlmCacheTokens.class));
     }
 
     // ==========================================================================
@@ -1058,7 +1058,7 @@ class AgentObservabilityServiceRecordFromRequestTest {
             service.recordFromRequest(req);
 
             verify(creditClient, never()).persistRejection(
-                any(), any(), any(), any(), any(), anyInt(), anyInt(), any());
+                any(), any(), any(), any(), any(), anyInt(), anyInt(), any(com.apimarketplace.common.credit.LlmCacheTokens.class));
         }
     }
 

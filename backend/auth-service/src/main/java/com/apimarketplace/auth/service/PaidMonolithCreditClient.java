@@ -53,6 +53,14 @@ public class PaidMonolithCreditClient {
                 HttpMethod.POST, request, CloudCreditAuthorityService.SettlementResponse.class);
     }
 
+    public CloudCreditAuthorityService.SettlementResponse outcomeUnknown(
+            UUID operationId, CloudCreditAuthorityService.OutcomeUnknownRequest request) {
+        return exchange("/internal/v1/credit-reservations/" + operationId
+                        + "/outcome-unknown",
+                HttpMethod.POST, request,
+                CloudCreditAuthorityService.SettlementResponse.class);
+    }
+
     private <T> T exchange(String path, HttpMethod method, Object body, Class<T> responseType) {
         HttpHeaders headers = new HttpHeaders();
         headers.setContentType(MediaType.APPLICATION_JSON);

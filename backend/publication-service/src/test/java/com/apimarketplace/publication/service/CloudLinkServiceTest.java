@@ -1687,6 +1687,77 @@ class CloudLinkServiceTest {
         }
 
         @Test
+        @SuppressWarnings({"rawtypes", "unchecked"})
+        void relinkRevokesOldRegistryAndAuthorityBeforeReplacingLocalRow() {
+            AuthClient authority = mock(AuthClient.class);
+            CloudLinkService external = new CloudLinkService(
+                    cloudLinkRepository,
+                    "https://keycloak.example.com/realms/test",
+                    "test-client-id",
+                    "http://localhost:3000/callback",
+                    ENCRYPTION_KEY,
+                    "https://cloud.trinyx.fr/api",
+                    "1.4.0-test",
+                    new ObjectMapper(),
+                    restTemplate,
+                    clock,
+                    authority,
+                    true);
+            CeCloudLinkEntity old = buildLink();
+            old.setInstallId(INSTALL_ID);
+            old.setOrganizationId(ORGANIZATION_ID.toString());
+            old.setRegisteredAt(clock.instant());
+            old.setCachedAccessToken("old-access-token");
+            old.setTokenExpiresAt(clock.instant().plusSeconds(300));
+            AtomicReference<CeCloudLinkEntity> stored = new AtomicReference<>(old);
+            when(cloudLinkRepository.findByTenantId(TENANT_ID))
+                    .thenAnswer(invocation -> Optional.ofNullable(stored.get()));
+            doAnswer(invocation -> {
+                stored.compareAndSet(invocation.getArgument(0), null);
+                return null;
+            }).when(cloudLinkRepository).delete(any());
+            when(cloudLinkRepository.save(any())).thenAnswer(invocation -> {
+                CeCloudLinkEntity saved = invocation.getArgument(0);
+                if (saved.getInstallId() == null) saved.setInstallId(UUID.randomUUID());
+                stored.set(saved);
+                return saved;
+            });
+            when(restTemplate.exchange(
+                    eq("https://cloud.trinyx.fr/api/ce-link/" + INSTALL_ID),
+                    eq(HttpMethod.DELETE), any(HttpEntity.class), eq(Void.class)))
+                    .thenReturn(ResponseEntity.noContent().build());
+            when(authority.revokeExternalCloudAuthority(
+                    String.valueOf(TENANT_ID), INSTALL_ID, ORGANIZATION_ID))
+                    .thenReturn(new AuthClient.CloudAuthorityProjection(
+                            "signed-revocation", 2L, clock.instant().plusSeconds(900),
+                            "REVOKED", "state-hash"));
+            when(authority.getDefaultOrganizationIdForUser(String.valueOf(TENANT_ID)))
+                    .thenReturn(ORGANIZATION_ID.toString());
+
+            String state = external.generateAuthUrl(TENANT_ID).get("state");
+            external.receiveCallback("callback-code-123", state);
+            when(restTemplate.exchange(
+                    eq("https://keycloak.example.com/realms/test/protocol/openid-connect/token"),
+                    eq(HttpMethod.POST), any(HttpEntity.class), eq(Map.class)))
+                    .thenReturn(ResponseEntity.ok(Map.of(
+                            "access_token", jwtWithClaims("replacement-user", "replacement"),
+                            "refresh_token", "replacement-refresh",
+                            "expires_in", 300)));
+
+            external.linkAccount(TENANT_ID, state);
+
+            InOrder order = inOrder(restTemplate, authority, cloudLinkRepository);
+            order.verify(restTemplate).exchange(
+                    eq("https://cloud.trinyx.fr/api/ce-link/" + INSTALL_ID),
+                    eq(HttpMethod.DELETE), any(HttpEntity.class), eq(Void.class));
+            order.verify(authority).revokeExternalCloudAuthority(
+                    String.valueOf(TENANT_ID), INSTALL_ID, ORGANIZATION_ID);
+            order.verify(cloudLinkRepository).delete(old);
+            order.verify(cloudLinkRepository).save(argThat(link -> link != old));
+            assertThat(stored.get().getCloudUserId()).isEqualTo("replacement-user");
+        }
+
+        @Test
         void unlinkRevokesCloudRegistryThenWritesSignedPaidAuthorityTombstones() {
             AuthClient authority = mock(AuthClient.class);
             CloudLinkService external = new CloudLinkService(

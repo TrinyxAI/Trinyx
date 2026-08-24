@@ -11,7 +11,7 @@ https://{$PAID_MONOLITH_INTERNAL_HOST:billing-internal.trinyx.private} {
 
 	@wallet {
 		method POST
-		path /internal/v1/credit-reservations /internal/v1/credit-reservations/*/commit /internal/v1/credit-reservations/*/release
+		path /internal/v1/credit-reservations /internal/v1/credit-reservations/*/commit /internal/v1/credit-reservations/*/release /internal/v1/credit-reservations/*/outcome-unknown
 	}
 	handle @wallet {
 		reverse_proxy 127.0.0.1:8080 {

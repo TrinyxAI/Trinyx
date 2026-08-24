@@ -19,11 +19,11 @@ import java.util.Map;
  * CE-side REST API for managing the cloud account link.
  * Allows CE admins to link/unlink their LiveContext cloud account via OAuth.
  *
- * Only active when marketplace.mode=remote (CE instances).
+ * Only active when cloud-link.enabled=true (CE/paid-monolith instances).
  */
 @RestController
 @RequestMapping("/api/cloud-link")
-@ConditionalOnProperty(name = "marketplace.mode", havingValue = "remote")
+@ConditionalOnProperty(name = "cloud-link.enabled", havingValue = "true")
 public class CloudLinkController {
 
     private static final Logger logger = LoggerFactory.getLogger(CloudLinkController.class);

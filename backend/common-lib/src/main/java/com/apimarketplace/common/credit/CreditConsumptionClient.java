@@ -1011,7 +1011,12 @@ public class CreditConsumptionClient {
                 ? "cloudWebSearchRelay" : "";
     }
 
-    private boolean usesExternalAuthority() {
+    /**
+     * True when this runtime must reserve and settle against the external
+     * paid-monolith authority. Exposed for provider modules that must choose a
+     * pre-flight reservation path before any billable upstream call.
+     */
+    public boolean usesExternalAuthority() {
         return "external-paid-monolith".equalsIgnoreCase(billingAuthorityMode);
     }
 

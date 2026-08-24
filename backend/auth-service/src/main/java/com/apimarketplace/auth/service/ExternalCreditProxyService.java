@@ -114,7 +114,7 @@ public class ExternalCreditProxyService {
         return values.getFirst();
     }
 
-    @Transactional
+    @Transactional(noRollbackFor = ResponseStatusException.class)
     public SettlementResult commit(UUID operationId, CommitCommand command) {
         var request = new CloudCreditAuthorityService.CommitRequest(
                 command.actualCredits(), command.provider(), command.model(),
@@ -134,7 +134,7 @@ public class ExternalCreditProxyService {
         }
     }
 
-    @Transactional
+    @Transactional(noRollbackFor = ResponseStatusException.class)
     public SettlementResult release(UUID operationId, ReleaseCommand command) {
         var request = new CloudCreditAuthorityService.ReleaseRequest(
                 command.reason(), command.requestHash());

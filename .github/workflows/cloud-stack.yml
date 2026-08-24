@@ -133,6 +133,13 @@ jobs:
             exit 1
           fi
 
+          if grep -nE '^# LiveContext|npx livecontext|https?://([^/]+\.)?livecontext\.ai' README.md docker/README-CE.md; then
+            echo "Canonical user documentation still contains legacy branding/runtime guidance" >&2
+            exit 1
+          fi
+          grep -q 'legacy compatibility' README.md
+          grep -q 'cli/assets/docker-compose.yml' README.md
+
           if grep -Rni 'ghcr.io/livecontext-ai/' cli/assets docker/docker-compose.cloud.yml; then
             echo "Runtime image is still owned by the LiveContext registry namespace" >&2
             exit 1

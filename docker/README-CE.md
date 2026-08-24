@@ -1,4 +1,4 @@
-# LiveContext Community Edition - Docker Setup
+# Trinyx Community Edition - Docker Setup
 
 CE ships as a single self-hosted monolith with embedded auth (no Keycloak). The cloud
 SaaS edition runs a different topology (microservices + Keycloak) and is deployed via
@@ -14,16 +14,19 @@ GitHub Actions, not via this directory.
 
 - Docker Desktop 4.x+ (or Docker Engine 24+ with Compose v2)
 - 4 GB RAM minimum (8 GB recommended)
-- An LLM provider for agents: connect to LiveContext Cloud (recommended), or add your own OpenAI / Anthropic / Google key in the app
+- An LLM provider for agents: connect to Trinyx Cloud (recommended), or add your own OpenAI / Anthropic / Google key in the app
 
 ## Quick Start
 
-```bash
-# From the repo root. This PULLS the prebuilt images (no local build):
-docker compose up -d
+Use the canonical Trinyx-owned Compose bundle. The root `docker-compose.yml` remains
+untouched for legacy paid-monolith/development compatibility and is not the new-install path.
 
-# Wait ~2-3 minutes for the backend to initialize (Flyway migrations + tool registration)
-docker compose ps
+```bash
+# From the repo root. This pulls the release-pinned Trinyx images:
+docker compose -f cli/assets/docker-compose.yml up -d
+
+# Wait ~2-3 minutes for migrations and tool registration:
+docker compose -f cli/assets/docker-compose.yml ps
 # Wait until the "livecontext" service is "healthy" and "frontend" is up.
 
 # Open http://localhost:3000 and create an account (the first user becomes the admin)
@@ -64,9 +67,9 @@ Browser (:3000)
 | `livecontext-redis` | `redis:7-alpine` | 6379 (internal) | Cache, pub/sub, streaming |
 | `livecontext-minio` | `minio/minio` | 9000 (internal) | S3-compatible file storage |
 | `livecontext-minio-init` | `minio/mc` | - | Creates `workflow-files` bucket, then exits |
-| `livecontext-bridge` | `ghcr.io/livecontext-ai/livecontext-ce-bridge` | 8093 (internal) | CLI adapters + MCP tools |
-| `livecontext-app` | `ghcr.io/livecontext-ai/livecontext-ce` | **8080** | All backend services in one JAR |
-| `livecontext-frontend` | `ghcr.io/livecontext-ai/livecontext-ce-frontend` | **3000** | Next.js app (embedded auth) |
+| `livecontext-bridge` | `ghcr.io/eddinerabii/trinyx-ce-bridge` | 8093 (internal) | CLI adapters + MCP tools |
+| `livecontext-app` | `ghcr.io/eddinerabii/trinyx-ce` | **8080** | All backend services in one JAR |
+| `livecontext-frontend` | `ghcr.io/eddinerabii/trinyx-ce-frontend` | **3000** | Next.js app (embedded auth) |
 
 Only ports **3000** (frontend, the app) and **8080** (backend API) are exposed to the host.
 
@@ -192,7 +195,7 @@ browser-agent module in the app):
 
 ```bash
 # First run builds the Chromium image (a few minutes); later runs reuse it.
-docker compose --env-file docker/.env.ce.browser-agent up -d
+docker compose -f cli/assets/docker-compose.yml --env-file docker/.env.ce.browser-agent up -d
 ```
 
 - **Model:** the agent node picks the model per AI provider
@@ -224,7 +227,7 @@ which starts the `screenshot-renderer` container (`renderer` Docker profile) and
 points the app at it (`SCREENSHOT_RENDERER_URL=http://screenshot-renderer:8094`):
 
 ```bash
-docker compose --env-file docker/.env.ce.renderer up -d
+docker compose -f cli/assets/docker-compose.yml --env-file docker/.env.ce.renderer up -d
 ```
 
 - **Best-effort when off:** with the renderer disabled the interface node still
@@ -237,25 +240,25 @@ docker compose --env-file docker/.env.ce.renderer up -d
 
 ```bash
 # Start everything (pulls the prebuilt images)
-docker compose up -d
+docker compose -f cli/assets/docker-compose.yml up -d
 
 # Update to a newer release: the compose pins the image version, so pull the repo
 # (which carries the new pinned compose), then restart
 git pull
-docker compose up -d
+docker compose -f cli/assets/docker-compose.yml up -d
 
 # View backend / frontend logs
-docker compose logs -f livecontext
-docker compose logs -f frontend
+docker compose -f cli/assets/docker-compose.yml logs -f livecontext
+docker compose -f cli/assets/docker-compose.yml logs -f frontend
 
 # Stop everything
-docker compose down
+docker compose -f cli/assets/docker-compose.yml down
 
 # Stop and delete all data (fresh start)
-docker compose down -v
+docker compose -f cli/assets/docker-compose.yml down -v
 
 # Check health status
-docker compose ps
+docker compose -f cli/assets/docker-compose.yml ps
 ```
 
 ## Startup Order and Timing
@@ -304,7 +307,7 @@ services:
       NODE_EXTRA_CA_CERTS: /app/extra-ca/corp-root.pem
 ```
 
-4. `docker compose up -d livecontext bridge`. The app logs
+4. `docker compose -f cli/assets/docker-compose.yml up -d livecontext bridge`. The app logs
    `[CE-TLS] Imported extra CA ...` on boot and cloud syncs work again.
 
 ### Backend fails to start - Flyway errors
@@ -313,8 +316,8 @@ If you see `relation "..." already exists`, the DB volume has stale data from a 
 
 ```bash
 # Nuclear option: wipe everything and start fresh
-docker compose down -v
-docker compose up -d
+docker compose -f cli/assets/docker-compose.yml down -v
+docker compose -f cli/assets/docker-compose.yml up -d
 ```
 
 ### Backend fails - "Could not deserialize" tool registration error
@@ -325,7 +328,7 @@ If you see `Could not deserialize string to java type: java.util.List<java.lang.
 
 If `http://localhost:3000` shows a blank page or times out on Windows with Docker Desktop (WSL2 backend), the prebuilt image already ships with Next.js compression disabled (it conflicts with the WSL2 port proxy), so this should not happen. If it does, restart the frontend:
 ```bash
-docker compose restart frontend
+docker compose -f cli/assets/docker-compose.yml restart frontend
 ```
 
 ### Port conflicts
@@ -335,7 +338,7 @@ If ports 3000 or 8080 are already in use, change `FRONTEND_PORT` freely:
 ```bash
 # Move the app to another port (safe with the prebuilt image)
 FRONTEND_PORT=9870 \
-  docker compose up -d
+  docker compose -f cli/assets/docker-compose.yml up -d
 ```
 
 Then open `http://localhost:9870`. Changing `BACKEND_PORT` is also safe with the prebuilt
@@ -344,7 +347,7 @@ browser derives the backend origin from the address you opened the app with. Set
 they stay consistent, no rebuild:
 
 ```bash
-FRONTEND_PORT=9870 BACKEND_PORT=18080 docker compose up -d
+FRONTEND_PORT=9870 BACKEND_PORT=18080 docker compose -f cli/assets/docker-compose.yml up -d
 ```
 
 ### Backend out of memory
@@ -360,7 +363,7 @@ The backend has a 1.5 GB memory limit. If you see OOM errors:
 
 ```bash
 # Quick status
-docker compose ps
+docker compose -f cli/assets/docker-compose.yml ps
 
 # Backend health endpoint
 curl http://localhost:8080/actuator/health

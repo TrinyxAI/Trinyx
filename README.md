@@ -1,37 +1,37 @@
-# LiveContext
+# Trinyx
 
 **The AI automation platform.** One message in, a working automation out.
 
-Describe the job in chat and LiveContext builds it in front of you: a workflow you can read,
+Describe the job in chat and Trinyx builds it in front of you: a workflow you can read,
 AI agents with scoped access and budgets you control, and a small app your team actually uses.
 Chat, Workflow, Agent and App in one self-hosted platform. No code to write, nothing to stitch together.
 
 **An open-source, self-hosted alternative to n8n, Zapier and Make, with AI agents built in.**
 
-[![GitHub stars](https://img.shields.io/github/stars/livecontext-ai/livecontext-ce?style=flat&logo=github&color=e11d48)](https://github.com/livecontext-ai/livecontext-ce/stargazers)
-[![Latest release](https://img.shields.io/github/v/release/livecontext-ai/livecontext-ce?color=16a34a)](https://github.com/livecontext-ai/livecontext-ce/releases/latest)
-[![Discussions](https://img.shields.io/github/discussions/livecontext-ai/livecontext-ce?color=2496ED)](https://github.com/livecontext-ai/livecontext-ce/discussions)
+[![GitHub stars](https://img.shields.io/github/stars/livecontext-ai/livecontext-ce?style=flat&logo=github&color=e11d48)](https://github.com/eddinerabii/Trinyx/stargazers)
+[![Latest release](https://img.shields.io/github/v/release/livecontext-ai/livecontext-ce?color=16a34a)](https://github.com/eddinerabii/Trinyx/releases/latest)
+[![Discussions](https://img.shields.io/github/discussions/livecontext-ai/livecontext-ce?color=2496ED)](https://github.com/eddinerabii/Trinyx/discussions)
 [![License: AGPL v3](https://img.shields.io/badge/License-AGPL_v3-2496ED.svg)](LICENSE)
 ![Java 21](https://img.shields.io/badge/Java-21-e11d48.svg)
 ![Next.js](https://img.shields.io/badge/Next.js-16-000000.svg)
 ![Docker Compose](https://img.shields.io/badge/Docker%20Compose-ready-2496ED.svg)
 ![Self-hosted](https://img.shields.io/badge/self--hosted-%E2%9C%93-16a34a.svg)
 
-<a href="https://livecontext.ai">
+<a href="https://trinyx.fr">
   <picture>
     <source media="(prefers-color-scheme: dark)" srcset="frontend/public/landing/readme/hero-dark.webp" />
-    <img src="frontend/public/landing/readme/hero-light.webp" alt="LiveContext builds an automation from a single chat message, then runs it: support, creator, sales, marketing and recruiting" width="100%" />
+    <img src="frontend/public/landing/readme/hero-light.webp" alt="Trinyx builds an automation from a single chat message, then runs it: support, creator, sales, marketing and recruiting" width="100%" />
   </picture>
 </a>
 
-<sub>The builder, built by chat: one message in, a working automation out. Five real scenarios, one loop. <a href="frontend/public/landing/readme/hero-light.mp4">Watch it full size</a> &middot; <a href="https://livecontext.ai">Try the hosted version</a></sub>
+<sub>The builder, built by chat: one message in, a working automation out. Five real scenarios, one loop. <a href="frontend/public/landing/readme/hero-light.mp4">Watch it full size</a> &middot; <a href="https://trinyx.fr">Try the hosted version</a></sub>
 
-<sub>⭐ If LiveContext looks useful, <a href="https://github.com/livecontext-ai/livecontext-ce">give it a star</a>. It helps other teams find it.</sub>
+<sub>⭐ If Trinyx looks useful, <a href="https://github.com/eddinerabii/Trinyx">give it a star</a>. It helps other teams find it.</sub>
 
 ## Build it once. It runs as all four.
 
 Most teams wire together a chatbot, an automation tool, an app builder and an agent framework.
-LiveContext is all four on one canvas, every agent scoped, budgeted and audited, and you can see
+Trinyx is all four on one canvas, every agent scoped, budgeted and audited, and you can see
 exactly what each one did. The chat (shown above) builds it; here is what it runs as:
 
 <table>
@@ -78,23 +78,25 @@ This repository is the **Community Edition (CE)**: the full platform as a single
 The fastest way is one npm command (Docker must be installed and running):
 
 ```bash
-npx livecontext
+npx trinyx
 ```
 
 It pulls the images, boots the whole stack, and serves on **http://localhost:3000**.
-`npx livecontext down` stops it and `npx livecontext update` upgrades it. The CLI wraps
+`npx trinyx down` stops it and `npx trinyx update` upgrades it. The CLI wraps
 Docker Compose, it does not replace Docker.
 
-Or run **Docker Compose** directly from a clone of this repo:
+Or run the canonical Trinyx Compose bundle directly from a clone:
 
 ```bash
-# From the repo root:
-docker compose up -d
-
-# Watch it come up. The "livecontext" service runs database migrations and registers
-# its tools on first boot; wait until it reports "healthy" and "frontend" is up:
-docker compose ps
+# From the repo root. This deliberately selects the Trinyx-owned image bundle:
+docker compose -f cli/assets/docker-compose.yml up -d
+docker compose -f cli/assets/docker-compose.yml ps
 ```
+
+> The root `docker-compose.yml` is retained unchanged as a **legacy compatibility**
+> surface for existing paid-monolith/development installations. It is not the canonical
+> Trinyx CE distribution and may retain historical upstream image/container identifiers.
+> New CE installations must use `npx trinyx` or `cli/assets/docker-compose.yml`.
 
 Then open **http://localhost:3000** and create the first account (the first user becomes the admin).
 Two optional add-ons (interface screenshots/PDFs, and a browser agent with web search) are one env
@@ -119,10 +121,10 @@ Deploying through Portainer, Coolify, Dokploy or a similar platform: see
 Built for **linux/amd64**. The Compose file pulls from GHCR:
 
 ```
-ghcr.io/livecontext-ai/livecontext-ce
-ghcr.io/livecontext-ai/livecontext-ce-frontend
-ghcr.io/livecontext-ai/livecontext-ce-bridge
-ghcr.io/livecontext-ai/livecontext-ce-screenshot-renderer   # opt-in renderer profile
+ghcr.io/eddinerabii/trinyx-ce
+ghcr.io/eddinerabii/trinyx-ce-frontend
+ghcr.io/eddinerabii/trinyx-ce-bridge
+ghcr.io/eddinerabii/trinyx-ce-screenshot-renderer   # opt-in renderer profile
 ```
 
 Each release is tagged `vX.Y.Z` (immutable) plus `vX.Y`, `vX` and `latest` if you would
@@ -137,20 +139,20 @@ app setting in one shot):
 - **Interface screenshots and PDFs** (`renderer` profile). Adds a headless Playwright/Chromium
   sidecar (~1 GB image) so interface nodes can render a PNG screenshot or a PDF. Enable it with:
   ```bash
-  docker compose --env-file docker/.env.ce.renderer up -d
+  docker compose -f cli/assets/docker-compose.yml --env-file docker/.env.ce.renderer up -d
   ```
 - **Browser agent and web search** (`browser-agent` profile). Adds a Chromium browser-use container
   plus a SearXNG metasearch sidecar (~2 GB) so agents can browse pages (`agent_browse`) and run
   `web_search`. Enable it with:
   ```bash
-  docker compose --env-file docker/.env.ce.browser-agent up -d
+  docker compose -f cli/assets/docker-compose.yml --env-file docker/.env.ce.browser-agent up -d
   ```
 
 Run both by passing both env files (repeat `--env-file`). See [docker/README-CE.md](docker/README-CE.md)
 for details and tuning.
 
 Both add-ons need this repository: the env files above are not part of the `livecontext` npm
-package and `npx livecontext` passes no `--env-file`, so **neither can be enabled through npx**.
+package and `npx trinyx` passes no `--env-file`, so **neither can be enabled through npx**.
 Clone the repo and use `docker compose` directly to turn them on.
 
 ## What's in the box
@@ -168,7 +170,7 @@ Clone the repo and use `docker compose` directly to turn them on.
   S3-compatible object store and a lightweight tools bridge as its dependencies, plus the Next.js
   frontend. It all comes up with one `docker compose up`.
 
-## Why self-host LiveContext
+## Why self-host Trinyx
 
 - **You stay in control.** Per-agent credit budgets, scoped access, a full audit trail and per-agent
   metrics. No black box.
@@ -180,7 +182,7 @@ Clone the repo and use `docker compose` directly to turn them on.
 ## Managed version
 
 Prefer not to run your own infrastructure? The managed service, with an always-current integration
-catalog and hosted account management, lives at **[livecontext.ai](https://livecontext.ai)**. Those
+catalog and hosted account management, lives at **[livecontext.ai](https://trinyx.fr)**. Those
 hosted-only features are not part of the Community Edition.
 
 ## Building from source
@@ -194,21 +196,20 @@ To build the images yourself instead of pulling, use the per-service Dockerfiles
 
 Please report vulnerabilities privately. See [SECURITY.md](SECURITY.md).
 
-## License
+## License and upstream attribution
 
-LiveContext CE is licensed under the **GNU Affero General Public License v3.0
-(AGPL-3.0)**, see [LICENSE](LICENSE). You are free to use, self-host, modify and
-redistribute it, including commercially. One condition matters most: if you run a
-modified version as a network service, the AGPL requires you to make the
-corresponding source of your changes available to that service's users.
+Trinyx is distributed under the **GNU Affero General Public License v3.0
+(AGPL-3.0)**; see [LICENSE](LICENSE). If you run a modified version as a network
+service, the AGPL requires making the corresponding source available to its users.
 
-The **LiveContext** name and logo are trademarks of their owner and are not
-covered by the AGPL, see [TRADEMARKS](TRADEMARKS). Third-party components ship
-under their own licenses, see [NOTICE](NOTICE) and
-[THIRD_PARTY_NOTICES](THIRD_PARTY_NOTICES).
+Trinyx is a fork/rebrand built on the LiveContext Community Edition codebase.
+Historical package names, database schemas, protocol headers and migration identifiers
+are retained where changing them would break compatibility. The original LiveContext
+name and logo remain trademarks of their respective owner and are not Trinyx branding.
+See [NOTICE](NOTICE), [TRADEMARKS](TRADEMARKS) and
+[THIRD_PARTY_NOTICES](THIRD_PARTY_NOTICES) for legal attribution.
 
 ---
 
-⭐ **If LiveContext is useful to you, star the repo.** It is the simplest way to help other teams
-discover it, and it means a lot to a small team. Questions or ideas? Open a
-[Discussion](https://github.com/livecontext-ai/livecontext-ce/discussions).
+⭐ **If Trinyx is useful to you, star this repository.** Questions and proposals are
+welcome in [GitHub Discussions](https://github.com/eddinerabii/Trinyx/discussions).

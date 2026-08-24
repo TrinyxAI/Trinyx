@@ -2,7 +2,7 @@
 # Usage:
 #   git clone https://github.com/eddinerabii/Trinyx
 #   cd Trinyx
-#   docker compose up -d
+#   docker compose -f cli/assets/docker-compose.yml up -d
 #   Open http://localhost:3000
 #
 # This compose PULLS prebuilt images from GHCR (no local build). The image tag is
@@ -30,7 +30,7 @@
 #
 # Each one is turned on by an env file (`docker/.env.ce.renderer`, `docker/.env.ce.browser-agent`)
 # that sets the Docker profile AND the matching app setting in one shot:
-#   docker compose --env-file docker/.env.ce.renderer up -d
+#   docker compose -f cli/assets/docker-compose.yml --env-file docker/.env.ce.renderer up -d
 #
 # Those env files ship with the git repository, NOT with the npm package, and
 # `npx trinyx` passes no --env-file. So if you started this stack with npx,

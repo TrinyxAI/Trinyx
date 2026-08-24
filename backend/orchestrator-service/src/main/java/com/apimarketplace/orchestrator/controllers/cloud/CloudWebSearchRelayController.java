@@ -239,9 +239,9 @@ public class CloudWebSearchRelayController {
     }
 
     /**
-     * Shared link-ownership check for the relay endpoints. Returns a populated
+     * Shared signed-scope check for the relay endpoints. Returns a populated
      * error {@link ResponseEntity} to short-circuit, or {@code null} when the caller
-     * owns an active link to the install and the request may proceed.
+     * is authorized for the active install/organization/payer scope and the request may proceed.
      */
     @Nullable
     private ResponseEntity<Map<String, Object>> authorize(Long cloudUserId, String installId) {

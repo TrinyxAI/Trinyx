@@ -70,6 +70,9 @@ final class AuthenticatedGatewayFilter implements GlobalFilter, Ordered {
                     return identityClient.resolve(token, subject, binding, entitlement)
                             .flatMap(context -> {
                                 EntitlementPolicy policy = policyFor(path);
+                                if (policy.identityOnly()) {
+                                    return withBody(exchange, chain, subject, context);
+                                }
                                 return identityClient.authorize(
                                                 context, policy.feature(), policy.paidOperation())
                                         .flatMap(decision -> decision.allowed()
@@ -185,22 +188,29 @@ final class AuthenticatedGatewayFilter implements GlobalFilter, Ordered {
 
     private EntitlementPolicy policyFor(String path) {
         if (path.startsWith("/api/ce-llm/")) {
-            return new EntitlementPolicy("cloudLlmRelay", true);
+            return new EntitlementPolicy("cloudLlmRelay", true, false);
         }
         if (path.startsWith("/api/ce-websearch/") || path.startsWith("/cdp/")) {
-            return new EntitlementPolicy("cloudWebSearchRelay", true);
+            return new EntitlementPolicy("cloudWebSearchRelay", true, false);
         }
         if (path.startsWith("/api/skill-bundles/")) {
-            return new EntitlementPolicy("skillBundle", false);
+            return new EntitlementPolicy("skillBundle", false, false);
         }
         if (path.startsWith("/api/catalog-bundles/")
                 || path.startsWith("/api/ce-catalog/")) {
-            return new EntitlementPolicy("catalogBundle", false);
+            return new EntitlementPolicy("catalogBundle", false, false);
         }
-        return new EntitlementPolicy(null, false);
+        if (path.startsWith("/api/ce-link/")) {
+            // Registration, heartbeat, entitlement repair/read and unlink are control-plane
+            // lifecycle operations. Identity remains mandatory, while stale billing state must
+            // not prevent repair or revocation. The endpoint itself still returns no effective
+            // plan for an expired/revoked projection.
+            return new EntitlementPolicy(null, false, true);
+        }
+        return new EntitlementPolicy(null, false, false);
     }
 
-    private record EntitlementPolicy(String feature, boolean paidOperation) {}
+    private record EntitlementPolicy(String feature, boolean paidOperation, boolean identityOnly) {}
 
     @Override
     public int getOrder() {

@@ -23,15 +23,23 @@ class CreditConsumptionClientAmbiguousOutcomeTest {
         assertThat(store.details)
                 .containsEntry("requestHash", "hash")
                 .containsEntry("reason", "timeout");
-        assertThat(store.persistedDelivery).isFalse();
+        assertThat(store.persistedDelivery).isTrue();
+        assertThat(store.intent.action()).isEqualTo("OUTCOME_UNKNOWN");
+        assertThat(store.intent.operationId()).isEqualTo(operationId);
+        assertThat(store.intent.url()).endsWith(
+                "/" + operationId + "/outcome-unknown");
     }
 
     private static final class FakeStore implements ExternalSettlementIntentStore {
         UUID unknownOperation;
         Map<String, Object> details;
         boolean persistedDelivery;
+        Intent intent;
         public boolean durable() { return true; }
-        public void persist(Intent intent) { persistedDelivery = true; }
+        public void persist(Intent intent) {
+            persistedDelivery = true;
+            this.intent = intent;
+        }
         public List<Intent> claimDue(int limit) { return List.of(); }
         public void acknowledge(Intent intent) {}
         public void retry(Intent intent, String error) {}

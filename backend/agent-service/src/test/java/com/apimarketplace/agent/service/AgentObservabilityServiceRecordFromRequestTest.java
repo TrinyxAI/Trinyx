@@ -101,7 +101,9 @@ class AgentObservabilityServiceRecordFromRequestTest {
     @DisplayName("externally managed billing preserves observability without a second local debit")
     void externallyManagedBillingSkipsLocalWallet() {
         AgentObservabilityRequest req = buildBaseRequest();
+        req.setAgentType("browser_agent");
         req.setCreditExternallyManaged(true);
+        when(creditClient.usesExternalAuthority()).thenReturn(true);
 
         service.recordFromRequest(req);
 
@@ -112,6 +114,22 @@ class AgentObservabilityServiceRecordFromRequestTest {
         verify(creditClient, never()).persistRejection(
                 anyString(), anyString(), anyString(), anyString(), anyString(),
                 anyInt(), anyInt(), anyString());
+    }
+
+    @Test
+    @DisplayName("external marker cannot suppress native or non-browser billing")
+    void invalidExternalMarkerDoesNotSuppressBilling() {
+        AgentObservabilityRequest req = buildBaseRequest();
+        req.setCreditExternallyManaged(true);
+        when(creditClient.usesExternalAuthority()).thenReturn(false);
+        when(creditClient.consumeCredits(anyString(), anyString(), anyString(),
+                anyString(), anyString(), anyInt(), anyInt(), any()))
+                .thenReturn(Map.of("success", true, "creditsUsed", 1));
+
+        service.recordFromRequest(req);
+
+        verify(creditClient).consumeCredits(anyString(), anyString(), anyString(),
+                anyString(), anyString(), anyInt(), anyInt(), any());
     }
 
     // ==========================================================================

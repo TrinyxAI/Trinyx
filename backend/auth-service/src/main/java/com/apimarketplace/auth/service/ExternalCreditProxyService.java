@@ -3,6 +3,7 @@ package com.apimarketplace.auth.service;
 import com.apimarketplace.common.security.CanonicalJson;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.springframework.http.HttpStatus;
+import org.springframework.http.HttpStatusCode;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -123,7 +124,11 @@ public class ExternalCreditProxyService {
             var response = authority.commit(operationId, request);
             markSettled(operationId, response.state(), response);
             return new SettlementResult(response, false);
-        } catch (RuntimeException failure) {
+        } catch (PaidMonolithCreditClient.PermanentAuthorityException permanent) {
+            terminal(operationId, "COMMIT", command.requestHash(), request, permanent);
+            throw new ResponseStatusException(HttpStatusCode.valueOf(permanent.statusCode()),
+                    "BILLING_AUTHORITY_TERMINAL_REJECTION", permanent);
+        } catch (PaidMonolithCreditClient.RetryableAuthorityException failure) {
             queue(operationId, "COMMIT", command.requestHash(), request, failure);
             return new SettlementResult(null, true);
         }
@@ -137,7 +142,11 @@ public class ExternalCreditProxyService {
             var response = authority.release(operationId, request);
             markSettled(operationId, response.state(), response);
             return new SettlementResult(response, false);
-        } catch (RuntimeException failure) {
+        } catch (PaidMonolithCreditClient.PermanentAuthorityException permanent) {
+            terminal(operationId, "RELEASE", command.requestHash(), request, permanent);
+            throw new ResponseStatusException(HttpStatusCode.valueOf(permanent.statusCode()),
+                    "BILLING_AUTHORITY_TERMINAL_REJECTION", permanent);
+        } catch (PaidMonolithCreditClient.RetryableAuthorityException failure) {
             queue(operationId, "RELEASE", command.requestHash(), request, failure);
             return new SettlementResult(null, true);
         }
@@ -153,6 +162,25 @@ public class ExternalCreditProxyService {
                 UPDATE auth.cloud_settlement_outbox
                 SET status='DELIVERED', delivered_at=now(), last_error=NULL
                 WHERE operation_id=? AND status IN ('PENDING','PROCESSING','FAILED')
+                """, operationId);
+    }
+
+    private void terminal(UUID operationId, String action, String requestHash,
+                          Object payload, RuntimeException failure) {
+        jdbc.update("""
+                INSERT INTO auth.cloud_settlement_outbox
+                (id, operation_id, action, request_hash, payload, status, next_attempt_at,
+                 last_error, terminal_at)
+                VALUES (?,?,?,?,CAST(? AS jsonb),'DEAD',now(),?,now())
+                ON CONFLICT (operation_id, action, request_hash)
+                DO UPDATE SET status='DEAD', last_error=EXCLUDED.last_error,
+                    terminal_at=now()
+                """, UUID.randomUUID(), operationId, action, requestHash, write(payload),
+                bounded(failure.getMessage()));
+        jdbc.update("""
+                UPDATE auth.cloud_credit_operation
+                SET state='SETTLEMENT_FAILED', updated_at=now()
+                WHERE operation_id=? AND state IN ('RESERVED','EXPIRED')
                 """, operationId);
     }
 

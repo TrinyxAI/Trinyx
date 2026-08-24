@@ -59,6 +59,26 @@ class CloudSettlementOutboxDispatcherTest {
     }
 
     @Test
+    void ambiguousOutcomeIsDeliveredAsItsOwnAction() throws Exception {
+        UUID operationId = UUID.randomUUID();
+        var request = new CloudCreditAuthorityService.OutcomeUnknownRequest(
+                "timeout after dispatch", "a".repeat(64), "openai", "gpt");
+        jdbc.pending = new PendingData(UUID.randomUUID(), operationId,
+                "OUTCOME_UNKNOWN", json.writeValueAsString(request), 0);
+        when(authority.outcomeUnknown(eq(operationId), any()))
+                .thenReturn(new CloudCreditAuthorityService.SettlementResponse(
+                        operationId, "OUTCOME_UNKNOWN", BigDecimal.ZERO,
+                        BigDecimal.TEN, false, "RECONCILIATION_REQUIRED_HOLD_RETAINED"));
+
+        dispatcher.dispatch();
+
+        verify(authority).outcomeUnknown(eq(operationId), eq(request));
+        verify(resultWriter).delivered(eq(jdbc.pending.id()), eq(operationId),
+                eq("OUTCOME_UNKNOWN"), anyString());
+        verify(authority, never()).release(any(), any());
+    }
+
+    @Test
     void timeoutOrFiveHundredSchedulesBoundedRetry() throws Exception {
         jdbc.pending = pendingCommit();
         doThrow(new PaidMonolithCreditClient.RetryableAuthorityException("timeout", null))

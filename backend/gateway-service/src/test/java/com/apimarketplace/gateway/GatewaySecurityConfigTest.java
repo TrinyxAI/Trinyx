@@ -72,6 +72,9 @@ class GatewaySecurityConfigTest {
     @Test
     void publicAllowlistCoversOnlyAuditedSelfAuthenticatingRoutes() {
         assertThat(GatewayPublicRoutes.matches("/webhooks/stripe")).isTrue();
+        assertThat(GatewayPublicRoutes.matches("/actuator/health")).isTrue();
+        assertThat(GatewayPublicRoutes.matches("/actuator/health/readiness")).isTrue();
+        assertThat(GatewayPublicRoutes.matches("/api/public")).isTrue();
         assertThat(GatewayPublicRoutes.matches("/api/public/showcase")).isTrue();
         assertThat(GatewayPublicRoutes.matches("/api/shared/token")).isTrue();
         assertThat(GatewayPublicRoutes.matches("/api/files/proxy-signed")).isTrue();
@@ -80,7 +83,9 @@ class GatewaySecurityConfigTest {
         assertThat(GatewayPublicRoutes.matches("/api/v2/workflows/dag")).isFalse();
         assertThat(GatewayPublicRoutes.matches("/api/internal/credentials")).isFalse();
         assertThat(String.join(",", GatewayPublicRoutes.securityMatchers()))
-                .doesNotContain("/webhooks/**");
+                .doesNotContain("/webhooks/**")
+                .doesNotContain("/actuator/health**")
+                .contains("/actuator/health/**");
     }
 
     private Jwt jwt(String issuer, List<String> audience, Instant issuedAt, Instant expiresAt) {

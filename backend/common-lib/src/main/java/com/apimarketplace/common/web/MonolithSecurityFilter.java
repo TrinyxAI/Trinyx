@@ -156,7 +156,7 @@ public class MonolithSecurityFilter implements Filter {
         String claimedActiveOrgId = httpRequest.getHeader(ACTIVE_ORG_ID_HEADER);
         boolean loopbackRequest = isLoopbackRequest(httpRequest);
         boolean protectedMonolithPath = isProtectedMonolithPath(path);
-        boolean privateBillingWorkloadPath = isPrivateBillingWorkloadPath(path);
+        boolean privateBillingWorkloadPath = isPrivateBillingWorkloadPath(httpRequest.getMethod(), path);
 
         // The external billing authority has its own Ed25519 workload JWT verifier in the
         // controller. The embedded-user JWT parser below must never consume that token.
@@ -676,8 +676,8 @@ public class MonolithSecurityFilter implements Filter {
                path.startsWith("/api/credentials/by-integration/");
     }
 
-    private boolean isPrivateBillingWorkloadPath(String path) {
-        if (path == null) {
+    private boolean isPrivateBillingWorkloadPath(String method, String path) {
+        if (!"POST".equals(method) || path == null) {
             return false;
         }
         return path.equals("/internal/v1/credit-reservations")

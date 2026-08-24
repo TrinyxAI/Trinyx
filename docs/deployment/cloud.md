@@ -393,3 +393,24 @@ and remains externally operated. Provider API keys, SMTP, TLS/DNS, backups,
 observability and production secret injection are operator responsibilities.
 No standalone Cloud frontend is required for linked paid-monolith control-plane
 flows.
+
+
+## Private Cloud-to-paid wallet edge
+
+Wallet reservations must never traverse the public `app.trinyx.fr` virtual host. Deploy
+`docker/paid-monolith-internal/Caddyfile` on the paid-monolith host with these invariants:
+
+- bind the listener only to its private VPC address;
+- allow ingress only from the Cloud security group;
+- use a certificate trusted by the Cloud JVM;
+- route only the three POST reservation/commit/release shapes;
+- remove forwarding headers before the loopback hop to the monolith;
+- keep the public proxy forwarding `Forwarded` or `X-Forwarded-For`.
+
+`MonolithSecurityFilter` returns 404 for the wallet surface unless the request is a genuine
+non-forwarded loopback hop. It does not parse the Ed25519 bearer as an embedded user JWT;
+`WorkloadAuthenticationService` remains the sole token verifier in the controller.
+
+Set `PAID_MONOLITH_BILLING_URL=https://billing-internal.trinyx.private` in the Cloud secret
+environment. Do not publish that hostname in public DNS and do not add `/internal/v1/**`
+to the public app proxy.

@@ -4,6 +4,13 @@ on:
   pull_request:
     paths:
       - "docker/docker-compose.cloud.yml"
+      - "backend/common-lib/**"
+      - "backend/gateway-service/**"
+      - "backend/auth-service/**"
+      - "backend/publication-service/**"
+      - "backend/migration-service/**"
+      - "backend/monolith-service/**"
+      - "cli/**"
       - "docker/.env.cloud.example"
       - "docker/cloud/**"
       - "docs/deployment/cloud.md"
@@ -28,6 +35,7 @@ jobs:
           test -f docker/docker-compose.cloud.yml
           test -f docker/.env.cloud.example
           test -f docker/cloud/Caddyfile
+          test -f docker/paid-monolith-internal/Caddyfile
           test -f docker/cloud/keycloak/Dockerfile
           test -f docker/cloud/keycloak/trinyx-realm.json
           test -f docker/cloud/postgres/00-keycloak-schema.sql
@@ -90,32 +98,60 @@ jobs:
           grep -q '@billing_ingest' docker/cloud/Caddyfile
           docker run --rm             -v "${PWD}/docker/cloud/Caddyfile:/etc/caddy/Caddyfile:ro"             caddy:2.11.4-alpine             caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile
 
-      - name: Reject legacy runtime URLs and committed secrets
+      - name: Reject legacy runtime domains and committed secrets
         shell: bash
         run: |
           set -euo pipefail
-          if grep -Rni 'livecontext\.ai'             docker/docker-compose.cloud.yml             docker/.env.cloud.example             docker/cloud
-          then
-            echo "Legacy runtime URL found in Cloud stack" >&2
+
+          # Runtime source only. Historical migrations, tests, generated/build output,
+          # legal attribution and protocol compatibility identifiers are intentionally
+          # outside this URL gate.
+          set +e
+          legacy_runtime_matches="$(
+            grep -RniE \
+              --include='*.java' --include='*.kt' --include='*.ts' --include='*.tsx' \
+              --include='*.js' --include='*.mjs' --include='*.yml' --include='*.yaml' \
+              --include='*.properties' --include='*.json' \
+              'https?://(auth\.)?livecontext\.ai' \
+              backend frontend mcp websearch-service docker cli \
+              --exclude-dir=target --exclude-dir=node_modules --exclude-dir=test \
+              --exclude-dir=tests --exclude-dir=__tests__ --exclude-dir=migration 2>/dev/null
+          )"
+          grep_status=$?
+          set -e
+          if [[ ${grep_status} -gt 1 ]]; then
+            echo "Legacy runtime dependency scan failed" >&2
+            exit ${grep_status}
+          fi
+          if [[ -n "${legacy_runtime_matches}" ]]; then
+            echo "Legacy LiveContext runtime URL found:" >&2
+            printf '%s\n' "${legacy_runtime_matches}" >&2
             exit 1
           fi
-          if grep -En '(sk_live_|rk_live_|whsec_[A-Za-z0-9]{20,}|price_[A-Za-z0-9]{10,})'             docker/docker-compose.cloud.yml             docker/.env.cloud.example             docker/cloud/keycloak/trinyx-realm.json
+
+          if grep -En '(sk_live_|rk_live_|whsec_[A-Za-z0-9]{20,}|price_[A-Za-z0-9]{10,})' \
+            docker/docker-compose.cloud.yml \
+            docker/.env.cloud.example \
+            docker/cloud/keycloak/trinyx-realm.json
           then
             echo "A Stripe secret or Price ID appears to be committed" >&2
             exit 1
           fi
 
-      - name: Inventory legacy LiveContext domains
+      - name: Validate private paid-monolith wallet edge policy
         shell: bash
         run: |
           set -euo pipefail
-          grep -RniE --include='*.java' --include='*.kt' --include='*.ts' --include='*.tsx' \
-            --include='*.js' --include='*.mjs' --include='*.yml' --include='*.yaml' \
-            --include='*.properties' --include='*.json' \
-            '(^|[^A-Za-z0-9.-])(auth\.)?livecontext\.ai' \
-            backend frontend mcp websearch-service docker 2>/dev/null \
-            | grep -vE 'target/|node_modules/|docs/|__tests__/|/test/|schema|example' \
-            | head -n 300 || true
+          private_edge=docker/paid-monolith-internal/Caddyfile
+          grep -q 'billing-internal.trinyx.private' "${private_edge}"
+          grep -q '@wallet_reserve' "${private_edge}"
+          grep -q '@wallet_commit' "${private_edge}"
+          grep -q '@wallet_release' "${private_edge}"
+          grep -q 'respond 404' "${private_edge}"
+          if grep -q '/internal/v1/credit-reservations' docker/cloud/Caddyfile; then
+            echo "The public Cloud edge must not expose the paid-monolith wallet" >&2
+            exit 1
+          fi
 
       - name: Set up Java
         uses: actions/setup-java@v4

@@ -38,6 +38,7 @@ public class CloudIdentityBindingService {
         JsonNode claims = assertions.verifyIdentity(compactJws, issuer, audience);
         UUID installId = uuid(claims, "installId");
         UUID organizationId = uuid(claims, "organizationId");
+        String organizationRole = organizationRole(claims);
         UUID principalId = uuid(claims, "principalId");
         UUID billingSubjectId = uuid(claims, "billingSubjectId");
         UUID jti = uuid(claims, "jti");
@@ -80,21 +81,21 @@ public class CloudIdentityBindingService {
         }
 
         // Cross-system identity is authoritative only after signature + scope validation.
-        jdbc.update("UPDATE auth.users SET principal_id=?, updated_at=now() WHERE id=?",
-                principalId, cloudUserId);
+        jdbc.update("UPDATE auth.users SET principal_id=?, billing_subject_id=?, updated_at=now() WHERE id=?",
+                principalId, billingSubjectId, cloudUserId);
         try {
             UUID id = UUID.randomUUID();
             jdbc.update("""
                     INSERT INTO auth.cloud_identity_binding
-                    (id, issuer, audience, install_id, organization_id, principal_id,
-                     billing_subject_id, keycloak_subject, cloud_user_id, binding_revision,
+                    (id, issuer, audience, install_id, organization_id, organization_role,
+                     principal_id, billing_subject_id, keycloak_subject, cloud_user_id, binding_revision,
                      assertion_jti, assertion_jws, status, issued_at, not_before, expires_at)
-                    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,'ACTIVE',?,?,?)
-                    """, id, issuer, audience, installId, organizationId, principalId,
+                    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,'ACTIVE',?,?,?)
+                    """, id, issuer, audience, installId, organizationId, organizationRole, principalId,
                     billingSubjectId, keycloakSubject, cloudUserId, revision, jti, compactJws,
                     timestamp(claims, "iat"), timestamp(claims, "nbf"), timestamp(claims, "exp"));
             return new BindingContext(cloudUserId, keycloakSubject, principalId, billingSubjectId,
-                    organizationId, installId, revision, "ACTIVE");
+                    organizationId, organizationRole, installId, revision, "ACTIVE");
         } catch (DataIntegrityViolationException conflict) {
             throw new ResponseStatusException(HttpStatus.CONFLICT, "IDENTITY_BINDING_CONFLICT", conflict);
         }
@@ -104,15 +105,16 @@ public class CloudIdentityBindingService {
     public BindingContext context(String keycloakSubject) {
         var rows = jdbc.query("""
                 SELECT id, cloud_user_id, keycloak_subject, principal_id, billing_subject_id,
-                       organization_id, install_id, binding_revision, assertion_jws, status
+                       organization_id, organization_role, install_id, binding_revision, assertion_jws, status
                 FROM auth.cloud_identity_binding
                 WHERE issuer=? AND keycloak_subject=? AND status='ACTIVE'
                 """, (rs, row) -> new BindingRow(
                 rs.getObject("id", UUID.class), rs.getLong("cloud_user_id"),
                 rs.getString("keycloak_subject"), rs.getObject("principal_id", UUID.class),
                 rs.getObject("billing_subject_id", UUID.class),
-                rs.getObject("organization_id", UUID.class), rs.getObject("install_id", UUID.class),
-                rs.getLong("binding_revision"), rs.getString("assertion_jws"), rs.getString("status")), issuer, keycloakSubject);
+                rs.getObject("organization_id", UUID.class), rs.getString("organization_role"),
+                rs.getObject("install_id", UUID.class), rs.getLong("binding_revision"),
+                rs.getString("assertion_jws"), rs.getString("status")), issuer, keycloakSubject);
         if (rows.size() != 1) {
             throw new ResponseStatusException(HttpStatus.NOT_FOUND, "IDENTITY_NOT_BOUND");
         }
@@ -167,7 +169,8 @@ public class CloudIdentityBindingService {
                 """, revision, jti, compactJws, timestamp(claims, "iat"),
                 timestamp(claims, "nbf"), timestamp(claims, "exp"), current.id());
         return new BindingContext(current.cloudUserId(), keycloakSubject, principalId,
-                billingSubjectId, organizationId, installId, revision, "REVOKED");
+                billingSubjectId, organizationId, current.organizationRole(), installId,
+                revision, "REVOKED");
     }
 
     @Transactional
@@ -186,21 +189,22 @@ public class CloudIdentityBindingService {
     private BindingRow findByJti(UUID jti) {
         var rows = jdbc.query("""
                 SELECT id, cloud_user_id, keycloak_subject, principal_id, billing_subject_id,
-                       organization_id, install_id, binding_revision, assertion_jws, status
+                       organization_id, organization_role, install_id, binding_revision, assertion_jws, status
                 FROM auth.cloud_identity_binding WHERE assertion_jti=?
                 """, (rs, row) -> new BindingRow(
                 rs.getObject("id", UUID.class), rs.getLong("cloud_user_id"),
                 rs.getString("keycloak_subject"), rs.getObject("principal_id", UUID.class),
                 rs.getObject("billing_subject_id", UUID.class),
-                rs.getObject("organization_id", UUID.class), rs.getObject("install_id", UUID.class),
-                rs.getLong("binding_revision"), rs.getString("assertion_jws"), rs.getString("status")), jti);
+                rs.getObject("organization_id", UUID.class), rs.getString("organization_role"),
+                rs.getObject("install_id", UUID.class), rs.getLong("binding_revision"),
+                rs.getString("assertion_jws"), rs.getString("status")), jti);
         return rows.isEmpty() ? null : rows.getFirst();
     }
 
     private BindingRow findLatestForUpdate(UUID installId, UUID organizationId, UUID principalId) {
         String sql = """
                 SELECT id, cloud_user_id, keycloak_subject, principal_id, billing_subject_id,
-                       organization_id, install_id, binding_revision, assertion_jws, status
+                       organization_id, organization_role, install_id, binding_revision, assertion_jws, status
                 FROM auth.cloud_identity_binding
                 WHERE issuer=? AND install_id=? AND principal_id=?
                 """ + (organizationId == null ? "" : " AND organization_id=?")
@@ -216,6 +220,14 @@ public class CloudIdentityBindingService {
                 rs.getLong("binding_revision"), rs.getString("assertion_jws"),
                 rs.getString("status")), arguments);
         return rows.isEmpty() ? null : rows.getFirst();
+    }
+
+    private static String organizationRole(JsonNode claims) {
+        String role = required(claims, "organizationRole").toUpperCase(java.util.Locale.ROOT);
+        if (!java.util.Set.of("OWNER", "ADMIN", "MEMBER", "VIEWER").contains(role)) {
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "IDENTITY_ROLE_INVALID");
+        }
+        return role;
     }
 
     private static String required(JsonNode claims, String field) {
@@ -234,14 +246,16 @@ public class CloudIdentityBindingService {
 
     private record BindingRow(UUID id, long cloudUserId, String keycloakSubject,
                               UUID principalId, UUID billingSubjectId, UUID organizationId,
-                              UUID installId, long revision, String assertionJws, String status) {
+                              String organizationRole, UUID installId, long revision,
+                              String assertionJws, String status) {
         BindingContext context() {
             return new BindingContext(cloudUserId, keycloakSubject, principalId, billingSubjectId,
-                    organizationId, installId, revision, status);
+                    organizationId, organizationRole, installId, revision, status);
         }
     }
 
     public record BindingContext(long userId, String providerId, UUID principalId,
-                                 UUID billingSubjectId, UUID organizationId, UUID installId,
+                                 UUID billingSubjectId, UUID organizationId,
+                                 String organizationRole, UUID installId,
                                  long bindingRevision, String status) {}
 }

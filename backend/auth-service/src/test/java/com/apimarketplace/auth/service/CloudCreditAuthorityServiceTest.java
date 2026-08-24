@@ -158,6 +158,26 @@ class CloudCreditAuthorityServiceTest {
     }
 
     @Test
+    void ambiguousProviderOutcomeRetainsHoldAndIsIdempotent() {
+        UUID operationId = UUID.randomUUID();
+        String hash = "0".repeat(64);
+        jdbc.row = ExistingRow.reserved(operationId, hash, "{}");
+        when(credits.getBalance(42L)).thenReturn(BigDecimal.TEN);
+        var request = new CloudCreditAuthorityService.OutcomeUnknownRequest(
+                "provider timeout after dispatch", hash, "openai", "gpt");
+
+        var first = service.outcomeUnknown(operationId, request);
+        var retry = service.outcomeUnknown(operationId, request);
+
+        assertThat(first.state()).isEqualTo("OUTCOME_UNKNOWN");
+        assertThat(first.outcome()).isEqualTo("RECONCILIATION_REQUIRED_HOLD_RETAINED");
+        assertThat(retry).isEqualTo(first);
+        verify(credits, never()).releaseReservation(anyString(), anyString());
+        verify(credits, never()).settleExternalReservation(
+                anyString(), any(), anyString(), anyString(), anyBoolean());
+    }
+
+    @Test
     void expiredReservationCanSettleInsideLateWindow() {
         UUID operationId = UUID.randomUUID();
         String hash = "1".repeat(64);
@@ -428,10 +448,14 @@ class CloudCreditAuthorityServiceTest {
                 row = new ExistingRow((UUID) args[0], (String) args[2], null, "RESERVED",
                         (String) args[13], ((Timestamp) args[15]).toInstant(), (String) args[8],
                         (String) args[11], (String) args[12]);
-            } else if (sql.contains("SET state=?")) {
+            } else if (sql.contains("SET state=?, actual_credits")) {
                 row = new ExistingRow(row.operationId(), row.requestHash(), (String) args[11],
                         (String) args[0], (String) args[12], row.lateSettlementUntil(),
                         row.sourceType(), (String) args[2], (String) args[3]);
+            } else if (sql.contains("SET state=?, settlement_hash")) {
+                row = new ExistingRow(row.operationId(), row.requestHash(), (String) args[1],
+                        (String) args[0], (String) args[2], row.lateSettlementUntil(),
+                        row.sourceType(), row.provider(), row.model());
             } else if (sql.contains("SET state='RELEASED'")) {
                 row = new ExistingRow(row.operationId(), row.requestHash(), (String) args[0],
                         "RELEASED", (String) args[1], row.lateSettlementUntil(),

@@ -414,6 +414,9 @@ public class BrowserAgentModule extends WebJobModule {
                 throw failure;
             }
             settleExternalBrowserReservation(externalReservation, runResult);
+            if (externalReservation != null) {
+                runResult = withExternalBillingMetadata(runResult);
+            }
             // Plumb the substitution notice into the result so the LLM sees
             // which model was actually used. Only present when a swap happened.
             if (substitution.isPresent() && runResult.success()) {
@@ -510,6 +513,15 @@ public class BrowserAgentModule extends WebJobModule {
             log.error("Browser-agent external release was not acknowledged: operationId={}",
                     reservation.operationId());
         }
+    }
+
+    private static ToolExecutionResult withExternalBillingMetadata(
+            ToolExecutionResult result) {
+        Map<String, Object> metadata = new LinkedHashMap<>();
+        if (result.metadata() != null) metadata.putAll(result.metadata());
+        metadata.put("externalBillingManaged", true);
+        return new ToolExecutionResult(result.success(), result.data(), result.error(),
+                result.errorCode(), Map.copyOf(metadata));
     }
 
     private static ToolExecutionContext markExternalBillingManaged(

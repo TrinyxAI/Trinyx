@@ -121,6 +121,28 @@ class CloudIdentityBindingServiceTest {
         assertThat(jdbc.membershipWrites).isEqualTo(2);
     }
 
+    @Test
+    void organizationMemberMayUseOwnerInstallOnlyForExactActiveSignedScope() {
+        jdbc.installAccessCount = 1;
+
+        assertThat(service.userMayUseActiveInstall(43L, INSTALL)).isTrue();
+        assertThat(jdbc.lastQueryForObjectSql)
+                .contains("JOIN auth.ce_link link")
+                .contains("link.status='ACTIVE'")
+                .contains("owner_binding.status='ACTIVE'")
+                .contains("owner_binding.organization_id=actor_binding.organization_id")
+                .contains("owner_binding.billing_subject_id=actor_binding.billing_subject_id");
+        assertThat(jdbc.lastQueryForObjectArgs).containsExactly(
+                "https://app.trinyx.fr", 43L, INSTALL);
+    }
+
+    @Test
+    void mismatchedRevokedOrUnknownMemberScopeFailsClosed() {
+        jdbc.installAccessCount = 0;
+
+        assertThat(service.userMayUseActiveInstall(44L, INSTALL)).isFalse();
+    }
+
     private ObjectNode assertion(long revision, String status, UUID jti) {
         Instant now = Instant.now();
         ObjectNode claims = new ObjectMapper().createObjectNode();
@@ -164,7 +186,10 @@ class CloudIdentityBindingServiceTest {
         int updates;
         int membershipWrites;
         int ownerCount = 1;
+        int installAccessCount;
         String lastUpdateSql = "";
+        String lastQueryForObjectSql = "";
+        Object[] lastQueryForObjectArgs = new Object[0];
 
         @Override
         public <T> List<T> query(String sql, RowMapper<T> mapper, Object... args) {
@@ -191,7 +216,10 @@ class CloudIdentityBindingServiceTest {
 
         @Override
         public <T> T queryForObject(String sql, Class<T> requiredType, Object... args) {
-            return requiredType.cast(ownerCount);
+            lastQueryForObjectSql = sql;
+            lastQueryForObjectArgs = args;
+            int value = sql.contains("JOIN auth.ce_link link") ? installAccessCount : ownerCount;
+            return requiredType.cast(value);
         }
 
         @Override

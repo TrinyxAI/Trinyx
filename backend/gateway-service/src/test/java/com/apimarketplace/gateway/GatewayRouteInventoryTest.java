@@ -2,6 +2,8 @@ package com.apimarketplace.gateway;
 
 import org.junit.jupiter.api.Test;
 import org.springframework.core.io.ClassPathResource;
+import org.springframework.core.io.ByteArrayResource;
+import org.springframework.boot.env.YamlPropertySourceLoader;
 
 import java.nio.charset.StandardCharsets;
 import java.util.Map;
@@ -11,6 +13,14 @@ import static org.assertj.core.api.Assertions.assertThat;
 class GatewayRouteInventoryTest {
 
     private final String routes = load();
+
+    @Test
+    void applicationYamlIsSyntacticallyLoadableBySpring() throws Exception {
+        assertThat(new YamlPropertySourceLoader().load(
+                "gateway-routes",
+                new ByteArrayResource(routes.getBytes(StandardCharsets.UTF_8))))
+                .isNotEmpty();
+    }
 
     @Test
     void routesEveryCoreServiceThroughAnExplicitFamily() {

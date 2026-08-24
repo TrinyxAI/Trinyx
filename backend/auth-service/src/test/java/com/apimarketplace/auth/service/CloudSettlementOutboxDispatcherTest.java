@@ -23,6 +23,25 @@ class CloudSettlementOutboxDispatcherTest {
             new CloudSettlementOutboxDispatcher(jdbc, authority, json);
 
     @Test
+    void claimIsAtomicAndRemoteDeliveryDoesNotHoldATransaction() throws Exception {
+        jdbc.pending = pendingCommit();
+        when(authority.commit(eq(jdbc.pending.operationId()), any()))
+                .thenReturn(new CloudCreditAuthorityService.SettlementResponse(
+                        jdbc.pending.operationId(), "COMMITTED", BigDecimal.ONE,
+                        BigDecimal.TEN, false, "COMMITTED"));
+
+        dispatcher.dispatch();
+
+        assertThat(jdbc.claimSql)
+                .contains("SET status='PROCESSING'")
+                .contains("FOR UPDATE SKIP LOCKED")
+                .contains("RETURNING id, operation_id");
+        assertThat(CloudSettlementOutboxDispatcher.class.getDeclaredMethod("dispatch")
+                .getAnnotation(org.springframework.transaction.annotation.Transactional.class))
+                .isNull();
+    }
+
+    @Test
     void permanentFourHundredConflictMovesToDeadLetterWithoutRetry() throws Exception {
         jdbc.pending = pendingCommit();
         doThrow(new PaidMonolithCreditClient.PermanentAuthorityException(
@@ -62,14 +81,17 @@ class CloudSettlementOutboxDispatcherTest {
     private static final class FakeJdbc extends JdbcTemplate {
         PendingData pending;
         final List<String> sql = new ArrayList<>();
+        String claimSql;
 
         @Override
         public <T> List<T> query(String statement, RowMapper<T> mapper) {
+            claimSql = statement;
             return map(mapper);
         }
 
         @Override
         public <T> List<T> query(String statement, RowMapper<T> mapper, Object... args) {
+            claimSql = statement;
             return map(mapper);
         }
 

@@ -190,7 +190,7 @@ final class AuthenticatedGatewayFilter implements GlobalFilter, Ordered {
         if (path.startsWith("/api/ce-llm/")) {
             return new EntitlementPolicy("cloudLlmRelay", true, false);
         }
-        if (path.startsWith("/api/ce-websearch/") || path.startsWith("/cdp/")) {
+        if (path.startsWith("/api/ce-websearch/")) {
             return new EntitlementPolicy("cloudWebSearchRelay", true, false);
         }
         if (path.startsWith("/api/skill-bundles/")) {

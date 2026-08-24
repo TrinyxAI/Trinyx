@@ -167,6 +167,14 @@ and reject bodies above 10 MiB by default.
 All externally supplied identity, role, assertion and HMAC headers are removed
 before trusted values are added.
 
+`X-LiveContext-Install-Id` remains accepted at the public edge only as a
+backward-compatible, untrusted installation selector. `X-Trinyx-Install-ID` and an
+inbound `X-Install-ID` are treated the same way. The gateway resolves the selector
+against the Keycloak subject's ACTIVE signed binding, rejects conflicting selectors, removes
+all selector headers, and injects only the resolved HMAC-bound `X-Install-ID` downstream.
+When a subject owns several installations, a selector (or a fresh signed binding during
+link/rebind) is mandatory; the gateway never chooses an arbitrary installation.
+
 ## Routing
 
 Only `cloud-edge` publishes a loopback application port. It forwards all

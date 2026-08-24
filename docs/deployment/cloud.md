@@ -174,7 +174,7 @@ Cloud application traffic to gateway-service.
 |---|---|---|
 | `/healthz`, `/actuator/health` | gateway | public |
 | `/api/ce/releases/latest` | auth-service | public release metadata only |
-| `/webhooks/**` | auth-service | provider signature, no browser JWT |
+| `/webhooks/stripe` | auth-service | Stripe signature, no browser JWT |
 | `/api/catalog/public/bundles/**` | catalog-service | explicit public allowlist |
 | `/api/ce-link/**` | auth-service | JWT + signed identity; lifecycle/repair is identity-only, entitlement response itself fails closed |
 | `/api/users/**`, `/api/billing/**`, `/api/credits/**` | auth-service | JWT + projection |
@@ -215,7 +215,7 @@ TRINYX_ENTITLEMENT_VERIFICATION_KEYS
 TRINYX_S2S_SIGNING_KID
 TRINYX_S2S_SIGNING_KEY
 TRINYX_S2S_VERIFICATION_KEYS
-PAID_MONOLITH_BILLING_URL=https://app.trinyx.fr
+PAID_MONOLITH_BILLING_URL=https://billing-internal.trinyx.private
 ```
 
 Cloud S2S direction is fixed by Compose:

@@ -75,6 +75,27 @@ class AuthenticatedGatewayFilterTest {
     }
 
     @Test
+    void onlyStripeWebhookIsPublic() {
+        AuthenticatedGatewayFilter filter = new AuthenticatedGatewayFilter(null, 1024);
+        AtomicReference<ServerWebExchange> forwarded = new AtomicReference<>();
+
+        MockServerWebExchange stripe = MockServerWebExchange.from(
+                MockServerHttpRequest.post("/webhooks/stripe").build());
+        StepVerifier.create(filter.filter(stripe, candidate -> {
+            forwarded.set(candidate);
+            return Mono.empty();
+        })).verifyComplete();
+        assertThat(forwarded.get()).isNotNull();
+
+        MockServerWebExchange unknown = MockServerWebExchange.from(
+                MockServerHttpRequest.post("/webhooks/unverified").build());
+        StepVerifier.create(filter.filter(unknown, ignored -> Mono.error(
+                new AssertionError("unknown webhook must require authentication"))))
+                .verifyComplete();
+        assertThat(unknown.getResponse().getStatusCode()).isEqualTo(HttpStatus.UNAUTHORIZED);
+    }
+
+    @Test
     void selectedOrganizationMustBeARealMembership() {
         GatewayUserContext context = new GatewayUserContext(
                 1L, "subject", Set.of("USER"), "org-a", "OWNER",

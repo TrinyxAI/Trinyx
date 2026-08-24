@@ -332,10 +332,10 @@ public class CloudCreditAuthorityService {
     }
 
     private static boolean isLlmSource(String sourceType) {
-        // CE relay carries raw provider token counters and can therefore be
-        // authoritatively repriced. Browser-agent execution currently reports an
-        // aggregate provider cost through the generic amount protocol.
-        return "CE_LLM_RELAY".equalsIgnoreCase(sourceType);
+        // Both relay paths carry provider/model plus raw token counters. Amounts
+        // supplied by Cloud are placeholders only: the paid authority owns pricing.
+        return "CE_LLM_RELAY".equalsIgnoreCase(sourceType)
+                || "BROWSER_AGENT_EXECUTION".equalsIgnoreCase(sourceType);
     }
 
     private static Integer toInt(Long value, String field) {

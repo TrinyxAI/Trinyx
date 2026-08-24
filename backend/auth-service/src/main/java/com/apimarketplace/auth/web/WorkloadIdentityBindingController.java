@@ -28,7 +28,13 @@ public class WorkloadIdentityBindingController {
             @RequestHeader("Authorization") String authorization,
             @Valid @RequestBody TombstoneRequest request) {
         authenticate(authorization);
-        return bindings.applyRevocation(request.assertion());
+        try {
+            return bindings.applyRevocation(request.assertion());
+        } catch (IllegalArgumentException invalidAssertion) {
+            throw new org.springframework.web.server.ResponseStatusException(
+                    org.springframework.http.HttpStatus.BAD_REQUEST,
+                    "INVALID_IDENTITY_ASSERTION", invalidAssertion);
+        }
     }
 
     private void authenticate(String authorization) {

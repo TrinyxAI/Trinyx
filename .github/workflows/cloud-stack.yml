@@ -212,6 +212,22 @@ jobs:
           node --check cli/bin/trinyx.mjs
           node cli/bin/trinyx.mjs --version
           grep -q '"trinyx": "bin/trinyx.mjs"' cli/package.json
+          node <<'NODE'
+          const fs = require('fs');
+          const version = require('./cli/package.json').version;
+          const compose = fs.readFileSync('cli/assets/docker-compose.yml', 'utf8');
+          const images = [
+            'trinyx-ce', 'trinyx-ce-bridge', 'trinyx-ce-frontend',
+            'trinyx-ce-screenshot-renderer', 'trinyx-ce-websearch'
+          ];
+          for (const image of images) {
+            const expected = `ghcr.io/eddinerabii/${image}:v${version}`;
+            if (!compose.includes(expected)) throw new Error(`missing pinned image ${expected}`);
+          }
+          if (/ghcr\.io\/eddinerabii\/trinyx-ce[^\s}]*:latest/.test(compose)) {
+            throw new Error('CLI runtime images must not use latest');
+          }
+          NODE
           grep -Fq '[mcp_servers.trinyx.http_headers]' frontend/app/\[locale\]/app/settings/mcp-server/page.tsx
           if grep -RniF '[mcp_servers.livecontext' frontend; then
             echo "User-facing MCP snippets must use the Trinyx server identifier" >&2

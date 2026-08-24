@@ -93,10 +93,11 @@ CREATE TABLE IF NOT EXISTS auth.identity_binding_outbox (
     event_type VARCHAR(32) NOT NULL CHECK (event_type IN ('REVOKE')),
     signed_jws TEXT NOT NULL,
     status VARCHAR(16) NOT NULL DEFAULT 'PENDING'
-        CHECK (status IN ('PENDING', 'PROCESSING', 'DELIVERED', 'FAILED')),
+        CHECK (status IN ('PENDING', 'PROCESSING', 'DELIVERED', 'FAILED', 'DEAD')),
     attempt_count INTEGER NOT NULL DEFAULT 0,
     next_attempt_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     delivered_at TIMESTAMPTZ,
+    terminal_at TIMESTAMPTZ,
     last_error VARCHAR(2000),
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     UNIQUE (aggregate_key, binding_revision)
@@ -126,11 +127,12 @@ CREATE TABLE IF NOT EXISTS auth.entitlement_outbox (
     event_type VARCHAR(32) NOT NULL CHECK (event_type IN ('UPSERT', 'REVOKE', 'REFRESH')),
     signed_jws TEXT NOT NULL,
     status VARCHAR(16) NOT NULL DEFAULT 'PENDING'
-        CHECK (status IN ('PENDING', 'PROCESSING', 'DELIVERED', 'FAILED')),
+        CHECK (status IN ('PENDING', 'PROCESSING', 'DELIVERED', 'FAILED', 'DEAD')),
     attempt_count INTEGER NOT NULL DEFAULT 0,
     next_attempt_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     processing_started_at TIMESTAMPTZ,
     delivered_at TIMESTAMPTZ,
+    terminal_at TIMESTAMPTZ,
     last_error VARCHAR(2000),
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     UNIQUE (aggregate_key, sequence)

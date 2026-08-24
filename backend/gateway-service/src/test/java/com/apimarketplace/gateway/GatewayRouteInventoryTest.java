@@ -1,0 +1,80 @@
+package com.apimarketplace.gateway;
+
+import org.junit.jupiter.api.Test;
+import org.springframework.core.io.ClassPathResource;
+
+import java.nio.charset.StandardCharsets;
+import java.util.Map;
+
+import static org.assertj.core.api.Assertions.assertThat;
+
+class GatewayRouteInventoryTest {
+
+    private final String routes = load();
+
+    @Test
+    void routesEveryCoreServiceThroughAnExplicitFamily() {
+        Map<String, String> required = Map.ofEntries(
+                Map.entry("auth-application", "AUTH_SERVICE_URL"),
+                Map.entry("catalog-application", "CATALOG_SERVICE_URL"),
+                Map.entry("agent-application", "AGENT_SERVICE_URL"),
+                Map.entry("conversation-application", "CONVERSATION_SERVICE_URL"),
+                Map.entry("datasource-application", "DATASOURCE_SERVICE_URL"),
+                Map.entry("interface-application", "INTERFACE_SERVICE_URL"),
+                Map.entry("trigger-application", "TRIGGER_SERVICE_URL"),
+                Map.entry("publication-application", "PUBLICATION_SERVICE_URL"),
+                Map.entry("orchestrator-application", "ORCHESTRATOR_SERVICE_URL"),
+                Map.entry("storage-application", "STORAGE_SERVICE_URL"));
+        required.forEach((id, target) -> assertThat(route(id)).contains(target, "Path="));
+    }
+
+    @Test
+    void workflowDagAndKnownCollisionsReachTheirFacadeServices() {
+        assertThat(route("orchestrator-workflows-v2"))
+                .contains("ORCHESTRATOR_SERVICE_URL", "Path=/api/v2/workflows/**");
+        assertThat(route("conversation-admin"))
+                .contains("CONVERSATION_SERVICE_URL", "/api/admin/conversations/**");
+        assertThat(route("publication-ce-tls"))
+                .contains("PUBLICATION_SERVICE_URL", "/api/ce/tls/**");
+        assertThat(route("orchestrator-storage-facade"))
+                .contains("ORCHESTRATOR_SERVICE_URL", "/api/storage/explorer/**");
+        assertThat(routes.indexOf("- id: orchestrator-workflows-v2"))
+                .isLessThan(routes.indexOf("- id: orchestrator-application"));
+    }
+
+    @Test
+    void servicePrefixedCompatibilityIsExplicitAndRewritten() {
+        for (String service : new String[]{"auth", "catalog", "agent", "conversation",
+                "datasource", "interface", "trigger", "publication", "orchestrator", "storage"}) {
+            assertThat(route("prefixed-" + service + "-service"))
+                    .contains("Path=/api/" + service + "-service/api/**")
+                    .contains("RewritePath=/api/" + service + "-service/");
+        }
+    }
+
+    @Test
+    void noCatchAllOrInternalRouteIsExposed() {
+        assertThat(routes)
+                .doesNotContain("Path=/api/**")
+                .doesNotContain("Path=/internal/**")
+                .doesNotContain("Path=/api/internal/**")
+                .doesNotContain("Path=/webhooks/**");
+        assertThat(route("auth-stripe-webhook")).contains("Path=/webhooks/stripe");
+    }
+
+    private String route(String id) {
+        String marker = "            - id: " + id;
+        int start = routes.indexOf(marker);
+        assertThat(start).as("route %s exists", id).isGreaterThanOrEqualTo(0);
+        int end = routes.indexOf("\n            - id:", start + marker.length());
+        return routes.substring(start, end < 0 ? routes.length() : end);
+    }
+
+    private static String load() {
+        try (var in = new ClassPathResource("application.yml").getInputStream()) {
+            return new String(in.readAllBytes(), StandardCharsets.UTF_8);
+        } catch (Exception failure) {
+            throw new AssertionError(failure);
+        }
+    }
+}

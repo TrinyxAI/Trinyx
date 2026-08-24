@@ -79,6 +79,7 @@ class CloudIdentityBindingServiceTest {
         claims.put("billingSubjectId", PAYER.toString());
         claims.put("keycloakSubject", SUBJECT);
         claims.put("organizationId", ORG.toString());
+        claims.put("organizationRole", "OWNER");
         claims.put("installId", INSTALL.toString());
         return claims;
     }
@@ -117,6 +118,7 @@ class CloudIdentityBindingServiceTest {
                 when(rs.getObject("principal_id", UUID.class)).thenReturn(source.principalId());
                 when(rs.getObject("billing_subject_id", UUID.class)).thenReturn(source.billingSubjectId());
                 when(rs.getObject("organization_id", UUID.class)).thenReturn(source.organizationId());
+                when(rs.getString("organization_role")).thenReturn("OWNER");
                 when(rs.getObject("install_id", UUID.class)).thenReturn(source.installId());
                 when(rs.getLong("binding_revision")).thenReturn(source.revision());
                 when(rs.getString("assertion_jws")).thenReturn(source.assertion());

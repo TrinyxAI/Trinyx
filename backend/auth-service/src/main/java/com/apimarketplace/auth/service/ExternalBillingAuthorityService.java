@@ -346,28 +346,43 @@ public class ExternalBillingAuthorityService {
         }
     }
 
-    private AuthorityScope validateScope(long userId, UUID installId, UUID organizationId) {
-        User user = users.findById(userId)
+    AuthorityScope validateScope(long userId, UUID installId, UUID organizationId) {
+        User actor = users.findById(userId)
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "USER_NOT_FOUND"));
         List<String> membershipRoles = jdbc.query(
                 "SELECT role FROM auth.organization_member WHERE user_id=? AND organization_id=?",
                 (rs, row) -> rs.getString(1).toUpperCase(java.util.Locale.ROOT),
                 userId, organizationId);
-        Integer installation = jdbc.queryForObject(
-                "SELECT count(*) FROM publication.ce_cloud_links WHERE tenant_id=? AND install_id=?",
-                Integer.class, userId, installId);
-        if (membershipRoles.size() != 1 || installation == null || installation != 1) {
+        if (membershipRoles.size() != 1) {
             throw new ResponseStatusException(HttpStatus.FORBIDDEN, "AUTHORITY_SCOPE_INVALID");
         }
         String organizationRole = membershipRoles.getFirst();
         if (!java.util.Set.of("OWNER", "ADMIN", "MEMBER", "VIEWER").contains(organizationRole)) {
             throw new ResponseStatusException(HttpStatus.FORBIDDEN, "AUTHORITY_ROLE_INVALID");
         }
+
         Long ownerId = jdbc.queryForObject(
                 "SELECT owner_id FROM auth.organization WHERE id=?", Long.class, organizationId);
+        if (ownerId == null) {
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "AUTHORITY_SCOPE_INVALID");
+        }
         User payer = users.findById(ownerId)
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "PAYER_NOT_FOUND"));
-        return new AuthorityScope(user, payer, organizationRole);
+
+        // The install belongs to the organization payer/owner, not to every actor.
+        // Members share that install and entitlement projection while retaining
+        // distinct principal IDs in their identity bindings.
+        Integer installation = jdbc.queryForObject("""
+                SELECT count(*)
+                FROM publication.ce_cloud_links link
+                WHERE link.tenant_id=?
+                  AND link.install_id=?
+                  AND link.organization_id=?
+                """, Integer.class, ownerId, installId, organizationId.toString());
+        if (installation == null || installation != 1) {
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "AUTHORITY_SCOPE_INVALID");
+        }
+        return new AuthorityScope(actor, payer, organizationRole);
     }
 
     private void lock(String scope) {
@@ -379,7 +394,7 @@ public class ExternalBillingAuthorityService {
         if (value != null) limits.put(name, value.longValue());
     }
 
-    private record AuthorityScope(User actor, User payer, String organizationRole) {}
+    record AuthorityScope(User actor, User payer, String organizationRole) {}
 
     public record AuthorityBundle(String identityBinding, String entitlementProjection,
                                   long entitlementSequence, Instant entitlementExpiresAt) {}

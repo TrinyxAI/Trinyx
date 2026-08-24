@@ -14,6 +14,7 @@ import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Component;
 import org.springframework.web.client.RestTemplate;
 
+import java.math.BigDecimal;
 import java.util.*;
 
 /**
@@ -23,10 +24,10 @@ import java.util.*;
  *
  * <p><b>Billing</b> &mdash; each successful search posts a {@code WEB_SEARCH}
  * debit to auth-service. Auth-service owns the fixed credit price via
- * {@code billing.websearch.credits-per-search} (default 1). Post-success debit
- * goes through the async client with retry + dead-letter so a flaky auth-service
- * does not add latency to the search call. Failures from SearXNG (HTTP non-2xx,
- * empty body) skip billing entirely.
+ * {@code billing.websearch.credits-per-search} (default 1). Native mode keeps
+ * the historical post-success async debit. External-authority mode reserves
+ * before SearXNG is called and commits/releases through the paid-monolith wallet;
+ * the Cloud-supplied amount is only a placeholder and never defines the price.
  */
 @Slf4j
 @Component
@@ -98,6 +99,28 @@ public class WebSearchModule implements ToolModule {
                     timeRange);
         }
 
+        String billingTenantId = resolveTenantId(tenantId, context);
+        Map<String, Object> credentials = context != null ? context.credentials() : null;
+        String sourceId = resolveBillingSourceId(credentials);
+        boolean externalAuthority = creditClient.usesExternalAuthority();
+
+        if (externalAuthority) {
+            Long userId = parseUserId(billingTenantId);
+            if (userId == null) {
+                return ToolExecutionResult.failure(
+                        ToolErrorCode.QUOTA_EXCEEDED,
+                        "External billing identity is unavailable");
+            }
+            CreditConsumptionClient.ScopeReserveResult hold = creditClient.scopeReserve(
+                    userId, sourceId, BILLING_PROVIDER, BILLING_MODEL,
+                    BigDecimal.ONE, null, 10, "WEB_SEARCH", sourceId, false);
+            if (!hold.success()) {
+                return ToolExecutionResult.failure(
+                        ToolErrorCode.QUOTA_EXCEEDED,
+                        hold.error() != null ? hold.error() : "Web-search credit reservation rejected");
+            }
+        }
+
         try {
             String url = config.getServiceUrl() + "/search";
             log.debug("Calling websearch-service: POST {} with query='{}'", url, query);
@@ -105,18 +128,28 @@ public class WebSearchModule implements ToolModule {
             Map<String, Object> response = restTemplate.postForObject(url, requestBody, Map.class);
 
             if (response == null) {
+                releaseExternalHold(externalAuthority, sourceId, "empty-provider-response");
                 return ToolExecutionResult.failure(ToolErrorCode.EXTERNAL_SERVICE_ERROR, "No response from websearch-service");
             }
 
-            // Post-success billing. Async + retry + dead-letter via the
-            // existing client. On 402 the async client logs a warn and gives up
-            // without surfacing to the user;
-            // that's the same posture as workflow_node billing.
-            chargeForSearch(tenantId, context);
+            if (externalAuthority) {
+                // The external authority replaces this placeholder with its own
+                // configured fixed WEB_SEARCH price. A retryable acknowledgement
+                // failure is persisted by the Cloud proxy outbox.
+                String outcome = creditClient.scopeCommit(
+                        sourceId, BigDecimal.ONE, BILLING_PROVIDER, BILLING_MODEL);
+                if ("RETRY".equals(outcome)) {
+                    log.warn("web_search: settlement queued for retry, sourceId={}", sourceId);
+                }
+            } else {
+                // Preserve native LiveContext billing unchanged.
+                chargeForSearch(billingTenantId, sourceId);
+            }
 
             return ToolExecutionResult.success(response);
 
         } catch (Exception e) {
+            releaseExternalHold(externalAuthority, sourceId, "provider-failure");
             log.error("Web search failed for query '{}': {}", query, e.getMessage(), e);
             return ToolExecutionResult.failure(ToolErrorCode.EXTERNAL_SERVICE_ERROR, "Web search failed: " + e.getMessage());
         }
@@ -129,20 +162,34 @@ public class WebSearchModule implements ToolModule {
      * than no debit, but logged as a WARN so the gap is visible. In normal
      * agent execution the {@code __toolCallId__} field is always set.
      */
-    private void chargeForSearch(String tenantId, ToolExecutionContext context) {
-        String billingTenantId = resolveTenantId(tenantId, context);
+    private void chargeForSearch(String billingTenantId, String sourceId) {
         if (billingTenantId == null || billingTenantId.isBlank()) {
             log.debug("web_search: skipping debit - no tenantId in context");
             return;
         }
-        Map<String, Object> creds = context != null ? context.credentials() : null;
-        String sourceId = resolveBillingSourceId(creds);
         try {
             creditClient.consumeCreditsAsync(billingTenantId, "WEB_SEARCH", sourceId,
                     BILLING_PROVIDER, BILLING_MODEL, 0, 0);
         } catch (RuntimeException e) {
             log.warn("web_search: failed to enqueue debit for tenant={} sourceId={}: {}",
                     billingTenantId, sourceId, e.getMessage(), e);
+        }
+    }
+
+    private void releaseExternalHold(boolean externalAuthority, String sourceId, String reason) {
+        if (!externalAuthority) return;
+        String outcome = creditClient.scopeRelease(sourceId, reason);
+        if ("RETRY".equals(outcome)) {
+            log.warn("web_search: release queued for retry, sourceId={}", sourceId);
+        }
+    }
+
+    private static Long parseUserId(String tenantId) {
+        if (tenantId == null || tenantId.isBlank()) return null;
+        try {
+            return Long.valueOf(tenantId);
+        } catch (NumberFormatException ignored) {
+            return null;
         }
     }
 

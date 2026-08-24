@@ -1,7 +1,7 @@
 # Trinyx Community Edition: Docker Compose (prebuilt images)
 # Usage:
 #   git clone https://github.com/eddinerabii/Trinyx
-#   cd livecontext-ce
+#   cd Trinyx
 #   docker compose up -d
 #   Open http://localhost:3000
 #
@@ -368,7 +368,7 @@ services:
       #
       # Set it only when the backend is NOT at <the address you opened the app with>:BACKEND_PORT,
       # typically a reverse proxy serving both on one origin:
-      #   GATEWAY_PUBLIC_URL=https://livecontext.example.com
+      #   GATEWAY_PUBLIC_URL=https://trinyx.example.com
       GATEWAY_PUBLIC_URL: ${GATEWAY_PUBLIC_URL:-}
       BACKEND_PORT: ${BACKEND_PORT:-8080}
 

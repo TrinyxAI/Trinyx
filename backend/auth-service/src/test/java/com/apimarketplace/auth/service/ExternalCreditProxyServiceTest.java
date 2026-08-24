@@ -22,10 +22,9 @@ class ExternalCreditProxyServiceTest {
     private final PaidMonolithCreditClient authority =
             mock(PaidMonolithCreditClient.class);
     private final RecordingJdbc jdbc = new RecordingJdbc();
-    private final ModelPricingService pricing = mock(ModelPricingService.class);
     private final ExternalCreditProxyService service = new ExternalCreditProxyService(
             entitlements, authority, jdbc,
-            new ObjectMapper().findAndRegisterModules(), pricing);
+            new ObjectMapper().findAndRegisterModules());
 
     @Test
     void permanentAuthorityRejectionPersistsDeadLetterAndPropagatesOriginalStatus() throws Exception {
@@ -71,10 +70,6 @@ class ExternalCreditProxyServiceTest {
     void llmCommitForwardsCompleteUsageForPaidAuthorityRepricing() {
         UUID operationId = UUID.randomUUID();
         String hash = "c".repeat(64);
-        when(pricing.hasPricing("openai", "gpt")).thenReturn(true);
-        when(pricing.calculateCost("openai", "gpt",
-                new LlmTokenBreakdown(10, 2, 3, 4, 5, 6)))
-                .thenReturn(new BigDecimal("7.50"));
         when(authority.commit(eq(operationId), any()))
                 .thenReturn(new CloudCreditAuthorityService.SettlementResponse(
                         operationId, "COMMITTED", new BigDecimal("7.50"),
@@ -87,7 +82,7 @@ class ExternalCreditProxyServiceTest {
         var request = org.mockito.ArgumentCaptor.forClass(
                 CloudCreditAuthorityService.CommitRequest.class);
         verify(authority).commit(eq(operationId), request.capture());
-        assertThat(request.getValue().actualCredits()).isEqualByComparingTo("7.50");
+        assertThat(request.getValue().actualCredits()).isEqualByComparingTo("0");
         assertThat(request.getValue().cacheCreationTokens()).isEqualTo(3);
         assertThat(request.getValue().cacheReadTokens()).isEqualTo(4);
         assertThat(request.getValue().cachedTokens()).isEqualTo(5);
@@ -96,8 +91,6 @@ class ExternalCreditProxyServiceTest {
 
     @Test
     void negativeProviderUsageIsAClientErrorAndNeverReachesAuthority() {
-        when(pricing.hasPricing("openai", "gpt")).thenReturn(true);
-
         assertThatThrownBy(() -> service.commitLlm(UUID.randomUUID(),
                 new ExternalCreditProxyService.LlmCommitCommand(
                         "openai", "gpt", null, 1, 1, "d".repeat(64),

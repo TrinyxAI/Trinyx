@@ -6,7 +6,8 @@ GitHub Actions, not via this directory.
 
 | Mode | File | Containers | Keycloak | Best for |
 |------|------|-----------|----------|----------|
-| **Monolith** | `docker-compose.yml` | 5 | No | Local dev, self-hosting |
+| **Monolith** | `cli/assets/docker-compose.yml` | 5 | No | New Trinyx CE installs |
+| Legacy compatibility | `docker-compose.yml` | existing topology | No | Existing deployments only |
 
 ---
 
@@ -42,7 +43,7 @@ docker compose -f cli/assets/docker-compose.yml ps
 > sure BOTH ports are published and reachable. If the backend is not at
 > `<the address you opened the app with>:BACKEND_PORT` (typically a reverse proxy serving
 > everything on one origin), set `GATEWAY_PUBLIC_URL` on the `frontend` service to the
-> browser-facing backend URL, e.g. `GATEWAY_PUBLIC_URL=https://livecontext.example.com`.
+> browser-facing backend URL, e.g. `GATEWAY_PUBLIC_URL=https://trinyx.example.com`.
 
 ## Architecture
 
@@ -162,7 +163,7 @@ anywhere other than localhost):
 
 | Variable | Default | Purpose |
 |----------|---------|---------|
-| `GATEWAY_PUBLIC_URL` | empty | Browser-facing backend origin. Empty means "derive it from the address the app was opened with, on `BACKEND_PORT`", which is what makes an install reachable by LAN IP or domain work unmodified. Set it when the backend is elsewhere, e.g. a reverse proxy on one origin: `https://livecontext.example.com`. |
+| `GATEWAY_PUBLIC_URL` | empty | Browser-facing backend origin. Empty means "derive it from the address the app was opened with, on `BACKEND_PORT`", which is what makes an install reachable by LAN IP or domain work unmodified. Set it when the backend is elsewhere, e.g. a reverse proxy on one origin: `https://trinyx.example.com`. |
 | `BACKEND_PORT` | `8080` | Port the backend is published on, used for that derivation. Keep it equal to the port mapping on the `livecontext` service. |
 
 ### next.config.mjs - `compress: false`

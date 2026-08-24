@@ -8,9 +8,9 @@ Chat, Workflow, Agent and App in one self-hosted platform. No code to write, not
 
 **An open-source, self-hosted alternative to n8n, Zapier and Make, with AI agents built in.**
 
-[![GitHub stars](https://img.shields.io/github/stars/livecontext-ai/livecontext-ce?style=flat&logo=github&color=e11d48)](https://github.com/eddinerabii/Trinyx/stargazers)
-[![Latest release](https://img.shields.io/github/v/release/livecontext-ai/livecontext-ce?color=16a34a)](https://github.com/eddinerabii/Trinyx/releases/latest)
-[![Discussions](https://img.shields.io/github/discussions/livecontext-ai/livecontext-ce?color=2496ED)](https://github.com/eddinerabii/Trinyx/discussions)
+[![GitHub stars](https://img.shields.io/github/stars/eddinerabii/Trinyx?style=flat&logo=github&color=e11d48)](https://github.com/eddinerabii/Trinyx/stargazers)
+[![Latest release](https://img.shields.io/github/v/release/eddinerabii/Trinyx?color=16a34a)](https://github.com/eddinerabii/Trinyx/releases/latest)
+[![Discussions](https://img.shields.io/github/discussions/eddinerabii/Trinyx?color=2496ED)](https://github.com/eddinerabii/Trinyx/discussions)
 [![License: AGPL v3](https://img.shields.io/badge/License-AGPL_v3-2496ED.svg)](LICENSE)
 ![Java 21](https://img.shields.io/badge/Java-21-e11d48.svg)
 ![Next.js](https://img.shields.io/badge/Next.js-16-000000.svg)
@@ -182,8 +182,8 @@ Clone the repo and use `docker compose` directly to turn them on.
 ## Managed version
 
 Prefer not to run your own infrastructure? The managed service, with an always-current integration
-catalog and hosted account management, lives at **[livecontext.ai](https://trinyx.fr)**. Those
-hosted-only features are not part of the Community Edition.
+managed application and account control plane are served from **[app.trinyx.fr](https://app.trinyx.fr)**.
+Hosted-only operations remain separate from the Community Edition.
 
 ## Building from source
 

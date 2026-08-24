@@ -144,9 +144,9 @@ jobs:
           set -euo pipefail
           private_edge=docker/paid-monolith-internal/Caddyfile
           grep -q 'billing-internal.trinyx.private' "${private_edge}"
-          grep -q '@wallet_reserve' "${private_edge}"
-          grep -q '@wallet_commit' "${private_edge}"
-          grep -q '@wallet_release' "${private_edge}"
+          grep -q '@wallet {' "${private_edge}"
+          grep -q '/internal/v1/credit-reservations/\*/commit' "${private_edge}"
+          grep -q '/internal/v1/credit-reservations/\*/release' "${private_edge}"
           grep -q 'respond 404' "${private_edge}"
           if grep -q '/internal/v1/credit-reservations' docker/cloud/Caddyfile; then
             echo "The public Cloud edge must not expose the paid-monolith wallet" >&2
@@ -166,7 +166,7 @@ jobs:
         run: >-
           mvn -B -Pce
           -pl common-lib,gateway-service,auth-client,auth-service,agent-service,publication-service,migration-service -am
-          -Dtest=AppEditionProviderTest,AppEditionAutoConfigurationTest,GatewayAuthenticationFilterTest,GatewayAuthenticationFilterV2Test,MonolithSecurityFilterBillingWorkloadTest,GatewaySignatureV2Test,GatewaySignatureV2ParityTest,AuthenticatedGatewayFilterTest,GatewaySecurityConfigTest,Ed25519JwsTest,WorkloadAuthenticationServiceTest,EntitlementProjectionServiceTest,CeLinkEntitlementsServiceTest,CloudIdentityBindingServiceTest,CloudCreditAuthorityServiceTest,PaidMonolithCreditClientTest,CloudSettlementOutboxDispatcherTest,ExternalBillingAuthorityServiceTest,CloudLinkServiceTest,CloudLinkControllerBeanGatingTest,RemoteMarketplaceConfigBeanGatingTest,CloudLlmRelayControllerTest,ExternalBillingAuthorityMigrationTest
+          -Dtest=AppEditionProviderTest,AppEditionAutoConfigurationTest,GatewayAuthenticationFilterTest,GatewayAuthenticationFilterV2Test,MonolithSecurityFilterBillingWorkloadTest,GatewaySignatureV2Test,GatewaySignatureV2ParityTest,AuthenticatedGatewayFilterTest,GatewaySecurityConfigTest,Ed25519JwsTest,WorkloadAuthenticationServiceTest,EntitlementProjectionServiceTest,CeLinkEntitlementsServiceTest,CloudIdentityBindingServiceTest,CloudCreditAuthorityServiceTest,PaidMonolithCreditClientTest,CloudSettlementOutboxDispatcherTest,ProjectionOutboxDispatcherTest,ExternalBillingAuthorityServiceTest,CloudLinkServiceTest,CloudLinkControllerBeanGatingTest,RemoteMarketplaceConfigBeanGatingTest,CloudLlmRelayControllerTest,ExternalBillingAuthorityMigrationTest
           -Dsurefire.failIfNoSpecifiedTests=false
           test
 

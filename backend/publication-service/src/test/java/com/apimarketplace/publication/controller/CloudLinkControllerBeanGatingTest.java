@@ -14,7 +14,7 @@ import static org.mockito.Mockito.mock;
  * Bean-gating contract for {@link CloudLinkController}.
  *
  * <p>The controller is annotated
- * {@code @ConditionalOnProperty(name = "cloud-link.enabled", havingValue = "remote")} with NO
+ * {@code @ConditionalOnProperty(name = "cloud-link.enabled", havingValue = "true")} with NO
  * {@code matchIfMissing}, so it defaults to false: the CE-side cloud-account link surface
  * (status/connect/disconnect, LLM-source, usage mirrors) is wired ONLY when
  * {@code cloud-link.enabled=true} (the cloud-linked CE/paid monolith). On a Cloud microservice
@@ -51,7 +51,7 @@ class CloudLinkControllerBeanGatingTest {
     }
 
     @Test
-    @DisplayName("cloud-link.enabled=true - controller bean IS wired exactly once (cloud-linked CE monolith)")
+    @DisplayName("cloud-link.enabled=true - controller bean IS wired exactly once (cloud-linked CE/paid monolith)")
     void beanPresentWhenEnabled() {
         contextRunner
                 .withPropertyValues("cloud-link.enabled=true")

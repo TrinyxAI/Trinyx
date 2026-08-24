@@ -44,13 +44,18 @@ public class RemoteMarketplaceConfig {
     @Value("${ce.version:dev}")
     private String ceVersion;
 
+    @Value("${billing.authority.mode:native}")
+    private String billingAuthorityMode;
+
     @Bean
     public CloudLinkService cloudLinkService(
             CeCloudLinkRepository cloudLinkRepository,
-            ObjectMapper objectMapper) {
+            ObjectMapper objectMapper,
+            AuthClient authClient) {
         return new CloudLinkService(
                 cloudLinkRepository, keycloakUrl, clientId, redirectUri, encryptionKey,
-                cloudApiUrl, ceVersion, objectMapper);
+                cloudApiUrl, ceVersion, objectMapper, authClient,
+                "paid-monolith-authority".equalsIgnoreCase(billingAuthorityMode));
     }
 
     @Bean

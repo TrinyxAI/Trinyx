@@ -1,6 +1,7 @@
 package com.apimarketplace.publication.service;
 
 import com.apimarketplace.agent.cloud.CloudLlmSource;
+import com.apimarketplace.auth.client.AuthClient;
 import com.apimarketplace.publication.domain.CeCloudLinkEntity;
 import com.apimarketplace.publication.repository.CeCloudLinkRepository;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -1624,6 +1625,110 @@ class CloudLinkServiceTest {
 
             assertThat(service.fetchCloudUsageHistory(TENANT_ID, 0, 15)).isNull();
             verifyNoInteractions(restTemplate);
+        }
+    }
+
+    @Nested
+    @DisplayName("external paid authority bootstrap")
+    class ExternalPaidAuthorityBootstrap {
+
+        private static final UUID INSTALL_ID =
+                UUID.fromString("11111111-2222-3333-4444-555555555555");
+        private static final UUID ORGANIZATION_ID =
+                UUID.fromString("22222222-3333-4444-5555-666666666666");
+
+        @Test
+        @SuppressWarnings({"rawtypes", "unchecked"})
+        void registerCarriesSignedIdentityAndEntitlementAssertions() {
+            AuthClient authority = mock(AuthClient.class);
+            CloudLinkService external = new CloudLinkService(
+                    cloudLinkRepository,
+                    "https://keycloak.example.com/realms/test",
+                    "test-client-id",
+                    "http://localhost:3000/callback",
+                    ENCRYPTION_KEY,
+                    "https://cloud.trinyx.fr/api",
+                    "1.4.0-test",
+                    new ObjectMapper(),
+                    restTemplate,
+                    clock,
+                    authority,
+                    true);
+            CeCloudLinkEntity link = buildLink();
+            link.setInstallId(INSTALL_ID);
+            link.setOrganizationId(ORGANIZATION_ID.toString());
+            link.setCachedAccessToken("keycloak-access-token");
+            link.setTokenExpiresAt(clock.instant().plusSeconds(300));
+            when(cloudLinkRepository.findByTenantId(TENANT_ID)).thenReturn(Optional.of(link));
+            when(cloudLinkRepository.save(any())).thenAnswer(invocation -> invocation.getArgument(0));
+            when(authority.issueExternalCloudAuthority(
+                    String.valueOf(TENANT_ID), INSTALL_ID, ORGANIZATION_ID, CLOUD_USER_ID))
+                    .thenReturn(new AuthClient.CloudAuthorityBundle(
+                            "signed-identity", "signed-entitlement", 1L,
+                            clock.instant().plusSeconds(900)));
+            when(restTemplate.postForEntity(
+                    eq("https://cloud.trinyx.fr/api/ce-link/register"),
+                    any(HttpEntity.class), eq(com.fasterxml.jackson.databind.JsonNode.class)))
+                    .thenReturn(ResponseEntity.status(HttpStatus.CREATED).build());
+
+            external.registerWithCloud(link);
+
+            ArgumentCaptor<HttpEntity> request = ArgumentCaptor.forClass(HttpEntity.class);
+            verify(restTemplate).postForEntity(
+                    eq("https://cloud.trinyx.fr/api/ce-link/register"), request.capture(),
+                    eq(com.fasterxml.jackson.databind.JsonNode.class));
+            HttpHeaders headers = request.getValue().getHeaders();
+            assertThat(headers.getFirst("Authorization")).isEqualTo("Bearer keycloak-access-token");
+            assertThat(headers.getFirst("X-Trinyx-Identity-Binding")).isEqualTo("signed-identity");
+            assertThat(headers.getFirst("X-Trinyx-Entitlement-Projection")).isEqualTo("signed-entitlement");
+            assertThat(headers.getFirst("X-Trinyx-Organization-ID"))
+                    .isEqualTo(ORGANIZATION_ID.toString());
+            assertThat(link.getRegisteredAt()).isNotNull();
+        }
+
+        @Test
+        void unlinkRevokesCloudRegistryThenWritesSignedPaidAuthorityTombstones() {
+            AuthClient authority = mock(AuthClient.class);
+            CloudLinkService external = new CloudLinkService(
+                    cloudLinkRepository,
+                    "https://keycloak.example.com/realms/test",
+                    "test-client-id",
+                    "http://localhost:3000/callback",
+                    ENCRYPTION_KEY,
+                    "https://cloud.trinyx.fr/api",
+                    "1.4.0-test",
+                    new ObjectMapper(),
+                    restTemplate,
+                    clock,
+                    authority,
+                    true);
+            CeCloudLinkEntity link = buildLink();
+            link.setInstallId(INSTALL_ID);
+            link.setOrganizationId(ORGANIZATION_ID.toString());
+            link.setRegisteredAt(clock.instant());
+            link.setCachedAccessToken("keycloak-access-token");
+            link.setTokenExpiresAt(clock.instant().plusSeconds(300));
+            when(cloudLinkRepository.findByTenantId(TENANT_ID)).thenReturn(Optional.of(link));
+            when(cloudLinkRepository.save(any())).thenAnswer(invocation -> invocation.getArgument(0));
+            when(restTemplate.exchange(
+                    eq("https://cloud.trinyx.fr/api/ce-link/" + INSTALL_ID),
+                    eq(HttpMethod.DELETE), any(HttpEntity.class), eq(Void.class)))
+                    .thenReturn(ResponseEntity.noContent().build());
+            when(authority.revokeExternalCloudAuthority(
+                    String.valueOf(TENANT_ID), INSTALL_ID, ORGANIZATION_ID))
+                    .thenReturn(new AuthClient.CloudAuthorityProjection(
+                            "signed-revocation", 2L, clock.instant().plusSeconds(900),
+                            "REVOKED", "state-hash"));
+
+            external.unlinkAccount(TENANT_ID);
+
+            org.mockito.InOrder order = inOrder(restTemplate, authority, cloudLinkRepository);
+            order.verify(restTemplate).exchange(
+                    eq("https://cloud.trinyx.fr/api/ce-link/" + INSTALL_ID),
+                    eq(HttpMethod.DELETE), any(HttpEntity.class), eq(Void.class));
+            order.verify(authority).revokeExternalCloudAuthority(
+                    String.valueOf(TENANT_ID), INSTALL_ID, ORGANIZATION_ID);
+            order.verify(cloudLinkRepository).delete(link);
         }
     }
 

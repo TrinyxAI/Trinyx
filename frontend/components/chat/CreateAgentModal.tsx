@@ -1317,7 +1317,7 @@ export const CreateAgentModal: React.FC<CreateAgentModalProps> = ({
   // Generate embed code
   const generateEmbedCode = () => {
     const token = widgetConfig.widgetToken || 'YOUR_WIDGET_TOKEN';
-    const scriptUrl = widgetConfig.widgetScriptUrl || 'https://app.livecontext.ai/widget.js';
+    const scriptUrl = widgetConfig.widgetScriptUrl || 'https://app.trinyx.fr/widget.js';
     return `<script
   src="${scriptUrl}"
   data-widget-token="${token}"

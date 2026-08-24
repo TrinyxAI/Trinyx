@@ -53,6 +53,7 @@ COPY conversation-client/pom.xml conversation-client/pom.xml
 COPY notification-client/pom.xml notification-client/pom.xml
 COPY catalog-service/pom.xml catalog-service/pom.xml
 COPY auth-service/pom.xml auth-service/pom.xml
+COPY gateway-service/pom.xml gateway-service/pom.xml
 COPY storage-service/pom.xml storage-service/pom.xml
 COPY conversation-service/pom.xml conversation-service/pom.xml
 COPY trigger-service/pom.xml trigger-service/pom.xml
@@ -86,6 +87,7 @@ COPY conversation-client conversation-client
 COPY notification-client notification-client
 COPY catalog-service catalog-service
 COPY auth-service auth-service
+COPY gateway-service gateway-service
 COPY storage-service storage-service
 COPY conversation-service conversation-service
 COPY trigger-service trigger-service

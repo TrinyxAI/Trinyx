@@ -6,6 +6,8 @@ import org.springframework.stereotype.Component;
 
 /** Releases abandoned holds; late provider settlements remain accountable for 24 hours. */
 @Component
+@ConditionalOnProperty(name = "billing.authority.mode",
+        havingValue = "paid-monolith-authority")
 public class CloudCreditReservationExpiryJob {
     private final CloudCreditAuthorityService authority;
 

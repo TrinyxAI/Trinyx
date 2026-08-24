@@ -22,7 +22,7 @@ public class AccountDeactivationMailer {
     public AccountDeactivationMailer(
             JavaMailSender mailSender,
             @Value("${app.mail.from:noreply@trinyx.fr}") String mailFrom,
-            @Value("${app.mail.from-name:LiveContext}") String mailFromName,
+            @Value("${app.mail.from-name:Trinyx}") String mailFromName,
             @Value("${oauth2.frontend-url:http://localhost:3000}") String frontendUrl) {
         this.mailSender = mailSender;
         this.mailFrom = mailFrom;
@@ -36,20 +36,20 @@ public class AccountDeactivationMailer {
             MimeMessageHelper helper = new MimeMessageHelper(message, true, "UTF-8");
             helper.setFrom(mailFrom, mailFromName);
             helper.setTo(email);
-            helper.setSubject("Your LiveContext account has been deactivated");
+            helper.setSubject("Your Trinyx account has been deactivated");
 
             String safeName = sanitize(displayName != null ? displayName : "there");
 
             String plain = String.format(
                     "Hi %s,%n%n"
-                            + "Your LiveContext account has been deactivated as requested.%n%n"
+                            + "Your Trinyx account has been deactivated as requested.%n%n"
                             + "Your data will be retained for 30 days. After that, all your data "
                             + "(workflows, agents, conversations, files, credentials, and publications) "
                             + "will be permanently deleted.%n%n"
                             + "If you change your mind, simply sign in again within 30 days and "
                             + "we will offer to restore your account. You can also reach us at "
                             + "support@trinyx.fr.%n%n"
-                            + "- The LiveContext Team",
+                            + "- The Trinyx Team",
                     safeName);
 
             String html = buildHtml(safeName);
@@ -74,19 +74,19 @@ public class AccountDeactivationMailer {
             MimeMessageHelper helper = new MimeMessageHelper(message, true, "UTF-8");
             helper.setFrom(mailFrom, mailFromName);
             helper.setTo(email);
-            helper.setSubject("Your LiveContext account has been restored");
+            helper.setSubject("Your Trinyx account has been restored");
 
             String safeName = sanitize(displayName != null ? displayName : "there");
 
             String plain = String.format(
                     "Hi %s,%n%n"
-                            + "Your LiveContext account has been restored and the scheduled "
+                            + "Your Trinyx account has been restored and the scheduled "
                             + "deletion has been cancelled. Nothing was deleted, and everything "
                             + "(workflows, agents, conversations, files, credentials, and "
                             + "publications) is exactly as you left it.%n%n"
                             + "If this was not you, contact us at support@trinyx.fr "
                             + "immediately.%n%n"
-                            + "- The LiveContext Team",
+                            + "- The Trinyx Team",
                     safeName);
 
             helper.setText(plain, buildRestoredHtml(safeName));
@@ -122,7 +122,7 @@ public class AccountDeactivationMailer {
                         <p style="margin:16px 0 0 0;">If this was not you, contact us at <a href="mailto:support@trinyx.fr" style="color:#2563eb;text-decoration:underline;">support@trinyx.fr</a> immediately.</p>
                       </td></tr>
                       <tr><td style="padding:24px 40px 32px 40px;border-top:1px solid #e7e5e4;font-size:12px;line-height:1.5;color:#6b7280;">
-                        Welcome back. Thank you for using LiveContext.<br><br>&copy; LiveContext
+                        Welcome back. Thank you for using Trinyx.<br><br>&copy; Trinyx
                       </td></tr>
                     </table>
                   </td></tr>
@@ -139,18 +139,18 @@ public class AccountDeactivationMailer {
             MimeMessageHelper helper = new MimeMessageHelper(message, true, "UTF-8");
             helper.setFrom(mailFrom, mailFromName);
             helper.setTo(email);
-            helper.setSubject("Your LiveContext data has been permanently deleted");
+            helper.setSubject("Your Trinyx data has been permanently deleted");
 
             String safeName = sanitize(displayName != null ? displayName : "there");
 
             String plain = String.format(
                     "Hi %s,%n%n"
-                            + "The 30-day grace period for your LiveContext account has ended.%n%n"
+                            + "The 30-day grace period for your Trinyx account has ended.%n%n"
                             + "All your data - workflows, agents, conversations, files, credentials, "
                             + "and marketplace publications - has been permanently deleted.%n%n"
-                            + "If you'd like to use LiveContext again in the future, you're welcome "
+                            + "If you'd like to use Trinyx again in the future, you're welcome "
                             + "to create a new account at any time.%n%n"
-                            + "- The LiveContext Team",
+                            + "- The Trinyx Team",
                     safeName);
 
             String html = buildPurgeHtml(safeName);
@@ -188,7 +188,7 @@ public class AccountDeactivationMailer {
                       <tr><td style="padding:32px 40px;font-size:15px;line-height:1.6;color:#111827;">
                         <h1 style="margin:0 0 16px 0;font-size:22px;font-weight:600;color:#111827;">Account deactivated</h1>
                         <p style="margin:0 0 12px 0;">Hi <strong>{{NAME}}</strong>,</p>
-                        <p style="margin:0 0 12px 0;">Your LiveContext account has been deactivated as requested.</p>
+                        <p style="margin:0 0 12px 0;">Your Trinyx account has been deactivated as requested.</p>
                         <div style="margin:20px 0;padding:16px 20px;background:#fef3c7;border:1px solid #f59e0b;border-radius:8px;">
                           <p style="margin:0;font-size:14px;color:#92400e;font-weight:600;">&#9888; Your data will be retained for 30 days.</p>
                           <p style="margin:8px 0 0 0;font-size:13px;color:#92400e;">After this period, all your data - workflows, agents, conversations, files, credentials, and marketplace publications - will be <strong>permanently deleted</strong>.</p>
@@ -196,7 +196,7 @@ public class AccountDeactivationMailer {
                         <p style="margin:16px 0 0 0;">Changed your mind? Just <a href="{{FRONTEND}}" style="color:#2563eb;text-decoration:underline;">sign in again</a> within 30 days and we will offer to restore your account. You can also reach us at <a href="mailto:support@trinyx.fr" style="color:#2563eb;text-decoration:underline;">support@trinyx.fr</a>.</p>
                       </td></tr>
                       <tr><td style="padding:24px 40px 32px 40px;border-top:1px solid #e7e5e4;font-size:12px;line-height:1.5;color:#6b7280;">
-                        We're sorry to see you go. Thank you for using LiveContext.<br><br>&copy; LiveContext
+                        We're sorry to see you go. Thank you for using Trinyx.<br><br>&copy; Trinyx
                       </td></tr>
                     </table>
                   </td></tr>
@@ -224,7 +224,7 @@ public class AccountDeactivationMailer {
                       <tr><td style="padding:32px 40px;font-size:15px;line-height:1.6;color:#111827;">
                         <h1 style="margin:0 0 16px 0;font-size:22px;font-weight:600;color:#111827;">Your data has been deleted</h1>
                         <p style="margin:0 0 12px 0;">Hi <strong>{{NAME}}</strong>,</p>
-                        <p style="margin:0 0 12px 0;">The 30-day grace period for your LiveContext account has ended. All your data has been <strong>permanently deleted</strong>, including:</p>
+                        <p style="margin:0 0 12px 0;">The 30-day grace period for your Trinyx account has ended. All your data has been <strong>permanently deleted</strong>, including:</p>
                         <ul style="margin:12px 0;padding-left:20px;font-size:14px;color:#374151;">
                           <li style="margin-bottom:6px;">Workflows &amp; workflow runs</li>
                           <li style="margin-bottom:6px;">Agents &amp; conversations</li>
@@ -233,13 +233,13 @@ public class AccountDeactivationMailer {
                           <li style="margin-bottom:6px;">API credentials</li>
                           <li style="margin-bottom:0;">Marketplace publications</li>
                         </ul>
-                        <p style="margin:16px 0 0 0;">If you'd like to use LiveContext again in the future, you're welcome to create a new account at any time.</p>
+                        <p style="margin:16px 0 0 0;">If you'd like to use Trinyx again in the future, you're welcome to create a new account at any time.</p>
                         <p style="margin:24px 0;text-align:center;">
                           <a href="{{URL}}" style="display:inline-block;padding:12px 28px;background:#111827;color:#ffffff;border-radius:8px;font-size:15px;font-weight:600;text-decoration:none;">Create a new account</a>
                         </p>
                       </td></tr>
                       <tr><td style="padding:24px 40px 32px 40px;border-top:1px solid #e7e5e4;font-size:12px;line-height:1.5;color:#6b7280;">
-                        Thank you for having used LiveContext. We hope to see you again.<br><br>&copy; LiveContext
+                        Thank you for having used Trinyx. We hope to see you again.<br><br>&copy; Trinyx
                       </td></tr>
                     </table>
                   </td></tr>

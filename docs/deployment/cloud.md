@@ -105,14 +105,19 @@ Cloud persists failed commit/release delivery in
 `auth.cloud_settlement_outbox` with jittered exponential retry. It never falls
 back to a local balance when the authority is unavailable.
 
-LLM relays reserve a conservative amount before dispatch and retain provider
-limits. Browser-agent relays additionally cap the external path to 25 steps and
-4,096 output tokens per step before reserving the aggregate maximum. Flat-price
-web search reserves before SearXNG; its configured fixed price is read only by
-the paid-monolith authority, never accepted from Cloud. Provider-specific output,
-iteration, timeout and concurrency limits must remain enabled at each provider
-adapter; the wallet hold is the final monetary boundary, not a substitute for
-those operational limits.
+LLM relays send the provider/model and prompt/output token ceiling before
+dispatch; paid-monolith computes the conservative hold from its own pricing and
+recomputes settlement from the complete prompt, completion, cache and reasoning
+usage. Cloud-provided monetary hints are ignored for this source. Browser-agent
+relays additionally cap the external path to 25 steps and 4,096 output tokens
+per step before reserving an aggregate amount. Until browser providers expose a
+single verifiable cost receipt, that aggregate remains trusted workload input
+and is therefore a staging/load-test risk rather than an independently
+repriceable LLM settlement. Flat-price web search reserves before SearXNG; its
+configured fixed price is read only by the paid-monolith authority, never
+accepted from Cloud. Provider-specific output, iteration, timeout and
+concurrency limits must remain enabled at each provider adapter; the wallet hold
+is the final monetary boundary, not a substitute for those operational limits.
 
 ## Gateway HMAC v2
 

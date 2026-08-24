@@ -69,6 +69,20 @@ class GatewaySecurityConfigTest {
                 .convert(unrelated).block()).isNull();
     }
 
+    @Test
+    void publicAllowlistCoversOnlyAuditedSelfAuthenticatingRoutes() {
+        assertThat(GatewayPublicRoutes.matches("/webhooks/stripe")).isTrue();
+        assertThat(GatewayPublicRoutes.matches("/api/public/showcase")).isTrue();
+        assertThat(GatewayPublicRoutes.matches("/api/shared/token")).isTrue();
+        assertThat(GatewayPublicRoutes.matches("/api/files/proxy-signed")).isTrue();
+        assertThat(GatewayPublicRoutes.matches("/api/webhooks")).isFalse();
+        assertThat(GatewayPublicRoutes.matches("/api/webhooks/arbitrary")).isFalse();
+        assertThat(GatewayPublicRoutes.matches("/api/v2/workflows/dag")).isFalse();
+        assertThat(GatewayPublicRoutes.matches("/api/internal/credentials")).isFalse();
+        assertThat(String.join(",", GatewayPublicRoutes.securityMatchers()))
+                .doesNotContain("/webhooks/**");
+    }
+
     private Jwt jwt(String issuer, List<String> audience, Instant issuedAt, Instant expiresAt) {
         return Jwt.withTokenValue("test-token")
                 .header("alg", "RS256")

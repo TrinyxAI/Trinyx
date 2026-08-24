@@ -2,18 +2,25 @@ package com.apimarketplace.gateway;
 
 import org.junit.jupiter.api.Test;
 import org.springframework.cloud.gateway.filter.GatewayFilterChain;
+import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.mock.http.server.reactive.MockServerHttpRequest;
 import org.springframework.mock.web.server.MockServerWebExchange;
 import org.springframework.web.server.ServerWebExchange;
+import org.springframework.security.oauth2.jwt.Jwt;
+import org.springframework.security.oauth2.server.resource.authentication.JwtAuthenticationToken;
 import reactor.core.publisher.Mono;
 import reactor.test.StepVerifier;
 
+import java.time.Instant;
 import java.util.List;
 import java.util.Set;
 import java.util.concurrent.atomic.AtomicReference;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.ArgumentMatchers.*;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.when;
 
 class AuthenticatedGatewayFilterTest {
 
@@ -118,6 +125,41 @@ class AuthenticatedGatewayFilterTest {
         assertThat(forwarded.get().getRequest().getHeaders().getFirst("X-User-ID")).isNull();
         assertThat(forwarded.get().getRequest().getHeaders().getFirst("X-Organization-ID")).isNull();
         assertThat(forwarded.get().getRequest().getHeaders().getFirst("X-Gateway-Secret")).isNull();
+    }
+
+    @Test
+    void downstreamFailureIsNotRewrittenAsAuthenticationFailure() {
+        GatewayIdentityClient identity = mock(GatewayIdentityClient.class);
+        AuthenticatedGatewayFilter filter = new AuthenticatedGatewayFilter(identity, 1024);
+        GatewayUserContext context = new GatewayUserContext(
+                1L, "subject", Set.of("USER"), "org", "OWNER",
+                List.of(new GatewayUserContext.Membership("org", "OWNER")),
+                "principal", "payer", "install");
+        Jwt jwt = Jwt.withTokenValue("jwt")
+                .header("alg", "none")
+                .subject("subject")
+                .issuedAt(Instant.now())
+                .expiresAt(Instant.now().plusSeconds(60))
+                .build();
+        MockServerWebExchange exchange = MockServerWebExchange.from(
+                MockServerHttpRequest.get("/api/users/profile").build())
+                .mutate().principal(Mono.just(new JwtAuthenticationToken(jwt))).build();
+
+        when(identity.resolve(eq("jwt"), eq("subject"), isNull(), isNull()))
+                .thenReturn(Mono.just(context));
+        when(identity.authorize(eq(context), isNull(), eq(false)))
+                .thenReturn(Mono.just(new GatewayIdentityClient.EntitlementDecision(
+                        true, "AUTHORIZED", 1L, Instant.now().plusSeconds(60))));
+        when(identity.signed(anyString(), anyString(), any(byte[].class),
+                anyString(), anyString(), anyString(), anyString(), anyString(),
+                anyString(), anyString(), anyString())).thenReturn(new HttpHeaders());
+
+        StepVerifier.create(filter.filter(exchange,
+                        ignored -> Mono.error(new IllegalStateException("downstream unavailable"))))
+                .expectErrorMessage("downstream unavailable")
+                .verify();
+
+        assertThat(exchange.getResponse().getStatusCode()).isNull();
     }
 
     @Test

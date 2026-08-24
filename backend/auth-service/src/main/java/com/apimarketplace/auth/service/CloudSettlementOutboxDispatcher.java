@@ -23,13 +23,16 @@ public class CloudSettlementOutboxDispatcher {
     private final JdbcTemplate jdbc;
     private final PaidMonolithCreditClient authority;
     private final ObjectMapper json;
+    private final CloudSettlementResultWriter resultWriter;
 
     public CloudSettlementOutboxDispatcher(JdbcTemplate jdbc,
                                            PaidMonolithCreditClient authority,
-                                           ObjectMapper json) {
+                                           ObjectMapper json,
+                                           CloudSettlementResultWriter resultWriter) {
         this.jdbc = jdbc;
         this.authority = authority;
         this.json = json;
+        this.resultWriter = resultWriter;
     }
 
     @Scheduled(fixedDelayString = "${billing.external.settlement-retry-ms:5000}")
@@ -65,31 +68,15 @@ public class CloudSettlementOutboxDispatcher {
                             CloudCreditAuthorityService.ReleaseRequest.class);
                     response = authority.release(pending.operationId(), request);
                 }
-                jdbc.update("""
-                        UPDATE auth.cloud_settlement_outbox
-                        SET status='DELIVERED', delivered_at=now(), last_error=NULL
-                        WHERE id=?
-                        """, pending.id());
-                jdbc.update("""
-                        UPDATE auth.cloud_credit_operation
-                        SET state=?, response_payload=CAST(? AS jsonb), updated_at=now()
-                        WHERE operation_id=?
-                        """, state(response), json.writeValueAsString(response),
-                        pending.operationId());
+                // Remote I/O is complete. Record both local state transitions in one
+                // short transaction so a crash cannot leave DELIVERED + RESERVED.
+                resultWriter.delivered(pending.id(), pending.operationId(),
+                        state(response), json.writeValueAsString(response));
             } catch (Exception failure) {
                 int attempt = pending.attemptCount() + 1;
                 if (isPermanent(failure)) {
-                    jdbc.update("""
-                            UPDATE auth.cloud_settlement_outbox
-                            SET status='DEAD', attempt_count=?, last_error=?,
-                                terminal_at=now()
-                            WHERE id=?
-                            """, attempt, bounded(failure.getMessage()), pending.id());
-                    jdbc.update("""
-                            UPDATE auth.cloud_credit_operation
-                            SET state='SETTLEMENT_FAILED', updated_at=now()
-                            WHERE operation_id=? AND state IN ('RESERVED','EXPIRED')
-                            """, pending.operationId());
+                    resultWriter.dead(pending.id(), pending.operationId(),
+                            attempt, bounded(failure.getMessage()));
                     log.error("Settlement moved to DEAD operationId={} action={} attempt={} type={}",
                             pending.operationId(), pending.action(), attempt,
                             failure.getClass().getSimpleName());

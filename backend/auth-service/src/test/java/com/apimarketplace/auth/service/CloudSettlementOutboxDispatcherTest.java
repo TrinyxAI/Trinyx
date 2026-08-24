@@ -19,8 +19,9 @@ class CloudSettlementOutboxDispatcherTest {
     private final ObjectMapper json = new ObjectMapper().findAndRegisterModules();
     private final FakeJdbc jdbc = new FakeJdbc();
     private final PaidMonolithCreditClient authority = mock(PaidMonolithCreditClient.class);
+    private final CloudSettlementResultWriter resultWriter = mock(CloudSettlementResultWriter.class);
     private final CloudSettlementOutboxDispatcher dispatcher =
-            new CloudSettlementOutboxDispatcher(jdbc, authority, json);
+            new CloudSettlementOutboxDispatcher(jdbc, authority, json, resultWriter);
 
     @Test
     void claimIsAtomicAndRemoteDeliveryDoesNotHoldATransaction() throws Exception {
@@ -39,6 +40,8 @@ class CloudSettlementOutboxDispatcherTest {
         assertThat(CloudSettlementOutboxDispatcher.class.getDeclaredMethod("dispatch")
                 .getAnnotation(org.springframework.transaction.annotation.Transactional.class))
                 .isNull();
+        verify(resultWriter).delivered(eq(jdbc.pending.id()), eq(jdbc.pending.operationId()),
+                eq("COMMITTED"), anyString());
     }
 
     @Test
@@ -50,8 +53,8 @@ class CloudSettlementOutboxDispatcherTest {
 
         dispatcher.dispatch();
 
-        assertThat(jdbc.sql).anyMatch(sql -> sql.contains("status='DEAD'"));
-        assertThat(jdbc.sql).anyMatch(sql -> sql.contains("SETTLEMENT_FAILED"));
+        verify(resultWriter).dead(eq(jdbc.pending.id()), eq(jdbc.pending.operationId()),
+                eq(1), contains("COMMIT_AFTER_RELEASE"));
         assertThat(jdbc.sql).noneMatch(sql -> sql.contains("status='FAILED'"));
     }
 

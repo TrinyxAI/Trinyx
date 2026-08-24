@@ -72,7 +72,7 @@ class PaidMonolithCreditClientTest {
                 .isInstanceOf(PaidMonolithCreditClient.RetryableAuthorityException.class);
     }
 
-    private static HttpClientErrorException response(HttpStatus status, String body) {
+    private static RestClientResponseException response(HttpStatus status, String body) {
         if (status.is5xxServerError()) {
             return new HttpServerErrorException(status, status.getReasonPhrase(),
                     HttpHeaders.EMPTY, body.getBytes(StandardCharsets.UTF_8), StandardCharsets.UTF_8);

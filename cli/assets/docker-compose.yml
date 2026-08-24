@@ -47,7 +47,7 @@ services:
     environment:
       POSTGRES_DB: livecontext
       POSTGRES_USER: ${DB_USERNAME:-postgres}
-      POSTGRES_PASSWORD: ${DB_PASSWORD:-postgres}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-${POSTGRES_PASSWORD:-postgres}}
     volumes:
       - livecontext_data:/var/lib/postgresql/data
     healthcheck:
@@ -157,7 +157,7 @@ services:
       DB_PORT: 5432
       DB_NAME: livecontext
       DB_USERNAME: ${DB_USERNAME:-postgres}
-      DB_PASSWORD: ${DB_PASSWORD:-postgres}
+      DB_PASSWORD: ${DB_PASSWORD:-${POSTGRES_PASSWORD:-postgres}}
       REDIS_HOST: redis
       REDIS_PORT: 6379
       JWT_SECRET: ${JWT_SECRET:-}

@@ -232,6 +232,7 @@ the opposite direction:
 
 ```text
 BILLING_AUTHORITY_MODE=paid-monolith-authority
+CLOUD_LINK_ENABLED=true
 TRINYX_IDENTITY_SIGNING_KID=<active kid>
 TRINYX_IDENTITY_SIGNING_KEY=<PKCS8 private key>
 TRINYX_ENTITLEMENT_SIGNING_KID=<active kid>
@@ -263,7 +264,9 @@ wallet for linked users. Native billing code is retained for other modes.
 
 ### Cloud-link bootstrap and unlink
 
-In `paid-monolith-authority` mode the existing OAuth completion stores the local
+Cloud-link lifecycle is gated by `CLOUD_LINK_ENABLED`, independently of
+`MARKETPLACE_MODE`; paid-monolith may therefore keep its marketplace local. In
+`paid-monolith-authority` mode the existing OAuth completion stores the local
 link first, resolves its trusted organization scope, and calls the local auth
 service to issue an `AuthorityBundle`. The first Cloud
 `POST /api/ce-link/register` carries:

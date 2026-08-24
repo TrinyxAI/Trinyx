@@ -40,6 +40,20 @@ class ProjectionOutboxDispatcherTest {
     }
 
     @Test
+    void projectionTimeoutAndRateLimitResponsesRetry() {
+        for (HttpStatus status : new HttpStatus[]{
+                HttpStatus.REQUEST_TIMEOUT, HttpStatus.TOO_MANY_REQUESTS}) {
+            Harness retry = new Harness();
+            retry.throwResponse(status);
+            new EntitlementOutboxDispatcher(retry.jdbc, retry.workloads, retry.builder,
+                    "https://cloud-internal.trinyx.private:8443/internal/v1/entitlement-projections")
+                    .dispatch();
+            assertThat(retry.jdbc.sql).anyMatch(sql -> sql.contains("status='FAILED'"));
+            assertThat(retry.jdbc.sql).noneMatch(sql -> sql.contains("status='DEAD'"));
+        }
+    }
+
+    @Test
     void identityFourHundredIsDeadAndTimeoutRetries() {
         Harness terminal = new Harness();
         terminal.throwResponse(HttpStatus.UNAUTHORIZED);

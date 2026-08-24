@@ -29,7 +29,7 @@ import static org.springframework.cloud.gateway.support.ServerWebExchangeUtils.G
 final class AuthenticatedGatewayFilter implements GlobalFilter, Ordered {
 
     private static final Set<String> STRIPPED = Set.of(
-            "x-gateway-secret", "x-gateway-signature-version", "x-gateway-timestamp",
+            "authorization", "x-gateway-secret", "x-gateway-signature-version", "x-gateway-timestamp",
             "x-gateway-nonce", "x-gateway-body-sha256", "x-provider-id", "x-user-id",
             "x-principal-id", "x-billing-subject-id", "x-organization-id",
             "x-organization-role", "x-user-roles", "x-install-id",
@@ -189,7 +189,14 @@ final class AuthenticatedGatewayFilter implements GlobalFilter, Ordered {
                                         && !name.equalsIgnoreCase("X-Trinyx-Identity-Binding")
                                         && !name.equalsIgnoreCase("X-Trinyx-Entitlement-Projection")
                                         && !name.equalsIgnoreCase("X-Trinyx-Organization-ID")) {
-                                    headers.put(name, values);
+                                    if (name.equalsIgnoreCase("Sec-WebSocket-Protocol")) {
+                                        List<String> safeProtocols = websocketProtocolsWithoutJwt(values);
+                                        if (!safeProtocols.isEmpty()) {
+                                            headers.put(name, safeProtocols);
+                                        }
+                                    } else {
+                                        headers.put(name, values);
+                                    }
                                 }
                             });
                             headers.putAll(signed);
@@ -224,9 +231,25 @@ final class AuthenticatedGatewayFilter implements GlobalFilter, Ordered {
                     List<String> names = List.copyOf(headers.keySet());
                     names.stream().filter(name -> STRIPPED.contains(name.toLowerCase()))
                             .forEach(headers::remove);
+                    List<String> safeProtocols = websocketProtocolsWithoutJwt(
+                            headers.getOrEmpty("Sec-WebSocket-Protocol"));
+                    if (safeProtocols.isEmpty()) {
+                        headers.remove("Sec-WebSocket-Protocol");
+                    } else {
+                        headers.put("Sec-WebSocket-Protocol", safeProtocols);
+                    }
                 })
                 .build();
         return exchange.mutate().request(request).build();
+    }
+
+    private static List<String> websocketProtocolsWithoutJwt(List<String> values) {
+        return values.stream()
+                .flatMap(value -> java.util.Arrays.stream(value.split(",")))
+                .map(String::trim)
+                .filter(value -> !value.isBlank())
+                .filter(value -> !value.startsWith("lc.jwt."))
+                .toList();
     }
 
     /**

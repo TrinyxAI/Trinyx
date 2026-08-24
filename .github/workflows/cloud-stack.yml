@@ -212,6 +212,11 @@ jobs:
           node --check cli/bin/trinyx.mjs
           node cli/bin/trinyx.mjs --version
           grep -q '"trinyx": "bin/trinyx.mjs"' cli/package.json
+          grep -Fq '[mcp_servers.trinyx.http_headers]' frontend/app/\[locale\]/app/settings/mcp-server/page.tsx
+          if grep -RniF '[mcp_servers.livecontext' frontend; then
+            echo "User-facing MCP snippets must use the Trinyx server identifier" >&2
+            exit 1
+          fi
           if grep -q "const CE_API_BASE = 'https://cloud.trinyx.fr" frontend/components/marketplace/CategoryFilter.tsx; then
             echo "Paid-monolith frontend must not hardcode an unavailable Cloud origin" >&2
             exit 1

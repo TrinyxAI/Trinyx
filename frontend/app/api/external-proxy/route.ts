@@ -34,7 +34,7 @@ export async function POST(request: NextRequest) {
 
     // Prepare the headers for the external request
     const requestHeaders: Record<string, string> = {
-      'User-Agent': 'LiveContext-Test-Client/1.0',
+      'User-Agent': 'Trinyx-Client/1.0',
       ...headers,
     };
     delete requestHeaders['host'];

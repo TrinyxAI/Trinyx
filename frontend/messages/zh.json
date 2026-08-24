@@ -157,7 +157,7 @@
       "description": "联系 Trinyx，获取支持、报告安全问题、商务合作或媒体咨询。"
     },
     "layout": {
-      "copyright": "© {year} LiveContext. 保留所有权利。",
+      "copyright": "© {year} Trinyx. 保留所有权利。",
       "privacyPolicy": "隐私政策",
       "termsOfService": "服务条款",
       "legalNotice": "法律声明",
@@ -1630,7 +1630,7 @@
     },
     "screening": {
       "attestationFooter": "无论您是否勾选该框，您的决定都会被记录（版本标识符 {version}），以便在收到删除通知时我们拥有审计跟踪。",
-      "attestationLabel": "我确认我拥有在此发布中使用这些资源的所有必要权利，包括通过 LiveContext 市场进行商业再分发的权利。我理解我对因此内容引起的任何侵权索赔负全部责任（条款 §8）。",
+      "attestationLabel": "我确认我拥有在此发布中使用这些资源的所有必要权利，包括通过 Trinyx 市场进行商业再分发的权利。我理解我对因此内容引起的任何侵权索赔负全部责任（条款 §8）。",
       "attestationVerbatim": "发布者根据条款 §8(iii)+(iv) 声明：对此发布中列出的每个资源拥有所有必要权利，包括商业再分发权利。",
       "cancel": "返回",
       "close": "关闭",

@@ -3,6 +3,8 @@ package com.apimarketplace.auth.service;
 import com.apimarketplace.auth.domain.CeLink;
 import com.apimarketplace.auth.dto.CeLinkEntitlements;
 import com.apimarketplace.auth.repository.CeLinkRepository;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -26,11 +28,25 @@ public class CeLinkEntitlementsService {
 
     private final CeLinkRepository ceLinkRepository;
     private final PlanResolutionService planResolutionService;
+    private final EntitlementProjectionService projectionService;
+    private final boolean externalPaidAuthority;
 
+    /** Legacy/native billing constructor retained for focused unit tests and native Cloud mode. */
     public CeLinkEntitlementsService(CeLinkRepository ceLinkRepository,
                                      PlanResolutionService planResolutionService) {
+        this(ceLinkRepository, planResolutionService, null, "native");
+    }
+
+    @Autowired
+    public CeLinkEntitlementsService(
+            CeLinkRepository ceLinkRepository,
+            PlanResolutionService planResolutionService,
+            EntitlementProjectionService projectionService,
+            @Value("${billing.authority.mode:native}") String billingAuthorityMode) {
         this.ceLinkRepository = ceLinkRepository;
         this.planResolutionService = planResolutionService;
+        this.projectionService = projectionService;
+        this.externalPaidAuthority = "external-paid-monolith".equalsIgnoreCase(billingAuthorityMode);
     }
 
     /**
@@ -48,6 +64,15 @@ public class CeLinkEntitlementsService {
                 .filter(CeLink::isActive)
                 .filter(link -> callerUserId.equals(link.getUserId()))
                 .map(link -> {
+                    if (externalPaidAuthority) {
+                        if (projectionService == null) return CeLinkEntitlements.none();
+                        return projectionService.activeCeEntitlement(link.getUserId(), installId)
+                                .map(projected -> new CeLinkEntitlements(
+                                        governingPlanCode(projected.planCode()),
+                                        link.getUserId(), projected.creditTierIndex(),
+                                        projected.cadence()))
+                                .orElseGet(CeLinkEntitlements::none);
+                    }
                     PlanResolutionService.ActiveOrgEntitlement gov =
                             planResolutionService.resolveActiveOrgEntitlement(link.getUserId());
                     return new CeLinkEntitlements(

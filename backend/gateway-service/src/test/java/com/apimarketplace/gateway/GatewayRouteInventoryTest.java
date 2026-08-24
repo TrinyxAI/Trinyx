@@ -53,6 +53,38 @@ class GatewayRouteInventoryTest {
     }
 
     @Test
+    void preservesHistoricalPublicEdgeRewritesAndCollisionOrder() {
+        assertThat(route("agent-widget-loader-public"))
+                .contains("AGENT_SERVICE_URL", "Path=/widget.js",
+                        "SetPath=/api/internal/widget/loader.js");
+        assertThat(route("agent-widget-public"))
+                .contains("AGENT_SERVICE_URL", "Path=/widget/**",
+                        "/api/internal/widget/");
+        assertThat(route("publication-share-public"))
+                .contains("PUBLICATION_SERVICE_URL", "Path=/share/**",
+                        "/api/public/share/");
+        assertThat(route("conversation-share-public"))
+                .contains("CONVERSATION_SERVICE_URL", "Path=/c/**",
+                        "/api/shared/c/");
+        assertThat(route("agent-webhook-public"))
+                .contains("AGENT_SERVICE_URL", "Path=/webhook/agent/**",
+                        "/api/internal/webhook/");
+        assertThat(route("orchestrator-webhook-public"))
+                .contains("ORCHESTRATOR_SERVICE_URL", "Path=/webhook/**",
+                        "/api/internal/webhook/");
+        assertThat(routes.indexOf("- id: agent-webhook-public"))
+                .isLessThan(routes.indexOf("- id: orchestrator-webhook-public"));
+        assertThat(route("orchestrator-approval-callback-public"))
+                .contains("Path=/approval-callback/**", "/api/internal/approval-callback/");
+        assertThat(route("orchestrator-chat-public"))
+                .contains("Path=/chat/**", "/api/internal/chat/");
+        assertThat(route("orchestrator-form-public"))
+                .contains("Path=/form/**", "/api/internal/form/");
+        assertThat(route("orchestrator-app-public"))
+                .contains("Path=/app/public/**", "/api/internal/app/public/");
+    }
+
+    @Test
     void serviceSelectorsCannotBypassPublicRoutePolicy() {
         assertThat(routes)
                 .doesNotContain("Path=/api/auth-service/")

@@ -32,6 +32,11 @@ class GatewayAuthenticationFilterV2Test {
     }
 
     @Test
+    void defaultBodyLimitPreservesFiftyMiBStorageContract() {
+        assertThat(properties.getMaxBodyBytes()).isEqualTo(50 * 1024 * 1024);
+    }
+
+    @Test
     void acceptsExactRequestAndLeavesBodyReplayable() throws Exception {
         byte[] body = "{\"value\":42}".getBytes(StandardCharsets.UTF_8);
         MockHttpServletRequest request = signed("POST", "/api/protected", "a=1", body, "nonce-1");

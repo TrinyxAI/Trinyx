@@ -37,6 +37,69 @@ spring:
               predicates:
                 - Path=/api/catalog/public/bundles/**
 
+            # Historical public LiveContext edge contract. These routes are anonymous only
+            # because their tokens/signatures are the capability; downstream services remain private.
+            - id: agent-widget-loader-public
+              uri: ${AGENT_SERVICE_URL:http://agent-service:8090}
+              predicates:
+                - Path=/widget.js
+              filters:
+                - SetPath=/api/internal/widget/loader.js
+            - id: agent-widget-public
+              uri: ${AGENT_SERVICE_URL:http://agent-service:8090}
+              predicates:
+                - Path=/widget/**
+              filters:
+                - RewritePath=/widget/(?<segment>.*), /api/internal/widget/$\{segment}
+            - id: publication-share-public
+              uri: ${PUBLICATION_SERVICE_URL:http://publication-service:8092}
+              predicates:
+                - Path=/share/**
+              filters:
+                - RewritePath=/share/(?<segment>.*), /api/public/share/$\{segment}
+            - id: conversation-share-public
+              uri: ${CONVERSATION_SERVICE_URL:http://conversation-service:8087}
+              predicates:
+                - Path=/c/**
+              filters:
+                - RewritePath=/c/(?<segment>.*), /api/shared/c/$\{segment}
+            - id: agent-webhook-public
+              uri: ${AGENT_SERVICE_URL:http://agent-service:8090}
+              predicates:
+                - Path=/webhook/agent/**
+              filters:
+                - RewritePath=/webhook/(?<segment>.*), /api/internal/webhook/$\{segment}
+            - id: orchestrator-webhook-public
+              uri: ${ORCHESTRATOR_SERVICE_URL:http://orchestrator-service:8099}
+              predicates:
+                - Path=/webhook/**
+              filters:
+                - RewritePath=/webhook/(?<segment>.*), /api/internal/webhook/$\{segment}
+            - id: orchestrator-approval-callback-public
+              uri: ${ORCHESTRATOR_SERVICE_URL:http://orchestrator-service:8099}
+              predicates:
+                - Path=/approval-callback/**
+              filters:
+                - RewritePath=/approval-callback/(?<segment>.*), /api/internal/approval-callback/$\{segment}
+            - id: orchestrator-chat-public
+              uri: ${ORCHESTRATOR_SERVICE_URL:http://orchestrator-service:8099}
+              predicates:
+                - Path=/chat/**
+              filters:
+                - RewritePath=/chat/(?<segment>.*), /api/internal/chat/$\{segment}
+            - id: orchestrator-form-public
+              uri: ${ORCHESTRATOR_SERVICE_URL:http://orchestrator-service:8099}
+              predicates:
+                - Path=/form/**
+              filters:
+                - RewritePath=/form/(?<segment>.*), /api/internal/form/$\{segment}
+            - id: orchestrator-app-public
+              uri: ${ORCHESTRATOR_SERVICE_URL:http://orchestrator-service:8099}
+              predicates:
+                - Path=/app/public/**
+              filters:
+                - RewritePath=/app/public/(?<segment>.*), /api/internal/app/public/$\{segment}
+
             # Collision-specific application routes must precede broader families.
             - id: conversation-admin
               uri: ${CONVERSATION_SERVICE_URL:http://conversation-service:8087}
@@ -116,6 +179,7 @@ trinyx:
       audience: ${KEYCLOAK_AUDIENCE:trinyx-frontend}
     auth-service-url: ${AUTH_SERVICE_URL:http://auth-service:8083}
     hmac-secret: ${GATEWAY_SECRET_KEY:}
+    max-body-bytes: ${CLOUD_GATEWAY_MAX_BODY_BYTES:52428800}
 
 management:
   endpoints:

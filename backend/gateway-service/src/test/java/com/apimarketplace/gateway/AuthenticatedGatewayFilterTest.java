@@ -105,6 +105,29 @@ class AuthenticatedGatewayFilterTest {
     }
 
     @Test
+    void historicalCapabilityRoutesRemainPublicButIdentityHeadersAreStripped() {
+        for (String path : List.of(
+                "/widget.js", "/widget/token/config", "/share/token", "/c/token",
+                "/webhook/token", "/approval-callback/telegram", "/chat/token/config",
+                "/form/token", "/app/public/token/config")) {
+            AuthenticatedGatewayFilter filter = new AuthenticatedGatewayFilter(null, 1024);
+            MockServerWebExchange exchange = MockServerWebExchange.from(
+                    MockServerHttpRequest.get(path)
+                            .header("X-User-ID", "forged")
+                            .header("X-Organization-ID", "forged")
+                            .build());
+            AtomicReference<ServerWebExchange> forwarded = new AtomicReference<>();
+            StepVerifier.create(filter.filter(exchange, candidate -> {
+                forwarded.set(candidate);
+                return Mono.empty();
+            })).verifyComplete();
+            assertThat(forwarded.get()).as(path).isNotNull();
+            assertThat(forwarded.get().getRequest().getHeaders().getFirst("X-User-ID")).isNull();
+            assertThat(forwarded.get().getRequest().getHeaders().getFirst("X-Organization-ID")).isNull();
+        }
+    }
+
+    @Test
     void cdpUpgradeUsesItsOwnTokenProtocolButNeverTrustsBrowserIdentityHeaders() {
         AuthenticatedGatewayFilter filter = new AuthenticatedGatewayFilter(null, 1024);
         MockServerWebExchange exchange = MockServerWebExchange.from(

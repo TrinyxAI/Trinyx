@@ -42,7 +42,7 @@ final class AuthenticatedGatewayFilter implements GlobalFilter, Ordered {
 
     AuthenticatedGatewayFilter(
             GatewayIdentityClient identityClient,
-            @Value("${trinyx.gateway.max-body-bytes:10485760}") int maxBodyBytes) {
+            @Value("${trinyx.gateway.max-body-bytes:52428800}") int maxBodyBytes) {
         this.identityClient = identityClient;
         this.maxBodyBytes = Math.max(1, maxBodyBytes);
     }

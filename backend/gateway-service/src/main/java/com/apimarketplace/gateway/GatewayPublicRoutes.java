@@ -8,6 +8,7 @@ final class GatewayPublicRoutes {
 
     private static final String[] EXACT = {
             "/healthz",
+            "/widget.js",
             "/actuator/health",
             "/cdp",
             "/api/catalog/public/bundles",
@@ -40,7 +41,15 @@ final class GatewayPublicRoutes {
             "/api/catalog/public/bundles/",
             "/api/public/",
             "/api/shared/",
-            "/api/websearch/screenshots/"
+            "/api/websearch/screenshots/",
+            "/widget/",
+            "/share/",
+            "/c/",
+            "/webhook/",
+            "/approval-callback/",
+            "/chat/",
+            "/form/",
+            "/app/public/"
     };
 
     private GatewayPublicRoutes() {}

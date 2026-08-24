@@ -138,7 +138,7 @@ class CeLinkServiceTest {
 
             assertThat(response.registered()).isFalse();
             assertThat(response.error()).isEqualTo("ALREADY_BOUND");
-            assertThat(response.boundToEmail()).isEqualTo("ad***@gmail.com");
+            assertThat(response.boundToEmail()).isEqualTo("us***@example.com");
             verify(repository, never()).save(any());
             verifyNoInteractions(auditService);
         }
@@ -377,7 +377,7 @@ class CeLinkServiceTest {
         @Test
         @DisplayName("two-char local part is masked with 'xx***@domain' pattern")
         void typical_email() {
-            assertThat(CeLinkService.maskEmail("user@example.com")).isEqualTo("ad***@gmail.com");
+            assertThat(CeLinkService.maskEmail("user@example.com")).isEqualTo("us***@example.com");
         }
 
         @Test

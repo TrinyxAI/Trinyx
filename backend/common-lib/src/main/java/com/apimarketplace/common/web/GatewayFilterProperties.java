@@ -29,7 +29,7 @@ public class GatewayFilterProperties {
     private long nonceTtlMs = 300_000;
 
     /** Maximum body buffered for exact v2 digest verification. */
-    private int maxBodyBytes = 10 * 1024 * 1024;
+    private int maxBodyBytes = 50 * 1024 * 1024;
 
     /** Fail startup rather than silently using per-process replay protection. */
     private boolean requireDistributedNonceStore = false;

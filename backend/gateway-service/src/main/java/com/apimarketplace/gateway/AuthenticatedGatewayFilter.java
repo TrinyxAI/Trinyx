@@ -67,28 +67,73 @@ final class AuthenticatedGatewayFilter implements GlobalFilter, Ordered {
                             .getFirst("X-Trinyx-Identity-Binding");
                     String entitlement = exchange.getRequest().getHeaders()
                             .getFirst("X-Trinyx-Entitlement-Projection");
-                    return identityClient.resolve(token, subject, binding, entitlement)
+                    EntitlementPolicy policy = policyFor(path);
+
+                    Mono<GatewayUserContext> authorized = identityClient
+                            .resolve(token, subject, binding, entitlement)
                             .flatMap(context -> {
-                                EntitlementPolicy policy = policyFor(path);
                                 if (policy.identityOnly()) {
-                                    return withBody(exchange, chain, subject, context);
+                                    return Mono.just(context);
                                 }
                                 return identityClient.authorize(
                                                 context, policy.feature(), policy.paidOperation())
                                         .flatMap(decision -> decision.allowed()
-                                                ? withBody(exchange, chain, subject, context)
-                                                : forbidden(exchange, decision.reason()));
+                                                ? Mono.just(context)
+                                                : Mono.error(new EntitlementDeniedException(
+                                                        decision.reason())));
                             });
-                })
-                .onErrorResume(error -> {
-                    exchange.getResponse().setStatusCode(
-                            error instanceof GatewayIdentityClient.UnboundIdentityException
-                                    ? HttpStatus.FORBIDDEN : HttpStatus.UNAUTHORIZED);
-                    byte[] body = ("{\"error\":\"gateway_identity_rejected\"}")
-                            .getBytes(StandardCharsets.UTF_8);
-                    return exchange.getResponse().writeWith(Mono.just(
-                            exchange.getResponse().bufferFactory().wrap(body)));
+
+                    // Only identity/entitlement resolution errors are translated here. Downstream
+                    // routing/provider failures happen in withBody() after this boundary and must
+                    // retain their real 5xx/error semantics instead of being mislabeled as 401.
+                    return authorized
+                            .onErrorResume(error -> rejectIdentity(exchange, error))
+                            .flatMap(context -> withBody(exchange, chain, subject, context));
                 });
+    }
+
+    private Mono<GatewayUserContext> rejectIdentity(ServerWebExchange exchange, Throwable error) {
+        HttpStatus status;
+        String code;
+        if (error instanceof EntitlementDeniedException denied) {
+            status = HttpStatus.FORBIDDEN;
+            code = denied.code();
+        } else if (error instanceof GatewayIdentityClient.UnboundIdentityException) {
+            status = HttpStatus.FORBIDDEN;
+            code = "gateway_identity_rejected";
+        } else if (error instanceof org.springframework.web.reactive.function.client.WebClientResponseException response) {
+            status = response.getStatusCode().is5xxServerError()
+                    ? HttpStatus.SERVICE_UNAVAILABLE : HttpStatus.FORBIDDEN;
+            code = response.getStatusCode().is5xxServerError()
+                    ? "identity_authority_unavailable" : "gateway_identity_rejected";
+        } else if (error instanceof org.springframework.web.reactive.function.client.WebClientRequestException) {
+            status = HttpStatus.SERVICE_UNAVAILABLE;
+            code = "identity_authority_unavailable";
+        } else {
+            status = HttpStatus.UNAUTHORIZED;
+            code = "gateway_identity_rejected";
+        }
+        return writeError(exchange, status, code).then(Mono.empty());
+    }
+
+    private Mono<Void> writeError(ServerWebExchange exchange, HttpStatus status, String code) {
+        exchange.getResponse().setStatusCode(status);
+        byte[] body = ("{\"error\":\"" + code + "\"}").getBytes(StandardCharsets.UTF_8);
+        return exchange.getResponse().writeWith(Mono.just(
+                exchange.getResponse().bufferFactory().wrap(body)));
+    }
+
+    private static final class EntitlementDeniedException extends RuntimeException {
+        private final String code;
+
+        private EntitlementDeniedException(String code) {
+            super(code);
+            this.code = code == null || code.isBlank() ? "ENTITLEMENT_DENIED" : code;
+        }
+
+        private String code() {
+            return code;
+        }
     }
 
     private Mono<Void> withBody(ServerWebExchange exchange, GatewayFilterChain chain,

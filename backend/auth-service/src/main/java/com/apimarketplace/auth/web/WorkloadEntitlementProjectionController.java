@@ -30,7 +30,13 @@ public class WorkloadEntitlementProjectionController {
             @RequestHeader("Authorization") String authorization,
             @Valid @RequestBody ProjectionRequest request) {
         authenticate(authorization);
-        return projections.apply(request.assertion());
+        try {
+            return projections.apply(request.assertion());
+        } catch (IllegalArgumentException invalidAssertion) {
+            throw new org.springframework.web.server.ResponseStatusException(
+                    org.springframework.http.HttpStatus.BAD_REQUEST,
+                    "INVALID_ENTITLEMENT_ASSERTION", invalidAssertion);
+        }
     }
 
     private void authenticate(String authorization) {

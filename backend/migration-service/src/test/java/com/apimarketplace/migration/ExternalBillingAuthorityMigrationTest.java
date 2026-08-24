@@ -55,6 +55,12 @@ class ExternalBillingAuthorityMigrationTest {
                 .contains("UNIQUE (aggregate_key, sequence)")
                 .contains("UNIQUE (aggregate_key, binding_revision)")
                 .contains("late_settlement_until TIMESTAMPTZ")
+                .contains("prompt_tokens BIGINT")
+                .contains("completion_tokens BIGINT")
+                .contains("cache_creation_tokens BIGINT")
+                .contains("cache_read_tokens BIGINT")
+                .contains("cached_tokens BIGINT")
+                .contains("reasoning_tokens BIGINT")
                 .contains("'DEAD'")
                 .contains("terminal_at TIMESTAMPTZ");
     }

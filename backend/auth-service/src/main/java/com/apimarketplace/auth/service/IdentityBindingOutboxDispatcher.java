@@ -101,8 +101,14 @@ public class IdentityBindingOutboxDispatcher {
     private static boolean isPermanent(Throwable failure) {
         Throwable current = failure;
         while (current != null) {
-            if (current instanceof org.springframework.web.client.RestClientResponseException response
-                    && response.getStatusCode().is4xxClientError()) return true;
+            if (current instanceof org.springframework.web.client.RestClientResponseException response) {
+                int status = response.getStatusCode().value();
+                if (response.getStatusCode().is4xxClientError()
+                        && status != HttpStatus.REQUEST_TIMEOUT.value()
+                        && status != HttpStatus.TOO_MANY_REQUESTS.value()) {
+                    return true;
+                }
+            }
             current = current.getCause();
         }
         return false;

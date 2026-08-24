@@ -164,7 +164,8 @@ CREATE TABLE IF NOT EXISTS auth.cloud_credit_operation (
     cached_tokens BIGINT CHECK (cached_tokens IS NULL OR cached_tokens >= 0),
     reasoning_tokens BIGINT CHECK (reasoning_tokens IS NULL OR reasoning_tokens >= 0),
     state VARCHAR(24) NOT NULL
-        CHECK (state IN ('RESERVED', 'COMMITTED', 'COMMITTED_DELINQUENT', 'RELEASED', 'EXPIRED', 'SETTLEMENT_FAILED')),
+        CHECK (state IN ('RESERVED', 'COMMITTED', 'COMMITTED_DELINQUENT', 'RELEASED', 'EXPIRED',
+                         'OUTCOME_UNKNOWN', 'OUTCOME_UNKNOWN_EXPIRED', 'SETTLEMENT_FAILED')),
     response_payload JSONB,
     expires_at TIMESTAMPTZ,
     late_settlement_until TIMESTAMPTZ,
@@ -179,7 +180,7 @@ CREATE INDEX IF NOT EXISTS idx_cloud_credit_operation_expiry
 CREATE TABLE IF NOT EXISTS auth.cloud_settlement_outbox (
     id UUID PRIMARY KEY,
     operation_id UUID NOT NULL REFERENCES auth.cloud_credit_operation(operation_id),
-    action VARCHAR(16) NOT NULL CHECK (action IN ('COMMIT', 'RELEASE')),
+    action VARCHAR(16) NOT NULL CHECK (action IN ('COMMIT', 'RELEASE', 'OUTCOME_UNKNOWN')),
     request_hash CHAR(64) NOT NULL,
     payload JSONB NOT NULL,
     status VARCHAR(16) NOT NULL DEFAULT 'PENDING'

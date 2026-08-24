@@ -69,6 +69,7 @@ public class CreditConsumptionClient {
     private final boolean enabled;
     private final String gatewaySecretKey;
     private String billingAuthorityMode = "native-cloud";
+    private String gatewaySignatureVersion = "2";
 
     /**
      * Injected from Spring's canonical configuration source. Directly constructed unit-test
@@ -77,6 +78,12 @@ public class CreditConsumptionClient {
     @org.springframework.beans.factory.annotation.Value("${billing.authority.mode:native-cloud}")
     public void setBillingAuthorityMode(String billingAuthorityMode) {
         this.billingAuthorityMode = billingAuthorityMode == null ? "native-cloud" : billingAuthorityMode;
+    }
+
+    @org.springframework.beans.factory.annotation.Value("${gateway.signature.version:2}")
+    public void setGatewaySignatureVersion(String gatewaySignatureVersion) {
+        this.gatewaySignatureVersion = gatewaySignatureVersion == null
+                ? "2" : gatewaySignatureVersion.trim();
     }
 
     private final ConcurrentHashMap<String, CachedCheck> creditCheckCache = new ConcurrentHashMap<>();
@@ -1120,11 +1127,8 @@ public class CreditConsumptionClient {
         String timestamp = String.valueOf(System.currentTimeMillis());
         String userId = value(headers.getFirst("X-User-ID"));
         String organizationId = value(headers.getFirst("X-Organization-ID"));
-        String configuredVersion = System.getenv().getOrDefault(
-                "GATEWAY_SIGNATURE_VERSION", "2").trim();
-
         headers.set("X-Provider-ID", INTERNAL_PROVIDER_ID);
-        if ("1".equals(configuredVersion)) {
+        if ("1".equals(gatewaySignatureVersion)) {
             headers.set("X-Gateway-Timestamp", timestamp);
             headers.set("X-Gateway-Secret", computeLegacyGatewaySignature(
                     INTERNAL_PROVIDER_ID, userId, organizationId, timestamp));

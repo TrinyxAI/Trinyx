@@ -215,8 +215,9 @@ services:
       # Catalog seed: import the bundled OpenAPI specs at first boot
       CATALOG_SEED_ENABLED: "true"
       CATALOG_SEED_PATH: /app/catalog-seeds
-      # Explicit Trinyx Cloud public trust roots (keyId=base64X509;...). Empty is
-      # intentionally fail-closed: no upstream signing key is inherited.
+      # Explicit Trinyx Cloud public trust roots (keyId=base64X509;...). Empty
+      # inherits no upstream key; verification remains closed until the existing
+      # HTTPS signing-key bootstrap pins the configured Trinyx Cloud key.
       CATALOG_BUNDLE_TRUSTED_KEYS: ${CATALOG_BUNDLE_TRUSTED_KEYS:-}
       LOGGING_FILE_NAME: /app/logs/livecontext-ce.log
       AUDIT_LOG_PATH: /app/logs/audit

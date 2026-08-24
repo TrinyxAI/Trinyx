@@ -51,6 +51,34 @@ public class CreditService {
         return webSearchCreditsPerSearch;
     }
 
+    /**
+     * Recalculate external LLM settlement from authoritative paid-monolith pricing.
+     * The Cloud reports provider usage counters; it never chooses the monetary debit.
+     */
+    public BigDecimal calculateExternalLlmCredits(
+            String provider, String model, Integer promptTokens, Integer completionTokens,
+            Integer cacheCreationTokens, Integer cacheReadTokens,
+            Integer cachedTokens, Integer reasoningTokens) {
+        if (provider == null || provider.isBlank() || model == null || model.isBlank()
+                || !pricingService.hasPricing(provider, model)) {
+            throw new IllegalArgumentException("MODEL_PRICING_UNKNOWN");
+        }
+        int prompt = nonNegative(promptTokens, "promptTokens");
+        int completion = nonNegative(completionTokens, "completionTokens");
+        return pricingService.calculateCost(provider, model, new LlmTokenBreakdown(
+                prompt, completion,
+                nonNegative(cacheCreationTokens, "cacheCreationTokens"),
+                nonNegative(cacheReadTokens, "cacheReadTokens"),
+                nonNegative(cachedTokens, "cachedTokens"),
+                nonNegative(reasoningTokens, "reasoningTokens")));
+    }
+
+    private static int nonNegative(Integer value, String field) {
+        if (value == null) return 0;
+        if (value < 0) throw new IllegalArgumentException(field + " must be non-negative");
+        return value;
+    }
+
     private final boolean markupEnabled;
     private final boolean markupShadow;
     private final BigDecimal webSearchCreditsPerSearch;

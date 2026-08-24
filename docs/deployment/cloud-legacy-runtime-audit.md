@@ -1,7 +1,7 @@
 # Legacy LiveContext runtime dependency audit
 
 Scope: runtime source/config under `backend`, `frontend`, `mcp`,
-`websearch-service` and `docker`. Test fixtures, generated output, documentation,
+`websearch-service`, `docker` and `cli`. Test fixtures, generated output, documentation,
 schema identifiers and compatibility names are excluded from the runtime gate.
 
 ## Replaced runtime dependencies
@@ -29,8 +29,10 @@ The following are not runtime network dependencies and are not blindly renamed:
 - database schema names and migration history;
 - historical test fixtures/snapshots;
 - compatibility Java/package names inherited by the fork;
-- the `X-LiveContext-Install-Id` HTTP header while existing linked installations
-  still emit it.
+- the `X-LiveContext-Install-Id` HTTP header at the public gateway while existing
+  linked installations still emit it. It is only an untrusted selector there, is
+  validated against an ACTIVE signed binding, stripped, and translated to the
+  downstream HMAC-bound `X-Install-ID`.
 
 Changing those identifiers requires a separately versioned protocol/data migration.
 Their preservation does not make a request to a LiveContext host.

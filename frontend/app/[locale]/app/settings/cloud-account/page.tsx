@@ -4,7 +4,7 @@
  * Cloud Account - single fused page covering both sides of the CE ↔ cloud link.
  *
  *  - CE edition  → "This install" section: connect/disconnect this CE install
- *    to a LiveContext cloud account (talks to /api/cloud-link/* via
+ *    to a Trinyx Cloud account (talks to /api/cloud-link/* via
  *    {@link cloudLinkService}).
  *  - Cloud       → "Connected installs" section: list + disconnect all CE
  *    installs bound to the current cloud account (talks to /api/ce-link/*
@@ -55,7 +55,7 @@ import { IS_CE } from '@/lib/edition/edition';
 import { cn } from '@/lib/utils';
 import BundlesSection from './components/BundlesSection';
 
-const CE_DOCS_URL = 'https://docs.livecontext.ai/community-edition';
+const CE_DOCS_URL = '/docs/self-host';
 const STALE_AMBER_DAYS = 7;
 const STALE_RED_DAYS = 30;
 

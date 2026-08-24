@@ -211,7 +211,7 @@ public class ExternalBillingAuthorityService {
         List<Subscription> payerSubscriptions =
                 subscriptions.findByBillingCustomer_User_IdAndStatusInOrderByCreatedAtDesc(
                         payer.getId(), List.of("trialing", "active", "past_due", "canceled"));
-        Subscription subscription = payerSubscriptions.isEmpty() ? null : payerSubscriptions.getFirst();
+        Subscription subscription = selectAuthoritativeSubscription(payerSubscriptions);
         AtomicReference<PlanResolutionService.ActiveOrgEntitlement> resolved = new AtomicReference<>();
         TenantResolver.runWithOrgScope(organizationId.toString(),
                 () -> resolved.set(planResolution.resolveActiveOrgEntitlement(actor.getId())));
@@ -270,6 +270,22 @@ public class ExternalBillingAuthorityService {
                 """, eventId, scope, sequence, eventType, assertion);
         return new Projection(assertion, sequence, expires, accessState,
                 CanonicalJson.sha256(claims));
+    }
+
+    static Subscription selectAuthoritativeSubscription(List<Subscription> candidates) {
+        if (candidates == null || candidates.isEmpty()) {
+            return null;
+        }
+        // Repository order remains newest-first within a status tier, but lifecycle
+        // priority always wins: historical canceled rows can never mask live access.
+        for (String preferredStatus : List.of("active", "trialing", "past_due", "canceled")) {
+            for (Subscription candidate : candidates) {
+                if (candidate != null && preferredStatus.equalsIgnoreCase(candidate.getStatus())) {
+                    return candidate;
+                }
+            }
+        }
+        return null;
     }
 
     private String accessState(Subscription subscription) {

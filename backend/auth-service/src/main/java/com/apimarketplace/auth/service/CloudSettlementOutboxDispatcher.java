@@ -63,10 +63,17 @@ public class CloudSettlementOutboxDispatcher {
                     var request = json.readValue(pending.payload(),
                             CloudCreditAuthorityService.CommitRequest.class);
                     response = authority.commit(pending.operationId(), request);
-                } else {
+                } else if ("RELEASE".equals(pending.action())) {
                     var request = json.readValue(pending.payload(),
                             CloudCreditAuthorityService.ReleaseRequest.class);
                     response = authority.release(pending.operationId(), request);
+                } else if ("OUTCOME_UNKNOWN".equals(pending.action())) {
+                    var request = json.readValue(pending.payload(),
+                            CloudCreditAuthorityService.OutcomeUnknownRequest.class);
+                    response = authority.outcomeUnknown(pending.operationId(), request);
+                } else {
+                    throw new IllegalArgumentException(
+                            "Unsupported settlement action " + pending.action());
                 }
                 // Remote I/O is complete. Record both local state transitions in one
                 // short transaction so a crash cannot leave DELIVERED + RESERVED.

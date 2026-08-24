@@ -14,6 +14,7 @@ on:
       - "docker/.env.cloud.example"
       - "docker/cloud/**"
       - "docs/deployment/cloud.md"
+      - "docs/deployment/cloud-gateway-routes.md"
       - ".github/workflows/cloud-stack.yml"
   workflow_dispatch:
 
@@ -131,6 +132,11 @@ jobs:
             exit 1
           fi
 
+          if grep -Rni 'ghcr.io/livecontext-ai/' cli/assets docker/docker-compose.cloud.yml; then
+            echo "Runtime image is still owned by the LiveContext registry namespace" >&2
+            exit 1
+          fi
+
           if grep -En '(sk_live_|rk_live_|whsec_[A-Za-z0-9]{20,}|price_[A-Za-z0-9]{10,})' \
             docker/docker-compose.cloud.yml \
             docker/.env.cloud.example \
@@ -188,7 +194,7 @@ jobs:
         run: >-
           mvn -B -Pce
           -pl common-lib,gateway-service,auth-client,auth-service,agent-client,agent-service,orchestrator-service,publication-service,migration-service -am
-          -Dtest=AppEditionProviderTest,AppEditionAutoConfigurationTest,GatewayAuthenticationFilterTest,GatewayAuthenticationFilterV2Test,MonolithSecurityFilterBillingWorkloadTest,GatewaySignatureV2Test,GatewaySignatureV2ParityTest,AuthenticatedGatewayFilterTest,GatewaySecurityConfigTest,Ed25519JwsTest,WorkloadAuthenticationServiceTest,EntitlementProjectionServiceTest,CeLinkServiceTest,CeLinkEntitlementsServiceTest,CloudIdentityBindingServiceTest,CloudCreditAuthorityServiceTest,CloudCreditAuthorityControllerTest,WorkloadIngestControllerTest,PaidMonolithCreditClientTest,ExternalCreditProxyServiceTest,CloudSettlementOutboxDispatcherTest,ProjectionOutboxDispatcherTest,ExternalBillingAuthorityServiceTest,CloudLinkServiceTest,CloudLinkControllerBeanGatingTest,RemoteMarketplaceConfigBeanGatingTest,CloudLlmRelayControllerTest,CloudWebSearchRelayControllerTest,WebSearchModuleBillingTest,BrowserAgentNodeObservabilityTest,AgentObservabilityServiceRecordFromRequestTest,ExternalBillingAuthorityMigrationTest
+          -Dtest=AppEditionProviderTest,AppEditionAutoConfigurationTest,GatewayAuthenticationFilterTest,GatewayAuthenticationFilterV2Test,MonolithSecurityFilterBillingWorkloadTest,GatewaySignatureV2Test,GatewaySignatureV2ParityTest,AuthenticatedGatewayFilterTest,GatewaySecurityConfigTest,GatewayRouteInventoryTest,Ed25519JwsTest,WorkloadAuthenticationServiceTest,EntitlementProjectionServiceTest,CeLinkServiceTest,CeLinkEntitlementsServiceTest,CloudIdentityBindingServiceTest,CloudCreditAuthorityServiceTest,CloudCreditAuthorityControllerTest,WorkloadIngestControllerTest,PaidMonolithCreditClientTest,ExternalCreditProxyServiceTest,ExternalCreditProxyControllerTest,CreditConsumptionClientOrgScopeTest,CloudSettlementOutboxDispatcherTest,ProjectionOutboxDispatcherTest,ExternalBillingAuthorityServiceTest,CloudLinkServiceTest,CloudLinkControllerBeanGatingTest,RemoteMarketplaceConfigBeanGatingTest,CloudLlmRelayControllerTest,CloudWebSearchRelayControllerTest,WebSearchModuleBillingTest,BrowserAgentNodeObservabilityTest,AgentObservabilityServiceRecordFromRequestTest,ExternalBillingAuthorityMigrationTest
           -Dsurefire.failIfNoSpecifiedTests=false
           test
 

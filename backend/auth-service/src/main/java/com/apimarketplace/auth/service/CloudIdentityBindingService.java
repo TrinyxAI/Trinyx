@@ -93,6 +93,8 @@ public class CloudIdentityBindingService {
         }
         jdbc.update("UPDATE auth.users SET principal_id=?, billing_subject_id=?, updated_at=now() WHERE id=?",
                 principalId, billingSubjectId, cloudUserId);
+        materializeOrganizationMembership(
+                cloudUserId, organizationId, organizationRole, billingSubjectId);
         try {
             UUID id = UUID.randomUUID();
             jdbc.update("""
@@ -194,6 +196,44 @@ public class CloudIdentityBindingService {
                 SET status='REVOKED', binding_revision=?, revoked_at=now(), updated_at=now()
                 WHERE id=?
                 """, revision, current.id());
+    }
+
+    /**
+     * Materialize the paid-monolith organization scope in the native Cloud tables so legacy
+     * downstream services and their foreign keys see the same trusted workspace as the HMAC
+     * context. A member cannot create an ownerless workspace: the signed OWNER binding must be
+     * linked first, after which every member is verified against that owner's billing subject.
+     */
+    private void materializeOrganizationMembership(long cloudUserId, UUID organizationId,
+                                                   String organizationRole,
+                                                   UUID billingSubjectId) {
+        if ("OWNER".equals(organizationRole)) {
+            jdbc.update("""
+                    INSERT INTO auth.organization
+                      (id, name, slug, is_personal, owner_id, created_at, updated_at)
+                    VALUES (?, ?, ?, false, ?, now(), now())
+                    ON CONFLICT (id) DO NOTHING
+                    """, organizationId, "Linked Trinyx workspace",
+                    "trinyx-linked-" + organizationId, cloudUserId);
+        }
+        Integer validOwner = jdbc.queryForObject("""
+                SELECT count(*) FROM auth.organization organization_row
+                JOIN auth.users owner_row ON owner_row.id=organization_row.owner_id
+                WHERE organization_row.id=? AND owner_row.billing_subject_id=?
+                  AND organization_row.deleted_at IS NULL
+                """, Integer.class, organizationId, billingSubjectId);
+        if (validOwner == null || validOwner != 1) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT,
+                    "ORGANIZATION_OWNER_BINDING_REQUIRED");
+        }
+        jdbc.update("""
+                INSERT INTO auth.organization_member
+                  (organization_id, user_id, role, is_default, joined_at)
+                VALUES (?, ?, ?, false, now())
+                ON CONFLICT (organization_id, user_id)
+                DO UPDATE SET role=EXCLUDED.role
+                """, organizationId, cloudUserId,
+                organizationRole.toLowerCase(java.util.Locale.ROOT));
     }
 
     private BindingRow findByJti(UUID jti) {

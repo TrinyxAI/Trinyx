@@ -84,7 +84,7 @@ describe('metaDescription', () => {
   it('falls back to a generated sentence when there is no description', () => {
     // An empty meta description is flagged by search consoles.
     expect(metaDescription(publication({ description: '   ' }))).toBe(
-      'Invoice Bot on the LiveContext marketplace.',
+      'Invoice Bot on the Trinyx marketplace.',
     );
   });
 

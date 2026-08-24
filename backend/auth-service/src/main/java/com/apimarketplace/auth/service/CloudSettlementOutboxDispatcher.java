@@ -70,6 +70,20 @@ public class CloudSettlementOutboxDispatcher {
                         pending.operationId());
             } catch (Exception failure) {
                 int attempt = pending.attemptCount() + 1;
+                if (isPermanent(failure)) {
+                    jdbc.update("""
+                            UPDATE auth.cloud_settlement_outbox
+                            SET status='DEAD', attempt_count=?, last_error=?,
+                                terminal_at=now()
+                            WHERE id=?
+                            """, attempt, bounded(failure.getMessage()), pending.id());
+                    jdbc.update("""
+                            UPDATE auth.cloud_credit_operation
+                            SET state='SETTLEMENT_FAILED', updated_at=now()
+                            WHERE operation_id=? AND state IN ('RESERVED','EXPIRED')
+                            """, pending.operationId());
+                    continue;
+                }
                 long capSeconds = Math.min(300, 1L << Math.min(8, attempt));
                 long delay = ThreadLocalRandom.current().nextLong(
                         Math.max(1, capSeconds / 2), capSeconds + 1);
@@ -82,6 +96,19 @@ public class CloudSettlementOutboxDispatcher {
                         bounded(failure.getMessage()), pending.id());
             }
         }
+    }
+
+    private static boolean isPermanent(Throwable failure) {
+        Throwable current = failure;
+        while (current != null) {
+            if (current instanceof PaidMonolithCreditClient.PermanentAuthorityException
+                    || current instanceof com.fasterxml.jackson.core.JsonProcessingException
+                    || current instanceof IllegalArgumentException) {
+                return true;
+            }
+            current = current.getCause();
+        }
+        return false;
     }
 
     private static String state(Object response) {

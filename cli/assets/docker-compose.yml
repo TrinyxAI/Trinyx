@@ -1,6 +1,6 @@
-# LiveContext Community Edition: Docker Compose (prebuilt images)
+# Trinyx Community Edition: Docker Compose (prebuilt images)
 # Usage:
-#   git clone https://github.com/livecontext-ai/livecontext-ce
+#   git clone https://github.com/eddinerabii/Trinyx
 #   cd livecontext-ce
 #   docker compose up -d
 #   Open http://localhost:3000
@@ -10,7 +10,7 @@
 #
 # Configuration (cloud connection, SMTP, ports): copy docker/.env.ce.example to
 # docker/.env.ce and pass it with `--env-file docker/.env.ce`. For agents to run, connect
-# to LiveContext Cloud (recommended) or add your own OpenAI/Anthropic/Google key in the app.
+# to Trinyx Cloud (recommended) or add your own OpenAI/Anthropic/Google key in the app.
 #
 # Ports (override via env or --env-file):
 #   FRONTEND_PORT=3000   (the app; open http://localhost:3000)
@@ -33,9 +33,9 @@
 #   docker compose --env-file docker/.env.ce.renderer up -d
 #
 # Those env files ship with the git repository, NOT with the npm package, and
-# `npx livecontext` passes no --env-file. So if you started this stack with npx,
+# `npx trinyx` passes no --env-file. So if you started this stack with npx,
 # clone the repo and use `docker compose` directly to enable either add-on:
-#   https://github.com/livecontext-ai/livecontext-ce
+#   https://github.com/eddinerabii/Trinyx
 # See README.md ("Optional features") and docker/README-CE.md for details.
 
 name: livecontext-ce
@@ -362,7 +362,7 @@ services:
       # so the same prebuilt image serves localhost, a LAN address and a public domain.
       #
       # Leave GATEWAY_PUBLIC_URL empty (the default) and the app derives the origin from
-      # the address you opened it with, on BACKEND_PORT: `npx livecontext` on a server and
+      # the address you opened it with, on BACKEND_PORT: `npx trinyx` on a server and
       # opening http://192.168.1.50:3000 connects to http://192.168.1.50:8080, with nothing
       # to rebuild.
       #

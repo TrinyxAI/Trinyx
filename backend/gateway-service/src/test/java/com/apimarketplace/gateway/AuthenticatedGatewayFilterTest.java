@@ -96,6 +96,49 @@ class AuthenticatedGatewayFilterTest {
     }
 
     @Test
+    void cdpUpgradeUsesItsOwnTokenProtocolButNeverTrustsBrowserIdentityHeaders() {
+        AuthenticatedGatewayFilter filter = new AuthenticatedGatewayFilter(null, 1024);
+        MockServerWebExchange exchange = MockServerWebExchange.from(
+                MockServerHttpRequest.get("/cdp/session-token/devtools/page/1")
+                        .header("Upgrade", "websocket")
+                        .header("X-User-ID", "999")
+                        .header("X-Organization-ID", "forged")
+                        .header("X-Gateway-Secret", "forged")
+                        .build());
+        AtomicReference<ServerWebExchange> forwarded = new AtomicReference<>();
+
+        StepVerifier.create(filter.filter(exchange, candidate -> {
+            forwarded.set(candidate);
+            return Mono.empty();
+        })).verifyComplete();
+
+        assertThat(forwarded.get()).isNotNull();
+        assertThat(forwarded.get().getRequest().getHeaders().getFirst("Upgrade"))
+                .isEqualTo("websocket");
+        assertThat(forwarded.get().getRequest().getHeaders().getFirst("X-User-ID")).isNull();
+        assertThat(forwarded.get().getRequest().getHeaders().getFirst("X-Organization-ID")).isNull();
+        assertThat(forwarded.get().getRequest().getHeaders().getFirst("X-Gateway-Secret")).isNull();
+    }
+
+    @Test
+    void membersKeepDistinctActorsWhileSharingOneBillingSubjectAndOrganization() {
+        GatewayUserContext memberB = new GatewayUserContext(
+                2L, "subject-b", Set.of("USER"), "org-a", "MEMBER",
+                List.of(new GatewayUserContext.Membership("org-a", "MEMBER")),
+                "principal-b", "payer-owner", "install");
+        GatewayUserContext memberC = new GatewayUserContext(
+                3L, "subject-c", Set.of("USER"), "org-a", "MEMBER",
+                List.of(new GatewayUserContext.Membership("org-a", "MEMBER")),
+                "principal-c", "payer-owner", "install");
+
+        assertThat(memberB.principalId()).isNotEqualTo(memberC.principalId());
+        assertThat(memberB.billingSubjectId()).isEqualTo(memberC.billingSubjectId());
+        assertThat(memberB.defaultOrganizationId()).isEqualTo(memberC.defaultOrganizationId());
+        assertThat(memberB.roleFor("org-a")).isEqualTo("MEMBER");
+        assertThat(memberC.roleFor("org-a")).isEqualTo("MEMBER");
+    }
+
+    @Test
     void selectedOrganizationMustBeARealMembership() {
         GatewayUserContext context = new GatewayUserContext(
                 1L, "subject", Set.of("USER"), "org-a", "OWNER",

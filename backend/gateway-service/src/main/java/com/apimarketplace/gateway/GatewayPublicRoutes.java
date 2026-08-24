@@ -8,6 +8,11 @@ final class GatewayPublicRoutes {
 
     private static final String[] EXACT = {
             "/healthz",
+            "/actuator/health",
+            "/cdp",
+            "/api/catalog/public/bundles",
+            "/api/public",
+            "/api/shared",
             "/webhooks/stripe",
             "/api/ce/releases/latest",
             "/.well-known/jwks.json",
@@ -30,7 +35,7 @@ final class GatewayPublicRoutes {
     };
 
     private static final String[] PREFIX = {
-            "/actuator/health",
+            "/actuator/health/",
             "/cdp/",
             "/api/catalog/public/bundles/",
             "/api/public/",

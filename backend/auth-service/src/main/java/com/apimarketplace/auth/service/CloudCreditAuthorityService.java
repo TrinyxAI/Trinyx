@@ -93,7 +93,8 @@ public class CloudCreditAuthorityService {
         if ("RELEASED".equals(operation.state())) {
             throw conflict("COMMIT_AFTER_RELEASE");
         }
-        boolean late = "EXPIRED".equals(operation.state());
+        boolean late = "EXPIRED".equals(operation.state())
+                || "OUTCOME_UNKNOWN_EXPIRED".equals(operation.state());
         if (late && (operation.lateSettlementUntil() == null
                 || !Instant.now().isBefore(operation.lateSettlementUntil()))) {
             throw conflict("LATE_SETTLEMENT_WINDOW_CLOSED");
@@ -149,6 +150,47 @@ public class CloudCreditAuthorityService {
                 SET state='RELEASED', settlement_hash=?, response_payload=CAST(? AS jsonb), updated_at=now()
                 WHERE operation_id=?
                 """, settlementHash, write(response), operationId);
+        return response;
+    }
+
+    @Transactional
+    public SettlementResponse outcomeUnknown(UUID operationId, OutcomeUnknownRequest request) {
+        lock(operationId);
+        Existing operation = required(operationId);
+        requireSame(operation.requestHash(), request.requestHash(), "REQUEST_HASH_MISMATCH");
+        if (!java.util.Objects.equals(operation.provider(), request.provider())
+                || !java.util.Objects.equals(operation.model(), request.model())) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
+                    "INVALID_PROVIDER_OUTCOME");
+        }
+        String settlementHash = CanonicalJson.sha256(json.valueToTree(request));
+        if (operation.state().startsWith("OUTCOME_UNKNOWN")) {
+            requireSame(operation.settlementHash(), settlementHash,
+                    "OUTCOME_UNKNOWN_PAYLOAD_CONFLICT");
+            return readSettlement(operation.responsePayload());
+        }
+        if (operation.state().startsWith("COMMITTED")) {
+            throw conflict("OUTCOME_UNKNOWN_AFTER_COMMIT");
+        }
+        if ("RELEASED".equals(operation.state())) {
+            throw conflict("OUTCOME_UNKNOWN_AFTER_RELEASE");
+        }
+
+        boolean holdAlreadyExpired = "EXPIRED".equals(operation.state());
+        String state = holdAlreadyExpired
+                ? "OUTCOME_UNKNOWN_EXPIRED" : "OUTCOME_UNKNOWN";
+        SettlementResponse response = new SettlementResponse(operationId, state,
+                BigDecimal.ZERO,
+                balanceForOrganization(operation.executorUserId(), operation.organizationId()),
+                holdAlreadyExpired,
+                holdAlreadyExpired
+                        ? "RECONCILIATION_REQUIRED_HOLD_EXPIRED"
+                        : "RECONCILIATION_REQUIRED_HOLD_RETAINED");
+        jdbc.update("""
+                UPDATE auth.cloud_credit_operation
+                SET state=?, settlement_hash=?, response_payload=CAST(? AS jsonb), updated_at=now()
+                WHERE operation_id=?
+                """, state, settlementHash, write(response), operationId);
         return response;
     }
 
@@ -419,6 +461,8 @@ public class CloudCreditAuthorityService {
         }
     }
     public record ReleaseRequest(String reason, String requestHash) {}
+    public record OutcomeUnknownRequest(String reason, String requestHash,
+                                        String provider, String model) {}
     public record ReserveResponse(UUID operationId, UUID reservationId, String state,
                                   Instant expiresAt, BigDecimal authoritativeBalance,
                                   boolean delinquent) {}

@@ -136,6 +136,23 @@ class CloudIdentityBindingServiceTest {
     }
 
     @Test
+    void workerContextResolvesUniqueBindingByCloudUserAndOrganization() {
+        jdbc.current = row(1, "ACTIVE", "active-jws", UUID.randomUUID());
+
+        var context = service.context(42L, ORG);
+
+        assertThat(context.principalId()).isEqualTo(PRINCIPAL);
+        assertThat(context.billingSubjectId()).isEqualTo(PAYER);
+        assertThat(context.installId()).isEqualTo(INSTALL);
+        assertThat(jdbc.lastQuerySql)
+                .contains("cloud_user_id=?")
+                .contains("organization_id=?")
+                .contains("status='ACTIVE'");
+        assertThat(jdbc.lastQueryArgs).containsExactly(
+                "https://app.trinyx.fr", 42L, ORG);
+    }
+
+    @Test
     void organizationMemberMayUseOwnerInstallOnlyForExactActiveSignedScope() {
         jdbc.installAccessCount = 1;
 

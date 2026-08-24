@@ -160,6 +160,26 @@ public class ExternalCreditProxyService {
         }
     }
 
+    @Transactional(noRollbackFor = ResponseStatusException.class)
+    public SettlementResult outcomeUnknown(UUID operationId, OutcomeUnknownCommand command) {
+        String requestHash = command.requestHash() == null || command.requestHash().isBlank()
+                ? requestHash(operationId) : command.requestHash();
+        var request = new CloudCreditAuthorityService.OutcomeUnknownRequest(
+                command.reason(), requestHash, command.provider(), command.model());
+        try {
+            var response = authority.outcomeUnknown(operationId, request);
+            markSettled(operationId, response.state(), response);
+            return new SettlementResult(response, false);
+        } catch (PaidMonolithCreditClient.PermanentAuthorityException permanent) {
+            terminal(operationId, "OUTCOME_UNKNOWN", requestHash, request, permanent);
+            throw new ResponseStatusException(HttpStatusCode.valueOf(permanent.statusCode()),
+                    "BILLING_AUTHORITY_TERMINAL_REJECTION", permanent);
+        } catch (PaidMonolithCreditClient.RetryableAuthorityException failure) {
+            queue(operationId, "OUTCOME_UNKNOWN", requestHash, request, failure);
+            return new SettlementResult(null, true);
+        }
+    }
+
     private void markSettled(UUID operationId, String state, Object response) {
         jdbc.update("""
                 UPDATE auth.cloud_credit_operation
@@ -290,6 +310,8 @@ public class ExternalCreditProxyService {
         }
     }
     public record ReleaseCommand(String reason, String requestHash) {}
+    public record OutcomeUnknownCommand(String reason, String requestHash,
+                                        String provider, String model) {}
     public record ReserveResult(CloudCreditAuthorityService.ReserveResponse authority,
                                 String requestHash, long entitlementSequence) {}
     public record SettlementResult(CloudCreditAuthorityService.SettlementResponse authority,

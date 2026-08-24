@@ -43,11 +43,15 @@ public class CloudCreditAuthorityService {
         Existing existing = existing(request.operationId());
         if (existing != null) {
             requireSame(existing.requestHash(), request.requestHash(), "OPERATION_ID_CONFLICT");
+            if (!"RESERVED".equals(existing.state())) {
+                throw conflict("OPERATION_ALREADY_" + existing.state());
+            }
             return reserveResponse(existing);
         }
 
         long executorUserId = validateAuthorityContext(request);
-        var result = reserveForOrganization(executorUserId, request);
+        BigDecimal authoritativeMaximum = authoritativeMaximum(request);
+        var result = reserveForOrganization(executorUserId, request, authoritativeMaximum);
         if (!result.success()) {
             throw new ResponseStatusException(HttpStatus.PAYMENT_REQUIRED,
                     result.delinquent() ? "WALLET_DELINQUENT" : "INSUFFICIENT_CREDITS");
@@ -66,7 +70,8 @@ public class CloudCreditAuthorityService {
                 """, request.operationId(), request.operationId(), request.requestHash(),
                 request.principalId(), request.billingSubjectId(), request.organizationId(),
                 request.installId(), request.entitlementSequence(), request.sourceType(),
-                request.estimatedCredits(), request.maximumCredits(), request.provider(), request.model(),
+                request.estimatedCredits().min(authoritativeMaximum), authoritativeMaximum,
+                request.provider(), request.model(),
                 write(response), Timestamp.from(response.expiresAt()),
                 Timestamp.from(response.expiresAt().plus(LATE_SETTLEMENT)));
         return response;
@@ -92,8 +97,9 @@ public class CloudCreditAuthorityService {
             throw conflict("LATE_SETTLEMENT_WINDOW_CLOSED");
         }
 
+        BigDecimal authoritativeActual = authoritativeActual(operation, request);
         CreditService.CommitOutcome outcome = credits.settleExternalReservation(
-                sourceId(operationId), request.actualCredits(), request.provider(),
+                sourceId(operationId), authoritativeActual, request.provider(),
                 request.model(), late);
         if (outcome == CreditService.CommitOutcome.RESERVATION_EXPIRED) {
             throw conflict("RESERVATION_NOT_SETTLEABLE");
@@ -103,7 +109,7 @@ public class CloudCreditAuthorityService {
         String state = delinquent ? "COMMITTED_DELINQUENT" : "COMMITTED";
         BigDecimal balance = balanceForOrganization(operation.executorUserId(), operation.organizationId());
         SettlementResponse response = new SettlementResponse(operationId, state,
-                request.actualCredits(), balance, delinquent, outcome.name());
+                authoritativeActual, balance, delinquent, outcome.name());
         jdbc.update("""
                 UPDATE auth.cloud_credit_operation
                 SET state=?, actual_credits=?, provider=?, model=?, provider_request_id=?,
@@ -221,7 +227,7 @@ public class CloudCreditAuthorityService {
         var rows = jdbc.query("""
                 SELECT o.operation_id, o.request_hash, o.settlement_hash, o.state,
                        o.response_payload::text, o.late_settlement_until, o.organization_id,
-                       u.id AS executor_user_id
+                       o.source_type, u.id AS executor_user_id
                 FROM auth.cloud_credit_operation o
                 JOIN auth.users u ON u.principal_id=o.principal_id
                 WHERE o.operation_id=? FOR UPDATE
@@ -230,18 +236,33 @@ public class CloudCreditAuthorityService {
                 rs.getString("response_payload"),
                 rs.getTimestamp("late_settlement_until") == null ? null
                         : rs.getTimestamp("late_settlement_until").toInstant(),
-                rs.getLong("executor_user_id"), rs.getObject("organization_id", UUID.class)), id);
+                rs.getLong("executor_user_id"), rs.getObject("organization_id", UUID.class),
+                rs.getString("source_type")), id);
         return rows.isEmpty() ? null : rows.getFirst();
     }
 
     private CreditService.CreditConsumeResult reserveForOrganization(
-            long executorUserId, ReserveRequest request) {
+            long executorUserId, ReserveRequest request, BigDecimal maximumCredits) {
         AtomicReference<CreditService.CreditConsumeResult> result = new AtomicReference<>();
         TenantResolver.runWithOrgScope(request.organizationId().toString(), () -> result.set(
                 credits.tryReserveMarkup(executorUserId, sourceId(request.operationId()),
-                        request.provider(), request.model(), request.maximumCredits(), null,
+                        request.provider(), request.model(), maximumCredits, null,
                         10, "CLOUD", request.operationId().toString(), false)));
         return result.get();
+    }
+
+    private BigDecimal authoritativeMaximum(ReserveRequest request) {
+        if ("WEB_SEARCH".equalsIgnoreCase(request.sourceType())) {
+            return credits.getWebSearchCreditsPerSearch();
+        }
+        return request.maximumCredits();
+    }
+
+    private BigDecimal authoritativeActual(Existing operation, CommitRequest request) {
+        if ("WEB_SEARCH".equalsIgnoreCase(operation.sourceType())) {
+            return credits.getWebSearchCreditsPerSearch();
+        }
+        return request.actualCredits();
     }
 
     private BigDecimal balanceForOrganization(long executorUserId, UUID organizationId) {
@@ -280,7 +301,7 @@ public class CloudCreditAuthorityService {
 
     private record Existing(UUID operationId, String requestHash, String settlementHash,
                             String state, String responsePayload, Instant lateSettlementUntil,
-                            long executorUserId, UUID organizationId) {}
+                            long executorUserId, UUID organizationId, String sourceType) {}
 
     public record ReserveRequest(UUID operationId, UUID principalId, UUID billingSubjectId,
                                  UUID organizationId, UUID installId, long entitlementSequence,

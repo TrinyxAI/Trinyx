@@ -53,13 +53,11 @@ class GatewayRouteInventoryTest {
     }
 
     @Test
-    void servicePrefixedCompatibilityIsExplicitAndRewritten() {
-        for (String service : new String[]{"auth", "catalog", "agent", "conversation",
-                "datasource", "interface", "trigger", "publication", "orchestrator", "storage"}) {
-            assertThat(route("prefixed-" + service + "-service"))
-                    .contains("Path=/api/" + service + "-service/api/**")
-                    .contains("RewritePath=/api/" + service + "-service/");
-        }
+    void serviceSelectorsCannotBypassPublicRoutePolicy() {
+        assertThat(routes)
+                .doesNotContain("Path=/api/auth-service/")
+                .doesNotContain("Path=/api/orchestrator-service/")
+                .doesNotContain("RewritePath=/api/");
     }
 
     @Test

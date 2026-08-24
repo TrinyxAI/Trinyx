@@ -41,6 +41,16 @@ public class CreditService {
     public boolean isUnlimited() {
         return unlimited;
     }
+
+    /**
+     * Authoritative fixed price used when an external Cloud runtime reserves a
+     * web-search operation. The Cloud sends only an operation intent; it must
+     * never become the source of truth for this configurable price.
+     */
+    public BigDecimal getWebSearchCreditsPerSearch() {
+        return webSearchCreditsPerSearch;
+    }
+
     private final boolean markupEnabled;
     private final boolean markupShadow;
     private final BigDecimal webSearchCreditsPerSearch;

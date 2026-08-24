@@ -138,6 +138,26 @@ jobs:
             exit 1
           fi
 
+      - name: Inventory remaining user-facing legacy branding
+        shell: bash
+        run: |
+          set -euo pipefail
+          set +e
+          branding_matches="$(
+            grep -RniE --include='*.ts' --include='*.tsx' --include='*.js' --include='*.mjs' \
+              --include='*.json' --include='*.html' --include='*.yml' --include='*.yaml' \
+              'LiveContext' frontend cli landing backend/*/src/main/resources 2>/dev/null
+          )"
+          branding_status=$?
+          set -e
+          if [[ ${branding_status} -gt 1 ]]; then exit ${branding_status}; fi
+          if [[ -n "${branding_matches}" ]]; then
+            echo "Classify remaining LiveContext branding (technical compatibility may remain):"
+            printf '%s\n' "${branding_matches}"
+          else
+            echo "No user-facing LiveContext branding candidates found."
+          fi
+
       - name: Validate private paid-monolith wallet edge policy
         shell: bash
         run: |

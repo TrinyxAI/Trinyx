@@ -19,10 +19,15 @@ and signs the final downstream target. It deliberately has no catch-all `/api/**
 | `/cdp/**` | websearch-service:8085 | CDP upgrade; protected by its session token |
 | `/webhooks/stripe` | auth-service:8083 | Only explicitly public webhook; Stripe signature is verified downstream |
 
-Known path collisions are resolved before broad families: conversation/admin, orchestrator/admin,
-publication CE TLS, orchestrator interface runtime, orchestrator storage facade, and all
-`/api/v2/workflows/**` routes. The orchestrator owns the public aggregate
-`/api/agent-tools/**` facade.
+The inventory was reconstructed from 205 controller classes (769 composed endpoint
+mappings) across the ten services. Known path collisions are resolved before broad
+families: conversation/admin, orchestrator/admin, publication CE TLS, orchestrator
+interface runtime, orchestrator storage facade, and all `/api/v2/workflows/**`
+routes. The orchestrator owns the public aggregate `/api/agent-tools/**` facade.
+Likewise, public workflow schedule calls stay on the orchestrator facade: it delegates
+CRUD to trigger-service and retains execute-now. The duplicate service-local
+`/api/agent-tools/**` and trigger schedule controllers are interservice surfaces,
+not additional public edge targets.
 
 Service-selector paths such as `/api/auth-service/api/**` are intentionally not exposed
 on the public edge. Interservice calls use Docker DNS directly; this prevents a rewritten

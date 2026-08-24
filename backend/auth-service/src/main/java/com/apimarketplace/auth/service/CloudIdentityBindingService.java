@@ -216,9 +216,9 @@ public class CloudIdentityBindingService {
                 rs.getObject("id", UUID.class), rs.getLong("cloud_user_id"),
                 rs.getString("keycloak_subject"), rs.getObject("principal_id", UUID.class),
                 rs.getObject("billing_subject_id", UUID.class),
-                rs.getObject("organization_id", UUID.class), rs.getObject("install_id", UUID.class),
-                rs.getLong("binding_revision"), rs.getString("assertion_jws"),
-                rs.getString("status")), arguments);
+                rs.getObject("organization_id", UUID.class), rs.getString("organization_role"),
+                rs.getObject("install_id", UUID.class), rs.getLong("binding_revision"),
+                rs.getString("assertion_jws"), rs.getString("status")), arguments);
         return rows.isEmpty() ? null : rows.getFirst();
     }
 

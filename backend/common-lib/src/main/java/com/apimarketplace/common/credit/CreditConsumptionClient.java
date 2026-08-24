@@ -70,6 +70,8 @@ public class CreditConsumptionClient {
     private final String gatewaySecretKey;
     private String billingAuthorityMode = "native-cloud";
     private String gatewaySignatureVersion = "2";
+    private ExternalSettlementIntentStore settlementIntentStore;
+    private boolean requireProducerSettlementOutbox;
 
     /**
      * Injected from Spring's canonical configuration source. Directly constructed unit-test
@@ -84,6 +86,26 @@ public class CreditConsumptionClient {
     public void setGatewaySignatureVersion(String gatewaySignatureVersion) {
         this.gatewaySignatureVersion = gatewaySignatureVersion == null
                 ? "2" : gatewaySignatureVersion.trim();
+    }
+
+    @org.springframework.beans.factory.annotation.Value(
+            "${billing.external.require-producer-outbox:false}")
+    public void setRequireProducerSettlementOutbox(boolean required) {
+        this.requireProducerSettlementOutbox = required;
+    }
+
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    public void setSettlementIntentStore(ExternalSettlementIntentStore store) {
+        this.settlementIntentStore = store;
+    }
+
+    @jakarta.annotation.PostConstruct
+    void validateExternalSettlementDurability() {
+        if (usesExternalAuthority() && requireProducerSettlementOutbox
+                && (settlementIntentStore == null || !settlementIntentStore.durable())) {
+            throw new IllegalStateException(
+                    "external-paid-monolith requires a durable producer settlement outbox");
+        }
     }
 
     private final ConcurrentHashMap<String, CachedCheck> creditCheckCache = new ConcurrentHashMap<>();
@@ -977,15 +999,9 @@ public class CreditConsumptionClient {
         body.put("provider", provider);
         body.put("model", model);
         body.put("providerRequestId", "");
-        try {
-            ResponseEntity<Map> response = restTemplate.exchange(
-                    url, HttpMethod.POST, new HttpEntity<>(body, headers), Map.class);
-            return response.getStatusCode().is2xxSuccessful() ? "COMMITTED" : "RETRY";
-        } catch (Exception failure) {
-            log.error("External scope commit not acknowledged for {}: {}",
-                    sourceId, failure.getMessage());
-            return "RETRY";
-        }
+        ExternalSettlementIntentStore.Intent intent =
+                new ExternalSettlementIntentStore.Intent("COMMIT_AMOUNT", operationId, url, body, 0);
+        return deliverDurably(intent, headers) ? "COMMITTED" : "RETRY";
     }
 
     private String externalScopeRelease(String sourceId, String reason) {
@@ -993,18 +1009,11 @@ public class CreditConsumptionClient {
         String url = authServiceUrl + "/api/internal/cloud-credit-proxy/"
                 + operationId + "/release-local";
         HttpHeaders headers = userHeaders(null, MediaType.APPLICATION_JSON);
-        try {
-            ResponseEntity<Map> response = restTemplate.exchange(
-                    url, HttpMethod.POST,
-                    new HttpEntity<>(Map.of("reason", reason == null ? "provider-not-called" : reason),
-                            headers),
-                    Map.class);
-            return response.getStatusCode().is2xxSuccessful() ? "RELEASED" : "RETRY";
-        } catch (Exception failure) {
-            log.error("External scope release not acknowledged for {}: {}",
-                    sourceId, failure.getMessage());
-            return "RETRY";
-        }
+        Map<String, Object> body = Map.of(
+                "reason", reason == null ? "provider-not-called" : reason);
+        ExternalSettlementIntentStore.Intent intent =
+                new ExternalSettlementIntentStore.Intent("RELEASE_LOCAL", operationId, url, body, 0);
+        return deliverDurably(intent, headers) ? "RELEASED" : "RETRY";
     }
 
     private static UUID externalOperationId(String sourceId) {
@@ -1105,16 +1114,9 @@ public class CreditConsumptionClient {
                 body.put("reasoningTokens", cacheTokens.reasoningTokens());
             }
         }
-        try {
-            ResponseEntity<Map> response = restTemplate.exchange(
-                    url, HttpMethod.POST, new HttpEntity<>(body, headers), Map.class);
-            // 202 means the durable Cloud outbox owns the retry.
-            return response.getStatusCode().is2xxSuccessful();
-        } catch (Exception failure) {
-            log.error("External settlement was not acknowledged for operation {}: {}",
-                    operationId, failure.getMessage());
-            return false;
-        }
+        ExternalSettlementIntentStore.Intent intent =
+                new ExternalSettlementIntentStore.Intent("COMMIT_LLM", operationId, url, body, 0);
+        return deliverDurably(intent, headers);
     }
 
     public boolean releaseExternal(
@@ -1125,16 +1127,90 @@ public class CreditConsumptionClient {
         Map<String, Object> body = new HashMap<>();
         body.put("requestHash", requestHash);
         body.put("reason", reason == null ? "provider-not-called" : reason);
+        ExternalSettlementIntentStore.Intent intent =
+                new ExternalSettlementIntentStore.Intent("RELEASE", operationId, url, body, 0);
+        return deliverDurably(intent, headers);
+    }
+
+    /**
+     * Provider delivery became ambiguous after dispatch. Never release the hold:
+     * retain a durable reconciliation record keyed by the original operation.
+     */
+    public void recordExternalOutcomeUnknown(
+            UUID operationId, String requestHash, String provider, String model, String reason) {
+        if (settlementIntentStore == null) {
+            log.error("CRITICAL: ambiguous provider outcome has no durable outbox operationId={}",
+                    operationId);
+            return;
+        }
+        settlementIntentStore.recordUnknown(operationId, Map.of(
+                "requestHash", value(requestHash),
+                "provider", value(provider),
+                "model", value(model),
+                "reason", value(reason)));
+    }
+
+    private boolean deliverDurably(ExternalSettlementIntentStore.Intent intent, HttpHeaders headers) {
+        if (settlementIntentStore == null || !settlementIntentStore.durable()) {
+            if (requireProducerSettlementOutbox) {
+                log.error("Settlement blocked: durable producer outbox unavailable operationId={}",
+                        intent.operationId());
+                return false;
+            }
+        } else {
+            try {
+                settlementIntentStore.persist(intent);
+            } catch (RuntimeException persistenceFailure) {
+                log.error("Settlement intent could not be persisted operationId={}: {}",
+                        intent.operationId(), persistenceFailure.getMessage());
+                return false;
+            }
+        }
+
+        SettlementDelivery result = deliverPersistedSettlement(intent, headers);
+        if (settlementIntentStore != null && settlementIntentStore.durable()) {
+            switch (result) {
+                case ACKNOWLEDGED -> settlementIntentStore.acknowledge(intent);
+                case PERMANENT_FAILURE -> settlementIntentStore.dead(intent,
+                        "permanent authority rejection");
+                case RETRYABLE_FAILURE -> settlementIntentStore.retry(intent,
+                        "authority unavailable");
+            }
+        }
+        return result == SettlementDelivery.ACKNOWLEDGED;
+    }
+
+    SettlementDelivery deliverPersistedSettlement(ExternalSettlementIntentStore.Intent intent) {
+        return deliverPersistedSettlement(intent,
+                userHeaders(null, MediaType.APPLICATION_JSON));
+    }
+
+    private SettlementDelivery deliverPersistedSettlement(
+            ExternalSettlementIntentStore.Intent intent, HttpHeaders headers) {
         try {
             ResponseEntity<Map> response = restTemplate.exchange(
-                    url, HttpMethod.POST, new HttpEntity<>(body, headers), Map.class);
-            return response.getStatusCode().is2xxSuccessful();
-        } catch (Exception failure) {
-            log.error("External release was not acknowledged for operation {}: {}",
-                    operationId, failure.getMessage());
-            return false;
+                    intent.url(), HttpMethod.POST,
+                    new HttpEntity<>(intent.body(), headers), Map.class);
+            return response.getStatusCode().is2xxSuccessful()
+                    ? SettlementDelivery.ACKNOWLEDGED
+                    : response.getStatusCode().is5xxServerError()
+                        ? SettlementDelivery.RETRYABLE_FAILURE
+                        : SettlementDelivery.PERMANENT_FAILURE;
+        } catch (org.springframework.web.client.HttpStatusCodeException status) {
+            int code = status.getStatusCode().value();
+            return code == 408 || code == 429 || code >= 500
+                    ? SettlementDelivery.RETRYABLE_FAILURE
+                    : SettlementDelivery.PERMANENT_FAILURE;
+        } catch (org.springframework.web.client.ResourceAccessException transport) {
+            return SettlementDelivery.RETRYABLE_FAILURE;
+        } catch (RuntimeException failure) {
+            log.error("External settlement delivery failed operationId={}: {}",
+                    intent.operationId(), failure.getMessage());
+            return SettlementDelivery.RETRYABLE_FAILURE;
         }
     }
+
+    enum SettlementDelivery { ACKNOWLEDGED, RETRYABLE_FAILURE, PERMANENT_FAILURE }
 
     private static String stripTrailingSlash(String url) {
         if (url != null && url.endsWith("/")) {

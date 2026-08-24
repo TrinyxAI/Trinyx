@@ -12,6 +12,7 @@ x-java-service: &java-service
     MARKETPLACE_MODE: local
     BILLING_PROVIDER: none
     BILLING_AUTHORITY_MODE: external-paid-monolith
+    BILLING_EXTERNAL_REQUIRE_PRODUCER_OUTBOX: "true"
     CREDIT_UNLIMITED: "false"
     CREDIT_CONSUMPTION_ENABLED: "true"
     PLAN_LIMITS_ENABLED: "true"

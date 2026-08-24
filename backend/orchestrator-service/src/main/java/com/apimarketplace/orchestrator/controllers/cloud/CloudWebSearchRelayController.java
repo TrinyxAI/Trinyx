@@ -28,8 +28,9 @@ import java.util.Set;
  * Cloud-side web-search relay for linked CE installs - mirrors the CE→cloud LLM relay
  * ({@code /api/ce-llm/*} in agent-service): validates that the calling cloud user owns
  * an ACTIVE link to the given install id, then executes the search locally through
- * {@link WebSearchModule}, which posts the flat {@code WEB_SEARCH} debit on the cloud
- * account (auth-service owns the credit price). The billing sourceId is SERVER-generated
+ * {@link WebSearchModule}. In external-authority mode it reserves and settles the
+ * flat {@code WEB_SEARCH} price against the paid-monolith wallet before/after the
+ * provider call; Cloud never owns that balance. The billing sourceId is SERVER-generated
  * (WebSearchModule's per-call UUID fallback): CE-supplied identifiers are never used as
  * the ledger dedup key, so a linked install cannot replay a key to dodge debits.
  *

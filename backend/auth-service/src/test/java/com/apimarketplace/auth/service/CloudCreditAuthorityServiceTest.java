@@ -389,8 +389,8 @@ class CloudCreditAuthorityServiceTest {
                         (String) args[13], ((Timestamp) args[15]).toInstant(), (String) args[8],
                         (String) args[11], (String) args[12]);
             } else if (sql.contains("SET state=?")) {
-                row = new ExistingRow(row.operationId(), row.requestHash(), (String) args[5],
-                        (String) args[0], (String) args[6], row.lateSettlementUntil(),
+                row = new ExistingRow(row.operationId(), row.requestHash(), (String) args[11],
+                        (String) args[0], (String) args[12], row.lateSettlementUntil(),
                         row.sourceType(), (String) args[2], (String) args[3]);
             } else if (sql.contains("SET state='RELEASED'")) {
                 row = new ExistingRow(row.operationId(), row.requestHash(), (String) args[0],

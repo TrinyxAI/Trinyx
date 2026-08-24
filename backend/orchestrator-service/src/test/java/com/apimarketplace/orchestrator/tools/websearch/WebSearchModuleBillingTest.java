@@ -15,6 +15,7 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.web.client.RestClientException;
 import org.springframework.web.client.RestTemplate;
 
+import java.math.BigDecimal;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -159,6 +160,89 @@ class WebSearchModuleBillingTest {
             assertThat(out).isPresent();
             assertThat(out.get().success()).isTrue();
             assertThat(out.get().data()).isEqualTo(Map.of("results", List.of(Map.of("title", "ok"))));
+        }
+    }
+
+    @Nested
+    @DisplayName("External paid-monolith authority")
+    class ExternalAuthority {
+
+        @Test
+        void reservesBeforeProviderAndCommitsAuthoritativeOperation() {
+            when(creditClient.usesExternalAuthority()).thenReturn(true);
+            when(context.credentials()).thenReturn(Map.of(
+                    "__streamId__", "stream-7", "__toolCallId__", "tool-call-9"));
+            when(creditClient.scopeReserve(eq(42L), anyString(), eq("websearch"),
+                    eq("default"), eq(BigDecimal.ONE), isNull(), eq(10),
+                    eq("WEB_SEARCH"), anyString(), eq(false)))
+                    .thenReturn(new CreditConsumptionClient.ScopeReserveResult(
+                            true, null, false, new BigDecimal("99")));
+            when(restTemplate.postForObject(anyString(), any(), eq(Map.class)))
+                    .thenReturn(Map.of("results", List.of()));
+            when(creditClient.scopeCommit(anyString(), eq(BigDecimal.ONE),
+                    eq("websearch"), eq("default"))).thenReturn("COMMITTED");
+
+            ToolExecutionResult result = module.execute(
+                    "search", Map.of("query", "java"), TENANT, context).orElseThrow();
+
+            assertThat(result.success()).isTrue();
+            InOrder order = inOrder(creditClient, restTemplate);
+            order.verify(creditClient).scopeReserve(eq(42L),
+                    eq("web-search:CHAT:stream-7:tool-call-9:0"), eq("websearch"),
+                    eq("default"), eq(BigDecimal.ONE), isNull(), eq(10),
+                    eq("WEB_SEARCH"), eq("web-search:CHAT:stream-7:tool-call-9:0"),
+                    eq(false));
+            order.verify(restTemplate).postForObject(
+                    eq("http://websearch:8085/search"), any(), eq(Map.class));
+            order.verify(creditClient).scopeCommit(
+                    eq("web-search:CHAT:stream-7:tool-call-9:0"),
+                    eq(BigDecimal.ONE), eq("websearch"), eq("default"));
+            verify(creditClient, never()).consumeCreditsAsync(
+                    anyString(), anyString(), anyString(), anyString(), anyString(),
+                    anyInt(), anyInt());
+        }
+
+        @Test
+        void rejectedReservationFailsClosedBeforeProvider() {
+            when(creditClient.usesExternalAuthority()).thenReturn(true);
+            when(context.credentials()).thenReturn(Map.of());
+            when(creditClient.scopeReserve(eq(42L), anyString(), eq("websearch"),
+                    eq("default"), eq(BigDecimal.ONE), isNull(), eq(10),
+                    eq("WEB_SEARCH"), anyString(), eq(false)))
+                    .thenReturn(new CreditConsumptionClient.ScopeReserveResult(
+                            false, "insufficient credits", false, BigDecimal.ZERO));
+
+            ToolExecutionResult result = module.execute(
+                    "search", Map.of("query", "java"), TENANT, context).orElseThrow();
+
+            assertThat(result.success()).isFalse();
+            assertThat(result.errorCode()).isEqualTo(ToolErrorCode.QUOTA_EXCEEDED);
+            verifyNoInteractions(restTemplate);
+        }
+
+        @Test
+        void providerFailureReleasesExistingHold() {
+            when(creditClient.usesExternalAuthority()).thenReturn(true);
+            when(context.credentials()).thenReturn(Map.of(
+                    "__streamId__", "stream-7", "__toolCallId__", "tool-call-9"));
+            when(creditClient.scopeReserve(eq(42L), anyString(), eq("websearch"),
+                    eq("default"), eq(BigDecimal.ONE), isNull(), eq(10),
+                    eq("WEB_SEARCH"), anyString(), eq(false)))
+                    .thenReturn(new CreditConsumptionClient.ScopeReserveResult(
+                            true, null, false, new BigDecimal("99")));
+            when(restTemplate.postForObject(anyString(), any(), eq(Map.class)))
+                    .thenThrow(new RestClientException("connection refused"));
+            when(creditClient.scopeRelease(anyString(), eq("provider-failure")))
+                    .thenReturn("RELEASED");
+
+            ToolExecutionResult result = module.execute(
+                    "search", Map.of("query", "java"), TENANT, context).orElseThrow();
+
+            assertThat(result.success()).isFalse();
+            verify(creditClient).scopeRelease(
+                    "web-search:CHAT:stream-7:tool-call-9:0", "provider-failure");
+            verify(creditClient, never()).scopeCommit(
+                    anyString(), any(), anyString(), anyString());
         }
     }
 

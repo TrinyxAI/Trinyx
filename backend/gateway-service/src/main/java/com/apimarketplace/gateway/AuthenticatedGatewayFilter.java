@@ -273,12 +273,7 @@ final class AuthenticatedGatewayFilter implements GlobalFilter, Ordered {
     }
 
     private boolean isPublic(String path) {
-        return path.equals("/healthz")
-                || path.startsWith("/actuator/health")
-                || path.startsWith("/cdp/")
-                || path.equals("/webhooks/stripe")
-                || path.startsWith("/api/catalog/public/bundles/")
-                || path.equals("/api/ce/releases/latest");
+        return GatewayPublicRoutes.matches(path);
     }
 
     private EntitlementPolicy policyFor(String path) {

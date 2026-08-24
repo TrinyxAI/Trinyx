@@ -12,6 +12,12 @@ import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.security.oauth2.jwt.JwtValidators;
 import org.springframework.security.oauth2.jwt.NimbusReactiveJwtDecoder;
 import org.springframework.security.web.server.SecurityWebFilterChain;
+import org.springframework.security.web.server.authentication.ServerAuthenticationConverter;
+import org.springframework.security.oauth2.server.resource.authentication.BearerTokenAuthenticationToken;
+import org.springframework.security.oauth2.server.resource.web.server.authentication.ServerBearerTokenAuthenticationConverter;
+import reactor.core.publisher.Mono;
+
+import java.util.Arrays;
 
 @Configuration
 public class GatewaySecurityConfig {
@@ -26,8 +32,37 @@ public class GatewaySecurityConfig {
                         .pathMatchers("/api/catalog/public/bundles/**", "/api/ce/releases/latest").permitAll()
                         .pathMatchers("/api/internal/**", "/internal/**").denyAll()
                         .anyExchange().authenticated())
-                .oauth2ResourceServer(oauth -> oauth.jwt(jwt -> {}))
+                .oauth2ResourceServer(oauth -> oauth
+                        .bearerTokenConverter(gatewayBearerTokenConverter())
+                        .jwt(jwt -> {}))
                 .build();
+    }
+
+
+    /**
+     * Browsers cannot set an Authorization header during a WebSocket upgrade. The existing
+     * LiveContext client deliberately transports its Keycloak token in the lc.jwt.* subprotocol;
+     * authenticate that exact /ws handshake while preserving normal bearer-header precedence.
+     * Query-string bearer tokens stay disabled to avoid token leakage in proxy logs.
+     */
+    static ServerAuthenticationConverter gatewayBearerTokenConverter() {
+        ServerBearerTokenAuthenticationConverter header =
+                new ServerBearerTokenAuthenticationConverter();
+        header.setAllowUriQueryParameter(false);
+        return exchange -> header.convert(exchange).switchIfEmpty(Mono.defer(() -> {
+            String path = exchange.getRequest().getURI().getPath();
+            if (!(path.equals("/ws") || path.startsWith("/ws/"))) return Mono.empty();
+            return exchange.getRequest().getHeaders().getOrEmpty("Sec-WebSocket-Protocol").stream()
+                    .flatMap(value -> Arrays.stream(value.split(",")))
+                    .map(String::trim)
+                    .filter(protocol -> protocol.startsWith("lc.jwt."))
+                    .map(protocol -> protocol.substring("lc.jwt.".length()))
+                    .filter(token -> !token.isBlank())
+                    .findFirst()
+                    .<Mono<org.springframework.security.core.Authentication>>map(
+                            token -> Mono.just(new BearerTokenAuthenticationToken(token)))
+                    .orElseGet(Mono::empty);
+        }));
     }
 
     @Bean

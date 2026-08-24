@@ -138,6 +138,11 @@ jobs:
             exit 1
           fi
 
+          if grep -Rni 'livecontext-prod-v1=' backend/*/src/main/resources cli/assets docker/docker-compose.cloud.yml; then
+            echo "Runtime still trusts the historical upstream bundle signer" >&2
+            exit 1
+          fi
+
           if grep -En '(sk_live_|rk_live_|whsec_[A-Za-z0-9]{20,}|price_[A-Za-z0-9]{10,})' \
             docker/docker-compose.cloud.yml \
             docker/.env.cloud.example \

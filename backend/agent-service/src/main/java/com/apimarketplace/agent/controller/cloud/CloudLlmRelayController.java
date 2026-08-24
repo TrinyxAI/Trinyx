@@ -453,6 +453,12 @@ public class CloudLlmRelayController {
                                               String cloudUserId,
                                               String model,
                                               boolean streaming) {
+        Integer providerMaxTokens = source.maxTokens();
+        if (isExternalAuthority() && (providerMaxTokens == null || providerMaxTokens <= 0)) {
+            // The authoritative hold is priced with this same conservative ceiling. Providers
+            // that support max output tokens therefore cannot be invoked without a matching cap.
+            providerMaxTokens = DEFAULT_COMPLETION_ESTIMATE;
+        }
         return CompletionRequest.builder()
                 .tenantId(cloudUserId)
                 .model(model)
@@ -460,7 +466,7 @@ public class CloudLlmRelayController {
                 .userPrompt(source.userPrompt())
                 .conversationHistory(source.conversationHistory())
                 .temperature(source.temperature())
-                .maxTokens(source.maxTokens())
+                .maxTokens(providerMaxTokens)
                 .topP(source.topP())
                 .frequencyPenalty(source.frequencyPenalty())
                 .presencePenalty(source.presencePenalty())

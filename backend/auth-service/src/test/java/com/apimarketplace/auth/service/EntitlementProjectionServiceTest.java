@@ -84,6 +84,25 @@ class EntitlementProjectionServiceTest {
     }
 
     @Test
+    void activeCeEntitlementReadsActorFreeProjectionAndPreservesPayerPlanMetadata() {
+        ObjectNode payload = projection(8, "ACTIVE");
+        payload.put("planCode", "PRO");
+        payload.put("creditTierIndex", 2);
+        payload.put("cadence", "yearly");
+        jdbc.ceProjectionPayload = payload.toString();
+        jdbc.ceProjectionSequence = 8;
+        jdbc.ceProjectionExpiry = Instant.now().plusSeconds(600);
+
+        var result = service.activeCeEntitlement(42L, INSTALL);
+
+        assertThat(result).isPresent();
+        assertThat(result.orElseThrow().planCode()).isEqualTo("PRO");
+        assertThat(result.orElseThrow().creditTierIndex()).isEqualTo(2);
+        assertThat(result.orElseThrow().cadence()).isEqualTo("yearly");
+        assertThat(result.orElseThrow().sequence()).isEqualTo(8);
+    }
+
+    @Test
     void actorIdentityOrSpendableBalanceIsRejectedFromProjectionSchema() {
         ObjectNode projection = projection(1, "ACTIVE");
         projection.put("principalId", UUID.randomUUID().toString());
@@ -132,6 +151,9 @@ class EntitlementProjectionServiceTest {
         String decisionState;
         Instant decisionExpiry;
         String decisionPayload;
+        long ceProjectionSequence;
+        Instant ceProjectionExpiry;
+        String ceProjectionPayload;
         int updates;
 
         @Override
@@ -158,6 +180,14 @@ class EntitlementProjectionServiceTest {
                     when(rs.getString("access_state")).thenReturn(decisionState);
                     when(rs.getTimestamp("expires_at")).thenReturn(Timestamp.from(decisionExpiry));
                     when(rs.getString("canonical_payload")).thenReturn(decisionPayload);
+                    return List.of(mapper.mapRow(rs, 0));
+                }
+                if (sql.contains("FROM auth.cloud_identity_binding")) {
+                    if (ceProjectionPayload == null) return List.of();
+                    ResultSet rs = mock(ResultSet.class);
+                    when(rs.getLong("sequence")).thenReturn(ceProjectionSequence);
+                    when(rs.getTimestamp("expires_at")).thenReturn(Timestamp.from(ceProjectionExpiry));
+                    when(rs.getString("canonical_payload")).thenReturn(ceProjectionPayload);
                     return List.of(mapper.mapRow(rs, 0));
                 }
                 return List.of();

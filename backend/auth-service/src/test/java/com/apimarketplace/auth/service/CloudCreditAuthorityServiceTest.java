@@ -90,6 +90,77 @@ class CloudCreditAuthorityServiceTest {
         verifyNoInteractions(credits);
     }
 
+    @Test
+    void reserveThenProviderCommitConsumesAuthoritativeWalletExactlyOnce() {
+        UUID operationId = UUID.randomUUID();
+        String hash = "e".repeat(64);
+        when(credits.tryReserveMarkup(eq(42L), eq("cloud-reservation:" + operationId),
+                eq("openai"), eq("gpt"), eq(BigDecimal.TEN), isNull(), eq(10),
+                eq("CLOUD"), eq(operationId.toString()), eq(false)))
+                .thenReturn(CreditService.CreditConsumeResult.success(BigDecimal.TEN,
+                        new BigDecimal("90")));
+        when(credits.settleExternalReservation(eq("cloud-reservation:" + operationId),
+                eq(new BigDecimal("3.25")), eq("openai"), eq("gpt"), eq(false)))
+                .thenReturn(CreditService.CommitOutcome.COMMITTED);
+        when(credits.getBalance(42L)).thenReturn(new BigDecimal("96.75"));
+
+        var held = service.reserve(reserve(operationId, hash));
+        var command = new CloudCreditAuthorityService.CommitRequest(
+                new BigDecimal("3.25"), "openai", "gpt", "provider-request", 10L, 2L, hash);
+        var committed = service.commit(operationId, command);
+        var retried = service.commit(operationId, command);
+
+        assertThat(held.state()).isEqualTo("RESERVED");
+        assertThat(committed.state()).isEqualTo("COMMITTED");
+        assertThat(retried).isEqualTo(committed);
+        verify(credits, times(1)).tryReserveMarkup(anyLong(), anyString(), anyString(),
+                anyString(), any(), any(), anyInt(), anyString(), anyString(), anyBoolean());
+        verify(credits, times(1)).settleExternalReservation(anyString(), any(), anyString(),
+                anyString(), anyBoolean());
+    }
+
+    @Test
+    void providerFailureReleaseIsIdempotentAndNeverConsumes() throws Exception {
+        UUID operationId = UUID.randomUUID();
+        String hash = "f".repeat(64);
+        jdbc.row = ExistingRow.reserved(operationId, hash, json.writeValueAsString(
+                new CloudCreditAuthorityService.ReserveResponse(operationId, operationId,
+                        "RESERVED", Instant.now().plusSeconds(300), BigDecimal.TEN, false)));
+        when(credits.releaseReservation("cloud-reservation:" + operationId,
+                "cloud-release:provider_failure"))
+                .thenReturn(CreditService.ReleaseOutcome.RELEASED);
+        when(credits.getBalance(42L)).thenReturn(BigDecimal.TEN);
+        var command = new CloudCreditAuthorityService.ReleaseRequest("provider failure", hash);
+
+        var released = service.release(operationId, command);
+        var retried = service.release(operationId, command);
+
+        assertThat(released.state()).isEqualTo("RELEASED");
+        assertThat(retried).isEqualTo(released);
+        verify(credits, times(1)).releaseReservation(anyString(), anyString());
+        verify(credits, never()).settleExternalReservation(anyString(), any(), anyString(),
+                anyString(), anyBoolean());
+    }
+
+    @Test
+    void expiredReservationCanSettleInsideLateWindow() {
+        UUID operationId = UUID.randomUUID();
+        String hash = "1".repeat(64);
+        jdbc.row = new ExistingRow(operationId, hash, null, "EXPIRED", "{}",
+                Instant.now().plusSeconds(3600));
+        when(credits.settleExternalReservation("cloud-reservation:" + operationId,
+                BigDecimal.ONE, "openai", "gpt", true))
+                .thenReturn(CreditService.CommitOutcome.COMMITTED);
+        when(credits.getBalance(42L)).thenReturn(BigDecimal.TEN);
+
+        var result = service.commit(operationId, new CloudCreditAuthorityService.CommitRequest(
+                BigDecimal.ONE, "openai", "gpt", "late-provider", 1L, 1L, hash));
+
+        assertThat(result.state()).isEqualTo("COMMITTED");
+        verify(credits).settleExternalReservation(
+                "cloud-reservation:" + operationId, BigDecimal.ONE, "openai", "gpt", true);
+    }
+
     private static CloudCreditAuthorityService.ReserveRequest reserve(UUID id, String hash) {
         return new CloudCreditAuthorityService.ReserveRequest(id, UUID.randomUUID(),
                 UUID.randomUUID(), UUID.randomUUID(), UUID.randomUUID(), 7,
@@ -115,8 +186,13 @@ class CloudCreditAuthorityServiceTest {
 
         @Override
         public <T> List<T> query(String sql, RowMapper<T> mapper, Object... args) {
-            if (row == null || !sql.contains("auth.cloud_credit_operation")) return List.of();
             try {
+                if (sql.contains("SELECT actor.id")) {
+                    ResultSet actor = mock(ResultSet.class);
+                    when(actor.getLong(1)).thenReturn(42L);
+                    return List.of(mapper.mapRow(actor, 0));
+                }
+                if (row == null || !sql.contains("auth.cloud_credit_operation")) return List.of();
                 ResultSet rs = mock(ResultSet.class);
                 when(rs.getObject("operation_id", UUID.class)).thenReturn(row.operationId());
                 when(rs.getString("request_hash")).thenReturn(row.requestHash());
@@ -134,8 +210,23 @@ class CloudCreditAuthorityServiceTest {
         }
 
         @Override
+        public <T> T queryForObject(String sql, Class<T> requiredType, Object... args) {
+            return requiredType.cast(1);
+        }
+
+        @Override
         public int update(String sql, Object... args) {
             updates++;
+            if (sql.contains("INSERT INTO auth.cloud_credit_operation")) {
+                row = new ExistingRow((UUID) args[0], (String) args[2], null, "RESERVED",
+                        (String) args[13], ((Timestamp) args[15]).toInstant());
+            } else if (sql.contains("SET state=?")) {
+                row = new ExistingRow(row.operationId(), row.requestHash(), (String) args[5],
+                        (String) args[0], (String) args[6], row.lateSettlementUntil());
+            } else if (sql.contains("SET state='RELEASED'")) {
+                row = new ExistingRow(row.operationId(), row.requestHash(), (String) args[0],
+                        "RELEASED", (String) args[1], row.lateSettlementUntil());
+            }
             return 1;
         }
     }

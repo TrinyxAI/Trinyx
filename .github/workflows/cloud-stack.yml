@@ -188,6 +188,7 @@ jobs:
           grep -q '@wallet {' "${private_edge}"
           grep -q '/internal/v1/credit-reservations/\*/commit' "${private_edge}"
           grep -q '/internal/v1/credit-reservations/\*/release' "${private_edge}"
+          grep -q '/internal/v1/credit-reservations/\*/outcome-unknown' "${private_edge}"
           grep -q 'respond 404' "${private_edge}"
           if grep -q '/internal/v1/credit-reservations' docker/cloud/Caddyfile; then
             echo "The public Cloud edge must not expose the paid-monolith wallet" >&2

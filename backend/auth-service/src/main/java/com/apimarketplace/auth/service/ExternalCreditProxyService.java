@@ -60,9 +60,15 @@ public class ExternalCreditProxyService {
         }
         int prompt = Math.max(0, command.promptTokens());
         int completion = Math.max(0, command.completionTokens());
-        BigDecimal actual = pricing.calculateCost(command.provider(), command.model(), prompt, completion);
+        int cacheCreation = nonNegative(command.cacheCreationTokens());
+        int cacheRead = nonNegative(command.cacheReadTokens());
+        int cached = nonNegative(command.cachedTokens());
+        int reasoning = nonNegative(command.reasoningTokens());
+        BigDecimal actual = pricing.calculateCost(command.provider(), command.model(),
+                new LlmTokenBreakdown(prompt, completion, cacheCreation, cacheRead, cached, reasoning));
         return commit(operationId, new CommitCommand(actual, command.provider(), command.model(),
-                command.providerRequestId(), (long) prompt, (long) completion, command.requestHash()));
+                command.providerRequestId(), (long) prompt, (long) completion, command.requestHash(),
+                cacheCreation, cacheRead, cached, reasoning));
     }
 
     @Transactional
@@ -119,7 +125,9 @@ public class ExternalCreditProxyService {
         var request = new CloudCreditAuthorityService.CommitRequest(
                 command.actualCredits(), command.provider(), command.model(),
                 command.providerRequestId(), command.promptTokens(),
-                command.completionTokens(), command.requestHash());
+                command.completionTokens(), command.requestHash(),
+                command.cacheCreationTokens(), command.cacheReadTokens(),
+                command.cachedTokens(), command.reasoningTokens());
         try {
             var response = authority.commit(operationId, request);
             markSettled(operationId, response.state(), response);
@@ -221,6 +229,10 @@ public class ExternalCreditProxyService {
         }
     }
 
+    private static int nonNegative(Integer value) {
+        return value == null ? 0 : Math.max(0, value);
+    }
+
     private static String bounded(String message) {
         String value = message == null ? "transport failure" : message;
         return value.substring(0, Math.min(2000, value.length()));
@@ -234,7 +246,15 @@ public class ExternalCreditProxyService {
                                     String provider, String model, int estimatedPromptTokens,
                                     int maximumCompletionTokens) {}
     public record LlmCommitCommand(String provider, String model, String providerRequestId,
-                                   int promptTokens, int completionTokens, String requestHash) {}
+                                   int promptTokens, int completionTokens, String requestHash,
+                                   Integer cacheCreationTokens, Integer cacheReadTokens,
+                                   Integer cachedTokens, Integer reasoningTokens) {
+        public LlmCommitCommand(String provider, String model, String providerRequestId,
+                                int promptTokens, int completionTokens, String requestHash) {
+            this(provider, model, providerRequestId, promptTokens, completionTokens, requestHash,
+                    null, null, null, null);
+        }
+    }
     public record Context(UUID principalId, UUID billingSubjectId,
                           UUID organizationId, UUID installId) {}
     public record ReserveCommand(UUID operationId, String feature, String sourceType,
@@ -242,7 +262,16 @@ public class ExternalCreditProxyService {
                                  String provider, String model) {}
     public record CommitCommand(BigDecimal actualCredits, String provider, String model,
                                 String providerRequestId, Long promptTokens,
-                                Long completionTokens, String requestHash) {}
+                                Long completionTokens, String requestHash,
+                                Integer cacheCreationTokens, Integer cacheReadTokens,
+                                Integer cachedTokens, Integer reasoningTokens) {
+        public CommitCommand(BigDecimal actualCredits, String provider, String model,
+                             String providerRequestId, Long promptTokens,
+                             Long completionTokens, String requestHash) {
+            this(actualCredits, provider, model, providerRequestId, promptTokens,
+                    completionTokens, requestHash, null, null, null, null);
+        }
+    }
     public record ReleaseCommand(String reason, String requestHash) {}
     public record ReserveResult(CloudCreditAuthorityService.ReserveResponse authority,
                                 String requestHash, long entitlementSequence) {}

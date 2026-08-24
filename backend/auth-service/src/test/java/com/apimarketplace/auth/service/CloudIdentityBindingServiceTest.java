@@ -122,6 +122,20 @@ class CloudIdentityBindingServiceTest {
     }
 
     @Test
+    void contextUsesExplicitInstallSelectorAndNeverChoosesAnArbitraryBinding() {
+        jdbc.current = row(1, "ACTIVE", "active-jws", UUID.randomUUID());
+
+        var context = service.context(SUBJECT, INSTALL);
+
+        assertThat(context.installId()).isEqualTo(INSTALL);
+        assertThat(jdbc.lastQuerySql).contains("keycloak_subject=?")
+                .contains("status='ACTIVE'")
+                .contains("install_id=?");
+        assertThat(jdbc.lastQueryArgs).containsExactly(
+                "https://app.trinyx.fr", SUBJECT, INSTALL);
+    }
+
+    @Test
     void organizationMemberMayUseOwnerInstallOnlyForExactActiveSignedScope() {
         jdbc.installAccessCount = 1;
 
@@ -188,11 +202,15 @@ class CloudIdentityBindingServiceTest {
         int ownerCount = 1;
         int installAccessCount;
         String lastUpdateSql = "";
+        String lastQuerySql = "";
+        Object[] lastQueryArgs = new Object[0];
         String lastQueryForObjectSql = "";
         Object[] lastQueryForObjectArgs = new Object[0];
 
         @Override
         public <T> List<T> query(String sql, RowMapper<T> mapper, Object... args) {
+            lastQuerySql = sql;
+            lastQueryArgs = args;
             FakeRow source = sql.contains("assertion_jti") ? replay : current;
             if (source == null) return List.of();
             try {

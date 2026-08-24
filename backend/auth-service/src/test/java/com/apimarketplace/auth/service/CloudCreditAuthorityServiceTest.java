@@ -12,6 +12,7 @@ import java.math.BigDecimal;
 import java.sql.ResultSet;
 import java.sql.Timestamp;
 import java.time.Instant;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
 
@@ -176,6 +177,25 @@ class CloudCreditAuthorityServiceTest {
     }
 
     @Test
+    void organizationMemberUsesPayerOwnedInstallInsteadOfActorOwnedInstall() {
+        UUID operationId = UUID.randomUUID();
+        String hash = "7".repeat(64);
+        when(credits.tryReserveMarkup(eq(42L), eq("cloud-reservation:" + operationId),
+                eq("openai"), eq("gpt"), eq(BigDecimal.TEN), isNull(), eq(10),
+                eq("CLOUD"), eq(operationId.toString()), eq(false)))
+                .thenReturn(CreditService.CreditConsumeResult.success(
+                        BigDecimal.TEN, new BigDecimal("90")));
+
+        service.reserve(reserve(operationId, hash));
+
+        assertThat(jdbc.countSqls).anySatisfy(sql -> {
+            assertThat(sql).contains("link.tenant_id=owner_row.id");
+            assertThat(sql).contains("owner_row.billing_subject_id=?");
+            assertThat(sql).contains("link.organization_id=organization_row.id::text");
+        });
+    }
+
+    @Test
     void webSearchUsesPaidAuthorityFixedPriceForHoldAndSettlement() {
         UUID operationId = UUID.randomUUID();
         String hash = "8".repeat(64);
@@ -224,6 +244,7 @@ class CloudCreditAuthorityServiceTest {
     private static final class FakeJdbc extends JdbcTemplate {
         ExistingRow row;
         int updates;
+        final List<String> countSqls = new ArrayList<>();
 
         @Override
         public void query(String sql, RowCallbackHandler handler, Object... args) {
@@ -258,6 +279,7 @@ class CloudCreditAuthorityServiceTest {
 
         @Override
         public <T> T queryForObject(String sql, Class<T> requiredType, Object... args) {
+            countSqls.add(sql);
             return requiredType.cast(1);
         }
 

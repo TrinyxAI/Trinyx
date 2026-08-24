@@ -49,6 +49,21 @@ class MonolithSecurityFilterBillingWorkloadTest {
     }
 
     @Test
+    void nonPostRequestNeverGetsPrivateWalletBypass() throws Exception {
+        MockHttpServletRequest request = new MockHttpServletRequest(
+                "GET", "/internal/v1/credit-reservations");
+        request.setRemoteAddr("127.0.0.1");
+        request.addHeader("Authorization", "Bearer ed25519.workload.token");
+        MockHttpServletResponse response = new MockHttpServletResponse();
+        AtomicReference<ServletRequest> captured = new AtomicReference<>();
+
+        filter.doFilter(request, response, (req, res) -> captured.set(req));
+
+        assertThat(captured.get()).isNull();
+        assertThat(response.getStatus()).isEqualTo(401);
+    }
+
+    @Test
     void onlyExactWalletSurfaceGetsPrivateWorkloadBypass() throws Exception {
         MockHttpServletRequest unrelatedExternal =
                 request("/internal/v1/entitlement-projections", "203.0.113.10");

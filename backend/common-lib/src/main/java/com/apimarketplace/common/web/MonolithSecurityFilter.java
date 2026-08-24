@@ -683,7 +683,7 @@ public class MonolithSecurityFilter implements Filter {
         return path.equals("/internal/v1/credit-reservations")
                 || path.matches("^/internal/v1/credit-reservations/"
                         + "[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-"
-                        + "[0-9a-fA-F]{4}-[0-9a-fA-F]{12}/(commit|release)$");
+                        + "[0-9a-fA-F]{4}-[0-9a-fA-F]{12}/(commit|release|outcome-unknown)$");
     }
 
     /**

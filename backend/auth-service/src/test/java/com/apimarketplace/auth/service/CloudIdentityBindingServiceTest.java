@@ -82,6 +82,20 @@ class CloudIdentityBindingServiceTest {
     }
 
     @Test
+    void memberBindingFailsClosedUntilSignedOwnerWorkspaceExists() {
+        jdbc.ownerCount = 0;
+        ObjectNode member = assertion(1, "ACTIVE", UUID.randomUUID())
+                .put("keycloakSubject", "member-before-owner")
+                .put("organizationRole", "MEMBER");
+        when(assertions.verifyIdentity(anyString(), anyString(), anyString())).thenReturn(member);
+
+        assertThatThrownBy(() -> service.bind("member-jws", "member-before-owner", 43L))
+                .isInstanceOf(ResponseStatusException.class)
+                .hasMessageContaining("ORGANIZATION_OWNER_BINDING_REQUIRED");
+        assertThat(jdbc.membershipWrites).isZero();
+    }
+
+    @Test
     void multipleMembersKeepDistinctPrincipalsAndShareOnePayerWorkspace() {
         UUID principalB = UUID.randomUUID();
         UUID principalC = UUID.randomUUID();
@@ -149,6 +163,7 @@ class CloudIdentityBindingServiceTest {
         FakeRow replay;
         int updates;
         int membershipWrites;
+        int ownerCount = 1;
         String lastUpdateSql = "";
 
         @Override
@@ -176,7 +191,7 @@ class CloudIdentityBindingServiceTest {
 
         @Override
         public <T> T queryForObject(String sql, Class<T> requiredType, Object... args) {
-            return requiredType.cast(1);
+            return requiredType.cast(ownerCount);
         }
 
         @Override

@@ -27,7 +27,7 @@ class AuthenticatedGatewayFilterTest {
     @Test
     void internalApisAreNeverExposedAtTheEdge() {
         AuthenticatedGatewayFilter filter = new AuthenticatedGatewayFilter(null, 1024);
-        MockServerWebExchange exchange = MockServerWebExchange.from(
+        ServerWebExchange exchange = MockServerWebExchange.from(
                 MockServerHttpRequest.get("/api/internal/entitlements/v2/projections").build());
 
         StepVerifier.create(filter.filter(exchange, ignored -> Mono.error(
@@ -40,7 +40,7 @@ class AuthenticatedGatewayFilterTest {
     @Test
     void workloadInternalApisAreNeverExposedAtTheEdge() {
         AuthenticatedGatewayFilter filter = new AuthenticatedGatewayFilter(null, 1024);
-        MockServerWebExchange exchange = MockServerWebExchange.from(
+        ServerWebExchange exchange = MockServerWebExchange.from(
                 MockServerHttpRequest.put("/internal/v1/identity-bindings/revocations").build());
 
         StepVerifier.create(filter.filter(exchange, ignored -> Mono.error(
@@ -53,7 +53,7 @@ class AuthenticatedGatewayFilterTest {
     @Test
     void publicRoutesStripEverySpoofableIdentityHeader() {
         AuthenticatedGatewayFilter filter = new AuthenticatedGatewayFilter(null, 1024);
-        MockServerWebExchange exchange = MockServerWebExchange.from(
+        ServerWebExchange exchange = MockServerWebExchange.from(
                 MockServerHttpRequest.get("/api/catalog/public/bundles/v1")
                         .header("X-User-ID", "999")
                         .header("X-Principal-ID", "forged")
@@ -111,7 +111,7 @@ class AuthenticatedGatewayFilterTest {
                 "/webhook/token", "/approval-callback/telegram", "/chat/token/config",
                 "/form/token", "/app/public/token/config")) {
             AuthenticatedGatewayFilter filter = new AuthenticatedGatewayFilter(null, 1024);
-            MockServerWebExchange exchange = MockServerWebExchange.from(
+            ServerWebExchange exchange = MockServerWebExchange.from(
                     MockServerHttpRequest.get(path)
                             .header("X-User-ID", "forged")
                             .header("X-Organization-ID", "forged")
@@ -130,7 +130,7 @@ class AuthenticatedGatewayFilterTest {
     @Test
     void cdpUpgradeUsesItsOwnTokenProtocolButNeverTrustsBrowserIdentityHeaders() {
         AuthenticatedGatewayFilter filter = new AuthenticatedGatewayFilter(null, 1024);
-        MockServerWebExchange exchange = MockServerWebExchange.from(
+        ServerWebExchange exchange = MockServerWebExchange.from(
                 MockServerHttpRequest.get("/cdp/session-token/devtools/page/1")
                         .header("Upgrade", "websocket")
                         .header("Sec-WebSocket-Protocol", "trinyx.events, lc.jwt.browser-secret")
@@ -171,7 +171,7 @@ class AuthenticatedGatewayFilterTest {
                 .issuedAt(Instant.now())
                 .expiresAt(Instant.now().plusSeconds(60))
                 .build();
-        MockServerWebExchange exchange = MockServerWebExchange.from(
+        ServerWebExchange exchange = MockServerWebExchange.from(
                 MockServerHttpRequest.get("/api/users/profile")
                         .header("X-LiveContext-Install-Id", "install")
                         .build())
@@ -209,7 +209,7 @@ class AuthenticatedGatewayFilterTest {
                 .issuedAt(Instant.now())
                 .expiresAt(Instant.now().plusSeconds(60))
                 .build();
-        MockServerWebExchange exchange = MockServerWebExchange.from(
+        ServerWebExchange exchange = MockServerWebExchange.from(
                 MockServerHttpRequest.get("/api/users/profile")
                         .header("Authorization", "Bearer jwt")
                         .header("X-LiveContext-Install-Id", install)
@@ -251,7 +251,7 @@ class AuthenticatedGatewayFilterTest {
                 .issuedAt(Instant.now())
                 .expiresAt(Instant.now().plusSeconds(60))
                 .build();
-        MockServerWebExchange exchange = MockServerWebExchange.from(
+        ServerWebExchange exchange = MockServerWebExchange.from(
                 MockServerHttpRequest.get("/api/users/profile")
                         .header("X-LiveContext-Install-Id",
                                 "40000000-0000-0000-0000-000000000004")

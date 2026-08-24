@@ -24,7 +24,8 @@ publication CE TLS, orchestrator interface runtime, orchestrator storage facade,
 `/api/v2/workflows/**` routes. The orchestrator owns the public aggregate
 `/api/agent-tools/**` facade.
 
-For compatibility, each core service also has an explicit authenticated selector
-`/api/<service>-service/api/**`. Only that selector is removed before forwarding.
-The gateway and security layer always deny `/api/internal/**` and `/internal/**`;
-private workload-JWT listeners are separate network surfaces and are never routed here.
+Service-selector paths such as `/api/auth-service/api/**` are intentionally not exposed
+on the public edge. Interservice calls use Docker DNS directly; this prevents a rewritten
+selector from bypassing route-specific entitlement policy. The gateway and security layer
+always deny `/api/internal/**` and `/internal/**`; private workload-JWT listeners are
+separate network surfaces and are never routed here.

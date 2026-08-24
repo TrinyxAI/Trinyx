@@ -66,8 +66,11 @@ public class PaidMonolithCreditClient {
             }
             return response.getBody();
         } catch (RestClientResponseException responseFailure) {
-            if (responseFailure.getStatusCode().is4xxClientError()) {
-                throw new PermanentAuthorityException(responseFailure.getStatusCode().value(),
+            int status = responseFailure.getStatusCode().value();
+            if (responseFailure.getStatusCode().is4xxClientError()
+                    && status != HttpStatus.REQUEST_TIMEOUT.value()
+                    && status != HttpStatus.TOO_MANY_REQUESTS.value()) {
+                throw new PermanentAuthorityException(status,
                         responseFailure.getResponseBodyAsString(), responseFailure);
             }
             throw new RetryableAuthorityException(

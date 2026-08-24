@@ -18,6 +18,9 @@ import java.util.concurrent.ThreadLocalRandom;
         havingValue = "external-paid-monolith")
 public class CloudSettlementOutboxDispatcher {
 
+    private static final org.slf4j.Logger log = org.slf4j.LoggerFactory.getLogger(
+            CloudSettlementOutboxDispatcher.class);
+
     private final JdbcTemplate jdbc;
     private final PaidMonolithCreditClient authority;
     private final ObjectMapper json;
@@ -82,6 +85,9 @@ public class CloudSettlementOutboxDispatcher {
                             SET state='SETTLEMENT_FAILED', updated_at=now()
                             WHERE operation_id=? AND state IN ('RESERVED','EXPIRED')
                             """, pending.operationId());
+                    log.error("Settlement moved to DEAD operationId={} action={} attempt={} type={}",
+                            pending.operationId(), pending.action(), attempt,
+                            failure.getClass().getSimpleName());
                     continue;
                 }
                 long capSeconds = Math.min(300, 1L << Math.min(8, attempt));
@@ -94,6 +100,9 @@ public class CloudSettlementOutboxDispatcher {
                         WHERE id=?
                         """, attempt, Timestamp.from(Instant.now().plusSeconds(delay)),
                         bounded(failure.getMessage()), pending.id());
+                log.warn("Settlement retry scheduled operationId={} action={} attempt={} delaySeconds={} type={}",
+                        pending.operationId(), pending.action(), attempt, delay,
+                        failure.getClass().getSimpleName());
             }
         }
     }

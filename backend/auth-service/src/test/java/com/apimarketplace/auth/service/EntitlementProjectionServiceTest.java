@@ -24,7 +24,7 @@ class EntitlementProjectionServiceTest {
     private final TrinyxAssertionService assertions = mock(TrinyxAssertionService.class);
     private final FakeJdbc jdbc = new FakeJdbc();
     private final EntitlementProjectionService service = new EntitlementProjectionService(
-            jdbc, assertions, "https://app.trinyx.fr", "trinyx-cloud");
+            jdbc, assertions, json, "https://app.trinyx.fr", "trinyx-cloud");
 
     @Test
     void higherSequenceAppliesAndIdenticalRetryIsIdempotentForAllMembersOfSamePayer() {

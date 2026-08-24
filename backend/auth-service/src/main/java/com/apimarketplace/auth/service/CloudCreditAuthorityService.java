@@ -182,7 +182,7 @@ public class CloudCreditAuthorityService {
         SettlementResponse response = new SettlementResponse(operationId, state,
                 BigDecimal.ZERO,
                 balanceForOrganization(operation.executorUserId(), operation.organizationId()),
-                holdAlreadyExpired,
+                false,
                 holdAlreadyExpired
                         ? "RECONCILIATION_REQUIRED_HOLD_EXPIRED"
                         : "RECONCILIATION_REQUIRED_HOLD_RETAINED");

@@ -4,8 +4,8 @@ ALTER TABLE auth.users ADD COLUMN IF NOT EXISTS principal_id UUID;
 ALTER TABLE auth.users ADD COLUMN IF NOT EXISTS billing_subject_id UUID;
 
 UPDATE auth.users
-SET principal_id = COALESCE(principal_id, md5('trinyx-principal:' || id::text)::uuid),
-    billing_subject_id = COALESCE(billing_subject_id, md5('trinyx-billing:' || id::text)::uuid)
+SET principal_id = COALESCE(principal_id, gen_random_uuid()),
+    billing_subject_id = COALESCE(billing_subject_id, gen_random_uuid())
 WHERE principal_id IS NULL OR billing_subject_id IS NULL;
 
 ALTER TABLE auth.users ALTER COLUMN principal_id SET NOT NULL;
@@ -175,12 +175,13 @@ CREATE TABLE IF NOT EXISTS auth.cloud_settlement_outbox (
     request_hash CHAR(64) NOT NULL,
     payload JSONB NOT NULL,
     status VARCHAR(16) NOT NULL DEFAULT 'PENDING'
-        CHECK (status IN ('PENDING', 'PROCESSING', 'DELIVERED', 'FAILED')),
+        CHECK (status IN ('PENDING', 'PROCESSING', 'DELIVERED', 'FAILED', 'DEAD')),
     attempt_count INTEGER NOT NULL DEFAULT 0,
     next_attempt_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     last_error VARCHAR(2000),
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     delivered_at TIMESTAMPTZ,
+    terminal_at TIMESTAMPTZ,
     UNIQUE(operation_id, action, request_hash)
 );
 CREATE INDEX IF NOT EXISTS idx_cloud_settlement_outbox_dispatch

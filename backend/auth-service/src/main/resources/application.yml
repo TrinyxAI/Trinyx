@@ -90,7 +90,7 @@ spring:
 app:
   mail:
     from: ${SMTP_FROM:noreply@trinyx.fr}
-    from-name: LiveContext
+    from-name: Trinyx
   security:
     keycloak:
       audience: ${KEYCLOAK_AUDIENCE:livecontext-frontend}

@@ -4,18 +4,19 @@ on:
   pull_request:
     paths:
       - "docker/docker-compose.cloud.yml"
-      - "backend/common-lib/**"
-      - "backend/gateway-service/**"
-      - "backend/auth-service/**"
-      - "backend/publication-service/**"
-      - "backend/migration-service/**"
-      - "backend/monolith-service/**"
+      - "backend/**"
+      - "frontend/**"
+      - "mcp/**"
+      - "websearch-service/**"
+      - "screenshot-renderer/**"
       - "cli/**"
       - "docker/.env.cloud.example"
       - "docker/cloud/**"
       - "docs/deployment/cloud.md"
       - "docs/deployment/cloud-gateway-routes.md"
+      - "docs/deployment/cloud-legacy-runtime-audit.md"
       - ".github/workflows/cloud-stack.yml"
+      - ".github/workflows/build-trinyx-ce-images.yml"
   workflow_dispatch:
 
 permissions:

@@ -223,11 +223,13 @@ marketplace:
 ce-catalog-relay:
   enabled: false
 
-# Cloud account linking (OAuth to LiveContext cloud for paid marketplace operations)
+# Cloud account linking to the operator-controlled Trinyx Cloud
 cloud-link:
   # Independent from MARKETPLACE_MODE: paid-monolith may keep its local marketplace
   # while authenticating against and consuming the Trinyx Cloud control plane.
-  enabled: ${CLOUD_LINK_ENABLED:true}
+  # Fail closed on a normal backend/frontend rollout. Enable only after
+  # auth.trinyx.fr, cloud.trinyx.fr and the private billing edge pass staging E2E.
+  enabled: ${CLOUD_LINK_ENABLED:false}
   keycloak-url: ${CLOUD_KEYCLOAK_URL:https://auth.trinyx.fr/realms/trinyx}
   client-id: ${CLOUD_LINK_CLIENT_ID:trinyx-frontend}
   redirect-uri: ${CLOUD_LINK_REDIRECT_URI:http://localhost:8080/api/cloud-link/callback}

@@ -23,7 +23,10 @@ class ExternalBillingAuthorityMigrationTest {
                 .contains("auth.cloud_credit_operation")
                 .contains("auth.cloud_settlement_outbox")
                 .contains("UNIQUE(operation_id, action, request_hash)");
-        assertThat(sql).doesNotContain("DROP TABLE auth.subscription")
+        assertThat(sql).contains("gen_random_uuid()")
+                .doesNotContain("md5('trinyx-principal:'")
+                .doesNotContain("md5('trinyx-billing:'")
+                .doesNotContain("DROP TABLE auth.subscription")
                 .doesNotContain("DROP TABLE auth.credit_ledger")
                 .doesNotContain("DROP COLUMN remaining_credits");
     }
@@ -51,6 +54,8 @@ class ExternalBillingAuthorityMigrationTest {
                 .contains("next_attempt_at TIMESTAMPTZ NOT NULL DEFAULT now()")
                 .contains("UNIQUE (aggregate_key, sequence)")
                 .contains("UNIQUE (aggregate_key, binding_revision)")
-                .contains("late_settlement_until TIMESTAMPTZ");
+                .contains("late_settlement_until TIMESTAMPTZ")
+                .contains("'DEAD'")
+                .contains("terminal_at TIMESTAMPTZ");
     }
 }

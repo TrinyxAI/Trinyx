@@ -10,7 +10,6 @@ import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.server.ResponseStatusException;
 
 import java.math.BigDecimal;
-import java.math.RoundingMode;
 import java.sql.Timestamp;
 import java.time.Duration;
 import java.time.Instant;
@@ -27,47 +26,46 @@ public class ExternalCreditProxyService {
     private final PaidMonolithCreditClient authority;
     private final JdbcTemplate jdbc;
     private final ObjectMapper json;
-    private final ModelPricingService pricing;
 
     public ExternalCreditProxyService(EntitlementProjectionService entitlements,
                                       PaidMonolithCreditClient authority,
                                       JdbcTemplate jdbc,
-                                      ObjectMapper json,
-                                      ModelPricingService pricing) {
+                                      ObjectMapper json) {
         this.entitlements = entitlements;
         this.authority = authority;
         this.jdbc = jdbc;
         this.json = json;
-        this.pricing = pricing;
     }
 
     public ReserveResult reserveLlm(Context context, LlmReserveCommand command) {
-        if (!pricing.hasPricing(command.provider(), command.model())) {
-            throw new ResponseStatusException(HttpStatus.PAYMENT_REQUIRED, "MODEL_PRICING_UNKNOWN");
+        if (command == null || command.provider() == null || command.provider().isBlank()
+                || command.model() == null || command.model().isBlank()
+                || command.estimatedPromptTokens() < 0
+                || command.maximumCompletionTokens() < 0) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
+                    "INVALID_PROVIDER_BUDGET");
         }
-        int prompt = Math.max(0, command.estimatedPromptTokens());
-        int completion = Math.max(0, command.maximumCompletionTokens());
-        BigDecimal estimated = pricing.calculateCost(command.provider(), command.model(), prompt, completion);
-        BigDecimal maximum = estimated.multiply(new BigDecimal("1.25")).setScale(6, RoundingMode.UP);
-        if (maximum.signum() <= 0) maximum = new BigDecimal("0.000001");
+        // These positive placeholders satisfy the generic Cloud audit schema only.
+        // Paid-monolith ignores them for LLM sources and authoritatively prices the
+        // token ceiling below before it takes the wallet hold.
+        BigDecimal hint = new BigDecimal("0.000001");
         return reserve(context, new ReserveCommand(command.operationId(), command.feature(),
-                command.sourceType(), estimated, maximum, command.provider(), command.model()));
+                command.sourceType(), hint, hint, command.provider(), command.model(),
+                command.estimatedPromptTokens(), command.maximumCompletionTokens()));
     }
 
     public SettlementResult commitLlm(UUID operationId, LlmCommitCommand command) {
-        if (!pricing.hasPricing(command.provider(), command.model())) {
-            throw new ResponseStatusException(HttpStatus.CONFLICT, "MODEL_PRICING_UNKNOWN_AT_SETTLEMENT");
-        }
-        int prompt = Math.max(0, command.promptTokens());
-        int completion = Math.max(0, command.completionTokens());
+        int prompt = nonNegative(command.promptTokens());
+        int completion = nonNegative(command.completionTokens());
         int cacheCreation = nonNegative(command.cacheCreationTokens());
         int cacheRead = nonNegative(command.cacheReadTokens());
         int cached = nonNegative(command.cachedTokens());
         int reasoning = nonNegative(command.reasoningTokens());
-        BigDecimal actual = pricing.calculateCost(command.provider(), command.model(),
-                new LlmTokenBreakdown(prompt, completion, cacheCreation, cacheRead, cached, reasoning));
-        return commit(operationId, new CommitCommand(actual, command.provider(), command.model(),
-                command.providerRequestId(), (long) prompt, (long) completion, command.requestHash(),
+        // Cloud supplies raw provider usage only. The paid authority deliberately
+        // ignores this placeholder and recomputes the debit from its own pricing.
+        return commit(operationId, new CommitCommand(BigDecimal.ZERO,
+                command.provider(), command.model(), command.providerRequestId(),
+                (long) prompt, (long) completion, command.requestHash(),
                 cacheCreation, cacheRead, cached, reasoning));
     }
 
@@ -84,12 +82,14 @@ public class ExternalCreditProxyService {
         String requestHash = CanonicalJson.sha256(json.valueToTree(new ReserveHash(
                 command.operationId(), context, decision.sequence(), command.sourceType(),
                 command.estimatedCredits(), command.maximumCredits(), command.provider(),
-                command.model())));
+                command.model(), command.estimatedPromptTokens(),
+                command.maximumCompletionTokens())));
         var request = new CloudCreditAuthorityService.ReserveRequest(
                 command.operationId(), context.principalId(), context.billingSubjectId(),
                 context.organizationId(), context.installId(), decision.sequence(),
                 command.sourceType(), command.estimatedCredits(), command.maximumCredits(),
-                command.provider(), command.model(), requestHash);
+                command.provider(), command.model(), requestHash,
+                command.estimatedPromptTokens(), command.maximumCompletionTokens());
         var response = authority.reserve(request);
 
         jdbc.update("""
@@ -247,7 +247,9 @@ public class ExternalCreditProxyService {
 
     private record ReserveHash(UUID operationId, Context context, long entitlementSequence,
                                String sourceType, BigDecimal estimatedCredits,
-                               BigDecimal maximumCredits, String provider, String model) {}
+                               BigDecimal maximumCredits, String provider, String model,
+                               Integer estimatedPromptTokens,
+                               Integer maximumCompletionTokens) {}
 
     public record LlmReserveCommand(UUID operationId, String feature, String sourceType,
                                     String provider, String model, int estimatedPromptTokens,
@@ -266,7 +268,15 @@ public class ExternalCreditProxyService {
                           UUID organizationId, UUID installId) {}
     public record ReserveCommand(UUID operationId, String feature, String sourceType,
                                  BigDecimal estimatedCredits, BigDecimal maximumCredits,
-                                 String provider, String model) {}
+                                 String provider, String model, Integer estimatedPromptTokens,
+                                 Integer maximumCompletionTokens) {
+        public ReserveCommand(UUID operationId, String feature, String sourceType,
+                              BigDecimal estimatedCredits, BigDecimal maximumCredits,
+                              String provider, String model) {
+            this(operationId, feature, sourceType, estimatedCredits, maximumCredits,
+                    provider, model, null, null);
+        }
+    }
     public record CommitCommand(BigDecimal actualCredits, String provider, String model,
                                 String providerRequestId, Long promptTokens,
                                 Long completionTokens, String requestHash,

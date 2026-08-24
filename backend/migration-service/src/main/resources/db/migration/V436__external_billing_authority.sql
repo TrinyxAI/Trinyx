@@ -156,7 +156,7 @@ CREATE TABLE IF NOT EXISTS auth.cloud_credit_operation (
     model VARCHAR(255),
     provider_request_id VARCHAR(255),
     state VARCHAR(24) NOT NULL
-        CHECK (state IN ('RESERVED', 'COMMITTED', 'COMMITTED_DELINQUENT', 'RELEASED', 'EXPIRED')),
+        CHECK (state IN ('RESERVED', 'COMMITTED', 'COMMITTED_DELINQUENT', 'RELEASED', 'EXPIRED', 'SETTLEMENT_FAILED')),
     response_payload JSONB,
     expires_at TIMESTAMPTZ,
     late_settlement_until TIMESTAMPTZ,

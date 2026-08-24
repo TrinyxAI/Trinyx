@@ -17,10 +17,13 @@ schema identifiers and compatibility names are excluded from the runtime gate.
 | OAuth callback fallback | LiveContext application | `https://app.trinyx.fr/api/credentials/oauth2/callback` |
 | Mail/contact defaults | LiveContext mail/domain | `@trinyx.fr` / `trinyx.fr` |
 | OAuth user agent | LiveContext | Trinyx |
+| Catalog bundle trust root | inherited upstream key | explicit Trinyx public ring / bounded HTTPS bootstrap |
 
-The Cloud deployment itself already uses only `app.trinyx.fr`,
-`cloud.trinyx.fr` and `auth.trinyx.fr`. CI inventories the wider runtime tree
-on every change and separately rejects a legacy domain in the Cloud stack.
+The Cloud deployment itself uses only `app.trinyx.fr`,
+`cloud.trinyx.fr` and `auth.trinyx.fr`. The blocking CI gate covers every
+runtime surface listed above, rejects legacy network domains, upstream GHCR image
+ownership and the historical upstream bundle signer. A current-HEAD CI success is
+still required before this source audit can be treated as executable proof.
 
 ## Intentionally preserved compatibility material
 
@@ -29,6 +32,11 @@ The following are not runtime network dependencies and are not blindly renamed:
 - database schema names and migration history;
 - historical test fixtures/snapshots;
 - compatibility Java/package names inherited by the fork;
+- internal Compose service, database, log and volume identifiers such as
+  `livecontext`, `livecontext-ce` and `livecontext_data`, which preserve upgrades;
+- legacy embedded JWT realm/audience/issuer defaults and `LIVECONTEXT_*` CLI
+  environment aliases, which preserve existing tokens and installations;
+- internal CSS selectors and the historical API-key prefix;
 - the `X-LiveContext-Install-Id` HTTP header at the public gateway while existing
   linked installations still emit it. It is only an untrusted selector there, is
   validated against an ACTIVE signed binding, stripped, and translated to the
@@ -36,6 +44,14 @@ The following are not runtime network dependencies and are not blindly renamed:
 
 Changing those identifiers requires a separately versioned protocol/data migration.
 Their preservation does not make a request to a LiveContext host.
+
+## User-visible and legal occurrences
+
+CLI commands/package metadata, mail sender defaults and mail bodies, frontend product
+copy, OAuth callbacks, release links and MCP snippets use Trinyx. The remaining
+`LIVECONTEXT SAS` postal address in localized contact/legal copy and the upstream
+license URL in Maven metadata are legal attribution and are intentionally retained.
+LICENSE, NOTICE and historical migration/test text are never rewritten.
 
 ## Trinyx-owned runtime artifacts
 

@@ -9,6 +9,7 @@ import com.apimarketplace.agent.tools.ToolErrorCode;
 import com.apimarketplace.agent.tools.ToolsProvider.ToolExecutionContext;
 import com.apimarketplace.agent.tools.ToolsProvider.ToolExecutionResult;
 import com.apimarketplace.common.credit.PricingSnapshotClient;
+import com.apimarketplace.common.credit.CreditConsumptionClient;
 import com.apimarketplace.orchestrator.config.WebSearchConfig;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.extern.slf4j.Slf4j;
@@ -198,6 +199,12 @@ public class BrowserAgentModule extends WebJobModule {
      * (and their tests) are untouched.
      */
     private CloudLlmRuntimeAccess cloudRuntimeAccess;
+    private CreditConsumptionClient creditConsumptionClient;
+
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    public void setCreditConsumptionClient(CreditConsumptionClient creditConsumptionClient) {
+        this.creditConsumptionClient = creditConsumptionClient;
+    }
 
     @org.springframework.beans.factory.annotation.Autowired(required = false)
     public void setCloudRuntimeAccess(CloudLlmRuntimeAccess cloudRuntimeAccess) {
@@ -386,8 +393,27 @@ public class BrowserAgentModule extends WebJobModule {
             // this hash, the consumer doesn't know which chat channel to
             // fan out the live-view bootstrap to. Best-effort: a Redis
             // hiccup must NOT block the agent_browse submit.
-            persistChatContextForLiveView(parameters, context, userId);
-            ToolExecutionResult runResult = submitAndAwait(action, parameters, tenantId, context);
+            ExternalBrowseReservation externalReservation =
+                    reserveExternalBrowserAgent(userId, parameters);
+            if (externalReservation != null && !externalReservation.accepted()) {
+                return Optional.of(ToolExecutionResult.failure(
+                        ToolErrorCode.QUOTA_EXCEEDED,
+                        externalReservation.error() != null
+                                ? externalReservation.error()
+                                : "Browser-agent credit reservation rejected"));
+            }
+            ToolExecutionContext executionContext =
+                    externalReservation == null ? context : markExternalBillingManaged(context);
+
+            persistChatContextForLiveView(parameters, executionContext, userId);
+            ToolExecutionResult runResult;
+            try {
+                runResult = submitAndAwait(action, parameters, tenantId, executionContext);
+            } catch (RuntimeException failure) {
+                releaseExternalBrowserReservation(externalReservation, "provider-dispatch-failure");
+                throw failure;
+            }
+            settleExternalBrowserReservation(externalReservation, runResult);
             // Plumb the substitution notice into the result so the LLM sees
             // which model was actually used. Only present when a swap happened.
             if (substitution.isPresent() && runResult.success()) {
@@ -397,6 +423,127 @@ public class BrowserAgentModule extends WebJobModule {
         }
         // browse_status/intervene/abort/screenshot are sync-only: hit FastAPI directly.
         return Optional.of(executeSessionControl(action, parameters));
+    }
+
+    private static final int EXTERNAL_BROWSER_MAX_STEPS = 25;
+    private static final int EXTERNAL_BROWSER_MAX_TOKENS_PER_STEP = 4096;
+
+    @SuppressWarnings("unchecked")
+    private ExternalBrowseReservation reserveExternalBrowserAgent(
+            String userId, Map<String, Object> parameters) {
+        if (creditConsumptionClient == null
+                || !creditConsumptionClient.usesExternalAuthority()) {
+            return null;
+        }
+        Long numericUserId;
+        try {
+            numericUserId = Long.valueOf(userId);
+        } catch (Exception invalidIdentity) {
+            return ExternalBrowseReservation.rejected("External billing identity is unavailable");
+        }
+
+        Object llmValue = parameters.get("llm");
+        if (!(llmValue instanceof Map<?, ?> rawLlm)) {
+            return ExternalBrowseReservation.rejected("Resolved browser LLM configuration is unavailable");
+        }
+        Map<String, Object> llm = new LinkedHashMap<>((Map<String, Object>) rawLlm);
+        String provider = stringFieldFromObj(llm.get("provider"));
+        String model = stringFieldFromObj(llm.get("model"));
+        if (provider == null || model == null) {
+            return ExternalBrowseReservation.rejected("Resolved browser LLM provider/model is unavailable");
+        }
+
+        int maxSteps = boundedInt(parameters.get("max_steps"), 10, 1, EXTERNAL_BROWSER_MAX_STEPS);
+        int maxTokens = boundedInt(llm.get("max_tokens"), 2048, 1,
+                EXTERNAL_BROWSER_MAX_TOKENS_PER_STEP);
+        parameters.put("max_steps", maxSteps);
+        llm.put("max_tokens", maxTokens);
+        parameters.put("llm", llm);
+
+        String task = stringFieldFromObj(parameters.get("task"));
+        long perStepPrompt = Math.max(1L, task == null ? 1L : (task.length() + 3L) / 4L);
+        int estimatedPrompt = saturatingInt(perStepPrompt * maxSteps);
+        int maximumCompletion = saturatingInt((long) maxTokens * maxSteps);
+        java.util.UUID operationId = java.util.UUID.randomUUID();
+        CreditConsumptionClient.ExternalReservationResult result =
+                creditConsumptionClient.reserveExternalLlm(
+                        numericUserId, operationId, "cloudWebSearchRelay",
+                        "BROWSER_AGENT_EXECUTION", provider, model,
+                        estimatedPrompt, maximumCompletion);
+        return result.success()
+                ? new ExternalBrowseReservation(true, operationId, result.requestHash(),
+                        provider, model, null)
+                : ExternalBrowseReservation.rejected(result.error());
+    }
+
+    private void settleExternalBrowserReservation(
+            ExternalBrowseReservation reservation, ToolExecutionResult result) {
+        if (reservation == null || !reservation.accepted()) return;
+        Map<String, Object> payload = result != null && result.data() instanceof Map<?, ?> raw
+                ? castStringMap(raw) : Map.of();
+        Map<String, Object> cost = payload.get("cost") instanceof Map<?, ?> rawCost
+                ? castStringMap(rawCost) : Map.of();
+        int promptTokens = saturatingInt(longField(cost, "tokens_in"));
+        int completionTokens = saturatingInt(longField(cost, "tokens_out"));
+        boolean providerCostIncurred = promptTokens > 0 || completionTokens > 0
+                || longField(cost, "llm_calls") > 0;
+        if (result != null && (result.success() || providerCostIncurred)) {
+            String providerRequestId = stringFieldFromObj(payload.get("session_id"));
+            boolean acknowledged = creditConsumptionClient.commitExternalLlm(
+                    reservation.operationId(), reservation.requestHash(),
+                    reservation.provider(), reservation.model(), providerRequestId,
+                    promptTokens, completionTokens);
+            if (!acknowledged) {
+                log.error("Browser-agent external settlement was not acknowledged: operationId={}",
+                        reservation.operationId());
+            }
+        } else {
+            releaseExternalBrowserReservation(reservation, "provider-not-executed");
+        }
+    }
+
+    private void releaseExternalBrowserReservation(
+            ExternalBrowseReservation reservation, String reason) {
+        if (reservation == null || !reservation.accepted()) return;
+        if (!creditConsumptionClient.releaseExternal(
+                reservation.operationId(), reservation.requestHash(), reason)) {
+            log.error("Browser-agent external release was not acknowledged: operationId={}",
+                    reservation.operationId());
+        }
+    }
+
+    private static ToolExecutionContext markExternalBillingManaged(
+            ToolExecutionContext context) {
+        if (context == null) return null;
+        Map<String, Object> credentials = new LinkedHashMap<>();
+        if (context.credentials() != null) credentials.putAll(context.credentials());
+        credentials.put("__externalBillingManaged__", true);
+        return new ToolExecutionContext(context.tenantId(), credentials,
+                context.variables(), context.approvedServices(),
+                context.viewingWorkflowId(), context.viewingWorkflowName(),
+                context.orgId(), context.orgRole());
+    }
+
+    private static int boundedInt(Object value, int fallback, int minimum, int maximum) {
+        int parsed = value instanceof Number number ? number.intValue() : fallback;
+        return Math.max(minimum, Math.min(maximum, parsed));
+    }
+
+    private static int saturatingInt(long value) {
+        return (int) Math.max(0L, Math.min(Integer.MAX_VALUE, value));
+    }
+
+    @SuppressWarnings("unchecked")
+    private static Map<String, Object> castStringMap(Map<?, ?> value) {
+        return (Map<String, Object>) value;
+    }
+
+    private record ExternalBrowseReservation(
+            boolean accepted, java.util.UUID operationId, String requestHash,
+            String provider, String model, String error) {
+        static ExternalBrowseReservation rejected(String error) {
+            return new ExternalBrowseReservation(false, null, null, null, null, error);
+        }
     }
 
     /**
@@ -1558,6 +1705,9 @@ public class BrowserAgentModule extends WebJobModule {
         req.setOrganizationId(context.orgId());
         req.setAgentType("browser_agent");
         req.setSource("chat_tool");
+        req.setCreditExternallyManaged(context.credentials() != null
+                && Boolean.parseBoolean(String.valueOf(
+                        context.credentials().get("__externalBillingManaged__"))));
 
         String rawStop = stringFieldFromObj(response.get("stop_reason"));
         boolean success = "COMPLETED".equalsIgnoreCase(rawStop);

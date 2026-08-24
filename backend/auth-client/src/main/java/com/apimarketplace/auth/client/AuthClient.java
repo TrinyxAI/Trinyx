@@ -131,9 +131,10 @@ public class AuthClient {
     public record PlanLimitResponse(String planCode, Integer limit) {}
 
     /**
-     * Cloud-side authorization check for CE LLM relay calls. The caller is the
-     * authenticated cloud user and the install id is the CE instance presenting
-     * the bearer token. Returns false on any malformed id or transport failure.
+     * Cloud-side authorization check for CE relay calls. The caller is the
+     * authenticated Cloud actor and the install id is the linked instance. Direct
+     * owners and organization members in the exact signed install/org/payer scope
+     * are accepted. Returns false on malformed input, scope mismatch or transport failure.
      */
     public boolean userOwnsActiveCeLink(String userId, String installId) {
         if (userId == null || userId.isBlank() || installId == null || installId.isBlank()) {
@@ -163,8 +164,8 @@ public class AuthClient {
 
     /**
      * Cloud-side subscription check for the CE catalog relay. Resolves the plan
-     * entitlements of the cloud account owning the given install's link. The
-     * caller is the authenticated cloud user, mirroring
+     * actor-free entitlements for the payer/workspace scope of the given install.
+     * The caller is the authenticated Cloud actor, mirroring
      * {@link #userOwnsActiveCeLink}. Fail-closed: any malformed id, transport
      * failure, or non-2xx response yields {@link CeLinkEntitlementsResult#none()}
      * ({@code planCode="__NONE__", hasSubscription=false}).

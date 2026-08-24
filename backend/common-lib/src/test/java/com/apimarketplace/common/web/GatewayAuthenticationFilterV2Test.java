@@ -37,6 +37,24 @@ class GatewayAuthenticationFilterV2Test {
     }
 
     @Test
+    void acceptsBodyAboveLegacyTenMiBLimitAndReplaysExactBytes() throws Exception {
+        byte[] body = new byte[11 * 1024 * 1024];
+        java.util.Arrays.fill(body, (byte) 0x5a);
+        MockHttpServletRequest request = signed(
+                "POST", "/api/storage/files", null, body, "large-body");
+        MockHttpServletResponse response = new MockHttpServletResponse();
+        java.util.concurrent.atomic.AtomicInteger observedBytes =
+                new java.util.concurrent.atomic.AtomicInteger();
+        FilterChain chain = (wrapped, ignored) ->
+                observedBytes.set(wrapped.getInputStream().readAllBytes().length);
+
+        filter.doFilter(request, response, chain);
+
+        assertThat(response.getStatus()).isEqualTo(200);
+        assertThat(observedBytes.get()).isEqualTo(body.length);
+    }
+
+    @Test
     void acceptsExactRequestAndLeavesBodyReplayable() throws Exception {
         byte[] body = "{\"value\":42}".getBytes(StandardCharsets.UTF_8);
         MockHttpServletRequest request = signed("POST", "/api/protected", "a=1", body, "nonce-1");

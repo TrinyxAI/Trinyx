@@ -20,6 +20,9 @@ import java.util.concurrent.ThreadLocalRandom;
         havingValue = "paid-monolith-authority", matchIfMissing = false)
 public class IdentityBindingOutboxDispatcher {
 
+    private static final org.slf4j.Logger log = org.slf4j.LoggerFactory.getLogger(
+            IdentityBindingOutboxDispatcher.class);
+
     private final JdbcTemplate jdbc;
     private final WorkloadAuthenticationService workloads;
     private final org.springframework.web.client.RestTemplate http;
@@ -78,6 +81,8 @@ public class IdentityBindingOutboxDispatcher {
                         SET status='DEAD', attempt_count=?, terminal_at=now(), last_error=?
                         WHERE event_id=?
                         """, attempt, bounded(failure.getMessage()), event.id());
+                log.error("Identity delivery moved to DEAD eventId={} attempt={} type={}",
+                        event.id(), attempt, failure.getClass().getSimpleName());
                 return;
             }
             long cap = Math.min(300, 1L << Math.min(8, attempt));
@@ -88,6 +93,8 @@ public class IdentityBindingOutboxDispatcher {
                     WHERE event_id=?
                     """, attempt, Timestamp.from(Instant.now().plusSeconds(delay)),
                     bounded(failure.getMessage()), event.id());
+            log.warn("Identity delivery retry scheduled eventId={} attempt={} delaySeconds={} type={}",
+                    event.id(), attempt, delay, failure.getClass().getSimpleName());
         }
     }
 

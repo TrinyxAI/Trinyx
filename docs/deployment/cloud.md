@@ -281,11 +281,13 @@ BILLING_PROVIDER=none
 BILLING_AUTHORITY_MODE=external-paid-monolith
 ```
 
-The catalog trust root is explicit and fail-closed. The public key represented by
+The production catalog trust root is explicit. The public key represented by
 `CATALOG_BUNDLE_TRUSTED_KEYS` must match the externally injected Cloud bundle
-signer; the repository does not inherit or trust the historical LiveContext key.
+signer; the repository no longer inherits or trusts the historical LiveContext key.
 Apply the same public ring to every linked CE/paid-monolith before enabling bundle
 sync, and keep the previous Trinyx public key only for a bounded rotation window.
+An empty development installation may use the existing HTTPS signing-key bootstrap,
+but verification remains closed and no bundle is applied before a key is pinned.
 
 There is no Cloud Stripe requirement, Price ID, customer, subscription or
 wallet for linked users. Native billing code is retained for other modes.

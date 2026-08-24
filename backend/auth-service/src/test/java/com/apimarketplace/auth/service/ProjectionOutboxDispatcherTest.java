@@ -89,7 +89,16 @@ class ProjectionOutboxDispatcherTest {
         final List<String> sql = new ArrayList<>();
 
         @Override
+        public <T> List<T> query(String statement, RowMapper<T> mapper) {
+            return map(mapper);
+        }
+
+        @Override
         public <T> List<T> query(String statement, RowMapper<T> mapper, Object... args) {
+            return map(mapper);
+        }
+
+        private <T> List<T> map(RowMapper<T> mapper) {
             try {
                 ResultSet rs = mock(ResultSet.class);
                 when(rs.getObject("event_id", UUID.class)).thenReturn(eventId);

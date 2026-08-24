@@ -27,7 +27,7 @@ import java.util.Optional;
  * {@code agent-model-config} gateway rule). CE downloads under {@code /api/skill-bundles/*}
  * are GATED behind an active cloud link (gateway validates the cloud-link bearer ->
  * {@code X-User-ID}; the handler checks {@code authClient.userOwnsActiveCeLink} on
- * {@code X-LiveContext-Install-Id}). Only {@code /api/skill-bundles/signing-key} is public
+ * {@code X-Install-ID}). Only {@code /api/skill-bundles/signing-key} is public
  * (trust bootstrap); signature verification stays as defence-in-depth.
  */
 @Slf4j
@@ -35,7 +35,7 @@ import java.util.Optional;
 public class SkillBundleController {
 
     /** Same header the LLM relay + catalog bundle use to carry the CE install id. */
-    static final String INSTALL_HEADER = "X-LiveContext-Install-Id";
+    static final String INSTALL_HEADER = "X-Install-ID";
 
     private final SkillBundleService bundleService;
     private final CatalogBundleSigner signer;

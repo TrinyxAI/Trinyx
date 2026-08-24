@@ -81,6 +81,16 @@ public class CloudIdentityBindingService {
         }
 
         // Cross-system identity is authoritative only after signature + scope validation.
+        // Explicit revoke/rebind may move the stable actor identity to a new Keycloak user.
+        // Release it from the revoked Cloud-local compatibility row first; active bindings
+        // never take this path, so two live subjects cannot share a principal.
+        if (current != null && "REVOKED".equals(current.status())
+                && current.cloudUserId() != cloudUserId) {
+            jdbc.update("""
+                    UPDATE auth.users SET principal_id=gen_random_uuid(), updated_at=now()
+                    WHERE id=? AND principal_id=?
+                    """, current.cloudUserId(), principalId);
+        }
         jdbc.update("UPDATE auth.users SET principal_id=?, billing_subject_id=?, updated_at=now() WHERE id=?",
                 principalId, billingSubjectId, cloudUserId);
         try {

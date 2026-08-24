@@ -60,6 +60,7 @@ class AuthenticatedGatewayFilterTest {
                         .header("X-Billing-Subject-ID", "forged")
                         .header("X-Organization-ID", "forged")
                         .header("X-Trinyx-Organization-ID", "forged")
+                        .header("X-LiveContext-Install-Id", "forged-install")
                         .header("X-User-Roles", "ADMIN")
                         .header("X-Gateway-Secret", "forged")
                         .build());
@@ -77,6 +78,7 @@ class AuthenticatedGatewayFilterTest {
         assertThat(headers.getFirst("X-Billing-Subject-ID")).isNull();
         assertThat(headers.getFirst("X-Organization-ID")).isNull();
         assertThat(headers.getFirst("X-Trinyx-Organization-ID")).isNull();
+        assertThat(headers.getFirst("X-LiveContext-Install-Id")).isNull();
         assertThat(headers.getFirst("X-User-Roles")).isNull();
         assertThat(headers.getFirst("X-Gateway-Secret")).isNull();
     }
@@ -142,10 +144,12 @@ class AuthenticatedGatewayFilterTest {
                 .expiresAt(Instant.now().plusSeconds(60))
                 .build();
         MockServerWebExchange exchange = MockServerWebExchange.from(
-                MockServerHttpRequest.get("/api/users/profile").build())
+                MockServerHttpRequest.get("/api/users/profile")
+                        .header("X-LiveContext-Install-Id", "install")
+                        .build())
                 .mutate().principal(Mono.just(new JwtAuthenticationToken(jwt))).build();
 
-        when(identity.resolve(eq("jwt"), eq("subject"), isNull(), isNull()))
+        when(identity.resolve(eq("jwt"), eq("subject"), isNull(), isNull(), eq("install")))
                 .thenReturn(Mono.just(context));
         when(identity.authorize(eq(context), isNull(), eq(false)))
                 .thenReturn(Mono.just(new GatewayIdentityClient.EntitlementDecision(
@@ -160,6 +164,33 @@ class AuthenticatedGatewayFilterTest {
                 .verify();
 
         assertThat(exchange.getResponse().getStatusCode()).isNull();
+    }
+
+    @Test
+    void conflictingExternalInstallSelectorsFailClosedBeforeIdentityResolution() {
+        GatewayIdentityClient identity = mock(GatewayIdentityClient.class);
+        AuthenticatedGatewayFilter filter = new AuthenticatedGatewayFilter(identity, 1024);
+        Jwt jwt = Jwt.withTokenValue("jwt")
+                .header("alg", "none")
+                .subject("subject")
+                .issuedAt(Instant.now())
+                .expiresAt(Instant.now().plusSeconds(60))
+                .build();
+        MockServerWebExchange exchange = MockServerWebExchange.from(
+                MockServerHttpRequest.get("/api/users/profile")
+                        .header("X-LiveContext-Install-Id",
+                                "40000000-0000-0000-0000-000000000004")
+                        .header("X-Install-ID",
+                                "50000000-0000-0000-0000-000000000005")
+                        .build())
+                .mutate().principal(Mono.just(new JwtAuthenticationToken(jwt))).build();
+
+        StepVerifier.create(filter.filter(exchange, ignored -> Mono.error(
+                        new AssertionError("chain must not run"))))
+                .verifyComplete();
+
+        assertThat(exchange.getResponse().getStatusCode()).isEqualTo(HttpStatus.FORBIDDEN);
+        org.mockito.Mockito.verifyNoInteractions(identity);
     }
 
     @Test

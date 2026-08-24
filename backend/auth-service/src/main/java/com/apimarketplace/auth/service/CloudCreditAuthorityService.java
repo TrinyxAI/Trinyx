@@ -115,7 +115,7 @@ public class CloudCreditAuthorityService {
                 SET state=?, actual_credits=?, provider=?, model=?, provider_request_id=?,
                     settlement_hash=?, response_payload=CAST(? AS jsonb), updated_at=now()
                 WHERE operation_id=?
-                """, state, request.actualCredits(), request.provider(), request.model(),
+                """, state, authoritativeActual, request.provider(), request.model(),
                 request.providerRequestId(), settlementHash, write(response), operationId);
         return response;
     }

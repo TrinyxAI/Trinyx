@@ -20,6 +20,7 @@ public class WorkloadAuthenticationService {
 
     private final Map<String, PublicKey> verificationKeys;
     private final StringRedisTemplate redis;
+    private final com.fasterxml.jackson.databind.ObjectMapper json;
     private final String verificationIssuer;
     private final String verificationAudience;
     private final String signingIssuer;
@@ -29,6 +30,7 @@ public class WorkloadAuthenticationService {
 
     public WorkloadAuthenticationService(
             StringRedisTemplate redis,
+            com.fasterxml.jackson.databind.ObjectMapper json,
             @Value("${trinyx.s2s.verification-keys:}") String encodedKeys,
             @Value("${trinyx.s2s.verification-issuer:trinyx-cloud}") String verificationIssuer,
             @Value("${trinyx.s2s.verification-audience:trinyx-billing-authority}") String verificationAudience,
@@ -37,6 +39,7 @@ public class WorkloadAuthenticationService {
             @Value("${trinyx.s2s.signing-kid:}") String signingKid,
             @Value("${trinyx.s2s.signing-key:}") String encodedSigningKey) {
         this.redis = redis;
+        this.json = json;
         this.verificationKeys = parseKeys(encodedKeys);
         this.verificationIssuer = verificationIssuer;
         this.verificationAudience = verificationAudience;
@@ -55,7 +58,7 @@ public class WorkloadAuthenticationService {
             throw new IllegalStateException("No active workload signing key configured");
         }
         Instant now = Instant.now();
-        var claims = new com.fasterxml.jackson.databind.ObjectMapper().createObjectNode();
+        var claims = json.createObjectNode();
         claims.put("iss", signingIssuer);
         claims.put("aud", signingAudience);
         claims.put("serviceId", serviceId);

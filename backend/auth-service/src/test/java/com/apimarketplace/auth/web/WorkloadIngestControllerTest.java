@@ -7,6 +7,9 @@ import org.junit.jupiter.api.Test;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.server.ResponseStatusException;
 
+import java.time.Instant;
+import java.util.UUID;
+
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.Mockito.mock;
@@ -16,7 +19,7 @@ import static org.mockito.Mockito.when;
 class WorkloadIngestControllerTest {
 
     @Test
-    void invalidProjectionWorkloadIsAterminalUnauthorizedRejection() {
+    void invalidProjectionWorkloadIsATerminalUnauthorizedRejection() {
         EntitlementProjectionService projections = mock(EntitlementProjectionService.class);
         WorkloadAuthenticationService workloads = mock(WorkloadAuthenticationService.class);
         when(workloads.authenticate("Bearer invalid",
@@ -34,7 +37,26 @@ class WorkloadIngestControllerTest {
     }
 
     @Test
-    void invalidIdentityWorkloadIsAterminalUnauthorizedRejection() {
+    void malformedProjectionAssertionIsATerminalBadRequest() {
+        EntitlementProjectionService projections = mock(EntitlementProjectionService.class);
+        WorkloadAuthenticationService workloads = mock(WorkloadAuthenticationService.class);
+        when(workloads.authenticate("Bearer valid",
+                "trinyx-paid-authority", "trinyx-cloud-internal"))
+                .thenReturn(new WorkloadAuthenticationService.WorkloadIdentity(
+                        "trinyx-paid-authority", UUID.randomUUID(), Instant.now().plusSeconds(60)));
+        when(projections.apply("malformed")).thenThrow(new IllegalArgumentException("invalid"));
+
+        WorkloadEntitlementProjectionController controller =
+                new WorkloadEntitlementProjectionController(projections, workloads);
+
+        assertThatThrownBy(() -> controller.apply("Bearer valid",
+                new WorkloadEntitlementProjectionController.ProjectionRequest("malformed")))
+                .isInstanceOfSatisfying(ResponseStatusException.class,
+                        error -> assertThat(error.getStatusCode()).isEqualTo(HttpStatus.BAD_REQUEST));
+    }
+
+    @Test
+    void invalidIdentityWorkloadIsATerminalUnauthorizedRejection() {
         CloudIdentityBindingService bindings = mock(CloudIdentityBindingService.class);
         WorkloadAuthenticationService workloads = mock(WorkloadAuthenticationService.class);
         when(workloads.authenticate("Bearer invalid",
@@ -49,5 +71,25 @@ class WorkloadIngestControllerTest {
                 .isInstanceOfSatisfying(ResponseStatusException.class,
                         error -> assertThat(error.getStatusCode()).isEqualTo(HttpStatus.UNAUTHORIZED));
         verifyNoInteractions(bindings);
+    }
+
+    @Test
+    void malformedIdentityTombstoneIsATerminalBadRequest() {
+        CloudIdentityBindingService bindings = mock(CloudIdentityBindingService.class);
+        WorkloadAuthenticationService workloads = mock(WorkloadAuthenticationService.class);
+        when(workloads.authenticate("Bearer valid",
+                "trinyx-paid-authority", "trinyx-cloud-internal"))
+                .thenReturn(new WorkloadAuthenticationService.WorkloadIdentity(
+                        "trinyx-paid-authority", UUID.randomUUID(), Instant.now().plusSeconds(60)));
+        when(bindings.applyRevocation("malformed"))
+                .thenThrow(new IllegalArgumentException("invalid"));
+
+        WorkloadIdentityBindingController controller =
+                new WorkloadIdentityBindingController(bindings, workloads);
+
+        assertThatThrownBy(() -> controller.revoke("Bearer valid",
+                new WorkloadIdentityBindingController.TombstoneRequest("malformed")))
+                .isInstanceOfSatisfying(ResponseStatusException.class,
+                        error -> assertThat(error.getStatusCode()).isEqualTo(HttpStatus.BAD_REQUEST));
     }
 }

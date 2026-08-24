@@ -24,8 +24,8 @@ cloud.trinyx.fr -> Caddy :8188 -> gateway-service :8086
 
 auth.trinyx.fr -> Caddy :8280 -> Keycloak :8080
 
-Cloud -- short Ed25519 workload JWT --> app.trinyx.fr
-       reserve / commit / release       (sole wallet + ledger authority)
+Cloud -- private TLS + short Ed25519 workload JWT --> billing-internal.trinyx.private
+       reserve / commit / release                         (paid-monolith wallet authority)
 
 app.trinyx.fr -- private TLS + workload JWT --> Cloud auth-service
                signed projections + identity tombstones
@@ -105,9 +105,11 @@ Cloud persists failed commit/release delivery in
 `auth.cloud_settlement_outbox` with jittered exponential retry. It never falls
 back to a local balance when the authority is unavailable.
 
-LLM relays reserve a conservative amount before dispatch and retain the
-provider's `maxTokens` limit. Flat-price scope reservations used by web search
-are also delegated in external-authority mode. Provider-specific output,
+LLM relays reserve a conservative amount before dispatch and retain provider
+limits. Browser-agent relays additionally cap the external path to 25 steps and
+4,096 output tokens per step before reserving the aggregate maximum. Flat-price
+web search reserves before SearXNG; its configured fixed price is read only by
+the paid-monolith authority, never accepted from Cloud. Provider-specific output,
 iteration, timeout and concurrency limits must remain enabled at each provider
 adapter; the wallet hold is the final monetary boundary, not a substitute for
 those operational limits.

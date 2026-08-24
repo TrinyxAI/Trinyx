@@ -90,7 +90,7 @@ export default function McpServerPage() {
   const codexSnippet = `[mcp_servers.trinyx]
 url = "${mcpUrl}"
 
-[mcp_servers.livecontext.http_headers]
+[mcp_servers.trinyx.http_headers]
 "X-API-Key" = "${keyForSnippet}"`;
 
   if (isAuthChecking || (isAuthenticated && loading)) {

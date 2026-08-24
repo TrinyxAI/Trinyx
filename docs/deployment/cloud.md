@@ -172,6 +172,9 @@ backward-compatible, untrusted installation selector. `X-Trinyx-Install-ID` and 
 inbound `X-Install-ID` are treated the same way. The gateway resolves the selector
 against the Keycloak subject's ACTIVE signed binding, rejects conflicting selectors, removes
 all selector headers, and injects only the resolved HMAC-bound `X-Install-ID` downstream.
+The browser `Authorization` header and any `lc.jwt.*` WebSocket authentication
+subprotocol are also consumed at the edge and never forwarded to microservices; non-secret
+application subprotocols are preserved.
 When a subject owns several installations, a selector (or a fresh signed binding during
 link/rebind) is mandatory; the gateway never chooses an arbitrary installation.
 

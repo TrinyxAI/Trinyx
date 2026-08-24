@@ -11,6 +11,7 @@ import reactor.core.publisher.Mono;
 
 import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Set;
 import java.util.UUID;
@@ -139,15 +140,20 @@ final class GatewayIdentityClient {
     }
 
     private GatewayUserContext merge(UserResolution user, BindingContext binding) {
-        String boundRole = user.memberships() == null ? null : user.memberships().stream()
-                .filter(membership -> binding.organizationId().equals(membership.orgId()))
-                .map(GatewayUserContext.Membership::role)
-                .findFirst().orElse(null);
-        if (boundRole == null) {
-            throw new IllegalStateException("Bound organization membership is missing");
+        String boundRole = GatewaySignatureV2.canonicalRole(binding.organizationRole());
+        if (!Set.of("OWNER", "ADMIN", "MEMBER", "VIEWER").contains(boundRole)) {
+            throw new IllegalStateException("Signed organization role is invalid");
         }
+        // The paid authority owns the cross-system organization scope. A just-in-time
+        // Cloud user initially has only a local personal workspace, so requiring a pre-existing
+        // membership here would make first link impossible. Materialize the signed membership in
+        // gateway context; downstream services receive it only through HMAC v2 headers.
+        List<GatewayUserContext.Membership> memberships = new ArrayList<>(
+                user.memberships() == null ? List.of() : user.memberships());
+        memberships.removeIf(existing -> binding.organizationId().equals(existing.orgId()));
+        memberships.add(new GatewayUserContext.Membership(binding.organizationId(), boundRole));
         return new GatewayUserContext(user.userId(), user.providerId(), user.roles(),
-                binding.organizationId(), boundRole, user.memberships(),
+                binding.organizationId(), boundRole, List.copyOf(memberships),
                 binding.principalId(), binding.billingSubjectId(), binding.installId());
     }
 
@@ -194,7 +200,8 @@ final class GatewayIdentityClient {
 
     private record BindingContext(Long userId, String providerId, String principalId,
                                   String billingSubjectId, String organizationId,
-                                  String installId, long bindingRevision, String status) {}
+                                  String organizationRole, String installId,
+                                  long bindingRevision, String status) {}
 
     record EntitlementDecision(boolean allowed, String reason, long sequence,
                                java.time.Instant expiresAt) {}

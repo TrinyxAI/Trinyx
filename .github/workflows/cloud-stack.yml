@@ -166,10 +166,22 @@ jobs:
         run: >-
           mvn -B -Pce
           -pl common-lib,gateway-service,auth-client,auth-service,agent-service,publication-service,migration-service -am
-          -Dtest=AppEditionProviderTest,AppEditionAutoConfigurationTest,GatewayAuthenticationFilterTest,GatewayAuthenticationFilterV2Test,GatewaySignatureV2Test,GatewaySignatureV2ParityTest,AuthenticatedGatewayFilterTest,GatewaySecurityConfigTest,Ed25519JwsTest,WorkloadAuthenticationServiceTest,EntitlementProjectionServiceTest,CeLinkEntitlementsServiceTest,CloudIdentityBindingServiceTest,CloudCreditAuthorityServiceTest,CloudLinkServiceTest,CloudLinkControllerBeanGatingTest,RemoteMarketplaceConfigBeanGatingTest,CloudLlmRelayControllerTest,ExternalBillingAuthorityMigrationTest
+          -Dtest=AppEditionProviderTest,AppEditionAutoConfigurationTest,GatewayAuthenticationFilterTest,GatewayAuthenticationFilterV2Test,MonolithSecurityFilterBillingWorkloadTest,GatewaySignatureV2Test,GatewaySignatureV2ParityTest,AuthenticatedGatewayFilterTest,GatewaySecurityConfigTest,Ed25519JwsTest,WorkloadAuthenticationServiceTest,EntitlementProjectionServiceTest,CeLinkEntitlementsServiceTest,CloudIdentityBindingServiceTest,CloudCreditAuthorityServiceTest,PaidMonolithCreditClientTest,CloudSettlementOutboxDispatcherTest,ExternalBillingAuthorityServiceTest,CloudLinkServiceTest,CloudLinkControllerBeanGatingTest,RemoteMarketplaceConfigBeanGatingTest,CloudLlmRelayControllerTest,ExternalBillingAuthorityMigrationTest
           -Dsurefire.failIfNoSpecifiedTests=false
           test
 
+
+      - name: Verify Trinyx CLI and frontend Cloud opt-in
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --check cli/bin/trinyx.mjs
+          node cli/bin/trinyx.mjs --version
+          grep -q '"trinyx": "bin/trinyx.mjs"' cli/package.json
+          if grep -q "const CE_API_BASE = 'https://cloud.trinyx.fr" frontend/components/marketplace/CategoryFilter.tsx; then
+            echo "Paid-monolith frontend must not hardcode an unavailable Cloud origin" >&2
+            exit 1
+          fi
 
       - name: Verify Java and Node HMAC v1/v2 parity
         shell: bash

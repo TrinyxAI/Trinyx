@@ -1068,6 +1068,19 @@ public class CreditConsumptionClient {
     public boolean commitExternalLlm(
             java.util.UUID operationId, String requestHash, String provider, String model,
             String providerRequestId, int promptTokens, int completionTokens) {
+        return commitExternalLlm(operationId, requestHash, provider, model,
+                providerRequestId, promptTokens, completionTokens, null);
+    }
+
+    /**
+     * Cache-aware external-authority settlement. The paid-monolith recomputes the
+     * authoritative price from this raw provider usage; Cloud never gets to choose
+     * the amount charged.
+     */
+    public boolean commitExternalLlm(
+            java.util.UUID operationId, String requestHash, String provider, String model,
+            String providerRequestId, int promptTokens, int completionTokens,
+            LlmCacheTokens cacheTokens) {
         String url = authServiceUrl + "/api/internal/cloud-credit-proxy/"
                 + operationId + "/commit-llm";
         HttpHeaders headers = userHeaders(null, MediaType.APPLICATION_JSON);
@@ -1078,6 +1091,20 @@ public class CreditConsumptionClient {
         body.put("providerRequestId", providerRequestId == null ? "" : providerRequestId);
         body.put("promptTokens", Math.max(0, promptTokens));
         body.put("completionTokens", Math.max(0, completionTokens));
+        if (cacheTokens != null && cacheTokens.hasAny()) {
+            if (cacheTokens.cacheCreationTokens() != null) {
+                body.put("cacheCreationTokens", cacheTokens.cacheCreationTokens());
+            }
+            if (cacheTokens.cacheReadTokens() != null) {
+                body.put("cacheReadTokens", cacheTokens.cacheReadTokens());
+            }
+            if (cacheTokens.cachedTokens() != null) {
+                body.put("cachedTokens", cacheTokens.cachedTokens());
+            }
+            if (cacheTokens.reasoningTokens() != null) {
+                body.put("reasoningTokens", cacheTokens.reasoningTokens());
+            }
+        }
         try {
             ResponseEntity<Map> response = restTemplate.exchange(
                     url, HttpMethod.POST, new HttpEntity<>(body, headers), Map.class);

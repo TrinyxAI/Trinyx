@@ -1,0 +1,90 @@
+package com.apimarketplace.auth.service;
+
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+import org.springframework.boot.web.client.RestTemplateBuilder;
+import org.springframework.http.*;
+import org.springframework.web.client.*;
+
+import java.math.BigDecimal;
+import java.nio.charset.StandardCharsets;
+import java.time.Duration;
+import java.util.UUID;
+
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.ArgumentMatchers.*;
+import static org.mockito.Mockito.*;
+
+class PaidMonolithCreditClientTest {
+
+    private final RestTemplateBuilder builder = mock(RestTemplateBuilder.class);
+    private final RestTemplate http = mock(RestTemplate.class);
+    private final WorkloadAuthenticationService workloads = mock(WorkloadAuthenticationService.class);
+    private PaidMonolithCreditClient client;
+
+    @BeforeEach
+    void setUp() {
+        when(builder.connectTimeout(any(Duration.class))).thenReturn(builder);
+        when(builder.readTimeout(any(Duration.class))).thenReturn(builder);
+        when(builder.build()).thenReturn(http);
+        when(workloads.issue("trinyx-cloud-runtime")).thenReturn("workload-jwt");
+        client = new PaidMonolithCreditClient(
+                builder, workloads, "https://billing-internal.trinyx.private/");
+    }
+
+    @Test
+    void businessConflictIsPermanentAndNeverClassifiedForRetry() {
+        when(http.exchange(anyString(), eq(HttpMethod.POST), any(HttpEntity.class),
+                eq(CloudCreditAuthorityService.ReserveResponse.class)))
+                .thenThrow(response(HttpStatus.CONFLICT, "REQUEST_HASH_MISMATCH"));
+
+        assertThatThrownBy(() -> client.reserve(reserve()))
+                .isInstanceOf(PaidMonolithCreditClient.PermanentAuthorityException.class)
+                .hasMessageContaining("409")
+                .hasMessageContaining("REQUEST_HASH_MISMATCH");
+    }
+
+    @Test
+    void authenticationRejectionIsPermanent() {
+        when(http.exchange(anyString(), eq(HttpMethod.POST), any(HttpEntity.class),
+                eq(CloudCreditAuthorityService.ReserveResponse.class)))
+                .thenThrow(response(HttpStatus.UNAUTHORIZED, "invalid workload"));
+
+        assertThatThrownBy(() -> client.reserve(reserve()))
+                .isInstanceOf(PaidMonolithCreditClient.PermanentAuthorityException.class);
+    }
+
+    @Test
+    void serverAndTransportFailuresRemainRetryable() {
+        when(http.exchange(anyString(), eq(HttpMethod.POST), any(HttpEntity.class),
+                eq(CloudCreditAuthorityService.ReserveResponse.class)))
+                .thenThrow(response(HttpStatus.SERVICE_UNAVAILABLE, "down"));
+
+        assertThatThrownBy(() -> client.reserve(reserve()))
+                .isInstanceOf(PaidMonolithCreditClient.RetryableAuthorityException.class);
+
+        reset(http);
+        when(http.exchange(anyString(), eq(HttpMethod.POST), any(HttpEntity.class),
+                eq(CloudCreditAuthorityService.ReserveResponse.class)))
+                .thenThrow(new ResourceAccessException("timeout"));
+
+        assertThatThrownBy(() -> client.reserve(reserve()))
+                .isInstanceOf(PaidMonolithCreditClient.RetryableAuthorityException.class);
+    }
+
+    private static HttpClientErrorException response(HttpStatus status, String body) {
+        if (status.is5xxServerError()) {
+            return new HttpServerErrorException(status, status.getReasonPhrase(),
+                    HttpHeaders.EMPTY, body.getBytes(StandardCharsets.UTF_8), StandardCharsets.UTF_8);
+        }
+        return new HttpClientErrorException(status, status.getReasonPhrase(),
+                HttpHeaders.EMPTY, body.getBytes(StandardCharsets.UTF_8), StandardCharsets.UTF_8);
+    }
+
+    private static CloudCreditAuthorityService.ReserveRequest reserve() {
+        return new CloudCreditAuthorityService.ReserveRequest(
+                UUID.randomUUID(), UUID.randomUUID(), UUID.randomUUID(), UUID.randomUUID(),
+                UUID.randomUUID(), 1, "LLM", BigDecimal.ONE, BigDecimal.TEN,
+                "openai", "gpt", "a".repeat(64));
+    }
+}

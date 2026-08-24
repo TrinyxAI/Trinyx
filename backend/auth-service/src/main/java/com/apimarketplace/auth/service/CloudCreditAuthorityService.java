@@ -115,10 +115,15 @@ public class CloudCreditAuthorityService {
         jdbc.update("""
                 UPDATE auth.cloud_credit_operation
                 SET state=?, actual_credits=?, provider=?, model=?, provider_request_id=?,
+                    prompt_tokens=?, completion_tokens=?, cache_creation_tokens=?,
+                    cache_read_tokens=?, cached_tokens=?, reasoning_tokens=?,
                     settlement_hash=?, response_payload=CAST(? AS jsonb), updated_at=now()
                 WHERE operation_id=?
                 """, state, authoritativeActual, request.provider(), request.model(),
-                request.providerRequestId(), settlementHash, write(response), operationId);
+                request.providerRequestId(), request.promptTokens(), request.completionTokens(),
+                request.cacheCreationTokens(), request.cacheReadTokens(),
+                request.cachedTokens(), request.reasoningTokens(),
+                settlementHash, write(response), operationId);
         return response;
     }
 

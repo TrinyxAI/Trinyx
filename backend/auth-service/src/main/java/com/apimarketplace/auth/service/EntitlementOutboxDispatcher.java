@@ -73,6 +73,14 @@ public class EntitlementOutboxDispatcher {
                         """, event.id());
             } catch (Exception failure) {
                 int attempt = event.attemptCount() + 1;
+                if (isPermanent(failure)) {
+                    jdbc.update("""
+                            UPDATE auth.entitlement_outbox
+                            SET status='DEAD', attempt_count=?, terminal_at=now(), last_error=?
+                            WHERE event_id=?
+                            """, attempt, bounded(failure.getMessage()), event.id());
+                    continue;
+                }
                 long cap = Math.min(300, 1L << Math.min(8, attempt));
                 long delay = ThreadLocalRandom.current().nextLong(
                         Math.max(1, cap / 2), cap + 1);
@@ -84,6 +92,16 @@ public class EntitlementOutboxDispatcher {
                         bounded(failure.getMessage()), event.id());
             }
         }
+    }
+
+    private static boolean isPermanent(Throwable failure) {
+        Throwable current = failure;
+        while (current != null) {
+            if (current instanceof org.springframework.web.client.RestClientResponseException response
+                    && response.getStatusCode().is4xxClientError()) return true;
+            current = current.getCause();
+        }
+        return false;
     }
 
     private static String bounded(String message) {

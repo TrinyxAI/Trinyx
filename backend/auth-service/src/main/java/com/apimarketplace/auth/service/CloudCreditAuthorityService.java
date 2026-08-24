@@ -180,9 +180,16 @@ public class CloudCreditAuthorityService {
         }
 
         Integer linked = jdbc.queryForObject("""
-                SELECT count(*) FROM publication.ce_cloud_links
-                WHERE install_id=? AND tenant_id=?
-                """, Integer.class, request.installId(), userId);
+                SELECT count(*)
+                FROM publication.ce_cloud_links link
+                JOIN auth.organization organization_row
+                  ON organization_row.id=? AND link.organization_id=organization_row.id::text
+                JOIN auth.users owner_row ON owner_row.id=organization_row.owner_id
+                WHERE link.install_id=?
+                  AND link.tenant_id=owner_row.id
+                  AND owner_row.billing_subject_id=?
+                """, Integer.class, request.organizationId(), request.installId(),
+                request.billingSubjectId());
         if (linked == null || linked != 1) {
             throw new ResponseStatusException(HttpStatus.FORBIDDEN, "INSTALL_BINDING_INVALID");
         }

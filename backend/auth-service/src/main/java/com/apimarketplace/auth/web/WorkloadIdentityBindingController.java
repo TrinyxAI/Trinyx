@@ -27,12 +27,22 @@ public class WorkloadIdentityBindingController {
     public CloudIdentityBindingService.BindingContext revoke(
             @RequestHeader("Authorization") String authorization,
             @Valid @RequestBody TombstoneRequest request) {
-        var identity = workloads.authenticate(authorization,
-                "trinyx-paid-authority", "trinyx-cloud-internal");
-        if (!"trinyx-paid-authority".equals(identity.serviceId())) {
-            throw new SecurityException("Unexpected identity authority workload");
-        }
+        authenticate(authorization);
         return bindings.applyRevocation(request.assertion());
+    }
+
+    private void authenticate(String authorization) {
+        try {
+            var identity = workloads.authenticate(authorization,
+                    "trinyx-paid-authority", "trinyx-cloud-internal");
+            if (!"trinyx-paid-authority".equals(identity.serviceId())) {
+                throw new SecurityException("Unexpected identity authority workload");
+            }
+        } catch (RuntimeException invalidWorkload) {
+            throw new org.springframework.web.server.ResponseStatusException(
+                    org.springframework.http.HttpStatus.UNAUTHORIZED,
+                    "INVALID_WORKLOAD_IDENTITY", invalidWorkload);
+        }
     }
 
     public record TombstoneRequest(@NotBlank String assertion) {}

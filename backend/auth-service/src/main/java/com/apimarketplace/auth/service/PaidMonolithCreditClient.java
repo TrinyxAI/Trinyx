@@ -4,6 +4,9 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.web.client.RestTemplateBuilder;
 import org.springframework.http.*;
 import org.springframework.stereotype.Service;
+import org.springframework.web.client.ResourceAccessException;
+import org.springframework.web.client.RestClientException;
+import org.springframework.web.client.RestClientResponseException;
 import org.springframework.web.client.RestTemplate;
 
 import java.time.Duration;
@@ -25,7 +28,7 @@ public class PaidMonolithCreditClient {
     public PaidMonolithCreditClient(
             RestTemplateBuilder builder,
             WorkloadAuthenticationService workloads,
-            @Value("${paid-monolith.billing-url:https://app.trinyx.fr}") String baseUrl) {
+            @Value("${paid-monolith.billing-url:https://billing-internal.trinyx.private}") String baseUrl) {
         this.http = builder.connectTimeout(Duration.ofSeconds(5))
                 .readTimeout(Duration.ofSeconds(15)).build();
         this.workloads = workloads;
@@ -54,12 +57,50 @@ public class PaidMonolithCreditClient {
         HttpHeaders headers = new HttpHeaders();
         headers.setContentType(MediaType.APPLICATION_JSON);
         headers.setBearerAuth(workloads.issue(SERVICE_ID));
-        ResponseEntity<T> response = http.exchange(baseUrl + path, method,
-                new HttpEntity<>(body, headers), responseType);
-        if (!response.getStatusCode().is2xxSuccessful() || response.getBody() == null) {
-            throw new IllegalStateException("Billing authority returned " + response.getStatusCode());
+        try {
+            ResponseEntity<T> response = http.exchange(baseUrl + path, method,
+                    new HttpEntity<>(body, headers), responseType);
+            if (!response.getStatusCode().is2xxSuccessful() || response.getBody() == null) {
+                throw new RetryableAuthorityException(
+                        "Billing authority returned an empty/non-success response", null);
+            }
+            return response.getBody();
+        } catch (RestClientResponseException responseFailure) {
+            if (responseFailure.getStatusCode().is4xxClientError()) {
+                throw new PermanentAuthorityException(responseFailure.getStatusCode().value(),
+                        responseFailure.getResponseBodyAsString(), responseFailure);
+            }
+            throw new RetryableAuthorityException(
+                    "Billing authority returned " + responseFailure.getStatusCode().value(),
+                    responseFailure);
+        } catch (ResourceAccessException transportFailure) {
+            throw new RetryableAuthorityException(
+                    "Billing authority transport unavailable", transportFailure);
+        } catch (RestClientException protocolFailure) {
+            throw new RetryableAuthorityException(
+                    "Billing authority protocol failure", protocolFailure);
         }
-        return response.getBody();
+    }
+
+    public static final class PermanentAuthorityException extends RuntimeException {
+        private final int statusCode;
+
+        public PermanentAuthorityException(int statusCode, String responseBody, Throwable cause) {
+            super("Permanent billing authority rejection " + statusCode
+                    + (responseBody == null || responseBody.isBlank() ? "" : ": " + responseBody),
+                    cause);
+            this.statusCode = statusCode;
+        }
+
+        public int statusCode() {
+            return statusCode;
+        }
+    }
+
+    public static final class RetryableAuthorityException extends RuntimeException {
+        public RetryableAuthorityException(String message, Throwable cause) {
+            super(message, cause);
+        }
     }
 
     private static String strip(String value) {

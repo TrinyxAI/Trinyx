@@ -406,6 +406,10 @@ credit:
 # stay env-overridable for a CE operator who deliberately resells with a margin.
 billing:
   provider: ${BILLING_PROVIDER:none}
+  authority:
+    mode: ${BILLING_AUTHORITY_MODE:native}
+  external:
+    past-due-grace-hours: ${BILLING_PAST_DUE_GRACE_HOURS:72}
   llm:
     cloud-multiplier: ${BILLING_LLM_CLOUD_MULTIPLIER:1.0}
   stripe:

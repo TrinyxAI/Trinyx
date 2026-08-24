@@ -82,6 +82,7 @@ public class CloudCreditAuthorityService {
         lock(operationId);
         Existing operation = required(operationId);
         requireSame(operation.requestHash(), request.requestHash(), "REQUEST_HASH_MISMATCH");
+        validateCommit(operation, request);
         String settlementHash = CanonicalJson.sha256(json.valueToTree(request));
 
         if (operation.state().startsWith("COMMITTED")) {
@@ -234,7 +235,7 @@ public class CloudCreditAuthorityService {
         var rows = jdbc.query("""
                 SELECT o.operation_id, o.request_hash, o.settlement_hash, o.state,
                        o.response_payload::text, o.late_settlement_until, o.organization_id,
-                       o.source_type, u.id AS executor_user_id
+                       o.source_type, o.provider, o.model, u.id AS executor_user_id
                 FROM auth.cloud_credit_operation o
                 JOIN auth.users u ON u.principal_id=o.principal_id
                 WHERE o.operation_id=? FOR UPDATE
@@ -244,7 +245,7 @@ public class CloudCreditAuthorityService {
                 rs.getTimestamp("late_settlement_until") == null ? null
                         : rs.getTimestamp("late_settlement_until").toInstant(),
                 rs.getLong("executor_user_id"), rs.getObject("organization_id", UUID.class),
-                rs.getString("source_type")), id);
+                rs.getString("source_type"), rs.getString("provider"), rs.getString("model")), id);
         return rows.isEmpty() ? null : rows.getFirst();
     }
 
@@ -269,7 +270,56 @@ public class CloudCreditAuthorityService {
         if ("WEB_SEARCH".equalsIgnoreCase(operation.sourceType())) {
             return credits.getWebSearchCreditsPerSearch();
         }
+        if (isLlmSource(operation.sourceType())) {
+            try {
+                return credits.calculateExternalLlmCredits(
+                        operation.provider(), operation.model(),
+                        toInt(request.promptTokens(), "promptTokens"),
+                        toInt(request.completionTokens(), "completionTokens"),
+                        request.cacheCreationTokens(), request.cacheReadTokens(),
+                        request.cachedTokens(), request.reasoningTokens());
+            } catch (IllegalArgumentException invalidUsage) {
+                throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
+                        "INVALID_PROVIDER_USAGE", invalidUsage);
+            }
+        }
         return request.actualCredits();
+    }
+
+    private void validateCommit(Existing operation, CommitRequest request) {
+        if (request == null || request.requestHash() == null
+                || !request.requestHash().matches("[0-9a-f]{64}")
+                || !java.util.Objects.equals(operation.provider(), request.provider())
+                || !java.util.Objects.equals(operation.model(), request.model())) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "INVALID_COMMIT");
+        }
+        if (!isLlmSource(operation.sourceType())
+                && !"WEB_SEARCH".equalsIgnoreCase(operation.sourceType())
+                && (request.actualCredits() == null || request.actualCredits().signum() < 0)) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "INVALID_ACTUAL_CREDITS");
+        }
+        nonNegative(request.cacheCreationTokens(), "cacheCreationTokens");
+        nonNegative(request.cacheReadTokens(), "cacheReadTokens");
+        nonNegative(request.cachedTokens(), "cachedTokens");
+        nonNegative(request.reasoningTokens(), "reasoningTokens");
+    }
+
+    private static boolean isLlmSource(String sourceType) {
+        return "CE_LLM_RELAY".equalsIgnoreCase(sourceType)
+                || "BROWSER_AGENT_EXECUTION".equalsIgnoreCase(sourceType);
+    }
+
+    private static Integer toInt(Long value, String field) {
+        if (value == null || value < 0 || value > Integer.MAX_VALUE) {
+            throw new IllegalArgumentException(field + " is invalid");
+        }
+        return value.intValue();
+    }
+
+    private static void nonNegative(Integer value, String field) {
+        if (value != null && value < 0) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, field + " is invalid");
+        }
     }
 
     private BigDecimal balanceForOrganization(long executorUserId, UUID organizationId) {
@@ -308,7 +358,8 @@ public class CloudCreditAuthorityService {
 
     private record Existing(UUID operationId, String requestHash, String settlementHash,
                             String state, String responsePayload, Instant lateSettlementUntil,
-                            long executorUserId, UUID organizationId, String sourceType) {}
+                            long executorUserId, UUID organizationId, String sourceType,
+                            String provider, String model) {}
 
     public record ReserveRequest(UUID operationId, UUID principalId, UUID billingSubjectId,
                                  UUID organizationId, UUID installId, long entitlementSequence,
@@ -317,7 +368,16 @@ public class CloudCreditAuthorityService {
                                  String requestHash) {}
     public record CommitRequest(BigDecimal actualCredits, String provider, String model,
                                 String providerRequestId, Long promptTokens, Long completionTokens,
-                                String requestHash) {}
+                                String requestHash, Integer cacheCreationTokens,
+                                Integer cacheReadTokens, Integer cachedTokens,
+                                Integer reasoningTokens) {
+        public CommitRequest(BigDecimal actualCredits, String provider, String model,
+                             String providerRequestId, Long promptTokens, Long completionTokens,
+                             String requestHash) {
+            this(actualCredits, provider, model, providerRequestId, promptTokens,
+                    completionTokens, requestHash, null, null, null, null);
+        }
+    }
     public record ReleaseRequest(String reason, String requestHash) {}
     public record ReserveResponse(UUID operationId, UUID reservationId, String state,
                                   Instant expiresAt, BigDecimal authoritativeBalance,

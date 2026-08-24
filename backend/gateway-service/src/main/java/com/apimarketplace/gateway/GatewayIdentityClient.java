@@ -32,7 +32,7 @@ final class GatewayIdentityClient {
     }
 
     Mono<GatewayUserContext> resolve(String bearerToken, String providerId, String bindingJws,
-                                     String entitlementJws) {
+                                     String entitlementJws, String installSelector) {
         String target = "/api/users/resolve?providerId="
                 + URLEncoder.encode(providerId, StandardCharsets.UTF_8);
         HttpHeaders signed = signed("GET", target, new byte[0], providerId,
@@ -44,15 +44,29 @@ final class GatewayIdentityClient {
                 })
                 .retrieve()
                 .bodyToMono(UserResolution.class)
-                .flatMap(user -> resolveBinding(user, providerId, bindingJws))
+                .flatMap(user -> resolveBinding(user, providerId, bindingJws, installSelector))
                 .flatMap(context -> applyProjection(context, providerId, entitlementJws)
                         .thenReturn(context));
     }
 
     private Mono<GatewayUserContext> resolveBinding(
-            UserResolution user, String providerId, String bindingJws) {
+            UserResolution user, String providerId, String bindingJws, String installSelector) {
+        // A fresh signed binding is the authoritative selector during first link/rebind. Replaying
+        // the identical JTI for the same Cloud user is idempotent in auth-service.
+        if (bindingJws != null && !bindingJws.isBlank()) {
+            return bind(user, providerId, bindingJws);
+        }
+
         String target = "/api/internal/cloud-identity/context?keycloakSubject="
                 + URLEncoder.encode(providerId, StandardCharsets.UTF_8);
+        if (installSelector != null && !installSelector.isBlank()) {
+            try {
+                UUID.fromString(installSelector);
+            } catch (IllegalArgumentException invalidSelector) {
+                return Mono.error(new UnboundIdentityException());
+            }
+            target += "&installId=" + URLEncoder.encode(installSelector, StandardCharsets.UTF_8);
+        }
         HttpHeaders headers = signed("GET", target, new byte[0], providerId,
                 String.valueOf(user.userId()), user.principalId(), user.billingSubjectId(),
                 user.defaultOrganizationId(), user.defaultOrganizationRole(),
@@ -63,9 +77,7 @@ final class GatewayIdentityClient {
                 .bodyToMono(BindingContext.class)
                 .map(binding -> merge(user, binding))
                 .onErrorResume(org.springframework.web.reactive.function.client.WebClientResponseException.NotFound.class,
-                        missing -> bindingJws == null || bindingJws.isBlank()
-                                ? Mono.error(new UnboundIdentityException())
-                                : bind(user, providerId, bindingJws));
+                        missing -> Mono.error(new UnboundIdentityException()));
     }
 
     private Mono<GatewayUserContext> bind(

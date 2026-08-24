@@ -1,0 +1,124 @@
+name: Validate Cloud stack
+
+on:
+  pull_request:
+    paths:
+      - "docker/docker-compose.cloud.yml"
+      - "docker/.env.cloud.example"
+      - "docker/cloud/**"
+      - "docs/deployment/cloud.md"
+      - ".github/workflows/cloud-stack.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  cloud-compose:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Verify referenced repository paths
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -f docker/docker-compose.cloud.yml
+          test -f docker/.env.cloud.example
+          test -f docker/cloud/Caddyfile
+          test -f docker/cloud/keycloak/Dockerfile
+          test -f docker/cloud/keycloak/trinyx-realm.json
+          test -f docker/cloud/postgres/00-keycloak-schema.sql
+          test -f docker/cloud/searxng/settings.yml
+          test -f websearch-service/Dockerfile
+          for service in             auth-service agent-service catalog-service conversation-service             datasource-service interface-service migration-service             orchestrator-service publication-service storage-service trigger-service
+          do
+            test -f "backend/${service}/Dockerfile"
+          done
+
+      - name: Render Docker Compose configuration
+        shell: bash
+        run: |
+          set -euo pipefail
+          docker compose             --env-file docker/.env.cloud.example             -f docker/docker-compose.cloud.yml             config --quiet
+          docker compose             --env-file docker/.env.cloud.example             -f docker/docker-compose.cloud.yml             config > /tmp/trinyx-cloud.rendered.yml
+
+      - name: Assert Cloud modes and service DNS
+        shell: bash
+        run: |
+          set -euo pipefail
+          rendered=/tmp/trinyx-cloud.rendered.yml
+          grep -q 'APP_EDITION: cloud' "${rendered}"
+          grep -q 'DEPLOYMENT_MODE: microservice' "${rendered}"
+          grep -q 'AUTH_MODE: keycloak' "${rendered}"
+          grep -q 'MARKETPLACE_MODE: local' "${rendered}"
+          grep -q 'BILLING_PROVIDER: stripe' "${rendered}"
+          grep -q 'AUTH_SERVICE_URL: http://auth-service:8083' "${rendered}"
+          grep -q 'CATALOG_SERVICE_URL: http://catalog-service:8081' "${rendered}"
+          grep -q 'STORAGE_SERVICE_URL: http://storage-service:8082' "${rendered}"
+          grep -q 'ORCHESTRATOR_SERVICE_URL: http://orchestrator-service:8099' "${rendered}"
+
+      - name: Verify external image manifests
+        shell: bash
+        run: |
+          set -euo pipefail
+          for image in \
+            pgvector/pgvector:pg16 \
+            redis:7-alpine \
+            minio/minio:RELEASE.2025-07-23T15-54-02Z \
+            minio/mc:RELEASE.2025-07-21T05-28-08Z \
+            quay.io/keycloak/keycloak:26.7.1 \
+            searxng/searxng:2026.8.17-374939b88 \
+            caddy:2.11.4-alpine
+          do
+            docker buildx imagetools inspect "${image}" >/dev/null
+          done
+
+      - name: Validate Keycloak realm and Caddy
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m json.tool docker/cloud/keycloak/trinyx-realm.json >/dev/null
+          docker run --rm             -v "${PWD}/docker/cloud/Caddyfile:/etc/caddy/Caddyfile:ro"             caddy:2.11.4-alpine             caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile
+
+      - name: Reject legacy runtime URLs and committed secrets
+        shell: bash
+        run: |
+          set -euo pipefail
+          if grep -Rni 'livecontext\.ai'             docker/docker-compose.cloud.yml             docker/.env.cloud.example             docker/cloud
+          then
+            echo "Legacy runtime URL found in Cloud stack" >&2
+            exit 1
+          fi
+          if grep -En '(sk_live_|rk_live_|whsec_[A-Za-z0-9]{20,}|price_[A-Za-z0-9]{10,})'             docker/docker-compose.cloud.yml             docker/.env.cloud.example             docker/cloud/keycloak/trinyx-realm.json
+          then
+            echo "A Stripe secret or Price ID appears to be committed" >&2
+            exit 1
+          fi
+
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+          cache: maven
+
+      - name: Test Cloud edition and gateway contracts
+        working-directory: backend
+        shell: bash
+        run: >-
+          mvn -B -Pce
+          -pl common-lib -am
+          -Dtest=AppEditionProviderTest,AppEditionAutoConfigurationTest,GatewayAuthenticationFilterTest
+          test
+
+      - name: Ensure paid-monolith files are untouched
+        if: github.event_name == 'pull_request'
+        shell: bash
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          set -euo pipefail
+          git diff --exit-code "${BASE_SHA}" --             docker-compose.yml             docker/.env.ce             docker/.env.paid-monolith

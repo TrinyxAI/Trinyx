@@ -1,0 +1,80 @@
+{
+	auto_https off
+	admin off
+}
+
+:8080 {
+	encode zstd gzip
+
+	@health path /healthz
+	handle @health {
+		header Content-Type application/json
+		respond `{"status":"UP","component":"trinyx-cloud-edge","authenticatedGateway":"MISSING"}` 200
+	}
+
+	handle /health/auth {
+		rewrite * /actuator/health
+		reverse_proxy auth-service:8083
+	}
+	handle /health/catalog {
+		rewrite * /actuator/health
+		reverse_proxy catalog-service:8081
+	}
+	handle /health/storage {
+		rewrite * /actuator/health
+		reverse_proxy storage-service:8082
+	}
+	handle /health/conversation {
+		rewrite * /actuator/health
+		reverse_proxy conversation-service:8087
+	}
+	handle /health/datasource {
+		rewrite * /actuator/health
+		reverse_proxy datasource-service:8088
+	}
+	handle /health/interface {
+		rewrite * /actuator/health
+		reverse_proxy interface-service:8089
+	}
+	handle /health/agent {
+		rewrite * /actuator/health
+		reverse_proxy agent-service:8090
+	}
+	handle /health/trigger {
+		rewrite * /actuator/health
+		reverse_proxy trigger-service:8091
+	}
+	handle /health/publication {
+		rewrite * /actuator/health
+		reverse_proxy publication-service:8092
+	}
+	handle /health/orchestrator {
+		rewrite * /actuator/health
+		reverse_proxy orchestrator-service:8099
+	}
+
+	# This controller is explicitly public in catalog-service. Everything that
+	# requires a Trinyx user is blocked until the missing authenticated gateway
+	# described in docs/deployment/cloud.md is supplied.
+	handle /api/catalog/public/* {
+		reverse_proxy catalog-service:8081
+	}
+
+	# Browser live-view uses its own short-lived CDP JWT.
+	handle /cdp/* {
+		reverse_proxy websearch-service:8085
+	}
+
+	@authenticated path /api/* /webhooks/* /ws /ws/*
+	handle @authenticated {
+		header Content-Type application/json
+		respond `{"error":"authenticated_gateway_missing","message":"Authenticated Cloud routes are intentionally disabled; see docs/deployment/cloud.md"}` 503
+	}
+
+	header Content-Type application/json
+	respond `{"error":"not_found"}` 404
+}
+
+:8180 {
+	reverse_proxy keycloak:8080
+}

@@ -146,7 +146,7 @@ jobs:
           branding_matches="$(
             grep -RniE --include='*.ts' --include='*.tsx' --include='*.js' --include='*.mjs' \
               --include='*.json' --include='*.html' --include='*.yml' --include='*.yaml' \
-              'LiveContext' frontend cli landing backend/*/src/main/resources 2>/dev/null
+              'LiveContext' frontend cli backend/*/src/main/resources 2>/dev/null
           )"
           branding_status=$?
           set -e

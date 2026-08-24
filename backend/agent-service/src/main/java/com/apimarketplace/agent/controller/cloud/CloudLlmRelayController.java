@@ -64,7 +64,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 @RequestMapping("/api/ce-llm")
 public class CloudLlmRelayController {
 
-    private static final String INSTALL_HEADER = "X-LiveContext-Install-Id";
+    private static final String INSTALL_HEADER = "X-Install-ID";
     private static final String SOURCE_TYPE = "CE_LLM_RELAY";
     private static final int DEFAULT_COMPLETION_ESTIMATE = 8192;
 

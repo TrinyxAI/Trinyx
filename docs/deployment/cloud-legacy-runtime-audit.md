@@ -55,10 +55,12 @@ LICENSE, NOTICE and historical migration/test text are never rewritten.
 
 ## Trinyx-owned runtime artifacts
 
-The npm CLI Compose asset now references only Trinyx-owned image names for the CE
-backend, frontend, MCP bridge, screenshot renderer and websearch service. The
-`Build Trinyx CE runtime images` workflow builds every image on pull requests and
-publishes immutable commit tags plus `latest` only after a push to `main`.
+The npm CLI Compose asset references only Trinyx-owned image names for the CE
+backend, frontend, MCP bridge, screenshot renderer and websearch service, pinned
+to the CLI release tag (`v0.2.11`). The `Build Trinyx CE runtime images`
+workflow builds every image on pull requests without publishing. It publishes
+the immutable commit tag, audited `v*` release tag and `latest` only for an
+explicit Git release-tag push; a main push or manual dispatch cannot publish.
 
 This removes the configured `ghcr.io/livecontext-ai/*` supply-chain dependency, but
 the new manifests do not become deployable merely because their names are present in

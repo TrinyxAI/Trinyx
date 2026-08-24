@@ -457,14 +457,13 @@ catalog:
       enabled: ${CATALOG_GENERATION_SEED_ENABLED:true}
   # Shared Ed25519 trust root for ALL signed bundles fetched from the cloud
   # (LLM model bundle AND API catalog bundle). Format: keyId=base64X509;...
-  # The cloud's PUBLIC key is baked as the default so a fresh CE / git clone
-  # trusts cloud-signed bundles out of the box (no manual config). This is a
-  # public key - the cloud serves the same value at /api/catalog-bundles/signing-key;
-  # it is NOT a secret. An empty default would make every sync tick record
-  # TRUST_UNCONFIGURED. Operators can override or extend (`;`-separated, e.g. for
-  # key rotation) via CATALOG_BUNDLE_TRUSTED_KEYS.
+  # Trust is provisioned explicitly from the Trinyx Cloud signing-key domain.
+  # Never inherit an upstream trust anchor after changing the bundle origin:
+  # an unconfigured installation records TRUST_UNCONFIGURED and fails closed.
+  # Public verification keys are not secrets, but must match the externally
+  # protected Cloud private signer. Multiple rotation keys are `;`-separated.
   bundle:
-    trusted-keys: ${CATALOG_BUNDLE_TRUSTED_KEYS:livecontext-prod-v1=MCowBQYDK2VwAyEAS0Q7EwzPEhGRu2hKzsMeHQqPfQJKpbK7ohjpvnDmmvM=}
+    trusted-keys: ${CATALOG_BUNDLE_TRUSTED_KEYS:}
     # LLM model-catalog bundle sync (cloud -> CE): keeps the CE model catalog (which
     # models exist + pricing) in step with the cloud's latest signed bundle, on a cron
     # plus once on startup. GATED behind an active cloud link: the scheduler authenticates

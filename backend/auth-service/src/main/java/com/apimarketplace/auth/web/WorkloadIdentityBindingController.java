@@ -38,7 +38,7 @@ public class WorkloadIdentityBindingController {
             if (!"trinyx-paid-authority".equals(identity.serviceId())) {
                 throw new SecurityException("Unexpected identity authority workload");
             }
-        } catch (RuntimeException invalidWorkload) {
+        } catch (SecurityException | IllegalArgumentException invalidWorkload) {
             throw new org.springframework.web.server.ResponseStatusException(
                     org.springframework.http.HttpStatus.UNAUTHORIZED,
                     "INVALID_WORKLOAD_IDENTITY", invalidWorkload);

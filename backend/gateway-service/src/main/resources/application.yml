@@ -19,6 +19,7 @@ spring:
       server:
         webflux:
           routes:
+            # Public/self-authenticating edge surfaces. Keep this list explicit.
             - id: websearch-cdp
               uri: ${WEBSEARCH_SERVICE_URL:http://websearch-service:8085}
               predicates:
@@ -27,15 +28,7 @@ spring:
               uri: ${AUTH_SERVICE_URL:http://auth-service:8083}
               predicates:
                 - Path=/api/ce/releases/latest
-            - id: auth-ce-link
-              uri: ${AUTH_SERVICE_URL:http://auth-service:8083}
-              predicates:
-                - Path=/api/ce-link/**
-            - id: auth-user-billing
-              uri: ${AUTH_SERVICE_URL:http://auth-service:8083}
-              predicates:
-                - Path=/api/users/**,/api/billing/**,/api/credits/**,/api/organizations/**,/api/credentials/**
-            - id: auth-webhooks
+            - id: auth-stripe-webhook
               uri: ${AUTH_SERVICE_URL:http://auth-service:8083}
               predicates:
                 - Path=/webhooks/stripe
@@ -43,18 +36,137 @@ spring:
               uri: ${CATALOG_SERVICE_URL:http://catalog-service:8081}
               predicates:
                 - Path=/api/catalog/public/bundles/**
-            - id: catalog-ce
+
+            # Historical service-prefixed contract used by internal LiveContext clients.
+            # Each rule removes only the service selector; /internal is still denied globally.
+            - id: prefixed-auth-service
+              uri: ${AUTH_SERVICE_URL:http://auth-service:8083}
+              predicates:
+                - Path=/api/auth-service/api/**
+              filters:
+                - RewritePath=/api/auth-service/(?<remaining>.*), /$\{remaining}
+            - id: prefixed-catalog-service
               uri: ${CATALOG_SERVICE_URL:http://catalog-service:8081}
               predicates:
-                - Path=/api/ce-catalog/**
-            - id: agent-bundles
+                - Path=/api/catalog-service/api/**
+              filters:
+                - RewritePath=/api/catalog-service/(?<remaining>.*), /$\{remaining}
+            - id: prefixed-agent-service
               uri: ${AGENT_SERVICE_URL:http://agent-service:8090}
               predicates:
-                - Path=/api/catalog-bundles/**,/api/skill-bundles/**,/api/ce-llm/**
-            - id: orchestrator-ce
+                - Path=/api/agent-service/api/**
+              filters:
+                - RewritePath=/api/agent-service/(?<remaining>.*), /$\{remaining}
+            - id: prefixed-conversation-service
+              uri: ${CONVERSATION_SERVICE_URL:http://conversation-service:8087}
+              predicates:
+                - Path=/api/conversation-service/api/**
+              filters:
+                - RewritePath=/api/conversation-service/(?<remaining>.*), /$\{remaining}
+            - id: prefixed-datasource-service
+              uri: ${DATASOURCE_SERVICE_URL:http://datasource-service:8088}
+              predicates:
+                - Path=/api/datasource-service/api/**
+              filters:
+                - RewritePath=/api/datasource-service/(?<remaining>.*), /$\{remaining}
+            - id: prefixed-interface-service
+              uri: ${INTERFACE_SERVICE_URL:http://interface-service:8089}
+              predicates:
+                - Path=/api/interface-service/api/**
+              filters:
+                - RewritePath=/api/interface-service/(?<remaining>.*), /$\{remaining}
+            - id: prefixed-trigger-service
+              uri: ${TRIGGER_SERVICE_URL:http://trigger-service:8091}
+              predicates:
+                - Path=/api/trigger-service/api/**
+              filters:
+                - RewritePath=/api/trigger-service/(?<remaining>.*), /$\{remaining}
+            - id: prefixed-publication-service
+              uri: ${PUBLICATION_SERVICE_URL:http://publication-service:8092}
+              predicates:
+                - Path=/api/publication-service/api/**
+              filters:
+                - RewritePath=/api/publication-service/(?<remaining>.*), /$\{remaining}
+            - id: prefixed-orchestrator-service
               uri: ${ORCHESTRATOR_SERVICE_URL:http://orchestrator-service:8099}
               predicates:
-                - Path=/api/ce-websearch/**
+                - Path=/api/orchestrator-service/api/**
+              filters:
+                - RewritePath=/api/orchestrator-service/(?<remaining>.*), /$\{remaining}
+            - id: prefixed-storage-service
+              uri: ${STORAGE_SERVICE_URL:http://storage-service:8082}
+              predicates:
+                - Path=/api/storage-service/api/**
+              filters:
+                - RewritePath=/api/storage-service/(?<remaining>.*), /$\{remaining}
+
+            # Collision-specific application routes must precede broader families.
+            - id: conversation-admin
+              uri: ${CONVERSATION_SERVICE_URL:http://conversation-service:8087}
+              predicates:
+                - Path=/api/admin/conversations/**
+            - id: orchestrator-admin
+              uri: ${ORCHESTRATOR_SERVICE_URL:http://orchestrator-service:8099}
+              predicates:
+                - Path=/api/admin/workflows/**
+            - id: publication-ce-tls
+              uri: ${PUBLICATION_SERVICE_URL:http://publication-service:8092}
+              predicates:
+                - Path=/api/ce/tls/**
+            - id: orchestrator-interface-runtime
+              uri: ${ORCHESTRATOR_SERVICE_URL:http://orchestrator-service:8099}
+              predicates:
+                - Path=/api/interfaces/*/render,/api/interfaces/*/items/**,/api/interfaces/*/run-info,/api/interfaces/*/items-count,/api/interfaces/expression-functions,/api/interfaces/*/render-datasource,/api/interfaces/*/datasource-items-count
+            - id: orchestrator-storage-facade
+              uri: ${ORCHESTRATOR_SERVICE_URL:http://orchestrator-service:8099}
+              predicates:
+                - Path=/api/files/download,/api/storage/explorer/**,/api/storage/quota/**
+            - id: orchestrator-workflows-v2
+              uri: ${ORCHESTRATOR_SERVICE_URL:http://orchestrator-service:8099}
+              predicates:
+                - Path=/api/v2/workflows/**
+
+            # Normal authenticated LiveContext/Trinyx application APIs.
+            - id: auth-application
+              uri: ${AUTH_SERVICE_URL:http://auth-service:8083}
+              predicates:
+                - Path=/.well-known/jwks.json,/v1/authorize/**,/api/admin/**,/api/auth/**,/api/billing/**,/api/bridge-access/**,/api/ce-link/**,/api/ce/**,/api/cloud-authority/**,/api/contact/**,/api/credentials/**,/api/credits/**,/api/me/**,/api/onboarding/**,/api/organizations/**,/api/platform-credentials/**,/api/subscriptions/**,/api/users/**,/api/variables/**,/api/version/**
+            - id: publication-application
+              uri: ${PUBLICATION_SERVICE_URL:http://publication-service:8092}
+              predicates:
+                - Path=/api/ce-marketplace/**,/api/cloud-link/**,/api/public/**,/api/publications/**
+            - id: conversation-application
+              uri: ${CONVERSATION_SERVICE_URL:http://conversation-service:8087}
+              predicates:
+                - Path=/api/conversations/**,/api/dm/**,/api/shared/**,/api/tool-results/**,/api/v3/chat/**
+            - id: agent-application
+              uri: ${AGENT_SERVICE_URL:http://agent-service:8090}
+              predicates:
+                - Path=/api/agent-prompts/**,/api/agent/**,/api/agents/**,/api/catalog-bundles/**,/api/ce-llm/**,/api/llm-providers/**,/api/model-config/**,/api/recurrences/**,/api/skill-bundles/**,/api/skill-folders/**,/api/skills/**,/api/tasks/**
+            - id: catalog-application
+              uri: ${CATALOG_SERVICE_URL:http://catalog-service:8081}
+              predicates:
+                - Path=/api/apis/**,/api/capability_knn/**,/api/catalog/**,/api/ce-catalog/**,/api/generation/**,/api/tool-categories/**,/api/tool-responses/**,/api/tools/**,/api/v1/**,/api/workflow-inspector/**,/catalog/v1/**
+            - id: datasource-application
+              uri: ${DATASOURCE_SERVICE_URL:http://datasource-service:8088}
+              predicates:
+                - Path=/api/crud/**,/api/data-sources/**
+            - id: orchestrator-application
+              uri: ${ORCHESTRATOR_SERVICE_URL:http://orchestrator-service:8099}
+              predicates:
+                - Path=/api/activities/**,/api/agent-tools/**,/api/browser-agent/**,/api/categories/**,/api/ce-websearch/**,/api/dashboard/**,/api/favorites/**,/api/mcp-server/**,/api/mcp/**,/api/node-definitions/**,/api/node-type-settings/**,/api/notifications/**,/api/org-access/**,/api/projects/**,/api/schedules/**,/api/stats/**,/api/websearch/**,/api/workflow-builder/**,/api/workflows/**,/mcp/**,/v1/chat/**
+            - id: interface-application
+              uri: ${INTERFACE_SERVICE_URL:http://interface-service:8089}
+              predicates:
+                - Path=/api/interfaces/**
+            - id: storage-application
+              uri: ${STORAGE_SERVICE_URL:http://storage-service:8082}
+              predicates:
+                - Path=/api/files/**,/api/storage/**,/storage/v1/**
+            - id: trigger-application
+              uri: ${TRIGGER_SERVICE_URL:http://trigger-service:8091}
+              predicates:
+                - Path=/api/chat-endpoints/**,/api/form-endpoints/**,/api/webhooks/**
             - id: conversation-websocket
               uri: ${CONVERSATION_WS_URL:ws://conversation-service:8087}
               predicates:

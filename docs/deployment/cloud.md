@@ -57,9 +57,12 @@ Email is never used to reconcile identities. The numeric `X-User-ID` is a
 Cloud-local compatibility value only.
 
 IdentityBinding v2 is a five-minute Ed25519 JWS. It includes issuer, audience,
-JTI, time claims, monotonic `bindingRevision` and all five identifiers. A
-subject change requires explicit revoke/rebind. The gateway requires the JWT
-`sub` to equal the signed `keycloakSubject`.
+JTI, time claims, monotonic `bindingRevision`, all five identifiers and the
+paid-authority-derived `organizationRole`. A subject change requires explicit
+revoke/rebind. The gateway requires the JWT `sub` to equal the signed
+`keycloakSubject`; it never substitutes a browser-supplied role. The signed
+organization membership is materialized in gateway context so first link does
+not depend on the unrelated personal workspace created by Cloud JIT onboarding.
 
 EntitlementProjection v2 deliberately excludes actor identity and spendable
 balance. It contains plan/cadence/subscription state, typed features and limits,
@@ -173,7 +176,7 @@ Cloud application traffic to gateway-service.
 | `/api/ce/releases/latest` | auth-service | public release metadata only |
 | `/webhooks/**` | auth-service | provider signature, no browser JWT |
 | `/api/catalog/public/bundles/**` | catalog-service | explicit public allowlist |
-| `/api/ce-link/**` | auth-service | JWT + identity + entitlement |
+| `/api/ce-link/**` | auth-service | JWT + signed identity; lifecycle/repair is identity-only, entitlement response itself fails closed |
 | `/api/users/**`, `/api/billing/**`, `/api/credits/**` | auth-service | JWT + projection |
 | `/api/ce-catalog/**` | catalog-service | `catalogBundle` |
 | `/api/catalog-bundles/**` | agent-service | `catalogBundle` |
@@ -257,6 +260,34 @@ BILLING_AUTHORITY_MODE=external-paid-monolith
 
 There is no Cloud Stripe requirement, Price ID, customer, subscription or
 wallet for linked users. Native billing code is retained for other modes.
+
+### Cloud-link bootstrap and unlink
+
+In `paid-monolith-authority` mode the existing OAuth completion stores the local
+link first, resolves its trusted organization scope, and calls the local auth
+service to issue an `AuthorityBundle`. The first Cloud
+`POST /api/ce-link/register` carries:
+
+```text
+Authorization: Bearer <Keycloak access token>
+X-Trinyx-Identity-Binding: <five-minute Ed25519 JWS>
+X-Trinyx-Entitlement-Projection: <fifteen-minute Ed25519 JWS>
+X-Trinyx-Organization-ID: <signed organization scope>
+```
+
+The gateway verifies and consumes the binding JTI, applies the projection
+idempotently, strips all bootstrap headers, then injects HMAC v2 context. Later
+heartbeats and reads use the persisted binding; the five-minute assertion is not
+a five-minute login. Projection refresh/outbox delivery remains five-minute and
+15-minute fail-closed.
+
+Unlink deliberately orders operations as Cloud registry revoke, paid-authority
+signed identity/entitlement tombstones, then local link deletion. A failure
+before the tombstones are committed leaves the local row retryable; no blind
+identity deletion occurs. Cloud-link lifecycle routes remain identity-authenticated
+even when a projection has expired so heartbeat repair and revocation cannot be
+blocked by stale billing data. Paid relay/bundle routes still require a current
+feature projection.
 
 ## Keycloak
 

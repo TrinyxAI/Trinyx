@@ -157,6 +157,12 @@ CREATE TABLE IF NOT EXISTS auth.cloud_credit_operation (
     provider VARCHAR(64),
     model VARCHAR(255),
     provider_request_id VARCHAR(255),
+    prompt_tokens BIGINT CHECK (prompt_tokens IS NULL OR prompt_tokens >= 0),
+    completion_tokens BIGINT CHECK (completion_tokens IS NULL OR completion_tokens >= 0),
+    cache_creation_tokens BIGINT CHECK (cache_creation_tokens IS NULL OR cache_creation_tokens >= 0),
+    cache_read_tokens BIGINT CHECK (cache_read_tokens IS NULL OR cache_read_tokens >= 0),
+    cached_tokens BIGINT CHECK (cached_tokens IS NULL OR cached_tokens >= 0),
+    reasoning_tokens BIGINT CHECK (reasoning_tokens IS NULL OR reasoning_tokens >= 0),
     state VARCHAR(24) NOT NULL
         CHECK (state IN ('RESERVED', 'COMMITTED', 'COMMITTED_DELINQUENT', 'RELEASED', 'EXPIRED', 'SETTLEMENT_FAILED')),
     response_payload JSONB,

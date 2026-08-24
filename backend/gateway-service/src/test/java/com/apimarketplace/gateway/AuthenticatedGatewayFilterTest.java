@@ -110,6 +110,8 @@ class AuthenticatedGatewayFilterTest {
         MockServerWebExchange exchange = MockServerWebExchange.from(
                 MockServerHttpRequest.get("/cdp/session-token/devtools/page/1")
                         .header("Upgrade", "websocket")
+                        .header("Sec-WebSocket-Protocol", "trinyx.events, lc.jwt.browser-secret")
+                        .header("Authorization", "Bearer browser-secret")
                         .header("X-User-ID", "999")
                         .header("X-Organization-ID", "forged")
                         .header("X-Gateway-Secret", "forged")
@@ -127,6 +129,9 @@ class AuthenticatedGatewayFilterTest {
         assertThat(forwarded.get().getRequest().getHeaders().getFirst("X-User-ID")).isNull();
         assertThat(forwarded.get().getRequest().getHeaders().getFirst("X-Organization-ID")).isNull();
         assertThat(forwarded.get().getRequest().getHeaders().getFirst("X-Gateway-Secret")).isNull();
+        assertThat(forwarded.get().getRequest().getHeaders().getFirst("Authorization")).isNull();
+        assertThat(forwarded.get().getRequest().getHeaders().getFirst("Sec-WebSocket-Protocol"))
+                .isEqualTo("trinyx.events");
     }
 
     @Test
@@ -183,6 +188,7 @@ class AuthenticatedGatewayFilterTest {
                 .build();
         MockServerWebExchange exchange = MockServerWebExchange.from(
                 MockServerHttpRequest.get("/api/users/profile")
+                        .header("Authorization", "Bearer jwt")
                         .header("X-LiveContext-Install-Id", install)
                         .build())
                 .mutate().principal(Mono.just(new JwtAuthenticationToken(jwt))).build();
@@ -204,6 +210,8 @@ class AuthenticatedGatewayFilterTest {
             return Mono.empty();
         })).verifyComplete();
 
+        assertThat(forwarded.get().getRequest().getHeaders()
+                .getFirst("Authorization")).isNull();
         assertThat(forwarded.get().getRequest().getHeaders()
                 .getFirst("X-LiveContext-Install-Id")).isNull();
         assertThat(forwarded.get().getRequest().getHeaders()

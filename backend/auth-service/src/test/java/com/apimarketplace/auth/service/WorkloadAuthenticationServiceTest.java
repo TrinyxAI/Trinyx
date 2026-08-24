@@ -29,7 +29,7 @@ class WorkloadAuthenticationServiceTest {
                 .thenReturn(true, false);
 
         WorkloadAuthenticationService service = new WorkloadAuthenticationService(
-                redis,
+                redis, new com.fasterxml.jackson.databind.ObjectMapper(),
                 "cloud-1=" + publicKey,
                 "trinyx-cloud",
                 "trinyx-billing-authority",
@@ -58,7 +58,7 @@ class WorkloadAuthenticationServiceTest {
         when(redis.opsForValue()).thenReturn(mock(ValueOperations.class));
 
         WorkloadAuthenticationService service = new WorkloadAuthenticationService(
-                redis, "cloud-1=" + publicKey,
+                redis, new com.fasterxml.jackson.databind.ObjectMapper(), "cloud-1=" + publicKey,
                 "trinyx-paid-authority", "trinyx-cloud-internal",
                 "trinyx-cloud", "trinyx-billing-authority",
                 "cloud-1", privateKey);

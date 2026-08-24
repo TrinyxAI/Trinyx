@@ -41,7 +41,7 @@ public class GatewaySecurityConfig {
 
     /**
      * Browsers cannot set an Authorization header during a WebSocket upgrade. The existing
-     * LiveContext client deliberately transports its Keycloak token in the lc.jwt.* subprotocol;
+     * Trinyx client deliberately transports its Keycloak token in the lc.jwt.* subprotocol;
      * authenticate that exact /ws handshake while preserving normal bearer-header precedence.
      * Query-string bearer tokens stay disabled to avoid token leakage in proxy logs.
      */

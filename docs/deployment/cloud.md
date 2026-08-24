@@ -92,6 +92,7 @@ The sole authority endpoints on paid-monolith are not edge-routed:
 POST /internal/v1/credit-reservations
 POST /internal/v1/credit-reservations/{operationId}/commit
 POST /internal/v1/credit-reservations/{operationId}/release
+POST /internal/v1/credit-reservations/{operationId}/outcome-unknown
 ```
 
 A provider call must not begin before reserve succeeds. `operationId` and
@@ -101,9 +102,19 @@ hold to actual usage and releases the difference. Overrun is accounted even
 when it creates delinquency. Release is terminal and idempotent. Reservation
 TTL is ten minutes; actual incurred cost may settle for 24 hours after expiry.
 
-Cloud persists failed commit/release delivery in
-`auth.cloud_settlement_outbox` with jittered exponential retry. It never falls
-back to a local balance when the authority is unavailable.
+Every provider-facing runtime first persists commit/release intent in the
+AOF-backed Cloud Redis producer outbox before contacting auth-service.
+Auth-service then persists paid-authority delivery in
+`auth.cloud_settlement_outbox` with jittered exponential retry. Remote I/O is
+outside the claim transaction; the final outbox and operation states are
+committed atomically.
+
+A transport failure after provider dispatch is reported as
+`OUTCOME_UNKNOWN`, not released. Paid-monolith retains the hold for
+reconciliation; if the report itself arrives after the original hold expired,
+the operation becomes `OUTCOME_UNKNOWN_EXPIRED` and remains eligible for
+late settlement within the 24-hour window. Cloud never falls back to a local
+balance when the authority is unavailable.
 
 LLM relays send the provider/model and prompt/output token ceiling before
 dispatch; paid-monolith computes the conservative hold from its own pricing and
@@ -193,6 +204,11 @@ Cloud application traffic to gateway-service.
 | `/healthz`, `/actuator/health` | gateway | public |
 | `/api/ce/releases/latest` | auth-service | public release metadata only |
 | `/webhooks/stripe` | auth-service | Stripe signature, no browser JWT |
+| `/widget.js`, `/widget/**` | agent-service | historical capability-token widget surface |
+| `/share/**` | publication-service | historical public share surface |
+| `/c/**` | conversation-service | historical shared conversation surface |
+| `/webhook/**` | orchestrator/agent | historical capability-token webhook surface |
+| `/approval-callback/**`, `/chat/**`, `/form/**`, `/app/public/**` | orchestrator-service | historical self-authenticated public entrypoints |
 | `/api/catalog/public/bundles/**` | catalog-service | explicit public allowlist |
 | `/api/ce-link/**` | auth-service | JWT + signed identity; lifecycle/repair is identity-only, entitlement response itself fails closed |
 | `/api/users/**`, `/api/billing/**`, `/api/credits/**` | auth-service | JWT + projection |
@@ -204,6 +220,11 @@ Cloud application traffic to gateway-service.
 | `/ws/**` | conversation-service | authenticated upgrade |
 | `/cdp/**` | websearch-service | CDP's dedicated token |
 | `/api/internal/**`, `/internal/**` | none | never edge-routed |
+
+Gateway and downstream HMAC body limits default to 50 MiB so the edge preserves
+the existing storage upload contract. The current implementation buffers these
+bytes for hashing; capacity testing is required before sustained large-upload
+traffic.
 
 The downstream service URLs use Docker DNS names; no service uses localhost.
 Keycloak is externally reachable only through `auth.trinyx.fr`.

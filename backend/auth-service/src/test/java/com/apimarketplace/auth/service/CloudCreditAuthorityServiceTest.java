@@ -282,6 +282,46 @@ class CloudCreditAuthorityServiceTest {
     }
 
     @Test
+    void browserAgentCannotReservePlaceholderAndSettleForZero() {
+        UUID operationId = UUID.randomUUID();
+        String hash = "6".repeat(64);
+        when(credits.calculateExternalLlmCredits(
+                "openai", "gpt", 400, 200, null, null, null, null))
+                .thenReturn(new BigDecimal("8"));
+        when(credits.tryReserveMarkup(eq(42L), eq("cloud-reservation:" + operationId),
+                eq("openai"), eq("gpt"), eq(new BigDecimal("10.000000")), isNull(), eq(10),
+                eq("CLOUD"), eq(operationId.toString()), eq(false)))
+                .thenReturn(CreditService.CreditConsumeResult.success(
+                        new BigDecimal("10.000000"), new BigDecimal("90")));
+        when(credits.calculateExternalLlmCredits(
+                "openai", "gpt", 120, 80, null, null, null, null))
+                .thenReturn(new BigDecimal("3.75"));
+        when(credits.settleExternalReservation(
+                "cloud-reservation:" + operationId, new BigDecimal("3.75"),
+                "openai", "gpt", false))
+                .thenReturn(CreditService.CommitOutcome.COMMITTED);
+        when(credits.getBalance(42L)).thenReturn(new BigDecimal("96.25"));
+
+        service.reserve(new CloudCreditAuthorityService.ReserveRequest(
+                operationId, UUID.randomUUID(), UUID.randomUUID(), UUID.randomUUID(),
+                UUID.randomUUID(), 7, "BROWSER_AGENT_EXECUTION",
+                new BigDecimal("0.000001"), new BigDecimal("0.000001"),
+                "openai", "gpt", hash, 400, 200));
+        var result = service.commit(operationId,
+                new CloudCreditAuthorityService.CommitRequest(
+                        BigDecimal.ZERO, "openai", "gpt", "browser-session",
+                        120L, 80L, hash));
+
+        assertThat(result.actualCredits()).isEqualByComparingTo("3.75");
+        verify(credits).tryReserveMarkup(eq(42L), eq("cloud-reservation:" + operationId),
+                eq("openai"), eq("gpt"), eq(new BigDecimal("10.000000")), isNull(), eq(10),
+                eq("CLOUD"), eq(operationId.toString()), eq(false));
+        verify(credits).settleExternalReservation(
+                "cloud-reservation:" + operationId, new BigDecimal("3.75"),
+                "openai", "gpt", false);
+    }
+
+    @Test
     void settlementCannotSubstituteTheReservedProviderOrModel() {
         UUID operationId = UUID.randomUUID();
         String hash = "3".repeat(64);

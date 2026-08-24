@@ -167,6 +167,50 @@ class AuthenticatedGatewayFilterTest {
     }
 
     @Test
+    void legacyInstallHeaderIsOnlyASelectorAndDownstreamGetsTrustedSignedHeader() {
+        GatewayIdentityClient identity = mock(GatewayIdentityClient.class);
+        AuthenticatedGatewayFilter filter = new AuthenticatedGatewayFilter(identity, 1024);
+        String install = "40000000-0000-0000-0000-000000000004";
+        GatewayUserContext context = new GatewayUserContext(
+                1L, "subject", Set.of("USER"), "org", "OWNER",
+                List.of(new GatewayUserContext.Membership("org", "OWNER")),
+                "principal", "payer", install);
+        Jwt jwt = Jwt.withTokenValue("jwt")
+                .header("alg", "none")
+                .subject("subject")
+                .issuedAt(Instant.now())
+                .expiresAt(Instant.now().plusSeconds(60))
+                .build();
+        MockServerWebExchange exchange = MockServerWebExchange.from(
+                MockServerHttpRequest.get("/api/users/profile")
+                        .header("X-LiveContext-Install-Id", install)
+                        .build())
+                .mutate().principal(Mono.just(new JwtAuthenticationToken(jwt))).build();
+
+        when(identity.resolve("jwt", "subject", null, null, install))
+                .thenReturn(Mono.just(context));
+        when(identity.authorize(context, null, false))
+                .thenReturn(Mono.just(new GatewayIdentityClient.EntitlementDecision(
+                        true, "AUTHORIZED", 1L, Instant.now().plusSeconds(60))));
+        HttpHeaders signed = new HttpHeaders();
+        signed.set("X-Install-ID", install);
+        when(identity.signed(anyString(), anyString(), any(byte[].class),
+                anyString(), anyString(), anyString(), anyString(), anyString(),
+                anyString(), anyString(), anyString())).thenReturn(signed);
+        AtomicReference<ServerWebExchange> forwarded = new AtomicReference<>();
+
+        StepVerifier.create(filter.filter(exchange, candidate -> {
+            forwarded.set(candidate);
+            return Mono.empty();
+        })).verifyComplete();
+
+        assertThat(forwarded.get().getRequest().getHeaders()
+                .getFirst("X-LiveContext-Install-Id")).isNull();
+        assertThat(forwarded.get().getRequest().getHeaders()
+                .getFirst("X-Install-ID")).isEqualTo(install);
+    }
+
+    @Test
     void conflictingExternalInstallSelectorsFailClosedBeforeIdentityResolution() {
         GatewayIdentityClient identity = mock(GatewayIdentityClient.class);
         AuthenticatedGatewayFilter filter = new AuthenticatedGatewayFilter(identity, 1024);

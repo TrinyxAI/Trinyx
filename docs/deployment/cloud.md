@@ -414,3 +414,19 @@ non-forwarded loopback hop. It does not parse the Ed25519 bearer as an embedded 
 Set `PAID_MONOLITH_BILLING_URL=https://billing-internal.trinyx.private` in the Cloud secret
 environment. Do not publish that hostname in public DNS and do not add `/internal/v1/**`
 to the public app proxy.
+
+
+### TLS trust for the private wallet hop
+
+`auth-service` never disables TLS verification. Build a PKCS12 truststore containing
+the CA (or exact issuing chain) for `billing-internal.trinyx.private`, keep it outside Git,
+and set:
+
+```dotenv
+PAID_MONOLITH_TRUSTSTORE_PATH=/absolute/host/path/to/paid-monolith-truststore.p12
+PAID_MONOLITH_TRUSTSTORE_PASSWORD=<external-secret>
+```
+
+Compose mounts it read-only only into Cloud `auth-service`. Certificate rotation must
+publish the new CA alongside the old one, restart the Cloud auth container, rotate the server
+certificate, then remove the retired CA. Never use an insecure trust-all client.

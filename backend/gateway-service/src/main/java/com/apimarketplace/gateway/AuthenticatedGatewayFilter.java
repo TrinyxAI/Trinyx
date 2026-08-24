@@ -181,7 +181,7 @@ final class AuthenticatedGatewayFilter implements GlobalFilter, Ordered {
         return path.equals("/healthz")
                 || path.startsWith("/actuator/health")
                 || path.startsWith("/cdp/")
-                || path.startsWith("/webhooks/")
+                || path.equals("/webhooks/stripe")
                 || path.startsWith("/api/catalog/public/bundles/")
                 || path.equals("/api/ce/releases/latest");
     }

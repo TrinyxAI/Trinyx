@@ -314,6 +314,14 @@ public class ToolExecutionManager {
                 log.info("[ToolExecutionManager] Executing tool {} (API: {}) with {} parameters for userId={}, JSON: {}",
                         context.getToolName(), apiId, parameters.size(), userId, parametersJson);
 
+                if (reservationSourceId != null
+                        && catalogBillingService.usesExternalAuthority()
+                        && !catalogBillingService.markProviderDispatching(
+                                reservationSourceId)) {
+                    throw new IllegalStateException(
+                            "Billing dispatch journal unavailable; provider was not called");
+                }
+
                 executionResult = apiService.executeApiTool(
                         apiId.toString(),
                         context.getToolName(),

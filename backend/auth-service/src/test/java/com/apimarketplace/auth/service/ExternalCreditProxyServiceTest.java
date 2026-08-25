@@ -27,6 +27,35 @@ class ExternalCreditProxyServiceTest {
             new ObjectMapper().findAndRegisterModules());
 
     @Test
+    void dispatchingMustBeAcknowledgedSynchronouslyAndIsNeverQueued() {
+        UUID operationId = UUID.randomUUID();
+        var command = new ExternalCreditProxyService.DispatchingCommand(
+                "a".repeat(64), "openai", "gpt");
+        var response = new CloudCreditAuthorityService.SettlementResponse(
+                operationId, "DISPATCHING", BigDecimal.ZERO, BigDecimal.TEN,
+                false, "PROVIDER_DISPATCH_AUTHORIZED_HOLD_RETAINED");
+        when(authority.dispatching(eq(operationId), any())).thenReturn(response);
+
+        assertThat(service.dispatching(operationId, command)).isEqualTo(response);
+        assertThat(jdbc.sql).anyMatch(sql -> sql.contains("state='DISPATCHING'"));
+        assertThat(jdbc.sql).noneMatch(sql -> sql.contains("'PENDING'"));
+    }
+
+    @Test
+    void unavailableDispatchAuthorityFailsClosedInsteadOfQueueingSuccess() {
+        UUID operationId = UUID.randomUUID();
+        var command = new ExternalCreditProxyService.DispatchingCommand(
+                "b".repeat(64), "openai", "gpt");
+        doThrow(new PaidMonolithCreditClient.RetryableAuthorityException("timeout", null))
+                .when(authority).dispatching(eq(operationId), any());
+
+        assertThatThrownBy(() -> service.dispatching(operationId, command))
+                .isInstanceOfSatisfying(ResponseStatusException.class,
+                        failure -> assertThat(failure.getStatusCode().value()).isEqualTo(503));
+        assertThat(jdbc.sql).noneMatch(sql -> sql.contains("'PENDING'"));
+    }
+
+    @Test
     void permanentAuthorityRejectionPersistsDeadLetterAndPropagatesOriginalStatus() throws Exception {
         UUID operationId = UUID.randomUUID();
         var command = new ExternalCreditProxyService.CommitCommand(

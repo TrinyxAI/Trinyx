@@ -145,6 +145,11 @@ public class CreditConsumptionClient {
             headers.set("X-User-ID", userId);
         }
         OrgContextHeaderForwarder.forward(headers);
+        copyTrustedInboundHeader(headers, "X-Principal-ID");
+        copyTrustedInboundHeader(headers, "X-Billing-Subject-ID");
+        copyTrustedInboundHeader(headers, "X-Organization-Role");
+        copyTrustedInboundHeader(headers, "X-User-Roles");
+        copyTrustedInboundHeader(headers, "X-Install-ID");
         return headers;
     }
 
@@ -975,6 +980,14 @@ public class CreditConsumptionClient {
                     && authority.get("authoritativeBalance") != null) {
                 balance = new BigDecimal(authority.get("authoritativeBalance").toString());
             }
+            Object requestHash = response.getBody() == null
+                    ? null : response.getBody().get("requestHash");
+            if (!registerExternalProviderOperation(operationId,
+                    requestHash == null ? "" : requestHash.toString(),
+                    provider, model, headers)) {
+                return new ScopeReserveResult(false,
+                        "provider dispatch journal unavailable", false, BigDecimal.ZERO);
+            }
             return new ScopeReserveResult(true, null, false, balance);
         } catch (org.springframework.web.client.HttpClientErrorException denied) {
             return new ScopeReserveResult(false,
@@ -1000,7 +1013,7 @@ public class CreditConsumptionClient {
         body.put("model", model);
         body.put("providerRequestId", "");
         ExternalSettlementIntentStore.Intent intent =
-                new ExternalSettlementIntentStore.Intent("COMMIT_AMOUNT", operationId, url, body, 0);
+                settlementIntent("COMMIT_AMOUNT", operationId, url, body);
         return deliverDurably(intent, headers) ? "COMMITTED" : "RETRY";
     }
 
@@ -1012,7 +1025,7 @@ public class CreditConsumptionClient {
         Map<String, Object> body = Map.of(
                 "reason", reason == null ? "provider-not-called" : reason);
         ExternalSettlementIntentStore.Intent intent =
-                new ExternalSettlementIntentStore.Intent("RELEASE_LOCAL", operationId, url, body, 0);
+                settlementIntent("RELEASE_LOCAL", operationId, url, body);
         return deliverDurably(intent, headers) ? "RELEASED" : "RETRY";
     }
 
@@ -1066,6 +1079,11 @@ public class CreditConsumptionClient {
             if (!response.getStatusCode().is2xxSuccessful() || requestHash == null) {
                 return new ExternalReservationResult(false, null, "reservation rejected");
             }
+            if (!registerExternalProviderOperation(operationId, requestHash.toString(),
+                    provider, model, headers)) {
+                return new ExternalReservationResult(false, requestHash.toString(),
+                        "provider dispatch journal unavailable");
+            }
             return new ExternalReservationResult(true, requestHash.toString(), null);
         } catch (Exception failure) {
             log.warn("External credit reservation failed closed for {}: {}",
@@ -1115,7 +1133,7 @@ public class CreditConsumptionClient {
             }
         }
         ExternalSettlementIntentStore.Intent intent =
-                new ExternalSettlementIntentStore.Intent("COMMIT_LLM", operationId, url, body, 0);
+                settlementIntent("COMMIT_LLM", operationId, url, body);
         return deliverDurably(intent, headers);
     }
 
@@ -1128,7 +1146,7 @@ public class CreditConsumptionClient {
         body.put("requestHash", requestHash);
         body.put("reason", reason == null ? "provider-not-called" : reason);
         ExternalSettlementIntentStore.Intent intent =
-                new ExternalSettlementIntentStore.Intent("RELEASE", operationId, url, body, 0);
+                settlementIntent("RELEASE", operationId, url, body);
         return deliverDurably(intent, headers);
     }
 
@@ -1158,12 +1176,82 @@ public class CreditConsumptionClient {
             settlementIntentStore.recordUnknown(operationId, details);
             String url = authServiceUrl + "/api/internal/cloud-credit-proxy/"
                     + operationId + "/outcome-unknown";
-            settlementIntentStore.persist(new ExternalSettlementIntentStore.Intent(
-                    "OUTCOME_UNKNOWN", operationId, url, details, 0));
+            settlementIntentStore.persist(settlementIntent(
+                    "OUTCOME_UNKNOWN", operationId, url, details));
         } catch (RuntimeException persistenceFailure) {
             log.error("CRITICAL: ambiguous provider outcome could not be persisted operationId={}: {}",
                     operationId, persistenceFailure.getMessage());
         }
+    }
+
+    /**
+     * Records the provider boundary before any network dispatch. Returning false
+     * is fail-closed: callers must not invoke the provider.
+     */
+    public boolean markExternalProviderDispatching(UUID operationId) {
+        if (!usesExternalAuthority()) return true;
+        if (settlementIntentStore == null || !settlementIntentStore.durable()) {
+            log.error("Provider dispatch blocked: durable journal unavailable operationId={}",
+                    operationId);
+            return false;
+        }
+        try {
+            boolean marked = settlementIntentStore.markProviderDispatching(operationId);
+            if (!marked) {
+                log.error("Provider dispatch blocked: operation missing or already dispatched operationId={}",
+                        operationId);
+            }
+            return marked;
+        } catch (RuntimeException failure) {
+            log.error("Provider dispatch blocked: journal write failed operationId={}: {}",
+                    operationId, failure.getMessage());
+            return false;
+        }
+    }
+
+    private boolean registerExternalProviderOperation(
+            UUID operationId, String requestHash, String provider, String model,
+            HttpHeaders headers) {
+        if (settlementIntentStore == null || !settlementIntentStore.durable()) {
+            return !requireProducerSettlementOutbox;
+        }
+        try {
+            String unknownUrl = authServiceUrl + "/api/internal/cloud-credit-proxy/"
+                    + operationId + "/outcome-unknown";
+            settlementIntentStore.registerProviderOperation(
+                    new ExternalSettlementIntentStore.ProviderOperation(
+                            operationId, value(requestHash), value(provider), value(model),
+                            unknownUrl, trustedSecurityHeaders(headers),
+                            "RESERVED", Instant.now()));
+            return true;
+        } catch (RuntimeException failure) {
+            log.error("Could not register provider operation operationId={}: {}",
+                    operationId, failure.getMessage());
+            return false;
+        }
+    }
+
+    private ExternalSettlementIntentStore.Intent settlementIntent(
+            String action, UUID operationId, String url, Map<String, Object> body) {
+        Map<String, String> trusted = settlementIntentStore == null
+                ? Map.of() : settlementIntentStore.trustedHeaders(operationId);
+        if (trusted.isEmpty()) {
+            trusted = trustedSecurityHeaders(userHeaders(null, MediaType.APPLICATION_JSON));
+        }
+        return new ExternalSettlementIntentStore.Intent(
+                action, operationId, url, body, 0, trusted);
+    }
+
+    private static Map<String, String> trustedSecurityHeaders(HttpHeaders headers) {
+        Map<String, String> trusted = new java.util.LinkedHashMap<>();
+        for (String name : java.util.List.of(
+                "X-User-ID", "X-Principal-ID", "X-Billing-Subject-ID",
+                "X-Organization-ID", "X-Organization-Role", "X-User-Roles",
+                "X-Install-ID")) {
+            String value = headers == null ? null : headers.getFirst(name);
+            if (value != null && !value.isBlank()) trusted.put(name, value);
+        }
+        return trusted;
     }
 
     private boolean deliverDurably(ExternalSettlementIntentStore.Intent intent, HttpHeaders headers) {
@@ -1204,6 +1292,7 @@ public class CreditConsumptionClient {
     private SettlementDelivery deliverPersistedSettlement(
             ExternalSettlementIntentStore.Intent intent, HttpHeaders headers) {
         try {
+            intent.trustedHeaders().forEach(headers::set);
             ResponseEntity<Map> response = restTemplate.exchange(
                     intent.url(), HttpMethod.POST,
                     new HttpEntity<>(intent.body(), headers), Map.class);

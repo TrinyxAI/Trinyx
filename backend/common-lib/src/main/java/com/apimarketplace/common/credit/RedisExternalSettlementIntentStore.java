@@ -244,7 +244,7 @@ public final class RedisExternalSettlementIntentStore
                         operationKey(intent.operationId()), dispatchKey(intent.operationId()),
                         dispatchClaimKey(intent.operationId()), PROVIDER_DISPATCH_DUE),
                 intent.key(), state, Instant.now().toString(),
-                String.valueOf((isTerminal(state) ? TERMINAL_TTL : ACTIVE_TTL).toMillis()),
+                String.valueOf(TERMINAL_TTL.toMillis()),
                 intent.operationId().toString());
         if (result == null || result < 0) {
             throw new IllegalStateException(

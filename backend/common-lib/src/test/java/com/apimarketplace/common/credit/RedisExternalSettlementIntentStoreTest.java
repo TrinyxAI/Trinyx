@@ -153,6 +153,9 @@ class RedisExternalSettlementIntentStoreTest {
 
             assertThat(store.providerOperation(committed).state())
                     .isEqualTo("SETTLEMENT_FAILED");
+            store.recordUnknown(committed, staleUnknown.body());
+            assertThat(store.providerOperation(committed).state())
+                    .isEqualTo("SETTLEMENT_FAILED");
 
             ExternalSettlementIntentStore.Intent laterUnknown =
                     intent("OUTCOME_UNKNOWN", committed, "http://auth/outcome-unknown");

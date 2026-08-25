@@ -119,6 +119,32 @@ class ExternalCreditProxyServiceTest {
     }
 
     @Test
+    void outcomeUnknownSuccessDoesNotAcknowledgeQueuedCommit() {
+        UUID operationId = UUID.randomUUID();
+        String hash = "e".repeat(64);
+        when(authority.outcomeUnknown(eq(operationId), any()))
+                .thenReturn(new CloudCreditAuthorityService.SettlementResponse(
+                        operationId, "OUTCOME_UNKNOWN", BigDecimal.ZERO,
+                        BigDecimal.TEN, false,
+                        "RECONCILIATION_REQUIRED_HOLD_RETAINED"));
+
+        service.outcomeUnknown(operationId,
+                new ExternalCreditProxyService.OutcomeUnknownCommand(
+                        "provider timeout", hash, "openai", "gpt"));
+
+        RecordingJdbc.SqlCall acknowledgement = jdbc.calls.stream()
+                .filter(call -> call.sql().contains("cloud_settlement_outbox")
+                        && call.sql().contains("status='DELIVERED'"))
+                .findFirst()
+                .orElseThrow();
+        assertThat(acknowledgement.sql())
+                .contains("action=?", "request_hash=?")
+                .doesNotContain("action='COMMIT'");
+        assertThat(acknowledgement.args())
+                .containsExactly(operationId, "OUTCOME_UNKNOWN", hash);
+    }
+
+    @Test
     void negativeProviderUsageIsAClientErrorAndNeverReachesAuthority() {
         assertThatThrownBy(() -> service.commitLlm(UUID.randomUUID(),
                 new ExternalCreditProxyService.LlmCommitCommand(
@@ -131,11 +157,15 @@ class ExternalCreditProxyServiceTest {
 
     private static final class RecordingJdbc extends JdbcTemplate {
         private final List<String> sql = new ArrayList<>();
+        private final List<SqlCall> calls = new ArrayList<>();
 
         @Override
         public int update(String statement, Object... args) {
             sql.add(statement);
+            calls.add(new SqlCall(statement, java.util.Arrays.asList(args)));
             return 1;
         }
+
+        private record SqlCall(String sql, List<Object> args) {}
     }
 }

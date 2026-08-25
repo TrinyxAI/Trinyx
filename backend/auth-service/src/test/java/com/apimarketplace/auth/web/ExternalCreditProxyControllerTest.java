@@ -13,6 +13,20 @@ import static org.mockito.Mockito.*;
 class ExternalCreditProxyControllerTest {
 
     @Test
+    void dispatchingRouteDelegatesTheSynchronousSafetyGate() {
+        ExternalCreditProxyService proxy = mock(ExternalCreditProxyService.class);
+        ExternalCreditProxyController controller = new ExternalCreditProxyController(
+                proxy, mock(CloudIdentityBindingService.class));
+        UUID operationId = UUID.randomUUID();
+        var command = new ExternalCreditProxyService.DispatchingCommand(
+                "a".repeat(64), "openai", "gpt");
+
+        controller.dispatching(operationId, command);
+
+        verify(proxy).dispatching(operationId, command);
+    }
+
+    @Test
     void requestlessWorkerContextComesFromUniquePersistedBinding() {
         ExternalCreditProxyService proxy = mock(ExternalCreditProxyService.class);
         CloudIdentityBindingService identities = mock(CloudIdentityBindingService.class);

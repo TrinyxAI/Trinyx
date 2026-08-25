@@ -51,6 +51,7 @@ class ExternalBillingAuthorityMigrationTest {
         assertThat(sql).contains("operation_id UUID PRIMARY KEY")
                 .contains("request_hash CHAR(64) NOT NULL")
                 .contains("settlement_hash CHAR(64)")
+                .contains("'DISPATCHING'")
                 .contains("next_attempt_at TIMESTAMPTZ NOT NULL DEFAULT now()")
                 .contains("UNIQUE (aggregate_key, sequence)")
                 .contains("UNIQUE (aggregate_key, binding_revision)")

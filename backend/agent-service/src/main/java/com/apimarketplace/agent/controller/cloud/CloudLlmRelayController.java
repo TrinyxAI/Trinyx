@@ -136,6 +136,7 @@ public class CloudLlmRelayController {
                     .body(Map.of("error", "INSUFFICIENT_CREDITS"));
         }
         if (!prepareProviderDispatch(target)) {
+            releaseUndispatchedHold(target);
             return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE)
                     .body(Map.of("error", "BILLING_DISPATCH_JOURNAL_UNAVAILABLE"));
         }
@@ -199,6 +200,7 @@ public class CloudLlmRelayController {
             AtomicBoolean providerDispatched = new AtomicBoolean(false);
             try {
                 if (!prepareProviderDispatch(target)) {
+                    releaseUndispatchedHold(target);
                     writeQuietly(outputStream,
                             CloudLlmStreamEvent.error(
                                     "BILLING_DISPATCH_JOURNAL_UNAVAILABLE"),
@@ -399,6 +401,20 @@ public class CloudLlmRelayController {
     private boolean prepareProviderDispatch(BillingTarget target) {
         return target.externalOperationId() == null
                 || creditClient.markExternalProviderDispatching(target.externalOperationId());
+    }
+
+    private void releaseUndispatchedHold(BillingTarget target) {
+        if (target.externalOperationId() == null) {
+            return;
+        }
+        boolean acknowledged = creditClient.releaseExternal(
+                target.externalOperationId(), target.externalRequestHash(),
+                "provider-not-dispatched-authority-ack-unavailable");
+        if (!acknowledged) {
+            log.warn("External wallet release queued after provider-dispatch authorization "
+                            + "was not acknowledged for operation {}",
+                    target.externalOperationId());
+        }
     }
 
     private void recordAmbiguousProviderOutcome(BillingTarget target, String reason) {

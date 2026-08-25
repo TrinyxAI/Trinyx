@@ -706,6 +706,42 @@ class CloudLlmRelayControllerTest {
 
         assertThat(result.getStatusCode()).isEqualTo(HttpStatus.SERVICE_UNAVAILABLE);
         verify(provider, never()).complete(any());
+        verify(creditClient, times(1)).releaseExternal(
+                any(UUID.class), eq("hash"),
+                eq("provider-not-dispatched-authority-ack-unavailable"));
+        verify(creditClient, never()).commitExternalLlm(
+                any(), any(), any(), any(), any(), anyInt(), anyInt(),
+                any(LlmCacheTokens.class));
+    }
+
+    @Test
+    @DisplayName("stream releases the external hold when dispatch authorization is not acknowledged")
+    void streamDispatchJournalFailureReleasesHoldWithoutProviderCall() throws Exception {
+        ReflectionTestUtils.setField(controller, "billingAuthorityMode", "external-paid-monolith");
+        when(authClient.userOwnsActiveCeLink("42", INSTALL_ID)).thenReturn(true);
+        when(providerFactory.getProvider(PROVIDER)).thenReturn(provider);
+        when(provider.getProviderName()).thenReturn(PROVIDER);
+        when(creditClient.reserveExternalLlm(eq(42L), any(UUID.class),
+                eq("cloudLlmRelay"), eq("CE_LLM_RELAY"), eq(PROVIDER), eq(MODEL),
+                anyInt(), eq(256)))
+                .thenReturn(new CreditConsumptionClient.ExternalReservationResult(
+                        true, "stream-hash", null));
+        when(creditClient.markExternalProviderDispatching(any(UUID.class)))
+                .thenReturn(false);
+
+        ResponseEntity<StreamingResponseBody> response = controller.stream(
+                CLOUD_USER_ID, INSTALL_ID,
+                new CloudLlmRelayRequest(PROVIDER, request(true)));
+        ByteArrayOutputStream output = new ByteArrayOutputStream();
+        response.getBody().writeTo(output);
+
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(output.toString(StandardCharsets.UTF_8))
+                .contains("BILLING_DISPATCH_JOURNAL_UNAVAILABLE");
+        verify(provider, never()).completeStreaming(any(), any());
+        verify(creditClient, times(1)).releaseExternal(
+                any(UUID.class), eq("stream-hash"),
+                eq("provider-not-dispatched-authority-ack-unavailable"));
         verify(creditClient, never()).commitExternalLlm(
                 any(), any(), any(), any(), any(), anyInt(), anyInt(),
                 any(LlmCacheTokens.class));

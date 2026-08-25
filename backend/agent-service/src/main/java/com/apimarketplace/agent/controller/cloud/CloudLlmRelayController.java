@@ -266,8 +266,8 @@ public class CloudLlmRelayController {
                 }
             } finally {
                 if (!providerDispatched.get()) {
-                    // No provider boundary was crossed; the authoritative hold
-                    // expires/releases without fabricating usage.
+                    // No provider boundary was crossed. The failed dispatch path
+                    // already scheduled the authoritative release durably.
                 } else if (providerOutcomeAmbiguous.get()
                         && target.externalOperationId() != null) {
                     recordAmbiguousProviderOutcome(target,

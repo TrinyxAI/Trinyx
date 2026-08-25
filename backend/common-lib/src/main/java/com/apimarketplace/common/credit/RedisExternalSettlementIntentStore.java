@@ -35,8 +35,12 @@ public final class RedisExternalSettlementIntentStore
 
     private static final DefaultRedisScript<Long> MARK_DISPATCHING =
             new DefaultRedisScript<>("""
-                    if redis.call('EXISTS', KEYS[1]) == 0 then return -1 end
+                    local raw = redis.call('GET', KEYS[1])
+                    if not raw then return -1 end
+                    local ok, operation = pcall(cjson.decode, raw)
+                    if not ok or operation['state'] ~= 'RESERVED' then return -2 end
                     if redis.call('EXISTS', KEYS[2]) == 1 then return 0 end
+                    redis.call('PSETEX', KEYS[1], ARGV[1], ARGV[2])
                     redis.call('PSETEX', KEYS[2], ARGV[1], ARGV[2])
                     redis.call('ZADD', KEYS[3], ARGV[3], ARGV[4])
                     return 1

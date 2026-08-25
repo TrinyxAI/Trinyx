@@ -65,7 +65,7 @@ class ExternalSettlementIntentDispatcherTest {
         var release = new ExternalSettlementIntentStore.Intent(
                 "RELEASE", operation, "http://auth/release",
                 Map.of("requestHash", "h"), 0);
-        FakeStore store = new FakeStore(List.of(unknown, release), null);
+        FakeStore store = new FakeStore(List.of(unknown, release), null, true);
         store.throwOnUnknownAcknowledgement = true;
 
         new ExternalSettlementIntentDispatcher(store,
@@ -126,10 +126,10 @@ class ExternalSettlementIntentDispatcherTest {
         Intent persisted;
 
         FakeStore(Intent intent, ProviderOperation staleOperation) {
-            this(intent == null ? List.of() : List.of(intent), staleOperation);
+            this(intent == null ? List.of() : List.of(intent), staleOperation, true);
         }
 
-        FakeStore(List<Intent> intents, ProviderOperation staleOperation) {
+        FakeStore(List<Intent> intents, ProviderOperation staleOperation, boolean batch) {
             this.intents = intents;
             this.staleOperation = staleOperation;
         }

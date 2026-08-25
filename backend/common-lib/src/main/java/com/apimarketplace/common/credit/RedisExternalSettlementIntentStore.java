@@ -57,6 +57,10 @@ public final class RedisExternalSettlementIntentStore
                     if not raw then return -1 end
                     local ok, operation = pcall(cjson.decode, raw)
                     if not ok then return -2 end
+                    if ARGV[6] ~= '' then
+                        local owner = redis.call('GET', KEYS[5])
+                        if not owner or owner ~= ARGV[6] then return -4 end
+                    end
                     local current = operation['state']
                     if current == 'OUTCOME_UNKNOWN' then
                         redis.call('PERSIST', KEYS[1])
@@ -418,6 +422,18 @@ public final class RedisExternalSettlementIntentStore
 
     @Override
     public void recordUnknown(UUID operationId, Map<String, Object> details) {
+        recordUnknown(operationId, "", details);
+    }
+
+    @Override
+    public boolean recordRecoveredUnknown(
+            ClaimedProviderOperation claimed, Map<String, Object> details) {
+        return recordUnknown(
+                claimed.operation().operationId(), claimed.claimToken(), details);
+    }
+
+    private boolean recordUnknown(
+            UUID operationId, String recoveryClaimToken, Map<String, Object> details) {
         try {
             String audit = json.writeValueAsString(Map.of(
                     "operationId", operationId,
@@ -432,12 +448,17 @@ public final class RedisExternalSettlementIntentStore
                             claimKey(unknownIntentKey), DUE),
                     Instant.now().toString(), audit,
                     String.valueOf(TERMINAL_TTL.toMillis()),
-                    operationId.toString(), unknownIntentKey);
+                    operationId.toString(), unknownIntentKey,
+                    recoveryClaimToken == null ? "" : recoveryClaimToken);
+            if (result != null && result == -4L) {
+                return false;
+            }
             if (result == null || result < 0) {
                 throw new IllegalStateException(
                         "Could not atomically record ambiguous provider outcome "
                                 + operationId + " result=" + result);
             }
+            return true;
         } catch (RuntimeException failure) {
             throw failure;
         } catch (Exception failure) {
@@ -503,12 +524,12 @@ public final class RedisExternalSettlementIntentStore
     }
 
     @Override
-    public List<ProviderOperation> claimStaleProviderDispatches(int limit) {
+    public List<ClaimedProviderOperation> claimStaleProviderDispatches(int limit) {
         Set<String> due = redis.opsForZSet().rangeByScore(
                 PROVIDER_DISPATCH_DUE, 0, System.currentTimeMillis(),
                 0, Math.max(1, limit));
         if (due == null || due.isEmpty()) return List.of();
-        List<ProviderOperation> result = new ArrayList<>();
+        List<ClaimedProviderOperation> result = new ArrayList<>();
         for (String rawId : due) {
             UUID operationId;
             try {
@@ -517,8 +538,9 @@ public final class RedisExternalSettlementIntentStore
                 redis.opsForZSet().remove(PROVIDER_DISPATCH_DUE, rawId);
                 continue;
             }
+            String claimToken = UUID.randomUUID().toString();
             Boolean lease = redis.opsForValue().setIfAbsent(
-                    dispatchClaimKey(operationId), UUID.randomUUID().toString(), CLAIM_TTL);
+                    dispatchClaimKey(operationId), claimToken, CLAIM_TTL);
             if (!Boolean.TRUE.equals(lease)) continue;
             try {
                 String encoded = redis.opsForValue().get(dispatchKey(operationId));
@@ -527,7 +549,8 @@ public final class RedisExternalSettlementIntentStore
                     redis.delete(dispatchClaimKey(operationId));
                     continue;
                 }
-                result.add(json.readValue(encoded, ProviderOperation.class));
+                result.add(new ClaimedProviderOperation(
+                        json.readValue(encoded, ProviderOperation.class), claimToken));
                 redis.opsForZSet().add(PROVIDER_DISPATCH_DUE, rawId,
                         System.currentTimeMillis() + CLAIM_TTL.toMillis());
             } catch (Exception failure) {

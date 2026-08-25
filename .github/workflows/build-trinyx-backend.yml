@@ -41,14 +41,14 @@ jobs:
       - name: Compile and install the required reactor graph
         run: >-
           mvn -B -Pce -DskipTests
-          -pl common-lib,auth-service,catalog-service,monolith-service
+          -pl common-lib,auth-service,catalog-service,storage-service,monolith-service
           -am install
       - name: Run paid-monolith affected tests
         run: >-
           mvn -B -Pce
-          -pl common-lib,auth-service,catalog-service,monolith-service
+          -pl common-lib,auth-service,catalog-service,storage-service,monolith-service
           -Dsurefire.failIfNoSpecifiedTests=false
-          -Dtest=AppEditionProviderTest,AppEditionAutoConfigurationTest,MonolithCeConfigContractTest,WebhookControllerTest,StripeBillingServiceTest,StripeScheduleServiceTest,SubscriptionServiceTest,SubscriptionCacheBusterTest,PlanStorageQuotaSyncerTest,WebhookControllerReferralTest,CreditAttributionServiceTest,FreeSubscriptionProvisionerTest,FreeSubscriptionRenewalSchedulerTest,CreditAttributionGrantPaygTopupTest,CreditLedgerRepositoryLockIntegrationTest,CreditServiceTest,CreditControllerTest,CreditConsumptionClientTest,GatewayAuthenticationFilterTest,ModelPricingServiceTest,PlanLimitServiceTest,BillingControllerTest,BillingControllerIntegrationTest,StripeHealthIndicatorTest,WorkloadAuthenticationServiceTest,CloudCreditAuthorityControllerTest,ExternalCreditProxyServiceTest,CloudSettlementOutboxDispatcherTest,CloudSettlementResultWriterTest,WorkspaceDataPurgerTest,WorkspaceStorageErasureOutboxTest,WorkspaceStorageErasureDispatcherTest,RedisExternalSettlementIntentStoreTest,CreditConsumptionClientAmbiguousOutcomeTest,WorkspaceStorageObjectDeleterWiringTest,ApiCatalogMergeServiceTest,ApiCatalogBundleSqlIntegrationTest,ApiCatalogBundleApplierTest
+          -Dtest=AppEditionProviderTest,AppEditionAutoConfigurationTest,MonolithCeConfigContractTest,WebhookControllerTest,StripeBillingServiceTest,StripeScheduleServiceTest,SubscriptionServiceTest,SubscriptionCacheBusterTest,PlanStorageQuotaSyncerTest,WebhookControllerReferralTest,CreditAttributionServiceTest,FreeSubscriptionProvisionerTest,FreeSubscriptionRenewalSchedulerTest,CreditAttributionGrantPaygTopupTest,CreditLedgerRepositoryLockIntegrationTest,CreditServiceTest,CreditControllerTest,CreditConsumptionClientTest,GatewayAuthenticationFilterTest,ModelPricingServiceTest,PlanLimitServiceTest,BillingControllerTest,BillingControllerIntegrationTest,StripeHealthIndicatorTest,WorkloadAuthenticationServiceTest,CloudCreditAuthorityControllerTest,ExternalCreditProxyServiceTest,CloudSettlementOutboxDispatcherTest,CloudSettlementResultWriterTest,WorkspaceDataPurgerTest,WorkspaceStorageErasureOutboxTest,WorkspaceStorageErasureDispatcherTest,RedisExternalSettlementIntentStoreTest,CreditConsumptionClientAmbiguousOutcomeTest,WorkspaceStorageObjectDeleterWiringTest,S3FileStorageServiceTest,ApiCatalogMergeServiceTest,ApiCatalogBundleSqlIntegrationTest,ApiCatalogBundleApplierTest
           test
 
   frontend-test:

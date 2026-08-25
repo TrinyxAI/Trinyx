@@ -57,6 +57,16 @@ public interface ExternalSettlementIntentStore {
         }
     }
 
+    /** A stale DISPATCHING recovery item plus its fenced lease ownership. */
+    record ClaimedProviderOperation(ProviderOperation operation, String claimToken) {
+        public ClaimedProviderOperation {
+            if (operation == null || claimToken == null || claimToken.isBlank()) {
+                throw new IllegalArgumentException(
+                        "claimed provider operation requires operation and claim token");
+            }
+        }
+    }
+
     boolean durable();
     void persist(Intent intent);
 
@@ -73,6 +83,17 @@ public interface ExternalSettlementIntentStore {
     void retry(Intent intent, String error);
     void dead(Intent intent, String error);
     void recordUnknown(UUID operationId, Map<String, Object> details);
+
+    /**
+     * Records UNKNOWN from the stale-DISPATCHING recovery worker only while it
+     * still owns the lease returned by {@link #claimStaleProviderDispatches(int)}.
+     * A false result means the lease was lost and no recovery state was mutated.
+     */
+    default boolean recordRecoveredUnknown(
+            ClaimedProviderOperation claimed, Map<String, Object> details) {
+        recordUnknown(claimed.operation().operationId(), details);
+        return true;
+    }
 
     /**
      * Registers the immutable producer operation immediately after the
@@ -96,7 +117,7 @@ public interface ExternalSettlementIntentStore {
      * Operations left DISPATCHING past the bounded safety window. They are not
      * released: the dispatcher turns them into OUTCOME_UNKNOWN authority intents.
      */
-    default List<ProviderOperation> claimStaleProviderDispatches(int limit) {
+    default List<ClaimedProviderOperation> claimStaleProviderDispatches(int limit) {
         return List.of();
     }
 

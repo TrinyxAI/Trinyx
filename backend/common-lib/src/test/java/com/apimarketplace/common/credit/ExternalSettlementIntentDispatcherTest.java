@@ -139,8 +139,10 @@ class ExternalSettlementIntentDispatcherTest {
         public List<Intent> claimDue(int limit) {
             return intents;
         }
-        public List<ProviderOperation> claimStaleProviderDispatches(int limit) {
-            return staleOperation == null ? List.of() : List.of(staleOperation);
+        public List<ClaimedProviderOperation> claimStaleProviderDispatches(int limit) {
+            return staleOperation == null ? List.of()
+                    : List.of(new ClaimedProviderOperation(
+                            staleOperation, "test-recovery-claim"));
         }
         public void acknowledge(Intent value) {
             acknowledgementAttempts++;

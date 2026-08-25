@@ -440,9 +440,16 @@ public class S3FileStorageService implements FileStorageService {
                 .build();
 
             s3Client.deleteObject(request);
-            logger.info("File deleted: key={}", key);
+            // S3 DeleteObject is idempotent: a successful response also means
+            // the key was already absent.
+            logger.info("File deleted or already absent: key={}", key);
             return true;
 
+        } catch (NoSuchKeyException alreadyAbsent) {
+            // Defensive compatibility for S3-compatible implementations that
+            // report an absent key instead of returning the normal success.
+            logger.info("File already absent: key={}", key);
+            return true;
         } catch (Exception e) {
             logger.error("Failed to delete file: key={}", key, e);
             return false;

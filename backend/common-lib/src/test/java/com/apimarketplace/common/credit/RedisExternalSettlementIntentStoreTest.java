@@ -33,6 +33,10 @@ class RedisExternalSettlementIntentStoreTest {
                 .contains("operation['state'] ~= 'RESERVED'")
                 .contains("SET', KEYS[1]")
                 .contains("SET', KEYS[2]");
+
+        assertThat(script("RECORD_OUTCOME_UNKNOWN"))
+                .contains("owner ~= ARGV[6]")
+                .contains("return -4");
     }
 
     @Test
@@ -512,9 +516,9 @@ class RedisExternalSettlementIntentStoreTest {
             redis.opsForZSet().add(
                     "trinyx:billing:producer-outbox:provider-dispatch-due",
                     committed.toString(), System.currentTimeMillis() - 1);
-            ExternalSettlementIntentStore.ProviderOperation staleCommit =
+            ExternalSettlementIntentStore.ClaimedProviderOperation staleCommit =
                     store.claimStaleProviderDispatches(1).get(0);
-            assertThat(staleCommit.state()).isEqualTo("DISPATCHING");
+            assertThat(staleCommit.operation().state()).isEqualTo("DISPATCHING");
 
             ExternalSettlementIntentStore.Intent commit =
                     intent("COMMIT_LLM", committed, "http://auth/commit");
@@ -525,15 +529,16 @@ class RedisExternalSettlementIntentStoreTest {
             ExternalSettlementIntentStore.Intent delayedCommitUnknown =
                     intent("OUTCOME_UNKNOWN", committed, "http://auth/outcome-unknown");
             store.persist(delayedCommitUnknown);
-            store.recordUnknown(staleCommit.operationId(), delayedCommitUnknown.body());
+            assertThat(store.recordRecoveredUnknown(
+                    staleCommit, delayedCommitUnknown.body())).isFalse();
             assertThat(store.providerOperation(committed).state()).isEqualTo("COMMITTED");
+            store.dead(delayedCommitUnknown, "authority already committed");
             assertThat(redis.opsForValue().get(
                     "trinyx:billing:producer-outbox:item:"
                             + delayedCommitUnknown.key())).isNull();
             assertThat(redis.opsForZSet().score(
                     "trinyx:billing:producer-outbox:due",
                     delayedCommitUnknown.key())).isNull();
-            store.dead(delayedCommitUnknown, "authority already committed");
             assertThat(store.providerOperation(committed).state()).isEqualTo("COMMITTED");
 
             UUID released = UUID.randomUUID();
@@ -542,9 +547,9 @@ class RedisExternalSettlementIntentStoreTest {
             redis.opsForZSet().add(
                     "trinyx:billing:producer-outbox:provider-dispatch-due",
                     released.toString(), System.currentTimeMillis() - 1);
-            ExternalSettlementIntentStore.ProviderOperation staleRelease =
+            ExternalSettlementIntentStore.ClaimedProviderOperation staleRelease =
                     store.claimStaleProviderDispatches(1).get(0);
-            assertThat(staleRelease.state()).isEqualTo("DISPATCHING");
+            assertThat(staleRelease.operation().state()).isEqualTo("DISPATCHING");
 
             ExternalSettlementIntentStore.Intent release =
                     intent("RELEASE", released, "http://auth/release");
@@ -555,16 +560,79 @@ class RedisExternalSettlementIntentStoreTest {
             ExternalSettlementIntentStore.Intent delayedReleaseUnknown =
                     intent("OUTCOME_UNKNOWN", released, "http://auth/outcome-unknown");
             store.persist(delayedReleaseUnknown);
-            store.recordUnknown(staleRelease.operationId(), delayedReleaseUnknown.body());
+            assertThat(store.recordRecoveredUnknown(
+                    staleRelease, delayedReleaseUnknown.body())).isFalse();
             assertThat(store.providerOperation(released).state()).isEqualTo("RELEASED");
+            store.dead(delayedReleaseUnknown, "authority already released");
             assertThat(redis.opsForValue().get(
                     "trinyx:billing:producer-outbox:item:"
                             + delayedReleaseUnknown.key())).isNull();
             assertThat(redis.opsForZSet().score(
                     "trinyx:billing:producer-outbox:due",
                     delayedReleaseUnknown.key())).isNull();
-            store.dead(delayedReleaseUnknown, "authority already released");
             assertThat(store.providerOperation(released).state()).isEqualTo("RELEASED");
+        } finally {
+            connectionFactory.destroy();
+        }
+    }
+
+    @Test
+    void expiredDispatchRecoveryLeaseFencesStaleWorker() {
+        String host = System.getenv("TRINYX_TEST_REDIS_HOST");
+        assumeTrue(host != null && !host.isBlank(), "real Redis is enabled by Cloud CI");
+
+        LettuceConnectionFactory connectionFactory = new LettuceConnectionFactory(host, 6379);
+        connectionFactory.afterPropertiesSet();
+        StringRedisTemplate redis = new StringRedisTemplate(connectionFactory);
+        redis.afterPropertiesSet();
+        try {
+            Set<String> existing = redis.keys("trinyx:billing:producer-outbox:*");
+            if (existing != null && !existing.isEmpty()) redis.delete(existing);
+
+            RedisExternalSettlementIntentStore store =
+                    new RedisExternalSettlementIntentStore(
+                            redis, new ObjectMapper().findAndRegisterModules());
+            UUID operationId = UUID.randomUUID();
+            store.registerProviderOperation(operation(operationId));
+            assertThat(store.markProviderDispatching(operationId)).isTrue();
+
+            String dueKey =
+                    "trinyx:billing:producer-outbox:provider-dispatch-due";
+            String claimKey =
+                    "trinyx:billing:producer-outbox:dispatch-claim:"
+                            + operationId;
+            redis.opsForZSet().add(dueKey, operationId.toString(),
+                    System.currentTimeMillis() - 1);
+            ExternalSettlementIntentStore.ClaimedProviderOperation workerA =
+                    store.claimStaleProviderDispatches(1).get(0);
+
+            // Deterministically model lease A expiry, then B reclaim.
+            redis.delete(claimKey);
+            redis.opsForZSet().add(dueKey, operationId.toString(),
+                    System.currentTimeMillis() - 1);
+            ExternalSettlementIntentStore.ClaimedProviderOperation workerB =
+                    store.claimStaleProviderDispatches(1).get(0);
+            assertThat(workerB.claimToken()).isNotEqualTo(workerA.claimToken());
+            assertThat(redis.opsForValue().get(claimKey))
+                    .isEqualTo(workerB.claimToken());
+
+            ExternalSettlementIntentStore.Intent unknown =
+                    intent("OUTCOME_UNKNOWN", operationId,
+                            "http://auth/outcome-unknown");
+            store.persist(unknown);
+
+            assertThat(store.recordRecoveredUnknown(workerA, unknown.body()))
+                    .isFalse();
+            assertThat(store.providerOperation(operationId).state())
+                    .isEqualTo("DISPATCHING");
+            assertThat(redis.opsForValue().get(claimKey))
+                    .isEqualTo(workerB.claimToken());
+
+            assertThat(store.recordRecoveredUnknown(workerB, unknown.body()))
+                    .isTrue();
+            assertThat(store.providerOperation(operationId).state())
+                    .isEqualTo("OUTCOME_UNKNOWN");
+            assertThat(redis.opsForValue().get(claimKey)).isNull();
         } finally {
             connectionFactory.destroy();
         }

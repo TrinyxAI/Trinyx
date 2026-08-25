@@ -49,8 +49,10 @@ public final class ExternalSettlementIntentDispatcher {
     }
 
     private void recoverAmbiguousDispatches() {
-        for (ExternalSettlementIntentStore.ProviderOperation operation
+        for (ExternalSettlementIntentStore.ClaimedProviderOperation claimed
                 : store.claimStaleProviderDispatches(25)) {
+            ExternalSettlementIntentStore.ProviderOperation operation =
+                    claimed.operation();
             Map<String, Object> body = new LinkedHashMap<>();
             body.put("requestHash", operation.requestHash());
             body.put("provider", operation.provider());
@@ -65,9 +67,13 @@ public final class ExternalSettlementIntentDispatcher {
                 // Persist the deliverable intent first. If the process fails
                 // after this write, the ordinary outbox still replays it.
                 store.persist(intent);
-                store.recordUnknown(operation.operationId(), body);
-                log.warn("Recovered stale provider dispatch as OUTCOME_UNKNOWN operationId={}",
-                        operation.operationId());
+                if (store.recordRecoveredUnknown(claimed, body)) {
+                    log.warn("Recovered stale provider dispatch as OUTCOME_UNKNOWN operationId={}",
+                            operation.operationId());
+                } else {
+                    log.debug("Skipped stale provider recovery after losing lease operationId={}",
+                            operation.operationId());
+                }
             } catch (RuntimeException failure) {
                 log.error("Could not recover stale provider dispatch operationId={}: {}",
                         operation.operationId(), failure.getMessage());

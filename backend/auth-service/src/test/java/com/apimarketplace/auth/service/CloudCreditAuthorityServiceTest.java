@@ -129,6 +129,9 @@ class CloudCreditAuthorityServiceTest {
         when(credits.getBalance(42L)).thenReturn(new BigDecimal("96.75"));
 
         var held = service.reserve(reserve(operationId, hash));
+        service.dispatching(operationId,
+                new CloudCreditAuthorityService.DispatchingRequest(
+                        hash, "openai", "gpt"));
         var command = new CloudCreditAuthorityService.CommitRequest(
                 new BigDecimal("3.25"), "openai", "gpt", "provider-request", 10L, 2L, hash);
         var committed = service.commit(operationId, command);
@@ -141,6 +144,24 @@ class CloudCreditAuthorityServiceTest {
                 anyString(), any(), any(), anyInt(), anyString(), anyString(), anyBoolean());
         verify(credits, times(1)).settleExternalReservation(anyString(), any(), anyString(),
                 anyString(), anyBoolean());
+    }
+
+    @Test
+    void normalCommitBeforeAuthoritativeDispatchIsRejected() {
+        UUID operationId = UUID.randomUUID();
+        String hash = "0".repeat(64);
+        jdbc.row = new ExistingRow(operationId, hash, null, "RESERVED", "{}",
+                Instant.now().plusSeconds(3600), "PLATFORM_MARKUP", "vendor", "tool");
+
+        assertThatThrownBy(() -> service.commit(operationId,
+                new CloudCreditAuthorityService.CommitRequest(
+                        BigDecimal.ONE, "vendor", "tool", "provider-request",
+                        null, null, hash)))
+                .isInstanceOf(ResponseStatusException.class)
+                .hasMessageContaining("COMMIT_BEFORE_DISPATCH");
+        verify(credits, never()).settleExternalReservation(
+                anyString(), any(), anyString(), anyString(), anyBoolean());
+        assertThat(jdbc.row.state()).isEqualTo("RESERVED");
     }
 
     @Test
@@ -309,6 +330,9 @@ class CloudCreditAuthorityServiceTest {
                 UUID.randomUUID(), 7, "WEB_SEARCH", BigDecimal.ONE, BigDecimal.ONE,
                 "websearch", "default", hash);
         service.reserve(request);
+        service.dispatching(operationId,
+                new CloudCreditAuthorityService.DispatchingRequest(
+                        hash, "websearch", "default"));
         var result = service.commit(operationId,
                 new CloudCreditAuthorityService.CommitRequest(
                         BigDecimal.ONE, "websearch", "default", "search-request",
@@ -351,7 +375,7 @@ class CloudCreditAuthorityServiceTest {
     void llmSettlementUsesPaidAuthorityPricingAndCompleteProviderUsage() {
         UUID operationId = UUID.randomUUID();
         String hash = "2".repeat(64);
-        jdbc.row = new ExistingRow(operationId, hash, null, "RESERVED", "{}",
+        jdbc.row = new ExistingRow(operationId, hash, null, "DISPATCHING", "{}",
                 Instant.now().plusSeconds(3600), "CE_LLM_RELAY", "openai", "gpt");
         when(credits.calculateExternalLlmCredits(
                 "openai", "gpt", 10, 2, 3, 4, 5, 6))
@@ -401,6 +425,9 @@ class CloudCreditAuthorityServiceTest {
                 UUID.randomUUID(), 7, "BROWSER_AGENT_EXECUTION",
                 new BigDecimal("0.000001"), new BigDecimal("0.000001"),
                 "openai", "gpt", hash, 400, 200));
+        service.dispatching(operationId,
+                new CloudCreditAuthorityService.DispatchingRequest(
+                        hash, "openai", "gpt"));
         var result = service.commit(operationId,
                 new CloudCreditAuthorityService.CommitRequest(
                         BigDecimal.ZERO, "openai", "gpt", "browser-session",
@@ -512,7 +539,7 @@ class CloudCreditAuthorityServiceTest {
     void settlementCannotSubstituteTheReservedProviderOrModel() {
         UUID operationId = UUID.randomUUID();
         String hash = "3".repeat(64);
-        jdbc.row = new ExistingRow(operationId, hash, null, "RESERVED", "{}",
+        jdbc.row = new ExistingRow(operationId, hash, null, "DISPATCHING", "{}",
                 Instant.now().plusSeconds(3600), "CE_LLM_RELAY", "openai", "gpt");
 
         assertThatThrownBy(() -> service.commit(operationId,

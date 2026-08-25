@@ -7,6 +7,7 @@ import com.apimarketplace.agent.tools.ToolsProvider.ToolExecutionContext;
 import com.apimarketplace.agent.tools.ToolsProvider.ToolExecutionResult;
 import com.apimarketplace.auth.client.AuthClient;
 import com.apimarketplace.common.credit.CreditConsumptionClient;
+import com.apimarketplace.common.credit.LlmCacheTokens;
 import com.apimarketplace.orchestrator.config.WebSearchConfig;
 import com.apimarketplace.orchestrator.tools.websearch.BrowserAgentModule;
 import com.apimarketplace.orchestrator.tools.websearch.CeWebSearchRelayRequest;
@@ -388,7 +389,7 @@ class CloudWebSearchRelayControllerTest {
             assertThat(observability.getValue().isCreditExternallyManaged()).isTrue();
             verify(externalCreditClient, never()).consumeCredits(
                     anyString(), anyString(), anyString(), anyString(), anyString(),
-                    anyInt(), anyInt(), any());
+                    anyInt(), anyInt(), any(LlmCacheTokens.class));
         }
 
         @Test

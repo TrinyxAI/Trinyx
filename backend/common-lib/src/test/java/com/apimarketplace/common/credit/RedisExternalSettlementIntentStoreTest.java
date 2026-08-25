@@ -1,5 +1,6 @@
 package com.apimarketplace.common.credit;
 
+import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;
 import org.springframework.data.redis.connection.lettuce.LettuceConnectionFactory;
@@ -12,6 +13,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
@@ -37,8 +39,21 @@ class RedisExternalSettlementIntentStoreTest {
         assertThat(script("RECORD_OUTCOME_UNKNOWN"))
                 .contains("owner ~= ARGV[6]")
                 .contains("return -4")
+                .contains("existingIntent['operationId'] ~= ARGV[4]")
                 .contains("SET', KEYS[6], ARGV[7]")
                 .contains("ZADD', KEYS[8], ARGV[8], ARGV[5]");
+
+        assertThat(script("FINALIZE_DISPATCH_CLAIM"))
+                .contains("owner ~= ARGV[1]")
+                .contains("ARGV[3] == 'touch'")
+                .contains("PEXPIRE', KEYS[1], ARGV[5]")
+                .contains("ARGV[3] == 'remove'")
+                .contains("DEL', KEYS[1]");
+
+        assertThat(script("QUARANTINE_CORRUPT_DISPATCH"))
+                .contains("owner ~= ARGV[1]")
+                .contains("PERSIST', KEYS[4]")
+                .contains("operation['state'] = 'SETTLEMENT_FAILED'");
     }
 
     @Test
@@ -643,6 +658,189 @@ class RedisExternalSettlementIntentStoreTest {
             assertThat(redis.opsForZSet().score(
                     "trinyx:billing:producer-outbox:due", unknown.key()))
                     .isNotNull();
+        } finally {
+            connectionFactory.destroy();
+        }
+    }
+
+    @Test
+    void staleClaimCleanupCannotDeleteReclaimedOwner() {
+        String host = System.getenv("TRINYX_TEST_REDIS_HOST");
+        assumeTrue(host != null && !host.isBlank(), "real Redis is enabled by Cloud CI");
+
+        LettuceConnectionFactory connectionFactory = new LettuceConnectionFactory(host, 6379);
+        connectionFactory.afterPropertiesSet();
+        StringRedisTemplate redis = new StringRedisTemplate(connectionFactory);
+        redis.afterPropertiesSet();
+        try {
+            Set<String> existing = redis.keys("trinyx:billing:producer-outbox:*");
+            if (existing != null && !existing.isEmpty()) redis.delete(existing);
+
+            UUID operationId = UUID.randomUUID();
+            String claimKey = "trinyx:billing:producer-outbox:dispatch-claim:"
+                    + operationId;
+            String dueKey =
+                    "trinyx:billing:producer-outbox:provider-dispatch-due";
+            String workerB = UUID.randomUUID().toString();
+            AtomicBoolean replaceLeaseDuringDecode = new AtomicBoolean(false);
+            ObjectMapper mapper = new ObjectMapper() {
+                @Override
+                public <T> T readValue(String content, Class<T> valueType)
+                        throws JsonProcessingException {
+                    if (ExternalSettlementIntentStore.ProviderOperation.class.equals(valueType)
+                            && replaceLeaseDuringDecode.compareAndSet(true, false)) {
+                        // Deterministically model A expiring and B reclaiming
+                        // while A is still decoding its snapshot.
+                        redis.delete(claimKey);
+                        redis.opsForValue().set(claimKey, workerB);
+                        throw new JsonProcessingException(
+                                "simulated stale worker decode failure") { };
+                    }
+                    return super.readValue(content, valueType);
+                }
+            };
+            mapper.findAndRegisterModules();
+            RedisExternalSettlementIntentStore store =
+                    new RedisExternalSettlementIntentStore(redis, mapper);
+            store.registerProviderOperation(operation(operationId));
+            assertThat(store.markProviderDispatching(operationId)).isTrue();
+            redis.opsForZSet().add(dueKey, operationId.toString(),
+                    System.currentTimeMillis() - 1);
+            replaceLeaseDuringDecode.set(true);
+
+            assertThat(store.claimStaleProviderDispatches(1)).isEmpty();
+
+            assertThat(redis.opsForValue().get(claimKey)).isEqualTo(workerB);
+            assertThat(redis.opsForZSet().score(dueKey, operationId.toString()))
+                    .isNotNull();
+            assertThat(redis.opsForValue().get(
+                    "trinyx:billing:producer-outbox:dead-corrupt-dispatch:"
+                            + operationId)).isNull();
+            assertThat(store.providerOperation(operationId).state())
+                    .isEqualTo("DISPATCHING");
+        } finally {
+            connectionFactory.destroy();
+        }
+    }
+
+    @Test
+    void corruptDispatchSnapshotIsQuarantinedWithoutBlockingOtherRecoveryOrIntents() {
+        String host = System.getenv("TRINYX_TEST_REDIS_HOST");
+        assumeTrue(host != null && !host.isBlank(), "real Redis is enabled by Cloud CI");
+
+        LettuceConnectionFactory connectionFactory = new LettuceConnectionFactory(host, 6379);
+        connectionFactory.afterPropertiesSet();
+        StringRedisTemplate redis = new StringRedisTemplate(connectionFactory);
+        redis.afterPropertiesSet();
+        try {
+            Set<String> existing = redis.keys("trinyx:billing:producer-outbox:*");
+            if (existing != null && !existing.isEmpty()) redis.delete(existing);
+            RedisExternalSettlementIntentStore store =
+                    new RedisExternalSettlementIntentStore(
+                            redis, new ObjectMapper().findAndRegisterModules());
+            String dueKey =
+                    "trinyx:billing:producer-outbox:provider-dispatch-due";
+
+            UUID corrupt = UUID.randomUUID();
+            store.registerProviderOperation(operation(corrupt));
+            assertThat(store.markProviderDispatching(corrupt)).isTrue();
+            redis.opsForValue().set(
+                    "trinyx:billing:producer-outbox:dispatch:" + corrupt,
+                    "{not-json");
+            redis.opsForZSet().add(dueKey, corrupt.toString(),
+                    System.currentTimeMillis() - 2);
+
+            UUID valid = UUID.randomUUID();
+            store.registerProviderOperation(operation(valid));
+            assertThat(store.markProviderDispatching(valid)).isTrue();
+            redis.opsForZSet().add(dueKey, valid.toString(),
+                    System.currentTimeMillis() - 1);
+            ExternalSettlementIntentStore.Intent settlement =
+                    intent("RELEASE", valid, "http://auth/release");
+            store.persist(settlement);
+
+            List<ExternalSettlementIntentStore.ClaimedProviderOperation> claimed =
+                    store.claimStaleProviderDispatches(25);
+
+            assertThat(claimed).extracting(
+                    item -> item.operation().operationId()).containsExactly(valid);
+            assertThat(store.providerOperation(corrupt).state())
+                    .isEqualTo("SETTLEMENT_FAILED");
+            assertThat(redis.opsForValue().get(
+                    "trinyx:billing:producer-outbox:dead-corrupt-dispatch:"
+                            + corrupt)).contains("{not-json");
+            assertThat(redis.getExpire(
+                    "trinyx:billing:producer-outbox:dead-corrupt-dispatch:"
+                            + corrupt)).isEqualTo(-1L);
+            assertThat(redis.opsForValue().get(
+                    "trinyx:billing:producer-outbox:dispatch:" + corrupt))
+                    .isNull();
+            assertThat(redis.opsForZSet().score(dueKey, corrupt.toString()))
+                    .isNull();
+
+            assertThat(store.claimDue(25)).extracting(
+                    ExternalSettlementIntentStore.Intent::key)
+                    .contains(settlement.key());
+        } finally {
+            connectionFactory.destroy();
+        }
+    }
+
+    @Test
+    void recoveryAdoptsExistingDurableUnknownAfterCrashBeforeStateTransition()
+            throws Exception {
+        String host = System.getenv("TRINYX_TEST_REDIS_HOST");
+        assumeTrue(host != null && !host.isBlank(), "real Redis is enabled by Cloud CI");
+
+        LettuceConnectionFactory connectionFactory = new LettuceConnectionFactory(host, 6379);
+        connectionFactory.afterPropertiesSet();
+        StringRedisTemplate redis = new StringRedisTemplate(connectionFactory);
+        redis.afterPropertiesSet();
+        try {
+            Set<String> keys = redis.keys("trinyx:billing:producer-outbox:*");
+            if (keys != null && !keys.isEmpty()) redis.delete(keys);
+            RedisExternalSettlementIntentStore store =
+                    new RedisExternalSettlementIntentStore(
+                            redis, new ObjectMapper().findAndRegisterModules());
+            UUID operationId = UUID.randomUUID();
+            store.registerProviderOperation(operation(operationId));
+            assertThat(store.markProviderDispatching(operationId)).isTrue();
+            redis.opsForZSet().add(
+                    "trinyx:billing:producer-outbox:provider-dispatch-due",
+                    operationId.toString(), System.currentTimeMillis() - 1);
+            ExternalSettlementIntentStore.ClaimedProviderOperation claimed =
+                    store.claimStaleProviderDispatches(1).get(0);
+
+            Map<String, Object> originalBody = Map.of(
+                    "requestHash", "a".repeat(64),
+                    "provider", "openai",
+                    "model", "gpt-test",
+                    "reason", "provider-timeout");
+            ExternalSettlementIntentStore.Intent original =
+                    new ExternalSettlementIntentStore.Intent(
+                            "OUTCOME_UNKNOWN", operationId,
+                            "http://auth/outcome-unknown",
+                            originalBody, 0, Map.of());
+            store.persist(original);
+
+            Map<String, Object> recoveredBody = Map.of(
+                    "requestHash", "a".repeat(64),
+                    "provider", "openai",
+                    "model", "gpt-test",
+                    "reason", "producer-restarted");
+            ExternalSettlementIntentStore.Intent recovered =
+                    new ExternalSettlementIntentStore.Intent(
+                            "OUTCOME_UNKNOWN", operationId,
+                            "http://auth/outcome-unknown",
+                            recoveredBody, 0, Map.of());
+
+            assertThat(store.recordRecoveredUnknown(claimed, recovered)).isTrue();
+            assertThat(store.providerOperation(operationId).state())
+                    .isEqualTo("OUTCOME_UNKNOWN");
+            String durable = redis.opsForValue().get(
+                    "trinyx:billing:producer-outbox:item:" + original.key());
+            assertThat(durable).contains("provider-timeout")
+                    .doesNotContain("producer-restarted");
         } finally {
             connectionFactory.destroy();
         }

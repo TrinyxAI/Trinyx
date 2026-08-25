@@ -77,6 +77,22 @@ class ExternalSettlementIntentDispatcherTest {
     }
 
     @Test
+    void recoveryScanFailureDoesNotBlockOrdinarySettlementBatch() {
+        UUID operation = UUID.randomUUID();
+        var intent = new ExternalSettlementIntentStore.Intent(
+                "RELEASE", operation, "http://auth/release",
+                Map.of("requestHash", "h"), 0);
+        FakeStore store = new FakeStore(intent, null);
+        store.throwOnRecoveryScan = true;
+
+        new ExternalSettlementIntentDispatcher(store,
+                new StubClient(CreditConsumptionClient.SettlementDelivery.ACKNOWLEDGED))
+                .dispatch();
+
+        assertThat(store.acknowledgedActions).containsExactly("RELEASE");
+    }
+
+    @Test
     void staleDispatchBecomesDurableUnknownAndIsNeverReleased() {
         UUID operationId = UUID.randomUUID();
         var operation = new ExternalSettlementIntentStore.ProviderOperation(
@@ -120,6 +136,7 @@ class ExternalSettlementIntentDispatcherTest {
         boolean released;
         boolean dead;
         boolean throwOnUnknownAcknowledgement;
+        boolean throwOnRecoveryScan;
         int acknowledgementAttempts;
         final List<String> acknowledgedActions = new ArrayList<>();
         UUID unknownOperation;
@@ -140,6 +157,9 @@ class ExternalSettlementIntentDispatcherTest {
             return intents;
         }
         public List<ClaimedProviderOperation> claimStaleProviderDispatches(int limit) {
+            if (throwOnRecoveryScan) {
+                throw new IllegalStateException("simulated corrupt dispatch snapshot");
+            }
             return staleOperation == null ? List.of()
                     : List.of(new ClaimedProviderOperation(
                             staleOperation, "test-recovery-claim"));

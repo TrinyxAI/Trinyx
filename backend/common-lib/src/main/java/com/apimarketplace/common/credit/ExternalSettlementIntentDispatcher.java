@@ -23,7 +23,12 @@ public final class ExternalSettlementIntentDispatcher {
 
     @Scheduled(fixedDelayString = "${billing.external.producer-outbox-retry-ms:5000}")
     public void dispatch() {
-        recoverAmbiguousDispatches();
+        try {
+            recoverAmbiguousDispatches();
+        } catch (RuntimeException failure) {
+            log.error("Could not scan stale provider dispatches; continuing settlement outbox: {}",
+                    failure.getMessage());
+        }
         for (ExternalSettlementIntentStore.Intent intent : store.claimDue(25)) {
             try {
                 CreditConsumptionClient.SettlementDelivery result =

@@ -78,8 +78,17 @@ public final class RedisExternalSettlementIntentStore
                     end
                     if ARGV[7] ~= '' then
                         local existing = redis.call('GET', KEYS[6])
-                        if existing and existing ~= ARGV[7] then return -5 end
-                        redis.call('SET', KEYS[6], ARGV[7])
+                        if existing then
+                            local existingOk, existingIntent =
+                                    pcall(cjson.decode, existing)
+                            if not existingOk
+                                    or existingIntent['action'] ~= 'OUTCOME_UNKNOWN'
+                                    or existingIntent['operationId'] ~= ARGV[4] then
+                                return -5
+                            end
+                        else
+                            redis.call('SET', KEYS[6], ARGV[7])
+                        end
                         redis.call('PERSIST', KEYS[6])
                         redis.call('ZADD', KEYS[8], ARGV[8], ARGV[5])
                     end
@@ -89,6 +98,49 @@ public final class RedisExternalSettlementIntentStore
                     redis.call('PSETEX', KEYS[2], ARGV[3], ARGV[2])
                     redis.call('ZREM', KEYS[3], ARGV[4])
                     redis.call('DEL', KEYS[4], KEYS[5])
+                    return 1
+                    """, Long.class);
+
+    private static final DefaultRedisScript<Long> FINALIZE_DISPATCH_CLAIM =
+            new DefaultRedisScript<>("""
+                    local owner = redis.call('GET', KEYS[1])
+                    if not owner or owner ~= ARGV[1] then return 0 end
+                    if ARGV[3] == 'touch' then
+                        redis.call('PEXPIRE', KEYS[1], ARGV[5])
+                        redis.call('ZADD', KEYS[2], ARGV[4], ARGV[2])
+                        return 1
+                    end
+                    if ARGV[3] == 'remove' then
+                        redis.call('ZREM', KEYS[2], ARGV[2])
+                    elseif ARGV[3] ~= 'release' then
+                        return -1
+                    end
+                    redis.call('DEL', KEYS[1])
+                    return 1
+                    """, Long.class);
+
+    private static final DefaultRedisScript<Long> QUARANTINE_CORRUPT_DISPATCH =
+            new DefaultRedisScript<>("""
+                    local owner = redis.call('GET', KEYS[1])
+                    if not owner or owner ~= ARGV[1] then return 0 end
+                    redis.call('SET', KEYS[4], ARGV[3])
+                    redis.call('PERSIST', KEYS[4])
+                    redis.call('ZREM', KEYS[2], ARGV[2])
+                    redis.call('DEL', KEYS[3], KEYS[1])
+                    local raw = redis.call('GET', KEYS[5])
+                    if raw then
+                        local ok, operation = pcall(cjson.decode, raw)
+                        if ok then
+                            local current = operation['state']
+                            if current ~= 'COMMITTED'
+                                    and current ~= 'RELEASED'
+                                    and current ~= 'SETTLEMENT_FAILED' then
+                                operation['state'] = 'SETTLEMENT_FAILED'
+                                operation['updatedAt'] = ARGV[4]
+                                redis.call('SET', KEYS[5], cjson.encode(operation))
+                            end
+                        end
+                    end
                     return 1
                     """, Long.class);
 
@@ -557,21 +609,83 @@ public final class RedisExternalSettlementIntentStore
             try {
                 String encoded = redis.opsForValue().get(dispatchKey(operationId));
                 if (encoded == null) {
-                    redis.opsForZSet().remove(PROVIDER_DISPATCH_DUE, rawId);
-                    redis.delete(dispatchClaimKey(operationId));
+                    finalizeDispatchClaim(operationId, claimToken, "remove", 0);
                     continue;
                 }
-                result.add(new ClaimedProviderOperation(
-                        json.readValue(encoded, ProviderOperation.class), claimToken));
-                redis.opsForZSet().add(PROVIDER_DISPATCH_DUE, rawId,
-                        System.currentTimeMillis() + CLAIM_TTL.toMillis());
+
+                ProviderOperation operation;
+                try {
+                    operation = json.readValue(encoded, ProviderOperation.class);
+                } catch (Exception invalidSnapshot) {
+                    quarantineCorruptProviderDispatch(
+                            operationId, claimToken, encoded, invalidSnapshot);
+                    continue;
+                }
+
+                long leaseUntil = System.currentTimeMillis() + CLAIM_TTL.toMillis();
+                if (finalizeDispatchClaim(
+                        operationId, claimToken, "touch", leaseUntil)) {
+                    result.add(new ClaimedProviderOperation(operation, claimToken));
+                }
             } catch (Exception failure) {
-                redis.delete(dispatchClaimKey(operationId));
-                throw new IllegalStateException(
-                        "Could not claim stale provider dispatch", failure);
+                // Release only this worker's lease. If it expired and another
+                // worker reclaimed, the compare-and-delete is a no-op.
+                try {
+                    finalizeDispatchClaim(operationId, claimToken, "release", 0);
+                } catch (RuntimeException cleanupFailure) {
+                    logger.error("Could not release failed provider dispatch claim operationId={}: {}",
+                            operationId, cleanupFailure.getMessage());
+                }
+                logger.error("Could not claim stale provider dispatch operationId={}: {}",
+                        operationId, failure.getMessage());
             }
         }
         return result;
+    }
+
+    private boolean finalizeDispatchClaim(
+            UUID operationId, String claimToken, String action, long dueAt) {
+        Long result = redis.execute(FINALIZE_DISPATCH_CLAIM,
+                List.of(dispatchClaimKey(operationId), PROVIDER_DISPATCH_DUE),
+                claimToken, operationId.toString(), action, String.valueOf(dueAt),
+                String.valueOf(CLAIM_TTL.toMillis()));
+        if (result != null && result == -1L) {
+            throw new IllegalArgumentException(
+                    "Unsupported dispatch claim finalization " + action);
+        }
+        return result != null && result == 1L;
+    }
+
+    private void quarantineCorruptProviderDispatch(
+            UUID operationId, String claimToken,
+            String rawPayload, Exception failure) {
+        try {
+            String envelope = json.writeValueAsString(Map.of(
+                    "operationId", operationId.toString(),
+                    "rawPayload", rawPayload == null ? "" : rawPayload,
+                    "error", failure.getClass().getSimpleName() + ": "
+                            + value(failure.getMessage()),
+                    "quarantinedAt", Instant.now().toString()));
+            Long result = redis.execute(QUARANTINE_CORRUPT_DISPATCH, List.of(
+                            dispatchClaimKey(operationId), PROVIDER_DISPATCH_DUE,
+                            dispatchKey(operationId),
+                            PREFIX + "dead-corrupt-dispatch:" + operationId,
+                            operationKey(operationId)),
+                    claimToken, operationId.toString(), envelope,
+                    Instant.now().toString());
+            if (result != null && result == 1L) {
+                logger.error("Quarantined corrupt provider dispatch operationId={}",
+                        operationId);
+            } else {
+                logger.debug("Skipped corrupt provider dispatch quarantine after losing lease "
+                                + "operationId={}",
+                        operationId);
+            }
+        } catch (Exception quarantineFailure) {
+            throw new IllegalStateException(
+                    "Could not quarantine corrupt provider dispatch "
+                            + operationId, quarantineFailure);
+        }
     }
 
     @Override

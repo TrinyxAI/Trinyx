@@ -404,6 +404,15 @@ public class BrowserAgentModule extends WebJobModule {
             }
             ToolExecutionContext executionContext =
                     externalReservation == null ? context : markExternalBillingManaged(context);
+            if (externalReservation != null
+                    && !creditConsumptionClient.markExternalProviderDispatching(
+                            externalReservation.operationId())) {
+                releaseExternalBrowserReservation(externalReservation,
+                        "provider-not-dispatched-journal-unavailable");
+                return Optional.of(ToolExecutionResult.failure(
+                        ToolErrorCode.EXTERNAL_SERVICE_ERROR,
+                        "Browser-agent billing dispatch journal is unavailable"));
+            }
 
             persistChatContextForLiveView(parameters, executionContext, userId);
             ToolExecutionResult runResult;

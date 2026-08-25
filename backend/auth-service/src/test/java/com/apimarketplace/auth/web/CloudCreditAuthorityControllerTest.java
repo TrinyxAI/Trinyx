@@ -47,6 +47,24 @@ class CloudCreditAuthorityControllerTest {
         verify(authority).reserve(request);
     }
 
+    @Test
+    void authenticatedCloudRuntimeCanAcknowledgeDispatchExactlyOnce() {
+        UUID operationId = UUID.randomUUID();
+        var request = new CloudCreditAuthorityService.DispatchingRequest(
+                "a".repeat(64), "openai", "gpt");
+        var response = new CloudCreditAuthorityService.SettlementResponse(
+                operationId, "DISPATCHING", BigDecimal.ZERO, BigDecimal.TEN,
+                false, "PROVIDER_DISPATCH_AUTHORIZED_HOLD_RETAINED");
+        when(workloads.authenticate("Bearer workload")).thenReturn(
+                new WorkloadAuthenticationService.WorkloadIdentity(
+                        "trinyx-cloud-runtime", UUID.randomUUID(), Instant.now().plusSeconds(30)));
+        when(authority.dispatching(operationId, request)).thenReturn(response);
+
+        assertThat(controller.dispatching("Bearer workload", operationId, request))
+                .isEqualTo(response);
+        verify(authority).dispatching(operationId, request);
+    }
+
     private static CloudCreditAuthorityService.ReserveRequest reserve() {
         return new CloudCreditAuthorityService.ReserveRequest(
                 UUID.randomUUID(), UUID.randomUUID(), UUID.randomUUID(), UUID.randomUUID(),

@@ -53,8 +53,10 @@ public final class ExternalSettlementIntentDispatcher {
                             operation.outcomeUnknownUrl(), body, 0,
                             operation.trustedHeaders());
             try {
-                store.recordUnknown(operation.operationId(), body);
+                // Persist the deliverable intent first. If the process fails
+                // after this write, the ordinary outbox still replays it.
                 store.persist(intent);
+                store.recordUnknown(operation.operationId(), body);
                 log.warn("Recovered stale provider dispatch as OUTCOME_UNKNOWN operationId={}",
                         operation.operationId());
             } catch (RuntimeException failure) {

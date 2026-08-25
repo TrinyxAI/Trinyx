@@ -1320,13 +1320,20 @@ public class CreditConsumptionClient {
         if (settlementIntentStore != null && settlementIntentStore.durable()) {
             switch (result) {
                 case ACKNOWLEDGED -> settlementIntentStore.acknowledge(intent);
+                case DURABLY_QUEUED -> settlementIntentStore.retry(intent,
+                        "auth-service accepted durable responsibility; awaiting authority decision");
                 case PERMANENT_FAILURE -> settlementIntentStore.dead(intent,
                         "permanent authority rejection");
                 case RETRYABLE_FAILURE -> settlementIntentStore.retry(intent,
                         "authority unavailable");
             }
         }
-        return result == SettlementDelivery.ACKNOWLEDGED;
+        // A 202 transfers durable delivery responsibility to auth-service and
+        // is therefore accepted by the provider-facing caller. It is not a
+        // financial terminal: the producer intent remains scheduled until a
+        // later final response can ACK or reject it locally.
+        return result == SettlementDelivery.ACKNOWLEDGED
+                || result == SettlementDelivery.DURABLY_QUEUED;
     }
 
     SettlementDelivery deliverPersistedSettlement(ExternalSettlementIntentStore.Intent intent) {
@@ -1341,6 +1348,9 @@ public class CreditConsumptionClient {
             ResponseEntity<Map> response = restTemplate.exchange(
                     intent.url(), HttpMethod.POST,
                     new HttpEntity<>(intent.body(), headers), Map.class);
+            if (response.getStatusCode() == HttpStatus.ACCEPTED) {
+                return SettlementDelivery.DURABLY_QUEUED;
+            }
             return response.getStatusCode().is2xxSuccessful()
                     ? SettlementDelivery.ACKNOWLEDGED
                     : response.getStatusCode().is5xxServerError()
@@ -1360,7 +1370,12 @@ public class CreditConsumptionClient {
         }
     }
 
-    enum SettlementDelivery { ACKNOWLEDGED, RETRYABLE_FAILURE, PERMANENT_FAILURE }
+    enum SettlementDelivery {
+        ACKNOWLEDGED,
+        DURABLY_QUEUED,
+        RETRYABLE_FAILURE,
+        PERMANENT_FAILURE
+    }
 
     private static String stripTrailingSlash(String url) {
         if (url != null && url.endsWith("/")) {

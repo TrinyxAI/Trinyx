@@ -386,7 +386,7 @@ class CloudWebSearchRelayControllerTest {
             order.verify(browseRestTemplate).postForObject(anyString(), any(), eq(Map.class));
             order.verify(externalCreditClient).commitExternalLlm(
                     any(UUID.class), eq("a".repeat(64)), eq("google"),
-                    eq("gemini-2.5-flash"), anyString(), eq(5000), eq(250));
+                    eq("gemini-2.5-flash"), nullable(String.class), eq(5000), eq(250));
 
             ArgumentCaptor<AgentObservabilityRequest> observability =
                     ArgumentCaptor.forClass(AgentObservabilityRequest.class);

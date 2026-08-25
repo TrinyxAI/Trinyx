@@ -164,7 +164,8 @@ public class ExternalCreditProxyService {
                 command.cachedTokens(), command.reasoningTokens());
         try {
             var response = authority.commit(operationId, request);
-            markSettled(operationId, response.state(), response);
+            markSettled(operationId, "COMMIT", command.requestHash(),
+                    response.state(), response);
             return new SettlementResult(response, false);
         } catch (PaidMonolithCreditClient.PermanentAuthorityException permanent) {
             terminal(operationId, "COMMIT", command.requestHash(), request, permanent);
@@ -182,7 +183,8 @@ public class ExternalCreditProxyService {
                 command.reason(), command.requestHash());
         try {
             var response = authority.release(operationId, request);
-            markSettled(operationId, response.state(), response);
+            markSettled(operationId, "RELEASE", command.requestHash(),
+                    response.state(), response);
             return new SettlementResult(response, false);
         } catch (PaidMonolithCreditClient.PermanentAuthorityException permanent) {
             terminal(operationId, "RELEASE", command.requestHash(), request, permanent);
@@ -202,7 +204,8 @@ public class ExternalCreditProxyService {
                 command.reason(), requestHash, command.provider(), command.model());
         try {
             var response = authority.outcomeUnknown(operationId, request);
-            markSettled(operationId, response.state(), response);
+            markSettled(operationId, "OUTCOME_UNKNOWN", requestHash,
+                    response.state(), response);
             return new SettlementResult(response, false);
         } catch (PaidMonolithCreditClient.PermanentAuthorityException permanent) {
             terminal(operationId, "OUTCOME_UNKNOWN", requestHash, request, permanent);
@@ -214,17 +217,37 @@ public class ExternalCreditProxyService {
         }
     }
 
-    private void markSettled(UUID operationId, String state, Object response) {
+    private void markSettled(UUID operationId, String action, String requestHash,
+                             String state, Object response) {
         jdbc.update("""
                 UPDATE auth.cloud_credit_operation
                 SET state=?, response_payload=CAST(? AS jsonb), updated_at=now()
                 WHERE operation_id=?
-                """, state, write(response), operationId);
-        jdbc.update("""
-                UPDATE auth.cloud_settlement_outbox
-                SET status='DELIVERED', delivered_at=now(), last_error=NULL
-                WHERE operation_id=? AND status IN ('PENDING','PROCESSING','FAILED')
-                """, operationId);
+                  AND (state NOT IN ('COMMITTED','COMMITTED_DELINQUENT','RELEASED')
+                       OR state=?)
+                """, state, write(response), operationId, state);
+        if (terminalState(state)) {
+            jdbc.update("""
+                    UPDATE auth.cloud_settlement_outbox
+                    SET status='DELIVERED', delivered_at=now(), last_error=NULL
+                    WHERE operation_id=? AND request_hash=?
+                      AND (action=? OR action='OUTCOME_UNKNOWN')
+                      AND status IN ('PENDING','PROCESSING','FAILED')
+                    """, operationId, requestHash, action);
+        } else {
+            jdbc.update("""
+                    UPDATE auth.cloud_settlement_outbox
+                    SET status='DELIVERED', delivered_at=now(), last_error=NULL
+                    WHERE operation_id=? AND action=? AND request_hash=?
+                      AND status IN ('PENDING','PROCESSING','FAILED')
+                    """, operationId, action, requestHash);
+        }
+    }
+
+    private static boolean terminalState(String state) {
+        return "COMMITTED".equals(state)
+                || "COMMITTED_DELINQUENT".equals(state)
+                || "RELEASED".equals(state);
     }
 
     private void terminal(UUID operationId, String action, String requestHash,

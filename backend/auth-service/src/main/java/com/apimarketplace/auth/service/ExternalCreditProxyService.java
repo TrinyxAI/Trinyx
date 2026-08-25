@@ -225,10 +225,15 @@ public class ExternalCreditProxyService {
             jdbc.update("""
                     UPDATE auth.cloud_settlement_outbox
                     SET status='DELIVERED', delivered_at=now(), last_error=NULL
-                    WHERE operation_id=? AND request_hash=?
-                      AND (action=? OR action='OUTCOME_UNKNOWN')
+                    WHERE operation_id=? AND action=? AND request_hash=?
                       AND status IN ('PENDING','PROCESSING','FAILED')
-                    """, operationId, requestHash, action);
+                    """, operationId, action, requestHash);
+            jdbc.update("""
+                    UPDATE auth.cloud_settlement_outbox
+                    SET status='DELIVERED', delivered_at=now(), last_error=NULL
+                    WHERE operation_id=? AND action='OUTCOME_UNKNOWN' AND request_hash=?
+                      AND status IN ('PENDING','PROCESSING','FAILED')
+                    """, operationId, requestHash);
         } else {
             jdbc.update("""
                     UPDATE auth.cloud_settlement_outbox

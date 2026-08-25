@@ -21,25 +21,47 @@ public class CloudSettlementResultWriter {
 
     @Transactional
     public void delivered(UUID outboxId, UUID operationId, String state, String responseJson) {
-        jdbc.update("""
+        int acknowledged = jdbc.update("""
                 UPDATE auth.cloud_settlement_outbox
                 SET status='DELIVERED', delivered_at=now(), last_error=NULL
                 WHERE id=? AND status='PROCESSING'
                 """, outboxId);
+        if (acknowledged != 1) {
+            return;
+        }
+        if (terminalState(state)) {
+            jdbc.update("""
+                    UPDATE auth.cloud_settlement_outbox
+                    SET status='DELIVERED', delivered_at=now(), last_error=NULL
+                    WHERE operation_id=? AND action='OUTCOME_UNKNOWN'
+                      AND status IN ('PENDING','PROCESSING','FAILED')
+                    """, operationId);
+        }
         jdbc.update("""
                 UPDATE auth.cloud_credit_operation
                 SET state=?, response_payload=CAST(? AS jsonb), updated_at=now()
                 WHERE operation_id=?
-                """, state, responseJson, operationId);
+                  AND (state NOT IN ('COMMITTED','COMMITTED_DELINQUENT','RELEASED')
+                       OR state=?)
+                """, state, responseJson, operationId, state);
+    }
+
+    private static boolean terminalState(String state) {
+        return "COMMITTED".equals(state)
+                || "COMMITTED_DELINQUENT".equals(state)
+                || "RELEASED".equals(state);
     }
 
     @Transactional
     public void dead(UUID outboxId, UUID operationId, int attempt, String error) {
-        jdbc.update("""
+        int acknowledged = jdbc.update("""
                 UPDATE auth.cloud_settlement_outbox
                 SET status='DEAD', attempt_count=?, last_error=?, terminal_at=now()
                 WHERE id=? AND status='PROCESSING'
                 """, attempt, error, outboxId);
+        if (acknowledged != 1) {
+            return;
+        }
         jdbc.update("""
                 UPDATE auth.cloud_credit_operation
                 SET state='SETTLEMENT_FAILED', updated_at=now()

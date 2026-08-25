@@ -3,6 +3,7 @@ package com.apimarketplace.common.credit;
 import org.junit.jupiter.api.Test;
 
 import java.time.Instant;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -56,6 +57,26 @@ class ExternalSettlementIntentDispatcherTest {
     }
 
     @Test
+    void onePoisonIntentCannotStarveALaterTerminalInTheSameBatch() {
+        UUID operation = UUID.randomUUID();
+        var unknown = new ExternalSettlementIntentStore.Intent(
+                "OUTCOME_UNKNOWN", operation, "http://auth/outcome-unknown",
+                Map.of("requestHash", "h"), 0);
+        var release = new ExternalSettlementIntentStore.Intent(
+                "RELEASE", operation, "http://auth/release",
+                Map.of("requestHash", "h"), 0);
+        FakeStore store = new FakeStore(List.of(unknown, release), null);
+        store.throwOnUnknownAcknowledgement = true;
+
+        new ExternalSettlementIntentDispatcher(store,
+                new StubClient(CreditConsumptionClient.SettlementDelivery.ACKNOWLEDGED))
+                .dispatch();
+
+        assertThat(store.acknowledgementAttempts).isEqualTo(2);
+        assertThat(store.acknowledgedActions).containsExactly("RELEASE");
+    }
+
+    @Test
     void staleDispatchBecomesDurableUnknownAndIsNeverReleased() {
         UUID operationId = UUID.randomUUID();
         var operation = new ExternalSettlementIntentStore.ProviderOperation(
@@ -92,29 +113,44 @@ class ExternalSettlementIntentDispatcherTest {
     }
 
     private static final class FakeStore implements ExternalSettlementIntentStore {
-        private final Intent intent;
+        private final List<Intent> intents;
         private final ProviderOperation staleOperation;
         boolean acknowledged;
         boolean retried;
         boolean released;
         boolean dead;
+        boolean throwOnUnknownAcknowledgement;
+        int acknowledgementAttempts;
+        final List<String> acknowledgedActions = new ArrayList<>();
         UUID unknownOperation;
         Intent persisted;
 
         FakeStore(Intent intent, ProviderOperation staleOperation) {
-            this.intent = intent;
+            this(intent == null ? List.of() : List.of(intent), staleOperation);
+        }
+
+        FakeStore(List<Intent> intents, ProviderOperation staleOperation) {
+            this.intents = intents;
             this.staleOperation = staleOperation;
         }
 
         public boolean durable() { return true; }
         public void persist(Intent value) { persisted = value; }
         public List<Intent> claimDue(int limit) {
-            return intent == null ? List.of() : List.of(intent);
+            return intents;
         }
         public List<ProviderOperation> claimStaleProviderDispatches(int limit) {
             return staleOperation == null ? List.of() : List.of(staleOperation);
         }
-        public void acknowledge(Intent value) { acknowledged = true; }
+        public void acknowledge(Intent value) {
+            acknowledgementAttempts++;
+            if (throwOnUnknownAcknowledgement
+                    && "OUTCOME_UNKNOWN".equals(value.action())) {
+                throw new IllegalStateException("simulated poison intent");
+            }
+            acknowledged = true;
+            acknowledgedActions.add(value.action());
+        }
         public void retry(Intent value, String error) { retried = true; }
         public void dead(Intent value, String error) { dead = true; }
         public void recordUnknown(UUID operationId, Map<String, Object> details) {

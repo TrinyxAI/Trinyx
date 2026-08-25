@@ -73,6 +73,8 @@ class RedisExternalSettlementIntentStoreTest {
 
             UUID released = UUID.randomUUID();
             store.registerProviderOperation(operation(released));
+            assertThat(store.providerOperation(released).requestHash())
+                    .isEqualTo("a".repeat(64));
             assertThat(store.markProviderDispatching(released)).isTrue();
             assertThat(store.markProviderDispatching(released)).isFalse();
             store.markProviderState(released, "RELEASED");

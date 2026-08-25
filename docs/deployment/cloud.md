@@ -90,14 +90,20 @@ The sole authority endpoints on paid-monolith are not edge-routed:
 
 ```text
 POST /internal/v1/credit-reservations
+POST /internal/v1/credit-reservations/{operationId}/dispatching
 POST /internal/v1/credit-reservations/{operationId}/commit
 POST /internal/v1/credit-reservations/{operationId}/release
 POST /internal/v1/credit-reservations/{operationId}/outcome-unknown
 ```
 
-A provider call must not begin before reserve succeeds. `operationId` and
-`requestHash` are stable idempotency identities. The authority locks the
-native wallet and preserves the subscription/PAYG split. Commit converts the
+A provider call must not begin before reserve succeeds **and** paid-monolith
+has synchronously acknowledged the idempotent `DISPATCHING` transition. The
+Cloud runtime writes its durable Redis dispatch journal first, then obtains this
+authoritative ACK; a timeout, queued response or rejection blocks the provider
+call. Paid-monolith expires only `RESERVED` operations. `DISPATCHING` retains the
+hold until explicit commit, release or ambiguous-outcome reconciliation.
+`operationId` and `requestHash` are stable idempotency identities. The authority
+locks the native wallet and preserves the subscription/PAYG split. Commit converts the
 hold to actual usage and releases the difference. Overrun is accounted even
 when it creates delinquency. Release is terminal and idempotent. Reservation
 TTL is ten minutes. Ordinary late settlements are accepted for 24 hours after
@@ -433,10 +439,13 @@ docker compose --env-file docker/.env.cloud \
 ### Billing producer journal and Redis durability
 
 For external billing, every provider operation is registered after the
-authoritative hold and transitions to `DISPATCHING` in Redis before the provider
-network call. If the process disappears while dispatching, the producer
-dispatcher converts the stale state to a durable `OUTCOME_UNKNOWN` intent before
-the paid-monolith reservation expires. `OUTCOME_UNKNOWN` is non-terminal: only
+authoritative hold and transitions to `DISPATCHING` in Redis. The runtime then
+requires paid-monolith to atomically acknowledge its own `RESERVED -> DISPATCHING`
+transition before the provider network call. If either durable write or the
+synchronous authority ACK fails, provider dispatch is forbidden. If the process
+disappears after both transitions, the producer dispatcher converts the stale
+state to a durable `OUTCOME_UNKNOWN` intent; the paid authority already retains
+the hold because its operation is no longer expiry-eligible `RESERVED`. `OUTCOME_UNKNOWN` is non-terminal: only
 an idempotent `COMMITTED` or `RELEASED` decision can finish the operation, and
 the original request hash/provider/model cannot change.
 

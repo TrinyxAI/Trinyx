@@ -178,6 +178,54 @@ class CloudCreditAuthorityServiceTest {
     }
 
     @Test
+    void unknownOutcomeRemainsNonTerminalUntilExplicitCommit() {
+        UUID operationId = UUID.randomUUID();
+        String hash = "a".repeat(64);
+        jdbc.row = ExistingRow.reserved(operationId, hash, "{}");
+        when(credits.getBalance(42L)).thenReturn(BigDecimal.TEN);
+        service.outcomeUnknown(operationId,
+                new CloudCreditAuthorityService.OutcomeUnknownRequest(
+                        "timeout", hash, "openai", "gpt"));
+        when(credits.settleExternalReservation(
+                "cloud-reservation:" + operationId, BigDecimal.ONE,
+                "openai", "gpt", false))
+                .thenReturn(CreditService.CommitOutcome.COMMITTED);
+
+        var committed = service.commit(operationId,
+                new CloudCreditAuthorityService.CommitRequest(
+                        BigDecimal.ONE, "openai", "gpt", "provider-request",
+                        1L, 1L, hash));
+
+        assertThat(committed.state()).isEqualTo("COMMITTED");
+        verify(credits).settleExternalReservation(
+                "cloud-reservation:" + operationId, BigDecimal.ONE,
+                "openai", "gpt", false);
+    }
+
+    @Test
+    void unknownOutcomeRemainsNonTerminalUntilExplicitRelease() {
+        UUID operationId = UUID.randomUUID();
+        String hash = "b".repeat(64);
+        jdbc.row = ExistingRow.reserved(operationId, hash, "{}");
+        when(credits.getBalance(42L)).thenReturn(BigDecimal.TEN);
+        service.outcomeUnknown(operationId,
+                new CloudCreditAuthorityService.OutcomeUnknownRequest(
+                        "timeout", hash, "openai", "gpt"));
+        when(credits.releaseReservation(
+                "cloud-reservation:" + operationId, "cloud-release:no-provider-charge"))
+                .thenReturn(CreditService.ReleaseOutcome.RELEASED);
+
+        var released = service.release(operationId,
+                new CloudCreditAuthorityService.ReleaseRequest(
+                        "no-provider-charge", hash));
+
+        assertThat(released.state()).isEqualTo("RELEASED");
+        verify(credits).releaseReservation(
+                "cloud-reservation:" + operationId,
+                "cloud-release:no-provider-charge");
+    }
+
+    @Test
     void expiredReservationCanSettleInsideLateWindow() {
         UUID operationId = UUID.randomUUID();
         String hash = "1".repeat(64);

@@ -53,6 +53,8 @@ class WebSearchModuleBillingTest {
         // the module never inspects the interceptor list outside the constructor log.
         when(restTemplate.getInterceptors()).thenReturn(List.of());
         lenient().when(config.getServiceUrl()).thenReturn("http://websearch:8085");
+        lenient().when(creditClient.markExternalScopeProviderDispatching(anyString()))
+                .thenReturn(true);
         module = new WebSearchModule(restTemplate, config, creditClient);
         // Drop the constructor's getInterceptors() call so per-test
         // verifyNoInteractions(restTemplate) is meaningful.

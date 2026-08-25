@@ -342,6 +342,17 @@ class CloudCreditAuthorityServiceTest {
     }
 
     @Test
+    void staleUnknownIsEscalatedWithoutReleasingTheWalletHold() {
+        int escalated = service.escalateStaleUnknownOutcomes();
+
+        assertThat(escalated).isEqualTo(1);
+        assertThat(jdbc.lastUpdateSql)
+                .contains("OUTCOME_UNKNOWN_EXPIRED")
+                .contains("WHERE state='OUTCOME_UNKNOWN'");
+        verify(credits, never()).releaseReservation(anyString(), anyString());
+    }
+
+    @Test
     void settlementCannotSubstituteTheReservedProviderOrModel() {
         UUID operationId = UUID.randomUUID();
         String hash = "3".repeat(64);
@@ -400,6 +411,7 @@ class CloudCreditAuthorityServiceTest {
     private static final class FakeJdbc extends JdbcTemplate {
         ExistingRow row;
         int updates;
+        String lastUpdateSql;
         final List<String> countSqls = new ArrayList<>();
 
         @Override
@@ -444,6 +456,7 @@ class CloudCreditAuthorityServiceTest {
         @Override
         public int update(String sql, Object... args) {
             updates++;
+            lastUpdateSql = sql;
             if (sql.contains("INSERT INTO auth.cloud_credit_operation")) {
                 row = new ExistingRow((UUID) args[0], (String) args[2], null, "RESERVED",
                         (String) args[13], ((Timestamp) args[15]).toInstant(), (String) args[8],

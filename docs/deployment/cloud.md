@@ -100,7 +100,11 @@ A provider call must not begin before reserve succeeds. `operationId` and
 native wallet and preserves the subscription/PAYG split. Commit converts the
 hold to actual usage and releases the difference. Overrun is accounted even
 when it creates delinquency. Release is terminal and idempotent. Reservation
-TTL is ten minutes; actual incurred cost may settle for 24 hours after expiry.
+TTL is ten minutes. Ordinary late settlements are accepted for 24 hours after
+reservation expiry. Ambiguous provider outcomes follow a separate
+reconciliation lifecycle: after the 24-hour `OUTCOME_UNKNOWN` SLA they become
+`OUTCOME_UNKNOWN_EXPIRED` and receive a fresh, bounded 24-hour explicit
+COMMIT-or-RELEASE window.
 
 Every provider-facing runtime first persists commit/release intent in the
 AOF-backed Cloud Redis producer outbox before contacting auth-service.

@@ -16,6 +16,7 @@ import java.util.UUID;
 import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 class RedisExternalSettlementIntentStoreTest {
 
@@ -44,6 +45,9 @@ class RedisExternalSettlementIntentStoreTest {
         String acknowledge = script("ACKNOWLEDGE_INTENT");
         assertThat(acknowledge)
                 .contains("operation['state'] = ARGV[2]")
+                .contains("current == 'SETTLEMENT_FAILED'")
+                .contains("ARGV[2] ~= 'COMMITTED'")
+                .contains("ARGV[2] ~= 'RELEASED'")
                 .contains("ZREM', KEYS[3]")
                 .contains("DEL', KEYS[1], KEYS[2]");
 
@@ -106,6 +110,103 @@ class RedisExternalSettlementIntentStoreTest {
         } finally {
             connectionFactory.destroy();
         }
+    }
+
+    @Test
+    void realRedisAllowsAuthoritativeTerminalToSupersedeLocalSettlementFailure() {
+        String host = System.getenv("TRINYX_TEST_REDIS_HOST");
+        assumeTrue(host != null && !host.isBlank(), "real Redis is enabled by Cloud CI");
+
+        LettuceConnectionFactory connectionFactory = new LettuceConnectionFactory(host, 6379);
+        connectionFactory.afterPropertiesSet();
+        StringRedisTemplate redis = new StringRedisTemplate(connectionFactory);
+        redis.afterPropertiesSet();
+        try {
+            Set<String> existing = redis.keys("trinyx:billing:producer-outbox:*");
+            if (existing != null && !existing.isEmpty()) redis.delete(existing);
+
+            RedisExternalSettlementIntentStore store =
+                    new RedisExternalSettlementIntentStore(
+                            redis, new ObjectMapper().findAndRegisterModules());
+
+            UUID committed = UUID.randomUUID();
+            store.registerProviderOperation(operation(committed));
+            assertThat(store.markProviderDispatching(committed)).isTrue();
+            ExternalSettlementIntentStore.Intent staleUnknown =
+                    intent("OUTCOME_UNKNOWN", committed, "http://auth/outcome-unknown");
+            ExternalSettlementIntentStore.Intent commit =
+                    intent("COMMIT_LLM", committed, "http://auth/commit");
+            store.persist(staleUnknown);
+            store.persist(commit);
+            store.dead(staleUnknown, "authority already committed");
+
+            assertThat(store.providerOperation(committed).state())
+                    .isEqualTo("SETTLEMENT_FAILED");
+
+            ExternalSettlementIntentStore.Intent laterUnknown =
+                    intent("OUTCOME_UNKNOWN", committed, "http://auth/outcome-unknown");
+            store.persist(laterUnknown);
+            assertThatThrownBy(() -> store.acknowledge(laterUnknown))
+                    .hasMessageContaining("result=-3");
+            store.dead(laterUnknown, "non-terminal evidence cannot recover a dead letter");
+
+            store.acknowledge(commit);
+            assertThat(store.providerOperation(committed).state()).isEqualTo("COMMITTED");
+            assertThat(redis.opsForValue().get(
+                    "trinyx:billing:producer-outbox:item:" + commit.key())).isNull();
+            assertThat(redis.opsForZSet().score(
+                    "trinyx:billing:producer-outbox:due", commit.key())).isNull();
+
+            ExternalSettlementIntentStore.Intent conflictingRelease =
+                    intent("RELEASE", committed, "http://auth/release");
+            store.persist(conflictingRelease);
+            assertThatThrownBy(() -> store.acknowledge(conflictingRelease))
+                    .hasMessageContaining("result=-3");
+            store.dead(conflictingRelease, "COMMITTED is authoritative");
+
+            UUID released = UUID.randomUUID();
+            store.registerProviderOperation(operation(released));
+            assertThat(store.markProviderDispatching(released)).isTrue();
+            ExternalSettlementIntentStore.Intent releaseUnknown =
+                    intent("OUTCOME_UNKNOWN", released, "http://auth/outcome-unknown");
+            ExternalSettlementIntentStore.Intent release =
+                    intent("RELEASE", released, "http://auth/release");
+            store.persist(releaseUnknown);
+            store.persist(release);
+            store.dead(releaseUnknown, "authority already released");
+
+            assertThat(store.providerOperation(released).state())
+                    .isEqualTo("SETTLEMENT_FAILED");
+
+            store.acknowledge(release);
+            assertThat(store.providerOperation(released).state()).isEqualTo("RELEASED");
+            assertThat(redis.opsForValue().get(
+                    "trinyx:billing:producer-outbox:item:" + release.key())).isNull();
+            assertThat(redis.opsForZSet().score(
+                    "trinyx:billing:producer-outbox:due", release.key())).isNull();
+
+            ExternalSettlementIntentStore.Intent conflictingCommit =
+                    intent("COMMIT_LLM", released, "http://auth/commit");
+            store.persist(conflictingCommit);
+            assertThatThrownBy(() -> store.acknowledge(conflictingCommit))
+                    .hasMessageContaining("result=-3");
+            assertThat(store.providerOperation(released).state()).isEqualTo("RELEASED");
+            store.dead(conflictingCommit, "RELEASED is authoritative");
+        } finally {
+            connectionFactory.destroy();
+        }
+    }
+
+    private static ExternalSettlementIntentStore.Intent intent(
+            String action, UUID operationId, String targetUrl) {
+        return new ExternalSettlementIntentStore.Intent(
+                action, operationId, targetUrl,
+                Map.of(
+                        "requestHash", "a".repeat(64),
+                        "provider", "openai",
+                        "model", "gpt-test"),
+                0,
+                Map.of("X-Principal-ID", UUID.randomUUID().toString()));
     }
 
     private static ExternalSettlementIntentStore.ProviderOperation operation(UUID operationId) {

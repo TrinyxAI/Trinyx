@@ -540,7 +540,7 @@ class CloudCreditAuthorityServiceTest {
                 row = new ExistingRow((UUID) args[0], (String) args[2], null, "RESERVED",
                         (String) args[13], ((Timestamp) args[15]).toInstant(), (String) args[8],
                         (String) args[11], (String) args[12]);
-            } else if (sql.contains("SET state='OUTCOME_UNKNOWN_EXPIRED'")) {
+            } else if (sql.contains("SET state='OUTCOME_UNKNOWN_EXPIRED'") && row != null) {
                 Instant extendedUntil = Instant.now().plusSeconds(((Number) args[0]).longValue());
                 Instant currentUntil = row.lateSettlementUntil();
                 row = new ExistingRow(row.operationId(), row.requestHash(),
@@ -548,7 +548,7 @@ class CloudCreditAuthorityServiceTest {
                         currentUntil == null || currentUntil.isBefore(extendedUntil)
                                 ? extendedUntil : currentUntil,
                         row.sourceType(), row.provider(), row.model());
-            } else if (sql.contains("SET late_settlement_until=GREATEST")) {
+            } else if (sql.contains("SET late_settlement_until=GREATEST") && row != null) {
                 Instant extendedUntil = Instant.now().plusSeconds(((Number) args[0]).longValue());
                 Instant currentUntil = row.lateSettlementUntil();
                 row = new ExistingRow(row.operationId(), row.requestHash(),

@@ -27,6 +27,7 @@ public class CloudCreditAuthorityService {
 
     private static final Duration RESERVATION_TTL = Duration.ofMinutes(10);
     private static final Duration LATE_SETTLEMENT = Duration.ofHours(24);
+    private static final Duration UNKNOWN_RECONCILIATION_SLA = Duration.ofHours(24);
     private final JdbcTemplate jdbc;
     private final CreditService credits;
     private final ObjectMapper json;
@@ -207,6 +208,21 @@ public class CloudCreditAuthorityService {
                     id);
         }
         return ids.size();
+    }
+
+    /**
+     * Escalates non-terminal ambiguous outcomes once the reconciliation SLA is
+     * breached. The hold is intentionally not released here: COMMIT or RELEASE
+     * must remain an explicit, evidence-based authority decision.
+     */
+    @Transactional
+    public int escalateStaleUnknownOutcomes() {
+        return jdbc.update("""
+                UPDATE auth.cloud_credit_operation
+                SET state='OUTCOME_UNKNOWN_EXPIRED', updated_at=now()
+                WHERE state='OUTCOME_UNKNOWN'
+                  AND updated_at <= now() - (? * interval '1 second')
+                """, UNKNOWN_RECONCILIATION_SLA.toSeconds());
     }
 
     private long validateAuthorityContext(ReserveRequest request) {

@@ -36,7 +36,9 @@ class RedisExternalSettlementIntentStoreTest {
 
         assertThat(script("RECORD_OUTCOME_UNKNOWN"))
                 .contains("owner ~= ARGV[6]")
-                .contains("return -4");
+                .contains("return -4")
+                .contains("SET', KEYS[6], ARGV[7]")
+                .contains("ZADD', KEYS[8], ARGV[8], ARGV[5]");
     }
 
     @Test
@@ -528,9 +530,8 @@ class RedisExternalSettlementIntentStoreTest {
 
             ExternalSettlementIntentStore.Intent delayedCommitUnknown =
                     intent("OUTCOME_UNKNOWN", committed, "http://auth/outcome-unknown");
-            store.persist(delayedCommitUnknown);
             assertThat(store.recordRecoveredUnknown(
-                    staleCommit, delayedCommitUnknown.body())).isFalse();
+                    staleCommit, delayedCommitUnknown)).isFalse();
             assertThat(store.providerOperation(committed).state()).isEqualTo("COMMITTED");
             store.dead(delayedCommitUnknown, "authority already committed");
             assertThat(redis.opsForValue().get(
@@ -559,9 +560,8 @@ class RedisExternalSettlementIntentStoreTest {
 
             ExternalSettlementIntentStore.Intent delayedReleaseUnknown =
                     intent("OUTCOME_UNKNOWN", released, "http://auth/outcome-unknown");
-            store.persist(delayedReleaseUnknown);
             assertThat(store.recordRecoveredUnknown(
-                    staleRelease, delayedReleaseUnknown.body())).isFalse();
+                    staleRelease, delayedReleaseUnknown)).isFalse();
             assertThat(store.providerOperation(released).state()).isEqualTo("RELEASED");
             store.dead(delayedReleaseUnknown, "authority already released");
             assertThat(redis.opsForValue().get(
@@ -619,20 +619,30 @@ class RedisExternalSettlementIntentStoreTest {
             ExternalSettlementIntentStore.Intent unknown =
                     intent("OUTCOME_UNKNOWN", operationId,
                             "http://auth/outcome-unknown");
-            store.persist(unknown);
-
-            assertThat(store.recordRecoveredUnknown(workerA, unknown.body()))
+            assertThat(store.recordRecoveredUnknown(workerA, unknown))
                     .isFalse();
             assertThat(store.providerOperation(operationId).state())
                     .isEqualTo("DISPATCHING");
             assertThat(redis.opsForValue().get(claimKey))
                     .isEqualTo(workerB.claimToken());
+            assertThat(redis.opsForValue().get(
+                    "trinyx:billing:producer-outbox:item:" + unknown.key()))
+                    .isNull();
+            assertThat(redis.opsForZSet().score(
+                    "trinyx:billing:producer-outbox:due", unknown.key()))
+                    .isNull();
 
-            assertThat(store.recordRecoveredUnknown(workerB, unknown.body()))
+            assertThat(store.recordRecoveredUnknown(workerB, unknown))
                     .isTrue();
             assertThat(store.providerOperation(operationId).state())
                     .isEqualTo("OUTCOME_UNKNOWN");
             assertThat(redis.opsForValue().get(claimKey)).isNull();
+            assertThat(redis.opsForValue().get(
+                    "trinyx:billing:producer-outbox:item:" + unknown.key()))
+                    .isNotNull();
+            assertThat(redis.opsForZSet().score(
+                    "trinyx:billing:producer-outbox:due", unknown.key()))
+                    .isNotNull();
         } finally {
             connectionFactory.destroy();
         }

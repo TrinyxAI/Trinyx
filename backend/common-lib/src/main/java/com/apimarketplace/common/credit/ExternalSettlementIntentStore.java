@@ -90,8 +90,11 @@ public interface ExternalSettlementIntentStore {
      * A false result means the lease was lost and no recovery state was mutated.
      */
     default boolean recordRecoveredUnknown(
-            ClaimedProviderOperation claimed, Map<String, Object> details) {
-        recordUnknown(claimed.operation().operationId(), details);
+            ClaimedProviderOperation claimed, Intent intent) {
+        // Compatibility for non-Redis/native test stores. The durable Redis
+        // implementation overrides this with one fenced atomic transition.
+        persist(intent);
+        recordUnknown(claimed.operation().operationId(), intent.body());
         return true;
     }
 

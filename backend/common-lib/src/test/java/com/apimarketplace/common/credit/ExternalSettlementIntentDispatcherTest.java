@@ -158,5 +158,11 @@ class ExternalSettlementIntentDispatcherTest {
         public void recordUnknown(UUID operationId, Map<String, Object> details) {
             unknownOperation = operationId;
         }
+        public boolean recordRecoveredUnknown(
+                ClaimedProviderOperation claimed, Intent intent) {
+            persisted = intent;
+            recordUnknown(claimed.operation().operationId(), intent.body());
+            return true;
+        }
     }
 }

@@ -76,6 +76,13 @@ public final class RedisExternalSettlementIntentStore
                         redis.call('DEL', KEYS[4], KEYS[5])
                         return 0
                     end
+                    if ARGV[7] ~= '' then
+                        local existing = redis.call('GET', KEYS[6])
+                        if existing and existing ~= ARGV[7] then return -5 end
+                        redis.call('SET', KEYS[6], ARGV[7])
+                        redis.call('PERSIST', KEYS[6])
+                        redis.call('ZADD', KEYS[8], ARGV[8], ARGV[5])
+                    end
                     operation['state'] = 'OUTCOME_UNKNOWN'
                     operation['updatedAt'] = ARGV[1]
                     redis.call('SET', KEYS[1], cjson.encode(operation))
@@ -422,24 +429,28 @@ public final class RedisExternalSettlementIntentStore
 
     @Override
     public void recordUnknown(UUID operationId, Map<String, Object> details) {
-        recordUnknown(operationId, "", details);
+        recordUnknown(operationId, "", details, null);
     }
 
     @Override
     public boolean recordRecoveredUnknown(
-            ClaimedProviderOperation claimed, Map<String, Object> details) {
+            ClaimedProviderOperation claimed, Intent intent) {
         return recordUnknown(
-                claimed.operation().operationId(), claimed.claimToken(), details);
+                claimed.operation().operationId(), claimed.claimToken(),
+                intent.body(), intent);
     }
 
     private boolean recordUnknown(
-            UUID operationId, String recoveryClaimToken, Map<String, Object> details) {
+            UUID operationId, String recoveryClaimToken,
+            Map<String, Object> details, Intent recoveredIntent) {
         try {
             String audit = json.writeValueAsString(Map.of(
                     "operationId", operationId,
                     "state", "UNKNOWN_PROVIDER_OUTCOME",
                     "details", details == null ? Map.of() : details));
             String unknownIntentKey = "OUTCOME_UNKNOWN:" + operationId;
+            String recoveredPayload = recoveredIntent == null
+                    ? "" : json.writeValueAsString(recoveredIntent);
             Long result = redis.execute(RECORD_OUTCOME_UNKNOWN, List.of(
                             operationKey(operationId), PREFIX + "unknown:" + operationId,
                             PROVIDER_DISPATCH_DUE, dispatchKey(operationId),
@@ -449,7 +460,8 @@ public final class RedisExternalSettlementIntentStore
                     Instant.now().toString(), audit,
                     String.valueOf(TERMINAL_TTL.toMillis()),
                     operationId.toString(), unknownIntentKey,
-                    recoveryClaimToken == null ? "" : recoveryClaimToken);
+                    recoveryClaimToken == null ? "" : recoveryClaimToken,
+                    recoveredPayload, String.valueOf(System.currentTimeMillis()));
             if (result != null && result == -4L) {
                 return false;
             }

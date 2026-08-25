@@ -64,10 +64,9 @@ public final class ExternalSettlementIntentDispatcher {
                             operation.outcomeUnknownUrl(), body, 0,
                             operation.trustedHeaders());
             try {
-                // Persist the deliverable intent first. If the process fails
-                // after this write, the ordinary outbox still replays it.
-                store.persist(intent);
-                if (store.recordRecoveredUnknown(claimed, body)) {
+                // The Redis store atomically verifies this recovery lease,
+                // persists the deliverable intent and records UNKNOWN.
+                if (store.recordRecoveredUnknown(claimed, intent)) {
                     log.warn("Recovered stale provider dispatch as OUTCOME_UNKNOWN operationId={}",
                             operation.operationId());
                 } else {

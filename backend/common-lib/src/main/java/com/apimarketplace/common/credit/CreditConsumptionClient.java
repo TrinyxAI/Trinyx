@@ -1154,6 +1154,11 @@ public class CreditConsumptionClient {
      * Provider delivery became ambiguous after dispatch. Never release the hold:
      * retain a durable reconciliation record keyed by the original operation.
      */
+    public boolean markExternalScopeProviderDispatching(String sourceId) {
+        return sourceId != null && !sourceId.isBlank()
+                && markExternalProviderDispatching(externalOperationId(sourceId));
+    }
+
     public void recordExternalScopeOutcomeUnknown(
             String sourceId, String provider, String model, String reason) {
         recordExternalOutcomeUnknown(externalOperationId(sourceId), "",

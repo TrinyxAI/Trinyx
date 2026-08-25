@@ -46,6 +46,60 @@ public final class RedisExternalSettlementIntentStore
                     return 1
                     """, Long.class);
 
+    private static final DefaultRedisScript<Long> PERSIST_INTENT =
+            new DefaultRedisScript<>("""
+                    local existing = redis.call('GET', KEYS[1])
+                    if existing then
+                        if existing == ARGV[1] then return 2 end
+                        return -1
+                    end
+                    redis.call('PSETEX', KEYS[1], ARGV[2], ARGV[1])
+                    redis.call('ZADD', KEYS[2], ARGV[3], ARGV[4])
+                    return 1
+                    """, Long.class);
+
+    private static final DefaultRedisScript<Long> ACKNOWLEDGE_INTENT =
+            new DefaultRedisScript<>("""
+                    local raw = redis.call('GET', KEYS[4])
+                    if not raw then return -1 end
+                    local ok, operation = pcall(cjson.decode, raw)
+                    if not ok then return -2 end
+                    local current = operation['state']
+                    if (current == 'COMMITTED' or current == 'RELEASED'
+                            or current == 'SETTLEMENT_FAILED') and current ~= ARGV[2] then
+                        return -3
+                    end
+                    operation['state'] = ARGV[2]
+                    operation['updatedAt'] = ARGV[3]
+                    redis.call('PSETEX', KEYS[4], ARGV[4], cjson.encode(operation))
+                    redis.call('ZREM', KEYS[3], ARGV[1])
+                    redis.call('DEL', KEYS[1], KEYS[2], KEYS[5], KEYS[6])
+                    redis.call('ZREM', KEYS[7], ARGV[5])
+                    return 1
+                    """, Long.class);
+
+    private static final DefaultRedisScript<Long> DEAD_LETTER_INTENT =
+            new DefaultRedisScript<>("""
+                    local raw = redis.call('GET', KEYS[5])
+                    if raw then
+                        local ok, operation = pcall(cjson.decode, raw)
+                        if ok then
+                            local current = operation['state']
+                            if current ~= 'COMMITTED' and current ~= 'RELEASED'
+                                    and current ~= 'SETTLEMENT_FAILED' then
+                                operation['state'] = 'SETTLEMENT_FAILED'
+                                operation['updatedAt'] = ARGV[5]
+                                redis.call('PSETEX', KEYS[5], ARGV[2], cjson.encode(operation))
+                            end
+                        end
+                    end
+                    redis.call('PSETEX', KEYS[1], ARGV[2], ARGV[1])
+                    redis.call('ZREM', KEYS[4], ARGV[3])
+                    redis.call('DEL', KEYS[2], KEYS[3], KEYS[6], KEYS[7])
+                    redis.call('ZREM', KEYS[8], ARGV[4])
+                    return 1
+                    """, Long.class);
+
     private final StringRedisTemplate redis;
     private final ObjectMapper json;
 
@@ -62,7 +116,7 @@ public final class RedisExternalSettlementIntentStore
             String key = payloadKey(intent);
             String encoded = json.writeValueAsString(intent);
             String existing = redis.opsForValue().get(key);
-            if (existing != null && !existing.equals(encoded)) {
+            if (existing != null) {
                 Intent prior = json.readValue(existing, Intent.class);
                 if (!prior.body().equals(intent.body()) || !prior.url().equals(intent.url())
                         || !prior.trustedHeaders().equals(intent.trustedHeaders())) {
@@ -71,8 +125,17 @@ public final class RedisExternalSettlementIntentStore
                 }
                 return;
             }
-            redis.opsForValue().set(key, encoded, ACTIVE_TTL);
-            redis.opsForZSet().add(DUE, intent.key(), System.currentTimeMillis());
+            Long result = redis.execute(PERSIST_INTENT, List.of(key, DUE),
+                    encoded, String.valueOf(ACTIVE_TTL.toMillis()),
+                    String.valueOf(System.currentTimeMillis()), intent.key());
+            if (result != null && result == -1L) {
+                throw new IllegalStateException(
+                        "settlement intent equivocation for " + intent.key());
+            }
+            if (result == null) {
+                throw new IllegalStateException(
+                        "Could not atomically persist settlement intent " + intent.key());
+            }
         } catch (RuntimeException failure) {
             throw failure;
         } catch (Exception failure) {
@@ -110,16 +173,27 @@ public final class RedisExternalSettlementIntentStore
 
     @Override
     public void acknowledge(Intent intent) {
-        redis.opsForZSet().remove(DUE, intent.key());
-        redis.delete(List.of(payloadKey(intent), claimKey(intent.key())));
         String state = switch (intent.action()) {
             case "COMMIT_LLM", "COMMIT_AMOUNT" -> "COMMITTED";
             case "RELEASE", "RELEASE_LOCAL" -> "RELEASED";
             case "OUTCOME_UNKNOWN" -> "OUTCOME_UNKNOWN";
             default -> null;
         };
-        if (state != null) {
-            markProviderState(intent.operationId(), state);
+        if (state == null) {
+            throw new IllegalArgumentException(
+                    "Unsupported settlement action " + intent.action());
+        }
+        Long result = redis.execute(ACKNOWLEDGE_INTENT, List.of(
+                        payloadKey(intent), claimKey(intent.key()), DUE,
+                        operationKey(intent.operationId()), dispatchKey(intent.operationId()),
+                        dispatchClaimKey(intent.operationId()), PROVIDER_DISPATCH_DUE),
+                intent.key(), state, Instant.now().toString(),
+                String.valueOf((isTerminal(state) ? TERMINAL_TTL : ACTIVE_TTL).toMillis()),
+                intent.operationId().toString());
+        if (result == null || result < 0) {
+            throw new IllegalStateException(
+                    "Could not atomically acknowledge settlement intent "
+                            + intent.key() + " result=" + result);
         }
     }
 
@@ -144,19 +218,22 @@ public final class RedisExternalSettlementIntentStore
     @Override
     public void dead(Intent intent, String error) {
         try {
-            redis.opsForValue().set(PREFIX + "dead:" + intent.key(),
-                    json.writeValueAsString(Map.of(
-                            "intent", intent,
-                            "error", error == null ? "permanent rejection" : error)),
-                    TERMINAL_TTL);
-            // Remove the rejected delivery without applying its requested
-            // terminal state. A racing COMMIT may already be authoritative.
-            redis.opsForZSet().remove(DUE, intent.key());
-            redis.delete(List.of(payloadKey(intent), claimKey(intent.key())));
-            ProviderOperation operation = readOperation(intent.operationId());
-            if (operation == null || !isTerminal(operation.state())) {
-                markProviderState(intent.operationId(), "SETTLEMENT_FAILED");
+            String encoded = json.writeValueAsString(Map.of(
+                    "intent", intent,
+                    "error", error == null ? "permanent rejection" : error));
+            Long result = redis.execute(DEAD_LETTER_INTENT, List.of(
+                            PREFIX + "dead:" + intent.key(), payloadKey(intent),
+                            claimKey(intent.key()), DUE, operationKey(intent.operationId()),
+                            dispatchKey(intent.operationId()),
+                            dispatchClaimKey(intent.operationId()), PROVIDER_DISPATCH_DUE),
+                    encoded, String.valueOf(TERMINAL_TTL.toMillis()), intent.key(),
+                    intent.operationId().toString(), Instant.now().toString());
+            if (result == null || result != 1L) {
+                throw new IllegalStateException(
+                        "Could not atomically dead-letter settlement intent " + intent.key());
             }
+        } catch (RuntimeException failure) {
+            throw failure;
         } catch (Exception failure) {
             throw new IllegalStateException("Could not dead-letter settlement intent", failure);
         }

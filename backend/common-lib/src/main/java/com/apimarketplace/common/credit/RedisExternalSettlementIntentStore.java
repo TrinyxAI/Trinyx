@@ -81,9 +81,39 @@ public final class RedisExternalSettlementIntentStore
                         if existing then
                             local existingOk, existingIntent =
                                     pcall(cjson.decode, existing)
+                            local existingBody = existingOk
+                                    and existingIntent['body'] or nil
+                            local existingHeaders = existingOk
+                                    and (existingIntent['trustedHeaders'] or {}) or {}
+                            local operationHeaders =
+                                    operation['trustedHeaders'] or {}
+                            local function sameMap(left, right)
+                                if type(left) ~= 'table'
+                                        or type(right) ~= 'table' then
+                                    return false
+                                end
+                                for key, value in pairs(left) do
+                                    if right[key] ~= value then return false end
+                                end
+                                for key, value in pairs(right) do
+                                    if left[key] ~= value then return false end
+                                end
+                                return true
+                            end
                             if not existingOk
                                     or existingIntent['action'] ~= 'OUTCOME_UNKNOWN'
-                                    or existingIntent['operationId'] ~= ARGV[4] then
+                                    or existingIntent['operationId'] ~= ARGV[4]
+                                    or existingIntent['url']
+                                            ~= operation['outcomeUnknownUrl']
+                                    or type(existingBody) ~= 'table'
+                                    or existingBody['requestHash']
+                                            ~= operation['requestHash']
+                                    or existingBody['provider']
+                                            ~= operation['provider']
+                                    or existingBody['model']
+                                            ~= operation['model']
+                                    or not sameMap(
+                                            existingHeaders, operationHeaders) then
                                 return -5
                             end
                         else
@@ -150,6 +180,7 @@ public final class RedisExternalSettlementIntentStore
                     if existing then
                         if existing == ARGV[1] then
                             redis.call('PERSIST', KEYS[1])
+                            redis.call('ZADD', KEYS[2], ARGV[2], ARGV[3])
                             return 2
                         end
                         return -1
@@ -169,6 +200,16 @@ public final class RedisExternalSettlementIntentStore
                             'SET', KEYS[2], ARGV[1], 'NX', 'PX', ARGV[2])
                     if not claimed then return 0 end
                     redis.call('ZADD', KEYS[3], ARGV[4], ARGV[3])
+                    return 1
+                    """, Long.class);
+
+    private static final DefaultRedisScript<Long> CLEANUP_MISSING_INTENT =
+            new DefaultRedisScript<>("""
+                    local owner = redis.call('GET', KEYS[1])
+                    if not owner or owner ~= ARGV[1] then return 0 end
+                    if redis.call('EXISTS', KEYS[2]) == 1 then return 0 end
+                    redis.call('ZREM', KEYS[3], ARGV[2])
+                    redis.call('DEL', KEYS[1])
                     return 1
                     """, Long.class);
 
@@ -372,8 +413,7 @@ public final class RedisExternalSettlementIntentStore
             if (claim == null || claim != 1L) continue;
             String encoded = redis.opsForValue().get(PREFIX + "item:" + member);
             if (encoded == null) {
-                redis.opsForZSet().remove(DUE, member);
-                redis.delete(claimKey(member));
+                cleanupMissingIntent(member, token);
                 continue;
             }
             try {
@@ -383,6 +423,13 @@ public final class RedisExternalSettlementIntentStore
             }
         }
         return claimed;
+    }
+
+    boolean cleanupMissingIntent(String member, String claimToken) {
+        Long cleaned = redis.execute(CLEANUP_MISSING_INTENT,
+                List.of(claimKey(member), PREFIX + "item:" + member, DUE),
+                claimToken, member);
+        return cleaned != null && cleaned == 1L;
     }
 
     @Override
@@ -609,7 +656,10 @@ public final class RedisExternalSettlementIntentStore
             try {
                 String encoded = redis.opsForValue().get(dispatchKey(operationId));
                 if (encoded == null) {
-                    finalizeDispatchClaim(operationId, claimToken, "remove", 0);
+                    quarantineCorruptProviderDispatch(
+                            operationId, claimToken, "",
+                            new IllegalStateException(
+                                    "provider dispatch snapshot is missing"));
                     continue;
                 }
 

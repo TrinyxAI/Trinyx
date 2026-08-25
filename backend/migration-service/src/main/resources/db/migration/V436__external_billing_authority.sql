@@ -164,8 +164,9 @@ CREATE TABLE IF NOT EXISTS auth.cloud_credit_operation (
     cached_tokens BIGINT CHECK (cached_tokens IS NULL OR cached_tokens >= 0),
     reasoning_tokens BIGINT CHECK (reasoning_tokens IS NULL OR reasoning_tokens >= 0),
     state VARCHAR(24) NOT NULL
-        CHECK (state IN ('RESERVED', 'COMMITTED', 'COMMITTED_DELINQUENT', 'RELEASED', 'EXPIRED',
-                         'OUTCOME_UNKNOWN', 'OUTCOME_UNKNOWN_EXPIRED', 'SETTLEMENT_FAILED')),
+        CHECK (state IN ('RESERVED', 'DISPATCHING', 'COMMITTED', 'COMMITTED_DELINQUENT',
+                         'RELEASED', 'EXPIRED', 'OUTCOME_UNKNOWN',
+                         'OUTCOME_UNKNOWN_EXPIRED', 'SETTLEMENT_FAILED')),
     response_payload JSONB,
     expires_at TIMESTAMPTZ,
     late_settlement_until TIMESTAMPTZ,

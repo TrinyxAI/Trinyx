@@ -119,6 +119,13 @@ public class WebSearchModule implements ToolModule {
                         ToolErrorCode.QUOTA_EXCEEDED,
                         hold.error() != null ? hold.error() : "Web-search credit reservation rejected");
             }
+            if (!creditClient.markExternalScopeProviderDispatching(sourceId)) {
+                releaseExternalHold(true, sourceId,
+                        "provider-not-dispatched-journal-unavailable");
+                return ToolExecutionResult.failure(
+                        ToolErrorCode.EXTERNAL_SERVICE_ERROR,
+                        "Web-search billing dispatch journal is unavailable");
+            }
         }
 
         try {

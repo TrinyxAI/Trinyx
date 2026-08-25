@@ -149,7 +149,8 @@ services:
     image: redis:7-alpine
     restart: unless-stopped
     networks: [cloud]
-    command: ["redis-server", "--appendonly", "yes", "--maxmemory", "512mb", "--maxmemory-policy", "noeviction", "--requirepass", "${CLOUD_REDIS_PASSWORD:?set CLOUD_REDIS_PASSWORD}"]
+    command: ["redis-server", "--appendonly", "yes", "--appendfsync", "everysec", "--aof-use-rdb-preamble", "yes", "--maxmemory", "512mb", "--maxmemory-policy", "noeviction", "--requirepass", "${CLOUD_REDIS_PASSWORD:?set CLOUD_REDIS_PASSWORD}"]
+    stop_grace_period: 30s
     volumes:
       - cloud-redis-data:/data
     environment:

@@ -75,6 +75,8 @@ class RedisExternalSettlementIntentStoreTest {
         String dead = script("DEAD_LETTER_INTENT");
         assertThat(dead)
                 .contains("operation['state'] = 'SETTLEMENT_FAILED'")
+                .contains("SET', KEYS[5]")
+                .contains("PERSIST', KEYS[5]")
                 .contains("PSETEX', KEYS[1]")
                 .contains("ZREM', KEYS[4]");
     }
@@ -341,9 +343,14 @@ class RedisExternalSettlementIntentStoreTest {
             assertThat(redis.opsForValue().get(failedPayloadKey)).isNull();
             assertThat(store.providerOperation(failed).state())
                     .isEqualTo("SETTLEMENT_FAILED");
-            assertThat(redis.getExpire(failedOperationKey))
-                    .isPositive()
-                    .isLessThanOrEqualTo(604800L);
+            assertThat(redis.getExpire(failedOperationKey)).isEqualTo(-1L);
+
+            // Repeating DEAD repairs legacy producer failures that still carry
+            // the former terminal TTL.
+            redis.expire(failedOperationKey, java.time.Duration.ofDays(7));
+            assertThat(redis.getExpire(failedOperationKey)).isPositive();
+            store.dead(failedIntent, "idempotent dead-letter retry");
+            assertThat(redis.getExpire(failedOperationKey)).isEqualTo(-1L);
         } finally {
             connectionFactory.destroy();
         }

@@ -1,6 +1,8 @@
 package com.apimarketplace.common.credit;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.data.redis.core.script.DefaultRedisScript;
 
@@ -22,6 +24,9 @@ import java.util.concurrent.ThreadLocalRandom;
  */
 public final class RedisExternalSettlementIntentStore
         implements ExternalSettlementIntentStore {
+
+    private static final Logger logger =
+            LoggerFactory.getLogger(RedisExternalSettlementIntentStore.class);
 
     private static final String PREFIX = "trinyx:billing:producer-outbox:";
     private static final String DUE = PREFIX + "due";
@@ -146,26 +151,56 @@ public final class RedisExternalSettlementIntentStore
 
     private static final DefaultRedisScript<Long> DEAD_LETTER_INTENT =
             new DefaultRedisScript<>("""
+                    local unresolved = true
                     local raw = redis.call('GET', KEYS[5])
                     if raw then
                         local ok, operation = pcall(cjson.decode, raw)
                         if ok then
                             local current = operation['state']
-                            if current == 'SETTLEMENT_FAILED' then
+                            if current == 'COMMITTED' or current == 'RELEASED' then
+                                unresolved = false
+                            elseif current == 'SETTLEMENT_FAILED' then
                                 -- Repair keys written by older builds: a transport/dead-letter
                                 -- state is still reconcilable and must outlive any fixed TTL.
                                 redis.call('PERSIST', KEYS[5])
-                            elseif current ~= 'COMMITTED' and current ~= 'RELEASED' then
+                            else
                                 operation['state'] = 'SETTLEMENT_FAILED'
                                 operation['updatedAt'] = ARGV[5]
                                 redis.call('SET', KEYS[5], cjson.encode(operation))
                             end
                         end
                     end
-                    redis.call('PSETEX', KEYS[1], ARGV[2], ARGV[1])
+                    if unresolved then
+                        -- SETTLEMENT_FAILED is not financially terminal. Preserve the complete
+                        -- payload until an authoritative COMMIT/RELEASE or manual reconciliation.
+                        redis.call('SET', KEYS[1], ARGV[1])
+                    else
+                        redis.call('PSETEX', KEYS[1], ARGV[2], ARGV[1])
+                    end
                     redis.call('ZREM', KEYS[4], ARGV[3])
                     redis.call('DEL', KEYS[2], KEYS[3], KEYS[6], KEYS[7])
                     redis.call('ZREM', KEYS[8], ARGV[4])
+                    return 1
+                    """, Long.class);
+
+    private static final DefaultRedisScript<Long> QUARANTINE_CORRUPT_INTENT =
+            new DefaultRedisScript<>("""
+                    local raw = redis.call('GET', KEYS[5])
+                    if raw then
+                        local ok, operation = pcall(cjson.decode, raw)
+                        if ok then
+                            local current = operation['state']
+                            if current ~= 'COMMITTED' and current ~= 'RELEASED' then
+                                operation['state'] = 'SETTLEMENT_FAILED'
+                                operation['updatedAt'] = ARGV[4]
+                                redis.call('SET', KEYS[5], cjson.encode(operation))
+                            end
+                        end
+                    end
+                    redis.call('SET', KEYS[1], ARGV[1])
+                    redis.call('ZREM', KEYS[4], ARGV[2])
+                    redis.call('DEL', KEYS[2], KEYS[3], KEYS[6], KEYS[7])
+                    redis.call('ZREM', KEYS[8], ARGV[3])
                     return 1
                     """, Long.class);
 
@@ -222,20 +257,20 @@ public final class RedisExternalSettlementIntentStore
             Boolean lease = redis.opsForValue().setIfAbsent(
                     claimKey(member), UUID.randomUUID().toString(), CLAIM_TTL);
             if (!Boolean.TRUE.equals(lease)) continue;
-            try {
-                String encoded = redis.opsForValue().get(PREFIX + "item:" + member);
-                if (encoded == null) {
-                    redis.opsForZSet().remove(DUE, member);
-                    redis.delete(claimKey(member));
-                    continue;
-                }
-                claimed.add(json.readValue(encoded, Intent.class));
-                redis.opsForZSet().add(DUE, member,
-                        System.currentTimeMillis() + CLAIM_TTL.toMillis());
-            } catch (Exception failure) {
+            String encoded = redis.opsForValue().get(PREFIX + "item:" + member);
+            if (encoded == null) {
+                redis.opsForZSet().remove(DUE, member);
                 redis.delete(claimKey(member));
-                throw new IllegalStateException("Could not claim settlement intent", failure);
+                continue;
             }
+            try {
+                claimed.add(json.readValue(encoded, Intent.class));
+            } catch (Exception failure) {
+                quarantineCorruptIntent(member, encoded, failure);
+                continue;
+            }
+            redis.opsForZSet().add(DUE, member,
+                    System.currentTimeMillis() + CLAIM_TTL.toMillis());
         }
         return claimed;
     }
@@ -449,6 +484,55 @@ public final class RedisExternalSettlementIntentStore
     public Map<String, String> trustedHeaders(UUID operationId) {
         ProviderOperation operation = readOperation(operationId);
         return operation == null ? Map.of() : operation.trustedHeaders();
+    }
+
+    private void quarantineCorruptIntent(
+            String member, String rawPayload, Exception failure) {
+        UUID operationId = null;
+        int separator = member == null ? -1 : member.lastIndexOf(':');
+        if (separator >= 0 && separator + 1 < member.length()) {
+            try {
+                operationId = UUID.fromString(member.substring(separator + 1));
+            } catch (IllegalArgumentException ignored) {
+                // The raw member is retained below for manual inspection.
+            }
+        }
+        try {
+            String envelope = json.writeValueAsString(Map.of(
+                    "intentKey", member == null ? "" : member,
+                    "rawPayload", rawPayload == null ? "" : rawPayload,
+                    "error", failure.getClass().getSimpleName() + ": "
+                            + value(failure.getMessage()),
+                    "quarantinedAt", Instant.now().toString()));
+            String operationIdValue = operationId == null ? "" : operationId.toString();
+            Long result = redis.execute(QUARANTINE_CORRUPT_INTENT, List.of(
+                            PREFIX + "dead-corrupt:" + member,
+                            PREFIX + "item:" + member,
+                            claimKey(member), DUE,
+                            operationId == null
+                                    ? PREFIX + "invalid-operation:" + member
+                                    : operationKey(operationId),
+                            operationId == null
+                                    ? PREFIX + "invalid-dispatch:" + member
+                                    : dispatchKey(operationId),
+                            operationId == null
+                                    ? PREFIX + "invalid-dispatch-claim:" + member
+                                    : dispatchClaimKey(operationId),
+                            PROVIDER_DISPATCH_DUE),
+                    envelope, member, operationIdValue, Instant.now().toString());
+            if (result == null || result != 1L) {
+                throw new IllegalStateException(
+                        "Could not atomically quarantine corrupt settlement intent " + member);
+            }
+            logger.error("Quarantined corrupt settlement intent {} without blocking its batch: {}",
+                    member, failure.getMessage());
+        } catch (RuntimeException quarantineFailure) {
+            throw quarantineFailure;
+        } catch (Exception quarantineFailure) {
+            throw new IllegalStateException(
+                    "Could not quarantine corrupt settlement intent " + member,
+                    quarantineFailure);
+        }
     }
 
     private ProviderOperation readOperation(UUID operationId) {

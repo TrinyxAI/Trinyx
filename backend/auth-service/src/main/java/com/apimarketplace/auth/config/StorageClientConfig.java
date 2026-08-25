@@ -1,5 +1,6 @@
 package com.apimarketplace.auth.config;
 
+import com.apimarketplace.auth.service.WorkspaceStorageObjectDeleter;
 import com.apimarketplace.storage.client.StorageClient;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
@@ -23,5 +24,11 @@ public class StorageClientConfig {
     public StorageClient storageClient(
             @Value("${services.storage-url:http://localhost:8082}") String storageUrl) {
         return new StorageClient(storageUrl);
+    }
+
+    @Bean
+    public WorkspaceStorageObjectDeleter workspaceStorageObjectDeleter(
+            StorageClient storageClient) {
+        return storageClient::delete;
     }
 }

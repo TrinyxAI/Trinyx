@@ -78,8 +78,17 @@ class RedisExternalSettlementIntentStoreTest {
                 .contains("operation['state'] = 'SETTLEMENT_FAILED'")
                 .contains("SET', KEYS[5]")
                 .contains("PERSIST', KEYS[5]")
+                .contains("if unresolved")
+                .contains("SET', KEYS[1]")
                 .contains("PSETEX', KEYS[1]")
                 .contains("ZREM', KEYS[4]");
+
+        String quarantine = script("QUARANTINE_CORRUPT_INTENT");
+        assertThat(quarantine)
+                .contains("operation['state'] = 'SETTLEMENT_FAILED'")
+                .contains("SET', KEYS[1]")
+                .contains("ZREM', KEYS[4]")
+                .contains("DEL', KEYS[2], KEYS[3]");
     }
 
     @Test
@@ -362,6 +371,11 @@ class RedisExternalSettlementIntentStoreTest {
             assertThat(store.providerOperation(failed).state())
                     .isEqualTo("SETTLEMENT_FAILED");
             assertThat(redis.getExpire(failedOperationKey)).isEqualTo(-1L);
+            String failedDeadKey =
+                    "trinyx:billing:producer-outbox:dead:" + failedIntent.key();
+            assertThat(redis.getExpire(failedDeadKey)).isEqualTo(-1L);
+            assertThat(redis.opsForValue().get(failedDeadKey))
+                    .contains("permanent authority rejection", failedIntent.operationId().toString());
 
             // Repeating DEAD repairs legacy producer failures that still carry
             // the former terminal TTL.
@@ -528,6 +542,67 @@ class RedisExternalSettlementIntentStoreTest {
                     delayedReleaseUnknown.key())).isNull();
             store.dead(delayedReleaseUnknown, "authority already released");
             assertThat(store.providerOperation(released).state()).isEqualTo("RELEASED");
+        } finally {
+            connectionFactory.destroy();
+        }
+    }
+
+    @Test
+    void corruptIntentIsPersistentlyQuarantinedWithoutBlockingValidBatchMembers() {
+        String host = System.getenv("TRINYX_TEST_REDIS_HOST");
+        assumeTrue(host != null && !host.isBlank(), "real Redis is enabled by Cloud CI");
+
+        LettuceConnectionFactory connectionFactory = new LettuceConnectionFactory(host, 6379);
+        connectionFactory.afterPropertiesSet();
+        StringRedisTemplate redis = new StringRedisTemplate(connectionFactory);
+        redis.afterPropertiesSet();
+        try {
+            Set<String> existing = redis.keys("trinyx:billing:producer-outbox:*");
+            if (existing != null && !existing.isEmpty()) redis.delete(existing);
+
+            RedisExternalSettlementIntentStore store =
+                    new RedisExternalSettlementIntentStore(
+                            redis, new ObjectMapper().findAndRegisterModules());
+
+            UUID corruptOperation = UUID.randomUUID();
+            store.registerProviderOperation(operation(corruptOperation));
+            assertThat(store.markProviderDispatching(corruptOperation)).isTrue();
+            String corruptMember = "COMMIT_LLM:" + corruptOperation;
+            String corruptPayloadKey =
+                    "trinyx:billing:producer-outbox:item:" + corruptMember;
+            redis.opsForValue().set(corruptPayloadKey, "{not-json");
+            redis.opsForZSet().add(
+                    "trinyx:billing:producer-outbox:due",
+                    corruptMember, System.currentTimeMillis() - 2);
+
+            UUID validOperation = UUID.randomUUID();
+            store.registerProviderOperation(operation(validOperation));
+            assertThat(store.markProviderDispatching(validOperation)).isTrue();
+            ExternalSettlementIntentStore.Intent valid =
+                    intent("COMMIT_LLM", validOperation, "http://auth/commit");
+            store.persist(valid);
+
+            List<ExternalSettlementIntentStore.Intent> claimed = store.claimDue(10);
+
+            assertThat(claimed)
+                    .extracting(ExternalSettlementIntentStore.Intent::key)
+                    .contains(valid.key())
+                    .doesNotContain(corruptMember);
+            assertThat(redis.opsForValue().get(corruptPayloadKey)).isNull();
+            assertThat(redis.opsForZSet().score(
+                    "trinyx:billing:producer-outbox:due", corruptMember)).isNull();
+            assertThat(redis.opsForValue().get(
+                    "trinyx:billing:producer-outbox:claim:" + corruptMember)).isNull();
+            String quarantineKey =
+                    "trinyx:billing:producer-outbox:dead-corrupt:" + corruptMember;
+            assertThat(redis.getExpire(quarantineKey)).isEqualTo(-1L);
+            assertThat(redis.opsForValue().get(quarantineKey))
+                    .contains("{not-json", corruptMember);
+            assertThat(store.providerOperation(corruptOperation).state())
+                    .isEqualTo("SETTLEMENT_FAILED");
+            assertThat(redis.getExpire(
+                    "trinyx:billing:producer-outbox:operation:" + corruptOperation))
+                    .isEqualTo(-1L);
         } finally {
             connectionFactory.destroy();
         }

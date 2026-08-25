@@ -47,7 +47,7 @@ class WorkspaceDataPurgerTest {
     @Mock private Connection conn;
     @Mock private PreparedStatement ps;
     @Mock private Savepoint savepoint;
-    @Mock private com.apimarketplace.storage.client.StorageClient storageClient;
+    @Mock private WorkspaceStorageObjectDeleter storageObjectDeleter;
     @Mock private jakarta.persistence.Query objectKeyQuery;
     @InjectMocks private WorkspaceDataPurger purger;
 
@@ -61,7 +61,7 @@ class WorkspaceDataPurgerTest {
 
     @BeforeEach
     void setUp() throws Exception {
-        // @InjectMocks now uses the StorageClient constructor, which means Mockito no longer does
+        // @InjectMocks uses the deletion-port constructor, so Mockito no longer does
         // field injection - em has to be set explicitly or it stays null.
         org.springframework.test.util.ReflectionTestUtils.setField(purger, "em", em);
         // Object enumeration runs before the storage DELETE; default it to "no objects" so the
@@ -108,15 +108,15 @@ class WorkspaceDataPurgerTest {
     void keysAreReadBeforeTheRowsThatCarryThemAreDeleted() throws Exception {
         when(objectKeyQuery.getResultList())
                 .thenReturn(List.<Object[]>of(new Object[]{"tenant-9/report.pdf", "tenant-9"}));
-        when(storageClient.delete(anyString(), anyString())).thenReturn(true);
+        when(storageObjectDeleter.delete(anyString(), anyString())).thenReturn(true);
 
         purger.purgeOperationalData(ORG_ID);
 
         // The keys live nowhere else. Reorder these two and the feature silently becomes a no-op
         // while every other assertion in this class stays green.
-        org.mockito.InOrder order = org.mockito.Mockito.inOrder(em, storageClient, conn);
+        org.mockito.InOrder order = org.mockito.Mockito.inOrder(em, storageObjectDeleter, conn);
         order.verify(em).createNativeQuery(org.mockito.ArgumentMatchers.contains("SELECT s3_key"));
-        order.verify(storageClient).delete("tenant-9", "tenant-9/report.pdf");
+        order.verify(storageObjectDeleter).delete("tenant-9", "tenant-9/report.pdf");
         order.verify(conn, atLeastOnce())
                 .prepareStatement(org.mockito.ArgumentMatchers.contains("DELETE FROM storage.storage"));
     }
@@ -125,16 +125,16 @@ class WorkspaceDataPurgerTest {
     @DisplayName("objects are deleted under the KEY OWNER's tenant, not the caller's")
     void objectsAreDeletedUnderTheOwnerTenant() throws Exception {
         // Internal storage refuses a key whose prefix does not match the X-User-ID it is given, and
-        // StorageClient turns that 403 into an empty Optional. Passing the wrong tenant therefore
+        // the deletion port reports that refusal as false. Passing the wrong tenant therefore
         // fails silently: the row goes, the object stays, and nothing throws.
         when(objectKeyQuery.getResultList())
                 .thenReturn(List.<Object[]>of(new Object[]{"tenant-42/a.png", "tenant-42"}));
-        when(storageClient.delete(anyString(), anyString())).thenReturn(true);
+        when(storageObjectDeleter.delete(anyString(), anyString())).thenReturn(true);
 
         purger.purgeOperationalData(ORG_ID);
 
-        verify(storageClient).delete("tenant-42", "tenant-42/a.png");
-        verify(storageClient, org.mockito.Mockito.never()).delete(org.mockito.ArgumentMatchers.eq(ORG_ID), anyString());
+        verify(storageObjectDeleter).delete("tenant-42", "tenant-42/a.png");
+        verify(storageObjectDeleter, org.mockito.Mockito.never()).delete(org.mockito.ArgumentMatchers.eq(ORG_ID), anyString());
     }
 
     @Test
@@ -144,16 +144,16 @@ class WorkspaceDataPurgerTest {
                 new Object[]{"tenant-9/first.bin", "tenant-9"},
                 new Object[]{null, "tenant-9"},
                 new Object[]{"tenant-9/third.bin", "tenant-9"}));
-        when(storageClient.delete("tenant-9", "tenant-9/first.bin"))
+        when(storageObjectDeleter.delete("tenant-9", "tenant-9/first.bin"))
                 .thenThrow(new RuntimeException("bucket unreachable"));
-        when(storageClient.delete("tenant-9", "tenant-9/third.bin")).thenReturn(true);
+        when(storageObjectDeleter.delete("tenant-9", "tenant-9/third.bin")).thenReturn(true);
 
         purger.purgeOperationalData(ORG_ID);
 
         // One unreachable object must not strand the account with all its rows intact; the third
         // key is still attempted, and the null key is skipped rather than sent as "null".
-        verify(storageClient).delete("tenant-9", "tenant-9/third.bin");
-        verify(storageClient, times(2)).delete(anyString(), anyString());
+        verify(storageObjectDeleter).delete("tenant-9", "tenant-9/third.bin");
+        verify(storageObjectDeleter, times(2)).delete(anyString(), anyString());
         verify(conn, atLeastOnce())
                 .prepareStatement(org.mockito.ArgumentMatchers.contains("DELETE FROM storage.storage"));
     }

@@ -286,9 +286,13 @@ public class ExternalCreditProxyService {
                 DO UPDATE SET status='PENDING', next_attempt_at=LEAST(
                     auth.cloud_settlement_outbox.next_attempt_at, now()),
                     last_error=EXCLUDED.last_error
+                WHERE auth.cloud_settlement_outbox.status IN ('PENDING','FAILED')
                 """, UUID.randomUUID(), operationId, action, requestHash, write(payload),
                 bounded(failure.getMessage()));
-        if (inserted == 0) {
+        // A zero update count means an existing PROCESSING/DELIVERED/DEAD row retained
+        // ownership or its audit terminal. That row already represents a durable handoff;
+        // never steal its lease or resurrect it merely because the producer polls after 202.
+        if (inserted < 0) {
             throw new IllegalStateException("Could not persist settlement retry", failure);
         }
     }

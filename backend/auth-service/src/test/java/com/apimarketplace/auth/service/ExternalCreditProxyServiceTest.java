@@ -96,6 +96,27 @@ class ExternalCreditProxyServiceTest {
     }
 
     @Test
+    void retryQueueDoesNotRearmOwnedOrTerminalRows() {
+        UUID operationId = UUID.randomUUID();
+        var command = new ExternalCreditProxyService.ReleaseCommand(
+                "provider-failure", "d".repeat(64));
+        doThrow(new PaidMonolithCreditClient.RetryableAuthorityException("timeout", null))
+                .when(authority).release(eq(operationId), any());
+        jdbc.nextUpdateResult = 0;
+
+        ExternalCreditProxyService.SettlementResult result =
+                service.release(operationId, command);
+
+        assertThat(result.queued()).isTrue();
+        assertThat(jdbc.sql)
+                .filteredOn(sql -> sql.contains("cloud_settlement_outbox"))
+                .singleElement()
+                .satisfies(sql -> assertThat(sql)
+                        .contains("status IN ('PENDING','FAILED')")
+                        .doesNotContain("status IN ('PROCESSING','DELIVERED','DEAD')"));
+    }
+
+    @Test
     void llmCommitForwardsCompleteUsageForPaidAuthorityRepricing() {
         UUID operationId = UUID.randomUUID();
         String hash = "c".repeat(64);
@@ -173,11 +194,17 @@ class ExternalCreditProxyServiceTest {
     private static final class RecordingJdbc extends JdbcTemplate {
         private final List<String> sql = new ArrayList<>();
         private final List<SqlCall> calls = new ArrayList<>();
+        private Integer nextUpdateResult;
 
         @Override
         public int update(String statement, Object... args) {
             sql.add(statement);
             calls.add(new SqlCall(statement, java.util.Arrays.asList(args)));
+            if (nextUpdateResult != null) {
+                int result = nextUpdateResult;
+                nextUpdateResult = null;
+                return result;
+            }
             return 1;
         }
 

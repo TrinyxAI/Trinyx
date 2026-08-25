@@ -34,6 +34,22 @@ class MonolithSecurityFilterBillingWorkloadTest {
     }
 
     @Test
+    void privateDispatchAckUsesWorkloadIdentityInsteadOfEmbeddedJwt() throws Exception {
+        MockHttpServletRequest request = request(
+                "/internal/v1/credit-reservations/"
+                        + "11111111-1111-1111-1111-111111111111/dispatching",
+                "127.0.0.1");
+        request.addHeader("Authorization", "Bearer ed25519.workload.token");
+        MockHttpServletResponse response = new MockHttpServletResponse();
+        AtomicReference<ServletRequest> captured = new AtomicReference<>();
+
+        filter.doFilter(request, response, (req, res) -> captured.set(req));
+
+        assertThat(captured.get()).isNotNull();
+        assertThat(response.getStatus()).isEqualTo(200);
+    }
+
+    @Test
     void privateUnknownOutcomeUsesWorkloadIdentityInsteadOfEmbeddedJwt() throws Exception {
         MockHttpServletRequest request = request(
                 "/internal/v1/credit-reservations/"

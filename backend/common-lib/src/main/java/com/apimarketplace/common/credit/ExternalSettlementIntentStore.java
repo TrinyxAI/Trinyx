@@ -83,6 +83,11 @@ public interface ExternalSettlementIntentStore {
         // Compatibility no-op.
     }
 
+    /** Immutable provider metadata captured with the authoritative reservation. */
+    default ProviderOperation providerOperation(UUID operationId) {
+        return null;
+    }
+
     /** Trusted identity context captured at reservation time for async retries. */
     default Map<String, String> trustedHeaders(UUID operationId) {
         return Map.of();

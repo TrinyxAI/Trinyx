@@ -516,6 +516,11 @@ class CloudCreditAuthorityServiceTest {
         }
 
         @Override
+        public <T> List<T> query(String sql, RowMapper<T> mapper) {
+            return query(sql, mapper, new Object[0]);
+        }
+
+        @Override
         public <T> List<T> query(String sql, RowMapper<T> mapper, Object... args) {
             try {
                 if (sql.contains("SELECT actor.id")) {

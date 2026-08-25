@@ -112,8 +112,8 @@ committed atomically.
 A transport failure after provider dispatch is reported as
 `OUTCOME_UNKNOWN`, not released. Paid-monolith retains the hold for
 reconciliation; if the report itself arrives after the original hold expired,
-the operation becomes `OUTCOME_UNKNOWN_EXPIRED` and remains eligible for
-late settlement within the 24-hour window. Cloud never falls back to a local
+the operation becomes `OUTCOME_UNKNOWN_EXPIRED` and receives a full bounded
+24-hour reconciliation settlement window from that transition. Cloud never falls back to a local
 balance when the authority is unavailable.
 
 LLM relays send the provider/model and prompt/output token ceiling before
@@ -178,7 +178,7 @@ The request target includes the raw query. Roles are uppercase, de-duplicated
 and lexicographically sorted. Empty fields remain empty lines. Timestamp skew
 is ±60 seconds. Redis consumes each nonce once for five minutes. The servlet
 and reactive gateway wrappers hash the exact bytes later read by controllers
-and reject bodies above 10 MiB by default.
+and reject bodies above 50 MiB by default.
 
 All externally supplied identity, role, assertion and HMAC headers are removed
 before trusted values are added.
@@ -445,10 +445,12 @@ requires encrypted volume snapshots/backups and alerting at minimum; a managed
 replicated Redis (or a future PostgreSQL producer journal) is recommended before
 claiming infrastructure-failure durability.
 
-An ambiguous operation must be reconciled within the 24-hour late-settlement
-window by replaying the provider usage as the same commit operation, or by an
-explicit release only after evidence that no cost was incurred. It must never be
-released merely because the producer timed out. Alert on
+An ambiguous operation has a 24-hour reconciliation SLA. If that SLA is
+breached, the authority transitions it to `OUTCOME_UNKNOWN_EXPIRED` and grants
+a fresh bounded 24-hour settlement window from the escalation time. Reconcile
+by replaying provider usage as the same commit operation, or explicitly release
+only after evidence that no cost was incurred. It must never be released merely
+because the producer timed out. Alert on
 `OUTCOME_UNKNOWN`, `OUTCOME_UNKNOWN_EXPIRED`, `SETTLEMENT_FAILED` and DEAD
 producer/auth outbox entries. There is deliberately no silent infinite
 last-known-good or automatic browser-triggered reconciliation.

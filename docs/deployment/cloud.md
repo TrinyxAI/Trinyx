@@ -426,10 +426,38 @@ docker compose --env-file docker/.env.cloud \
   -f docker/docker-compose.cloud.yml up -d
 ```
 
+### Billing producer journal and Redis durability
+
+For external billing, every provider operation is registered after the
+authoritative hold and transitions to `DISPATCHING` in Redis before the provider
+network call. If the process disappears while dispatching, the producer
+dispatcher converts the stale state to a durable `OUTCOME_UNKNOWN` intent before
+the paid-monolith reservation expires. `OUTCOME_UNKNOWN` is non-terminal: only
+an idempotent `COMMITTED` or `RELEASED` decision can finish the operation, and
+the original request hash/provider/model cannot change.
+
+The bundled Redis explicitly uses AOF with `appendfsync everysec`, an RDB
+preamble, `noeviction`, a named `/data` volume and a graceful shutdown window.
+That survives application restarts and Redis container replacement while the
+Docker volume remains intact. It does **not** provide host/volume failure
+tolerance, replication or multi-AZ durability. Production billing therefore
+requires encrypted volume snapshots/backups and alerting at minimum; a managed
+replicated Redis (or a future PostgreSQL producer journal) is recommended before
+claiming infrastructure-failure durability.
+
+An ambiguous operation must be reconciled within the 24-hour late-settlement
+window by replaying the provider usage as the same commit operation, or by an
+explicit release only after evidence that no cost was incurred. It must never be
+released merely because the producer timed out. Alert on
+`OUTCOME_UNKNOWN`, `OUTCOME_UNKNOWN_EXPIRED`, `SETTLEMENT_FAILED` and DEAD
+producer/auth outbox entries. There is deliberately no silent infinite
+last-known-good or automatic browser-triggered reconciliation.
+
 Before production: generate/rotate keys, configure the paid authority, run
-migration backups/restores, complete the provider-stub E2E, test revoke and
-late settlement, validate WebSocket/CDP behavior, install metrics/alerts and
-capacity-test Chromium.
+migration backups/restores, complete the seven provider-stub failure-mode E2E
+scenarios, test revoke and late settlement, validate WebSocket/CDP behavior,
+install billing/outbox/unknown-outcome metrics and alerts, verify Redis backup
+restore, and capacity-test Chromium.
 
 ## Capacity and remaining external dependencies
 
@@ -454,7 +482,7 @@ Wallet reservations must never traverse the public `app.trinyx.fr` virtual host.
 - bind the listener only to its private VPC address;
 - allow ingress only from the Cloud security group;
 - use a certificate trusted by the Cloud JVM;
-- route only the three POST reservation/commit/release shapes;
+- route only the explicit POST reservation/commit/release/outcome-unknown shapes;
 - remove forwarding headers before the loopback hop to the monolith;
 - keep the public proxy forwarding `Forwarded` or `X-Forwarded-For`.
 

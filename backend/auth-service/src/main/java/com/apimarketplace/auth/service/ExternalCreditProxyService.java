@@ -219,13 +219,8 @@ public class ExternalCreditProxyService {
 
     private void markSettled(UUID operationId, String action, String requestHash,
                              String state, Object response) {
-        jdbc.update("""
-                UPDATE auth.cloud_credit_operation
-                SET state=?, response_payload=CAST(? AS jsonb), updated_at=now()
-                WHERE operation_id=?
-                  AND (state NOT IN ('COMMITTED','COMMITTED_DELINQUENT','RELEASED')
-                       OR state=?)
-                """, state, write(response), operationId, state);
+        // Keep the same lock order as CloudSettlementResultWriter: outbox row(s)
+        // first, then the operation projection.
         if (terminalState(state)) {
             jdbc.update("""
                     UPDATE auth.cloud_settlement_outbox
@@ -242,6 +237,13 @@ public class ExternalCreditProxyService {
                       AND status IN ('PENDING','PROCESSING','FAILED')
                     """, operationId, action, requestHash);
         }
+        jdbc.update("""
+                UPDATE auth.cloud_credit_operation
+                SET state=?, response_payload=CAST(? AS jsonb), updated_at=now()
+                WHERE operation_id=?
+                  AND (state NOT IN ('COMMITTED','COMMITTED_DELINQUENT','RELEASED')
+                       OR state=?)
+                """, state, write(response), operationId, state);
     }
 
     private static boolean terminalState(String state) {

@@ -238,7 +238,7 @@ public class ExternalCreditProxyService {
         jdbc.update("""
                 UPDATE auth.cloud_credit_operation
                 SET state='SETTLEMENT_FAILED', updated_at=now()
-                WHERE operation_id=? AND state IN ('RESERVED','EXPIRED','OUTCOME_UNKNOWN','OUTCOME_UNKNOWN_EXPIRED')
+                WHERE operation_id=? AND state IN ('RESERVED','DISPATCHING','EXPIRED','OUTCOME_UNKNOWN','OUTCOME_UNKNOWN_EXPIRED')
                 """, operationId);
     }
 

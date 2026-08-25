@@ -111,14 +111,15 @@ public final class RedisExternalSettlementIntentStore
 
     private static final DefaultRedisScript<Long> RETRY_INTENT =
             new DefaultRedisScript<>("""
-                    local owner = redis.call('GET', KEYS[3])
-                    if not owner or owner ~= ARGV[4] then return -4 end
                     local existing = redis.call('GET', KEYS[1])
                     if not existing then
                         redis.call('ZREM', KEYS[2], ARGV[3])
-                        redis.call('DEL', KEYS[3])
+                        local owner = redis.call('GET', KEYS[3])
+                        if owner == ARGV[4] then redis.call('DEL', KEYS[3]) end
                         return 0
                     end
+                    local owner = redis.call('GET', KEYS[3])
+                    if not owner or owner ~= ARGV[4] then return -4 end
                     redis.call('SET', KEYS[1], ARGV[1])
                     redis.call('ZADD', KEYS[2], ARGV[2], ARGV[3])
                     redis.call('DEL', KEYS[3])
@@ -381,7 +382,8 @@ public final class RedisExternalSettlementIntentStore
                     intent.claimToken());
             if (result == null || result != 1L) {
                 throw new IllegalStateException(
-                        "Could not atomically dead-letter settlement intent " + intent.key());
+                        "Could not atomically dead-letter settlement intent "
+                                + intent.key() + " result=" + result);
             }
         } catch (RuntimeException failure) {
             throw failure;

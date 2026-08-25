@@ -152,7 +152,10 @@ class RedisExternalSettlementIntentStoreTest {
             List<ExternalSettlementIntentStore.Intent> claimed = store.claimDue(10);
             assertThat(claimed).extracting(ExternalSettlementIntentStore.Intent::key)
                     .contains(intent.key());
-            store.acknowledge(intent);
+            ExternalSettlementIntentStore.Intent claimedCommit = claimed.stream()
+                    .filter(value -> value.key().equals(intent.key()))
+                    .findFirst().orElseThrow();
+            store.acknowledge(claimedCommit);
 
             assertThat(redis.opsForValue().get(
                     "trinyx:billing:producer-outbox:item:" + intent.key())).isNull();
@@ -221,9 +224,12 @@ class RedisExternalSettlementIntentStoreTest {
             ExternalSettlementIntentStore.Intent conflictingRelease =
                     intent("RELEASE", committed, "http://auth/release");
             store.persist(conflictingRelease);
-            assertThatThrownBy(() -> store.acknowledge(conflictingRelease))
+            ExternalSettlementIntentStore.Intent ownedConflictingRelease =
+                    store.claim(conflictingRelease);
+            assertThat(ownedConflictingRelease).isNotNull();
+            assertThatThrownBy(() -> store.acknowledge(ownedConflictingRelease))
                     .hasMessageContaining("result=-3");
-            store.dead(conflictingRelease, "COMMITTED is authoritative");
+            store.dead(ownedConflictingRelease, "COMMITTED is authoritative");
 
             UUID released = UUID.randomUUID();
             store.registerProviderOperation(operation(released));

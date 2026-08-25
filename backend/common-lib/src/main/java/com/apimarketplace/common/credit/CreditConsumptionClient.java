@@ -1203,14 +1203,43 @@ public class CreditConsumptionClient {
             return false;
         }
         try {
+            ExternalSettlementIntentStore.ProviderOperation operation =
+                    settlementIntentStore.providerOperation(operationId);
+            if (operation == null) {
+                log.error("Provider dispatch blocked: operation metadata missing operationId={}",
+                        operationId);
+                return false;
+            }
             boolean marked = settlementIntentStore.markProviderDispatching(operationId);
             if (!marked) {
                 log.error("Provider dispatch blocked: operation missing or already dispatched operationId={}",
                         operationId);
+                return false;
             }
-            return marked;
+
+            // The local durable journal is the first half of the point of no
+            // return. The paid wallet must acknowledge DISPATCHING synchronously
+            // before the provider may see any bytes. A queued/retryable response
+            // is deliberately not sufficient to authorize provider delivery.
+            Map<String, Object> body = new HashMap<>();
+            body.put("requestHash", value(operation.requestHash()));
+            body.put("provider", value(operation.provider()));
+            body.put("model", value(operation.model()));
+            ExternalSettlementIntentStore.Intent authorityDispatch =
+                    new ExternalSettlementIntentStore.Intent(
+                            "DISPATCHING", operationId,
+                            dispatchingUrl(operation.outcomeUnknownUrl()), body, 0,
+                            operation.trustedHeaders());
+            SettlementDelivery delivery = deliverPersistedSettlement(authorityDispatch);
+            if (delivery != SettlementDelivery.ACKNOWLEDGED) {
+                log.error("Provider dispatch blocked: paid authority did not acknowledge "
+                                + "DISPATCHING operationId={} result={}",
+                        operationId, delivery);
+                return false;
+            }
+            return true;
         } catch (RuntimeException failure) {
-            log.error("Provider dispatch blocked: journal write failed operationId={}: {}",
+            log.error("Provider dispatch blocked: pre-dispatch handshake failed operationId={}: {}",
                     operationId, failure.getMessage());
             return false;
         }
@@ -1247,6 +1276,15 @@ public class CreditConsumptionClient {
         }
         return new ExternalSettlementIntentStore.Intent(
                 action, operationId, url, body, 0, trusted);
+    }
+
+    private static String dispatchingUrl(String outcomeUnknownUrl) {
+        String suffix = "/outcome-unknown";
+        if (outcomeUnknownUrl == null || !outcomeUnknownUrl.endsWith(suffix)) {
+            throw new IllegalStateException("Provider operation has no valid outcome URL");
+        }
+        return outcomeUnknownUrl.substring(0,
+                outcomeUnknownUrl.length() - suffix.length()) + "/dispatching";
     }
 
     private static Map<String, String> trustedSecurityHeaders(HttpHeaders headers) {

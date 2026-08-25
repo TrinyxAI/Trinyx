@@ -191,18 +191,21 @@ public class CloudLlmRelayController {
                     .body(outputStream -> writeEvent(outputStream,
                             CloudLlmStreamEvent.error("INSUFFICIENT_CREDITS")));
         }
-        if (!prepareProviderDispatch(target)) {
-            return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE)
-                    .contentType(MediaType.APPLICATION_JSON)
-                    .body(outputStream -> writeEvent(outputStream,
-                            CloudLlmStreamEvent.error("BILLING_DISPATCH_JOURNAL_UNAVAILABLE")));
-        }
         StreamingResponseBody body = outputStream -> {
             AtomicInteger streamedContentChars = new AtomicInteger(0);
             AtomicBoolean recorded = new AtomicBoolean(false);
             AtomicBoolean streamClosed = new AtomicBoolean(false);
             AtomicBoolean providerOutcomeAmbiguous = new AtomicBoolean(false);
+            AtomicBoolean providerDispatched = new AtomicBoolean(false);
             try {
+                if (!prepareProviderDispatch(target)) {
+                    writeQuietly(outputStream,
+                            CloudLlmStreamEvent.error(
+                                    "BILLING_DISPATCH_JOURNAL_UNAVAILABLE"),
+                            streamClosed);
+                    return;
+                }
+                providerDispatched.set(true);
                 billedProvider.completeStreaming(request, new StreamingCallback() {
                     @Override
                     public void onChunk(String chunk) {
@@ -260,7 +263,11 @@ public class CloudLlmRelayController {
                     writeQuietly(outputStream, CloudLlmStreamEvent.error(e.getMessage()), streamClosed);
                 }
             } finally {
-                if (providerOutcomeAmbiguous.get() && target.externalOperationId() != null) {
+                if (!providerDispatched.get()) {
+                    // No provider boundary was crossed; the authoritative hold
+                    // expires/releases without fabricating usage.
+                } else if (providerOutcomeAmbiguous.get()
+                        && target.externalOperationId() != null) {
                     recordAmbiguousProviderOutcome(target,
                             "stream-provider-outcome-unknown-after-dispatch");
                 } else if (target.externalOperationId() != null || streamedContentChars.get() > 0) {

@@ -1,11 +1,17 @@
 package com.apimarketplace.auth.service;
 
+import com.apimarketplace.auth.domain.CreditLedgerEntry;
+import com.apimarketplace.auth.domain.Plan;
+import com.apimarketplace.auth.domain.Subscription;
+import com.apimarketplace.auth.repository.CreditLedgerRepository;
+import com.apimarketplace.auth.repository.SubscriptionRepository;
 import com.apimarketplace.common.security.CanonicalJson;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.core.RowCallbackHandler;
 import org.springframework.jdbc.core.RowMapper;
+import org.springframework.data.domain.Pageable;
 import org.springframework.web.server.ResponseStatusException;
 
 import java.math.BigDecimal;
@@ -13,8 +19,10 @@ import java.sql.ResultSet;
 import java.sql.Timestamp;
 import java.time.Duration;
 import java.time.Instant;
+import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Optional;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.*;
@@ -408,6 +416,16 @@ class CloudCreditAuthorityServiceTest {
     }
 
     @Test
+    void unknownLifecycleComposesCloudStateGenericSweeperAndRealWallet() {
+        assertRealWalletUnknownLifecycle(false);
+    }
+
+    @Test
+    void unknownExpiredLifecycleComposesCloudStateGenericSweeperAndRealWallet() {
+        assertRealWalletUnknownLifecycle(true);
+    }
+
+    @Test
     void staleUnknownIsEscalatedWithoutReleasingTheWalletHold() {
         int escalated = service.escalateStaleUnknownOutcomes();
 
@@ -480,6 +498,76 @@ class CloudCreditAuthorityServiceTest {
                 .hasMessageContaining("INVALID_ACTUAL_CREDITS");
         verify(credits, never()).settleExternalReservation(
                 anyString(), any(), anyString(), anyString(), anyBoolean());
+    }
+
+    private void assertRealWalletUnknownLifecycle(boolean escalate) {
+        SubscriptionRepository subscriptions = mock(SubscriptionRepository.class);
+        CreditLedgerRepository ledger = mock(CreditLedgerRepository.class);
+        ModelPricingService pricing = mock(ModelPricingService.class);
+        CreditService realCredits = new CreditService(subscriptions, ledger, pricing, false);
+
+        Subscription wallet = new Subscription();
+        wallet.setId(1L);
+        wallet.setPlan(new Plan("PRO", "Pro", "paid"));
+        wallet.setRemainingCredits(new BigDecimal("20"));
+        wallet.setPaygRemainingCredits(BigDecimal.ZERO);
+        wallet.setDelinquent(false);
+        when(subscriptions.findActiveByUserIdForUpdate(42L)).thenReturn(Optional.of(wallet));
+        when(subscriptions.findActiveByUserId(42L)).thenReturn(Optional.of(wallet));
+
+        UUID operationId = UUID.randomUUID();
+        String sourceId = "cloud-reservation:" + operationId;
+        String hash = (escalate ? "6" : "5").repeat(64);
+        CreditLedgerEntry[] held = new CreditLedgerEntry[1];
+        when(ledger.existsBySourceId(sourceId)).thenReturn(false);
+        when(ledger.save(any(CreditLedgerEntry.class))).thenAnswer(invocation -> {
+            CreditLedgerEntry saved = invocation.getArgument(0);
+            held[0] = saved;
+            return saved;
+        });
+        when(ledger.findFirstBySourceIdForUpdate(sourceId))
+                .thenAnswer(ignored -> Optional.ofNullable(held[0]));
+        when(ledger.findFirstBySourceId(sourceId))
+                .thenAnswer(ignored -> Optional.ofNullable(held[0]));
+
+        assertThat(realCredits.tryReserveMarkup(42L, sourceId, "vendor", "tool",
+                BigDecimal.TEN, null, 10, "CLOUD", operationId.toString(), false).success())
+                .isTrue();
+        held[0].setExpiresAt(LocalDateTime.now().minusMinutes(10));
+
+        jdbc.row = new ExistingRow(operationId, hash, null, "RESERVED", "{}",
+                Instant.now().plusSeconds(3600), "PLATFORM_MARKUP", "vendor", "tool");
+        CloudCreditAuthorityService integrated =
+                new CloudCreditAuthorityService(jdbc, realCredits, json);
+        integrated.outcomeUnknown(operationId,
+                new CloudCreditAuthorityService.OutcomeUnknownRequest(
+                        "provider timeout after dispatch", hash, "vendor", "tool"));
+
+        when(ledger.findExpiredReserves(any(LocalDateTime.class), any(Pageable.class)))
+                .thenReturn(List.of(held[0]));
+        new PlatformMarkupReserveSweeper(ledger, realCredits, true)
+                .sweepExpiredReservations();
+
+        assertThat(held[0].getSourceType()).isEqualTo("PLATFORM_MARKUP_RESERVE");
+        assertThat(wallet.getTotalBalance()).isEqualByComparingTo("10");
+
+        if (escalate) {
+            assertThat(integrated.escalateStaleUnknownOutcomes()).isEqualTo(1);
+            assertThat(jdbc.row.state()).isEqualTo("OUTCOME_UNKNOWN_EXPIRED");
+        } else {
+            assertThat(jdbc.row.state()).isEqualTo("OUTCOME_UNKNOWN");
+        }
+
+        var command = new CloudCreditAuthorityService.CommitRequest(
+                new BigDecimal("12"), "vendor", "tool", "provider-proof",
+                null, null, hash);
+        var committed = integrated.commit(operationId, command);
+        var retried = integrated.commit(operationId, command);
+
+        assertThat(committed.state()).isEqualTo("COMMITTED");
+        assertThat(retried).isEqualTo(committed);
+        assertThat(wallet.getTotalBalance()).isEqualByComparingTo("8");
+        assertThat(held[0].getSourceType()).isEqualTo("PLATFORM_MARKUP");
     }
 
     private static CloudCreditAuthorityService.ReserveRequest reserve(UUID id, String hash) {

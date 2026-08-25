@@ -21,19 +21,21 @@ public class CloudSettlementResultWriter {
 
     @Transactional
     public void delivered(UUID outboxId, UUID operationId, String requestHash,
-                          String state, String responseJson) {
+                          UUID claimToken, String state, String responseJson) {
         int acknowledged = jdbc.update("""
                 UPDATE auth.cloud_settlement_outbox
-                SET status='DELIVERED', delivered_at=now(), last_error=NULL
-                WHERE id=? AND status='PROCESSING'
-                """, outboxId);
+                SET status='DELIVERED', delivered_at=now(), last_error=NULL,
+                    claim_token=NULL
+                WHERE id=? AND status='PROCESSING' AND claim_token=?
+                """, outboxId, claimToken);
         if (acknowledged != 1) {
             return;
         }
         if (terminalState(state)) {
             jdbc.update("""
                     UPDATE auth.cloud_settlement_outbox
-                    SET status='DELIVERED', delivered_at=now(), last_error=NULL
+                    SET status='DELIVERED', delivered_at=now(), last_error=NULL,
+                        claim_token=NULL
                     WHERE operation_id=? AND action='OUTCOME_UNKNOWN' AND request_hash=?
                       AND status IN ('PENDING','PROCESSING','FAILED')
                     """, operationId, requestHash);
@@ -54,12 +56,14 @@ public class CloudSettlementResultWriter {
     }
 
     @Transactional
-    public void dead(UUID outboxId, UUID operationId, int attempt, String error) {
+    public void dead(UUID outboxId, UUID operationId, UUID claimToken,
+                     int attempt, String error) {
         int acknowledged = jdbc.update("""
                 UPDATE auth.cloud_settlement_outbox
-                SET status='DEAD', attempt_count=?, last_error=?, terminal_at=now()
-                WHERE id=? AND status='PROCESSING'
-                """, attempt, error, outboxId);
+                SET status='DEAD', attempt_count=?, last_error=?, terminal_at=now(),
+                    claim_token=NULL
+                WHERE id=? AND status='PROCESSING' AND claim_token=?
+                """, attempt, error, outboxId, claimToken);
         if (acknowledged != 1) {
             return;
         }

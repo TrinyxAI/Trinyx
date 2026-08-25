@@ -42,7 +42,8 @@ class CloudSettlementOutboxDispatcherTest {
                 .getAnnotation(org.springframework.transaction.annotation.Transactional.class))
                 .isNull();
         verify(resultWriter).delivered(eq(jdbc.pending.id()), eq(jdbc.pending.operationId()),
-                eq(jdbc.pending.requestHash()), eq("COMMITTED"), anyString());
+                eq(jdbc.pending.requestHash()), eq(jdbc.pending.claimToken()),
+                eq("COMMITTED"), anyString());
     }
 
     @Test
@@ -55,7 +56,7 @@ class CloudSettlementOutboxDispatcherTest {
         dispatcher.dispatch();
 
         verify(resultWriter).dead(eq(jdbc.pending.id()), eq(jdbc.pending.operationId()),
-                eq(1), contains("COMMIT_AFTER_RELEASE"));
+                eq(jdbc.pending.claimToken()), eq(1), contains("COMMIT_AFTER_RELEASE"));
         assertThat(jdbc.sql).noneMatch(sql -> sql.contains("status='FAILED'"));
     }
 
@@ -76,7 +77,8 @@ class CloudSettlementOutboxDispatcherTest {
 
         verify(authority).outcomeUnknown(eq(operationId), eq(request));
         verify(resultWriter).delivered(eq(jdbc.pending.id()), eq(operationId),
-                eq(jdbc.pending.requestHash()), eq("OUTCOME_UNKNOWN"), anyString());
+                eq(jdbc.pending.requestHash()), eq(jdbc.pending.claimToken()),
+                eq("OUTCOME_UNKNOWN"), anyString());
         verify(authority, never()).release(any(), any());
     }
 
@@ -89,7 +91,8 @@ class CloudSettlementOutboxDispatcherTest {
         dispatcher.dispatch();
 
         assertThat(jdbc.sql).anyMatch(sql -> sql.contains("status='FAILED'")
-                && sql.contains("status='PROCESSING'"));
+                && sql.contains("status='PROCESSING'")
+                && sql.contains("claim_token=?"));
         assertThat(jdbc.sql).noneMatch(sql -> sql.contains("status='DEAD'"));
     }
 
@@ -102,7 +105,14 @@ class CloudSettlementOutboxDispatcherTest {
     }
 
     private record PendingData(UUID id, UUID operationId, String action,
-                               String requestHash, String payload, int attempts) {}
+                               String requestHash, String payload, int attempts,
+                               UUID claimToken) {
+        private PendingData(UUID id, UUID operationId, String action,
+                            String requestHash, String payload, int attempts) {
+            this(id, operationId, action, requestHash, payload, attempts,
+                    UUID.randomUUID());
+        }
+    }
 
     private static final class FakeJdbc extends JdbcTemplate {
         PendingData pending;
@@ -131,6 +141,8 @@ class CloudSettlementOutboxDispatcherTest {
                 when(rs.getString("request_hash")).thenReturn(pending.requestHash());
                 when(rs.getString("payload")).thenReturn(pending.payload());
                 when(rs.getInt("attempt_count")).thenReturn(pending.attempts());
+                when(rs.getObject("claim_token", UUID.class))
+                        .thenReturn(pending.claimToken());
                 return List.of(mapper.mapRow(rs, 0));
             } catch (Exception failure) {
                 throw new AssertionError(failure);

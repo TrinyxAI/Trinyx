@@ -15,7 +15,8 @@ public interface ExternalSettlementIntentStore {
 
     record Intent(String action, UUID operationId, String url,
                   Map<String, Object> body, int attempts,
-                  Map<String, String> trustedHeaders) {
+                  Map<String, String> trustedHeaders,
+                  String claimToken) {
         public Intent {
             body = body == null ? Map.of() : java.util.Collections.unmodifiableMap(
                     new java.util.LinkedHashMap<>(body));
@@ -24,10 +25,22 @@ public interface ExternalSettlementIntentStore {
                             new java.util.LinkedHashMap<>(trustedHeaders));
         }
 
+        /** Constructor for a durable, not-yet-claimed intent. */
+        public Intent(String action, UUID operationId, String url,
+                      Map<String, Object> body, int attempts,
+                      Map<String, String> trustedHeaders) {
+            this(action, operationId, url, body, attempts, trustedHeaders, null);
+        }
+
         /** Backward-compatible constructor for native/tests that do not carry gateway context. */
         public Intent(String action, UUID operationId, String url,
                       Map<String, Object> body, int attempts) {
-            this(action, operationId, url, body, attempts, Map.of());
+            this(action, operationId, url, body, attempts, Map.of(), null);
+        }
+
+        public Intent claimedBy(String token) {
+            return new Intent(action, operationId, url, body, attempts,
+                    trustedHeaders, token);
         }
 
         public String key() { return action + ":" + operationId; }
@@ -46,6 +59,15 @@ public interface ExternalSettlementIntentStore {
 
     boolean durable();
     void persist(Intent intent);
+
+    /**
+     * Claims one live intent for immediate delivery. A null result means another
+     * worker owns the current lease; callers must leave the durable payload alone.
+     */
+    default Intent claim(Intent intent) {
+        return intent.claimedBy(UUID.randomUUID().toString());
+    }
+
     List<Intent> claimDue(int limit);
     void acknowledge(Intent intent);
     void retry(Intent intent, String error);

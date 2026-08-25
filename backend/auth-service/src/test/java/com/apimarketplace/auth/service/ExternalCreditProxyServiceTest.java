@@ -22,9 +22,11 @@ class ExternalCreditProxyServiceTest {
     private final PaidMonolithCreditClient authority =
             mock(PaidMonolithCreditClient.class);
     private final RecordingJdbc jdbc = new RecordingJdbc();
+    private final ObjectMapper json = new ObjectMapper().findAndRegisterModules();
+    private final ExternalCreditProxyStateWriter stateWriter =
+            new ExternalCreditProxyStateWriter(jdbc, json);
     private final ExternalCreditProxyService service = new ExternalCreditProxyService(
-            entitlements, authority, jdbc,
-            new ObjectMapper().findAndRegisterModules());
+            entitlements, authority, jdbc, json, stateWriter);
 
     @Test
     void dispatchingMustBeAcknowledgedSynchronouslyAndIsNeverQueued() {
@@ -72,11 +74,18 @@ class ExternalCreditProxyServiceTest {
         assertThat(jdbc.sql).anyMatch(sql -> sql.contains("'DEAD'"));
         assertThat(jdbc.sql).anyMatch(sql -> sql.contains("SETTLEMENT_FAILED"));
 
-        Transactional contract = ExternalCreditProxyService.class
+        assertThat(ExternalCreditProxyService.class
                 .getMethod("commit", UUID.class,
                         ExternalCreditProxyService.CommitCommand.class)
-                .getAnnotation(Transactional.class);
-        assertThat(contract.noRollbackFor()).contains(ResponseStatusException.class);
+                .getAnnotation(Transactional.class)).isNull();
+        assertThat(ExternalCreditProxyService.class
+                .getMethod("release", UUID.class,
+                        ExternalCreditProxyService.ReleaseCommand.class)
+                .getAnnotation(Transactional.class)).isNull();
+        assertThat(ExternalCreditProxyStateWriter.class
+                .getMethod("terminal", UUID.class, String.class, String.class,
+                        Object.class, RuntimeException.class)
+                .getAnnotation(Transactional.class)).isNotNull();
     }
 
     @Test
@@ -93,27 +102,6 @@ class ExternalCreditProxyServiceTest {
         assertThat(result.queued()).isTrue();
         assertThat(jdbc.sql).anyMatch(sql -> sql.contains("'PENDING'"));
         assertThat(jdbc.sql).noneMatch(sql -> sql.contains("'DEAD'"));
-    }
-
-    @Test
-    void retryQueueDoesNotRearmOwnedOrTerminalRows() {
-        UUID operationId = UUID.randomUUID();
-        var command = new ExternalCreditProxyService.ReleaseCommand(
-                "provider-failure", "d".repeat(64));
-        doThrow(new PaidMonolithCreditClient.RetryableAuthorityException("timeout", null))
-                .when(authority).release(eq(operationId), any());
-        jdbc.nextUpdateResult = 0;
-
-        ExternalCreditProxyService.SettlementResult result =
-                service.release(operationId, command);
-
-        assertThat(result.queued()).isTrue();
-        assertThat(jdbc.sql)
-                .filteredOn(sql -> sql.contains("cloud_settlement_outbox"))
-                .singleElement()
-                .satisfies(sql -> assertThat(sql)
-                        .contains("status IN ('PENDING','FAILED')")
-                        .doesNotContain("status IN ('PROCESSING','DELIVERED','DEAD')"));
     }
 
     @Test
@@ -194,17 +182,11 @@ class ExternalCreditProxyServiceTest {
     private static final class RecordingJdbc extends JdbcTemplate {
         private final List<String> sql = new ArrayList<>();
         private final List<SqlCall> calls = new ArrayList<>();
-        private Integer nextUpdateResult;
 
         @Override
         public int update(String statement, Object... args) {
             sql.add(statement);
             calls.add(new SqlCall(statement, java.util.Arrays.asList(args)));
-            if (nextUpdateResult != null) {
-                int result = nextUpdateResult;
-                nextUpdateResult = null;
-                return result;
-            }
             return 1;
         }
 

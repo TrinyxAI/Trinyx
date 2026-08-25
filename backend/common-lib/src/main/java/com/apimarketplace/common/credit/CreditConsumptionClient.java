@@ -1300,6 +1300,7 @@ public class CreditConsumptionClient {
     }
 
     private boolean deliverDurably(ExternalSettlementIntentStore.Intent intent, HttpHeaders headers) {
+        ExternalSettlementIntentStore.Intent deliveryIntent = intent;
         if (settlementIntentStore == null || !settlementIntentStore.durable()) {
             if (requireProducerSettlementOutbox) {
                 log.error("Settlement blocked: durable producer outbox unavailable operationId={}",
@@ -1309,22 +1310,28 @@ public class CreditConsumptionClient {
         } else {
             try {
                 settlementIntentStore.persist(intent);
+                deliveryIntent = settlementIntentStore.claim(intent);
+                if (deliveryIntent == null) {
+                    // Another worker owns the fenced lease. The durable intent is
+                    // already accepted and that owner alone may mutate it.
+                    return true;
+                }
             } catch (RuntimeException persistenceFailure) {
-                log.error("Settlement intent could not be persisted operationId={}: {}",
+                log.error("Settlement intent could not be persisted/claimed operationId={}: {}",
                         intent.operationId(), persistenceFailure.getMessage());
                 return false;
             }
         }
 
-        SettlementDelivery result = deliverPersistedSettlement(intent, headers);
+        SettlementDelivery result = deliverPersistedSettlement(deliveryIntent, headers);
         if (settlementIntentStore != null && settlementIntentStore.durable()) {
             switch (result) {
-                case ACKNOWLEDGED -> settlementIntentStore.acknowledge(intent);
-                case DURABLY_QUEUED -> settlementIntentStore.retry(intent,
+                case ACKNOWLEDGED -> settlementIntentStore.acknowledge(deliveryIntent);
+                case DURABLY_QUEUED -> settlementIntentStore.retry(deliveryIntent,
                         "auth-service accepted durable responsibility; awaiting authority decision");
-                case PERMANENT_FAILURE -> settlementIntentStore.dead(intent,
+                case PERMANENT_FAILURE -> settlementIntentStore.dead(deliveryIntent,
                         "permanent authority rejection");
-                case RETRYABLE_FAILURE -> settlementIntentStore.retry(intent,
+                case RETRYABLE_FAILURE -> settlementIntentStore.retry(deliveryIntent,
                         "authority unavailable");
             }
         }

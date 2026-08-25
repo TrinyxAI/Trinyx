@@ -96,8 +96,23 @@ public final class RedisExternalSettlementIntentStore
                     return 1
                     """, Long.class);
 
+    private static final DefaultRedisScript<Long> CLAIM_INTENT =
+            new DefaultRedisScript<>("""
+                    if redis.call('EXISTS', KEYS[1]) == 0 then
+                        redis.call('ZREM', KEYS[3], ARGV[3])
+                        return 0
+                    end
+                    local claimed = redis.call(
+                            'SET', KEYS[2], ARGV[1], 'NX', 'PX', ARGV[2])
+                    if not claimed then return 0 end
+                    redis.call('ZADD', KEYS[3], ARGV[4], ARGV[3])
+                    return 1
+                    """, Long.class);
+
     private static final DefaultRedisScript<Long> RETRY_INTENT =
             new DefaultRedisScript<>("""
+                    local owner = redis.call('GET', KEYS[3])
+                    if not owner or owner ~= ARGV[4] then return -4 end
                     local existing = redis.call('GET', KEYS[1])
                     if not existing then
                         redis.call('ZREM', KEYS[2], ARGV[3])
@@ -112,6 +127,8 @@ public final class RedisExternalSettlementIntentStore
 
     private static final DefaultRedisScript<Long> ACKNOWLEDGE_INTENT =
             new DefaultRedisScript<>("""
+                    local owner = redis.call('GET', KEYS[2])
+                    if not owner or owner ~= ARGV[6] then return -4 end
                     local raw = redis.call('GET', KEYS[4])
                     if not raw then return -1 end
                     local ok, operation = pcall(cjson.decode, raw)
@@ -151,6 +168,8 @@ public final class RedisExternalSettlementIntentStore
 
     private static final DefaultRedisScript<Long> DEAD_LETTER_INTENT =
             new DefaultRedisScript<>("""
+                    local owner = redis.call('GET', KEYS[3])
+                    if not owner or owner ~= ARGV[6] then return -4 end
                     local unresolved = true
                     local raw = redis.call('GET', KEYS[5])
                     if raw then
@@ -185,6 +204,8 @@ public final class RedisExternalSettlementIntentStore
 
     private static final DefaultRedisScript<Long> QUARANTINE_CORRUPT_INTENT =
             new DefaultRedisScript<>("""
+                    local owner = redis.call('GET', KEYS[3])
+                    if not owner or owner ~= ARGV[5] then return -4 end
                     local raw = redis.call('GET', KEYS[5])
                     if raw then
                         local ok, operation = pcall(cjson.decode, raw)
@@ -248,15 +269,28 @@ public final class RedisExternalSettlementIntentStore
     }
 
     @Override
+    public Intent claim(Intent intent) {
+        String token = UUID.randomUUID().toString();
+        Long result = redis.execute(CLAIM_INTENT,
+                List.of(payloadKey(intent), claimKey(intent.key()), DUE),
+                token, String.valueOf(CLAIM_TTL.toMillis()), intent.key(),
+                String.valueOf(System.currentTimeMillis() + CLAIM_TTL.toMillis()));
+        return result != null && result == 1L ? intent.claimedBy(token) : null;
+    }
+
+    @Override
     public List<Intent> claimDue(int limit) {
         Set<String> due = redis.opsForZSet().rangeByScore(
                 DUE, 0, System.currentTimeMillis(), 0, Math.max(1, limit));
         if (due == null || due.isEmpty()) return List.of();
         List<Intent> claimed = new ArrayList<>();
         for (String member : due) {
-            Boolean lease = redis.opsForValue().setIfAbsent(
-                    claimKey(member), UUID.randomUUID().toString(), CLAIM_TTL);
-            if (!Boolean.TRUE.equals(lease)) continue;
+            String token = UUID.randomUUID().toString();
+            Long claim = redis.execute(CLAIM_INTENT,
+                    List.of(PREFIX + "item:" + member, claimKey(member), DUE),
+                    token, String.valueOf(CLAIM_TTL.toMillis()), member,
+                    String.valueOf(System.currentTimeMillis() + CLAIM_TTL.toMillis()));
+            if (claim == null || claim != 1L) continue;
             String encoded = redis.opsForValue().get(PREFIX + "item:" + member);
             if (encoded == null) {
                 redis.opsForZSet().remove(DUE, member);
@@ -264,19 +298,18 @@ public final class RedisExternalSettlementIntentStore
                 continue;
             }
             try {
-                claimed.add(json.readValue(encoded, Intent.class));
+                claimed.add(json.readValue(encoded, Intent.class).claimedBy(token));
             } catch (Exception failure) {
-                quarantineCorruptIntent(member, encoded, failure);
-                continue;
+                quarantineCorruptIntent(member, token, encoded, failure);
             }
-            redis.opsForZSet().add(DUE, member,
-                    System.currentTimeMillis() + CLAIM_TTL.toMillis());
         }
         return claimed;
     }
 
     @Override
     public void acknowledge(Intent intent) {
+        intent = owned(intent);
+        if (intent == null) return;
         String state = switch (intent.action()) {
             case "COMMIT_LLM", "COMMIT_AMOUNT" -> "COMMITTED";
             case "RELEASE", "RELEASE_LOCAL" -> "RELEASED";
@@ -293,7 +326,7 @@ public final class RedisExternalSettlementIntentStore
                         dispatchClaimKey(intent.operationId()), PROVIDER_DISPATCH_DUE),
                 intent.key(), state, Instant.now().toString(),
                 String.valueOf(TERMINAL_TTL.toMillis()),
-                intent.operationId().toString());
+                intent.operationId().toString(), intent.claimToken());
         if (result == null || result < 0) {
             throw new IllegalStateException(
                     "Could not atomically acknowledge settlement intent "
@@ -303,9 +336,11 @@ public final class RedisExternalSettlementIntentStore
 
     @Override
     public void retry(Intent intent, String error) {
+        intent = owned(intent);
+        if (intent == null) return;
         Intent next = new Intent(intent.action(), intent.operationId(),
                 intent.url(), intent.body(), intent.attempts() + 1,
-                intent.trustedHeaders());
+                intent.trustedHeaders(), intent.claimToken());
         try {
             long cap = Math.min(300, 1L << Math.min(8, next.attempts()));
             long delay = ThreadLocalRandom.current().nextLong(
@@ -315,7 +350,7 @@ public final class RedisExternalSettlementIntentStore
                     json.writeValueAsString(next),
                     String.valueOf(System.currentTimeMillis()
                             + Duration.ofSeconds(delay).toMillis()),
-                    next.key());
+                    next.key(), next.claimToken());
             if (result == null || result < 0) {
                 throw new IllegalStateException(
                         "Could not atomically reschedule settlement intent "
@@ -330,6 +365,8 @@ public final class RedisExternalSettlementIntentStore
 
     @Override
     public void dead(Intent intent, String error) {
+        intent = owned(intent);
+        if (intent == null) return;
         try {
             String encoded = json.writeValueAsString(Map.of(
                     "intent", intent,
@@ -340,7 +377,8 @@ public final class RedisExternalSettlementIntentStore
                             dispatchKey(intent.operationId()),
                             dispatchClaimKey(intent.operationId()), PROVIDER_DISPATCH_DUE),
                     encoded, String.valueOf(TERMINAL_TTL.toMillis()), intent.key(),
-                    intent.operationId().toString(), Instant.now().toString());
+                    intent.operationId().toString(), Instant.now().toString(),
+                    intent.claimToken());
             if (result == null || result != 1L) {
                 throw new IllegalStateException(
                         "Could not atomically dead-letter settlement intent " + intent.key());
@@ -487,7 +525,7 @@ public final class RedisExternalSettlementIntentStore
     }
 
     private void quarantineCorruptIntent(
-            String member, String rawPayload, Exception failure) {
+            String member, String claimToken, String rawPayload, Exception failure) {
         UUID operationId = null;
         int separator = member == null ? -1 : member.lastIndexOf(':');
         if (separator >= 0 && separator + 1 < member.length()) {
@@ -519,7 +557,8 @@ public final class RedisExternalSettlementIntentStore
                                     ? PREFIX + "invalid-dispatch-claim:" + member
                                     : dispatchClaimKey(operationId),
                             PROVIDER_DISPATCH_DUE),
-                    envelope, member, operationIdValue, Instant.now().toString());
+                    envelope, member, operationIdValue, Instant.now().toString(),
+                    claimToken);
             if (result == null || result != 1L) {
                 throw new IllegalStateException(
                         "Could not atomically quarantine corrupt settlement intent " + member);
@@ -533,6 +572,22 @@ public final class RedisExternalSettlementIntentStore
                     "Could not quarantine corrupt settlement intent " + member,
                     quarantineFailure);
         }
+    }
+
+    private Intent owned(Intent intent) {
+        if (intent.claimToken() != null && !intent.claimToken().isBlank()) {
+            return intent;
+        }
+        Intent claimed = claim(intent);
+        if (claimed == null) {
+            Boolean payloadExists = redis.hasKey(payloadKey(intent));
+            if (!Boolean.TRUE.equals(payloadExists)) {
+                return null;
+            }
+            throw new IllegalStateException(
+                    "Settlement intent lease lost for " + intent.key());
+        }
+        return claimed;
     }
 
     private ProviderOperation readOperation(UUID operationId) {

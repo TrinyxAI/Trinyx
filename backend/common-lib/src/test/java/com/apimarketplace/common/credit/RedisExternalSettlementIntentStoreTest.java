@@ -43,8 +43,14 @@ class RedisExternalSettlementIntentStoreTest {
                 .contains("SET', KEYS[1]")
                 .contains("ZADD', KEYS[2]");
 
+        String claim = script("CLAIM_INTENT");
+        assertThat(claim)
+                .contains("'SET', KEYS[2], ARGV[1], 'NX', 'PX'")
+                .contains("ZADD', KEYS[3]");
+
         String retry = script("RETRY_INTENT");
         assertThat(retry)
+                .contains("owner ~= ARGV[4]")
                 .contains("if not existing")
                 .contains("ZREM', KEYS[2]")
                 .contains("SET', KEYS[1]")
@@ -52,6 +58,7 @@ class RedisExternalSettlementIntentStoreTest {
 
         String acknowledge = script("ACKNOWLEDGE_INTENT");
         assertThat(acknowledge)
+                .contains("owner ~= ARGV[6]")
                 .contains("operation['state'] = ARGV[2]")
                 .contains("current == 'SETTLEMENT_FAILED'")
                 .contains("ARGV[2] ~= 'COMMITTED'")
@@ -75,6 +82,7 @@ class RedisExternalSettlementIntentStoreTest {
 
         String dead = script("DEAD_LETTER_INTENT");
         assertThat(dead)
+                .contains("owner ~= ARGV[6]")
                 .contains("operation['state'] = 'SETTLEMENT_FAILED'")
                 .contains("SET', KEYS[5]")
                 .contains("PERSIST', KEYS[5]")
@@ -603,6 +611,57 @@ class RedisExternalSettlementIntentStoreTest {
             assertThat(redis.getExpire(
                     "trinyx:billing:producer-outbox:operation:" + corruptOperation))
                     .isEqualTo(-1L);
+        } finally {
+            connectionFactory.destroy();
+        }
+    }
+
+    @Test
+    void expiredRedisLeaseFencesStaleWorkerFromAckRetryAndDead() {
+        String host = System.getenv("TRINYX_TEST_REDIS_HOST");
+        assumeTrue(host != null && !host.isBlank(), "real Redis is enabled by Cloud CI");
+
+        LettuceConnectionFactory connectionFactory = new LettuceConnectionFactory(host, 6379);
+        connectionFactory.afterPropertiesSet();
+        StringRedisTemplate redis = new StringRedisTemplate(connectionFactory);
+        redis.afterPropertiesSet();
+        try {
+            Set<String> existing = redis.keys("trinyx:billing:producer-outbox:*");
+            if (existing != null && !existing.isEmpty()) redis.delete(existing);
+
+            RedisExternalSettlementIntentStore store =
+                    new RedisExternalSettlementIntentStore(
+                            redis, new ObjectMapper().findAndRegisterModules());
+            UUID operationId = UUID.randomUUID();
+            store.registerProviderOperation(operation(operationId));
+            assertThat(store.markProviderDispatching(operationId)).isTrue();
+            ExternalSettlementIntentStore.Intent intent =
+                    intent("COMMIT_LLM", operationId, "http://auth/commit");
+            store.persist(intent);
+
+            ExternalSettlementIntentStore.Intent workerA = store.claim(intent);
+            assertThat(workerA).isNotNull();
+            redis.delete("trinyx:billing:producer-outbox:claim:" + intent.key());
+            ExternalSettlementIntentStore.Intent workerB = store.claim(intent);
+            assertThat(workerB).isNotNull();
+            assertThat(workerB.claimToken()).isNotEqualTo(workerA.claimToken());
+
+            assertThatThrownBy(() -> store.acknowledge(workerA))
+                    .hasMessageContaining("result=-4");
+            assertThatThrownBy(() -> store.retry(workerA, "stale"))
+                    .hasMessageContaining("result=-4");
+            assertThatThrownBy(() -> store.dead(workerA, "stale"))
+                    .hasMessageContaining("result=-4");
+            assertThat(store.providerOperation(operationId).state())
+                    .isEqualTo("DISPATCHING");
+            assertThat(redis.opsForValue().get(
+                    "trinyx:billing:producer-outbox:item:" + intent.key())).isNotNull();
+
+            store.acknowledge(workerB);
+            assertThat(store.providerOperation(operationId).state())
+                    .isEqualTo("COMMITTED");
+            assertThat(redis.opsForValue().get(
+                    "trinyx:billing:producer-outbox:item:" + intent.key())).isNull();
         } finally {
             connectionFactory.destroy();
         }

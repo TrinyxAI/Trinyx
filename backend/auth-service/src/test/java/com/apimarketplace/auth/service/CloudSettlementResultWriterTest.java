@@ -18,25 +18,30 @@ class CloudSettlementResultWriterTest {
         CloudSettlementResultWriter writer = new CloudSettlementResultWriter(jdbc);
         UUID outbox = UUID.randomUUID();
         UUID operation = UUID.randomUUID();
+        UUID claimToken = UUID.randomUUID();
+        jdbc.currentClaimToken = claimToken;
 
-        writer.delivered(outbox, operation, "a".repeat(64), "COMMITTED", "{}");
+        writer.delivered(outbox, operation, "a".repeat(64), claimToken,
+                "COMMITTED", "{}");
         assertThat(jdbc.sql).hasSize(3);
-        assertThat(jdbc.sql.get(0)).contains("status='DELIVERED'");
+        assertThat(jdbc.sql.get(0)).contains("status='DELIVERED'", "claim_token=?");
         assertThat(jdbc.sql.get(1)).contains("action='OUTCOME_UNKNOWN'");
         assertThat(jdbc.sql.get(2)).contains("cloud_credit_operation");
 
         jdbc.sql.clear();
-        writer.dead(outbox, operation, 2, "permanent");
+        jdbc.currentClaimToken = claimToken;
+        writer.dead(outbox, operation, claimToken, 2, "permanent");
         assertThat(jdbc.sql).hasSize(2);
-        assertThat(jdbc.sql.get(0)).contains("status='DEAD'");
+        assertThat(jdbc.sql.get(0)).contains("status='DEAD'", "claim_token=?");
         assertThat(jdbc.sql.get(1)).contains("SETTLEMENT_FAILED");
 
         assertThat(CloudSettlementResultWriter.class
                 .getDeclaredMethod("delivered", UUID.class, UUID.class, String.class,
-                        String.class, String.class)
+                        UUID.class, String.class, String.class)
                 .getAnnotation(Transactional.class)).isNotNull();
         assertThat(CloudSettlementResultWriter.class
-                .getDeclaredMethod("dead", UUID.class, UUID.class, int.class, String.class)
+                .getDeclaredMethod("dead", UUID.class, UUID.class, UUID.class,
+                        int.class, String.class)
                 .getAnnotation(Transactional.class)).isNotNull();
     }
 
@@ -44,10 +49,12 @@ class CloudSettlementResultWriterTest {
     void staleUnknownDeliveryCannotOverwriteCommittedProjection() {
         FakeJdbc jdbc = new FakeJdbc();
         jdbc.operationState = "COMMITTED";
+        UUID token = UUID.randomUUID();
+        jdbc.currentClaimToken = token;
         CloudSettlementResultWriter writer = new CloudSettlementResultWriter(jdbc);
 
         writer.delivered(UUID.randomUUID(), UUID.randomUUID(),
-                "b".repeat(64), "OUTCOME_UNKNOWN", "{}");
+                "b".repeat(64), token, "OUTCOME_UNKNOWN", "{}");
 
         assertThat(jdbc.operationState).isEqualTo("COMMITTED");
         assertThat(jdbc.sql).hasSize(2);
@@ -56,27 +63,41 @@ class CloudSettlementResultWriterTest {
     }
 
     @Test
-    void cancelledProcessingRowCannotRewriteOperationState() {
+    void reclaimedRowFencesOutStaleWorkerAndCurrentOwnerAloneCanComplete() {
         FakeJdbc jdbc = new FakeJdbc();
         jdbc.operationState = "OUTCOME_UNKNOWN";
-        jdbc.claimResult = 0;
+        UUID staleToken = UUID.randomUUID();
+        UUID currentToken = UUID.randomUUID();
+        jdbc.currentClaimToken = currentToken;
         CloudSettlementResultWriter writer = new CloudSettlementResultWriter(jdbc);
+        UUID outbox = UUID.randomUUID();
+        UUID operation = UUID.randomUUID();
 
-        writer.delivered(UUID.randomUUID(), UUID.randomUUID(),
-                "c".repeat(64), "COMMITTED", "{}");
+        writer.delivered(outbox, operation, "c".repeat(64), staleToken,
+                "COMMITTED", "{}");
 
         assertThat(jdbc.sql).hasSize(1);
         assertThat(jdbc.operationState).isEqualTo("OUTCOME_UNKNOWN");
+        assertThat(jdbc.currentClaimToken).isEqualTo(currentToken);
+
+        jdbc.sql.clear();
+        writer.delivered(outbox, operation, "c".repeat(64), currentToken,
+                "COMMITTED", "{}");
+
+        assertThat(jdbc.operationState).isEqualTo("COMMITTED");
+        assertThat(jdbc.currentClaimToken).isNull();
     }
 
     @Test
     void terminalCommitMaySupersedeStaleUnknownIntent() {
         FakeJdbc jdbc = new FakeJdbc();
         jdbc.operationState = "OUTCOME_UNKNOWN";
+        UUID token = UUID.randomUUID();
+        jdbc.currentClaimToken = token;
         CloudSettlementResultWriter writer = new CloudSettlementResultWriter(jdbc);
 
         writer.delivered(UUID.randomUUID(), UUID.randomUUID(),
-                "d".repeat(64), "COMMITTED", "{}");
+                "d".repeat(64), token, "COMMITTED", "{}");
 
         assertThat(jdbc.sql).hasSize(3);
         assertThat(jdbc.sql.get(1))
@@ -87,14 +108,20 @@ class CloudSettlementResultWriterTest {
 
     private static final class FakeJdbc extends JdbcTemplate {
         final List<String> sql = new ArrayList<>();
-        int claimResult = 1;
+        UUID currentClaimToken;
         String operationState = "DISPATCHING";
 
         @Override
         public int update(String statement, Object... args) {
             sql.add(statement);
-            if (statement.contains("WHERE id=? AND status='PROCESSING'")) {
-                return claimResult;
+            if (statement.contains("WHERE id=? AND status='PROCESSING'")
+                    && statement.contains("claim_token=?")) {
+                UUID supplied = (UUID) args[args.length - 1];
+                if (currentClaimToken == null || !currentClaimToken.equals(supplied)) {
+                    return 0;
+                }
+                currentClaimToken = null;
+                return 1;
             }
             if (statement.contains("UPDATE auth.cloud_credit_operation")
                     && statement.contains("SET state=?")) {

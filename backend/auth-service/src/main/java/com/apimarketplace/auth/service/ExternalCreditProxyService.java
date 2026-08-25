@@ -10,9 +10,6 @@ import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.server.ResponseStatusException;
 
 import java.math.BigDecimal;
-import java.sql.Timestamp;
-import java.time.Duration;
-import java.time.Instant;
 import java.util.UUID;
 
 /**
@@ -26,15 +23,18 @@ public class ExternalCreditProxyService {
     private final PaidMonolithCreditClient authority;
     private final JdbcTemplate jdbc;
     private final ObjectMapper json;
+    private final ExternalCreditProxyStateWriter stateWriter;
 
     public ExternalCreditProxyService(EntitlementProjectionService entitlements,
                                       PaidMonolithCreditClient authority,
                                       JdbcTemplate jdbc,
-                                      ObjectMapper json) {
+                                      ObjectMapper json,
+                                      ExternalCreditProxyStateWriter stateWriter) {
         this.entitlements = entitlements;
         this.authority = authority;
         this.jdbc = jdbc;
         this.json = json;
+        this.stateWriter = stateWriter;
     }
 
     public ReserveResult reserveLlm(Context context, LlmReserveCommand command) {
@@ -69,7 +69,6 @@ public class ExternalCreditProxyService {
                 cacheCreation, cacheRead, cached, reasoning));
     }
 
-    @Transactional
     public ReserveResult reserve(Context context, ReserveCommand command) {
         validate(context, command);
         EntitlementProjectionService.Decision decision = entitlements.authorize(
@@ -92,20 +91,8 @@ public class ExternalCreditProxyService {
                 command.estimatedPromptTokens(), command.maximumCompletionTokens());
         var response = authority.reserve(request);
 
-        jdbc.update("""
-                INSERT INTO auth.cloud_credit_operation
-                (operation_id, reservation_id, request_hash, principal_id, billing_subject_id,
-                 organization_id, install_id, entitlement_sequence, source_type,
-                 estimated_credits, maximum_credits, provider, model, state,
-                 response_payload, expires_at, late_settlement_until)
-                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,'RESERVED',CAST(? AS jsonb),?,?)
-                ON CONFLICT (operation_id) DO NOTHING
-                """, command.operationId(), response.reservationId(), requestHash,
-                context.principalId(), context.billingSubjectId(), context.organizationId(),
-                context.installId(), decision.sequence(), command.sourceType(),
-                command.estimatedCredits(), command.maximumCredits(), command.provider(),
-                command.model(), write(response), Timestamp.from(response.expiresAt()),
-                Timestamp.from(response.expiresAt().plus(Duration.ofHours(24))));
+        stateWriter.reserved(
+                context, command, decision.sequence(), requestHash, response);
         return new ReserveResult(response, requestHash, decision.sequence());
     }
 
@@ -120,7 +107,6 @@ public class ExternalCreditProxyService {
         return values.getFirst();
     }
 
-    @Transactional(noRollbackFor = ResponseStatusException.class)
     public CloudCreditAuthorityService.SettlementResponse dispatching(
             UUID operationId, DispatchingCommand command) {
         if (command == null || command.requestHash() == null
@@ -132,12 +118,7 @@ public class ExternalCreditProxyService {
                 command.requestHash(), command.provider(), command.model());
         try {
             var response = authority.dispatching(operationId, request);
-            int updated = jdbc.update("""
-                    UPDATE auth.cloud_credit_operation
-                    SET state='DISPATCHING', response_payload=CAST(? AS jsonb), updated_at=now()
-                    WHERE operation_id=? AND state IN ('RESERVED','DISPATCHING')
-                    """, write(response), operationId);
-            if (updated != 1) {
+            if (!stateWriter.dispatching(operationId, response)) {
                 throw new ResponseStatusException(HttpStatus.CONFLICT,
                         "EXTERNAL_RESERVATION_STATE_MISSING");
             }
@@ -154,7 +135,6 @@ public class ExternalCreditProxyService {
         }
     }
 
-    @Transactional(noRollbackFor = ResponseStatusException.class)
     public SettlementResult commit(UUID operationId, CommitCommand command) {
         var request = new CloudCreditAuthorityService.CommitRequest(
                 command.actualCredits(), command.provider(), command.model(),
@@ -164,39 +144,37 @@ public class ExternalCreditProxyService {
                 command.cachedTokens(), command.reasoningTokens());
         try {
             var response = authority.commit(operationId, request);
-            markSettled(operationId, "COMMIT", command.requestHash(),
+            stateWriter.settled(operationId, "COMMIT", command.requestHash(),
                     response.state(), response);
             return new SettlementResult(response, false);
         } catch (PaidMonolithCreditClient.PermanentAuthorityException permanent) {
-            terminal(operationId, "COMMIT", command.requestHash(), request, permanent);
+            stateWriter.terminal(operationId, "COMMIT", command.requestHash(), request, permanent);
             throw new ResponseStatusException(HttpStatusCode.valueOf(permanent.statusCode()),
                     "BILLING_AUTHORITY_TERMINAL_REJECTION", permanent);
         } catch (PaidMonolithCreditClient.RetryableAuthorityException failure) {
-            queue(operationId, "COMMIT", command.requestHash(), request, failure);
+            stateWriter.queue(operationId, "COMMIT", command.requestHash(), request, failure);
             return new SettlementResult(null, true);
         }
     }
 
-    @Transactional(noRollbackFor = ResponseStatusException.class)
     public SettlementResult release(UUID operationId, ReleaseCommand command) {
         var request = new CloudCreditAuthorityService.ReleaseRequest(
                 command.reason(), command.requestHash());
         try {
             var response = authority.release(operationId, request);
-            markSettled(operationId, "RELEASE", command.requestHash(),
+            stateWriter.settled(operationId, "RELEASE", command.requestHash(),
                     response.state(), response);
             return new SettlementResult(response, false);
         } catch (PaidMonolithCreditClient.PermanentAuthorityException permanent) {
-            terminal(operationId, "RELEASE", command.requestHash(), request, permanent);
+            stateWriter.terminal(operationId, "RELEASE", command.requestHash(), request, permanent);
             throw new ResponseStatusException(HttpStatusCode.valueOf(permanent.statusCode()),
                     "BILLING_AUTHORITY_TERMINAL_REJECTION", permanent);
         } catch (PaidMonolithCreditClient.RetryableAuthorityException failure) {
-            queue(operationId, "RELEASE", command.requestHash(), request, failure);
+            stateWriter.queue(operationId, "RELEASE", command.requestHash(), request, failure);
             return new SettlementResult(null, true);
         }
     }
 
-    @Transactional(noRollbackFor = ResponseStatusException.class)
     public SettlementResult outcomeUnknown(UUID operationId, OutcomeUnknownCommand command) {
         String requestHash = command.requestHash() == null || command.requestHash().isBlank()
                 ? requestHash(operationId) : command.requestHash();
@@ -204,94 +182,17 @@ public class ExternalCreditProxyService {
                 command.reason(), requestHash, command.provider(), command.model());
         try {
             var response = authority.outcomeUnknown(operationId, request);
-            markSettled(operationId, "OUTCOME_UNKNOWN", requestHash,
+            stateWriter.settled(operationId, "OUTCOME_UNKNOWN", requestHash,
                     response.state(), response);
             return new SettlementResult(response, false);
         } catch (PaidMonolithCreditClient.PermanentAuthorityException permanent) {
-            terminal(operationId, "OUTCOME_UNKNOWN", requestHash, request, permanent);
+            stateWriter.terminal(operationId, "OUTCOME_UNKNOWN", requestHash, request, permanent);
             throw new ResponseStatusException(HttpStatusCode.valueOf(permanent.statusCode()),
                     "BILLING_AUTHORITY_TERMINAL_REJECTION", permanent);
         } catch (PaidMonolithCreditClient.RetryableAuthorityException failure) {
-            queue(operationId, "OUTCOME_UNKNOWN", requestHash, request, failure);
+            stateWriter.queue(operationId, "OUTCOME_UNKNOWN", requestHash, request, failure);
             return new SettlementResult(null, true);
         }
-    }
-
-    private void markSettled(UUID operationId, String action, String requestHash,
-                             String state, Object response) {
-        // Keep the same lock order as CloudSettlementResultWriter: outbox row(s)
-        // first, then the operation projection.
-        if (terminalState(state)) {
-            jdbc.update("""
-                    UPDATE auth.cloud_settlement_outbox
-                    SET status='DELIVERED', delivered_at=now(), last_error=NULL
-                    WHERE operation_id=? AND action=? AND request_hash=?
-                      AND status IN ('PENDING','PROCESSING','FAILED')
-                    """, operationId, action, requestHash);
-            jdbc.update("""
-                    UPDATE auth.cloud_settlement_outbox
-                    SET status='DELIVERED', delivered_at=now(), last_error=NULL
-                    WHERE operation_id=? AND action='OUTCOME_UNKNOWN' AND request_hash=?
-                      AND status IN ('PENDING','PROCESSING','FAILED')
-                    """, operationId, requestHash);
-        } else {
-            jdbc.update("""
-                    UPDATE auth.cloud_settlement_outbox
-                    SET status='DELIVERED', delivered_at=now(), last_error=NULL
-                    WHERE operation_id=? AND action=? AND request_hash=?
-                      AND status IN ('PENDING','PROCESSING','FAILED')
-                    """, operationId, action, requestHash);
-        }
-        jdbc.update("""
-                UPDATE auth.cloud_credit_operation
-                SET state=?, response_payload=CAST(? AS jsonb), updated_at=now()
-                WHERE operation_id=?
-                  AND (state NOT IN ('COMMITTED','COMMITTED_DELINQUENT','RELEASED')
-                       OR state=?)
-                """, state, write(response), operationId, state);
-    }
-
-    private static boolean terminalState(String state) {
-        return "COMMITTED".equals(state)
-                || "COMMITTED_DELINQUENT".equals(state)
-                || "RELEASED".equals(state);
-    }
-
-    private void terminal(UUID operationId, String action, String requestHash,
-                          Object payload, RuntimeException failure) {
-        jdbc.update("""
-                INSERT INTO auth.cloud_settlement_outbox
-                (id, operation_id, action, request_hash, payload, status, next_attempt_at,
-                 last_error, terminal_at)
-                VALUES (?,?,?,?,CAST(? AS jsonb),'DEAD',now(),?,now())
-                ON CONFLICT (operation_id, action, request_hash)
-                DO UPDATE SET status='DEAD', last_error=EXCLUDED.last_error,
-                    terminal_at=now()
-                """, UUID.randomUUID(), operationId, action, requestHash, write(payload),
-                bounded(failure.getMessage()));
-        jdbc.update("""
-                UPDATE auth.cloud_credit_operation
-                SET state='SETTLEMENT_FAILED', updated_at=now()
-                WHERE operation_id=? AND state IN ('RESERVED','DISPATCHING','EXPIRED','OUTCOME_UNKNOWN','OUTCOME_UNKNOWN_EXPIRED')
-                """, operationId);
-    }
-
-    private void queue(UUID operationId, String action, String requestHash,
-                       Object payload, RuntimeException failure) {
-        // A zero update count means an existing PROCESSING/DELIVERED/DEAD row retained
-        // ownership or its audit terminal. That row already represents a durable handoff;
-        // never steal its lease or resurrect it merely because the producer polls after 202.
-        jdbc.update("""
-                INSERT INTO auth.cloud_settlement_outbox
-                (id, operation_id, action, request_hash, payload, status, next_attempt_at, last_error)
-                VALUES (?,?,?,?,CAST(? AS jsonb),'PENDING',now(),?)
-                ON CONFLICT (operation_id, action, request_hash)
-                DO UPDATE SET status='PENDING', next_attempt_at=LEAST(
-                    auth.cloud_settlement_outbox.next_attempt_at, now()),
-                    last_error=EXCLUDED.last_error
-                WHERE auth.cloud_settlement_outbox.status IN ('PENDING','FAILED')
-                """, UUID.randomUUID(), operationId, action, requestHash, write(payload),
-                bounded(failure.getMessage()));
     }
 
     private void validate(Context context, ReserveCommand command) {

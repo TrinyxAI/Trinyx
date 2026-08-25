@@ -25,18 +25,25 @@ public final class ExternalSettlementIntentDispatcher {
     public void dispatch() {
         recoverAmbiguousDispatches();
         for (ExternalSettlementIntentStore.Intent intent : store.claimDue(25)) {
-            CreditConsumptionClient.SettlementDelivery result =
-                    client.deliverPersistedSettlement(intent);
-            switch (result) {
-                case ACKNOWLEDGED -> store.acknowledge(intent);
-                case DURABLY_QUEUED -> store.retry(intent,
-                        "auth-service accepted durable responsibility; awaiting authority decision");
-                case RETRYABLE_FAILURE -> store.retry(intent, "authority unavailable");
-                case PERMANENT_FAILURE -> {
-                    store.dead(intent, "permanent authority rejection");
-                    log.error("Producer settlement moved to DEAD operationId={} action={}",
-                            intent.operationId(), intent.action());
+            try {
+                CreditConsumptionClient.SettlementDelivery result =
+                        client.deliverPersistedSettlement(intent);
+                switch (result) {
+                    case ACKNOWLEDGED -> store.acknowledge(intent);
+                    case DURABLY_QUEUED -> store.retry(intent,
+                            "auth-service accepted durable responsibility; awaiting authority decision");
+                    case RETRYABLE_FAILURE -> store.retry(intent, "authority unavailable");
+                    case PERMANENT_FAILURE -> {
+                        store.dead(intent, "permanent authority rejection");
+                        log.error("Producer settlement moved to DEAD operationId={} action={}",
+                                intent.operationId(), intent.action());
+                    }
                 }
+            } catch (RuntimeException failure) {
+                // One corrupted/stale message must not starve later terminal
+                // reconciliation intents that were claimed in the same batch.
+                log.error("Could not process producer settlement intent operationId={} action={}: {}",
+                        intent.operationId(), intent.action(), failure.getMessage());
             }
         }
     }

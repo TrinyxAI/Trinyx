@@ -28,7 +28,8 @@ public class CloudCreditAuthorityController {
 
     @PostMapping
     public CloudCreditAuthorityService.ReserveResponse reserve(
-            @RequestHeader(HttpHeaders.AUTHORIZATION) String authorization,
+            @RequestHeader(value = HttpHeaders.AUTHORIZATION, required = false)
+            String authorization,
             @Valid @RequestBody CloudCreditAuthorityService.ReserveRequest request) {
         authenticate(authorization);
         return authority.reserve(request);
@@ -36,7 +37,8 @@ public class CloudCreditAuthorityController {
 
     @PostMapping("/{operationId}/dispatching")
     public CloudCreditAuthorityService.SettlementResponse dispatching(
-            @RequestHeader(HttpHeaders.AUTHORIZATION) String authorization,
+            @RequestHeader(value = HttpHeaders.AUTHORIZATION, required = false)
+            String authorization,
             @PathVariable UUID operationId,
             @Valid @RequestBody CloudCreditAuthorityService.DispatchingRequest request) {
         authenticate(authorization);
@@ -45,7 +47,8 @@ public class CloudCreditAuthorityController {
 
     @PostMapping("/{operationId}/commit")
     public CloudCreditAuthorityService.SettlementResponse commit(
-            @RequestHeader(HttpHeaders.AUTHORIZATION) String authorization,
+            @RequestHeader(value = HttpHeaders.AUTHORIZATION, required = false)
+            String authorization,
             @PathVariable UUID operationId,
             @Valid @RequestBody CloudCreditAuthorityService.CommitRequest request) {
         authenticate(authorization);
@@ -54,7 +57,8 @@ public class CloudCreditAuthorityController {
 
     @PostMapping("/{operationId}/release")
     public CloudCreditAuthorityService.SettlementResponse release(
-            @RequestHeader(HttpHeaders.AUTHORIZATION) String authorization,
+            @RequestHeader(value = HttpHeaders.AUTHORIZATION, required = false)
+            String authorization,
             @PathVariable UUID operationId,
             @Valid @RequestBody CloudCreditAuthorityService.ReleaseRequest request) {
         authenticate(authorization);
@@ -63,7 +67,8 @@ public class CloudCreditAuthorityController {
 
     @PostMapping("/{operationId}/outcome-unknown")
     public CloudCreditAuthorityService.SettlementResponse outcomeUnknown(
-            @RequestHeader(HttpHeaders.AUTHORIZATION) String authorization,
+            @RequestHeader(value = HttpHeaders.AUTHORIZATION, required = false)
+            String authorization,
             @PathVariable UUID operationId,
             @Valid @RequestBody CloudCreditAuthorityService.OutcomeUnknownRequest request) {
         authenticate(authorization);
@@ -74,9 +79,10 @@ public class CloudCreditAuthorityController {
         try {
             var workload = workloadAuthentication.authenticate(authorization);
             if (!"trinyx-cloud-runtime".equals(workload.serviceId())) {
-                throw new SecurityException("Workload is not allowed to access the wallet");
+                throw new WorkloadAuthenticationService.WorkloadAuthenticationException(
+                        "Workload is not allowed to access the wallet");
             }
-        } catch (SecurityException e) {
+        } catch (WorkloadAuthenticationService.WorkloadAuthenticationException e) {
             throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "INVALID_WORKLOAD_IDENTITY", e);
         }
     }

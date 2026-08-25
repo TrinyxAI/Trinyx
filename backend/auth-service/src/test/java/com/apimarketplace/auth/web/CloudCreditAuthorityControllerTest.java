@@ -33,6 +33,28 @@ class CloudCreditAuthorityControllerTest {
     }
 
     @Test
+    void missingAndMalformedCredentialsReturnUnauthorizedWithoutParserLeak() {
+        when(workloads.authenticate(null)).thenThrow(
+                new WorkloadAuthenticationService.WorkloadAuthenticationException(
+                        "Missing workload bearer token"));
+        when(workloads.authenticate("Bearer invalid")).thenThrow(
+                new WorkloadAuthenticationService.WorkloadAuthenticationException(
+                        "Invalid workload bearer token",
+                        new IllegalArgumentException("Compact JWS must have three parts")));
+
+        for (String credential : new String[]{null, "Bearer invalid"}) {
+            assertThatThrownBy(() -> controller.reserve(credential, reserve()))
+                    .isInstanceOfSatisfying(ResponseStatusException.class, failure -> {
+                        assertThat(failure.getStatusCode().value()).isEqualTo(401);
+                        assertThat(failure.getReason())
+                                .isEqualTo("INVALID_WORKLOAD_IDENTITY")
+                                .doesNotContain("Compact JWS");
+                    });
+        }
+        verifyNoInteractions(authority);
+    }
+
+    @Test
     void authenticatedCloudRuntimeDelegatesExactlyOnce() {
         var request = reserve();
         var response = new CloudCreditAuthorityService.ReserveResponse(

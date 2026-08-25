@@ -78,6 +78,28 @@ class StripeHealthIndicatorTest {
         }
 
         @Test
+        @DisplayName("should report DOWN without throwing when optional Stripe fields are null")
+        void shouldReportDownWhenStripeCodeAndMessageAreNull() throws Exception {
+            when(stripeClient.balance()).thenReturn(balanceService);
+            com.stripe.exception.StripeException stripeFailure =
+                    mock(com.stripe.exception.StripeException.class);
+            when(stripeFailure.getMessage()).thenReturn(null);
+            when(stripeFailure.getCode()).thenReturn(null);
+            when(stripeFailure.getRequestId()).thenReturn(null);
+            when(balanceService.retrieve()).thenThrow(stripeFailure);
+
+            Health.Builder builder = new Health.Builder();
+            healthIndicator.doHealthCheck(builder);
+            Health health = builder.build();
+
+            assertThat(health.getStatus()).isEqualTo(Status.DOWN);
+            assertThat(health.getDetails())
+                    .containsEntry("status", "disconnected")
+                    .containsEntry("error", "Stripe request failed")
+                    .doesNotContainKeys("code", "requestId");
+        }
+
+        @Test
         @DisplayName("should report DOWN on generic exception")
         void shouldReportDownOnGenericException() throws Exception {
             when(stripeClient.balance()).thenThrow(new RuntimeException("Connection failed"));

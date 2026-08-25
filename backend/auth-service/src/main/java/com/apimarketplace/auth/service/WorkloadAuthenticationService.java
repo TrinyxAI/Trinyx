@@ -75,10 +75,20 @@ public class WorkloadAuthenticationService {
 
     public WorkloadIdentity authenticate(
             String authorization, String expectedIssuer, String expectedAudience) {
-        if (authorization == null || !authorization.startsWith("Bearer ")) {
-            throw new SecurityException("Missing workload bearer token");
+        if (authorization == null || !authorization.startsWith("Bearer ")
+                || authorization.length() <= 7) {
+            throw new WorkloadAuthenticationException("Missing workload bearer token");
         }
-        JsonNode claims = Ed25519Jws.verify(authorization.substring(7), verificationKeys).claims();
+
+        final JsonNode claims;
+        try {
+            claims = Ed25519Jws.verify(
+                    authorization.substring(7), verificationKeys).claims();
+        } catch (IllegalArgumentException | SecurityException invalidCredential) {
+            throw new WorkloadAuthenticationException(
+                    "Invalid workload bearer token", invalidCredential);
+        }
+
         Instant now = Instant.now();
         Instant issued = Instant.ofEpochSecond(claims.path("iat").asLong());
         Instant notBefore = Instant.ofEpochSecond(claims.path("nbf").asLong());
@@ -88,14 +98,25 @@ public class WorkloadAuthenticationService {
                 || now.isBefore(issued.minusSeconds(5)) || now.isBefore(notBefore)
                 || !now.isBefore(expires)
                 || Duration.between(issued, expires).compareTo(Duration.ofMinutes(2)) > 0) {
-            throw new SecurityException("Invalid workload token claims");
+            throw new WorkloadAuthenticationException("Invalid workload token claims");
         }
         String serviceId = claims.path("serviceId").asText();
-        UUID jti = UUID.fromString(claims.path("jti").asText());
-        if (serviceId.isBlank()) throw new SecurityException("Missing workload service identity");
+        final UUID jti;
+        try {
+            jti = UUID.fromString(claims.path("jti").asText());
+        } catch (IllegalArgumentException invalidJti) {
+            throw new WorkloadAuthenticationException(
+                    "Invalid workload token identifier", invalidJti);
+        }
+        if (serviceId.isBlank()) {
+            throw new WorkloadAuthenticationException(
+                    "Missing workload service identity");
+        }
         Boolean consumed = redis.opsForValue().setIfAbsent(
                 "trinyx:s2s:jti:" + jti, serviceId, Duration.ofMinutes(3));
-        if (!Boolean.TRUE.equals(consumed)) throw new SecurityException("Replayed workload token");
+        if (!Boolean.TRUE.equals(consumed)) {
+            throw new WorkloadAuthenticationException("Replayed workload token");
+        }
         return new WorkloadIdentity(serviceId, jti, expires);
     }
 
@@ -109,6 +130,16 @@ public class WorkloadAuthenticationService {
                     Ed25519Jws.publicKeyFromX509Base64(entry.substring(separator + 1).trim()));
         }
         return Map.copyOf(keys);
+    }
+
+    public static final class WorkloadAuthenticationException extends SecurityException {
+        public WorkloadAuthenticationException(String message) {
+            super(message);
+        }
+
+        public WorkloadAuthenticationException(String message, Throwable cause) {
+            super(message, cause);
+        }
     }
 
     public record WorkloadIdentity(String serviceId, UUID jti, Instant expiresAt) {}

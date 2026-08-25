@@ -232,7 +232,7 @@ class RedisExternalSettlementIntentStoreTest {
                     "trinyx:billing:producer-outbox:provider-dispatch-due",
                     committed.toString(), System.currentTimeMillis() - 1);
             ExternalSettlementIntentStore.ProviderOperation staleCommit =
-                    store.claimStaleProviderDispatches(1).getFirst();
+                    store.claimStaleProviderDispatches(1).get(0);
             assertThat(staleCommit.state()).isEqualTo("DISPATCHING");
 
             ExternalSettlementIntentStore.Intent commit =
@@ -256,7 +256,7 @@ class RedisExternalSettlementIntentStoreTest {
                     "trinyx:billing:producer-outbox:provider-dispatch-due",
                     released.toString(), System.currentTimeMillis() - 1);
             ExternalSettlementIntentStore.ProviderOperation staleRelease =
-                    store.claimStaleProviderDispatches(1).getFirst();
+                    store.claimStaleProviderDispatches(1).get(0);
             assertThat(staleRelease.state()).isEqualTo("DISPATCHING");
 
             ExternalSettlementIntentStore.Intent release =

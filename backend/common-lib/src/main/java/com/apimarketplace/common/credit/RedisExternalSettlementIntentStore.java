@@ -190,6 +190,15 @@ public final class RedisExternalSettlementIntentStore
                     return 1
                     """, Long.class);
 
+    private static final DefaultRedisScript<Long> RESCHEDULE_EXISTING_INTENT =
+            new DefaultRedisScript<>("""
+                    local current = redis.call('GET', KEYS[1])
+                    if not current or current ~= ARGV[1] then return 0 end
+                    redis.call('PERSIST', KEYS[1])
+                    redis.call('ZADD', KEYS[2], ARGV[2], ARGV[3])
+                    return 1
+                    """, Long.class);
+
     private static final DefaultRedisScript<Long> CLAIM_INTENT =
             new DefaultRedisScript<>("""
                     if redis.call('EXISTS', KEYS[1]) == 0 then
@@ -368,7 +377,8 @@ public final class RedisExternalSettlementIntentStore
                     throw new IllegalStateException(
                             "settlement intent equivocation for " + intent.key());
                 }
-                redis.persist(key);
+                redis.execute(RESCHEDULE_EXISTING_INTENT, List.of(key, DUE),
+                        existing, String.valueOf(System.currentTimeMillis()), intent.key());
                 return;
             }
             Long result = redis.execute(PERSIST_INTENT, List.of(key, DUE),

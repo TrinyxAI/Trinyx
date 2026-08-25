@@ -70,6 +70,12 @@ class RedisExternalSettlementIntentStoreTest {
                 .contains("SET', KEYS[1]")
                 .contains("ZADD', KEYS[2]");
 
+        String reschedule = script("RESCHEDULE_EXISTING_INTENT");
+        assertThat(reschedule)
+                .contains("current ~= ARGV[1]")
+                .contains("PERSIST', KEYS[1]")
+                .contains("ZADD', KEYS[2]");
+
         String claim = script("CLAIM_INTENT");
         assertThat(claim)
                 .contains("'SET', KEYS[2], ARGV[1], 'NX', 'PX'")

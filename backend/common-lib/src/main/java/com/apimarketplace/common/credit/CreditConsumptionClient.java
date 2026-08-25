@@ -1178,11 +1178,13 @@ public class CreditConsumptionClient {
                 "model", value(model),
                 "reason", value(reason));
         try {
-            settlementIntentStore.recordUnknown(operationId, details);
             String url = authServiceUrl + "/api/internal/cloud-credit-proxy/"
                     + operationId + "/outcome-unknown";
+            // The replayable delivery must exist before the audit marker can
+            // remove the DISPATCHING recovery lease.
             settlementIntentStore.persist(settlementIntent(
                     "OUTCOME_UNKNOWN", operationId, url, details));
+            settlementIntentStore.recordUnknown(operationId, details);
         } catch (RuntimeException persistenceFailure) {
             log.error("CRITICAL: ambiguous provider outcome could not be persisted operationId={}: {}",
                     operationId, persistenceFailure.getMessage());

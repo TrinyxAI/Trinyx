@@ -65,8 +65,13 @@ public final class RedisExternalSettlementIntentStore
                     local ok, operation = pcall(cjson.decode, raw)
                     if not ok then return -2 end
                     local current = operation['state']
-                    if (current == 'COMMITTED' or current == 'RELEASED'
-                            or current == 'SETTLEMENT_FAILED') and current ~= ARGV[2] then
+                    if (current == 'COMMITTED' or current == 'RELEASED')
+                            and current ~= ARGV[2] then
+                        return -3
+                    end
+                    if current == 'SETTLEMENT_FAILED'
+                            and ARGV[2] ~= 'COMMITTED'
+                            and ARGV[2] ~= 'RELEASED' then
                         return -3
                     end
                     operation['state'] = ARGV[2]

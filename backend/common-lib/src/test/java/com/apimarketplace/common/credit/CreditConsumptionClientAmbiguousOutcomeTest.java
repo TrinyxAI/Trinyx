@@ -1,6 +1,7 @@
 package com.apimarketplace.common.credit;
 
 import org.junit.jupiter.api.Test;
+import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.test.util.ReflectionTestUtils;
 import org.springframework.test.web.client.MockRestServiceServer;
@@ -15,6 +16,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.springframework.test.web.client.ExpectedCount.once;
 import static org.springframework.test.web.client.match.MockRestRequestMatchers.method;
 import static org.springframework.test.web.client.match.MockRestRequestMatchers.requestTo;
+import static org.springframework.test.web.client.response.MockRestResponseCreators.withStatus;
 import static org.springframework.test.web.client.response.MockRestResponseCreators.withSuccess;
 import org.springframework.http.HttpMethod;
 import org.springframework.web.client.RestTemplate;
@@ -88,6 +90,35 @@ class CreditConsumptionClientAmbiguousOutcomeTest {
         server.verify();
     }
 
+    @Test
+    void acceptedHandoffKeepsProducerIntentUntilFinalAuthorityResponse() {
+        CreditConsumptionClient client = new CreditConsumptionClient("http://auth", false);
+        FakeStore store = new FakeStore();
+        client.setSettlementIntentStore(store);
+        UUID operationId = UUID.randomUUID();
+
+        RestTemplate http = (RestTemplate) ReflectionTestUtils.getField(client, "restTemplate");
+        MockRestServiceServer server = MockRestServiceServer.createServer(http);
+        server.expect(once(), requestTo("http://auth/api/internal/cloud-credit-proxy/"
+                        + operationId + "/commit-llm"))
+                .andExpect(method(HttpMethod.POST))
+                .andRespond(withStatus(HttpStatus.ACCEPTED)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .body("{}"));
+
+        boolean accepted = client.commitExternalLlm(
+                operationId, "a".repeat(64), "openai", "gpt-5",
+                "provider-request", 10, 5);
+
+        assertThat(accepted).isTrue();
+        assertThat(store.persistedDelivery).isTrue();
+        assertThat(store.intent.action()).isEqualTo("COMMIT_LLM");
+        assertThat(store.retried).isTrue();
+        assertThat(store.acknowledged).isFalse();
+        assertThat(store.dead).isFalse();
+        server.verify();
+    }
+
     private static final class FakeStore implements ExternalSettlementIntentStore {
         UUID unknownOperation;
         Map<String, Object> details;
@@ -97,15 +128,18 @@ class CreditConsumptionClientAmbiguousOutcomeTest {
         UUID dispatchedOperation;
         Map<String, String> trustedHeaders = Map.of();
         ProviderOperation operation;
+        boolean acknowledged;
+        boolean retried;
+        boolean dead;
         public boolean durable() { return true; }
         public void persist(Intent intent) {
             persistedDelivery = true;
             this.intent = intent;
         }
         public List<Intent> claimDue(int limit) { return List.of(); }
-        public void acknowledge(Intent intent) {}
-        public void retry(Intent intent, String error) {}
-        public void dead(Intent intent, String error) {}
+        public void acknowledge(Intent intent) { acknowledged = true; }
+        public void retry(Intent intent, String error) { retried = true; }
+        public void dead(Intent intent, String error) { dead = true; }
         public void recordUnknown(UUID operationId, Map<String, Object> value) {
             unknownOperation = operationId;
             details = value;

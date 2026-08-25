@@ -92,7 +92,7 @@ class CreditConsumptionClientAmbiguousOutcomeTest {
 
     @Test
     void acceptedHandoffKeepsProducerIntentUntilFinalAuthorityResponse() {
-        CreditConsumptionClient client = new CreditConsumptionClient("http://auth", false);
+        CreditConsumptionClient client = new CreditConsumptionClient("http://auth", true);
         FakeStore store = new FakeStore();
         client.setSettlementIntentStore(store);
         UUID operationId = UUID.randomUUID();

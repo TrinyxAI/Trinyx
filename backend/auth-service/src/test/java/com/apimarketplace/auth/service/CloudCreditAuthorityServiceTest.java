@@ -426,6 +426,48 @@ class CloudCreditAuthorityServiceTest {
     }
 
     @Test
+    void authoritativeDispatchRetainsHoldPastReservationExpiryAndIsIdempotent()
+            throws Exception {
+        UUID operationId = UUID.randomUUID();
+        String hash = "8".repeat(64);
+        jdbc.row = ExistingRow.reserved(operationId, hash, "{}");
+        when(credits.getBalance(42L)).thenReturn(BigDecimal.TEN);
+        var request = new CloudCreditAuthorityService.DispatchingRequest(
+                hash, "openai", "gpt");
+
+        var first = service.dispatching(operationId, request);
+        var retry = service.dispatching(operationId, request);
+
+        assertThat(first.state()).isEqualTo("DISPATCHING");
+        assertThat(retry).isEqualTo(first);
+        assertThat(jdbc.row.state()).isEqualTo("DISPATCHING");
+        assertThat(service.expireDueReservations()).isZero();
+        verify(credits, never()).releaseReservation(anyString(), anyString());
+    }
+
+    @Test
+    void unknownRetryReturnsEscalatedStateInsteadOfStaleStoredPayload()
+            throws Exception {
+        UUID operationId = UUID.randomUUID();
+        String hash = "9".repeat(64);
+        var request = new CloudCreditAuthorityService.OutcomeUnknownRequest(
+                "provider timeout", hash, "vendor", "tool");
+        var stored = new CloudCreditAuthorityService.SettlementResponse(
+                operationId, "OUTCOME_UNKNOWN", BigDecimal.ZERO, BigDecimal.TEN,
+                false, "RECONCILIATION_REQUIRED_HOLD_RETAINED");
+        jdbc.row = new ExistingRow(operationId, hash,
+                CanonicalJson.sha256(json.valueToTree(request)),
+                "OUTCOME_UNKNOWN", json.writeValueAsString(stored),
+                Instant.now().plusSeconds(60), "PLATFORM_MARKUP", "vendor", "tool");
+
+        assertThat(service.escalateStaleUnknownOutcomes()).isEqualTo(1);
+        var retry = service.outcomeUnknown(operationId, request);
+
+        assertThat(retry.state()).isEqualTo("OUTCOME_UNKNOWN_EXPIRED");
+        assertThat(retry.outcome()).isEqualTo("RECONCILIATION_REQUIRED_HOLD_RETAINED");
+    }
+
+    @Test
     void staleUnknownIsEscalatedWithoutReleasingTheWalletHold() {
         int escalated = service.escalateStaleUnknownOutcomes();
 
@@ -539,6 +581,9 @@ class CloudCreditAuthorityServiceTest {
                 Instant.now().plusSeconds(3600), "PLATFORM_MARKUP", "vendor", "tool");
         CloudCreditAuthorityService integrated =
                 new CloudCreditAuthorityService(jdbc, realCredits, json);
+        integrated.dispatching(operationId,
+                new CloudCreditAuthorityService.DispatchingRequest(
+                        hash, "vendor", "tool"));
         integrated.outcomeUnknown(operationId,
                 new CloudCreditAuthorityService.OutcomeUnknownRequest(
                         "provider timeout after dispatch", hash, "vendor", "tool"));
@@ -656,6 +701,10 @@ class CloudCreditAuthorityServiceTest {
                 row = new ExistingRow((UUID) args[0], (String) args[2], null, "RESERVED",
                         (String) args[13], ((Timestamp) args[15]).toInstant(), (String) args[8],
                         (String) args[11], (String) args[12]);
+            } else if (sql.contains("SET state='DISPATCHING'") && row != null) {
+                row = new ExistingRow(row.operationId(), row.requestHash(),
+                        row.settlementHash(), "DISPATCHING", (String) args[0],
+                        row.lateSettlementUntil(), row.sourceType(), row.provider(), row.model());
             } else if (sql.contains("SET state='EXPIRED'") && row != null) {
                 row = new ExistingRow(row.operationId(), row.requestHash(),
                         row.settlementHash(), "EXPIRED", row.response(),

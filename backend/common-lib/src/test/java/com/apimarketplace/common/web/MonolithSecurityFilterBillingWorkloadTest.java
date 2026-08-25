@@ -68,6 +68,9 @@ class MonolithSecurityFilterBillingWorkloadTest {
     @Test
     void externalWalletRequestIsHiddenBeforeWorkloadController() throws Exception {
         assertHidden(request("/internal/v1/credit-reservations", "203.0.113.10"));
+        assertHidden(request("/internal/v1/credit-reservations/"
+                + "11111111-1111-1111-1111-111111111111/dispatching",
+                "203.0.113.10"));
     }
 
     @Test

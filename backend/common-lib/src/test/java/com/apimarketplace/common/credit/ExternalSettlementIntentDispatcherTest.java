@@ -31,6 +31,31 @@ class ExternalSettlementIntentDispatcherTest {
     }
 
     @Test
+    void durableHandoffIsRetriedUntilAFinalResponseAcknowledgesIt() {
+        UUID operation = UUID.randomUUID();
+        var intent = new ExternalSettlementIntentStore.Intent(
+                "COMMIT_LLM", operation, "http://auth/commit",
+                Map.of("requestHash", "h"), 0);
+        FakeStore store = new FakeStore(intent, null);
+
+        new ExternalSettlementIntentDispatcher(store,
+                new StubClient(CreditConsumptionClient.SettlementDelivery.DURABLY_QUEUED))
+                .dispatch();
+
+        assertThat(store.retried).isTrue();
+        assertThat(store.acknowledged).isFalse();
+        assertThat(store.dead).isFalse();
+
+        store.retried = false;
+        new ExternalSettlementIntentDispatcher(store,
+                new StubClient(CreditConsumptionClient.SettlementDelivery.ACKNOWLEDGED))
+                .dispatch();
+
+        assertThat(store.acknowledged).isTrue();
+        assertThat(store.retried).isFalse();
+    }
+
+    @Test
     void staleDispatchBecomesDurableUnknownAndIsNeverReleased() {
         UUID operationId = UUID.randomUUID();
         var operation = new ExternalSettlementIntentStore.ProviderOperation(
@@ -72,6 +97,7 @@ class ExternalSettlementIntentDispatcherTest {
         boolean acknowledged;
         boolean retried;
         boolean released;
+        boolean dead;
         UUID unknownOperation;
         Intent persisted;
 
@@ -90,7 +116,7 @@ class ExternalSettlementIntentDispatcherTest {
         }
         public void acknowledge(Intent value) { acknowledged = true; }
         public void retry(Intent value, String error) { retried = true; }
-        public void dead(Intent value, String error) {}
+        public void dead(Intent value, String error) { dead = true; }
         public void recordUnknown(UUID operationId, Map<String, Object> details) {
             unknownOperation = operationId;
         }

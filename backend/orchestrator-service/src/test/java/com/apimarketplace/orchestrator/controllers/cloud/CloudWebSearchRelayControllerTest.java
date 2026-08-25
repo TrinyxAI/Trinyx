@@ -41,6 +41,7 @@ import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyMap;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.ArgumentMatchers.nullable;
 import static org.mockito.Mockito.clearInvocations;
 import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.inOrder;
@@ -354,7 +355,7 @@ class CloudWebSearchRelayControllerTest {
                     .thenReturn(new CreditConsumptionClient.ExternalReservationResult(
                             true, "a".repeat(64), null));
             when(externalCreditClient.commitExternalLlm(any(UUID.class), eq("a".repeat(64)),
-                    eq("google"), eq("gemini-2.5-flash"), anyString(),
+                    eq("google"), eq("gemini-2.5-flash"), nullable(String.class),
                     eq(5000), eq(250))).thenReturn(true);
             when(browseConfig.getBrowserAgentBlpopTimeout()).thenReturn(150);
             when(browseConfig.getCallbackBaseUrl()).thenReturn("http://orchestrator:8099");

@@ -31,16 +31,24 @@ class RedisExternalSettlementIntentStoreTest {
         assertThat(lua)
                 .contains("cjson.decode")
                 .contains("operation['state'] ~= 'RESERVED'")
-                .contains("PSETEX', KEYS[1]")
-                .contains("PSETEX', KEYS[2]");
+                .contains("SET', KEYS[1]")
+                .contains("SET', KEYS[2]");
     }
 
     @Test
     void intentPersistenceAndFinalizationAreSingleRedisScripts() throws Exception {
         String persist = script("PERSIST_INTENT");
         assertThat(persist)
-                .contains("PSETEX', KEYS[1]")
+                .contains("PERSIST', KEYS[1]")
+                .contains("SET', KEYS[1]")
                 .contains("ZADD', KEYS[2]");
+
+        String retry = script("RETRY_INTENT");
+        assertThat(retry)
+                .contains("if not existing")
+                .contains("ZREM', KEYS[2]")
+                .contains("SET', KEYS[1]")
+                .contains("DEL', KEYS[3]");
 
         String acknowledge = script("ACKNOWLEDGE_INTENT");
         assertThat(acknowledge)
@@ -221,6 +229,121 @@ class RedisExternalSettlementIntentStoreTest {
                     .hasMessageContaining("result=-3");
             assertThat(store.providerOperation(released).state()).isEqualTo("RELEASED");
             store.dead(conflictingCommit, "RELEASED is authoritative");
+        } finally {
+            connectionFactory.destroy();
+        }
+    }
+
+    @Test
+    void unresolvedJournalRemainsPersistentAndStaleRetryCannotResurrectIt() {
+        String host = System.getenv("TRINYX_TEST_REDIS_HOST");
+        assumeTrue(host != null && !host.isBlank(), "real Redis is enabled by Cloud CI");
+
+        LettuceConnectionFactory connectionFactory = new LettuceConnectionFactory(host, 6379);
+        connectionFactory.afterPropertiesSet();
+        StringRedisTemplate redis = new StringRedisTemplate(connectionFactory);
+        redis.afterPropertiesSet();
+        try {
+            Set<String> existing = redis.keys("trinyx:billing:producer-outbox:*");
+            if (existing != null && !existing.isEmpty()) redis.delete(existing);
+
+            RedisExternalSettlementIntentStore store =
+                    new RedisExternalSettlementIntentStore(
+                            redis, new ObjectMapper().findAndRegisterModules());
+
+            UUID committed = UUID.randomUUID();
+            String committedOperationKey =
+                    "trinyx:billing:producer-outbox:operation:" + committed;
+            String committedDispatchKey =
+                    "trinyx:billing:producer-outbox:dispatch:" + committed;
+            store.registerProviderOperation(operation(committed));
+            assertThat(redis.getExpire(committedOperationKey)).isPositive();
+            assertThat(store.markProviderDispatching(committed)).isTrue();
+            assertThat(redis.getExpire(committedOperationKey)).isEqualTo(-1L);
+            assertThat(redis.getExpire(committedDispatchKey)).isEqualTo(-1L);
+
+            ExternalSettlementIntentStore.Intent commit =
+                    intent("COMMIT_LLM", committed, "http://auth/commit");
+            String commitPayloadKey =
+                    "trinyx:billing:producer-outbox:item:" + commit.key();
+            store.persist(commit);
+            assertThat(redis.getExpire(commitPayloadKey)).isEqualTo(-1L);
+
+            ExternalSettlementIntentStore.Intent claimed =
+                    store.claimDue(1).get(0);
+            store.retry(claimed, "authority unavailable");
+            assertThat(redis.getExpire(commitPayloadKey)).isEqualTo(-1L);
+            redis.opsForZSet().add(
+                    "trinyx:billing:producer-outbox:due",
+                    commit.key(), System.currentTimeMillis() - 1);
+            ExternalSettlementIntentStore.Intent retried =
+                    store.claimDue(1).get(0);
+            assertThat(retried.attempts()).isEqualTo(1);
+
+            store.acknowledge(retried);
+            assertThat(redis.opsForValue().get(commitPayloadKey)).isNull();
+            assertThat(store.providerOperation(committed).state()).isEqualTo("COMMITTED");
+            assertThat(redis.getExpire(committedOperationKey))
+                    .isPositive()
+                    .isLessThanOrEqualTo(604800L);
+
+            store.retry(retried, "stale worker response");
+            assertThat(redis.opsForValue().get(commitPayloadKey)).isNull();
+            assertThat(redis.opsForZSet().score(
+                    "trinyx:billing:producer-outbox:due", commit.key())).isNull();
+
+            UUID released = UUID.randomUUID();
+            String releasedOperationKey =
+                    "trinyx:billing:producer-outbox:operation:" + released;
+            store.registerProviderOperation(operation(released));
+            assertThat(store.markProviderDispatching(released)).isTrue();
+            ExternalSettlementIntentStore.Intent release =
+                    intent("RELEASE", released, "http://auth/release");
+            String releasePayloadKey =
+                    "trinyx:billing:producer-outbox:item:" + release.key();
+            store.persist(release);
+            assertThat(redis.getExpire(releasePayloadKey)).isEqualTo(-1L);
+            store.acknowledge(release);
+            assertThat(redis.opsForValue().get(releasePayloadKey)).isNull();
+            assertThat(store.providerOperation(released).state()).isEqualTo("RELEASED");
+            assertThat(redis.getExpire(releasedOperationKey))
+                    .isPositive()
+                    .isLessThanOrEqualTo(604800L);
+
+            UUID unknown = UUID.randomUUID();
+            store.registerProviderOperation(operation(unknown));
+            assertThat(store.markProviderDispatching(unknown)).isTrue();
+            ExternalSettlementIntentStore.Intent unknownIntent =
+                    intent("OUTCOME_UNKNOWN", unknown, "http://auth/outcome-unknown");
+            String unknownPayloadKey =
+                    "trinyx:billing:producer-outbox:item:" + unknownIntent.key();
+            store.persist(unknownIntent);
+            assertThat(redis.getExpire(unknownPayloadKey)).isEqualTo(-1L);
+            store.recordUnknown(unknown, unknownIntent.body());
+            store.acknowledge(unknownIntent);
+            assertThat(redis.opsForValue().get(unknownPayloadKey)).isNull();
+            assertThat(redis.getExpire(
+                    "trinyx:billing:producer-outbox:operation:" + unknown))
+                    .isEqualTo(-1L);
+
+            UUID failed = UUID.randomUUID();
+            String failedOperationKey =
+                    "trinyx:billing:producer-outbox:operation:" + failed;
+            store.registerProviderOperation(operation(failed));
+            assertThat(store.markProviderDispatching(failed)).isTrue();
+            ExternalSettlementIntentStore.Intent failedIntent =
+                    intent("COMMIT_LLM", failed, "http://auth/commit");
+            String failedPayloadKey =
+                    "trinyx:billing:producer-outbox:item:" + failedIntent.key();
+            store.persist(failedIntent);
+            assertThat(redis.getExpire(failedPayloadKey)).isEqualTo(-1L);
+            store.dead(failedIntent, "permanent authority rejection");
+            assertThat(redis.opsForValue().get(failedPayloadKey)).isNull();
+            assertThat(store.providerOperation(failed).state())
+                    .isEqualTo("SETTLEMENT_FAILED");
+            assertThat(redis.getExpire(failedOperationKey))
+                    .isPositive()
+                    .isLessThanOrEqualTo(604800L);
         } finally {
             connectionFactory.destroy();
         }

@@ -34,6 +34,15 @@ public class CloudCreditAuthorityController {
         return authority.reserve(request);
     }
 
+    @PostMapping("/{operationId}/dispatching")
+    public CloudCreditAuthorityService.SettlementResponse dispatching(
+            @RequestHeader(HttpHeaders.AUTHORIZATION) String authorization,
+            @PathVariable UUID operationId,
+            @Valid @RequestBody CloudCreditAuthorityService.DispatchingRequest request) {
+        authenticate(authorization);
+        return authority.dispatching(operationId, request);
+    }
+
     @PostMapping("/{operationId}/commit")
     public CloudCreditAuthorityService.SettlementResponse commit(
             @RequestHeader(HttpHeaders.AUTHORIZATION) String authorization,

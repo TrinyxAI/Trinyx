@@ -115,11 +115,15 @@ public class CloudCreditAuthorityService {
                 "DISPATCHING", BigDecimal.ZERO,
                 balanceForOrganization(operation.executorUserId(), operation.organizationId()),
                 false, "PROVIDER_DISPATCH_AUTHORIZED_HOLD_RETAINED");
-        jdbc.update("""
+        int updated = jdbc.update("""
                 UPDATE auth.cloud_credit_operation
                 SET state='DISPATCHING', response_payload=CAST(? AS jsonb), updated_at=now()
                 WHERE operation_id=? AND state='RESERVED'
                 """, write(response), operationId);
+        if (updated != 1) {
+            throw new IllegalStateException(
+                    "Could not persist authoritative DISPATCHING transition");
+        }
         return response;
     }
 

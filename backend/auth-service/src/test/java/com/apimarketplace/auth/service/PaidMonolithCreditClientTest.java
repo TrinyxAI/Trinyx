@@ -11,6 +11,7 @@ import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.UUID;
 
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
@@ -30,6 +31,31 @@ class PaidMonolithCreditClientTest {
         when(workloads.issue("trinyx-cloud-runtime")).thenReturn("workload-jwt");
         client = new PaidMonolithCreditClient(
                 builder, workloads, "https://billing-internal.trinyx.private/");
+    }
+
+    @Test
+    void dispatchingUsesThePrivateExactRouteAndWorkloadCredential() {
+        UUID operationId = UUID.randomUUID();
+        var response = new CloudCreditAuthorityService.SettlementResponse(
+                operationId, "DISPATCHING", BigDecimal.ZERO, BigDecimal.TEN,
+                false, "PROVIDER_DISPATCH_AUTHORIZED_HOLD_RETAINED");
+        when(http.exchange(anyString(), eq(HttpMethod.POST), any(HttpEntity.class),
+                eq(CloudCreditAuthorityService.SettlementResponse.class)))
+                .thenReturn(ResponseEntity.ok(response));
+
+        assertThat(client.dispatching(operationId,
+                new CloudCreditAuthorityService.DispatchingRequest(
+                        "a".repeat(64), "openai", "gpt"))).isEqualTo(response);
+
+        var url = org.mockito.ArgumentCaptor.forClass(String.class);
+        var entity = org.mockito.ArgumentCaptor.forClass(HttpEntity.class);
+        verify(http).exchange(url.capture(), eq(HttpMethod.POST), entity.capture(),
+                eq(CloudCreditAuthorityService.SettlementResponse.class));
+        assertThat(url.getValue()).isEqualTo(
+                "https://billing-internal.trinyx.private/internal/v1/credit-reservations/"
+                        + operationId + "/dispatching");
+        assertThat(entity.getValue().getHeaders().getFirst(HttpHeaders.AUTHORIZATION))
+                .isEqualTo("Bearer workload-jwt");
     }
 
     @Test

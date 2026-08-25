@@ -278,7 +278,10 @@ public class ExternalCreditProxyService {
 
     private void queue(UUID operationId, String action, String requestHash,
                        Object payload, RuntimeException failure) {
-        int inserted = jdbc.update("""
+        // A zero update count means an existing PROCESSING/DELIVERED/DEAD row retained
+        // ownership or its audit terminal. That row already represents a durable handoff;
+        // never steal its lease or resurrect it merely because the producer polls after 202.
+        jdbc.update("""
                 INSERT INTO auth.cloud_settlement_outbox
                 (id, operation_id, action, request_hash, payload, status, next_attempt_at, last_error)
                 VALUES (?,?,?,?,CAST(? AS jsonb),'PENDING',now(),?)
@@ -289,12 +292,6 @@ public class ExternalCreditProxyService {
                 WHERE auth.cloud_settlement_outbox.status IN ('PENDING','FAILED')
                 """, UUID.randomUUID(), operationId, action, requestHash, write(payload),
                 bounded(failure.getMessage()));
-        // A zero update count means an existing PROCESSING/DELIVERED/DEAD row retained
-        // ownership or its audit terminal. That row already represents a durable handoff;
-        // never steal its lease or resurrect it merely because the producer polls after 202.
-        if (inserted < 0) {
-            throw new IllegalStateException("Could not persist settlement retry", failure);
-        }
     }
 
     private void validate(Context context, ReserveCommand command) {

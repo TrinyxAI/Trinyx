@@ -203,6 +203,21 @@ public final class RedisExternalSettlementIntentStore
                     return 1
                     """, Long.class);
 
+    private static final DefaultRedisScript<Long> REPAIR_DEAD_LETTER =
+            new DefaultRedisScript<>("""
+                    local raw = redis.call('GET', KEYS[2])
+                    if not raw then return 0 end
+                    local ok, operation = pcall(cjson.decode, raw)
+                    if not ok or operation['state'] ~= 'SETTLEMENT_FAILED' then
+                        return 0
+                    end
+                    redis.call('PERSIST', KEYS[2])
+                    if redis.call('EXISTS', KEYS[1]) == 1 then
+                        redis.call('PERSIST', KEYS[1])
+                    end
+                    return 1
+                    """, Long.class);
+
     private static final DefaultRedisScript<Long> QUARANTINE_CORRUPT_INTENT =
             new DefaultRedisScript<>("""
                     local owner = redis.call('GET', KEYS[3])
@@ -366,8 +381,17 @@ public final class RedisExternalSettlementIntentStore
 
     @Override
     public void dead(Intent intent, String error) {
+        Intent requested = intent;
         intent = owned(intent);
-        if (intent == null) return;
+        if (intent == null) {
+            // ACK/DEAD may already have removed the live payload. Retrying DEAD is
+            // still useful to repair legacy TTLs on unresolved audit state, but
+            // it must not recreate or mutate transport work.
+            redis.execute(REPAIR_DEAD_LETTER, List.of(
+                    PREFIX + "dead:" + requested.key(),
+                    operationKey(requested.operationId())));
+            return;
+        }
         try {
             String encoded = json.writeValueAsString(Map.of(
                     "intent", intent,

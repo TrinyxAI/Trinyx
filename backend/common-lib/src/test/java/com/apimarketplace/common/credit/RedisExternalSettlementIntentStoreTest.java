@@ -91,6 +91,12 @@ class RedisExternalSettlementIntentStoreTest {
                 .contains("PSETEX', KEYS[1]")
                 .contains("ZREM', KEYS[4]");
 
+        String repairDead = script("REPAIR_DEAD_LETTER");
+        assertThat(repairDead)
+                .contains("operation['state'] ~= 'SETTLEMENT_FAILED'")
+                .contains("PERSIST', KEYS[2]")
+                .contains("PERSIST', KEYS[1]");
+
         String quarantine = script("QUARANTINE_CORRUPT_INTENT");
         assertThat(quarantine)
                 .contains("operation['state'] = 'SETTLEMENT_FAILED'")
@@ -268,10 +274,13 @@ class RedisExternalSettlementIntentStoreTest {
             ExternalSettlementIntentStore.Intent conflictingCommit =
                     intent("COMMIT_LLM", released, "http://auth/commit");
             store.persist(conflictingCommit);
-            assertThatThrownBy(() -> store.acknowledge(conflictingCommit))
+            ExternalSettlementIntentStore.Intent ownedConflictingCommit =
+                    store.claim(conflictingCommit);
+            assertThat(ownedConflictingCommit).isNotNull();
+            assertThatThrownBy(() -> store.acknowledge(ownedConflictingCommit))
                     .hasMessageContaining("result=-3");
             assertThat(store.providerOperation(released).state()).isEqualTo("RELEASED");
-            store.dead(conflictingCommit, "RELEASED is authoritative");
+            store.dead(ownedConflictingCommit, "RELEASED is authoritative");
         } finally {
             connectionFactory.destroy();
         }

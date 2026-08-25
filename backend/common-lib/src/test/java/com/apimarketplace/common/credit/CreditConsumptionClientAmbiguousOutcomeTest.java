@@ -1,12 +1,23 @@
 package com.apimarketplace.common.credit;
 
 import org.junit.jupiter.api.Test;
+import org.springframework.http.MediaType;
+import org.springframework.test.util.ReflectionTestUtils;
+import org.springframework.test.web.client.MockRestServiceServer;
+
+import java.time.Instant;
 
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.springframework.test.web.client.ExpectedCount.once;
+import static org.springframework.test.web.client.match.MockRestRequestMatchers.method;
+import static org.springframework.test.web.client.match.MockRestRequestMatchers.requestTo;
+import static org.springframework.test.web.client.response.MockRestResponseCreators.withSuccess;
+import org.springframework.http.HttpMethod;
+import org.springframework.web.client.RestTemplate;
 
 class CreditConsumptionClientAmbiguousOutcomeTest {
 
@@ -48,19 +59,33 @@ class CreditConsumptionClientAmbiguousOutcomeTest {
     }
 
     @Test
-    void providerCallIsBlockedUnlessDispatchStateWasPersisted() {
-        CreditConsumptionClient client = new CreditConsumptionClient("http://auth", false);
+    void providerCallIsBlockedUnlessLocalJournalAndPaidAuthorityBothAcknowledge() {
+        CreditConsumptionClient client = new CreditConsumptionClient("http://auth", true);
         FakeStore store = new FakeStore();
         client.setSettlementIntentStore(store);
         client.setBillingAuthorityMode("external-paid-monolith");
         UUID operationId = UUID.randomUUID();
+        store.operation = new ExternalSettlementIntentStore.ProviderOperation(
+                operationId, "a".repeat(64), "openai", "gpt",
+                "http://auth/api/internal/cloud-credit-proxy/" + operationId
+                        + "/outcome-unknown",
+                Map.of("X-Principal-ID", UUID.randomUUID().toString()),
+                "RESERVED", Instant.now());
 
         store.dispatchAccepted = false;
         assertThat(client.markExternalProviderDispatching(operationId)).isFalse();
 
+        RestTemplate http = (RestTemplate) ReflectionTestUtils.getField(client, "restTemplate");
+        MockRestServiceServer server = MockRestServiceServer.createServer(http);
+        server.expect(once(), requestTo("http://auth/api/internal/cloud-credit-proxy/"
+                        + operationId + "/dispatching"))
+                .andExpect(method(HttpMethod.POST))
+                .andRespond(withSuccess("{}", MediaType.APPLICATION_JSON));
+
         store.dispatchAccepted = true;
         assertThat(client.markExternalProviderDispatching(operationId)).isTrue();
         assertThat(store.dispatchedOperation).isEqualTo(operationId);
+        server.verify();
     }
 
     private static final class FakeStore implements ExternalSettlementIntentStore {
@@ -71,6 +96,7 @@ class CreditConsumptionClientAmbiguousOutcomeTest {
         boolean dispatchAccepted;
         UUID dispatchedOperation;
         Map<String, String> trustedHeaders = Map.of();
+        ProviderOperation operation;
         public boolean durable() { return true; }
         public void persist(Intent intent) {
             persistedDelivery = true;
@@ -87,6 +113,9 @@ class CreditConsumptionClientAmbiguousOutcomeTest {
         public boolean markProviderDispatching(UUID operationId) {
             dispatchedOperation = operationId;
             return dispatchAccepted;
+        }
+        public ProviderOperation providerOperation(UUID operationId) {
+            return operation;
         }
         public Map<String, String> trustedHeaders(UUID operationId) {
             return trustedHeaders;

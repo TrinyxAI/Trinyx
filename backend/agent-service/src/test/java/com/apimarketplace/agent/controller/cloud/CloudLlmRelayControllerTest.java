@@ -646,6 +646,7 @@ class CloudLlmRelayControllerTest {
         order.verify(creditClient).reserveExternalLlm(eq(42L), any(UUID.class),
                 eq("cloudLlmRelay"), eq("CE_LLM_RELAY"), eq(PROVIDER), eq(MODEL),
                 anyInt(), eq(256));
+        order.verify(creditClient).markExternalProviderDispatching(any(UUID.class));
         order.verify(provider).complete(any());
         order.verify(creditClient).commitExternalLlm(any(UUID.class), eq("hash"),
                 eq(PROVIDER), eq(MODEL), org.mockito.ArgumentMatchers.isNull(), eq(11), eq(7),
@@ -682,6 +683,32 @@ class CloudLlmRelayControllerTest {
         ArgumentCaptor<CompletionRequest> captor = ArgumentCaptor.forClass(CompletionRequest.class);
         verify(provider).complete(captor.capture());
         assertThat(captor.getValue().maxTokens()).isEqualTo(8192);
+    }
+
+    @Test
+    @DisplayName("dispatch journal failure is fail-closed after reserve and before provider")
+    void dispatchJournalFailurePreventsProviderCall() {
+        ReflectionTestUtils.setField(controller, "billingAuthorityMode", "external-paid-monolith");
+        when(authClient.userOwnsActiveCeLink("42", INSTALL_ID)).thenReturn(true);
+        when(providerFactory.getProvider(PROVIDER)).thenReturn(provider);
+        when(provider.getProviderName()).thenReturn(PROVIDER);
+        when(creditClient.reserveExternalLlm(eq(42L), any(UUID.class),
+                eq("cloudLlmRelay"), eq("CE_LLM_RELAY"), eq(PROVIDER), eq(MODEL),
+                anyInt(), eq(256)))
+                .thenReturn(new CreditConsumptionClient.ExternalReservationResult(
+                        true, "hash", null));
+        when(creditClient.markExternalProviderDispatching(any(UUID.class)))
+                .thenReturn(false);
+
+        ResponseEntity<?> result = controller.complete(
+                CLOUD_USER_ID, INSTALL_ID,
+                new CloudLlmRelayRequest(PROVIDER, request(false)));
+
+        assertThat(result.getStatusCode()).isEqualTo(HttpStatus.SERVICE_UNAVAILABLE);
+        verify(provider, never()).complete(any());
+        verify(creditClient, never()).commitExternalLlm(
+                any(), any(), any(), any(), any(), anyInt(), anyInt(),
+                any(LlmCacheTokens.class));
     }
 
     @Test

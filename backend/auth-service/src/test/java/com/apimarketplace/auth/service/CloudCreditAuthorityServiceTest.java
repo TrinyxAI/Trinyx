@@ -246,6 +246,23 @@ class CloudCreditAuthorityServiceTest {
     }
 
     @Test
+    void reservedWithoutProviderDispatchExpiresThroughCloudAuthorityExactlyOnce() {
+        UUID operationId = UUID.randomUUID();
+        String hash = "8".repeat(64);
+        jdbc.row = ExistingRow.reserved(operationId, hash, "{}");
+        when(credits.releaseReservation(
+                "cloud-reservation:" + operationId, "auto-release-timeout:cloud"))
+                .thenReturn(CreditService.ReleaseOutcome.RELEASED);
+
+        assertThat(service.expireDueReservations()).isEqualTo(1);
+        assertThat(service.expireDueReservations()).isZero();
+
+        assertThat(jdbc.row.state()).isEqualTo("EXPIRED");
+        verify(credits, times(1)).releaseReservation(
+                "cloud-reservation:" + operationId, "auto-release-timeout:cloud");
+    }
+
+    @Test
     void organizationMemberUsesPayerOwnedInstallInsteadOfActorOwnedInstall() {
         UUID operationId = UUID.randomUUID();
         String hash = "7".repeat(64);
@@ -507,6 +524,12 @@ class CloudCreditAuthorityServiceTest {
                     return List.of(mapper.mapRow(actor, 0));
                 }
                 if (row == null || !sql.contains("auth.cloud_credit_operation")) return List.of();
+                if (sql.contains("WHERE state='RESERVED' AND expires_at <= now()")) {
+                    if (!"RESERVED".equals(row.state())) return List.of();
+                    ResultSet due = mock(ResultSet.class);
+                    when(due.getObject(1, UUID.class)).thenReturn(row.operationId());
+                    return List.of(mapper.mapRow(due, 0));
+                }
                 ResultSet rs = mock(ResultSet.class);
                 when(rs.getObject("operation_id", UUID.class)).thenReturn(row.operationId());
                 when(rs.getString("request_hash")).thenReturn(row.requestHash());
@@ -540,6 +563,10 @@ class CloudCreditAuthorityServiceTest {
                 row = new ExistingRow((UUID) args[0], (String) args[2], null, "RESERVED",
                         (String) args[13], ((Timestamp) args[15]).toInstant(), (String) args[8],
                         (String) args[11], (String) args[12]);
+            } else if (sql.contains("SET state='EXPIRED'") && row != null) {
+                row = new ExistingRow(row.operationId(), row.requestHash(),
+                        row.settlementHash(), "EXPIRED", row.response(),
+                        row.lateSettlementUntil(), row.sourceType(), row.provider(), row.model());
             } else if (sql.contains("SET state='OUTCOME_UNKNOWN_EXPIRED'") && row != null) {
                 Instant extendedUntil = Instant.now().plusSeconds(((Number) args[0]).longValue());
                 Instant currentUntil = row.lateSettlementUntil();

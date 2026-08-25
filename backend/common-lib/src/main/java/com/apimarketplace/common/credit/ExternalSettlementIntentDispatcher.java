@@ -29,6 +29,8 @@ public final class ExternalSettlementIntentDispatcher {
                     client.deliverPersistedSettlement(intent);
             switch (result) {
                 case ACKNOWLEDGED -> store.acknowledge(intent);
+                case DURABLY_QUEUED -> store.retry(intent,
+                        "auth-service accepted durable responsibility; awaiting authority decision");
                 case RETRYABLE_FAILURE -> store.retry(intent, "authority unavailable");
                 case PERMANENT_FAILURE -> {
                     store.dead(intent, "permanent authority rejection");

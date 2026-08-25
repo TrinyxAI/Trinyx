@@ -57,6 +57,7 @@ class RedisExternalSettlementIntentStoreTest {
                 .contains("ARGV[2] ~= 'COMMITTED'")
                 .contains("ARGV[2] ~= 'RELEASED'")
                 .contains("ARGV[2] == 'OUTCOME_UNKNOWN'")
+                .contains("return 2")
                 .contains("SET', KEYS[4]")
                 .contains("ZREM', KEYS[3]")
                 .contains("DEL', KEYS[1], KEYS[2]");
@@ -185,9 +186,13 @@ class RedisExternalSettlementIntentStoreTest {
             ExternalSettlementIntentStore.Intent laterUnknown =
                     intent("OUTCOME_UNKNOWN", committed, "http://auth/outcome-unknown");
             store.persist(laterUnknown);
-            assertThatThrownBy(() -> store.acknowledge(laterUnknown))
-                    .hasMessageContaining("result=-3");
-            store.dead(laterUnknown, "non-terminal evidence cannot recover a dead letter");
+            store.acknowledge(laterUnknown);
+            assertThat(store.providerOperation(committed).state())
+                    .isEqualTo("SETTLEMENT_FAILED");
+            assertThat(redis.opsForValue().get(
+                    "trinyx:billing:producer-outbox:item:" + laterUnknown.key())).isNull();
+            assertThat(redis.opsForZSet().score(
+                    "trinyx:billing:producer-outbox:due", laterUnknown.key())).isNull();
 
             store.acknowledge(commit);
             assertThat(store.providerOperation(committed).state()).isEqualTo("COMMITTED");
@@ -216,6 +221,19 @@ class RedisExternalSettlementIntentStoreTest {
 
             assertThat(store.providerOperation(released).state())
                     .isEqualTo("SETTLEMENT_FAILED");
+
+            ExternalSettlementIntentStore.Intent laterReleaseUnknown =
+                    intent("OUTCOME_UNKNOWN", released, "http://auth/outcome-unknown");
+            store.persist(laterReleaseUnknown);
+            store.acknowledge(laterReleaseUnknown);
+            assertThat(store.providerOperation(released).state())
+                    .isEqualTo("SETTLEMENT_FAILED");
+            assertThat(redis.opsForValue().get(
+                    "trinyx:billing:producer-outbox:item:"
+                            + laterReleaseUnknown.key())).isNull();
+            assertThat(redis.opsForZSet().score(
+                    "trinyx:billing:producer-outbox:due",
+                    laterReleaseUnknown.key())).isNull();
 
             store.acknowledge(release);
             assertThat(store.providerOperation(released).state()).isEqualTo("RELEASED");

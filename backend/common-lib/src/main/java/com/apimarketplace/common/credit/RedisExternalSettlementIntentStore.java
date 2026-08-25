@@ -366,6 +366,11 @@ public final class RedisExternalSettlementIntentStore
     }
 
     @Override
+    public ProviderOperation providerOperation(UUID operationId) {
+        return readOperation(operationId);
+    }
+
+    @Override
     public Map<String, String> trustedHeaders(UUID operationId) {
         ProviderOperation operation = readOperation(operationId);
         return operation == null ? Map.of() : operation.trustedHeaders();

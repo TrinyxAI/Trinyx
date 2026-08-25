@@ -47,7 +47,7 @@ class WorkspaceDataPurgerTest {
     @Mock private Connection conn;
     @Mock private PreparedStatement ps;
     @Mock private Savepoint savepoint;
-    @Mock private WorkspaceStorageObjectDeleter storageObjectDeleter;
+    @Mock private WorkspaceStorageErasureOutbox storageErasureOutbox;
     @Mock private jakarta.persistence.Query objectKeyQuery;
     @InjectMocks private WorkspaceDataPurger purger;
 
@@ -61,7 +61,7 @@ class WorkspaceDataPurgerTest {
 
     @BeforeEach
     void setUp() throws Exception {
-        // @InjectMocks uses the deletion-port constructor, so Mockito no longer does
+        // @InjectMocks uses the durable-erasure constructor, so Mockito no longer does
         // field injection - em has to be set explicitly or it stays null.
         org.springframework.test.util.ReflectionTestUtils.setField(purger, "em", em);
         // Object enumeration runs before the storage DELETE; default it to "no objects" so the
@@ -104,58 +104,58 @@ class WorkspaceDataPurgerTest {
      * would show.
      */
     @Test
-    @DisplayName("stored object keys are read BEFORE the rows that carry them are deleted")
+    @DisplayName("stored object keys are durably queued BEFORE metadata is deleted")
     void keysAreReadBeforeTheRowsThatCarryThemAreDeleted() throws Exception {
         when(objectKeyQuery.getResultList())
                 .thenReturn(List.<Object[]>of(new Object[]{"tenant-9/report.pdf", "tenant-9"}));
-        when(storageObjectDeleter.delete(anyString(), anyString())).thenReturn(true);
 
         purger.purgeOperationalData(ORG_ID);
 
-        // The keys live nowhere else. Reorder these two and the feature silently becomes a no-op
-        // while every other assertion in this class stays green.
-        org.mockito.InOrder order = org.mockito.Mockito.inOrder(em, storageObjectDeleter, conn);
-        order.verify(em).createNativeQuery(org.mockito.ArgumentMatchers.contains("SELECT s3_key"));
-        order.verify(storageObjectDeleter).delete("tenant-9", "tenant-9/report.pdf");
-        order.verify(conn, atLeastOnce())
-                .prepareStatement(org.mockito.ArgumentMatchers.contains("DELETE FROM storage.storage"));
+        org.mockito.InOrder order = org.mockito.Mockito.inOrder(
+                em, storageErasureOutbox, conn);
+        order.verify(em).createNativeQuery(
+                org.mockito.ArgumentMatchers.contains("SELECT s3_key"));
+        order.verify(storageErasureOutbox).enqueue(
+                ORG_ID, "tenant-9", "tenant-9/report.pdf");
+        order.verify(conn, atLeastOnce()).prepareStatement(
+                org.mockito.ArgumentMatchers.contains(
+                        "DELETE FROM storage.storage"));
     }
 
     @Test
-    @DisplayName("objects are deleted under the KEY OWNER's tenant, not the caller's")
+    @DisplayName("erasure is queued under the KEY OWNER tenant, not the caller")
     void objectsAreDeletedUnderTheOwnerTenant() throws Exception {
-        // Internal storage refuses a key whose prefix does not match the X-User-ID it is given, and
-        // the deletion port reports that refusal as false. Passing the wrong tenant therefore
-        // fails silently: the row goes, the object stays, and nothing throws.
         when(objectKeyQuery.getResultList())
                 .thenReturn(List.<Object[]>of(new Object[]{"tenant-42/a.png", "tenant-42"}));
-        when(storageObjectDeleter.delete(anyString(), anyString())).thenReturn(true);
 
         purger.purgeOperationalData(ORG_ID);
 
-        verify(storageObjectDeleter).delete("tenant-42", "tenant-42/a.png");
-        verify(storageObjectDeleter, org.mockito.Mockito.never()).delete(org.mockito.ArgumentMatchers.eq(ORG_ID), anyString());
+        verify(storageErasureOutbox).enqueue(
+                ORG_ID, "tenant-42", "tenant-42/a.png");
+        verify(storageErasureOutbox, org.mockito.Mockito.never()).enqueue(
+                org.mockito.ArgumentMatchers.eq(ORG_ID),
+                org.mockito.ArgumentMatchers.eq(ORG_ID), anyString());
     }
 
     @Test
-    @DisplayName("a failing object delete does not abort the rest of the purge")
+    @DisplayName("an erasure enqueue failure aborts before storage metadata is deleted")
     void aFailingObjectDeleteDoesNotAbortThePurge() throws Exception {
         when(objectKeyQuery.getResultList()).thenReturn(List.<Object[]>of(
-                new Object[]{"tenant-9/first.bin", "tenant-9"},
-                new Object[]{null, "tenant-9"},
-                new Object[]{"tenant-9/third.bin", "tenant-9"}));
-        when(storageObjectDeleter.delete("tenant-9", "tenant-9/first.bin"))
-                .thenThrow(new RuntimeException("bucket unreachable"));
-        when(storageObjectDeleter.delete("tenant-9", "tenant-9/third.bin")).thenReturn(true);
+                new Object[]{"tenant-9/first.bin", "tenant-9"}));
+        doAnswer(invocation -> {
+            throw new IllegalStateException("outbox unavailable");
+        }).when(storageErasureOutbox).enqueue(
+                ORG_ID, "tenant-9", "tenant-9/first.bin");
 
-        purger.purgeOperationalData(ORG_ID);
+        org.assertj.core.api.Assertions.assertThatThrownBy(
+                () -> purger.purgeOperationalData(ORG_ID))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("outbox unavailable");
 
-        // One unreachable object must not strand the account with all its rows intact; the third
-        // key is still attempted, and the null key is skipped rather than sent as "null".
-        verify(storageObjectDeleter).delete("tenant-9", "tenant-9/third.bin");
-        verify(storageObjectDeleter, times(2)).delete(anyString(), anyString());
-        verify(conn, atLeastOnce())
-                .prepareStatement(org.mockito.ArgumentMatchers.contains("DELETE FROM storage.storage"));
+        ArgumentCaptor<String> sql = ArgumentCaptor.forClass(String.class);
+        verify(conn, atLeastOnce()).prepareStatement(sql.capture());
+        assertThat(sql.getAllValues()).noneMatch(
+                statement -> statement.contains("DELETE FROM storage.storage"));
     }
 
     @Test

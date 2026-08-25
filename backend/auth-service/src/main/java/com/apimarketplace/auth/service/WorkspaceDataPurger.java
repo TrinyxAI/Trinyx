@@ -31,10 +31,10 @@ import java.util.List;
  * Statements are also type-safe: org-id columns are a UUID/VARCHAR mix across schemas, so
  * predicates cast {@code organization_id::text = ?}; the one UUID column uses {@code = ?::uuid}.
  *
- * <p><b>Storage:</b> deletes the underlying S3/MinIO objects as well as the
- * {@code storage.storage} rows. The objects go FIRST, because their keys live only in those
- * rows. Object deletion is best-effort per key and never aborts the purge, but the failure
- * count is logged: an erasure we could not complete has to be visible, not assumed.
+ * <p><b>Storage:</b> records every immutable tenant/key tuple in a durable erasure outbox
+ * before deleting {@code storage.storage}. Physical S3/MinIO deletion is retried outside
+ * the purge transaction until confirmed. An enumeration or enqueue failure aborts the
+ * surrounding purge transaction so metadata can never disappear without a recovery record.
  *
  * <p>⚠️ <b>Custom APIs:</b> {@code catalog.apis} (user-created custom APIs carry an
  * {@code organization_id}; the 700+ global third-party APIs are {@code organization_id
@@ -56,11 +56,11 @@ public class WorkspaceDataPurger {
     @PersistenceContext
     private EntityManager em;
 
-    /** Removes the stored bytes; the rows below only reference them. */
-    private final WorkspaceStorageObjectDeleter storageObjectDeleter;
+    /** Durable handoff for stored bytes; the rows below only reference them. */
+    private final WorkspaceStorageErasureOutbox storageErasureOutbox;
 
-    public WorkspaceDataPurger(WorkspaceStorageObjectDeleter storageObjectDeleter) {
-        this.storageObjectDeleter = storageObjectDeleter;
+    public WorkspaceDataPurger(WorkspaceStorageErasureOutbox storageErasureOutbox) {
+        this.storageErasureOutbox = storageErasureOutbox;
     }
 
     /**
@@ -103,18 +103,15 @@ public class WorkspaceDataPurger {
     );
 
     /**
-     * Removes the stored objects themselves (S3/MinIO), not just the rows that reference them.
+     * Durably records the tenant/key tuples before their metadata rows disappear.
      *
-     * <p>Best-effort per object and never fatal: a bucket hiccup must not abort a purge that has
-     * already destroyed rows in a dozen schemas, and every object we fail to delete is
-     * unreachable anyway once its row is gone. The count is logged both ways so an incomplete
-     * erasure is visible rather than assumed - "we deleted your files" should be something the
-     * logs can back up.
-     *
-     * <p>Keys are read before the rows are deleted because they exist nowhere else.
+     * <p>The caller owns the surrounding transaction. Any enumeration, ownership or
+     * enqueue failure is fatal so the transaction rolls back and retains the source
+     * metadata. The dispatcher performs physical deletion only after this transaction
+     * commits and can resume after a restart.
      */
-    private void deleteStorageObjects(String orgId) {
-        List<Object[]> objects;
+    private void enqueueStorageErasures(String orgId) {
+        final List<Object[]> objects;
         try {
             @SuppressWarnings("unchecked")
             List<Object[]> rows = em.createNativeQuery(
@@ -123,37 +120,21 @@ public class WorkspaceDataPurger {
                     .setParameter(1, orgId)
                     .getResultList();
             objects = rows;
-        } catch (Exception e) {
-            logger.warn("Workspace purge: could not enumerate storage objects for org {}: {}", orgId, e.getMessage());
-            return;
+        } catch (Exception failure) {
+            throw new IllegalStateException(
+                    "Could not enumerate workspace storage objects before purge", failure);
         }
-        if (objects.isEmpty()) {
-            return;
-        }
-        int deleted = 0;
-        int failed = 0;
+
+        int queued = 0;
         for (Object[] row : objects) {
             String key = row[0] == null ? null : row[0].toString();
             String tenantId = row[1] == null ? null : row[1].toString();
-            if (key == null || key.isBlank()) continue;
-            try {
-                // Owner tenant, not the caller: internal storage refuses a key whose prefix does
-                // not match the X-User-ID it is given.
-                if (storageObjectDeleter.delete(tenantId, key)) {
-                    deleted++;
-                } else {
-                    failed++;
-                }
-            } catch (Exception e) {
-                failed++;
-                logger.warn("Workspace purge: object delete failed for key {}: {}", key, e.getMessage());
-            }
+            storageErasureOutbox.enqueue(orgId, tenantId, key);
+            queued++;
         }
-        if (failed > 0) {
-            logger.warn("Workspace purge: org {} - {} stored objects deleted, {} FAILED and remain in the bucket",
-                    orgId, deleted, failed);
-        } else {
-            logger.info("Workspace purge: org {} - {} stored objects deleted from the bucket", orgId, deleted);
+        if (queued > 0) {
+            logger.info("Workspace purge: org {} - {} stored objects durably queued for erasure",
+                    orgId, queued);
         }
     }
 
@@ -207,13 +188,10 @@ public class WorkspaceDataPurger {
         nativeExec("DELETE FROM trigger.webhook_tokens WHERE organization_id::text = ?", orgId);
         nativeExec("DELETE FROM trigger.datasource_trigger_subscriptions WHERE organization_id::text = ?", orgId);
 
-        // storage schema - the OBJECTS first, then the rows that point at them.
-        // Dropping only the rows left every uploaded byte sitting in the bucket forever:
-        // unreachable through the app, but neither deleted nor billed to anyone, and still very
-        // much the customer's data on our disks after we told them it was erased. The keys only
-        // exist in these rows, so they have to be read before the DELETE - afterwards there is
-        // nothing left to enumerate.
-        deleteStorageObjects(orgId);
+        // storage schema - durable erasure records first, then metadata.
+        // The outbox insert joins the caller transaction: a failure rolls back and keeps the
+        // source rows, while a committed purge leaves restart-safe work for the dispatcher.
+        enqueueStorageErasures(orgId);
         int storageRows = nativeExec("DELETE FROM storage.storage WHERE organization_id::text = ?", orgId);
         if (storageRows > 0) {
             logger.info("Workspace purge: deleted {} storage rows for org {}", storageRows, orgId);

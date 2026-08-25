@@ -20,7 +20,8 @@ public class CloudSettlementResultWriter {
     }
 
     @Transactional
-    public void delivered(UUID outboxId, UUID operationId, String state, String responseJson) {
+    public void delivered(UUID outboxId, UUID operationId, String requestHash,
+                          String state, String responseJson) {
         int acknowledged = jdbc.update("""
                 UPDATE auth.cloud_settlement_outbox
                 SET status='DELIVERED', delivered_at=now(), last_error=NULL
@@ -33,9 +34,9 @@ public class CloudSettlementResultWriter {
             jdbc.update("""
                     UPDATE auth.cloud_settlement_outbox
                     SET status='DELIVERED', delivered_at=now(), last_error=NULL
-                    WHERE operation_id=? AND action='OUTCOME_UNKNOWN'
+                    WHERE operation_id=? AND action='OUTCOME_UNKNOWN' AND request_hash=?
                       AND status IN ('PENDING','PROCESSING','FAILED')
-                    """, operationId);
+                    """, operationId, requestHash);
         }
         jdbc.update("""
                 UPDATE auth.cloud_credit_operation

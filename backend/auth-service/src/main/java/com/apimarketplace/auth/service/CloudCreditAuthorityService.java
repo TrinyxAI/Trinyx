@@ -142,6 +142,15 @@ public class CloudCreditAuthorityService {
         if ("RELEASED".equals(operation.state())) {
             throw conflict("COMMIT_AFTER_RELEASE");
         }
+        if ("RESERVED".equals(operation.state())) {
+            throw conflict("COMMIT_BEFORE_DISPATCH");
+        }
+        if (!"DISPATCHING".equals(operation.state())
+                && !"OUTCOME_UNKNOWN".equals(operation.state())
+                && !"EXPIRED".equals(operation.state())
+                && !"OUTCOME_UNKNOWN_EXPIRED".equals(operation.state())) {
+            throw conflict("COMMIT_FROM_" + operation.state());
+        }
         boolean late = "EXPIRED".equals(operation.state())
                 || "OUTCOME_UNKNOWN_EXPIRED".equals(operation.state());
         if (late && (operation.lateSettlementUntil() == null

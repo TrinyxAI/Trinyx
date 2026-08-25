@@ -251,10 +251,9 @@ public class CloudCreditAuthorityService {
                 false, "RECONCILIATION_REQUIRED_HOLD_RETAINED");
         jdbc.update("""
                 UPDATE auth.cloud_credit_operation
-                SET state='OUTCOME_UNKNOWN', settlement_hash=?,
-                    response_payload=CAST(? AS jsonb), updated_at=now()
+                SET state=?, settlement_hash=?, response_payload=CAST(? AS jsonb), updated_at=now()
                 WHERE operation_id=?
-                """, settlementHash, write(response), operationId);
+                """, "OUTCOME_UNKNOWN", settlementHash, write(response), operationId);
         return response;
     }
 

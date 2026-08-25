@@ -85,6 +85,16 @@ class RedisExternalSettlementIntentStoreTest {
 
             UUID released = UUID.randomUUID();
             store.registerProviderOperation(operation(released));
+            store.registerProviderOperation(operation(released));
+            assertThat(store.providerOperation(released).requestHash())
+                    .isEqualTo("a".repeat(64));
+            ExternalSettlementIntentStore.ProviderOperation equivocation =
+                    new ExternalSettlementIntentStore.ProviderOperation(
+                            released, "b".repeat(64), "openai", "gpt-test",
+                            "http://auth/outcome-unknown", Map.of(),
+                            "RESERVED", Instant.now());
+            assertThatThrownBy(() -> store.registerProviderOperation(equivocation))
+                    .hasMessageContaining("provider operation equivocation");
             assertThat(store.providerOperation(released).requestHash())
                     .isEqualTo("a".repeat(64));
             assertThat(store.markProviderDispatching(released)).isTrue();

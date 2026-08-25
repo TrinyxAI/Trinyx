@@ -145,8 +145,14 @@ public final class RedisExternalSettlementIntentStore
                             "intent", intent,
                             "error", error == null ? "permanent rejection" : error)),
                     TERMINAL_TTL);
-            acknowledge(intent);
-            markProviderState(intent.operationId(), "SETTLEMENT_FAILED");
+            // Remove the rejected delivery without applying its requested
+            // terminal state. A racing COMMIT may already be authoritative.
+            redis.opsForZSet().remove(DUE, intent.key());
+            redis.delete(List.of(payloadKey(intent), claimKey(intent.key())));
+            ProviderOperation operation = readOperation(intent.operationId());
+            if (operation == null || !isTerminal(operation.state())) {
+                markProviderState(intent.operationId(), "SETTLEMENT_FAILED");
+            }
         } catch (Exception failure) {
             throw new IllegalStateException("Could not dead-letter settlement intent", failure);
         }

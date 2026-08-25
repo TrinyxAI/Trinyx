@@ -193,6 +193,9 @@ class CloudCreditAuthorityServiceTest {
         String hash = "0".repeat(64);
         jdbc.row = ExistingRow.reserved(operationId, hash, "{}");
         when(credits.getBalance(42L)).thenReturn(BigDecimal.TEN);
+        service.dispatching(operationId,
+                new CloudCreditAuthorityService.DispatchingRequest(
+                        hash, "openai", "gpt"));
         var request = new CloudCreditAuthorityService.OutcomeUnknownRequest(
                 "provider timeout after dispatch", hash, "openai", "gpt");
 
@@ -213,6 +216,9 @@ class CloudCreditAuthorityServiceTest {
         String hash = "a".repeat(64);
         jdbc.row = ExistingRow.reserved(operationId, hash, "{}");
         when(credits.getBalance(42L)).thenReturn(BigDecimal.TEN);
+        service.dispatching(operationId,
+                new CloudCreditAuthorityService.DispatchingRequest(
+                        hash, "openai", "gpt"));
         service.outcomeUnknown(operationId,
                 new CloudCreditAuthorityService.OutcomeUnknownRequest(
                         "timeout", hash, "openai", "gpt"));
@@ -238,6 +244,9 @@ class CloudCreditAuthorityServiceTest {
         String hash = "b".repeat(64);
         jdbc.row = ExistingRow.reserved(operationId, hash, "{}");
         when(credits.getBalance(42L)).thenReturn(BigDecimal.TEN);
+        service.dispatching(operationId,
+                new CloudCreditAuthorityService.DispatchingRequest(
+                        hash, "openai", "gpt"));
         service.outcomeUnknown(operationId,
                 new CloudCreditAuthorityService.OutcomeUnknownRequest(
                         "timeout", hash, "openai", "gpt"));
@@ -256,22 +265,50 @@ class CloudCreditAuthorityServiceTest {
     }
 
     @Test
-    void expiredReservationCanSettleInsideLateWindow() {
+    void expiredUndispatchedReservationCannotCommit() {
         UUID operationId = UUID.randomUUID();
         String hash = "1".repeat(64);
         jdbc.row = new ExistingRow(operationId, hash, null, "EXPIRED", "{}",
                 Instant.now().plusSeconds(3600), "LLM");
-        when(credits.settleExternalReservation("cloud-reservation:" + operationId,
-                BigDecimal.ONE, "openai", "gpt", true))
-                .thenReturn(CreditService.CommitOutcome.COMMITTED);
-        when(credits.getBalance(42L)).thenReturn(BigDecimal.TEN);
 
-        var result = service.commit(operationId, new CloudCreditAuthorityService.CommitRequest(
-                BigDecimal.ONE, "openai", "gpt", "late-provider", 1L, 1L, hash));
+        assertThatThrownBy(() -> service.commit(operationId,
+                new CloudCreditAuthorityService.CommitRequest(
+                        BigDecimal.ONE, "openai", "gpt", "late-provider",
+                        1L, 1L, hash)))
+                .isInstanceOf(ResponseStatusException.class)
+                .hasMessageContaining("COMMIT_AFTER_UNDISPATCHED_EXPIRY");
+        verify(credits, never()).settleExternalReservation(
+                anyString(), any(), anyString(), anyString(), anyBoolean());
+    }
 
-        assertThat(result.state()).isEqualTo("COMMITTED");
-        verify(credits).settleExternalReservation(
-                "cloud-reservation:" + operationId, BigDecimal.ONE, "openai", "gpt", true);
+    @Test
+    void reservedCannotBecomeOutcomeUnknownBeforeDispatch() {
+        UUID operationId = UUID.randomUUID();
+        String hash = "c".repeat(64);
+        jdbc.row = ExistingRow.reserved(operationId, hash, "{}");
+
+        assertThatThrownBy(() -> service.outcomeUnknown(operationId,
+                new CloudCreditAuthorityService.OutcomeUnknownRequest(
+                        "provider outcome cannot be ambiguous before dispatch",
+                        hash, "openai", "gpt")))
+                .isInstanceOf(ResponseStatusException.class)
+                .hasMessageContaining("OUTCOME_UNKNOWN_BEFORE_DISPATCH");
+        assertThat(jdbc.row.state()).isEqualTo("RESERVED");
+    }
+
+    @Test
+    void expiredCannotBecomeOutcomeUnknown() {
+        UUID operationId = UUID.randomUUID();
+        String hash = "d".repeat(64);
+        jdbc.row = new ExistingRow(operationId, hash, null, "EXPIRED", "{}",
+                Instant.now().plusSeconds(3600), "LLM", "openai", "gpt");
+
+        assertThatThrownBy(() -> service.outcomeUnknown(operationId,
+                new CloudCreditAuthorityService.OutcomeUnknownRequest(
+                        "late ambiguity without dispatch", hash, "openai", "gpt")))
+                .isInstanceOf(ResponseStatusException.class)
+                .hasMessageContaining("OUTCOME_UNKNOWN_AFTER_UNDISPATCHED_EXPIRY");
+        assertThat(jdbc.row.state()).isEqualTo("EXPIRED");
     }
 
     @Test

@@ -53,13 +53,25 @@ public final class RedisExternalSettlementIntentStore
                     local ok, operation = pcall(cjson.decode, raw)
                     if not ok then return -2 end
                     local current = operation['state']
-                    if current == 'OUTCOME_UNKNOWN' then return 2 end
-                    if current ~= 'DISPATCHING' then return 0 end
+                    if current == 'OUTCOME_UNKNOWN' then
+                        redis.call('PERSIST', KEYS[1])
+                        redis.call('PSETEX', KEYS[2], ARGV[3], ARGV[2])
+                        redis.call('ZREM', KEYS[3], ARGV[4])
+                        redis.call('DEL', KEYS[4], KEYS[5])
+                        return 2
+                    end
+                    if current ~= 'DISPATCHING' then
+                        redis.call('ZREM', KEYS[8], ARGV[5])
+                        redis.call('DEL', KEYS[6], KEYS[7])
+                        redis.call('ZREM', KEYS[3], ARGV[4])
+                        redis.call('DEL', KEYS[4], KEYS[5])
+                        return 0
+                    end
                     operation['state'] = 'OUTCOME_UNKNOWN'
                     operation['updatedAt'] = ARGV[1]
-                    redis.call('PSETEX', KEYS[1], ARGV[2], cjson.encode(operation))
-                    redis.call('PSETEX', KEYS[2], ARGV[3], ARGV[4])
-                    redis.call('ZREM', KEYS[3], ARGV[5])
+                    redis.call('SET', KEYS[1], cjson.encode(operation))
+                    redis.call('PSETEX', KEYS[2], ARGV[3], ARGV[2])
+                    redis.call('ZREM', KEYS[3], ARGV[4])
                     redis.call('DEL', KEYS[4], KEYS[5])
                     return 1
                     """, Long.class);
@@ -94,7 +106,11 @@ public final class RedisExternalSettlementIntentStore
                     end
                     operation['state'] = ARGV[2]
                     operation['updatedAt'] = ARGV[3]
-                    redis.call('PSETEX', KEYS[4], ARGV[4], cjson.encode(operation))
+                    if ARGV[2] == 'OUTCOME_UNKNOWN' then
+                        redis.call('SET', KEYS[4], cjson.encode(operation))
+                    else
+                        redis.call('PSETEX', KEYS[4], ARGV[4], cjson.encode(operation))
+                    end
                     redis.call('ZREM', KEYS[3], ARGV[1])
                     redis.call('DEL', KEYS[1], KEYS[2], KEYS[5], KEYS[6])
                     redis.call('ZREM', KEYS[7], ARGV[5])
@@ -269,13 +285,16 @@ public final class RedisExternalSettlementIntentStore
                     "operationId", operationId,
                     "state", "UNKNOWN_PROVIDER_OUTCOME",
                     "details", details == null ? Map.of() : details));
+            String unknownIntentKey = "OUTCOME_UNKNOWN:" + operationId;
             Long result = redis.execute(RECORD_OUTCOME_UNKNOWN, List.of(
                             operationKey(operationId), PREFIX + "unknown:" + operationId,
                             PROVIDER_DISPATCH_DUE, dispatchKey(operationId),
-                            dispatchClaimKey(operationId)),
-                    Instant.now().toString(), String.valueOf(ACTIVE_TTL.toMillis()),
-                    audit, String.valueOf(TERMINAL_TTL.toMillis()),
-                    operationId.toString());
+                            dispatchClaimKey(operationId),
+                            PREFIX + "item:" + unknownIntentKey,
+                            claimKey(unknownIntentKey), DUE),
+                    Instant.now().toString(), audit,
+                    String.valueOf(TERMINAL_TTL.toMillis()),
+                    operationId.toString(), unknownIntentKey);
             if (result == null || result < 0) {
                 throw new IllegalStateException(
                         "Could not atomically record ambiguous provider outcome "

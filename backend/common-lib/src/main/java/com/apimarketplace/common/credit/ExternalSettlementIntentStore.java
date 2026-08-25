@@ -78,11 +78,6 @@ public interface ExternalSettlementIntentStore {
         return List.of();
     }
 
-    /** Persist the producer-side state transition retained for audit/recovery. */
-    default void markProviderState(UUID operationId, String state) {
-        // Compatibility no-op.
-    }
-
     /** Immutable provider metadata captured with the authoritative reservation. */
     default ProviderOperation providerOperation(UUID operationId) {
         return null;

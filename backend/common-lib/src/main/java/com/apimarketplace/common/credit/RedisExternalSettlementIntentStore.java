@@ -46,6 +46,24 @@ public final class RedisExternalSettlementIntentStore
                     return 1
                     """, Long.class);
 
+    private static final DefaultRedisScript<Long> RECORD_OUTCOME_UNKNOWN =
+            new DefaultRedisScript<>("""
+                    local raw = redis.call('GET', KEYS[1])
+                    if not raw then return -1 end
+                    local ok, operation = pcall(cjson.decode, raw)
+                    if not ok then return -2 end
+                    local current = operation['state']
+                    if current == 'OUTCOME_UNKNOWN' then return 2 end
+                    if current ~= 'DISPATCHING' then return 0 end
+                    operation['state'] = 'OUTCOME_UNKNOWN'
+                    operation['updatedAt'] = ARGV[1]
+                    redis.call('PSETEX', KEYS[1], ARGV[2], cjson.encode(operation))
+                    redis.call('PSETEX', KEYS[2], ARGV[3], ARGV[4])
+                    redis.call('ZREM', KEYS[3], ARGV[5])
+                    redis.call('DEL', KEYS[4], KEYS[5])
+                    return 1
+                    """, Long.class);
+
     private static final DefaultRedisScript<Long> PERSIST_INTENT =
             new DefaultRedisScript<>("""
                     local existing = redis.call('GET', KEYS[1])
@@ -247,13 +265,24 @@ public final class RedisExternalSettlementIntentStore
     @Override
     public void recordUnknown(UUID operationId, Map<String, Object> details) {
         try {
-            redis.opsForValue().set(PREFIX + "unknown:" + operationId,
-                    json.writeValueAsString(Map.of(
-                            "operationId", operationId,
-                            "state", "UNKNOWN_PROVIDER_OUTCOME",
-                            "details", details == null ? Map.of() : details)),
-                    TERMINAL_TTL);
-            markProviderState(operationId, "OUTCOME_UNKNOWN");
+            String audit = json.writeValueAsString(Map.of(
+                    "operationId", operationId,
+                    "state", "UNKNOWN_PROVIDER_OUTCOME",
+                    "details", details == null ? Map.of() : details));
+            Long result = redis.execute(RECORD_OUTCOME_UNKNOWN, List.of(
+                            operationKey(operationId), PREFIX + "unknown:" + operationId,
+                            PROVIDER_DISPATCH_DUE, dispatchKey(operationId),
+                            dispatchClaimKey(operationId)),
+                    Instant.now().toString(), String.valueOf(ACTIVE_TTL.toMillis()),
+                    audit, String.valueOf(TERMINAL_TTL.toMillis()),
+                    operationId.toString());
+            if (result == null || result < 0) {
+                throw new IllegalStateException(
+                        "Could not atomically record ambiguous provider outcome "
+                                + operationId + " result=" + result);
+            }
+        } catch (RuntimeException failure) {
+            throw failure;
         } catch (Exception failure) {
             throw new IllegalStateException("Could not persist ambiguous provider outcome", failure);
         }
@@ -348,26 +377,6 @@ public final class RedisExternalSettlementIntentStore
             }
         }
         return result;
-    }
-
-    @Override
-    public void markProviderState(UUID operationId, String state) {
-        try {
-            ProviderOperation prior = readOperation(operationId);
-            if (prior == null) return;
-            ProviderOperation next = new ProviderOperation(
-                    prior.operationId(), prior.requestHash(), prior.provider(), prior.model(),
-                    prior.outcomeUnknownUrl(), prior.trustedHeaders(), state, Instant.now());
-            redis.opsForValue().set(operationKey(operationId),
-                    json.writeValueAsString(next),
-                    isTerminal(state) ? TERMINAL_TTL : ACTIVE_TTL);
-            if (!"DISPATCHING".equals(state)) {
-                redis.opsForZSet().remove(PROVIDER_DISPATCH_DUE, operationId.toString());
-                redis.delete(List.of(dispatchKey(operationId), dispatchClaimKey(operationId)));
-            }
-        } catch (Exception failure) {
-            throw new IllegalStateException("Could not update provider operation state", failure);
-        }
     }
 
     @Override

@@ -40,9 +40,9 @@ public final class RedisExternalSettlementIntentStore
                     local ok, operation = pcall(cjson.decode, raw)
                     if not ok or operation['state'] ~= 'RESERVED' then return -2 end
                     if redis.call('EXISTS', KEYS[2]) == 1 then return 0 end
-                    redis.call('PSETEX', KEYS[1], ARGV[1], ARGV[2])
-                    redis.call('PSETEX', KEYS[2], ARGV[1], ARGV[2])
-                    redis.call('ZADD', KEYS[3], ARGV[3], ARGV[4])
+                    redis.call('SET', KEYS[1], ARGV[1])
+                    redis.call('SET', KEYS[2], ARGV[1])
+                    redis.call('ZADD', KEYS[3], ARGV[2], ARGV[3])
                     return 1
                     """, Long.class);
 
@@ -80,11 +80,28 @@ public final class RedisExternalSettlementIntentStore
             new DefaultRedisScript<>("""
                     local existing = redis.call('GET', KEYS[1])
                     if existing then
-                        if existing == ARGV[1] then return 2 end
+                        if existing == ARGV[1] then
+                            redis.call('PERSIST', KEYS[1])
+                            return 2
+                        end
                         return -1
                     end
-                    redis.call('PSETEX', KEYS[1], ARGV[2], ARGV[1])
-                    redis.call('ZADD', KEYS[2], ARGV[3], ARGV[4])
+                    redis.call('SET', KEYS[1], ARGV[1])
+                    redis.call('ZADD', KEYS[2], ARGV[2], ARGV[3])
+                    return 1
+                    """, Long.class);
+
+    private static final DefaultRedisScript<Long> RETRY_INTENT =
+            new DefaultRedisScript<>("""
+                    local existing = redis.call('GET', KEYS[1])
+                    if not existing then
+                        redis.call('ZREM', KEYS[2], ARGV[3])
+                        redis.call('DEL', KEYS[3])
+                        return 0
+                    end
+                    redis.call('SET', KEYS[1], ARGV[1])
+                    redis.call('ZADD', KEYS[2], ARGV[2], ARGV[3])
+                    redis.call('DEL', KEYS[3])
                     return 1
                     """, Long.class);
 
@@ -162,11 +179,11 @@ public final class RedisExternalSettlementIntentStore
                     throw new IllegalStateException(
                             "settlement intent equivocation for " + intent.key());
                 }
+                redis.persist(key);
                 return;
             }
             Long result = redis.execute(PERSIST_INTENT, List.of(key, DUE),
-                    encoded, String.valueOf(ACTIVE_TTL.toMillis()),
-                    String.valueOf(System.currentTimeMillis()), intent.key());
+                    encoded, String.valueOf(System.currentTimeMillis()), intent.key());
             if (result != null && result == -1L) {
                 throw new IllegalStateException(
                         "settlement intent equivocation for " + intent.key());
@@ -242,13 +259,22 @@ public final class RedisExternalSettlementIntentStore
                 intent.url(), intent.body(), intent.attempts() + 1,
                 intent.trustedHeaders());
         try {
-            redis.opsForValue().set(payloadKey(next), json.writeValueAsString(next), ACTIVE_TTL);
             long cap = Math.min(300, 1L << Math.min(8, next.attempts()));
             long delay = ThreadLocalRandom.current().nextLong(
                     Math.max(1, cap / 2), cap + 1);
-            redis.opsForZSet().add(DUE, next.key(),
-                    System.currentTimeMillis() + Duration.ofSeconds(delay).toMillis());
-            redis.delete(claimKey(next.key()));
+            Long result = redis.execute(RETRY_INTENT,
+                    List.of(payloadKey(next), DUE, claimKey(next.key())),
+                    json.writeValueAsString(next),
+                    String.valueOf(System.currentTimeMillis()
+                            + Duration.ofSeconds(delay).toMillis()),
+                    next.key());
+            if (result == null || result < 0) {
+                throw new IllegalStateException(
+                        "Could not atomically reschedule settlement intent "
+                                + next.key() + " result=" + result);
+            }
+        } catch (RuntimeException failure) {
+            throw failure;
         } catch (Exception failure) {
             throw new IllegalStateException("Could not reschedule settlement intent", failure);
         }
@@ -356,7 +382,6 @@ public final class RedisExternalSettlementIntentStore
             Long result = redis.execute(MARK_DISPATCHING,
                     List.of(operationKey(operationId), dispatchKey(operationId),
                             PROVIDER_DISPATCH_DUE),
-                    String.valueOf(ACTIVE_TTL.toMillis()),
                     json.writeValueAsString(dispatching),
                     String.valueOf(dueAt), operationId.toString());
             return result != null && result == 1L;

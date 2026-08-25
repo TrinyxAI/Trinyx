@@ -73,6 +73,12 @@ jobs:
           grep -q 'ORCHESTRATOR_SERVICE_URL: http://orchestrator-service:8099' "${rendered}"
           grep -q 'host_ip: 127.0.0.1' "${rendered}"
           grep -q 'target: 8443' "${rendered}"
+          grep -q -- '--appendonly' "${rendered}"
+          grep -q -- '--appendfsync' "${rendered}"
+          grep -q -- 'everysec' "${rendered}"
+          grep -q -- '--maxmemory-policy' "${rendered}"
+          grep -q -- 'noeviction' "${rendered}"
+          grep -q 'cloud-redis-data:' "${rendered}"
 
       - name: Verify external image manifests
         shell: bash

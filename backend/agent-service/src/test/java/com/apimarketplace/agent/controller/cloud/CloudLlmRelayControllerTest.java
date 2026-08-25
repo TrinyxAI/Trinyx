@@ -87,6 +87,8 @@ class CloudLlmRelayControllerTest {
         // The MODEL_NOT_SUPPORTED tests use a model id with no row (Mockito returns Optional.empty()).
         lenient().when(modelConfigRepository.findByProviderAndModelId(PROVIDER, MODEL))
                 .thenReturn(Optional.of(new ModelConfigOverrideEntity()));
+        lenient().when(creditClient.markExternalProviderDispatching(any(UUID.class)))
+                .thenReturn(true);
     }
 
     @Test

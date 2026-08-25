@@ -19,7 +19,7 @@ class CloudSettlementResultWriterTest {
         UUID outbox = UUID.randomUUID();
         UUID operation = UUID.randomUUID();
 
-        writer.delivered(outbox, operation, "COMMITTED", "{}");
+        writer.delivered(outbox, operation, "a".repeat(64), "COMMITTED", "{}");
         assertThat(jdbc.sql).hasSize(3);
         assertThat(jdbc.sql.get(0)).contains("status='DELIVERED'");
         assertThat(jdbc.sql.get(1)).contains("action='OUTCOME_UNKNOWN'");
@@ -32,7 +32,8 @@ class CloudSettlementResultWriterTest {
         assertThat(jdbc.sql.get(1)).contains("SETTLEMENT_FAILED");
 
         assertThat(CloudSettlementResultWriter.class
-                .getDeclaredMethod("delivered", UUID.class, UUID.class, String.class, String.class)
+                .getDeclaredMethod("delivered", UUID.class, UUID.class, String.class,
+                        String.class, String.class)
                 .getAnnotation(Transactional.class)).isNotNull();
         assertThat(CloudSettlementResultWriter.class
                 .getDeclaredMethod("dead", UUID.class, UUID.class, int.class, String.class)
@@ -45,7 +46,8 @@ class CloudSettlementResultWriterTest {
         jdbc.operationState = "COMMITTED";
         CloudSettlementResultWriter writer = new CloudSettlementResultWriter(jdbc);
 
-        writer.delivered(UUID.randomUUID(), UUID.randomUUID(), "OUTCOME_UNKNOWN", "{}");
+        writer.delivered(UUID.randomUUID(), UUID.randomUUID(),
+                "b".repeat(64), "OUTCOME_UNKNOWN", "{}");
 
         assertThat(jdbc.operationState).isEqualTo("COMMITTED");
         assertThat(jdbc.sql).hasSize(2);
@@ -60,7 +62,8 @@ class CloudSettlementResultWriterTest {
         jdbc.claimResult = 0;
         CloudSettlementResultWriter writer = new CloudSettlementResultWriter(jdbc);
 
-        writer.delivered(UUID.randomUUID(), UUID.randomUUID(), "COMMITTED", "{}");
+        writer.delivered(UUID.randomUUID(), UUID.randomUUID(),
+                "c".repeat(64), "COMMITTED", "{}");
 
         assertThat(jdbc.sql).hasSize(1);
         assertThat(jdbc.operationState).isEqualTo("OUTCOME_UNKNOWN");
@@ -72,11 +75,13 @@ class CloudSettlementResultWriterTest {
         jdbc.operationState = "OUTCOME_UNKNOWN";
         CloudSettlementResultWriter writer = new CloudSettlementResultWriter(jdbc);
 
-        writer.delivered(UUID.randomUUID(), UUID.randomUUID(), "COMMITTED", "{}");
+        writer.delivered(UUID.randomUUID(), UUID.randomUUID(),
+                "d".repeat(64), "COMMITTED", "{}");
 
         assertThat(jdbc.sql).hasSize(3);
         assertThat(jdbc.sql.get(1))
-                .contains("action='OUTCOME_UNKNOWN'", "status IN ('PENDING','PROCESSING','FAILED')");
+                .contains("action='OUTCOME_UNKNOWN'", "request_hash=?",
+                        "status IN ('PENDING','PROCESSING','FAILED')");
         assertThat(jdbc.operationState).isEqualTo("COMMITTED");
     }
 

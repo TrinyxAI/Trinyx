@@ -1,6 +1,7 @@
 package com.apimarketplace.auth.web;
 
 import com.apimarketplace.auth.service.ExternalCreditProxyService;
+import com.apimarketplace.auth.service.CloudCreditAuthorityService;
 import com.apimarketplace.auth.service.CloudIdentityBindingService;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotNull;
@@ -49,6 +50,13 @@ public class ExternalCreditProxyController {
             @Valid @RequestBody ExternalCreditProxyService.LlmReserveCommand command) {
         return proxy.reserveLlm(context(userId, principalId, billingSubjectId,
                 organizationId, installId), command);
+    }
+
+    @PostMapping("/{operationId}/dispatching")
+    public CloudCreditAuthorityService.SettlementResponse dispatching(
+            @PathVariable UUID operationId,
+            @Valid @RequestBody ExternalCreditProxyService.DispatchingCommand command) {
+        return proxy.dispatching(operationId, command);
     }
 
     @PostMapping("/{operationId}/commit-llm")

@@ -132,11 +132,15 @@ public class ExternalCreditProxyService {
                 command.requestHash(), command.provider(), command.model());
         try {
             var response = authority.dispatching(operationId, request);
-            jdbc.update("""
+            int updated = jdbc.update("""
                     UPDATE auth.cloud_credit_operation
                     SET state='DISPATCHING', response_payload=CAST(? AS jsonb), updated_at=now()
                     WHERE operation_id=? AND state IN ('RESERVED','DISPATCHING')
                     """, write(response), operationId);
+            if (updated != 1) {
+                throw new ResponseStatusException(HttpStatus.CONFLICT,
+                        "EXTERNAL_RESERVATION_STATE_MISSING");
+            }
             return response;
         } catch (PaidMonolithCreditClient.PermanentAuthorityException permanent) {
             throw new ResponseStatusException(HttpStatusCode.valueOf(permanent.statusCode()),

@@ -36,12 +36,13 @@ class CloudSettlementOutboxDispatcherTest {
         assertThat(jdbc.claimSql)
                 .contains("SET status='PROCESSING'")
                 .contains("FOR UPDATE SKIP LOCKED")
-                .contains("RETURNING id, operation_id");
+                .contains("RETURNING id, operation_id")
+                .contains("request_hash");
         assertThat(CloudSettlementOutboxDispatcher.class.getDeclaredMethod("dispatch")
                 .getAnnotation(org.springframework.transaction.annotation.Transactional.class))
                 .isNull();
         verify(resultWriter).delivered(eq(jdbc.pending.id()), eq(jdbc.pending.operationId()),
-                eq("COMMITTED"), anyString());
+                eq(jdbc.pending.requestHash()), eq("COMMITTED"), anyString());
     }
 
     @Test
@@ -64,7 +65,8 @@ class CloudSettlementOutboxDispatcherTest {
         var request = new CloudCreditAuthorityService.OutcomeUnknownRequest(
                 "timeout after dispatch", "a".repeat(64), "openai", "gpt");
         jdbc.pending = new PendingData(UUID.randomUUID(), operationId,
-                "OUTCOME_UNKNOWN", json.writeValueAsString(request), 0);
+                "OUTCOME_UNKNOWN", request.requestHash(),
+                json.writeValueAsString(request), 0);
         when(authority.outcomeUnknown(eq(operationId), any()))
                 .thenReturn(new CloudCreditAuthorityService.SettlementResponse(
                         operationId, "OUTCOME_UNKNOWN", BigDecimal.ZERO,
@@ -74,7 +76,7 @@ class CloudSettlementOutboxDispatcherTest {
 
         verify(authority).outcomeUnknown(eq(operationId), eq(request));
         verify(resultWriter).delivered(eq(jdbc.pending.id()), eq(operationId),
-                eq("OUTCOME_UNKNOWN"), anyString());
+                eq(jdbc.pending.requestHash()), eq("OUTCOME_UNKNOWN"), anyString());
         verify(authority, never()).release(any(), any());
     }
 
@@ -86,7 +88,8 @@ class CloudSettlementOutboxDispatcherTest {
 
         dispatcher.dispatch();
 
-        assertThat(jdbc.sql).anyMatch(sql -> sql.contains("status='FAILED'"));
+        assertThat(jdbc.sql).anyMatch(sql -> sql.contains("status='FAILED'")
+                && sql.contains("status='PROCESSING'"));
         assertThat(jdbc.sql).noneMatch(sql -> sql.contains("status='DEAD'"));
     }
 
@@ -95,11 +98,11 @@ class CloudSettlementOutboxDispatcherTest {
         var request = new CloudCreditAuthorityService.CommitRequest(
                 BigDecimal.ONE, "openai", "gpt", "provider-request", 10L, 2L, "a".repeat(64));
         return new PendingData(UUID.randomUUID(), operationId, "COMMIT",
-                json.writeValueAsString(request), 0);
+                request.requestHash(), json.writeValueAsString(request), 0);
     }
 
     private record PendingData(UUID id, UUID operationId, String action,
-                               String payload, int attempts) {}
+                               String requestHash, String payload, int attempts) {}
 
     private static final class FakeJdbc extends JdbcTemplate {
         PendingData pending;
@@ -125,6 +128,7 @@ class CloudSettlementOutboxDispatcherTest {
                 when(rs.getObject("id", UUID.class)).thenReturn(pending.id());
                 when(rs.getObject("operation_id", UUID.class)).thenReturn(pending.operationId());
                 when(rs.getString("action")).thenReturn(pending.action());
+                when(rs.getString("request_hash")).thenReturn(pending.requestHash());
                 when(rs.getString("payload")).thenReturn(pending.payload());
                 when(rs.getInt("attempt_count")).thenReturn(pending.attempts());
                 return List.of(mapper.mapRow(rs, 0));

@@ -401,6 +401,36 @@ class CloudCreditAuthorityServiceTest {
     }
 
     @Test
+    void escalatedUnknownKeepsAFullWindowForExplicitCommit() {
+        UUID operationId = UUID.randomUUID();
+        String hash = "7".repeat(64);
+        Instant beforeEscalation = Instant.now();
+        jdbc.row = new ExistingRow(operationId, hash, "unknown-settlement-hash",
+                "OUTCOME_UNKNOWN", "{}", beforeEscalation.plusSeconds(60),
+                "PLATFORM_MARKUP", "vendor", "tool");
+        when(credits.settleExternalReservation(
+                "cloud-reservation:" + operationId, BigDecimal.ONE,
+                "vendor", "tool", true))
+                .thenReturn(CreditService.CommitOutcome.COMMITTED);
+        when(credits.getBalance(42L)).thenReturn(BigDecimal.TEN);
+
+        assertThat(service.escalateStaleUnknownOutcomes()).isEqualTo(1);
+        assertThat(jdbc.row.state()).isEqualTo("OUTCOME_UNKNOWN_EXPIRED");
+        assertThat(jdbc.row.lateSettlementUntil())
+                .isAfter(beforeEscalation.plus(Duration.ofHours(23)));
+
+        var committed = service.commit(operationId,
+                new CloudCreditAuthorityService.CommitRequest(
+                        BigDecimal.ONE, "vendor", "tool", "provider-proof",
+                        null, null, hash));
+
+        assertThat(committed.state()).isEqualTo("COMMITTED");
+        verify(credits).settleExternalReservation(
+                "cloud-reservation:" + operationId, BigDecimal.ONE,
+                "vendor", "tool", true);
+    }
+
+    @Test
     void settlementCannotSubstituteTheReservedProviderOrModel() {
         UUID operationId = UUID.randomUUID();
         String hash = "3".repeat(64);
@@ -509,6 +539,22 @@ class CloudCreditAuthorityServiceTest {
                 row = new ExistingRow((UUID) args[0], (String) args[2], null, "RESERVED",
                         (String) args[13], ((Timestamp) args[15]).toInstant(), (String) args[8],
                         (String) args[11], (String) args[12]);
+            } else if (sql.contains("SET state='OUTCOME_UNKNOWN_EXPIRED'")) {
+                Instant extendedUntil = Instant.now().plusSeconds(((Number) args[0]).longValue());
+                Instant currentUntil = row.lateSettlementUntil();
+                row = new ExistingRow(row.operationId(), row.requestHash(),
+                        row.settlementHash(), "OUTCOME_UNKNOWN_EXPIRED", row.response(),
+                        currentUntil == null || currentUntil.isBefore(extendedUntil)
+                                ? extendedUntil : currentUntil,
+                        row.sourceType(), row.provider(), row.model());
+            } else if (sql.contains("SET late_settlement_until=GREATEST")) {
+                Instant extendedUntil = Instant.now().plusSeconds(((Number) args[0]).longValue());
+                Instant currentUntil = row.lateSettlementUntil();
+                row = new ExistingRow(row.operationId(), row.requestHash(),
+                        row.settlementHash(), row.state(), row.response(),
+                        currentUntil == null || currentUntil.isBefore(extendedUntil)
+                                ? extendedUntil : currentUntil,
+                        row.sourceType(), row.provider(), row.model());
             } else if (sql.contains("SET state=?, actual_credits")) {
                 row = new ExistingRow(row.operationId(), row.requestHash(), (String) args[11],
                         (String) args[0], (String) args[12], row.lateSettlementUntil(),

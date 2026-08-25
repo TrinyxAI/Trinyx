@@ -141,11 +141,14 @@ public final class RedisExternalSettlementIntentStore
                         local ok, operation = pcall(cjson.decode, raw)
                         if ok then
                             local current = operation['state']
-                            if current ~= 'COMMITTED' and current ~= 'RELEASED'
-                                    and current ~= 'SETTLEMENT_FAILED' then
+                            if current == 'SETTLEMENT_FAILED' then
+                                -- Repair keys written by older builds: a transport/dead-letter
+                                -- state is still reconcilable and must outlive any fixed TTL.
+                                redis.call('PERSIST', KEYS[5])
+                            elseif current ~= 'COMMITTED' and current ~= 'RELEASED' then
                                 operation['state'] = 'SETTLEMENT_FAILED'
                                 operation['updatedAt'] = ARGV[5]
-                                redis.call('PSETEX', KEYS[5], ARGV[2], cjson.encode(operation))
+                                redis.call('SET', KEYS[5], cjson.encode(operation))
                             end
                         end
                     end

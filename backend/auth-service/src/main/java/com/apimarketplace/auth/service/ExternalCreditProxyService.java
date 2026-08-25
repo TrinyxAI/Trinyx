@@ -121,6 +121,36 @@ public class ExternalCreditProxyService {
     }
 
     @Transactional(noRollbackFor = ResponseStatusException.class)
+    public CloudCreditAuthorityService.SettlementResponse dispatching(
+            UUID operationId, DispatchingCommand command) {
+        if (command == null || command.requestHash() == null
+                || !command.requestHash().matches("[0-9a-f]{64}")) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
+                    "INVALID_PROVIDER_DISPATCH");
+        }
+        var request = new CloudCreditAuthorityService.DispatchingRequest(
+                command.requestHash(), command.provider(), command.model());
+        try {
+            var response = authority.dispatching(operationId, request);
+            jdbc.update("""
+                    UPDATE auth.cloud_credit_operation
+                    SET state='DISPATCHING', response_payload=CAST(? AS jsonb), updated_at=now()
+                    WHERE operation_id=? AND state IN ('RESERVED','DISPATCHING')
+                    """, write(response), operationId);
+            return response;
+        } catch (PaidMonolithCreditClient.PermanentAuthorityException permanent) {
+            throw new ResponseStatusException(HttpStatusCode.valueOf(permanent.statusCode()),
+                    "BILLING_AUTHORITY_DISPATCH_REJECTED", permanent);
+        } catch (PaidMonolithCreditClient.RetryableAuthorityException unavailable) {
+            // This transition is a synchronous safety gate. Never turn an
+            // unavailable authority into a queued success that could permit the
+            // provider call.
+            throw new ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE,
+                    "BILLING_AUTHORITY_DISPATCH_UNAVAILABLE", unavailable);
+        }
+    }
+
+    @Transactional(noRollbackFor = ResponseStatusException.class)
     public SettlementResult commit(UUID operationId, CommitCommand command) {
         var request = new CloudCreditAuthorityService.CommitRequest(
                 command.actualCredits(), command.provider(), command.model(),
@@ -309,6 +339,7 @@ public class ExternalCreditProxyService {
                     completionTokens, requestHash, null, null, null, null);
         }
     }
+    public record DispatchingCommand(String requestHash, String provider, String model) {}
     public record ReleaseCommand(String reason, String requestHash) {}
     public record OutcomeUnknownCommand(String reason, String requestHash,
                                         String provider, String model) {}

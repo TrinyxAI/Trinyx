@@ -28,6 +28,9 @@ public class CloudCreditAuthorityService {
     private static final Duration RESERVATION_TTL = Duration.ofMinutes(10);
     private static final Duration LATE_SETTLEMENT = Duration.ofHours(24);
     private static final Duration UNKNOWN_RECONCILIATION_SLA = Duration.ofHours(24);
+    // Once an ambiguous operation breaches the reconciliation SLA, operators
+    // still receive a full bounded window to account for proven provider cost.
+    private static final Duration UNKNOWN_EXPIRED_SETTLEMENT_WINDOW = Duration.ofHours(24);
     private final JdbcTemplate jdbc;
     private final CreditService credits;
     private final ObjectMapper json;
@@ -192,6 +195,15 @@ public class CloudCreditAuthorityService {
                 SET state=?, settlement_hash=?, response_payload=CAST(? AS jsonb), updated_at=now()
                 WHERE operation_id=?
                 """, state, settlementHash, write(response), operationId);
+        if (holdAlreadyExpired) {
+            jdbc.update("""
+                    UPDATE auth.cloud_credit_operation
+                    SET late_settlement_until=GREATEST(
+                        COALESCE(late_settlement_until, now()),
+                        now() + (? * interval '1 second'))
+                    WHERE operation_id=?
+                    """, UNKNOWN_EXPIRED_SETTLEMENT_WINDOW.toSeconds(), operationId);
+        }
         return response;
     }
 
@@ -219,10 +231,15 @@ public class CloudCreditAuthorityService {
     public int escalateStaleUnknownOutcomes() {
         return jdbc.update("""
                 UPDATE auth.cloud_credit_operation
-                SET state='OUTCOME_UNKNOWN_EXPIRED', updated_at=now()
+                SET state='OUTCOME_UNKNOWN_EXPIRED',
+                    late_settlement_until=GREATEST(
+                        COALESCE(late_settlement_until, now()),
+                        now() + (? * interval '1 second')),
+                    updated_at=now()
                 WHERE state='OUTCOME_UNKNOWN'
                   AND updated_at <= now() - (? * interval '1 second')
-                """, UNKNOWN_RECONCILIATION_SLA.toSeconds());
+                """, UNKNOWN_EXPIRED_SETTLEMENT_WINDOW.toSeconds(),
+                UNKNOWN_RECONCILIATION_SLA.toSeconds());
     }
 
     private long validateAuthorityContext(ReserveRequest request) {

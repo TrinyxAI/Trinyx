@@ -202,6 +202,7 @@ jobs:
           private_edge=docker/paid-monolith-internal/Caddyfile
           grep -q 'billing-internal.trinyx.private' "${private_edge}"
           grep -q '@wallet {' "${private_edge}"
+          grep -q '/internal/v1/credit-reservations/\*/dispatching' "${private_edge}"
           grep -q '/internal/v1/credit-reservations/\*/commit' "${private_edge}"
           grep -q '/internal/v1/credit-reservations/\*/release' "${private_edge}"
           grep -q '/internal/v1/credit-reservations/\*/outcome-unknown' "${private_edge}"

@@ -117,6 +117,16 @@ public final class RedisExternalSettlementIntentStore
                         return -3
                     end
                     if current == 'SETTLEMENT_FAILED'
+                            and ARGV[2] == 'OUTCOME_UNKNOWN' then
+                        -- The authority may idempotently confirm an older UNKNOWN
+                        -- after a different local settlement intent was dead-lettered.
+                        -- Keep the stronger local failure state, but atomically retire
+                        -- this now-superseded transport message.
+                        redis.call('ZREM', KEYS[3], ARGV[1])
+                        redis.call('DEL', KEYS[1], KEYS[2])
+                        return 2
+                    end
+                    if current == 'SETTLEMENT_FAILED'
                             and ARGV[2] ~= 'COMMITTED'
                             and ARGV[2] ~= 'RELEASED' then
                         return -3

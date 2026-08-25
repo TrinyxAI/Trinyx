@@ -49,11 +49,12 @@ public class CloudSettlementOutboxDispatcher {
                       AND next_attempt_at <= now()
                     ORDER BY created_at FOR UPDATE SKIP LOCKED LIMIT 25
                 )
-                RETURNING id, operation_id, action, payload::text, attempt_count
+                RETURNING id, operation_id, action, request_hash, payload::text, attempt_count
                 """, (rs, row) -> new Pending(
                 rs.getObject("id", UUID.class),
                 rs.getObject("operation_id", UUID.class),
                 rs.getString("action"),
+                rs.getString("request_hash"),
                 rs.getString("payload"),
                 rs.getInt("attempt_count")));
         for (Pending pending : rows) {
@@ -78,7 +79,8 @@ public class CloudSettlementOutboxDispatcher {
                 // Remote I/O is complete. Record both local state transitions in one
                 // short transaction so a crash cannot leave DELIVERED + RESERVED.
                 resultWriter.delivered(pending.id(), pending.operationId(),
-                        state(response), json.writeValueAsString(response));
+                        pending.requestHash(), state(response),
+                        json.writeValueAsString(response));
             } catch (Exception failure) {
                 int attempt = pending.attemptCount() + 1;
                 if (isPermanent(failure)) {
@@ -96,7 +98,7 @@ public class CloudSettlementOutboxDispatcher {
                         UPDATE auth.cloud_settlement_outbox
                         SET status='FAILED', attempt_count=?, next_attempt_at=?,
                             last_error=?
-                        WHERE id=?
+                        WHERE id=? AND status='PROCESSING'
                         """, attempt, Timestamp.from(Instant.now().plusSeconds(delay)),
                         bounded(failure.getMessage()), pending.id());
                 log.warn("Settlement retry scheduled operationId={} action={} attempt={} delaySeconds={} type={}",
@@ -132,5 +134,5 @@ public class CloudSettlementOutboxDispatcher {
     }
 
     private record Pending(UUID id, UUID operationId, String action,
-                           String payload, int attemptCount) {}
+                           String requestHash, String payload, int attemptCount) {}
 }

@@ -82,6 +82,47 @@ public class CloudCreditAuthorityService {
         return response;
     }
 
+    /**
+     * Authoritative provider point-of-no-return. The provider must not be called
+     * until this transition is acknowledged. DISPATCHING is intentionally not
+     * eligible for reservation expiry: only explicit reconciliation may commit
+     * or release the retained hold.
+     */
+    @Transactional
+    public SettlementResponse dispatching(UUID operationId, DispatchingRequest request) {
+        if (request == null || request.requestHash() == null
+                || !request.requestHash().matches("[0-9a-f]{64}")) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
+                    "INVALID_PROVIDER_DISPATCH");
+        }
+        lock(operationId);
+        Existing operation = required(operationId);
+        requireSame(operation.requestHash(), request.requestHash(),
+                "REQUEST_HASH_MISMATCH");
+        if (!java.util.Objects.equals(operation.provider(), request.provider())
+                || !java.util.Objects.equals(operation.model(), request.model())) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
+                    "INVALID_PROVIDER_DISPATCH");
+        }
+        if ("DISPATCHING".equals(operation.state())) {
+            return currentSettlement(operation);
+        }
+        if (!"RESERVED".equals(operation.state())) {
+            throw conflict("DISPATCH_AFTER_" + operation.state());
+        }
+
+        SettlementResponse response = new SettlementResponse(operationId,
+                "DISPATCHING", BigDecimal.ZERO,
+                balanceForOrganization(operation.executorUserId(), operation.organizationId()),
+                false, "PROVIDER_DISPATCH_AUTHORIZED_HOLD_RETAINED");
+        jdbc.update("""
+                UPDATE auth.cloud_credit_operation
+                SET state='DISPATCHING', response_payload=CAST(? AS jsonb), updated_at=now()
+                WHERE operation_id=? AND state='RESERVED'
+                """, write(response), operationId);
+        return response;
+    }
+
     @Transactional
     public SettlementResponse commit(UUID operationId, CommitRequest request) {
         lock(operationId);
@@ -171,7 +212,7 @@ public class CloudCreditAuthorityService {
         if (operation.state().startsWith("OUTCOME_UNKNOWN")) {
             requireSame(operation.settlementHash(), settlementHash,
                     "OUTCOME_UNKNOWN_PAYLOAD_CONFLICT");
-            return readSettlement(operation.responsePayload());
+            return currentSettlement(operation);
         }
         if (operation.state().startsWith("COMMITTED")) {
             throw conflict("OUTCOME_UNKNOWN_AFTER_COMMIT");
@@ -232,6 +273,9 @@ public class CloudCreditAuthorityService {
         return jdbc.update("""
                 UPDATE auth.cloud_credit_operation
                 SET state='OUTCOME_UNKNOWN_EXPIRED',
+                    response_payload=jsonb_set(
+                        COALESCE(response_payload, '{}'::jsonb),
+                        '{state}', to_jsonb('OUTCOME_UNKNOWN_EXPIRED'::text), true),
                     late_settlement_until=GREATEST(
                         COALESCE(late_settlement_until, now()),
                         now() + (? * interval '1 second')),
@@ -438,6 +482,14 @@ public class CloudCreditAuthorityService {
         catch (Exception e) { throw new IllegalStateException("Stored reservation response is invalid", e); }
     }
 
+    private SettlementResponse currentSettlement(Existing operation) {
+        SettlementResponse stored = readSettlement(operation.responsePayload());
+        if (operation.state().equals(stored.state())) return stored;
+        return new SettlementResponse(operation.operationId(), operation.state(),
+                stored.actualCredits(), stored.authoritativeBalance(),
+                stored.delinquent(), stored.outcome());
+    }
+
     private SettlementResponse readSettlement(String value) {
         try { return json.readValue(value, SettlementResponse.class); }
         catch (Exception e) { throw new IllegalStateException("Stored settlement response is invalid", e); }
@@ -481,6 +533,7 @@ public class CloudCreditAuthorityService {
                     provider, model, requestHash, null, null);
         }
     }
+    public record DispatchingRequest(String requestHash, String provider, String model) {}
     public record CommitRequest(BigDecimal actualCredits, String provider, String model,
                                 String providerRequestId, Long promptTokens, Long completionTokens,
                                 String requestHash, Integer cacheCreationTokens,

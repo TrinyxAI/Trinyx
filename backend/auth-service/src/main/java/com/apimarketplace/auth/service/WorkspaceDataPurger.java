@@ -57,10 +57,10 @@ public class WorkspaceDataPurger {
     private EntityManager em;
 
     /** Removes the stored bytes; the rows below only reference them. */
-    private final com.apimarketplace.storage.client.StorageClient storageClient;
+    private final WorkspaceStorageObjectDeleter storageObjectDeleter;
 
-    public WorkspaceDataPurger(com.apimarketplace.storage.client.StorageClient storageClient) {
-        this.storageClient = storageClient;
+    public WorkspaceDataPurger(WorkspaceStorageObjectDeleter storageObjectDeleter) {
+        this.storageObjectDeleter = storageObjectDeleter;
     }
 
     /**
@@ -139,7 +139,7 @@ public class WorkspaceDataPurger {
             try {
                 // Owner tenant, not the caller: internal storage refuses a key whose prefix does
                 // not match the X-User-ID it is given.
-                if (storageClient.delete(tenantId, key)) {
+                if (storageObjectDeleter.delete(tenantId, key)) {
                     deleted++;
                 } else {
                     failed++;

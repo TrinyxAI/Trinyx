@@ -298,21 +298,25 @@ public final class RedisExternalSettlementIntentStore
                     "RESERVED", Instant.now());
             String key = operationKey(operation.operationId());
             String encoded = json.writeValueAsString(reserved);
+            Boolean created = redis.opsForValue().setIfAbsent(key, encoded, ACTIVE_TTL);
+            if (Boolean.TRUE.equals(created)) return;
+
             String existing = redis.opsForValue().get(key);
-            if (existing != null) {
-                ProviderOperation prior = json.readValue(existing, ProviderOperation.class);
-                if (!prior.requestHash().equals(reserved.requestHash())
-                        || !prior.provider().equals(reserved.provider())
-                        || !prior.model().equals(reserved.model())
-                        || !prior.outcomeUnknownUrl().equals(reserved.outcomeUnknownUrl())
-                        || (!reserved.trustedHeaders().isEmpty()
-                            && !prior.trustedHeaders().equals(reserved.trustedHeaders()))) {
-                    throw new IllegalStateException(
-                            "provider operation equivocation for " + operation.operationId());
-                }
-                return;
+            if (existing == null) {
+                throw new IllegalStateException(
+                        "provider operation disappeared during registration "
+                                + operation.operationId());
             }
-            redis.opsForValue().set(key, encoded, ACTIVE_TTL);
+            ProviderOperation prior = json.readValue(existing, ProviderOperation.class);
+            if (!prior.requestHash().equals(reserved.requestHash())
+                    || !prior.provider().equals(reserved.provider())
+                    || !prior.model().equals(reserved.model())
+                    || !prior.outcomeUnknownUrl().equals(reserved.outcomeUnknownUrl())
+                    || (!reserved.trustedHeaders().isEmpty()
+                        && !prior.trustedHeaders().equals(reserved.trustedHeaders()))) {
+                throw new IllegalStateException(
+                        "provider operation equivocation for " + operation.operationId());
+            }
         } catch (RuntimeException failure) {
             throw failure;
         } catch (Exception failure) {

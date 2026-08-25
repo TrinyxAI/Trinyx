@@ -116,6 +116,21 @@ class ExternalCreditProxyServiceTest {
         assertThat(request.getValue().cacheReadTokens()).isEqualTo(4);
         assertThat(request.getValue().cachedTokens()).isEqualTo(5);
         assertThat(request.getValue().reasoningTokens()).isEqualTo(6);
+
+        List<RecordingJdbc.SqlCall> acknowledgements = jdbc.calls.stream()
+                .filter(call -> call.sql().contains("cloud_settlement_outbox")
+                        && call.sql().contains("status='DELIVERED'"))
+                .toList();
+        assertThat(acknowledgements).hasSize(2);
+        assertThat(acknowledgements.get(0).sql())
+                .contains("action=?", "request_hash=?")
+                .doesNotContain("action='OUTCOME_UNKNOWN'");
+        assertThat(acknowledgements.get(0).args())
+                .containsExactly(operationId, "COMMIT", hash);
+        assertThat(acknowledgements.get(1).sql())
+                .contains("action='OUTCOME_UNKNOWN'", "request_hash=?");
+        assertThat(acknowledgements.get(1).args())
+                .containsExactly(operationId, hash);
     }
 
     @Test

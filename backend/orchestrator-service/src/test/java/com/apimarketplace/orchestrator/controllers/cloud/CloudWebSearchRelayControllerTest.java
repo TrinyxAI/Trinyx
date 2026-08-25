@@ -380,6 +380,8 @@ class CloudWebSearchRelayControllerTest {
             order.verify(externalCreditClient).reserveExternalLlm(eq(42L), any(UUID.class),
                     eq("cloudWebSearchRelay"), eq("BROWSER_AGENT_EXECUTION"),
                     eq("google"), eq("gemini-2.5-flash"), anyInt(), eq(102400));
+            order.verify(externalCreditClient)
+                    .markExternalProviderDispatching(any(UUID.class));
             order.verify(browseRestTemplate).postForObject(anyString(), any(), eq(Map.class));
             order.verify(externalCreditClient).commitExternalLlm(
                     any(UUID.class), eq("a".repeat(64)), eq("google"),

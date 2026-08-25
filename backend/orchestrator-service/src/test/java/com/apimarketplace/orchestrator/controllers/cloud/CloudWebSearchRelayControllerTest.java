@@ -330,6 +330,8 @@ class CloudWebSearchRelayControllerTest {
                     browseRestTemplate, browseConfig, browseRedisTemplate, objectMapper,
                     null, null, null, null, null, agentClient);
             realBrowseModule.setCreditConsumptionClient(externalCreditClient);
+            lenient().when(externalCreditClient.markExternalProviderDispatching(any(UUID.class)))
+                    .thenReturn(true);
             controller = new CloudWebSearchRelayController(authClient, searchModule, realBrowseModule);
         }
 

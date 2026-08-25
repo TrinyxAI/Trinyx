@@ -184,7 +184,8 @@ public final class RedisExternalSettlementIntentStore
                         || !prior.provider().equals(reserved.provider())
                         || !prior.model().equals(reserved.model())
                         || !prior.outcomeUnknownUrl().equals(reserved.outcomeUnknownUrl())
-                        || !prior.trustedHeaders().equals(reserved.trustedHeaders())) {
+                        || (!reserved.trustedHeaders().isEmpty()
+                            && !prior.trustedHeaders().equals(reserved.trustedHeaders()))) {
                     throw new IllegalStateException(
                             "provider operation equivocation for " + operation.operationId());
                 }
@@ -202,7 +203,7 @@ public final class RedisExternalSettlementIntentStore
     public boolean markProviderDispatching(UUID operationId) {
         try {
             ProviderOperation operation = readOperation(operationId);
-            if (operation == null) return false;
+            if (operation == null || !"RESERVED".equals(operation.state())) return false;
             ProviderOperation dispatching = new ProviderOperation(
                     operation.operationId(), operation.requestHash(), operation.provider(),
                     operation.model(), operation.outcomeUnknownUrl(),

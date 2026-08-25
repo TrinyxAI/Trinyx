@@ -135,6 +135,10 @@ public class CloudLlmRelayController {
             return ResponseEntity.status(HttpStatus.PAYMENT_REQUIRED)
                     .body(Map.of("error", "INSUFFICIENT_CREDITS"));
         }
+        if (!prepareProviderDispatch(target)) {
+            return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE)
+                    .body(Map.of("error", "BILLING_DISPATCH_JOURNAL_UNAVAILABLE"));
+        }
 
         try {
             CompletionResponse response = billedProvider.complete(request);
@@ -187,10 +191,17 @@ public class CloudLlmRelayController {
                     .body(outputStream -> writeEvent(outputStream,
                             CloudLlmStreamEvent.error("INSUFFICIENT_CREDITS")));
         }
+        if (!prepareProviderDispatch(target)) {
+            return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE)
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .body(outputStream -> writeEvent(outputStream,
+                            CloudLlmStreamEvent.error("BILLING_DISPATCH_JOURNAL_UNAVAILABLE")));
+        }
         StreamingResponseBody body = outputStream -> {
             AtomicInteger streamedContentChars = new AtomicInteger(0);
             AtomicBoolean recorded = new AtomicBoolean(false);
             AtomicBoolean streamClosed = new AtomicBoolean(false);
+            AtomicBoolean providerOutcomeAmbiguous = new AtomicBoolean(false);
             try {
                 billedProvider.completeStreaming(request, new StreamingCallback() {
                     @Override
@@ -229,6 +240,7 @@ public class CloudLlmRelayController {
 
                     @Override
                     public void onError(String error) {
+                        providerOutcomeAmbiguous.set(true);
                         if (!streamClosed.get()) {
                             writeQuietly(outputStream, CloudLlmStreamEvent.error(error), streamClosed);
                         }
@@ -240,6 +252,7 @@ public class CloudLlmRelayController {
                     }
                 });
             } catch (Exception e) {
+                providerOutcomeAmbiguous.set(true);
                 log.warn("CE LLM relay stream failed for cloudUser={} installId={} billed={}/{}: {}",
                         cloudUserId, installId, billedProvider.getProviderName(), billedModel,
                         e.getMessage());
@@ -247,9 +260,12 @@ public class CloudLlmRelayController {
                     writeQuietly(outputStream, CloudLlmStreamEvent.error(e.getMessage()), streamClosed);
                 }
             } finally {
-                if (target.externalOperationId() != null || streamedContentChars.get() > 0) {
-                    // For an external reservation, settle even a prompt-only/error response:
-                    // the upstream may have incurred cost before producing the first chunk.
+                if (providerOutcomeAmbiguous.get() && target.externalOperationId() != null) {
+                    recordAmbiguousProviderOutcome(target,
+                            "stream-provider-outcome-unknown-after-dispatch");
+                } else if (target.externalOperationId() != null || streamedContentChars.get() > 0) {
+                    // Settle prompt-only successful responses too: the upstream may
+                    // incur cost before producing the first content chunk.
                     recordUsageOnce(recorded, target,
                             usageFrom(null, estimate, streamedContentChars.get()));
                 }
@@ -371,6 +387,11 @@ public class CloudLlmRelayController {
         }
         return new BillingTarget(centralized, userId, executionId, sourceId, provider, model,
                 null, null);
+    }
+
+    private boolean prepareProviderDispatch(BillingTarget target) {
+        return target.externalOperationId() == null
+                || creditClient.markExternalProviderDispatching(target.externalOperationId());
     }
 
     private void recordAmbiguousProviderOutcome(BillingTarget target, String reason) {

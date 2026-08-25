@@ -1839,7 +1839,17 @@ public class CreditService {
                 }
             }
             newBalance = unlimited ? UNLIMITED_BALANCE : sub.getTotalBalance();
-            outcome = CommitOutcome.COMMITTED;
+            boolean paygOwed = !unlimited && !subEligible
+                    && sub.getPaygRemainingCredits().signum() < 0;
+            if (paygOwed) {
+                // FREE monthly credits cannot repay non-workflow PAYG debt.
+                // The actual provider cost was fully accounted, but the account
+                // must be gated exactly like deductCredits' post-flight path.
+                sub.setDelinquent(true);
+                outcome = CommitOutcome.COMMITTED_PARTIAL;
+            } else {
+                outcome = CommitOutcome.COMMITTED;
+            }
         } else if (maxChargeable.signum() >= 0) {
             // partial-charge: drive total balance to 0 by refunding (or
             // debiting) the gap.
@@ -1995,9 +2005,14 @@ public class CreditService {
 
         Subscription sub = findSubscriptionForUpdate(row.getUserId());
         if (sub == null) return CommitOutcome.RESERVATION_EXPIRED;
+        boolean settlementDelinquent = false;
         if (!unlimited && actualAmount.signum() > 0) {
-            applyDebit(sub, actualAmount, subBucketEligible(sub, "PLATFORM_MARKUP"));
-            if (sub.getTotalBalance().signum() < 0) {
+            boolean subEligible = subBucketEligible(sub, "PLATFORM_MARKUP");
+            applyDebit(sub, actualAmount, subEligible);
+            boolean paygOwed = !subEligible
+                    && sub.getPaygRemainingCredits().signum() < 0;
+            settlementDelinquent = sub.getTotalBalance().signum() < 0 || paygOwed;
+            if (settlementDelinquent) {
                 sub.setDelinquent(true);
             }
             subscriptionRepository.save(sub);
@@ -2010,7 +2025,7 @@ public class CreditService {
         row.setExpiresAt(null);
         row.setDescription(truncateDescription("Late Cloud settlement: " + provider + "/" + model));
         ledgerRepository.save(row);
-        return !unlimited && sub.getTotalBalance().signum() < 0
+        return settlementDelinquent
                 ? CommitOutcome.COMMITTED_PARTIAL : CommitOutcome.COMMITTED;
     }
 

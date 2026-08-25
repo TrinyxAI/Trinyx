@@ -145,14 +145,15 @@ public class CloudCreditAuthorityService {
         if ("RESERVED".equals(operation.state())) {
             throw conflict("COMMIT_BEFORE_DISPATCH");
         }
+        if ("EXPIRED".equals(operation.state())) {
+            throw conflict("COMMIT_AFTER_UNDISPATCHED_EXPIRY");
+        }
         if (!"DISPATCHING".equals(operation.state())
                 && !"OUTCOME_UNKNOWN".equals(operation.state())
-                && !"EXPIRED".equals(operation.state())
                 && !"OUTCOME_UNKNOWN_EXPIRED".equals(operation.state())) {
             throw conflict("COMMIT_FROM_" + operation.state());
         }
-        boolean late = "EXPIRED".equals(operation.state())
-                || "OUTCOME_UNKNOWN_EXPIRED".equals(operation.state());
+        boolean late = "OUTCOME_UNKNOWN_EXPIRED".equals(operation.state());
         if (late && (operation.lateSettlementUntil() == null
                 || !Instant.now().isBefore(operation.lateSettlementUntil()))) {
             throw conflict("LATE_SETTLEMENT_WINDOW_CLOSED");
@@ -234,30 +235,26 @@ public class CloudCreditAuthorityService {
             throw conflict("OUTCOME_UNKNOWN_AFTER_RELEASE");
         }
 
-        boolean holdAlreadyExpired = "EXPIRED".equals(operation.state());
-        String state = holdAlreadyExpired
-                ? "OUTCOME_UNKNOWN_EXPIRED" : "OUTCOME_UNKNOWN";
-        SettlementResponse response = new SettlementResponse(operationId, state,
+        if ("RESERVED".equals(operation.state())) {
+            throw conflict("OUTCOME_UNKNOWN_BEFORE_DISPATCH");
+        }
+        if ("EXPIRED".equals(operation.state())) {
+            throw conflict("OUTCOME_UNKNOWN_AFTER_UNDISPATCHED_EXPIRY");
+        }
+        if (!"DISPATCHING".equals(operation.state())) {
+            throw conflict("OUTCOME_UNKNOWN_FROM_" + operation.state());
+        }
+
+        SettlementResponse response = new SettlementResponse(operationId, "OUTCOME_UNKNOWN",
                 BigDecimal.ZERO,
                 balanceForOrganization(operation.executorUserId(), operation.organizationId()),
-                false,
-                holdAlreadyExpired
-                        ? "RECONCILIATION_REQUIRED_HOLD_EXPIRED"
-                        : "RECONCILIATION_REQUIRED_HOLD_RETAINED");
+                false, "RECONCILIATION_REQUIRED_HOLD_RETAINED");
         jdbc.update("""
                 UPDATE auth.cloud_credit_operation
-                SET state=?, settlement_hash=?, response_payload=CAST(? AS jsonb), updated_at=now()
+                SET state='OUTCOME_UNKNOWN', settlement_hash=?,
+                    response_payload=CAST(? AS jsonb), updated_at=now()
                 WHERE operation_id=?
-                """, state, settlementHash, write(response), operationId);
-        if (holdAlreadyExpired) {
-            jdbc.update("""
-                    UPDATE auth.cloud_credit_operation
-                    SET late_settlement_until=GREATEST(
-                        COALESCE(late_settlement_until, now()),
-                        now() + (? * interval '1 second'))
-                    WHERE operation_id=?
-                    """, UNKNOWN_EXPIRED_SETTLEMENT_WINDOW.toSeconds(), operationId);
-        }
+                """, settlementHash, write(response), operationId);
         return response;
     }
 

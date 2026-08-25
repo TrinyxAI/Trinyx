@@ -41,6 +41,12 @@ public class PaidMonolithCreditClient {
                 CloudCreditAuthorityService.ReserveResponse.class);
     }
 
+    public CloudCreditAuthorityService.SettlementResponse dispatching(
+            UUID operationId, CloudCreditAuthorityService.DispatchingRequest request) {
+        return exchange("/internal/v1/credit-reservations/" + operationId + "/dispatching",
+                HttpMethod.POST, request, CloudCreditAuthorityService.SettlementResponse.class);
+    }
+
     public CloudCreditAuthorityService.SettlementResponse commit(
             UUID operationId, CloudCreditAuthorityService.CommitRequest request) {
         return exchange("/internal/v1/credit-reservations/" + operationId + "/commit",

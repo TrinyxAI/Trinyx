@@ -25,6 +25,16 @@ permissions:
 jobs:
   cloud-compose:
     runs-on: ubuntu-latest
+    services:
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
     steps:
       - uses: actions/checkout@v4
         with:
@@ -211,6 +221,8 @@ jobs:
       - name: Test Cloud edition and gateway contracts
         working-directory: backend
         shell: bash
+        env:
+          TRINYX_TEST_REDIS_HOST: 127.0.0.1
         run: >-
           mvn -B -Pce
           -pl common-lib,gateway-service,auth-client,auth-service,agent-client,agent-service,orchestrator-service,publication-service,migration-service -am

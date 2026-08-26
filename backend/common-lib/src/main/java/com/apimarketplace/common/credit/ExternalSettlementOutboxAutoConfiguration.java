@@ -2,13 +2,14 @@ package com.apimarketplace.common.credit;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.springframework.boot.autoconfigure.AutoConfiguration;
+import org.springframework.boot.autoconfigure.data.redis.RedisAutoConfiguration;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnBean;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnClass;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.context.annotation.Bean;
 import org.springframework.data.redis.core.StringRedisTemplate;
 
-@AutoConfiguration
+@AutoConfiguration(after = RedisAutoConfiguration.class)
 @ConditionalOnClass(StringRedisTemplate.class)
 @ConditionalOnProperty(name = "billing.authority.mode",
         havingValue = "external-paid-monolith")

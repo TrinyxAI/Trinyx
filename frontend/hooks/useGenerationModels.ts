@@ -81,18 +81,44 @@ export function useGenerationModels(enabled: boolean = true): GenerationCatalogS
 
   // Stable identity: callers filter and quote off this list inside memos, and a
   // fresh array every render would re-run all of them.
-  const models = useMemo(() => data?.models ?? [], [data]);
+  //
+  // `Array.isArray` and not `?? []`, because the callers do not merely READ this
+  // list, they `map`, `filter` and `find` over it. A 200 whose `models` is
+  // anything but an array would pass a nullish default untouched and reach
+  // those calls, which is a crash during render rather than a page with nothing
+  // to offer. What the type promises is enforced here, once, at the boundary.
+  const models = useMemo(() => (Array.isArray(data?.models) ? data.models : []), [data]);
 
   const availability = useMemo<GenerationAvailability>(() => {
     // A 404 is checked FIRST, and it beats a cached list. If generation is
     // turned off on an install that used to serve it, the stale models in hand
     // describe a surface that no longer answers.
     if (error instanceof ApiError && error.status === 404) return 'absent';
-    if (data) return data.models.length > 0 ? 'ready' : 'empty';
+    // Counted off the NORMALISED list above, never off `data.models` again.
+    // Two reasons, and the second is the one that bit:
+    //
+    //  - A 200 carrying no `models` array is not a hypothetical. Anything that
+    //    answers this path without serving it (a proxy, a gateway, a test
+    //    double) sends one, and reading `.length` straight off the payload
+    //    threw inside a memo, DURING RENDER: one odd body took the entire page
+    //    into the error boundary, so a chat composer that has nothing to do
+    //    with generation stopped rendering at all. Degrading to "there is
+    //    nothing to offer" is the honest outcome; taking the page down is not.
+    //
+    //  - The dialog lists `models`. Counting anything else lets the control's
+    //    claim and the dialog's contents disagree, which is the very split this
+    //    hook exists to close: one list, one verdict, one request.
+    //
+    // Still 'empty' rather than 'unknown' on such a body, deliberately. 'empty'
+    // is what the reader actually faces (an answer arrived and it names no
+    // model), and it keeps the entry point disabled WITH its reason instead of
+    // enabled onto a dialog that would open on an empty list, which is the
+    // exact regression this hook was written to end.
+    if (data) return models.length > 0 ? 'ready' : 'empty';
     // Anything else - still in flight, a 5xx, a transport that never
     // delivered - says nothing about whether the feature exists.
     return 'unknown';
-  }, [data, error]);
+  }, [data, error, models]);
 
   return { models, isLoading, availability };
 }

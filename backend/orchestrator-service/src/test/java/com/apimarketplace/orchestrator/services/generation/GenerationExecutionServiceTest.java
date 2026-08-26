@@ -47,11 +47,15 @@ class GenerationExecutionServiceTest {
     @SuppressWarnings("rawtypes")
     @Captor private ArgumentCaptor<HttpEntity> entityCaptor;
 
+    private org.springframework.web.client.RestTemplate readRestTemplate;
     private GenerationExecutionService service;
 
     @BeforeEach
     void setUp() {
-        service = new GenerationExecutionService(restTemplate, "http://catalog:8081");
+        // Two templates on purpose: the generation call needs a 25 minute read
+        // window, and a plain read must never inherit it.
+        readRestTemplate = org.mockito.Mockito.mock(org.springframework.web.client.RestTemplate.class);
+        service = new GenerationExecutionService(restTemplate, readRestTemplate, "http://catalog:8081");
     }
 
     @SuppressWarnings({"unchecked", "rawtypes"})
@@ -327,5 +331,56 @@ class GenerationExecutionServiceTest {
         var headers = entityCaptor.getValue().getHeaders();
         assertNull(headers.getFirst("X-Lc-Billing-Scope-Kind"));
         assertNull(headers.getFirst("X-Lc-Billing-Scope-Id"));
+    }
+
+    @Test
+    @DisplayName("listing models uses the SHORT-timeout template, never the generation one")
+    void listingDoesNotInheritTheLongWindow() {
+        // generationRestTemplate carries a 25 minute read window sized for a
+        // provider finishing a video, and its own comment says no other call may
+        // inherit it. A stalled catalogue would otherwise hang the agent's help
+        // request for twenty-five minutes instead of failing.
+        org.mockito.Mockito.when(readRestTemplate.exchange(
+                org.mockito.ArgumentMatchers.anyString(),
+                org.mockito.ArgumentMatchers.eq(org.springframework.http.HttpMethod.GET),
+                org.mockito.ArgumentMatchers.any(),
+                org.mockito.ArgumentMatchers.eq(Map.class)))
+            .thenReturn(org.springframework.http.ResponseEntity.ok(
+                    Map.of("models", java.util.List.of(Map.of("model", "m")))));
+
+        assertEquals(1, service.readModels().models().size());
+        assertTrue(service.readModels().served());
+        org.mockito.Mockito.verifyNoInteractions(restTemplate);
+    }
+
+    @Test
+    @DisplayName("a 404 means generation is OFF here, which a reader may act on")
+    void aNotFoundMeansGenerationIsOff() {
+        org.mockito.Mockito.when(readRestTemplate.exchange(
+                org.mockito.ArgumentMatchers.anyString(),
+                org.mockito.ArgumentMatchers.eq(org.springframework.http.HttpMethod.GET),
+                org.mockito.ArgumentMatchers.any(),
+                org.mockito.ArgumentMatchers.eq(Map.class)))
+            .thenThrow(new org.springframework.web.client.HttpClientErrorException(
+                    org.springframework.http.HttpStatus.NOT_FOUND));
+
+        assertTrue(service.readModels().models().isEmpty());
+        assertFalse(service.readModels().served());
+    }
+
+    @Test
+    @DisplayName("regression: an unreachable catalogue says NOTHING about the installation")
+    void unreachableIsNotAbsent() {
+        org.mockito.Mockito.when(readRestTemplate.exchange(
+                org.mockito.ArgumentMatchers.anyString(),
+                org.mockito.ArgumentMatchers.eq(org.springframework.http.HttpMethod.GET),
+                org.mockito.ArgumentMatchers.any(),
+                org.mockito.ArgumentMatchers.eq(Map.class)))
+            .thenThrow(new org.springframework.web.client.ResourceAccessException("connection reset"));
+
+        // Folded into "no models here", a three second blip tells the agent to
+        // abandon a feature that works.
+        assertTrue(service.readModels().models().isEmpty());
+        assertNull(service.readModels().served());
     }
 }

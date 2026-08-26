@@ -31,14 +31,16 @@ public interface InterfaceRepository extends JpaRepository<InterfaceEntity, UUID
     /** Org-scoped whole-set, light projection (mirrors {@link #findByOrganizationOrOwner}). */
     @Query("SELECT i.id AS id, i.name AS name, i.description AS description, "
             + "i.interfaceType AS interfaceType, i.dataSourceId AS dataSourceId, "
-            + "i.createdAt AS createdAt, i.updatedAt AS updatedAt "
+            + "i.createdAt AS createdAt, i.updatedAt AS updatedAt, "
+            + "i.folderId AS folderId, i.format AS format "
             + "FROM InterfaceEntity i WHERE i.organizationId = :orgId ORDER BY i.createdAt DESC")
     List<InterfaceListView> findViewByOrganizationId(@Param("orgId") String orgId);
 
     /** Tenant-scoped name/description ILIKE search, light projection (mirrors {@link #searchByTenant}). */
     @Query("SELECT i.id AS id, i.name AS name, i.description AS description, "
             + "i.interfaceType AS interfaceType, i.dataSourceId AS dataSourceId, "
-            + "i.createdAt AS createdAt, i.updatedAt AS updatedAt "
+            + "i.createdAt AS createdAt, i.updatedAt AS updatedAt, "
+            + "i.folderId AS folderId, i.format AS format "
             + "FROM InterfaceEntity i WHERE i.tenantId = :tenantId "
             + "AND (LOWER(i.name) LIKE LOWER(CONCAT('%', :q, '%')) "
             + "OR LOWER(COALESCE(i.description, '')) LIKE LOWER(CONCAT('%', :q, '%'))) "
@@ -202,4 +204,46 @@ public interface InterfaceRepository extends JpaRepository<InterfaceEntity, UUID
         @Param("conversationId") String conversationId,
         @Param("messageId") String messageId,
         @Param("agentId") String agentId);
+
+    // ===================== List folders (V450) =====================
+
+    /**
+     * File the given pages into {@code folderId} ({@code null} = back to the top level)
+     * inside ONE workspace. The organization predicate IS the scope check, so a caller can
+     * never re-file a row from another workspace.
+     *
+     * <p>Leaves {@code updatedAt} alone on purpose: filing a page changes how the list is
+     * organised, not the page.
+     */
+    @Modifying
+    @Query("UPDATE InterfaceEntity i SET i.folderId = :folderId "
+            + "WHERE i.id IN :ids AND i.organizationId = :organizationId")
+    int assignFolderForOrganization(@Param("ids") java.util.Collection<java.util.UUID> ids,
+                                    @Param("folderId") java.util.UUID folderId,
+                                    @Param("organizationId") String organizationId);
+
+    /** Personal-workspace counterpart of {@link #assignFolderForOrganization}. */
+    @Modifying
+    @Query("UPDATE InterfaceEntity i SET i.folderId = :folderId "
+            + "WHERE i.id IN :ids AND i.tenantId = :ownerId AND i.organizationId IS NULL")
+    int assignFolderForOwner(@Param("ids") java.util.Collection<java.util.UUID> ids,
+                             @Param("folderId") java.util.UUID folderId,
+                             @Param("ownerId") String ownerId);
+
+    /**
+     * Empty the given folders: their pages go back to the top level. Called when the folders
+     * are deleted - a folder never deletes what it holds.
+     */
+    @Modifying
+    @Query("UPDATE InterfaceEntity i SET i.folderId = null "
+            + "WHERE i.folderId IN :folderIds AND i.organizationId = :organizationId")
+    int clearFolderForOrganization(@Param("folderIds") java.util.Collection<java.util.UUID> folderIds,
+                                   @Param("organizationId") String organizationId);
+
+    /** Personal-workspace counterpart of {@link #clearFolderForOrganization}. */
+    @Modifying
+    @Query("UPDATE InterfaceEntity i SET i.folderId = null "
+            + "WHERE i.folderId IN :folderIds AND i.tenantId = :ownerId AND i.organizationId IS NULL")
+    int clearFolderForOwner(@Param("folderIds") java.util.Collection<java.util.UUID> folderIds,
+                            @Param("ownerId") String ownerId);
 }

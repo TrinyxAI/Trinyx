@@ -2,6 +2,8 @@ package com.apimarketplace.common.storage.service;
 
 import com.apimarketplace.common.storage.dto.ExplorerSort;
 import com.apimarketplace.common.storage.dto.FolderCrumbDto;
+import com.apimarketplace.common.storage.dto.GenerationHistoryDto;
+import com.apimarketplace.common.storage.dto.GenerationHistoryProjection;
 import com.apimarketplace.common.storage.dto.StorageExplorerDto;
 import com.apimarketplace.common.storage.dto.StorageExplorerProjection;
 import com.apimarketplace.common.storage.dto.StoragePreviewFile;
@@ -11,6 +13,8 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageImpl;
+import org.springframework.data.domain.Slice;
+import org.springframework.data.domain.SliceImpl;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
@@ -45,6 +49,45 @@ public class StorageExplorerService {
 
     public StorageExplorerService(StorageExplorerRepository explorerRepository) {
         this.explorerRepository = explorerRepository;
+    }
+
+    /**
+     * What this workspace has generated, newest first.
+     *
+     * <p>The history is read off the assets themselves: a generated file carries the recipe it was
+     * made from, so this lists the files that carry one. Nothing else has to be kept in step, and a
+     * deleted asset takes its entry with it.
+     *
+     * <p>A row whose recipe cannot be read is DROPPED rather than shown. The alternative is an
+     * entry offering to reproduce an asset from a recipe nobody can read, which is a button that
+     * quietly makes something else.
+     *
+     * <p>That leaves the page's content shorter than what the database matched, which is why this
+     * hands back a SLICE and not a page: there is no total to be wrong about. {@code hasNext} comes
+     * from the query and is passed through untouched, so a dropped row shortens the page without
+     * hiding the pages after it.
+     *
+     * @param kind optional format filter (image / video / audio / voice / music)
+     * @param excludedIds files this member may not see, from the org access guard - the same
+     *        deny-list the ordinary listing applies
+     */
+    public Slice<GenerationHistoryDto> listGenerations(String organizationId, String kind,
+                                                       Collection<UUID> excludedIds, Pageable pageable) {
+        Slice<GenerationHistoryProjection> slice =
+                explorerRepository.searchGenerations(organizationId, kind, excludedIds, pageable);
+        List<GenerationHistoryDto> rows = new ArrayList<>(slice.getNumberOfElements());
+        for (GenerationHistoryProjection projection : slice.getContent()) {
+            GenerationHistoryDto dto = GenerationHistoryDto.from(projection);
+            if (dto != null) {
+                rows.add(dto);
+            } else {
+                logger.warn("Generation history: unreadable recipe on storage row {}", projection.id());
+            }
+        }
+        // hasNext is carried through UNCHANGED even when a row was dropped here: it describes
+        // whether the DATABASE has more matches, which is what the pager asks. Recomputing it from
+        // the surviving rows would strand a reader on a page whose successor exists.
+        return new SliceImpl<>(rows, pageable, slice.hasNext());
     }
 
     /**

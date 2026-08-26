@@ -118,7 +118,7 @@ vi.mock('../../../hooks/useRunOutputData', () => ({
 vi.mock('@/components/agent-fleet/hooks/useAgentActivityStream', () => ({ useAgentActivity: () => null }));
 vi.mock('@/contexts/WorkflowRunContext', () => ({ useRun: () => [undefined] }));
 vi.mock('@tanstack/react-query', () => ({ useQueryClient: () => ({ invalidateQueries: vi.fn() }) }));
-vi.mock('@/lib/api/api-client', () => ({ apiClient: { getTokenProvider: () => null } }));
+vi.mock('@/lib/api/api-client', () => ({ apiClient: { getTokenProvider: () => null, getAuthToken: async () => null } }));
 vi.mock('@/lib/api/orchestrator/file.service', () => ({
   fileRefToUrl: () => '',
   normalizeFileRef: (x: any) => x,

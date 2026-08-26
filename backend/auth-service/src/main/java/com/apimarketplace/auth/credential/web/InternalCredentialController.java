@@ -207,7 +207,10 @@ public class InternalCredentialController {
     public ResponseEntity<Map<String, Object>> getCredentialScopes(
             @RequestParam String userId,
             @RequestParam String name) {
-        return userCredentialService.getCredentialByTenantAndName(userId, name)
+        // Filtered lookup: `name` is the requirement slug, so a credential merely LABELLED
+        // with it (but belonging to another provider) must not answer the scope preflight -
+        // it would compare one provider's granted scopes against another's requirement.
+        return userCredentialService.findByNameIdentifyingIntegration(userId, name)
                 .<ResponseEntity<Map<String, Object>>>map(c -> {
                     Map<String, Object> body = new LinkedHashMap<>();
                     body.put("type", c.type() != null ? c.type().name() : null);

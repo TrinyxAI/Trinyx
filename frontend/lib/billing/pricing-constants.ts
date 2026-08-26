@@ -117,12 +117,34 @@ export function getCreditCost(planId: string, creditTierIndex: number): number {
     : CREDIT_COSTS[creditTierIndex];
 }
 
+/**
+ * Yearly-cycle multiplier, applied to the BASE plan price only and never to credits.
+ * Exported so a pricing event composes its announced future price through exactly the
+ * same formula as the current billed price (see priceFromBase).
+ */
+export const YEARLY_BASE_MULTIPLIER = 0.8;
+
+/**
+ * Compose a displayed monthly price from an arbitrary base price.
+ *
+ * Shared by calcPrice (the price actually billed today) and by the pricing-event
+ * announcement (the higher price a plan moves to once the event window closes), so the
+ * two can never drift apart on the yearly discount or on how credits are added.
+ */
+export function priceFromBase(
+  base: number,
+  planId: string,
+  cycle: 'monthly' | 'yearly',
+  creditTierIndex: number
+): number {
+  const basePrice = cycle === 'yearly' ? Math.round(base * YEARLY_BASE_MULTIPLIER) : base;
+  return basePrice + getCreditCost(planId, creditTierIndex);
+}
+
 export function calcPrice(planId: string, cycle: 'monthly' | 'yearly', creditTierIndex: number): number {
   const base = BASE_PRICES[planId];
   if (base === undefined) return 0;
-  const creditCost = getCreditCost(planId, creditTierIndex);
-  const basePrice = cycle === 'yearly' ? Math.round(base * 0.8) : base;
-  return basePrice + creditCost;
+  return priceFromBase(base, planId, cycle, creditTierIndex);
 }
 
 export function formatTierLabel(tier: number): string {

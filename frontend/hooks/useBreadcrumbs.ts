@@ -24,6 +24,12 @@ import {
 // Shared locale parsing (covers ALL routing locales - the old local copy
 // hardcoded en|fr|es and broke breadcrumbs for de/pt/zh users).
 import { parseLocalePath } from '@/lib/utils/locale';
+import {
+  onResourceFolderTrail,
+  folderUrl,
+  type ResourceFolderCrumb,
+  type ResourceFolderTrailState,
+} from '@/lib/folders/foldersHeaderBus';
 
 // Helper to build path with locale prefix. Kept local (not the shared
 // buildLocalePath): this one preserves the CURRENT prefix verbatim - when the
@@ -154,6 +160,41 @@ export function useBreadcrumbs(_options: UseBreadcrumbsOptions = {}): UseBreadcr
   // Application detail page detection: /app/applications/{publicationId}
   const isApplicationView = currentView === 'applications';
   const isApplicationPage = isApplicationView && !!normalizedPathname?.match(/\/app\/applications\/[^\/]+$/);
+
+  // The folder path a resource LIST is showing (V448-V452). Which folder is open lives in
+  // the address, but only the list knows what those ids are CALLED, so it broadcasts the
+  // names and we print them. Dropped as soon as we leave a list, or the header would keep
+  // showing a path the user has left.
+  const isResourceListView = isWorkflowView || isAgentView || isDataView
+    || isInterfaceView || isApplicationView;
+  const [folderTrailState, setFolderTrailState] = useState<ResourceFolderTrailState | null>(null);
+  useEffect(() => {
+    if (!isResourceListView) {
+      setFolderTrailState(null);
+      return;
+    }
+    return onResourceFolderTrail(setFolderTrailState);
+  }, [isResourceListView]);
+
+  /**
+   * The folder crumbs to append after a list's own crumb. Each one navigates by changing the
+   * address (`?folder=<id>`), which is what the list itself listens to - so a crumb, a
+   * shared link and the back button all take exactly the same path.
+   */
+  const folderCrumbs = useCallback((view: ResourceFolderTrailState['view']): BreadcrumbItem[] => {
+    if (folderTrailState?.view !== view) return [];
+    const trail = folderTrailState.trail;
+    return trail.map((crumb: ResourceFolderCrumb, index: number) => ({
+      label: crumb.name,
+      truncate: true,
+      // The last crumb IS the page being shown, so it does not navigate.
+      onClick: index === trail.length - 1
+        ? undefined
+        : () => safeNavigate(folderUrl(pathname ?? '', searchParams, crumb.id)),
+    }));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [folderTrailState, pathname, searchParams, safeNavigate]);
+
 
   // Marketplace preview page detection: /app/marketplace/{publicationId}/preview
   const marketplacePreviewMatch = normalizedPathname?.match(/\/app\/marketplace\/([^\/]+)\/preview/);
@@ -540,6 +581,9 @@ export function useBreadcrumbs(_options: UseBreadcrumbsOptions = {}): UseBreadcr
         { label: 'Workflows', onClick: () => navigateTo('/app/workflow') },
       ];
 
+      // Inside a folder, the path continues: Workflows / Marketing / Q4.
+      if (!workflowId) items.push(...folderCrumbs('workflow'));
+
       if (workflowId && workflowId !== 'new') {
         const isLoading = workflowName === null;
         items.push({
@@ -575,6 +619,8 @@ export function useBreadcrumbs(_options: UseBreadcrumbsOptions = {}): UseBreadcr
         homeItem,
         { label: 'Tables', onClick: () => navigateTo('/app/tables') },
       ];
+
+      if (!dataSourceId) items.push(...folderCrumbs('table'));
 
       if (dataSourceId && dataSourceId !== 'new') {
         const isLoading = dataSourceName === null;
@@ -686,7 +732,12 @@ export function useBreadcrumbs(_options: UseBreadcrumbsOptions = {}): UseBreadcr
           { label: 'Skills' },
         ];
       }
-      return [homeItem, { label: 'Agents' }];
+      return [
+        homeItem,
+        // With a folder open, "Agents" goes back to the top level rather than sitting inert.
+        { label: 'Agents', onClick: folderCrumbs('agent').length > 0 ? () => navigateTo('/app/agent') : undefined },
+        ...folderCrumbs('agent'),
+      ];
     }
 
     // Interface breadcrumbs
@@ -695,6 +746,8 @@ export function useBreadcrumbs(_options: UseBreadcrumbsOptions = {}): UseBreadcr
         homeItem,
         { label: 'Interfaces', onClick: () => navigateTo('/app/interface') },
       ];
+
+      if (!isInterfacePage) items.push(...folderCrumbs('interface'));
 
       if (isInterfacePage && interfaceId) {
         const isLoading = interfaceName === null;
@@ -726,10 +779,18 @@ export function useBreadcrumbs(_options: UseBreadcrumbsOptions = {}): UseBreadcr
 
     // Application breadcrumbs
     if (isApplicationView) {
+      const folderPath = folderCrumbs('application');
       const items: BreadcrumbItem[] = [
         homeItem,
-        { label: 'Applications', onClick: isApplicationPage ? () => navigateTo('/app/applications') : undefined },
+        {
+          label: 'Applications',
+          onClick: (isApplicationPage || folderPath.length > 0)
+            ? () => navigateTo('/app/applications')
+            : undefined,
+        },
       ];
+
+      if (!isApplicationPage) items.push(...folderPath);
 
       if (isApplicationPage && publicationId) {
         const isLoading = publicationTitle === null;
@@ -873,6 +934,9 @@ export function useBreadcrumbs(_options: UseBreadcrumbsOptions = {}): UseBreadcr
     projectName,
     isFilesView,
     filesDetail,
+    // The folder path of a resource list: without this the header keeps the path it printed
+    // when the memo last ran, which is the whole point of the crumbs.
+    folderCrumbs,
     isProfileView,
     profileHandle,
     isAuthenticated,

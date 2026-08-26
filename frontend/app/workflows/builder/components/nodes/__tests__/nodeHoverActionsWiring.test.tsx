@@ -121,7 +121,7 @@ vi.mock('@/contexts/WorkflowRunContext', () => ({
 vi.mock('@tanstack/react-query', () => ({
   useQueryClient: () => ({ invalidateQueries: vi.fn() }),
 }));
-vi.mock('@/lib/api/api-client', () => ({ apiClient: { getTokenProvider: () => null } }));
+vi.mock('@/lib/api/api-client', () => ({ apiClient: { getTokenProvider: () => null, getAuthToken: async () => null } }));
 vi.mock('@/lib/api/orchestrator/file.service', () => ({
   fileRefToUrl: () => '',
   normalizeFileRef: (x: any) => x,

@@ -1,5 +1,6 @@
 package com.apimarketplace.common.storage.service;
 
+import com.apimarketplace.common.storage.GenerationProvenanceFields;
 import com.apimarketplace.common.storage.domain.QuotaStatus;
 import com.apimarketplace.common.storage.domain.StorageEntity;
 import com.apimarketplace.common.storage.domain.StorageStatus;
@@ -360,6 +361,86 @@ public class StorageService implements StorageOperations {
      */
     private static boolean isAdoptableSourceType(String sourceType) {
         return sourceType == null || sourceType.isBlank() || StorageSourceTypes.S3_FILE.equals(sourceType);
+    }
+
+    /**
+     * {@inheritDoc}
+     *
+     * <p>Three guards, in the order they matter. <b>Write-once</b>: a row already carrying a
+     * provenance is skipped, so re-stamping cannot rewrite the recipe of an asset made from a
+     * different one - the same one-way rule adoption uses on {@code workflow_id}. <b>Merge, never
+     * replace</b>: only the {@code generation} key is written, so anything else the row keeps in
+     * {@code metadata} survives (the column is shared, and a producer that overwrote it would
+     * silently destroy a sibling's data). <b>Bounded</b>: the serialized recipe is measured before
+     * anything is written, and an oversized one stamps nothing rather than storing a truncated
+     * recipe that would offer to reproduce an asset it cannot.
+     *
+     * <p>Deliberately NOT touching {@code source_type}: an asset stays what it is (an S3 file, a
+     * step output), and the usage ledger derives its bucket from that column at delete time. This
+     * annotates a row, it does not re-type it.
+     */
+    @Override
+    public int stampGenerationProvenance(String tenantId, Collection<UUID> ids,
+                                         java.util.Map<String, Object> provenance) {
+        if (ids == null || ids.isEmpty() || provenance == null || provenance.isEmpty()) {
+            return 0;
+        }
+        String serialized;
+        try {
+            serialized = objectMapper.writeValueAsString(provenance);
+        } catch (Exception e) {
+            logger.warn("Generation provenance is not serializable, nothing stamped: {}", e.getMessage());
+            return 0;
+        }
+        if (serialized.getBytes(java.nio.charset.StandardCharsets.UTF_8).length
+                > GenerationProvenanceFields.MAX_PROVENANCE_BYTES) {
+            logger.warn("Generation provenance over {} bytes, nothing stamped",
+                    GenerationProvenanceFields.MAX_PROVENANCE_BYTES);
+            return 0;
+        }
+
+        int stamped = 0;
+        for (UUID id : ids) {
+            if (id == null) {
+                continue;
+            }
+            Optional<StorageEntity> found = storageRepository.findByIdAndTenantId(id, tenantId);
+            if (found.isEmpty()) {
+                // Unknown, deleted, or another tenant's file: skipped in silence. The generation
+                // itself is not in question here.
+                continue;
+            }
+            StorageEntity storage = found.get();
+            com.fasterxml.jackson.databind.node.ObjectNode metadata;
+            try {
+                JsonNode existing = storage.getMetadata() == null || storage.getMetadata().isBlank()
+                        ? null
+                        : objectMapper.readTree(storage.getMetadata());
+                if (existing != null && existing.isObject()) {
+                    metadata = (com.fasterxml.jackson.databind.node.ObjectNode) existing;
+                    if (metadata.has(GenerationProvenanceFields.METADATA_KEY)) {
+                        continue; // already recorded - never rewrite a recipe
+                    }
+                } else {
+                    // Absent, null, or a non-object (legacy rows): start a fresh object rather than
+                    // failing. Nothing readable is being discarded - a scalar metadata has no key to
+                    // preserve - and refusing here would cost the asset its recipe over a shape no
+                    // reader of this column expects.
+                    metadata = objectMapper.createObjectNode();
+                }
+                metadata.set(GenerationProvenanceFields.METADATA_KEY, objectMapper.readTree(serialized));
+                storage.setMetadata(objectMapper.writeValueAsString(metadata));
+            } catch (Exception e) {
+                logger.warn("Could not stamp generation provenance on {}: {}", id, e.getMessage());
+                continue;
+            }
+            storageRepository.save(storage);
+            stamped++;
+        }
+        if (stamped > 0) {
+            logger.info("Stamped generation provenance on {} file(s) for tenant {}", stamped, tenantId);
+        }
+        return stamped;
     }
 
     @Override

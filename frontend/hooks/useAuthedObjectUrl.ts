@@ -81,8 +81,12 @@ export function useAuthedObjectUrl(
 
     (async () => {
       try {
-        const tokenProvider = apiClient.getTokenProvider();
-        const token = tokenProvider ? await tokenProvider() : null;
+        // getAuthToken, rather than reading the provider, so the fetch waits for the async auth bootstrap
+        // in smart-providers.tsx. Reading the provider directly made a component that mounts
+        // during that window fire an anonymous request; the gateway answers
+        // "Authentication required" and this effect, keyed only on [src, mimeTypeHint], never
+        // retries - the media stayed broken until a reload.
+        const token = await apiClient.getAuthToken();
         const headers: Record<string, string> = { ...getActiveOrgHeaderForRequest() };
         if (token) headers['Authorization'] = `Bearer ${token}`;
 

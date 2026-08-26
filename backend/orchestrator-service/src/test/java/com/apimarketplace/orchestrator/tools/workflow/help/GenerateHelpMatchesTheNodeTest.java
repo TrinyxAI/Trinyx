@@ -32,9 +32,17 @@ class GenerateHelpMatchesTheNodeTest {
     private static final String MEASURED_UNIT_CAVEAT = "MEASURED";
 
     private Map<String, Object> generateHelp() {
+        var generation = mock(
+                com.apimarketplace.orchestrator.services.generation.GenerationExecutionService.class);
+        // A mock returns null for the record, and the help reads two of its
+        // components: stub it so these tests exercise the help, not the stub.
+        org.mockito.Mockito.when(generation.readModels()).thenReturn(
+                new com.apimarketplace.orchestrator.services.generation
+                        .GenerationExecutionService.ModelCatalogue(java.util.List.of(), Boolean.TRUE));
         WorkflowHelpProvider provider = new WorkflowHelpProvider(
                 mock(com.apimarketplace.orchestrator.service.NodeLibraryService.class),
                 mock(com.apimarketplace.orchestrator.service.NodeHelpFormatter.class),
+                generation,
                 mock(com.apimarketplace.common.web.AppEditionProvider.class));
         return provider.getHelp("generate");
     }

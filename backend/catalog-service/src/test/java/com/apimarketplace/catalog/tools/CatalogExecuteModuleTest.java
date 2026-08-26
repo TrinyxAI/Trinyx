@@ -95,6 +95,14 @@ class CatalogExecuteModuleTest {
             assertThat(result.success()).isTrue();
             Map<String, Object> payload = (Map<String, Object>) result.data();
             assertThat(payload.get("status")).isEqualTo("approval_needed");
+            // success()=true here means "the request was surfaced", never "the call ran", and
+            // this flag is the only thing that says so in a way the agent is told to read. The
+            // two authorization refusals carry it, the prompts and every tool help tell the
+            // agent to branch on it, so a payload that omits it reads as an ordinary success
+            // and gets narrated as an API result for a call that never left the building.
+            assertThat(payload.get("executed"))
+                .as("the agent is taught to settle 'did this run?' on executed, everywhere")
+                .isEqualTo(false);
 
             Map<String, Object> cred = (Map<String, Object>) payload.get("credential");
             assertThat(cred).isNotNull();

@@ -134,6 +134,17 @@ interface ApplicationTabContentProps {
    * invisible no-op.
    */
   templateSource?: ApplicationTemplateSource;
+  /**
+   * Mute state for the application's own audio/video. Undefined = play as
+   * authored; a boolean hands the volume to the embedder, which then flips it
+   * with a message rather than by re-rendering the interface.
+   */
+  mediaMuted?: boolean;
+  /**
+   * Fired with whether the application contains any audio/video at all. Only the
+   * frame can answer it (sandboxed, cross-origin), so it travels up from there.
+   */
+  onMediaAudioPresence?: (hasAudio: boolean) => void;
 }
 
 type ResolvedVariablePagination = {
@@ -152,7 +163,7 @@ function isExplicitFalse(value: unknown): boolean {
   return value === false || value === 'false';
 }
 
-export function ApplicationTabContent({ config, runId, workflowId, onAction, carouselControls, isExpanded: controlledExpanded, onExpandedChange, toolbarOpen: controlledToolbarOpen, onToolbarOpenChange, viewingEpoch: controlledViewingEpoch, onViewingEpochChange, openOnLatestEpoch = false, previewMode = false, templateSource }: ApplicationTabContentProps) {
+export function ApplicationTabContent({ config, runId, workflowId, onAction, carouselControls, isExpanded: controlledExpanded, onExpandedChange, toolbarOpen: controlledToolbarOpen, onToolbarOpenChange, viewingEpoch: controlledViewingEpoch, onViewingEpochChange, openOnLatestEpoch = false, previewMode = false, templateSource, mediaMuted, onMediaAudioPresence }: ApplicationTabContentProps) {
   const t = useTranslations('marketplace');
   const tActions = useTranslations('actions');
   const tCanvas = useTranslations('workflowBuilder.canvas');
@@ -1513,6 +1524,15 @@ export function ApplicationTabContent({ config, runId, workflowId, onAction, car
   // Letterbox measurement: useState callback ref (same rationale as
   // appContainerEl below) + ResizeObserver so the scale tracks panel resizes.
   const [formatBoxEl, setFormatBoxEl] = React.useState<HTMLDivElement | null>(null);
+  // The LETTERBOXED area itself - the scaled box the application actually
+  // occupies. Distinct from `formatBoxEl` (the full-size container the box is
+  // centred in) and from `formatViewport` (the UNSCALED declared dimensions,
+  // carried by the inner `application-format-viewport` element). The trigger panel anchors on this one: it has to fit,
+  // and centre on, the application the user sees. Anchoring on the container
+  // instead made the anchor ~= the window whenever a format was declared, so
+  // a phone-format app inside a wide browser still got a full-width panel
+  // spilling past both its edges - the reported symptom.
+  const [letterboxEl, setLetterboxEl] = React.useState<HTMLDivElement | null>(null);
   const [formatBox, setFormatBox] = React.useState({ width: 0, height: 0 });
   React.useLayoutEffect(() => {
     if (!formatViewport || !formatBoxEl) return;
@@ -1560,6 +1580,8 @@ export function ApplicationTabContent({ config, runId, workflowId, onAction, car
       onContinue={handleContinue}
       onVariablePagination={handleVariablePagination}
       fileUploadContext={workflowId && runId ? { workflowId, runId } : undefined}
+      mediaMuted={mediaMuted}
+      onMediaAudioPresence={onMediaAudioPresence}
     />
   );
   const iframeContent = (
@@ -1579,6 +1601,8 @@ export function ApplicationTabContent({ config, runId, workflowId, onAction, car
         >
           {formatScale > 0 && (
             <div
+              ref={setLetterboxEl}
+              data-testid="application-format-scaled-box"
               style={{
                 width: formatViewport.width * formatScale,
                 height: formatViewport.height * formatScale,
@@ -1750,7 +1774,7 @@ export function ApplicationTabContent({ config, runId, workflowId, onAction, car
             triggerConfigs={launchable.panelConfigs}
             onExecuteTrigger={handlePanelExecuteTrigger}
             onTriggerSuccess={() => setIsTriggerPanelOpen(false)}
-            anchorElement={appContainerEl}
+            anchorElement={letterboxEl ?? appContainerEl}
             prefillValues={templateValues}
           />
         )}
@@ -1924,7 +1948,7 @@ export function ApplicationTabContent({ config, runId, workflowId, onAction, car
           triggerConfigs={launchable.panelConfigs}
           onExecuteTrigger={handlePanelExecuteTrigger}
           onTriggerSuccess={() => setIsTriggerPanelOpen(false)}
-          anchorElement={appContainerEl}
+          anchorElement={letterboxEl ?? appContainerEl}
           prefillValues={templateValues}
         />
       )}

@@ -1,6 +1,7 @@
 package com.apimarketplace.common.storage.repository;
 
 import com.apimarketplace.common.storage.dto.ExplorerSort;
+import com.apimarketplace.common.storage.dto.GenerationHistoryProjection;
 import com.apimarketplace.common.storage.dto.StorageExplorerProjection;
 import com.apimarketplace.common.storage.dto.StoragePreviewFile;
 import com.apimarketplace.common.storage.dto.VirtualFolderAddress;
@@ -9,6 +10,8 @@ import jakarta.persistence.PersistenceContext;
 import jakarta.persistence.Query;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageImpl;
+import org.springframework.data.domain.Slice;
+import org.springframework.data.domain.SliceImpl;
 import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Repository;
 
@@ -241,6 +244,106 @@ public class StorageExplorerRepository {
 
     /** Slice of storage projections + the total matching count (offset pagination). */
     public record SliceResult(List<StorageExplorerProjection> rows, long total) {}
+
+    /**
+     * The account's generated assets, newest first.
+     *
+     * <p>The history of generations IS the set of files carrying a recipe: the two are one row, so
+     * an asset that was deleted leaves no entry behind and an entry can never point at a file that
+     * is gone. That is the whole reason the recipe lives on the asset instead of in a table of its
+     * own (see {@code GenerationProvenanceFields}).</p>
+     *
+     * <p>{@code jsonb_exists(metadata, 'generation')} is the key-exists test, written as the FUNCTION
+     * rather than the {@code ?} operator it backs: JPA reads a single {@code ?} in native SQL as a
+     * positional parameter, and the {@code ??} escape that works around it is a JDBC-driver
+     * convention rather than a guarantee.</p>
+     *
+     * <p><b>A SLICE, not a page: there is no COUNT.</b> A total would cost a second pass that,
+     * unlike this one, cannot stop early - it has to visit every ACTIVE row the workspace owns and
+     * heap-fetch each one to evaluate the jsonb test, on every page view, while the query below
+     * stops at the first {@code size + 1} matches. On the busiest table in the product that is the
+     * expensive half of the request, and it buys one number. So the extra row IS the answer the
+     * pager needs ("is there a next page"), and the reader is shown a range rather than a total.</p>
+     *
+     * <p><b>No index of its own.</b> {@code idx_storage_org_status_created} -
+     * {@code (organization_id, status, created_at DESC)}, partial on ACTIVE - already serves the
+     * scope and the ordering, so the plan is an index scan with the jsonb test as a filter,
+     * measured at 2.6 ms for a workspace holding 20 000 files of which 1 000 are generated. A
+     * dedicated partial index would drop that filter and the sort, and this query is written to be
+     * matched by one: {@code (organization_id, created_at DESC, id) WHERE
+     * jsonb_exists(metadata,'generation') AND status='ACTIVE' AND is_folder=false} covers its
+     * scope, predicate and full ORDER BY with no sort and no recheck (verified with EXPLAIN).
+     * It is left unbuilt because nothing measured needs it yet, not because it cannot be built:
+     * {@code V204} already adds two indexes to this table with {@code CREATE INDEX CONCURRENTLY}
+     * plus {@code flyway:executeInTransaction=false}, which is the pattern to copy. Be warned that
+     * a CONCURRENTLY build waits on every transaction that can see the table, so it will sit
+     * forever behind any connection left idle-in-transaction - that was reproduced here against a
+     * plain {@code Flyway.configure()} harness, which is NOT how this service runs Flyway.</p>
+     *
+     * @param kind optional format filter ({@code image}, {@code video}, ...), matched against the
+     *             recipe's own {@code kind} - not against the mime type, which cannot tell a voice
+     *             from a music track
+     * @param excludedIds files this member may not see, from the org access guard. Passed for the
+     *        same reason the ordinary listing passes it: a second way of listing files that skips
+     *        the deny-list is a second way of reading them
+     */
+    public Slice<GenerationHistoryProjection> searchGenerations(String organizationId, String kind,
+                                                                Collection<UUID> excludedIds,
+                                                                Pageable pageable) {
+        if (organizationId == null || organizationId.isBlank()) {
+            throw new IllegalArgumentException("organizationId is required (post-V261 sweep)");
+        }
+
+        StringBuilder where = new StringBuilder(
+                "WHERE s.organization_id = :orgId AND s.status = 'ACTIVE' AND s.is_folder = false"
+                + " AND jsonb_exists(s.metadata, 'generation')");
+        boolean byKind = kind != null && !kind.isBlank();
+        if (byKind) {
+            where.append(" AND s.metadata -> 'generation' ->> 'kind' = :kind");
+        }
+        boolean excluding = excludedIds != null && !excludedIds.isEmpty();
+        if (excluding) {
+            where.append(" AND s.id NOT IN (:excludedIds)");
+        }
+
+        Query dataQuery = em.createNativeQuery(
+                "SELECT s.id, s.file_name, s.mime_type, s.size_bytes, s.created_at, s.s3_key,"
+                + " s.metadata -> 'generation' FROM storage.storage s " + where
+                // The id tie-breaks, or two assets generated in the same batch (a model asked for
+                // four images answers in one call) can land on two pages or on neither.
+                + " ORDER BY s.created_at DESC, s.id LIMIT :limit OFFSET :offset");
+        dataQuery.setParameter("orgId", organizationId);
+        if (byKind) {
+            dataQuery.setParameter("kind", kind);
+        }
+        if (excluding) {
+            dataQuery.setParameter("excludedIds", excludedIds);
+        }
+        // ONE row past the page: enough to answer "is there a next page", which is all the pager
+        // asks. See the method note above on why there is no COUNT.
+        dataQuery.setParameter("limit", pageable.getPageSize() + 1);
+        dataQuery.setParameter("offset", (int) pageable.getOffset());
+
+        @SuppressWarnings("unchecked")
+        List<Object[]> rows = dataQuery.getResultList();
+        boolean hasNext = rows.size() > pageable.getPageSize();
+        if (hasNext) {
+            rows = rows.subList(0, pageable.getPageSize());
+        }
+        List<GenerationHistoryProjection> results = new ArrayList<>(rows.size());
+        for (Object[] row : rows) {
+            results.add(new GenerationHistoryProjection(
+                (UUID) row[0],
+                (String) row[1],
+                (String) row[2],
+                row[3] != null ? ((Number) row[3]).intValue() : null,
+                row[4] != null ? toInstant(row[4]) : null,
+                (String) row[5],
+                row[6] == null ? null : row[6].toString()
+            ));
+        }
+        return new SliceImpl<>(results, pageable, hasNext);
+    }
 
     /**
      * Folder-aware listing for the Files browser (V313 manual folders).

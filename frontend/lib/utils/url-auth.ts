@@ -34,7 +34,9 @@ export async function fetchAuthedBlobUrl(url: string): Promise<string> {
     ? '/api/proxy' + url.substring('/api'.length)
     : url;
 
-  const token = await apiClient.getTokenProvider()?.();
+  // getAuthToken so a click landing during the auth bootstrap downloads the file instead of a
+  // 401 body. Same reason as useAuthedObjectUrl.
+  const token = await apiClient.getAuthToken();
   const headers: Record<string, string> = { ...getActiveOrgHeaderForRequest() };
   if (token) headers['Authorization'] = `Bearer ${token}`;
 

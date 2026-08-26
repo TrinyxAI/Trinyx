@@ -4,14 +4,17 @@ import { renderHook, waitFor } from '@testing-library/react';
 import { useInterfaceFileUrls } from '../useInterfaceFileUrls';
 
 vi.mock('@/lib/api/api-client', () => ({
-  apiClient: { getTokenProvider: vi.fn() },
+  // getTokenProvider is mocked as "not installed yet" on purpose: that is the real state during
+  // the async auth bootstrap, and it is what the pre-fix code read. Any call site that reaches
+  // for it instead of getAuthToken therefore reproduces the prod 401 in these tests.
+  apiClient: { getAuthToken: vi.fn(), getTokenProvider: vi.fn(() => undefined) },
 }));
 vi.mock('@/lib/stores/current-org-store', () => ({
   getActiveOrgHeaderForRequest: vi.fn(() => ({ 'X-Active-Organization-ID': 'org-7' })),
 }));
 
 import { apiClient } from '@/lib/api/api-client';
-const mockGetTokenProvider = vi.mocked(apiClient.getTokenProvider);
+const mockGetAuthToken = vi.mocked(apiClient.getAuthToken);
 
 const ID = '9a443915-a594-48a1-9760-e7a1b4b2eaf7';
 const RAW = `/api/proxy/files/by-id/${ID}/raw?disposition=inline`;
@@ -22,7 +25,7 @@ function fileRef() {
 
 beforeEach(() => {
   vi.resetAllMocks();
-  mockGetTokenProvider.mockReturnValue(() => Promise.resolve('jwt-abc'));
+  mockGetAuthToken.mockResolvedValue('jwt-abc');
 });
 afterEach(() => vi.restoreAllMocks());
 
@@ -59,6 +62,44 @@ describe('useInterfaceFileUrls', () => {
     const other = '/api/proxy/files/by-id/other/raw?disposition=inline';
     expect(result.current.resolveFileUrl(other)).toBe(other);
     expect(result.current.resolveFileUrl(other)).not.toMatch(/token=/);
+  });
+
+  // Regression - prod 2026-08-25. This hook produced the gateway's most frequent error: 98 x 401
+  // on GET /api/files/by-id/<id>/raw in 7 days, arriving in PAIRS 0.0s apart. It read
+  // apiClient.getTokenProvider() directly, which is undefined until the async auth bootstrap in
+  // smart-providers.tsx installs it. Inside that window the fetch went out anonymous (401 #1),
+  // res.ok was false so the entry stayed unresolved, and resolveFileUrl then handed the interface
+  // the RAW by-id URL - which the sandboxed iframe (allow-scripts only, so no header and no
+  // same-origin) could only load anonymously too (401 #2), leaving the image permanently broken.
+  it('waits for the token instead of resolving every file anonymously while auth is still booting', async () => {
+    let releaseToken: (t: string) => void = () => {};
+    mockGetAuthToken.mockReturnValue(new Promise<string>((resolve) => { releaseToken = resolve; }));
+    const fetchMock = mockFetchOk();
+
+    const { result } = renderHook(() => useInterfaceFileUrls({ photo: fileRef() }, true));
+
+    await Promise.resolve();
+    expect(fetchMock).not.toHaveBeenCalled();
+
+    releaseToken('jwt-late');
+    await waitFor(() => expect(result.current.resolveFileUrl(RAW)).toMatch(/^data:/));
+    expect(fetchMock.mock.calls[0][1].headers.Authorization).toBe('Bearer jwt-late');
+  });
+
+  it('falls back to the raw URL, not a crash, when there is genuinely no token', async () => {
+    // The signed-out counterpart: getAuthToken answers null once its wait is exhausted, and this
+    // hook must still resolve to SOMETHING the iframe can render rather than throwing inside the
+    // effect. The raw URL is the documented fallback; what the fix removes is reaching it while a
+    // token was merely still on its way.
+    mockGetAuthToken.mockResolvedValue(null);
+    const fetchMock = vi.fn().mockResolvedValue({ ok: false, status: 401 });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const { result } = renderHook(() => useInterfaceFileUrls({ photo: fileRef() }, true));
+
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+    expect(fetchMock.mock.calls[0][1].headers.Authorization).toBeUndefined();
+    await waitFor(() => expect(result.current.resolveFileUrl(RAW)).toBe(RAW));
   });
 
   it('does nothing when disabled (edit mode) - no fetch', () => {

@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { TYPOGRAPHY } from '@/lib/typography';
 import { Zap, Database, Clock, Check, ArrowRight } from 'lucide-react';
 import PlanSelector from '@/components/pricing/PlanSelector';
+import { usePricingEvent } from '@/hooks/usePricingEvent';
 import TopUpModal from '@/components/billing/TopUpModal';
 import { usePaygTiers } from '@/lib/hooks/smart-hooks-complete';
 import { isCeMode } from '@/lib/format-cost';
@@ -37,6 +38,8 @@ export default function PricingPage() {
   const locale = useLocale();
   const [billingCycle, setBillingCycle] = useState<'monthly' | 'yearly'>('yearly');
   const [creditTierIndex, setCreditTierIndex] = useState(0);
+  // Window resolved server-side, shared by every plan card below.
+  const { event: pricingEvent } = usePricingEvent();
   // Hidden tiers (5M / 10M) are revealed via ?tiers=full (persisted in localStorage).
   const [fullTiersUnlocked, setFullTiersUnlocked] = useState(false);
   const creditAmount = CREDIT_TIERS[creditTierIndex];
@@ -1103,6 +1106,8 @@ export default function PricingPage() {
                 currentCadence={effectiveCurrentCadence}
                 onPlanChanged={handlePlanChanged}
                 onBillingCycleChange={setBillingCycle}
+                pricingEvent={pricingEvent}
+                creditTierIndex={creditTierIndex}
               />
             ))}
           </div>
@@ -1129,6 +1134,8 @@ export default function PricingPage() {
                 currentCadence={effectiveCurrentCadence}
                 onPlanChanged={handlePlanChanged}
                 onBillingCycleChange={setBillingCycle}
+                pricingEvent={pricingEvent}
+                creditTierIndex={creditTierIndex}
               />
             ))}
           </div>

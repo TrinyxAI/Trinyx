@@ -684,6 +684,11 @@ async function executeViaCli({ prompt, systemPrompt, model, maxTurns, spawnTimeo
       // forwarded so CliAgentService injects __approvedToolActions__ → the gate skips
       // re-prompting on the resume turn (parity with the remote AgentLoopService path).
       APPROVED_TOOL_ACTIONS: JSON.stringify(approvedToolActions || []),
+      // The watchdog window THIS run was armed with. agent-cli-server forwards it into the
+      // session so the server-side approval gate can size a park that fits inside it and
+      // still leaves time to run the tool once the user answers. Without it the gate falls
+      // back to its own default and the watchdog kills the run mid-execution.
+      AGENT_INACTIVITY_SECONDS: String(Math.max(0, Math.round((inactivityMs || 0) / 1000))),
     },
   };
 

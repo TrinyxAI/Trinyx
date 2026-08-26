@@ -5,6 +5,8 @@
  * Split from orchestrator-api.ts following Single Responsibility Principle.
  */
 
+import type { ResourceFolder, ResourceFolderTile } from './resource-folder.service';
+
 // ============================================
 // Core Entity Types
 // ============================================
@@ -56,6 +58,12 @@ export interface Workflow {
    */
   publicationStatus?: 'ACTIVE' | 'PENDING_REVIEW' | 'REJECTED' | null;
   projectId?: string | null;
+  /**
+   * Folder this workflow is filed under on the list page, or null at the top level.
+   * A folder organises the LIST; a project is a shared space for a piece of work - a
+   * workflow can be in both.
+   */
+  folderId?: string | null;
   /** Workflow type: WORKFLOW (default) or APPLICATION */
   workflowType?: 'WORKFLOW' | 'APPLICATION';
   /** Immutable reference plan for APPLICATION workflows (used for reset) */
@@ -170,6 +178,12 @@ export interface WorkflowsPage {
   totalCount: number;
   page: number;
   size: number;
+  /** Folder tiles of the level being listed - empty unless `includeFolders` was asked for. */
+  folders: ResourceFolderTile[];
+  /** Root -> ... -> current folder, so the page can render the path it navigated into. */
+  folderTrail: ResourceFolder[];
+  /** The requested folder no longer exists: this page is the top level, drop the filter. */
+  folderMissing?: boolean;
 }
 
 /**
@@ -863,6 +877,22 @@ export interface AcquirePublicationResponse {
   workflowId: string;
   publicationId: string;
   title: string;
+  /**
+   * Per-type count of what the install actually created in the workspace
+   * (interfaces / tables / agents / sub-workflows). Types that produced nothing are
+   * absent, so `{}` means the publication itself was the whole install. Feeds the
+   * post-install summary; older backends omit the field entirely.
+   */
+  resources?: Record<string, number>;
+}
+
+/** Outcome of "create my editable copy of this installed application". */
+export interface EditableWorkflowCopyResponse {
+  /** The decoupled, editable WORKFLOW clone (new, or the one that already existed). */
+  workflowId: string;
+  title: string;
+  /** false when the caller already had a copy and this call returned it unchanged. */
+  created: boolean;
 }
 
 /**

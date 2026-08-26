@@ -3,6 +3,7 @@ package com.apimarketplace.catalog.web;
 import com.apimarketplace.agent.tools.ToolErrorCode;
 import com.apimarketplace.agent.tools.ToolsProvider.ToolExecutionContext;
 import com.apimarketplace.agent.tools.ToolsProvider.ToolExecutionResult;
+import com.apimarketplace.catalog.service.generation.DynamicOptionsResolver;
 import com.apimarketplace.catalog.service.generation.GenerationRegistry;
 import com.apimarketplace.catalog.service.generation.GenerationSpec;
 import com.apimarketplace.catalog.tools.generation.GenerationModule;
@@ -52,6 +53,8 @@ class GenerationControllerTest {
 
     @Mock private GenerationRegistry registry;
     @Mock private GenerationModule module;
+    @Mock private DynamicOptionsResolver optionsResolver;
+    @Mock private com.apimarketplace.catalog.service.generation.PlatformSalesResolver platformSales;
 
     @Captor private ArgumentCaptor<Map<String, Object>> parametersCaptor;
     @Captor private ArgumentCaptor<ToolExecutionContext> contextCaptor;
@@ -60,10 +63,15 @@ class GenerationControllerTest {
 
     @BeforeEach
     void setUp() {
-        controller = new GenerationController(registry, module);
+        controller = new GenerationController(registry, module, optionsResolver, platformSales);
     }
 
     private static GenerationRegistry.GenerationModel videoModel() {
+        return videoModel(Map.of());
+    }
+
+    /** The same model, carrying values inherited from the catalogue. */
+    private static GenerationRegistry.GenerationModel videoModel(Map<String, List<String>> inherited) {
         GenerationSpec.Model model = new GenerationSpec.Model(
                 "seedance-2.0-fast", "seedance/fast-2", "Seedance 2.0 Fast",
                 java.util.Set.of("prompt", "duration_seconds", "aspect_ratio"),
@@ -80,7 +88,7 @@ class GenerationControllerTest {
         return new GenerationRegistry.GenerationModel(
                 "seedance-2.0-fast", "video", model, spec, TOOL_ID,
                 "seedance/create-video", "seedance", "Seedance", "seedance",
-                "seedance", "async_poll");
+                "seedance", "async_poll", inherited);
     }
 
     // ── models ──────────────────────────────────────────────────────────────
@@ -440,5 +448,184 @@ class GenerationControllerTest {
         assertThat(response.getBody().get("success")).isEqualTo(false);
         verify(module).execute(eq("create"), parametersCaptor.capture(), eq("tenant-1"), any());
         assertThat(parametersCaptor.getValue()).isEmpty();
+    }
+
+    @Test
+    @DisplayName("regression: the browser gets the WHOLE inherited list, not the agent's sample")
+    void inheritedListIsNotCappedForTheBrowser() {
+        // The two surfaces share the shaping and differ on exactly one thing:
+        // the agent pays for this payload in context and takes a sample, the
+        // browser pays in bytes and takes the lot. Passing the agent's cap here
+        // would silently hide 88 voices from a picker.
+        List<String> hundred = new java.util.ArrayList<>();
+        for (int i = 0; i < 100; i++) hundred.add("voice-" + i);
+        when(registry.list(null)).thenReturn(List.of(videoModel(Map.of("prompt", hundred))));
+
+        Map<String, Object> body = controller.models(null).getBody();
+
+        @SuppressWarnings("unchecked")
+        List<Map<String, Object>> rows = (List<Map<String, Object>>) body.get("models");
+        @SuppressWarnings("unchecked")
+        Map<String, Object> limits = (Map<String, Object>) rows.get(0).get("limits");
+        @SuppressWarnings("unchecked")
+        Map<String, Object> prompt = (Map<String, Object>) limits.get("prompt");
+
+        assertThat((List<?>) prompt.get("allowed")).hasSize(100);
+        assertThat(prompt).doesNotContainKey("allowedTruncated");
+        // Still marked as a suggestion: nothing refuses a value outside it.
+        assertThat(prompt).containsEntry("allowedEnforced", false);
+    }
+
+    // ── model-options ───────────────────────────────────────────────────────
+
+    @Test
+    @DisplayName("hands the question to the module and passes its answer through whole")
+    void optionsDelegatesAndReturnsTheAnswer() {
+        when(module.execute(eq("options"), anyMap(), eq("tenant-1"), any()))
+                .thenReturn(Optional.of(ToolExecutionResult.success(Map.of(
+                        "options", List.of(Map.of("value", "21m00", "label", "Rachel")),
+                        "count", 1,
+                        "credential_source", "user"))));
+
+        ResponseEntity<Map<String, Object>> response = controller.options(
+                "tts-fast", "voice", "user", null, "tenant-1", null);
+
+        assertThat(response.getStatusCode().value()).isEqualTo(200);
+        assertThat(response.getBody().get("success")).isEqualTo(true);
+        assertThat(response.getBody().get("count")).isEqualTo(1);
+        // WHICH key answered has to reach the dialog: it shows the payer beside
+        // the field, and a list from another key offers ids a run cannot use.
+        assertThat(response.getBody().get("credential_source")).isEqualTo("user");
+    }
+
+    @Test
+    @DisplayName("the chosen payer travels, because the answer depends on which key is asked")
+    void optionsForwardsTheCredentialSource() {
+        when(module.execute(eq("options"), anyMap(), eq("tenant-1"), any()))
+                .thenReturn(Optional.of(ToolExecutionResult.success(Map.of("options", List.of()))));
+
+        controller.options("tts-fast", "voice", "platform", "42", "tenant-1", "org-1");
+
+        verify(module).execute(eq("options"), parametersCaptor.capture(), eq("tenant-1"),
+                contextCaptor.capture());
+        assertThat(parametersCaptor.getValue())
+                .containsEntry("model", "tts-fast")
+                .containsEntry("parameter", "voice")
+                .containsEntry("credential_source", "platform");
+        // The pinned key rides the CONTEXT, never the parameter map: the module
+        // behind this is the one an agent also reaches, and an agent must not be
+        // able to name a credential.
+        assertThat(parametersCaptor.getValue()).doesNotContainKey("credential_id");
+        assertThat(contextCaptor.getValue().credentials()).containsKey("__credentialId__");
+    }
+
+    @Test
+    @DisplayName("no pinned key means the account default, not an empty one")
+    void optionsOmitsABlankCredentialId() {
+        when(module.execute(eq("options"), anyMap(), eq("tenant-1"), any()))
+                .thenReturn(Optional.of(ToolExecutionResult.success(Map.of("options", List.of()))));
+
+        controller.options("tts-fast", "voice", "user", "", "tenant-1", null);
+
+        verify(module).execute(eq("options"), anyMap(), eq("tenant-1"), contextCaptor.capture());
+        assertThat(contextCaptor.getValue().credentials()).doesNotContainKey("__credentialId__");
+    }
+
+    @Test
+    @DisplayName("a signed-out caller is refused without the module being asked anything")
+    void optionsRequiresAUser() {
+        ResponseEntity<Map<String, Object>> response =
+                controller.options("tts-fast", "voice", null, null, "  ", null);
+
+        assertThat(response.getStatusCode().value()).isEqualTo(401);
+        assertThat(response.getBody().get("success")).isEqualTo(false);
+        verifyNoInteractions(module);
+    }
+
+    @Test
+    @DisplayName("a refusal carries its REASON, which is not the same fact as an empty list")
+    void optionsPassesTheReasonThrough() {
+        when(module.execute(eq("options"), anyMap(), eq("tenant-1"), any()))
+                .thenReturn(Optional.of(ToolExecutionResult.failure(ToolErrorCode.EXECUTION_FAILED,
+                        "no ElevenLabs key is connected")));
+
+        ResponseEntity<Map<String, Object>> response =
+                controller.options("tts-fast", "voice", "user", null, "tenant-1", null);
+
+        // An empty dropdown says "this account has no voices". The dialog has to
+        // be able to say "connect a key" instead.
+        assertThat(response.getBody().get("success")).isEqualTo(false);
+        assertThat(String.valueOf(response.getBody().get("error"))).contains("key is connected");
+        assertThat(response.getBody()).doesNotContainKey("options");
+    }
+
+    @Test
+    @DisplayName("the model list marks which fields are worth asking about")
+    void modelsMarkOptionsAvailable() {
+        when(registry.list(null)).thenReturn(List.of(videoModel()));
+        when(optionsResolver.unifiedDynamicParameters(any())).thenReturn(java.util.Set.of("prompt"));
+
+        @SuppressWarnings("unchecked")
+        List<Map<String, Object>> rows =
+                (List<Map<String, Object>>) controller.models(null).getBody().get("models");
+        @SuppressWarnings("unchecked")
+        Map<String, Object> limits = (Map<String, Object>) rows.get(0).get("limits");
+        @SuppressWarnings("unchecked")
+        Map<String, Object> prompt = (Map<String, Object>) limits.get("prompt");
+
+        // Without it the dialog draws a text box for a field that has a list,
+        // and the reader types an opaque identifier by hand.
+        assertThat(prompt).containsEntry("optionsAvailable", true);
+    }
+
+    // ── which key can run it here ───────────────────────────────────────────
+
+    @Test
+    @DisplayName("each row says which key can run it, so a surface stops offering a payer that cannot")
+    void modelsCarryRunsOn() {
+        // Renaming this field silently degraded every model to 'unknown' once
+        // already, because the reader looked for the old key and nothing
+        // asserted the new one.
+        when(registry.list(null)).thenReturn(List.of(videoModel()));
+        when(optionsResolver.unifiedDynamicParameters(any())).thenReturn(java.util.Set.of());
+        when(platformSales.resolve(any())).thenReturn(java.util.Map.of(
+                com.apimarketplace.catalog.service.generation.PlatformSalesResolver.ModelRef
+                        .of(videoModel()),
+                com.apimarketplace.catalog.service.generation.PlatformSalesResolver.Verdict
+                        .PLATFORM_OR_OWN_KEY));
+
+        @SuppressWarnings("unchecked")
+        List<Map<String, Object>> rows =
+                (List<Map<String, Object>>) controller.models(null).getBody().get("models");
+
+        assertThat(rows.get(0)).containsEntry("runsOn", "platform_or_own_key");
+    }
+
+    @Test
+    @DisplayName("a model the resolver did not answer for is 'unknown', never a confident claim")
+    void anUnresolvedModelIsUnknown() {
+        when(registry.list(null)).thenReturn(List.of(videoModel()));
+        when(optionsResolver.unifiedDynamicParameters(any())).thenReturn(java.util.Set.of());
+        // Nothing resolved for it: the row must not default to a payer.
+        when(platformSales.resolve(any())).thenReturn(java.util.Map.of());
+
+        @SuppressWarnings("unchecked")
+        List<Map<String, Object>> rows =
+                (List<Map<String, Object>>) controller.models(null).getBody().get("models");
+
+        assertThat(rows.get(0)).containsEntry("runsOn", "unknown");
+    }
+
+    @Test
+    @DisplayName("the model identity asked about is the one the published prices are keyed on")
+    void modelRefIsBuiltFromTheModel() {
+        var ref = com.apimarketplace.catalog.service.generation.PlatformSalesResolver.ModelRef
+                .of(videoModel());
+
+        // The single shaping point: two surfaces asking differently would get
+        // different answers for the same model.
+        assertThat(ref.integrationName()).isEqualTo("seedance");
+        assertThat(ref.apiToolId()).isEqualTo(TOOL_ID.toString());
+        assertThat(ref.modelId()).isEqualTo("seedance-2.0-fast");
     }
 }

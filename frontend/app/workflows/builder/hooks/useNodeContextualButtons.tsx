@@ -8,6 +8,7 @@ import { DataSourcePanelContent } from '@/components/app/DataSourcePanelContent'
 import { openFilesPanel, type FilePanelTarget } from '@/lib/sidePanel/openFilesPanel';
 import type { BuilderNodeData } from '@/app/workflows/builder/types';
 import type { TriggerButtonVariant } from '../components/NodePlayButton';
+import { workflowPanelTabId } from '@/lib/sidePanel/tabResource';
 
 /**
  * Centralized derivation of the node-type flags that drive the contextual
@@ -247,7 +248,7 @@ export function useNodeContextualButtons({
           window.dispatchEvent(new CustomEvent('workflowOpenSubWorkflow', { detail: { workflowId: referencedWorkflowId, workflowName: referencedWorkflowName, nodeId: nodeUiId } }));
         } else {
           import('@/components/app/WorkflowBuilderPanelContent').then(({ WorkflowBuilderPanelContent }) => {
-            sidePanel?.openTab({ id: `workflow-builder-${referencedWorkflowId}`, label: referencedWorkflowName, icon: <Workflow className="w-4 h-4" />, content: React.createElement(WorkflowBuilderPanelContent, { workflowId: referencedWorkflowId }), preferredWidth: 0.5, keepMounted: true });
+            sidePanel?.openTab({ id: workflowPanelTabId(referencedWorkflowId), label: referencedWorkflowName, icon: <Workflow className="w-4 h-4" />, content: React.createElement(WorkflowBuilderPanelContent, { workflowId: referencedWorkflowId }), preferredWidth: 0.5, keepMounted: true });
           });
         }
       },

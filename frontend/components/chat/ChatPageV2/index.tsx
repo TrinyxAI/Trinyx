@@ -38,6 +38,8 @@ import { ChatPageLayout } from '@/app/shared/components/ChatPageLayout';
 import { ServiceApprovalCard } from '../ServiceApprovalCard';
 import { ModelSelectorDropdown } from '@/components/chat/ModelSelectorDropdown';
 import { NoProviderCta } from '@/components/ai/NoProviderCta';
+import { UpgradeRequiredNotice } from '@/components/billing/UpgradeRequiredBadge';
+import { useMonthlyCreditsCannotPay } from '@/lib/hooks/useMonthlyCreditsCannotPay';
 import { ComposerLeadingControl } from '@/components/chat/ComposerLeadingControl';
 import { resolveConversationAgentId } from '@/lib/chat/linkedAgent';
 import { useLinkedAgentLoader } from '@/hooks/chat/useLinkedAgentLoader';
@@ -64,6 +66,9 @@ export function ChatPageV2({ conversationIdFromParams, enableDataSource = false 
   // empty - never while loading (flash) or on a fetch error (a transient
   // failure is not an onboarding state). Same contract as ModelPicker's gate.
   const modelsResolvedEmpty = !modelsLoading && !modelsError;
+  // Asked once for the whole menu: the answer is about the account, not
+  // about any one model.
+  const { blocked: creditsCannotPay } = useMonthlyCreditsCannotPay();
 
   // Models for the composer model selector. Spread the full AIModel (capability
   // flags, context window, rate limits, …) so ModelOptionDisplay renders the
@@ -607,6 +612,8 @@ export function ChatPageV2({ conversationIdFromParams, enableDataSource = false 
           changeModelTitle={t('actions.changeModel')}
           noModelsLabel={modelsResolvedEmpty ? t('aiProviders.noProviderCta.noModels') : undefined}
           emptyState={modelsResolvedEmpty ? <NoProviderCta variant="menu" /> : undefined}
+          upgradeRequired={creditsCannotPay}
+          upgradeNotice={<UpgradeRequiredNotice blocked={creditsCannotPay} />}
           reasoningEffort={state.reasoningEffort}
           onReasoningEffortChange={state.setReasoningEffort}
           reasoningEffortLabel={t('actions.reasoningEffort')}

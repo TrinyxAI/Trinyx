@@ -466,9 +466,21 @@ export function ChatCore({
     }
   }, [conversationId, addToast, t]);
 
-  // Service approval handlers - non-blocking, dismiss THIS card + clear its DB row + queue resume.
-  const handleServiceApproved = useCallback((serviceNames: string[], key: string) => {
+  // Every call the agent is HOLDING behind this card, or empty when it came from the
+  // non-blocking path (nothing is parked, so the turn already ended and only a new message
+  // can restart it). Several because cards merge by the services they name: two parallel
+  // calls blocked on the same unconnected service share one card and BOTH must be released.
+  const heldServiceGateKeys = useCallback((key: string): string[] => {
+    const approval = pendingServiceApprovals.find(
+      a => serviceApprovalKey(a.services, a.needsAttention) === key);
+    return approval?.blocking ? (approval.gateKeys ?? []) : [];
+  }, [pendingServiceApprovals]);
+
+  // Service approval handlers - dismiss THIS card + clear its DB row, then either release
+  // the held call (the agent keeps going in the same turn) or queue a resume message.
+  const handleServiceApproved = useCallback(async (serviceNames: string[], key: string) => {
     if (conversationId) {
+      const gateKeys = heldServiceGateKeys(key);
       dismissKey(key);
       streaming.clearServiceApproval(conversationId, key);
       conversationApi.clearPendingAction(conversationId, key).catch(() => {});
@@ -481,6 +493,19 @@ export function ChatCore({
         duration: 5000,
       });
 
+      if (gateKeys.length > 0) {
+        // The card SAYS calls are held, but they may have stopped holding since (a hold has
+        // a deadline, and the card stays on screen past it). Only the server knows, so the
+        // resume message is skipped only when it confirms it released one - otherwise the
+        // approval would visibly do nothing at all. Any release means the turn is still
+        // running, which is what makes the resume redundant.
+        const released = await Promise.all(gateKeys.map(gateKey => conversationApi
+          .resolveApprovalGate(conversationId, gateKey, true).catch(() => false)));
+        if (released.some(Boolean)) {
+          return;
+        }
+      }
+
       // Resend a message so the LLM continues with the newly configured credentials.
       // Always queue it through the composer so approvals do not interrupt an
       // in-flight turn; the queue auto-drains when the conversation is idle.
@@ -488,15 +513,21 @@ export function ChatCore({
       const resumeMessage = t('credentials.toasts.credentialConfiguredResume', { services: names });
       enqueueApprovalResume(resumeMessage);
     }
-  }, [conversationId, streaming, dismissKey, addToast, t, enqueueApprovalResume]);
+  }, [conversationId, streaming, dismissKey, addToast, t, enqueueApprovalResume, heldServiceGateKeys]);
 
   const handleServiceDenied = useCallback((serviceNames: string[], key: string) => {
     if (conversationId) {
+      const gateKeys = heldServiceGateKeys(key);
       dismissKey(key);
       streaming.clearServiceApproval(conversationId, key);
       conversationApi.clearPendingAction(conversationId, key).catch(() => {});
+      // Release every held call as refused so each stops now instead of waiting out its
+      // deadline - one card can stand for several.
+      for (const gateKey of gateKeys) {
+        conversationApi.resolveApprovalGate(conversationId, gateKey, false).catch(() => {});
+      }
     }
-  }, [conversationId, streaming, dismissKey]);
+  }, [conversationId, streaming, dismissKey, heldServiceGateKeys]);
 
   // The marketplace install modal opened from an `application:acquire` authorization:
   // the USER installs the app directly (not the agent). `installSucceededRef` distinguishes
@@ -523,14 +554,25 @@ export function ChatCore({
     // Dismiss/clear THIS specific card by its (rule, toolCallId) key so a sibling
     // card of the same rule keeps showing (F16).
     const key = toolAuthorizationKey(rule, toolCallId);
-    const applicationId = pendingToolAuthorizations.find(
-      a => a.rule === rule && a.toolCallId === toolCallId)?.applicationId;
+    const pending = pendingToolAuthorizations.find(
+      a => a.rule === rule && a.toolCallId === toolCallId);
+    const applicationId = pending?.applicationId;
+    // Set only when the agent is HOLDING this call - approving then releases it in place
+    // rather than ending the turn and restarting one.
+    const gateKey = pending?.blocking ? pending.gateKey : undefined;
     dismissKey(key);
     streaming.clearToolAuthorization(conversationId, key);
 
     if (blanket) {
       // "Ne plus demander dans cette conversation" → persist; backend turns this into a
       // "*" wildcard so the gate stops firing for the rest of the conversation.
+      //
+      // It takes effect from the NEXT turn, not this one: the wildcard is read into the
+      // turn's credentials when the turn starts, and a released call resumes inside a turn
+      // that started before the box was ticked. So a second sensitive call later in this
+      // same turn still raises its own card. That is a visible consequence of resolving
+      // permission in place rather than restarting the turn, and it is the safe direction:
+      // the alternative would be applying a grant to calls the user had not yet seen.
       updateChatConfig({ autoAuthorizeTools: true });
     }
 
@@ -547,8 +589,10 @@ export function ChatCore({
     }
 
     // Grant once so the resume turn's now-authorized call passes the gate without re-prompting.
+    // The toolCallId also releases the held call, when there is one.
+    let released = false;
     try {
-      await conversationApi.approveToolAuthorization(conversationId, rule, false);
+      released = await conversationApi.approveToolAuthorization(conversationId, rule, false, gateKey);
     } catch {
       // Non-fatal: the backend still has the pending action; the user can retry.
     }
@@ -557,19 +601,30 @@ export function ChatCore({
       // one-shot consumed by the freshly-executed application card.
       useAppRunAutoOpenStore.getState().arm();
     }
+    if (gateKey && released) {
+      // The released call runs inside the turn that is still open - a resume message here
+      // would queue a redundant second turn. Both halves are required: a card that never
+      // claimed a hold has nothing to release, and a card whose hold already timed out
+      // still needs the resume, or approving it does nothing at all.
+      return;
+    }
     resumeAgent(t('toolAuthorization.resumeContinue'));
   }, [conversationId, pendingToolAuthorizations, streaming, dismissKey, updateChatConfig, resumeAgent, t]);
 
   const handleToolDenied = useCallback((rule: string, toolCallId?: string) => {
     if (!conversationId) return;
     const key = toolAuthorizationKey(rule, toolCallId);
+    const pending = pendingToolAuthorizations.find(
+      a => a.rule === rule && a.toolCallId === toolCallId);
+    const gateKey = pending?.blocking ? pending.gateKey : undefined;
     dismissKey(key);
     streaming.clearToolAuthorization(conversationId, key);
     // Disarm any pending auto-open so a declined turn can't open a later card.
     useAppRunAutoOpenStore.getState().clear();
-    // No resume - the agent stops and the user takes over.
-    conversationApi.denyToolAuthorization(conversationId, rule).catch(() => {});
-  }, [conversationId, streaming, dismissKey]);
+    // No resume - the agent stops and the user takes over. Passing the gate key releases a
+    // held call right away rather than leaving it parked until its deadline.
+    conversationApi.denyToolAuthorization(conversationId, rule, gateKey).catch(() => {});
+  }, [conversationId, pendingToolAuthorizations, streaming, dismissKey]);
 
   // Install modal completed → grant once (a stray agent re-acquire is a benign 409) and
   // resume the agent telling it the app is installed.

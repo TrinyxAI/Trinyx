@@ -86,7 +86,7 @@ vi.mock('@/lib/stores/interface-pagination-store', () => ({
 }));
 
 vi.mock('@/lib/api/api-client', () => ({
-  apiClient: { getTokenProvider: () => null },
+  apiClient: { getTokenProvider: () => null, getAuthToken: async () => null },
 }));
 
 vi.mock('@/lib/api', () => ({ orchestratorApi: {} }));

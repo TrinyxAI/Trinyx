@@ -217,4 +217,19 @@ describe('GenerateEntryButton - what each answer from the catalogue means', () =
     await settled();
     expect(control()).toHaveTextContent('');
   });
+
+  it('wears the wand, not the app-wide AI sparkle', async () => {
+    // `Sparkles` is the generic "something AI" badge across some thirty files
+    // (skills, suggestions, onboarding, the avatar picker, credits). Worn here
+    // it said nothing about producing a file, and nothing this control does was
+    // distinguishable from any other AI affordance on the same screen.
+    renderButton();
+    await settled();
+
+    const icon = control()!.querySelector('svg');
+
+    expect(icon?.getAttribute('class')).toContain('lucide-wand-sparkles');
+    // The bare sparkle stays free to go on meaning "AI" everywhere else.
+    expect(icon?.getAttribute('class')).not.toMatch(/lucide-sparkles\b/);
+  });
 });

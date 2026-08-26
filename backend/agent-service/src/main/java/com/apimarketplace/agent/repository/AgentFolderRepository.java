@@ -1,0 +1,23 @@
+package com.apimarketplace.agent.repository;
+
+import com.apimarketplace.agent.domain.AgentFolderEntity;
+import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.stereotype.Repository;
+
+import java.util.List;
+import java.util.UUID;
+
+/**
+ * Folders of the agent list. The whole workspace tree is read at once (tens of rows, and
+ * every caller needs more than one level of it), then walked in memory by
+ * {@code ResourceFolderCoreService}.
+ */
+@Repository
+public interface AgentFolderRepository extends JpaRepository<AgentFolderEntity, UUID> {
+
+    /** Org workspace: every folder tagged with that organization. */
+    List<AgentFolderEntity> findByOrganizationId(String organizationId);
+
+    /** Personal workspace: the caller's own untagged folders (strict scope, see ScopeGuard). */
+    List<AgentFolderEntity> findByOwnerIdAndOrganizationIdIsNull(String ownerId);
+}

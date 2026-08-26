@@ -32,11 +32,7 @@ export class ChatApiService {
 
   async stopChatStream(conversationId: string): Promise<any> {
     try {
-      const tokenProvider = apiClient.getTokenProvider();
-      if (!tokenProvider) {
-        throw new Error('No token provider available');
-      }
-      const token = await tokenProvider();
+      const token = await apiClient.getAuthToken();
       if (!token) {
         throw new Error('No access token available');
       }

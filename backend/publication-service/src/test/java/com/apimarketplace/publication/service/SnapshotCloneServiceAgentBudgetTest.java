@@ -63,8 +63,8 @@ class SnapshotCloneServiceAgentBudgetTest {
                 new ObjectMapper(),
                 mock(DataSourceFileCloneService.class));
         cloneAgentsForTenant = SnapshotCloneService.class.getDeclaredMethod(
-                "cloneAgentsForTenant", Map.class, String.class, UUID.class, String.class,
-                Map.class, Map.class, String.class);
+                "cloneAgentsForTenant", SnapshotCloneService.ResourceTally.class, Map.class, String.class,
+                UUID.class, String.class, Map.class, Map.class, String.class);
         cloneAgentsForTenant.setAccessible(true);
     }
 
@@ -84,7 +84,7 @@ class SnapshotCloneServiceAgentBudgetTest {
         Map<String, Object> plan = new HashMap<>();
         plan.put("agents", agents);
 
-        cloneAgentsForTenant.invoke(service, plan, TENANT, PUBLICATION_ID, "acquired-wf",
+        cloneAgentsForTenant.invoke(service, new SnapshotCloneService.ResourceTally(), plan, TENANT, PUBLICATION_ID, "acquired-wf",
                 new HashMap<String, String>(), new HashMap<String, String>(), ORG);
 
         @SuppressWarnings({"unchecked", "rawtypes"})
@@ -122,7 +122,7 @@ class SnapshotCloneServiceAgentBudgetTest {
         Map<String, Object> plan = new HashMap<>();
         plan.put("agents", agents);
 
-        cloneAgentsForTenant.invoke(service, plan, TENANT, PUBLICATION_ID, "acquired-wf",
+        cloneAgentsForTenant.invoke(service, new SnapshotCloneService.ResourceTally(), plan, TENANT, PUBLICATION_ID, "acquired-wf",
                 new HashMap<String, String>(), new HashMap<String, String>(), ORG);
 
         ArgumentCaptor<Map<String, Object>> captor = ArgumentCaptor.forClass((Class) Map.class);
@@ -161,7 +161,7 @@ class SnapshotCloneServiceAgentBudgetTest {
         Map<String, Object> plan = new HashMap<>();
         plan.put("agents", agents);
 
-        cloneAgentsForTenant.invoke(service, plan, TENANT, PUBLICATION_ID, "acquired-wf",
+        cloneAgentsForTenant.invoke(service, new SnapshotCloneService.ResourceTally(), plan, TENANT, PUBLICATION_ID, "acquired-wf",
                 new HashMap<String, String>(), new HashMap<String, String>(), ORG);
 
         UUID newAgentUuid = UUID.fromString(newAgentId);

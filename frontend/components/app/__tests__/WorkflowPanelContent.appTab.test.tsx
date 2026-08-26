@@ -11,6 +11,11 @@ import React from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { act, cleanup, render, screen } from '@testing-library/react';
 
+// The composer fetches the verdict once for its model menu. Stubbed:
+// these suites are about layout, not billing.
+vi.mock('@/lib/hooks/useMonthlyCreditsCannotPay', () => ({
+  useMonthlyCreditsCannotPay: () => ({ blocked: false, isLoading: false }),
+}));
 vi.mock('next-intl', () => ({ useTranslations: () => (k: string) => k }));
 vi.mock('@/i18n/navigation', () => ({ usePathname: () => '/app/chat' }));
 
@@ -50,7 +55,16 @@ vi.mock('@/lib/stores/interface-pagination-store', () => ({
   ),
 }));
 vi.mock('@/app/workflows/builder/utils/labelNormalizer', () => ({ normalizeLabel: (s: string) => s }));
-vi.mock('@/contexts/workflow-run/RunStateStore', () => ({ TERMINAL_STATUSES: new Set<string>() }));
+// Stubbed to keep the real store (a stateful class with a module-level
+// registry) out of a composer test, and EMPTY so that no status reads as
+// terminal here. It has to name every constant this tree REACHES, not just
+// the ones this file reads: run-panel/runFormatting pulls UNREVIVABLE_STATUSES
+// in through WorkflowPanelContent, and a stub missing one does not fail an
+// assertion, it fails the whole FILE at import.
+vi.mock('@/contexts/workflow-run/RunStateStore', () => ({
+  TERMINAL_STATUSES: new Set<string>(),
+  UNREVIVABLE_STATUSES: new Set<string>(),
+}));
 
 // Child components → simple identifiable stubs.
 vi.mock('@/components/chat/ChatCore', () => ({ ChatCore: () => <div data-testid="chat-core" /> }));

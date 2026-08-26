@@ -74,7 +74,9 @@ class ConversationRedisStreamingCallbackTest {
         lenient().when(redisTemplate.opsForList()).thenReturn(listOps);
         lenient().when(redisTemplate.expire(anyString(), any(Duration.class))).thenReturn(true);
         callbackFactory = new ConversationRedisStreamingCallback(
-            redisTemplate, eventBus, objectMapper, conversationClient, activeStreamRegistry);
+            redisTemplate, eventBus, objectMapper, conversationClient, activeStreamRegistry,
+            new ApprovalCardPublisher(redisTemplate, eventBus, objectMapper),
+            new ApprovalCardExtractor(objectMapper));
     }
 
     @Nested
@@ -443,6 +445,85 @@ class ConversationRedisStreamingCallbackTest {
             String published = String.join("\n", messageCaptor.getAllValues());
             assertThat(published).contains("\"services\":");
             assertThat(published).contains("github");
+        }
+
+        @Test
+        @DisplayName("should NOT re-emit a card the approval gate already published before parking")
+        void shouldNotReEmitACardTheGateAlreadyPublished() {
+            when(redisTemplate.convertAndSend(anyString(), anyString())).thenReturn(1L);
+
+            var callback = callbackFactory.forExecution(STREAM_ID, CONVERSATION_ID);
+            // Shape of a result handed back by a park that was refused or expired: the gate
+            // painted the card itself before waiting, so a second copy here would double it.
+            ToolResult result = ToolResult.builder()
+                .toolCall(ToolCall.builder().id("call_1").toolName("workflow").build())
+                .success(true)
+                .content("{\"status\":\"authorization_required\"}")
+                .metadata(Map.of(
+                    "toolAuthorizationRequired", true,
+                    "rule", "workflow:execute",
+                    ToolApprovalGate.META_CARD_EMITTED, true))
+                .build();
+
+            callback.onToolResult(result);
+
+            ArgumentCaptor<String> messageCaptor = ArgumentCaptor.forClass(String.class);
+            verify(redisTemplate, atLeast(1)).convertAndSend(anyString(), messageCaptor.capture());
+            String published = String.join("\n", messageCaptor.getAllValues());
+            // The ordinary tool_result event still goes out; only the card is suppressed.
+            assertThat(published).doesNotContain("\"toolAuthorization\":");
+        }
+
+        @Test
+        @DisplayName("should NOT re-emit a CONNECT card the gate already published either")
+        void shouldNotReEmitAServiceCardTheGateAlreadyPublished() {
+            when(redisTemplate.convertAndSend(anyString(), anyString())).thenReturn(1L);
+
+            var callback = callbackFactory.forExecution(STREAM_ID, CONVERSATION_ID);
+            // The credential park's refused/expired result. The bridge path already pins this
+            // shape; without it here the two routes would disagree and the Java path would
+            // show the connect card twice.
+            ToolResult result = ToolResult.builder()
+                .toolCall(ToolCall.builder().id("call_2").toolName("catalog").build())
+                .success(true)
+                .content("{\"status\":\"approval_needed\"}")
+                .metadata(Map.of(
+                    "serviceApprovalRequested", true,
+                    "services", java.util.List.of(Map.of("serviceType", "gmail", "serviceName", "Gmail")),
+                    "reason", "Connect Gmail",
+                    ToolApprovalGate.META_CARD_EMITTED, true))
+                .build();
+
+            callback.onToolResult(result);
+
+            ArgumentCaptor<String> messageCaptor = ArgumentCaptor.forClass(String.class);
+            verify(redisTemplate, atLeast(1)).convertAndSend(anyString(), messageCaptor.capture());
+            String published = String.join("\n", messageCaptor.getAllValues());
+            assertThat(published).doesNotContain("\"reason\":\"Connect Gmail\"");
+        }
+
+        @Test
+        @DisplayName("should still emit the card when the gate did NOT publish it")
+        void shouldEmitTheCardWhenTheGateDidNotPublishIt() {
+            when(redisTemplate.convertAndSend(anyString(), anyString())).thenReturn(1L);
+
+            var callback = callbackFactory.forExecution(STREAM_ID, CONVERSATION_ID);
+            ToolResult result = ToolResult.builder()
+                .toolCall(ToolCall.builder().id("call_1").toolName("workflow").build())
+                .success(true)
+                .content("{\"status\":\"authorization_required\"}")
+                .metadata(Map.of(
+                    "toolAuthorizationRequired", true,
+                    "rule", "workflow:execute"))
+                .build();
+
+            callback.onToolResult(result);
+
+            ArgumentCaptor<String> messageCaptor = ArgumentCaptor.forClass(String.class);
+            verify(redisTemplate, atLeast(1)).convertAndSend(anyString(), messageCaptor.capture());
+            String published = String.join("\n", messageCaptor.getAllValues());
+            assertThat(published).contains("\"toolAuthorization\":");
+            assertThat(published).contains("workflow:execute");
         }
 
         @Test

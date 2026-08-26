@@ -13,6 +13,7 @@ import com.apimarketplace.conversation.service.PendingActionService;
 import com.apimarketplace.conversation.service.PendingActionResumeService;
 import com.apimarketplace.conversation.service.ConversationSharingService;
 import com.apimarketplace.conversation.service.approval.ServiceApprovalService;
+import com.apimarketplace.conversation.service.approval.ToolApprovalGateResolver;
 import com.apimarketplace.conversation.service.approval.ToolAuthorizationApprovalService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -45,6 +46,7 @@ public class ConversationController {
     private final ServiceApprovalService serviceApprovalService;
     private final ToolAuthorizationApprovalService toolAuthorizationApprovalService;
     private final ConversationSharingService conversationSharingService;
+    private final ToolApprovalGateResolver toolApprovalGateResolver;
 
     public ConversationController(ConversationCommandService conversationCommandService,
                                   ConversationQueryService conversationQueryService,
@@ -53,7 +55,8 @@ public class ConversationController {
                                   PendingActionResumeService pendingActionResumeService,
                                   ServiceApprovalService serviceApprovalService,
                                   ToolAuthorizationApprovalService toolAuthorizationApprovalService,
-                                  ConversationSharingService conversationSharingService) {
+                                  ConversationSharingService conversationSharingService,
+                                  ToolApprovalGateResolver toolApprovalGateResolver) {
         this.conversationCommandService = conversationCommandService;
         this.conversationQueryService = conversationQueryService;
         this.messageService = messageService;
@@ -62,6 +65,7 @@ public class ConversationController {
         this.serviceApprovalService = serviceApprovalService;
         this.toolAuthorizationApprovalService = toolAuthorizationApprovalService;
         this.conversationSharingService = conversationSharingService;
+        this.toolApprovalGateResolver = toolApprovalGateResolver;
     }
     
     /**
@@ -791,9 +795,15 @@ public class ConversationController {
      * Authorize a sensitive tool action the agent requested in this conversation.
      * Called by the chat authorization card. Body:
      * {@code { "rule": "application:acquire", "toolCallId": "...", "remember": false }}.
-     * {@code remember=true} persists the rule ("Toujours autoriser dans cette conversation");
-     * otherwise it is a single-shot grant consumed by the resume turn. Clears the pending
-     * action either way; the frontend then resumes the run.
+     * {@code remember=true} persists the rule ("Toujours autoriser dans cette conversation").
+     *
+     * <p>Otherwise the answer first tries to RELEASE a call still held on this card
+     * ({@code toolCallId} selects which), and what happens next depends on whether one was:
+     * a released call finishes the turn already running, so no grant is written and the
+     * frontend does not resume. A grant is written only when nothing was released, which is
+     * the case where a fresh turn has to replay the call - writing one in the other case
+     * would leave an unused grant that silently authorizes the NEXT call of the same rule.
+     * The pending action is cleared either way.
      */
     @PostMapping("/{conversationId}/tool-authorization/approve")
     public ResponseEntity<Map<String, Object>> approveToolAuthorization(
@@ -812,15 +822,27 @@ public class ConversationController {
             return ResponseEntity.badRequest().body(Map.of("error", "rule is required"));
         }
         boolean remember = request != null && Boolean.TRUE.equals(request.get("remember"));
-        toolAuthorizationApprovalService.approve(conversationId, rule, remember);
+        // Release the parked call first, because whether one was released decides how this
+        // approval must be recorded.
+        String gateKey = gateKeyOf(request, "toolCallId");
+        boolean released = toolApprovalGateResolver.resolve(conversationId, gateKey, true);
+        // Exactly ONE mechanism per click. A single-shot grant is consumed at the START of
+        // the next turn - but a released call resumes INSIDE the turn already running, so no
+        // next turn ever consumes it and the grant would sit there authorizing the following
+        // call of the same rule with no card at all. Releasing IS the authorization here.
+        // "Toujours autoriser" is a deliberate standing choice and is persisted regardless.
+        if (remember || !released) {
+            toolAuthorizationApprovalService.approve(conversationId, rule, remember);
+        }
         // Clear ONLY this rule's card so other parallel cards stay pending.
         pendingActionService.clearOnePendingAction(conversationId, "auth:" + rule);
-        logger.info("🔓 [TOOL_AUTH] Approved rule {} for conversation {} (remember={})",
-                rule, conversationId, remember);
+        logger.info("🔓 [TOOL_AUTH] Approved rule {} for conversation {} (remember={}, parkedCallReleased={})",
+                rule, conversationId, remember, released);
         return ResponseEntity.ok(Map.of(
             "conversationId", conversationId,
             "rule", rule,
-            "remembered", remember
+            "remembered", remember,
+            "parkedCallReleased", released
         ));
     }
 
@@ -848,10 +870,67 @@ public class ConversationController {
         } else {
             pendingActionService.clearPendingAction(conversationId);
         }
-        logger.info("🚫 [TOOL_AUTH] Declined rule {} for conversation {}", rule, conversationId);
+        // Release the parked call as refused so the agent stops immediately instead of
+        // holding the turn until the gate's deadline.
+        String gateKey = gateKeyOf(request, "toolCallId");
+        boolean released = toolApprovalGateResolver.resolve(conversationId, gateKey, false);
+        logger.info("🚫 [TOOL_AUTH] Declined rule {} for conversation {} (parkedCallReleased={})",
+                rule, conversationId, released);
         return ResponseEntity.ok(Map.of(
             "conversationId", conversationId,
-            "denied", true
+            "denied", true,
+            "parkedCallReleased", released
+        ));
+    }
+
+    /**
+     * The parked call's id from the request body, or null when it names none.
+     *
+     * <p>Reads the value rather than casting it: a client sending a number would turn a
+     * plain "nothing was parked" into a 500, and the user's approval click would fail on a
+     * detail that is optional in the first place.
+     */
+    private static String gateKeyOf(Map<String, Object> request, String field) {
+        Object value = request != null ? request.get(field) : null;
+        return value instanceof String s && !s.isBlank() ? s : null;
+    }
+
+    /**
+     * Release a tool call parked on a CONNECT-a-service card.
+     *
+     * <p>Separate from the tool-authorization endpoints because connecting a service is
+     * not a rule grant: there is nothing to remember and nothing to clear, only a parked
+     * call to release once the credential exists. Body:
+     * {@code { "gateKey": "<toolCallId>", "approved": true }}.
+     */
+    @PostMapping("/{conversationId}/approval-gate/resolve")
+    public ResponseEntity<Map<String, Object>> resolveApprovalGate(
+            @PathVariable("conversationId") String conversationId,
+            @RequestBody Map<String, Object> request,
+            @RequestHeader(value = "X-User-ID", required = false) String userId,
+            @RequestHeader(value = "X-Organization-ID", required = false) String organizationId) {
+        if (userId == null || userId.isBlank()) {
+            return ResponseEntity.status(HttpStatus.UNAUTHORIZED).build();
+        }
+        if (conversationQueryService.getConversationById(conversationId, userId, organizationId).isEmpty()) {
+            return ResponseEntity.notFound().build();
+        }
+        String gateKey = gateKeyOf(request, "gateKey");
+        if (gateKey == null || gateKey.isBlank()) {
+            return ResponseEntity.badRequest().body(Map.of("error", "gateKey is required"));
+        }
+        // A permission decision defaults to NO. An omitted field is a caller that did not
+        // say yes, and releasing a held call as approved would run the action for real.
+        // Accepts the string form too, so a client that sends "true" is not silently denied.
+        Object rawApproved = request.get("approved");
+        boolean approved = Boolean.TRUE.equals(rawApproved)
+                || (rawApproved instanceof String s && "true".equalsIgnoreCase(s.trim()));
+        boolean released = toolApprovalGateResolver.resolve(conversationId, gateKey, approved);
+        return ResponseEntity.ok(Map.of(
+            "conversationId", conversationId,
+            "gateKey", gateKey,
+            "approved", approved,
+            "parkedCallReleased", released
         ));
     }
 

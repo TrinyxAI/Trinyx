@@ -37,6 +37,7 @@ import { PROVIDER_ICON_MAP } from '@/lib/ai-providers/providerIcons';
 import { buildWorkflowPanelTab, useAutoRegisterWorkflowPanelTab } from '@/lib/sidePanel/workflowPanelTab';
 import { buildAgentConfigPanelTab } from '@/lib/sidePanel/agentConfigPanelTab';
 import { fetchLinkedAgent } from '@/lib/chat/linkedAgent';
+import { workflowPanelTabId } from '@/lib/sidePanel/tabResource';
 import {
   emitFilesDetailCommand,
   emitFilesFolderNavigate,
@@ -518,7 +519,7 @@ export function AppHeader() {
 
       switch (type) {
         case 'workflow': {
-          const tabId = `workflow-${id}`;
+          const tabId = workflowPanelTabId(id);
           openFn({
             id: tabId,
             label: title || 'Workflow',
@@ -605,7 +606,7 @@ export function AppHeader() {
         }
         case 'workflow_run': {
           if (!eventRunId) break;
-          const tabId = `workflow-${id}`;  // Same tab ID - openTab merges
+          const tabId = workflowPanelTabId(id);  // Deliberately NOT run-scoped: same id, so the run REPLACES the workflow tab
           openFn({
             id: tabId,
             label: title || 'Workflow Run',

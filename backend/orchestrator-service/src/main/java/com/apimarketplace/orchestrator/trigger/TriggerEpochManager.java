@@ -276,9 +276,28 @@ public class TriggerEpochManager {
      * @param triggerId The trigger ID
      * @return The new spawn number
      */
-    @SuppressWarnings("unchecked")
     @Transactional
     public int incrementSpawn(WorkflowRunEntity run, String triggerId) {
+        return incrementSpawnAtLeast(run, triggerId, 0);
+    }
+
+    /**
+     * Increment spawn for a DAG, never landing below {@code minimumSpawn}.
+     *
+     * <p>{@code dagCurrentSpawn} is per DAG and is RESET to 0 by every trigger fire
+     * ({@code incrementEpoch}), so "the next spawn" is only guaranteed unused in the epoch that
+     * fire opened. A rerun that targets an OLDER epoch is therefore free to land on a spawn that
+     * epoch already used, and the supersede filter in {@code WorkflowStepDataRepository} keeps
+     * ALL rows tied at the max spawn per (alias, trigger, epoch, iteration, item): both attempts
+     * would count, which is exactly the stale-row problem that filter exists to prevent. Such a
+     * caller passes the epoch's own highest spawn plus one as the floor.
+     *
+     * @param minimumSpawn the lowest acceptable resulting spawn; 0 means "just increment"
+     * @return the new spawn number
+     */
+    @SuppressWarnings("unchecked")
+    @Transactional
+    public int incrementSpawnAtLeast(WorkflowRunEntity run, String triggerId, int minimumSpawn) {
         if (run == null) {
             throw new IllegalArgumentException("Run cannot be null");
         }
@@ -315,15 +334,15 @@ public class TriggerEpochManager {
         if (spawnValue instanceof Number) {
             currentSpawn = ((Number) spawnValue).intValue();
         }
-        int newSpawn = currentSpawn + 1;
+        int newSpawn = Math.max(currentSpawn + 1, minimumSpawn);
         dagCurrentSpawn.put(triggerId, newSpawn);
         metadata.put("dagCurrentSpawn", dagCurrentSpawn);
 
         lockedRun.setMetadata(metadata);
         runRepository.save(lockedRun);
 
-        logger.info("[TriggerEpochManager] Incremented spawn from {} to {} for triggerId={}, runId={}",
-                   currentSpawn, newSpawn, triggerId, runId);
+        logger.info("[TriggerEpochManager] Incremented spawn from {} to {} (floor {}) for triggerId={}, runId={}",
+                   currentSpawn, newSpawn, minimumSpawn, triggerId, runId);
 
         return newSpawn;
     }

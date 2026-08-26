@@ -318,4 +318,48 @@ public interface AgentRepository extends JpaRepository<AgentEntity, UUID> {
            "COALESCE(SUM(a.creditsConsumed), 0) " +
            "FROM AgentEntity a WHERE a.organizationId = :orgId")
     Object[] getFleetCountersByOrganizationIdStrict(@Param("orgId") String orgId);
+
+    // ===================== List folders (V449) =====================
+
+    /**
+     * File the given agents into {@code folderId} ({@code null} = back to the top level)
+     * inside ONE workspace. The organization predicate IS the scope check, so a caller can
+     * never re-file a row from another workspace, and the count says how many of the
+     * requested ids were actually theirs.
+     *
+     * <p>Deliberately leaves {@code updatedAt} alone: filing an agent changes how the list
+     * is organised, not the agent, and the folder tiles order themselves on the newest
+     * change INSIDE them.
+     */
+    @Modifying
+    @Query("UPDATE AgentEntity a SET a.folderId = :folderId "
+            + "WHERE a.id IN :ids AND a.organizationId = :organizationId")
+    int assignFolderForOrganization(@Param("ids") java.util.Collection<UUID> ids,
+                                    @Param("folderId") UUID folderId,
+                                    @Param("organizationId") String organizationId);
+
+    /** Personal-workspace counterpart of {@link #assignFolderForOrganization}. */
+    @Modifying
+    @Query("UPDATE AgentEntity a SET a.folderId = :folderId "
+            + "WHERE a.id IN :ids AND a.tenantId = :ownerId AND a.organizationId IS NULL")
+    int assignFolderForOwner(@Param("ids") java.util.Collection<UUID> ids,
+                             @Param("folderId") UUID folderId,
+                             @Param("ownerId") String ownerId);
+
+    /**
+     * Empty the given folders: their agents go back to the top level. Called when the
+     * folders are deleted - a folder never deletes what it holds.
+     */
+    @Modifying
+    @Query("UPDATE AgentEntity a SET a.folderId = null "
+            + "WHERE a.folderId IN :folderIds AND a.organizationId = :organizationId")
+    int clearFolderForOrganization(@Param("folderIds") java.util.Collection<UUID> folderIds,
+                                   @Param("organizationId") String organizationId);
+
+    /** Personal-workspace counterpart of {@link #clearFolderForOrganization}. */
+    @Modifying
+    @Query("UPDATE AgentEntity a SET a.folderId = null "
+            + "WHERE a.folderId IN :folderIds AND a.tenantId = :ownerId AND a.organizationId IS NULL")
+    int clearFolderForOwner(@Param("folderIds") java.util.Collection<UUID> folderIds,
+                            @Param("ownerId") String ownerId);
 }

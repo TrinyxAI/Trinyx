@@ -1,5 +1,6 @@
 package com.apimarketplace.publication.controller;
 
+import com.apimarketplace.publication.dto.MarketplaceQueryFilter;
 import com.apimarketplace.publication.config.OrchestratorInternalClient;
 import com.apimarketplace.publication.domain.WorkflowPublicationEntity;
 import com.apimarketplace.publication.repository.WorkflowPublicationRepository;
@@ -8,6 +9,7 @@ import com.apimarketplace.publication.service.RemoteMarketplaceService;
 import com.apimarketplace.publication.service.ResourcePublicationService;
 import com.apimarketplace.publication.service.ShowcaseSnapshotBackfillService;
 import com.apimarketplace.publication.service.WorkflowPublicationService;
+import org.mockito.ArgumentCaptor;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
@@ -119,12 +121,14 @@ class InternalPublicationControllerRemoteMarketplaceTest {
         void byCategoryProxiesToCloud() {
             RemoteMarketplaceService remote = mock(RemoteMarketplaceService.class);
             WorkflowPublicationRepository repo = mock(WorkflowPublicationRepository.class);
-            when(remote.fetchMarketplacePublications(0, 10, "productivity")).thenReturn(Map.of(
-                    "publications", List.of(), "count", 0));
+            when(remote.fetchMarketplacePublications(eq(0), eq(10), any(MarketplaceQueryFilter.class)))
+                    .thenReturn(Map.of("publications", List.of(), "count", 0));
 
             controllerWith(remote, repo).getByCategory("productivity", 0, 10);
 
-            verify(remote).fetchMarketplacePublications(0, 10, "productivity");
+            ArgumentCaptor<MarketplaceQueryFilter> filter = ArgumentCaptor.forClass(MarketplaceQueryFilter.class);
+            verify(remote).fetchMarketplacePublications(eq(0), eq(10), filter.capture());
+            assertThat(filter.getValue().categorySlug()).isEqualTo("productivity");
             verify(repo, never()).findMarketplacePublicationsByCategorySlug(any(), any());
         }
 

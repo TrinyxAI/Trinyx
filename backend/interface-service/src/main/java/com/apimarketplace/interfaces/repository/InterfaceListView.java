@@ -24,4 +24,10 @@ public interface InterfaceListView {
     Long getDataSourceId();
     Instant getCreatedAt();
     Instant getUpdatedAt();
+
+    /** Folder this page is filed under (V450), or null at the top level. */
+    UUID getFolderId();
+
+    /** Preset name or "WIDTHxHEIGHT" - the shape a folder tile draws for this page. */
+    String getFormat();
 }

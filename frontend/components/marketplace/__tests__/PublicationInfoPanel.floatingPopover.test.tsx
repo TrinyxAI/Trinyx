@@ -12,6 +12,14 @@ vi.mock('next/navigation', () => ({
   useRouter: () => ({ push: vi.fn() }),
   usePathname: () => '/',
 }));
+// The panel links to the editable copy through the locale-aware Link; stubbed here so the
+// suite does not pull next-intl's real navigation factory (it resolves next/navigation at
+// import time, which the mock above replaces).
+vi.mock('@/i18n/navigation', () => ({
+  useRouter: () => ({ push: vi.fn() }),
+  usePathname: () => '/',
+  Link: ({ href, children }: { href: string; children: React.ReactNode }) => <a href={href}>{children}</a>,
+}));
 vi.mock('next-intl', () => ({
   useTranslations: () => (key: string) => key,
 }));

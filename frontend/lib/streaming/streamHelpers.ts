@@ -84,6 +84,14 @@ export interface StreamEventData {
     }>;
     reason?: string;
     needsAttention?: boolean;
+    /**
+     * The agent is HOLDING the tool call that raised this card: answering it resolves
+     * that call in place, so the assistant continues its current turn instead of ending
+     * it and waiting for a follow-up message.
+     */
+    blocking?: boolean;
+    /** Identifies the held call; echoed back when the user answers. */
+    gateKey?: string;
   };
   toolAuthorization?: {
     rule: string;
@@ -91,6 +99,9 @@ export interface StreamEventData {
     action?: string;
     toolCallId?: string;
     argsSummary?: string;
+    /** See serviceApprovalRequired.blocking. */
+    blocking?: boolean;
+    gateKey?: string;
     /** Publication id - only for application:acquire, used to open the install modal. */
     applicationId?: string;
   };
@@ -236,6 +247,8 @@ export function mapV2EventToV1(
           services: (data.services as StreamEventData['serviceApprovalRequired']['services']) || [],
           reason: data.reason as string,
           needsAttention: data.needsAttention as boolean,
+          blocking: data.blocking as boolean,
+          gateKey: data.gateKey as string,
         },
         streamId,
       };

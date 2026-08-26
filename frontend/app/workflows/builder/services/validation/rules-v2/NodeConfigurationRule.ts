@@ -70,6 +70,47 @@ export class NodeConfigurationRule extends BaseValidationRule {
         }
       }
 
+      // Step set to choose its account at RUN time, with no expression to choose it
+      // with. A build-time error and not only a run-time one: the state is reached by
+      // toggling the field on and saving it unwritten, and it is also what an ACQUIRED
+      // workflow arrives in, because publishing blanks the publisher choice on purpose.
+      // Without this the canvas is clean and every run of the step fails.
+      if (nodeType === 'mcp' && !isInterfaceNode(node) && !isCrudNode(node)) {
+        const selector = (node.data?.toolData as Record<string, unknown> | undefined)?.credentialSelector;
+        if (typeof selector === 'string' && selector.trim() === '') {
+          issues.push(
+            this.createError(
+              elementKey,
+              'mcp',
+              'This step chooses its account at run time but has no expression to choose it with',
+              { rule: 'step_blank_credential_selector', nodeId: node.id }
+            )
+          );
+        }
+      }
+
+      // Step set to BOTH choose an account at run time and run on the platform pool.
+      // The two modes answer one question, so the run refuses; unchecked here the plan
+      // saves clean and the author only learns when it fails.
+      if (nodeType === 'mcp' && !isInterfaceNode(node) && !isCrudNode(node)) {
+        const toolData = node.data?.toolData as Record<string, unknown> | undefined;
+        const selector = toolData?.credentialSelector ?? toolData?.credential_selector;
+        if (
+          selector !== null &&
+          selector !== undefined &&
+          String(toolData?.credentialSource).toLowerCase() === 'platform'
+        ) {
+          issues.push(
+            this.createError(
+              elementKey,
+              'mcp',
+              'This step both chooses an account at run time and runs on a platform credential; the two cannot both apply',
+              { rule: 'step_credential_selector_platform_conflict', nodeId: node.id }
+            )
+          );
+        }
+      }
+
       // #11: Decision without conditions
       if (nodeRegistry.isDecisionNode(node)) {
         this.validateDecision(node, elementKey, issues);

@@ -45,10 +45,12 @@ class DataSourceCrudControllerPagedSampleRowsTest {
         DataSourceService.DataSourcePage page = new DataSourceService.DataSourcePage(
                 List.of(), 0, 0, 25, counts, sample, publicationStatuses);
         when(service.getDataSourcesPaged(eq("tenant-A"), isNull(), isNull(), isNull(), eq(0), eq(25),
-                isNull(), isNull()))
+                isNull(), isNull(), isNull(), eq(false)))
                 .thenReturn(page);
 
-        var response = controller.getAllDataSourcesPaged(request, null, null, null, null, 0, 25, null, null);
+        // No folder view asked for: the list behaves exactly as it did before folders.
+        var response = controller.getAllDataSourcesPaged(
+                request, null, null, null, null, 0, 25, null, null, null, false);
 
         assertThat(response.getStatusCode().value()).isEqualTo(200);
         @SuppressWarnings("unchecked")

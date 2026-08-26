@@ -36,6 +36,13 @@ const MAX_VIDEO_END_PADDING_MS = 3000;
 const DEFAULT_VIDEO_DONE_FLAG = '__DONE__';
 const DONE_FLAG_PATTERN = /^[A-Za-z_$][A-Za-z0-9_$]*$/;
 const DEFAULT_VIDEO_FPS = 30;
+// Page-scored audio. Playwright's recordVideo captures no sound at all, so a page that
+// wants a soundtrack declares its events on window[audioFlag] and the renderer builds the
+// track from them. Capped so a runaway page cannot make the synth allocate unbounded work.
+const DEFAULT_VIDEO_AUDIO_FLAG = '__AUDIO__';
+const MAX_AUDIO_EVENTS = 2000;
+const AUDIO_SAMPLE_RATE = 44100;
+const MAX_AUDIO_SECONDS = 180;
 // 'live' records in real time (Playwright recordVideo, ~25fps, frames drop under load);
 // 'smooth' renders OFFLINE frame by frame under a virtual clock - every frame is perfect
 // regardless of machine load, at the cost of render time (~60-120ms per frame).
@@ -345,6 +352,14 @@ function validateVideoRequest(body, caps) {
     fps = Math.round(f);
   }
 
+  let audioFlag = DEFAULT_VIDEO_AUDIO_FLAG;
+  if (b.audioFlag !== undefined && b.audioFlag !== null) {
+    if (typeof b.audioFlag !== 'string' || !DONE_FLAG_PATTERN.test(b.audioFlag)) {
+      return { ok: false, error: 'audioFlag must be a valid JS identifier (e.g. __AUDIO__)' };
+    }
+    audioFlag = b.audioFlag;
+  }
+
   return {
     ok: true,
     value: {
@@ -359,6 +374,10 @@ function validateVideoRequest(body, caps) {
       waitForDone: b.waitForDone !== false,
       doneFlag,
       fps,
+      // Page-scored audio: read window[audioFlag] after the clip and mux it in. Opt-out
+      // with audio:false. mp4 only - the aac mux below is not valid in a webm container.
+      audio: b.audio !== false && format === 'mp4',
+      audioFlag,
       waitUntil: resolveWaitUntil(b.waitFor),
       timeoutMs: clampTimeout(b.timeoutMs),
     },
@@ -2051,6 +2070,173 @@ function mediaOutputExtension(specValue) {
   return specValue.options.outputFormat; // extract_audio
 }
 
+/* ------------------------------------------------------------------ audio */
+
+/**
+ * Stable 32-bit hash of a string. Used to give an unnamed event `kind` a deterministic
+ * pitch, so the same page always scores the same way across renders.
+ */
+function hashString(s) {
+  let h = 2166136261;
+  for (let i = 0; i < s.length; i += 1) {
+    h ^= s.charCodeAt(i);
+    h = Math.imul(h, 16777619);
+  }
+  return h >>> 0;
+}
+
+// Pentatonic degrees: unrelated event kinds land on notes that still sit together.
+const AUDIO_SCALE_MIDI = [84, 79, 76, 72, 67, 64, 60, 55];
+
+/**
+ * Normalise a page-declared audio timeline. The page owns the CONTRACT, not the meaning:
+ * each entry is `{ t, freq?, dur?, gain?, type?, kind?, power? }` where t is seconds from
+ * the clip start. Anything the page gets wrong is dropped rather than failing the render -
+ * a soundtrack is best-effort, exactly like the screenshot and pdf outputs.
+ * Returns { ok, value: events[], dropped } - never throws.
+ */
+function validateAudioTimeline(raw, opts) {
+  const maxSeconds = (opts && Number(opts.maxSeconds) > 0)
+    ? Math.min(Number(opts.maxSeconds), MAX_AUDIO_SECONDS)
+    : MAX_AUDIO_SECONDS;
+  if (!Array.isArray(raw)) return { ok: false, value: [], dropped: 0, error: 'not an array' };
+
+  const out = [];
+  let dropped = 0;
+  for (let i = 0; i < raw.length && out.length < MAX_AUDIO_EVENTS; i += 1) {
+    const e = raw[i];
+    if (!e || typeof e !== 'object') { dropped += 1; continue; }
+    const t = Number(e.t);
+    if (!Number.isFinite(t) || t < 0 || t > maxSeconds) { dropped += 1; continue; }
+
+    const power = Number.isFinite(Number(e.power)) ? Math.min(Math.max(Number(e.power), 0), 1) : 0;
+    const kind = (typeof e.kind === 'string' && e.kind) ? e.kind : 'hit';
+
+    // A page may state the note outright; otherwise derive it from kind + power so the
+    // renderer stays generic and never needs to know what the page is animating.
+    let freq = Number(e.freq);
+    if (!Number.isFinite(freq) || freq < 40 || freq > 12000) {
+      const midi = AUDIO_SCALE_MIDI[hashString(kind) % AUDIO_SCALE_MIDI.length] - Math.round(power * 12);
+      freq = 440 * Math.pow(2, (midi - 69) / 12);
+    }
+    let dur = Number(e.dur);
+    if (!Number.isFinite(dur) || dur <= 0 || dur > 4) dur = 0.16 + power * 0.3;
+    let gain = Number(e.gain);
+    if (!Number.isFinite(gain) || gain < 0 || gain > 1) gain = 0.45 + power * 0.4;
+    const type = (e.type === 'square' || e.type === 'triangle' || e.type === 'noise') ? e.type : 'sine';
+
+    out.push({ t, freq, dur, gain, type });
+  }
+  if (raw.length > MAX_AUDIO_EVENTS) dropped += raw.length - MAX_AUDIO_EVENTS;
+  return { ok: true, value: out, dropped };
+}
+
+/**
+ * Render a validated timeline to a mono 16-bit PCM WAV Buffer. Pure maths, no deps.
+ * Voices are short percussive blips with a fast attack and an exponential decay; the sum
+ * goes through a tanh soft-limiter so a burst of simultaneous events cannot clip (a hard
+ * clip is the one artefact that would make the whole track sound broken).
+ * Returns null when there is nothing audible to render.
+ */
+function synthesizeClipAudio(events, opts) {
+  const sampleRate = (opts && Number(opts.sampleRate) > 0) ? Math.round(Number(opts.sampleRate)) : AUDIO_SAMPLE_RATE;
+  if (!Array.isArray(events) || events.length === 0) return null;
+
+  let end = 0;
+  for (const e of events) end = Math.max(end, e.t + e.dur);
+  const requested = (opts && Number(opts.durationSeconds) > 0) ? Number(opts.durationSeconds) : 0;
+  const seconds = Math.min(Math.max(end + 0.25, requested), MAX_AUDIO_SECONDS);
+  const total = Math.ceil(seconds * sampleRate);
+  if (total <= 0) return null;
+
+  const mix = new Float32Array(total);
+  for (const e of events) {
+    const start = Math.floor(e.t * sampleRate);
+    const len = Math.min(Math.ceil(e.dur * sampleRate), total - start);
+    if (len <= 0) continue;
+    const w = 2 * Math.PI * e.freq / sampleRate;
+    // ~4ms attack keeps the transient without the click a zero-length attack produces.
+    const attack = Math.max(1, Math.round(0.004 * sampleRate));
+    // Integer xorshift for the noise voice: seeded per event so the render stays
+    // deterministic, and allocation-free so a timeline full of long noise events cannot
+    // turn into tens of millions of throwaway objects.
+    let rng = (hashString(`${e.t}:${e.freq}`) | 0) || 1;
+    for (let i = 0; i < len; i += 1) {
+      const k = i / len;
+      const env = (i < attack ? i / attack : 1) * Math.exp(-5.5 * k);
+      let s;
+      if (e.type === 'square') s = Math.sin(w * i) >= 0 ? 1 : -1;
+      else if (e.type === 'triangle') s = (2 / Math.PI) * Math.asin(Math.sin(w * i));
+      else if (e.type === 'noise') {
+        rng ^= rng << 13; rng ^= rng >>> 17; rng ^= rng << 5;
+        s = (rng >>> 0) / 2147483648 - 1;
+      } else s = Math.sin(w * i);
+      mix[start + i] += s * env * e.gain;
+    }
+  }
+
+  const pcm = Buffer.alloc(total * 2);
+  for (let i = 0; i < total; i += 1) {
+    const limited = Math.tanh(mix[i] * 0.8);
+    pcm.writeInt16LE(Math.max(-32768, Math.min(32767, Math.round(limited * 32767))), i * 2);
+  }
+
+  const header = Buffer.alloc(44);
+  header.write('RIFF', 0);
+  header.writeUInt32LE(36 + pcm.length, 4);
+  header.write('WAVE', 8);
+  header.write('fmt ', 12);
+  header.writeUInt32LE(16, 16);          // PCM chunk size
+  header.writeUInt16LE(1, 20);           // format = PCM
+  header.writeUInt16LE(1, 22);           // mono
+  header.writeUInt32LE(sampleRate, 24);
+  header.writeUInt32LE(sampleRate * 2, 28); // byte rate
+  header.writeUInt16LE(2, 32);           // block align
+  header.writeUInt16LE(16, 34);          // bits per sample
+  header.write('data', 36);
+  header.writeUInt32LE(pcm.length, 40);
+  return Buffer.concat([header, pcm]);
+}
+
+/**
+ * ffmpeg argv that lays the synthesized track onto the finished clip (pure, unit-testable).
+ * The video is STREAM-COPIED, so this second pass costs a fraction of the render.
+ * `apad` + `-shortest` is the pairing that matters: without apad, a track shorter than the
+ * clip would make -shortest truncate the VIDEO; with it, the audio is padded with silence
+ * and -shortest then trims to the video length instead.
+ */
+function buildAudioMuxArgs(videoPath, audioPath, outputPath) {
+  return [
+    '-y', '-loglevel', 'error',
+    '-i', videoPath,
+    '-i', audioPath,
+    '-filter_complex', '[1:a]apad[aud]',
+    '-map', '0:v:0', '-map', '[aud]',
+    '-c:v', 'copy', '-c:a', 'aac', '-b:a', '128k',
+    '-shortest', '-movflags', '+faststart',
+    outputPath,
+  ];
+}
+
+/**
+ * Best-effort read of the page's audio timeline. Any failure (no such global, a page that
+ * already navigated away, a serialisation error) yields an empty timeline: the clip still
+ * ships, silent, exactly as it did before this feature existed.
+ */
+async function readPageAudioTimeline(page, flag) {
+  try {
+    const raw = await page.evaluate((f) => {
+      const v = window[f];
+      return Array.isArray(v) ? v.slice(0, 2000) : null;
+    }, flag);
+    if (!raw) return [];
+    const v = validateAudioTimeline(raw, {});
+    return v.ok ? v.value : [];
+  } catch (_) {
+    return [];
+  }
+}
+
 module.exports = {
   DEFAULT_VIEWPORT,
   DEFAULT_TIMEOUT_MS,
@@ -2088,6 +2274,13 @@ module.exports = {
   validateVideoRequest,
   drivePageForVideo,
   buildFfmpegArgs,
+  DEFAULT_VIDEO_AUDIO_FLAG,
+  MAX_AUDIO_EVENTS,
+  AUDIO_SAMPLE_RATE,
+  validateAudioTimeline,
+  synthesizeClipAudio,
+  buildAudioMuxArgs,
+  readPageAudioTimeline,
   Semaphore,
   classifyRenderError,
   RenderPool,

@@ -36,21 +36,50 @@ import java.util.concurrent.ConcurrentHashMap;
 public record SplitContext(
     String splitNodeId,
     List<Object> items,
-    Map<String, List<Object>> resultsByNode
+    Map<String, List<Object>> resultsByNode,
+    int epoch
 ) {
 
     /**
-     * Creates a new SplitContext with the given items.
+     * Epoch of a context built by a caller that does not know which epoch it belongs to
+     * (legacy/test entry points). A context stamped with this value is never treated as
+     * stale, so callers that cannot supply an epoch keep the pre-2026-08 behaviour.
+     */
+    public static final int UNKNOWN_EPOCH = -1;
+
+    /**
+     * Creates a new SplitContext with the given items, without epoch attribution.
      *
      * @param splitNodeId the node ID of the split that created this context
      * @param items the list of items to iterate over
-     * @return a new SplitContext
+     * @return a new SplitContext stamped {@link #UNKNOWN_EPOCH}
      */
     public static SplitContext create(String splitNodeId, List<Object> items) {
+        return create(splitNodeId, items, UNKNOWN_EPOCH);
+    }
+
+    /**
+     * Creates a new SplitContext with the given items, attributed to the epoch that spawned
+     * them.
+     *
+     * <p>The epoch is what lets {@code SplitContextManager.restoreContext} tell a context
+     * belonging to THIS epoch (which must be preserved, it holds the per-item results) from one
+     * left behind by an earlier epoch of the same run (which must be rebuilt). With
+     * {@code replicas >= 2}, an async agent delivery lands on whichever pod consumes the Redis
+     * message, so a pod that ran epoch N and not epoch N+1 keeps its epoch-N context in memory
+     * under the same, epoch-less context key.
+     *
+     * @param splitNodeId the node ID of the split that created this context
+     * @param items the list of items to iterate over
+     * @param epoch the epoch this split spawned in, or {@link #UNKNOWN_EPOCH}
+     * @return a new SplitContext
+     */
+    public static SplitContext create(String splitNodeId, List<Object> items, int epoch) {
         return new SplitContext(
             splitNodeId,
             items != null ? List.copyOf(items) : List.of(),
-            new ConcurrentHashMap<>()
+            new ConcurrentHashMap<>(),
+            epoch
         );
     }
 
@@ -98,7 +127,7 @@ public record SplitContext(
             ? Collections.unmodifiableList(new ArrayList<>(results))
             : List.of();
         newResults.put(nodeId, stored);
-        return new SplitContext(splitNodeId, items, newResults);
+        return new SplitContext(splitNodeId, items, newResults, epoch);
     }
 
     /**
@@ -137,7 +166,7 @@ public record SplitContext(
         }
         mutable.set(itemIndex, result);
         newResults.put(nodeId, Collections.unmodifiableList(mutable));
-        return new SplitContext(splitNodeId, items, newResults);
+        return new SplitContext(splitNodeId, items, newResults, epoch);
     }
 
     /**
@@ -192,7 +221,7 @@ public record SplitContext(
     public SplitContext clearResults(String nodeId) {
         Map<String, List<Object>> newResults = new ConcurrentHashMap<>(resultsByNode);
         newResults.remove(nodeId);
-        return new SplitContext(splitNodeId, items, newResults);
+        return new SplitContext(splitNodeId, items, newResults, epoch);
     }
 
     /**
@@ -201,6 +230,6 @@ public record SplitContext(
      * @return a new SplitContext with only items, no results
      */
     public SplitContext clearAllResults() {
-        return new SplitContext(splitNodeId, items, new ConcurrentHashMap<>());
+        return new SplitContext(splitNodeId, items, new ConcurrentHashMap<>(), epoch);
     }
 }

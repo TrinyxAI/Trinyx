@@ -2,6 +2,7 @@ package com.apimarketplace.agent.catalog.bundle;
 
 import com.apimarketplace.agent.bridge.BridgeAllowlist;
 import com.apimarketplace.agent.catalog.CatalogDefaults;
+import com.apimarketplace.agent.config.ModelPricingConfig;
 import com.apimarketplace.agent.domain.ModelCategory;
 import com.apimarketplace.agent.domain.ModelCategorySettingsEntity;
 import com.apimarketplace.agent.domain.ModelCategorySettingsId;
@@ -57,6 +58,19 @@ public class CatalogMergeService {
     private final ModelCategorySettingsRepository categoryRepo;
     private final AuthPricingSyncClient authPricingSyncClient;
     private final CatalogDefaults catalogDefaults;
+
+    /**
+     * The curated {@code ai.agent.rate-limits} table, consulted only to decide
+     * whether a model already has a researched per-model limit that the generic
+     * fallback must not overwrite. See {@link #hasCuratedRateLimit}.
+     *
+     * <p>Setter-injected rather than added to the Lombok constructor: six unit
+     * tests build this service directly, and none of them exercises rate-limit
+     * fallbacks. A null value simply restores the previous "always stamp the
+     * fallback" behaviour, so those harnesses stay valid without edits.
+     */
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private ModelPricingConfig modelPricingConfig;
 
     /** Per-row pricing change queued for the afterCommit mirror. */
     private record PricingChange(String provider, String modelId,
@@ -585,13 +599,44 @@ public class CatalogMergeService {
      * the rate limiter can enforce a ceiling - LiteLLM only populates
      * rpm/tpm for ~1.8% of entries, so without defaults the majority of
      * rows land with null and bypass the limiter.
+     *
+     * <p><b>Except when the model has a curated limit in
+     * {@code ai.agent.rate-limits}.</b> Those two layers were fighting:
+     * {@code CachedModelRateLimitProvider} resolves DB column first and only
+     * falls back to the YAML seed when the column is NULL, so stamping the
+     * generic 60000/500 here silently overrode every researched per-model
+     * value. Measured on production 2026-08-24, that had killed 44 of the 50
+     * curated entries - openai/gpt-5.4-mini enforcing 60k TPM against a
+     * curated 10M, deepseek/deepseek-chat 60k against 2M. Leaving the columns
+     * NULL for those models is what hands control back to the curated table;
+     * the ceiling is not lost, it is the stricter, researched one.
      */
     private void applyRateLimitDefaults(ModelConfigOverrideEntity row) {
         if (catalogDefaults == null) return; // defensive for non-Spring test harnesses
+        if (hasCuratedRateLimit(row.getProvider(), row.getModelId())) return;
         if (row.getRateLimitTpm()          == null) row.setRateLimitTpm(catalogDefaults.getRateLimitTpm());
         if (row.getRateLimitRpm()          == null) row.setRateLimitRpm(catalogDefaults.getRateLimitRpm());
         if (row.getRateLimitTpmPerTenant() == null) row.setRateLimitTpmPerTenant(catalogDefaults.getRateLimitTpmPerTenant());
         if (row.getRateLimitRpmPerTenant() == null) row.setRateLimitRpmPerTenant(catalogDefaults.getRateLimitRpmPerTenant());
+    }
+
+    /**
+     * Does {@code ai.agent.rate-limits} carry an entry for this model? Key
+     * lookup mirrors {@link com.apimarketplace.agent.service.CachedModelRateLimitProvider}
+     * exactly - scoped {@code provider:modelId} first, then the bare
+     * {@code modelId} - so the two cannot disagree about which models are
+     * curated. A disagreement would be the worst outcome: the merge would skip
+     * the fallback while the resolver found no curated value, leaving the model
+     * with no ceiling at all.
+     *
+     * <p>Null-safe on {@code modelPricingConfig} so the non-Spring test
+     * harnesses that pass {@code null} keep the pre-existing behaviour.
+     */
+    private boolean hasCuratedRateLimit(String provider, String modelId) {
+        if (modelPricingConfig == null || modelId == null) return false;
+        Map<String, ModelPricingConfig.ModelRateLimitInfo> curated = modelPricingConfig.getRateLimits();
+        if (curated == null || curated.isEmpty()) return false;
+        return curated.containsKey(provider + ":" + modelId) || curated.containsKey(modelId);
     }
 
     private static String keyOf(String provider, String modelId) {

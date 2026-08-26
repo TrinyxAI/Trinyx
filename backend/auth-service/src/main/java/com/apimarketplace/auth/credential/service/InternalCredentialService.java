@@ -479,7 +479,9 @@ public class InternalCredentialService {
     }
 
     /**
-     * Resolve a user credential by name, then by integration. <b>Org-aware</b>: when
+     * Resolve a user credential by name (only when that name identifies its provider,
+     * see {@code CredentialService.findByNameIdentifyingIntegration}), then by
+     * integration. <b>Org-aware</b>: when
      * the executing user has no matching credential of their own AND an
      * {@code organizationId} (the active workspace) is supplied, fall back to the
      * workspace-shared credential for that integration ({@code is_default} first).
@@ -496,7 +498,16 @@ public class InternalCredentialService {
                                       String organizationId) {
         // Typed enum comparison - renaming CredentialStatus.active would then fail at compile
         // time rather than silently returning null here and leaving every caller token-less.
-        Optional<Credential> byName = credentialService.getCredentialByTenantAndName(userId.trim(), credentialName);
+        //
+        // The by-name branch goes through findByNameIdentifyingIntegration, NOT the raw
+        // lookup: `credentialName` is a provider slug while a credential's name is free text
+        // the user typed, so a raw match hands back whatever row happens to carry that label
+        // and sends one provider's key to another provider's endpoint. The filtered lookup
+        // accepts the name only from a credential that declares no integration of its own
+        // (the workflow-native connectors, which is why this branch exists) or one whose
+        // integration IS that slug. Everything it rejects is then found by integration below.
+        Optional<Credential> byName =
+                credentialService.findByNameIdentifyingIntegration(userId.trim(), credentialName);
         if (byName.isPresent() && byName.get().status() == CredentialStatus.active) {
             return byName.get();
         }

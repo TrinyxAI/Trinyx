@@ -76,6 +76,76 @@ public class WorkflowErrorChecker {
             ));
         }
 
+        // A step set to choose its account at RUN time, with no expression to choose
+        // it with. It is a build-time error and not only a run-time one because the
+        // run-time failure arrives once the workflow is already live: the state is
+        // reached by toggling the field on and saving it unwritten, and it is what an
+        // acquired workflow arrives in, since publishing blanks the publisher's choice
+        // on purpose. Without this, validate() is green and every catalog step of a
+        // freshly cloned app fails on its first real run.
+        // Both buckets: a table step lives in session.getTables(), so a loop over
+        // getMcps() alone could never reach the table-specific advice below - it was
+        // written for a node the check never saw, and a table node carrying a blank
+        // selector got no build-time signal from either layer.
+        List<Map<String, Object>> stepsWithCredentials = new ArrayList<>(session.getMcps());
+        stepsWithCredentials.addAll(session.getTables());
+        for (Map<String, Object> mcp : stepsWithCredentials) {
+            // The two modes answer one question, so a step set to both is refused at
+            // run time. Unchecked here, the plan saves clean, validate() is green, and
+            // every run of that step fails - the same asymmetry the blank-state check
+            // below exists to prevent, one state over.
+            Object selectorForPool = mcp.get("credentialSelector") != null
+                ? mcp.get("credentialSelector") : mcp.get("credential_selector");
+            if (selectorForPool != null && "platform".equalsIgnoreCase(String.valueOf(mcp.get("credentialSource")))) {
+                String poolLabel = mcp.get("label") != null ? mcp.get("label").toString() : "step";
+                String poolRef = formatNodeRef(session, mcp.get("id") != null ? mcp.get("id").toString() : poolLabel);
+                errors.add(Map.of(
+                    "type", "CONFLICTING_FIELDS",
+                    "node", poolRef != null ? poolRef : poolLabel,
+                    "message", "'" + poolLabel + "' both chooses an account at run time and is set to "
+                        + "run on a platform credential. A run-time choice picks among the credentials "
+                        + "the workflow owner holds, so the two cannot both apply and every run of this "
+                        + "step will fail",
+                    // Only the selector removal is advised. The other way out (moving
+                    // the step off the platform pool) is not a parameter modify routes
+                    // to the node: it would land in the TOOL params and travel to the
+                    // provider as an undeclared argument, which is the failure the
+                    // reserved-parameter list exists to prevent. Removing the
+                    // expression clears the conflict on its own.
+                    "fix", "workflow(action='modify', node='" + poolLabel + "', "
+                        + "params={credential_selector: null})"
+                ));
+            }
+            // Both spellings, because the plan parser reads either. Checking only the
+            // camel one left a blank snake-spelled selector with NO build-time error
+            // while the run failed, which is the whole gap this check exists to close.
+            Object rawSelector = mcp.get("credentialSelector") != null
+                ? mcp.get("credentialSelector") : mcp.get("credential_selector");
+            if (!(rawSelector instanceof String selector) || !selector.isBlank()) {
+                continue;
+            }
+            String label = mcp.get("label") != null ? mcp.get("label").toString() : "step";
+            // Never null: Map.of refuses a null value, and a node reference that cannot
+            // be resolved must not be the reason a real error goes unreported.
+            String resolvedRef = formatNodeRef(session, mcp.get("id") != null ? mcp.get("id").toString() : label);
+            String ref = resolvedRef != null ? resolvedRef : label;
+            errors.add(Map.of(
+                "type", "MISSING_REQUIRED_FIELD",
+                "node", ref,
+                "message", "'" + label + "' is set to choose which account it runs on at run time "
+                    + "but has no expression to choose it with, so every run of it will fail. "
+                    + (isTableStep(mcp)
+                        ? "A table step reads this workspace's own data and authenticates against no "
+                            + "provider, so it has no account to choose: remove the expression"
+                        : "Give it an expression resolving to the NAME of one of the owner's ACTIVE "
+                            + "credentials for this integration (get_connected_services, or "
+                            + "credential(action='list') where that is what you have, lists them), "
+                            + "or remove it to go back to a fixed account"),
+                "fix", "workflow(action='modify', node='" + label + "', "
+                    + "params={credential_selector: '{{item.ig_account}}'}) OR params={credential_selector: null}"
+            ));
+        }
+
         // Check for orphan nodes
         List<String> orphans = session.findOrphanNodes();
         for (String orphan : orphans) {
@@ -438,7 +508,7 @@ public class WorkflowErrorChecker {
                     errors.add(Map.of("type", "MISSING_INPUT", "node", ref,
                         "message", "Generate '" + label + "' requires a model. The model decides the format "
                             + "produced (image, video, audio, voice, music), the parameters accepted and the price",
-                        "fix", "generation(action='models') to list the model ids, then "
+                        "fix", "workflow(action='help', topics=['generate']) to list the model ids, then "
                             + "workflow(action='modify', node='" + label + "', params={model: '<a-model-id>'})"));
                 }
                 String source = configString(cn, "params", "credential_source");
@@ -1000,5 +1070,16 @@ public class WorkflowErrorChecker {
      */
     private String formatNodeRef(WorkflowBuilderSession session, String nodeId) {
         return session.formatNodeRefWithLabel(nodeId);
+    }
+
+    /**
+     * True when this step map is a table (CRUD) step rather than a catalog call.
+     *
+     * <p>The two need different advice: a table step can only ever be told to remove
+     * an account expression, because it authenticates against no provider.
+     */
+    private static boolean isTableStep(Map<String, Object> step) {
+        Object type = step.get("type");
+        return type != null && type.toString().startsWith("crud-");
     }
 }

@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import '@testing-library/jest-dom/vitest';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi, beforeEach } from 'vitest';
 import React from 'react';
 import { cleanup, render, screen } from '@testing-library/react';
 import { NextIntlClientProvider } from 'next-intl';
@@ -8,6 +8,12 @@ import { NextIntlClientProvider } from 'next-intl';
 import enMessages from '@/messages/en.json';
 
 // External deps stubbed so the component is exercised in isolation.
+// The lists keep the open folder in the address, so they read next/navigation. This fake
+// router is URL-backed and re-renders on navigation, the way the real one does.
+vi.mock('next/navigation', async () => {
+  const mod = await import('@/lib/folders/testing/fakeFolderRouter');
+  return mod.fakeFolderRouter.nextNavigationModule();
+});
 vi.mock('@/i18n/navigation', () => ({ useRouter: () => ({ push: vi.fn() }) }));
 vi.mock('@/lib/api', () => ({
   orchestratorApi: { createDataSource: vi.fn(), deleteDataSource: vi.fn(), cloneDataSource: vi.fn() },
@@ -26,6 +32,7 @@ vi.mock('@/hooks/useResourceFavorites', () => ({
   useResourceFavorites: () => ({ favoriteIds: new Set(), toggleFavorite: vi.fn() }),
 }));
 
+import { fakeFolderRouter } from '@/lib/folders/testing/fakeFolderRouter';
 import DataSourceTable from '../DataSourceTable';
 import { dataSourceService } from '@/lib/api/orchestrator/datasource.service';
 
@@ -44,6 +51,12 @@ function renderTable() {
   );
 }
 
+beforeEach(() => {
+  // The address is shared state: without this, a test that opened a folder leaves the
+  // next one starting inside it.
+  fakeFolderRouter.reset();
+});
+
 describe('DataSourceTable cards - column + row counts in the footer', () => {
   it('shows each table\'s column count and the server-batched row count', async () => {
     mockGetPage.mockResolvedValue({
@@ -57,7 +70,7 @@ describe('DataSourceTable cards - column + row counts in the footer', () => {
       ] as any,
       totalCount: 2,
       page: 0,
-      size: 25, publicationStatuses: {},
+      size: 25, publicationStatuses: {}, folders: [], folderTrail: [],
       rowCounts: { '10': 5 },
       sampleRows: {},
     });
@@ -83,7 +96,7 @@ describe('DataSourceTable cards - column + row counts in the footer', () => {
       items: [
         { id: '10', name: 'Alpha', updated_at: '2026-06-01T00:00:00Z', mapping_spec: { title: { type: 'text' } } },
       ] as any,
-      totalCount: 1, page: 0, size: 25, publicationStatuses: {}, rowCounts: { '10': 1 }, sampleRows: {},
+      totalCount: 1, page: 0, size: 25, publicationStatuses: {}, folders: [], folderTrail: [], rowCounts: { '10': 1 }, sampleRows: {},
     });
 
     const { container } = render(
@@ -109,7 +122,7 @@ describe('DataSourceTable cards - column + row counts in the footer', () => {
       ] as any,
       totalCount: 1,
       page: 0,
-      size: 25, publicationStatuses: {},
+      size: 25, publicationStatuses: {}, folders: [], folderTrail: [],
       rowCounts: { '30': 7 },
       sampleRows: {},
     });
@@ -122,7 +135,7 @@ describe('DataSourceTable cards - column + row counts in the footer', () => {
   });
 
   it('renders the empty state when there are no tables', async () => {
-    mockGetPage.mockResolvedValue({ items: [], totalCount: 0, page: 0, size: 25, publicationStatuses: {}, rowCounts: {}, sampleRows: {} });
+    mockGetPage.mockResolvedValue({ items: [], totalCount: 0, page: 0, size: 25, publicationStatuses: {}, folders: [], folderTrail: [], rowCounts: {}, sampleRows: {} });
 
     renderTable();
 
@@ -142,7 +155,7 @@ describe('DataSourceTable cards - mini-table preview (table-visualize-card style
           },
         },
       ] as any,
-      totalCount: 1, page: 0, size: 25, publicationStatuses: {},
+      totalCount: 1, page: 0, size: 25, publicationStatuses: {}, folders: [], folderTrail: [],
       rowCounts: { '10': 2 },
       sampleRows: {
         '10': [
@@ -173,7 +186,7 @@ describe('DataSourceTable cards - mini-table preview (table-visualize-card style
       items: [
         { id: '20', name: 'Cities', updated_at: '2026-06-01T00:00:00Z', mapping_spec: {} },
       ] as any,
-      totalCount: 1, page: 0, size: 25, publicationStatuses: {},
+      totalCount: 1, page: 0, size: 25, publicationStatuses: {}, folders: [], folderTrail: [],
       rowCounts: { '20': 1 },
       sampleRows: { '20': [{ city: 'Paris', country: 'France' }] },
     });
@@ -194,7 +207,7 @@ describe('DataSourceTable cards - mini-table preview (table-visualize-card style
           mapping_spec: { active: { type: 'boolean' }, note: { type: 'text' } },
         },
       ] as any,
-      totalCount: 1, page: 0, size: 25, publicationStatuses: {},
+      totalCount: 1, page: 0, size: 25, publicationStatuses: {}, folders: [], folderTrail: [],
       rowCounts: { '30': 1 },
       sampleRows: { '30': [{ active: true, note: null }] },
     });
@@ -223,7 +236,7 @@ describe('DataSourceTable cards - mini-table preview (table-visualize-card style
           },
         },
       ] as any,
-      totalCount: 1, page: 0, size: 25, publicationStatuses: {},
+      totalCount: 1, page: 0, size: 25, publicationStatuses: {}, folders: [], folderTrail: [],
       rowCounts: { '50': 4 },
       sampleRows: {
         '50': [
@@ -275,7 +288,7 @@ describe('DataSourceTable cards - mini-table preview (table-visualize-card style
           },
         },
       ] as any,
-      totalCount: 1, page: 0, size: 25, publicationStatuses: {},
+      totalCount: 1, page: 0, size: 25, publicationStatuses: {}, folders: [], folderTrail: [],
       rowCounts: { '60': 1 },
       sampleRows: { '60': [{ k1: 'v1', k2: 'v2', k3: 'v3', k4: 'v4' }] },
     });
@@ -303,7 +316,7 @@ describe('DataSourceTable cards - mini-table preview (table-visualize-card style
           },
         },
       ] as any,
-      totalCount: 1, page: 0, size: 25, publicationStatuses: {},
+      totalCount: 1, page: 0, size: 25, publicationStatuses: {}, folders: [], folderTrail: [],
       rowCounts: { '61': 1 },
       sampleRows: { '61': [{ k1: 'v1', k2: 'v2', k3: 'v3', k4: 'v4', k5: 'v5' }] },
     });
@@ -338,7 +351,7 @@ describe('DataSourceTable cards - mini-table preview (table-visualize-card style
           mapping_spec: { title: { type: 'text', display: { label: 'Title' } } },
         },
       ] as any,
-      totalCount: 1, page: 0, size: 25, publicationStatuses: {},
+      totalCount: 1, page: 0, size: 25, publicationStatuses: {}, folders: [], folderTrail: [],
       rowCounts: {},      // zero rows
       sampleRows: {},     // …but the table HAS a column
     });
@@ -364,7 +377,7 @@ describe('DataSourceTable cards - mini-table preview (table-visualize-card style
       items: [
         { id: '41', name: 'Schemaless', updated_at: '2026-06-01T00:00:00Z', mapping_spec: {} },
       ] as any,
-      totalCount: 1, page: 0, size: 25, publicationStatuses: {},
+      totalCount: 1, page: 0, size: 25, publicationStatuses: {}, folders: [], folderTrail: [],
       rowCounts: {},   // zero rows
       sampleRows: {},  // …and no rows to derive columns from → no columns at all
     });

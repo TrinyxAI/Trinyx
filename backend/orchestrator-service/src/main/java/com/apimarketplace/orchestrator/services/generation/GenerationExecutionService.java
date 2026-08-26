@@ -6,6 +6,8 @@ import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpEntity;
+import java.util.ArrayList;
+import java.util.List;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpMethod;
 import org.springframework.http.MediaType;
@@ -97,14 +99,108 @@ public class GenerationExecutionService {
     }
 
     private final RestTemplate restTemplate;
+    /**
+     * Ordinary timeouts, for the calls that are NOT a generation.
+     *
+     * <p>{@code generationRestTemplate} carries a 25 minute read window, sized
+     * for a provider finishing a video, and its own comment says no other call
+     * should inherit it. Listing models is a plain read on a request an agent is
+     * waiting on: a stalled catalog would hang the help for twenty-five minutes
+     * rather than fail.
+     */
+    private final RestTemplate readRestTemplate;
     private final String catalogBaseUrl;
 
     public GenerationExecutionService(
             @Qualifier("generationRestTemplate") RestTemplate restTemplate,
+            // NAMED, because there are four RestTemplate beans and none is
+            // @Primary: by-type injection is ambiguous and by-name matches the
+            // BEAN name, not the parameter name, so an unqualified
+            // 'readRestTemplate' resolves to nothing and the whole service
+            // fails to start. Unit tests build this class by hand and cannot
+            // see it; the context test can.
+            @Qualifier("restTemplate") RestTemplate readRestTemplate,
             @Value("${orchestrator.catalog.base-url:http://localhost:8081}") String catalogBaseUrl) {
         this.restTemplate = restTemplate;
+        this.readRestTemplate = readRestTemplate;
         this.catalogBaseUrl = catalogBaseUrl;
     }
+
+    /**
+     * Every generation model the platform offers.
+     *
+     * <p><b>A read, and free.</b> It exists here because the paid
+     * {@code generation} tool is opt-in per agent, deliberately: a create spends
+     * the customer's credits at the model's own rate. Listing spends nothing,
+     * yet it was reachable only through that same gated tool, so an agent
+     * without the opt-in could not learn a single model id. Since {@code model}
+     * is the one required parameter of a generate node and its ids cannot be
+     * guessed, that agent could not build the node at all, and had no way to say
+     * why. Discovery therefore rides on the workflow tool, which every builder
+     * already holds; spending still requires the opt-in.
+     *
+     * <p>Answers with an empty list rather than throwing when generation is not
+     * served on this install (a self-hosted default answers 404 on the whole
+     * surface): "there are none" is the truthful answer to a reader, and it must
+     * not take the rest of the help down with it.
+     *
+     * @return the models, or empty. {@link #isGenerationServed()} tells the two
+     *         empties apart: a 404 means this install does not serve generation
+     *         at all, anything else means the catalogue could not be reached and
+     *         no claim about the installation may be made from it.
+     */
+    /**
+     * One answer, carrying both halves.
+     *
+     * <p>A record rather than a field read afterwards: this service is a
+     * singleton and its callers are concurrent request threads, so "list, then
+     * ask what that told us" was two unsynchronised reads of shared state. A
+     * neighbouring request hitting a blip could hand this one a verdict about a
+     * call it never made, and the answer built from it is a confident sentence
+     * about the installation.
+     *
+     * @param models the models, empty when none could be listed
+     * @param served TRUE it answered, FALSE it answered 404 (generation is off
+     *               here), null it could not be reached and nothing is known
+     */
+    public record ModelCatalogue(List<Map<String, Object>> models, Boolean served) {}
+
+    /** @deprecated use {@link #readModels()}, which cannot race. */
+    @Deprecated
+    public List<Map<String, Object>> listModels() {
+        return readModels().models();
+    }
+
+    @SuppressWarnings("unchecked")
+    public ModelCatalogue readModels() {
+        try {
+            ResponseEntity<Map> response = readRestTemplate.exchange(
+                    catalogBaseUrl + "/api/generation/models", HttpMethod.GET,
+                    new HttpEntity<>(new HttpHeaders()), Map.class);
+            Map<String, Object> payload = response.getBody();
+            if (payload == null || !(payload.get("models") instanceof List<?> models)) {
+                return new ModelCatalogue(List.of(), Boolean.TRUE);
+            }
+            List<Map<String, Object>> rows = new ArrayList<>(models.size());
+            for (Object row : models) {
+                if (row instanceof Map<?, ?> m) rows.add((Map<String, Object>) m);
+            }
+            return new ModelCatalogue(rows, Boolean.TRUE);
+        } catch (HttpStatusCodeException e) {
+            // A 404 is the installation SAYING generation is off: the whole
+            // surface is config-gated and unregistered here. That is a fact a
+            // reader can act on, and it is not the same as a hiccup.
+            logger.warn("[Generation] listing models answered {}: {}",
+                    e.getStatusCode().value(), e.getMessage());
+            return new ModelCatalogue(List.of(), e.getStatusCode().value() != 404);
+        } catch (Exception e) {
+            // Anything else says nothing about the installation.
+            logger.warn("[Generation] could not list models for the workflow help: {}", e.getMessage());
+            return new ModelCatalogue(List.of(), null);
+        }
+    }
+
+
 
     /**
      * Run one generation.

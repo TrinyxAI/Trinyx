@@ -243,16 +243,46 @@ async function getModelsOnce(force: boolean): Promise<ModelsData> {
     // per-tenant LLM source (CLOUD vs BYOK) and return the matching catalog
     // (a CLOUD-linked CE must see the cloud models). Stays anonymous
     // (skipAuth) pre-login so public surfaces keep working without a token.
+    //
+    // Deliberately getTokenProvider and NOT getAuthToken, unlike every other call site: this
+    // endpoint is PUBLIC and the landing/marketplace call it signed out, where getAuthToken's wait
+    // would only delay a request that was always going to be anonymous.
+    //
+    // KNOWN GAP, pre-dating this and deliberately NOT fixed here. The catalog is per-tenant (a
+    // CLOUD-linked CE must see the cloud models), so a picker mounting during the async auth
+    // bootstrap reads no token and the ANONYMOUS catalog is what lands in the module cache above.
+    // Two ways to close it were built and measured, and both were withdrawn:
+    //   - Gate the fetch on the context's `isLoading`. Looks right, is not: a session being
+    //     auto-recovered from an expired token (the `signinSilent` recovery effect in
+    //     smart-providers) reports isLoading=false AND isAuthenticated=false, so the gate opens on
+    //     exactly the state it exists to wait through. Telling that window apart means widening
+    //     AuthContextType, i.e. changing the auth provider.
+    //   - Mark the cached entry anonymous and treat it as stale once a token exists. Purely local,
+    //     ~4 lines, and wrong when auth settles WHILE the first fetch is open: the mark is only
+    //     written when that fetch RESOLVES, so both attempts read "not anonymous yet", the request
+    //     de-duplication below joins them onto the anonymous promise, and nothing re-runs.
+    // Neither is impossible; both cost more than the bug, which pre-dates this change and was not
+    // reported. Left documented rather than half-closed. What DOES help, and is fixed below, is that the
+    // TTL never expired: the wrong catalog used to be frozen for the life of the page. It now
+    // clears on the first fetch attempt made after the TTL, which means a re-mount or an explicit
+    // refresh - a picker that stays mounted still holds it.
     const tokenProvider = apiClient.getTokenProvider();
     const token = tokenProvider ? await tokenProvider().catch(() => null) : null;
     return apiClient.get<ModelsData>('/v3/chat/models', { skipAuth: !token });
   })();
-  modelsRequest = request.finally(() => {
-    if (modelsRequest === request) {
+  // The in-flight de-duplication has to release itself, and it did not: the guard compared
+  // `modelsRequest` (the promise returned by .finally) against `request` (the one before it), so
+  // the two were never equal and modelsRequest stayed set for the life of the page. Every later
+  // non-forced call then returned that FIRST promise, which made the 5-minute TTL above dead code
+  // and `refresh()` the only way the catalog could ever change. Compare the tracked promise
+  // against itself instead.
+  const tracked: Promise<ModelsData> = request.finally(() => {
+    if (modelsRequest === tracked) {
       modelsRequest = null;
     }
   });
-  return modelsRequest;
+  modelsRequest = tracked;
+  return tracked;
 }
 
 /**

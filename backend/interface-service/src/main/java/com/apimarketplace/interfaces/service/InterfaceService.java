@@ -1,6 +1,7 @@
 package com.apimarketplace.interfaces.service;
 
 import com.apimarketplace.auth.client.access.OrgAccessGuard;
+import com.apimarketplace.common.folder.FolderScope;
 import com.apimarketplace.common.scope.ScopeGuard;
 import com.apimarketplace.common.storage.service.StorageBreakdownService;
 import com.apimarketplace.common.web.TenantResolver;
@@ -38,6 +39,9 @@ public class InterfaceService {
     // the paged-list status path. When null, the paged list skips the visibility filter and emits no
     // publication badges (best-effort, mirrors PublicationClient's own fail-soft behaviour).
     private final PublicationClient publicationClient;
+    // Optional: folders of the interface list (V450). Absent in tests that don't exercise
+    // them - the paged list then simply returns no folder view.
+    private final InterfaceFolderService interfaceFolderService;
 
     @Autowired
     public InterfaceService(InterfaceRepository interfaceRepository,
@@ -46,7 +50,8 @@ public class InterfaceService {
                             OrgAccessGuard orgAccessService,
                             com.apimarketplace.auth.client.entitlement.EntitlementGuard entitlementGuard,
                             OrchestratorCascadeClient orchestratorCascadeClient,
-                            PublicationClient publicationClient) {
+                            PublicationClient publicationClient,
+                            InterfaceFolderService interfaceFolderService) {
         this.interfaceRepository = interfaceRepository;
         this.variableExtractor = variableExtractor;
         this.breakdownService = breakdownService;
@@ -54,6 +59,19 @@ public class InterfaceService {
         this.entitlementGuard = entitlementGuard;
         this.orchestratorCascadeClient = orchestratorCascadeClient;
         this.publicationClient = publicationClient;
+        this.interfaceFolderService = interfaceFolderService;
+    }
+
+    // Overload without the folder service (back-compat for callers that don't show folders).
+    public InterfaceService(InterfaceRepository interfaceRepository,
+                            InterfaceVariableExtractor variableExtractor,
+                            StorageBreakdownService breakdownService,
+                            OrgAccessGuard orgAccessService,
+                            com.apimarketplace.auth.client.entitlement.EntitlementGuard entitlementGuard,
+                            OrchestratorCascadeClient orchestratorCascadeClient,
+                            PublicationClient publicationClient) {
+        this(interfaceRepository, variableExtractor, breakdownService, orgAccessService,
+             entitlementGuard, orchestratorCascadeClient, publicationClient, null);
     }
 
     // Overload without the publication client (back-compat for callers that don't stamp badges).
@@ -64,7 +82,7 @@ public class InterfaceService {
                             com.apimarketplace.auth.client.entitlement.EntitlementGuard entitlementGuard,
                             OrchestratorCascadeClient orchestratorCascadeClient) {
         this(interfaceRepository, variableExtractor, breakdownService,
-             orgAccessService, entitlementGuard, orchestratorCascadeClient, null);
+             orgAccessService, entitlementGuard, orchestratorCascadeClient, null, null);
     }
 
     // Convenience overload for unit tests that don't need the cascade / publication paths.
@@ -74,7 +92,7 @@ public class InterfaceService {
                             OrgAccessGuard orgAccessService,
                             com.apimarketplace.auth.client.entitlement.EntitlementGuard entitlementGuard) {
         this(interfaceRepository, variableExtractor, breakdownService,
-             orgAccessService, entitlementGuard, null, null);
+             orgAccessService, entitlementGuard, null, null, null);
     }
 
     /**
@@ -537,8 +555,32 @@ public class InterfaceService {
      * the card needs no per-row publication call. The search term `q` is matched
      * server-side against name + description (ILIKE).
      */
+    /**
+     * The folder to narrow to, or {@code null} for the top level / no filter. An unparseable
+     * id is treated as the top level rather than an error: the filter is a view preference,
+     * and a bad one must never take the list down.
+     */
+    private static UUID parseFolderId(String folderId) {
+        if (folderId == null || folderId.isBlank() || "root".equalsIgnoreCase(folderId.trim())) return null;
+        try {
+            return UUID.fromString(folderId.trim());
+        } catch (IllegalArgumentException e) {
+            return null;
+        }
+    }
+
     public record InterfacePage(List<InterfaceEntity> items, int totalCount, int page, int size,
-                                Map<String, Map<String, String>> publicationStatuses) {}
+                                Map<String, Map<String, String>> publicationStatuses,
+                                List<com.apimarketplace.common.folder.ResourceFolderDto> folders,
+                                List<Map<String, Object>> folderTrail,
+                                boolean folderMissing) {
+
+        /** A page with no folder view - what every caller that does not ask for folders gets. */
+        public InterfacePage(List<InterfaceEntity> items, int totalCount, int page, int size,
+                             Map<String, Map<String, String>> publicationStatuses) {
+            this(items, totalCount, page, size, publicationStatuses, List.of(), List.of(), false);
+        }
+    }
 
     /**
      * Server-paged, DB-searchable, server-sorted + server-visibility-filtered list - the resource
@@ -561,6 +603,28 @@ public class InterfaceService {
                                               int size,
                                               String sort,
                                               String visibility) {
+        return listInterfacesPaged(tenantId, interfaceType, excludeTableAttached, q, orgId, orgRole,
+                page, size, sort, visibility, null, false);
+    }
+
+    /**
+     * Folder-aware overload (V450). A SEARCH looks everywhere (an active {@code q} ignores
+     * {@code folderId} and the tiles step aside); otherwise {@code folderId} narrows to one
+     * level ({@code "root"} = the pages filed nowhere). An ABSENT parameter means no folder
+     * filter at all, which is what every other caller gets.
+     */
+    public InterfacePage listInterfacesPaged(String tenantId,
+                                              String interfaceType,
+                                              Boolean excludeTableAttached,
+                                              String q,
+                                              String orgId,
+                                              String orgRole,
+                                              int page,
+                                              int size,
+                                              String sort,
+                                              String visibility,
+                                              String folderId,
+                                              boolean includeFolders) {
         String decodedTenantId = tenantId != null ? tenantId.replace("%7C", "|") : tenantId;
 
         // 1. Load the WHOLE tenant/org set as a LIGHTWEIGHT projection (no @Lob templates / data
@@ -614,6 +678,25 @@ public class InterfaceService {
                     .toList();
         }
 
+        // 3b. FOLDERS (V450). The tiles are built from the set as it stands HERE - after search,
+        //     type and visibility, before the folder narrowing - so a tile counts exactly what the
+        //     caller may see, over the folder's whole subtree.
+        FolderScope folderScope = new FolderScope(decodedTenantId, orgId);
+        UUID folderFilter = parseFolderId(folderId);
+        boolean rootOnly = folderId != null && folderFilter == null;
+        boolean folderMissing = false;
+        if (folderFilter != null && interfaceFolderService != null
+                && !interfaceFolderService.existsInScope(folderFilter, folderScope)) {
+            folderFilter = null;
+            rootOnly = true;
+            folderMissing = true;
+        }
+        List<InterfaceListView> folderAggregateSource = all;
+        if (!hasSearch && (rootOnly || folderFilter != null)) {
+            final UUID wanted = folderFilter;
+            all = all.stream().filter(v -> Objects.equals(v.getFolderId(), wanted)).toList();
+        }
+
         // 4. Order, then slice (on the light projections). Stable sort keeps the created_at-DESC base
         //    order as the tie-breaker.
         all = sortInterfaceViews(all, sort);
@@ -643,7 +726,23 @@ public class InterfaceService {
                         : Map.of());
         Map<String, Map<String, String>> publicationStatuses = toPublicationStatusMap(pageItems, pageRefs);
 
-        return new InterfacePage(pageItems, totalCount, safePage, safeSize, publicationStatuses);
+        List<com.apimarketplace.common.folder.ResourceFolderDto> folderTiles = List.of();
+        List<Map<String, Object>> folderTrail = List.of();
+        if (includeFolders && interfaceFolderService != null) {
+            folderTiles = hasSearch
+                    ? List.of()
+                    : interfaceFolderService.listFolderSummaries(
+                            folderScope, folderFilter, folderAggregateSource, sort);
+            folderTrail = folderFilter == null
+                    ? List.of()
+                    : interfaceFolderService.breadcrumb(
+                                    interfaceFolderService.listAll(folderScope), folderFilter).stream()
+                            .map(com.apimarketplace.common.folder.AbstractResourceFolderController::toBareMap)
+                            .toList();
+        }
+
+        return new InterfacePage(pageItems, totalCount, safePage, safeSize, publicationStatuses,
+                folderTiles, folderTrail, folderMissing);
     }
 
     private static final String INTERFACE_PUBLICATION_TYPE = "INTERFACE";

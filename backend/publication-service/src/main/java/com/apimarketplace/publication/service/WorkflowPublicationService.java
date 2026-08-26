@@ -97,6 +97,14 @@ public class WorkflowPublicationService {
     private PublicationAcquisitionHelper acquisitionHelper;
 
     /**
+     * On-demand editable copy of an acquired application ({@link #createEditableWorkflowTwin}).
+     * Field-injected like the helpers above so the existing 13-arg test constructions keep
+     * working; acquire itself no longer touches it (the twin is no longer minted at install).
+     */
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private EditableWorkflowTwinService editableWorkflowTwinService;
+
+    /**
      * Edition gate for CE-exclusive publications. Field-injected like the helper
      * above (null in the many unit constructions); checked here as well as in
      * {@link PublicationAcquisitionHelper} so the legacy no-helper branch of
@@ -1220,15 +1228,12 @@ public class WorkflowPublicationService {
         // history starts here (acquired pubs keep history; never-acquired keep none).
         ensureSnapshotVersionRetained(publication);
 
-        // #2a - decouple-to-editable-workflow: AUTOMATICALLY create a freely-editable,
-        // DECOUPLED WORKFLOW twin of the just-acquired application so the user can
-        // customize it in /app/workflows while the APPLICATION clone above stays
-        // run-only. Best-effort: a duplicate failure NEVER fails the acquire (the
-        // application clone already succeeded and the receipt is saved).
-        String applicationWorkflowId = acquireResult.get("workflowId") != null
-                ? acquireResult.get("workflowId").toString() : null;
-        duplicateAcquiredApplicationAsEditableWorkflow(
-                planSnapshot, tenantId, organizationId, publication, applicationWorkflowId);
+        // NO editable WORKFLOW twin here (changed 2026-08-14). Acquiring used to mint one
+        // automatically, and because the twin is a SECOND full clone of the same snapshot
+        // every install produced two of everything the app carries (two interfaces, two
+        // tables, two agents) - stacked in the user's lists, billed twice against the
+        // INTERFACE / DATA entitlements, and orphaned on uninstall. The copy is now created
+        // only when the user asks for it: see {@link #createEditableWorkflowTwin}.
 
         logger.info("Tenant {} {} publication {} -> workflow {}",
                 tenantId, alreadyPaid ? "re-acquired" : "acquired", publicationId, acquireResult.get("workflowId"));
@@ -1237,80 +1242,62 @@ public class WorkflowPublicationService {
     }
 
     /**
-     * #2a - create the editable, DECOUPLED {@code WORKFLOW} twin of a just-acquired
-     * application. Sourced from the publication's enriched {@code planSnapshot}: its
-     * embedded file refs live under {@code _publications/{publicationId}/}, so passing
-     * {@code fileNamespaceId = publicationId} makes the clone-time allowlist match and
-     * re-copy INDEPENDENT file copies into the acquirer's tenant (a fresh namespace would
-     * only apply if the files were re-snapshotted, e.g. a future live-plan variant). The
-     * twin is byte-equivalent to the run-only application at acquire time (apps are
-     * run-only, so there is no acquirer edit to diverge), only its row type
-     * ({@code WORKFLOW}) and source tag ({@code source_publication_id = NULL}, lineage in
-     * {@code metadata.duplicatedFromApplicationId}) differ.
+     * Create the caller's freely-editable, DECOUPLED {@code WORKFLOW} copy of an
+     * application they already acquired - the on-demand replacement for the twin that
+     * used to be minted automatically at install (and doubled every interface / table /
+     * agent in the workspace, see the note in {@code acquirePublication}).
      *
-     * <p>Quota: bills WORKFLOW quota only, NO credit (the run-only application already
-     * billed APPLICATION). The internal {@code create-application} endpoint runs no
-     * entitlement check, so the guard is enforced here. Over-quota → skip the twin, keep
-     * the application. Clone failure → compensate ONLY the twin's own rows via
-     * {@link OrchestratorInternalClient#deleteDecoupledDuplicateWorkflow} (never
-     * {@code deleteAcquiredWorkflow}: its {@code pubId.equals(sourcePublicationId)} guard
-     * NPEs on the twin's null source). Either way the acquire is unaffected.
+     * <p>Sourced from the publication's enriched {@code planSnapshot}: its embedded file
+     * refs live under {@code _publications/{publicationId}/}, so {@code fileNamespaceId =
+     * publicationId} makes the clone-time allowlist match and re-copy INDEPENDENT file
+     * copies into the acquirer's tenant. The copy differs from the run-only application
+     * only by its row type ({@code WORKFLOW}) and source tag
+     * ({@code source_publication_id = NULL}, lineage in
+     * {@code metadata.duplicatedFromApplicationId}).
+     *
+     * <p><b>Idempotent:</b> a second call returns the copy that already exists rather than
+     * cloning a second resource set. The response carries {@code created} so the caller can
+     * tell "here is your new copy" from "you already had one".
+     *
+     * @return {@code {workflowId, title, created}}
+     * @throws IllegalArgumentException when the caller has not acquired this publication
+     *         (nothing to copy) or the publication carries no plan
      */
-    private void duplicateAcquiredApplicationAsEditableWorkflow(Map<String, Object> planSnapshot,
-                                                                String tenantId,
-                                                                String organizationId,
-                                                                WorkflowPublicationEntity publication,
-                                                                String applicationWorkflowId) {
-        final String orgScope = normalizeScope(organizationId);
-        try {
-            if (entitlementGuard != null && orgScope != null) {
-                entitlementGuard.check(tenantId,
-                        com.apimarketplace.auth.client.entitlement.ResourceType.WORKFLOW,
-                        () -> orchestratorClient.countWorkflowsByOrg(orgScope));
-            }
-        } catch (RuntimeException quotaDenied) {
-            logger.info("[Acquire/duplicate] WORKFLOW quota reached for tenant={} pub={} - "
-                            + "skipping editable duplicate ({}); application clone is unaffected",
-                    tenantId, publication.getId(), quotaDenied.getMessage());
-            return;
+    public Map<String, Object> createEditableWorkflowTwin(UUID publicationId, String tenantId,
+                                                           String organizationId) {
+        WorkflowPublicationEntity publication = publicationRepository.findById(publicationId)
+                .orElseThrow(() -> new IllegalArgumentException("Publication not found: " + publicationId));
+
+        final String orgScope = normalizeScope(resolveAcquirerOrg(tenantId, organizationId, publicationId));
+
+        // The editable copy is a benefit of OWNING the application: resolve the acquired
+        // APPLICATION clone rather than trusting a receipt, so an app the user uninstalled
+        // can't be copied out of a permanent purchase record.
+        Map<String, Object> applicationClone =
+                orchestratorClient.findBySourcePublicationStrict(publicationId, tenantId, orgScope);
+        String applicationWorkflowId = applicationClone != null && applicationClone.get("id") != null
+                ? applicationClone.get("id").toString() : null;
+        if (applicationWorkflowId == null) {
+            throw new IllegalArgumentException("Application is not installed in this workspace");
         }
 
-        try {
-            Map<String, Object> duplicate = snapshotCloneService.duplicateToEditableWorkflow(
-                    planSnapshot, tenantId, orgScope,
-                    publication.getTitle(), publication.getDescription(),
-                    publication.getNodeIcons(), publication.getId(), applicationWorkflowId);
-            logger.info("[Acquire/duplicate] tenant {} pub {} -> editable WORKFLOW {} "
-                            + "(decoupled from application {})",
-                    tenantId, publication.getId(), duplicate.get("workflowId"), applicationWorkflowId);
-        } catch (AcquireCloneFailedException dupFailure) {
-            logger.warn("[Acquire/duplicate] editable duplicate failed for tenant={} pub={}: {} - "
-                            + "compensating only its own rows; application clone is unaffected",
-                    tenantId, publication.getId(), dupFailure.getMessage());
-            compensateDuplicateFailure(dupFailure.getCreatedWorkflowIds(), tenantId, orgScope);
-        } catch (RuntimeException e) {
-            logger.warn("[Acquire/duplicate] editable duplicate errored for tenant={} pub={}: {} - "
-                            + "application clone is unaffected", tenantId, publication.getId(), e.getMessage());
+        if (editableWorkflowTwinService == null) {
+            throw new IllegalStateException("Editable copy is unavailable (twin service not wired)");
         }
-    }
 
-    /**
-     * Best-effort compensation for a failed editable-duplicate clone: delete ONLY the
-     * rows the duplicate created (root + any sub-workflows), each a plain decoupled
-     * {@code WORKFLOW} the orchestrator guards as such. Swallows failures - the acquire
-     * already succeeded and must not be masked by a cleanup-side error.
-     */
-    private void compensateDuplicateFailure(Set<String> createdWorkflowIds, String tenantId, String organizationId) {
-        if (createdWorkflowIds == null || createdWorkflowIds.isEmpty()) return;
-        String orgScope = normalizeScope(organizationId);
-        for (String idStr : createdWorkflowIds) {
-            if (idStr == null) continue;
-            try {
-                orchestratorClient.deleteDecoupledDuplicateWorkflow(UUID.fromString(idStr), tenantId, orgScope);
-            } catch (Exception e) {
-                logger.warn("[Acquire/duplicate/compensate] cleanup failed for {}: {}", idStr, e.getMessage());
-            }
-        }
+        // The snapshot is read lazily so the "you already have a copy" path stays cheap and
+        // the whole check-then-create runs under the twin service's per-application lock.
+        return editableWorkflowTwinService.resolveOrCreate(
+                publicationId, applicationWorkflowId, tenantId, orgScope, publication.getTitle(),
+                () -> {
+                    Map<String, Object> planSnapshot = publication.getPlanSnapshot();
+                    if (planSnapshot == null || planSnapshot.isEmpty()) {
+                        throw new IllegalArgumentException("Publication has no plan");
+                    }
+                    return new EditableWorkflowTwinService.TwinSource(
+                            planSnapshot, publication.getTitle(), publication.getDescription(),
+                            publication.getNodeIcons());
+                });
     }
 
     /**
@@ -3852,7 +3839,27 @@ public class WorkflowPublicationService {
         // Layer 2 - generic recursive scrub on the whole plan. The redaction
         // rule is identical to ShowcaseSnapshotBuilder.scrubMap so we have
         // symmetric behavior between plan-snapshot and run-state JSONB.
+        // BEFORE the scrub: a key whose value is null means "no selector at all", and
+        // the scrub cannot tell that apart because it overwrites every value it
+        // matches. Dropped here so it never becomes a blank, which would put the
+        // acquirer's step into the dynamic-but-unfilled state - refusing on every run
+        // - for a feature its author never used.
+        dropNullStepCredentialSelectors(plan);
+
         scrubRecursivelyForCredentials(plan);
+
+        // AFTER the recursive scrub, deliberately. That scrub redacts by key name and
+        // "credentialSelector" contains the "credential" token, so anything written
+        // before it is overwritten with the redaction placeholder - which a run then
+        // reads as a credential NAME, and the acquirer is told no credential is called
+        // "[redacted]" instead of that they have not filled the field in.
+        //
+        // Blanked rather than removed, because removing it drops the step back to the
+        // acquirer DEFAULT account and every run is green: this feature own headline
+        // failure, relocated to the publish boundary. A present-but-blank selector
+        // keeps the step saying it chooses its account at run time, so it fails
+        // loudly until the acquirer writes their own expression.
+        blankStepCredentialSelectors(plan);
     }
 
     /**
@@ -4274,5 +4281,74 @@ public class WorkflowPublicationService {
                 }
             }
         }
+    }
+
+    /**
+     * Blank every step run-time credential selector in the plan.
+     *
+     * <p>The choice must not travel, but the STEP has to keep saying that it makes
+     * one, or the reader inherits a silent fallback to their own default account.
+     * Package-private and static so {@code SnapshotCloneService} uses this one rather
+     * than keeping a second copy of the same rule.
+     */
+    /**
+     * Remove a step's account selector when its value is null.
+     *
+     * <p>Runs BEFORE {@code scrubRecursivelyForCredentials}, which is the whole
+     * point: that scrub matches this key by name and overwrites whatever it holds,
+     * so a null read after it has already become the placeholder. A guard placed
+     * after it can never fire, which is exactly how the first attempt at this failed.
+     */
+    static void dropNullStepCredentialSelectors(java.util.Map<String, Object> plan) {
+        forEachStep(plan, step -> {
+            for (String spelling : CREDENTIAL_SELECTOR_KEYS) {
+                if (step.containsKey(spelling) && step.get(spelling) == null) {
+                    step.remove(spelling);
+                }
+            }
+        });
+    }
+
+    /** Both spellings a stored plan can carry, because the plan parser reads both. */
+    private static final String[] CREDENTIAL_SELECTOR_KEYS = {"credentialSelector", "credential_selector"};
+
+    private static void forEachStep(java.util.Map<String, Object> plan,
+                                    java.util.function.Consumer<java.util.Map<String, Object>> action) {
+        for (String stepBucket : new String[]{"mcps", "agents"}) {
+            if (!(plan.get(stepBucket) instanceof java.util.List<?> steps)) {
+                continue;
+            }
+            for (Object step : steps) {
+                if (step instanceof java.util.Map<?, ?> stepMap) {
+                    @SuppressWarnings("unchecked")
+                    java.util.Map<String, Object> mutableStep = (java.util.Map<String, Object>) stepMap;
+                    action.accept(mutableStep);
+                }
+            }
+        }
+    }
+
+    static void blankStepCredentialSelectors(java.util.Map<String, Object> plan) {
+        // Both spellings, because the plan parser reads both: a stored plan spelled
+        // credential_selector is a live selector at run time, so leaving it here would
+        // hand the acquirer the publisher's expression.
+        //
+        // The null case is handled by dropNullStepCredentialSelectors BEFORE the
+        // recursive scrub; anything still present here holds a real value.
+        forEachStep(plan, step -> {
+            for (String spelling : CREDENTIAL_SELECTOR_KEYS) {
+                // A non-null VALUE, not merely the key: an explicit null means "no
+                // selector at all", and blanking it would put the reader's step into
+                // the dynamic-but-unfilled state for a feature its author never used.
+                // The publish path additionally drops nulls BEFORE the recursive
+                // scrub, which would otherwise overwrite them and hide this case.
+                if (step.get(spelling) != null) {
+                    // safeScrubPut, not a hand-rolled try/catch: it is the helper this
+                    // file already uses to survive an immutable map, and a fallback to
+                    // remove() would rethrow, because that throws just as put() does.
+                    safeScrubPut(step, spelling, "");
+                }
+            }
+        });
     }
 }

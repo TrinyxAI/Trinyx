@@ -10,12 +10,20 @@ import java.util.Set;
  * authorization, returning the canonical rule key {@code "tool:action"} that
  * matched (or {@code null} when no authorization is needed).
  *
- * <p>Unlike {@code BridgeAccessGuard}, this guard NEVER throws: a denial here
- * is a <em>soft, non-blocking authorization request</em> raised to the user
- * (the run is NOT halted), not a hard error. The agent-service call-site
- * ({@code RemoteToolExecutionService}) turns a non-null rule into a
- * {@code ToolResult} carrying {@code toolAuthorizationRequired=true}, which the
- * streaming callback hands off to the chat LIVE exactly like the credential card.
+ * <p>Unlike {@code BridgeAccessGuard}, this guard NEVER throws: a denial here is
+ * an authorization REQUEST raised to the user, not a hard error. The
+ * agent-service call-site ({@code RemoteToolExecutionService}) turns a non-null
+ * rule into a {@code ToolResult} carrying {@code toolAuthorizationRequired=true},
+ * shows the card, and then HOLDS the call on {@code ToolApprovalGate} until the
+ * user answers - so an in-time approval runs the tool and returns its real result
+ * from this same call. The hold has a budget; when it runs out the request is
+ * returned as-is and the user's later answer starts a fresh turn, which is the
+ * behaviour that shipped before the gate existed.
+ *
+ * <p>Rules the USER performs rather than authorizes are never held, however fast
+ * they answer: {@code application:acquire} installs the app itself, out of band,
+ * so there is no call to release (see {@code isUserPerformedRule}). For those the
+ * request always reaches the agent and the two-turn flow is the only flow.
  *
  * <p><b>Fail-closed within scope.</b> If a tool that <em>has</em> sensitive
  * actions is invoked without a resolvable action (null/blank/unparseable args),

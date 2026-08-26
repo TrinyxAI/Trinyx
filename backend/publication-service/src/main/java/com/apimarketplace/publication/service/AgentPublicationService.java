@@ -1205,10 +1205,15 @@ public class AgentPublicationService {
         Map<String, String> interfaceMapping = new HashMap<>();
         Map<String, String> dsMapping = new HashMap<>();
         Map<String, String> agentMapping = new HashMap<>();
+        // Resources cloned by the agent's BUNDLED workflows (their own interfaces, tables,
+        // agents and sub-workflows). Counted separately because those clones run through
+        // SnapshotCloneService and report their own summary, which would otherwise be
+        // dropped - naming the workflow while staying silent about everything inside it.
+        SnapshotCloneService.ResourceTally nestedTally = new SnapshotCloneService.ResourceTally();
 
         try {
             UUID rootAgentId = cloneAgentFromSnapshot(agentSnapshot, tenantId, publicationId, organizationId,
-                    workflowMapping, interfaceMapping, dsMapping, agentMapping);
+                    workflowMapping, interfaceMapping, dsMapping, agentMapping, nestedTally);
 
             if (acquisitionHelper != null) {
                 acquisitionHelper.recordAcquisition(publication, tenantId, organizationId, hasReceipt);
@@ -1228,6 +1233,13 @@ public class AgentPublicationService {
             Map<String, Object> result = new HashMap<>();
             result.put("agentId", rootAgentId.toString());
             result.put("name", publication.getTitle());
+            // What else landed in the workspace alongside the agent the user acquired: the
+            // snapshot's own top-level resources PLUS everything its bundled workflows
+            // cloned. countSubAgents excludes the acquired agent itself.
+            nestedTally.addResources(interfaceMapping.size(), dsMapping.size(),
+                    countSubAgents(agentMapping, rootAgentId));
+            nestedTally.subWorkflows += workflowMapping.size();
+            result.put(SnapshotCloneService.RESOURCES_KEY, nestedTally.toMap());
             return result;
         } catch (RuntimeException cloneFailure) {
             logger.error("[AgentAcquire] failed for pub={} tenant={}: {} - running compensation",
@@ -1259,9 +1271,11 @@ public class AgentPublicationService {
         Map<String, String> interfaceMapping = new HashMap<>();
         Map<String, String> dsMapping = new HashMap<>();
         Map<String, String> agentMapping = new HashMap<>();
+        // Resources cloned by the agent's BUNDLED workflows - see the local path.
+        SnapshotCloneService.ResourceTally nestedTally = new SnapshotCloneService.ResourceTally();
         try {
             UUID rootAgentId = cloneAgentFromSnapshot(agentSnapshot, tenantId, publicationId, organizationId,
-                    workflowMapping, interfaceMapping, dsMapping, agentMapping);
+                    workflowMapping, interfaceMapping, dsMapping, agentMapping, nestedTally);
 
             PublicationReceiptEntity receipt = new PublicationReceiptEntity(
                     tenantId, publicationId, creditsPaid, normalizeScope(organizationId));
@@ -1270,6 +1284,12 @@ public class AgentPublicationService {
 
             Map<String, Object> result = new HashMap<>();
             result.put("agentId", rootAgentId.toString());
+            // Same install summary as the local path (bundled-workflow resources included,
+            // the acquired agent itself excluded).
+            nestedTally.addResources(interfaceMapping.size(), dsMapping.size(),
+                    countSubAgents(agentMapping, rootAgentId));
+            nestedTally.subWorkflows += workflowMapping.size();
+            result.put(SnapshotCloneService.RESOURCES_KEY, nestedTally.toMap());
             return result;
         } catch (RuntimeException cloneFailure) {
             logger.error("[AgentAcquire/remote] failed for pub={} tenant={}: {} - running compensation",
@@ -1294,7 +1314,8 @@ public class AgentPublicationService {
     private UUID cloneAgentFromSnapshot(Map<String, Object> agentSnapshot, String tenantId, UUID publicationId,
                                         String organizationId,
                                         Map<String, String> workflowMapping, Map<String, String> interfaceMapping,
-                                        Map<String, String> dsMapping, Map<String, String> agentMapping) {
+                                        Map<String, String> dsMapping, Map<String, String> agentMapping,
+                                        SnapshotCloneService.ResourceTally nestedTally) {
         // Deep copy to avoid mutating the source
         Map<String, Object> snapshot = objectMapper.convertValue(agentSnapshot,
                 new TypeReference<Map<String, Object>>() {});
@@ -1314,6 +1335,14 @@ public class AgentPublicationService {
                             (Map<String, Object>) plan, tenantId, publicationId, wfData, organizationId);
                     if (result != null && result.get("workflowId") != null) {
                         workflowMapping.put(oldWfId, result.get("workflowId").toString());
+                        // Everything that bundled workflow cloned (its interfaces, tables,
+                        // agents, sub-workflows) lands in the acquirer's lists too, so it
+                        // counts towards what the install reports. Dropping it named the
+                        // workflow and stayed silent about the six rows it brought with it.
+                        if (nestedTally != null
+                                && result.get(SnapshotCloneService.RESOURCES_KEY) instanceof Map<?, ?> counts) {
+                            nestedTally.addNested((Map<String, Object>) counts);
+                        }
                     }
                 }
             }
@@ -1426,6 +1455,27 @@ public class AgentPublicationService {
      * are logged but never rethrown - the original cause is what the caller
      * gets to see.
      */
+    /**
+     * Agents cloned BESIDES the one the user knowingly acquired - the number the install
+     * summary reports.
+     *
+     * <p>Excludes the root by its NEW id rather than subtracting one: the root only lands
+     * in {@code agentMapping} when its snapshot carried an old id, so a blind {@code -1}
+     * under-reports a snapshot that has none (2 sub-agents reported as 1).
+     */
+    static int countSubAgents(Map<String, String> agentMapping, UUID rootAgentId) {
+        if (agentMapping == null || agentMapping.isEmpty()) return 0;
+        String rootId = rootAgentId != null ? rootAgentId.toString() : null;
+        // distinct(): the same cloned agent can be recorded under two OLD keys (the
+        // parent's sub-agent key and the child's own id), which come from different
+        // sources and need not match character for character. Counting values as-is would
+        // report an agent the workspace does not have.
+        return (int) agentMapping.values().stream()
+                .filter(id -> id != null && !id.equals(rootId))
+                .distinct()
+                .count();
+    }
+
     private void compensateAgentAcquireFailure(UUID publicationId, String tenantId, String organizationId,
                                                 Map<String, String> workflowMapping,
                                                 Map<String, String> interfaceMapping,

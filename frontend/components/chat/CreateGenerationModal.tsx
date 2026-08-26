@@ -3,8 +3,8 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import {
-  ArrowLeft, ArrowRight, Check, Image as ImageIcon, Loader2, Music, Film,
-  Mic, AudioWaveform, Sparkles, X, Download, AlertCircle, LayoutGrid, PenLine, Upload,
+  ArrowLeft, ArrowRight, Check, History, Loader2, Sparkles, X, FolderOpen,
+  Download, AlertCircle, LayoutGrid, PenLine, Upload,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -17,10 +17,27 @@ import { useQueries, useQuery } from '@tanstack/react-query';
 import { generationService, type GenerationModel, type GenerationResult }
   from '@/lib/api/orchestrator/generation.service';
 import { useGenerationModels } from '@/hooks/useGenerationModels';
-import { fileRefToUrl, fileService, type FileRef } from '@/lib/api/orchestrator/file.service';
+import { useGenerationOptions } from '@/hooks/useGenerationOptions';
+import {
+  downloadStoredFile, fileService, isFileRef, normalizeFileRef, type FileRef,
+} from '@/lib/api/orchestrator/file.service';
+// The SAME viewer /app/files opens when a file is clicked, and the side panel
+// mounts for a chat result: one component means the asset is presented one way,
+// whichever screen you reached it from.
+import { FileDetailView } from '@/components/app/FileDetailView';
+// Locale-aware: a plain next/link would drop the reader out of /fr into /en.
+import { useRouter } from '@/i18n/navigation';
 import { orchestratorApi } from '@/lib/api';
 import type { PlatformCredentialPublicInfo } from '@/lib/api/orchestrator/types';
 import { platformQuantityFor } from '@/app/workflows/builder/utils/generateParams';
+// The formats and the provider mark are drawn the same way here and in the
+// history that lists what was generated: one list, one icon per format.
+import { FORMAT_ICONS, FORMAT_ORDER, ProviderIcon } from '@/lib/generation/formats';
+// What this workspace has already generated, and the recipe behind each asset. The SAME list the
+// Files page shows: one idea of what a past generation is, in both places a reader looks for it.
+import { GenerationHistoryList } from '@/components/generation/GenerationHistoryList';
+import { useInvalidateGenerationHistory } from '@/hooks/useGenerationHistory';
+import type { GenerationProvenance } from '@/lib/api/storage-api';
 // The SAME credential section the workflow inspector uses for this exact
 // choice. Rebuilding a smaller one here is what left this dialog with a payer
 // toggle and no way to say WHICH key pays, no way to add one, and nothing on
@@ -30,8 +47,8 @@ import { CredentialSection } from '@/app/workflows/builder/components/inspector/
 import { priceUnitLabel } from '@/lib/credentials/priceUnits';
 // ApiError carries the STATUS, which is the only thing that says what happened.
 import { ApiError } from '@/lib/api/api-client';
-import { useCreditBalance } from '@/lib/hooks/smart-hooks-complete';
-import { IS_CE } from '@/lib/edition';
+import { useMonthlyCreditsCannotPay } from '@/lib/hooks/useMonthlyCreditsCannotPay';
+import { UpgradeRequiredBadge, UpgradeRequiredNotice } from '@/components/billing/UpgradeRequiredBadge';
 
 /**
  * Run one generation, from a format to a finished asset.
@@ -90,18 +107,35 @@ interface CreateGenerationModalProps {
   onGenerated?: (result: GenerationResult) => void;
   /** Opens straight on a format, skipping step 1. */
   initialKind?: string;
+  /**
+   * Open with the form already filled in from a past generation.
+   *
+   * <p>This is what "change one word and run it again" is made of: the caller hands over the recipe
+   * an asset was made from - the model, the prompt, every parameter, the input files - and the
+   * dialog opens on step 2 with all of it in place, ready to be edited. Without it the only way to
+   * vary a generation was to retype it from memory, which is not a variation, it is a guess.
+   *
+   * <p>Applied when the dialog opens and whenever the caller hands over a DIFFERENT recipe, so a
+   * reader who has started editing is never overwritten by a re-render.
+   */
+  initialRecipe?: GenerationProvenance | null;
 }
 
-/** Formats in the order a catalogue is usually browsed, with the icon each reads as. */
-const FORMAT_ICONS: Record<string, React.ComponentType<{ className?: string }>> = {
-  image: ImageIcon,
-  video: Film,
-  audio: AudioWaveform,
-  voice: Mic,
-  music: Music,
-};
+/**
+ * The uploaded files inside a recipe, under one parameter.
+ *
+ * <p>An input file travels as its whole handle, so replaying a recipe re-attaches the very file the
+ * first run used. A path or a URL would not do: the platform reads the bytes out of storage to hand
+ * them to the provider in whatever shape that provider wants, and only the handle identifies them.
+ * Anything that is not recognisably a file handle is dropped rather than guessed at.
+ */
+function recipeFileRefs(value: unknown): FileRef[] {
+  const candidates = Array.isArray(value) ? value : [value];
+  return candidates
+    .filter((item): item is FileRef => isFileRef(item))
+    .map((item) => normalizeFileRef(item));
+}
 
-const FORMAT_ORDER = ['image', 'video', 'audio', 'voice', 'music'];
 
 /** Unified parameters the form offers, and how each is entered. */
 const TEXT_PARAMS = ['negative_prompt', 'voice', 'language', 'style', 'aspect_ratio', 'resolution', 'quality'];
@@ -123,28 +157,6 @@ const ASSET_ACCEPT: Record<string, string> = {
   input_audio: 'audio/*',
   input_video: 'video/*',
 };
-
-/**
- * The provider's own mark, from the same place every other surface takes it:
- * the icon slug the API catalogue ships beside the integration.
- *
- * <p>Falls back to nothing rather than to a generic glyph. A row that reads
- * "OpenAI" with a placeholder box beside it is noisier than the name alone, and
- * a missing file is the one case where the name is already doing the work.
- */
-function ProviderIcon({ slug }: { slug?: string | null }) {
-  const [failed, setFailed] = useState(false);
-  if (!slug || failed) return null;
-  return (
-    <img
-      src={`/icons/services/${slug}.svg`}
-      alt=""
-      aria-hidden="true"
-      className="h-4 w-4 flex-shrink-0 rounded-sm"
-      onError={() => setFailed(true)}
-    />
-  );
-}
 
 /**
  * One icon per step, and three DIFFERENT ones.
@@ -276,12 +288,19 @@ function localizedUnit(unit: string | undefined, tUnits: ReturnType<typeof useTr
 }
 
 export const CreateGenerationModal: React.FC<CreateGenerationModalProps> = ({
-  isOpen, onClose, onGenerated, initialKind,
+  isOpen, onClose, onGenerated, initialKind, initialRecipe,
 }) => {
   const t = useTranslations('generationModal');
   // Unit names come from the dictionary the inspector already uses, so one
   // translation of 'second' serves both screens.
   const tUnits = useTranslations('credentials');
+  // The file viewer's own words for saving a file: same action, same object, so
+  // the dialog does not invent a second vocabulary for it.
+  const tFile = useTranslations('fileDetail');
+  const router = useRouter();
+  // A finished generation belongs at the top of the history, on this screen and on the Files page
+  // that may be open behind it. Both read one cache, so one invalidation refreshes both.
+  const invalidateHistory = useInvalidateGenerationHistory();
 
   // A caller that names the format has already made step 1's decision, so the
   // modal opens past it. Leaving it on step 1 made the prop a no-op that only
@@ -293,6 +312,20 @@ export const CreateGenerationModal: React.FC<CreateGenerationModalProps> = ({
   const [params, setParams] = useState<Record<string, string>>({});
   /** Uploaded input files, kept apart from `params` because these are handles, not values. */
   const [assets, setAssets] = useState<Record<string, FileRef[]>>({});
+  /**
+   * The parameter values of the recipe this form was opened on, in their ORIGINAL JSON types.
+   *
+   * <p>`params` above holds text, because that is what a text field holds. A recipe does not: it
+   * stores what was actually sent, so a `guidance_scale` is the number 7.5 and a `raw` flag is the
+   * boolean true. Replayed through the text state alone, both would reach the provider as strings -
+   * refused after the call is billed, or silently coerced into something else - and the whole
+   * promise of "the one thing you edit is the only thing that differs" would be false for every
+   * parameter outside the handful this dialog types by name.
+   *
+   * <p>So the original values are kept beside the text, and a field the reader did NOT touch is
+   * sent as it was. Cleared wherever `params` is cleared: they belong to one recipe on one model.
+   */
+  const [recipeParams, setRecipeParams] = useState<Record<string, unknown>>({});
   /** The asset parameter currently uploading, so its field can say so instead of looking idle. */
   const [uploading, setUploading] = useState<string | null>(null);
   /** Keyed by parameter: with two asset fields, one failure must not accuse both. */
@@ -318,6 +351,14 @@ export const CreateGenerationModal: React.FC<CreateGenerationModalProps> = ({
   const [credentialId, setCredentialId] = useState<number | null>(null);
   const [running, setRunning] = useState(false);
   const [result, setResult] = useState<GenerationResult | null>(null);
+  /**
+   * Whether the past generations are on screen INSTEAD of the current step.
+   *
+   * <p>A layer over the form rather than a fourth step: the steps are the shape of one generation,
+   * and looking at what you made last week is not part of making this one. It also means the form
+   * keeps everything typed into it while the history is open, so a glance back costs nothing.
+   */
+  const [showHistory, setShowHistory] = useState(false);
 
   // The shared catalogue read: same query key, same cache, same lifetime as the
   // surface that decided whether to offer this dialog at all. A caller that has
@@ -385,6 +426,7 @@ export const CreateGenerationModal: React.FC<CreateGenerationModalProps> = ({
   const chooseModel = useCallback((next: string) => {
     setModelId(next);
     setParams({});
+    setRecipeParams({});
     setAssets({});
     setUploadError({});
     setCredentialId(null);
@@ -479,28 +521,19 @@ export const CreateGenerationModal: React.FC<CreateGenerationModalProps> = ({
     })),
   });
 
-  const { paygBalance, monthlyCreditsAreWorkflowOnly } = useCreditBalance();
-
   /**
    * True when this account holds credits, but not the kind that can pay for a
    * generation on the platform's key.
    *
-   * <p>Whether the monthly grant is workflow-scoped is the SERVER's answer,
-   * asked for rather than inferred. Deriving it from the two balances looked
-   * equivalent and was not: a monthly balance with no top-up is the ordinary
-   * state of a paying subscriber, whose monthly credits pay for everything, so
-   * the inferred version told every PRO and TEAM customer that their credits
-   * could not pay while the server charged them without complaint. The rule
-   * belongs to the plan, and only the credit service knows the plan.
-   *
-   * <p>The empty top-up bucket still has to be checked here: the rule says
-   * WHICH bucket pays, and this says whether that bucket has anything in it.
-   * CE never applies the rule at all.
+   * <p>The rule itself (which plan, which bucket, and why it is asked of the
+   * server rather than inferred from the two balances) lives in the shared
+   * hook, because every surface that offers a paid choice needs the same
+   * answer. What belongs HERE is the second half: it only bites on the
+   * platform's key, since a generation on the reader's own key is not billed
+   * in credits at all.
    */
-  const monthlyCreditsCannotPay = !IS_CE
-    && credentialSource === 'platform'
-    && monthlyCreditsAreWorkflowOnly
-    && paygBalance != null && paygBalance <= 0;
+  const { blocked: creditsCannotPay } = useMonthlyCreditsCannotPay();
+  const monthlyCreditsCannotPay = creditsCannotPay && credentialSource === 'platform';
 
   /**
    * The price line for one model row: the quoted amount, or a note that nothing
@@ -515,6 +548,21 @@ export const CreateGenerationModal: React.FC<CreateGenerationModalProps> = ({
    * would leave those rows permanently blank, which is exactly the blank that
    * reads as free and that this label exists to remove.
    */
+  const platformSells = useCallback((m: GenerationModel): boolean => {
+    // Read from the SELECTED model's quote, not from the list, while that
+    // answer is outstanding. The list is deferred behind it (`enabled:
+    // platformSellsForSure`), and a DISABLED query is not a loading one: it
+    // reports `isLoading === false` with no data, which would read as "the
+    // platform sells none of these" for the whole window.
+    if (selectedQuote.isLoading) return true;
+    const index = modelsOfKind.findIndex((row) => row.model === m.model);
+    const query = index < 0 ? undefined : quoteQueries[index];
+    // This row's own answer, still in flight, is not a "no" either.
+    if (query?.isLoading) return true;
+    const quote = query?.data;
+    return Boolean(quote?.available && quote?.platformCredentialId != null && quote?.hasPricing);
+  }, [modelsOfKind, quoteQueries, selectedQuote.isLoading]);
+
   const priceLabelOf = useCallback((m: GenerationModel): string => {
     const index = modelsOfKind.findIndex((row) => row.model === m.model);
     const query = index < 0 ? undefined : quoteQueries[index];
@@ -531,18 +579,21 @@ export const CreateGenerationModal: React.FC<CreateGenerationModalProps> = ({
     setModelId(null);
     setPrompt('');
     setParams({});
+    setRecipeParams({});
     setAssets({});
     setUploadError({});
     setCredentialSource('platform');
     setCredentialId(null);
     setResult(null);
     setRunning(false);
+    setShowHistory(false);
   }, [isOpen, initialKind]);
 
   const chooseKind = useCallback((k: string) => {
     setKind(k);
     setModelId(null);
     setParams({});
+    setRecipeParams({});
     setAssets({});
     setUploadError({});
     // A key belongs to ONE provider, so a pinned id cannot survive a change of
@@ -552,6 +603,68 @@ export const CreateGenerationModal: React.FC<CreateGenerationModalProps> = ({
     setCredentialId(null);
     setStep(2);
   }, []);
+
+  /**
+   * Fill the form from a past generation.
+   *
+   * <p>Everything the recipe names is put back exactly as it was sent, because that is what makes
+   * the next run a VARIATION rather than a new guess: same model, same parameters, same input
+   * files, and the reader changes the one thing they came to change.
+   *
+   * <p>Lands on step 2 (the form), never step 3: the previous run's asset is not this run's result,
+   * and showing it as one would claim something was generated that has not been.
+   *
+   * <p>Two deliberate omissions. WHICH of your own keys paid is not replayed - the picker lands on
+   * the account's default for the provider by itself, and a key can be deleted between two runs.
+   * And a parameter whose value is neither a file nor a scalar is dropped rather than stringified:
+   * a field showing {@code [object Object]} is worse than an empty one, which at least says what
+   * has to be filled in.
+   */
+  const applyRecipe = useCallback((recipe: GenerationProvenance) => {
+    const model = models.find((m) => m.model === recipe.model);
+    setKind(recipe.kind ?? model?.kind ?? null);
+    setModelId(recipe.model);
+    setPrompt(recipe.prompt ?? '');
+
+    const nextParams: Record<string, string> = {};
+    const nextAssets: Record<string, FileRef[]> = {};
+    Object.entries(recipe.params ?? {}).forEach(([name, value]) => {
+      if (value === null || value === undefined) return;
+      const files = recipeFileRefs(value);
+      if (files.length > 0) {
+        nextAssets[name] = files;
+        return;
+      }
+      if (typeof value === 'object') return;
+      nextParams[name] = String(value);
+    });
+    setParams(nextParams);
+    // The values as they were SENT, so a field nobody edits is replayed with its own type.
+    setRecipeParams(recipe.params ?? {});
+    setAssets(nextAssets);
+    setUploadError({});
+    setCredentialId(null);
+    setCredentialSource(recipe.credentialSource === 'user' ? 'user' : 'platform');
+    setResult(null);
+    setShowHistory(false);
+    setStep(2);
+  }, [models]);
+
+  /**
+   * Apply the recipe the caller opened this dialog with.
+   *
+   * <p>Keyed on the recipe's IDENTITY, so it runs when the dialog opens with one and again only if
+   * a different one is handed over. A re-render of the page behind the dialog must not put the form
+   * back to what it was and throw away what the reader has typed since.
+   */
+  useEffect(() => {
+    if (!isOpen || !initialRecipe) return;
+    applyRecipe(initialRecipe);
+    // applyRecipe is deliberately NOT a dependency: it is rebuilt whenever the model catalogue
+    // arrives, and re-running this on that would silently undo the reader's edits the moment the
+    // list landed.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isOpen, initialRecipe]);
 
   /**
    * Pre-select the first model of the chosen format.
@@ -565,22 +678,82 @@ export const CreateGenerationModal: React.FC<CreateGenerationModalProps> = ({
    * <p>Only fills a blank: it never overrides a choice already made, and it
    * clears a model that does not belong to the current format so a stale id
    * from the previous format cannot survive.
+   *
+   * <p><b>A model the catalogue has RE-FILED is followed, not thrown away.</b> A recipe carries the
+   * format the asset was generated in, and a model can be re-categorised between then and now
+   * (audio becoming voice is a real move on this platform). Read as "this model does not belong to
+   * this format", that drift landed the reader on a DIFFERENT model with an empty prompt and empty
+   * parameters, silently, which is the exact failure replaying a recipe exists to prevent. The
+   * model is the choice; the format is a property OF it, so the format gives way.
    */
   useEffect(() => {
-    if (modelsOfKind.length === 0) return;
     if (modelId && modelsOfKind.some((m) => m.model === modelId)) return;
+    // BEFORE the empty-format check, deliberately. When the model was the only one of its old
+    // format, that format now holds nothing at all - and returning early there would leave the
+    // reader on a stale format with empty provider and model dropdowns over an otherwise correct
+    // form. Following the model is exactly as right when its old format emptied out.
+    if (modelId) {
+      const elsewhere = models.find((m) => m.model === modelId);
+      if (elsewhere) {
+        setKind(elsewhere.kind);
+        return;
+      }
+    }
+    if (modelsOfKind.length === 0) return;
     setModelId(modelsOfKind[0].model);
     setParams({});
+    setRecipeParams({});
     setAssets({});
     setUploadError({});
     setCredentialId(null);
-  }, [modelsOfKind, modelId]);
+  }, [models, modelsOfKind, modelId]);
 
   /** Parameters this model accepts, minus the prompt, which has its own field. */
   const acceptedParams = useMemo(
     () => (selected?.accepts ?? []).filter((p) => p !== 'prompt'),
     [selected],
   );
+
+  /**
+   * The values only the provider can name, for the fields that have them.
+   *
+   * <p>Held back until the options step, because each one costs a call to the
+   * provider and a reader browsing models has not asked for any of them yet.
+   *
+   * <p>The payer is part of the question: a voice list read on the platform's
+   * key is not the reader's own, so flipping the toggle re-asks rather than
+   * leaving ids on screen that the chosen key never had.
+   */
+  const dynamicOptions = useGenerationOptions(
+    selected ?? null,
+    credentialSource,
+    credentialId,
+    step === 2,
+  );
+
+  /**
+   * Drop a chosen value the current key does not actually offer.
+   *
+   * <p>Voices belong to the account behind the key. Picking one on the
+   * platform's key and then paying with your own leaves an id the provider has
+   * never heard of sitting in a field that still LOOKS chosen, and the run
+   * fails after it is billed. Only ever clears against a list that arrived
+   * whole: a truncated one is a sample, and a value outside a sample is not
+   * evidence of anything.
+   */
+  useEffect(() => {
+    const stale = Object.entries(dynamicOptions).filter(([name, state]) => {
+      const value = params[name];
+      if (!value || state.isLoading || state.truncated || state.options.length === 0) return false;
+      return !state.options.some((o) => o.value === value);
+    });
+    if (stale.length === 0) return;
+    setParams((p) => {
+      const next = { ...p };
+      stale.forEach(([name]) => delete next[name]);
+      return next;
+    });
+  }, [dynamicOptions, params]);
 
   /**
    * Whether the PLATFORM can actually sell the chosen model.
@@ -638,6 +811,42 @@ export const CreateGenerationModal: React.FC<CreateGenerationModalProps> = ({
     onClose();
   }, [running, onClose]);
 
+  /**
+   * Leave for the Files view, where the asset now lives.
+   *
+   * <p>Closes the dialog first: navigating with it still mounted would leave a
+   * modal floating over the destination, and this one blocks the page behind it.
+   * Deliberately NOT `dismiss`, which refuses while a generation is running -
+   * this is only reachable from the result step, where nothing is in flight, and
+   * routing away from a finished result is always allowed.
+   */
+  const openInFiles = useCallback(() => {
+    onClose();
+    router.push('/app/files');
+  }, [onClose, router]);
+
+  /**
+   * Save the finished asset to disk.
+   *
+   * <p>Through the same helper the Files viewer uses, so the auth-header rule
+   * (the token never reaches a URL) has one implementation rather than a copy
+   * per screen. The dialog stays open: keeping the file and being done with the
+   * screen are two different decisions.
+   */
+  const [downloadingAsset, setDownloadingAsset] = useState(false);
+  const [downloadError, setDownloadError] = useState<string | null>(null);
+  const downloadAsset = useCallback(async (fileId: string, fileName?: string) => {
+    setDownloadingAsset(true);
+    setDownloadError(null);
+    try {
+      await downloadStoredFile(fileId, fileName);
+    } catch (err) {
+      setDownloadError(err instanceof Error ? err.message : tFile('downloadFailed'));
+    } finally {
+      setDownloadingAsset(false);
+    }
+  }, [tFile]);
+
   const dismissRef = useRef(dismiss);
   useEffect(() => { dismissRef.current = dismiss; }, [dismiss]);
 
@@ -675,6 +884,20 @@ export const CreateGenerationModal: React.FC<CreateGenerationModalProps> = ({
     // LAST among the capture handlers, quietly losing the ordering the whole
     // design rests on. The ref keeps the callback current without that.
   }, [isOpen]);
+
+  /**
+   * Whether a parameter carries a NUMBER.
+   *
+   * <p>Two sources, because neither is complete on its own: the names this dialog enters through a
+   * number field, and the catalogue's own description of the chosen model, which states a numeric
+   * bound for parameters this build has never heard of. Without the second, every model-specific
+   * numeric (a guidance scale, a strength, a step count) reached the provider as text.
+   */
+  const isNumericParam = useCallback((name: string): boolean => {
+    if (NUMBER_PARAMS.includes(name)) return true;
+    const limit = selected?.limits?.[name];
+    return typeof limit?.min === 'number' || typeof limit?.max === 'number';
+  }, [selected]);
 
   const missingRequired = useMemo(() => {
     if (!selected) return [];
@@ -756,9 +979,20 @@ export const CreateGenerationModal: React.FC<CreateGenerationModalProps> = ({
       for (const [key, raw] of Object.entries(params)) {
         const value = raw.trim();
         if (!value) continue;
-        // Numbers must reach the provider as numbers: a stringified duration
-        // changes the size the run is billed on.
-        body[key] = NUMBER_PARAMS.includes(key) && Number.isFinite(Number(value))
+        // A field the reader did NOT touch since the recipe was applied travels EXACTLY as it was
+        // sent the first time, whatever its type. This is what makes a replay a variation rather
+        // than a new guess: the form only ever holds text, and rebuilding a boolean or a decimal
+        // out of that text is guesswork this dialog does not have to do.
+        const original = recipeParams[key];
+        if (original !== undefined && original !== null && String(original) === value) {
+          body[key] = original;
+          continue;
+        }
+        // Otherwise the value was typed here, so its type comes from what the MODEL says the
+        // parameter is: the names this dialog enters as numbers, plus any parameter the catalogue
+        // describes with a numeric bound. A stringified duration changes the size the run is billed
+        // on, and a stringified scale is refused by the provider after the call is paid for.
+        body[key] = isNumericParam(key) && Number.isFinite(Number(value))
           ? Number(value)
           : value;
       }
@@ -783,7 +1017,12 @@ export const CreateGenerationModal: React.FC<CreateGenerationModalProps> = ({
           : {}),
       });
       setResult(answer);
-      if (answer.success) onGenerated?.(answer);
+      if (answer.success) {
+        // The asset now exists and carries its own recipe, so it belongs at the top of the
+        // history - here and on the Files page behind this dialog, which read one cache.
+        invalidateHistory();
+        onGenerated?.(answer);
+      }
     } catch (e) {
       // A LOST CONNECTION is not a failed generation. Nothing here cancels the
       // server: it goes on to finish the call, store the asset and commit the
@@ -829,7 +1068,8 @@ export const CreateGenerationModal: React.FC<CreateGenerationModalProps> = ({
     } finally {
       setRunning(false);
     }
-  }, [selected, prompt, params, assets, credentialSource, credentialId, onGenerated, t]);
+  }, [selected, prompt, params, recipeParams, isNumericParam, assets, credentialSource,
+      credentialId, onGenerated, invalidateHistory, t]);
 
   if (!isOpen) return null;
 
@@ -847,13 +1087,35 @@ export const CreateGenerationModal: React.FC<CreateGenerationModalProps> = ({
       >
         {/* Header */}
         <div className="px-8 pt-8 pb-4">
-          <div className="flex items-start justify-between">
+          <div className="flex items-start justify-between gap-2">
+            {/* The history toggle balances the close button on the other side, so the title stays
+                centred between them. Hidden while a generation is in flight: this screen is the
+                only one that will show the asset being paid for, and swapping it for a list of old
+                ones would take that away. */}
+            <button
+              type="button"
+              onClick={() => setShowHistory((open) => !open)}
+              disabled={running}
+              aria-pressed={showHistory}
+              aria-label={t('history.toggle')}
+              title={t('history.toggle')}
+              className={`transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${
+                showHistory
+                  ? 'text-[var(--accent-primary)]'
+                  : 'text-theme-secondary hover:text-theme-primary'
+              }`}
+            >
+              <History className="h-5 w-5" />
+            </button>
             <div className="flex-1 text-center">
-              <h3 className="text-xl font-semibold text-theme-primary">{t('title')}</h3>
+              <h3 className="text-xl font-semibold text-theme-primary">
+                {showHistory ? t('history.title') : t('title')}
+              </h3>
               <p className="text-sm text-theme-secondary mt-1">
-                {step === 1 && t('subtitle.format')}
-                {step === 2 && t('subtitle.prompt')}
-                {step === 3 && t('subtitle.result')}
+                {showHistory && t('history.subtitle')}
+                {!showHistory && step === 1 && t('subtitle.format')}
+                {!showHistory && step === 2 && t('subtitle.prompt')}
+                {!showHistory && step === 3 && t('subtitle.result')}
               </p>
             </div>
             <button
@@ -870,30 +1132,46 @@ export const CreateGenerationModal: React.FC<CreateGenerationModalProps> = ({
           {/* The shared step header, the same one the agent modal shows: filled
               steps in the accent, DONE steps in green with a check, and the
               connector filling in behind them. This screen used to hand-roll its
-              own copy, which is how it ended up the only header with no completed
-              state at all - a finished step looked exactly like an upcoming one.
-              Reachability follows the same rule as the agent modal (a step you
-              have already been through), minus anything while a generation is in
-              flight, which is what the footer's Back button already refuses. */}
-          <ModalStepIndicator
-            className="mt-6 mb-0"
-            currentStep={step}
-            onStepClick={setStep}
-            isStepEnabled={(n) => !running && n <= step}
-            steps={STEPS.map((s) => ({ number: s.number, icon: s.icon, label: t(s.labelKey) }))}
-          />
+              own copy, which had drifted: its finished step did swap in a check
+              and did darken its label, but it was the only header in the app
+              with no GREEN, so "done" and "current" read as two shades of the
+              same thing. Reachability is new here rather than carried over -
+              nothing in the copy was clickable - and it is the agent modal's
+              rule (a step you have already been through) minus anything while a
+              generation is in flight, which is what the footer's Back button
+              already refuses. */}
+          {/* The steps describe the generation being configured. While the history is on screen
+              there is no step in progress to point at, and leaving the indicator up invited a click
+              that would silently swap the content back. */}
+          {!showHistory && (
+            <ModalStepIndicator
+              className="mt-6 mb-0"
+              currentStep={step}
+              onStepClick={setStep}
+              isStepEnabled={(n) => !running && n <= step}
+              steps={STEPS.map((s) => ({ number: s.number, icon: s.icon, label: t(s.labelKey) }))}
+            />
+          )}
         </div>
 
         {/* Content */}
         <div className="flex-1 overflow-y-auto px-8 pb-4">
-          {isLoading && (
+          {/* The past generations, in place of the form. Reusing one fills the form in and brings
+              it back, so a variation starts from what was actually run rather than from memory. */}
+          {showHistory && (
+            <div className="animate-in fade-in-0 duration-200">
+              <GenerationHistoryList onReuse={(entry) => applyRecipe(entry.provenance)} />
+            </div>
+          )}
+
+          {!showHistory && isLoading && (
             <div className="flex items-center justify-center py-12">
               <Loader2 className="h-5 w-5 animate-spin text-theme-secondary" />
             </div>
           )}
 
           {/* Step 1: what to produce */}
-          {!isLoading && step === 1 && (
+          {!showHistory && !isLoading && step === 1 && (
             <div className="space-y-3 animate-in fade-in-0 slide-in-from-right-4 duration-300">
               {availableKinds.length === 0 && (
                 <p className="text-sm text-theme-secondary text-center py-8">{t('empty')}</p>
@@ -924,7 +1202,7 @@ export const CreateGenerationModal: React.FC<CreateGenerationModalProps> = ({
           )}
 
           {/* Step 2: which model, and what to say */}
-          {!isLoading && step === 2 && (
+          {!showHistory && !isLoading && step === 2 && (
             <div className="space-y-5 animate-in fade-in-0 slide-in-from-right-4 duration-300">
               {/* Provider, then model. Two fields rather than one long list:
                   the models of a format come from several providers, and the
@@ -1006,7 +1284,16 @@ export const CreateGenerationModal: React.FC<CreateGenerationModalProps> = ({
                       const price = credentialSource === 'platform' ? priceLabelOf(m) : '';
                       return (
                         <SelectItem key={m.model} value={m.model} className="text-sm">
-                          {m.label || m.model}{price ? ` - ${price}` : ''}
+                          <span className="flex items-center gap-1.5">
+                            <span>{m.label || m.model}{price ? ` - ${price}` : ''}</span>
+                            {/* Per MODEL, and only on the platform's key: a
+                                model the platform does not sell is run on the
+                                reader's own key and costs no credits, so a lock
+                                there would be a lie. */}
+                            <UpgradeRequiredBadge
+                              blocked={monthlyCreditsCannotPay && platformSells(m)}
+                            />
+                          </span>
                         </SelectItem>
                       );
                     })}
@@ -1072,12 +1359,10 @@ export const CreateGenerationModal: React.FC<CreateGenerationModalProps> = ({
                     credentialSource={credentialSource}
                     onCredentialSourceChange={(source) => setCredentialSource(source)}
                   />
-                  {credentialSource === 'platform' && monthlyCreditsCannotPay && (
-                    <p className="flex items-start gap-2 text-xs text-theme-secondary">
-                      <AlertCircle className="mt-0.5 h-3 w-3 shrink-0" aria-hidden="true" />
-                      {t('payer.monthlyCreditsOnly')}
-                    </p>
-                  )}
+                  {/* The same sentence every other picker shows, and now with
+                      the way out attached: it used to state the problem and
+                      leave the reader to find the plans on their own. */}
+                  <UpgradeRequiredNotice blocked={monthlyCreditsCannotPay} />
                 </div>
               )}
 
@@ -1105,7 +1390,18 @@ export const CreateGenerationModal: React.FC<CreateGenerationModalProps> = ({
                   <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
                     {acceptedParams.map((name) => {
                       const limit = selected.limits?.[name];
-                      const allowed = limit?.allowed;
+                      const dynamic = dynamicOptions[name];
+                      // The provider's own answer beats the catalogue's, and
+                      // replaces it rather than joining it: they describe the
+                      // same field, and the account's list is the one the run
+                      // will actually be judged against.
+                      const choices: { value: string; label: string }[] =
+                        dynamic && dynamic.options.length > 0
+                          ? dynamic.options.map((o) => ({ value: o.value, label: o.label }))
+                          : (limit?.allowed ?? []).map((v) => ({
+                              value: String(v),
+                              label: String(v),
+                            }));
                       const isRequired = (selected.required ?? []).includes(name);
                       const shape = selected.inputs?.[name];
                       // As many pickers as the provider takes files, each named
@@ -1176,7 +1472,7 @@ export const CreateGenerationModal: React.FC<CreateGenerationModalProps> = ({
                                 );
                               })}
                             </div>
-                          ) : allowed && allowed.length > 0 ? (
+                          ) : choices.length > 0 ? (
                             <>
                             <label
                               htmlFor={`generation-param-${name}`}
@@ -1185,19 +1481,75 @@ export const CreateGenerationModal: React.FC<CreateGenerationModalProps> = ({
                               {paramLabel(name, t)}
                               {isRequired && <span aria-hidden="true"> *</span>}
                             </label>
-                            <select
-                              id={`generation-param-${name}`}
-                              value={params[name] ?? ''}
-                              onChange={(e) => setParams((p) => ({ ...p, [name]: e.target.value }))}
-                              className="w-full rounded-lg border border-theme bg-theme-primary p-2 text-sm text-theme-primary"
+                            {/* A closed list is a choice; a SAMPLE of a bigger
+                                one cannot be, or a reader whose value sits
+                                outside the sample has no way to enter it at
+                                all. Same field either way, one control: pick,
+                                or type. */}
+                            {dynamic?.truncated ? (
+                              <>
+                                <Input
+                                  id={`generation-param-${name}`}
+                                  list={`generation-param-${name}-list`}
+                                  value={params[name] ?? ''}
+                                  onChange={(e) => setParams((p) => ({ ...p, [name]: e.target.value }))}
+                                />
+                                {/* label as an ATTRIBUTE, not as a child: a
+                                    datalist option shows its value, and the
+                                    value here is the opaque id. Firefox and
+                                    Safari read the attribute and keep the name
+                                    on screen, which is the whole point of
+                                    having asked the provider for it. */}
+                                <datalist id={`generation-param-${name}-list`}>
+                                  {choices.map((option) => (
+                                    <option
+                                      key={option.value}
+                                      value={option.value}
+                                      label={option.label}
+                                    />
+                                  ))}
+                                </datalist>
+                                {dynamic.totalCount != null && (
+                                  <p className="text-xs text-theme-secondary">
+                                    {t('fields.optionsTruncated', { count: dynamic.totalCount })}
+                                  </p>
+                                )}
+                              </>
+                            ) : (
+                              <select
+                                id={`generation-param-${name}`}
+                                value={params[name] ?? ''}
+                                onChange={(e) => setParams((p) => ({ ...p, [name]: e.target.value }))}
+                                className="w-full rounded-lg border border-theme bg-theme-primary p-2 text-sm text-theme-primary"
+                              >
+                                <option value="">{t('fields.unset')}</option>
+                                {choices.map((option) => (
+                                  <option key={option.value} value={option.value}>
+                                    {option.label}
+                                  </option>
+                                ))}
+                              </select>
+                            )}
+                            </>
+                          ) : dynamic?.isLoading ? (
+                            <>
+                            <label
+                              htmlFor={`generation-param-${name}`}
+                              className="text-xs text-theme-secondary"
                             >
-                              <option value="">{t('fields.unset')}</option>
-                              {allowed.map((option) => (
-                                <option key={String(option)} value={String(option)}>
-                                  {String(option)}
-                                </option>
-                              ))}
-                            </select>
+                              {paramLabel(name, t)}
+                              {isRequired && <span aria-hidden="true"> *</span>}
+                            </label>
+                            {/* Not a text box that turns into a dropdown under
+                                the cursor: the field keeps its shape and says
+                                it is still asking. */}
+                            <div
+                              id={`generation-param-${name}`}
+                              className="flex h-[38px] items-center gap-2 rounded-lg border border-theme bg-theme-primary px-2 text-sm text-theme-secondary"
+                            >
+                              <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                              {t('fields.optionsLoading')}
+                            </div>
                             </>
                           ) : (
                             <>
@@ -1210,7 +1562,11 @@ export const CreateGenerationModal: React.FC<CreateGenerationModalProps> = ({
                             </label>
                             <Input
                               id={`generation-param-${name}`}
-                              type={NUMBER_PARAMS.includes(name) ? 'number' : 'text'}
+                              // A number field for anything the model describes as numeric, not
+                              // only for the handful of names this dialog knows: the catalogue
+                              // states a bound for parameters no build has heard of, and the value
+                              // is sent as a number either way, so the field should say so.
+                              type={isNumericParam(name) ? 'number' : 'text'}
                               value={params[name] ?? ''}
                               onChange={(e) => setParams((p) => ({ ...p, [name]: e.target.value }))}
                               placeholder={
@@ -1219,6 +1575,25 @@ export const CreateGenerationModal: React.FC<CreateGenerationModalProps> = ({
                                   : ''
                               }
                             />
+                            {/* Why this is a text box when it was going to be a
+                                list. Silence here reads as "this field simply
+                                has no choices", which is a different fact from
+                                "no key is connected to ask with".
+
+                                Both branches matter: a field that WAS going to
+                                offer values and ends up offering none must say
+                                so. Saying nothing is what made the first live
+                                failure unreadable, because "it loads, then
+                                nothing" describes a refusal, an empty account
+                                and a provider that omits the model equally
+                                well, and they call for different moves. */}
+                            {dynamic?.error ? (
+                              <p className="text-xs text-theme-secondary">{dynamic.error}</p>
+                            ) : dynamic && !dynamic.isLoading ? (
+                              <p className="text-xs text-theme-secondary">
+                                {t('fields.optionsEmpty')}
+                              </p>
+                            ) : null}
                             </>
                           )}
                         </div>
@@ -1231,7 +1606,7 @@ export const CreateGenerationModal: React.FC<CreateGenerationModalProps> = ({
           )}
 
           {/* Step 3: the result */}
-          {step === 3 && (
+          {!showHistory && step === 3 && (
             <div className="animate-in fade-in-0 duration-300">
               {running && (
                 <div className="flex flex-col items-center gap-3 py-12">
@@ -1254,23 +1629,84 @@ export const CreateGenerationModal: React.FC<CreateGenerationModalProps> = ({
                       })}
                     </p>
                   )}
-                  {/* Linked by ID, never by `path`. `path` is the S3 object
+                  {/* The asset itself, in the SAME viewer /app/files opens when
+                      you click a file: image, video with controls, audio player,
+                      pdf, or a rendered text/json/csv preview. It used to be a
+                      bare download link, so the one thing you had just paid for
+                      was the one thing this screen would not show you.
+
+                      `chromeless`, and no framing of our own: the asset sits
+                      directly on the dialog, with its size / type / created /
+                      path text under it and nothing else. Boxed, it came with a
+                      header bar and a full-width download button of its own,
+                      which put a card inside a card and gave the step three
+                      competing actions. The one action that belongs to this step
+                      is below.
+
+                      A definite height because the viewer fills its container,
+                      and this dialog's column is a scroll area - with no height
+                      to fill it would collapse to nothing. `fitMediaToHost` then
+                      measures the media against THAT height rather than against
+                      the viewport, which is what the full-page Files viewer
+                      assumes and what would make a portrait asset - the common
+                      output shape here - overflow the dialog.
+
+                      Addressed by ID, never by `path`: `path` is the S3 object
                       key, so a browser resolves it against the current page and
                       the customer gets a dead link to something they paid for,
-                      with their tenant prefix written into the DOM. The id
-                      resolves to the authenticated raw-file route, which is
-                      what every other consumer of a FileRef uses. Rendered only
-                      when the id is present, so an asset that somehow arrives
-                      without one shows no link rather than a broken one. */}
-                  {result.data.file?.id && (
-                    <a
-                      href={fileRefToUrl({ id: String(result.data.file.id) })}
-                      download={result.data.file.name ? String(result.data.file.name) : undefined}
-                      className="inline-flex items-center gap-2 rounded-xl border border-theme px-4 py-2 text-sm text-theme-primary hover:bg-theme-tertiary"
-                    >
-                      <Download className="h-4 w-4" />
-                      {result.data.file.name ? String(result.data.file.name) : t('download')}
-                    </a>
+                      with their tenant prefix written into the DOM. */}
+                  {result.data.file?.id ? (
+                    <div className="h-[52vh]">
+                      <FileDetailView
+                        entryId={String(result.data.file.id)}
+                        s3Key={result.data.file.path ? String(result.data.file.path) : undefined}
+                        fileName={result.data.file.name ? String(result.data.file.name) : undefined}
+                        mimeType={result.data.file.mimeType ? String(result.data.file.mimeType) : undefined}
+                        sizeBytes={typeof result.data.file.size === 'number' ? result.data.file.size : undefined}
+                        chromeless
+                        fitMediaToHost
+                        // Never called in chromeless mode (there is no header to
+                        // click), but it is a required prop and a wrong value
+                        // here would be a trap for whoever un-chromelesses it.
+                        onBack={openInFiles}
+                      />
+                    </div>
+                  ) : (
+                    // No id: nothing can be previewed or downloaded. This branch
+                    // also covers `file` being absent entirely, so the sentence
+                    // does NOT assert a workspace write it cannot see - it says
+                    // what is certain (the generation finished, this page cannot
+                    // show it) and points at Files, where a stored asset is.
+                    <p className="text-sm text-theme-secondary">{t('savedNoPreview')}</p>
+                  )}
+
+                  {/* The two things to do with a finished asset: keep it, or go
+                      to where it lives. Both here, because the chromeless viewer
+                      draws no controls of its own - which is the point of it. */}
+                  <div className="flex flex-wrap items-center gap-2">
+                    <Button variant="outline" onClick={openInFiles}>
+                      <FolderOpen className="mr-1.5 h-4 w-4" />
+                      {t('openInFiles')}
+                    </Button>
+                    {result.data.file?.id && (
+                      <Button
+                        variant="outline"
+                        onClick={() => downloadAsset(
+                          String(result.data!.file!.id),
+                          result.data!.file!.name ? String(result.data!.file!.name) : undefined,
+                        )}
+                        disabled={downloadingAsset}
+                        aria-busy={downloadingAsset}
+                      >
+                        <Download className="mr-1.5 h-4 w-4" />
+                        {downloadingAsset ? tFile('downloading') : t('download')}
+                      </Button>
+                    )}
+                  </div>
+                  {/* A failed save must say so: the button re-enabling on its own
+                      looks exactly like a click that never registered. */}
+                  {downloadError && (
+                    <p className="text-sm text-theme-secondary" role="status">{downloadError}</p>
                   )}
                 </div>
               )}
@@ -1293,12 +1729,20 @@ export const CreateGenerationModal: React.FC<CreateGenerationModalProps> = ({
 
         {/* Footer */}
         <div className="flex items-center justify-between border-t border-theme px-8 py-4">
+          {/* Out of the history the way back is to the form, which still holds everything typed
+              into it - never a step backwards through the form itself. */}
           <Button
             variant="ghost"
-            onClick={() => (step === 1 ? dismiss() : setStep(step - 1))}
+            onClick={() => {
+              if (showHistory) { setShowHistory(false); return; }
+              if (step === 1) { dismiss(); return; }
+              setStep(step - 1);
+            }}
             disabled={running}
           >
-            {step === 1 ? t('cancel') : <><ArrowLeft className="mr-1 h-4 w-4" />{t('back')}</>}
+            {showHistory || step > 1
+              ? <><ArrowLeft className="mr-1 h-4 w-4" />{t('back')}</>
+              : t('cancel')}
           </Button>
 
           {/* No list of what is still missing beside the button. The fields are
@@ -1306,14 +1750,14 @@ export const CreateGenerationModal: React.FC<CreateGenerationModalProps> = ({
               until they are filled: repeating their names in a footnote said
               nothing the form was not already saying, and it grew a line with
               every parameter the catalogue gained. */}
-          {step === 2 && (
+          {!showHistory && step === 2 && (
             <Button onClick={run} disabled={!canRun}>
               {t('generate')}
               <ArrowRight className="ml-1 h-4 w-4" />
             </Button>
           )}
 
-          {step === 3 && !running && (
+          {!showHistory && step === 3 && !running && (
             <div className="flex items-center gap-2">
               <Button variant="ghost" onClick={() => setStep(2)}>{t('again')}</Button>
               <Button onClick={onClose}>{t('close')}</Button>

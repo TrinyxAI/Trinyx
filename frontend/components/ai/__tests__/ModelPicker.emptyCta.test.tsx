@@ -20,6 +20,12 @@ const h = vi.hoisted(() => ({
   error: null as string | null,
 }));
 
+// The picker asks once, for the whole list, whether this account's credits
+// can pay for what a model does. Stubbed: these suites are about the
+// catalog and the stacking, not about billing.
+vi.mock('@/lib/hooks/useMonthlyCreditsCannotPay', () => ({
+  useMonthlyCreditsCannotPay: () => ({ blocked: false, isLoading: false }),
+}));
 vi.mock('next/image', () => ({ default: () => null }));
 vi.mock('@/components/ui/select', () => ({
   Select: ({ children }: { children: React.ReactNode }) => <div data-testid="select">{children}</div>,

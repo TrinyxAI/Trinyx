@@ -61,10 +61,26 @@ export class CredentialService {
   }
 
   /**
-   * Update a credential
+   * Rename a credential (display label only). Returns the updated credential,
+   * secrets stripped.
+   *
+   * The credential keeps its id, and everything that pins one pins the id
+   * (workflow nodes, agent tool configs, published apps), so a rename does not
+   * re-point them. The server refuses the renames that would move more than a
+   * label, each with its own `code` on the thrown ApiError:
+   * `duplicate_name` (409, the name already IDENTIFIES another credential of the OWNER
+   * and would identify this one too, possibly across a workspace the caller cannot see;
+   * a name that identifies neither, or only the other, is allowed) and
+   * `name_is_identity` (422, the credential carries no integration, so its name
+   * is what identifies it to the nodes that pinned it). Also `400`
+   * (`invalid_name` / `workspace_required`) and `404` when the credential is not
+   * in the caller's workspace.
+   *
+   * Replaces the former `updateCredential`, which PUT to a route the
+   * auth-service never exposed (it had no caller, and would have 405'd).
    */
-  async updateCredential(id: number, updates: Partial<Credential>): Promise<Credential> {
-    return apiClient.put<Credential>(`/credentials/${id}`, updates);
+  async renameCredential(id: number, name: string): Promise<Credential> {
+    return apiClient.patch<Credential>(`/credentials/${id}`, { name });
   }
 
   /**

@@ -3,18 +3,18 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { isInternalUrl, fetchAuthedBlobUrl, openAuthedFileInNewTab, downloadAuthedFile } from '../url-auth';
 
 vi.mock('@/lib/api/api-client', () => ({
-  apiClient: { getTokenProvider: vi.fn() },
+  apiClient: { getAuthToken: vi.fn() },
 }));
 vi.mock('@/lib/stores/current-org-store', () => ({
   getActiveOrgHeaderForRequest: vi.fn(() => ({ 'X-Active-Organization-ID': 'org-7' })),
 }));
 
 import { apiClient } from '@/lib/api/api-client';
-const mockGetTokenProvider = vi.mocked(apiClient.getTokenProvider);
+const mockGetAuthToken = vi.mocked(apiClient.getAuthToken);
 
 beforeEach(() => {
   vi.resetAllMocks();
-  mockGetTokenProvider.mockReturnValue(() => Promise.resolve('jwt-abc'));
+  mockGetAuthToken.mockResolvedValue('jwt-abc');
   // jsdom doesn't implement object URLs - stub them.
   URL.createObjectURL = vi.fn(() => 'blob:mock-object-url');
   URL.revokeObjectURL = vi.fn();
@@ -74,7 +74,7 @@ describe('fetchAuthedBlobUrl', () => {
   });
 
   it('still fetches (header-only) when no token is available - no token ever appears in the URL', async () => {
-    mockGetTokenProvider.mockReturnValue(null);
+    mockGetAuthToken.mockResolvedValue(null);
     const fetchMock = mockFetchOk();
     await fetchAuthedBlobUrl('/api/proxy/files/by-id/abc/raw');
     const [calledUrl, init] = fetchMock.mock.calls[0];

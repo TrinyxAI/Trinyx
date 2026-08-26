@@ -5,6 +5,7 @@ import com.apimarketplace.agent.registry.AgentToolDefinition;
 import com.apimarketplace.agent.registry.ToolCategory;
 import com.apimarketplace.agent.tools.ToolErrorCode;
 import com.apimarketplace.agent.tools.ToolsProvider;
+import com.apimarketplace.agent.tools.credential.SelectableAccounts;
 import com.apimarketplace.credential.client.CredentialClient;
 import com.apimarketplace.credential.client.dto.CredentialSummaryDto;
 import lombok.RequiredArgsConstructor;
@@ -13,6 +14,7 @@ import org.springframework.stereotype.Component;
 
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 
 import static com.apimarketplace.agent.registry.ToolSchemaGenerator.*;
@@ -66,12 +68,12 @@ public class CredentialToolsProvider implements ToolsProvider {
             .description("""
                 Discover which external services the user has connected (Gmail, Slack, Calendar, etc.).
                 Takes NO parameters - just call get_connected_services().
-                Returns: {connected: [{name, integration, status, isDefault, account}], count, hint}.
+                Returns: {connected: [{name, integration, status, isDefault, account}], count, defaultCount, hint}.
                 Status: 'active' (ready), 'expiring' (still works, token expiring soon), 'needs_reauth' (token revoked or expired; only the user can Reconnect, you cannot use or fix it), 'error' (misconfigured; an admin must fix it, reconnecting alone will not help).
-                Only 'isDefault=true' credentials are used when executing tools.
+                isDefault=true marks the one that runs when nothing names another. The others are NOT dead: a workflow mcp step runs on one of them by setting credential_selector to an expression that resolves to that entry's name, which is how one workflow serves several accounts of the same integration instead of being duplicated per account. Selectable this way are the entries whose status is exactly 'active' (an expiring one is refused too, not only needs_reauth and error), whose name is not shared with another active entry of the same integration, and whose name is not a positive whole number (that is read as a credential id). Capitalisation and surrounding spaces are ignored when matching; nothing else about the name is.
 
-                WHEN TO USE: When uncertain which service the user has (e.g. "check my emails" without specifying Gmail/Outlook).
-                SKIP if user explicitly mentions a service (e.g., "send with Gmail").
+                WHEN TO USE: when uncertain which service the user has (e.g. "check my emails" without specifying Gmail/Outlook), and whenever you need the exact NAME of an account, which is the only way to discover the values credential_selector accepts.
+                SKIP if the user names the service AND you do not need an account name (e.g. "send with Gmail" when they have one Gmail).
                 """)
             .category(ToolCategory.CATALOG)
             .parameters(List.of())
@@ -82,12 +84,27 @@ public class CredentialToolsProvider implements ToolsProvider {
 
                 Returns:
                 {
+                  "count": 3,
+                  "defaultCount": 2,
                   "connected": [
-                    {"name": "Gmail", "integration": "gmail", "status": "active"},
-                    {"name": "Slack", "integration": "slack", "status": "active"}
+                    {"name": "Gmail", "integration": "gmail", "status": "active", "isDefault": true, "account": "me@example.com"},
+                    {"name": "Client A", "integration": "instagram", "status": "active", "isDefault": true},
+                    {"name": "Client B", "integration": "instagram", "status": "active", "isDefault": false}
                   ],
-                  "hint": "User has Gmail and Slack connected. Use catalog(action='search') to find tools."
+                  "hint": "User has 2 default credential(s) ready for execution: Gmail, Client A. Executing a tool directly always uses the default one. This is what YOUR workspace holds; a workflow runs under its owner's, so a name taken from here resolves only if the two are the same. Also held and selectable by a workflow step that names one in its credential_selector (active only): \\"Client B\\" (instagram)."
                 }
+
+                Two entries share an integration when the user holds several accounts of it,
+                as with Client A and Client B above. Executing a tool directly always uses the
+                default one; to run a workflow step on the other, pass its name through the
+                step's credential_selector. Copy the name from here rather than retyping it:
+                only capitalisation and surrounding spaces are ignored when matching, so any
+                other reformatting (a hyphen for a space, a shortened form) selects nothing and
+                the step fails rather than falling back.
+
+                This lists what the CALLING workspace holds. A workflow runs under its owner's
+                workspace, so a name taken from here is only guaranteed to resolve if you are
+                building for the same workspace you are calling from.
 
                 Status values:
                 - active: Ready to use
@@ -110,7 +127,7 @@ public class CredentialToolsProvider implements ToolsProvider {
                 Map<String, Object> entry = new LinkedHashMap<>();
                 entry.put("name", c.getName());
                 entry.put("integration", c.getIntegration());
-                entry.put("status", c.getStatus() != null ? c.getStatus().toLowerCase() : "unknown");
+                entry.put("status", c.getStatus() != null ? c.getStatus().toLowerCase(Locale.ROOT) : "unknown");
                 entry.put("isDefault", c.isDefault());
 
                 // Extract account identifier if available (e.g., email address)
@@ -123,7 +140,7 @@ public class CredentialToolsProvider implements ToolsProvider {
             })
             .toList();
 
-        // Count default credentials (only defaults are used for execution)
+        // Count default credentials (the direct-execution path resolves is_default first)
         long defaultCount = connected.stream()
             .filter(c -> Boolean.TRUE.equals(c.get("isDefault")))
             .count();
@@ -140,13 +157,33 @@ public class CredentialToolsProvider implements ToolsProvider {
             List<String> defaultServiceNames = connected.stream()
                 .filter(c -> Boolean.TRUE.equals(c.get("isDefault")))
                 .map(c -> (String) c.get("name"))
+                // A null name is storable, and String.join renders one as the literal
+                // "null", so the summary would read "ready for execution: Gmail, null".
+                // The listing itself still shows the entry; only this summary skips it.
+                .filter(name -> name != null && !name.isBlank())
                 .toList();
 
             String servicesList = String.join(", ", defaultServiceNames);
+            // The hint is the agent's window into state, so it outranks any static
+            // description: it once carried the retracted claim too, and correcting the
+            // description alone left that claim being served on every call. It also
+            // listed default names only, hiding exactly the entries a workflow step
+            // selects by name. (Phrased carefully: the discoverability guard scans this
+            // file for the claim, comments included, and a paraphrase here would fail
+            // the build. Rewrite around it rather than loosening the pattern.)
+            //
+            // Which entries qualify is SelectableAccounts' problem, not this method's,
+            // because credential(action='list') shapes the same rows for chat agents and
+            // the two answers must not diverge again.
+            String extra = SelectableAccounts.offer(connected);
             result.put("hint", String.format(
-                "User has %d default credential(s) ready for execution: %s. Only default credentials are used when executing tools.",
+                "User has %d default credential(s) ready for execution: %s. Executing a tool "
+                + "directly always uses the default one. This is what YOUR workspace holds; a "
+                + "workflow runs under its owner's, so a name taken from here resolves only if "
+                + "the two are the same.%s",
                 defaultCount,
-                servicesList.isEmpty() ? "(none)" : servicesList
+                servicesList.isEmpty() ? "(none)" : servicesList,
+                extra
             ));
 
             // Add specific hints for common use cases

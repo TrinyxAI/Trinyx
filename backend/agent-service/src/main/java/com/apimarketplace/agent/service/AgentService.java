@@ -8,6 +8,7 @@ import com.apimarketplace.agent.dto.AgentAvatarResponse;
 import com.apimarketplace.agent.repository.AgentMetricsAggregationRepository;
 import com.apimarketplace.agent.repository.AgentRepository;
 import com.apimarketplace.auth.client.access.OrgAccessGuard;
+import com.apimarketplace.common.folder.FolderScope;
 import com.apimarketplace.common.scope.ScopeGuard;
 import com.apimarketplace.publication.client.PublicationClient;
 import com.apimarketplace.common.web.TenantResolver;
@@ -71,16 +72,24 @@ public class AgentService {
     @Value("${services.trigger-service.url:http://localhost:8091}")
     private String triggerServiceUrl;
 
+    /**
+     * Folders of the agent list (V449). Optional: a context without it (a slice test, an
+     * older wiring) simply lists agents without any folder view.
+     */
+    private final AgentFolderService agentFolderService;
+
     public AgentService(AgentRepository agentRepository,
                        AgentDefaultsConfig defaults,
                        OrgAccessGuard orgAccessService,
                        AgentMetricsAggregationRepository metricsAggregationRepository,
-                       com.apimarketplace.auth.client.entitlement.EntitlementGuard entitlementGuard) {
+                       com.apimarketplace.auth.client.entitlement.EntitlementGuard entitlementGuard,
+                       AgentFolderService agentFolderService) {
         this.agentRepository = agentRepository;
         this.defaults = defaults;
         this.orgAccessService = orgAccessService;
         this.metricsAggregationRepository = metricsAggregationRepository;
         this.entitlementGuard = entitlementGuard;
+        this.agentFolderService = agentFolderService;
     }
 
     /**
@@ -570,7 +579,17 @@ public class AgentService {
      * shared), batched server-side so the card needs no per-row publication call.
      */
     public record AgentPage(List<AgentEntity> items, int totalCount, int page, int size,
-                            Map<String, Map<String, String>> publicationStatuses) {}
+                            Map<String, Map<String, String>> publicationStatuses,
+                            List<com.apimarketplace.common.folder.ResourceFolderDto> folders,
+                            List<Map<String, Object>> folderTrail,
+                            boolean folderMissing) {
+
+        /** A page with no folder view - what every caller that does not ask for folders gets. */
+        public AgentPage(List<AgentEntity> items, int totalCount, int page, int size,
+                         Map<String, Map<String, String>> publicationStatuses) {
+            this(items, totalCount, page, size, publicationStatuses, List.of(), List.of(), false);
+        }
+    }
 
     private static final String AGENT_PUBLICATION_TYPE = "AGENT";
 
@@ -586,6 +605,22 @@ public class AgentService {
      */
     public AgentPage listAgentsPaged(String tenantId, String orgId, String orgRole,
                                        String q, int page, int size, String sort, String visibility) {
+        return listAgentsPaged(tenantId, orgId, orgRole, q, page, size, sort, visibility, null, false);
+    }
+
+    /**
+     * Folder-aware overload (V449). Two rules decide what comes back:
+     * <ul>
+     *   <li>a SEARCH looks everywhere - an active {@code q} ignores {@code folderId} and the
+     *       tiles step aside, so an agent is findable wherever it was filed;</li>
+     *   <li>otherwise {@code folderId} narrows to one level: {@code "root"} = the agents
+     *       filed nowhere, an id = that folder's own agents. An ABSENT parameter means no
+     *       folder filter at all, which is what every other caller of this method gets.</li>
+     * </ul>
+     */
+    public AgentPage listAgentsPaged(String tenantId, String orgId, String orgRole,
+                                       String q, int page, int size, String sort, String visibility,
+                                       String folderId, boolean includeFolders) {
         String decodedTenantId = tenantId != null ? tenantId.replace("%7C", "|") : tenantId;
         boolean hasSearch = q != null && !q.isBlank();
 
@@ -623,6 +658,28 @@ public class AgentService {
                     .toList();
         }
 
+        // FOLDERS (V449). The tiles are built from the set as it stands HERE - after search and
+        // visibility, before the folder narrowing - so a tile counts exactly what the caller may
+        // see, over the folder's whole subtree.
+        boolean searching = hasSearch;
+        FolderScope folderScope = new FolderScope(decodedTenantId, orgId);
+        UUID folderFilter = parseFolderId(folderId);
+        boolean rootOnly = folderId != null && folderFilter == null;
+        boolean folderMissing = false;
+        if (folderFilter != null && agentFolderService != null
+                && !agentFolderService.existsInScope(folderFilter, folderScope)) {
+            // Deleted, or another workspace's: show the top level rather than an eternally empty
+            // page, and tell the caller to drop its filter.
+            folderFilter = null;
+            rootOnly = true;
+            folderMissing = true;
+        }
+        List<AgentEntity> folderAggregateSource = all;
+        if (!searching && (rootOnly || folderFilter != null)) {
+            final UUID wanted = folderFilter;
+            all = all.stream().filter(a -> java.util.Objects.equals(a.getFolderId(), wanted)).toList();
+        }
+
         // Order, then slice. Stable sort keeps the created_at-DESC base order as the tie-breaker.
         all = sortAgents(all, sort);
 
@@ -643,7 +700,35 @@ public class AgentService {
                         : Map.of());
         Map<String, Map<String, String>> publicationStatuses = toPublicationStatusMap(pageItems, pageRefs);
 
-        return new AgentPage(pageItems, totalCount, safePage, safeSize, publicationStatuses);
+        List<com.apimarketplace.common.folder.ResourceFolderDto> folderTiles = List.of();
+        List<Map<String, Object>> folderTrail = List.of();
+        if (includeFolders && agentFolderService != null) {
+            folderTiles = searching
+                    ? List.of()
+                    : agentFolderService.listFolderSummaries(folderScope, folderFilter, folderAggregateSource, sort);
+            folderTrail = folderFilter == null
+                    ? List.of()
+                    : agentFolderService.breadcrumb(agentFolderService.listAll(folderScope), folderFilter).stream()
+                            .map(com.apimarketplace.common.folder.AbstractResourceFolderController::toBareMap)
+                            .toList();
+        }
+
+        return new AgentPage(pageItems, totalCount, safePage, safeSize, publicationStatuses,
+                folderTiles, folderTrail, folderMissing);
+    }
+
+    /**
+     * The folder to narrow to, or {@code null} for the top level / no filter. An unparseable
+     * id is treated as the top level rather than an error: the filter is a view preference,
+     * and a bad one must never take the list down.
+     */
+    private static UUID parseFolderId(String folderId) {
+        if (folderId == null || folderId.isBlank() || "root".equalsIgnoreCase(folderId.trim())) return null;
+        try {
+            return UUID.fromString(folderId.trim());
+        } catch (IllegalArgumentException e) {
+            return null;
+        }
     }
 
     private static List<String> resourceIdsOf(List<AgentEntity> list) {

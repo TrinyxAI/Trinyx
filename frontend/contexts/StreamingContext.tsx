@@ -302,6 +302,21 @@ export interface PendingServiceApproval {
   services: ServiceApprovalInfo[];
   reason?: string;
   needsAttention?: boolean;
+  /**
+   * The agent is HOLDING the tool call that raised this card. Answering releases that
+   * call so the assistant finishes its current turn with the real result, instead of the
+   * older flow where the turn ended and a synthetic user message restarted it.
+   */
+  blocking?: boolean;
+  /**
+   * Every held call this card stands for, sent back on answer so each is released.
+   *
+   * <p>A LIST, not one key: cards are merged by the set of services they name, so two
+   * parallel calls blocked on the same unconnected service collapse into a single card.
+   * Keeping one key would release one call and leave the other holding until its deadline,
+   * with half the work silently failing at the end of a five-minute wait.
+   */
+  gateKeys?: string[];
   timestamp: number;
 }
 
@@ -314,6 +329,9 @@ export interface PendingToolAuthorization {
   toolCallId?: string;   // LLM tool-call id (correlation)
   argsSummary?: string;  // short human-readable summary of the call arguments
   applicationId?: string; // publication id - only for application:acquire (opens install modal)
+  /** See PendingServiceApproval.blocking. */
+  blocking?: boolean;
+  gateKey?: string;
   timestamp: number;
 }
 
@@ -365,6 +383,12 @@ function mergeApprovalReason(left?: string, right?: string): string | undefined 
   return Array.from(new Set(parts)).join('\n') || undefined;
 }
 
+/** Union of the held calls two merged cards stand for, order-stable and de-duplicated. */
+function mergeGateKeys(left?: string[], right?: string[]): string[] | undefined {
+  const keys = Array.from(new Set([...(left ?? []), ...(right ?? [])]));
+  return keys.length > 0 ? keys : undefined;
+}
+
 export function mergePendingServiceApprovals(
   existing: PendingServiceApproval,
   incoming: PendingServiceApproval,
@@ -382,6 +406,11 @@ export function mergePendingServiceApprovals(
     services: Array.from(services.values()),
     reason: mergeApprovalReason(existing.reason, incoming.reason),
     needsAttention: existing.needsAttention || incoming.needsAttention,
+    // A merged card stands for EVERY call that raised it, so the keys accumulate. Dropping
+    // one would leave that call holding until its deadline while the user believes they
+    // answered it.
+    blocking: existing.blocking || incoming.blocking,
+    gateKeys: mergeGateKeys(existing.gateKeys, incoming.gateKeys),
     timestamp: Math.min(existing.timestamp, incoming.timestamp),
   };
 }
@@ -478,9 +507,9 @@ type StreamingAction =
   | { type: 'TOOL_CALL'; conversationId: string; toolName: string; toolId: string; arguments?: string; thinkingMessage?: string }
   | { type: 'TOOL_RESULT'; conversationId: string; toolId: string; success: boolean; result?: string; resultId?: string; durationMs?: number; error?: string; visualization?: ToolVisualization; iconSlug?: string; displayToolName?: string; label?: string; tasksData?: ToolActivity['tasksData']; credentialRequired?: boolean; serviceApproval?: ToolActivity['serviceApproval']; diff?: ToolActivity['diff']; gitStatus?: ToolActivity['gitStatus'] }
   | { type: 'AGENT_BROWSE_STEP'; conversationId: string; toolId: string; sessionId: string; cdpToken: string; cdpWsUrl: string; currentUrl: string; runId: string; nodeId: string; stepIndex: number }
-  | { type: 'SERVICE_APPROVAL_REQUIRED'; conversationId: string; services: ServiceApprovalInfo[]; reason?: string; needsAttention?: boolean }
+  | { type: 'SERVICE_APPROVAL_REQUIRED'; conversationId: string; services: ServiceApprovalInfo[]; reason?: string; needsAttention?: boolean; blocking?: boolean; gateKey?: string }
   | { type: 'CLEAR_SERVICE_APPROVAL'; conversationId: string; key?: string }
-  | { type: 'TOOL_AUTHORIZATION_REQUIRED'; conversationId: string; rule: string; toolName?: string; action?: string; toolCallId?: string; argsSummary?: string; applicationId?: string }
+  | { type: 'TOOL_AUTHORIZATION_REQUIRED'; conversationId: string; rule: string; toolName?: string; action?: string; toolCallId?: string; argsSummary?: string; applicationId?: string; blocking?: boolean; gateKey?: string }
   | { type: 'CLEAR_TOOL_AUTHORIZATION'; conversationId: string; key?: string }
   | { type: 'COMPLETED'; conversationId: string; content?: string; streamId?: string }
   | { type: 'STOPPED'; conversationId: string; streamId?: string }
@@ -855,6 +884,8 @@ function streamingReducer(state: StreamingState, action: StreamingAction): Strea
         services: action.services,
         reason: action.reason,
         needsAttention: action.needsAttention,
+        blocking: action.blocking,
+        gateKeys: action.gateKey ? [action.gateKey] : undefined,
         timestamp: Date.now(),
       };
       const incomingKey = serviceApprovalKey(incoming.services, incoming.needsAttention);
@@ -908,6 +939,8 @@ function streamingReducer(state: StreamingState, action: StreamingAction): Strea
             toolCallId: action.toolCallId,
             argsSummary: action.argsSummary,
             applicationId: action.applicationId,
+            blocking: action.blocking,
+            gateKey: action.gateKey,
             timestamp: Date.now(),
           },
         ],
@@ -1423,6 +1456,8 @@ export function StreamingProvider({ children }: { children: ReactNode }) {
               services: mapped.serviceApprovalRequired.services,
               reason: mapped.serviceApprovalRequired.reason,
               needsAttention: mapped.serviceApprovalRequired.needsAttention,
+              blocking: mapped.serviceApprovalRequired.blocking,
+              gateKey: mapped.serviceApprovalRequired.gateKey,
             });
           }
           break;
@@ -1439,6 +1474,8 @@ export function StreamingProvider({ children }: { children: ReactNode }) {
               toolCallId: mapped.toolAuthorization.toolCallId,
               argsSummary: mapped.toolAuthorization.argsSummary,
               applicationId: mapped.toolAuthorization.applicationId,
+              blocking: mapped.toolAuthorization.blocking,
+              gateKey: mapped.toolAuthorization.gateKey,
             });
           }
           break;
@@ -1967,6 +2004,34 @@ export function StreamingProvider({ children }: { children: ReactNode }) {
                   && mapped.visualization.type !== 'agent_browse') {
                 dispatchSidePanelAutoOpen(mapped.visualization);
               }
+            } else if (mapped.type === 'service_approval_required' && mapped.serviceApprovalRequired) {
+              // A card the agent is HOLDING outlives a page reload, so it has to come back
+              // with it. Without this the user returns to a tool spinning for minutes with
+              // nothing to click, and the held call can only ever time out. Both reducers
+              // dedup by card key, so a card that ALSO arrived from the database collapses
+              // into one instead of showing twice.
+              dispatch({
+                type: 'SERVICE_APPROVAL_REQUIRED',
+                conversationId,
+                services: mapped.serviceApprovalRequired.services,
+                reason: mapped.serviceApprovalRequired.reason,
+                needsAttention: mapped.serviceApprovalRequired.needsAttention,
+                blocking: mapped.serviceApprovalRequired.blocking,
+                gateKey: mapped.serviceApprovalRequired.gateKey,
+              });
+            } else if (mapped.type === 'tool_authorization_required' && mapped.toolAuthorization) {
+              dispatch({
+                type: 'TOOL_AUTHORIZATION_REQUIRED',
+                conversationId,
+                rule: mapped.toolAuthorization.rule,
+                toolName: mapped.toolAuthorization.toolName,
+                action: mapped.toolAuthorization.action,
+                toolCallId: mapped.toolAuthorization.toolCallId,
+                argsSummary: mapped.toolAuthorization.argsSummary,
+                applicationId: mapped.toolAuthorization.applicationId,
+                blocking: mapped.toolAuthorization.blocking,
+                gateKey: mapped.toolAuthorization.gateKey,
+              });
             }
           } catch {
             // Ignore parse errors

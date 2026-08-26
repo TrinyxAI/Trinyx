@@ -24,6 +24,7 @@ import { conversationApi } from '@/lib/api/conversationApi';
 import { projectService } from '@/lib/api/orchestrator/project.service';
 import type { WorkflowPublication } from '@/lib/api/orchestrator/types';
 import { AvatarDisplay } from '@/components/agents/AvatarPicker';
+import { applicationPanelTabId, parseTabResource, workflowPanelTabId } from '@/lib/sidePanel/tabResource';
 
 interface PickerItem {
   id: string;
@@ -131,7 +132,7 @@ export function AddTabPicker({ variant = 'tab-bar' }: AddTabPickerProps) {
         if (!seenPubIds.has(pub.id)) {
           seenPubIds.add(pub.id);
           pickerItems.push({
-            id: `application-${pub.id}`,
+            id: applicationPanelTabId(pub.id),
             label: pub.title,
             category: 'application',
             publicationId: pub.id,
@@ -142,7 +143,7 @@ export function AddTabPicker({ variant = 'tab-bar' }: AddTabPickerProps) {
         if (!seenPubIds.has(app.sourcePublicationId)) {
           seenPubIds.add(app.sourcePublicationId);
           pickerItems.push({
-            id: `application-${app.sourcePublicationId}`,
+            id: applicationPanelTabId(app.sourcePublicationId),
             label: app.name,
             category: 'application',
             publicationId: app.sourcePublicationId,
@@ -170,7 +171,7 @@ export function AddTabPicker({ variant = 'tab-bar' }: AddTabPickerProps) {
       if (Array.isArray(workflows)) {
         for (const wf of workflows) {
           pickerItems.push({
-            id: `workflow-${wf.id}`,
+            id: workflowPanelTabId(wf.id),
             label: wf.name,
             category: 'workflow',
           });
@@ -289,7 +290,7 @@ export function AddTabPicker({ variant = 'tab-bar' }: AddTabPickerProps) {
       }
       for (const wf of (res.workflows || [])) {
         resourceItems.push({
-          id: `workflow-${wf.id}`,
+          id: workflowPanelTabId(wf.id),
           label: wf.name,
           category: 'workflow',
         });
@@ -311,7 +312,7 @@ export function AddTabPicker({ variant = 'tab-bar' }: AddTabPickerProps) {
       }
       for (const pub of (res.applications || [])) {
         resourceItems.push({
-          id: `application-${pub.id}`,
+          id: applicationPanelTabId(pub.id),
           label: pub.title || pub.name,
           category: 'application',
           publicationId: pub.id,
@@ -359,7 +360,7 @@ export function AddTabPicker({ variant = 'tab-bar' }: AddTabPickerProps) {
           id: item.id,
           label: item.label,
           icon: <Monitor className="w-4 h-4" />,
-          content: <InterfacePanelContent interfaceId={item.id.replace('interface-', '')} />,
+          content: <InterfacePanelContent interfaceId={parseTabResource(item.id)?.id ?? ''} />,
         });
         break;
       case 'table':
@@ -367,7 +368,7 @@ export function AddTabPicker({ variant = 'tab-bar' }: AddTabPickerProps) {
           id: item.id,
           label: item.label,
           icon: <Table className="w-4 h-4" />,
-          content: <DataSourcePanelContent dataSourceId={item.id.replace('datasource-', '')} />,
+          content: <DataSourcePanelContent dataSourceId={parseTabResource(item.id)?.id ?? ''} />,
           preferredWidth: 0.35,
         });
         break;
@@ -376,12 +377,12 @@ export function AddTabPicker({ variant = 'tab-bar' }: AddTabPickerProps) {
           id: item.id,
           label: item.label,
           icon: <Workflow className="w-4 h-4" />,
-          content: <WorkflowBuilderPanelContent workflowId={item.id.replace('workflow-', '')} />,
+          content: <WorkflowBuilderPanelContent workflowId={parseTabResource(item.id)?.id ?? ''} />,
           preferredWidth: 0.35,
         });
         break;
       case 'agent': {
-        const rawAgentId = item.id.replace('agent-', '');
+        const rawAgentId = parseTabResource(item.id)?.id ?? '';
         sidePanel.openTab({
           id: item.id,
           label: item.label,

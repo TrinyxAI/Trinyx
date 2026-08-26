@@ -1871,4 +1871,153 @@ class WorkflowErrorCheckerTest {
                     assertThat(String.valueOf(e.get("message"))).contains("credential_id"));
         }
     }
+
+    @Nested
+    @DisplayName("a step set to choose its account at run time, with no expression")
+    class BlankCredentialSelector {
+
+        @Test
+        @DisplayName("is an error at BUILD time, not only when the workflow finally runs")
+        void blankSelectorIsAnError() {
+            // The run-time failure arrives once the workflow is already live. This
+            // state is reached by toggling the field on and saving it unwritten, and it
+            // is what an ACQUIRED workflow arrives in, because publishing blanks the
+            // publisher choice on purpose. Without this check validate() is green and
+            // every catalog step of a freshly cloned app fails on its first real run.
+            Map<String, Object> step = mcpStep("tool-1", "Publish", Map.of());
+            step.put("credentialSelector", "");
+            stubValidSession(List.of(step));
+
+            List<Map<String, Object>> errors = checker.checkForErrors(session).errors();
+
+            assertThat(errors).anySatisfy(error -> {
+                assertThat(error.get("type")).isEqualTo("MISSING_REQUIRED_FIELD");
+                assertThat(error.get("message").toString()).contains("Publish");
+            });
+        }
+
+        @Test
+        @DisplayName("the message says which accounts qualify and how to find their names")
+        void messageNamesTheDiscoveryActionAndTheActiveRule() {
+            // This error is where an agent lands after building the step, so it is the
+            // one surface that has to answer "so what do I put here". Telling it the
+            // field is required, without saying that only an ACTIVE account resolves or
+            // naming an action that lists them, leaves it guessing at a fail-closed field.
+            Map<String, Object> step = mcpStep("tool-1", "Publish", Map.of());
+            step.put("credentialSelector", "");
+            stubValidSession(List.of(step));
+
+            List<Map<String, Object>> errors = checker.checkForErrors(session).errors();
+
+            assertThat(errors).anySatisfy(error -> {
+                assertThat(error.get("message").toString())
+                        .contains("ACTIVE")
+                        .contains("get_connected_services");
+                // The suggested fix is copied verbatim, so it has to resolve. This one
+                // always did ({{item.account}}); it is spelled the same as every other
+                // surface now so an agent does not meet two shapes for one field.
+                assertThat(error.get("fix").toString()).contains("{{item.ig_account}}");
+            });
+        }
+
+        @Test
+        @DisplayName("a whitespace-only expression counts as blank, because it resolves to nothing")
+        void whitespaceCountsAsBlank() {
+            Map<String, Object> step = mcpStep("tool-1", "Publish", Map.of());
+            step.put("credentialSelector", "   ");
+            stubValidSession(List.of(step));
+
+            assertThat(checker.checkForErrors(session).errors())
+                    .anyMatch(e -> "MISSING_REQUIRED_FIELD".equals(e.get("type")));
+        }
+
+        @Test
+        @DisplayName("the snake spelling is checked too, because the plan parser reads it")
+        void snakeSpellingIsChecked() {
+            // A plan imported through set_plan can carry credential_selector, and it is
+            // a live selector at run time. Checked only under the camel spelling, a
+            // blank one produced NO build-time error while every run of it failed.
+            Map<String, Object> step = mcpStep("tool-1", "Publish", Map.of());
+            step.put("credential_selector", "");
+            stubValidSession(List.of(step));
+
+            assertThat(checker.checkForErrors(session).errors())
+                    .anyMatch(e -> "MISSING_REQUIRED_FIELD".equals(e.get("type")));
+        }
+
+        @Test
+        @DisplayName("a filled expression is not an error")
+        void filledSelectorIsFine() {
+            Map<String, Object> step = mcpStep("tool-1", "Publish", Map.of());
+            step.put("credentialSelector", "{{item.ig_account}}");
+            stubValidSession(List.of(step));
+
+            assertThat(checker.checkForErrors(session).errors())
+                    .noneMatch(e -> "MISSING_REQUIRED_FIELD".equals(e.get("type")));
+        }
+
+        @Test
+        @DisplayName("a step with no selector at all is not an error, so existing workflows stay clean")
+        void absentSelectorIsFine() {
+            // Every workflow written before this feature takes this branch. An error
+            // here would light up every canvas in the product.
+            stubValidSession(List.of(mcpStep("tool-1", "Publish", Map.of())));
+
+            assertThat(checker.checkForErrors(session).errors())
+                    .noneMatch(e -> "MISSING_REQUIRED_FIELD".equals(e.get("type")));
+        }
+    }
+
+    @Nested
+    @DisplayName("a step set to BOTH choose an account and run on the platform pool")
+    class ConflictingCredentialModes {
+
+        @Test
+        @DisplayName("is an error at build time, because the run refuses it")
+        void conflictIsAnError() {
+            // The two modes answer one question. Unchecked here the plan saves clean,
+            // validate() is green, and every run of that step fails.
+            Map<String, Object> step = mcpStep("tool-1", "Publish", Map.of());
+            step.put("credentialSelector", "{{item.account}}");
+            step.put("credentialSource", "platform");
+            stubValidSession(List.of(step));
+
+            assertThat(checker.checkForErrors(session).errors())
+                    .anyMatch(e -> "CONFLICTING_FIELDS".equals(e.get("type")));
+        }
+
+        @Test
+        @DisplayName("the advice it gives can actually be followed")
+        void adviceRoutesToTheNodeNotTheToolParams() {
+            // The other way out of the conflict - moving the step off the platform pool
+            // - is not a parameter modify routes to the NODE: it would land in the tool
+            // params and travel to the provider as an undeclared argument. Advising it
+            // would have reintroduced the failure the reserved-parameter list exists to
+            // prevent, through the fix string of the error that reports the conflict.
+            Map<String, Object> step = mcpStep("tool-1", "Publish", Map.of());
+            step.put("credentialSelector", "{{item.account}}");
+            step.put("credentialSource", "platform");
+            stubValidSession(List.of(step));
+
+            String fix = checker.checkForErrors(session).errors().stream()
+                    .filter(e -> "CONFLICTING_FIELDS".equals(e.get("type")))
+                    .map(e -> String.valueOf(e.get("fix")))
+                    .findFirst().orElseThrow();
+
+            assertThat(fix).contains("credential_selector: null");
+            assertThat(fix).doesNotContain("credential_source");
+        }
+
+        @Test
+        @DisplayName("a step on the platform pool with no expression is not a conflict")
+        void platformAloneIsFine() {
+            // The no-regression half: every platform-pinned step today takes this branch.
+            Map<String, Object> step = mcpStep("tool-1", "Publish", Map.of());
+            step.put("credentialSource", "platform");
+            stubValidSession(List.of(step));
+
+            assertThat(checker.checkForErrors(session).errors())
+                    .noneMatch(e -> "CONFLICTING_FIELDS".equals(e.get("type")));
+        }
+    }
 }

@@ -150,4 +150,70 @@ describe('useGenerationModels', () => {
     expect(api.getModels).not.toHaveBeenCalled();
     expect(result.current.availability).toBe('unknown');
   });
+
+  /**
+   * A 200 that does not carry a catalogue.
+   *
+   * <p>Every case above hands the hook a well-formed body, and that is what let
+   * a real one through: anything that answers this path without serving it (a
+   * proxy, a gateway, a test double standing in for the whole API) replies 200
+   * with a body that has no `models` at all. Reading `.length` off it threw
+   * inside a memo DURING RENDER, so the throw did not land on generation, it
+   * landed on whatever page mounted the entry point, and a chat composer that
+   * never asked for a generation stopped rendering.
+   *
+   * <p>These pin the contract that makes that impossible: a body the hook
+   * cannot read as a catalogue yields NO models and a verdict, never an
+   * exception. They fail on the pre-fix hook with the TypeError it threw.
+   */
+  describe('a 200 whose body is not a catalogue', () => {
+    it('reports empty instead of throwing when the body carries no models at all', async () => {
+      // Exactly what a stand-in for the API sends: a 200, and nothing in it.
+      api.getModels.mockResolvedValue({});
+      const { Wrapper } = wrapper();
+
+      const { result } = renderHook(() => useGenerationModels(), { wrapper: Wrapper });
+
+      await waitFor(() => expect(result.current.isLoading).toBe(false));
+      // 'empty' and not 'unknown': an answer DID arrive and it names no model,
+      // which is what the reader faces. It keeps the entry point disabled with
+      // its reason rather than enabled onto a dialog with nothing in it.
+      expect(result.current.availability).toBe('empty');
+      expect(result.current.models).toEqual([]);
+    });
+
+    it('reports empty when models is present but is not a list', async () => {
+      // The callers map, filter and find over this. A non-array that survived
+      // normalisation would reach those calls and throw there instead, which is
+      // the same crash one stack frame later.
+      api.getModels.mockResolvedValue({ models: {}, count: 0, kinds: [] });
+      const { Wrapper } = wrapper();
+
+      const { result } = renderHook(() => useGenerationModels(), { wrapper: Wrapper });
+
+      await waitFor(() => expect(result.current.isLoading).toBe(false));
+      expect(result.current.availability).toBe('empty');
+      expect(Array.isArray(result.current.models)).toBe(true);
+      expect(result.current.models).toEqual([]);
+    });
+
+    it('renders a reader of that answer instead of taking its page down', async () => {
+      // The point of the fix, stated as the symptom it removes: the hook is
+      // read during render, so a throw here is not a failed feature, it is a
+      // blank page. Rendering at all is the assertion.
+      api.getModels.mockResolvedValue({});
+      const { Wrapper } = wrapper();
+
+      function Reader() {
+        const { availability, models } = useGenerationModels();
+        return <span data-testid="verdict">{`${availability}:${models.length}`}</span>;
+      }
+      const { getByTestId } = render(<Wrapper><Reader /></Wrapper>);
+
+      // The first render is legitimately 'unknown:0' (the answer is still out),
+      // so settle before reading: the pre-fix hook threw on the render that
+      // consumed the answer, which is the one that has to be asserted.
+      await waitFor(() => expect(getByTestId('verdict').textContent).toBe('empty:0'));
+    });
+  });
 });

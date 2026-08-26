@@ -2,11 +2,12 @@
 
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { getClientLocale } from '@/lib/utils/locale';
-import { Paperclip, ArrowUp, Square, X, FileIcon, ImageIcon, Loader2, Mic, MicOff, Settings2 } from 'lucide-react';
+import { Paperclip, ArrowUp, Square, X, FileIcon, ImageIcon, Loader2, Mic, MicOff, Settings2, Plus } from 'lucide-react';
 import { useQuery } from '@tanstack/react-query';
 import { AttachmentHandler, type AttachmentView } from './AttachmentHandler';
 import { ImageLightbox } from './ImageLightbox';
 import { Button } from '../ui/button';
+import { Popover, PopoverContent, PopoverTrigger } from '../ui/popover';
 import { useTranslations } from 'next-intl';
 import { attachmentApi, type PendingAttachment, type AttachmentRef } from '@/lib/api/attachmentApi';
 import { useDefaultSkills } from '@/hooks/useDefaultSkills';
@@ -15,9 +16,30 @@ import { orchestratorApi } from '@/lib/api/orchestrator';
 import { QueuedMessageBar } from './QueuedMessageBar';
 import { CreateGenerationModal } from '@/components/chat/generationModalEntry';
 import { GenerateEntryButton } from '@/components/chat/GenerateEntryButton';
+import { menuItemClass, menuSurfaceClass } from '@/components/ui/menu';
 import { MAX_QUEUE_SIZE, type QueuedMessage } from '@/lib/stores/message-queue-store';
 import { readDraft, writeDraft, clearDraft } from '@/lib/chat/draftStorage';
 import { fetchLinkedAgent, canFetchLinkedAgent } from '@/lib/chat/linkedAgent';
+
+/**
+ * Composer width (px) below which the three leading controls - attach, tools &
+ * skills, generate - are merged into a single button opening a menu.
+ *
+ * Measured, not guessed. At 430px the row is exactly full: three 36px icon
+ * buttons, the model selector at its readable width, the mic and the send
+ * button. Every pixel below that was taken from the RIGHT end of the row, and
+ * the composer bubble is `overflow-hidden`, so what disappeared was the send /
+ * stop button itself - 82px of it missing in a 320px side panel, which is the
+ * narrowest the panel can be dragged. Merging the three frees 74px, which is
+ * also what keeps the model name readable instead of squeezed to a few
+ * characters.
+ *
+ * Measured on the composer ELEMENT, not the viewport: this composer is rendered
+ * inside a resizable side panel and inside the builder's trigger panels, so it
+ * is routinely narrow on a wide screen. `useMobileDetection` answers a different
+ * question and would leave every one of those cases clipped.
+ */
+const MERGE_ACTIONS_BELOW_WIDTH_PX = 430;
 
 export interface AnalyzeBadge {
   id: string;
@@ -190,6 +212,9 @@ export function MessageComposer({
   const [localValue, setLocalValue] = useState(inputValue);
   const [openPanel, setOpenPanel] = useState<AttachmentView | null>(null);
   const [generationOpen, setGenerationOpen] = useState(false);
+  // Open state of the merged actions menu (narrow composers only - see
+  // MERGE_ACTIONS_BELOW_WIDTH_PX).
+  const [actionsMenuOpen, setActionsMenuOpen] = useState(false);
   const [pendingAttachments, setPendingAttachments] = useState<PendingAttachment[]>([]);
   const [isListening, setIsListening] = useState(false);
   // Pre-send image preview shown enlarged in the lightbox (null = closed). Uses the local
@@ -197,11 +222,37 @@ export function MessageComposer({
   const [lightboxPreview, setLightboxPreview] = useState<{ src: string; fileName: string } | null>(null);
   const menuContainerRef = useRef<HTMLDivElement>(null);
   const panelAnchorRef = useRef<HTMLDivElement>(null);
+  const composerRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const recognitionRef = useRef<SpeechRecognition | null>(null);
   // Tracks the confirmed text before the current interim result
   const confirmedTranscriptRef = useRef('');
+
+  // Merge the leading controls into one menu when the composer gets too narrow
+  // to hold them beside the send button (see MERGE_ACTIONS_BELOW_WIDTH_PX for
+  // the measurement, and for why this is an element width rather than the
+  // viewport's). Starts false, so a renderer with no ResizeObserver - jsdom, and
+  // any server render - draws the full row it drew before.
+  const [mergeActions, setMergeActions] = useState(false);
+  useEffect(() => {
+    const el = composerRef.current;
+    if (!el || typeof ResizeObserver === 'undefined') return;
+    const measure = () => {
+      setMergeActions(el.getBoundingClientRect().width < MERGE_ACTIONS_BELOW_WIDTH_PX);
+    };
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, []);
+
+  // The menu only exists while the row is merged. Widening the composer with it
+  // open would otherwise leave an orphaned popover anchored to a button that is
+  // no longer rendered.
+  useEffect(() => {
+    if (!mergeActions) setActionsMenuOpen(false);
+  }, [mergeActions]);
 
   // Close panel on outside click
   useEffect(() => {
@@ -554,6 +605,7 @@ export function MessageComposer({
         <div className="relative">
           {/* Composer container */}
           <div
+            ref={composerRef}
             className="bg-theme-primary overflow-hidden shadow-sm border border-theme"
             style={{ borderRadius: '28px' }}
           >
@@ -639,19 +691,130 @@ export function MessageComposer({
 
               {/* Bottom row: leading (file + tools + skills) | footer (empty) | trailing (send) */}
 
-              {/* Leading - 3 buttons side by side */}
-              <div ref={panelAnchorRef} className="flex items-center gap-0.5">
-                {/* File attachment - also available in minimal (DM) mode: DMs carry
-                    real attachments; only the AI-only Tools & Skills stay chat-only. */}
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  onClick={() => fileInputRef.current?.click()}
-                  className="h-9 w-9"
-                  title={t('chat.attachFiles')}
-                >
-                  <Paperclip className="w-4 h-4" />
-                </Button>
+              {/* Leading - the same three actions, drawn side by side when the
+                  composer has room for them and merged into one menu when it
+                  does not (MERGE_ACTIONS_BELOW_WIDTH_PX). `shrink-0` because
+                  what has to survive a narrow row is the send button at the
+                  other end, never these. */}
+              <div ref={panelAnchorRef} className="flex items-center gap-0.5 shrink-0">
+                {mergeActions ? (
+                  <Popover open={actionsMenuOpen} onOpenChange={setActionsMenuOpen}>
+                    <PopoverTrigger asChild>
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="h-9 w-9 shrink-0"
+                        title={t('chat.moreActions')}
+                        aria-label={t('chat.moreActions')}
+                      >
+                        <Plus className="w-4 h-4" />
+                      </Button>
+                    </PopoverTrigger>
+                    {/* The app's action menu (`components/ui/menu`), not a
+                        composer-specific one: same surface, same rows, same hover
+                        as the side panel's and the chat header's. Opens ABOVE the
+                        trigger and aligned on its left edge, because the composer
+                        sits at the bottom of its pane and a menu opening
+                        downwards would open off-screen. */}
+                    <PopoverContent
+                      align="start"
+                      side="top"
+                      className={`w-64 ${menuSurfaceClass}`}
+                    >
+                      <div role="menu" className="space-y-1">
+                        <button
+                          type="button"
+                          role="menuitem"
+                          className={menuItemClass}
+                          onClick={() => {
+                            setActionsMenuOpen(false);
+                            fileInputRef.current?.click();
+                          }}
+                        >
+                          <Paperclip className="h-4 w-4 flex-shrink-0" />
+                          <span>{t('chat.attachFiles')}</span>
+                        </button>
+                        {!minimal && (
+                          <button
+                            type="button"
+                            role="menuitem"
+                            className={menuItemClass}
+                            onClick={() => {
+                              setActionsMenuOpen(false);
+                              setOpenPanel(openPanel ? null : 'tools');
+                            }}
+                          >
+                            <Settings2 className="h-4 w-4 flex-shrink-0" />
+                            <span>{t('credentials.toolsAndSkills')}</span>
+                          </button>
+                        )}
+                        {/* The same component as the wide row, so the gate
+                            deciding whether a generation can be started here is
+                            asked once and answered the same way in both. */}
+                        <GenerateEntryButton
+                          variant="menuitem"
+                          label={t('chat.generateAsset')}
+                          onOpen={() => {
+                            setActionsMenuOpen(false);
+                            setGenerationOpen(true);
+                          }}
+                        />
+                      </div>
+                    </PopoverContent>
+                  </Popover>
+                ) : (
+                  <>
+                    {/* File attachment - also available in minimal (DM) mode: DMs carry
+                        real attachments; only the AI-only Tools & Skills stay chat-only. */}
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      onClick={() => fileInputRef.current?.click()}
+                      className="h-9 w-9 shrink-0"
+                      title={t('chat.attachFiles')}
+                    >
+                      <Paperclip className="w-4 h-4" />
+                    </Button>
+
+                    {!minimal && (
+                      <>
+                    {/* Tools & Skills (unified) */}
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      onClick={() => setOpenPanel(openPanel ? null : 'tools')}
+                      className={`h-9 w-9 shrink-0 ${openPanel ? 'bg-gray-100 dark:bg-gray-800' : ''}`}
+                      title={t('credentials.toolsAndSkills')}
+                    >
+                      <Settings2 className="w-4 h-4" />
+                    </Button>
+                      </>
+                    )}
+
+                    {/* Make an asset, beside the tools that use one. Outside the
+                        `minimal` block on purpose: making one is about the account,
+                        not about who reads the thread, so a DM offers it too, and
+                        so do the builder's chat-trigger panels, which render this
+                        composer whole. Every composer, deliberately: an asset is
+                        worth making wherever a message is written.
+
+                        The asset lands in the workspace files and is NOT attached
+                        to the draft: an attachment needs the bytes in hand, so that
+                        would download a stored asset only to upload a second copy
+                        of it, and the composer accepts neither video nor audio
+                        anyway. Independent of `disabled` too, which says this
+                        message cannot be sent yet, not that nothing may be made. */}
+                    <GenerateEntryButton
+                      variant="icon"
+                      label={t('chat.generateAsset')}
+                      onOpen={() => setGenerationOpen(true)}
+                    />
+                  </>
+                )}
+
+                {/* Outside the branch above: the picker is what BOTH the button
+                    and the menu row click, so unmounting it on a resize would
+                    drop the file the user is choosing. */}
                 <input
                   ref={fileInputRef}
                   type="file"
@@ -661,60 +824,29 @@ export function MessageComposer({
                   className="hidden"
                 />
 
-                {!minimal && (
-                  <>
-                {/* Tools & Skills (unified) */}
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  onClick={() => setOpenPanel(openPanel ? null : 'tools')}
-                  className={`h-9 w-9 ${openPanel ? 'bg-gray-100 dark:bg-gray-800' : ''}`}
-                  title={t('credentials.toolsAndSkills')}
-                >
-                  <Settings2 className="w-4 h-4" />
-                </Button>
-                  </>
-                )}
-
-                {/* Make an asset, beside the tools that use one. Outside the
-                    `minimal` block on purpose: making one is about the account,
-                    not about who reads the thread, so a DM offers it too, and
-                    so do the builder's chat-trigger panels, which render this
-                    composer whole. Every composer, deliberately: an asset is
-                    worth making wherever a message is written.
-
-                    The asset lands in the workspace files and is NOT attached
-                    to the draft: an attachment needs the bytes in hand, so that
-                    would download a stored asset only to upload a second copy
-                    of it, and the composer accepts neither video nor audio
-                    anyway. Independent of `disabled` too, which says this
-                    message cannot be sent yet, not that nothing may be made. */}
-                <GenerateEntryButton
-                  variant="icon"
-                  label={t('chat.generateAsset')}
-                  onOpen={() => setGenerationOpen(true)}
-                />
-
                 {/* Notification bell relocated to AppHeader (next to the
                     right-side-panel toggle) so the chat-home page surfaces
                     notifications without the composer needing to render. */}
               </div>
 
-              {/* Footer - center area */}
-              <div className="flex items-center justify-start gap-2 overflow-x-auto px-2">
+              {/* Footer - center area. Empty, and still the row's only elastic
+                  track: it is what pushes the trailing group to the right edge,
+                  and `min-w-0` is what lets it give that space back instead of
+                  the row overflowing the bubble. */}
+              <div className="flex items-center justify-start gap-2 overflow-x-auto px-2 min-w-0">
               </div>
 
               {/* Trailing - model selector / agent avatar + Mic + Send/Stop buttons.
                   leadingControl sits left of the mic (model conversations show the model
                   selector here, agent conversations the agent avatar). Dictation also
                   works in minimal (DM) mode - plain speech-to-text, not an AI tool. */}
-              <div className="flex items-center gap-1">
+              <div className="flex items-center gap-1 min-w-0">
                 {leadingControl}
                 {speechSupported && (
                   isListening ? (
                     <button
                       onClick={toggleDictation}
-                      className="flex items-center gap-2 h-9 px-3 rounded-xl bg-red-500/10 hover:bg-red-500/20 transition-colors"
+                      className="flex items-center gap-2 h-9 px-3 rounded-xl bg-red-500/10 hover:bg-red-500/20 transition-colors shrink-0"
                       title={t('chat.stopDictation')}
                     >
                       {/* Animated sound bars */}
@@ -732,7 +864,7 @@ export function MessageComposer({
                       variant="ghost"
                       size="icon"
                       onClick={toggleDictation}
-                      className="h-9 w-9"
+                      className="h-9 w-9 shrink-0"
                       title={t('chat.startDictation')}
                     >
                       <Mic className="w-4 h-4" />
@@ -752,7 +884,7 @@ export function MessageComposer({
                         onClick={handleSend}
                         disabled={disabled || isUploading || queueIsFull}
                         // Same slot, same control: the queue variant is round too.
-                        className="h-9 w-9 rounded-full shadow-none hover:shadow-none"
+                        className="h-9 w-9 shrink-0 rounded-full shadow-none hover:shadow-none"
                         title={queueIsFull ? t('chat.queue.full') : t('chat.queue.queued')}
                       >
                         <ArrowUp className="w-5 h-5" />
@@ -773,7 +905,12 @@ export function MessageComposer({
                       // moving; a shape that flips with the state (or with disabled) made it
                       // read as two different buttons. Everything else in the app stays on
                       // the square ladder.
-                      className="h-9 w-9 rounded-full shadow-none hover:shadow-none"
+                      // `shrink-0`: this is the control a cramped row must never
+                      // eat into. Before the row learned to merge its leading
+                      // buttons, a 320px composer clipped 82px off this button
+                      // against the bubble's `overflow-hidden` - the send/stop
+                      // control, half gone, with nothing saying why.
+                      className="h-9 w-9 shrink-0 rounded-full shadow-none hover:shadow-none"
                       title={showStopButton ? t('chat.stop') : t('chat.send')}
                     >
                       {showStopButton ? <Square className="w-5 h-5" /> : <ArrowUp className="w-5 h-5" />}

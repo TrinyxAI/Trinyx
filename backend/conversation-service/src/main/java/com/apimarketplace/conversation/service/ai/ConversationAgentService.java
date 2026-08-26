@@ -1159,7 +1159,10 @@ public class ConversationAgentService {
      * 1. request_credential tool → metadata contains serviceApprovalRequested=true
      * 2. approval_needed in tool content → tool result content contains {"status":"approval_needed"}
      */
-    private void persistPendingActionIfNeeded(String conversationId, AgentExecutionResponseDto response) {
+    // Package-private so the skip decision can be exercised through this method rather than
+    // through the predicate alone - a test on the predicate stays green if the call site
+    // loses its guard, which is the failure that matters.
+    void persistPendingActionIfNeeded(String conversationId, AgentExecutionResponseDto response) {
         try {
             // Previously persisted only the FIRST matching tool result and gated on
             // metrics.streamCompletedEarly. The async model raises approval/authorization
@@ -1171,6 +1174,10 @@ public class ConversationAgentService {
 
             List<Map<String, Object>> actions = new ArrayList<>();
             for (Map<String, Object> tr : toolResults) {
+                // A card the user REFUSED while the call was parked is settled: persisting it
+                // would resurrect, on the next page load, a card they just dismissed. A park
+                // that merely expired is still genuinely pending, so it is persisted as usual.
+                if (approvalGateRefused(tr)) continue;
                 Map<String, Object> action = extractPendingAction(tr);
                 if (action != null) {
                     actions.add(action);
@@ -1184,6 +1191,29 @@ public class ConversationAgentService {
         } catch (Exception e) {
             log.warn("Failed to persist pending action for conversation {}: {}", conversationId, e.getMessage());
         }
+    }
+
+    /**
+     * True when the user REFUSED while the call was parked, i.e. the request is settled and
+     * nothing is left pending.
+     *
+     * <p>Deliberately narrow: it is NOT "the gate handled this card". A park that expired or
+     * that the gate could not run left a card genuinely waiting on screen, which must still
+     * survive a page refresh and must still be replayed to a client that subscribed too
+     * late. Only an answer settles anything.
+     *
+     * <p>Metadata key mirrors {@code ToolApprovalGate.META_DECISION} (agent-service is not a
+     * dependency of this module, so the contract travels as a literal, like the sibling
+     * {@code toolAuthorizationRequired} / {@code serviceApprovalRequested} keys).
+     */
+    @SuppressWarnings("unchecked")
+    static boolean approvalGateRefused(Map<String, Object> tr) {
+        Map<String, Object> metadata = (Map<String, Object>) tr.get("metadata");
+        Object decision = metadata != null ? metadata.get("approvalGateDecision") : null;
+        // "stopped" settles it too: the user pressed Stop, so bringing the card back on the
+        // next page load would invite them to authorize a turn they just cancelled - and
+        // that click would find no park listening, so it would do nothing at all.
+        return "denied".equals(decision) || "stopped".equals(decision);
     }
 
     /**
@@ -1479,6 +1509,12 @@ public class ConversationAgentService {
             String channel = "ws:conversation:" + conversationId;
             Set<String> seen = new HashSet<>();
             for (Map<String, Object> tr : toolResults) {
+                // Same test as the persist path above, and for the same reason: only a card
+                // the user REFUSED is settled. A park that merely expired left its card
+                // waiting on screen, and this replay is the safety net for the users who hit
+                // the POST-before-WS-subscribe race - skipping those would leave them with
+                // no card at all until they refresh.
+                if (approvalGateRefused(tr)) continue;
                 Map<String, Object> action = extractPendingAction(tr);
                 if (action == null) continue;
                 // Dedup within the turn so a retried gated call does not double-emit. The

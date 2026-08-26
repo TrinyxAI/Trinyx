@@ -30,7 +30,8 @@ public record Step(String id,
                    String graphNodeId,
                    Long selectedCredentialId,
                    CredentialSource credentialSource,
-                   Long platformCredentialId) {
+                   Long platformCredentialId,
+                   String credentialSelector) {
 
     // Valid step types
     private static final Set<String> VALID_TYPES = Set.of(
@@ -96,6 +97,13 @@ public record Step(String id,
         params = params == null ? Map.of() : Map.copyOf(params);
         // graphNodeId is optional - passed from frontend plan, kept as-is (not normalized)
         credentialSource = credentialSource == null ? CredentialSource.USER : credentialSource;
+        // Only trimmed, never collapsed to null when blank. Absent means the step
+        // has no dynamic selection at all; PRESENT BUT BLANK means the author chose
+        // dynamic mode and left it empty, which has to fail loudly at run time.
+        // Collapsing the two made clearing the field in the builder fall back to the
+        // auto-filled pin, turning a multi-account step back into a single-account
+        // one with nothing to show for it.
+        credentialSelector = credentialSelector == null ? null : credentialSelector.trim();
         if (credentialSource.isPlatform() && platformCredentialId == null) {
             throw new IllegalArgumentException(
                     "Step '" + label + "' has credentialSource=platform but no platformCredentialId");
@@ -115,7 +123,29 @@ public record Step(String id,
                 CrudConfig crud,
                 String graphNodeId) {
         this(id, type, label, parentLoopId, params, dataSourceId, crud, graphNodeId,
-                null, CredentialSource.USER, null);
+                null, CredentialSource.USER, null, null);
+    }
+
+    /**
+     * Back-compat constructor for every caller that predates the dynamic
+     * credential selector. A step built through it has no selector, which is
+     * the state of every plan written before the field existed: the credential
+     * is resolved exactly as it was, from {@code selectedCredentialId} or the
+     * account default.
+     */
+    public Step(String id,
+                String type,
+                String label,
+                String parentLoopId,
+                Map<String, Object> params,
+                Long dataSourceId,
+                CrudConfig crud,
+                String graphNodeId,
+                Long selectedCredentialId,
+                CredentialSource credentialSource,
+                Long platformCredentialId) {
+        this(id, type, label, parentLoopId, params, dataSourceId, crud, graphNodeId,
+                selectedCredentialId, credentialSource, platformCredentialId, null);
     }
 
     /**
@@ -138,6 +168,21 @@ public record Step(String id,
 
     public boolean usesPlatformCredential() {
         return credentialSource == CredentialSource.PLATFORM;
+    }
+
+    /**
+     * True when this step decides its credential at RUN time rather than at
+     * authoring time.
+     *
+     * <p>This is the single discriminator between the two modes, and it is set
+     * only by a deliberate gesture (the builder's toggle, or an explicit
+     * parameter). It is deliberately NOT inferred from
+     * {@code selectedCredentialId}, which the node inspector auto-fills with the
+     * account's default key on first render, with no user action: "a pin exists"
+     * has never meant "the author chose one".
+     */
+    public boolean hasCredentialSelector() {
+        return credentialSelector != null;
     }
 
     /**
@@ -219,6 +264,6 @@ public record Step(String id,
 
     public Step withParams(Map<String, Object> newParams) {
         return new Step(id, type, label, parentLoopId, newParams, dataSourceId, crud, graphNodeId,
-                selectedCredentialId, credentialSource, platformCredentialId);
+                selectedCredentialId, credentialSource, platformCredentialId, credentialSelector);
     }
 }

@@ -22,6 +22,8 @@ import java.util.UUID;
 
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
+import static org.mockito.ArgumentMatchers.isNull;
+import static org.mockito.ArgumentMatchers.anyBoolean;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -80,7 +82,8 @@ class AgentControllerPagedTest {
         Map<String, Map<String, String>> statuses = new LinkedHashMap<>();
         statuses.put(sharedId.toString(), Map.of("status", "ACTIVE"));
         when(agentService.listAgentsPaged(
-                eq(TENANT_ID), eq(ORG_ID), eq(ORG_ROLE), eq("bot"), eq(2), eq(10), eq("name"), eq("public")))
+                eq(TENANT_ID), eq(ORG_ID), eq(ORG_ROLE), eq("bot"), eq(2), eq(10), eq("name"), eq("public"),
+                any(), anyBoolean()))
                 .thenReturn(new AgentService.AgentPage(
                         List.of(agentRow(sharedId, "Shared Bot")), 1, 2, 10, statuses));
 
@@ -99,14 +102,17 @@ class AgentControllerPagedTest {
 
         // The bound params reached the service verbatim (no silent drop / default override).
         verify(agentService).listAgentsPaged(
-                eq(TENANT_ID), eq(ORG_ID), eq(ORG_ROLE), eq("bot"), eq(2), eq(10), eq("name"), eq("public"));
+                eq(TENANT_ID), eq(ORG_ID), eq(ORG_ROLE), eq("bot"), eq(2), eq(10), eq("name"), eq("public"),
+                // No folder view was asked for: the list behaves exactly as it did before folders.
+                isNull(), eq(false));
     }
 
     @Test
     @DisplayName("defaults page=0/size=25 and leaves sort/visibility null when those params are absent")
     void appliesDefaultsWhenParamsAbsent() throws Exception {
         when(agentService.listAgentsPaged(
-                eq(TENANT_ID), eq(ORG_ID), eq(ORG_ROLE), any(), anyInt(), anyInt(), any(), any()))
+                eq(TENANT_ID), eq(ORG_ID), eq(ORG_ROLE), any(), anyInt(), anyInt(), any(), any(),
+                any(), anyBoolean()))
                 .thenReturn(new AgentService.AgentPage(List.of(), 0, 0, 25, Map.of()));
 
         mockMvc.perform(get("/api/agents/paged").header("X-User-ID", TENANT_ID))
@@ -119,6 +125,8 @@ class AgentControllerPagedTest {
         // page/size fall back to their @RequestParam defaults; sort/visibility bind to null (server
         // applies its own lastModified/all defaults downstream).
         verify(agentService).listAgentsPaged(
-                eq(TENANT_ID), eq(ORG_ID), eq(ORG_ROLE), eq(null), eq(0), eq(25), eq(null), eq(null));
+                eq(TENANT_ID), eq(ORG_ID), eq(ORG_ROLE), eq(null), eq(0), eq(25), eq(null), eq(null),
+                // No folderId either: an absent parameter means no folder filter at all.
+                eq(null), eq(false));
     }
 }

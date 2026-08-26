@@ -25,6 +25,8 @@ const mocks = vi.hoisted(() => ({
   getCredentialTemplateByName: vi.fn(),
   useCreditBalance: vi.fn(),
   uploadGeneric: vi.fn(),
+  downloadStoredFile: vi.fn(),
+  getModelOptions: vi.fn(),
 }));
 
 /**
@@ -36,6 +38,9 @@ const mocks = vi.hoisted(() => ({
 vi.mock('@/lib/api/orchestrator/file.service', () => ({
   fileService: { uploadGeneric: mocks.uploadGeneric },
   fileRefToUrl: ({ id }: { id?: string }) => `/api/proxy/files/by-id/${id}/raw`,
+  // The shared authenticated download. Stubbed because jsdom serves no bytes;
+  // what this file asserts is that the button reaches it with the right handle.
+  downloadStoredFile: mocks.downloadStoredFile,
 }));
 
 /**
@@ -104,8 +109,41 @@ vi.mock('@/lib/hooks/smart-hooks-complete', () => ({
   useCreditBalance: mocks.useCreditBalance,
 }));
 
+/**
+ * The Files viewer. Reduced to a marker that REPORTS what it was handed: what
+ * matters here is that the result step mounts the app's one file viewer and
+ * addresses it by the opaque id, not that the viewer works - it has its own
+ * tests, and rendering it for real would fetch bytes jsdom cannot serve.
+ */
+vi.mock('@/components/app/FileDetailView', () => ({
+  FileDetailView: (props: {
+    entryId?: string; s3Key?: string; fileName?: string; mimeType?: string;
+    sizeBytes?: number; fitMediaToHost?: boolean; chromeless?: boolean; onBack: () => void;
+  }) => (
+    <div
+      data-testid="file-detail-view"
+      data-entry-id={props.entryId ?? ''}
+      data-s3-key={props.s3Key ?? ''}
+      data-file-name={props.fileName ?? ''}
+      data-mime={props.mimeType ?? ''}
+      data-size={props.sizeBytes ?? ''}
+      data-fit-host={String(!!props.fitMediaToHost)}
+      data-chromeless={String(!!props.chromeless)}
+    >
+      <button type="button" onClick={props.onBack}>viewer-back</button>
+    </div>
+  ),
+}));
+
+const nav = vi.hoisted(() => ({ push: vi.fn() }));
+vi.mock('@/i18n/navigation', () => ({ useRouter: () => ({ push: nav.push }) }));
+
 vi.mock('@/lib/api/orchestrator/generation.service', () => ({
-  generationService: { getModels: mocks.getModels, execute: mocks.execute },
+  generationService: {
+    getModels: mocks.getModels,
+    execute: mocks.execute,
+    getModelOptions: mocks.getModelOptions,
+  },
 }));
 
 vi.mock('@/lib/api', () => ({
@@ -120,6 +158,12 @@ vi.mock('next-intl', () => ({
   // independent of the wording.
   useTranslations: () => (key: string, values?: Record<string, unknown>) =>
     values ? `${key}:${Object.values(values).join(',')}` : key,
+  // The upgrade notice builds a locale-prefixed link to the plans.
+  useLocale: () => 'en',
+}));
+
+vi.mock('next/link', () => ({
+  default: ({ href, children }: any) => <a href={href}>{children}</a>,
 }));
 
 import { ApiError } from '@/lib/api/api-client';
@@ -207,6 +251,191 @@ describe('CreateGenerationModal', () => {
    * it rather than a class list: a finished step reads as finished, and a step
    * behind you is a way back.
    */
+  /**
+   * What the reader gets for their money.
+   *
+   * <p>The result step used to be a line of text and a download LINK: the one
+   * thing that had just been paid for was the one thing this screen would not
+   * show, and nothing said the asset had been written into the workspace at all.
+   * It now mounts the app's single file viewer - the same one /app/files opens
+   * on a click and the side panel mounts for a chat result - and offers the way
+   * to where the asset lives.
+   */
+  describe('the finished asset', () => {
+    const file = { id: 'f1', path: 'tenant/wf/out.mp4', name: 'out.mp4', mimeType: 'video/mp4', size: 2048 };
+
+    async function generate(data: Record<string, unknown>) {
+      mocks.getModels.mockResolvedValue({ models: [model()], count: 1, kinds: ['video'] });
+      mocks.execute.mockResolvedValue({ success: true, data });
+
+      renderModal();
+      fireEvent.click(await screen.findByText('formats.video'));
+      fireEvent.change(screen.getByLabelText(/fields\.prompt/), { target: { value: 'a boat' } });
+      fireEvent.click(screen.getByText('generate'));
+      await waitFor(() => expect(mocks.execute).toHaveBeenCalled());
+    }
+
+    it('shows the asset in the SAME viewer the Files page opens', async () => {
+      await generate({ model: 'seedance-2.0', kind: 'video', provider: 'Seedance', file });
+
+      const viewer = await screen.findByTestId('file-detail-view');
+
+      expect(viewer.getAttribute('data-file-name')).toBe('out.mp4');
+      expect(viewer.getAttribute('data-mime')).toBe('video/mp4');
+      expect(viewer.getAttribute('data-size')).toBe('2048');
+    });
+
+    it('addresses it by the opaque id, never by the storage key', async () => {
+      // `path` is the S3 object key: used as a URL it resolves against the
+      // current page and writes the tenant prefix into the DOM. The viewer
+      // loads by id and treats the key as display-only.
+      await generate({ model: 'seedance-2.0', kind: 'video', provider: 'Seedance', file });
+
+      const viewer = await screen.findByTestId('file-detail-view');
+
+      expect(viewer.getAttribute('data-entry-id')).toBe('f1');
+    });
+
+    it('offers the way to where the asset now lives, and closes on the way out', async () => {
+      // A generation writes into the workspace. Until now the reader had to
+      // know that, close the dialog and go looking.
+      const onClose = vi.fn();
+      mocks.getModels.mockResolvedValue({ models: [model()], count: 1, kinds: ['video'] });
+      mocks.execute.mockResolvedValue({
+        success: true,
+        data: { model: 'seedance-2.0', kind: 'video', provider: 'Seedance', file },
+      });
+      const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+      render(
+        <QueryClientProvider client={client}>
+          <CreateGenerationModal isOpen onClose={onClose} />
+        </QueryClientProvider>,
+      );
+      fireEvent.click(await screen.findByText('formats.video'));
+      fireEvent.change(screen.getByLabelText(/fields\.prompt/), { target: { value: 'a boat' } });
+      fireEvent.click(screen.getByText('generate'));
+      await screen.findByTestId('file-detail-view');
+
+      fireEvent.click(screen.getByText('openInFiles'));
+
+      // Closed FIRST, and asserted as an ORDER: routing with it mounted would
+      // leave a blocking modal floating over the destination, and "both were
+      // called" stays green when the two lines are swapped.
+      expect(onClose).toHaveBeenCalled();
+      expect(nav.push).toHaveBeenCalledWith('/app/files');
+      expect(onClose.mock.invocationCallOrder[0])
+        .toBeLessThan(nav.push.mock.invocationCallOrder[0]);
+    });
+
+    it('bounds the viewer, and tells it to fit the media to that box', async () => {
+      // Both halves are load-bearing and neither is visible in a screenshot: the
+      // viewer fills its container, so with no height it collapses to nothing;
+      // and its own caps are viewport-relative, so without this a portrait asset
+      // renders taller than the frame and scrolls inside it.
+      await generate({ model: 'seedance-2.0', kind: 'video', provider: 'Seedance', file });
+
+      const viewer = await screen.findByTestId('file-detail-view');
+
+      expect(viewer.parentElement?.className).toMatch(/h-\[\d+vh\]/);
+      expect(viewer.getAttribute('data-fit-host')).toBe('true');
+    });
+
+    it('shows the asset bare, not as a card inside the dialog', async () => {
+      // The asset sits directly on the dialog: no header bar of its own, no
+      // border, no second surface. Boxed, the viewer brought its own header and
+      // its own full-width download, which put a card inside a card and gave the
+      // step three competing actions where it has one.
+      await generate({ model: 'seedance-2.0', kind: 'video', provider: 'Seedance', file });
+
+      const viewer = await screen.findByTestId('file-detail-view');
+      const host = viewer.parentElement as HTMLElement;
+
+      expect(viewer.getAttribute('data-chromeless')).toBe('true');
+      expect(host.className).not.toMatch(/\bborder\b|\brounded-/);
+    });
+
+    it('offers the download beside it, through the shared authenticated helper', async () => {
+      // The chromeless viewer draws no controls, so this button is the only way
+      // to keep the file from this screen. It goes through the shared helper
+      // rather than a second hand-written fetch: that helper is where the rule
+      // "the token travels in a header, never in a URL" is enforced once.
+      await generate({ model: 'seedance-2.0', kind: 'video', provider: 'Seedance', file });
+      await screen.findByTestId('file-detail-view');
+
+      fireEvent.click(screen.getByText('download'));
+
+      await waitFor(() => expect(mocks.downloadStoredFile).toHaveBeenCalledWith('f1', 'out.mp4'));
+    });
+
+    it('keeps the dialog open after a download - keeping the file is not being done', async () => {
+      const onClose = vi.fn();
+      mocks.getModels.mockResolvedValue({ models: [model()], count: 1, kinds: ['video'] });
+      mocks.execute.mockResolvedValue({
+        success: true,
+        data: { model: 'seedance-2.0', kind: 'video', provider: 'Seedance', file },
+      });
+      const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+      render(
+        <QueryClientProvider client={client}>
+          <CreateGenerationModal isOpen onClose={onClose} />
+        </QueryClientProvider>,
+      );
+      fireEvent.click(await screen.findByText('formats.video'));
+      fireEvent.change(screen.getByLabelText(/fields\.prompt/), { target: { value: 'a boat' } });
+      fireEvent.click(screen.getByText('generate'));
+      await screen.findByTestId('file-detail-view');
+
+      fireEvent.click(screen.getByText('download'));
+
+      await waitFor(() => expect(mocks.downloadStoredFile).toHaveBeenCalled());
+      expect(onClose).not.toHaveBeenCalled();
+    });
+
+    it('says so when the save fails, instead of silently re-enabling the button', async () => {
+      // A button that comes back to life looks exactly like a click that never
+      // registered, and the reader has already paid for this file.
+      mocks.downloadStoredFile.mockRejectedValueOnce(new Error('HTTP 403'));
+      await generate({ model: 'seedance-2.0', kind: 'video', provider: 'Seedance', file });
+      await screen.findByTestId('file-detail-view');
+
+      fireEvent.click(screen.getByText('download'));
+
+      expect(await screen.findByText('HTTP 403')).toBeInTheDocument();
+    });
+
+    it('offers no download when the asset came back without a handle', async () => {
+      // There is nothing to fetch, so a button that could only fail is worse
+      // than no button.
+      await generate({ model: 'seedance-2.0', kind: 'video', provider: 'Seedance', file: { name: 'out.mp4' } });
+
+      expect(await screen.findByText('savedNoPreview')).toBeInTheDocument();
+      expect(screen.queryByText('download')).toBeNull();
+      expect(screen.getByText('openInFiles')).toBeInTheDocument();
+    });
+
+    it('sends the viewer own back arrow to Files too, so it is not a dead end', async () => {
+      // Its header chevron is labelled "Files". In this modal there is no list
+      // behind it, so it goes where it says rather than nowhere.
+      await generate({ model: 'seedance-2.0', kind: 'video', provider: 'Seedance', file });
+      await screen.findByTestId('file-detail-view');
+
+      fireEvent.click(screen.getByText('viewer-back'));
+
+      expect(nav.push).toHaveBeenCalledWith('/app/files');
+    });
+
+    it('says where the asset is when it comes back with no id, instead of a dead link', async () => {
+      // Nothing can be previewed or downloaded without the handle, but the file
+      // IS in the workspace - which is the only useful thing left to say.
+      await generate({ model: 'seedance-2.0', kind: 'video', provider: 'Seedance', file: { name: 'out.mp4' } });
+
+      expect(await screen.findByText('savedNoPreview')).toBeInTheDocument();
+      expect(screen.queryByTestId('file-detail-view')).toBeNull();
+      // And the way to Files is still offered, since that is where it landed.
+      expect(screen.getByText('openInFiles')).toBeInTheDocument();
+    });
+  });
+
   describe('the step header', () => {
     /** The dialog renders through a portal, so the steps are on the document. */
     const steps = async () => {
@@ -231,15 +460,36 @@ describe('CreateGenerationModal', () => {
       expect(first.className).toContain('emerald');
     });
 
-    it('marks a finished step with a check, not with the step icon', async () => {
+    it('keeps the check on a finished step, and refuses it on the ones not done', async () => {
+      // The check itself is NOT what this change brought - the hand-rolled copy
+      // already swapped the icon. What it is here for is the contrast: the check
+      // marks the finished step ONLY, so "done" cannot be confused with the step
+      // you are on. Asserting the check alone would have passed before the change.
       mocks.getModels.mockResolvedValue({ models: [], count: 0, kinds: [] });
 
       renderModal({ initialKind: 'image' });
-      const [first] = await steps();
+      const [first, second] = await steps();
 
-      // lucide names its svg, which is how the check is told from the original
-      // icon without asserting on the drawing itself.
-      expect(first.querySelector('svg')?.getAttribute('class')).toContain('lucide-check');
+      const iconOf = (b: HTMLButtonElement) => b.querySelector('svg')?.getAttribute('class') ?? '';
+
+      expect(iconOf(first)).toContain('lucide-check');
+      expect(iconOf(second)).not.toContain('lucide-check');
+      // Step 3 is deliberately not part of the contrast: "Result" carries a
+      // check as its OWN icon (see STEPS), so a check there says nothing about
+      // whether it is finished. What separates done from pending on this header
+      // is the green, which the case above pins.
+    });
+
+    it('names every step for a reader who cannot see the label', async () => {
+      // The label is hidden below `sm`, which left three unnamed icon buttons in
+      // the tab order at exactly the width where pointing is hardest.
+      mocks.getModels.mockResolvedValue({ models: [], count: 0, kinds: [] });
+
+      renderModal({ initialKind: 'image' });
+
+      for (const step of await steps()) {
+        expect(step.getAttribute('aria-label')?.length ?? 0).toBeGreaterThan(0);
+      }
     });
 
     it('draws its steps as buttons on the Button rung, like every other modal', async () => {
@@ -309,6 +559,25 @@ describe('CreateGenerationModal', () => {
       // And it is the CHOSEN model that was asked about, since its answer is
       // the one that decides who pays.
       expect(mocks.getPlatformCredentialPublicInfo.mock.calls[0][0]).toBe('a');
+    });
+
+    it('regression: marks only the rows the platform can actually sell', async () => {
+      // The catalogue is not filtered by sellability, so a list holds both
+      // kinds. A model the platform does not sell runs on the reader's own key
+      // and costs no credits, and a lock on its row would be the same lie the
+      // own-key branch already refuses.
+      mocks.getModels.mockResolvedValue(threeModels());
+      mocks.useCreditBalance.mockReturnValue({ subBalance: 800, paygBalance: 0, monthlyCreditsAreWorkflowOnly: true });
+      mocks.getPlatformCredentialPublicInfo.mockImplementation(async (integration: string) =>
+        (integration === 'b'
+          ? quote({ available: false, platformCredentialId: null, hasPricing: false })
+          : quote()));
+
+      renderModal({ initialKind: 'image' });
+      await screen.findByText(/Image A/);
+
+      // Three models, one of them unsold: two locks.
+      await waitFor(() => expect(screen.getAllByText('label')).toHaveLength(2));
     });
 
     it('still quotes every model once the platform is known to sell, so the list keeps its prices', async () => {
@@ -1067,7 +1336,56 @@ describe('CreateGenerationModal', () => {
     renderModal();
     fireEvent.click(await screen.findByText('formats.video'));
 
-    expect(await screen.findByText('payer.monthlyCreditsOnly')).toBeInTheDocument();
+    expect(await screen.findByRole('link', { name: 'cta' })).toBeInTheDocument();
+  });
+
+  it('offers an ADVISORY list here, unlike the workflow builder', async () => {
+    // Deliberate, and the opposite of what the inspector does with the same
+    // flag. There a parameter is often bound to runtime data, so closing the
+    // field would take the templating away; here every value is typed by a
+    // person and the alternative is a plain text box asking for an opaque
+    // identifier. The trade is that a value the catalogue does not know cannot
+    // be entered in this dialog.
+    mocks.getModels.mockResolvedValue({
+      models: [model({
+        limits: { style: { allowed: ['anime', 'cinematic'], allowedEnforced: false } },
+        accepts: ['prompt', 'style'],
+      })],
+      count: 1,
+      kinds: ['video'],
+    });
+
+    renderModal();
+    fireEvent.click(await screen.findByText('formats.video'));
+
+    // A select, not a text box: the option is there to be picked.
+    expect(await screen.findByText('anime')).toBeInTheDocument();
+  });
+
+  it('marks each model row it cannot pay for, while the reader is still choosing', async () => {
+    // The sentence under the picker arrives after a model is chosen; the badge
+    // is on the rows themselves, which is where the choice is actually made.
+    mocks.getModels.mockResolvedValue({ models: [model()], count: 1, kinds: ['video'] });
+    mocks.useCreditBalance.mockReturnValue({ subBalance: 800, paygBalance: 0, monthlyCreditsAreWorkflowOnly: true });
+
+    renderModal();
+    fireEvent.click(await screen.findByText('formats.video'));
+
+    expect(await screen.findByText('label')).toBeInTheDocument();
+  });
+
+  it('takes the row badge away once the payer is the reader’s own key', async () => {
+    // Their own key is not billed in credits, so a badge there would be a lie.
+    mocks.getModels.mockResolvedValue({ models: [model()], count: 1, kinds: ['video'] });
+    mocks.useCreditBalance.mockReturnValue({ subBalance: 800, paygBalance: 0, monthlyCreditsAreWorkflowOnly: true });
+
+    renderModal();
+    fireEvent.click(await screen.findByText('formats.video'));
+    expect(await screen.findByText('label')).toBeInTheDocument();
+
+    fireEvent.click(screen.getByText('source.user'));
+
+    expect(screen.queryByText('label')).not.toBeInTheDocument();
   });
 
   it('says nothing about credits once the payer is the user’s own key', async () => {
@@ -1078,10 +1396,10 @@ describe('CreateGenerationModal', () => {
 
     renderModal();
     fireEvent.click(await screen.findByText('formats.video'));
-    expect(await screen.findByText('payer.monthlyCreditsOnly')).toBeInTheDocument();
+    expect(await screen.findByRole('link', { name: 'cta' })).toBeInTheDocument();
 
     fireEvent.click(screen.getByText('source.user'));
-    expect(screen.queryByText('payer.monthlyCreditsOnly')).not.toBeInTheDocument();
+    expect(screen.queryByRole('link', { name: 'cta' })).not.toBeInTheDocument();
   });
 
   it('stays quiet for an account that can actually pay', async () => {
@@ -1091,7 +1409,7 @@ describe('CreateGenerationModal', () => {
     renderModal();
     fireEvent.click(await screen.findByText('formats.video'));
 
-    expect(screen.queryByText('payer.monthlyCreditsOnly')).not.toBeInTheDocument();
+    expect(screen.queryByRole('link', { name: 'cta' })).not.toBeInTheDocument();
   });
 
   it('stays quiet while the balance is still unknown, rather than warning on a guess', async () => {
@@ -1104,7 +1422,7 @@ describe('CreateGenerationModal', () => {
     renderModal();
     fireEvent.click(await screen.findByText('formats.video'));
 
-    expect(screen.queryByText('payer.monthlyCreditsOnly')).not.toBeInTheDocument();
+    expect(screen.queryByRole('link', { name: 'cta' })).not.toBeInTheDocument();
   });
 
   it('says nothing to a PAYING account whose monthly credits pay for everything', async () => {
@@ -1120,7 +1438,7 @@ describe('CreateGenerationModal', () => {
     renderModal();
     fireEvent.click(await screen.findByText('formats.video'));
 
-    expect(screen.queryByText('payer.monthlyCreditsOnly')).not.toBeInTheDocument();
+    expect(screen.queryByRole('link', { name: 'cta' })).not.toBeInTheDocument();
   });
 
   it('presents a lost connection as still running and still charged, never as a failure', async () => {
@@ -1528,5 +1846,149 @@ describe('CreateGenerationModal', () => {
     // stopped before it, so this is the only click that could dismiss.
     fireEvent.click(screen.getByRole('dialog').parentElement!);
     expect(onClose).not.toHaveBeenCalled();
+  });
+});
+
+describe('CreateGenerationModal - values only the provider can name', () => {
+  /**
+   * An ElevenLabs voice belongs to the account holding the key: the shared
+   * defaults, plus everything that account cloned or bought. No list shipped in
+   * the catalogue is true for two readers, and a wrong voice id is twenty opaque
+   * characters that fail at the provider AFTER the call is paid for. So the row
+   * only says asking is worth it, and the dialog does the asking.
+   */
+  function voiceModel(over: Record<string, unknown> = {}) {
+    return model({
+      accepts: ['prompt', 'voice'],
+      limits: { voice: { optionsAvailable: true } },
+      ...over,
+    });
+  }
+
+  it('offers the provider’s own values, labelled, instead of a box for an opaque id', async () => {
+    mocks.getModels.mockResolvedValue({ models: [voiceModel()], count: 1, kinds: ['video'] });
+    mocks.getModelOptions.mockResolvedValue({
+      success: true,
+      options: [{ value: '21m00', label: 'Rachel' }, { value: 'AZnzlk', label: 'Domi' }],
+      count: 2,
+    });
+
+    renderModal();
+    fireEvent.click(await screen.findByText('formats.video'));
+
+    // The NAME is what a person recognises; the id is what the run needs.
+    const option = await screen.findByRole('option', { name: 'Rachel' });
+    expect(option).toBeInTheDocument();
+    expect((option as HTMLOptionElement).value).toBe('21m00');
+  });
+
+  it('asks with the payer the dialog is showing, and asks again when it moves', async () => {
+    mocks.getModels.mockResolvedValue({ models: [voiceModel()], count: 1, kinds: ['video'] });
+    mocks.getModelOptions.mockResolvedValue({ success: true, options: [{ value: 'v', label: 'V' }] });
+
+    renderModal();
+    fireEvent.click(await screen.findByText('formats.video'));
+    await screen.findByRole('option', { name: 'V' });
+    expect(mocks.getModelOptions).toHaveBeenCalledWith(
+      'seedance-2.0', 'voice', 'platform', null,
+    );
+
+    fireEvent.click(screen.getByText('source.user'));
+
+    // A voice list read on the platform's key is not the reader's own: leaving
+    // it on screen would offer ids the chosen key never had.
+    await waitFor(() => expect(mocks.getModelOptions).toHaveBeenCalledWith(
+      'seedance-2.0', 'voice', 'user', null,
+    ));
+  });
+
+  it('drops a chosen value the new key does not actually offer', async () => {
+    mocks.getModels.mockResolvedValue({ models: [voiceModel()], count: 1, kinds: ['video'] });
+    mocks.getModelOptions
+      .mockResolvedValueOnce({ success: true, options: [{ value: 'platform-only', label: 'Platform Voice' }] })
+      .mockResolvedValue({ success: true, options: [{ value: 'mine', label: 'My Voice' }] });
+
+    renderModal();
+    fireEvent.click(await screen.findByText('formats.video'));
+    const select = (await screen.findByRole('option', { name: 'Platform Voice' })).closest('select')!;
+    fireEvent.change(select, { target: { value: 'platform-only' } });
+    expect((select as HTMLSelectElement).value).toBe('platform-only');
+
+    fireEvent.click(screen.getByText('source.user'));
+
+    // Left in place it still LOOKS chosen, and the run fails after it is billed.
+    await waitFor(() => expect(
+      (screen.getByRole('option', { name: 'My Voice' }).closest('select') as HTMLSelectElement).value,
+    ).toBe(''));
+  });
+
+  it('says why the field is a text box when the values could not be had', async () => {
+    mocks.getModels.mockResolvedValue({ models: [voiceModel()], count: 1, kinds: ['video'] });
+    mocks.getModelOptions.mockResolvedValue({
+      success: false,
+      error: 'no ElevenLabs key is connected',
+    });
+
+    renderModal();
+    fireEvent.click(await screen.findByText('formats.video'));
+
+    // Silence reads as "this field has no choices", which is a different fact
+    // from "nobody was ever asked".
+    expect(await screen.findByText('no ElevenLabs key is connected')).toBeInTheDocument();
+  });
+
+  it('does not ask for a field whose values the catalogue already knows', async () => {
+    mocks.getModels.mockResolvedValue({
+      models: [model({ accepts: ['prompt', 'style'], limits: { style: { allowed: ['anime'] } } })],
+      count: 1,
+      kinds: ['video'],
+    });
+
+    renderModal();
+    fireEvent.click(await screen.findByText('formats.video'));
+    await screen.findByRole('option', { name: 'anime' });
+
+    // Each ask costs a call to the provider. A closed set the catalogue
+    // documents is not one of them.
+    expect(mocks.getModelOptions).not.toHaveBeenCalled();
+  });
+
+  it('lets a value outside a SAMPLE be typed, instead of showing a closed list that is not one', async () => {
+    mocks.getModels.mockResolvedValue({ models: [voiceModel()], count: 1, kinds: ['video'] });
+    mocks.getModelOptions.mockResolvedValue({
+      success: true,
+      options: [{ value: 'v1', label: 'Voice One' }],
+      truncated: true,
+      total_count: 812,
+    });
+
+    renderModal();
+    fireEvent.click(await screen.findByText('formats.video'));
+
+    // A select over a sample is a dead end: the reader whose voice is one of
+    // the other 811 cannot enter it at all. Type-or-pick, one control.
+    const field = await screen.findByLabelText(/params\.voice/);
+    expect(field.tagName).toBe('INPUT');
+    fireEvent.change(field, { target: { value: 'v800' } });
+    expect((field as HTMLInputElement).value).toBe('v800');
+    // And the sample is still offered, so the common case stays a click.
+    // Read off the DOM rather than by role: a datalist's options are suggestions
+    // attached to the input, not choices in the accessibility tree.
+    const suggestions = document.getElementById(field.getAttribute('list')!);
+    expect(suggestions?.querySelector('option')?.getAttribute('value')).toBe('v1');
+  });
+
+  it('regression: an empty answer SAYS so instead of leaving a bare box', async () => {
+    // The live symptom was "it loads, then nothing". A field that was going to
+    // offer values and ends up offering none has to say that much: silence
+    // describes a refusal, an empty account and a provider that omits the
+    // model equally well, and they call for different moves.
+    mocks.getModels.mockResolvedValue({ models: [voiceModel()], count: 1, kinds: ['video'] });
+    mocks.getModelOptions.mockResolvedValue({ success: true, options: [], count: 0 });
+
+    renderModal();
+    fireEvent.click(await screen.findByText('formats.video'));
+
+    expect(await screen.findByText('fields.optionsEmpty')).toBeInTheDocument();
   });
 });

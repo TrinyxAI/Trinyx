@@ -1,7 +1,9 @@
 package com.apimarketplace.auth.credential.service;
 
 import com.apimarketplace.auth.credential.domain.CredentialModels.*;
+import com.apimarketplace.auth.credential.domain.CredentialRenameRefusedException;
 import com.apimarketplace.auth.credential.repository.CredentialRepository;
+import com.apimarketplace.common.icon.IconSlugNormalizer;
 import com.apimarketplace.common.web.TenantResolver;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -25,6 +27,41 @@ import java.util.Set;
 public class CredentialService {
 
     private static final Logger log = LoggerFactory.getLogger(CredentialService.class);
+
+    /**
+     * Max length of a credential's display name - mirrors the
+     * {@code auth.credentials.name VARCHAR(255)} column, so an over-long rename
+     * is rejected with a 400 instead of a database error.
+     */
+    public static final int MAX_NAME_LENGTH = 255;
+
+    /**
+     * Trim and validate a credential's display name, for CREATE and for RENAME alike.
+     *
+     * <p>The three rules exist for the same reasons on both paths: the column is
+     * {@code VARCHAR(255)} so an over-long name is a database error rather than a
+     * feature, a blank name leaves an unidentifiable row in every picker, and control
+     * characters survive {@code trim()} and would reach agent-facing listings
+     * ({@code get_connected_services} returns the raw name) and every UI label.
+     *
+     * @return the trimmed name
+     * @throws IllegalArgumentException when the name is blank, too long, or carries
+     *                                  control characters
+     */
+    public static String validateName(String name) {
+        String trimmed = name == null ? "" : name.trim();
+        if (trimmed.isEmpty()) {
+            throw new IllegalArgumentException("Credential name cannot be empty");
+        }
+        if (trimmed.length() > MAX_NAME_LENGTH) {
+            throw new IllegalArgumentException(
+                    "Credential name cannot exceed " + MAX_NAME_LENGTH + " characters");
+        }
+        if (trimmed.chars().anyMatch(Character::isISOControl)) {
+            throw new IllegalArgumentException("Credential name cannot contain control characters");
+        }
+        return trimmed;
+    }
 
     private final CredentialRepository credentialRepository;
     private final StringRedisTemplate redisTemplate;
@@ -63,9 +100,9 @@ public class CredentialService {
             throw new IllegalArgumentException("tenantId cannot be null or empty");
         }
         TenantResolver.requireOrgId(organizationId);
-        if (name == null || name.trim().isEmpty()) {
-            throw new IllegalArgumentException("name cannot be null or empty");
-        }
+        // Same rules as a rename: a name too long for the column, or carrying control
+        // characters, is no more acceptable at creation time than later.
+        String validatedName = validateName(name);
         if (type == null) {
             throw new IllegalArgumentException("type cannot be null");
         }
@@ -82,7 +119,7 @@ public class CredentialService {
             null,
             tenantId,
             organizationId,
-            name,
+            validatedName,
             integration,
             type,
             environment,
@@ -302,53 +339,364 @@ public class CredentialService {
     }
 
     /**
-     * Get a credential by tenant and name.
+     * Resolve a credential by the name an API's credential requirement carries
+     * ({@code gmail}, {@code elevenlabs}, {@code smtp}...), returning it ONLY when
+     * that name really identifies this credential's provider.
+     *
+     * <p><b>The trap this closes.</b> A credential's {@code name} is free text the
+     * user types. A requirement name is a provider slug. Matching one against the
+     * other with no further check means any credential a user happens to call
+     * {@code elevenlabs} answers every ElevenLabs call, whatever provider it is
+     * actually for, and one provider's secret goes out to another provider's
+     * endpoint. The name is accepted as an identity in exactly one case: a
+     * credential carrying NO {@code integration}, which is how the workflow-native
+     * connectors (smtp, ssh, database) identify themselves and the reason this
+     * name-first branch exists at all. Otherwise {@code integration} decides, and it
+     * is compared on the canonical slug ({@link IconSlugNormalizer#normalizeForKey}),
+     * the same normalisation catalog-service applies when it validates a pinned
+     * credential.
+     *
+     * <p>Rejecting here is safe: every caller falls back to resolving by
+     * {@code integration}, which is the correct row.
+     *
+     * <p><b>Two behaviour changes for an install that already holds duplicate names</b>, both
+     * from preferring an identifying row over whichever row sorts first, and neither reachable
+     * without two rows sharing one exact name:
+     * <ul>
+     *   <li>A scope preflight that used to be skipped can start running. {@code GET /scopes}
+     *       404'd whenever the first-sorting row did not identify, and its caller fails open,
+     *       so the check silently did not happen. It now resolves, and a call that ran
+     *       unchecked can be refused for missing scopes. That is the point of the endpoint,
+     *       but it is a behaviour change, not a pure bug fix.</li>
+     *   <li>Which key answers can flip, and NOT always within one provider. With rows
+     *       {@code A(slack, default, named "xai")}, {@code B(xai, named "xai")} and
+     *       {@code C(xai, default)}, the name branch used to return nothing and the
+     *       integration fallback picked {@code C}; it now returns {@code B}: same provider,
+     *       different key, its own quota and granted scopes. But a row with a BLANK
+     *       integration identifies EVERY name, so it can be the newly preferred one: with
+     *       {@code A(slack, default, named "elevenlabs")}, {@code B(no integration, named
+     *       "elevenlabs")} and {@code C(elevenlabs)}, the walk used to stop at {@code A},
+     *       reject it and fall back to {@code C}; it now returns {@code B}, whose secret is
+     *       not an ElevenLabs key. That is the declared contract of a blank integration (the
+     *       name IS the identity, which is how smtp/ssh/database connectors resolve), and
+     *       {@code A} shielding {@code B} was an accident of sort order rather than a
+     *       control. It is still the one shape of this change that can send an unrelated
+     *       secret to a provider, so it is named here rather than left to be discovered.</li>
+     * </ul>
      */
-    public Optional<Credential> getCredentialByTenantAndName(String tenantId, String name) {
-        return credentialRepository.findByTenantIdAndName(tenantId, name);
+    public Optional<Credential> findByNameIdentifyingIntegration(String tenantId, String requirementName) {
+        List<Credential> byName = credentialRepository.findAllByTenantIdAndName(tenantId, requirementName);
+        if (byName.isEmpty()) {
+            return Optional.empty();
+        }
+        // Every row carrying this name is considered, not just the one that sorts first.
+        // Nothing stops two credentials of one owner sharing a name (the create path applies
+        // no uniqueness rule at all), and when they do, the row that sorts first can easily be
+        // a credential merely LABELLED with the slug. Taking that row and then rejecting it
+        // would shadow the real provider's credential and report "no match" for a name that
+        // resolves perfectly well. The token path survives that on its integration fallback;
+        // the /scopes preflight has none and its caller fails open, i.e. the scope check
+        // silently stops running. So: prefer a row the name really identifies, and fall back
+        // to the sort order only among rows that are equally valid answers.
+        Optional<Credential> identifying = byName.stream()
+                .filter(candidate -> nameIdentifies(candidate, requirementName))
+                .findFirst();
+        if (identifying.isEmpty()) {
+            // Only when NO row answers. Before the walk, a mislabelled row sorting first was
+            // reported even when the right credential sat behind it; that line is gone for the
+            // case that now resolves correctly, which is the point, but it does mean a
+            // mislabelled credential is no longer announced while a good namesake exists.
+            //
+            // WARNed, never silent: these rows DID answer this name before the check existed,
+            // so a workflow can stop finding "its" credential here. The caller then resolves
+            // by integration, but if that misses too the only other symptom is a missing
+            // token, which is undiagnosable without this line. Mirrors the WARN catalog-service
+            // logs when it drops a pinned credential for the same reason.
+            Credential first = byName.get(0);
+            log.warn("Credential {} is named '{}' but belongs to integration '{}', so it does not "
+                            + "answer for '{}' ({} row(s) carry that name). Resolving by "
+                            + "integration instead.",
+                    first.id(), requirementName, first.integration(), requirementName, byName.size());
+        }
+        return identifying;
     }
 
     /**
-     * Update a credential.
+     * True when this credential has nothing but its name to identify it: catalog-service
+     * validates a pinned credential of this shape by name
+     * ({@code HttpExecutionService.resolvePinnedCredentialOwnership}), the builder's
+     * picker mirrors it ({@code frontend/lib/credentials/credentialMatching.ts}), and
+     * {@link #findByNameIdentifyingIntegration} accepts its name as an identity.
      */
-    public Optional<Credential> updateCredential(Long id, String tenantId, Map<String, Object> updates) {
-        Optional<Credential> existingOpt = credentialRepository.findById(id);
-        if (existingOpt.isEmpty()) {
+    private static boolean isNameTheIdentity(Credential credential) {
+        return credential.integration() == null || credential.integration().isBlank();
+    }
+
+    /**
+     * True when {@code requirementName} may stand in as this credential's identity: the
+     * credential declares no integration, or its integration IS that slug.
+     *
+     * <p>The {@code -credential} suffix is stripped before comparing, because the two
+     * mirrors of this rule strip it too: {@code InternalCredentialService} derives its
+     * integration fallback as {@code credentialName.replaceAll("-credential$", "")}, and
+     * catalog's {@code HttpExecutionService.resolvePinnedCredentialOwnership} compares a
+     * pinned credential's integration against BOTH the raw requirement and the stripped
+     * one. Without the strip, a credential named {@code smtp-credential} declaring
+     * {@code integration = "smtp"} would be rejected here. On the token path that costs
+     * only a WARN (the integration fallback recovers the row), but the {@code /scopes}
+     * preflight has NO fallback: it would 404, and the caller fails open, so the scope
+     * check the endpoint exists for would silently stop running for that credential.
+     */
+    private static boolean nameIdentifies(Credential credential, String requirementName) {
+        return nameIdentifies(credential.integration(), requirementName);
+    }
+
+    /** What a {@code -credential} requirement suffix becomes once canonicalised. */
+    private static final String CREDENTIAL_REQUIREMENT_SUFFIX_KEY = "credential";
+
+    /**
+     * True when two canonical identifiers would put their credentials in front of ONE
+     * requirement, as catalog's run-time selector decides it
+     * ({@code HttpExecutionService.credentialIdentityMatchesRequirement}).
+     *
+     * <p>That reader admits a credential three ways, and each of them compares CANONICAL slugs
+     * ({@code sameCredentialIdentity} runs both sides through {@code normalizeForKey}), against
+     * either the requirement or the integration derived from it by dropping a {@code -credential}
+     * suffix. Canonicalising deletes punctuation and case, so {@code "smtp-credential"} and
+     * {@code "SMTP Credential"} are one key, and the difference between the two spellings of a
+     * requirement survives only as a trailing {@code "credential"} on the key. Hence the two
+     * asymmetric comparisons: without them a guard reasoning on {@code integration} alone reads
+     * two rows the selector offers side by side as unrelated.
+     *
+     * <p><b>Known corner, left open deliberately.</b> {@code normalize} strips a trailing
+     * {@code -api} BEFORE deleting punctuation, so for a requirement spelt
+     * {@code "shop-api-credential"} the two keys are {@code "shopapicredential"} and
+     * {@code "shop"}, and the suffix relation above does not hold between them. No requirement in
+     * the catalog seeds is spelt that way (checked), and inventing a second normalisation to
+     * cover a shape nothing produces would make this harder to reason about than the risk earns.
+     *
+     * <p>Deliberately NOT the same test as {@link #nameIdentifies(String, String)}, which mirrors
+     * auth's resolver: that one strips a LITERAL {@code "-credential"} off the requirement before
+     * comparing, so it does not recognise {@code "SMTP Credential"} at all. Two readers, two
+     * rules, both applied.
+     */
+    private static boolean offeredForTheSameRequirement(String keyA, String keyB) {
+        if (keyA == null || keyB == null || keyA.isBlank() || keyB.isBlank()) {
+            return false;
+        }
+        return keyA.equals(keyB)
+                || keyA.equals(keyB + CREDENTIAL_REQUIREMENT_SUFFIX_KEY)
+                || keyB.equals(keyA + CREDENTIAL_REQUIREMENT_SUFFIX_KEY);
+    }
+
+    /**
+     * {@link #nameIdentifies(Credential, String)} against a bare {@code integration} value, so
+     * the rename guard can apply the SAME rule to rows it reads one column of. Keeping one
+     * implementation is the point: a guard that approximated this rule would refuse renames the
+     * resolver considers harmless, or allow ones it considers ambiguous.
+     */
+    private static boolean nameIdentifies(String integration, String requirementName) {
+        if (integration == null || integration.isBlank()) {
+            return true;
+        }
+        String integrationKey = IconSlugNormalizer.normalizeForKey(integration);
+        if (integrationKey.equals(IconSlugNormalizer.normalizeForKey(requirementName))) {
+            return true;
+        }
+        String stripped = requirementName == null
+                ? null
+                : requirementName.replaceAll("-credential$", "");
+        return stripped != null
+                && !stripped.equals(requirementName)
+                && integrationKey.equals(IconSlugNormalizer.normalizeForKey(stripped));
+    }
+
+    /**
+     * Rename a credential in the caller's active workspace. Strict isolation:
+     * returns empty when the row does not exist or lives in another scope,
+     * exactly like {@link #getCredentialForScope} / {@link #deleteCredentialForScope}
+     * (so an org member can rename a credential shared in their workspace, and
+     * nobody can rename across workspaces).
+     *
+     * <p><b>A rename is a relabel.</b> Only {@code name} and {@code updated_at}
+     * change; {@code integration}, {@code is_default}, the status and the encrypted
+     * {@code credential_data} are untouched ({@link CredentialRepository#updateName}).
+     * Everything that pins a credential pins its {@code id} (workflow nodes, agent
+     * tool configs, published apps) and the id never moves.
+     *
+     * <p><b>Two lookups do read the name, and this method refuses the renames that
+     * would disturb them</b> rather than letting a relabel change which key an
+     * execution runs on:
+     * <ul>
+     *   <li>A credential with a BLANK {@code integration} is identified by its name
+     *       and nothing else - catalog-service validates a pinned credential that
+     *       way ({@code HttpExecutionService.resolvePinnedCredentialOwnership}) and
+     *       the builder's picker mirrors it
+     *       ({@code frontend/lib/credentials/credentialMatching.ts}). Renaming would
+     *       detach every node pinning it, so it is refused
+     *       ({@link CredentialRenameRefusedException.Reason#NAME_IS_IDENTITY}).</li>
+     *   <li>{@code InternalCredentialService.findCredential} tries the exact name
+     *       before the {@code integration} slug, and catalog's run-time selector
+     *       ({@code HttpExecutionService.resolveCredentialIdNamed}) matches a typed
+     *       LABEL, trimmed and case-insensitively, among the credentials the
+     *       endpoint's integration would offer. A rename is refused
+     *       ({@link CredentialRenameRefusedException.Reason#DUPLICATE_NAME}) when
+     *       another credential of the owner carries that name AND either declares the
+     *       same integration (the selector would then call the choice ambiguous and
+     *       resolve nothing) or answers to the name alongside this one
+     *       ({@link #nameIdentifies(String, String)} true for both).</li>
+     * </ul>
+     * What remains possible, deliberately, in two shapes. A name that identifies
+     * neither credential and belongs to a DIFFERENT provider: no reader can confuse
+     * them, and refusing it was refusing a rename over a row of an unrelated API,
+     * often in a workspace the user cannot even see, with a message they had no way to
+     * act on. And a name that identifies THIS credential but no other row, typically
+     * labelling a credential with its own provider slug: that is allowed, and it does
+     * change which key answers, because the name branch now resolves to this row where
+     * it previously fell through to the integration default. Same provider, different
+     * key, its own quota and granted scopes.
+     *
+     * <p><b>Known gap, recorded rather than relied on:</b> {@link #createCredential}
+     * applies neither this rule nor the identity rule, so the very ambiguity refused
+     * here can still be created in one click. That is not an argument for a weaker
+     * guard, it is a hole on the create path; it is left alone here only because
+     * credential names on the OAuth callback path are generated, and a hard refusal
+     * there would break a legitimate second account of one provider.
+     *
+     * <p><b>One rename that used to succeed now fails</b>, on an install that already holds
+     * near-duplicate labels: the probe matches trimmed and case-insensitively, so an owner whose
+     * two keys of one provider are called {@code "Prod"} and {@code "prod"} gets a 409 where they
+     * previously got a rename. Catalog's selector already cannot resolve that pair, so the
+     * refusal reports a state that was silently broken rather than creating a new problem, but
+     * it is a new refusal and it ships with no warning.
+     *
+     * <p><b>Also unguarded, and inherent:</b> renaming a credential AWAY from a name
+     * that identified it hands that requirement back to the {@code integration}
+     * fallback, which may select a different key of the same provider. Guarding it
+     * would make every credential named after its provider unrenameable, which is the
+     * over-refusal this rule exists to avoid.
+     *
+     * @param newName trimmed, non-blank, free of control characters, at most
+     *                {@value #MAX_NAME_LENGTH} chars (the column is
+     *                {@code VARCHAR(255)})
+     * @throws IllegalArgumentException          when the name is blank, too long, or
+     *                                           carries control characters
+     * @throws CredentialRenameRefusedException  when the credential is identified by
+     *                                           its name, or the name is taken
+     */
+    @Transactional
+    public Optional<Credential> renameCredentialForScope(Long id,
+                                                         String tenantId,
+                                                         String organizationId,
+                                                         String newName) {
+        // Both throw IllegalArgumentException, and the HTTP layer reports the two
+        // differently, so it pre-checks the workspace itself and only ever reaches this
+        // requireOrgId with a valid one. Kept for non-HTTP callers.
+        TenantResolver.requireOrgId(organizationId);
+        String trimmed = validateName(newName);
+
+        Optional<Credential> existing = credentialRepository.findById(id)
+                .filter(cred -> matchesScope(cred, tenantId, organizationId));
+        if (existing.isEmpty()) {
             return Optional.empty();
         }
-
-        Credential existing = existingOpt.get();
-        if (!existing.tenantId().equals(tenantId)) {
-            return Optional.empty();
+        Credential credential = existing.get();
+        if (trimmed.equals(credential.name())) {
+            return Optional.of(credential); // no-op rename: skip the write
         }
-
-        // Apply updates
-        Credential updated = existing;
-        if (updates.containsKey("name")) {
-            updated = new Credential(
-                updated.id(),
-                updated.tenantId(),
-                updated.organizationId(),
-                (String) updates.get("name"),
-                updated.integration(),
-                updated.type(),
-                updated.environment(),
-                updated.status(),
-                updated.description(),
-                updated.credentialData(),
-                updated.scopes(),
-                updated.tags(),
-                updated.owner(),
-                updated.iconUrl(),
-                updated.isDefault(),
-                updated.lastUsed(),
-                updated.createdAt(),
-                Instant.now()
-            );
+        if (isNameTheIdentity(credential)) {
+            // EVERY rename, including one that looks identity-preserving. Two of the
+            // three readers normalise the name (catalog's pinned-credential check and
+            // the builder's picker), but the third does not: the token lookup starts at
+            // findAllByTenantIdAndName, whose SQL is an EXACT `name = ?`. Verified live on
+            // 2026-08-24 - renaming "smtp" to "SMTP" left the pin and the picker intact
+            // and still emptied `data-map?name=smtp`. So the refusal is deliberately as
+            // wide as the strictest reader.
+            throw new CredentialRenameRefusedException(
+                    CredentialRenameRefusedException.Reason.NAME_IS_IDENTITY,
+                    "This credential carries no integration, so its name is what identifies it "
+                            + "to the nodes that use it. Renaming it would detach them.");
         }
-        // Add more update fields as needed
-
-        return Optional.of(credentialRepository.save(updated));
+        // TWO readers select a credential by name, and the guard has to satisfy both.
+        //
+        //   1. findByNameIdentifyingIntegration (auth). A name resolves a credential only when
+        //      nameIdentifies holds, so two rows are in each other's way under a name only when
+        //      BOTH would answer for it.
+        //   2. HttpExecutionService.resolveCredentialIdNamed (catalog), the run-time credential
+        //      selector on a step. It matches the LABEL a person typed, trimmed and
+        //      case-insensitively, over the credentials the endpoint's integration would offer.
+        //      No slug is involved: two ACTIVE credentials of ONE provider sharing any label at
+        //      all make it report "ambiguous", and it then either fails the step outright or
+        //      falls back to the account default, i.e. runs on a key nobody chose.
+        //
+        // Reader 2 is why the same-provider arm cannot be dropped: it is the difference between
+        // this guard and one derived from the auth resolver alone, and dropping it lets a rename
+        // break a step that was resolving correctly.
+        //
+        // Status is deliberately NOT part of the test even though reader 2 filters on ACTIVE: a
+        // revoked credential can be reactivated, and a refusal that depends on a state which
+        // flips underneath the user is worse than one that is slightly wide.
+        //
+        // SCOPE, stated because it does not match reader 2 and cannot be made to here. The probe
+        // is the OWNER's tenant, which is exactly reader 1's scope. Reader 2 resolves over an
+        // ORG-scoped identity list, so against it this scope is wrong in both directions: it
+        // refuses across two workspaces of the same owner, where that reader would never see the
+        // two rows together, and it misses a teammate's identically labelled credential, where
+        // it would. Fixing the second means refusing over rows of another person's tenant, which
+        // is a wider decision than this one; see CredentialRepository for the full note.
+        String renamedKey = IconSlugNormalizer.normalizeForKey(credential.integration());
+        String labelKey = IconSlugNormalizer.normalizeForKey(trimmed);
+        boolean renamedAnswersToTheName = nameIdentifies(credential.integration(), trimmed);
+        // A plain loop, not stream().filter(...).findFirst(): the contending integration is
+        // NULL for a credential that declares none, and findFirst throws on a null element.
+        // That row is the single most important case here (its NAME is its identity), so the
+        // stream form would turn the refusal it exists for into a 500.
+        for (String otherIntegration : credentialRepository
+                .findOtherIntegrationsWithNameForTenant(id, credential.tenantId(), trimmed)) {
+            boolean contenderIsNameless = otherIntegration == null || otherIntegration.isBlank();
+            // Reader 2, first two arms: the endpoint offers both rows because their integrations
+            // name one provider.
+            boolean sameProvider = !contenderIsNameless
+                    && offeredForTheSameRequirement(
+                            IconSlugNormalizer.normalizeForKey(otherIntegration), renamedKey);
+            // Reader 2, third arm: it also offers a row that declares NO integration when that
+            // row's NAME collapses to the requirement's key. Both rows carry the new label here,
+            // so the nameless one is offered whenever the label is this provider's requirement,
+            // and the renamed one is offered because its integration is that provider. This is
+            // the arm a pairwise integration comparison cannot see: the contender has no
+            // integration to compare. Concretely, an SMTP connector named "SMTP Credential" and
+            // an smtp key relabelled "SMTP Credential" are both offered for requirement
+            // "smtp-credential", because normalizeForKey deletes the space and the hyphen alike.
+            boolean namelessRivalForThisProvider =
+                    contenderIsNameless && offeredForTheSameRequirement(labelKey, renamedKey);
+            // Reader 1: a name resolves a credential only when nameIdentifies holds, so two rows
+            // are in each other's way there only when it holds for both.
+            boolean bothAnswerToTheName =
+                    renamedAnswersToTheName && nameIdentifies(otherIntegration, trimmed);
+            if (!sameProvider && !namelessRivalForThisProvider && !bothAnswerToTheName) {
+                continue;
+            }
+            // The integration stays in the LOG, not in the response: it belongs to a row the
+            // caller may not be able to open, and the message reaches them over HTTP.
+            log.info("Refusing to rename credential {} to '{}': a credential of owner {} already "
+                            + "answers to that name (integration={}, sameProvider={})",
+                    id, trimmed, credential.tenantId(),
+                    otherIntegration == null ? "none" : otherIntegration, sameProvider);
+            throw new CredentialRenameRefusedException(
+                    CredentialRenameRefusedException.Reason.DUPLICATE_NAME,
+                    "'" + trimmed + "' already identifies another credential of this "
+                            + "credential's owner");
+        }
+        if (credentialRepository.updateName(id, organizationId, trimmed) == 0) {
+            return Optional.empty(); // deleted between the read and the write
+        }
+        log.info("Credential {} renamed from '{}' to '{}' (integration={}, owner={}) by {} in org {}",
+                id, credential.name(), trimmed, credential.integration(), credential.tenantId(),
+                tenantId, organizationId);
+        // Re-read through the same scope filter: a concurrent scope move must not
+        // hand back a row the caller can no longer see.
+        return credentialRepository.findById(id)
+                .filter(cred -> matchesScope(cred, tenantId, organizationId));
     }
 
     /**

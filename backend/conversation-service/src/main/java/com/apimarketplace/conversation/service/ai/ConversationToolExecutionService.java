@@ -4,6 +4,7 @@ import com.apimarketplace.agent.domain.ToolCall;
 import com.apimarketplace.agent.domain.ToolDefinition;
 import com.apimarketplace.agent.domain.ToolResult;
 import com.apimarketplace.agent.tool.ToolExecutionService;
+import com.apimarketplace.agent.tools.credential.SelectableAccounts;
 import com.apimarketplace.conversation.service.ConversationHistoryService;
 import com.apimarketplace.conversation.service.ToolResultService;
 import com.apimarketplace.conversation.streaming.StreamPubSubService;
@@ -26,6 +27,7 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 
@@ -583,7 +585,10 @@ public class ConversationToolExecutionService implements ToolExecutionService {
             result.put("status", "credentials_required");
             result.put("services", services);
             result.put("reason", reason != null ? reason : "");
-            result.put("message", "Credential connection requested. Do NOT call catalog(action='execute') for these services until connected.");
+            result.put("message", "A Connect card was shown to the user. Nothing is connected yet, and this "
+                    + "card does not resolve inside this call: do NOT call credential(action='require') again "
+                    + "for these services, and do not act as if they were connected. Continue with other work "
+                    + "or finish your turn; the user comes back once they have connected.");
 
             long duration = System.currentTimeMillis() - startTime;
             log.info("✅ [TOOL] request_credential executed: {} services", services.size());
@@ -711,7 +716,7 @@ public class ConversationToolExecutionService implements ToolExecutionService {
                 entry.put("name", row.get("name"));
                 entry.put("integration", row.get("integration"));
                 Object status = row.get("status");
-                entry.put("status", status != null ? String.valueOf(status).toLowerCase() : "unknown");
+                entry.put("status", status != null ? String.valueOf(status).toLowerCase(Locale.ROOT) : "unknown");
                 entry.put("isDefault", Boolean.TRUE.equals(row.get("is_default")));
                 String account = extractAccountIdentifier(row.get("credential_data"));
                 if (account != null) {
@@ -726,10 +731,19 @@ public class ConversationToolExecutionService implements ToolExecutionService {
             result.put("connected", connected);
             result.put("count", connected.size());
             result.put("defaultCount", defaultCount);
+            // The selectable accounts are computed by the SAME helper get_connected_services
+            // uses. A chat agent sees only this listing, so a hand-written sentence here
+            // drifts from what the runtime accepts and cannot be noticed from this side:
+            // the previous one promised that every non-default account was selectable and
+            // named neither the duplicate-name nor the numeric-name refusal.
+            String selectable = SelectableAccounts.offer(connected);
             result.put("hint", connected.isEmpty()
                 ? "No services connected yet. Use credential(action=\"require\") when a tool needs one."
-                : "Only isDefault=true credentials are used when executing tools. "
-                    + "status=needs_reauth means only the user can Reconnect it.");
+                : "Executing a tool directly always uses the isDefault=true credential. "
+                    + "status=needs_reauth means only the user can Reconnect it. "
+                    + "This is what YOUR workspace holds; a workflow runs under its owner's, so a "
+                    + "name taken from here resolves only if the two are the same."
+                    + selectable);
 
             return ToolResult.builder()
                 .toolCall(toolCall)

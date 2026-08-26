@@ -518,6 +518,18 @@ public interface WorkflowStepDataRepository extends JpaRepository<WorkflowStepDa
     List<com.apimarketplace.orchestrator.repository.EpochItemProjection> findDistinctEpochItemPairsExcludingTriggers(@Param("runId") String runId);
 
     /**
+     * The highest spawn any row of ONE epoch carries, or 0 when the epoch has no rows.
+     *
+     * <p>Needed because {@code metadata.dagCurrentSpawn} is per DAG and is reset by every trigger
+     * fire: "the next spawn" is only known-unused in the epoch that fire opened. A rerun aimed at
+     * an OLDER epoch has to start above that epoch's own history, or it writes rows tied with an
+     * earlier attempt at the same max spawn and the supersede filter above keeps both.
+     */
+    @Query("SELECT COALESCE(MAX(COALESCE(w.spawn, 0)), 0) FROM WorkflowStepDataEntity w "
+         + "WHERE w.runId = :runId AND w.epoch = :epoch")
+    Integer findMaxSpawnForEpoch(@Param("runId") String runId, @Param("epoch") int epoch);
+
+    /**
      * Count distinct (epoch, itemIndex) pairs for a run.
      * Optimized count for interface item counting.
      */

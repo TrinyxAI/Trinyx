@@ -36,6 +36,7 @@ import { WorkflowUnauthorizedState } from './WorkflowUnauthorizedState';
 import { runRoutePathFor } from '@/lib/workflow/runRoutePath';
 import { useAutoCollapseSidebar } from './hooks';
 import { OPEN_TRIGGER_TAB_EVENT, findTriggerTabConfig, type OpenTriggerTabDetail } from '@/lib/workflow/triggerTabEvent';
+import { workflowPanelTabId } from '@/lib/sidePanel/tabResource';
 
 // ============================================
 // Types
@@ -391,7 +392,7 @@ export function WorkflowDetailView({ workflowId, runId: runIdProp, autoOpenApp }
       if (pinnedRunId) {
         import('@/components/app/WorkflowBuilderPanelContent').then(({ WorkflowBuilderPanelContent }) => {
           sidePanel.openTab({
-            id: `workflow-run-${subWfId}-${pinnedRunId}`,
+            id: workflowPanelTabId(subWfId, pinnedRunId),
             label: wfName,
             icon: React.createElement(Workflow, { className: 'w-4 h-4' }),
             content: React.createElement(WorkflowBuilderPanelContent, { workflowId: subWfId, runId: pinnedRunId!, readOnly: isPreviewOnly }),
@@ -402,7 +403,7 @@ export function WorkflowDetailView({ workflowId, runId: runIdProp, autoOpenApp }
       } else {
         import('@/components/app/WorkflowBuilderPanelContent').then(({ WorkflowBuilderPanelContent }) => {
           sidePanel.openTab({
-            id: `workflow-builder-${subWfId}`,
+            id: workflowPanelTabId(subWfId),
             label: wfName,
             icon: React.createElement(Workflow, { className: 'w-4 h-4' }),
             content: React.createElement(WorkflowBuilderPanelContent, { workflowId: subWfId, readOnly: isPreviewOnly }),

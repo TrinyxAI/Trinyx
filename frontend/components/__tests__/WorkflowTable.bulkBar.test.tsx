@@ -21,6 +21,12 @@ const mocks = vi.hoisted(() => ({
   clear: vi.fn(),
 }));
 
+// The lists keep the open folder in the address, so they read next/navigation. This fake
+// router is URL-backed and re-renders on navigation, the way the real one does.
+vi.mock('next/navigation', async () => {
+  const mod = await import('@/lib/folders/testing/fakeFolderRouter');
+  return mod.fakeFolderRouter.nextNavigationModule();
+});
 vi.mock('@/i18n/navigation', () => ({ useRouter: () => ({ push: vi.fn() }) }));
 vi.mock('@/lib/api', () => ({
   orchestratorApi: {
@@ -56,6 +62,7 @@ vi.mock('@/hooks/useResourceFavorites', () => ({
   useResourceFavorites: () => ({ favoriteIds: new Set(), toggleFavorite: vi.fn() }),
 }));
 
+import { fakeFolderRouter } from '@/lib/folders/testing/fakeFolderRouter';
 import WorkflowTable from '../WorkflowTable';
 
 function renderTable() {
@@ -67,6 +74,9 @@ function renderTable() {
 }
 
 beforeEach(() => {
+  // The address is shared state: without this, a test that opened a folder leaves the
+  // next one starting inside it.
+  fakeFolderRouter.reset();
   mocks.getWorkflowsPage.mockResolvedValue({
     workflows: [{ id: 'w1', name: 'WF One', updatedAt: '2026-06-01T00:00:00Z', isPublished: false }],
     count: 1,

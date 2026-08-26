@@ -35,6 +35,8 @@ import {
 } from '@/hooks/useModels';
 import { getProviderIconSlug, getProviderDisplayName } from '@/lib/ai-providers/providerIcons';
 import { ModelOptionDisplay, ModelInfoPopover } from '@/components/ai/ModelInfo';
+import { UpgradeRequiredNotice } from '@/components/billing/UpgradeRequiredBadge';
+import { useMonthlyCreditsCannotPay } from '@/lib/hooks/useMonthlyCreditsCannotPay';
 import { NoProviderCta } from '@/components/ai/NoProviderCta';
 import { IS_CE } from '@/lib/edition';
 
@@ -88,6 +90,10 @@ export function ModelPicker({
   excludeBridgeProviders = false,
 }: ModelPickerProps) {
   const { providers, defaultModel, defaultProvider, isLoading, error } = useVisibleModels();
+  // Asked ONCE for the whole list: the answer is about the account, not about
+  // any one model, and a query observer per option would be a waste of the same
+  // cached answer.
+  const { blocked: upgradeRequired } = useMonthlyCreditsCannotPay();
 
   // Apply the capability (and optional bridge-exclusion) filter ONCE at the
   // top: providers without any matching model are dropped entirely (so the
@@ -252,7 +258,7 @@ export function ModelPicker({
                   exactly like the dropdown rows, so the collapsed trigger and the
                   menu stay visually identical. */}
               {selectedModel ? (
-                <ModelOptionDisplay model={selectedModel} />
+                <ModelOptionDisplay model={selectedModel} upgradeRequired={upgradeRequired} />
               ) : (
                 <span className="truncate text-sm font-medium">{selectedModelName}</span>
               )}
@@ -269,12 +275,15 @@ export function ModelPicker({
                     height={16}
                     className="w-4 h-4 flex-shrink-0 rounded-md p-0.5 dark:bg-slate-100/10 mt-0.5"
                   />
-                  <ModelOptionDisplay model={model} />
+                  <ModelOptionDisplay model={model} upgradeRequired={upgradeRequired} />
                 </div>
               </SelectItem>
             ))}
           </SelectContent>
         </Select>
+        {/* Under the control, never inside it: a click in a listbox option
+            cannot open a dialog without leaving the menu floating over it. */}
+        <UpgradeRequiredNotice blocked={upgradeRequired} className="mt-1.5" />
       </div>
     </div>
   );

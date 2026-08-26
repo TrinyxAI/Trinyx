@@ -1043,6 +1043,9 @@ describe('NotificationBell - tabs Inbox/Activity', () => {
     render(<NotificationBell />);
     fireEvent.click(screen.getByRole('button', { name: 'title' }));
     fireEvent.click(screen.getByText('triggersTab'));
+    // The tab opens pre-filtered on SCHEDULE; clear it to assert on the
+    // unfiltered list this test is about.
+    fireEvent.click(screen.getByRole('button', { name: 'kindLabel.schedule', pressed: true }));
 
     // Both rows are present; one per kind. The visible labels are the
     // subtitle keys from chat.home.live.kindLabel.* (manual/chat).
@@ -1051,17 +1054,63 @@ describe('NotificationBell - tabs Inbox/Activity', () => {
     expect(screen.getByText('kindLabel.chat')).toBeTruthy();
   });
 
-  it('Filter chip strip has 8 chips in canonical order, each with aria-pressed=false initially', () => {
+  it('Filter chip strip has 8 chips, SCHEDULE pressed by default and the 7 others unpressed', () => {
     render(<NotificationBell />);
     fireEvent.click(screen.getByRole('button', { name: 'title' }));
     fireEvent.click(screen.getByText('triggersTab'));
 
     // R10 chip-strip - 8 toggle buttons in a role=group container, single-select,
-    // click-to-deselect. All start unpressed.
+    // click-to-deselect. SCHEDULE is the default selection (first chip in
+    // TRIGGER_KIND_ORDER), every other chip starts unpressed.
     const group = screen.getByRole('group', { name: 'filterByKind' });
-    const chips = group.querySelectorAll('button');
+    const chips = Array.from(group.querySelectorAll('button'));
     expect(chips).toHaveLength(8);
-    chips.forEach((chip) => expect(chip.getAttribute('aria-pressed')).toBe('false'));
+    expect(chips[0].getAttribute('aria-label')).toBe('kindLabel.schedule');
+    expect(chips[0].getAttribute('aria-pressed')).toBe('true');
+    chips.slice(1).forEach((chip) => expect(chip.getAttribute('aria-pressed')).toBe('false'));
+  });
+
+  it('Triggers tab opens filtered on SCHEDULE, and re-opening the bell restores that default', () => {
+    // Regression: the Triggers tab must always land on schedules (the rows a
+    // user opens the bell to check), whatever chip a previous visit left on.
+    homeStatusMock.current = {
+      ...homeStatusMock.current,
+      automations: [
+        {
+          resourceType: 'WORKFLOW' as const,
+          resourceId: 'wf-sched',
+          name: 'Scheduled job',
+          triggerType: 'SCHEDULE' as const,
+          schedule: { cronExpression: '0 9 * * *', timezone: 'UTC', executionCount: 1 },
+        },
+        {
+          resourceType: 'WORKFLOW' as const,
+          resourceId: 'wf-manual',
+          name: 'Manual job',
+          triggerType: 'MANUAL' as const,
+          lastRunAt: '2026-05-15T10:00:00Z',
+        },
+      ],
+    };
+    render(<NotificationBell />);
+    fireEvent.click(screen.getByRole('button', { name: 'title' }));
+    fireEvent.click(screen.getByText('triggersTab'));
+
+    // Default: only the SCHEDULE row shows.
+    expect(screen.getByText('Scheduled job')).toBeTruthy();
+    expect(screen.queryByText('Manual job')).toBeNull();
+
+    // Switch to MANUAL, then close and re-open the bell.
+    fireEvent.click(screen.getByRole('button', { name: 'kindLabel.manual', pressed: false }));
+    expect(screen.getByText('Manual job')).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: 'title' }));
+    fireEvent.click(screen.getByRole('button', { name: 'title' }));
+    fireEvent.click(screen.getByText('triggersTab'));
+
+    // Back on SCHEDULE - the previous selection did not survive the re-open.
+    expect(screen.getByRole('button', { name: 'kindLabel.schedule', pressed: true })).toBeTruthy();
+    expect(screen.getByText('Scheduled job')).toBeTruthy();
+    expect(screen.queryByText('Manual job')).toBeNull();
   });
 
   it('Clicking a chip filters rows to that kind; clicking the active chip again clears the filter', () => {
@@ -1087,6 +1136,8 @@ describe('NotificationBell - tabs Inbox/Activity', () => {
     render(<NotificationBell />);
     fireEvent.click(screen.getByRole('button', { name: 'title' }));
     fireEvent.click(screen.getByText('triggersTab'));
+    // Clear the default SCHEDULE chip so the strip starts from "no filter".
+    fireEvent.click(screen.getByRole('button', { name: 'kindLabel.schedule', pressed: true }));
 
     // Both rows visible before filtering.
     expect(screen.getByText('Scheduled job')).toBeTruthy();
@@ -1146,6 +1197,8 @@ describe('NotificationBell - tabs Inbox/Activity', () => {
     render(<NotificationBell />);
     fireEvent.click(screen.getByRole('button', { name: 'title' }));
     fireEvent.click(screen.getByText('triggersTab'));
+    // Clear the default SCHEDULE chip - the row under test is a MANUAL one.
+    fireEvent.click(screen.getByRole('button', { name: 'kindLabel.schedule', pressed: true }));
 
     expect(screen.getByText('-')).toBeTruthy();
   });

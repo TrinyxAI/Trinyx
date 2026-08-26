@@ -76,9 +76,13 @@ ENV NEXT_PUBLIC_GOOGLE_PICKER_API_KEY=$NEXT_PUBLIC_GOOGLE_PICKER_API_KEY
 # (app/legal, which name a natural person for legal reasons) must not be
 # compiled into the CE image, and the unused landing media (CE bypasses the
 # marketing landing page) is dead weight. The public repo export already
-# excludes both (exclude-paths.txt + export-ce.sh step 5c); without this,
-# `COPY . .` from the PRIVATE repo would bake them into the published image
-# anyway. Only string hrefs point at /legal/* (no imports), so the build is
+# excludes app/legal (exclude-paths.txt); without this, `COPY . .` from the
+# PRIVATE repo would bake it into the published image anyway. The landing media
+# is a different case: the public REPO keeps landing/screenshots, because a fork
+# building the frontend from source resolves EDITION to "cloud" and renders the
+# landing page (GATE F pins that). Here the edition IS ce, so the page redirects
+# to /app/chat and the media is unreachable, so dropping it only shrinks the
+# image. Only string hrefs point at /legal/* (no imports), so the build is
 # unaffected - the public-tree build (gate D) already proves Next builds
 # without app/legal. publish-ce.yml's image content gate pins the legal-page
 # absence pre-push.

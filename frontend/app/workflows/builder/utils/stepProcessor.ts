@@ -1614,7 +1614,27 @@ function processStepNodes(
     // explicitly; otherwise catalog execution resolves by integration and picks
     // the default credential. Platform pins stay on their existing source path.
     const toolData = (node.data as any)?.toolData;
-    if (toolData?.credentialSource === 'platform' && toolData.platformCredentialId != null) {
+    // A step that decides its account at RUN time carries an expression instead
+    // of a pin, and the two are exclusive: the picker is replaced by the
+    // expression field, so only one of them is ever populated. Written first, and
+    // without the pin, so a leftover auto-filled id can never travel alongside it
+    // and leave the plan saying two different things.
+    // Normalised, not type-tested: an agent-built plan can carry a NUMBER here (a
+    // credential id is a legitimate value). Treating that as "no selector" made the
+    // inspector render the picker, which auto-persists the account default, and the
+    // next save wrote a pin - the erase-itself defect again, through a type the
+    // first guard did not cover.
+    const rawSelector = toolData?.credentialSelector;
+    const credentialSelector =
+      rawSelector === null || rawSelector === undefined ? undefined : String(rawSelector);
+    if (typeof credentialSelector === 'string') {
+      // Blank travels too. Dropping it here is what made clearing the field revert
+      // the step to the auto-filled pin on the next reload: the mode was lost, the
+      // picker came back, and a multi-account step silently became a single-account
+      // one. Present-but-blank is a state ("dynamic, not filled in yet") and the
+      // run says so out loud instead of guessing an account.
+      step.credentialSelector = credentialSelector.trim();
+    } else if (toolData?.credentialSource === 'platform' && toolData.platformCredentialId != null) {
       step.credentialSource = 'platform';
       step.platformCredentialId = toolData.platformCredentialId;
     } else if (toolData?.selectedCredentialId != null) {

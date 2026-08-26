@@ -679,9 +679,20 @@ public class AgentAsyncCompletionService {
         return pending.splitItemData() != null && !pending.splitItemData().isEmpty();
     }
 
+    /**
+     * Rebuild the split scope this delivery belongs to on THIS pod.
+     *
+     * <p>The delivery epoch is passed on purpose: with several replicas the delivery is handled
+     * by whichever pod consumed the Redis message, and that pod may still hold this split's
+     * context from an EARLIER epoch of the same run (the in-memory key carries no epoch). Without
+     * the epoch, the restore was skipped as "already exists" and the successors ran on the
+     * previous epoch's items and per-item results - see
+     * {@code SplitContextManager.restoreContext(String, String, Map, int)}.
+     */
     private void restoreSplitContextIfAny(PendingAgent pending) {
         if (isSplitAgent(pending)) {
-            splitContextManager.restoreContext(pending.runId(), pending.nodeId(), pending.splitItemData());
+            splitContextManager.restoreContext(
+                pending.runId(), pending.nodeId(), pending.splitItemData(), pending.epoch());
         }
     }
 

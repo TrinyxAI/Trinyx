@@ -736,6 +736,7 @@ public class WorkflowRunController {
     public ResponseEntity<?> rerunFromStep(
             @PathVariable("runId") String runId,
             @PathVariable("stepId") String stepId,
+            @RequestParam(value = "epoch", required = false) Integer epoch,
             @RequestBody(required = false) Map<String, Object> requestBody,
             @RequestHeader(value = "X-User-ID", required = false) String tenantId,
             @RequestHeader(value = "X-Organization-ID", required = false) String orgId) {
@@ -769,8 +770,20 @@ public class WorkflowRunController {
                 }
             }
 
-            logger.info("Re-running from step: {} for run: {} (planFromPayload={})", stepId, runId, planFromPayload);
-            StepRerunService.RerunResult result = stepRerunService.rerunFromStep(runId, stepId, planFromPayload);
+            // ?epoch=N replays that fire of the run instead of the most recent one; the builder
+            // does not send it, so the UI keeps its existing behaviour unchanged.
+            //
+            // Note the pre-existing ordering above: a request that carries a plan has ALREADY had
+            // it written to run.plan by the time the rerun is refused (unknown epoch, node not
+            // rerunnable, run stopped...). That was true of every refusal before this parameter
+            // existed; the epoch adds more ways to reach it. Left as is deliberately - moving the
+            // plan write after the service call changes what a rerun executes, which is a
+            // separate decision - but a caller combining a plan with an epoch should read the
+            // response before assuming neither took effect.
+            logger.info("Re-running from step: {} for run: {} (planFromPayload={}, epoch={})",
+                    stepId, runId, planFromPayload, epoch);
+            StepRerunService.RerunResult result =
+                    stepRerunService.rerunFromStep(runId, stepId, planFromPayload, epoch);
 
             // Once the rerun transaction is committed, advancing the run is execution policy:
             // step-by-step waits for the user, automatic drives the wave loop and closes the

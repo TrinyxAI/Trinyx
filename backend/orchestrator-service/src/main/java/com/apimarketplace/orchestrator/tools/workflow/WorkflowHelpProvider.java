@@ -24,6 +24,9 @@ public class WorkflowHelpProvider {
 
     private final NodeLibraryService nodeLibraryService;
     private final NodeHelpFormatter nodeHelpFormatter;
+    /** Reads the model catalogue so the generate help can name the ids. */
+    private final com.apimarketplace.orchestrator.services.generation.GenerationExecutionService
+            generationExecutionService;
     // Vector similarity (RAG) is self-hosted-only: datasource-service rejects
     // similarity queries and vector columns on managed cloud, so the
     // workflow-builder help must not advertise them there - an
@@ -657,13 +660,88 @@ public class WorkflowHelpProvider {
         Map<String, Object> result = new LinkedHashMap<>();
         result.put("title", "Generate Node - one asset from a prompt (image, video, audio, voice, music)");
         result.put("model_first", "'model' is the only required param and it decides everything else: the "
-            + "format produced, which other params are accepted, and the price. Model ids cannot be guessed. "
-            + "Call generation(action='models') to list them, optionally narrowed with kind='video'; each row "
-            + "gives the id, what it accepts, its limits and its rate. Then "
-            + "workflow(action='add_node', type='generate', label='Make Clip', "
-            + "params={model:'<id-from-that-list>', prompt:'...'}, connect_after='...').");
+            + "format produced, which other params are accepted, and the price. Model ids cannot be guessed, "
+            + "so the ids are listed under 'models' in THIS payload - you already have them, no other call "
+            + "is needed to build the node. Then workflow(action='add_node', type='generate', "
+            + "label='Make Clip', params={model:'<id-from-that-list>', prompt:'...'}, connect_after='...'). "
+            + "The generation tool, if you have it, answers the same list with action='models' plus the "
+            + "per-model limits; it is opt-in per agent because CREATING spends credits, so do not assume "
+            + "you hold it and never tell someone to run it. Building the node needs only this list.");
+        // The ids, from the live catalogue, in the payload the builder already
+        // reads. Discovery is free; only creating spends. Before this, the ids
+        // existed solely behind the opt-in generation tool, so an agent without
+        // it could not name a single model and had no way to say why.
+        com.apimarketplace.orchestrator.services.generation.GenerationExecutionService.ModelCatalogue catalogue = generationExecutionService.readModels();
+        List<Map<String, Object>> models = catalogue.models();
+        if (models.isEmpty()) {
+            // The two empties are different facts and only one of them is about
+            // the installation. Telling someone to abandon the feature on the
+            // strength of a network blip is the more expensive mistake.
+            // Read from the SAME answer, not a second call: the served flag used
+            // to live on the service as shared mutable state, so a concurrent
+            // request's transport blip could be read here as this one's result
+            // and produce the confident, wrong "served but empty" sentence.
+            Boolean served = catalogue.served();
+            String why;
+            if (Boolean.FALSE.equals(served)) {
+                why = "This installation does not serve generation at all, so the generate node cannot "
+                    + "work here. Say so rather than guessing a model id: only an administrator can "
+                    + "change it.";
+            } else if (Boolean.TRUE.equals(served)) {
+                // Served, and its catalogue is genuinely empty: a real state, and
+                // an administrator's to fix by seeding it.
+                why = "No generation model is available on this installation: generation is served but "
+                    + "its catalogue is empty. The generate node cannot work until one is seeded, which "
+                    + "only an administrator can do. Say so rather than guessing an id.";
+            } else {
+                why = "The model catalogue could not be read just now, so no id can be offered. This "
+                    + "says NOTHING about whether generation works here: do not tell anyone the feature "
+                    + "is unavailable. Ask again, and report that the catalogue is unreachable if it "
+                    + "keeps failing.";
+            }
+            result.put("models", why);
+        } else {
+            List<Map<String, Object>> rows = new ArrayList<>(models.size());
+            for (Map<String, Object> m : models) {
+                Map<String, Object> row = new LinkedHashMap<>();
+                row.put("model", m.get("model"));
+                row.put("kind", m.get("kind"));
+                row.put("label", m.get("label"));
+                row.put("provider", m.get("provider"));
+                // What it TAKES and what it INSISTS on: enough to write the
+                // params of a valid node without a second call.
+                row.put("accepts", m.get("accepts"));
+                row.put("required", m.get("required"));
+                // Which param the price multiplies, so the cost of a longer
+                // request is predictable before anyone runs it.
+                row.put("billed_on", m.get("billedOn"));
+                // The half that decides whether this model is runnable AT ALL
+                // on this installation, and it differs cloud versus self-hosted.
+                Object runsOn = m.get("runsOn");
+                row.put("runs_on", runsOn == null ? "unknown" : String.valueOf(runsOn));
+                rows.add(row);
+            }
+            result.put("models", rows);
+            result.put("credential_default", "A generate node left unstated runs on the PLATFORM key: "
+                + "the node substitutes it, so there is no try-the-owner's-key-first fallback here (the "
+                + "generation tool's own create does have one; the node does not). 'runs_on' is therefore "
+                + "the field to read before writing the node: 'platform_or_own_key' means the platform "
+                + "resells this provider on this installation and an unstated node works; 'own_key_only' "
+                + "means it does not, and the node needs credential_source:'user' plus a key the owner "
+                + "has connected - if they have not, say so instead of building a node that fails on its "
+                + "first run. A third value, 'unknown', means the check itself did not answer: make no "
+                + "claim either way, and say the payer could not be confirmed rather than guessing. "
+                + "'platform_or_own_key' means a platform key exists AND a price is published, which is "
+                + "what billing requires; a run can still be refused if the model is priced in a unit "
+                + "the call cannot be measured in.");
+            result.put("models_note", "Every generation model this installation offers, by kind. "
+                + "'accepts' is the exact set of params that model takes: anything else is refused before "
+                + "the provider is called, at no cost. Limits per param (allowed values, min/max) are not "
+                + "here to keep this readable; the generation tool's action='models' carries them when you "
+                + "have that tool.");
+        }
         result.put("params", ordered(
-            "model", "REQUIRED. A model id from generation(action='models').",
+            "model", "REQUIRED. One of the ids under 'models' in this payload.",
             "prompt", "What to generate. Required by every model that accepts it.",
             "duration_seconds", "Length for video, music and speech. Models priced per second bill on this.",
             "aspect_ratio", "Framing, e.g. '16:9'. Only the values in that model's limits.",
@@ -676,9 +754,13 @@ public class WorkflowHelpProvider {
             "negative_prompt", "What to avoid.",
             "input_image / input_audio / input_video", "A whole FileRef from an upstream node, used as a "
                 + "reference or a first frame, e.g. '{{core:download.output.file}}' - never .path, never a URL.",
-            "credential_source", "'platform' = the platform's provider key, billed at the platform price. "
-                + "'user' = a key you configured yourself, billed nothing by the platform. Omit and this "
-                + "node uses 'platform', which is the price every surface quotes for it.",
+            "credential_source", "'platform' = the platform's provider key, billed at the platform "
+                + "price. 'user' = a key the owner configured themselves, billed nothing by the platform. "
+                + "UNSTATED MEANS 'platform' for this node: it is substituted before the run, so leaving "
+                + "it out is a choice of payer, not a fallback. Read 'runs_on' in the models list before "
+                + "you decide: where it says own_key_only the platform does not resell that provider "
+                + "here, and a node left unstated - or set to 'platform' - fails on its first run. Set "
+                + "credential_source:'user' for those, and only if the owner has connected a key.",
             "credential_id", "WHICH of the owner's own provider keys this node runs on, when they hold "
                 + "several for the same provider. Only meaningful beside credential_source:'user'. You have "
                 + "no way to look one up: the ids belong to the owner's account and no action here lists "
@@ -689,8 +771,11 @@ public class WorkflowHelpProvider {
         ));
         result.put("accepted_params", "A model accepts only the params listed in its 'accepts' row. Sending "
             + "one it does not accept is refused with the accepted list BEFORE the provider is called, so a "
-            + "rejected call costs nothing: correct the param and run again. The same applies to a value "
-            + "outside that model's limits.");
+            + "rejected call costs nothing: correct the param and run again. A value outside a limit is "
+            + "refused the same way, EXCEPT where that limit carries allowedEnforced=false: those values "
+            + "are what the provider documents, nothing checks them, and one outside the list reaches the "
+            + "provider and fails there. Treat those as a suggestion and confirm the value with the person "
+            + "rather than trying others.");
         result.put("price", "Every successful run is charged. 1 credit = $0.001. A model is priced per call, "
             + "per second, per image or per character, so a longer request costs more: a per-second video "
             + "model at 60 credits/second costs 600 credits for a 10 second clip. The node reports what it "
@@ -1058,8 +1143,8 @@ public class WorkflowHelpProvider {
             "Each time a workflow is saved, a new plan version is recorded. Production triggers " +
             "(webhook, schedule, workflow(action='execute', version='pinned')) fire ONLY the pinned " +
             "version - never the latest draft. Pinning is explicit: no auto-pin happens on first run. " +
-            "Before pinning a version, you must run it at least once (workflow(action='execute', id='...', version=N)) " +
-            "so production has a WAITING_TRIGGER run to accumulate fires into.");
+            "A version you have never executed can be pinned: pin prepares the production run that " +
+            "fires accumulate into, so there is no execute-then-pin sequence to perform.");
 
         help.put("production_model", List.of(
             "The pinned version IS the production workflow - think of it as 'what's live'.",
@@ -1074,9 +1159,10 @@ public class WorkflowHelpProvider {
         Map<String, Object> actions = new LinkedHashMap<>();
         actions.put("pin", ordered(
             "syntax", "workflow(action='pin', workflow_id='<uuid>', version=N)",
-            "purpose", "Promote version N to production. N must already have at least one successful " +
-                       "or active run (COMPLETED / WAITING_TRIGGER / RUNNING / PAUSED) - that run's latest " +
-                       "instance becomes the production run for triggers to hit.",
+            "purpose", "Promote version N to production. If N already has a successful or active run " +
+                       "(COMPLETED / WAITING_TRIGGER / RUNNING / PAUSED) that run becomes the production " +
+                       "run triggers hit; if it has none, pin prepares one. Either way you do NOT have " +
+                       "to execute N first.",
             "side_effects", "All existing webhook/schedule triggers re-sync to the pinned plan immediately."
         ));
         actions.put("unpin", ordered(
@@ -1093,15 +1179,23 @@ public class WorkflowHelpProvider {
 
         help.put("typical_flow", List.of(
             "1. Save workflow → version N is recorded",
-            "2. workflow(action='execute', id='<uuid>', version=N) → verifies v_N works end-to-end",
+            "2. workflow(action='execute', id='<uuid>', version=N) → verifies v_N works end-to-end (recommended, not required by pin)",
             "3. workflow(action='pin', workflow_id='<uuid>', version=N) → promote to production",
             "4. Webhooks/schedules now fire v_N; edits create v_(N+1) without affecting production",
             "5. workflow(action='pin', workflow_id='<uuid>', version=N+1) when ready to ship the next cut"
         ));
 
+        // The rule itself is stated in `description` and in actions.pin.purpose. This entry
+        // only adds what neither says: why step 2 above is still worth doing.
+        help.put("why_still_execute_first", "Step 2 above is about confidence in the plan, not about "
+            + "unlocking the pin: skipping it ships a version whose behaviour you have not observed.");
+
         help.put("common_errors", ordered(
             "version_required", "pin requires the 'version' param - use 'unpin' to clear the pin",
-            "no_successful_run", "The target version has never been executed successfully. Run it once via action='execute' then retry pin.",
+            "production_run_unavailable", "The version has no production run and pin could not prepare one. "
+                + "Pin is refused rather than left half-done, because a pinned version with no production run "
+                + "arms the webhook, schedule and chained-workflow triggers with nothing to fire. Retry once; "
+                + "if it fails again, the owner of the workflow has to resolve it.",
             "version_not_found", "That version number doesn't exist in the workflow history - check with workflow(action='get')."
         ));
 
@@ -1118,13 +1212,16 @@ public class WorkflowHelpProvider {
             "Fires a workflow trigger on behalf of the user. The workflow runs and the result " +
             "is returned synchronously once the triggered epoch completes.");
         help.put("interactive_chat_authorization",
-            "IMPORTANT (interactive chat only): execute is a sensitive action and is GATED behind " +
-            "user authorization. When gated, the call does NOT run the workflow - it returns " +
-            "{status:'authorization_required', executed:false} instead of a run result. That means " +
-            "NOTHING ran: there is no run_id, no node status, no output. Do NOT describe, summarize, " +
-            "or invent any outcome, and do NOT re-call execute - wait for the user to approve. Only " +
-            "once they approve does the workflow actually run and return the real result (with run_id, " +
-            "status, outputs). A response with run_id/status/outputs is the ONLY proof it executed.");
+            "IMPORTANT (interactive chat only): execute is a sensitive action and needs the user's " +
+            "authorization. Asking them happens inside your call: it may simply take longer to " +
+            "answer while they decide. Do NOT stop, do NOT announce that you are waiting, and do " +
+            "NOT re-call execute - just read what comes back. Two shapes: a normal run result " +
+            "(run_id, status, outputs) means they allowed it and it RAN; " +
+            "{executed:false} with status 'authorization_required', 'denied' or 'stopped' means " +
+            "NOTHING ran - no run_id, no node status, no output. On {executed:false} do not " +
+            "describe, summarize or invent an outcome, and do not call execute again: continue " +
+            "with other work or finish your turn. If they answer after that, they come back with a " +
+            "new request. A response carrying run_id/status/outputs is the ONLY proof it executed.");
 
         // Parameters
         Map<String, Object> params = new LinkedHashMap<>();

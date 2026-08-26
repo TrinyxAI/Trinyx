@@ -1095,15 +1095,36 @@ public record Core(
      *
      * @param workflowId UUID of the workflow to execute
      * @param inputMapping SpEL expression for input data to pass to the sub-workflow
-     * @param timeoutSeconds Maximum wait time for sub-workflow completion (default: 300)
+     * @param timeoutSeconds How long to wait for the sub-workflow to FINISH, in seconds
+     *                       (default 300). Values above MAX_TIMEOUT_SECONDS are silently
+     *                       reduced to it; zero or less becomes the default. It never
+     *                       bounds the sub-workflow itself, which keeps running
      * @param maxDepth Maximum recursion depth to prevent infinite loops (default: 5)
      * @param triggerId Optional trigger ID to fire (defaults to first fireable trigger)
      */
     @JsonIgnoreProperties(ignoreUnknown = true)
     public record SubWorkflowConfig(String workflowId, String inputMapping, int timeoutSeconds, int maxDepth,
                                      String triggerId) {
+        /**
+         * Ceiling on how long the node may wait for the target, enforced in the compact
+         * constructor below.
+         *
+         * <p>The engine gives a parallel branch 30 MINUTES to finish: four joins bound it, for
+         * fork branches, split items, nested splits, and parallel ready nodes (the last of these
+         * does not throw, it marks the cycle failed). Those clocks start when the BRANCH is
+         * dispatched, while this node's budget starts when the node itself begins, so anything
+         * that ran earlier in the same branch is charged to the join and not to us. 1500 leaves
+         * five minutes of that headroom, which keeps this node's own timeout the one that fires
+         * for any realistic prefix. It is not a proof: a branch that spends more than five
+         * minutes before reaching this node can still be pre-empted by its parent's join.
+         */
+        public static final int MAX_TIMEOUT_SECONDS = 1500;
+
         public SubWorkflowConfig {
-            timeoutSeconds = timeoutSeconds <= 0 ? 300 : timeoutSeconds;
+            // The node now genuinely waits out this budget on a pooled worker, so an unbounded
+            // value is no longer just optimistic bookkeeping: it parks capacity for as long as it
+            // says, and past MAX_TIMEOUT_SECONDS it outlives the engine's own branch joins.
+            timeoutSeconds = timeoutSeconds <= 0 ? 300 : Math.min(timeoutSeconds, MAX_TIMEOUT_SECONDS);
             maxDepth = maxDepth <= 0 ? 5 : Math.min(maxDepth, 10);
         }
 

@@ -6,7 +6,7 @@ vi.mock('@/lib/stores/current-org-store', () => ({
 }));
 
 vi.mock('../../api-client', () => ({
-  apiClient: { getTokenProvider: () => async () => 'tok-abc' },
+  apiClient: { getAuthToken: async () => 'tok-abc' },
   ApiError: class ApiError extends Error {
     status: number;
     constructor(message: string, status: number) {

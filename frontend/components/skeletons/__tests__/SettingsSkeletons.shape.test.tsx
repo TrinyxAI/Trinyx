@@ -14,12 +14,12 @@
  * half the height redraws a capsule whatever the class is called.
  */
 import '@testing-library/jest-dom/vitest';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import React from 'react';
 import { afterEach, describe, expect, it } from 'vitest';
 import { cleanup, render } from '@testing-library/react';
 
-import { badgeVariants } from '@/components/ui/badge';
-import { buttonVariants } from '@/components/ui/button';
 import {
   CredentialsListSkeleton,
   IntegrationsListSkeleton,
@@ -36,9 +36,15 @@ const HEIGHT_PX: Record<string, number> = {
   'h-10': 40, 'h-16': 64, 'h-32': 128, 'h-48': 192, 'h-64': 256,
 };
 
-/** Radius rung -> rendered px. `rounded` alone is the 4px default. */
+/**
+ * Radius rung -> rendered px, for Tailwind v4 (the version this app pins).
+ *
+ * `rounded-sm` is 4px in v4, NOT the 2px it was in v3 - that value moved to
+ * `rounded-xs`. The wrong number here would understate a corner in the one
+ * direction that hides a capsule from the assertions below.
+ */
 const RADIUS_PX: Record<string, number> = {
-  rounded: 4, 'rounded-sm': 2, 'rounded-md': 6, 'rounded-lg': 8,
+  rounded: 4, 'rounded-xs': 2, 'rounded-sm': 4, 'rounded-md': 6, 'rounded-lg': 8,
   'rounded-xl': 12, 'rounded-2xl': 16, 'rounded-3xl': 24,
 };
 
@@ -56,8 +62,37 @@ function classesOf(el: Element): string[] {
   return el.className.split(/\s+/).filter(Boolean);
 }
 
+/**
+ * The radius the REAL counterpart draws, read from its source.
+ *
+ * A skeleton's whole job is to promise the shape that is coming, so the promise
+ * has to be checked against the element it stands in for - not against a shared
+ * primitive that element does not use. Throws rather than returning undefined:
+ * a pattern that silently stops matching would turn these into assertions that
+ * `undefined === undefined`.
+ */
+function radiusInSource(relativePath: string, pattern: RegExp): string {
+  const source = readFileSync(join(__dirname, '../../..', relativePath), 'utf8');
+  const match = source.match(pattern);
+  if (!match) throw new Error(`Counterpart shape not found in ${relativePath} with ${pattern}`);
+  return match[1];
+}
+
+/**
+ * The corner the element actually renders: the LARGEST radius rung on it, not
+ * the first one in attribute order.
+ *
+ * <p>Taking the first was a real hole. `SkeletonBox` used to concatenate its
+ * base `rounded` with the caller's class, so the capsule this file was written
+ * to catch (`rounded` + `rounded-2xl` on an h-6 box) measured 4px, 0.17 of its
+ * height, and every assertion below went green on the broken markup. The base
+ * is merged away now, but reading the widest rung means these tests keep their
+ * teeth if any caller ever ships two again.
+ */
 function radiusOf(el: Element): string | undefined {
-  return classesOf(el).find((c) => c in RADIUS_PX);
+  const rungs = classesOf(el).filter((c) => c in RADIUS_PX);
+  if (rungs.length === 0) return undefined;
+  return rungs.reduce((widest, c) => (RADIUS_PX[c] > RADIUS_PX[widest] ? c : widest));
 }
 
 afterEach(cleanup);
@@ -89,42 +124,37 @@ describe('settings skeletons - the corner matches what is coming', () => {
     }
   });
 
-  it('draws the credential type chip at the Badge rung, like the real chip', () => {
-    // The real cell renders `text-xs px-2 py-1 rounded-md`, a label. Reading the
-    // rung off badgeVariants keeps the two together if the label rung ever moves.
-    const badgeRadius = badgeVariants().split(/\s+/).find((c) => c in RADIUS_PX);
+  it('draws the credential type chip at the rung the REAL chip uses', () => {
+    // Read off the counterpart's own source, not off `badgeVariants`: the real
+    // cell is a hand-written `<span className="text-xs px-2 py-1 … rounded-md">`,
+    // not a `<Badge>`, so keying on Badge would go red when Badge moves and stay
+    // green when the chip does - drift in both directions, from the wrong file.
+    const chipRadius = radiusInSource(
+      join('app', '[locale]', 'app', 'settings', 'credentials', 'components', 'MyCredentialsList.tsx'),
+      /className="text-xs px-2 py-1 bg-theme-tertiary (rounded-\w+)/,
+    );
     const { container } = render(<CredentialsListSkeleton />);
 
     // The only h-6 box in this skeleton is that chip.
     const chips = Array.from(container.querySelectorAll('*')).filter((el) => classesOf(el).includes('h-6'));
 
-    expect(badgeRadius).toBeDefined();
     expect(chips).not.toHaveLength(0);
-    for (const chip of chips) expect(radiusOf(chip)).toBe(badgeRadius);
+    for (const chip of chips) expect(radiusOf(chip)).toBe(chipRadius);
   });
 
-  it('draws the tab bar as a surface holding controls, like the page it replaces', () => {
-    // Overview renders a `rounded-2xl` bar of `h-9 rounded-xl` triggers.
-    const buttonRadius = buttonVariants().split(/\s+/).find((c) => c in RADIUS_PX);
+  it('draws the tab bar and its items at the rungs the REAL bar uses', () => {
+    // Same reasoning: the overview tab bar is hand-written markup, so both rungs
+    // come from that page rather than from `buttonVariants`.
+    const overview = join('app', '[locale]', 'app', 'settings', 'overview', 'page.tsx');
+    const barRadius = radiusInSource(overview, /p-1 sm:p-1\.5 bg-theme-tertiary (rounded-\w+)/);
+    const itemRadius = radiusInSource(overview, /flex h-9 items-center[^"]*?(rounded-\w+)/);
+
     const { container } = render(<TabsSkeleton tabCount={3} />);
     const bar = container.firstElementChild as HTMLElement;
     const items = Array.from(bar.children);
 
-    expect(radiusOf(bar)).toBe('rounded-2xl');
+    expect(radiusOf(bar)).toBe(barRadius);
     expect(items).toHaveLength(3);
-    for (const item of items) expect(radiusOf(item)).toBe(buttonRadius);
-  });
-
-  it('keeps the tab bar one rung above the items it holds', () => {
-    // Stated as a relation, not two literals: a surface is above its controls.
-    const rungs = ['rounded', 'rounded-sm', 'rounded-md', 'rounded-lg', 'rounded-xl', 'rounded-2xl', 'rounded-3xl'];
-    const { container } = render(<TabsSkeleton tabCount={2} />);
-    const bar = container.firstElementChild as HTMLElement;
-
-    const barRung = rungs.indexOf(radiusOf(bar) as string);
-    const itemRung = rungs.indexOf(radiusOf(bar.children[0]) as string);
-
-    expect(itemRung).toBeGreaterThan(-1);
-    expect(barRung).toBeGreaterThan(itemRung);
+    for (const item of items) expect(radiusOf(item)).toBe(itemRadius);
   });
 });

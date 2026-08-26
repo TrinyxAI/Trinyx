@@ -3,7 +3,7 @@
 import { memo, useState, useEffect } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { Coins, Gift, Package, Download, CheckCircle, Network, Zap, Workflow, Monitor, Table, Star, ArrowUpRight } from 'lucide-react';
+import { Coins, Gift, Package, Download, CheckCircle, Network, Zap, Workflow, Monitor, Table, Star, ArrowUpRight, Volume2, VolumeX } from 'lucide-react';
 import { useTranslations } from 'next-intl';
 import { track } from '@/lib/analytics/analytics';
 import type { WorkflowPublication } from '@/lib/api';
@@ -74,7 +74,7 @@ export function PricePill({ publication, isFree }: { publication: WorkflowPublic
 // (embedded landing snapshot - TABLE / INTERFACE / SKILL / AGENT) based on what the
 // publication actually carries.
 
-export function PublicationPreview({ publication, fallback, overlay, overlayFallbackStyle, fill, ownerPreview, remote, acquired }: { publication: WorkflowPublication; fallback?: React.ReactNode; overlay?: React.ReactNode; overlayFallbackStyle?: React.CSSProperties; fill?: boolean; ownerPreview?: boolean; remote?: boolean; acquired?: boolean }) {
+export function PublicationPreview({ publication, fallback, overlay, overlayFallbackStyle, fill, ownerPreview, remote, acquired, mediaMuted, onMediaAudioPresence }: { publication: WorkflowPublication; fallback?: React.ReactNode; overlay?: React.ReactNode; overlayFallbackStyle?: React.CSSProperties; fill?: boolean; ownerPreview?: boolean; remote?: boolean; acquired?: boolean; mediaMuted?: boolean; onMediaAudioPresence?: (hasAudio: boolean) => void }) {
   const hasRun = !!publication.showcaseRunId && !!publication.showcaseInterfaceId;
   const [landing, setLanding] = useState<InterfaceSnapshotLike | null>(null);
   const [loadingLanding, setLoadingLanding] = useState(!hasRun);
@@ -117,6 +117,8 @@ export function PublicationPreview({ publication, fallback, overlay, overlayFall
         // path 403s "not publicly available"). Cloud purchases (remote) keep the by-id proxy.
         authenticated={acquired && !remote}
         remote={remote && !publication.localShowcase}
+        mediaMuted={mediaMuted}
+        onMediaAudioPresence={onMediaAudioPresence}
         className={fill ? 'absolute inset-0 h-full w-full' : ''}
       />
     );
@@ -233,6 +235,12 @@ export interface PublicationCardProps {
    */
   installProgress?: number | null;
   /**
+   * A DIFFERENT publication is currently installing. The install machine is single-flight,
+   * so a second Install would be refused with no visible effect: the button is disabled and
+   * explains why instead of lying about starting.
+   */
+  installBlocked?: boolean;
+  /**
    * Destination of the "Open" button that REPLACES the Install button once the publication is
    * installed (e.g. /app/applications/{publicationId}). Callers pass it only when the viewer
    * actually has the installed resource; omitted → no Open button (badge only).
@@ -244,8 +252,13 @@ export interface PublicationCardProps {
 // whole grid re-renders; memo confines that to the ONE card whose
 // installProgress prop actually changes (iframe previews make a full-grid
 // re-render at 20Hz genuinely expensive).
-export const PublicationCard = memo(function PublicationCard({ publication, currentUserId, ownedByMe, onAcquire, isAcquired, showStats, mine, remote, acquired, installProgress, openHref }: PublicationCardProps) {
+export const PublicationCard = memo(function PublicationCard({ publication, currentUserId, ownedByMe, onAcquire, isAcquired, showStats, mine, remote, acquired, installProgress, installBlocked, openHref }: PublicationCardProps) {
   const t = useTranslations('marketplace');
+  const tAcquire = useTranslations('modals.acquire');
+  // The sound labels live in the applications namespace, where the app card
+  // already uses them. One source of truth beats the same sentence translated
+  // twice in two namespaces and drifting.
+  const tSound = useTranslations('applications');
   const router = useRouter();
   const displayMode = publication.displayMode || 'WORKFLOW';
   const isAgent = displayMode === 'AGENT';
@@ -254,6 +267,17 @@ export const PublicationCard = memo(function PublicationCard({ publication, curr
   const isFree = !publication.creditsPerUse || publication.creditsPerUse === 0;
   const isInstalling = installProgress != null;
   const clampedProgress = isInstalling ? Math.min(100, Math.max(0, installProgress)) : 0;
+
+  // Sound. A card's thumbnail is not a picture, it is the publication running, so
+  // one carrying an <audio>/<video> would start talking the moment the grid
+  // mounts - and a marketplace grid mounts a couple of dozen at once. The preview
+  // therefore starts MUTED and the visitor turns it on, per card.
+  //
+  // `hasAudio` comes from the frame itself: the host cannot inspect a sandboxed
+  // cross-origin document, which is also why the control appears only on the
+  // publications that can actually make a sound.
+  const [hasAudio, setHasAudio] = useState(false);
+  const [soundOn, setSoundOn] = useState(false);
   // CE-exclusive on managed cloud: the acquire endpoint would 403, so the card
   // shows the badge instead of an Install button that cannot succeed.
   const ceExclusiveBlocked = isCeExclusiveBlocked(publication);
@@ -296,12 +320,14 @@ export const PublicationCard = memo(function PublicationCard({ publication, curr
               ownerPreview={mine}
               remote={remote}
               acquired={acquired}
+              mediaMuted={!soundOn}
+              onMediaAudioPresence={setHasAudio}
               overlay={<AvatarDisplay avatarUrl={publication.agentAvatarUrl} name={publication.title} size="xl" />}
               overlayFallbackStyle={{ background: heroGradientCss(publication.agentAvatarUrl) }}
               fallback={<StandardFallback publication={publication} />}
             />
           ) : hasInterfacePreview ? (
-            <PublicationPreview publication={publication} fill ownerPreview={mine} remote={remote} acquired={acquired} fallback={<StandardFallback publication={publication} />} />
+            <PublicationPreview publication={publication} fill ownerPreview={mine} remote={remote} acquired={acquired} mediaMuted={!soundOn} onMediaAudioPresence={setHasAudio} fallback={<StandardFallback publication={publication} />} />
           ) : (
             <StandardFallback publication={publication} />
           )}
@@ -325,6 +351,34 @@ export const PublicationCard = memo(function PublicationCard({ publication, curr
             {t('installed')}
           </span>
         ) : null}
+
+        {/* Bottom-left: sound toggle, only for a publication that actually has
+            media - a speaker on a silent card promises a sound that does not
+            exist. Stays visible once ON so the card making the noise is
+            identifiable at a glance; hover/focus-revealed otherwise.
+
+            Withheld while installing: the progress bar owns the bottom strip,
+            and the greyed-out preview is not what anyone wants to listen to.
+
+            preventDefault as well as stopPropagation - the whole card is a Link,
+            so without it turning the sound on would navigate away instead. */}
+        {hasAudio && !isInstalling && (
+          <button
+            type="button"
+            onClick={(e) => { e.preventDefault(); e.stopPropagation(); setSoundOn((on) => !on); }}
+            aria-pressed={soundOn}
+            aria-label={soundOn ? tSound('muteSound') : tSound('unmuteSound')}
+            title={soundOn ? tSound('muteSound') : tSound('unmuteSound')}
+            data-testid="publication-sound-toggle"
+            className={`absolute bottom-3 left-3 z-30 inline-flex items-center justify-center h-7 w-7 rounded-xl backdrop-blur bg-white/80 dark:bg-black/50 border border-white/40 dark:border-white/10 shadow-sm transition-opacity ${
+              soundOn
+                ? 'opacity-100 text-theme-primary'
+                : 'opacity-0 group-hover:opacity-100 focus-within:opacity-100 text-theme-secondary hover:text-theme-primary'
+            }`}
+          >
+            {soundOn ? <Volume2 className="h-3.5 w-3.5" /> : <VolumeX className="h-3.5 w-3.5" />}
+          </button>
+        )}
 
         {/* Install-in-progress: the preview starts fully greyed out and un-greys
             left-to-right as the gauge fills - the veil's left edge tracks the
@@ -412,10 +466,21 @@ export const PublicationCard = memo(function PublicationCard({ publication, curr
               {t('open')}
             </button>
           ) : canAcquire ? (
+            // installBlocked: another publication is mid-install and the install machine
+            // takes one at a time, so this click would be dropped silently. Disabled +
+            // titled with the reason beats a button that looks live and does nothing.
             <button
               type="button"
-              onClick={(e) => { e.preventDefault(); e.stopPropagation(); onAcquire!(publication); }}
-              className="inline-flex items-center gap-1 h-[22px] px-2 rounded-lg text-[11px] font-medium bg-[var(--accent-primary)] text-[var(--bg-primary)] hover:brightness-110 active:scale-95 transition-[filter,transform] shrink-0"
+              data-testid="publication-card-acquire"
+              disabled={installBlocked}
+              title={installBlocked ? tAcquire('installBusy') : undefined}
+              onClick={(e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                if (installBlocked) return;
+                onAcquire!(publication);
+              }}
+              className="inline-flex items-center gap-1 h-[22px] px-2 rounded-lg text-[11px] font-medium bg-[var(--accent-primary)] text-[var(--bg-primary)] hover:brightness-110 active:scale-95 transition-[filter,transform] shrink-0 disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:brightness-100 disabled:active:scale-100"
             >
               <Download className="h-3 w-3" />
               {t('acquire')}

@@ -19,7 +19,8 @@ public final class CloudRelaySupport {
             "zai",
             "openrouter",
             "qwen",
-            "moonshot"
+            "moonshot",
+            "minimax"
     );
 
     private CloudRelaySupport() {

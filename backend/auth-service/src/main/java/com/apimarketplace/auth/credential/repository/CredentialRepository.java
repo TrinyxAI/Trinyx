@@ -134,6 +134,118 @@ public class CredentialRepository {
         return jdbc.update("UPDATE auth.credentials SET last_used = CURRENT_TIMESTAMP WHERE id = ?", id);
     }
 
+    /**
+     * Rename a credential: writes {@code name} and stamps {@code updated_at},
+     * nothing else.
+     *
+     * <p>A targeted UPDATE rather than a {@link #save} round-trip, for two
+     * reasons. (1) {@code save} re-encrypts {@code credential_data} on every
+     * call, so renaming would needlessly re-wrap every secret of the row.
+     * (2) {@code save}'s UPDATE is keyed {@code WHERE id = ? AND tenant_id = ?},
+     * which silently writes 0 rows for an org-shared credential renamed by a
+     * member who is not its owner.
+     *
+     * <p>The WHERE clause is {@code id AND organization_id}, which is EXACTLY the
+     * predicate {@code CredentialService.matchesScope} enforces upstream (post-V261
+     * scope is pure org equality, tenant plays no part). Repeating it here is
+     * defence in depth: a future caller that forgets the service-side check still
+     * cannot rename a row outside the workspace it names. Do not widen it to
+     * {@code OR tenant_id = ?} - that would let a caller rename their own row in
+     * a workspace they are not currently in, which is precisely what strict
+     * isolation forbids.
+     *
+     * <p>{@code updated_at} MUST move: {@link #computeStateVersion} keys the
+     * agent response cache on {@code MAX(updated_at)}, so a rename that left it
+     * untouched would leave the old name cached in agent-facing listings.
+     *
+     * @return rows updated (0 when the id no longer exists, or is out of scope)
+     */
+    public int updateName(Long id, String organizationId, String name) {
+        if (id == null || name == null || organizationId == null || organizationId.isBlank()) {
+            return 0;
+        }
+        return jdbc.update("""
+                UPDATE auth.credentials
+                SET name = ?, updated_at = CURRENT_TIMESTAMP
+                WHERE id = ? AND organization_id = ?
+                """, name, id, organizationId);
+    }
+
+    /**
+     * The {@code integration} of every OTHER credential of the same owner already carrying this
+     * name, compared TRIMMED and CASE-INSENSITIVELY (not the exact {@code name = ?} of
+     * {@link #findAllByTenantIdAndName}; see below for why), in the order that method would
+     * consider them. Empty when the name is free. Entries are null for a credential that
+     * declares none.
+     *
+     * <p>Feeds the rename guard, which refuses only the collisions that would actually change
+     * which key an execution runs on. That judgement needs the colliding rows' integration and
+     * nothing else, so this reads ONE column and never builds a {@code Credential}.
+     *
+     * <p><b>Matched trimmed and case-insensitively</b>, which is wider than the exact
+     * {@code name = ?} of {@link #findAllByTenantIdAndName}. The guard protects two readers,
+     * not one, and the other is catalog's run-time named selection
+     * ({@code HttpExecutionService.resolveCredentialIdNamed} via {@code sameChosenName}), which
+     * compares the LABEL a person typed with {@code trim().equalsIgnoreCase(...)}. Probing
+     * exactly would let {@code "grok perso"} and {@code "Grok perso"} coexist, which that reader
+     * then reports as ambiguous and refuses to resolve.
+     *
+     * <p>No index backs {@code lower(name)}; the scan is over one tenant's credentials, which is
+     * a handful of rows, and it runs once per rename.
+     *
+     * <p><b>One column on purpose: this must not decrypt anything.</b> Mapping these rows
+     * through {@link CredentialRowMapper} would call
+     * {@code CredentialEncryptionService.decryptSensitiveFields} on every colliding row, so a
+     * rename would materialise the plaintext api_key / access_token / password of credentials
+     * the caller may not even be able to open, purely to decide not to use them. That is the
+     * exact shape catalog's {@code HttpExecutionService.resolvePinnedCredentialOwnership}
+     * refuses for the same reason, and it is why {@code /scopes/by-id} exists as an
+     * identity-only endpoint. It would also make the rename FAIL on a row encrypted under a
+     * rotated key: {@code decrypt} throws, the row mapper wraps it, and a 409 or a success
+     * turns into a 500 that names nothing.
+     *
+     * <p>Scoped by {@code tenant_id} because that is the scope of the lookup it protects:
+     * {@link #findAllByTenantIdAndName} keys on {@code (tenant_id, name)}, and it is what
+     * {@code InternalCredentialService.findCredential} consults before falling back to the
+     * {@code integration} slug.
+     *
+     * <p>The owner's tenant, NOT the caller's: an org member can rename a credential shared by
+     * someone else, and the row that would then be ambiguous at execution time belongs to the
+     * OWNER. Probing the caller's rows would both miss the real collision and refuse harmless
+     * names that merely clash with something of the caller's own.
+     *
+     * <p>Deliberately NOT narrowed to the workspace: a collision in another workspace of the
+     * same owner is real for the readers that key on {@code (tenant_id, name)}, which is why
+     * the refusal message has to mention it.
+     *
+     * <p><b>Known gap, in the other direction.</b> One by-name reader is ORG-scoped and this
+     * probe cannot see it: catalog's named selection resolves over
+     * {@code GET /internal/credentials/identities}, which returns
+     * {@code findByOrganizationIdStrict} whenever an organization header is present, i.e. rows
+     * of OTHER tenants in the same workspace. So a teammate's identically labelled credential
+     * of the same integration still produces the ambiguity this guard refuses, and no rename
+     * check catches it. Widening the probe to the workspace would mean refusing over rows of
+     * another person's tenant, which is a bigger decision than this fix; it is recorded here
+     * rather than half-done.
+     *
+     * <p><b>Best effort, not an invariant.</b> There is no unique index behind it
+     * ({@code auth.credentials} has none on {@code name}), {@code createCredential} does not
+     * apply it at all, and the check and the write are separate statements, so concurrent
+     * renames can still land a duplicate. That is tolerable precisely because
+     * {@link #findAllByTenantIdAndName} is ordered and its caller prefers a row the name really
+     * identifies: duplicates stay resolvable, deterministically, and to the right row.
+     */
+    public List<String> findOtherIntegrationsWithNameForTenant(Long excludeId, String ownerTenantId, String name) {
+        if (name == null || ownerTenantId == null || ownerTenantId.isBlank()) {
+            return List.of();
+        }
+        return jdbc.queryForList("""
+                SELECT integration FROM auth.credentials
+                WHERE tenant_id = ? AND LOWER(BTRIM(name)) = LOWER(BTRIM(?)) AND id <> ?
+                ORDER BY is_default DESC, created_at ASC, id ASC
+                """, String.class, ownerTenantId, name, excludeId == null ? -1L : excludeId);
+    }
+
     public Optional<Credential> findById(Long id) {
         String sql = "SELECT * FROM auth.credentials WHERE id = ?";
         return jdbc.query(sql, new CredentialRowMapper(), id)
@@ -173,11 +285,63 @@ public class CredentialRepository {
         return jdbc.queryForObject(sql, Integer.class, tenantId, status.name());
     }
 
-    public Optional<Credential> findByTenantIdAndName(String tenantId, String name) {
-        String sql = "SELECT * FROM auth.credentials WHERE tenant_id = ? AND name = ?";
-        return jdbc.query(sql, new CredentialRowMapper(), tenantId, name)
-            .stream()
-            .findFirst();
+    /**
+     * EVERY credential of one tenant carrying this exact name, in the order the resolver
+     * considers them.
+     *
+     * <p>Consulted by {@code InternalCredentialService.findCredential} before the
+     * {@code integration} fallback, so it decides which key an execution runs on.
+     * Names are not unique in this table, hence the explicit ORDER BY: without it
+     * Postgres is free to return either row of a duplicate pair, and the SAME workflow
+     * could resolve to a different key between two runs.
+     *
+     * <p><b>This can change which credential an existing install resolves to.</b> The
+     * query was UNORDERED before, so whichever row Postgres happened to return first won,
+     * and on a table where {@code touchLastUsed} rewrites a tuple on every use, heap order
+     * drifts away from insertion order continuously. There is no ordering to "preserve":
+     * an install holding two same-named rows was already resolving arbitrarily, and after
+     * this it resolves to the default one, or failing that the oldest. That is the point
+     * (the same workflow used to be able to pick a different key between two runs), but it
+     * is a behaviour change, not a compatibility guarantee, and it ships with no warning.
+     * Duplicate names are rare (nothing creates them deliberately) and the new rename guard
+     * refuses to add more.
+     *
+     * <p>{@code created_at ASC, id ASC} rather than the {@code DESC} used by
+     * {@link #findByTenantIdAndIntegration}: among duplicates the oldest is the one that
+     * has had the most time to be pinned by an id somewhere, so it is the safer default of
+     * the two arbitrary choices. {@code is_default} is the FIRST key regardless, because an
+     * explicitly chosen default outranks age. The {@code id} tiebreak covers rows created
+     * inside one transaction, where {@code created_at} (the transaction timestamp) ties.
+     *
+     * <p>Unlike {@link #findOtherIntegrationsWithNameForTenant}, this DOES map full rows
+     * through {@link CredentialRowMapper} and therefore decrypts, including the homonyms it
+     * discards. The two are not inconsistent: this path exists to hand back a usable
+     * credential, so the winning row's secret is the point, and the set is one row in every
+     * install that has no duplicate name. The guard needs no secret at all, which is why it
+     * reads one column. Splitting this into "ids first, fetch the winner" would add a round
+     * trip to the hot token path to save a decryption that only happens on duplicates.
+     *
+     * <p>Returns ALL the matches, not the first one, because the caller does not want
+     * "the row that happens to sort first" but "the row this name really identifies"
+     * ({@code CredentialService.findByNameIdentifyingIntegration}). Handing it one row
+     * meant a credential merely LABELLED with a provider's slug could shadow the real one
+     * and turn a resolvable requirement into no match at all: harmless on the token path,
+     * which falls back to the integration, but the {@code /scopes} preflight has no
+     * fallback and its caller fails open. The order below is therefore the preference
+     * among EQUALLY valid rows, no longer the whole decision.
+     *
+     * <p>Renaming onto a name of the same owner that a competing credential already holds
+     * is refused upstream by {@link #findOtherIntegrationsWithNameForTenant}; duplicates that predate
+     * that guard, or that the create path let through (it applies no such rule), still
+     * resolve deterministically here.
+     */
+    public List<Credential> findAllByTenantIdAndName(String tenantId, String name) {
+        String sql = """
+            SELECT * FROM auth.credentials
+            WHERE tenant_id = ? AND name = ?
+            ORDER BY is_default DESC, created_at ASC, id ASC
+            """;
+        return jdbc.query(sql, new CredentialRowMapper(), tenantId, name);
     }
 
     public void deleteById(Long id) {

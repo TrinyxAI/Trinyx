@@ -74,6 +74,32 @@ public class FindNode extends BaseNode {
         logger.info("[FindNode] Executing: nodeId={}, dataSourceId={}, maxItems={}, hasToolsGateway={}",
             nodeId, stepConfig.dataSourceId(), maxItems, toolsGateway != null);
 
+        // A table step cannot carry a run-time account selector today: this node is
+        // built only from plan.getTables(), and WorkflowPlanParser.parseTables uses the
+        // 8-arg Step constructor, so the field is structurally null here.
+        //
+        // Enforced rather than asserted in a comment, because the failure mode if that
+        // ever changes is the worst one available: the selection would fail, applyTo
+        // would throw, the catch below turns it into null, and the caller reads null as
+        // "try the list fallback" - so a step whose account could not be chosen comes
+        // back GREEN with items. Two lines here make that impossible instead of
+        // unlikely.
+        if (stepConfig.hasCredentialSelector()) {
+            String error = "Step '" + stepConfig.label() + "' is a table step and cannot choose its "
+                + "account at run time: a table reads a datasource and authenticates against no "
+                + "provider. Remove the account expression from it.";
+            logger.error("[FindNode] {}", error);
+            Map<String, Object> failOutput = new HashMap<>();
+            failOutput.put("node_type", "FIND");
+            failOutput.put("find_id", nodeId);
+            failOutput.put("item_index", context.itemIndex());
+            failOutput.put("itemIndex", context.itemIndex());
+            failOutput.put("item_id", context.itemId());
+            failOutput.put("error", error);
+            return NodeExecutionResult.failureWithOutput(
+                nodeId, error, failOutput, System.currentTimeMillis() - startTime);
+        }
+
         List<Object> items;
         Map<String, Object> resolvedInputData = null;
 
@@ -181,18 +207,18 @@ public class FindNode extends BaseNode {
             if (context.runId() != null) {
                 billingIdentifiers.put("__workflowRunId__", context.runId());
             }
-            // Propagate workflow author's credential toggle - see StepNode for
-            // the rationale. Catalog uses these fields strictly (no fallback)
-            // when present, applies fallback-if-priced when absent.
-            if (stepConfig.usesPlatformCredential() && stepConfig.platformCredentialId() != null) {
-                billingIdentifiers.put("__credentialSource__", "platform");
-                billingIdentifiers.put("__platformCredentialId__", stepConfig.platformCredentialId());
-            } else {
-                billingIdentifiers.put("__credentialSource__", "user");
-                if (stepConfig.selectedCredentialId() != null) {
-                    billingIdentifiers.put("__selectedCredentialId__", stepConfig.selectedCredentialId());
-                }
-            }
+            // Which credential this step runs on - one decision, owned by
+            // StepCredentialSelection, so this node and StepNode cannot drift on the
+            // markers they emit.
+            //
+            // A table step can never carry a run-time selector: this node is built
+            // only from plan.getTables(), which WorkflowPlanParser.parseTables
+            // constructs through the 8-arg Step constructor, so credentialSelector is
+            // structurally null here. The selection is therefore always the static
+            // one, and no refusal branch is reachable - which is just as well, since
+            // this method signals failure with null and the caller reads null as
+            // "try the list fallback", i.e. a refusal here would come back GREEN.
+            StepCredentialSelection.resolve(stepConfig, null).applyTo(billingIdentifiers);
             com.apimarketplace.orchestrator.services.interfaces.ExecutionResult result =
                 toolsGateway.executeTool(toolRef, inputData, tenantId, billingIdentifiers);
 

@@ -38,6 +38,14 @@ import { RunApprovalsDialog } from '@/components/approvals/RunApprovalsDialog';
 type Tab = 'inbox' | 'triggers' | 'activity' | 'shared';
 
 /**
+ * Trigger-kind chip pre-selected whenever the Triggers tab is shown. Schedules
+ * are the automations users open the bell to check (next fire countdown), so
+ * the tab lands on them instead of on an unfiltered mixed list. Still
+ * deselectable: clicking the active chip clears the filter and shows all kinds.
+ */
+const DEFAULT_TRIGGER_KIND_FILTER: TriggerType = 'SCHEDULE';
+
+/**
  * Resource types backed by a SharedLink. Mirrors backend
  * {@code SharedLinkEntity.ResourceType} (publication-service):
  * CHAT, FORM, CONVERSATION, APPLICATION.
@@ -123,7 +131,11 @@ export function NotificationBell() {
   // Active trigger-kind filter on the Triggers tab. null = show all rows.
   // Single-select with click-to-deselect: clicking the active chip clears
   // the filter (rather than requiring an explicit "All" chip).
-  const [kindFilter, setKindFilter] = useState<TriggerType | null>(null);
+  // Defaults to SCHEDULE (and is reset to it on every popover open, see
+  // handleOpenChange): schedules are the automations users come here to check
+  // (next fire countdown), so the tab always lands on them rather than on a
+  // mixed list or on whatever chip was left selected in a previous visit.
+  const [kindFilter, setKindFilter] = useState<TriggerType | null>(DEFAULT_TRIGGER_KIND_FILTER);
   // Active resource-type filter on the Shared tab (4 chips: conversations,
   // applications, chat, form). Same click-to-deselect contract as the
   // Triggers / Activity tabs above.
@@ -155,6 +167,10 @@ export function NotificationBell() {
     if (next && !inboxLoading && unreadCount === 0 && items.length === 0) {
       setTab(automations.length > 0 ? 'triggers' : 'activity');
     }
+    // The bell stays mounted for the whole session, so without this reset the
+    // Triggers tab would keep whatever chip was selected on a previous visit.
+    // Every open starts back on SCHEDULE.
+    if (next) setKindFilter(DEFAULT_TRIGGER_KIND_FILTER);
     setOpen(next);
   };
 

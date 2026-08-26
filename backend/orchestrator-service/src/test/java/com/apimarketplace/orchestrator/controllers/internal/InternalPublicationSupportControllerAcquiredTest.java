@@ -447,6 +447,37 @@ class InternalPublicationSupportControllerAcquiredTest {
         assertThat(response.getStatusCode().value()).isEqualTo(404);
     }
 
+    @Test
+    @DisplayName("editable-duplicate lookup returns the existing copy of an application clone (what keeps 'create my editable copy' idempotent)")
+    void findsTheEditableDuplicateOfAnApplication() {
+        UUID appCloneId = UUID.randomUUID();
+        WorkflowEntity copy = new WorkflowEntity(TENANT, "Cool App", TENANT);
+        copy.setId(UUID.randomUUID());
+        copy.setOrganizationId(ORG_A);
+        when(workflowRepository.findEditableDuplicateOfApplication(ORG_A, appCloneId.toString(), null))
+                .thenReturn(java.util.Optional.of(copy));
+
+        ResponseEntity<?> response = controller.findEditableDuplicate(appCloneId, TENANT, ORG_A, null);
+
+        assertThat(response.getStatusCode().is2xxSuccessful()).isTrue();
+        @SuppressWarnings("unchecked")
+        Map<String, Object> body = (Map<String, Object>) response.getBody();
+        assertThat(body).containsEntry("id", copy.getId().toString());
+        assertThat(body).containsEntry("title", "Cool App");
+    }
+
+    @Test
+    @DisplayName("editable-duplicate lookup 404s when the user never created a copy, so the caller clones one")
+    void noEditableDuplicateYet() {
+        UUID appCloneId = UUID.randomUUID();
+        when(workflowRepository.findEditableDuplicateOfApplication(ORG_A, appCloneId.toString(), null))
+                .thenReturn(java.util.Optional.empty());
+
+        ResponseEntity<?> response = controller.findEditableDuplicate(appCloneId, TENANT, ORG_A, null);
+
+        assertThat(response.getStatusCode().value()).isEqualTo(404);
+    }
+
     private WorkflowEntity workflowWith(String orgId, String name, UUID sourcePubId) {
         WorkflowEntity entity = new WorkflowEntity(TENANT, name, TENANT);
         entity.setId(UUID.randomUUID());

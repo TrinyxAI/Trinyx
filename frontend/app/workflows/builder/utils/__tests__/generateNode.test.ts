@@ -21,7 +21,7 @@ import { DEFAULT_CREDENTIAL_SOURCE } from '../generateParams';
 import type { BuilderNodeData } from '../../types';
 
 vi.mock('@/lib/api/api-client', () => ({
-  apiClient: { get: vi.fn(), post: vi.fn(), put: vi.fn(), delete: vi.fn(), getTokenProvider: () => null },
+  apiClient: { get: vi.fn(), post: vi.fn(), put: vi.fn(), delete: vi.fn(), getTokenProvider: () => null, getAuthToken: async () => null },
 }));
 vi.mock('../../services/workflowPlanImporter/ToolDataService', () => ({
   ToolDataService: { fetchToolsBatch: vi.fn().mockResolvedValue(new Map()), getToolData: vi.fn() },

@@ -186,29 +186,44 @@ export class RedisPublisher {
       if (metadata.diff) event.diff = metadata.diff;
       if (metadata.gitStatus) event.gitStatus = metadata.gitStatus;
 
+      // The server-side approval gate parked this call and already published its card
+      // before waiting, so re-publishing here would show the user the same card twice.
+      // Mirror of the same guard in ConversationRedisStreamingCallback.
+      const cardAlreadyEmitted = metadata.approvalCardEmitted === true;
+
       // Convert serviceApprovalRequested metadata into serviceApproval on tool result
       // + emit separate service_approval_required event (triggers approval modal)
       if (metadata.serviceApprovalRequested && metadata.services) {
+        // The inline chip belongs to the tool ROW, not to the card, so it survives even when
+        // the gate already published the card: suppressing it would leave the tool row with
+        // no sign of what it was waiting for. The duplicate to avoid is the separate card
+        // EVENT below, which is the thing the gate already sent.
         event.serviceApproval = {
           services: metadata.services,
           reason: metadata.reason || '',
         };
-        // Emit the modal-triggering event
-        await this._publish({
-          streamId: this.streamId,
-          services: metadata.services,
-          reason: metadata.reason || '',
-          needsAttention: metadata.needsAttention || false,
-          timestamp: new Date().toISOString(),
-        });
+        // Emit the modal-triggering event - THIS is the duplicate to avoid.
+        if (!cardAlreadyEmitted) {
+          await this._publish({
+            streamId: this.streamId,
+            services: metadata.services,
+            reason: metadata.reason || '',
+            needsAttention: metadata.needsAttention || false,
+            timestamp: new Date().toISOString(),
+          });
+        }
       }
 
       // Tool-authorization gate (bridge path mirror of ConversationRedisStreamingCallback):
       // emit a tool_authorization_required event so the chat paints the authorization card.
       // Frontend detects via 'toolAuthorization' in data (distinct from service approval).
-      // Emitted live - the bridge never pauses the agent (async), so several cards can be
-      // raised across a single turn just like the Java path.
-      if (metadata.toolAuthorizationRequired && metadata.rule) {
+      // Reached only when the gate painted no card of its own. An APPROVED hold returns the
+      // real tool result (nothing to react to); every other ending - denied, stopped, out of
+      // budget - returns approvalCardEmitted, which the check above suppresses. What is left: the
+      // gate is off, it declined to park, or the rule is one the USER performs
+      // (application:acquire) and is never held. In all of those the card stays up, the
+      // turn ends, and the user's answer starts a new one.
+      if (!cardAlreadyEmitted && metadata.toolAuthorizationRequired && metadata.rule) {
         await this._publish({
           streamId: this.streamId,
           toolAuthorization: {

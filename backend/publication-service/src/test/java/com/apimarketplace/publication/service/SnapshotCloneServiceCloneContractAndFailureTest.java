@@ -114,11 +114,11 @@ class SnapshotCloneServiceCloneContractAndFailureTest {
     }
 
     // ========================================================================
-    // Output contract: { workflowId, title }
+    // Output contract: { workflowId, title, resources }
     // ========================================================================
 
     @Test
-    @DisplayName("cloneFromSnapshot returns exactly workflowId + title, with workflowId echoing the orchestrator's created id")
+    @DisplayName("cloneFromSnapshot returns exactly workflowId + title + resources, with workflowId echoing the orchestrator's created id")
     void cloneFromSnapshot_returnsExactlyWorkflowIdAndTitle() {
         when(orchestratorClient.createApplicationWorkflow(any(), anyString()))
                 .thenReturn(Map.of("id", "created-wf-id"));
@@ -127,10 +127,13 @@ class SnapshotCloneServiceCloneContractAndFailureTest {
                 trivialPlan(), TENANT, PUBLICATION_ID, "My Title", "desc", null);
 
         assertThat(result)
-                .as("the acquire result is a 2-key contract consumed by the caller")
-                .containsOnlyKeys("workflowId", "title");
+                .as("the acquire result is a 3-key contract consumed by the caller")
+                .containsOnlyKeys("workflowId", "title", SnapshotCloneService.RESOURCES_KEY);
         assertThat(result.get("workflowId")).isEqualTo("created-wf-id");
         assertThat(result.get("title")).isEqualTo("My Title");
+        assertThat(result.get(SnapshotCloneService.RESOURCES_KEY))
+                .as("a trivial plan creates nothing besides the workflow itself, so every count is omitted")
+                .isEqualTo(Map.of());
     }
 
     // ========================================================================
@@ -561,7 +564,7 @@ class SnapshotCloneServiceCloneContractAndFailureTest {
         Map<String, Object> result =
                 service.cloneFromSnapshot(trivialPlan(), TENANT, PUBLICATION_ID, "My Title", "desc", null);
 
-        assertThat(result).containsOnlyKeys("workflowId", "title");
+        assertThat(result).containsOnlyKeys("workflowId", "title", SnapshotCloneService.RESOURCES_KEY);
         assertThat(result.get("workflowId"))
                 .as("a missing orchestrator 'id' must not NPE; it degrades to a null workflowId")
                 .isNull();

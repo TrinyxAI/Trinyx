@@ -10,6 +10,9 @@ import { useTranslations } from 'next-intl';
 import { getClientLocale } from '@/lib/utils/locale';
 import DeploymentBadge from '@/components/pricing/DeploymentBadge';
 import FeatureLabel from '@/components/pricing/FeatureLabel';
+import FoundingPriceNote from '@/components/pricing/FoundingPriceNote';
+import ReferencePrice from '@/components/pricing/ReferencePrice';
+import type { ResolvedPricingEvent } from '@/lib/billing/pricing-events';
 
 interface Plan {
   id: string;
@@ -37,6 +40,10 @@ interface PlanSelectorProps {
   currentCadence?: 'monthly' | 'yearly';
   onPlanChanged?: (newPlan: string) => void;
   onBillingCycleChange?: (cycle: 'monthly' | 'yearly') => void;
+  /** Open pricing event, or null. Drives the founding-price note under the price. */
+  pricingEvent?: ResolvedPricingEvent | null;
+  /** Credit tier the displayed price was composed with, so the announced price matches it. */
+  creditTierIndex?: number;
 }
 
 const PlanSelector = React.memo(function PlanSelector({
@@ -48,7 +55,9 @@ const PlanSelector = React.memo(function PlanSelector({
   currentPlan = 'FREE',
   currentCadence = 'yearly',
   onPlanChanged,
-  onBillingCycleChange
+  onBillingCycleChange,
+  pricingEvent = null,
+  creditTierIndex = 0
 }: PlanSelectorProps) {
   const { theme } = useTheme();
   const { isLoading: isLoadingPlans } = usePlans();
@@ -132,14 +141,34 @@ const PlanSelector = React.memo(function PlanSelector({
           {isLoadingPlans ? (
             <div className="animate-pulse bg-gray-200 h-8 w-24 rounded mx-auto"></div>
           ) : (
-            <div className="flex items-center justify-center gap-2">
-              <span>{formatPriceLocal(plan.id.toUpperCase())}</span>
-              {plan.id !== 'free' && !plan.disabled && (
-                <span className="text-sm text-theme-secondary">{t('period')}</span>
+            <div className="flex items-baseline justify-center gap-2">
+              {!plan.disabled && (
+                <ReferencePrice
+                  planId={plan.id}
+                  cycle={billingCycle}
+                  creditTierIndex={creditTierIndex}
+                  event={pricingEvent}
+                />
               )}
+              <span className="flex items-baseline gap-1.5">
+                <span>{formatPriceLocal(plan.id.toUpperCase())}</span>
+                {plan.id !== 'free' && !plan.disabled && (
+                  <span className="text-sm text-theme-secondary">{t('period')}</span>
+                )}
+              </span>
             </div>
           )}
         </div>
+        {/* Gated on isLoadingPlans as well: while the price is still a skeleton there is
+            no figure for the caption to qualify, and it would sit under an empty box. */}
+        {!plan.disabled && !isLoadingPlans && (
+          <FoundingPriceNote
+            planId={plan.id}
+            cycle={billingCycle}
+            creditTierIndex={creditTierIndex}
+            event={pricingEvent}
+          />
+        )}
       </div>
 
       <div className="flex justify-center mb-6">

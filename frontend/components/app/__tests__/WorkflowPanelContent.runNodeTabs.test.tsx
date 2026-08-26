@@ -17,7 +17,19 @@ const nodeCreatorProps = vi.hoisted(() => ({ current: null as any }));
 
 vi.mock('next-intl', () => ({ useTranslations: () => (key: string) => key }));
 vi.mock('@/i18n/navigation', () => ({ usePathname: () => '/app/workflow/wf-1' }));
-vi.mock('@/components/chat/ChatCore', () => ({ ChatCore: () => <div data-testid="chat" /> }));
+// Captures what the panel hands ChatCore, so the model menu it BUILDS can be
+// read without the stand-in having to render it.
+const chatCoreProps = vi.hoisted(() => ({ last: null as Record<string, unknown> | null }));
+const credits = vi.hoisted(() => ({ blocked: false }));
+vi.mock('@/lib/hooks/useMonthlyCreditsCannotPay', () => ({
+  useMonthlyCreditsCannotPay: () => ({ blocked: credits.blocked }),
+}));
+vi.mock('@/components/chat/ChatCore', () => ({
+  ChatCore: (props: Record<string, unknown>) => {
+    chatCoreProps.last = props;
+    return <div data-testid="chat" />;
+  },
+}));
 vi.mock('@/app/shared/components', () => ({ WelcomeTitle: ({ children }: any) => <>{children}</> }));
 vi.mock('@/components/chat/ModelSelectorDropdown', () => ({
   ModelSelectorDropdown: () => null,
@@ -235,5 +247,34 @@ describe('WorkflowPanelContent - Run / Add Node sub-tabs', () => {
 
     expect(screen.queryByTestId('run-panel')).toBeNull();
     expect(screen.getByTestId('chat')).toBeTruthy();
+  });
+
+  /** The model menu the panel builds, read as the element it handed down. */
+  function leadingControlProps(): Record<string, unknown> {
+    const leading = chatCoreProps.last?.leadingControl as React.ReactElement<Record<string, unknown>>;
+    return leading?.props ?? {};
+  }
+
+  it('hands the verdict and the notice down to the model menu', () => {
+    // The dropdown carries no translations and no data hooks by design, so the
+    // panel asks and passes both down. Nothing else would notice one going
+    // missing, which is why this is asserted per host rather than once.
+    credits.blocked = true;
+    render(<WorkflowPanelContent workflowId="wf-1" />);
+
+    const menu = leadingControlProps();
+    expect(menu.upgradeRequired).toBe(true);
+    const notice = menu.upgradeNotice as React.ReactElement<{ blocked?: boolean }>;
+    expect(notice?.props?.blocked).toBe(true);
+  });
+
+  it('hands down a clear verdict for an account that can pay', () => {
+    credits.blocked = false;
+    render(<WorkflowPanelContent workflowId="wf-1" />);
+
+    const menu = leadingControlProps();
+    expect(menu.upgradeRequired).toBe(false);
+    const notice = menu.upgradeNotice as React.ReactElement<{ blocked?: boolean }>;
+    expect(notice?.props?.blocked).toBe(false);
   });
 });

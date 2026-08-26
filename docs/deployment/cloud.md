@@ -518,9 +518,12 @@ and set:
 
 ```dotenv
 PAID_MONOLITH_TRUSTSTORE_PATH=/absolute/host/path/to/paid-monolith-truststore.p12
-PAID_MONOLITH_TRUSTSTORE_PASSWORD=<external-secret>
+PAID_MONOLITH_TRUSTSTORE_PASSWORD_PATH=/absolute/host/path/to/paid-monolith-truststore-password
 ```
 
-Compose mounts it read-only only into Cloud `auth-service`. Certificate rotation must
+The password file must contain only the truststore password and remain outside Git with
+restrictive host permissions. Compose mounts both files read-only only into Cloud
+`auth-service`; the JVM reads the password file before the Spring context creates HTTP clients.
+Never put the password in an environment variable or JVM startup option. Certificate rotation must
 publish the new CA alongside the old one, restart the Cloud auth container, rotate the server
 certificate, then remove the retired CA. Never use an insecure trust-all client.

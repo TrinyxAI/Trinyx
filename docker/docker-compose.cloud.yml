@@ -275,12 +275,12 @@ services:
       <<: *cloud-environment
       PORT: "8083"
       SPRING_DATASOURCE_URL: jdbc:postgresql://cloud-postgres:5432/${CLOUD_DB_NAME:-trinyx_cloud}?currentSchema=auth
-      JAVA_TOOL_OPTIONS: >-
-        -Djavax.net.ssl.trustStore=/run/secrets/paid-monolith-truststore.p12
-        -Djavax.net.ssl.trustStorePassword=${PAID_MONOLITH_TRUSTSTORE_PASSWORD:?set PAID_MONOLITH_TRUSTSTORE_PASSWORD}
-        -Djavax.net.ssl.trustStoreType=PKCS12
+      PAID_MONOLITH_TRUSTSTORE_FILE: /run/secrets/paid-monolith-truststore.p12
+      PAID_MONOLITH_TRUSTSTORE_PASSWORD_FILE: /run/secrets/paid-monolith-truststore-password
     volumes:
       - ${PAID_MONOLITH_TRUSTSTORE_PATH:?set PAID_MONOLITH_TRUSTSTORE_PATH}:/run/secrets/paid-monolith-truststore.p12:ro
+    secrets:
+      - paid-monolith-truststore-password
     depends_on:
       <<: *java-dependencies
       keycloak: {condition: service_healthy}
@@ -521,3 +521,7 @@ volumes:
   cloud-redis-data:
   cloud-minio-data:
   cloud-caddy-data:
+
+secrets:
+  paid-monolith-truststore-password:
+    file: ${PAID_MONOLITH_TRUSTSTORE_PASSWORD_PATH:?set PAID_MONOLITH_TRUSTSTORE_PASSWORD_PATH}

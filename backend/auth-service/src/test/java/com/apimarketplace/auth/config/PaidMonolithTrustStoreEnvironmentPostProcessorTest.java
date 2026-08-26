@@ -15,7 +15,7 @@ import org.springframework.boot.test.system.OutputCaptureExtension;
 import org.springframework.context.ConfigurableApplicationContext;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
-import org.springframework.core.env.MockEnvironment;
+import org.springframework.mock.env.MockEnvironment;
 
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;

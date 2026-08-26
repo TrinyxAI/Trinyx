@@ -6,9 +6,13 @@ import org.springframework.core.MethodParameter;
 import org.springframework.http.HttpMethod;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.test.web.servlet.MockMvc;
+import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 import org.springframework.web.HttpRequestMethodNotSupportedException;
 import org.springframework.web.bind.MissingRequestHeaderException;
+import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestHeader;
+import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.servlet.resource.NoResourceFoundException;
 import org.springframework.web.server.ResponseStatusException;
 
@@ -17,6 +21,9 @@ import java.util.List;
 import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 @DisplayName("GlobalExceptionHandler")
 class GlobalExceptionHandlerTest {
@@ -32,6 +39,18 @@ class GlobalExceptionHandlerTest {
     private MissingRequestHeaderException missingHeader(String headerName, int parameterIndex) throws NoSuchMethodException {
         Method method = GlobalExceptionHandlerTest.class.getDeclaredMethod("headerFixture", String.class, String.class);
         return new MissingRequestHeaderException(headerName, new MethodParameter(method, parameterIndex));
+    }
+
+    @RestController
+    static class ResponseStatusFixtureController {
+
+        @GetMapping("/response-status-fixture")
+        void failWithUnauthorized() {
+            throw new ResponseStatusException(
+                    HttpStatus.UNAUTHORIZED,
+                    "INVALID_WORKLOAD_IDENTITY",
+                    new IllegalArgumentException("Compact JWS must have three parts"));
+        }
     }
 
     @Test
@@ -86,30 +105,34 @@ class GlobalExceptionHandlerTest {
 
     @Test
     @DisplayName("preserves workload authentication 401 without leaking the JWT parser cause")
-    void preservesWorkloadAuthenticationUnauthorizedWithoutParserLeak() {
-        ResponseStatusException exception = new ResponseStatusException(
-                HttpStatus.UNAUTHORIZED,
-                "INVALID_WORKLOAD_IDENTITY",
-                new IllegalArgumentException("Compact JWS must have three parts"));
+    void preservesWorkloadAuthenticationUnauthorizedWithoutParserLeak() throws Exception {
+        MockMvc mockMvc = MockMvcBuilders.standaloneSetup(new ResponseStatusFixtureController())
+                .setControllerAdvice(handler)
+                .build();
 
-        ResponseEntity<Map<String, Object>> response = handler.handleResponseStatus(exception);
+        String responseBody = mockMvc.perform(get("/response-status-fixture"))
+                .andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.success").value(false))
+                .andExpect(jsonPath("$.errorCode").value("INVALID_WORKLOAD_IDENTITY"))
+                .andExpect(jsonPath("$.message").value("Request failed"))
+                .andReturn()
+                .getResponse()
+                .getContentAsString();
 
-        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.UNAUTHORIZED);
-        assertThat(response.getBody()).containsEntry("success", false);
-        assertThat(response.getBody()).containsEntry("errorCode", "INVALID_WORKLOAD_IDENTITY");
-        assertThat(response.getBody().toString()).doesNotContain("Compact JWS");
+        assertThat(responseBody).doesNotContain("Compact JWS");
     }
 
     @Test
-    @DisplayName("preserves non-401 response statuses")
-    void preservesOtherResponseStatuses() {
+    @DisplayName("preserves non-401 statuses and hides human-readable reasons")
+    void preservesOtherResponseStatusesAndHidesHumanReasons() {
         ResponseStatusException exception =
-                new ResponseStatusException(HttpStatus.NOT_FOUND, "RESERVATION_NOT_FOUND");
+                new ResponseStatusException(HttpStatus.NOT_FOUND, "Reservation not found");
 
         ResponseEntity<Map<String, Object>> response = handler.handleResponseStatus(exception);
 
         assertThat(response.getStatusCode()).isEqualTo(HttpStatus.NOT_FOUND);
         assertThat(response.getBody()).containsEntry("success", false);
-        assertThat(response.getBody()).containsEntry("errorCode", "RESERVATION_NOT_FOUND");
+        assertThat(response.getBody()).containsEntry("errorCode", "REQUEST_FAILED");
+        assertThat(response.getBody().toString()).doesNotContain("Reservation not found");
     }
 }

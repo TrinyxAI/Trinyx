@@ -174,8 +174,9 @@ public class GlobalExceptionHandler {
      */
     @ExceptionHandler(ResponseStatusException.class)
     public ResponseEntity<Map<String, Object>> handleResponseStatus(ResponseStatusException ex) {
-        String errorCode = ex.getReason() != null && !ex.getReason().isBlank()
-                ? ex.getReason()
+        String reason = ex.getReason();
+        String errorCode = reason != null && reason.matches("[A-Z][A-Z0-9_]*")
+                ? reason
                 : "REQUEST_FAILED";
         logger.warn("Request failed with status {} and error code {}", ex.getStatusCode(), errorCode);
         return ResponseEntity.status(ex.getStatusCode())

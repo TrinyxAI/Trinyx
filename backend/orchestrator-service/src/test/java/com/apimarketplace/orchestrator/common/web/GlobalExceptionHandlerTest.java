@@ -10,6 +10,7 @@ import org.springframework.web.HttpRequestMethodNotSupportedException;
 import org.springframework.web.bind.MissingRequestHeaderException;
 import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.servlet.resource.NoResourceFoundException;
+import org.springframework.web.server.ResponseStatusException;
 
 import java.lang.reflect.Method;
 import java.util.List;
@@ -81,5 +82,34 @@ class GlobalExceptionHandlerTest {
         assertThat(response.getBody()).containsEntry("errorCode", "METHOD_NOT_ALLOWED");
         // 405 must advertise the permitted methods (HTTP-correct Allow header).
         assertThat(response.getHeaders().getAllow()).contains(HttpMethod.POST, HttpMethod.DELETE);
+    }
+
+    @Test
+    @DisplayName("preserves workload authentication 401 without leaking the JWT parser cause")
+    void preservesWorkloadAuthenticationUnauthorizedWithoutParserLeak() {
+        ResponseStatusException exception = new ResponseStatusException(
+                HttpStatus.UNAUTHORIZED,
+                "INVALID_WORKLOAD_IDENTITY",
+                new IllegalArgumentException("Compact JWS must have three parts"));
+
+        ResponseEntity<Map<String, Object>> response = handler.handleResponseStatus(exception);
+
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.UNAUTHORIZED);
+        assertThat(response.getBody()).containsEntry("success", false);
+        assertThat(response.getBody()).containsEntry("errorCode", "INVALID_WORKLOAD_IDENTITY");
+        assertThat(response.getBody().toString()).doesNotContain("Compact JWS");
+    }
+
+    @Test
+    @DisplayName("preserves non-401 response statuses")
+    void preservesOtherResponseStatuses() {
+        ResponseStatusException exception =
+                new ResponseStatusException(HttpStatus.NOT_FOUND, "RESERVATION_NOT_FOUND");
+
+        ResponseEntity<Map<String, Object>> response = handler.handleResponseStatus(exception);
+
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.NOT_FOUND);
+        assertThat(response.getBody()).containsEntry("success", false);
+        assertThat(response.getBody()).containsEntry("errorCode", "RESERVATION_NOT_FOUND");
     }
 }

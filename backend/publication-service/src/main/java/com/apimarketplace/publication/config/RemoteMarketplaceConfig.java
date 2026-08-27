@@ -31,7 +31,7 @@ public class RemoteMarketplaceConfig {
     public RemoteMarketplaceService remoteMarketplaceService(
             SnapshotCloneService snapshotCloneService,
             PublicationReceiptRepository receiptRepository,
-            CloudLinkService cloudLinkService,
+            ObjectProvider<CloudLinkService> cloudLinkService,
             ObjectMapper objectMapper,
             AuthClient authClient,
             AgentPublicationService agentPublicationService,
@@ -39,7 +39,8 @@ public class RemoteMarketplaceConfig {
             OrchestratorInternalClient orchestratorClient,
             ObjectProvider<EditableWorkflowTwinService> editableWorkflowTwinService) {
         return new RemoteMarketplaceService(
-                cloudApiUrl, snapshotCloneService, receiptRepository, cloudLinkService, objectMapper, authClient,
+                cloudApiUrl, snapshotCloneService, receiptRepository, cloudLinkService.getIfAvailable(),
+                objectMapper, authClient,
                 agentPublicationService, resourcePublicationService, orchestratorClient,
                 // Backs the ON-DEMAND editable copy (and owns its WORKFLOW-quota check).
                 // Acquire itself no longer needs it: it stopped minting a copy per install.

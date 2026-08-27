@@ -90,6 +90,13 @@ class RemoteMarketplaceServiceAcquireDispatchTest {
         lenient().when(receiptRepository.existsByOrganizationIdAndPublicationId(ORG, PUB)).thenReturn(false);
     }
 
+    private RemoteMarketplaceService serviceWithoutCloudLink() {
+        return new RemoteMarketplaceService(
+                CLOUD_API_URL, snapshotCloneService, receiptRepository,
+                null, new ObjectMapper(), authClient,
+                agentPublicationService, resourcePublicationService, orchestratorClient, null, restTemplate);
+    }
+
     @SuppressWarnings({"unchecked", "rawtypes"})
     private void stubFreeSnapshot(Map<String, Object> body) {
         when(restTemplate.getForObject(anyString(), eq(Map.class))).thenReturn((Map) body);
@@ -103,6 +110,23 @@ class RemoteMarketplaceServiceAcquireDispatchTest {
     @Nested
     @DisplayName("free publications (no cloud charge)")
     class Free {
+
+        @Test
+        @DisplayName("free acquisition works without CloudLink")
+        void freeAcquisitionWorksWithoutCloudLink() {
+            stubFreeSnapshot(Map.of(
+                    "publicationType", "WORKFLOW",
+                    "planSnapshot", Map.of("name", "Free Flow"),
+                    "title", "Free Flow",
+                    "creditsPerUse", 0));
+            when(snapshotCloneService.cloneFromSnapshot(any(), eq(TENANT), eq(PUB), eq("Free Flow"), any(), any(), eq(ORG)))
+                    .thenReturn(new HashMap<>(Map.of("workflowId", "w-free")));
+
+            Map<String, Object> result = serviceWithoutCloudLink().acquirePublication(PUB, TENANT, ORG);
+
+            assertThat(result).containsEntry("workflowId", "w-free");
+            verifyNoInteractions(cloudLinkService);
+        }
 
         @Test
         @DisplayName("AGENT → delegates the agent snapshot + creditsPaid=0 to the agent service; no workflow/resource clone")
@@ -207,6 +231,20 @@ class RemoteMarketplaceServiceAcquireDispatchTest {
     @Nested
     @DisplayName("paid publications charge the linked cloud account")
     class Paid {
+
+        @Test
+        @DisplayName("paid acquisition without CloudLink fails at acquire-with-auth with the linked-account semantic")
+        void paidAcquisitionWithoutCloudLinkFailsClearly() {
+            when(restTemplate.getForObject(anyString(), eq(Map.class))).thenThrow(paymentRequired());
+
+            assertThatThrownBy(() -> serviceWithoutCloudLink().acquirePublication(PUB, TENANT, ORG))
+                    .isInstanceOf(CloudLinkService.CloudAccountNotLinkedException.class)
+                    .hasMessageContaining("Connect your Trinyx Cloud account");
+
+            verify(restTemplate, never()).exchange(anyString(), eq(HttpMethod.POST), any(HttpEntity.class), eq(Map.class));
+            verifyNoInteractions(agentPublicationService, resourcePublicationService, snapshotCloneService);
+            verify(receiptRepository, never()).save(any());
+        }
 
         @Test
         @DisplayName("AGENT paid happy path → cloud acquire-with-auth charges, creditsPaid is forwarded to the clone")

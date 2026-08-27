@@ -26,7 +26,7 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 /**
- * Cloud-parity read proxies of {@link RemoteMarketplaceService} (linked CE
+ * Cloud-parity read proxies of {@link RemoteMarketplaceService} (remote CE
  * marketplace UI): marketplace listing, search and curated highlights are
  * forwarded to the cloud public API and FAIL-SOFT to empty payloads when the
  * cloud is unreachable - the CE marketplace must degrade, never break.
@@ -39,7 +39,6 @@ class RemoteMarketplaceServiceReadProxyTest {
 
     @Mock private SnapshotCloneService snapshotCloneService;
     @Mock private PublicationReceiptRepository receiptRepository;
-    @Mock private CloudLinkService cloudLinkService;
     @Mock private AuthClient authClient;
     @Mock private AgentPublicationService agentPublicationService;
     @Mock private ResourcePublicationService resourcePublicationService;
@@ -51,7 +50,7 @@ class RemoteMarketplaceServiceReadProxyTest {
     void setUp() {
         service = new RemoteMarketplaceService(
                 CLOUD_API_URL, snapshotCloneService, receiptRepository,
-                cloudLinkService, new ObjectMapper(), authClient,
+                null /* public read proxies do not require CloudLink */, new ObjectMapper(), authClient,
                 agentPublicationService, resourcePublicationService,
                 null /* orchestratorClient: unused by these read-proxy tests (no acquire) */,
                 null /* entitlementGuard: acquire-only, unused here */, restTemplate);

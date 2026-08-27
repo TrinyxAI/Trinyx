@@ -134,7 +134,7 @@ spring:
             - id: publication-application
               uri: ${PUBLICATION_SERVICE_URL:http://publication-service:8092}
               predicates:
-                - Path=/api/ce-marketplace/**,/api/cloud-link/**,/api/public/**,/api/publications/**
+                - Path=/api/application-folders/**,/api/ce-marketplace/**,/api/cloud-link/**,/api/public/**,/api/publications/**
             - id: conversation-application
               uri: ${CONVERSATION_SERVICE_URL:http://conversation-service:8087}
               predicates:
@@ -142,7 +142,7 @@ spring:
             - id: agent-application
               uri: ${AGENT_SERVICE_URL:http://agent-service:8090}
               predicates:
-                - Path=/api/agent-prompts/**,/api/agent/**,/api/agents/**,/api/catalog-bundles/**,/api/ce-llm/**,/api/llm-providers/**,/api/model-config/**,/api/recurrences/**,/api/skill-bundles/**,/api/skill-folders/**,/api/skills/**,/api/tasks/**
+                - Path=/api/agent-folders/**,/api/agent-prompts/**,/api/agent/**,/api/agents/**,/api/catalog-bundles/**,/api/ce-llm/**,/api/llm-providers/**,/api/model-config/**,/api/recurrences/**,/api/skill-bundles/**,/api/skill-folders/**,/api/skills/**,/api/tasks/**
             - id: catalog-application
               uri: ${CATALOG_SERVICE_URL:http://catalog-service:8081}
               predicates:
@@ -150,15 +150,15 @@ spring:
             - id: datasource-application
               uri: ${DATASOURCE_SERVICE_URL:http://datasource-service:8088}
               predicates:
-                - Path=/api/crud/**,/api/data-sources/**
+                - Path=/api/crud/**,/api/data-sources/**,/api/table-folders/**
             - id: orchestrator-application
               uri: ${ORCHESTRATOR_SERVICE_URL:http://orchestrator-service:8099}
               predicates:
-                - Path=/api/activities/**,/api/agent-tools/**,/api/browser-agent/**,/api/categories/**,/api/ce-websearch/**,/api/dashboard/**,/api/favorites/**,/api/mcp-server/**,/api/mcp/**,/api/node-definitions/**,/api/node-type-settings/**,/api/notifications/**,/api/org-access/**,/api/projects/**,/api/schedules/**,/api/stats/**,/api/websearch/**,/api/workflow-builder/**,/api/workflows/**,/mcp/**,/v1/chat/**
+                - Path=/api/activities/**,/api/agent-tools/**,/api/workflow-folders/**,/api/browser-agent/**,/api/categories/**,/api/ce-websearch/**,/api/dashboard/**,/api/favorites/**,/api/mcp-server/**,/api/mcp/**,/api/node-definitions/**,/api/node-type-settings/**,/api/notifications/**,/api/org-access/**,/api/projects/**,/api/schedules/**,/api/stats/**,/api/websearch/**,/api/workflow-builder/**,/api/workflows/**,/mcp/**,/v1/chat/**
             - id: interface-application
               uri: ${INTERFACE_SERVICE_URL:http://interface-service:8089}
               predicates:
-                - Path=/api/interfaces/**
+                - Path=/api/interface-folders/**,/api/interfaces/**
             - id: storage-application
               uri: ${STORAGE_SERVICE_URL:http://storage-service:8082}
               predicates:

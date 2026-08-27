@@ -39,6 +39,20 @@ class GatewayRouteInventoryTest {
     }
 
     @Test
+    void routesLiveContextResourceFoldersToTheirOwningServices() {
+        assertThat(route("agent-application"))
+                .contains("AGENT_SERVICE_URL", "/api/agent-folders/**");
+        assertThat(route("datasource-application"))
+                .contains("DATASOURCE_SERVICE_URL", "/api/table-folders/**");
+        assertThat(route("interface-application"))
+                .contains("INTERFACE_SERVICE_URL", "/api/interface-folders/**");
+        assertThat(route("orchestrator-application"))
+                .contains("ORCHESTRATOR_SERVICE_URL", "/api/workflow-folders/**");
+        assertThat(route("publication-application"))
+                .contains("PUBLICATION_SERVICE_URL", "/api/application-folders/**");
+    }
+
+    @Test
     void workflowDagAndKnownCollisionsReachTheirFacadeServices() {
         assertThat(route("orchestrator-workflows-v2"))
                 .contains("ORCHESTRATOR_SERVICE_URL", "Path=/api/v2/workflows/**");

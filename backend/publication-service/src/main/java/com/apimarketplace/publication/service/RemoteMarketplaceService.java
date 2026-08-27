@@ -36,6 +36,11 @@ public class RemoteMarketplaceService {
     private final RestTemplate restTemplate;
     private final SnapshotCloneService snapshotCloneService;
     private final PublicationReceiptRepository receiptRepository;
+    /**
+     * Optional: public/free remote Marketplace operations do not need a linked
+     * Trinyx Cloud account. Paid acquisition checks this dependency at the exact
+     * acquire-with-auth boundary.
+     */
     private final CloudLinkService cloudLinkService;
     private final ObjectMapper objectMapper;
     private final AuthClient authClient;
@@ -382,6 +387,11 @@ public class RemoteMarketplaceService {
      */
     @SuppressWarnings("unchecked")
     private Map<String, Object> acquireWithAuth(UUID publicationId, String tenantId) {
+        if (cloudLinkService == null) {
+            throw new CloudLinkService.CloudAccountNotLinkedException(
+                    "Connect your Trinyx Cloud account to acquire this paid publication.");
+        }
+
         // Get tenant ID as Long for CloudLinkService
         Long tenantIdLong;
         try {

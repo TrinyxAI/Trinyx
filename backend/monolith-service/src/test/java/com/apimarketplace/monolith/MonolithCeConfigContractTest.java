@@ -285,6 +285,18 @@ class MonolithCeConfigContractTest {
     }
 
     @Test
+    @DisplayName("application-ce.yml defaults to remote Marketplace with the independent local-mode CloudLink switch off")
+    void ceCloudLinkDefaultsToUpstreamRemoteAvailability() throws Exception {
+        Map<String, Object> root = loadCeYaml();
+
+        assertThat(nestedValue(root, "marketplace", "mode"))
+            .isEqualTo("${MARKETPLACE_MODE:remote}");
+        assertThat(nestedValue(root, "cloud-link", "enabled"))
+            .as("remote mode activates CloudLink; this separate switch is only the local-mode opt-in")
+            .isEqualTo("${CLOUD_LINK_ENABLED:false}");
+    }
+
+    @Test
     @DisplayName("application-ce.yml maps Cloud Link OAuth and IP hash settings to CE Docker env vars")
     void ceCloudLinkUsesBackendCallbackAndGeneratedIpHashKey() throws Exception {
         Map<String, Object> root = loadCeYaml();

@@ -225,10 +225,9 @@ ce-catalog-relay:
 
 # Cloud account linking to the operator-controlled Trinyx Cloud
 cloud-link:
-  # Independent from MARKETPLACE_MODE: paid-monolith may keep its local marketplace
-  # while authenticating against and consuming the Trinyx Cloud control plane.
-  # Fail closed on a normal backend/frontend rollout. Enable only after
-  # auth.trinyx.fr, cloud.trinyx.fr and the private billing edge pass staging E2E.
+  # Remote Marketplace always exposes the OAuth linking capability, as upstream does;
+  # no central account is required until a linked-cloud operation is requested.
+  # This switch is the independent Trinyx opt-in for local Marketplace (paid monolith).
   enabled: ${CLOUD_LINK_ENABLED:false}
   keycloak-url: ${CLOUD_KEYCLOAK_URL:https://auth.trinyx.fr/realms/trinyx}
   client-id: ${CLOUD_LINK_CLIENT_ID:trinyx-frontend}

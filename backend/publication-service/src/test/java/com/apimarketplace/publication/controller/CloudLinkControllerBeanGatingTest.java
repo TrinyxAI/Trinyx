@@ -13,17 +13,11 @@ import static org.mockito.Mockito.mock;
 /**
  * Bean-gating contract for {@link CloudLinkController}.
  *
- * <p>The controller is annotated
- * {@code @ConditionalOnProperty(name = "cloud-link.enabled", havingValue = "true")} with NO
- * {@code matchIfMissing}, so it defaults to false: the CE-side cloud-account link surface
- * (status/connect/disconnect, LLM-source, usage mirrors) is wired ONLY when
- * {@code cloud-link.enabled=true} (the cloud-linked CE/paid monolith). On a Cloud microservice
- * (property unset, or {@code cloud-link.enabled=false}) the controller MUST NOT exist, otherwise its
- * routes would expose cloud-link management on an install that has no cloud link configured. These
- * tests pin that contract so a regression in the condition (flipping {@code matchIfMissing} or
- * renaming the property) is caught.
+ * <p>With no explicit override, remote Marketplace mode exposes the OAuth linking
+ * capability and local mode does not. cloud-link.enabled=true is an additional
+ * paid-monolith local + CloudLink opt-in; false never removes upstream remote capability.
  */
-@DisplayName("CloudLinkController - cloud-link.enabled=true bean gating")
+@DisplayName("CloudLinkController - availability gating")
 class CloudLinkControllerBeanGatingTest {
 
     private final ApplicationContextRunner contextRunner = new ApplicationContextRunner()
@@ -31,19 +25,21 @@ class CloudLinkControllerBeanGatingTest {
             .withUserConfiguration(CloudLinkControllerImport.class);
 
     @Test
-    @DisplayName("Property unset - controller bean is ABSENT (matchIfMissing defaults to false)")
-    void beanAbsentWhenPropertyUnset() {
-        contextRunner.run(context -> {
-            assertThat(context).hasNotFailed();
-            assertThat(context).doesNotHaveBean(CloudLinkController.class);
-        });
+    @DisplayName("remote marketplace exposes CloudLink when the explicit switch is absent")
+    void remoteMarketplaceAutoEnablesController() {
+        contextRunner
+                .withPropertyValues("marketplace.mode=remote")
+                .run(context -> {
+                    assertThat(context).hasNotFailed();
+                    assertThat(context).hasSingleBean(CloudLinkController.class);
+                });
     }
 
     @Test
-    @DisplayName("cloud-link.enabled=false - controller bean is ABSENT (no cloud-link surface on a non-remote install)")
-    void beanAbsentWhenDisabled() {
+    @DisplayName("local marketplace leaves CloudLink absent when the explicit switch is absent")
+    void localMarketplaceDoesNotAutoEnableController() {
         contextRunner
-                .withPropertyValues("cloud-link.enabled=false")
+                .withPropertyValues("marketplace.mode=local")
                 .run(context -> {
                     assertThat(context).hasNotFailed();
                     assertThat(context).doesNotHaveBean(CloudLinkController.class);
@@ -51,10 +47,21 @@ class CloudLinkControllerBeanGatingTest {
     }
 
     @Test
-    @DisplayName("cloud-link.enabled=true - controller bean IS wired exactly once (cloud-linked CE/paid monolith)")
-    void beanPresentWhenEnabled() {
+    @DisplayName("remote marketplace keeps CloudLink available when the independent switch is false")
+    void remoteMarketplaceWinsOverFalseLocalModeSwitch() {
         contextRunner
-                .withPropertyValues("cloud-link.enabled=true")
+                .withPropertyValues("marketplace.mode=remote", "cloud-link.enabled=false")
+                .run(context -> {
+                    assertThat(context).hasNotFailed();
+                    assertThat(context).hasSingleBean(CloudLinkController.class);
+                });
+    }
+
+    @Test
+    @DisplayName("explicit true enables CloudLink with a local marketplace")
+    void explicitTrueEnablesControllerForPaidMonolith() {
+        contextRunner
+                .withPropertyValues("marketplace.mode=local", "cloud-link.enabled=true")
                 .run(context -> {
                     assertThat(context).hasNotFailed();
                     assertThat(context).hasSingleBean(CloudLinkController.class);

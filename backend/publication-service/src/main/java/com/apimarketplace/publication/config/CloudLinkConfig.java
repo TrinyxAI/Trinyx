@@ -6,17 +6,17 @@ import com.apimarketplace.publication.service.CeCloudLinkHeartbeatScheduler;
 import com.apimarketplace.publication.service.CloudLinkService;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.springframework.beans.factory.annotation.Value;
-import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
+import org.springframework.context.annotation.Conditional;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
 /**
- * CE/paid-monolith Cloud-link lifecycle. Deliberately independent from marketplace.mode:
- * Trinyx paid-monolith may use its local marketplace while Cloud supplies control-plane,
- * bundle and relay capabilities. Cloud microservices leave cloud-link.enabled false.
+ * CE/paid-monolith Cloud-link lifecycle. Remote CE always exposes the capability,
+ * matching LiveContext; cloud-link.enabled=true additionally enables it for Trinyx
+ * paid-monolith while that deployment keeps its Marketplace local.
  */
 @Configuration
-@ConditionalOnProperty(name = "cloud-link.enabled", havingValue = "true")
+@Conditional(CloudLinkAvailableCondition.class)
 public class CloudLinkConfig {
 
     @Value("${marketplace.cloud-api-url:https://cloud.trinyx.fr/api}")

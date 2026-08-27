@@ -1,5 +1,6 @@
 package com.apimarketplace.publication.controller;
 
+import com.apimarketplace.publication.config.CloudLinkAvailableCondition;
 import com.apimarketplace.publication.service.CloudLinkService;
 import com.apimarketplace.agent.cloud.CloudLlmSource;
 import org.slf4j.Logger;
@@ -7,7 +8,7 @@ import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
-import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
+import org.springframework.context.annotation.Conditional;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
@@ -16,14 +17,14 @@ import java.nio.charset.StandardCharsets;
 import java.util.Map;
 
 /**
- * CE-side REST API for managing the cloud account link.
- * Allows CE admins to link/unlink their LiveContext cloud account via OAuth.
- *
- * Only active when cloud-link.enabled=true (CE/paid-monolith instances).
+ * CE-side REST API for managing the Trinyx Cloud account link.
+ * Remote CE always exposes this capability; paid-monolith can enable it while
+ * retaining a local Marketplace. A local user identity is still required by each
+ * workspace-affecting endpoint.
  */
 @RestController
 @RequestMapping("/api/cloud-link")
-@ConditionalOnProperty(name = "cloud-link.enabled", havingValue = "true")
+@Conditional(CloudLinkAvailableCondition.class)
 public class CloudLinkController {
 
     private static final Logger logger = LoggerFactory.getLogger(CloudLinkController.class);

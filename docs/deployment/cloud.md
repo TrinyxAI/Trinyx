@@ -370,7 +370,7 @@ wildcard. Never expose Keycloak management port 9000.
 
 ## Database and startup
 
-Flyway migration `V454__external_billing_authority.sql` is backward-compatible.
+Flyway migration `V453_1__external_billing_authority.sql` is backward-compatible.
 It adds stable UUID identities, binding/projection state, entitlement and identity-tombstone outbox state
 and reservation idempotency. Native subscription, wallet, PAYG and ledger
 tables are not removed or replaced.

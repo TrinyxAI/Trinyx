@@ -10,7 +10,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 class ExternalBillingAuthorityMigrationTest {
 
     private static final Path MIGRATION = Path.of(
-            "src/main/resources/db/migration/V454__external_billing_authority.sql");
+            "src/main/resources/db/migration/V453_1__external_billing_authority.sql");
 
     @Test
     void createsSeparateIdentityEntitlementAndWalletStateWithoutReplacingNativeBilling() throws Exception {

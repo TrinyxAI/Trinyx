@@ -19,7 +19,7 @@ const newer = {
   tag_name: 'v0.1.6',
   name: 'Trinyx CE v0.1.6',
   published_at: '2026-07-04T09:00:00Z',
-  html_url: 'https://github.com/eddinerabii/Trinyx/releases/tag/v0.1.6',
+  html_url: 'https://github.com/TrinyxAI/Trinyx/releases/tag/v0.1.6',
   body: '## Highlights\n\n- Branch-port overflow fix',
   draft: false,
   prerelease: false,
@@ -29,7 +29,7 @@ const older = {
   tag_name: 'v0.1.5',
   name: 'Trinyx CE v0.1.5',
   published_at: '2026-07-02T12:30:00Z',
-  html_url: 'https://github.com/eddinerabii/Trinyx/releases/tag/v0.1.5',
+  html_url: 'https://github.com/TrinyxAI/Trinyx/releases/tag/v0.1.5',
   body: '## What is new\n\n- Rerun cycle fix',
   draft: false,
   prerelease: false,
@@ -82,7 +82,7 @@ describe('ChangelogPage timeline', () => {
     expect(screen.getByText(/momentarily unavailable/)).toBeTruthy();
     const links = screen.getAllByRole('link') as HTMLAnchorElement[];
     expect(
-      links.some((l) => l.href === 'https://github.com/eddinerabii/Trinyx/releases'),
+      links.some((l) => l.href === 'https://github.com/TrinyxAI/Trinyx/releases'),
     ).toBe(true);
   });
 });

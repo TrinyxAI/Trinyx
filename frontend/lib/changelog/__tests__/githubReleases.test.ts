@@ -5,7 +5,7 @@ const release = (over: Record<string, unknown> = {}) => ({
   tag_name: 'v0.1.5',
   name: 'Trinyx CE v0.1.5',
   published_at: '2026-07-02T12:30:00Z',
-  html_url: 'https://github.com/eddinerabii/Trinyx/releases/tag/v0.1.5',
+  html_url: 'https://github.com/TrinyxAI/Trinyx/releases/tag/v0.1.5',
   body: '## What is new\n\n- something',
   draft: false,
   prerelease: false,
@@ -15,7 +15,7 @@ const release = (over: Record<string, unknown> = {}) => ({
 describe('releasesApiUrl', () => {
   it('derives the API endpoint from the canonical public-repo constant', () => {
     expect(releasesApiUrl()).toBe(
-      'https://api.github.com/repos/eddinerabii/Trinyx/releases?per_page=25',
+      'https://api.github.com/repos/TrinyxAI/Trinyx/releases?per_page=25',
     );
   });
 });
@@ -28,7 +28,7 @@ describe('mapReleases', () => {
       title: 'Trinyx CE v0.1.5',
       publishedAt: '2026-07-02T12:30:00Z',
       body: '## What is new\n\n- something',
-      htmlUrl: 'https://github.com/eddinerabii/Trinyx/releases/tag/v0.1.5',
+      htmlUrl: 'https://github.com/TrinyxAI/Trinyx/releases/tag/v0.1.5',
     });
   });
 

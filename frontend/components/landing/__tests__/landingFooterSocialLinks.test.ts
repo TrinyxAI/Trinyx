@@ -9,7 +9,7 @@ describe('public landing footer social links', () => {
     'https://www.linkedin.com/in/trinyx-ai-5bb4a5430/',
     'https://x.com/Trinyxai',
     'https://www.instagram.com/trinyx.ai/',
-    'https://github.com/eddinerabii/Trinyx',
+    'https://github.com/TrinyxAI/Trinyx',
     'https://www.tiktok.com/@trinyx.ai',
     'https://discord.gg/EykNSkEvM6',
   ];

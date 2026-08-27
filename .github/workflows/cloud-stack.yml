@@ -328,7 +328,7 @@ jobs:
             const expected = `ghcr.io/trinyxai/${image}:v${version}`;
             if (!compose.includes(expected)) throw new Error(`missing pinned image ${expected}`);
           }
-          if (/ghcr\.io\/eddinerabii\/trinyx-ce[^\s}]*:latest/.test(compose)) {
+          if (/ghcr\.io\/trinyxai\/trinyx-ce[^\s}]*:latest/.test(compose)) {
             throw new Error('CLI runtime images must not use latest');
           }
           NODE

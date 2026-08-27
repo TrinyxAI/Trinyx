@@ -113,9 +113,18 @@ const AGENT_PUB = {
 beforeEach(() => {
   vi.clearAllMocks();
   routerState.params = new URLSearchParams();
-  orchestratorApiMock.getMarketplacePublications.mockResolvedValue({
-    publications: [APP_PUB, AGENT_PUB],
-  });
+  // The type filter is a QUERY PARAM answered by the backend, so the mock
+  // answers it the same way. Pre-fix it was a client-side pass over one
+  // popularity-ordered page, which meant the agents grid could only ever show
+  // the agents that happened to rank inside that page.
+  orchestratorApiMock.getMarketplacePublications.mockImplementation(
+    async (_page: number, _size: number, _category?: string, refinements?: { displayMode?: string }) => {
+      const all = [APP_PUB, AGENT_PUB];
+      const rows = refinements?.displayMode
+        ? all.filter((p) => p.displayMode === refinements.displayMode)
+        : all;
+      return { publications: rows, count: rows.length };
+    });
 });
 
 afterEach(cleanup);
@@ -139,12 +148,14 @@ describe('Marketplace Explore - resource type is a select beside the category fi
     await waitFor(() => expect(orchestratorApiMock.getMarketplacePublications).toHaveBeenCalled());
   });
 
-  it('defaults to applications and shows only that display mode', async () => {
+  it('defaults to applications and asks the SERVER for that display mode', async () => {
     render(<MarketplacePage />);
 
     expect(typeSelect().textContent).toContain('filterApplications');
     expect(await screen.findByText('An Application')).toBeInTheDocument();
     expect(screen.queryByText('An Agent')).not.toBeInTheDocument();
+    await waitFor(() => expect(orchestratorApiMock.getMarketplacePublications).toHaveBeenCalledWith(
+      0, expect.any(Number), undefined, expect.objectContaining({ displayMode: 'APPLICATION' })));
   });
 
   it('offers exactly the two surfaced types', async () => {
@@ -178,5 +189,7 @@ describe('Marketplace Explore - resource type is a select beside the category fi
     expect(typeSelect().textContent).toContain('filterAgents');
     expect(await screen.findByText('An Agent')).toBeInTheDocument();
     expect(screen.queryByText('An Application')).not.toBeInTheDocument();
+    await waitFor(() => expect(orchestratorApiMock.getMarketplacePublications).toHaveBeenCalledWith(
+      0, expect.any(Number), undefined, expect.objectContaining({ displayMode: 'AGENT' })));
   });
 });

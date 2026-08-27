@@ -354,4 +354,58 @@ class SnapshotCloneServiceDatasourceTriggerRemapTest {
 
         assertThat(plan).doesNotContainKey("triggers");
     }
+
+    @Test
+    @DisplayName("a cloned step keeps its run-time account MODE while losing the publisher's choice")
+    void cloneBlanksTheAccountSelector() throws Exception {
+        // Removing it instead would drop the step back to the ACQUIRER default account
+        // and every run would be green: this feature's own headline failure, relocated
+        // to the clone boundary. Blank keeps the step saying it chooses at run time,
+        // so the acquirer gets a loud failure until they write their own expression.
+        Map<String, Object> step = new LinkedHashMap<>();
+        step.put("id", "m1");
+        step.put("label", "Publish");
+        step.put("selectedCredentialId", 42);
+        step.put("credentialSelector", "Acme IG");
+        Map<String, Object> plan = new LinkedHashMap<>();
+        plan.put("mcps", new java.util.ArrayList<>(java.util.List.of(step)));
+
+        invokeStrip(plan);
+
+        assertThat(step).doesNotContainKey("selectedCredentialId");
+        assertThat(step).containsEntry("credentialSelector", "");
+    }
+
+    @Test
+    @DisplayName("a cloned step that never chose at run time gains no selector")
+    void cloneAddsNoSelectorToAStaticStep() throws Exception {
+        Map<String, Object> step = new LinkedHashMap<>();
+        step.put("id", "m1");
+        step.put("selectedCredentialId", 42);
+        Map<String, Object> plan = new LinkedHashMap<>();
+        plan.put("mcps", new java.util.ArrayList<>(java.util.List.of(step)));
+
+        invokeStrip(plan);
+
+        assertThat(step).doesNotContainKey("credentialSelector");
+    }
+
+    @Test
+    @DisplayName("an explicit null selector is left alone, not turned into a blank one")
+    void explicitNullIsNotBlanked() throws Exception {
+        // A plan can carry an explicit null here: set_plan imports a raw plan without
+        // going through the merge that reads null as a delete. Blanking that would put
+        // the step into the dynamic-but-unfilled state for a feature its author never
+        // used, so the acquired app would refuse on every run and validate would report
+        // a missing field, over a key that meant "no selector at all".
+        Map<String, Object> step = new LinkedHashMap<>();
+        step.put("id", "m1");
+        step.put("credentialSelector", null);
+        Map<String, Object> plan = new LinkedHashMap<>();
+        plan.put("mcps", new java.util.ArrayList<>(java.util.List.of(step)));
+
+        invokeStrip(plan);
+
+        assertThat(step.get("credentialSelector")).isNull();
+    }
 }

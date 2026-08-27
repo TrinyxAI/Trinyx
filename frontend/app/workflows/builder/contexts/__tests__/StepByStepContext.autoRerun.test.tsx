@@ -24,6 +24,7 @@ vi.mock('@/contexts/WorkflowModeContext', () => ({
 
 vi.mock('../../utils/labelNormalizer', () => ({
   normalizeLabel: (label: string) => label.toLowerCase().replace(/\s+/g, '_'),
+  extractLabelFromKey: (key: string) => (key.includes(':') ? key.slice(key.indexOf(':') + 1) : null),
 }));
 
 const STEP = 'mcp:step_a';

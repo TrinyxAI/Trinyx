@@ -165,6 +165,50 @@ class InternalCredentialLookupControllerTest {
         verify(credentialRepository, never()).findByOrganizationIdStrict(ORG, 1, 10_000);
     }
 
+    // ===== GET /identities =====
+
+    @Test
+    @DisplayName("identities answer with id, name and integration, and never with credential material")
+    void identitiesCarryNoSecrets() {
+        // This endpoint exists so a caller can work out WHICH credential was meant
+        // without receiving the material of the ones it is about to reject. A field
+        // added here that can carry secrets defeats its entire reason for existing,
+        // so the assertion is on the ABSENCE, not on the presence.
+        when(credentialRepository.findAllByTenantId(OWNER))
+                .thenReturn(List.of(cred(10L, OWNER, null, "instagram", CredentialStatus.active, true)));
+
+        ResponseEntity<List<InternalCredentialLookupController.CredentialIdentity>> response =
+                controller.getCredentialIdentities(OWNER, null);
+
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(response.getBody()).hasSize(1);
+        InternalCredentialLookupController.CredentialIdentity identity = response.getBody().get(0);
+        assertThat(identity.id()).isEqualTo(10L);
+        assertThat(identity.name()).isEqualTo("Cred 10");
+        assertThat(identity.integration()).isEqualTo("instagram");
+        assertThat(identity.status()).isEqualTo("active");
+        // The record has exactly four components; a fifth one carrying material
+        // would make this fail rather than ship silently.
+        assertThat(InternalCredentialLookupController.CredentialIdentity.class.getRecordComponents())
+                .hasSize(4);
+    }
+
+    @Test
+    @DisplayName("identities follow the same scope rule as the full listing")
+    void identitiesAreOrgScopedLikeTheFullListing() {
+        // The two must never disagree about which rows exist: a narrower identity
+        // listing would refuse a name the picker offered.
+        when(credentialRepository.findByOrganizationIdStrict(ORG, 1, 10_000))
+                .thenReturn(List.of(cred(11L, OTHER_MEMBER, ORG, "instagram", CredentialStatus.active, false)));
+
+        ResponseEntity<List<InternalCredentialLookupController.CredentialIdentity>> response =
+                controller.getCredentialIdentities(OWNER, ORG);
+
+        assertThat(response.getBody()).extracting(InternalCredentialLookupController.CredentialIdentity::id)
+                .containsExactly(11L);
+        verify(credentialRepository, never()).findAllByTenantId(OWNER);
+    }
+
     private static Credential cred(Long id, String tenantId, String orgId, String integration,
                                    CredentialStatus status, boolean isDefault) {
         Instant now = Instant.now();

@@ -5,7 +5,7 @@ const deleteMock = vi.fn();
 
 vi.mock('../api-client', () => ({
   apiClient: {
-    getTokenProvider: () => async () => 'tok-123',
+    getAuthToken: async () => 'tok-123',
     delete: (...a: unknown[]) => deleteMock(...a),
   },
 }));

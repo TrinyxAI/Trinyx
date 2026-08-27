@@ -91,8 +91,11 @@ export default function IntegrationsPage() {
           <code>get_connected_services</code> takes no parameters and lists every credential you&apos;ve
           connected: its integration, its status, whether it&apos;s the default, and a best-effort
           account identifier (pulled from fields like email, username, workspace, or team name on the
-          credential itself). Only the credential with <code>isDefault=true</code> is used when tools
-          from that integration execute.
+          credential itself). The credential with <code>isDefault=true</code> is the one used when a
+          tool from that integration runs on its own. A workflow step is the exception: it can run on
+          any other <em>active</em> account of that integration by naming it in{' '}
+          <code>credential_selector</code>, which is how one workflow serves several accounts instead
+          of being duplicated per account.
         </p>
         <DocsTable
           head={['Status', 'Meaning', 'How to fix it']}

@@ -5,6 +5,8 @@ import com.apimarketplace.agent.tools.ToolsProvider.ToolExecutionContext;
 import com.apimarketplace.agent.tools.ToolsProvider.ToolExecutionResult;
 import com.apimarketplace.catalog.service.generation.GenerationAssetResolver;
 import com.apimarketplace.catalog.service.generation.GenerationInputResolver;
+import com.apimarketplace.catalog.service.generation.GenerationLimits;
+import com.apimarketplace.catalog.service.generation.DynamicOptionsResolver;
 import com.apimarketplace.catalog.service.generation.GenerationRegistry;
 import com.apimarketplace.catalog.service.generation.GenerationSpec;
 import com.apimarketplace.catalog.tools.CatalogExecuteModule;
@@ -54,6 +56,7 @@ class GenerationToolTest {
     private GenerationAssetResolver assetResolver;
     private InterfaceClient interfaceClient;
     private StorageClient storage;
+    private com.apimarketplace.catalog.service.generation.GenerationProvenanceRecorder provenanceRecorder;
     private GenerationToolsProvider provider;
 
     private static GenerationSpec spec(String json) {
@@ -91,10 +94,16 @@ class GenerationToolTest {
             """);
 
     private static GenerationRegistry.GenerationModel model(GenerationSpec spec, String id) {
+        return model(spec, id, java.util.Map.of());
+    }
+
+    /** The same model, carrying values inherited from the catalogue. */
+    private static GenerationRegistry.GenerationModel model(GenerationSpec spec, String id,
+                                                            java.util.Map<String, java.util.List<String>> inherited) {
         return new GenerationRegistry.GenerationModel(
                 id, spec.kind(), spec.model(id).orElseThrow(), spec,
                 UUID.randomUUID(), "provider/" + id, "provider", "Provider Inc",
-                "provider", "provider_key", "async_poll");
+                "provider", "provider_key", "async_poll", inherited);
     }
 
     /** Listed per minute, still measured in seconds like every other duration. */
@@ -225,6 +234,8 @@ class GenerationToolTest {
         assetResolver = mock(GenerationAssetResolver.class);
         interfaceClient = mock(InterfaceClient.class);
         storage = mock(StorageClient.class);
+        provenanceRecorder = mock(
+                com.apimarketplace.catalog.service.generation.GenerationProvenanceRecorder.class);
         // A stored asset by default. Left unstubbed, the module's asset
         // resolver returns null and every dispatch test ends in an NPE
         // whose ERROR line would hide a real regression later.
@@ -234,9 +245,13 @@ class GenerationToolTest {
         // A REAL input resolver over a mocked storage, rather than a mocked
         // resolver: what these tests have to prove is the ORDER of resolve and
         // dispatch, and a mock of the thing under test would prove nothing.
+        DynamicOptionsResolver optionsResolver = mock(DynamicOptionsResolver.class);
+        when(optionsResolver.unifiedDynamicParameters(any())).thenReturn(java.util.Set.of());
         provider = new GenerationToolsProvider(new GenerationModule(registry, executeModule, assetResolver,
                 new com.apimarketplace.catalog.service.ResponseShaper(),
-                new GenerationInputResolver(storage, 20_971_520L), interfaceClient));
+                new GenerationInputResolver(storage, 20_971_520L), optionsResolver,
+                mock(com.apimarketplace.catalog.service.generation.PlatformSalesResolver.class), interfaceClient,
+                provenanceRecorder));
 
         when(registry.list(null)).thenReturn(List.of(VIDEO, VOICE));
         when(registry.list("video")).thenReturn(List.of(VIDEO));
@@ -334,6 +349,34 @@ class GenerationToolTest {
     class Models {
 
         @Test
+        @DisplayName("regression: an inherited list reaches the wire, capped and marked")
+        void inheritedListIsCappedForTheAgent() {
+            // This payload is TOKENS and carries every model at once, so a
+            // provider's hundred-voice catalogue has to arrive as a sample. The
+            // cap belongs to THIS surface: the browser's copy takes the lot.
+            List<String> hundred = new java.util.ArrayList<>();
+            for (int i = 0; i < 100; i++) hundred.add("voice-" + i);
+            when(registry.list(null)).thenReturn(List.of(
+                    model(VOICE_SPEC, "tts-fast", java.util.Map.of("voice", hundred))));
+
+            Map<String, Object> d = data(call("generation", params("action", "models")));
+
+            @SuppressWarnings("unchecked")
+            List<Map<String, Object>> rows = (List<Map<String, Object>>) d.get("models");
+            @SuppressWarnings("unchecked")
+            Map<String, Object> limits = (Map<String, Object>) rows.get(0).get("limits");
+            @SuppressWarnings("unchecked")
+            Map<String, Object> voice = (Map<String, Object>) limits.get("voice");
+
+            assertThat((List<?>) voice.get("allowed")).hasSize(GenerationLimits.AGENT_INLINE_CAP);
+            assertThat(voice).containsEntry("allowedTruncated", true);
+            assertThat(voice).containsEntry("allowedCount", 100);
+            // And it says the list is not a rule: a value outside it is
+            // dispatched and paid for, unlike a declared one.
+            assertThat(voice).containsEntry("allowedEnforced", false);
+        }
+
+        @Test
         @DisplayName("lists every model with its accepted params, limits and price")
         void listsModels() {
             Map<String, Object> d = data(call("generation", params("action", "models")));
@@ -418,6 +461,113 @@ class GenerationToolTest {
             when(registry.list("hologram")).thenReturn(List.of());
             Map<String, Object> d = data(call("generation", params("action", "models", "kind", "hologram")));
             assertThat(d.get("hint").toString()).contains("video", "voice");
+        }
+    }
+
+    /**
+     * The recipe is what turns a generated file into something a person can recognise in their
+     * workspace and run again with one word changed. It is written by the module, at exactly one
+     * point in the flow: after the asset exists, and only then.
+     */
+    @Nested
+    @DisplayName("records what made the asset")
+    class RecordsTheRecipe {
+
+        private ToolExecutionResult generate() {
+            when(executeModule.executeGeneration(any(), any(), any()))
+                    .thenReturn(Optional.of(ToolExecutionResult.success(Map.of("ok", true))));
+            return provider.execute("generation", params(
+                    "action", "create", "model", "vid-fast", "prompt", "a cat", "duration_seconds", 5),
+                    chatContext());
+        }
+
+        @Test
+        @DisplayName("stamps the asset with the model, the prompt and the parameters that made it")
+        void stampsTheFinishedAsset() {
+            ToolExecutionResult r = generate();
+            assertThat(r.success()).isTrue();
+
+            ArgumentCaptor<com.apimarketplace.catalog.service.generation.GenerationProvenanceRecorder.Recipe>
+                    recipe = ArgumentCaptor.forClass(
+                        com.apimarketplace.catalog.service.generation.GenerationProvenanceRecorder.Recipe.class);
+            verify(provenanceRecorder).record(any(), recipe.capture(), eq("tenant-1"), eq("org-1"));
+
+            assertThat(recipe.getValue().model()).isEqualTo("vid-fast");
+            assertThat(recipe.getValue().kind()).isEqualTo("video");
+            assertThat(recipe.getValue().unified())
+                    .containsEntry("prompt", "a cat")
+                    // The size the run was billed on has to come back on a replay, or the variant
+                    // costs a different amount than the asset it varies.
+                    .containsEntry("duration_seconds", 5);
+        }
+
+        @Test
+        @DisplayName("hands over the SAME asset the caller gets back, so the recipe lands on that row")
+        void stampsTheAssetTheCallerReceives() {
+            generate();
+
+            @SuppressWarnings("unchecked")
+            ArgumentCaptor<Map<String, Object>> stamped = ArgumentCaptor.forClass(Map.class);
+            verify(provenanceRecorder).record(stamped.capture(), any(), anyString(), any());
+            assertThat(stamped.getValue()).containsEntry("path", "tenant-1/out.png");
+        }
+
+        @Test
+        @DisplayName("records nothing when the generation produced no asset")
+        void recordsNothingWithoutAnAsset() {
+            // The call was charged but nothing came back to annotate. A recipe stamped here would
+            // have no row to land on, and the failure branch returns a recovery payload instead.
+            when(executeModule.executeGeneration(any(), any(), any()))
+                    .thenReturn(Optional.of(ToolExecutionResult.success(Map.of("ok", true))));
+            when(assetResolver.resolve(any(), any(), any(), any()))
+                    .thenReturn(new GenerationAssetResolver.Resolved(null, "the CDN timed out"));
+
+            ToolExecutionResult r = call("generation", params("action", "create", "model", "vid-fast",
+                    "prompt", "a cat", "duration_seconds", 5));
+
+            assertThat(r.success()).isFalse();
+            verifyNoInteractions(provenanceRecorder);
+        }
+
+        @Test
+        @DisplayName("records nothing when no key was connected, because nothing ran")
+        void recordsNothingWhenNothingRan() {
+            when(executeModule.executeGeneration(any(), any(), any()))
+                    .thenReturn(Optional.of(ToolExecutionResult.success(Map.of(
+                            "status", "approval_needed",
+                            "serviceName", "Elevenlabs",
+                            "platformKeyAvailable", true,
+                            "message", "Credential required for Elevenlabs"))));
+
+            call("generation", params("action", "create", "model", "vid-fast",
+                    "prompt", "a cat", "duration_seconds", 5));
+
+            verifyNoInteractions(provenanceRecorder);
+        }
+
+        @Test
+        @DisplayName("records nothing when the provider refused the call")
+        void recordsNothingOnAFailedExecution() {
+            when(executeModule.executeGeneration(any(), any(), any()))
+                    .thenReturn(Optional.of(ToolExecutionResult.failure(
+                            com.apimarketplace.agent.tools.ToolErrorCode.EXECUTION_FAILED,
+                            "the provider refused")));
+
+            call("generation", params("action", "create", "model", "vid-fast",
+                    "prompt", "a cat", "duration_seconds", 5));
+
+            verifyNoInteractions(provenanceRecorder);
+        }
+
+        @Test
+        @DisplayName("records nothing when the parameters were refused before dispatch")
+        void recordsNothingWhenRefusedBeforeDispatch() {
+            // Nothing ran, nothing was charged, and there is no asset: the earliest refusal must
+            // not leave a recipe behind either.
+            call("generation", params("action", "create", "model", "vid-fast", "prompt", "a cat",
+                    "duration_seconds", 999));
+
+            verifyNoInteractions(provenanceRecorder);
         }
     }
 

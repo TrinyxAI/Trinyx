@@ -2,7 +2,7 @@
 
 import { useState } from 'react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
-import { Package, CheckCircle, Clock, XCircle, Sparkles, Star } from 'lucide-react';
+import { Package, CheckCircle, Clock, XCircle, Sparkles, Star, Volume2, VolumeX } from 'lucide-react';
 import { useTranslations } from 'next-intl';
 import type { WorkflowPublication } from '@/lib/api/orchestrator/types';
 import { ShowcasePreview } from '@/components/marketplace/ShowcasePreview';
@@ -113,6 +113,16 @@ export function ApplicationCard({ publication, source, isSelected, onToggleSelec
   // the marketplace card shows). If that publication has no captured snapshot the call
   // fails - fall back to the cover tile rather than surfacing the raw error.
   const [acquiredPreviewFailed, setAcquiredPreviewFailed] = useState(false);
+
+  // Sound. An application preview is live HTML, so it can carry an <audio>/<video>
+  // that starts the moment the card mounts - and this page renders a whole GRID of
+  // them. So the preview starts MUTED and the visitor turns it on, per card.
+  //
+  // `hasAudio` is reported by the frame itself (the host cannot inspect a sandboxed
+  // cross-origin document), which is why the control appears only on the apps that
+  // can actually make a sound rather than sitting dead on every card.
+  const [hasAudio, setHasAudio] = useState(false);
+  const [soundOn, setSoundOn] = useState(false);
   const canPreview = !!previewRunId && !!publication.showcaseInterfaceId
     && (!isAcquired || !acquiredPreviewFailed);
 
@@ -143,6 +153,8 @@ export function ApplicationCard({ publication, source, isSelected, onToggleSelec
               // cloud, so route the render through the remote by-id proxy - a local
               // showcase-render would 404 and fall back to the empty cover tile.
               remote={publication.remote}
+              mediaMuted={!soundOn}
+              onMediaAudioPresence={setHasAudio}
               onError={isAcquired ? () => setAcquiredPreviewFailed(true) : undefined}
               suppressErrorUi={isAcquired}
               className="absolute inset-0 h-full w-full"
@@ -235,25 +247,47 @@ export function ApplicationCard({ publication, source, isSelected, onToggleSelec
           </span>
         )}
 
-        {/* Bottom-left: favorite star. Always visible once favorited (so the user
-            sees their picks at a glance); hover/focus-revealed otherwise. Stops
-            propagation so it never triggers the card's navigation. */}
-        {onToggleFavorite && (
-          <button
-            type="button"
-            onClick={(e) => { e.stopPropagation(); onToggleFavorite(publication.id); }}
-            aria-pressed={!!isFavorite}
-            aria-label={isFavorite ? tApp('unfavorite') : tApp('favorite')}
-            title={isFavorite ? tApp('unfavorite') : tApp('favorite')}
-            className={`absolute bottom-3 left-3 z-20 inline-flex items-center justify-center h-7 w-7 rounded-xl backdrop-blur bg-white/80 dark:bg-black/50 border border-white/40 dark:border-white/10 shadow-sm transition-opacity ${
-              isFavorite
-                ? 'opacity-100 text-amber-500'
-                : 'opacity-0 group-hover:opacity-100 focus-within:opacity-100 text-theme-secondary hover:text-theme-primary'
-            }`}
-          >
-            <Star className={`h-3.5 w-3.5 ${isFavorite ? 'fill-current' : ''}`} />
-          </button>
-        )}
+        {/* Bottom-left: favorite star, then the sound toggle beside it. Both stay
+            visible once ON (so the user sees their picks - and which card is the
+            one making noise - at a glance) and are hover/focus-revealed otherwise.
+            Both stop propagation so neither triggers the card's navigation. */}
+        <div className="absolute bottom-3 left-3 z-20 flex items-center gap-1.5">
+          {onToggleFavorite && (
+            <button
+              type="button"
+              onClick={(e) => { e.stopPropagation(); onToggleFavorite(publication.id); }}
+              aria-pressed={!!isFavorite}
+              aria-label={isFavorite ? tApp('unfavorite') : tApp('favorite')}
+              title={isFavorite ? tApp('unfavorite') : tApp('favorite')}
+              className={`inline-flex items-center justify-center h-7 w-7 rounded-xl backdrop-blur bg-white/80 dark:bg-black/50 border border-white/40 dark:border-white/10 shadow-sm transition-opacity ${
+                isFavorite
+                  ? 'opacity-100 text-amber-500'
+                  : 'opacity-0 group-hover:opacity-100 focus-within:opacity-100 text-theme-secondary hover:text-theme-primary'
+              }`}
+            >
+              <Star className={`h-3.5 w-3.5 ${isFavorite ? 'fill-current' : ''}`} />
+            </button>
+          )}
+          {/* Only for an app that actually has media: a speaker on a silent card
+              promises a sound that does not exist. */}
+          {hasAudio && (
+            <button
+              type="button"
+              onClick={(e) => { e.stopPropagation(); setSoundOn((on) => !on); }}
+              aria-pressed={soundOn}
+              aria-label={soundOn ? tApp('muteSound') : tApp('unmuteSound')}
+              title={soundOn ? tApp('muteSound') : tApp('unmuteSound')}
+              data-testid="application-sound-toggle"
+              className={`inline-flex items-center justify-center h-7 w-7 rounded-xl backdrop-blur bg-white/80 dark:bg-black/50 border border-white/40 dark:border-white/10 shadow-sm transition-opacity ${
+                soundOn
+                  ? 'opacity-100 text-theme-primary'
+                  : 'opacity-0 group-hover:opacity-100 focus-within:opacity-100 text-theme-secondary hover:text-theme-primary'
+              }`}
+            >
+              {soundOn ? <Volume2 className="h-3.5 w-3.5" /> : <VolumeX className="h-3.5 w-3.5" />}
+            </button>
+          )}
+        </div>
       </div>
 
       {/* Footer - always visible below the thumbnail (mirrors marketplace + /app/interface) */}

@@ -131,6 +131,21 @@ public class CatalogToolsGateway implements ToolsGateway {
 
         // Route CRUD operations to CrudToolExecutor (no billing - internal CRUD).
         if (toolId != null && toolId.startsWith(CRUD_TOOL_PREFIX)) {
+            // A CRUD tool reads the tenant's own datasource and authenticates against
+            // no provider, so an account chosen for this run cannot be honoured here.
+            // Dropping the markers silently would end the step green on a choice that
+            // was never applied, which is the shape this whole feature guards against.
+            if (Boolean.TRUE.equals(billingIdentifiers != null
+                    ? billingIdentifiers.get("__credentialSelectionStrict__") : null)) {
+                String message = "This step chooses an account at run time, but it is a table "
+                        + "operation: it reads this workspace's own data and authenticates against "
+                        + "no provider, so there is no account for it to choose. Remove the account "
+                        + "expression from it.";
+                logger.error("Refusing a run-time account selection on a table operation: toolId={}", toolId);
+                return new ExecutionResult(false, Map.of(),
+                        List.of(Map.of("type", "credential_selection_error", "message", message)),
+                        List.of());
+            }
             return crudToolExecutor.execute(toolId, input, tenantId);
         }
 
@@ -195,6 +210,22 @@ public class CatalogToolsGateway implements ToolsGateway {
                         if (selectedCredId != null) {
                             payload.put("selectedCredentialId", selectedCredId);
                         }
+                        // A step whose credential is chosen at RUN time can name it
+                        // instead of numbering it, because that is what an author
+                        // puts in a table row or a trigger field. The catalog is the
+                        // one that knows which integration the endpoint requires, so
+                        // it, not this gateway, turns the name into a credential.
+                        Object selectedCredName = billingIdentifiers.get("__selectedCredentialName__");
+                        if (selectedCredName != null) {
+                            payload.put("selectedCredentialName", selectedCredName);
+                        }
+                    }
+                    // Strict = this choice was made FOR THIS RUN, so an id or name
+                    // the catalog cannot match must refuse the call rather than soften
+                    // into the integration default. Absent for every author-time pin,
+                    // which keeps their forgiving fallback exactly as it is.
+                    if (Boolean.TRUE.equals(billingIdentifiers.get("__credentialSelectionStrict__"))) {
+                        payload.put("credentialSelectionStrict", true);
                     }
                 }
             }
@@ -298,6 +329,26 @@ public class CatalogToolsGateway implements ToolsGateway {
             // the X-Lc-Billing-Scope-* headers set above.
 
             return new ExecutionResult(success, output, errors, List.of());
+        } catch (org.springframework.web.client.HttpClientErrorException.UnprocessableEntity e) {
+            // The catalog refuses a run-time credential choice with a sentence written
+            // for the person who has to fix it. Left to the generic handler below, the
+            // step's error reads "422 UNPROCESSABLE_ENTITY: {json blob}" and the
+            // sentence is buried inside it, which defeats the point of writing one.
+            String body = e.getResponseBodyAsString();
+            // Only a body carrying the refusal CODE is labelled as one. The catalog
+            // returns 422 from a single place today; the first future one would
+            // otherwise reach the step as a credential error and send the reader
+            // looking at an account name that is not the problem. Handled in this
+            // block rather than rethrown, because a rethrow from a catch does not
+            // re-enter its sibling.
+            boolean isCredentialRefusal = body != null && body.contains("CREDENTIAL_SELECTION_UNRESOLVED");
+            String message = isCredentialRefusal ? credentialSelectionMessage(body) : e.getMessage();
+            logger.error("Catalog returned 422 for tool {}: {}", toolId, message);
+            return new ExecutionResult(false, Map.of(),
+                    List.of(Map.of(
+                        "type", isCredentialRefusal ? "credential_selection_error" : "execution_error",
+                        "message", message)),
+                    List.of());
         } catch (Exception e) {
             logger.error("Error executing tool {} via catalog service: {}", tool.toolId(), e.getMessage(), e);
             return new ExecutionResult(
@@ -408,5 +459,28 @@ public class CatalogToolsGateway implements ToolsGateway {
         }
 
         return castedInput;
+    }
+
+    /**
+     * The human sentence out of a credential-selection refusal, or the raw body when
+     * it is not one. Deliberately tolerant: a refusal whose message cannot be parsed
+     * must still surface something, because the alternative is a step that failed for
+     * a reason nobody can read.
+     */
+    private String credentialSelectionMessage(String responseBody) {
+        if (responseBody == null || responseBody.isBlank()) {
+            return "The catalog refused the credential this step selected for this run.";
+        }
+        try {
+            com.fasterxml.jackson.databind.JsonNode node =
+                    new com.fasterxml.jackson.databind.ObjectMapper().readTree(responseBody);
+            com.fasterxml.jackson.databind.JsonNode message = node.get("message");
+            if (message != null && message.isTextual() && !message.asText().isBlank()) {
+                return message.asText();
+            }
+        } catch (Exception ignored) {
+            // Fall through to the raw body below.
+        }
+        return responseBody;
     }
 }

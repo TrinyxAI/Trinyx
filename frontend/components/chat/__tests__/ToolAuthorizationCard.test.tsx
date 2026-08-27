@@ -89,3 +89,31 @@ describe('ToolAuthorizationCard', () => {
     expect(onApproved).toHaveBeenCalledWith('application:execute', false, 'call-1');
   });
 });
+
+describe('ToolAuthorizationCard - saying that the agent is holding', () => {
+  it('says the assistant is waiting when the call is HELD', () => {
+    // Without this line the tool above just spins with no explanation, and the user has no
+    // reason to connect the spinner to the card asking them something.
+    render(
+      <ToolAuthorizationCard
+        conversationId="c1"
+        pendingAuthorization={{ ...baseAuth, rule: 'application:execute', blocking: true, gateKey: 'call-1' }}
+      />,
+    );
+
+    expect(screen.getByTestId('tool-authorization-waiting')).toBeInTheDocument();
+  });
+
+  it('stays silent when nothing is held', () => {
+    // The non-blocking card ends the turn immediately, so claiming the assistant is waiting
+    // would be a lie the user acts on.
+    render(
+      <ToolAuthorizationCard
+        conversationId="c1"
+        pendingAuthorization={{ ...baseAuth, rule: 'application:execute' }}
+      />,
+    );
+
+    expect(screen.queryByTestId('tool-authorization-waiting')).not.toBeInTheDocument();
+  });
+});

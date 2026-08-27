@@ -53,7 +53,8 @@ interface InterfaceData {
 
 interface CreateInterfaceModalProps {
   onClose: () => void;
-  onInterfaceCreated: () => void;
+  /** Called after a save. Carries the new page's id on a CREATE, nothing on an edit. */
+  onInterfaceCreated: (interfaceId?: string) => void;
   interfaceData?: InterfaceData;
 }
 
@@ -154,13 +155,17 @@ export const CreateInterfaceModal: React.FC<CreateInterfaceModalProps> = ({
       // would make "back to Auto" impossible.
       payload.format = effectiveFormat;
 
+      let createdId: string | undefined;
       if (isEditMode && interfaceData?.id) {
         await orchestratorApi.updateInterface(interfaceData.id, payload);
       } else {
-        await orchestratorApi.createInterface(payload);
+        const created = await orchestratorApi.createInterface(payload);
+        createdId = (created as { id?: string } | undefined)?.id;
       }
 
-      onInterfaceCreated();
+      // The id only travels on a CREATE: on an edit the page already sits where it sits,
+      // and handing its id to the list would refile it under whatever folder is open.
+      onInterfaceCreated(createdId);
       onClose();
     } catch (err) {
       console.error('Error saving interface:', err);

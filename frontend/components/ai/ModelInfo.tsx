@@ -41,6 +41,7 @@ import { formatUtcDate } from '@/lib/utils/dateFormatters';
 import { cn } from '@/lib/utils';
 import type { AIModel } from '@/hooks/useModels';
 import { getProviderDisplayName } from '@/lib/ai-providers/providerIcons';
+import { UpgradeRequiredBadge } from '@/components/billing/UpgradeRequiredBadge';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Helpers
@@ -255,6 +256,14 @@ interface ModelOptionDisplayProps {
    * for tight inspector dropdowns (~280px). "default" includes price.
    */
   variant?: 'compact' | 'default';
+  /**
+   * True when this account's credits cannot pay for what this model does, which
+   * marks the row. Passed in rather than read here: the answer belongs to the
+   * whole list, and asking per row would put a query observer behind every
+   * option and make this presentational row unrenderable without a query
+   * client. The caller asks `useMonthlyCreditsCannotPay` once.
+   */
+  upgradeRequired?: boolean;
   className?: string;
 }
 
@@ -265,6 +274,7 @@ interface ModelOptionDisplayProps {
 export function ModelOptionDisplay({
   model,
   variant = 'default',
+  upgradeRequired = false,
   className,
 }: ModelOptionDisplayProps) {
   const t = useTranslations('modelInfo');
@@ -312,6 +322,14 @@ export function ModelOptionDisplay({
       <div className="flex items-center gap-x-2 gap-y-0.5 text-[11px] text-slate-500 dark:text-slate-400 min-w-0 flex-wrap">
         <TierBadge tier={model.tier} />
         <ProviderKindBadge providerKind={model.providerKind} />
+        {/* Said where the choice is made rather than after it. Every picker
+            that renders this row spends from the pay-as-you-go bucket (a chat
+            turn, an agent's tokens, a classify or guardrail call), which the
+            Free plan's monthly credits may not fund. A label only, and a lock
+            without the word in every variant: the row has no width to spare and
+            the word is there for a screen reader. What to DO about it sits
+            under the control, where a click works. */}
+        <UpgradeRequiredBadge blocked={upgradeRequired} />
         <CapabilityIcons model={model} maxInline={maxInline} />
         {ctx && <span>{t('context', { tokens: ctx })}</span>}
         {ctx && showPrice && (

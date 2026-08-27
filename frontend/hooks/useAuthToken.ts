@@ -6,9 +6,9 @@ import { apiClient } from '@/lib/api/api-client';
 /**
  * Returns a "fresh enough" JWT for use as an {@code Authorization: Bearer} header on
  * fetches that a component issues directly (e.g. the bulk zip-download POSTs in
- * {@code FileBrowser} / {@code StorageExplorerTab}). The provider returned by
- * {@link apiClient.getTokenProvider} delegates to OIDC silent refresh under the hood, so
- * each invocation returns the current valid access token; this hook re-reads it on
+ * {@code FileBrowser} / {@code StorageExplorerTab}). {@link apiClient.getAuthToken} resolves
+ * through OIDC silent refresh under the hood, so each invocation returns the current valid
+ * access token; this hook re-reads it on
  * visibility change + a slow timer so a long-open tab doesn't hold a stale value.
  *
  * <p><strong>Never put this token in a URL.</strong> File/media rendering does NOT use this
@@ -41,9 +41,9 @@ export function useAuthToken(refreshIntervalMs: number = 30 * 60 * 1000): string
 
     const fetchToken = async () => {
       try {
-        const provider = apiClient.getTokenProvider();
-        if (!provider) return;
-        const fresh = await provider();
+        // getAuthToken: returning early because the provider was not installed yet left callers
+        // anonymous until the next 30-minute tick or a visibility change.
+        const fresh = await apiClient.getAuthToken();
         if (cancelledRef.current) return;
         const next = fresh || undefined;
         // Avoid a state update (and re-render) when the OIDC client returned

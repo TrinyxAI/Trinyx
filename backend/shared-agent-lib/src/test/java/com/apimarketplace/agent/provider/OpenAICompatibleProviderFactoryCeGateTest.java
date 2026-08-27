@@ -29,18 +29,18 @@ class OpenAICompatibleProviderFactoryCeGateTest {
     }
 
     @Test
-    @DisplayName("CE (embedded) does NOT register openrouter or cohere, keeps the rest incl. qwen/moonshot")
+    @DisplayName("CE (embedded) does NOT register openrouter or cohere, keeps the rest incl. qwen/moonshot/minimax")
     void embeddedSkipsBlockedProviders() {
         List<String> names = providerNames("embedded");
         assertThat(names).doesNotContain("openrouter", "cohere");
-        assertThat(names).contains("xai", "perplexity", "zai", "qwen", "moonshot");
+        assertThat(names).contains("xai", "perplexity", "zai", "qwen", "moonshot", "minimax");
     }
 
     @Test
     @DisplayName("Cloud (no auth.mode) registers every provider incl. openrouter and cohere")
     void cloudRegistersAllProviders() {
         List<String> names = providerNames(null);
-        assertThat(names).contains("openrouter", "cohere", "xai", "perplexity", "zai", "qwen", "moonshot");
+        assertThat(names).contains("openrouter", "cohere", "xai", "perplexity", "zai", "qwen", "moonshot", "minimax");
     }
 
     @Test

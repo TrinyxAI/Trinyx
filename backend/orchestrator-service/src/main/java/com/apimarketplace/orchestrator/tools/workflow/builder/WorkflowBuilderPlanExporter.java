@@ -861,7 +861,7 @@ public class WorkflowBuilderPlanExporter {
                 if (!(genModel instanceof String genModelStr) || genModelStr.isBlank()) {
                     errors.add("cores[" + i + "]: 'params.model' is required for generate. The model decides "
                         + "the format produced, the parameters accepted and the price; call "
-                        + "generation(action='models') to list the available model ids.");
+                        + "workflow(action='help', topics=['generate']) to list the available model ids.");
                 }
                 Object genSource = genMap.get("credential_source");
                 if (genSource != null && !"user".equals(genSource) && !"platform".equals(genSource)) {

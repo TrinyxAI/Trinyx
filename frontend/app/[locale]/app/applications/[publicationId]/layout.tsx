@@ -192,7 +192,9 @@ export function ApplicationLayoutInner({ publicationId, children }: { publicatio
 
       // Run-only acquired applications (decouple-to-editable-workflow): the
       // acquirer's APPLICATION clone is NOT editable in place - editing lives in the
-      // separate WORKFLOW twin that acquiring also creates (visible in /app/workflows).
+      // separate WORKFLOW copy the acquirer creates on request from the application's
+      // info panel (visible in /app/workflows). Installing does NOT create one: it would
+      // re-clone the app's interfaces, tables and agents a second time.
       // So isClonedAcquisition no longer grants canEdit; the backend PUT /plan also
       // 409s an APPLICATION row. The PUBLISHER still edits their own SOURCE workflow
       // (type=WORKFLOW, not blocked) and may push to the live snapshot (Publish update).

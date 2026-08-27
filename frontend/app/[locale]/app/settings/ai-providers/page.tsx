@@ -105,6 +105,13 @@ const PROVIDER_DEFINITIONS: LlmProviderDefinition[] = [
     docsUrl: "https://platform.moonshot.ai/console/api-keys",
     placeholder: "sk-...",
   },
+  {
+    providerName: "minimax",
+    integrationName: "llm_minimax",
+    displayName: "MiniMax",
+    docsUrl: "https://platform.minimax.io/user-center/basic-information/interface-key",
+    placeholder: "eyJ...",
+  },
 ];
 
 function LoadingDot() {

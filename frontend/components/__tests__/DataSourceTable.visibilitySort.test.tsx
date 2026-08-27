@@ -2,7 +2,7 @@
 import '@testing-library/jest-dom/vitest';
 import React from 'react';
 import { cleanup, render, screen, waitFor, fireEvent } from '@testing-library/react';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi, beforeEach } from 'vitest';
 
 /**
  * DataSourceTable (Tables list) is now server-paginated + server-enriched: one page request returns
@@ -21,6 +21,12 @@ const mocks = vi.hoisted(() => ({
   getResourcePublicationStatus: vi.fn(),
 }));
 
+// The lists keep the open folder in the address, so they read next/navigation. This fake
+// router is URL-backed and re-renders on navigation, the way the real one does.
+vi.mock('next/navigation', async () => {
+  const mod = await import('@/lib/folders/testing/fakeFolderRouter');
+  return mod.fakeFolderRouter.nextNavigationModule();
+});
 vi.mock('next-intl', () => ({ useTranslations: () => (key: string) => key }));
 vi.mock('@/i18n/navigation', () => ({ useRouter: () => ({ push: vi.fn() }) }));
 vi.mock('@/lib/api', () => ({
@@ -78,6 +84,7 @@ vi.mock('@/hooks/useResourceFavorites', () => ({
   useResourceFavorites: () => ({ favoriteIds: new Set(), toggleFavorite: vi.fn() }),
 }));
 
+import { fakeFolderRouter } from '@/lib/folders/testing/fakeFolderRouter';
 import DataSourceTable from '../DataSourceTable';
 
 const ds = (id: string, name: string) => ({ id, name, updated_at: '2026-06-01T00:00:00Z' });
@@ -93,6 +100,12 @@ const page = (
 afterEach(() => {
   cleanup();
   vi.clearAllMocks();
+});
+
+beforeEach(() => {
+  // The address is shared state: without this, a test that opened a folder leaves the
+  // next one starting inside it.
+  fakeFolderRouter.reset();
 });
 
 describe('DataSourceTable - Globe/Lock marker comes from the page envelope', () => {

@@ -22,7 +22,7 @@ vi.mock('@/hooks/useAuthGuard', () => ({
 vi.mock('@/lib/providers/smart-providers', () => ({
   useAuth: () => ({ loginWithRedirect: vi.fn(), user: { email: 'owner@example.com' } }),
 }));
-vi.mock('@/lib/api', () => ({ apiClient: { getTokenProvider: () => null } }));
+vi.mock('@/lib/api', () => ({ apiClient: { getTokenProvider: () => null, getAuthToken: async () => null } }));
 vi.mock('@/lib/api/organization-api', () => ({
   organizationApi: {
     getOrganizations: (...a: unknown[]) => getOrganizations(...a),

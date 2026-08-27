@@ -13,6 +13,8 @@ import { orchestratorApi, type GenerationModel } from '@/lib/api/orchestrator';
 import type { BuilderNodeData } from '../../../types';
 import type { ConnectionProps } from '../ExpressionField';
 import { CredentialSection, type CredentialSource } from '../CredentialSection';
+import { UpgradeRequiredBadge, UpgradeRequiredNotice } from '@/components/billing/UpgradeRequiredBadge';
+import { useMonthlyCreditsCannotPay } from '@/lib/hooks/useMonthlyCreditsCannotPay';
 import {
   platformQuantityFor,
   GENERATE_FILE_PARAMS,
@@ -61,6 +63,11 @@ export function GenerateParametersForm({
   const credentialSource: CredentialSource = isCredentialSource((data as any).generateCredentialSource)
     ? (data as any).generateCredentialSource
     : DEFAULT_CREDENTIAL_SOURCE;
+
+  // Only the platform key spends credits: a node set to the reader's own key
+  // is billed by the provider directly, so a badge there would be a lie.
+  const { blocked: creditsCannotPay } = useMonthlyCreditsCannotPay();
+  const generationBlocked = creditsCannotPay && credentialSource === 'platform';
 
   const { data: catalog, isLoading: isLoadingModels } = useQuery({
     queryKey: ['generation-models'],
@@ -182,11 +189,29 @@ export function GenerateParametersForm({
           <SelectContent>
             {models.map((m) => (
               <SelectItem key={m.model} value={m.model} className="text-sm">
-                {m.label} ({m.kind})
+                <span className="flex items-center gap-1.5">
+                  <span>{m.label} ({m.kind})</span>
+                  {/* The node's own flat fee is covered by the Free plan's
+                      monthly credits; the generation it runs on the platform's
+                      key is not, and that is the part that gets refused. Only
+                      on the platform key: a node set to the reader's own key is
+                      never billed in credits. */}
+                  {/* Per MODEL: one with no platform credential behind it can
+                      only run on the reader's own key, so it costs no credits
+                      and a lock on its row would be a lie. This list carries
+                      the credential, not the published rate; whether a rate
+                      exists is answered by the quote in the section below. */}
+                  <UpgradeRequiredBadge blocked={generationBlocked && m.integrationName != null} />
+                </span>
               </SelectItem>
             ))}
           </SelectContent>
         </Select>
+        {/* Under the picker, not in its options: a listbox option cannot host
+            a control. The node's own flat fee IS covered by the monthly
+            credits; what is not is the generation it runs on the platform's
+            key, which is what gets refused. */}
+        <UpgradeRequiredNotice blocked={generationBlocked} className="mt-1.5" />
         {!isLoadingModels && models.length === 0 && (
           <span className="text-xs text-slate-400 dark:text-slate-500">{t('generate.noModels')}</span>
         )}
@@ -196,7 +221,13 @@ export function GenerateParametersForm({
           accepts, so a value it would refuse cannot be entered here at all. */}
       {selected && visibleParams.map((key) => {
         const limit = selected.limits?.[key];
-        const allowed = limit?.allowed;
+        // Only a list the platform ENFORCES becomes a closed choice here. An
+        // advisory one (values the catalogue knows the provider documents, which
+        // nothing checks) must not take the expression field away: a workflow
+        // binds a parameter to runtime data far more often than it types one,
+        // and a saved node holding a template would read as unset against a
+        // list that does not contain it.
+        const allowed = limit?.allowedEnforced === false ? undefined : limit?.allowed;
         const value = params[key];
         const isRequired = requiredParams.has(key);
         const isFile = GENERATE_FILE_PARAMS.includes(key);

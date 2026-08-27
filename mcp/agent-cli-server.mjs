@@ -112,6 +112,10 @@ const EXECUTION_ID = process.env.EXECUTION_ID || '';
 // JSON array of user-authorized sensitive tool-action rule keys ("tool:action").
 // Forwarded into the CLI session so the bridge guard skips re-prompting on resume.
 const APPROVED_TOOL_ACTIONS = process.env.APPROVED_TOOL_ACTIONS || '[]';
+// The bridge's inactivity watchdog window for this run, in seconds (0 = disabled, '' =
+// not told). Forwarded to the session so the server-side approval gate can size a park
+// that fits inside it with room left to run the tool afterwards.
+const AGENT_INACTIVITY_SECONDS = process.env.AGENT_INACTIVITY_SECONDS || '';
 
 // --- Session resilience knobs (env-overridable; tiny values in tests) ---
 // A transient backend blip at session start (host reboot before k3s networking is
@@ -228,6 +232,14 @@ async function startSession() {
     }
   } catch {
     // Malformed env → treat as no approvals (gate will prompt, which is safe).
+  }
+  // Forward the run's inactivity watchdog window. A tool call that parks on a user approval
+  // card is silent for its whole wait, so the server-side gate has to know how much silence
+  // this run tolerates - otherwise it sizes the park against its own default and the
+  // watchdog kills the run mid-execution, just after the user approved.
+  const inactivitySeconds = Number(AGENT_INACTIVITY_SECONDS);
+  if (AGENT_INACTIVITY_SECONDS !== '' && Number.isFinite(inactivitySeconds) && inactivitySeconds >= 0) {
+    body.inactivityTimeoutSeconds = inactivitySeconds;
   }
 
   const data = await apiPost('/api/agent/cli/session', body, FETCH_TIMEOUT_MS);

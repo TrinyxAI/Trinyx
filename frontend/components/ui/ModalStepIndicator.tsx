@@ -65,9 +65,24 @@ export function ModalStepIndicator({
           <React.Fragment key={step.number}>
             <button
               type="button"
+              // The step's number, as a handle. The browser suites address steps
+              // by it (`[data-step="2"][aria-current="step"]`), which is how they
+              // say "the dialog is on step 2" without depending on a label that
+              // every locale spells differently. The generation modal carried it
+              // on its own copy of this header; folding that copy in here without
+              // it took five checked-in tests down, so it belongs to the shared
+              // component now.
+              data-step={step.number}
               onClick={() => onStepClick?.(step.number)}
               disabled={!enabled}
               aria-current={isActive ? 'step' : undefined}
+              // The label is hidden below `sm` (three to five of them do not fit
+              // on a phone), which left the control as a bare icon with NO
+              // accessible name at exactly the width where a pointer is least
+              // precise. Naming it here holds at every width; the visible span
+              // repeats the same words, so nothing is announced twice.
+              aria-label={step.label}
+              title={step.label}
               className={cn(
                 'flex items-center gap-2 px-3 py-1.5 rounded-xl transition-colors',
                 isActive

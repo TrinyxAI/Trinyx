@@ -131,7 +131,7 @@ class CredentialToolsProviderTest {
     // ── populated state ─────────────────────────────────────────────────
 
     @Test
-    @DisplayName("lowercases status, surfaces isDefault, counts only defaults, and lists default names in the hint")
+    @DisplayName("lowercases status, surfaces isDefault, counts defaults, and names both the default and the selectable ones in the hint")
     void populatedShaping() {
         when(credentialClient.getAllCredentials(TENANT)).thenReturn(List.of(
                 cred("Gmail", "gmail", "ACTIVE", true, Map.of("email", "me@x.com")),
@@ -147,9 +147,166 @@ class CredentialToolsProviderTest {
                 .containsEntry("name", "Gmail").containsEntry("status", "active")
                 .containsEntry("isDefault", true).containsEntry("account", "me@x.com");
         assertThat(connected.get(1)).containsEntry("status", "active").containsEntry("isDefault", false);
-        // Only the default (Gmail) is named in the execution hint.
+        // The hint is what the agent actually reads, so it has to name BOTH: the default
+        // that a direct tool call uses, and the non-default that a workflow step can pick
+        // by name. Naming only the default is what taught agents the second one was dead.
         String hint = (String) d.get("hint");
-        assertThat(hint).contains("1 default").contains("Gmail").doesNotContain("Slack");
+        assertThat(hint).contains("1 default").contains("Gmail")
+                .contains("Slack").contains("credential_selector");
+    }
+
+    @Test
+    @DisplayName("the hint offers only ACTIVE non-defaults, never a revoked or expiring one")
+    void hintOffersOnlyActiveNonDefaults() {
+        // The hint says these are usable by credential_selector, and the run-time
+        // matcher accepts 'active' only, fail-closed. Every non-active entry offered
+        // here therefore buys the agent a FAILED step, not a wrong account. Note that
+        // 'expiring' is the trap: the same tool describes it as "still works".
+        when(credentialClient.getAllCredentials(TENANT)).thenReturn(List.of(
+                cred("Main", "instagram", "active", true, null),
+                cred("Usable", "instagram", "active", false, null),
+                cred("Revoked", "instagram", "needs_reauth", false, null),
+                cred("Broken", "instagram", "error", false, null),
+                cred("Expiring", "instagram", "expiring", false, null)));
+
+        String hint = (String) data(call()).get("hint");
+
+        assertThat(hint).contains("Usable");
+        assertThat(hint).doesNotContain("Revoked").doesNotContain("Broken").doesNotContain("Expiring");
+    }
+
+    @Test
+    @DisplayName("the hint drops a name two active accounts of one integration share")
+    void hintDropsAmbiguousNames() {
+        // Naming a duplicate selects NEITHER account, so offering it is offering a
+        // guaranteed failure. Same spelling under a DIFFERENT integration is not
+        // ambiguous and must survive.
+        when(credentialClient.getAllCredentials(TENANT)).thenReturn(List.of(
+                cred("Main", "instagram", "active", true, null),
+                cred("Client", "instagram", "active", false, null),
+                cred(" client ", "instagram", "active", false, null),
+                cred("Client", "slack", "active", false, null)));
+
+        String hint = (String) data(call()).get("hint");
+
+        // The matcher trims and ignores case, so " client " collides with "Client".
+        assertThat(hint).doesNotContain("(instagram)");
+        assertThat(hint).contains("\"Client\" (slack)");
+    }
+
+    @Test
+    @DisplayName("a DEFAULT credential with no name does not print as the literal null")
+    void hintSkipsANamelessDefault() {
+        // The summary lists default names with String.join, which renders a null as the
+        // four characters "null", so the hint read "ready for execution: Gmail, null".
+        // The entry still appears in `connected`; only this one sentence skips it.
+        when(credentialClient.getAllCredentials(TENANT)).thenReturn(List.of(
+                cred("Gmail", "gmail", "active", true, null),
+                cred(null, "slack", "active", true, null),
+                cred("   ", "notion", "active", true, null)));
+
+        String hint = (String) data(call()).get("hint");
+
+        assertThat(hint).contains("Gmail").doesNotContain("null");
+    }
+
+    @Test
+    @DisplayName("the hint drops a numeric name, which resolves as an id and never as a name")
+    void hintDropsNumericNames() {
+        // A positive whole number short-circuits to the id path before the name path is
+        // consulted, so naming "42" looks up credential 42. The description says so; the
+        // hint said otherwise, and the hint is what the agent reads as state.
+        when(credentialClient.getAllCredentials(TENANT)).thenReturn(List.of(
+                cred("Main", "instagram", "active", true, null),
+                cred("42", "instagram", "active", false, null),
+                cred("0", "instagram", "active", false, null)));
+
+        String hint = (String) data(call()).get("hint");
+
+        assertThat(hint).doesNotContain("\"42\" (instagram)");
+        // "0" is NOT an id: positiveId refuses anything <= 0, so it stays reachable by
+        // name. This is why the rule is written as POSITIVE whole number everywhere.
+        assertThat(hint).contains("\"0\" (instagram)");
+    }
+
+    @Test
+    @DisplayName("the hint drops an entry with no name or no integration, which can match nothing")
+    void hintDropsUnattributableEntries() {
+        when(credentialClient.getAllCredentials(TENANT)).thenReturn(List.of(
+                cred("Main", "instagram", "active", true, null),
+                cred(null, "instagram", "active", false, null),
+                cred("   ", "instagram", "active", false, null),
+                cred("Orphan", null, "active", false, null)));
+
+        String hint = (String) data(call()).get("hint");
+
+        // Asserted on the OFFER form: a bare doesNotContain("null") passes for free,
+        // since the default-names half of the hint could never have produced it. Also an
+        // absence guard, green on pre-change code too; it pins that the filters do not
+        // regress, not that they exist.
+        assertThat(hint).doesNotContain("(instagram)").doesNotContain("Orphan");
+        assertThat(hint).doesNotContain("credential_selector");
+    }
+
+    @Test
+    @DisplayName("an integration spelled with different case is still one namespace for collisions")
+    void hintTreatsIntegrationCaseInsensitively() {
+        // The integration column is not guaranteed lower-cased. Splitting "Instagram" and
+        // "instagram" into two buckets would make an ambiguous pair look unambiguous and
+        // offer both, which is the exact failure the collision filter exists to prevent.
+        // Another absence guard, so also green pre-change; it discriminates against the
+        // case-splitting mutation, not against the feature being missing.
+        when(credentialClient.getAllCredentials(TENANT)).thenReturn(List.of(
+                cred("Main", "instagram", "active", true, null),
+                cred("Shared", "Instagram", "active", false, null),
+                cred("Shared", "instagram", "active", false, null)));
+
+        assertThat((String) data(call()).get("hint")).doesNotContain("Shared");
+    }
+
+    @Test
+    @DisplayName("each offered name carries its integration, so the agent knows which step it fits")
+    void hintQualifiesNamesWithTheirIntegration() {
+        when(credentialClient.getAllCredentials(TENANT)).thenReturn(List.of(
+                cred("Gmail", "gmail", "active", true, null),
+                cred("Client B", "instagram", "active", false, null)));
+
+        assertThat((String) data(call()).get("hint")).contains("\"Client B\" (instagram)");
+    }
+
+    @Test
+    @DisplayName("a long list of accounts is capped and says so, instead of growing without bound")
+    void hintCapsTheOfferedList() {
+        // Without a cap this sentence grows with the account's credential count and is
+        // served on EVERY call. A silent truncation would read as "these are all".
+        List<CredentialSummaryDto> many = new java.util.ArrayList<>();
+        many.add(cred("Main", "instagram", "active", true, null));
+        for (int i = 1; i <= 20; i++) {
+            many.add(cred("Acct " + i, "instagram", "active", false, null));
+        }
+        when(credentialClient.getAllCredentials(TENANT)).thenReturn(many);
+
+        String hint = (String) data(call()).get("hint");
+
+        assertThat(hint).contains("\"Acct 1\" (instagram)").contains("\"Acct 12\" (instagram)");
+        assertThat(hint).doesNotContain("\"Acct 13\" (instagram)");
+        assertThat(hint).contains("and 8 more in the connected list");
+    }
+
+    @Test
+    @DisplayName("with no non-default credential the hint omits the selector clause entirely")
+    void hintOmitsSelectorClauseWhenEveryCredentialIsDefault() {
+        when(credentialClient.getAllCredentials(TENANT)).thenReturn(List.of(
+                cred("Gmail", "gmail", "active", true, null)));
+
+        String hint = (String) data(call()).get("hint");
+
+        // Nothing is selectable by name here, so mentioning the field would send the
+        // agent looking for a second account that does not exist. NOTE this is an
+        // absence guard: it also passed before the clause existed at all, so it proves
+        // the silence is correct, not that the feature is present. The presence tests
+        // above carry that weight.
+        assertThat(hint).contains("Gmail").doesNotContain("credential_selector").doesNotContain("Also held");
     }
 
     @Test

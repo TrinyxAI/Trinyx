@@ -34,5 +34,32 @@ public record CliSessionStartRequest(
      * into the session credentials - letting {@code ToolAuthorizationGuard} skip the
      * gate on a resume turn (bridge parity with the remote AgentLoopService path).
      */
-    List<String> approvedToolActions
-) {}
+    List<String> approvedToolActions,
+
+    /**
+     * The bridge's inactivity watchdog window for THIS run, in seconds (0 = disabled).
+     *
+     * <p>The bridge kills a run that produces no CLI output for this long, and a tool call
+     * that parks on a user approval card is silent for its whole wait. Without the number
+     * here, the approval gate cannot tell how much silence it may spend, so it would size a
+     * park against its own default and let the watchdog kill the run mid-execution - right
+     * after the user clicked approve, with the action already paid for. It is per-agent
+     * (config, 10-7200 s), which is why it has to travel rather than be assumed.
+     */
+    Integer inactivityTimeoutSeconds
+) {
+
+    /**
+     * The shape before the inactivity window was threaded through. Kept so the many existing
+     * construction sites (and an older bridge that does not send the field yet) stay valid:
+     * a missing window means "not told", which the approval gate reads as "no watchdog
+     * ceiling to respect" - the behaviour that shipped before.
+     */
+    public CliSessionStartRequest(List<String> enabledModules, String sessionId, String model,
+                                  String conversationId, String conversationServiceUrl, String streamId,
+                                  Boolean isNewConversation, String agentId, String executionId,
+                                  List<String> approvedToolActions) {
+        this(enabledModules, sessionId, model, conversationId, conversationServiceUrl, streamId,
+                isNewConversation, agentId, executionId, approvedToolActions, null);
+    }
+}

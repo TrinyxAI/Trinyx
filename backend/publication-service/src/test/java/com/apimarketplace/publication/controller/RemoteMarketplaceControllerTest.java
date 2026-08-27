@@ -1,5 +1,6 @@
 package com.apimarketplace.publication.controller;
 
+import com.apimarketplace.publication.dto.MarketplaceQueryFilter;
 import com.apimarketplace.publication.service.CloudLinkService;
 import com.apimarketplace.publication.service.RemoteMarketplaceService;
 import org.junit.jupiter.api.BeforeEach;
@@ -7,6 +8,8 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.ArgumentCaptor;
+import org.mockito.Captor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.http.HttpStatus;
@@ -19,6 +22,9 @@ import java.util.Map;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyInt;
+import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.Mockito.verify;
@@ -31,6 +37,12 @@ class RemoteMarketplaceControllerTest {
 
     @Mock
     private RemoteMarketplaceService remoteMarketplaceService;
+
+    @Captor
+    private ArgumentCaptor<MarketplaceQueryFilter> filterCaptor;
+
+    @Captor
+    private ArgumentCaptor<MarketplaceQueryFilter> searchFilterCaptor;
 
     private RemoteMarketplaceController controller;
 
@@ -145,39 +157,84 @@ class RemoteMarketplaceControllerTest {
         @DisplayName("GET /marketplace should delegate page, size and category to the service")
         void marketplaceShouldDelegateToService() {
             Map<String, Object> upstream = Map.of("publications", List.of(Map.of("id", "p1")), "count", 1);
-            when(remoteMarketplaceService.fetchMarketplacePublications(2, 25, "operations"))
+            when(remoteMarketplaceService.fetchMarketplacePublications(eq(2), eq(25), any()))
                     .thenReturn(upstream);
 
-            ResponseEntity<?> response = controller.listRemoteMarketplacePublications(2, 25, "operations");
+            ResponseEntity<?> response = controller.listRemoteMarketplacePublications(
+                    2, 25, "operations", null, null, null, null, null);
 
             assertThat(response.getStatusCode()).isEqualTo(HttpStatus.OK);
             assertThat(response.getBody()).isSameAs(upstream);
-            verify(remoteMarketplaceService).fetchMarketplacePublications(2, 25, "operations");
+            verify(remoteMarketplaceService).fetchMarketplacePublications(eq(2), eq(25), filterCaptor.capture());
+            assertThat(filterCaptor.getValue().categorySlug()).isEqualTo("operations");
         }
 
         @Test
         @DisplayName("GET /marketplace without category should pass null through")
         void marketplaceShouldPassNullCategory() {
             Map<String, Object> upstream = Map.of("publications", List.of(), "count", 0);
-            when(remoteMarketplaceService.fetchMarketplacePublications(0, 50, null)).thenReturn(upstream);
+            when(remoteMarketplaceService.fetchMarketplacePublications(eq(0), eq(50), any())).thenReturn(upstream);
 
-            ResponseEntity<?> response = controller.listRemoteMarketplacePublications(0, 50, null);
+            ResponseEntity<?> response = controller.listRemoteMarketplacePublications(
+                    0, 50, null, null, null, null, null, null);
 
             assertThat(response.getStatusCode()).isEqualTo(HttpStatus.OK);
-            verify(remoteMarketplaceService).fetchMarketplacePublications(0, 50, null);
+            verify(remoteMarketplaceService).fetchMarketplacePublications(eq(0), eq(50), filterCaptor.capture());
+            assertThat(filterCaptor.getValue().isUnfiltered()).isTrue();
         }
 
         @Test
         @DisplayName("GET /search should delegate q and category to the service")
         void searchShouldDelegateToService() {
             Map<String, Object> upstream = Map.of("publications", List.of(Map.of("id", "p2")), "count", 1);
-            when(remoteMarketplaceService.searchMarketplacePublications("crm sync", "ai"))
+            when(remoteMarketplaceService.searchMarketplacePublications(eq("crm sync"), any()))
                     .thenReturn(upstream);
 
-            ResponseEntity<?> response = controller.searchRemoteMarketplacePublications("crm sync", "ai");
+            ResponseEntity<?> response = controller.searchRemoteMarketplacePublications(
+                    "crm sync", "ai", null, null, null, null, null);
 
             assertThat(response.getStatusCode()).isEqualTo(HttpStatus.OK);
             assertThat(response.getBody()).isSameAs(upstream);
+        }
+
+        @Test
+        @DisplayName("GET /marketplace should forward every refinement to the cloud, not apply it locally")
+        void marketplaceShouldForwardRefinements() {
+            when(remoteMarketplaceService.fetchMarketplacePublications(anyInt(), anyInt(), any()))
+                    .thenReturn(Map.of("publications", List.of(), "count", 0));
+
+            controller.listRemoteMarketplacePublications(
+                    0, 24, "ai", "agent", "recent", "min_4", 7, "free");
+
+            verify(remoteMarketplaceService).fetchMarketplacePublications(eq(0), eq(24), filterCaptor.capture());
+            MarketplaceQueryFilter forwarded = filterCaptor.getValue();
+            assertThat(forwarded.displayMode()).isEqualTo("AGENT");
+            assertThat(forwarded.sort()).isEqualTo(MarketplaceQueryFilter.Sort.RECENT);
+            assertThat(forwarded.rating()).isEqualTo(MarketplaceQueryFilter.Rating.MIN_4);
+            assertThat(forwarded.windowDays()).isEqualTo(7);
+            assertThat(forwarded.price()).isEqualTo(MarketplaceQueryFilter.Price.FREE);
+            // Reaches the cloud as query params, so the cloud - not this box - decides
+            // which publications match. Filtering here could only ever filter the page
+            // the cloud already chose.
+            assertThat(forwarded.toQueryParams())
+                    .containsEntry("displayMode", "AGENT")
+                    .containsEntry("sort", "RECENT")
+                    .containsEntry("rating", "MIN_4")
+                    .containsEntry("days", "7")
+                    .containsEntry("price", "FREE");
+        }
+
+        @Test
+        @DisplayName("GET /search should carry the grid refinements so typing narrows instead of resetting")
+        void searchShouldForwardRefinements() {
+            when(remoteMarketplaceService.searchMarketplacePublications(anyString(), any()))
+                    .thenReturn(Map.of("publications", List.of(), "count", 0));
+
+            controller.searchRemoteMarketplacePublications("crm", null, "APPLICATION", null, null, null, "paid");
+
+            verify(remoteMarketplaceService).searchMarketplacePublications(eq("crm"), searchFilterCaptor.capture());
+            assertThat(searchFilterCaptor.getValue().displayMode()).isEqualTo("APPLICATION");
+            assertThat(searchFilterCaptor.getValue().price()).isEqualTo(MarketplaceQueryFilter.Price.PAID);
         }
 
         @Test

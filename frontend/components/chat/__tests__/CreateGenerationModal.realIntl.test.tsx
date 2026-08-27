@@ -54,6 +54,10 @@ vi.mock('@/components/ui/select', () => ({
   // Used by the credential picker the modal shares with the workflow
   // inspector. Absent, it renders as undefined and the dialog throws.
   SelectSeparator: () => null,
+  // Read at MODULE level by InterfaceFormatSelect, which the inspector pulls in
+  // through the shared credential picker. A mock that omits it fails the whole
+  // suite at import time, before any test runs.
+  SELECT_EMPTY_VALUE_SENTINEL: '__select_empty_value__',
 }));
 
 /**
@@ -89,6 +93,17 @@ vi.mock('@/lib/api', () => ({
     getPlatformCredentialPublicInfo: mocks.getPlatformCredentialPublicInfo,
   },
 }));
+
+/**
+ * The locale-aware router the result step routes to Files with.
+ *
+ * <p>Mocked because it cannot be imported for real here: `next-intl/navigation`
+ * reaches `next/navigation`, an extensionless specifier that vitest cannot
+ * resolve from the externalized ESM build, so the whole suite fails to LOAD -
+ * silently taking down the two cases this file exists for. Every other suite in
+ * the repo that renders a component importing it mocks it the same way.
+ */
+vi.mock('@/i18n/navigation', () => ({ useRouter: () => ({ push: vi.fn() }) }));
 
 import { CreateGenerationModal } from '../CreateGenerationModal';
 

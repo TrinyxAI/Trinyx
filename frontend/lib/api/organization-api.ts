@@ -263,8 +263,7 @@ class OrganizationApiService {
   // Multipart upload bypasses apiClient (which forces application/json), so it
   // uses a raw fetch with the OIDC token - same pattern as the user AvatarGallery.
   async uploadAvatar(orgId: string, file: File): Promise<OrgAvatarUploadResult> {
-    const tokenProvider = apiClient.getTokenProvider();
-    const token = tokenProvider ? await tokenProvider() : null;
+    const token = await apiClient.getAuthToken();
 
     const formData = new FormData();
     formData.append('file', file, file.name);

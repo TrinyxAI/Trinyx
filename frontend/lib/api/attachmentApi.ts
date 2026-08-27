@@ -77,9 +77,10 @@ class AttachmentApiService {
     const formData = new FormData();
     formData.append('file', file);
 
-    const tokenProvider = apiClient.getTokenProvider();
-    if (!tokenProvider) throw new Error('No token provider');
-    const token = await tokenProvider();
+    // getAuthToken: "No token provider" was thrown at signed-in users whose attachment happened
+    // to be picked before the async auth bootstrap finished.
+    const token = await apiClient.getAuthToken();
+    if (!token) throw new Error('Authentication required');
 
     // Audit 2026-05-17 round-3 - raw fetch must carry X-Active-Organization-ID.
     const uploadHeaders: Record<string, string> = {

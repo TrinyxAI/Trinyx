@@ -84,7 +84,9 @@ export function ServiceApprovalCard({
     toolId: s.toolName,
   }));
 
-  // Approve services - just dismiss the card (no backend call, approval is transient)
+  // Dismiss the card and hand the answer up. The card itself writes nothing: the parent
+  // resolves the held call server-side, and whether that released anything is what decides
+  // if the agent finishes its current turn or has to be resumed with a message.
   const approveServices = React.useCallback(() => {
     const serviceNames = [...new Set(pendingApproval.services.map(s => s.serviceName))];
     setIsApproved(true);
@@ -193,8 +195,8 @@ export function ServiceApprovalCard({
   };
 
   const handleDeny = () => {
-    // Show denied state - no API call needed
-    // The services won't be added to Conversation.approvedServices
+    // Show denied state. Nothing is written here either - there is no "approved services"
+    // set to stay out of; the parent tells the server the held call was refused.
     setIsDenied(true);
     const serviceNames = [...new Set(pendingApproval.services.map(s => s.serviceName))];
     if (onDenied) {
@@ -295,6 +297,13 @@ export function ServiceApprovalCard({
             <p className="text-xs text-slate-500 dark:text-slate-400">
               {needsAttentionMode ? t('needsAttentionSubtitle') : t('subtitle')}
             </p>
+            {/* The agent is holding the call that needs this connection: say so, otherwise
+                the tool above just looks stuck spinning for no visible reason. */}
+            {pendingApproval.blocking && (
+              <p className="text-xs text-slate-400 dark:text-slate-500 mt-0.5" data-testid="service-approval-waiting">
+                {t('waitingForYou')}
+              </p>
+            )}
           </div>
         </div>
 

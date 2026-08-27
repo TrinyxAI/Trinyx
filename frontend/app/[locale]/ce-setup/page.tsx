@@ -166,6 +166,13 @@ const ALL_PROVIDER_DEFINITIONS: LlmProviderDefinition[] = [
     docsUrl: 'https://platform.moonshot.ai/console/api-keys',
     placeholder: 'sk-...',
   },
+  {
+    providerName: 'minimax',
+    integrationName: 'llm_minimax',
+    displayName: 'MiniMax',
+    docsUrl: 'https://platform.minimax.io/user-center/basic-information/interface-key',
+    placeholder: 'eyJ...',
+  },
 ];
 
 // This wizard is the CE (self-hosted) onboarding, so it NEVER offers the

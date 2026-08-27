@@ -36,6 +36,13 @@ public final class ToolAuthorizationScope {
     public static final String KEY_AGENT_ID = "__agentId__";
     public static final String KEY_REQUIRE_AUTHORIZATION = "__requireToolAuthorization__";
 
+    /**
+     * Set when the call arrives through the CLI bridge, so a CLI is sitting on the MCP
+     * request while we hold it. It does not change WHETHER a card is raised, only how long
+     * the call may be parked waiting for the answer.
+     */
+    public static final String KEY_CLI_BRIDGE_SESSION = "__cliBridgeSession__";
+
     private ToolAuthorizationScope() {
     }
 
@@ -78,6 +85,18 @@ public final class ToolAuthorizationScope {
             }
         }
         return 0;
+    }
+
+    /**
+     * True when a CLI is holding this call open at the other end of an MCP request.
+     *
+     * <p>Lives here, next to the key, because the alternative is two truthiness rules for
+     * one credential drifting apart in two modules. It answers HOW LONG a parked call may
+     * be held, not WHETHER a card is raised, so it is deliberately not part of
+     * {@link #isCardRaised}.
+     */
+    public static boolean isCliBridgeSession(Map<String, Object> credentials) {
+        return credentials != null && isTruthy(credentials.get(KEY_CLI_BRIDGE_SESSION));
     }
 
     private static boolean hasText(Object value) {

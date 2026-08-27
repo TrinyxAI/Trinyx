@@ -85,6 +85,18 @@ public final class PlanSecretRedactor {
                 mutableStep.remove("credentialId");
                 mutableStep.remove("platformCredentialId");
                 mutableStep.remove("credentialSource");
+                // REMOVED here, unlike the publish and clone scrubs which blank it.
+                // This redactor only ever runs on a deep COPY served to a share-link
+                // visitor (WorkflowControllerHelper.isShareContext); execution reads
+                // the stored plan, so nothing here changes what a run does. Blanking
+                // would therefore buy no safety and would cost a canvas error on the
+                // visitor's screen for a workflow that runs perfectly. The choice is a
+                // credential decision that is not the visitor's to see, so it goes.
+                // Both spellings: the plan parser reads either, so a plan spelled
+                // credential_selector is a live selector and removing only the camel
+                // one would show a share-link visitor the author's expression.
+                mutableStep.remove("credentialSelector");
+                mutableStep.remove("credential_selector");
             }
         }
     }
@@ -99,4 +111,5 @@ public final class PlanSecretRedactor {
             }
         }
     }
+
 }

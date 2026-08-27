@@ -145,10 +145,66 @@ class ApiClient {
   }
 
   /**
-   * Get the current token provider
+   * Get the current token provider.
+   *
+   * <p><strong>Almost always the wrong method.</strong> Use {@link getAuthToken}: reading the
+   * provider skips its wait, and during the async auth bootstrap it is `undefined`, so the caller
+   * silently goes out anonymous. In prod that was the gateway's most frequent error in the week to
+   * 2026-08-25, 98 x 401 on `GET /api/files/by-id/<id>/raw`. Two call sites remain, for two
+   * different reasons:
+   *   1. `smart-providers.tsx` does not want a token at all - it saves and restores the provider
+   *      FUNCTION around a share-token session.
+   *   2. `useModels` does want one, to decide `skipAuth`, but must not pay the WAIT: that endpoint
+   *      is public and is called signed out, where waiting would only delay a request that was
+   *      always going to be anonymous.
    */
   getTokenProvider(): (() => Promise<string | null>) | undefined {
     return this.tokenProvider;
+  }
+
+  /**
+   * Resolve the current access token the same way every apiClient request does, including
+   * the startup wait.
+   *
+   * <p>For the raw `fetch` call sites that cannot go through apiClient (media blobs, uploads,
+   * streaming) but must still send `Authorization`. The provider is installed inside an async
+   * bootstrap in `smart-providers.tsx`, so a component mounting first sees
+   * `getTokenProvider() === undefined`. Reading the provider directly turns that window into an
+   * anonymous request, the gateway answers 401, and a one-shot effect never retries: the media
+   * stays broken until a reload. This waits for the provider to appear and for it to return a
+   * token instead of giving up on the first null.
+   *
+   * <p><strong>The cost of the wait, since this now runs behind every media element on a page:</strong>
+   * when a provider is installed and returns a token (every signed-in call) it resolves on the
+   * first try and adds nothing.
+   *
+   * <p>It blocks when there is no token to be had: about 1 s while no provider has appeared
+   * (10 polls of 100 ms), then up to 1 s more if the provider keeps answering null, after which it
+   * returns null. Read that as the NORMAL signed-out path, not a rare one: `smart-providers.tsx`
+   * installs a provider only once it holds an access token, so a genuinely signed-out session
+   * never installs one at all and every call here pays the full first loop, plus one
+   * `console.warn`, where reading the provider used to return instantly. Concurrent callers wait
+   * in parallel, so a gallery pays it once in wall-clock, not once per image. On a surface that is
+   * EXPECTED to be anonymous, prefer an explicitly anonymous request over paying the wait.
+   *
+   * <p><strong>It is a bound, not a guarantee.</strong> If the bootstrap takes longer than the
+   * wait above, the request still goes out anonymous and a one-shot effect still never retries -
+   * the original symptom, just rarer. The wait is sized against a healthy bootstrap (a token read
+   * plus three parallel calls), not against an arbitrarily slow one.
+   *
+   * <p><strong>Never rejects.</strong> A provider that throws is caught and becomes null, so
+   * callers need no try/catch around it. `authenticatedFetch` dropped one on that basis, which
+   * makes this a load-bearing guarantee rather than a convenience: it is pinned in
+   * `api-client.getAuthToken.test.ts` by making a REAL client's provider throw. Pinning it by
+   * mocking `getAuthToken` itself to reject would be worthless, since that is a shape the real
+   * object cannot produce.
+   *
+   * <p>One caveat the wait cannot cover: `await` on the provider has no timeout of its own (same
+   * as every `apiClient` request), so a provider that never settles hangs the caller rather than
+   * resolving null after ~2 s.
+   */
+  async getAuthToken(): Promise<string | null> {
+    return this.getToken(true);
   }
 
   /**

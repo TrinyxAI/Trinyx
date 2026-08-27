@@ -73,6 +73,13 @@ export interface InterfaceThumbnailProps {
    * outward shadow gets clipped by the overflow-hidden ancestors. Contain mode only.
    */
   frameStyle?: React.CSSProperties;
+  /**
+   * Mute state for the interface's own `<audio>`/`<video>`. Undefined = play as
+   * authored; a boolean hands the volume to the embedder (see `InterfaceIframe`).
+   */
+  mediaMuted?: boolean;
+  /** Fired with whether the interface contains any `<audio>`/`<video>` at all. */
+  onMediaAudioPresence?: (hasAudio: boolean) => void;
 }
 
 /**
@@ -111,6 +118,8 @@ export function InterfaceThumbnail({
   viewport,
   frameClassName,
   frameStyle,
+  mediaMuted,
+  onMediaAudioPresence,
 }: InterfaceThumbnailProps) {
   const vp = viewport ?? VIRTUAL_VIEWPORT;
   // Measuring + fit maths are shared with the other surfaces that render an interface at its own
@@ -177,6 +186,8 @@ export function InterfaceThumbnail({
               removeScripts={dropJs}
               actionMapping={actionMapping}
               triggerData={triggerData}
+              mediaMuted={mediaMuted}
+              onMediaAudioPresence={onMediaAudioPresence}
             />
           </div>
           {frameStyle && (

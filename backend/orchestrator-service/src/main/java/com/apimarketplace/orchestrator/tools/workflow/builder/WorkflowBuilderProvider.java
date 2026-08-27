@@ -1025,6 +1025,11 @@ public class WorkflowBuilderProvider implements ToolsProvider {
                                 + "Do NOT create and pin a new run: that would point production away from the run "
                                 + "holding the pending signal.");
                         }
+                        // Still "execute, then pin" on purpose, and NOT the removed pre-pin
+                        // ritual: the workflow is ALREADY pinned here and its run resolves
+                        // empty (typically a COMPLETED run - a deliberate stop, which pin
+                        // provisioning does not override). Re-pinning alone would elect the
+                        // same dead run, so a fresh run really does have to exist first.
                         return ToolExecutionResult.failure(ToolErrorCode.EXECUTION_FAILED, "No production run found for workflow at pinned v" + pinned +
                             " (outcome=" + prodResolution.outcome() + "). " +
                             "The pinned version needs a run in COMPLETED, WAITING_TRIGGER, RUNNING or PAUSED to " +

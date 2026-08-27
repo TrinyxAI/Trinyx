@@ -1,5 +1,6 @@
 package com.apimarketplace.publication.controller;
 
+import com.apimarketplace.publication.dto.MarketplaceQueryFilter;
 import com.apimarketplace.publication.domain.WorkflowPublicationEntity.DisplayMode;
 import com.apimarketplace.publication.service.CloudLinkService;
 import com.apimarketplace.publication.service.RemoteMarketplaceService;
@@ -71,6 +72,57 @@ public class RemoteMarketplaceController {
         }
     }
 
+    /**
+     * POST /api/publications/remote/{publicationId}/editable-workflow
+     *
+     * CE mirror of the local endpoint: create, on demand, the caller's freely-editable
+     * WORKFLOW copy of a cloud-acquired application. Idempotent ({@code created:false}
+     * when they already have one). Installing no longer mints this copy: it re-clones the
+     * whole snapshot, so doing it eagerly duplicated every interface / table / agent.
+     */
+    @PostMapping("/{publicationId}/editable-workflow")
+    public ResponseEntity<?> createEditableWorkflow(
+            @PathVariable UUID publicationId,
+            @RequestHeader("X-User-ID") String tenantId,
+            @RequestHeader(value = "X-Organization-ID", required = false) String organizationId,
+            @RequestHeader(value = "X-Organization-Role", required = false) String organizationRole) {
+        try {
+            // Creating a workflow in the workspace is a write - a read-only VIEWER must not.
+            // Same predicate as WorkflowPublicationController's acquire gates (trimmed,
+            // case-insensitive) so the two editions refuse identically.
+            if (organizationRole != null && "VIEWER".equalsIgnoreCase(organizationRole.trim())) {
+                return ResponseEntity.status(HttpStatus.FORBIDDEN)
+                        .body(Map.of("error", "VIEWER role cannot create an editable copy"));
+            }
+            return ResponseEntity.ok(
+                    remoteMarketplaceService.createEditableWorkflowTwin(publicationId, tenantId, organizationId));
+
+        } catch (CloudLinkService.CloudAccountNotLinkedException e) {
+            // The snapshot is re-fetched from the cloud, so an unlinked install can't copy.
+            return ResponseEntity.status(HttpStatus.FORBIDDEN)
+                    .body(Map.of("error", e.getMessage(), "code", "CLOUD_ACCOUNT_NOT_LINKED"));
+
+        } catch (com.apimarketplace.auth.client.entitlement.LimitExceededException e) {
+            // Rethrown so LimitExceededExceptionHandler emits the platform-wide 409 +
+            // LimitExceededError body; caught explicitly only to keep the generic catch
+            // below from burying a quota refusal in a 500.
+            throw e;
+
+        } catch (com.apimarketplace.publication.service.EditableWorkflowTwinService.CopyInProgressException e) {
+            // Another request is already creating this exact copy: 409, not 500.
+            return ResponseEntity.status(HttpStatus.CONFLICT)
+                    .body(Map.of("error", e.getMessage(), "code", "COPY_IN_PROGRESS"));
+
+        } catch (IllegalArgumentException e) {
+            return ResponseEntity.badRequest().body(Map.of("error", e.getMessage()));
+
+        } catch (Exception e) {
+            logger.error("Remote editable copy failed for publication {}: {}", publicationId, e.getMessage());
+            return ResponseEntity.internalServerError()
+                    .body(Map.of("error", "Failed to create the editable copy"));
+        }
+    }
+
     // =====================================================================
     // Cloud-parity read proxies (2026-06-10) - a cloud-linked CE renders the
     // SAME marketplace UI as cloud; these endpoints forward the cloud's PUBLIC
@@ -81,25 +133,46 @@ public class RemoteMarketplaceController {
 
     /**
      * GET /api/publications/remote/marketplace
-     * Proxies the cloud's public marketplace listing (paged, optional category).
+     * Proxies the cloud's public marketplace listing (paged, refinements forwarded).
+     *
+     * <p>The refinements travel upstream instead of being applied to whatever the
+     * cloud returned: the linked-CE grid is the cloud catalogue, so filtering it
+     * here would only ever filter the page already fetched - the same "filter over
+     * an arbitrary window" this endpoint's cloud twin was fixed to stop doing.
+     * They are normalised through {@code MarketplaceQueryFilter} first, so only
+     * whitelisted values leave the box.
      */
     @GetMapping("/marketplace")
     public ResponseEntity<?> listRemoteMarketplacePublications(
             @RequestParam(defaultValue = "0") int page,
             @RequestParam(defaultValue = "50") int size,
-            @RequestParam(required = false) String category) {
-        return ResponseEntity.ok(remoteMarketplaceService.fetchMarketplacePublications(page, size, category));
+            @RequestParam(required = false) String category,
+            @RequestParam(required = false) String displayMode,
+            @RequestParam(required = false) String sort,
+            @RequestParam(required = false) String rating,
+            @RequestParam(required = false) Integer days,
+            @RequestParam(required = false) String price) {
+        MarketplaceQueryFilter filter =
+                MarketplaceQueryFilter.fromRequest(category, displayMode, sort, rating, days, price);
+        return ResponseEntity.ok(remoteMarketplaceService.fetchMarketplacePublications(page, size, filter));
     }
 
     /**
      * GET /api/publications/remote/search?q=...
-     * Proxies the cloud's public marketplace search (optional category).
+     * Proxies the cloud's public marketplace search (refinements forwarded).
      */
     @GetMapping("/search")
     public ResponseEntity<?> searchRemoteMarketplacePublications(
             @RequestParam("q") String query,
-            @RequestParam(required = false) String category) {
-        return ResponseEntity.ok(remoteMarketplaceService.searchMarketplacePublications(query, category));
+            @RequestParam(required = false) String category,
+            @RequestParam(required = false) String displayMode,
+            @RequestParam(required = false) String sort,
+            @RequestParam(required = false) String rating,
+            @RequestParam(required = false) Integer days,
+            @RequestParam(required = false) String price) {
+        MarketplaceQueryFilter filter =
+                MarketplaceQueryFilter.fromRequest(category, displayMode, sort, rating, days, price);
+        return ResponseEntity.ok(remoteMarketplaceService.searchMarketplacePublications(query, filter));
     }
 
     /**

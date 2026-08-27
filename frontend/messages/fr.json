@@ -822,6 +822,7 @@
     "stopDictation": "Arrêter la dictée",
     "dictationNotSupported": "La reconnaissance vocale n'est pas supportée par ce navigateur",
     "attachFiles": "Joindre des fichiers",
+    "moreActions": "Plus d'actions",
     "imageViewer": {
       "enlarge": "Agrandir"
     },
@@ -1492,6 +1493,17 @@
     "retry": "Réessayer"
   },
   "marketplace": {
+    "editableCopy": {
+      "button": "Créer une copie modifiable",
+      "description": "Copie cette application dans vos workflows pour pouvoir la modifier. L'application installée continue de fonctionner telle quelle.",
+      "creating": "Création de la copie modifiable...",
+      "created": "Copie modifiable créée",
+      "existing": "Vous avez déjà une copie modifiable",
+      "open": "L'ouvrir",
+      "error": "La copie modifiable n'a pas pu être créée",
+      "openCreated": "Ouvrir la copie modifiable",
+      "installFailed": "La copie modifiable n'a pas pu être créée. L'application est bien installée : vous pouvez redemander la copie depuis son menu de paramètres."
+    },
     "screening": {
       "title": "{count, plural, one {# ressource média à vérifier} other {# ressources média à vérifier}}",
       "subtitle": "À noter : nous avons détecté les références média ci-dessous dans votre publication. Confirmez que vous avez le droit d'utiliser chacune - même les fichiers hébergés en interne peuvent provenir de contenus protégés par des droits tiers. Ceci est un rappel, pas un blocage.",
@@ -1597,6 +1609,8 @@
     "priceFree": "Gratuit",
     "pricePaid": "Payant",
     "resetFilters": "Réinitialiser les filtres",
+    "loadMore": "Charger plus",
+    "loadingMore": "Chargement...",
     "noFilterResults": "Aucune application ne correspond à ces filtres",
     "noFilterResultsHint": "Élargissez le filtre de note, de date ou de prix pour voir plus d'applications.",
     "filterTables": "Tables",
@@ -1731,6 +1745,9 @@
       "comingSoon": "Marketplace de compétences bientôt disponible.",
       "subtitle": "Découvrez les compétences d'agent partagées par la communauté",
       "title": "Compétences"
+    },
+    "settingsMenu": {
+      "label": "Paramètres de l'application"
     }
   },
   "reviews": {
@@ -1787,6 +1804,8 @@
   "applications": {
     "favorite": "Ajouter aux favoris",
     "unfavorite": "Retirer des favoris",
+    "unmuteSound": "Activer le son",
+    "muteSound": "Couper le son",
     "favoriteErrorTitle": "Impossible de mettre à jour les favoris",
     "favoriteErrorMessage": "Veuillez réessayer.",
     "filterAll": "Toutes",
@@ -1946,6 +1965,19 @@
       "dismiss": "J'ai compris"
     },
     "acquire": {
+      "installedTitle": "Installation terminée",
+      "installedIntro": "« {title} » a été ajouté à votre espace :",
+      "installedPrimaryApplication": "1 application",
+      "installedPrimaryWorkflow": "1 workflow",
+      "installedPrimaryAgent": "1 agent",
+      "installedPrimarySkill": "1 skill",
+      "installedPrimaryTable": "1 table",
+      "installedPrimaryInterface": "1 interface",
+      "installedWorkflows": "{count, plural, one {# workflow} other {# workflows}}",
+      "installedInterfaces": "{count, plural, one {# interface} other {# interfaces}}",
+      "installedTables": "{count, plural, one {# table} other {# tables}}",
+      "installedAgents": "{count, plural, one {# agent} other {# agents}}",
+      "installBusy": "Une autre installation est en cours",
       "titleFree": "Installer l'application",
       "titlePaid": "Acheter l'application",
       "anonymous": "Anonyme",
@@ -3286,7 +3318,7 @@
     },
     "catalogSync": {
       "title": "Rafraîchir depuis les feeds live",
-      "subtitle": "Récupère les modèles et prix actuels depuis LiteLLM + OpenRouter, prévisualise le diff, puis applique.",
+      "subtitle": "Récupère les modèles et prix actuels depuis LiteLLM, OpenRouter et la liste publiée par chaque fournisseur, prévisualise le diff, puis applique.",
       "refresh": "Rafraîchir depuis les providers",
       "modalTitle": "Aperçu du sync",
       "modalSubtitle": "Vérifie le diff et les éventuels gardes avant d'appliquer.",
@@ -3305,7 +3337,11 @@
       "cancel": "Annuler",
       "apply": "Appliquer",
       "applied": "Appliqué : {inserted} ajoutés, {updated} mis à jour, {deprecated} dépréciés. Construis un nouveau bundle pour distribuer.",
-      "applyRejected": "Application rejetée - vérifie les gardes ci-dessus."
+      "applyRejected": "Application rejetée - vérifie les gardes ci-dessus.",
+      "discoveryTitle": "Découverts chez les fournisseurs eux-mêmes",
+      "discoveryPricedFromOpenRouter": "Les prix viennent d'OpenRouter, qui affiche un tarif de revente. Vérifiez-les sur la grille du fournisseur avant d'activer un modèle.",
+      "discoveryCount": "{count, plural, one {# nouveau modèle} other {# nouveaux modèles}}",
+      "discoverySkipped": "Pas de clé API pour : {providers}. Leur liste de modèles n'a pas pu être lue."
     },
     "bridge": {
       "claudeCode": {
@@ -3712,6 +3748,24 @@
       "cannotRemoveDefault": "Impossible de retirer le défaut",
       "onlyCredentialForIntegration": "C'est le seul identifiant pour ce service. Ajoutez un autre identifiant avant de retirer celui-ci comme défaut.",
       "cannotRemoveOnlyCredential": "Impossible de retirer le défaut : c'est le seul identifiant pour ce service",
+      "rename": "Renommer",
+      "renameAriaLabel": "Renommer {name}",
+      "renameDialog": {
+        "title": "Renommer l'identifiant",
+        "description": "Seul le nom affiché change : la connexion, ses autorisations et son statut par défaut restent inchangés.",
+        "label": "Nom",
+        "placeholder": "ex. Gmail (compte pro)",
+        "save": "Enregistrer",
+        "saving": "Enregistrement...",
+        "cancel": "Annuler",
+        "successTitle": "Identifiant renommé",
+        "success": "Renommé en « {name} »",
+        "cannotRename": "Cette connexion est identifiée par son nom, elle ne peut donc pas être renommée : les nœuds de workflow qui l'utilisent la reconnaissent par ce nom, et la renommer les détacherait.",
+        "duplicateName": "Ce nom est déjà utilisé par un autre identifiant du même propriétaire pour le même service, éventuellement dans un autre espace de travail. Choisissez-en un autre.",
+        "failed": "Impossible de renommer cet identifiant. Veuillez réessayer.",
+        "emptyName": "Le nom ne peut pas être vide.",
+        "tooLong": "Le nom ne peut pas dépasser {max} caractères."
+      },
       "noMatchingCredentials": "Aucun identifiant ne correspond à vos filtres.",
       "noCredentialsYet": "Aucun identifiant configuré pour l'instant.",
       "addFirstIntegration": "Ajoutez votre première intégration depuis l'onglet Disponibles.",
@@ -5141,6 +5195,13 @@
       "planDescription": "Description",
       "price": "Prix",
       "tools": "Outils"
+    },
+    "event": {
+      "card": {
+        "referenceTitle": "Prix après la période fondateur : {price} par mois",
+        "foundingUntilKept": "Prix fondateur garanti jusqu’au <b>{date}</b>, puis conservé aussi longtemps que vous restez abonné",
+        "foundingUntil": "Prix fondateur garanti jusqu’au <b>{date}</b>"
+      }
     }
   },
   "storage": {
@@ -5292,7 +5353,8 @@
     "moveHere": "Déplacer ici",
     "noFoldersYet": "Aucun dossier - créez-en un d'abord, ou déplacez au niveau supérieur.",
     "backToParent": "Remonter d'un niveau",
-    "generate": "Générer"
+    "generate": "Générer",
+    "generatedAssets": "Générés"
   },
   "fileDetail": {
     "download": "Télécharger {name}",
@@ -6830,7 +6892,7 @@
       "mappingValuePlaceholder": "Expression ou valeur",
       "timeout": "Délai d'expiration (secondes)",
       "timeoutPlaceholder": "ex. 300",
-      "timeoutHelp": "Durée maximale d'exécution en secondes",
+      "timeoutHelp": "Durée d'attente de la fin du sous-workflow. Il continue de s'exécuter si ce délai est dépassé.",
       "maxDepth": "Profondeur maximale",
       "maxDepthPlaceholder": "ex. 5",
       "maxDepthHelp": "Profondeur d'imbrication maximale pour les sous-workflows récursifs",
@@ -6952,6 +7014,11 @@
       "timeout": "Délai d'expiration (secondes)",
       "timeoutPlaceholder": "ex. 30",
       "timeoutHelp": "Durée maximale d'exécution en secondes"
+    },
+    "rerunConfirm": {
+      "title": "Repartir de cette étape ?",
+      "message": "Ce run est en mode automatique. Repartir d'ici relance cette étape, puis laisse le reste du workflow se réexécuter tout seul, ce qui peut appeler des outils payants et envoyer de vrais messages.",
+      "confirm": "Relancer"
     },
     "canvas": {
       "portSingleTargetHint": "Cette sortie est déjà connectée. Un port mène à un seul nœud - ajoutez un nœud Fork pour en exécuter plusieurs en parallèle.",
@@ -7788,6 +7855,15 @@
       "selectAll": "Tout sélectionner",
       "autoLayout": "Disposition automatique",
       "fitView": "Ajuster la vue"
+    },
+    "credentialSelector": {
+      "accountLabel": "Compte utilisé par cette étape",
+      "toggleAriaLabel": "Choisir le compte au moment du run",
+      "toggleHelpOff": "Le compte est choisi maintenant, dans le sélecteur ci-dessous. Activez pour le choisir au moment du run.",
+      "toggleHelpOn": "Le compte est choisi au moment du run, à partir de l’expression ci-dessous. Désactivez pour en choisir un maintenant.",
+      "expressionLabel": "Expression du compte",
+      "expressionCaution": "Qui peut écrire cette valeur choisit le compte : liez-la à une source que vous maîtrisez.",
+      "expressionHelp": "Doit se résoudre vers le NOM d’un de vos identifiants pour cette intégration (ou vers son id). Utilisez une ligne de table, un champ de déclencheur ou un élément de split pour faire tourner un seul workflow sur plusieurs comptes. Si la résolution est vide, l’étape échoue au lieu de retomber sur votre compte par défaut. Seul un compte dont le statut est actif peut être sélectionné, son nom ne doit pas être partagé avec un autre compte actif de la même intégration, et un nom composé d’un entier positif est lu comme un identifiant. Liez-la à une source que le propriétaire du workflow maîtrise (une ligne de table, une variable) plutôt qu’à un champ qu’un visiteur non fiable peut remplir, comme le corps d’un webhook public ou un formulaire d’application partagée."
     }
   },
   "webhookTrigger": {
@@ -8271,6 +8347,7 @@
     "systemPrompt": "Prompt système"
   },
   "serviceApproval": {
+    "waitingForYou": "L'assistant attend votre réponse pour continuer.",
     "title": "Connecter les services",
     "subtitle": "Connectez les services suivants pour compléter votre demande",
     "reason": "Pourquoi c'est nécessaire",
@@ -8288,6 +8365,7 @@
     "deniedMessage": "La demande de connexion a été annulée"
   },
   "toolAuthorization": {
+    "waitingForYou": "L'assistant attend votre réponse pour continuer.",
     "runTitle": "Exécuter cette action ?",
     "runSubtitle": "L'agent souhaite exécuter une action sensible",
     "resolveApprovalTitle": "Résoudre cette approbation ?",
@@ -8829,6 +8907,12 @@
           "generic": "Une erreur s'est produite. Veuillez réessayer."
         }
       }
+    },
+    "upgradeRequired": {
+      "label": "Crédits payants requis",
+      "title": "Vos crédits ne peuvent pas payer ce modèle",
+      "explanation": "Vos crédits mensuels couvrent l'exécution des nœuds de workflow, mais pas le travail d'un modèle (chat, agents, génération). Celui-ci se paie avec les crédits à la demande, et il ne vous en reste plus.",
+      "cta": "Voir les offres ou recharger"
     }
   },
   "localMcp": {
@@ -10230,7 +10314,10 @@
       "providerPlaceholder": "Choisissez un fournisseur",
       "chooseFile": "Choisir un fichier",
       "replaceFile": "Remplacer",
-      "noFile": "Aucun fichier choisi"
+      "noFile": "Aucun fichier choisi",
+      "optionsLoading": "Chargement des valeurs...",
+      "optionsTruncated": "Affichage des premières valeurs sur {count}. Saisissez une valeur si celle que vous cherchez n'apparaît pas.",
+      "optionsEmpty": "Le fournisseur n'a renvoyé aucune valeur pour ce champ. Saisissez-la si vous la connaissez."
     },
     "modelCount": "{count} modèles",
     "empty": "Aucun modèle de génération n’est disponible pour l’instant.",
@@ -10238,6 +10325,8 @@
     "done": "Terminé",
     "billedOn": "Facturé sur {quantity} {unit}",
     "download": "Télécharger",
+    "openInFiles": "Voir dans les fichiers",
+    "savedNoPreview": "La génération est terminée, mais rien de ce qui est revenu ne peut être affiché ici. Si un asset a été produit, il est dans vos fichiers.",
     "generate": "Générer",
     "again": "Modifier",
     "back": "Retour",
@@ -10248,14 +10337,65 @@
       "stillRunning": "La connexion a été coupée, mais la génération continue sur le serveur et sera facturée. Votre fichier apparaîtra dans vos fichiers une fois terminé.",
       "unreadable": "La génération a été refusée et rien n’a été produit, mais la raison est revenue sous une forme que cette page ne peut pas afficher. Essayez un autre modèle, ou réessayez dans un instant."
     },
-    "payer": {
-      "monthlyCreditsOnly": "Vos crédits mensuels financent les exécutions de workflow, pas la génération. Utilisez votre propre clé, ou abonnez-vous ou rechargez pour payer en crédits."
-    },
     "assetRoles": {
       "source": "Image source",
       "first_frame": "Première image",
       "reference": "Image de référence",
       "mask": "Masque"
+    },
+    "history": {
+      "toggle": "Générations passées",
+      "title": "Générations passées",
+      "subtitle": "Choisissez-en une pour repartir de ce qui l’a produite"
     }
+  },
+  "generationHistory": {
+    "allFormats": "Tout",
+    "empty": "Rien n’a encore été généré ici. Ce que vous générez apparaît ici, avec le modèle et les mots qui l’ont produit.",
+    "emptyForFormat": "Aucun contenu de type {format} n’a encore été généré ici.",
+    "error": "Impossible de charger les générations passées. Réessayez dans un instant.",
+    "untitled": "Génération sans titre",
+    "reuse": "Réutiliser",
+    "reuseUnavailable": "Ce modèle n’est plus disponible : cette génération ne peut plus être relancée.",
+    "open": "Ouvrir {name}",
+    "previous": "Précédent",
+    "next": "Suivant",
+    "range": "{from}-{to}",
+    "generatedWith": "Généré avec {model}",
+    "regenerate": "Modifier et générer à nouveau"
+  },
+  "folders": {
+    "newFolder": "Nouveau dossier",
+    "createFolder": "Créer un dossier",
+    "renameFolder": "Renommer le dossier",
+    "folderName": "Nom du dossier",
+    "cancel": "Annuler",
+    "deleteFolder": "Supprimer le dossier",
+    "deleteFolderConfirm": "Supprimer le dossier « {name} » ? Son contenu remonte au niveau supérieur, rien n'est supprimé.",
+    "moveToFolder": "Déplacer vers un dossier",
+    "back": "Retour",
+    "upOneLevel": "Remonter d’un niveau",
+    "allWorkflows": "Tous les workflows",
+    "allAgents": "Tous les agents",
+    "allTables": "Toutes les tables",
+    "allInterfaces": "Toutes les pages",
+    "allApplications": "Toutes les apps",
+    "workflowCount": "{count, plural, =0 {Vide} one {# workflow} other {# workflows}}",
+    "agentCount": "{count, plural, =0 {Vide} one {# agent} other {# agents}}",
+    "tableCount": "{count, plural, =0 {Vide} one {# table} other {# tables}}",
+    "interfaceCount": "{count, plural, =0 {Vide} one {# page} other {# pages}}",
+    "applicationCount": "{count, plural, =0 {Vide} one {# app} other {# apps}}",
+    "subfolderCount": "{count, plural, one {# dossier} other {# dossiers}}",
+    "emptyFolderTitle": "Ce dossier est vide",
+    "emptyFolderSubtitle": "Faites glisser des cartes sur un dossier, ou utilisez Déplacer vers un dossier sur une sélection.",
+    "moved": "Déplacé",
+    "movedToFolder": "{count, plural, one {# élément déplacé} other {# éléments déplacés}} vers {name}",
+    "movedToTopLevel": "{count, plural, one {# élément remonté} other {# éléments remontés}} au niveau supérieur",
+    "draggingCount": "{count, plural, one {# élément} other {# éléments}}",
+    "actionFailed": "Action sur le dossier impossible",
+    "createFailed": "Le dossier n'a pas pu être créé.",
+    "renameFailed": "Le dossier n'a pas pu être renommé.",
+    "deleteFailed": "Le dossier n'a pas pu être supprimé.",
+    "moveFailed": "Le déplacement n'a pas pu aboutir."
   }
 }

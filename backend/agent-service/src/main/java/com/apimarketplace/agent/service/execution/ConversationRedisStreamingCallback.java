@@ -52,6 +52,8 @@ public class ConversationRedisStreamingCallback {
     private final ObjectMapper objectMapper;
     private final ConversationClient conversationClient;
     private final ActiveStreamRegistry activeStreamRegistry;
+    private final ApprovalCardPublisher approvalCardPublisher;
+    private final ApprovalCardExtractor approvalCardExtractor;
 
     /**
      * Create a callback for a specific conversation execution (no stream_started emission).
@@ -387,74 +389,25 @@ public class ConversationRedisStreamingCallback {
          *   <li>{@code approval_needed} JSON in the content (soft credential warning).</li>
          * </ol>
          */
-        @SuppressWarnings("unchecked")
         private void emitApprovalCardsIfPresent(ToolResult result, String toolName) {
-            if (!result.success()) return;
+            // The gate parked this call and already painted its card before waiting; emitting
+            // here too would duplicate it (the per-turn dedup below cannot see a card that was
+            // published outside this callback).
             Map<String, Object> metadata = result.metadata();
-
-            // 1) Service approval requested via request_credential metadata.
-            if (metadata != null && Boolean.TRUE.equals(metadata.get("serviceApprovalRequested"))) {
-                List<Map<String, Object>> services = metadata.get("services") instanceof List<?> l
-                    ? (List<Map<String, Object>>) l : List.of();
-                if (!services.isEmpty()) {
-                    List<Map<String, Object>> approvalInfos = toApprovalInfos(services);
-                    boolean needsAttention = Boolean.TRUE.equals(metadata.get("needsAttention"));
-                    if (markEmitted("svc:" + (needsAttention ? "attention:" : "connect:") + serviceKey(approvalInfos))) {
-                        publishServiceApprovalRequired(approvalInfos,
-                            (String) metadata.get("reason"),
-                            needsAttention);
-                    }
-                    return;
-                }
-            }
-
-            // 2) Sensitive action gated by ToolAuthorizationPolicy (any tool).
-            if (metadata != null && Boolean.TRUE.equals(metadata.get("toolAuthorizationRequired"))) {
-                String rule = (String) metadata.get("rule");
-                if (rule != null && !rule.isBlank() && markEmitted("auth:" + rule)) {
-                    publishToolAuthorizationRequired(metadata);
-                }
+            if (metadata != null && Boolean.TRUE.equals(metadata.get(ToolApprovalGate.META_CARD_EMITTED))) {
                 return;
             }
 
-            // 3) Soft "approval_needed" JSON returned in the tool content (catalog credential miss).
-            String content = result.content();
-            if (content != null && content.contains("approval_needed")) {
-                try {
-                    Map<String, Object> contentMap = objectMapper.readValue(content, Map.class);
-                    if ("approval_needed".equals(contentMap.get("status"))) {
-                        Map<String, Object> info = new LinkedHashMap<>();
-                        info.put("serviceType", contentMap.get("serviceType"));
-                        info.put("serviceName", contentMap.get("serviceName"));
-                        info.put("iconSlug", contentMap.get("iconSlug"));
-                        info.put("toolName", contentMap.get("toolName"));
-                        info.put("toolId", contentMap.get("toolId"));
-                        info.put("description", contentMap.get("message"));
-                        if (markEmitted("svc:connect:" + serviceKey(List.of(info)))) {
-                            publishServiceApprovalRequired(List.of(info),
-                                (String) contentMap.get("message"), false);
-                        }
-                    }
-                } catch (Exception e) {
-                    log.debug("Tool result content not JSON for approval check: {}", e.getMessage());
+            approvalCardExtractor.extract(result).ifPresent(card -> {
+                if (!markEmitted(card.dedupKey())) {
+                    return;
                 }
-            }
-        }
-
-        /** Convert service metadata maps into the approval-info shape the card consumes. */
-        private List<Map<String, Object>> toApprovalInfos(List<Map<String, Object>> services) {
-            List<Map<String, Object>> infos = new ArrayList<>();
-            for (Map<String, Object> svc : services) {
-                Map<String, Object> info = new LinkedHashMap<>();
-                info.put("serviceType", svc.get("serviceType"));
-                info.put("serviceName", svc.get("serviceName"));
-                info.put("iconSlug", svc.get("iconSlug"));
-                info.put("toolName", svc.get("toolName"));
-                info.put("toolId", svc.get("toolId"));
-                info.put("description", svc.get("description"));
-                infos.add(info);
-            }
-            return infos;
+                switch (card.kind()) {
+                    case SERVICE -> publishServiceApprovalRequired(
+                        card.services(), card.reason(), card.needsAttention());
+                    case AUTHORIZATION -> publishToolAuthorizationRequired(card.authorizationMetadata());
+                }
+            });
         }
 
         /** Record a card key; returns true the first time it is seen this turn. */
@@ -462,21 +415,15 @@ public class ConversationRedisStreamingCallback {
             return emittedApprovalKeys.add(key);
         }
 
-        /** Stable signature for a set of services (sorted serviceTypes). */
-        private static String serviceKey(List<Map<String, Object>> services) {
-            return services.stream()
-                .map(s -> String.valueOf(s.get("serviceType")))
-                .sorted()
-                .collect(java.util.stream.Collectors.joining(","));
-        }
-
         @Override
         public void onComplete(CompletionResponse response) {
             // Flush any remaining thinking buffer
             flushThinkingBuffer();
 
-            // Approval/authorization cards are emitted live per tool result (async model) - no
-            // end-of-turn safety net or early-completion skip: the run always finishes normally.
+            // Approval/authorization cards are emitted per tool result, never batched here: by
+            // the time a turn completes, a card either was answered inside its own call or is
+            // already on screen waiting. So there is no end-of-turn safety net and no
+            // early-completion skip - the run always finishes normally.
 
             // Conversation format: StreamCompleted
             String content = response != null ? response.content() : "";
@@ -828,13 +775,10 @@ public class ConversationRedisStreamingCallback {
          */
         private void publishServiceApprovalRequired(List<Map<String, Object>> services,
                                                       String reason, boolean needsAttention) {
-            Map<String, Object> event = new LinkedHashMap<>();
-            event.put("streamId", streamId);
-            event.put("services", services);
-            event.put("reason", reason != null ? reason : "Services need approval");
-            event.put("needsAttention", needsAttention);
-            event.put("timestamp", Instant.now().toString());
-            publish(event);
+            // Non-blocking card: the gated call already returned, so there is nothing parked
+            // for the user to release - hence blocking=false and no gate key.
+            approvalCardPublisher.publishServiceApproval(streamId, conversationId, services,
+                reason, needsAttention, false, null);
         }
 
         /**
@@ -843,21 +787,8 @@ public class ConversationRedisStreamingCallback {
          * service-approval discriminant, which is 'services' + 'reason').
          */
         private void publishToolAuthorizationRequired(Map<String, Object> metadata) {
-            Map<String, Object> authorization = new LinkedHashMap<>();
-            authorization.put("rule", metadata.get("rule"));
-            authorization.put("toolName", metadata.get("toolName"));
-            authorization.put("action", metadata.get("action"));
-            authorization.put("toolCallId", metadata.get("toolCallId"));
-            authorization.put("argsSummary", metadata.get("argsSummary"));
-            // Only present for application:acquire - lets the card open the marketplace install
-            // modal on the publication the user is about to install.
-            authorization.put("applicationId", metadata.get("applicationId"));
-
-            Map<String, Object> event = new LinkedHashMap<>();
-            event.put("streamId", streamId);
-            event.put("toolAuthorization", authorization);
-            event.put("timestamp", Instant.now().toString());
-            publish(event);
+            // Non-blocking card - see publishServiceApprovalRequired for why.
+            approvalCardPublisher.publishToolAuthorization(streamId, conversationId, metadata, false, null);
         }
 
         private void publishDoneEvent(String content) {

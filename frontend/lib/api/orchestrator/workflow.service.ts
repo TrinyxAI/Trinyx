@@ -19,6 +19,14 @@ export interface WorkflowsListOptions {
   sort?: string;
   /** Server-side visibility filter derived from publication status: all | public | private. */
   visibility?: 'all' | 'public' | 'private';
+  /**
+   * Which folder to list: `'root'` for the workflows filed nowhere, a folder id for that
+   * folder's own workflows. Omit it entirely to list everything, filed or not (what the
+   * board and the pickers want). A search overrides it - typing a name looks everywhere.
+   */
+  folderId?: string | null;
+  /** Ask for the folder tiles of that level (and the trail leading to it) alongside the rows. */
+  includeFolders?: boolean;
 }
 
 export class WorkflowService {
@@ -33,6 +41,8 @@ export class WorkflowService {
     if (options.q && options.q.trim().length > 0) params.q = options.q.trim();
     if (options.sort) params.sort = options.sort;
     if (options.visibility) params.visibility = options.visibility;
+    if (options.folderId !== undefined && options.folderId !== null) params.folderId = options.folderId;
+    if (options.includeFolders) params.includeFolders = 'true';
     const data = await apiClient.get<any>('/workflows', { params });
     return {
       workflows: data.workflows ?? [],
@@ -40,6 +50,11 @@ export class WorkflowService {
       totalCount: data.totalCount ?? data.count ?? (data.workflows?.length ?? 0),
       page: data.page ?? 0,
       size: data.size ?? 25,
+      folders: data.folders ?? [],
+      folderTrail: data.folderTrail ?? [],
+      // The folder we asked for is gone (deleted, or another workspace's): the server
+      // answered with the top level and the page should drop its filter.
+      folderMissing: data.folderMissing === true,
     };
   }
 

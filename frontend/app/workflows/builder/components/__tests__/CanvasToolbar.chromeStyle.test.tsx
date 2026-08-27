@@ -31,6 +31,10 @@ vi.mock('reactflow', () => ({
     <div data-testid="canvas-toolbar-panel" className={className}>{children}</div>
   ),
 }));
+// A RUN canvas. The file-strip toggle takes itself off an editing toolbar, and
+// without a provider the mode hook answers "edit" - which would leave the style
+// assertion below with nothing to measure.
+vi.mock('@/contexts/WorkflowModeContext', () => ({ useWorkflowMode: () => ({ isEditMode: false }) }));
 vi.mock('../CanvasRunTriggerButton', () => ({ CanvasRunTriggerButton: () => null }));
 vi.mock('../nodes/TriggerNodePinButton', () => ({ TriggerNodePinButton: () => null }));
 

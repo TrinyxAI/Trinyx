@@ -12,6 +12,7 @@ import com.apimarketplace.conversation.service.MessageService;
 import com.apimarketplace.conversation.service.PendingActionService;
 import com.apimarketplace.conversation.service.PendingActionResumeService;
 import com.apimarketplace.conversation.service.approval.ServiceApprovalService;
+import com.apimarketplace.conversation.service.approval.ToolApprovalGateResolver;
 import com.apimarketplace.conversation.service.approval.ToolAuthorizationApprovalService;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.BeforeEach;
@@ -65,6 +66,10 @@ class ConversationControllerTest {
 
     @Mock
     private ToolAuthorizationApprovalService toolAuthorizationApprovalService;
+
+    /** Releases a tool call the agent parked on this card; a no-op when nothing is parked. */
+    @Mock
+    private ToolApprovalGateResolver toolApprovalGateResolver;
 
     @InjectMocks
     private ConversationController conversationController;
@@ -172,6 +177,208 @@ class ConversationControllerTest {
         verify(toolAuthorizationApprovalService).approve("conv-1", "application:acquire", true);
         // Only this rule's card is cleared so other parallel cards stay pending.
         verify(pendingActionService).clearOnePendingAction("conv-1", "auth:application:acquire");
+        // No toolCallId in the body means no call is parked - releasing must be a no-op,
+        // not a stray verdict key that a later call could inherit.
+        verify(toolApprovalGateResolver).resolve("conv-1", null, true);
+    }
+
+    @Test
+    void approveToolAuthorizationReleasesTheParkedCallWhenGivenItsId() throws Exception {
+        ConversationDto dto = new ConversationDto();
+        dto.setId("conv-1");
+        dto.setUserId("user-1");
+        when(conversationQueryService.getConversationById("conv-1", "user-1", null))
+                .thenReturn(Optional.of(dto));
+        when(toolApprovalGateResolver.resolve("conv-1", "call-9", true)).thenReturn(true);
+
+        mockMvc.perform(post("/api/conversations/{conversationId}/tool-authorization/approve", "conv-1")
+                        .header("X-User-ID", "user-1")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(Map.of(
+                                "rule", "workflow:execute",
+                                "remember", false,
+                                "toolCallId", "call-9"))))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.parkedCallReleased").value(true));
+
+        verify(toolApprovalGateResolver).resolve("conv-1", "call-9", true);
+        // NO single-shot grant when the call was released. That grant is consumed at the
+        // start of the next turn, and a released call resumes inside the turn already
+        // running - so it would survive and let the NEXT call of this rule run with no card.
+        // Releasing is the authorization; writing both would widen what the user allowed.
+        verify(toolAuthorizationApprovalService, never()).approve(any(), any(), anyBoolean());
+    }
+
+    @Test
+    void approveToolAuthorizationStillGrantsOnceWhenNothingWasParked() throws Exception {
+        ConversationDto dto = new ConversationDto();
+        dto.setId("conv-1");
+        dto.setUserId("user-1");
+        when(conversationQueryService.getConversationById("conv-1", "user-1", null))
+                .thenReturn(Optional.of(dto));
+        // The hold ended before the user clicked (or there never was one).
+        when(toolApprovalGateResolver.resolve("conv-1", "call-9", true)).thenReturn(false);
+
+        mockMvc.perform(post("/api/conversations/{conversationId}/tool-authorization/approve", "conv-1")
+                        .header("X-User-ID", "user-1")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(Map.of(
+                                "rule", "workflow:execute",
+                                "remember", false,
+                                "toolCallId", "call-9"))))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.parkedCallReleased").value(false));
+
+        // Nothing was released, so the resume turn is the only way forward and it needs the
+        // grant - without it the very call the user just authorized asks again.
+        verify(toolAuthorizationApprovalService).approve("conv-1", "workflow:execute", false);
+    }
+
+    @Test
+    void approveToolAuthorizationPersistsAlwaysEvenWhenTheParkedCallWasReleased() throws Exception {
+        ConversationDto dto = new ConversationDto();
+        dto.setId("conv-1");
+        dto.setUserId("user-1");
+        when(conversationQueryService.getConversationById("conv-1", "user-1", null))
+                .thenReturn(Optional.of(dto));
+        when(toolApprovalGateResolver.resolve("conv-1", "call-9", true)).thenReturn(true);
+
+        mockMvc.perform(post("/api/conversations/{conversationId}/tool-authorization/approve", "conv-1")
+                        .header("X-User-ID", "user-1")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(Map.of(
+                                "rule", "workflow:execute",
+                                "remember", true,
+                                "toolCallId", "call-9"))))
+                .andExpect(status().isOk());
+
+        // "Always allow" is a standing decision about future turns, not a way to let this
+        // one call through - releasing the call must not swallow it.
+        verify(toolAuthorizationApprovalService).approve("conv-1", "workflow:execute", true);
+    }
+
+    @Test
+    void denyToolAuthorizationReleasesTheParkedCallAsRefused() throws Exception {
+        ConversationDto dto = new ConversationDto();
+        dto.setId("conv-1");
+        dto.setUserId("user-1");
+        when(conversationQueryService.getConversationById("conv-1", "user-1", null))
+                .thenReturn(Optional.of(dto));
+        when(toolApprovalGateResolver.resolve("conv-1", "call-9", false)).thenReturn(true);
+
+        mockMvc.perform(post("/api/conversations/{conversationId}/tool-authorization/deny", "conv-1")
+                        .header("X-User-ID", "user-1")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(Map.of(
+                                "rule", "workflow:execute",
+                                "toolCallId", "call-9"))))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.parkedCallReleased").value(true));
+
+        // Refused immediately rather than left parked until the gate's deadline.
+        verify(toolApprovalGateResolver).resolve("conv-1", "call-9", false);
+    }
+
+    @Test
+    void resolveApprovalGateReleasesTheParkedCallForAConnectCard() throws Exception {
+        ConversationDto dto = new ConversationDto();
+        dto.setId("conv-1");
+        dto.setUserId("user-1");
+        when(conversationQueryService.getConversationById("conv-1", "user-1", null))
+                .thenReturn(Optional.of(dto));
+        when(toolApprovalGateResolver.resolve("conv-1", "call-7", true)).thenReturn(true);
+
+        mockMvc.perform(post("/api/conversations/{conversationId}/approval-gate/resolve", "conv-1")
+                        .header("X-User-ID", "user-1")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(Map.of(
+                                "gateKey", "call-7",
+                                "approved", true))))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.parkedCallReleased").value(true));
+
+        verify(toolApprovalGateResolver).resolve("conv-1", "call-7", true);
+        // Connecting a service grants no rule - there is only a parked call to let through.
+        verify(toolAuthorizationApprovalService, never()).approve(any(), any(), anyBoolean());
+    }
+
+    @Test
+    void resolveApprovalGateDeniesWhenTheCallerDidNotSayYes() throws Exception {
+        ConversationDto dto = new ConversationDto();
+        dto.setId("conv-1");
+        dto.setUserId("user-1");
+        when(conversationQueryService.getConversationById("conv-1", "user-1", null))
+                .thenReturn(Optional.of(dto));
+
+        mockMvc.perform(post("/api/conversations/{conversationId}/approval-gate/resolve", "conv-1")
+                        .header("X-User-ID", "user-1")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(Map.of("gateKey", "call-7"))))
+                .andExpect(status().isOk());
+
+        // An omitted decision is not consent: releasing as approved would run a sensitive
+        // action for real on the strength of a field the caller never sent.
+        verify(toolApprovalGateResolver).resolve("conv-1", "call-7", false);
+    }
+
+    @Test
+    void resolveApprovalGateAcceptsTheStringFormOfApproved() throws Exception {
+        ConversationDto dto = new ConversationDto();
+        dto.setId("conv-1");
+        dto.setUserId("user-1");
+        when(conversationQueryService.getConversationById("conv-1", "user-1", null))
+                .thenReturn(Optional.of(dto));
+
+        mockMvc.perform(post("/api/conversations/{conversationId}/approval-gate/resolve", "conv-1")
+                        .header("X-User-ID", "user-1")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"gateKey\":\"call-7\",\"approved\":\"true\"}"))
+                .andExpect(status().isOk());
+
+        // Fail-closed must not mean "silently deny a client that said yes in a different shape".
+        verify(toolApprovalGateResolver).resolve("conv-1", "call-7", true);
+    }
+
+    @Test
+    void resolveApprovalGateRejectsAMissingGateKey() throws Exception {
+        ConversationDto dto = new ConversationDto();
+        dto.setId("conv-1");
+        dto.setUserId("user-1");
+        when(conversationQueryService.getConversationById("conv-1", "user-1", null))
+                .thenReturn(Optional.of(dto));
+
+        mockMvc.perform(post("/api/conversations/{conversationId}/approval-gate/resolve", "conv-1")
+                        .header("X-User-ID", "user-1")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(Map.of("approved", true))))
+                .andExpect(status().isBadRequest());
+
+        verify(toolApprovalGateResolver, never()).resolve(any(), any(), anyBoolean());
+    }
+
+    @Test
+    void resolveApprovalGateRefusesAnUnauthenticatedCaller() throws Exception {
+        mockMvc.perform(post("/api/conversations/{conversationId}/approval-gate/resolve", "conv-1")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(Map.of("gateKey", "call-7"))))
+                .andExpect(status().isUnauthorized());
+
+        verify(toolApprovalGateResolver, never()).resolve(any(), any(), anyBoolean());
+    }
+
+    @Test
+    void resolveApprovalGateRefusesAConversationTheCallerCannotSee() throws Exception {
+        when(conversationQueryService.getConversationById("conv-1", "user-2", null))
+                .thenReturn(Optional.empty());
+
+        mockMvc.perform(post("/api/conversations/{conversationId}/approval-gate/resolve", "conv-1")
+                        .header("X-User-ID", "user-2")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(Map.of("gateKey", "call-7"))))
+                .andExpect(status().isNotFound());
+
+        // A stranger must not be able to release someone else's parked call.
+        verify(toolApprovalGateResolver, never()).resolve(any(), any(), anyBoolean());
     }
 
     @Test

@@ -20,7 +20,9 @@ import java.util.Set;
  * <p>The {@code model} parameter decides everything else: the format produced,
  * which of the unified parameters are accepted, and what the call costs. Model
  * ids come from the platform's generation catalog; a workflow author picks one
- * in the inspector, an agent lists them with {@code generation(action='models')}.
+ * in the inspector, an agent lists them with {@code workflow(action='help',
+ * topics=['generate'])} - a free read every builder has, unlike the opt-in
+ * {@code generation} tool, which spends credits and may not be granted.
  *
  * <p>Config lives in Core's generic {@code params} map, exactly like
  * {@code core:media}. Every param accepts {@code {{...}}} template expressions
@@ -105,7 +107,8 @@ public class GenerateNode extends BaseNode {
                     // No UI navigation here: this message is read by an agent
                     // that has no screen, only the tools it can call.
                     "model is required. Set params={model: '<model-id>'}. List the ids with "
-                        + "generation(action='models'). The model decides the format produced, the "
+                        + "workflow(action='help', topics=['generate']), which lists every id this "
+                        + "installation offers and is free to read. The model decides the format produced, the "
                         + "parameters accepted and the price.");
             }
 

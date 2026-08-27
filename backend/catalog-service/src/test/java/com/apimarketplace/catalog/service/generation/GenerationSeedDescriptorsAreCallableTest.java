@@ -230,4 +230,34 @@ class GenerationSeedDescriptorsAreCallableTest {
             }
         }
     }
+
+    @Test
+    @DisplayName("regression: multilingual v2 does not offer a language the provider ignores")
+    void multilingualV2DoesNotOfferALanguage() throws Exception {
+        // ElevenLabs documents that `language_code` "is not supported for
+        // multilingual_v2 models" and that an unsupported code "will be
+        // ignored". Advertising it meant the field was filled in, sent, and
+        // dropped in silence: no error, no effect, nothing to notice. Its two
+        // siblings keep it, so the paramMap entry stays and only this model
+        // stops claiming it.
+        Map<String, List<String>> byModel = capabilitiesByModel();
+
+        assertThat(byModel.get("eleven-multilingual-v2"))
+                .as("multilingual v2 must not advertise a language")
+                .doesNotContain("language");
+        assertThat(byModel.get("eleven-flash-v2-5"))
+                .as("flash v2.5 does support it")
+                .contains("language");
+    }
+
+    /** Every shipped model's capabilities, keyed by model id. */
+    private static Map<String, List<String>> capabilitiesByModel() throws Exception {
+        Map<String, List<String>> byModel = new LinkedHashMap<>();
+        for (SeededEndpoint e : shipped()) {
+            for (GenerationSpec.Model m : e.spec().models()) {
+                byModel.put(m.id(), new ArrayList<>(m.capabilities()));
+            }
+        }
+        return byModel;
+    }
 }

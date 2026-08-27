@@ -2,6 +2,7 @@
 
 import React from 'react';
 import { COLUMN_TYPE_META } from '@/components/data-table/visualHelpers';
+import { nodeIconBoxRadiusClass } from '@/app/workflows/builder/components/nodes/shared';
 import type { ColumnVisualType } from '@/types/data-sources';
 import type { DataSource } from '@/lib/api';
 
@@ -121,10 +122,15 @@ export function DataSourceColumnIcons({ types, maxDisplay = 5, size = 'md', clas
   // Shared chip shape; the per-type colour comes from COLUMN_TYPE_META.badgeClass.
   // `sm` is the compact strip sitting above the mini-table preview; `md` is the
   // hero chip shown centered when a table is empty (today's look).
+  const chipPx = size === 'sm' ? 28 : 40;
   const chipSize = size === 'sm' ? 'h-7 w-7' : 'h-10 w-10';
   const iconSize = size === 'sm' ? 'h-3.5 w-3.5' : 'h-4 w-4';
+  // Same ladder, read from the same helper, as the WorkflowNodeIcons bubble this
+  // component is the sibling of: these two draw the same object on the same
+  // cards, and a single hand-picked `rounded-md` for both sizes had them
+  // disagreeing by one rung at 28px and two at 40px.
   const base =
-    `flex items-center justify-center ${chipSize} rounded-md border border-slate-200 dark:border-slate-700 shadow-sm`;
+    `flex items-center justify-center ${chipSize} ${nodeIconBoxRadiusClass(chipPx)} border border-slate-200 dark:border-slate-700 shadow-sm`;
 
   return (
     <div className={`flex items-center gap-2 ${className}`}>

@@ -25,6 +25,16 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { ShareWorkflowModal } from '@/components/workflow';
 import { processApps, type AppSortKey, type AppSourceFilter, type AppVisibilityFilter } from './applicationSort';
 import { deriveFavoritePubIds, favoriteTargetFor } from './applicationFavorites';
+import { DndContext, DragOverlay } from '@dnd-kit/core';
+import { FolderPlus } from 'lucide-react';
+import { ApplicationFolderFace } from '@/components/folders/ApplicationFolderFace';
+import { FolderBreadcrumb } from '@/components/folders/FolderBreadcrumb';
+import { FolderTilesGrid } from '@/components/folders/FolderTilesGrid';
+import { FolderDialogs } from '@/components/folders/FolderDialogs';
+import { DraggableResourceCard } from '@/components/folders/DraggableResourceCard';
+import { useListFolders } from '@/hooks/useListFolders';
+import { resourceFolderService, type ResourceFolder } from '@/lib/api/orchestrator/resource-folder.service';
+import { buildFolderTiles, buildFolderTrail } from '@/lib/folders/buildFolderTiles';
 
 import { ApplicationCard, PublicationCardSkeleton, type AppSource } from '@/components/applications/ApplicationCard';
 
@@ -33,6 +43,8 @@ import { ApplicationCard, PublicationCardSkeleton, type AppSource } from '@/comp
 function ApplicationsPageContent() {
   const t = useTranslations('applications');
   const tCommon = useTranslations('common');
+  // The folder wording is shared by the five lists that have folders.
+  const tFolders = useTranslations('folders');
   const router = useRouter();
   const { isLoading: isAuthLoading } = useAuth();
   // The applications page is the union (deduped by publication id) of two backend
@@ -227,18 +239,102 @@ function ApplicationsPageContent() {
     [allItems, pubFavoriteIds, wfFavoriteIds],
   );
 
+  // FOLDERS (V452). This page is the one that builds its own tiles: it merges its published
+  // apps with the ones it acquired and enriches them before showing anything, so the whole
+  // set only exists here - and a tile computed from a slice of it would lie about what a
+  // folder holds. The folders and the filing map come from the server; the counting,
+  // previewing and ordering are the shared client twin of the server's builder.
+  const [folderRows, setFolderRows] = useState<ResourceFolder[]>([]);
+  const [memberships, setMemberships] = useState<Map<string, string>>(new Map());
+  const searching = debouncedSearch.trim().length > 0;
+
+  const loadFolderState = useCallback(async () => {
+    try {
+      const [rows, map] = await Promise.all([
+        resourceFolderService.list('application'),
+        resourceFolderService.memberships('application'),
+      ]);
+      setFolderRows(rows);
+      setMemberships(map);
+    } catch (err) {
+      console.error('Error loading application folders:', err);
+    }
+  }, []);
+
+  const folders = useListFolders({
+    kind: 'application',
+    reload: loadFolderState,
+    selectedIds: selectedItems,
+    clearSelection,
+    searching,
+    canMutate: true,
+    labels: {
+      actionFailed: tFolders('actionFailed'),
+      createFailed: tFolders('createFailed'),
+      renameFailed: tFolders('renameFailed'),
+      deleteFailed: tFolders('deleteFailed'),
+      moveFailed: tFolders('moveFailed'),
+      moved: tFolders('moved'),
+      movedToFolder: (count, name) => tFolders('movedToFolder', { count, name }),
+      movedToTopLevel: (count) => tFolders('movedToTopLevel', { count }),
+    },
+    notify: addToast,
+    // Card ids carry their provenance ("acquired-<id>"); the filing is by publication id.
+    toResourceId: (cardId) => cardId.replace(/^(acquired|published)-/, ''),
+  });
+
+  useEffect(() => {
+    loadFolderState();
+  }, [loadFolderState, currentOrgId]);
+
   const processed = useMemo(
     () => processApps(allItems, sourceFilter, visibilityFilter, sortBy, favoritePubIds),
     [allItems, sourceFilter, visibilityFilter, sortBy, favoritePubIds],
   );
-  const totalCount = processed.length;
+
+  // A search looks through every folder; otherwise the level narrows the list.
+  const atLevel = useMemo(() => {
+    if (searching) return processed;
+    return processed.filter(
+      (app) => (memberships.get(app.pub.id) ?? null) === folders.currentFolderId,
+    );
+  }, [processed, searching, memberships, folders.currentFolderId]);
+
+  // Tiles + trail for the level being shown, fed to the shared hook so the tile grid, the
+  // breadcrumb and the dialogs work exactly as they do on the four server-fed lists.
+  useEffect(() => {
+    folders.applyListResponse({
+      folders: searching ? [] : buildFolderTiles({
+        folders: folderRows,
+        parentFolderId: folders.currentFolderId,
+        items: processed.map((app) => ({
+          id: app.pub.id,
+          name: app.pub.title,
+          lastModifiedAt: app.pub.updatedAt ?? app.pub.publishedAt ?? null,
+          lastActivityAt: app.lastExecutedAt ?? null,
+        })),
+        memberships,
+        sort: sortBy === 'name' ? 'name' : sortBy === 'execution' ? 'lastActivity' : 'lastModified',
+      }),
+      folderTrail: buildFolderTrail(folderRows, folders.currentFolderId),
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [folderRows, memberships, processed, searching, sortBy, folders.currentFolderId]);
+
+  const folderCountLabel = useCallback(
+    (count: number) => tFolders('applicationCount', { count }),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [],
+  );
+
+  const totalCount = atLevel.length;
   const totalPages = Math.max(1, Math.ceil(totalCount / pageSize));
   const safePage = Math.min(page, totalPages - 1);
   const filtered = useMemo(() => {
     const from = safePage * pageSize;
     const to = from + pageSize;
-    return processed.slice(from, to);
-  }, [processed, safePage, pageSize]);
+    return atLevel.slice(from, to);
+  }, [atLevel, safePage, pageSize]);
 
   // Snap back if the active page becomes out-of-range (e.g. after delete reduces totalCount).
   useEffect(() => {
@@ -383,13 +479,39 @@ function ApplicationsPageContent() {
       <div className="min-h-full w-full p-6 pb-12">
         <div className="max-w-6xl mx-auto space-y-6 w-full">
           {/* Header */}
-          <div>
-            <h1 className="text-lg font-semibold text-theme-primary">
-              {t('title')}
-            </h1>
-            <p className="text-sm text-theme-secondary mt-0.5">
-              {t('subtitle')}
-            </p>
+          <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
+            {/* Inside a folder the PATH is the page title, with the folder mark and an
+                up-one-level arrow beside it - the same header the Files browser uses. */}
+            {folders.trail.length > 0 ? (
+              <FolderBreadcrumb
+                trail={folders.trail}
+                rootLabel={tFolders('allApplications')}
+                backLabel={tFolders('upOneLevel')}
+                subtitle={tFolders('applicationCount', { count: atLevel.length })}
+                onNavigate={folders.navigateToFolder}
+                droppable={folders.canOrganize}
+              />
+            ) : (
+              <div className="min-w-0">
+                <h1 className="text-lg font-semibold text-theme-primary">
+                  {t('title')}
+                </h1>
+                <p className="text-sm text-theme-secondary mt-0.5">
+                  {t('subtitle')}
+                </p>
+              </div>
+            )}
+            {folders.foldersEnabled && (
+              <Button
+                variant="outline"
+                size="sm"
+                className="shrink-0"
+                onClick={() => folders.setShowCreateDialog(true)}
+              >
+                <FolderPlus className="h-4 w-4 mr-1.5" />
+                {tFolders('newFolder')}
+              </Button>
+            )}
           </div>
 
           {/* Search + provenance filter + visibility filter + sort. Gated on the RAW union size (not
@@ -478,6 +600,12 @@ function ApplicationsPageContent() {
           {/* Selection actions - floating bottom-center bar (mirrors the task board). */}
           {selectedItems.size > 0 && (
             <SelectionActionBar count={selectedItems.size} onClear={clearSelection}>
+              {/* Filing stays available while searching: you often find an app BECAUSE you
+                  were looking for where to put it. Only the drag targets need a folder view. */}
+              <BulkBarButton onClick={folders.openMoveDialog}>
+                <FolderPlus className="h-3.5 w-3.5" />
+                {tFolders('moveToFolder')}
+              </BulkBarButton>
               {selectedPublishedItems.length === 1 && (
                 <>
                   <BulkBarButton onClick={handleUpdateSelected}>
@@ -555,12 +683,29 @@ function ApplicationsPageContent() {
             />
           )}
 
-          {/* Grid - Pinterest masonry like My Publications */}
-          {!isLoading && filtered.length > 0 && (
+          {/* Folders + grid. One drag context over both: a card dropped on a tile is filed
+              there, a tile dropped on another tile is nested inside it. */}
+          {!isLoading && (
+            <DndContext
+              sensors={folders.sensors}
+              onDragStart={(event) => folders.handleDragStart(
+                event, (id) => allItems.find((a) => id.endsWith(a.pub.id))?.pub.title)}
+              onDragEnd={folders.handleDragEnd}
+              onDragCancel={folders.cancelDrag}
+            >
+              <FolderTilesGrid
+                folders={folders}
+                countLabel={folderCountLabel}
+                gridClassName="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4 mb-4"
+                renderFace={(folder) => <ApplicationFolderFace preview={folder.preview ?? []} />}
+              />
+
+              {filtered.length > 0 && (
             <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
               {filtered.map(({ pub, source, workflowId, acquiredAt, applicationRunId, pinnedVersion }) => {
                 const cardId = source === 'acquired' ? `acquired-${pub.id}` : `published-${pub.id}`;
                 return (
+                  <DraggableResourceCard key={cardId} id={cardId} disabled={!folders.canOrganize}>
                   <ApplicationCard
                     key={cardId}
                     publication={pub}
@@ -574,9 +719,23 @@ function ApplicationsPageContent() {
                     isFavorite={favoritePubIds.has(pub.id)}
                     onToggleFavorite={() => handleToggleFavorite({ pub, source, workflowId })}
                   />
+                  </DraggableResourceCard>
                 );
               })}
             </div>
+              )}
+
+              {/* What is being dragged, following the pointer. */}
+              <DragOverlay>
+                {folders.activeDrag && (
+                  <div className="rounded-xl border border-[var(--accent-primary)] bg-theme-secondary px-3 py-2 text-sm text-theme-primary shadow-lg">
+                    {folders.activeDrag.count > 1
+                      ? tFolders('draggingCount', { count: folders.activeDrag.count })
+                      : folders.activeDrag.label}
+                  </div>
+                )}
+              </DragOverlay>
+            </DndContext>
           )}
 
           {!isLoading && totalCount > pageSize && (
@@ -616,6 +775,8 @@ function ApplicationsPageContent() {
           workflowDescription={appToUpdate.description}
         />
       )}
+      <FolderDialogs folders={folders} selectedIds={selectedItems} />
+
       <ToastContainer toasts={toasts} onRemoveToast={removeToast} />
     </div>
   );

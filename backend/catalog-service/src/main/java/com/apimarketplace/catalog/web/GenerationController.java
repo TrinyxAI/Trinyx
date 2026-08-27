@@ -2,7 +2,10 @@ package com.apimarketplace.catalog.web;
 
 import com.apimarketplace.agent.tools.ToolsProvider.ToolExecutionContext;
 import com.apimarketplace.agent.tools.ToolsProvider.ToolExecutionResult;
+import com.apimarketplace.catalog.service.generation.DynamicOptionsResolver;
+import com.apimarketplace.catalog.service.generation.GenerationLimits;
 import com.apimarketplace.catalog.service.generation.GenerationRegistry;
+import com.apimarketplace.catalog.service.generation.PlatformSalesResolver;
 import com.apimarketplace.catalog.tools.CatalogExecuteModule;
 import com.apimarketplace.catalog.service.generation.GenerationSpec;
 import com.apimarketplace.catalog.tools.generation.GenerationModule;
@@ -54,10 +57,16 @@ public class GenerationController {
 
     private final GenerationRegistry registry;
     private final GenerationModule module;
+    private final DynamicOptionsResolver optionsResolver;
+    private final PlatformSalesResolver platformSales;
 
-    public GenerationController(GenerationRegistry registry, GenerationModule module) {
+    public GenerationController(GenerationRegistry registry, GenerationModule module,
+                                DynamicOptionsResolver optionsResolver,
+                                PlatformSalesResolver platformSales) {
         this.registry = registry;
         this.module = module;
+        this.optionsResolver = optionsResolver;
+        this.platformSales = platformSales;
     }
 
     /**
@@ -72,15 +81,89 @@ public class GenerationController {
     @GetMapping("/api/generation/models")
     public ResponseEntity<Map<String, Object>> models(
             @RequestParam(value = "kind", required = false) String kind) {
+        List<GenerationRegistry.GenerationModel> models = registry.list(kind);
+        // One bulk resolution for the whole list: the price lookup takes every
+        // integration and endpoint at once, so fifty models cost one call.
+        Map<PlatformSalesResolver.ModelRef, PlatformSalesResolver.Verdict> sold =
+                platformSales.resolve(models.stream().map(PlatformSalesResolver.ModelRef::of).toList());
         List<Map<String, Object>> rows = new ArrayList<>();
-        for (GenerationRegistry.GenerationModel m : registry.list(kind)) {
-            rows.add(describeModel(m));
+        for (GenerationRegistry.GenerationModel m : models) {
+            rows.add(describeModel(m, optionsResolver.unifiedDynamicParameters(m),
+                    sold.getOrDefault(PlatformSalesResolver.ModelRef.of(m), PlatformSalesResolver.Verdict.UNKNOWN)));
         }
         Map<String, Object> out = new LinkedHashMap<>();
         out.put("models", rows);
         out.put("count", rows.size());
         out.put("kinds", registry.kinds());
         return ResponseEntity.ok(out);
+    }
+
+    /**
+     * What one parameter of one model accepts, asked of the provider.
+     *
+     * <p>Separate from {@code /models} on purpose. That answer is one snapshot
+     * shared by every reader and cached for five minutes; this one belongs to
+     * the account behind the caller's key and costs a call to the provider, so
+     * it is fetched only when a dialog actually opens the field.
+     *
+     * <p>Takes the payer the dialog is showing, because the answer depends on
+     * it: a voice list read on the platform's key is not the reader's own. The
+     * dialog re-asks when that toggle moves, and the answer names the key it
+     * came from so the two cannot silently diverge.
+     */
+    @GetMapping("/api/generation/model-options")
+    public ResponseEntity<Map<String, Object>> options(
+            @RequestParam("model") String model,
+            @RequestParam("parameter") String parameter,
+            @RequestParam(value = "credential_source", required = false) String credentialSource,
+            @RequestParam(value = "credential_id", required = false) String credentialId,
+            @RequestHeader(value = "X-User-ID", required = false) String userId,
+            @RequestHeader(value = "X-Organization-ID", required = false) String orgId) {
+
+        if (userId == null || userId.isBlank()) {
+            return ResponseEntity.status(401).body(Map.of(
+                    "success", false, "error", "Sign in to read a provider's values."));
+        }
+
+        Map<String, Object> parameters = new LinkedHashMap<>();
+        parameters.put("model", model);
+        parameters.put("parameter", parameter);
+        if (credentialSource != null && !credentialSource.isBlank()) {
+            parameters.put(CatalogExecuteModule.CREDENTIAL_SOURCE_KEY, credentialSource);
+        }
+
+        // Same lifting as a run: the pinned key travels on the CONTEXT, never in
+        // the parameter map, because the module behind this is the one an agent
+        // also reaches and an agent must not be able to name a credential.
+        Map<String, Object> credentials = new LinkedHashMap<>();
+        putPinnedCredential(credentials, Map.of(CatalogExecuteModule.CREDENTIAL_ID_KEY,
+                credentialId == null ? "" : credentialId));
+        ToolExecutionContext context = new ToolExecutionContext(
+                userId, credentials, Map.of(), java.util.Set.of(), null, null, orgId, null);
+
+        Optional<ToolExecutionResult> result = module.execute("options", parameters, userId, context);
+        Map<String, Object> out = new LinkedHashMap<>();
+        if (result.isEmpty()) {
+            out.put("success", false);
+            out.put("error", "Could not read the values for this field.");
+            return ResponseEntity.ok(out);
+        }
+        ToolExecutionResult r = result.get();
+        out.put("success", r.success());
+        if (r.success()) {
+            out.putAll(asMap(r.data()));
+        } else {
+            // The reason travels rather than an empty list: "connect a key" and
+            // "we could not ask" are different facts from "there are none", and
+            // a dialog drawing an empty dropdown states the last one.
+            out.put("error", r.error());
+        }
+        return ResponseEntity.ok(out);
+    }
+
+    @SuppressWarnings("unchecked")
+    private static Map<String, Object> asMap(Object data) {
+        return data instanceof Map ? (Map<String, Object>) data : Map.of();
     }
 
     /**
@@ -242,7 +325,9 @@ public class GenerationController {
 
     // ── projection ──────────────────────────────────────────────────────────
 
-    private static Map<String, Object> describeModel(GenerationRegistry.GenerationModel m) {
+    private static Map<String, Object> describeModel(GenerationRegistry.GenerationModel m,
+                                                     java.util.Set<String> dynamic,
+                                                     PlatformSalesResolver.Verdict sold) {
         Map<String, Object> row = new LinkedHashMap<>();
         row.put("model", m.modelId());
         row.put("kind", m.kind());
@@ -253,6 +338,13 @@ public class GenerationController {
         // rate; the integration name is the platform credential the rate hangs off.
         row.put("apiToolId", m.apiToolId() == null ? null : m.apiToolId().toString());
         row.put("integrationName", m.platformCredentialName());
+        // WHICH key can run it HERE. A cloud deployment resells the providers it
+        // holds keys AND published prices for; a self-hosted one usually resells
+        // none, and the same model is then only runnable on a key its owner
+        // connected. Without this a surface finds out by running and failing.
+        // Three values, because the check can fail to answer and a boolean
+        // would turn that into a confident claim in one direction.
+        row.put("runsOn", sold.wire());
         row.put("accepts", new TreeSet<>(m.model().capabilities()));
         row.put("required", new TreeSet<>(m.model().required()));
         // Which parameter the price multiplies, and what it becomes when the
@@ -270,20 +362,13 @@ public class GenerationController {
         BigDecimal defaultQuantity = m.model().defaultMeasurement();
         row.put("defaultQuantity", defaultQuantity == null ? null : defaultQuantity.toPlainString());
 
-        // The same shape the agent's action='models' reports, deliberately: two
-        // surfaces describing one model differently is how a builder shows a
-        // limit the tool does not enforce, or hides one it does.
-        Map<String, Object> limits = new LinkedHashMap<>();
-        m.model().constraints().forEach((param, c) -> {
-            Map<String, Object> lim = new LinkedHashMap<>();
-            if (!c.allowed().isEmpty()) lim.put("allowed", c.allowed());
-            if (c.min() != null) lim.put("min", c.min());
-            if (c.max() != null) lim.put("max", c.max());
-            if (c.maxLength() != null) lim.put("maxLength", c.maxLength());
-            // An empty entry claims a restriction and names none.
-            if (!lim.isEmpty()) limits.put(param, lim);
-        });
-        row.put("limits", limits);
+        // The same shape the agent's action='models' reports, from the same
+        // code: two surfaces describing one model differently is how a builder
+        // shows a limit the tool does not enforce, or hides one it does, and
+        // two hand-kept copies of the shaping had already drifted on the empty
+        // case. Uncapped, because this one is a browser fetch where a long list
+        // costs bytes rather than context.
+        row.put("limits", GenerationLimits.describe(m.model(), m.catalogAllowed(), 0, dynamic));
 
             // What each FILE this model takes actually IS, and how many of them.
             // The slot name alone ("input_image") says an image goes here; it

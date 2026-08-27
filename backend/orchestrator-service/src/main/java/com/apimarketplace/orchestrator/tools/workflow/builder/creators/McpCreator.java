@@ -42,7 +42,13 @@ public class McpCreator extends CreatorBase {
     /** Reserved parameter names - not passed to the tool */
     private static final Set<String> RESERVED_PARAMS = Set.of(
         "label", "name", "connect_after", "connect_after_loop", "interface_id",
-        "type", "action", "session_id", "params", "parameters"
+        "type", "action", "session_id", "params", "parameters",
+        // Reserved because everything NOT listed here is forwarded to the external
+        // API as a tool parameter. Left out, a credential selector would travel to
+        // the provider as an argument it never declared, and the step would still
+        // run on the default account: the parameter would look accepted and do
+        // nothing, which is the exact failure this list prevents.
+        "credential_selector", "credentialSelector"
     );
 
     /**
@@ -163,6 +169,28 @@ public class McpCreator extends CreatorBase {
         String interfaceId = (String) parameters.get("interface_id");
         if (interfaceId != null) {
             node.put("interfaceId", interfaceId);
+        }
+
+        // WHICH account this step runs on, when the answer is only known at run
+        // time. Lifted out of the tool parameters and onto the node, under the key
+        // the plan parser reads, because it configures the step rather than being
+        // an argument for the provider.
+        // PRESENT, not non-blank. Absent means the step has no dynamic selection;
+        // present-but-blank means one was chosen and left unwritten, which fails the
+        // run rather than quietly using the account default. firstNonBlank collapses
+        // the two, which made add_node unable to express the second state at all
+        // while modify could - the same input meaning two things on two surfaces.
+        // camelCase first, matching modify, so the same pair of keys cannot mean two
+        // different things on the two agent surfaces. Any non-null value is accepted
+        // and stringified, matching the plan parser: a number is a legitimate value
+        // here (a credential id), and rejecting it only on THIS surface is the
+        // accepted-here-dropped-there trap - the node would be created, no error
+        // raised, and the step would run on the default account.
+        for (String key : new String[]{"credentialSelector", "credential_selector"}) {
+            if (parameters.containsKey(key) && parameters.get(key) != null) {
+                node.put("credentialSelector", String.valueOf(parameters.get(key)).trim());
+                break;
+            }
         }
 
         return node;

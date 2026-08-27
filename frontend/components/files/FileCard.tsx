@@ -149,7 +149,23 @@ function useInView<T extends Element>(rootMargin = '300px'): [React.RefObject<T>
  * {@link useAuthedObjectUrl}). The media-fragment hashes ({@code #t=0.1},
  * {@code #toolbar=0…}) ride on the blob URL just as they did on the proxy URL.
  */
-export function FileThumb({ entry }: { entry: StorageExplorerEntry }) {
+/**
+ * The least a row must expose to be drawn as a thumbnail: the opaque id the bytes are fetched by,
+ * and enough to decide what kind of file it is.
+ *
+ * <p>Deliberately structural rather than {@code StorageExplorerEntry}. The generation history shows
+ * the same tiles over rows of its own shape, and a second copy of this component (image eagerly,
+ * video/PDF lazily, themed icon otherwise, bytes fetched with a Bearer header and rendered from a
+ * blob URL) is exactly the kind of drift that ends with a token in a URL on one screen and not the
+ * other. An explorer entry satisfies this as it is.
+ */
+export interface FileThumbEntry {
+  id: string;
+  mimeType?: string | null;
+  fileName?: string | null;
+}
+
+export function FileThumb({ entry }: { entry: FileThumbEntry }) {
   const [containerRef, inView] = useInView<HTMLDivElement>();
   // MIME wins; filename extension is the fallback (same rule as the detail view).
   const kind = detectPreviewKind(entry.mimeType, entry.fileName);

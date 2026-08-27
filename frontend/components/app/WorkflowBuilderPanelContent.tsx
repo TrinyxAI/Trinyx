@@ -24,6 +24,7 @@ import { useSidePanelSafe } from '@/contexts/SidePanelContext';
 import { orchestratorApi } from '@/lib/api';
 import { useOrgScopedReset } from '@/lib/hooks/useOrgScopedReset';
 import { subscribeBindRun } from '@/components/workflow/run-panel/runPanelBus';
+import { workflowPanelTabId } from '@/lib/sidePanel/tabResource';
 
 interface WorkflowBuilderPanelContentProps {
   workflowId: string;
@@ -240,7 +241,7 @@ export function WorkflowBuilderPanelContent({ workflowId, runId, readOnly = fals
 
       if (pinnedRunId) {
         sidePanel.openTab({
-          id: `workflow-run-${subWfId}-${pinnedRunId}`,
+          id: workflowPanelTabId(subWfId, pinnedRunId),
           label: wfName,
           icon: React.createElement(Workflow, { className: 'w-4 h-4' }),
           content: React.createElement(WorkflowBuilderPanelContent, { workflowId: subWfId, runId: pinnedRunId, readOnly }),
@@ -249,7 +250,7 @@ export function WorkflowBuilderPanelContent({ workflowId, runId, readOnly = fals
         });
       } else {
         sidePanel.openTab({
-          id: `workflow-builder-${subWfId}`,
+          id: workflowPanelTabId(subWfId),
           label: wfName,
           icon: React.createElement(Workflow, { className: 'w-4 h-4' }),
           content: React.createElement(WorkflowBuilderPanelContent, { workflowId: subWfId, readOnly }),

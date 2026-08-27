@@ -231,6 +231,84 @@ describe('NodeConfigurationRule', () => {
     });
   });
 
+  // ============ Step set to choose its account at run time, unfilled ============
+
+  describe('Step with a blank run-time account expression', () => {
+    const withSelector = (selector: unknown) => {
+      const step = makeStepNode('Publish', { toolId: 'instagram-publish' });
+      (step.data.toolData as Record<string, unknown>).credentialSelector = selector;
+      return step;
+    };
+
+    const blankIssues = (step: ReturnType<typeof withSelector>) =>
+      rule
+        .validate(buildContext([step], []))
+        .issues.filter((i) => i.context?.rule === 'step_blank_credential_selector');
+
+    it('errors at BUILD time, not only when the workflow finally runs', () => {
+      // This is the state an ACQUIRED workflow arrives in, because publishing blanks
+      // the publisher choice on purpose. Without a canvas error the app looks fine
+      // and every catalog step fails on its first real run, in production.
+      const issues = blankIssues(withSelector(''));
+      expect(issues).toHaveLength(1);
+      expect(issues[0].severity).toBe('error');
+    });
+
+    it('treats a whitespace-only expression as blank, because it resolves to nothing', () => {
+      expect(blankIssues(withSelector('   '))).toHaveLength(1);
+    });
+
+    it('does not flag a filled expression', () => {
+      expect(blankIssues(withSelector('{{item.ig_account}}'))).toHaveLength(0);
+    });
+
+    it('does not flag a step that has no expression at all', () => {
+      // Every workflow written before this feature takes this branch. An error here
+      // would light up every canvas in the product.
+      expect(blankIssues(withSelector(undefined))).toHaveLength(0);
+    });
+  });
+
+  // ====== Step set to BOTH choose an account and run on the platform pool ======
+
+  describe('Step with a run-time account expression AND a platform pin', () => {
+    const withBoth = (extra: Record<string, unknown>) => {
+      const step = makeStepNode('Publish', { toolId: 'instagram-publish' });
+      Object.assign(step.data.toolData as Record<string, unknown>, extra);
+      return step;
+    };
+
+    const conflictIssues = (step: ReturnType<typeof withBoth>) =>
+      rule
+        .validate(buildContext([step], []))
+        .issues.filter((i) => i.context?.rule === 'step_credential_selector_platform_conflict');
+
+    it('errors, because the two modes answer one question and the run refuses', () => {
+      const issues = conflictIssues(
+        withBoth({ credentialSelector: '{{item.account}}', credentialSource: 'platform' })
+      );
+      expect(issues).toHaveLength(1);
+      expect(issues[0].severity).toBe('error');
+    });
+
+    it('flags the snake_case spelling too, which the backend parser also reads', () => {
+      expect(
+        conflictIssues(
+          withBoth({ credential_selector: '{{item.account}}', credentialSource: 'platform' })
+        )
+      ).toHaveLength(1);
+    });
+
+    it('does not flag a platform pin on its own', () => {
+      // The no-regression half: every platform-pinned step today takes this branch.
+      expect(conflictIssues(withBoth({ credentialSource: 'platform' }))).toHaveLength(0);
+    });
+
+    it('does not flag an expression on its own', () => {
+      expect(conflictIssues(withBoth({ credentialSelector: '{{item.account}}' }))).toHaveLength(0);
+    });
+  });
+
   // ===================== #11: Decision without conditions =====================
 
   describe('#11 - Decision without conditions', () => {

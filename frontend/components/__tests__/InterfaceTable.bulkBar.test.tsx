@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import '@testing-library/jest-dom/vitest';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi, beforeEach } from 'vitest';
 import React from 'react';
 import { cleanup, render, screen, fireEvent, within, waitFor } from '@testing-library/react';
 import { NextIntlClientProvider } from 'next-intl';
@@ -21,6 +21,12 @@ const mocks = vi.hoisted(() => ({
   clear: vi.fn(),
 }));
 
+// The lists keep the open folder in the address, so they read next/navigation. This fake
+// router is URL-backed and re-renders on navigation, the way the real one does.
+vi.mock('next/navigation', async () => {
+  const mod = await import('@/lib/folders/testing/fakeFolderRouter');
+  return mod.fakeFolderRouter.nextNavigationModule();
+});
 vi.mock('@/i18n/navigation', () => ({ useRouter: () => ({ push: vi.fn() }) }));
 vi.mock('@/lib/api', () => ({
   orchestratorApi: { cloneInterface: mocks.cloneInterface, deleteInterface: mocks.deleteInterface },
@@ -53,6 +59,7 @@ vi.mock('@/hooks/useResourceFavorites', () => ({
   useResourceFavorites: () => ({ favoriteIds: new Set(), toggleFavorite: vi.fn() }),
 }));
 
+import { fakeFolderRouter } from '@/lib/folders/testing/fakeFolderRouter';
 import { InterfaceTable } from '../InterfaceTable';
 
 function renderTable() {
@@ -75,6 +82,12 @@ const oneInterface = (publicationStatuses: Record<string, { status: string }> = 
     items: [{ id: 'i1', name: 'IF One', isPublic: false, isActive: true, htmlTemplate: '<div>x</div>' }],
     totalCount: 1, page: 0, size: 25, publicationStatuses,
   });
+
+beforeEach(() => {
+  // The address is shared state: without this, a test that opened a folder leaves the
+  // next one starting inside it.
+  fakeFolderRouter.reset();
+});
 
 describe('InterfaceTable - selection actions float + publish state machine in the bar', () => {
   it('an unpublished selection shows Clone + Share + Delete in the bar', async () => {

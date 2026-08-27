@@ -17,6 +17,9 @@ vi.mock('next-intl', () => ({
     };
     return map[key] ?? key;
   },
+  // PlanSelector renders FoundingPriceNote, which formats the announced price and the
+  // deadline in the APP locale. Without this the whole card fails to render.
+  useLocale: () => 'en',
 }));
 
 vi.mock('@/components/ThemeProvider', () => ({ useTheme: () => ({ theme: 'light' }) }));
@@ -64,5 +67,46 @@ describe('PlanSelector - static deployment badge', () => {
     render(<PlanSelector plan={{ ...basePlan, price: '4000' }} billingCycle="monthly" onPlanSelect={noop} />);
     expect(screen.getByText('$4,000')).toBeTruthy();
     expect(screen.queryByText('$4000')).toBeNull();
+  });
+});
+
+describe('PlanSelector - founding price while plans are loading', () => {
+  it('hides the founding caption until the price itself has rendered', async () => {
+    // Regression: the caption rendered outside the isLoadingPlans branch, so a card
+    // showed "Founding price until ..." under an empty skeleton box.
+    vi.resetModules();
+    vi.doMock('@/lib/hooks/smart-hooks-complete', () => ({ usePlans: () => ({ isLoading: true }) }));
+    const { default: LoadingPlanSelector } = await import('../PlanSelector');
+
+    render(
+      <LoadingPlanSelector
+        plan={{
+          id: 'pro',
+          name: 'Pro',
+          description: 'desc',
+          price: '24',
+          period: '/mo',
+          credits: '5,000',
+          storage: '10 GB',
+          features: [],
+          cta: 'Start Pro',
+          creditPrice: '',
+        }}
+        billingCycle="monthly"
+        onPlanSelect={async () => ({ success: true })}
+        pricingEvent={{
+          id: 'test-window',
+          startsAt: '2026-03-01T00:00:00.000Z',
+          endsAt: '2026-03-31T23:59:59.999Z',
+          windowEndsAt: '2026-03-08T00:00:00.000Z',
+          announcedBasePrices: { pro: 45 },
+          locksPrice: true,
+        }}
+        creditTierIndex={0}
+      />
+    );
+
+    expect(screen.queryByText(/Founding price until/i)).toBeNull();
+    expect(screen.queryByText('$45')).toBeNull();
   });
 });

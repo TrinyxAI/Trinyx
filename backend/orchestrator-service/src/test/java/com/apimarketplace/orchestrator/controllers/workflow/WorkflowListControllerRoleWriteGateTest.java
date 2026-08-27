@@ -8,6 +8,7 @@ import com.apimarketplace.orchestrator.repository.WorkflowRepository;
 import com.apimarketplace.orchestrator.repository.WorkflowRunRepository;
 import com.apimarketplace.orchestrator.services.WorkflowBoardService;
 import com.apimarketplace.orchestrator.services.WorkflowManagementService;
+import com.apimarketplace.orchestrator.services.folder.WorkflowFolderService;
 import com.apimarketplace.publication.client.PublicationClient;
 import com.apimarketplace.trigger.client.TriggerClient;
 import org.junit.jupiter.api.DisplayName;
@@ -53,7 +54,8 @@ class WorkflowListControllerRoleWriteGateTest {
                 mock(PublicationClient.class),
                 mock(WorkflowManagementService.class),
                 mock(WorkflowBoardService.class),
-                accessGuard);
+                accessGuard,
+                mock(WorkflowFolderService.class));
 
         ResponseEntity<?> response = controller.updateWorkflowMetadata(
                 workflowId,
@@ -90,7 +92,8 @@ class WorkflowListControllerRoleWriteGateTest {
                 mock(PublicationClient.class),
                 mock(WorkflowManagementService.class),
                 mock(WorkflowBoardService.class),
-                accessGuard);
+                accessGuard,
+                mock(WorkflowFolderService.class));
 
         assertThatThrownBy(() -> controller.updateWorkflowMetadata(
                 workflowId,
@@ -125,7 +128,8 @@ class WorkflowListControllerRoleWriteGateTest {
                 mock(PublicationClient.class),
                 mock(WorkflowManagementService.class),
                 mock(WorkflowBoardService.class),
-                accessGuard);
+                accessGuard,
+                mock(WorkflowFolderService.class));
 
         assertThatThrownBy(() -> controller.getWorkflow(workflowId, "99", ORG, "MEMBER"))
                 .isInstanceOf(OrgAccessDeniedException.class);

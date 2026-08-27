@@ -205,9 +205,10 @@ export function CanvasToolbar({
         </div>
 
         {/* Whether file previews hang open under the nodes. A remembered preference,
-            so it stays put even with nothing on screen to act on: edit mode and a
-            run without files are precisely where you would set it ahead of time. It
-            reads its own state from the canvas registry, so it needs no mode prop. */}
+            so it stays put on a run that produced no file - that is still a moment
+            worth stating it. It removes itself in EDIT mode, where nothing it acts on
+            can exist. Reads both its state and that decision itself, so it needs no
+            prop from here. */}
         <CanvasFileStripToggleButton />
 
         {/* Interactivity lock */}

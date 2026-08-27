@@ -34,6 +34,7 @@ import static com.apimarketplace.agent.catalog.sync.FeedParsingUtils.*;
  *   moonshot   → moonshot       (kimi)
  *   dashscope  → qwen           (Alibaba's API brand, not the model family)
  *   zai        → zai            (glm)
+ *   minimax    → minimax        (the M-series)
  * </pre>
  *
  * <p>Entries whose {@code litellm_provider} is {@code vertex_ai-language-models},
@@ -56,7 +57,9 @@ import static com.apimarketplace.agent.catalog.sync.FeedParsingUtils.*;
  *       ids would collide with the native row identity contract.</li>
  *   <li>Both {@code input_cost_per_token} and {@code output_cost_per_token}
  *       at 0 → reject (experimental/preview rows would slip past the
- *       credit gate).</li>
+ *       credit gate). A row that prices itself through a
+ *       {@code tiered_pricing} ladder instead of the flat keys counts as
+ *       priced - see {@link #effectiveCost}.</li>
  * </ol>
  *
  * <p>Output map shape - identical to
@@ -116,7 +119,8 @@ public class LiteLlmFeedParser {
             Map.entry("cohere_chat", "cohere"),
             Map.entry("moonshot",    "moonshot"),
             Map.entry("dashscope",   "qwen"),
-            Map.entry("zai",         "zai")
+            Map.entry("zai",         "zai"),
+            Map.entry("minimax",     "minimax")
     );
 
     private static final TypeReference<Map<String, Map<String, Object>>> FEED_TYPE =
@@ -187,8 +191,10 @@ public class LiteLlmFeedParser {
             // gemini-exp-*, gemma-3-*, learnlm-*). They'd slip past the
             // CreditService gate with zero cost and enable free LLM use.
             // Every row we publish MUST have a real price.
-            Object inC = fields.get("input_cost_per_token");
-            Object outC = fields.get("output_cost_per_token");
+            // effectiveCost (not a raw get) so a context-bracket price ladder
+            // counts as priced - see its javadoc.
+            Object inC = effectiveCost(fields, "input_cost_per_token");
+            Object outC = effectiveCost(fields, "output_cost_per_token");
             boolean hasInput  = isPositive(inC);
             boolean hasOutput = isPositive(outC);
             if (!hasInput && !hasOutput) { rejectedZeroPrice++; continue; }
@@ -290,8 +296,8 @@ public class LiteLlmFeedParser {
         out.put("displayName", modelId);
 
         // Pricing - convert per-token → per-1M tokens (scale 4).
-        BigDecimal priceInput  = costPerTokenToPricePerMillion(lm.get("input_cost_per_token"));
-        BigDecimal priceOutput = costPerTokenToPricePerMillion(lm.get("output_cost_per_token"));
+        BigDecimal priceInput  = costPerTokenToPricePerMillion(effectiveCost(lm, "input_cost_per_token"));
+        BigDecimal priceOutput = costPerTokenToPricePerMillion(effectiveCost(lm, "output_cost_per_token"));
         out.put("priceInput",  priceInput);
         out.put("priceOutput", priceOutput);
 
@@ -317,8 +323,11 @@ public class LiteLlmFeedParser {
         BigDecimal priceOutputBatch = costPerTokenToPricePerMillion(lm.get("output_cost_per_token_batches"));
         out.put("priceInputBatch",  priceInputBatch);
         out.put("priceOutputBatch", priceOutputBatch);
-        out.put("priceCacheRead",   costPerTokenToPricePerMillion(lm.get("cache_read_input_token_cost")));
-        out.put("priceCacheWrite",  costPerTokenToPricePerMillion(lm.get("cache_creation_input_token_cost")));
+        // Cache rates ride the same ladder on tiered rows (qwen3-coder-plus
+        // declares cache_read only inside its brackets), so resolve them the
+        // same way or a tiered model looks cache-free.
+        out.put("priceCacheRead",   costPerTokenToPricePerMillion(effectiveCost(lm, "cache_read_input_token_cost")));
+        out.put("priceCacheWrite",  costPerTokenToPricePerMillion(effectiveCost(lm, "cache_creation_input_token_cost")));
 
         // Derived floors - cheapest variant the caller can obtain.
         out.put("priceFloorInput",
@@ -354,6 +363,76 @@ public class LiteLlmFeedParser {
         out.put("feedMetadata", feedMeta);
 
         return out;
+    }
+
+    /**
+     * Resolve one per-token cost, falling back to the base bracket of a
+     * {@code tiered_pricing} ladder when the flat key is absent or zero.
+     *
+     * <p>Alibaba (DashScope) and ByteDance (Volcengine) bill by CONTEXT
+     * BRACKET, and LiteLLM mirrors that by publishing {@code tiered_pricing}
+     * INSTEAD of the flat {@code input_cost_per_token} /
+     * {@code output_cost_per_token} keys - never alongside them. Reading only
+     * the flat keys made every such row look unpriced, so the zero-price gate
+     * in {@link #parse} deleted it silently: 19 models measured against the
+     * live feed on 2026-08-19, 100% of them Chinese (15 dashscope + 4
+     * volcengine), including {@code qwen3-max}, the whole {@code qwen3-coder}
+     * line and {@code doubao-seed-2-0-pro}. No western provider in the feed
+     * publishes this shape, so the fallback is a strict no-op for them.
+     *
+     * <p>The value returned is the BASE bracket: the tier whose range starts
+     * at 0, or the first entry when no range is declared. That is the figure
+     * the provider advertises as the model's price - verified 2026-08-19
+     * against Alibaba Model Studio (qwen3-max $1.20/$6.00 base, rising to
+     * $3.00/$15.00 on the largest bracket) and Volcengine Ark
+     * (doubao-seed-2.0-pro $0.47/$2.37 base) - and it keeps a tiered row
+     * comparable with its flat-priced siblings in the picker and in tier
+     * classification. The upper brackets are not dropped: the whole ladder
+     * stays in {@code feedMetadata.raw.tiered_pricing}.
+     *
+     * <p>Consequence to know: a request whose context lands in an upper
+     * bracket is billed at the base rate. Modelling the ladder properly needs
+     * a schema change on {@code model_config_overrides}; until then the base
+     * rate is the honest headline, and under-billing a long-context call is
+     * preferable to over-billing every short one.
+     */
+    static Object effectiveCost(Map<String, Object> fields, String costKey) {
+        Object flat = fields.get(costKey);
+        if (isPositive(flat)) return flat;
+        Map<String, Object> base = baseTier(fields);
+        if (base == null) return flat;
+        Object tiered = base.get(costKey);
+        return tiered != null ? tiered : flat;
+    }
+
+    /**
+     * The base bracket of a {@code tiered_pricing} ladder: the tier whose
+     * {@code range} starts at 0, else the first well-formed entry. Returns
+     * null when the row carries no usable ladder.
+     */
+    @SuppressWarnings("unchecked")
+    static Map<String, Object> baseTier(Map<String, Object> fields) {
+        if (!(fields.get("tiered_pricing") instanceof List<?> tiers)) return null;
+        Map<String, Object> first = null;
+        for (Object entry : tiers) {
+            if (!(entry instanceof Map<?, ?> raw)) continue;
+            Map<String, Object> tier = (Map<String, Object>) raw;
+            if (first == null) first = tier;
+            if (rangeStartsAtZero(tier)) return tier;
+        }
+        return first;
+    }
+
+    /** True when the tier's {@code range} is {@code [0, …]}. */
+    private static boolean rangeStartsAtZero(Map<String, Object> tier) {
+        if (!(tier.get("range") instanceof List<?> range) || range.isEmpty()) return false;
+        Object low = range.get(0);
+        if (low == null) return false;
+        try {
+            return new BigDecimal(low.toString()).signum() == 0;
+        } catch (NumberFormatException e) {
+            return false;
+        }
     }
 
     private static String strOf(Object v) { return v == null ? null : v.toString(); }

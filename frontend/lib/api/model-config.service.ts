@@ -296,6 +296,25 @@ export interface CatalogSyncFeedStats {
   openRouterRejected: Record<string, number>;
 }
 
+/**
+ * The third catalog source: each provider's own /models endpoint, which is the
+ * only place a brand-new vendor model shows up on release day (the LiteLLM and
+ * OpenRouter feeds mirror vendors on their own schedule and lag badly for some).
+ *
+ * `discoveredByProvider` rows are already counted inside `plan.added`. What the
+ * breakdown adds is the part an admin must act on: those rows arrive WITHOUT a
+ * price, because /models publishes none and an aggregator's rate is its resale
+ * rate, not the vendor's. They stay disabled until priced.
+ *
+ * `skippedProviders` are the ones with no usable API key (or whose endpoint
+ * errored) - nothing could be asked of them this run.
+ */
+export interface CatalogSyncDiscovery {
+  models: Array<Record<string, unknown>>;
+  discoveredByProvider: Record<string, number>;
+  skippedProviders: string[];
+}
+
 export interface CatalogSyncPlan {
   stats: CatalogSyncFeedStats;
   added: Array<Record<string, unknown>>;
@@ -303,6 +322,7 @@ export interface CatalogSyncPlan {
   unchanged: number;
   flagged: CatalogSyncFlaggedRow[];
   guardFailures: CatalogSyncGuardFailure[];
+  discovery: CatalogSyncDiscovery;
 }
 
 export interface CatalogSyncResult {

@@ -1,9 +1,8 @@
 package com.apimarketplace.publication.service;
 
 import com.apimarketplace.auth.client.AuthClient;
-import com.apimarketplace.auth.client.entitlement.EntitlementGuard;
-import com.apimarketplace.auth.client.entitlement.ResourceType;
 import com.apimarketplace.publication.config.OrchestratorInternalClient;
+import com.apimarketplace.publication.dto.MarketplaceQueryFilter;
 import com.apimarketplace.publication.domain.PublicationReceiptEntity;
 import com.apimarketplace.publication.domain.WorkflowPublicationEntity.PublicationType;
 import com.apimarketplace.publication.repository.PublicationReceiptRepository;
@@ -20,7 +19,6 @@ import java.net.URI;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.Set;
 import java.util.UUID;
 import java.util.function.Consumer;
 
@@ -44,8 +42,14 @@ public class RemoteMarketplaceService {
     private final AgentPublicationService agentPublicationService;
     private final ResourcePublicationService resourcePublicationService;
     private final OrchestratorInternalClient orchestratorClient;
-    /** Nullable - mirrors the local acquire path's optional WORKFLOW-quota guard. */
-    private final EntitlementGuard entitlementGuard;
+    /**
+     * Nullable - backs the ON-DEMAND editable copy ({@link #createEditableWorkflowTwin}),
+     * which also owns the WORKFLOW-quota check that used to live in this class (the twin
+     * was the only thing here that ever billed quota). Absent (unit fixtures) means the
+     * action reports itself unavailable; acquire never needs it since it no longer mints
+     * a twin.
+     */
+    private final EditableWorkflowTwinService editableWorkflowTwinService;
 
     public RemoteMarketplaceService(String cloudApiUrl,
                                      SnapshotCloneService snapshotCloneService,
@@ -56,10 +60,10 @@ public class RemoteMarketplaceService {
                                      AgentPublicationService agentPublicationService,
                                      ResourcePublicationService resourcePublicationService,
                                      OrchestratorInternalClient orchestratorClient,
-                                     EntitlementGuard entitlementGuard) {
+                                     EditableWorkflowTwinService editableWorkflowTwinService) {
         this(cloudApiUrl, snapshotCloneService, receiptRepository, cloudLinkService, objectMapper, authClient,
-                agentPublicationService, resourcePublicationService, orchestratorClient, entitlementGuard,
-                new RestTemplate());
+                agentPublicationService, resourcePublicationService, orchestratorClient,
+                editableWorkflowTwinService, new RestTemplate());
     }
 
     RemoteMarketplaceService(String cloudApiUrl,
@@ -71,8 +75,9 @@ public class RemoteMarketplaceService {
                              AgentPublicationService agentPublicationService,
                              ResourcePublicationService resourcePublicationService,
                              OrchestratorInternalClient orchestratorClient,
-                             EntitlementGuard entitlementGuard,
+                             EditableWorkflowTwinService editableWorkflowTwinService,
                              RestTemplate restTemplate) {
+        this.editableWorkflowTwinService = editableWorkflowTwinService;
         this.cloudApiUrl = cloudApiUrl;
         this.restTemplate = restTemplate;
         this.snapshotCloneService = snapshotCloneService;
@@ -83,7 +88,6 @@ public class RemoteMarketplaceService {
         this.agentPublicationService = agentPublicationService;
         this.resourcePublicationService = resourcePublicationService;
         this.orchestratorClient = orchestratorClient;
-        this.entitlementGuard = entitlementGuard;
     }
 
     /**
@@ -196,23 +200,18 @@ public class RemoteMarketplaceService {
                     receipt.setRemoteAcquisition(true);
                     receiptRepository.save(receipt);
                 }
-                // #2a (CE parity with the local acquire path): AUTOMATICALLY create the
-                // freely-editable, DECOUPLED WORKFLOW twin of the just-acquired application
-                // so the user can customize it in /app/workflows while the APPLICATION
-                // clone above stays run-only. Without this, a CE remote install produced a
-                // run-only app with NO editable workflow at all (PUT /plan on an
-                // APPLICATION is 409 by design - editing lives in the twin). Best-effort:
-                // a duplicate failure NEVER fails the acquire (the application clone
-                // already succeeded and the receipt is saved). Runs on reinstall too,
-                // mirroring the local path (the twin is decoupled, so a delete of the app
-                // never removes it and a reinstall legitimately mints a fresh one).
-                String applicationWorkflowId = cloneResult.get("workflowId") != null
-                        ? cloneResult.get("workflowId").toString() : null;
-                duplicateAcquiredApplicationAsEditableWorkflow(planSnapshot, tenantId,
-                        normalizeScope(organizationId), publicationId, title, description,
-                        nodeIcons, applicationWorkflowId);
+                // NO editable WORKFLOW twin here (changed 2026-08-14, CE parity with the
+                // local acquire path). Minting it automatically made every install clone the
+                // snapshot TWICE, so the workspace got two of every interface / table / agent
+                // the app carries. The editable copy is now created only when the user asks
+                // for it: see {@link #createEditableWorkflowTwin}. (Editing still lives in the
+                // copy - PUT /plan on an APPLICATION stays 409 by design.)
                 result = new HashMap<>();
                 result.put("workflowId", cloneResult.get("workflowId"));
+                // What the clone created (interfaces / tables / agents / sub-workflows), so
+                // the CE install can tell the user instead of leaving them to find new rows.
+                result.put(SnapshotCloneService.RESOURCES_KEY,
+                        cloneResult.getOrDefault(SnapshotCloneService.RESOURCES_KEY, Map.of()));
             }
         }
 
@@ -233,73 +232,61 @@ public class RemoteMarketplaceService {
     }
 
     /**
-     * CE mirror of the local acquire path's "#2a" step (see
-     * {@code WorkflowPublicationService#duplicateAcquiredApplicationAsEditableWorkflow}):
-     * clone the cloud {@code planSnapshot} again as a decoupled, editable {@code WORKFLOW}
-     * ({@code source_publication_id = NULL}, lineage in
-     * {@code metadata.duplicatedFromApplicationId}). {@code fileNamespaceId} is the cloud
-     * publication id - the snapshot's embedded file refs live under
-     * {@code _publications/{publicationId}/}, exactly like the application clone that just
-     * succeeded through the same engine.
+     * CE mirror of {@code WorkflowPublicationService#createEditableWorkflowTwin}: create,
+     * ON DEMAND, the caller's freely-editable DECOUPLED {@code WORKFLOW} copy of a
+     * cloud-acquired application ({@code source_publication_id = NULL}, lineage in
+     * {@code metadata.duplicatedFromApplicationId}).
      *
-     * <p>Quota: bills WORKFLOW quota only, NO credit (the application already paid).
-     * Over-quota → skip the twin, keep the application. Clone failure → compensate ONLY the
-     * twin's own rows via {@link OrchestratorInternalClient#deleteDecoupledDuplicateWorkflow}.
-     * Either way the acquire is unaffected.
+     * <p>The publication row lives on the CLOUD, so the snapshot is re-fetched with
+     * {@link #fetchSnapshotNoCharge} (never re-charges: the receipt written at acquire time
+     * is the durable purchase record). {@code fileNamespaceId} is the cloud publication id -
+     * the snapshot's embedded file refs live under {@code _publications/{publicationId}/},
+     * exactly like the application clone that went through the same engine.
+     *
+     * <p>Idempotent (returns the existing copy) and NOT best-effort: the user asked for this,
+     * so a quota denial or a clone failure reaches them instead of being swallowed.
+     *
+     * @return {@code {workflowId, title, created}}
+     * @throws IllegalArgumentException when the application is not installed in this workspace
      */
-    private void duplicateAcquiredApplicationAsEditableWorkflow(Map<String, Object> planSnapshot,
-                                                                String tenantId,
-                                                                String orgScope,
-                                                                UUID publicationId,
-                                                                String title,
-                                                                String description,
-                                                                List<Map<String, Object>> nodeIcons,
-                                                                String applicationWorkflowId) {
-        try {
-            if (entitlementGuard != null && orgScope != null) {
-                entitlementGuard.check(tenantId, ResourceType.WORKFLOW,
-                        () -> orchestratorClient.countWorkflowsByOrg(orgScope));
-            }
-        } catch (RuntimeException quotaDenied) {
-            logger.info("[RemoteAcquire/duplicate] WORKFLOW quota reached for tenant={} pub={} - "
-                            + "skipping editable duplicate ({}); application clone is unaffected",
-                    tenantId, publicationId, quotaDenied.getMessage());
-            return;
+    public Map<String, Object> createEditableWorkflowTwin(UUID publicationId, String tenantId,
+                                                           String organizationId) {
+        if (editableWorkflowTwinService == null) {
+            throw new IllegalStateException("Editable copy is unavailable (twin service not wired)");
+        }
+        final String orgScope = normalizeScope(resolveAcquirerOrg(tenantId, organizationId, publicationId));
+
+        // Owning the app is what grants the copy - resolve the local APPLICATION clone
+        // rather than the (permanent) receipt, so an uninstalled app can't be copied.
+        Map<String, Object> applicationClone =
+                orchestratorClient.findBySourcePublicationStrict(publicationId, tenantId, orgScope);
+        String applicationWorkflowId = applicationClone != null && applicationClone.get("id") != null
+                ? applicationClone.get("id").toString() : null;
+        if (applicationWorkflowId == null) {
+            throw new IllegalArgumentException("Application is not installed in this workspace");
         }
 
-        try {
-            Map<String, Object> duplicate = snapshotCloneService.duplicateToEditableWorkflow(
-                    planSnapshot, tenantId, orgScope, title, description, nodeIcons,
-                    publicationId, applicationWorkflowId);
-            logger.info("[RemoteAcquire/duplicate] tenant {} pub {} -> editable WORKFLOW {} "
-                            + "(decoupled from application {})",
-                    tenantId, publicationId, duplicate.get("workflowId"), applicationWorkflowId);
-        } catch (AcquireCloneFailedException dupFailure) {
-            logger.warn("[RemoteAcquire/duplicate] editable duplicate failed for tenant={} pub={}: {} - "
-                            + "compensating only its own rows; application clone is unaffected",
-                    tenantId, publicationId, dupFailure.getMessage());
-            compensateDuplicateFailure(dupFailure.getCreatedWorkflowIds(), tenantId, orgScope);
-        } catch (RuntimeException e) {
-            logger.warn("[RemoteAcquire/duplicate] editable duplicate errored for tenant={} pub={}: {} - "
-                    + "application clone is unaffected", tenantId, publicationId, e.getMessage());
-        }
-    }
+        String installedTitle = applicationClone.get("title") != null
+                ? applicationClone.get("title").toString() : null;
 
-    /**
-     * Best-effort compensation for a failed editable-duplicate clone: delete ONLY the rows
-     * the duplicate created. Swallows failures - the acquire already succeeded and must not
-     * be masked by a cleanup-side error.
-     */
-    private void compensateDuplicateFailure(Set<String> createdWorkflowIds, String tenantId, String orgScope) {
-        if (createdWorkflowIds == null || createdWorkflowIds.isEmpty()) return;
-        for (String idStr : createdWorkflowIds) {
-            if (idStr == null) continue;
-            try {
-                orchestratorClient.deleteDecoupledDuplicateWorkflow(UUID.fromString(idStr), tenantId, orgScope);
-            } catch (Exception e) {
-                logger.warn("[RemoteAcquire/duplicate/compensate] cleanup failed for {}: {}", idStr, e.getMessage());
-            }
-        }
+        // Same entry point as the local path (one idempotence rule, one lock, one response
+        // shape). The cloud snapshot is fetched INSIDE the supplier, so a caller who already
+        // has a copy costs no cloud round-trip.
+        Map<String, Object> result = new HashMap<>(editableWorkflowTwinService.resolveOrCreate(
+                publicationId, applicationWorkflowId, tenantId, orgScope, installedTitle,
+                () -> {
+                    Map<String, Object> snapshotResponse = fetchSnapshotNoCharge(publicationId);
+                    Map<String, Object> planSnapshot = requirePlanSnapshot(snapshotResponse, publicationId);
+                    String title = (String) snapshotResponse.getOrDefault("title", "Acquired Publication");
+                    String description = (String) snapshotResponse.get("description");
+                    @SuppressWarnings("unchecked")
+                    List<Map<String, Object>> nodeIcons = snapshotResponse.get("nodeIcons") instanceof List
+                            ? (List<Map<String, Object>>) snapshotResponse.get("nodeIcons") : null;
+                    return new EditableWorkflowTwinService.TwinSource(
+                            planSnapshot, title, description, nodeIcons);
+                }));
+        result.put("publicationId", publicationId.toString());
+        return result;
     }
 
     private static String normalizeScope(String organizationId) {
@@ -452,13 +439,16 @@ public class RemoteMarketplaceService {
      * Proxy of the cloud's public marketplace listing
      * ({@code GET /publications/marketplace}). Fail-soft: empty page on upstream failure.
      */
-    public Map<String, Object> fetchMarketplacePublications(int page, int size, String category) {
+    public Map<String, Object> fetchMarketplacePublications(int page, int size, MarketplaceQueryFilter filter) {
+        MarketplaceQueryFilter f = filter == null ? MarketplaceQueryFilter.unfiltered() : filter;
         try {
             return getCloudJson(cloudUri("/publications/marketplace", builder -> {
                 builder.queryParam("page", page).queryParam("size", size);
-                if (category != null && !category.isBlank()) {
-                    builder.queryParam("category", category);
-                }
+                // The refinements are forwarded, not re-implemented: a linked CE
+                // renders the cloud's catalogue, so filtering the page it already
+                // received would reproduce the very bug this fix removes (a filter
+                // over an arbitrary window instead of over the catalogue).
+                f.toQueryParams().forEach(builder::queryParam);
             }));
         } catch (Exception e) {
             logger.warn("Cloud marketplace listing unavailable, returning empty page: {}", e.getMessage());
@@ -476,13 +466,12 @@ public class RemoteMarketplaceService {
      * Proxy of the cloud's public marketplace search
      * ({@code GET /publications/search}). Fail-soft: empty result list on upstream failure.
      */
-    public Map<String, Object> searchMarketplacePublications(String query, String category) {
+    public Map<String, Object> searchMarketplacePublications(String query, MarketplaceQueryFilter filter) {
+        MarketplaceQueryFilter f = filter == null ? MarketplaceQueryFilter.unfiltered() : filter;
         try {
             return getCloudJson(cloudUri("/publications/search", builder -> {
                 builder.queryParam("q", query);
-                if (category != null && !category.isBlank()) {
-                    builder.queryParam("category", category);
-                }
+                f.toQueryParams().forEach(builder::queryParam);
             }));
         } catch (Exception e) {
             logger.warn("Cloud marketplace search unavailable, returning empty result: {}", e.getMessage());

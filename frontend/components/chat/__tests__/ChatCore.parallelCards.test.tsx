@@ -166,7 +166,8 @@ describe('ChatCore parallel approval/authorization cards', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'deny-auth-application:acquire' }));
 
-    expect(mocks.denyToolAuthorization).toHaveBeenCalledWith('conv-1', 'application:acquire');
+    // 3rd arg is the held-call key: undefined here because nothing is parked.
+    expect(mocks.denyToolAuthorization).toHaveBeenCalledWith('conv-1', 'application:acquire', undefined);
     expect(mocks.streaming.clearToolAuthorization).toHaveBeenCalledWith('conv-1', 'auth:application:acquire');
     expect(screen.queryByTestId('auth-card-application:acquire')).not.toBeInTheDocument();
     expect(screen.getByTestId('svc-card-gmail-slack')).toBeInTheDocument();

@@ -914,7 +914,12 @@ public class SignalResumeService {
      */
     private void restoreSplitContextIfNeeded(SignalWaitEntity resolvedSignal, String runId, String nodeId) {
         if (resolvedSignal.getSplitItemData() != null && !resolvedSignal.getSplitItemData().isEmpty()) {
-            splitContextManager.restoreContext(runId, nodeId, resolvedSignal.getSplitItemData());
+            // The signal's OWN epoch (not the run's current one, same rule as
+            // persistSignalResolutionOutput below): it tells a context belonging to this
+            // resume apart from one an earlier epoch left on this pod, which with several
+            // replicas is a different pod than the one that ran the split.
+            splitContextManager.restoreContext(
+                runId, nodeId, resolvedSignal.getSplitItemData(), resolvedSignal.getEpoch());
         }
     }
 

@@ -12,12 +12,13 @@
  *
  * The flip is also a REMEMBERED preference ({@link readFileStripPreference}): it
  * survives the run, the epoch and the browser session, and it is what a strip
- * falls back to when it has no opinion of its own. The toolbar control is
- * therefore always on screen, including in edit mode and on a run that produced
- * no file, because those are precisely the moments you would state it ahead of
- * time. (It used to hide itself whenever the canvas carried no strip, which meant
- * the only moment you could ask for open previews was a moment when they were
- * already in front of you.)
+ * falls back to when it has no opinion of its own. The toolbar control therefore
+ * stays on screen on a run that produced no file: that is still a moment worth
+ * stating it. (It used to hide itself whenever the canvas carried no strip, which
+ * meant the only moment you could ask for open previews was a moment when they
+ * were already in front of you.) It does NOT appear in edit mode, where no strip
+ * can exist at all - the control gates itself on the mode, this context knows
+ * nothing about it.
  *
  * The strips register themselves on mount rather than being enumerated from the
  * node list: whether a node ends up showing a strip is decided deep inside

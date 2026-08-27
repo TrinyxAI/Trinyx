@@ -1,6 +1,7 @@
 package com.apimarketplace.auth.credential.web;
 
 import com.apimarketplace.auth.credential.domain.CredentialModels.*;
+import com.apimarketplace.auth.credential.domain.CredentialRenameRefusedException;
 import com.apimarketplace.auth.credential.service.CredentialService;
 import com.apimarketplace.auth.credential.util.RequestParameterExtractor;
 import com.apimarketplace.common.web.TenantResolver;
@@ -91,12 +92,23 @@ public class CredentialController {
      * workspace lets them create personal ones - the two scopes never mix.</p>
      */
     @PostMapping
-    public ResponseEntity<Credential> createCredential(
+    public ResponseEntity<?> createCredential(
             HttpServletRequest httpRequest,
             @RequestBody Map<String, Object> request) {
 
         String tenantId = tenantResolver.resolveOrNull(httpRequest);
         String organizationId = tenantResolver.resolveOrgId(httpRequest);
+
+        // Same 400 the rename path returns, for the same rule. The service validates the
+        // name too, but auth-service registers no exception handler, so letting its
+        // IllegalArgumentException escape a controller turns "your name is too long" into a
+        // 500 and a generic "something went wrong" toast. Creating and renaming must fail
+        // the same way, or the user learns the rule only from whichever path they tried.
+        try {
+            CredentialService.validateName(extractor.getString(request, "name"));
+        } catch (IllegalArgumentException e) {
+            return badRequest(String.valueOf(e.getMessage()), "invalid_name");
+        }
 
         String typeStr = extractor.getString(request, "type");
         String environmentStr = extractor.getString(request, "environment");
@@ -142,6 +154,67 @@ public class CredentialController {
         return credentialService.getCredentialForScope(id, tenantId, organizationId)
             .map(cred -> ResponseEntity.ok(cred.withoutSecrets()))
             .orElse(ResponseEntity.notFound().build());
+    }
+
+    /**
+     * PATCH /api/credentials/{id} - Rename a credential. Body: {@code {"name": "..."}}.
+     *
+     * <p>Strict isolation, same rule as GET/DELETE {@code /{id}}: 404 when the row
+     * lives in another workspace. 400 when there is no active workspace, or the name
+     * is missing, not a string, blank, over {@code CredentialService.MAX_NAME_LENGTH},
+     * or carries control characters. 409 / 422 when the rename is refused
+     * ({@link CredentialRenameRefusedException}: a name already taken, or a credential
+     * whose name is its identity). Every failure carries
+     * {@code {"error": "...", "code": "..."}}, so a caller branches on the code rather
+     * than on prose.
+     *
+     * <p>Only the display label moves. The credential keeps its id, its
+     * {@code integration} slug, its default flag and its secrets.
+     */
+    @PatchMapping("/{id}")
+    public ResponseEntity<?> renameCredential(
+            @PathVariable("id") Long id,
+            HttpServletRequest httpRequest,
+            @RequestBody Map<String, Object> request) {
+
+        String tenantId = tenantResolver.resolveOrNull(httpRequest);
+        tenantResolver.validate(tenantId);
+        String organizationId = tenantResolver.resolveOrgId(httpRequest);
+        if (organizationId == null || organizationId.isBlank()) {
+            // Answered here so the response says what the CALLER got wrong, instead of
+            // relaying TenantResolver's internal "required after V261" wording.
+            return badRequest("An active workspace is required", "workspace_required");
+        }
+
+        // RequestParameterExtractor.getString coerces with toString(), which would
+        // persist "{a=1}" for {"name": {"a": 1}}. A rename takes a string or nothing.
+        Object rawName = request.get("name");
+        if (!(rawName instanceof String)) {
+            return badRequest("'name' must be a string", "invalid_name");
+        }
+
+        // Validated here so an invalid NAME cannot be confused with any other
+        // IllegalArgumentException the service may raise (TenantResolver's, whose message
+        // names an internal migration). The service validates again for non-HTTP callers.
+        try {
+            CredentialService.validateName((String) rawName);
+        } catch (IllegalArgumentException e) {
+            return badRequest(String.valueOf(e.getMessage()), "invalid_name");
+        }
+
+        try {
+            return credentialService
+                    .renameCredentialForScope(id, tenantId, organizationId, (String) rawName)
+                    .<ResponseEntity<?>>map(cred -> ResponseEntity.ok(cred.withoutSecrets()))
+                    .orElseGet(() -> ResponseEntity.notFound().build());
+        } catch (CredentialRenameRefusedException e) {
+            return ResponseEntity.status(e.reason().httpStatus())
+                    .body(Map.of("error", String.valueOf(e.getMessage()), "code", e.reason().code()));
+        }
+    }
+
+    private static ResponseEntity<Map<String, String>> badRequest(String message, String code) {
+        return ResponseEntity.badRequest().body(Map.of("error", message, "code", code));
     }
 
     /**

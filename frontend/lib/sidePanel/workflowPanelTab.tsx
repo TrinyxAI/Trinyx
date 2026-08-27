@@ -5,8 +5,10 @@ import { useEffect, useRef } from 'react';
 import { LayoutDashboard } from 'lucide-react';
 import { WorkflowPanelContent } from '@/components/app/WorkflowPanelContent';
 import { useSidePanelSafe, type SidePanelTab } from '@/contexts/SidePanelContext';
+import { WORKFLOW_PANEL_TAB_ID } from '@/lib/sidePanel/tabResource';
 
-export const WORKFLOW_PANEL_TAB_ID = 'workflow-panel';
+// Re-exported from its owner so the existing import path keeps working.
+export { WORKFLOW_PANEL_TAB_ID };
 
 export function buildWorkflowPanelTab(workflowId: string): SidePanelTab {
   return {

@@ -79,8 +79,7 @@ export function ImageLightbox({
       if (authenticated) {
         // Chat attachment: fetch the protected URL with auth, then save the blob. Mirrors
         // FileDetailView.handleDownload - <a download> can't carry the Authorization header.
-        const tokenProvider = apiClient.getTokenProvider();
-        const token = tokenProvider ? await tokenProvider() : null;
+        const token = await apiClient.getAuthToken();
         const headers: Record<string, string> = { ...getActiveOrgHeaderForRequest() };
         if (token) headers['Authorization'] = `Bearer ${token}`;
         const res = await fetch(src, { headers });

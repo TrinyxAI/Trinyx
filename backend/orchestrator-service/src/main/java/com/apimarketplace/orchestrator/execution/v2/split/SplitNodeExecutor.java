@@ -109,12 +109,12 @@ public class SplitNodeExecutor {
         if (items.isEmpty()) {
             logger.info("[SplitExecutor] Source expression evaluated to empty list: nodeId={}", nodeId);
             // Still create context (empty), split is COMPLETED
-            contextManager.createContext(runId, nodeId, workflowItemIndex, parentScopeKey, items);
+            contextManager.createContext(runId, nodeId, workflowItemIndex, parentScopeKey, items, epochOf(context));
             return createSuccessResult(nodeId, items, "empty_list", sourceExpression, maxItems);
         }
 
         // 4. Create SplitContext with items (scoped to workflow item and parent scope)
-        SplitContext splitContext = contextManager.createContext(runId, nodeId, workflowItemIndex, parentScopeKey, items);
+        SplitContext splitContext = contextManager.createContext(runId, nodeId, workflowItemIndex, parentScopeKey, items, epochOf(context));
 
         logger.info("[SplitExecutor] Split spawned {} items: nodeId={}, contextKey={}",
             items.size(), nodeId, splitContext.splitNodeId());
@@ -261,8 +261,14 @@ public class SplitNodeExecutor {
     /**
      * Executes a split with pre-resolved items (no SpEL evaluation).
      *
-     * <p>Used by FindNode which already has items from CRUD read execution.
-     * Same logic as execute() but skips expression evaluation.
+     * <p>Same logic as {@link #execute} but skips expression evaluation, for a caller that
+     * already holds the items (the original intent was FindNode reading rows from CRUD).
+     *
+     * <p><b>No production caller today</b> - verified 2026-08-14; FindNode does not spawn (it is
+     * a plain collection node). It is kept because it is the natural entry point for a
+     * pre-resolved spawn, and it is covered by one test pinning the obligation any future caller
+     * inherits: the scope it builds MUST carry the epoch, or a delivery on a pod holding an
+     * earlier epoch's scope reuses that one (see {@code SplitContextManager.restoreContext}).
      *
      * @param runId the workflow run ID
      * @param nodeId the split/find node ID
@@ -300,12 +306,12 @@ public class SplitNodeExecutor {
         // Handle empty list
         if (effectiveItems.isEmpty()) {
             logger.info("[SplitExecutor] Items list is empty: nodeId={}", nodeId);
-            contextManager.createContext(runId, nodeId, workflowItemIndex, parentScopeKey, effectiveItems);
+            contextManager.createContext(runId, nodeId, workflowItemIndex, parentScopeKey, effectiveItems, epochOf(context));
             return createSuccessResult(nodeId, effectiveItems, "empty_list", null, maxItems);
         }
 
         // Create SplitContext with items
-        SplitContext splitContext = contextManager.createContext(runId, nodeId, workflowItemIndex, parentScopeKey, effectiveItems);
+        SplitContext splitContext = contextManager.createContext(runId, nodeId, workflowItemIndex, parentScopeKey, effectiveItems, epochOf(context));
 
         logger.info("[SplitExecutor] Split spawned {} items (from pre-resolved): nodeId={}, contextKey={}",
             effectiveItems.size(), nodeId, splitContext.splitNodeId());
@@ -336,5 +342,14 @@ public class SplitNodeExecutor {
         contextManager.removeContext(runId, nodeId, workflowItemIndex);
         logger.info("[SplitExecutor] Cleared context for rerun: runId={}, nodeId={}, workflowItemIndex={}",
             runId, nodeId, workflowItemIndex);
+    }
+
+    /**
+     * Epoch this split is spawning for, stamped on the context so a delivery landing on another
+     * replica can tell it apart from the same split's context in an earlier epoch
+     * (see {@code SplitContextManager.restoreContext}). Null-tolerant for unit-test contexts.
+     */
+    private static int epochOf(ExecutionContext context) {
+        return context != null ? context.epoch() : SplitContext.UNKNOWN_EPOCH;
     }
 }

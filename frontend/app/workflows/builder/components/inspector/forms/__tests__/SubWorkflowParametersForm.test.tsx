@@ -50,4 +50,28 @@ describe('SubWorkflowParametersForm', () => {
     renderForm({ subWorkflowId: 'wf-1', subWorkflowTimeoutSeconds: 600 });
     expect(screen.getByDisplayValue('600')).toBeTruthy();
   });
+
+  it('caps the timeout at the value the backend will actually honour', () => {
+    // The node parks a pooled worker for this long, so the backend clamps it. Without the same
+    // clamp here the field would show a number the run silently ignores.
+    const onUpdate = renderForm({ subWorkflowId: 'wf-1', subWorkflowTimeoutSeconds: 300 });
+    fireEvent.change(screen.getByPlaceholderText('timeoutPlaceholder'), { target: { value: '86400' } });
+    expect(onUpdate).toHaveBeenCalledWith(
+      expect.objectContaining({ subWorkflowTimeoutSeconds: 1500 })
+    );
+  });
+
+  it('leaves a timeout under the cap untouched', () => {
+    const onUpdate = renderForm({ subWorkflowId: 'wf-1', subWorkflowTimeoutSeconds: 300 });
+    fireEvent.change(screen.getByPlaceholderText('timeoutPlaceholder'), { target: { value: '600' } });
+    expect(onUpdate).toHaveBeenCalledWith(
+      expect.objectContaining({ subWorkflowTimeoutSeconds: 600 })
+    );
+  });
+
+  it('advertises the cap on the input so the field itself refuses more', () => {
+    renderForm({ subWorkflowId: 'wf-1', subWorkflowTimeoutSeconds: 300 });
+    const field = screen.getByPlaceholderText('timeoutPlaceholder') as HTMLInputElement;
+    expect(field.getAttribute('max')).toBe('1500');
+  });
 });

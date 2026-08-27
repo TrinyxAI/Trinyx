@@ -5,26 +5,36 @@ import { useTranslations } from 'next-intl';
 import { ChevronsDownUp, ChevronsUpDown, Images } from 'lucide-react';
 import { canvasChromeCompactButtonClass } from '@/components/ui/canvas-chrome';
 import { useFileStripExpansionSafe } from '@/contexts/FileStripExpansionContext';
+import { useWorkflowMode } from '@/contexts/WorkflowModeContext';
 
 /**
  * Toolbar control for whether file previews hang open under the nodes of a run.
  *
  * It is a REMEMBERED preference, not a one-shot bulk action: the click writes it to
  * local storage, and it is what a strip falls back to on the next run, the next epoch
- * and the next visit. That is also why the control stays on the toolbar with nothing
- * on screen - it used to hide itself whenever the canvas carried no strip, which meant
- * the only moment you could state "I want previews open" was a moment when they were
- * already in front of you. Setting it in edit mode, or on a run that produced no file,
- * is exactly when it is worth setting.
+ * and the next visit. That is why it stays on the toolbar of a run that produced NO
+ * file - it used to hide itself whenever the canvas carried no strip, which meant the
+ * only moment you could state "I want previews open" was a moment when they were
+ * already in front of you.
  *
- * Still renders nothing outside the provider: on a surface with no canvas chrome there
- * is no toolbar to sit in.
+ * It is NOT on the toolbar in edit mode. The earlier reading was that edit mode is
+ * where you would set the preference ahead of a run; the user's reading, which wins,
+ * is that a control about run results has no business in a toolbar you are using to
+ * wire a graph. Nothing it acts on can exist there: file strips hang under nodes in
+ * run mode only, so in edit mode it is a permanently inert button explaining a state
+ * you cannot see.
+ *
+ * Still renders nothing outside the provider either: on a surface with no canvas
+ * chrome there is no toolbar to sit in.
  */
 export function CanvasFileStripToggleButton() {
   const t = useTranslations('workflowBuilder.canvas');
   const expansion = useFileStripExpansionSafe();
+  // Defaults to edit outside a provider, which is the right default here: with no
+  // canvas around it, there is no run whose results this could be about.
+  const { isEditMode } = useWorkflowMode();
 
-  if (!expansion) return null;
+  if (!expansion || isEditMode) return null;
 
   // With strips on screen: a partially-expanded canvas counts as "not all expanded", so
   // the first click always brings every preview up and the next one puts them all away.

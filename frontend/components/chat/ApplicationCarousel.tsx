@@ -42,6 +42,17 @@ interface ApplicationCarouselProps {
    * do not apply (preview, publisher's own view).
    */
   templateSource?: ApplicationTemplateSource;
+  /**
+   * Mute state for the application's own audio/video. Undefined = play as
+   * authored; a boolean hands the volume to the embedder, which then flips it
+   * with a message rather than by re-rendering the interface.
+   */
+  mediaMuted?: boolean;
+  /**
+   * Fired with whether the application contains any audio/video at all. Only the
+   * frame can answer it (sandboxed, cross-origin), so it travels up from there.
+   */
+  onMediaAudioPresence?: (hasAudio: boolean) => void;
 }
 
 export function ApplicationCarousel({
@@ -54,6 +65,8 @@ export function ApplicationCarousel({
   previewMode = false,
   openOnLatestEpoch = false,
   templateSource,
+  mediaMuted,
+  onMediaAudioPresence,
 }: ApplicationCarouselProps) {
   const t = useTranslations('chat.carousel');
   const { isRunMode } = useWorkflowMode();
@@ -254,6 +267,8 @@ export function ApplicationCarousel({
             openOnLatestEpoch={openOnLatestEpoch}
             previewMode={previewMode}
             templateSource={templateSource}
+            mediaMuted={mediaMuted}
+            onMediaAudioPresence={onMediaAudioPresence}
           />
         </div>
       )}

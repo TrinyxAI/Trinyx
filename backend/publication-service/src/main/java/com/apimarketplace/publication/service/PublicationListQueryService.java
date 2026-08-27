@@ -1,5 +1,6 @@
 package com.apimarketplace.publication.service;
 
+import com.apimarketplace.publication.dto.MarketplaceQueryFilter;
 import com.apimarketplace.publication.dto.PublicationListItem;
 import jakarta.persistence.EntityManager;
 import jakarta.persistence.PersistenceContext;
@@ -13,7 +14,10 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Instant;
 import java.time.OffsetDateTime;
+import java.time.ZoneOffset;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
 import java.util.stream.Collectors;
@@ -101,6 +105,12 @@ public class PublicationListQueryService {
              ) DESC, p.published_at DESC
             """;
 
+    /**
+     * Safety cap for the unbounded (non-paged) search endpoints. Named rather
+     * than repeated so the three of them cannot drift apart.
+     */
+    private static final int SEARCH_RESULT_LIMIT = 100;
+
     // ========================================================================
     // Marketplace (paginated)
     // ========================================================================
@@ -110,38 +120,58 @@ public class PublicationListQueryService {
      * Ordered by {@link #POPULARITY_ORDER_BY} (most-liked first).
      */
     public Page<PublicationListItem> findMarketplacePublications(int page, int size) {
-        String dataSql = "SELECT " + SELECT_COLUMNS + FROM_CLAUSE
-                + " WHERE p.status = 'ACTIVE' AND p.visibility = 'PUBLIC'"
-                + POPULARITY_ORDER_BY;
-
-        String countSql = "SELECT COUNT(*) FROM workflow_publications p"
-                + " WHERE p.status = 'ACTIVE' AND p.visibility = 'PUBLIC'";
-
-        return executePagedQuery(dataSql, countSql, PageRequest.of(page, size));
+        return findMarketplacePublications(MarketplaceQueryFilter.unfiltered(), page, size);
     }
 
     /**
      * Get marketplace publications filtered by category slug, excluding planSnapshot.
      */
     public Page<PublicationListItem> findMarketplacePublicationsByCategory(String categorySlug, int page, int size) {
-        String dataSql = "SELECT " + SELECT_COLUMNS + FROM_CLAUSE
-                + " WHERE p.status = 'ACTIVE' AND p.visibility = 'PUBLIC'"
-                + " AND p.category_slug = :categorySlug"
-                + POPULARITY_ORDER_BY;
+        return findMarketplacePublications(MarketplaceQueryFilter.ofCategory(categorySlug), page, size);
+    }
 
-        String countSql = "SELECT COUNT(*) FROM workflow_publications p"
-                + " WHERE p.status = 'ACTIVE' AND p.visibility = 'PUBLIC'"
-                + " AND p.category_slug = :categorySlug";
+    /**
+     * The public marketplace browse query: ACTIVE + PUBLIC narrowed by every
+     * refinement the grid offers, ordered by the requested {@code sort}, paged.
+     *
+     * <p>This is the only marketplace read the grid makes, and the reason it
+     * takes the whole filter rather than just a category is correctness rather
+     * than convenience. The grid used to fetch one popularity-ordered page of 50
+     * rows and apply type / sort / rating / date / price in the browser, which
+     * silently redefined every one of them as "...among the 50 most popular
+     * publications": anything ranked below that was unreachable by any
+     * combination of clicks (a freshly published app, having no installs,
+     * favorites or reviews, sorts last and is therefore exactly what disappears),
+     * "recent" could not surface a publication newer than the popular window, and
+     * a date window came back empty on the day something was published. Filtering
+     * and ordering here also makes the page boundary honest: {@code totalElements}
+     * counts the filtered set, so the caller can page to the end of what it
+     * actually shows.
+     *
+     * <p>Every predicate is a bound parameter and {@code sort} selects from a
+     * fixed set of ORDER BY clauses (see {@link MarketplaceQueryFilter.Sort}), so
+     * no caller-supplied text is ever concatenated into the SQL.
+     */
+    public Page<PublicationListItem> findMarketplacePublications(MarketplaceQueryFilter filter, int page, int size) {
+        MarketplaceQueryFilter f = filter == null ? MarketplaceQueryFilter.unfiltered() : filter;
 
-        Pageable pageable = PageRequest.of(page, size);
+        Map<String, Object> params = new LinkedHashMap<>();
+        String where = marketplaceWhere(f, params);
+
+        String dataSql = "SELECT " + SELECT_COLUMNS + FROM_CLAUSE + where + orderByFor(f.sort());
+        String countSql = "SELECT COUNT(*) FROM workflow_publications p" + where;
+
+        int safeSize = Math.min(Math.max(size, 1), 100);
+        Pageable pageable = PageRequest.of(Math.max(page, 0), safeSize);
 
         Query dataQuery = em.createNativeQuery(dataSql);
-        dataQuery.setParameter("categorySlug", categorySlug);
+        Query countQuery = em.createNativeQuery(countSql);
+        params.forEach((key, value) -> {
+            dataQuery.setParameter(key, value);
+            countQuery.setParameter(key, value);
+        });
         dataQuery.setFirstResult((int) pageable.getOffset());
         dataQuery.setMaxResults(pageable.getPageSize());
-
-        Query countQuery = em.createNativeQuery(countSql);
-        countQuery.setParameter("categorySlug", categorySlug);
 
         @SuppressWarnings("unchecked")
         List<Object[]> rows = dataQuery.getResultList();
@@ -152,6 +182,109 @@ public class PublicationListQueryService {
                 .collect(Collectors.toList());
 
         return new PageImpl<>(items, pageable, total);
+    }
+
+    /**
+     * ORDER BY clause for a requested sort. Every clause ends on
+     * {@code p.published_at DESC} so ties resolve deterministically: without a
+     * total order, two pages of the same query can repeat or skip a row, which is
+     * exactly the class of bug a "load more" button makes visible.
+     */
+    private static String orderByFor(MarketplaceQueryFilter.Sort sort) {
+        return switch (sort) {
+            case POPULAR -> POPULARITY_ORDER_BY;
+            // Unrated last rather than as a 0 average, then the average, then how
+            // many people backed it - a lone 5-star must not outrank a well-rated app.
+            case RATING -> """
+                     ORDER BY (CASE WHEN p.review_count > 0 THEN p.average_rating ELSE -1 END) DESC,
+                              p.review_count DESC, p.published_at DESC
+                    """;
+            case RECENT -> " ORDER BY p.published_at DESC";
+            case INSTALLS -> " ORDER BY p.use_count DESC, p.published_at DESC";
+        };
+    }
+
+    /**
+     * The shared WHERE clause of every public marketplace read: the ACTIVE +
+     * PUBLIC gate plus each refinement the caller asked for. Browse and search
+     * both go through it so a refinement cannot mean one thing in the grid and
+     * another as soon as the visitor types in the search box.
+     *
+     * <p>Bound values are collected into {@code params} instead of being inlined,
+     * so the caller binds them on BOTH the data query and the count query (the
+     * two share this clause and would otherwise disagree).
+     *
+     * @param f      the refinements; already normalised by its constructor
+     * @param params out-parameter: receives every named binding this clause uses
+     * @return a clause starting with {@code " WHERE "}, safe to concatenate
+     */
+    private static String marketplaceWhere(MarketplaceQueryFilter f, Map<String, Object> params) {
+        StringBuilder where = new StringBuilder(" WHERE p.status = 'ACTIVE' AND p.visibility = 'PUBLIC'");
+
+        if (f.categorySlug() != null) {
+            where.append(" AND p.category_slug = :categorySlug");
+            params.put("categorySlug", f.categorySlug());
+        }
+        if (f.displayMode() != null) {
+            where.append(" AND p.display_mode = :displayMode");
+            params.put("displayMode", f.displayMode());
+        }
+        if (f.rating().requiresReviews()) {
+            // Unrated means "no average to compare", not "average 0": it fails the
+            // filter instead of passing as a silent zero.
+            where.append(" AND p.review_count > 0");
+            if (f.rating().threshold() > 0) {
+                where.append(" AND p.average_rating >= :minRating");
+                params.put("minRating", f.rating().threshold());
+            }
+        }
+        // Resolved ONCE and bound, not recomputed per predicate: the data query and
+        // the count query share this clause and must agree on the boundary.
+        Instant publishedAfter = f.publishedAfter(Instant.now());
+        if (publishedAfter != null) {
+            where.append(" AND p.published_at >= :publishedAfter");
+            params.put("publishedAfter", OffsetDateTime.ofInstant(publishedAfter, ZoneOffset.UTC));
+        }
+        switch (f.price()) {
+            case FREE -> where.append(" AND p.credits_per_use <= 0");
+            case PAID -> where.append(" AND p.credits_per_use > 0");
+            case ANY -> { /* no predicate */ }
+        }
+        return where.toString();
+    }
+
+    /**
+     * Marketplace search: the same refinements as the browse grid, narrowed to
+     * publications whose title or description matches {@code search}.
+     *
+     * <p>Description as well as title, matching {@code searchAgentPublications}:
+     * a visitor searching "invoice" is describing what they want the app to do,
+     * which is what the description says and what the title often does not.
+     *
+     * <p>Sharing {@link #marketplaceWhere} with the browse query is the point.
+     * While the grid filtered client-side, typing a query silently dropped the
+     * active type / rating / date / price refinements, so the same publication
+     * could be excluded from the grid and present one keystroke later.
+     */
+    public List<PublicationListItem> searchMarketplace(String search, MarketplaceQueryFilter filter) {
+        MarketplaceQueryFilter f = filter == null ? MarketplaceQueryFilter.unfiltered() : filter;
+
+        Map<String, Object> params = new LinkedHashMap<>();
+        String sql = "SELECT " + SELECT_COLUMNS + FROM_CLAUSE
+                + marketplaceWhere(f, params)
+                + " AND (LOWER(p.title) LIKE LOWER(:search) OR LOWER(p.description) LIKE LOWER(:search))"
+                + orderByFor(f.sort());
+
+        Query query = em.createNativeQuery(sql);
+        params.forEach(query::setParameter);
+        query.setParameter("search", "%" + escapeLike(search) + "%");
+        query.setMaxResults(SEARCH_RESULT_LIMIT);
+
+        @SuppressWarnings("unchecked")
+        List<Object[]> rows = query.getResultList();
+        return rows.stream()
+                .map(PublicationListQueryService::mapRow)
+                .collect(Collectors.toList());
     }
 
     // ========================================================================
@@ -316,11 +449,9 @@ public class PublicationListQueryService {
                 + " AND (LOWER(p.title) LIKE LOWER(:search) OR LOWER(p.description) LIKE LOWER(:search))"
                 + " ORDER BY p.use_count DESC, p.published_at DESC";
 
-        // Escape LIKE special characters to prevent wildcard injection
-        String escaped = search.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_");
         Query query = em.createNativeQuery(sql);
-        query.setParameter("search", "%" + escaped + "%");
-        query.setMaxResults(100); // safety limit for unbounded search
+        query.setParameter("search", "%" + escapeLike(search) + "%");
+        query.setMaxResults(SEARCH_RESULT_LIMIT);
 
         @SuppressWarnings("unchecked")
         List<Object[]> rows = query.getResultList();
@@ -329,50 +460,12 @@ public class PublicationListQueryService {
                 .collect(Collectors.toList());
     }
 
-    // ========================================================================
-    // Search
-    // ========================================================================
-
     /**
-     * Search publications by title (ACTIVE + PUBLIC), excluding planSnapshot.
+     * Escape the LIKE wildcards in a user-typed query so a bare {@code %} or
+     * {@code _} searches for that character instead of matching everything.
      */
-    public List<PublicationListItem> searchByTitle(String search) {
-        return searchByTitle(search, null);
-    }
-
-    /**
-     * Search publications by title with optional category filter.
-     *
-     * <p>Pre-fix the controller-level {@code /search} endpoint accepted no
-     * category param at all, so typing into the marketplace search bar
-     * silently dropped any active category filter - only the title-only
-     * result set came back, surprising users who had pre-filtered.
-     *
-     * @param search       title fragment (LIKE-escaped, wrapped in %…%)
-     * @param categorySlug optional category slug to AND with the title filter
-     */
-    public List<PublicationListItem> searchByTitle(String search, String categorySlug) {
-        StringBuilder sql = new StringBuilder("SELECT " + SELECT_COLUMNS + FROM_CLAUSE
-                + " WHERE p.status = 'ACTIVE' AND p.visibility = 'PUBLIC'"
-                + " AND LOWER(p.title) LIKE LOWER(:search)");
-        if (categorySlug != null && !categorySlug.isBlank()) {
-            sql.append(" AND p.category_slug = :categorySlug");
-        }
-        sql.append(" ORDER BY p.published_at DESC");
-
-        String escaped = search.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_");
-        Query query = em.createNativeQuery(sql.toString());
-        query.setParameter("search", "%" + escaped + "%");
-        if (categorySlug != null && !categorySlug.isBlank()) {
-            query.setParameter("categorySlug", categorySlug);
-        }
-        query.setMaxResults(100);
-
-        @SuppressWarnings("unchecked")
-        List<Object[]> rows = query.getResultList();
-        return rows.stream()
-                .map(PublicationListQueryService::mapRow)
-                .collect(Collectors.toList());
+    private static String escapeLike(String search) {
+        return search.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_");
     }
 
     // ========================================================================

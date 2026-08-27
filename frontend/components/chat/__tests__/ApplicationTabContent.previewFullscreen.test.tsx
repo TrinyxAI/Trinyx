@@ -57,7 +57,7 @@ vi.mock('@/app/workflows/builder/hooks/useInterfaces', () => ({
 vi.mock('@/lib/stores/interface-pagination-store', () => ({
   useSharedInterfacePage: () => [0, () => undefined],
 }));
-vi.mock('@/lib/api/api-client', () => ({ apiClient: { getTokenProvider: () => null } }));
+vi.mock('@/lib/api/api-client', () => ({ apiClient: { getTokenProvider: () => null, getAuthToken: async () => null } }));
 vi.mock('@/lib/api', () => ({ orchestratorApi: {} }));
 vi.mock('@/lib/api/orchestrator/execution.service', () => ({ executionService: {} }));
 vi.mock('@/lib/api/orchestrator/workflow.service', () => ({

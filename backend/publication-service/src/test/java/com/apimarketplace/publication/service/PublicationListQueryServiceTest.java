@@ -1,5 +1,6 @@
 package com.apimarketplace.publication.service;
 
+import com.apimarketplace.publication.dto.MarketplaceQueryFilter;
 import com.apimarketplace.publication.dto.PublicationListItem;
 import jakarta.persistence.EntityManager;
 import jakarta.persistence.Query;
@@ -267,9 +268,222 @@ class PublicationListQueryServiceTest {
         }
     }
 
+    /**
+     * The marketplace grid used to fetch one popularity-ordered page and apply
+     * type / sort / rating / date / price in the browser. Each of these pins one
+     * refinement to the SQL, which is what makes it a filter over the CATALOGUE
+     * instead of over whatever that page happened to contain.
+     */
     @Nested
-    @DisplayName("searchByTitle")
-    class SearchByTitle {
+    @DisplayName("Marketplace refinements are answered by SQL, not by the client")
+    class MarketplaceRefinements {
+
+        private final List<String> sql = new java.util.ArrayList<>();
+
+        /** Capture both SQL strings (data query first, COUNT companion second). */
+        private void captureSql(Runnable call) {
+            doAnswer(inv -> {
+                sql.add(inv.getArgument(0));
+                return sql.size() == 1 ? dataQuery : countQuery;
+            }).when(em).createNativeQuery(anyString());
+            when(dataQuery.getResultList()).thenReturn(List.of());
+            when(countQuery.getSingleResult()).thenReturn(0L);
+            call.run();
+        }
+
+        private String dataSql() {
+            return sql.get(0);
+        }
+
+        private String countSql() {
+            return sql.get(1);
+        }
+
+        private void run(MarketplaceQueryFilter filter) {
+            captureSql(() -> service.findMarketplacePublications(filter, 0, 24));
+        }
+
+        @Test
+        @DisplayName("A type filter becomes a display_mode predicate instead of a client-side pass over one page")
+        void typeFilterReachesSql() {
+            run(MarketplaceQueryFilter.fromRequest(null, "AGENT", null, null, null, null));
+
+            assertThat(dataSql()).contains("AND p.display_mode = :displayMode");
+            verify(dataQuery).setParameter("displayMode", "AGENT");
+        }
+
+        @Test
+        @DisplayName("sort=recent orders by published_at in SQL - the fix for a new publication being unreachable")
+        void recentSortReachesSql() {
+            run(MarketplaceQueryFilter.fromRequest(null, null, "recent", null, null, null));
+
+            // The reported bug: a freshly published app scores 0 on popularity
+            // (no installs, favorites or reviews) so it sorted last, past the
+            // single page the client held - and "Recent", being a client-side
+            // re-sort of that page, could never bring it back. Only an ORDER BY
+            // in the query can.
+            assertThat(dataSql()).contains("ORDER BY p.published_at DESC");
+            assertThat(dataSql()).doesNotContain("user_publication_favorites");
+        }
+
+        @Test
+        @DisplayName("sort=installs orders by use_count in SQL")
+        void installsSortReachesSql() {
+            run(MarketplaceQueryFilter.fromRequest(null, null, "installs", null, null, null));
+
+            assertThat(dataSql()).contains("ORDER BY p.use_count DESC, p.published_at DESC");
+        }
+
+        @Test
+        @DisplayName("sort=rating ranks unrated LAST rather than as a 0 average")
+        void ratingSortPutsUnratedLast() {
+            run(MarketplaceQueryFilter.fromRequest(null, null, "rating", null, null, null));
+
+            assertThat(dataSql())
+                    .contains("CASE WHEN p.review_count > 0 THEN p.average_rating ELSE -1 END");
+        }
+
+        @Test
+        @DisplayName("An unknown sort falls back to popularity rather than failing the request")
+        void unknownSortFallsBackToPopularity() {
+            run(MarketplaceQueryFilter.fromRequest(null, null, "whatever", null, null, null));
+
+            assertThat(dataSql()).contains("user_publication_favorites");
+        }
+
+        @Test
+        @DisplayName("rating=min_4 requires at least one review AND binds the 4.0 floor")
+        void ratingFloorReachesSql() {
+            run(MarketplaceQueryFilter.fromRequest(null, null, null, "min_4", null, null));
+
+            assertThat(dataSql())
+                    .contains("AND p.review_count > 0")
+                    .contains("AND p.average_rating >= :minRating");
+            verify(dataQuery).setParameter("minRating", 4d);
+        }
+
+        @Test
+        @DisplayName("rating=rated asks only for a review, with no average floor bound")
+        void ratedOnlyBindsNoFloor() {
+            run(MarketplaceQueryFilter.fromRequest(null, null, null, "rated", null, null));
+
+            assertThat(dataSql()).contains("AND p.review_count > 0").doesNotContain(":minRating");
+            verify(dataQuery, org.mockito.Mockito.never())
+                    .setParameter(org.mockito.ArgumentMatchers.eq("minRating"), any());
+        }
+
+        @Test
+        @DisplayName("days=7 binds an absolute published_at floor about seven days back")
+        void dateWindowReachesSql() {
+            Instant before = Instant.now();
+            run(MarketplaceQueryFilter.fromRequest(null, null, null, null, 7, null));
+
+            assertThat(dataSql()).contains("AND p.published_at >= :publishedAfter");
+            verify(dataQuery).setParameter(
+                    org.mockito.ArgumentMatchers.eq("publishedAfter"),
+                    argThat(value -> {
+                        Instant bound = ((OffsetDateTime) value).toInstant();
+                        // Seven days before "now", where now is bracketed by the
+                        // instants either side of the call.
+                        return !bound.isBefore(before.minus(java.time.Duration.ofDays(7)).minusSeconds(5))
+                                && !bound.isAfter(Instant.now().minus(java.time.Duration.ofDays(7)).plusSeconds(5));
+                    }));
+        }
+
+        @Test
+        @DisplayName("A non-positive window is no window at all, not a request for future publications")
+        void nonPositiveWindowIsIgnored() {
+            run(MarketplaceQueryFilter.fromRequest(null, null, null, null, 0, null));
+
+            assertThat(dataSql()).doesNotContain(":publishedAfter");
+        }
+
+        @Test
+        @DisplayName("price=free keeps only publications that cost nothing")
+        void freePriceReachesSql() {
+            run(MarketplaceQueryFilter.fromRequest(null, null, null, null, null, "free"));
+
+            assertThat(dataSql()).contains("AND p.credits_per_use <= 0");
+        }
+
+        @Test
+        @DisplayName("price=paid keeps only publications that charge credits")
+        void paidPriceReachesSql() {
+            run(MarketplaceQueryFilter.fromRequest(null, null, null, null, null, "paid"));
+
+            assertThat(dataSql()).contains("AND p.credits_per_use > 0");
+        }
+
+        @Test
+        @DisplayName("The COUNT companion carries the SAME predicates, so totalPages describes the filtered set")
+        void countQueryCarriesTheSamePredicates() {
+            run(MarketplaceQueryFilter.fromRequest("ai", "APPLICATION", "recent", "min_3", 30, "free"));
+
+            // Without this, "load more" would page against a total computed over
+            // the WHOLE catalogue: the grid would keep offering a next page long
+            // after the filtered results ran out.
+            assertThat(countSql())
+                    .startsWith("SELECT COUNT(*)")
+                    .contains("AND p.category_slug = :categorySlug")
+                    .contains("AND p.display_mode = :displayMode")
+                    .contains("AND p.review_count > 0")
+                    .contains("AND p.published_at >= :publishedAfter")
+                    .contains("AND p.credits_per_use <= 0")
+                    .doesNotContain("ORDER BY");
+            // Both queries must BIND what they reference or Hibernate throws.
+            verify(countQuery).setParameter("displayMode", "APPLICATION");
+            verify(countQuery).setParameter("categorySlug", "ai");
+        }
+
+        @Test
+        @DisplayName("An unfiltered browse emits no refinement predicate at all (unchanged for existing callers)")
+        void unfilteredEmitsNoPredicates() {
+            run(MarketplaceQueryFilter.unfiltered());
+
+            assertThat(dataSql())
+                    .doesNotContain(":displayMode")
+                    .doesNotContain(":minRating")
+                    .doesNotContain(":publishedAfter")
+                    // credits_per_use is a SELECTED column, so only the predicate form proves absence.
+                    .doesNotContain("AND p.credits_per_use")
+                    .doesNotContain("AND p.review_count > 0")
+                    .contains("user_publication_favorites");
+        }
+
+        @Test
+        @DisplayName("Page size is clamped, so a caller cannot ask the marketplace for the whole table")
+        void pageSizeIsClamped() {
+            captureSql(() -> service.findMarketplacePublications(MarketplaceQueryFilter.unfiltered(), 0, 5000));
+
+            verify(dataQuery).setMaxResults(100);
+        }
+
+        @Test
+        @DisplayName("Search applies the same refinements, so typing narrows the grid instead of resetting it")
+        void searchSharesTheRefinements() {
+            captureSql(() -> service.searchMarketplace(
+                    "invoice", MarketplaceQueryFilter.fromRequest(null, "APPLICATION", "recent", null, null, "free")));
+
+            assertThat(dataSql())
+                    .contains("AND p.display_mode = :displayMode")
+                    .contains("AND p.credits_per_use <= 0")
+                    .contains("ORDER BY p.published_at DESC");
+            verify(dataQuery).setParameter("displayMode", "APPLICATION");
+        }
+
+        @Test
+        @DisplayName("Search matches the description too - a visitor types what the app DOES, which the title often omits")
+        void searchMatchesDescription() {
+            captureSql(() -> service.searchMarketplace("invoice", null));
+
+            assertThat(dataSql()).contains("LOWER(p.description) LIKE LOWER(:search)");
+            verify(dataQuery).setParameter("search", "%invoice%");
+        }
+    }
+
+    @Nested
+    @DisplayName("searchMarketplace")
+    class SearchMarketplace {
 
         @Test
         @DisplayName("should pass search term with wildcards")
@@ -279,7 +493,7 @@ class PublicationListQueryServiceTest {
 
             stubForSimpleQuery(List.<Object[]>of(buildRow(pubId, wfId, "Test Workflow", null)));
 
-            List<PublicationListItem> results = service.searchByTitle("test");
+            List<PublicationListItem> results = service.searchMarketplace("test", null);
 
             assertThat(results).hasSize(1);
             assertThat(results.get(0).title()).isEqualTo("Test Workflow");
@@ -297,7 +511,7 @@ class PublicationListQueryServiceTest {
                 return dataQuery;
             });
 
-            service.searchByTitle("hello", null);
+            service.searchMarketplace("hello", MarketplaceQueryFilter.ofCategory(null));
 
             // Note: "p.category_slug" appears in the SELECT clause unconditionally
             // (it's a returned column). The WHERE clause must NOT contain the AND
@@ -316,7 +530,7 @@ class PublicationListQueryServiceTest {
                 return dataQuery;
             });
 
-            service.searchByTitle("loft", "rentals");
+            service.searchMarketplace("loft", MarketplaceQueryFilter.ofCategory("rentals"));
 
             assertThat(capturedSql.get())
                 .as("Pre-fix the /search endpoint took no category param at all - "
@@ -338,7 +552,7 @@ class PublicationListQueryServiceTest {
                 return dataQuery;
             });
 
-            service.searchByTitle("loft", "   ");
+            service.searchMarketplace("loft", MarketplaceQueryFilter.ofCategory("   "));
 
             // Note: "p.category_slug" appears in the SELECT clause unconditionally
             // (it's a returned column). The WHERE clause must NOT contain the AND

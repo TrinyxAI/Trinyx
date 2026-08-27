@@ -2178,6 +2178,102 @@ class SplitAwareNodeExecutorTest {
             local.shutdown();
         }
 
+        /** Epoch and workflow item index are DIFFERENT values on purpose: they sit two arguments
+         *  apart in the same createContext call, so a swap must fail the verify. */
+        private static final int FLAT_EPOCH = 77;
+        private static final int FLAT_WORKFLOW_ITEM = 2;
+
+        /** Drives the private nested-flat path with a mocked inner split yielding {@code inner}. */
+        private NodeExecutionResult invokeNestedSplitFlat(List<Object> inner) throws Exception {
+            TestNode innerNode = new TestNode("core:inner_split", NodeType.SPLIT);
+            SplitNodeExecutor splitNodeExecutor = org.mockito.Mockito.mock(SplitNodeExecutor.class);
+            when(splitNodeExecutor.execute(any(), any(), any(), anyInt(), anyInt(), any()))
+                .thenReturn(NodeExecutionResult.success("core:inner_split", Map.of("items", inner)));
+            when(context.epoch()).thenReturn(FLAT_EPOCH);
+            when(context.withItemIndex(anyInt())).thenReturn(context);
+            when(context.withGlobalData(any(), any())).thenReturn(context);
+            // Echoes the arguments back, so the stub cannot launder what was passed.
+            org.mockito.Mockito.lenient()
+                .when(contextManager.createContext(any(), any(), anyInt(), any(), any(), anyInt()))
+                .thenAnswer(inv -> SplitContext.create(
+                    "core:inner_split:" + FLAT_WORKFLOW_ITEM, inv.getArgument(4), inv.getArgument(5)));
+
+            java.lang.reflect.Method method = SplitAwareNodeExecutor.class.getDeclaredMethod(
+                "executeNestedSplitFlat", ExecutionNode.class, ExecutionContext.class, String.class,
+                String.class, int.class, SplitContext.class, SplitNodeExecutor.class);
+            method.setAccessible(true);
+            return (NodeExecutionResult) method.invoke(executor, innerNode, context, "run1",
+                "core:inner_split", FLAT_WORKFLOW_ITEM,
+                SplitContext.create("core:outer:0", List.of("p1"), FLAT_EPOCH), splitNodeExecutor);
+        }
+
+        @Test
+        @DisplayName("nested split (flat mode) stamps the flat context with the EPOCH, not the workflow item index")
+        void nestedSplitFlatStampsTheEpoch() throws Exception {
+            // The flat context replaces the per-parent scoped ones, so it is the scope every
+            // successor resolves. Shipped once with the epoch-less overload, which stamped
+            // UNKNOWN_EPOCH: never stale, so a delivery on a pod holding an earlier epoch's flat
+            // context reused it.
+            NodeExecutionResult result = invokeNestedSplitFlat(List.of("i1", "i2"));
+
+            assertThat(result.status()).isEqualTo(NodeStatus.COMPLETED);
+            org.mockito.Mockito.verify(contextManager).createContext(
+                "run1", "core:inner_split", FLAT_WORKFLOW_ITEM, null, List.of("i1", "i2"), FLAT_EPOCH);
+        }
+
+        @Test
+        @DisplayName("nested split (flat mode) stamps the epoch on the empty-inner-items branch too")
+        void nestedSplitFlatStampsTheEpochWhenNoInnerItems() throws Exception {
+            // Same obligation, other branch: an empty flat spawn REPLACES the scope just as
+            // destructively, so an UNKNOWN stamp here leaves the same un-stale context behind.
+            NodeExecutionResult result = invokeNestedSplitFlat(List.of());
+
+            assertThat(result.status()).isEqualTo(NodeStatus.SKIPPED);
+            org.mockito.Mockito.verify(contextManager).createContext(
+                "run1", "core:inner_split", FLAT_WORKFLOW_ITEM, null, List.of(), FLAT_EPOCH);
+        }
+
+        @Test
+        @DisplayName("Regression (stale-epoch handoff): a dense context left by an EARLIER epoch reads as warm - the epoch-aware restore is what turns it cold so the reader falls to the durable epoch query")
+        void staleEpochContextStopsBeingWarmOnceRestored() {
+            // The end of the chain this fix closes. Prod run run_<id>:
+            // pod A ran epoch 96 (4 mails) and kept a DENSE context; epoch 97 (1 mail) ran on the
+            // other pod but its agent delivery landed on A. "Dense" is what starved the durable
+            // backfill (a live in-memory value always wins), so the reader served epoch 96's uid.
+            SplitContextManager podA = new SplitContextManager();
+            TestNode reader = new TestNode("core:move_newsletters", NodeType.MCP);
+            reader.setPredecessors(List.of("core:snapshot"));
+
+            podA.createContext("run1", "core:each_mail", 0, null,
+                List.of("m1022", "m1023", "m1024", "m1025"), 96);
+            podA.storeResults("run1", "core:each_mail", 0, "core:snapshot", java.util.Arrays.asList(
+                Map.of("uid", "1025"), Map.of("uid", "1024"),
+                Map.of("uid", "1023"), Map.of("uid", "1022")));
+
+            SplitContext leftBehind = podA.getContext("run1", "core:each_mail", 0).orElseThrow();
+            assertThat(executor.inMemorySlotsComplete(
+                leftBehind, java.util.Set.of(0, 1, 2, 3), reader, nodeMap))
+                .as("epoch 96's context is dense, so nothing downstream would ever query the "
+                    + "epoch-scoped durable store - this is why the stale uid was served")
+                .isTrue();
+
+            // The epoch-97 delivery arrives on this pod.
+            Map<String, Object> resume = new java.util.LinkedHashMap<>();
+            resume.put("splitNodeId", "core:each_mail");
+            resume.put("items", List.of("m1026"));
+            resume.put("workflowItemIndex", 0);
+            resume.put("itemIndex", 0);
+            podA.restoreContext("run1", "agent:classify_mail", resume, 97);
+
+            SplitContext rebuilt = podA.getContext("run1", "core:each_mail", 0).orElseThrow();
+            assertThat(rebuilt.itemCount()).isEqualTo(1);
+            assertThat(executor.inMemorySlotsComplete(
+                rebuilt, java.util.Set.of(0), reader, nodeMap))
+                .as("rebuilt = items only, no results: the cold state that lets "
+                    + "loadPerItemOutputsByStepKey(runId, THIS epoch, tenantId) serve the value")
+                .isFalse();
+        }
+
         @Test
         @DisplayName("inMemorySlotsComplete: empty cache / null slot / short list -> not warm (load); fully dense with all direct predecessors present -> warm (skip)")
         void inMemorySlotsCompleteBranches() {

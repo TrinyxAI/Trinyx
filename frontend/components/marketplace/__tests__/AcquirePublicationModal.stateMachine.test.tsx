@@ -385,6 +385,10 @@ describe('AcquirePublicationModal - inlineProgress mode (real timers)', () => {
         progress: 100,
         acquiredId: 'w1',
         error: null,
+        resources: {},
+        withEditableCopy: false,
+        editableCopyWorkflowId: null,
+        editableCopyFailed: false,
       },
     });
     render(<AcquirePublicationModal isOpen publication={pub()} onClose={() => {}} />);
@@ -403,6 +407,10 @@ describe('AcquirePublicationModal - inlineProgress mode (real timers)', () => {
         progress: 100,
         acquiredId: 'w1',
         error: null,
+        resources: {},
+        withEditableCopy: false,
+        editableCopyWorkflowId: null,
+        editableCopyFailed: false,
       },
     });
     const onSuccess = vi.fn();
@@ -424,6 +432,10 @@ describe('AcquirePublicationModal - inlineProgress mode (real timers)', () => {
         progress: 40,
         acquiredId: null,
         error: 'boom from the marketplace',
+        resources: {},
+        withEditableCopy: false,
+        editableCopyWorkflowId: null,
+        editableCopyFailed: false,
       },
     });
     render(<AcquirePublicationModal isOpen publication={pub()} onClose={() => {}} />);
@@ -443,6 +455,10 @@ describe('AcquirePublicationModal - inlineProgress mode (real timers)', () => {
         progress: 40,
         acquiredId: null,
         error: 'boom from the marketplace',
+        resources: {},
+        withEditableCopy: false,
+        editableCopyWorkflowId: null,
+        editableCopyFailed: false,
       },
     });
     render(<AcquirePublicationModal isOpen inlineProgress publication={pub()} onClose={() => {}} />);

@@ -4,6 +4,8 @@ import com.apimarketplace.auth.client.access.OrgAccessGuard;
 import com.apimarketplace.common.web.ContentDispositions;
 import com.apimarketplace.common.storage.dto.ExplorerSort;
 import com.apimarketplace.common.storage.dto.FolderCrumbDto;
+import com.apimarketplace.common.storage.dto.GenerationHistoryDto;
+import com.apimarketplace.common.storage.dto.GenerationProvenanceReader;
 import com.apimarketplace.common.storage.dto.StorageExplorerDto;
 import com.apimarketplace.common.storage.dto.VirtualFolderAddress;
 import com.apimarketplace.common.storage.service.StorageExplorerService;
@@ -17,6 +19,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
+import org.springframework.data.domain.Slice;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
@@ -55,6 +58,7 @@ public class StorageExplorerController {
     /** Hard cap on files per bulk-download ZIP request (abuse guard). */
     private static final int MAX_ZIP_ENTRIES = 200;
     private static final String FILE_RESOURCE_TYPE = "file";
+
 
     private final StorageExplorerService explorerService;
     private final StorageService storageService;
@@ -514,6 +518,70 @@ public class StorageExplorerController {
             return null;
         }
         return UUID.fromString(s);
+    }
+
+    /**
+     * What this workspace has generated, newest first.
+     *
+     * <p>GET /api/storage/explorer/generations?page=0&amp;size=12&amp;kind=image</p>
+     *
+     * <p>Reads the recipe off the assets themselves: a generated file carries the model, the prompt
+     * and the parameters it was made from, so the history is the set of files that carry one. An
+     * asset deleted from the workspace takes its entry with it, and no entry can point at a file
+     * that is gone.</p>
+     *
+     * <p>Same org scope and same member deny-list as the ordinary listing. A second way of listing
+     * files that skipped either would be a second way of reading files this member cannot open.</p>
+     *
+     * <p>Answers a SLICE, not a page: {@code content} plus {@code last}. There is deliberately no
+     * total - counting them would cost a second pass over every file the workspace owns, on every
+     * page view, to produce one number. See
+     * {@code StorageExplorerRepository.searchGenerations}.</p>
+     */
+    @GetMapping("/generations")
+    public ResponseEntity<Slice<GenerationHistoryDto>> generations(
+            @RequestHeader("X-User-ID") String tenantId,
+            @RequestHeader(value = "X-Organization-ID", required = false) String organizationId,
+            @RequestHeader(value = "X-Organization-Role", required = false) String orgRole,
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "12") int size,
+            @RequestParam(required = false) String kind) {
+
+        Pageable pageable = PageRequest.of(page, Math.min(size, 100));
+        return ResponseEntity.ok(explorerService.listGenerations(
+                organizationId, kind, restrictedFileIds(organizationId, tenantId, orgRole), pageable));
+    }
+
+    /**
+     * The recipe one asset was made from, or 404.
+     *
+     * <p>GET /api/storage/explorer/{id}/generation</p>
+     *
+     * <p>This is what lets the file viewer say "generated with Flux, from these words" over an
+     * asset that otherwise looks exactly like an uploaded one, and offer to run it again with a
+     * parameter changed. A 404 means the file was not generated here - the ordinary case for the
+     * overwhelming majority of files, so it is an answer rather than an error.</p>
+     *
+     * <p>Gated exactly like the preview beside it: the row is resolved in the caller's scope AND
+     * checked against the member deny-list, because a recipe is content (it carries the prompt).</p>
+     */
+    @GetMapping("/{id}/generation")
+    public ResponseEntity<Map<String, Object>> generation(
+            @RequestHeader("X-User-ID") String tenantId,
+            @RequestHeader(value = "X-Organization-ID", required = false) String organizationId,
+            @RequestHeader(value = "X-Organization-Role", required = false) String orgRole,
+            @PathVariable UUID id) {
+
+        Optional<StorageEntity> entityOpt = storageService.getEntityByIdForScope(id, tenantId, organizationId);
+        if (entityOpt.isEmpty() || !canAccessFile(organizationId, tenantId, orgRole, id)) {
+            return ResponseEntity.notFound().build();
+        }
+        Map<String, Object> provenance =
+                GenerationProvenanceReader.fromMetadataJson(entityOpt.get().getMetadata());
+        if (provenance == null) {
+            return ResponseEntity.notFound().build();
+        }
+        return ResponseEntity.ok(provenance);
     }
 
     /**

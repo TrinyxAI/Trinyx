@@ -743,4 +743,80 @@ class ReusableTriggerServiceSignalBlockingTest {
             verify(runRepository, never()).save(any());
         }
     }
+
+    // ==================== isEpochStillOpen (public face of the predicate) ====================
+
+    /**
+     * {@code SubWorkflowNode} fires a trigger synchronously and then has to know whether the work
+     * it asked for actually finished. It cannot work that out from the child's data: a node that
+     * yields persists NO step row in any state, so a deferred epoch is indistinguishable from a
+     * smaller epoch that ran to the end. These pin the predicate it asks instead.
+     */
+    @Nested
+    @DisplayName("isEpochStillOpen")
+    class IsEpochStillOpenTests {
+
+        @Test
+        @DisplayName("Open while a blocking signal holds the epoch (wait > 3s, approval, interface)")
+        void shouldReportOpenWhileABlockingSignalIsHeld() {
+            when(unifiedSignalService.hasBlockingSignalsForDagAndEpoch("run-1", "trigger:start", 2))
+                .thenReturn(true);
+
+            assertThat(service.isEpochStillOpen("run-1", "trigger:start", 2)).isTrue();
+        }
+
+        @Test
+        @DisplayName("Open while an async agent is still pending, which is the DEFAULT path for agent nodes")
+        void shouldReportOpenWhileAnAsyncAgentIsPending() {
+            // scaling.agent.queue.enabled defaults to true, so every agent node yields this way.
+            // An agent inside a called workflow is the common shape, not an edge case.
+            when(unifiedSignalService.hasBlockingSignalsForDagAndEpoch("run-1", "trigger:start", 2))
+                .thenReturn(false);
+            when(unifiedSignalService.hasPendingSignalResumesForDagAndEpoch("run-1", "trigger:start", 2))
+                .thenReturn(false);
+            when(pendingAgentRegistry.hasPendingFor("run-1", "trigger:start", 2)).thenReturn(true);
+
+            assertThat(service.isEpochStillOpen("run-1", "trigger:start", 2)).isTrue();
+        }
+
+        @Test
+        @DisplayName("Closed once nothing is left for the epoch")
+        void shouldReportClosedWhenNothingIsPending() {
+            when(unifiedSignalService.hasBlockingSignalsForDagAndEpoch("run-1", "trigger:start", 2))
+                .thenReturn(false);
+            when(unifiedSignalService.hasPendingSignalResumesForDagAndEpoch("run-1", "trigger:start", 2))
+                .thenReturn(false);
+            when(pendingAgentRegistry.hasPendingFor("run-1", "trigger:start", 2)).thenReturn(false);
+
+            assertThat(service.isEpochStillOpen("run-1", "trigger:start", 2)).isFalse();
+        }
+
+        @Test
+        @DisplayName("Scoped to the epoch asked about, so a later epoch never makes an earlier one look busy")
+        void shouldScopeTheAnswerToTheEpoch() {
+            // A reusable child run accumulates epochs, one per fire. Answering run-wide would make
+            // a parent wait on somebody else's work.
+            when(unifiedSignalService.hasBlockingSignalsForDagAndEpoch("run-1", "trigger:start", 5))
+                .thenReturn(true);
+            when(unifiedSignalService.hasBlockingSignalsForDagAndEpoch("run-1", "trigger:start", 4))
+                .thenReturn(false);
+            when(unifiedSignalService.hasPendingSignalResumesForDagAndEpoch("run-1", "trigger:start", 4))
+                .thenReturn(false);
+            when(pendingAgentRegistry.hasPendingFor("run-1", "trigger:start", 4)).thenReturn(false);
+
+            assertThat(service.isEpochStillOpen("run-1", "trigger:start", 5)).isTrue();
+            assertThat(service.isEpochStillOpen("run-1", "trigger:start", 4)).isFalse();
+        }
+
+        @Test
+        @DisplayName("An unanswerable question is never reported as open")
+        void shouldReportClosedForIncompleteCoordinates() {
+            // Reporting "open" here would park a caller forever on a question that has no answer.
+            assertThat(service.isEpochStillOpen(null, "trigger:start", 1)).isFalse();
+            assertThat(service.isEpochStillOpen("run-1", null, 1)).isFalse();
+            assertThat(service.isEpochStillOpen("run-1", "trigger:start", -1)).isFalse();
+            verifyNoInteractions(unifiedSignalService);
+        }
+    }
+
 }

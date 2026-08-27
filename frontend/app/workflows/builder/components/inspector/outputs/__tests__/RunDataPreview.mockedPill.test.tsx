@@ -18,7 +18,7 @@ vi.mock('@/contexts/PublicationSnapshotContext', () => ({
   getActivePublicPreview: () => null,
 }));
 vi.mock('@/lib/api/api-client', () => ({
-  apiClient: { getTokenProvider: () => null },
+  apiClient: { getTokenProvider: () => null, getAuthToken: async () => null },
 }));
 
 const hookState: any = {};

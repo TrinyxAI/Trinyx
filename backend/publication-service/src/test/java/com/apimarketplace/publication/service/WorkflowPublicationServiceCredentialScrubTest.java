@@ -208,6 +208,12 @@ class WorkflowPublicationServiceCredentialScrubTest {
         mcp.put("id", "m1");
         mcp.put("platformCredentialId", "cred-1");
         mcp.put("credentialSource", "platform");
+        // A run-time account selector is a credential choice too, even though it is
+        // written as a NAME rather than an id. Left in, a published workflow naming
+        // "Acme IG" resolves against the ACQUIRER workspace and runs on whichever
+        // credential they happen to have under that name - an account nobody chose,
+        // handed over by a name collision.
+        mcp.put("credentialSelector", "Acme IG");
         mcp.put("name", "Keep me");
 
         Map<String, Object> plan = new HashMap<>();
@@ -219,6 +225,49 @@ class WorkflowPublicationServiceCredentialScrubTest {
         assertThat(params).doesNotContainKeys("basicPassword", "jwtSecretKey");
         assertThat(params).containsEntry("url", "https://hooks.example.com/in");
         assertThat(mcp).doesNotContainKeys("platformCredentialId", "credentialSource");
+        // BLANK, exactly. Not removed, because removing it drops the step back to the
+        // acquirer default account and every run is green: this feature own headline
+        // failure, relocated to the publish boundary. And not the recursive scrub
+        // redaction placeholder either: a run reads that as a credential NAME, so the
+        // acquirer would be told no credential is called "[redacted]" rather than that
+        // they have not filled the field in. Pinning the exact value is the point -
+        // asserting merely "something not the original" is what let the blanking sit
+        // dead behind the scrub without anyone noticing.
+        assertThat(mcp).containsEntry("credentialSelector", "");
         assertThat(mcp).containsEntry("name", "Keep me");
+    }
+
+    @Test
+    @DisplayName("an explicit null selector survives publish as null, not as a blank")
+    void publishLeavesAnExplicitNullAlone() {
+        // The guard for this lived AFTER the recursive scrub, which overwrites every
+        // value it matches by key name - so it read the placeholder, never null, and
+        // could not fire. The acquirer then got a step in the dynamic-but-unfilled
+        // state, refusing on every run, for a feature its author never used.
+        Map<String, Object> mcp = new HashMap<>();
+        mcp.put("id", "m1");
+        mcp.put("credentialSelector", null);
+        Map<String, Object> plan = new HashMap<>();
+        plan.put("mcps", new ArrayList<>(List.of(mcp)));
+
+        service.stripSensitiveCredentials(plan);
+
+        assertThat(mcp.get("credentialSelector")).isNull();
+    }
+
+    @Test
+    @DisplayName("a snake_case selector is neutered too, because the parser reads that spelling")
+    void publishNeutersTheSnakeSpelling() {
+        // A stored plan spelled credential_selector is a LIVE selector at run time.
+        // Left alone, the acquirer inherits the publisher's expression.
+        Map<String, Object> mcp = new HashMap<>();
+        mcp.put("id", "m1");
+        mcp.put("credential_selector", "Acme IG");
+        Map<String, Object> plan = new HashMap<>();
+        plan.put("mcps", new ArrayList<>(List.of(mcp)));
+
+        service.stripSensitiveCredentials(plan);
+
+        assertThat(mcp).containsEntry("credential_selector", "");
     }
 }

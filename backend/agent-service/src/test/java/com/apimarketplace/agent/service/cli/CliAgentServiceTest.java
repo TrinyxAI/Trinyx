@@ -323,6 +323,44 @@ class CliAgentServiceTest {
             assertThat(creds).containsKey("turnId");
             assertThat(creds).containsKey("conversationId");
         }
+
+    }
+
+    @Nested
+    @DisplayName("Approval-gate budget credentials (how long a tool call may be held)")
+    class ApprovalGateBudget {
+
+        @Test
+        @DisplayName("should declare the session as CLI-bridge, so a held tool call is bounded")
+        void shouldMarkTheSessionAsCliBridge() throws Exception {
+            // No start request at all - the controller accepts a body-less call, and the
+            // marker must not hang off any request field: it describes the ROUTE, which is
+            // the same whatever the caller chose to send.
+            CliSessionResponse response = service.startSession(null, "tenant-1", "org-test");
+
+            // Every tool call on this session is held open by a CLI at the other end of an
+            // MCP request. The approval gate caps how long it may hold one, and it must know
+            // that from the session rather than infer it: inferring from the watchdog window
+            // was wrong in both directions - the window is absent when the watchdog is
+            // disabled, and present on the direct route when an agent configures one.
+            Map<String, Object> creds = getSessionCredentials(response.sessionId());
+            assertThat(creds).containsEntry("__cliBridgeSession__", true);
+        }
+
+        @Test
+        @DisplayName("should carry the run's watchdog window when the bridge sends one")
+        void shouldCarryTheInactivityWindow() throws Exception {
+            CliSessionStartRequest request = new CliSessionStartRequest(
+                null, null, "test-model", null, null, null, null, null, null, null, 300);
+
+            CliSessionResponse response = service.startSession(request, "tenant-1", "org-test");
+
+            // Separate from the marker above: this bounds the hold so the tool still has
+            // time to run before the watchdog kills a silent run. Nothing asserted this hop
+            // before, so removing it would have been invisible.
+            assertThat(getSessionCredentials(response.sessionId()))
+                .containsEntry("__inactivityTimeoutSeconds__", 300);
+        }
     }
 
     @Nested

@@ -207,6 +207,14 @@ public class ApiService {
             errorResult.put("missingScopes", new java.util.ArrayList<>(e.getMissingScopes()));
             errorResult.put("remediation", "reconnect_credential");
             return errorResult;
+        } catch (com.apimarketplace.catalog.service.exception.CredentialSelectionException e) {
+            // Refusal, not a failure of the tool: the step named a credential for
+            // this run, it could not be honoured, and the provider was never called.
+            // Rethrown for the same reason InsufficientCreditsException is: swallowed
+            // into a generic error envelope, the refusal reads as "the API failed",
+            // which sends the reader looking at the provider instead of at the
+            // account the workflow asked for.
+            throw e;
         } catch (Exception e) {
             log.error("Error executing tool: {}", e.getMessage(), e);
             Map<String, Object> errorResult = new HashMap<>();
@@ -266,8 +274,36 @@ public class ApiService {
         // to belong to a different provider is not a way in: the executor
         // refuses it there and falls back to the integration's default, which
         // is what this line's other half is asking about.
+        // A run-time choice can NAME the credential rather than number it. Counted the
+        // same way the pinned id is, and for the same reason: without it this
+        // pre-flight answers "no credentials configured" for an account that has one,
+        // and the caller gets a generic refusal naming the integration instead of the
+        // refusal that names the account. Resolution itself still happens in the
+        // executor, which is the only place that knows the endpoint requirement.
+        // A run-time choice can NAME the credential rather than number it. Counted the
+        // same way the pinned id is, and for the same reason: without it this
+        // pre-flight answers "no credentials configured" for an account that has one,
+        // and the caller gets a generic refusal naming the integration instead of the
+        // refusal that names the account.
+        //
+        // KNOWN RESIDUAL, reproduced live and deliberately NOT papered over here: with
+        // credentialSource=user and the strict flag set but nothing named, this
+        // pre-flight still answers the generic "this tool requires X credentials"
+        // rather than the refusal that says a selection was stated and named nothing.
+        // Adding isSelectionStrict() to the condition below does NOT change it - the
+        // strict thread-local reads false at this point while the NAME one reads
+        // correctly, so something between the controller and here clears it, and that
+        // is a separate defect to find rather than something to guess at. Behaviour is
+        // fail-closed either way (no call is made, success=false); only the sentence is
+        // wrong. Repro: POST /catalog/v1/tools/{id}/execute from inside the app
+        // container with {"credentialSource":"user","credentialSelectionStrict":true}
+        // on a tenant holding no credential for that integration.
+        boolean statesARunTimeSelection = "user".equals(explicitSource)
+                && com.apimarketplace.catalog.service.http.CredentialModeContext
+                        .getSelectedCredentialName() != null;
         boolean hasUserCredentials = userId != null && userCredentialService != null
                 && (!userCredentialService.getCredentialDataMap(userId, credReq.credentialName()).isEmpty()
+                    || statesARunTimeSelection
                     || ("user".equals(explicitSource) && selectedCredentialId != null
                         && !userCredentialService.getCredentialDataMapById(userId, selectedCredentialId).isEmpty()));
         boolean hasPlatformCredentials = platformCredName != null && userCredentialService != null &&

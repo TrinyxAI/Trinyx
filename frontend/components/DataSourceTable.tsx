@@ -22,6 +22,14 @@ import { useTranslations } from 'next-intl';
 import { useCanMutateInCurrentOrg } from '@/lib/stores/current-org-store';
 import { useOrgScopedReset } from '@/lib/hooks/useOrgScopedReset';
 import { useSelectableItems } from '@/hooks/useSelectableItems';
+import { DndContext, DragOverlay } from '@dnd-kit/core';
+import { FolderPlus } from 'lucide-react';
+import { TableFolderFace } from '@/components/folders/TableFolderFace';
+import { FolderBreadcrumb } from '@/components/folders/FolderBreadcrumb';
+import { FolderTilesGrid } from '@/components/folders/FolderTilesGrid';
+import { FolderDialogs } from '@/components/folders/FolderDialogs';
+import { DraggableResourceCard } from '@/components/folders/DraggableResourceCard';
+import { useListFolders } from '@/hooks/useListFolders';
 import { BulkDeleteModal } from '@/components/ui/BulkDeleteModal';
 import { SelectionActionBar, BulkBarButton } from '@/components/ui/SelectionActionBar';
 import { EmptyState } from '@/components/ui/EmptyState';
@@ -98,6 +106,37 @@ export default function DataSourceTable({
   const [unsharing, setUnsharing] = useState(false);
   const [unshareConfirmDataSource, setUnshareConfirmDataSource] = useState<string | null>(null);
 
+  // FOLDERS (V451). The level being shown is a fetch parameter like the page number; the
+  // tiles and the trail come back WITH the list. `reloadRef` breaks the loop between the
+  // two: the hook needs a way to reload, and the fetch needs the hook's level.
+  const reloadRef = useRef<() => void>(() => {});
+  const searching = debouncedSearch.trim().length > 0;
+  const folders = useListFolders({
+    kind: 'table',
+    reload: useCallback(() => reloadRef.current(), []),
+    busy: loading,
+    selectedIds: selectedDataSources,
+    clearSelection: clearDataSourceSelection,
+    searching,
+    canMutate,
+    labels: {
+      actionFailed: t('folders.actionFailed'),
+      createFailed: t('folders.createFailed'),
+      renameFailed: t('folders.renameFailed'),
+      deleteFailed: t('folders.deleteFailed'),
+      moveFailed: t('folders.moveFailed'),
+      moved: t('folders.moved'),
+      movedToFolder: (count, name) => t('folders.movedToFolder', { count, name }),
+      movedToTopLevel: (count) => t('folders.movedToTopLevel', { count }),
+    },
+    notify: addToast,
+  });
+  const folderCountLabel = useCallback(
+    (count: number) => t('folders.tableCount', { count }),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [],
+  );
+
   // Load ONE server page. Server applies search (`q`), sort and the visibility filter over the whole
   // set and returns only the requested slice already enriched with each row's publication badge
   // (`publicationStatuses`), so the browser never loads more than it shows and never fans out a
@@ -113,10 +152,15 @@ export default function DataSourceTable({
         q: debouncedSearch,
         sort: sortBy,
         visibility: visibilityFilter,
+        // `root` = the tables filed nowhere. A search overrides this server-side and looks
+        // through every folder, so a name is always findable.
+        folderId: folders.folderIdParam,
+        includeFolders: true,
       });
       // A newer request superseded this one - drop its (now stale) result.
       if (reqId !== requestIdRef.current) return;
 
+      folders.applyListResponse(result);
       setDataSources((result.items || []) as DataSource[]);
       setRowCounts(result.rowCounts || {});
       setSampleRows(result.sampleRows || {});
@@ -147,13 +191,21 @@ export default function DataSourceTable({
     } finally {
       if (reqId === requestIdRef.current) setLoading(false);
     }
-  }, [page, pageSize, debouncedSearch, sortBy, visibilityFilter, addToast, t]);
+    // addToast / t are intentionally NOT deps: they are stable in production but recreated
+    // every render under test mocks, and the load effect keys on this callback's identity -
+    // listing them turns any post-fetch state update (the folder tiles, for one) into a
+    // render -> fetch loop. Mirrors WorkflowTable.fetchWorkflows.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [page, pageSize, debouncedSearch, sortBy, visibilityFilter, folders.folderIdParam]);
 
   // Reset to page 0 when the search term, sort, or visibility filter changes (a new page 0 fetch
   // then fires via the load effect below).
   useEffect(() => {
     setPage(0);
-  }, [debouncedSearch, sortBy, visibilityFilter]);
+  }, [debouncedSearch, sortBy, visibilityFilter, folders.folderIdParam]);
+
+  // The hook reloads through this ref, so it can be created before the fetch it triggers.
+  reloadRef.current = fetchDataSources;
 
   // 🇫🇷 Démarrer l'ajout inline de datasource
   const startAddingDataSourceInline = () => {
@@ -370,19 +422,38 @@ export default function DataSourceTable({
           state shows the same layout as the Applications page. The create button shows only when
           there are items; when empty the EmptyState carries the create CTA. */}
       <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
-        <div>
-          <h1 className="text-lg font-semibold text-theme-primary">{t('data.title')}</h1>
-          <p className="text-sm text-theme-secondary mt-0.5">{t('data.subtitle')}</p>
-        </div>
+        {/* Inside a folder the PATH is the page title, with the folder mark and an
+            up-one-level arrow beside it - the same header the Files browser uses. */}
+        {folders.trail.length > 0 ? (
+          <FolderBreadcrumb
+            trail={folders.trail}
+            rootLabel={t('folders.allTables')}
+            backLabel={t('folders.upOneLevel')}
+            subtitle={t('folders.tableCount', { count: totalCount })}
+            onNavigate={folders.navigateToFolder}
+            droppable={folders.canOrganize}
+          />
+        ) : (
+          <div className="min-w-0">
+            <h1 className="text-lg font-semibold text-theme-primary">{t('data.title')}</h1>
+            <p className="text-sm text-theme-secondary mt-0.5">{t('data.subtitle')}</p>
+          </div>
+        )}
         {canMutate && !loading && (
           <div className="flex shrink-0 items-center gap-2">
+            {folders.foldersEnabled && (
+              <Button variant="outline" size="sm" onClick={() => folders.setShowCreateDialog(true)}>
+                <FolderPlus className="h-4 w-4 mr-1.5" />
+                {t('folders.newFolder')}
+              </Button>
+            )}
             {/* Templates behind a button rather than a permanent banner. Shown even
                 when the list is empty, which is when a starting point helps most. */}
             <TemplateGallery
               kind="table"
               canMutate={canMutate}
               existingNames={dataSources.map((d) => d.name).filter(Boolean) as string[]}
-              onTableCreated={(dataSourceId, skippedColumns) => {
+              onTableCreated={async (dataSourceId, skippedColumns) => {
                 if (skippedColumns.length > 0) {
                   // Say what is missing rather than letting the user discover a
                   // half-built table on their own.
@@ -392,6 +463,9 @@ export default function DataSourceTable({
                     message: skippedColumns.join(', '),
                   });
                 }
+                // Created while standing in a folder: file it there before leaving for
+                // the table, or it would land back at the top level.
+                await folders.fileNewResource(dataSourceId);
                 router.push(`/app/tables/${dataSourceId}`);
               }}
               onError={(message) =>
@@ -453,6 +527,14 @@ export default function DataSourceTable({
       {/* Actions contextuelles - floating bottom-center bar (mirrors the task board). */}
       {selectedDataSources.size > 0 && (
         <SelectionActionBar count={selectedDataSources.size} onClear={clearDataSourceSelection}>
+          {/* Filing stays available while searching: you often find a table BECAUSE you were
+              looking for where to put it. Only the drag targets need a folder view. */}
+          {canMutate && (
+            <BulkBarButton onClick={folders.openMoveDialog}>
+              <FolderPlus className="h-3.5 w-3.5" />
+              {t('folders.moveToFolder')}
+            </BulkBarButton>
+          )}
           {canMutate && (
             <BulkBarButton onClick={cloneSelectedDataSources}>
               <Copy className="h-3.5 w-3.5" />
@@ -496,15 +578,34 @@ export default function DataSourceTable({
       <div className="space-y-4 w-full overflow-visible">
         {loading ? (
           <CardSkeletonGrid />
-        ) : filteredDataSources.length === 0 && !isAddingDataSourceInline ? (
+        ) : (
+          /* One drag context over the folders AND the cards: a card dropped on a tile is filed
+             there, a tile dropped on another tile is nested inside it. */
+          <DndContext
+            sensors={folders.sensors}
+            onDragStart={(event) => folders.handleDragStart(
+              event, (id) => dataSources.find((d) => String(d.id) === id)?.name)}
+            onDragEnd={folders.handleDragEnd}
+            onDragCancel={folders.cancelDrag}
+          >
+            <FolderTilesGrid
+              folders={folders}
+              countLabel={folderCountLabel}
+              gridClassName="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4"
+              renderFace={(folder) => <TableFolderFace preview={folder.preview ?? []} />}
+            />
+
+            {filteredDataSources.length === 0 && folders.tiles.length === 0 && !isAddingDataSourceInline ? (
           <EmptyState
             icon={<Table className="h-7 w-7 text-theme-muted" />}
             size="md"
-            title={t('data.noTablesFound')}
-            subtitle={totalCount === 0 && debouncedSearch.trim().length === 0
-              ? t('data.createFirstTable')
-              : t('data.noMatchingTables')}
-            actions={canMutate && totalCount === 0 && debouncedSearch.trim().length === 0 ? (
+            title={folders.currentFolderId ? t('folders.emptyFolderTitle') : t('data.noTablesFound')}
+            subtitle={folders.currentFolderId
+              ? t('folders.emptyFolderSubtitle')
+              : (totalCount === 0 && debouncedSearch.trim().length === 0
+                ? t('data.createFirstTable')
+                : t('data.noMatchingTables'))}
+            actions={canMutate && !folders.currentFolderId && totalCount === 0 && debouncedSearch.trim().length === 0 ? (
               <Button
                 variant="default"
                 onClick={() => setShowCreateDataModal(true)}
@@ -515,11 +616,11 @@ export default function DataSourceTable({
               </Button>
             ) : undefined}
           />
-        ) : (
+            ) : (
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             {filteredDataSources.map((ds) => (
+              <DraggableResourceCard key={ds.id} id={String(ds.id)} disabled={!folders.canOrganize}>
               <DataSourceCard
-                key={ds.id}
                 ds={ds}
                 rowCount={rowCounts[String(ds.id)] ?? 0}
                 sampleRows={sampleRows[String(ds.id)] ?? []}
@@ -538,8 +639,23 @@ export default function DataSourceTable({
                   showPrivate: true,
                 }}
               />
+              </DraggableResourceCard>
             ))}
           </div>
+            )}
+
+            {/* What is being dragged, following the pointer. A multi-selection drag says how
+                many cards are travelling, so a drop never moves more than you meant. */}
+            <DragOverlay>
+              {folders.activeDrag && (
+                <div className="rounded-xl border border-[var(--accent-primary)] bg-theme-secondary px-3 py-2 text-sm text-theme-primary shadow-lg">
+                  {folders.activeDrag.count > 1
+                    ? t('folders.draggingCount', { count: folders.activeDrag.count })
+                    : folders.activeDrag.label}
+                </div>
+              )}
+            </DragOverlay>
+          </DndContext>
         )}
 
       </div>
@@ -637,8 +753,12 @@ export default function DataSourceTable({
       {showCreateDataModal && (
         <CreateDataSourceModal
           onClose={() => setShowCreateDataModal(false)}
-          onDataSourceCreated={(dataSourceId) => {
+          onDataSourceCreated={async (dataSourceId) => {
             setShowCreateDataModal(false);
+            // This callback still declares a numeric id, while a data source is keyed by
+            // uuid everywhere else - so file it by the string the folder API expects,
+            // whatever shape it actually arrives in.
+            await folders.fileNewResource(String(dataSourceId));
             fetchDataSources();
           }}
         />
@@ -702,6 +822,8 @@ export default function DataSourceTable({
         </div>,
         document.body
       )}
+
+      <FolderDialogs folders={folders} selectedIds={selectedDataSources} />
 
       <ToastContainer toasts={toasts} onRemoveToast={removeToast} />
     </div>

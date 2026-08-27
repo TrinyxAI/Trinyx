@@ -36,8 +36,8 @@ import java.util.regex.Pattern;
  * </pre>
  *
  * The field name in the projected output is taken from the FIRST {@code fileRef}-typed
- * field declared in the tool's {@code output_schema}. If no fileRef field is declared
- * (validator should have caught this) the binary is dropped and an error is logged.
+ * field declared in the tool's {@code output_schema}. When the schema names none, the
+ * asset is still stored, under {@link #FALLBACK_FILE_REF_KEY} - see {@code handle}.
  */
 @Component
 @RequiredArgsConstructor
@@ -45,6 +45,13 @@ import java.util.regex.Pattern;
 public class BinaryResponseHandler {
 
     private static final String CATALOG_BINARY_CATEGORY = "catalog-binary";
+
+    /**
+     * Key the asset is projected under when the tool's output_schema names no
+     * fileRef field. Deliberately the platform's ordinary name for a file, the
+     * one {@code core:media} and the FileRef scanners already expect.
+     */
+    static final String FALLBACK_FILE_REF_KEY = "file";
 
     @Autowired(required = false)
     private StorageClient storageClient;
@@ -74,10 +81,25 @@ public class BinaryResponseHandler {
             return Map.of();
         }
 
+        // A schema that names no fileRef used to end here, and the bytes were
+        // dropped. That is the wrong trade: the upstream call already ran and,
+        // on a paid endpoint, was already CHARGED, so throwing the asset away
+        // over a missing field NAME turns a stale catalogue row into a silent
+        // total loss - the caller gets success with an empty body and no hint.
+        // Seen live: prod still carried the pre-fileRef output_schema for the
+        // ElevenLabs and Clipdrop binary endpoints, so every generation on them
+        // billed the customer and stored nothing.
+        //
+        // Storing it under a fallback key cannot break a reader, because the
+        // alternative was an EMPTY projection: no consumer can be reading a
+        // field that was never emitted. The warning stays, and names the fix -
+        // the schema is still what SHOULD carry the key.
         String fileRefKey = findFirstFileRefKey(outputSchemaJson);
         if (fileRefKey == null) {
-            log.warn("BinaryResponseHandler: tool '{}' returned binary but outputSchema declares no fileRef field", toolSlug);
-            return Map.of();
+            log.warn("BinaryResponseHandler: tool '{}' returned binary but its outputSchema declares no "
+                    + "fileRef field; storing the asset under '{}' so it is not lost. Re-import this API "
+                    + "so its output_schema declares the field.", toolSlug, FALLBACK_FILE_REF_KEY);
+            fileRefKey = FALLBACK_FILE_REF_KEY;
         }
 
         String mimeType = contentType == null || contentType.isBlank() ? "application/octet-stream" : contentType;

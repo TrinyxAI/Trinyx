@@ -64,6 +64,29 @@ export interface InterfaceIframeProps {
   fileUploadContext?: { workflowId: string; runId: string };
   /** Strip <script> tags + on* handlers from htmlTemplate (untrusted publisher contexts). */
   removeScripts?: boolean;
+  /**
+   * Mute state for the interface's own `<audio>`/`<video>`.
+   *
+   * `undefined` (the default) means "not managed": the page plays exactly as its
+   * author wrote it, which is what every editing and running surface wants.
+   * Passing a boolean hands this component the volume, and a preview grid should
+   * pass `true` - a wall of cards that starts talking at the visitor is the
+   * reason this exists.
+   *
+   * Flipping it does NOT re-render the document: the initial value is baked into
+   * the HTML and later changes travel as a message, so unmuting cannot restart
+   * the interface or lose its state.
+   */
+  mediaMuted?: boolean;
+  /**
+   * Fired with whether this interface contains any `<audio>`/`<video>` at all
+   * (re-fired if that changes, e.g. media injected by the interface's own JS).
+   *
+   * The host cannot answer this itself - the iframe is sandboxed and
+   * cross-origin - and it is what lets a sound control appear only on the
+   * interfaces that can actually make a sound.
+   */
+  onMediaAudioPresence?: (hasAudio: boolean) => void;
 }
 
 /**
@@ -97,11 +120,16 @@ export const InterfaceIframe = React.forwardRef<HTMLIFrameElement, InterfaceIfra
       onVariablePagination,
       fileUploadContext,
       removeScripts = false,
+      mediaMuted,
+      onMediaAudioPresence,
     },
     ref
   ) => {
     const internalRef = React.useRef<HTMLIFrameElement>(null);
     const iframeRef = (ref as React.RefObject<HTMLIFrameElement>) || internalRef;
+
+    // The mute state the document is BUILT with, captured once. See the memo below.
+    const initialMediaMutedRef = React.useRef(mediaMuted);
 
     // Pre-fetch every FileRef in the data as a base64 data: URI (auth in the header,
     // never the URL) so the iframe renders files without the session token in its HTML.
@@ -153,9 +181,15 @@ export const InterfaceIframe = React.forwardRef<HTMLIFrameElement, InterfaceIfra
         triggerData: prefillTriggerData ?? (mode === 'run' ? triggerData : undefined),
         jsTemplate: removeScripts ? undefined : jsTemplate,
         resolveFileUrl: mode === 'run' ? resolveFileUrl : undefined,
+        // Only the FIRST value is baked in. `completeHtml` is a srcDoc: making it
+        // depend on the live prop would reload the whole interface on every
+        // mute toggle, throwing away its scroll position and any state its JS
+        // built. Runtime changes go through postMessage instead (below).
+        muteMedia: initialMediaMutedRef.current,
       };
 
       return renderInterfaceTemplate(safeHtml, options);
+      // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [htmlTemplate, mode, resolvedData, customCss, autoFit, actionMapping, triggerData, prefillTriggerData, jsTemplate, resolveFileUrl, removeScripts]);
 
     // Fade out briefly when HTML content changes, fade in when iframe loads
@@ -236,6 +270,33 @@ export const InterfaceIframe = React.forwardRef<HTMLIFrameElement, InterfaceIfra
       return () => window.removeEventListener('message', handler);
     }, [iframeRef]);
 
+    // Audio presence, reported by MEDIA_AUDIO_SCRIPT. Always listening (like the
+    // navigation gate) so any surface can ask; only messages from THIS iframe count.
+    React.useEffect(() => {
+      if (!onMediaAudioPresence) return;
+      const handler = (event: MessageEvent) => {
+        if (event.source !== iframeRef.current?.contentWindow) return;
+        if (event.data?.type === '__iframe_audio') {
+          onMediaAudioPresence(!!event.data.hasAudio);
+        }
+      };
+      window.addEventListener('message', handler);
+      return () => window.removeEventListener('message', handler);
+    }, [iframeRef, onMediaAudioPresence]);
+
+    // Push the current mute state into the frame. Re-sent on every load as well
+    // as on change: a reload (new htmlTemplate, epoch swap) rebuilds the document
+    // from the INITIAL value, so without this the sound the visitor turned on
+    // would silently turn itself back off.
+    const [iframeLoadCount, setIframeLoadCount] = React.useState(0);
+    React.useEffect(() => {
+      if (mediaMuted === undefined) return;
+      iframeRef.current?.contentWindow?.postMessage(
+        { type: '__iframe_set_muted', muted: mediaMuted },
+        '*',
+      );
+    }, [mediaMuted, iframeLoadCount, iframeRef]);
+
     // Confirm runs inside the button's click handler so the window.open stays a user gesture
     // (popup blockers allow it). The parent page is not sandboxed, so the new tab opens.
     const confirmNavigation = React.useCallback(() => {
@@ -251,6 +312,8 @@ export const InterfaceIframe = React.forwardRef<HTMLIFrameElement, InterfaceIfra
       if (!iframe) return;
       // Fade in after new content has loaded
       setIframeOpacity(1);
+      // Re-arms the mute push above: a fresh document starts from the baked-in value.
+      setIframeLoadCount((n) => n + 1);
       onLoad?.(iframe);
     }, [iframeRef, onLoad]);
 

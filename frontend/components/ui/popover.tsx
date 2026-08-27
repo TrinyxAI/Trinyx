@@ -16,7 +16,13 @@ const PopoverContent = React.forwardRef<
       align={align}
       sideOffset={sideOffset}
       className={cn(
-        "z-50 w-72 rounded-xl border bg-popover p-4 text-popover-foreground shadow-[0_8px_24px_rgba(0,0,0,0.12)] outline-none",
+        // `bg-theme-primary` / `text-theme-primary`, NOT shadcn's stock
+        // `bg-popover` / `text-popover-foreground`: this app defines no
+        // `--popover` token, so those resolve to nothing and the popover renders
+        // with no background at all, the page showing straight through it. Every
+        // call site in the app already overrides the background for exactly that
+        // reason; this default just means the next one does not have to know.
+        "z-50 w-72 rounded-xl border bg-theme-primary p-4 text-theme-primary shadow-[0_8px_24px_rgba(0,0,0,0.12)] outline-none",
         className
       )}
       style={{ animation: 'none', transition: 'none' }}

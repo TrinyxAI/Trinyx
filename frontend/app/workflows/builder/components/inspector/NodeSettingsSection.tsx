@@ -6,13 +6,7 @@ import { useTranslations } from 'next-intl';
 import { ChevronRight } from 'lucide-react';
 import type { Node } from 'reactflow';
 import { Input } from '@/components/ui/input';
-import { Switch } from '@/components/ui/switch';
-import {
-  Tooltip,
-  TooltipContent,
-  TooltipProvider,
-  TooltipTrigger,
-} from '@/components/ui/tooltip';
+import { InspectorToggleRow } from './InspectorToggleRow';
 import type { BuilderNodeData, NodePolicy } from '../../types';
 import {
   MAX_RETRY_COUNT,
@@ -173,7 +167,7 @@ export function NodeSettingsSection({
           ) : null}
 
           {/* Continue on fail */}
-          <PolicyToggleRow
+          <InspectorToggleRow
             label={t('continueOnFailureLabel')}
             help={t('continueOnFailureHelp')}
             checked={policy.continueOnFailure === true}
@@ -204,7 +198,7 @@ export function NodeSettingsSection({
           </div>
 
           {/* Execute once */}
-          <PolicyToggleRow
+          <InspectorToggleRow
             label={t('executeOnceLabel')}
             help={t('executeOnceHelp')}
             checked={policy.executeOnce === true}
@@ -227,62 +221,6 @@ export function NodeSettingsSection({
           ) : null}
         </div>
       ) : null}
-    </div>
-  );
-}
-
-interface PolicyToggleRowProps {
-  label: string;
-  help: string;
-  checked: boolean;
-  onChange: (checked: boolean) => void;
-  disabled: boolean;
-  /** When set, the toggle is gated for this node type - shown as a tooltip. */
-  blockedReason?: string;
-  testId: string;
-}
-
-function PolicyToggleRow({
-  label,
-  help,
-  checked,
-  onChange,
-  disabled,
-  blockedReason,
-  testId,
-}: PolicyToggleRowProps) {
-  const toggle = (
-    <Switch
-      checked={checked}
-      onCheckedChange={onChange}
-      disabled={disabled}
-      aria-label={label}
-    />
-  );
-
-  return (
-    <div className="flex flex-col gap-1.5" data-testid={testId}>
-      <div className="flex items-center justify-between gap-2">
-        <span className="text-sm font-medium text-slate-500 dark:text-slate-400">{label}</span>
-        {blockedReason ? (
-          <TooltipProvider delayDuration={150}>
-            <Tooltip>
-              <TooltipTrigger asChild>
-                {/* span wrapper: a disabled button does not fire pointer events */}
-                <span tabIndex={0} data-testid={`${testId}-blocked`}>{toggle}</span>
-              </TooltipTrigger>
-              <TooltipContent side="left" className="max-w-72">
-                {blockedReason}
-              </TooltipContent>
-            </Tooltip>
-          </TooltipProvider>
-        ) : (
-          toggle
-        )}
-      </div>
-      <p className="text-sm text-slate-400 dark:text-slate-500">
-        {blockedReason ?? help}
-      </p>
     </div>
   );
 }

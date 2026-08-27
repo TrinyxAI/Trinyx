@@ -504,6 +504,18 @@
                                      different between processes. Asserts the state, not a symptom. -->
                                 <include>**/e2e/nodes/TriggerDagBirthE2ETest.java</include>
                                 <include>**/e2e/nodes/RerunMultiTriggerE2ETest.java</include>
+                                <!-- Chosen-epoch restart (2026-08-16): a restart must be able to
+                                     replay an OLDER fire of a run, leave the other epochs alone,
+                                     and not push the run's epoch pointer backward (the next fire
+                                     would then reuse an epoch that already has history). Same cheap
+                                     shape as RerunCycle: manual trigger + set node, no agents. -->
+                                <include>**/e2e/nodes/RerunChosenEpochE2ETest.java</include>
+                                <!-- Same feature through the AGENT entry point, where the epoch
+                                     used to be dropped: the call succeeded, reported the latest
+                                     epoch, and the fire the caller wanted repaired was untouched.
+                                     Also covers the refusals, including the one that must lift
+                                     once the live epoch settles. -->
+                                <include>**/e2e/nodes/RerunChosenEpochAgentE2ETest.java</include>
                                 <include>**/e2e/nodes/ComplexPatternsE2ETest.java</include>
                                 <include>**/e2e/stress/CombinationStressE2ETest.java</include>
                             </includes>

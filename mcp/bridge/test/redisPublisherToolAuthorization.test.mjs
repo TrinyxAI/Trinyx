@@ -82,11 +82,14 @@ test('forwards applicationId so application:acquire can open the install modal',
   assert.equal(authEvent.toolAuthorization.applicationId, 'pub-123');
 });
 
-test('emits a distinct card per gated call within a turn (parallel, async - no pause)', async () => {
+test('emits a distinct card per gated call within a turn', async () => {
   const redis = makeRedis();
   const publisher = new RedisPublisher(redis, 'stream-1', 'conv-1', redis);
 
-  // The bridge never pauses the agent, so two gated actions in the same turn each raise a card.
+  // Two gated actions in one turn each raise their own card. Neither carries
+  // approvalCardEmitted, so the gate painted neither: acquire is never held (the user
+  // installs the app themselves) and this execute reached the publisher ungated. When the
+  // gate does paint a card, it holds the call and this publisher stays out of the way.
   await publisher.publishToolResult('call-a', 'application', true, 100, '{}', {
     toolAuthorizationRequired: true, rule: 'application:acquire', toolName: 'application',
   });
@@ -101,6 +104,42 @@ test('emits a distinct card per gated call within a turn (parallel, async - no p
     .filter((e) => e.toolAuthorization)
     .map((e) => e.toolAuthorization.rule);
   assert.deepEqual(rules, ['application:acquire', 'application:execute']);
+});
+
+test('does NOT re-emit an authorization card the server-side gate already published', async () => {
+  const redis = makeRedis();
+  const publisher = new RedisPublisher(redis, 'stream-1', 'conv-1', redis);
+
+  // Shape of a result handed back by a park that was refused or expired: the gate painted
+  // the card itself before waiting, so publishing here would show the user two identical cards.
+  await publisher.publishToolResult('call-4', 'workflow', true, 100, '{}', {
+    toolAuthorizationRequired: true,
+    rule: 'workflow:execute',
+    toolName: 'workflow',
+    approvalCardEmitted: true,
+  });
+
+  assert.ok(
+    !parseEvents(redis).some((e) => e.toolAuthorization),
+    'the card must not be published twice',
+  );
+});
+
+test('does NOT re-emit a service-approval card the server-side gate already published', async () => {
+  const redis = makeRedis();
+  const publisher = new RedisPublisher(redis, 'stream-1', 'conv-1', redis);
+
+  await publisher.publishToolResult('call-5', 'catalog', true, 100, '{}', {
+    serviceApprovalRequested: true,
+    services: [{ serviceType: 'gmail', serviceName: 'Gmail', iconSlug: 'gmail' }],
+    reason: 'Connect Gmail',
+    approvalCardEmitted: true,
+  });
+
+  assert.ok(
+    !parseEvents(redis).some((e) => e.services),
+    'the card must not be published twice',
+  );
 });
 
 test('emits distinct credential approval events within a bridge turn', async () => {

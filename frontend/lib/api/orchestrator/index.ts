@@ -36,6 +36,14 @@ export { BridgeAccessService, bridgeAccessService } from './bridge-access.servic
 export { ExecutionService, executionService, type StepOutputSkeleton } from './execution.service';
 export { PublicationService, publicationService } from './publication.service';
 export { VersionService, versionService } from './version.service';
+export {
+  ResourceFolderService,
+  resourceFolderService,
+  type FolderResourceKind,
+  type ResourceFolder,
+  type ResourceFolderTile,
+  type FolderPreviewItem,
+} from './resource-folder.service';
 // ActivityService removed 2026-05-08 - right-side-panel ActivityFeed +
 // ActivityLog backend stack deleted (V177 migration drops the table).
 export { DashboardService, dashboardService } from './dashboard.service';
@@ -272,7 +280,7 @@ export const orchestratorApi = {
   getCredentials: credentialService.getCredentials.bind(credentialService),
   getCredential: credentialService.getCredential.bind(credentialService),
   createCredential: credentialService.createCredential.bind(credentialService),
-  updateCredential: credentialService.updateCredential.bind(credentialService),
+  renameCredential: credentialService.renameCredential.bind(credentialService),
   deleteCredential: credentialService.deleteCredential.bind(credentialService),
   getAllCredentials: credentialService.getAllCredentials.bind(credentialService),
   setDefaultCredential: credentialService.setDefaultCredential.bind(credentialService),

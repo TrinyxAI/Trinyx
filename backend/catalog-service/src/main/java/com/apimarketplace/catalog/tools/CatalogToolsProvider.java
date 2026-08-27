@@ -171,11 +171,24 @@ public class CatalogToolsProvider implements ToolsProvider {
                   (type: api_key | oauth2 | bearer_token | basic_auth | none; requiredScopes) = what
                   credential(action='require') would ask the user to connect ('none' = no credential, just execute).
                 - execute: run a tool with the user's credentials. catalog(action='execute', tool_id='<uuid>', params={...}).
+                  In an interactive chat this call can pause on the user: it needs their authorization, and if
+                  the service is not connected it shows them a Connect card. Both asks happen INSIDE your call,
+                  so it may simply take longer to answer. Do not stop, do not announce that you are waiting,
+                  and do not re-send it - read what comes back. A real API response means it ran. Anything
+                  carrying executed:false means it did NOT run (status 'approval_needed' = not connected,
+                  'authorization_required' = nobody authorized it in time, 'denied' / 'stopped' = the user
+                  said no): report that plainly, do not invent an outcome, and do not send the same call
+                  again - if the user acts afterwards they come back with a new request.
                   Every refusal comes back as one sentence led by a stable code, so branch on the code and
                   report the sentence. CREDENTIALS_REQUIRED = no key of that tool's provider is available for
-                  the pool this call used; the sentence names the integration, and connecting a key is the
-                  user's act (credential(action='require', services=['<integration>'])), so do not retry the
-                  same call. UPSTREAM_REJECTED = the service refused the call, so change it before resending.
+                  the pool this call used; unlike the statuses above this one is a hard failure, so it never
+                  resolves by waiting, and it raises NO card of its own. The sentence names the integration.
+                  Do not retry the same call: report the sentence, then call credential(action='require',
+                  services=['<the integration the sentence names>'], reason='...') to put a Connect card on
+                  their screen - with force=true when the sentence says the token is expired, revoked or
+                  invalid. (Only here. On 'approval_needed' the call already asked for that service, so
+                  asking again adds nothing.)
+                  UPSTREAM_REJECTED = the service refused the call, so change it before resending.
                   TOOL_CALL_FAILED = the call never completed for a reason nothing in it can fix; send it once
                   more at most.
                 - register_api / update_api / delete_api / list_custom_apis: manage your own custom APIs.

@@ -39,6 +39,7 @@ import type { DataSource } from '@/lib/api';
 import type { StorageExplorerEntry } from '@/lib/api/storage-api';
 import type { WorkflowPublication } from '@/lib/api/orchestrator/types';
 import { fileService } from '@/lib/api/orchestrator/file.service';
+import { applicationPanelTabId, workflowPanelTabId } from '@/lib/sidePanel/tabResource';
 
 
 type TabKey = 'workflows' | 'agents' | 'interfaces' | 'tables' | 'applications' | 'files';
@@ -87,7 +88,7 @@ export function ProjectDetailView({ projectId }: ProjectDetailViewProps) {
     switch (type) {
       case 'workflow':
         sidePanel.openTab({
-          id: `workflow-${id}`,
+          id: workflowPanelTabId(id),
           label,
           icon: <WorkflowIcon className="w-4 h-4" />,
           content: <WorkflowBuilderPanelContent workflowId={id} />,
@@ -124,7 +125,7 @@ export function ProjectDetailView({ projectId }: ProjectDetailViewProps) {
         break;
       case 'application':
         sidePanel.openTab({
-          id: `application-${id}`,
+          id: applicationPanelTabId(id),
           label,
           icon: <AppWindow className="w-4 h-4" />,
           content: <ApplicationPanelContent publicationId={id} />,

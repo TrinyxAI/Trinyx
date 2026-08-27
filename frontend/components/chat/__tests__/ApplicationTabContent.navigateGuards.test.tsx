@@ -48,7 +48,7 @@ vi.mock('@/lib/stores/interface-pagination-store', () => ({
 }));
 vi.mock('@/components/app/WorkflowPanelContent', () => ({ setPendingActivateTab: () => undefined }));
 vi.mock('@/lib/api/api-client', () => ({
-  apiClient: { get: vi.fn(), post: vi.fn(), put: vi.fn(), delete: vi.fn(), getTokenProvider: () => null },
+  apiClient: { get: vi.fn(), post: vi.fn(), put: vi.fn(), delete: vi.fn(), getTokenProvider: () => null, getAuthToken: async () => null },
 }));
 vi.mock('@/lib/api', () => ({ orchestratorApi: {} }));
 vi.mock('@/app/workflows/builder/components/interface/InterfaceToolbar', () => ({

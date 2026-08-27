@@ -4,21 +4,24 @@ import { renderHook, waitFor } from '@testing-library/react';
 import { useAuthedObjectUrl } from '../useAuthedObjectUrl';
 
 vi.mock('@/lib/api/api-client', () => ({
-  apiClient: { getTokenProvider: vi.fn() },
+  // getTokenProvider is mocked as "not installed yet" on purpose: that is the real state during
+  // the async auth bootstrap, and it is what the pre-fix code read. Any call site that reaches
+  // for it instead of getAuthToken therefore reproduces the prod 401 in these tests.
+  apiClient: { getAuthToken: vi.fn(), getTokenProvider: vi.fn(() => undefined) },
 }));
 vi.mock('@/lib/stores/current-org-store', () => ({
   getActiveOrgHeaderForRequest: vi.fn(() => ({ 'X-Active-Organization-ID': 'org-7' })),
 }));
 
 import { apiClient } from '@/lib/api/api-client';
-const mockGetTokenProvider = vi.mocked(apiClient.getTokenProvider);
+const mockGetAuthToken = vi.mocked(apiClient.getAuthToken);
 
 let revoked: string[] = [];
 
 beforeEach(() => {
   vi.resetAllMocks();
   revoked = [];
-  mockGetTokenProvider.mockReturnValue(() => Promise.resolve('jwt-abc'));
+  mockGetAuthToken.mockResolvedValue('jwt-abc');
   URL.createObjectURL = vi.fn(() => 'blob:obj-1');
   URL.revokeObjectURL = vi.fn((u: string) => { revoked.push(u); });
 });
@@ -125,6 +128,43 @@ describe('useAuthedObjectUrl', () => {
     await waitFor(() => expect(result.current.url).toBe('blob:obj-1'));
     expect(captured).toBeTruthy();
     expect(captured!.type).toBe('application/pdf');
+  });
+
+  // Regression - prod 2026-08-25: 98 of the gateway's 401s in 7 days were
+  // GET /api/files/by-id/<id>/raw arriving with NO Authorization header at all
+  // ("Authentication required", rejected in 0 ms). The hook read
+  // apiClient.getTokenProvider() directly, which is undefined until the async auth
+  // bootstrap in smart-providers.tsx installs it, so a component mounting inside that
+  // window fetched anonymously - and the effect, keyed only on [src, mimeTypeHint],
+  // never retried once auth arrived. Going through getAuthToken makes the fetch WAIT.
+  it('waits for the token instead of firing an anonymous request while auth is still booting', async () => {
+    let releaseToken: (t: string) => void = () => {};
+    mockGetAuthToken.mockReturnValue(new Promise<string>((resolve) => { releaseToken = resolve; }));
+    const fetchMock = mockFetchOk();
+
+    const { result } = renderHook(() => useAuthedObjectUrl('/api/proxy/files/by-id/abc/raw'));
+
+    // The window where the old code fired an anonymous request the gateway answered 401.
+    await Promise.resolve();
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(result.current.loading).toBe(true);
+
+    releaseToken('jwt-late');
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+    expect(fetchMock.mock.calls[0][1].headers.Authorization).toBe('Bearer jwt-late');
+    await waitFor(() => expect(result.current.url).toBe('blob:obj-1'));
+  });
+
+  it('still serves a signed-out caller anonymously when no token exists at all', async () => {
+    // getAuthToken resolves null once its wait is exhausted; the hook must answer rather than
+    // hang, so a public/share-token context keeps working.
+    mockGetAuthToken.mockResolvedValue(null);
+    const fetchMock = mockFetchOk();
+
+    const { result } = renderHook(() => useAuthedObjectUrl('/api/proxy/files/by-id/abc/raw'));
+
+    await waitFor(() => expect(result.current.url).toBe('blob:obj-1'));
+    expect(fetchMock.mock.calls[0][1].headers.Authorization).toBeUndefined();
   });
 
   it('keeps a specific server Content-Type even when a hint is provided (no re-type)', async () => {

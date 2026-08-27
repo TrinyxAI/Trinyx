@@ -134,6 +134,12 @@ class CatalogToolsProviderTest {
                     // the credential triage block - must point at the UNIFIED tool's
                     // require action, not the legacy request_credential name
                     .contains("credential(action='require')")
+                    // ...and specifically ON the CREDENTIALS_REQUIRED branch, which raises no
+                    // card of its own. Matching the bare call name is satisfied by an
+                    // unrelated bullet higher up, which is how the pointer was once deleted
+                    // from here with the suite still green - leaving the agent told, by the
+                    // always-in-context decision table, to make a call this text forbade.
+                    .contains("report the sentence, then call credential(action='require'")
                     .contains("api_key | oauth2 | bearer_token | basic_auth | none")
                     // routing away from internal resources
                     .contains("NOT FOR INTERNAL RESOURCES")

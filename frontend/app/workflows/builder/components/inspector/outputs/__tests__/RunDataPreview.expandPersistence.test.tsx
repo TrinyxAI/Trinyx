@@ -26,7 +26,7 @@ vi.mock('@/contexts/PublicationSnapshotContext', () => ({
 }));
 
 vi.mock('@/lib/api/api-client', () => ({
-  apiClient: { getTokenProvider: () => null },
+  apiClient: { getTokenProvider: () => null, getAuthToken: async () => null },
 }));
 
 // Mock the hook entirely so the test controls (data, currentIndex, totalItems)

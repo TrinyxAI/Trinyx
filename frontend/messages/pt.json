@@ -792,6 +792,7 @@
     "stopDictation": "Parar ditado",
     "dictationNotSupported": "Reconhecimento de voz não é suportado neste navegador",
     "attachFiles": "Anexar arquivos",
+    "moreActions": "Mais ações",
     "imageViewer": {
       "enlarge": "Ampliar"
     },
@@ -1424,6 +1425,17 @@
     "retry": "Tentar Novamente"
   },
   "marketplace": {
+    "editableCopy": {
+      "button": "Criar uma cópia editável",
+      "description": "Copia esta aplicação para os seus fluxos de trabalho para poder editá-la. A aplicação instalada continua a funcionar sem alterações.",
+      "creating": "A criar a cópia editável...",
+      "created": "Cópia editável criada",
+      "existing": "Já tem uma cópia editável",
+      "open": "Abrir",
+      "error": "Não foi possível criar a cópia editável",
+      "openCreated": "Abrir a cópia editável",
+      "installFailed": "Não foi possível criar a cópia editável. A aplicação está instalada: pode pedir a cópia novamente no menu de definições."
+    },
     "title": "Marketplace",
     "subtitle": "Descubra e use workflows criados pela comunidade",
     "searchPlaceholder": "Buscar workflows...",
@@ -1610,6 +1622,8 @@
     "priceFree": "Gratuito",
     "pricePaid": "Pago",
     "resetFilters": "Repor filtros",
+    "loadMore": "Carregar mais",
+    "loadingMore": "A carregar...",
     "noFilterResults": "Nenhuma aplicação corresponde a estes filtros",
     "noFilterResultsHint": "Alargue o filtro de avaliação, data ou preço para ver mais aplicações.",
     "filterSkills": "Skills",
@@ -1663,7 +1677,10 @@
     "snapshotBadge": "Snapshot",
     "snapshotEmpty": "Nenhum dado neste snapshot",
     "snapshotPreview": "Prévia do snapshot",
-    "viewRejectionReason": "Ver motivo da rejeição"
+    "viewRejectionReason": "Ver motivo da rejeição",
+    "settingsMenu": {
+      "label": "Definições da aplicação"
+    }
   },
   "reviews": {
     "title": "Avaliações",
@@ -1719,6 +1736,8 @@
   "applications": {
     "favorite": "Adicionar aos favoritos",
     "unfavorite": "Remover dos favoritos",
+    "unmuteSound": "Ativar o som",
+    "muteSound": "Desativar o som",
     "favoriteErrorTitle": "Não foi possível atualizar os favoritos",
     "favoriteErrorMessage": "Tente novamente.",
     "filterAll": "Todas",
@@ -1878,6 +1897,19 @@
       "dismiss": "Entendi"
     },
     "acquire": {
+      "installedTitle": "Instalação concluída",
+      "installedIntro": "«{title}» foi adicionado ao seu espaço:",
+      "installedPrimaryApplication": "1 aplicação",
+      "installedPrimaryWorkflow": "1 fluxo de trabalho",
+      "installedPrimaryAgent": "1 agente",
+      "installedPrimarySkill": "1 skill",
+      "installedPrimaryTable": "1 tabela",
+      "installedPrimaryInterface": "1 interface",
+      "installedWorkflows": "{count, plural, one {# fluxo de trabalho} other {# fluxos de trabalho}}",
+      "installedInterfaces": "{count, plural, one {# interface} other {# interfaces}}",
+      "installedTables": "{count, plural, one {# tabela} other {# tabelas}}",
+      "installedAgents": "{count, plural, one {# agente} other {# agentes}}",
+      "installBusy": "Já existe outra instalação em curso",
       "titleFree": "Instalar Aplicação",
       "titlePaid": "Comprar Aplicação",
       "anonymous": "Anônimo",
@@ -3265,6 +3297,10 @@
       "applied": "Aplicados {inserted} novos, {updated} atualizados, {deprecated} obsoletos. Crie um novo pacote para distribuir.",
       "apply": "Aplicar",
       "applyRejected": "A aplicação foi rejeitada - verifique as falhas de guarda acima.",
+      "discoveryTitle": "Descobertos nos próprios provedores",
+      "discoveryPricedFromOpenRouter": "Os preços vêm do OpenRouter, que publica uma tarifa de revenda. Confira-os na tabela do próprio provedor antes de ativar um modelo.",
+      "discoveryCount": "{count, plural, one {# novo modelo} other {# novos modelos}}",
+      "discoverySkipped": "Sem chave de API para: {providers}. Não foi possível ler as listas de modelos deles.",
       "cancel": "Cancelar",
       "colModel": "Modelo",
       "colProvider": "Provedor",
@@ -3278,7 +3314,7 @@
       "overridePriceSanity": "Ignorar a guarda de sanidade de preços",
       "overridePriceSanityHint": "Aplicar as linhas sinalizadas mesmo assim. Marque isso apenas se tiver verificado as alterações de preço na página oficial de preços do provedor.",
       "refresh": "Atualizar a partir dos provedores",
-      "subtitle": "Busque os modelos e preços atuais do LiteLLM + OpenRouter, visualize o diff e depois aplique.",
+      "subtitle": "Busque os modelos e preços atuais do LiteLLM, do OpenRouter e da lista de modelos de cada provedor, visualize o diff e depois aplique.",
       "title": "Atualizar a partir de feeds ao vivo",
       "unchanged": "Inalterado",
       "updated": "Atualizado"
@@ -3473,6 +3509,24 @@
       "cannotRemoveDefault": "Nao e possivel remover padrao",
       "onlyCredentialForIntegration": "Esta e a unica credencial para este servico. Adicione outra credencial antes de remover esta como padrao.",
       "cannotRemoveOnlyCredential": "Nao e possivel remover padrao: esta e a unica credencial para este servico",
+      "rename": "Renomear",
+      "renameAriaLabel": "Renomear {name}",
+      "renameDialog": {
+        "title": "Renomear credencial",
+        "description": "Apenas o nome exibido muda: a conexão, suas permissões e seu status padrão permanecem iguais.",
+        "label": "Nome",
+        "placeholder": "ex.: Gmail (conta de trabalho)",
+        "save": "Salvar",
+        "saving": "Salvando...",
+        "cancel": "Cancelar",
+        "successTitle": "Credencial renomeada",
+        "success": "Renomeada para «{name}»",
+        "cannotRename": "Esta conexão é identificada pelo nome, portanto não pode ser renomeada: os nós de workflow que a utilizam a reconhecem por esse nome e renomeá-la os desconectaria.",
+        "duplicateName": "Este nome já é usado por outra credencial do mesmo proprietário para o mesmo serviço, possivelmente em outro espaço de trabalho. Escolha outro.",
+        "failed": "Não foi possível renomear esta credencial. Tente novamente.",
+        "emptyName": "O nome não pode ficar vazio.",
+        "tooLong": "O nome não pode ultrapassar {max} caracteres."
+      },
       "noMatchingCredentials": "Nenhuma credencial corresponde aos seus filtros.",
       "noCredentialsYet": "Nenhuma credencial configurada ainda.",
       "addFirstIntegration": "Adicione sua primeira integracao na aba Disponiveis.",
@@ -4927,6 +4981,13 @@
         "body": "As recargas únicas serão habilitadas aqui assim que o pagamento for configurado.",
         "title": "Em breve"
       }
+    },
+    "event": {
+      "card": {
+        "referenceTitle": "Preço após o período fundador: {price} por mês",
+        "foundingUntilKept": "Preço fundador garantido até <b>{date}</b> e, depois, mantido enquanto você continuar assinante",
+        "foundingUntil": "Preço fundador garantido até <b>{date}</b>"
+      }
     }
   },
   "storage": {
@@ -5078,7 +5139,8 @@
     "moveHere": "Mover aqui",
     "noFoldersYet": "Ainda não há pastas - crie uma primeiro ou mova para o nível superior.",
     "backToParent": "Subir um nível",
-    "generate": "Gerar"
+    "generate": "Gerar",
+    "generatedAssets": "Gerados"
   },
   "fileDetail": {
     "download": "Baixar {name}",
@@ -6611,7 +6673,7 @@
       "mappingValuePlaceholder": "Expressão ou valor",
       "timeout": "Tempo Limite (segundos)",
       "timeoutPlaceholder": "ex.: 300",
-      "timeoutHelp": "Tempo máximo de execução em segundos",
+      "timeoutHelp": "Tempo de espera até o subfluxo terminar. Ele continua em execução se esgotar.",
       "maxDepth": "Profundidade máxima",
       "maxDepthPlaceholder": "ex.: 5",
       "maxDepthHelp": "Profundidade máxima de aninhamento para sub-workflows recursivos",
@@ -6733,6 +6795,11 @@
       "timeout": "Tempo Limite (segundos)",
       "timeoutPlaceholder": "ex.: 30",
       "timeoutHelp": "Tempo máximo de execução em segundos"
+    },
+    "rerunConfirm": {
+      "title": "Recomeçar desta etapa?",
+      "message": "Esta execução é automática. Recomeçar aqui reexecuta esta etapa e depois deixa o resto do fluxo correr sozinho, o que pode chamar ferramentas pagas e enviar mensagens reais.",
+      "confirm": "Recomeçar"
     },
     "canvas": {
       "portSingleTargetHint": "Esta saída já está conectada. Uma porta vai para um único nó - adicione um nó Fork para executar vários em paralelo.",
@@ -7569,6 +7636,15 @@
       "selectAll": "Selecionar tudo",
       "autoLayout": "Layout automático",
       "fitView": "Ajustar visualização"
+    },
+    "credentialSelector": {
+      "accountLabel": "Conta usada por esta etapa",
+      "toggleAriaLabel": "Escolher a conta na execução",
+      "toggleHelpOff": "A conta é escolhida agora, no seletor abaixo. Ative para escolhê-la na execução.",
+      "toggleHelpOn": "A conta é escolhida na execução, a partir da expressão abaixo. Desative para escolher uma agora.",
+      "expressionLabel": "Expressão da conta",
+      "expressionCaution": "Quem puder escrever este valor escolhe a conta: vincule-o a uma fonte que você controla.",
+      "expressionHelp": "Deve resolver para o NOME de uma das suas credenciais desta integração (ou para o id dela). Use uma linha de tabela, um campo de gatilho ou um item de split para executar um mesmo fluxo em várias contas. Se não resolver para nada, a etapa falha em vez de recorrer à sua conta padrão. Só pode ser selecionada uma conta com status ativo, cujo nome não seja partilhado com outra conta ativa da mesma integração; um nome que seja um inteiro positivo é lido como um id. Vincule-o a algo que o dono do fluxo controla (uma linha de tabela, uma variável) e não a um campo que um visitante não confiável possa preencher, como o corpo de um webhook público ou um formulário de uma aplicação partilhada."
     }
   },
   "webhookTrigger": {
@@ -8052,6 +8128,7 @@
     "warningCount": "Aviso"
   },
   "serviceApproval": {
+    "waitingForYou": "O assistente aguarda sua resposta para continuar.",
     "title": "Conectar Servicos",
     "subtitle": "Conecte os seguintes servicos para completar sua solicitacao",
     "reason": "Por que isso e necessario",
@@ -8575,6 +8652,12 @@
       "totalAvailable": "Total de créditos disponíveis",
       "walletSubtitle": "Créditos do seu plano e recargas",
       "walletTitle": "Carteira"
+    },
+    "upgradeRequired": {
+      "label": "Requer créditos pagos",
+      "title": "Os seus créditos não podem pagar este modelo",
+      "explanation": "Os seus créditos mensais cobrem a execução dos nós de fluxo, mas não o trabalho de um modelo (chat, agentes, geração). Esse é pago com créditos pré-pagos, e já não tem nenhum.",
+      "cta": "Ver planos ou recarregar"
     }
   },
   "localMcp": {
@@ -9615,6 +9698,7 @@
     }
   },
   "toolAuthorization": {
+    "waitingForYou": "O assistente aguarda sua resposta para continuar.",
     "actionLabel": "Ação",
     "approve": "Autorizar",
     "approved": "Autorizada",
@@ -10230,7 +10314,10 @@
       "providerPlaceholder": "Escolha um fornecedor",
       "chooseFile": "Escolher um ficheiro",
       "replaceFile": "Substituir",
-      "noFile": "Nenhum ficheiro escolhido"
+      "noFile": "Nenhum ficheiro escolhido",
+      "optionsLoading": "A carregar valores...",
+      "optionsTruncated": "A mostrar os primeiros valores de {count}. Escreva um valor se o que procura não aparecer.",
+      "optionsEmpty": "O fornecedor não devolveu valores para este campo. Escreva um se o souber."
     },
     "modelCount": "{count} modelos",
     "empty": "Ainda não há nenhum modelo de geração disponível.",
@@ -10238,6 +10325,8 @@
     "done": "Concluído",
     "billedOn": "Faturado sobre {quantity} {unit}",
     "download": "Transferir",
+    "openInFiles": "Ver nos ficheiros",
+    "savedNoPreview": "A geração terminou, mas não voltou nada que esta página consiga mostrar. Se foi produzido um recurso, está nos seus ficheiros.",
     "generate": "Gerar",
     "again": "Alterar algo",
     "back": "Voltar",
@@ -10248,14 +10337,65 @@
       "stillRunning": "A ligação caiu, mas a geração continua a correr no servidor e será faturada. O seu ficheiro aparecerá nos seus ficheiros assim que terminar.",
       "unreadable": "A geração foi recusada e nada foi produzido, mas o motivo chegou num formato que esta página não consegue mostrar. Experimente outro modelo ou tente novamente daqui a pouco."
     },
-    "payer": {
-      "monthlyCreditsOnly": "Os seus créditos mensais financiam as execuções de fluxos, não a geração. Use a sua própria chave, ou subscreva ou carregue para pagar com créditos."
-    },
     "assetRoles": {
       "source": "Imagem de origem",
       "first_frame": "Primeira imagem",
       "reference": "Imagem de referência",
       "mask": "Máscara"
+    },
+    "history": {
+      "toggle": "Gerações anteriores",
+      "title": "Gerações anteriores",
+      "subtitle": "Escolha uma para partir do que a produziu"
     }
+  },
+  "generationHistory": {
+    "allFormats": "Tudo",
+    "empty": "Ainda não foi gerado nada aqui. O que você gerar aparece aqui, com o modelo e as palavras que o criaram.",
+    "emptyForFormat": "Ainda não foi gerado nenhum conteúdo do tipo {format} aqui.",
+    "error": "Não foi possível carregar as gerações anteriores. Tente novamente daqui a pouco.",
+    "untitled": "Geração sem título",
+    "reuse": "Reutilizar",
+    "reuseUnavailable": "Este modelo já não está disponível, por isso esta geração não pode ser repetida.",
+    "open": "Abrir {name}",
+    "previous": "Anterior",
+    "next": "Seguinte",
+    "range": "{from}-{to}",
+    "generatedWith": "Gerado com {model}",
+    "regenerate": "Alterar algo e gerar de novo"
+  },
+  "folders": {
+    "newFolder": "Nova pasta",
+    "createFolder": "Criar pasta",
+    "renameFolder": "Renomear pasta",
+    "folderName": "Nome da pasta",
+    "cancel": "Cancelar",
+    "deleteFolder": "Excluir pasta",
+    "deleteFolderConfirm": "Excluir a pasta «{name}»? O conteúdo volta para o nível superior, nada é excluído.",
+    "moveToFolder": "Mover para uma pasta",
+    "back": "Voltar",
+    "upOneLevel": "Subir um nível",
+    "allWorkflows": "Todos os fluxos",
+    "allAgents": "Todos os agentes",
+    "allTables": "Todas as tabelas",
+    "allInterfaces": "Todas as páginas",
+    "allApplications": "Todos os apps",
+    "workflowCount": "{count, plural, =0 {Vazia} one {# fluxo} other {# fluxos}}",
+    "agentCount": "{count, plural, =0 {Vazia} one {# agente} other {# agentes}}",
+    "tableCount": "{count, plural, =0 {Vazia} one {# tabela} other {# tabelas}}",
+    "interfaceCount": "{count, plural, =0 {Vazia} one {# página} other {# páginas}}",
+    "applicationCount": "{count, plural, =0 {Vazia} one {# app} other {# apps}}",
+    "subfolderCount": "{count, plural, one {# pasta} other {# pastas}}",
+    "emptyFolderTitle": "Esta pasta está vazia",
+    "emptyFolderSubtitle": "Arraste cartões até uma pasta ou use Mover para uma pasta em uma seleção.",
+    "moved": "Movido",
+    "movedToFolder": "{count, plural, one {# item movido} other {# itens movidos}} para {name}",
+    "movedToTopLevel": "{count, plural, one {# item movido} other {# itens movidos}} para o nível superior",
+    "draggingCount": "{count, plural, one {# item} other {# itens}}",
+    "actionFailed": "Falha na ação da pasta",
+    "createFailed": "Não foi possível criar a pasta.",
+    "renameFailed": "Não foi possível renomear a pasta.",
+    "deleteFailed": "Não foi possível excluir a pasta.",
+    "moveFailed": "Não foi possível concluir a movimentação."
   }
 }

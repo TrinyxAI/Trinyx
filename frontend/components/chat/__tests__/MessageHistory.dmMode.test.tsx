@@ -33,7 +33,7 @@ vi.mock('@/components/chat/MessageActions', () => ({ MessageActions: () => null 
 vi.mock('@/components/agents/AvatarPicker', () => ({
   AvatarDisplay: ({ name }: { name?: string }) => <div data-testid="msg-avatar">{name}</div>,
 }));
-vi.mock('@/lib/api/api-client', () => ({ apiClient: { getTokenProvider: () => null } }));
+vi.mock('@/lib/api/api-client', () => ({ apiClient: { getTokenProvider: () => null, getAuthToken: async () => null } }));
 
 import { MessageHistory } from '../MessageHistory';
 

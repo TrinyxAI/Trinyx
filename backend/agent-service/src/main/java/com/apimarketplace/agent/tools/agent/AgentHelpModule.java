@@ -168,7 +168,11 @@ public class AgentHelpModule implements ToolModule {
             "tool-calling loop. Requires agent_id + prompt. Sub-agent sees previous conversation (memory=true " +
             "default) unless memory=false. IMPORTANT: on this path the sub-agent's system_prompt is automatically " +
             "augmented with a 'Tasks in your inbox' section, so calling execute is one of the two automatic " +
-            "inbox wake-up paths (the other is schedule fire).");
+            "inbox wake-up paths (the other is schedule fire). INTERACTIVE CHAT: this needs the user's " +
+            "authorization, and asking them happens inside your call, so it may take longer to answer. Do not " +
+            "stop, do not announce that you are waiting, do not re-call: read the response. A sub-agent " +
+            "response means it ran; `executed:false` means it did NOT - report that, invent nothing, and " +
+            "continue or finish.");
 
         // --- Memory & sharing ---
         actions.put("get_history",

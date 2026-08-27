@@ -47,5 +47,11 @@ public record WorkflowSummary(
      * set. Edited in the workflow settings "Advanced" section. The frontend
      * renders it as dollars in CE and raw credits in cloud.
      */
-    java.math.BigDecimal budgetCredits
+    java.math.BigDecimal budgetCredits,
+    /**
+     * Folder this workflow is filed under on the list page (V448), or {@code null} when it
+     * sits at the top level. Lets the list show where a row lives without a second call -
+     * used by the "move to..." dialog to preselect the current folder.
+     */
+    UUID folderId
 ) {}

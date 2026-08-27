@@ -57,17 +57,21 @@ class LiteLlmProviderCoverageTest {
     }
 
     @Test
-    @DisplayName("The 3 previously-missing Chinese providers are mapped under their LiteLLM keys")
+    @DisplayName("Every Chinese provider we can execute is mapped under its LiteLLM key")
     void chineseProvidersAreMappedUnderTheirLiteLlmKeys() {
         // LiteLLM names Qwen after Alibaba's API brand, not the model family.
+        // minimax was the last one still unmapped: its 6 chat models passed
+        // every other filter and were dropped purely for want of this entry.
         assertThat(LiteLlmFeedParser.PROVIDER_MAP)
                 .containsEntry("moonshot", "moonshot")
                 .containsEntry("dashscope", "qwen")
-                .containsEntry("zai", "zai");
+                .containsEntry("zai", "zai")
+                .containsEntry("minimax", "minimax")
+                .containsEntry("deepseek", "deepseek");
     }
 
     @Test
-    @DisplayName("PROVIDER_MAP is exactly the 12 expected LiteLLM keys - nothing silently added or lost")
+    @DisplayName("PROVIDER_MAP is exactly the 13 expected LiteLLM keys - nothing silently added or lost")
     void providerMapIsExactlyTheExpectedKeys() {
         // Pins the map in both directions: everyExecutableProviderIsMapped
         // catches a MISSING provider, this catches an accidentally ADDED key
@@ -89,7 +93,8 @@ class LiteLlmProviderCoverageTest {
                         Map.entry("cohere_chat", "cohere"),
                         Map.entry("moonshot", "moonshot"),
                         Map.entry("dashscope", "qwen"),
-                        Map.entry("zai", "zai")));
+                        Map.entry("zai", "zai"),
+                        Map.entry("minimax", "minimax")));
     }
 
     @Test

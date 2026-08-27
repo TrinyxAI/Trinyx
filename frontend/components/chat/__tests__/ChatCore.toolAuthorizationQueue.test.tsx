@@ -187,7 +187,8 @@ describe('ChatCore tool authorization', () => {
     fireEvent.click(screen.getByRole('button', { name: 'approve' }));
 
     await waitFor(() => {
-      expect(mocks.approveToolAuthorization).toHaveBeenCalledWith('conversation-1', 'application:execute', false);
+      // 4th arg is the held-call key: undefined here because nothing is parked.
+      expect(mocks.approveToolAuthorization).toHaveBeenCalledWith('conversation-1', 'application:execute', false, undefined);
     });
     await waitFor(() => {
       expect(screen.getByTestId('queued-message')).toHaveTextContent(RESUME_CONTINUE);
@@ -214,6 +215,8 @@ describe('ChatCore tool authorization', () => {
     // Install completes → grant once + contextual "installed" resume.
     fireEvent.click(screen.getByRole('button', { name: 'modal-success' }));
     await waitFor(() => {
+      // The install-modal path grants without a held-call key: application:acquire is never
+      // parked (approving it means "the USER installs", not "run the tool").
       expect(mocks.approveToolAuthorization).toHaveBeenCalledWith('conversation-1', 'application:acquire', false);
     });
     await waitFor(() => {
@@ -261,7 +264,8 @@ describe('ChatCore tool authorization', () => {
       await Promise.resolve();
     });
 
-    expect(mocks.approveToolAuthorization).toHaveBeenCalledWith('conversation-1', 'application:execute', false);
+    // 4th arg is the held-call key: undefined here because nothing is parked.
+    expect(mocks.approveToolAuthorization).toHaveBeenCalledWith('conversation-1', 'application:execute', false, undefined);
     expect(useMessageQueueStore.getState().getQueue('conversation-1')).toHaveLength(1);
     expect(useMessageQueueStore.getState().getQueue('conversation-1')[0]?.content).toBe(RESUME_CONTINUE);
     expect(onSendMessage).not.toHaveBeenCalled();
@@ -310,7 +314,7 @@ describe('ChatCore tool authorization', () => {
     fireEvent.click(screen.getByRole('button', { name: 'decline-tool' }));
 
     await waitFor(() => {
-      expect(mocks.denyToolAuthorization).toHaveBeenCalledWith('conversation-1', 'application:execute');
+      expect(mocks.denyToolAuthorization).toHaveBeenCalledWith('conversation-1', 'application:execute', undefined);
     });
     expect(mocks.streaming.clearToolAuthorization).toHaveBeenCalledWith('conversation-1', 'auth:application:execute#call-1');
     expect(useAppRunAutoOpenStore.getState().armedAt).toBeNull();

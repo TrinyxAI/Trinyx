@@ -4,6 +4,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { useRouter } from 'next/navigation';
 import { CheckCircle, X, Gift, Coins, AlertTriangle, AppWindow, Monitor, Workflow, PackagePlus, Table2, Link2, Bot, Zap, Network, Download, Server } from 'lucide-react';
+import { Checkbox } from '@/components/ui/checkbox';
 import { Button } from '@/components/ui/button';
 import { useTranslations } from 'next-intl';
 import type { WorkflowPublication } from '@/lib/api/orchestrator/types';
@@ -12,6 +13,7 @@ import { ceExclusiveFeatureKeys, isCeExclusiveBlocked } from '@/lib/marketplace/
 import { PublisherAvatar } from '@/components/marketplace/PublisherAvatar';
 import { track } from '@/lib/analytics/analytics';
 import { useMarketplaceInstallStore } from '@/lib/stores/marketplace-install-store';
+import { InstalledResourcesList } from '@/components/marketplace/InstallSummaryModal';
 
 type ModalState =
   | 'confirm'
@@ -64,6 +66,15 @@ export default function AcquirePublicationModal({
   const router = useRouter();
   const [mounted, setMounted] = useState(false);
 
+  // Opt-in editable WORKFLOW copy, requested at install time.
+  //
+  // The copy re-clones the app's whole snapshot (a second set of its interfaces,
+  // tables and agents), which is exactly why it stopped being minted on every
+  // install. Offering it here as an unchecked box keeps the cheap install the
+  // default while sparing the user who DOES want to edit the app a second trip
+  // through the application's settings cog.
+  const [withEditableCopy, setWithEditableCopy] = useState(false);
+
   // The install state machine (simulated 5-10s progress + acquire call +
   // error mapping) lives in the SHARED marketplace-install store so it
   // survives this modal closing/unmounting (inline-progress mode) and page
@@ -80,6 +91,12 @@ export default function AcquirePublicationModal({
   const progress = isMyInstall ? active.progress : 0;
   const error = isMyInstall ? active.error : null;
   const acquiredId = isMyInstall ? active.acquiredId : null;
+  // What the acquire reported creating - drives the success screen's recap.
+  const resources = isMyInstall ? active.resources : {};
+  // Editable copy outcome for the success screen (see the confirm-screen opt-in).
+  const editableCopyRequested = isMyInstall ? active.withEditableCopy : false;
+  const editableCopyWorkflowId = isMyInstall ? active.editableCopyWorkflowId : null;
+  const editableCopyFailed = isMyInstall ? active.editableCopyFailed : false;
 
   // Notify the caller exactly once per completed install (non-inline flow -
   // in inline mode the modal is already closed and the caller watches the
@@ -118,6 +135,10 @@ export default function AcquirePublicationModal({
   const wasOpenRef = useRef(false);
   useEffect(() => {
     if (isOpen && !wasOpenRef.current) {
+      // A fresh open starts from the confirm screen, so the tick starts unchecked
+      // too - a box left ticked from a previous publication would silently clone a
+      // second app the user never asked to edit.
+      setWithEditableCopy(false);
       const current = useMarketplaceInstallStore.getState().active;
       if (current?.publication.id === publication.id) {
         const isTerminal = current.status !== 'installing';
@@ -143,6 +164,16 @@ export default function AcquirePublicationModal({
   const isTable = publication.publicationType === 'TABLE';
   const isInterface = publication.publicationType === 'INTERFACE';
 
+  // Only an APPLICATION acquired from someone else has an editable copy to make:
+  // the publisher owns the source workflow directly (no APPLICATION clone), and the
+  // resource types below install a single resource with nothing to decouple. Mirrors
+  // `canCreateEditableCopy` in PublicationInfoPanel, which offers the same action
+  // after the fact.
+  const canRequestEditableCopy =
+    displayMode === 'APPLICATION' &&
+    !isAgent && !isSkill && !isTable && !isInterface &&
+    !publication.ownedByMe;
+
   // Another publication is mid-install: the store is single-flight, so
   // confirming would be silently dropped - disable the CTA instead of lying.
   const otherInstallRunning = !isMyInstall && active?.status === 'installing';
@@ -154,7 +185,11 @@ export default function AcquirePublicationModal({
   const handleConfirm = () => {
     if (ceExclusiveBlocked) return;
     const fromConfirm = state === 'confirm';
-    const started = startInstall(publication, { ceMode, inline: Boolean(inlineProgress) });
+    const started = startInstall(publication, {
+      ceMode,
+      inline: Boolean(inlineProgress),
+      withEditableCopy: canRequestEditableCopy && withEditableCopy,
+    });
     if (!started) return; // another install is running - keep the modal as-is
     if (inlineProgress && fromConfirm) {
       // Return to the page: the caller's card takes over progress rendering.
@@ -201,6 +236,15 @@ export default function AcquirePublicationModal({
       return;
     }
     router.push('/app/applications');
+  };
+
+  // Plain router.push (not next-intl's Link): this modal is embedded in many trees
+  // (chat included) and the middleware re-applies the /{locale} prefix - same
+  // approach as every other navigation in this component.
+  const handleOpenEditableCopy = () => {
+    if (!editableCopyWorkflowId) return;
+    handleClose();
+    router.push(`/app/workflow/${editableCopyWorkflowId}`);
   };
 
   const handleGoToSettings = () => {
@@ -291,9 +335,26 @@ export default function AcquirePublicationModal({
             <h2 id="acquire-publication-success-title" className="text-xl font-semibold text-theme-primary mb-2">
               {t('successTitle')}
             </h2>
-            <p className="text-sm text-theme-secondary mb-6">
+            <p className="text-sm text-theme-secondary mb-5">
               {t('successMessage', { title: publication.title })}
             </p>
+            {/* What the install actually created. The inline-progress consumers get the
+                same list from InstallSummaryModal; here it rides the success screen so
+                no install path leaves the user guessing what landed. */}
+            {/* The requested editable copy rides the same recap: it is a second
+                workflow the user can open right now, listed under (not among) the
+                app's own resources. A failed copy is a note there, never an error
+                screen - the application itself installed fine. */}
+            <div className="rounded-xl border border-theme bg-theme-secondary/40 p-4 mb-6 text-left">
+              <InstalledResourcesList
+                publication={publication}
+                resources={resources}
+                editableCopy={editableCopyRequested
+                  ? { workflowId: editableCopyWorkflowId, failed: editableCopyFailed }
+                  : undefined}
+                onOpenEditableCopy={handleOpenEditableCopy}
+              />
+            </div>
             <Button
               onClick={handleGoToApplications}
               className="w-full"
@@ -572,6 +633,34 @@ export default function AcquirePublicationModal({
           )}
         </div>
 
+        {/* Editable copy opt-in - unchecked by default: the copy duplicates every
+            interface, table and agent the app carries, so it is a deliberate choice,
+            not a free extra. The same action stays available afterwards from the
+            application's settings cog. */}
+        {canRequestEditableCopy && (
+          <label
+            htmlFor="acquire-editable-copy"
+            className="flex items-start gap-2.5 mb-5 p-3 rounded-xl border border-theme cursor-pointer hover:bg-theme-secondary/40 transition-colors"
+          >
+            <Checkbox
+              id="acquire-editable-copy"
+              data-testid="acquire-editable-copy-checkbox"
+              checked={withEditableCopy}
+              onCheckedChange={(checked) => setWithEditableCopy(checked === true)}
+              className="mt-0.5"
+            />
+            <span className="min-w-0">
+              <span className="flex items-center gap-1.5 text-sm font-medium text-theme-primary">
+                <Workflow className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+                {tMarketplace('editableCopy.button')}
+              </span>
+              <span className="block mt-0.5 text-xs text-theme-secondary leading-snug">
+                {tMarketplace('editableCopy.description')}
+              </span>
+            </span>
+          </label>
+        )}
+
         {/* Price */}
         <div className="flex items-center gap-2 mb-6">
           {isFree ? (
@@ -588,6 +677,14 @@ export default function AcquirePublicationModal({
             </>
           )}
         </div>
+
+        {/* Another install is mid-flight and the machine takes one at a time: say so,
+            instead of leaving a disabled button with no explanation. */}
+        {otherInstallRunning && (
+          <p className="text-xs text-theme-secondary mb-2" role="status">
+            {t('installBusy')}
+          </p>
+        )}
 
         {/* Buttons */}
         <div className="flex gap-3 mt-8">

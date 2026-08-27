@@ -6,6 +6,7 @@
  */
 
 import { apiClient, ApiError } from '../api-client';
+import type { ResourceFolder, ResourceFolderTile } from './resource-folder.service';
 import { getActiveOrgHeaderForRequest } from '@/lib/stores/current-org-store';
 import type { DataSource, DataSourceColumn, DataSourceItem, PaginatedResponse } from './types';
 
@@ -37,6 +38,13 @@ export class DataSourceService {
     // string to accept the caller's wider ListSortKey without coupling this client to that type.
     sort?: string;
     visibility?: 'all' | 'public' | 'private';
+    /**
+     * Which folder to list: `'root'` for the tables filed nowhere, a folder id for that
+     * folder's own tables. Omit it to list everything. A search overrides it server-side.
+     */
+    folderId?: string | null;
+    /** Ask for the folder tiles of that level (and the trail leading to it). */
+    includeFolders?: boolean;
   } = {}): Promise<{
     items: DataSource[];
     totalCount: number;
@@ -45,6 +53,9 @@ export class DataSourceService {
     rowCounts: Record<string, number>;
     sampleRows: Record<string, Array<Record<string, unknown>>>;
     publicationStatuses: Record<string, { status: string; rejectionReason?: string }>;
+    folders: ResourceFolderTile[];
+    folderTrail: ResourceFolder[];
+    folderMissing?: boolean;
   }> {
     const params: Record<string, string> = {};
     if (options.page != null) params.page = String(options.page);
@@ -52,6 +63,8 @@ export class DataSourceService {
     if (options.q && options.q.trim().length > 0) params.q = options.q.trim();
     if (options.sort) params.sort = options.sort;
     if (options.visibility) params.visibility = options.visibility;
+    if (options.folderId != null) params.folderId = options.folderId;
+    if (options.includeFolders) params.includeFolders = 'true';
     const data = await apiClient.get<any>('/data-sources/paged', { params });
     return {
       items: data.items ?? [],
@@ -66,6 +79,9 @@ export class DataSourceService {
       // Per-datasource publication badge for the page (id -> {status, rejectionReason?}),
       // batched server-side - replaces the per-row is-resource-published sweep.
       publicationStatuses: data.publicationStatuses ?? {},
+      folders: data.folders ?? [],
+      folderTrail: data.folderTrail ?? [],
+      folderMissing: data.folderMissing === true,
     };
   }
 
@@ -314,7 +330,7 @@ export class DataSourceService {
     });
 
     const url = `/api/proxy/data-sources/${dataSourceId}/export?${params}`;
-    const token = await apiClient.getTokenProvider()?.();
+    const token = await apiClient.getAuthToken();
 
     const response = await fetch(url, {
       // Include the active-workspace header like every other raw-fetch site, otherwise the

@@ -83,15 +83,30 @@ class WorkflowBuilderToolDefinitionFactoryTest {
     }
 
     @Test
-    @DisplayName("action param keeps the load-bearing one-liners: finish closes the session, pin needs a successful run, both run-control verbs are gated")
+    @DisplayName("action param keeps the load-bearing one-liners: finish closes the session, pin needs no prior run, both run-control verbs are gated")
     void actionParamKeepsLoadBearingRules() {
         String d = actionParam().description();
         assertThat(d)
                 .contains("CLOSES the build session")
                 .contains("'create' is a back-compat alias")
-                .contains("the version needs a successful run")
+                // Pin prepares its own production run (2026-08-25). Stating it here is
+                // load-bearing in the negative: the agent cannot discover by trying that a
+                // never-executed version is pinnable, and the previous wording sent it off
+                // to execute the workflow first - a real fire, with real side effects.
+                .contains("does NOT need to have been run first")
+                .contains("pin prepares the production run itself")
                 .contains("decision='approved'|'rejected'")
-                .contains("gated by the chat authorization card")
+                // Both run-control verbs need the user's authorization, and the agent must be
+                // told HOW that arrives: the ask happens inside the call, so the response is
+                // what settles it. Pinning only the words "authorization card" let the text
+                // keep describing the flow that shipped before the call was held open, which
+                // is what makes an agent stop and wait for a turn that never comes.
+                .contains("need the user's authorization in an interactive chat")
+                .contains("executed:false")
+                // Per-action, not a substring the three gated verbs happen to share: matching
+                // once let restart_from_node's sentence be deleted with the suite still green.
+                .contains("executed:false means nothing replayed")
+                .contains("executed:false means nothing was resolved or advanced")
                 // wait_run (2026-07-03 feature) must survive any future compaction of this param
                 .contains("get_run, wait_run, get_node_output")
                 .contains("prefer ONE wait_run over a get_run poll loop");

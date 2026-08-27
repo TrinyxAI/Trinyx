@@ -20,6 +20,12 @@ import { cleanup, render } from '@testing-library/react';
 
 const infoPanelProps = vi.hoisted(() => [] as Array<{ remote?: boolean }>);
 
+// The view mounts ApplicationSettingsMenu, whose "open the copy" link is a locale-aware
+// next-intl Link. That module resolves next/navigation from inside node_modules, which
+// vitest cannot do - stub it; the cog's own behaviour has its own suite.
+vi.mock('@/i18n/navigation', () => ({
+  Link: ({ href, children }: { href: string; children: React.ReactNode }) => <a href={href}>{children}</a>,
+}));
 vi.mock('@/lib/api', () => ({ orchestratorApi: { updatePublication: vi.fn() } }));
 vi.mock('next-intl', () => ({ useTranslations: () => (k: string) => k }));
 vi.mock('@/hooks/useAuthGuard', () => ({

@@ -1,5 +1,6 @@
 package com.apimarketplace.publication.controller;
 
+import com.apimarketplace.publication.dto.MarketplaceQueryFilter;
 import com.apimarketplace.publication.service.ApplicationTemplateResetService;
 
 import com.apimarketplace.auth.client.access.OrgAccessGuard;
@@ -29,6 +30,7 @@ import java.util.Map;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.when;
@@ -92,29 +94,29 @@ class WorkflowPublicationControllerMarketplaceWiringTest {
     @Test
     @DisplayName("/marketplace stamps ownedByMe from the active org header")
     void marketplaceEnriches() {
-        when(listQueryService.findMarketplacePublications(anyInt(), anyInt()))
+        when(listQueryService.findMarketplacePublications(any(MarketplaceQueryFilter.class), anyInt(), anyInt()))
                 .thenReturn(new PageImpl<>(List.of(orgOwned("org-A"))));
 
         // Active workspace == owner org → owned.
-        assertThat(items(controller.getMarketplacePublications(0, 20, null, "5", "org-A"), "publications")
+        assertThat(items(controller.getMarketplacePublications(0, 20, null, null, null, null, null, null, "5", "org-A"), "publications")
                 .get(0).get("ownedByMe")).isEqualTo(true);
         // Member-elsewhere / different active workspace → not owned.
-        assertThat(items(controller.getMarketplacePublications(0, 20, null, "5", "org-B"), "publications")
+        assertThat(items(controller.getMarketplacePublications(0, 20, null, null, null, null, null, null, "5", "org-B"), "publications")
                 .get(0).get("ownedByMe")).isEqualTo(false);
         // Anonymous (no user id) → not owned.
-        assertThat(items(controller.getMarketplacePublications(0, 20, null, null, "org-A"), "publications")
+        assertThat(items(controller.getMarketplacePublications(0, 20, null, null, null, null, null, null, null, "org-A"), "publications")
                 .get(0).get("ownedByMe")).isEqualTo(false);
     }
 
     @Test
     @DisplayName("/search stamps ownedByMe (the live search-bar path)")
     void searchEnriches() {
-        when(listQueryService.searchByTitle(eq("q"), eq(null)))
+        when(listQueryService.searchMarketplace(eq("q"), any(MarketplaceQueryFilter.class)))
                 .thenReturn(List.of(orgOwned("org-A")));
 
-        assertThat(items(controller.searchPublications("q", null, "5", "org-A"), "publications")
+        assertThat(items(controller.searchPublications("q", null, null, null, null, null, null, "5", "org-A"), "publications")
                 .get(0).get("ownedByMe")).isEqualTo(true);
-        assertThat(items(controller.searchPublications("q", null, "5", "org-B"), "publications")
+        assertThat(items(controller.searchPublications("q", null, null, null, null, null, null, "5", "org-B"), "publications")
                 .get(0).get("ownedByMe")).isEqualTo(false);
     }
 

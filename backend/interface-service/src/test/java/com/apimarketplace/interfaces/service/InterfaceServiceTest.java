@@ -79,6 +79,9 @@ class InterfaceServiceTest {
                 public Long getDataSourceId() { return e.getDataSourceId(); }
                 public Instant getCreatedAt() { return e.getCreatedAt(); }
                 public Instant getUpdatedAt() { return e.getUpdatedAt(); }
+                // Folder view (V450): these fixtures sit at the top level with no declared format.
+                public UUID getFolderId() { return e.getFolderId(); }
+                public String getFormat() { return e.getFormat(); }
             };
         }
 

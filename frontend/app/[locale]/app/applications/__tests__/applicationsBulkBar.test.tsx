@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import '@testing-library/jest-dom/vitest';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi, beforeEach } from 'vitest';
 import React from 'react';
 import { cleanup, render, screen, fireEvent, within, waitFor } from '@testing-library/react';
 import { NextIntlClientProvider } from 'next-intl';
@@ -29,6 +29,12 @@ const mocks = vi.hoisted(() => ({
   shareModalProps: [] as Array<Record<string, unknown>>,
 }));
 
+// The lists keep the open folder in the address, so they read next/navigation. This fake
+// router is URL-backed and re-renders on navigation, the way the real one does.
+vi.mock('next/navigation', async () => {
+  const mod = await import('@/lib/folders/testing/fakeFolderRouter');
+  return mod.fakeFolderRouter.nextNavigationModule();
+});
 vi.mock('@/i18n/navigation', () => ({ useRouter: () => ({ push: vi.fn() }) }));
 vi.mock('@/lib/providers/smart-providers', () => ({ useAuth: () => ({ isLoading: false }) }));
 vi.mock('@/lib/api/orchestrator/publication.service', () => ({
@@ -70,6 +76,7 @@ vi.mock('@/hooks/useSelectableItems', () => ({
   }),
 }));
 
+import { fakeFolderRouter } from '@/lib/folders/testing/fakeFolderRouter';
 import ApplicationsPage from '../page';
 
 function renderPage() {
@@ -85,6 +92,12 @@ afterEach(() => {
   vi.clearAllMocks();
   mocks.selectedIds = new Set<string>();
   mocks.shareModalProps = [];
+});
+
+beforeEach(() => {
+  // The address is shared state: without this, a test that opened a folder leaves the
+  // next one starting inside it.
+  fakeFolderRouter.reset();
 });
 
 describe('Applications page - selection actions float, provenance-aware', () => {

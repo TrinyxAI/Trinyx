@@ -185,9 +185,10 @@ jobs:
 
           wait_for_backend() {
             label="$1"
+            health_path="${2:-/actuator/health}"
             for attempt in {1..120}; do
-              if curl --fail --silent http://127.0.0.1:18080/actuator/health >/dev/null; then
-                echo "${label} smoke boot succeeded"
+              if curl --fail --silent "http://127.0.0.1:18080${health_path}" >/dev/null; then
+                echo "${label} smoke boot succeeded via ${health_path}"
                 return 0
               fi
               if ! docker ps --format '{{.Names}}' | grep -qx ce-smoke-backend; then
@@ -217,5 +218,11 @@ jobs:
 
           docker rm -f ce-smoke-backend >/dev/null
           start_backend -e APP_EDITION=paid-monolith -e MARKETPLACE_MODE=local -e CLOUD_LINK_ENABLED=true \
-            -e CREDIT_UNLIMITED=false -e PLAN_LIMITS_ENABLED=true -e BILLING_PROVIDER=stripe
-          wait_for_backend "Paid monolith local Marketplace + CloudLink"
+            -e CREDIT_UNLIMITED=false -e PLAN_LIMITS_ENABLED=true -e BILLING_PROVIDER=stripe \
+            -e MANAGEMENT_ENDPOINT_HEALTH_PROBES_ENABLED=true
+          # The aggregate health endpoint is intentionally DOWN without a real Stripe secret.
+          # Liveness proves the Spring process booted without weakening the paid runtime contract.
+          wait_for_backend "Paid monolith local Marketplace + CloudLink" "/actuator/health/liveness"
+          paid_version="$(curl --fail --silent http://127.0.0.1:18080/api/version)"
+          grep -q '"edition":"paid-monolith"' <<<"${paid_version}"
+          echo "Paid monolith edition contract confirmed"

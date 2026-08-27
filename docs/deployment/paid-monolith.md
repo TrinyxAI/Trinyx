@@ -11,8 +11,8 @@ another billing service.
 Backend:
 
 ```dotenv
-BACKEND_IMAGE=ghcr.io/eddinerabii/trinyx-backend:<tested-sha>
-FRONTEND_IMAGE=ghcr.io/eddinerabii/trinyx-frontend:paid-<tested-sha>
+BACKEND_IMAGE=ghcr.io/trinyxai/trinyx-backend:<tested-sha>
+FRONTEND_IMAGE=ghcr.io/trinyxai/trinyx-frontend:paid-<tested-sha>
 APP_EDITION=paid-monolith
 AUTH_MODE=embedded
 DEPLOYMENT_MODE=monolith
@@ -163,21 +163,21 @@ deleted.
 
    ```bash
    docker build --platform linux/amd64 \
-     -t ghcr.io/eddinerabii/trinyx-backend:<tested-sha> \
+     -t ghcr.io/trinyxai/trinyx-backend:<tested-sha> \
      -f backend/monolith-service/Dockerfile backend
-   docker push ghcr.io/eddinerabii/trinyx-backend:<tested-sha>
+   docker push ghcr.io/trinyxai/trinyx-backend:<tested-sha>
 
    docker build --platform linux/amd64 \
-     -t ghcr.io/eddinerabii/trinyx-frontend:paid-<tested-sha> \
+     -t ghcr.io/trinyxai/trinyx-frontend:paid-<tested-sha> \
      --build-arg NEXT_PUBLIC_APP_EDITION=paid-monolith \
      --build-arg NEXT_PUBLIC_AUTH_MODE=embedded \
      --build-arg NEXT_PUBLIC_BILLING_ENABLED=true \
      --build-arg NEXT_PUBLIC_SPRING_BASE_URL=http://livecontext-app:8080 \
      frontend
-   docker push ghcr.io/eddinerabii/trinyx-frontend:paid-<tested-sha>
+   docker push ghcr.io/trinyxai/trinyx-frontend:paid-<tested-sha>
 
-   export BACKEND_IMAGE=ghcr.io/eddinerabii/trinyx-backend:<tested-sha>
-   export FRONTEND_IMAGE=ghcr.io/eddinerabii/trinyx-frontend:paid-<tested-sha>
+   export BACKEND_IMAGE=ghcr.io/trinyxai/trinyx-backend:<tested-sha>
+   export FRONTEND_IMAGE=ghcr.io/trinyxai/trinyx-frontend:paid-<tested-sha>
    docker pull "$BACKEND_IMAGE" "$FRONTEND_IMAGE"
    docker compose --env-file docker/.env.paid-monolith config --quiet
    ```

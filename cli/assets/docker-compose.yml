@@ -112,7 +112,7 @@ services:
     restart: "no"
 
   bridge:
-    image: ${TRINYX_CE_BRIDGE_IMAGE:-ghcr.io/eddinerabii/trinyx-ce-bridge:v0.2.12}
+    image: ${TRINYX_CE_BRIDGE_IMAGE:-ghcr.io/trinyxai/trinyx-ce-bridge:v0.2.12}
     restart: unless-stopped
     depends_on:
       redis:
@@ -139,7 +139,7 @@ services:
           memory: 512M
 
   livecontext:
-    image: ${TRINYX_CE_IMAGE:-ghcr.io/eddinerabii/trinyx-ce:v0.2.12}
+    image: ${TRINYX_CE_IMAGE:-ghcr.io/trinyxai/trinyx-ce:v0.2.12}
     restart: unless-stopped
     depends_on:
       postgres:
@@ -255,7 +255,7 @@ services:
   # CE Redis + MinIO.
   websearch:
     profiles: ["browser-agent"]
-    image: ${TRINYX_CE_WEBSEARCH_IMAGE:-ghcr.io/eddinerabii/trinyx-ce-websearch:v0.2.12}
+    image: ${TRINYX_CE_WEBSEARCH_IMAGE:-ghcr.io/trinyxai/trinyx-ce-websearch:v0.2.12}
     restart: unless-stopped
     depends_on:
       redis:
@@ -330,7 +330,7 @@ services:
   # secrets - HTML in, bytes out; reached only by the app over the compose network.
   screenshot-renderer:
     profiles: ["renderer"]
-    image: ${TRINYX_CE_SCREENSHOT_RENDERER_IMAGE:-ghcr.io/eddinerabii/trinyx-ce-screenshot-renderer:v0.2.12}
+    image: ${TRINYX_CE_SCREENSHOT_RENDERER_IMAGE:-ghcr.io/trinyxai/trinyx-ce-screenshot-renderer:v0.2.12}
     restart: unless-stopped
     environment:
       PORT: "8094"
@@ -353,7 +353,7 @@ services:
           memory: 1024M
 
   frontend:
-    image: ${TRINYX_CE_FRONTEND_IMAGE:-ghcr.io/eddinerabii/trinyx-ce-frontend:v0.2.12}
+    image: ${TRINYX_CE_FRONTEND_IMAGE:-ghcr.io/trinyxai/trinyx-ce-frontend:v0.2.12}
     restart: unless-stopped
     depends_on:
       livecontext:

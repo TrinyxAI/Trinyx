@@ -23,7 +23,7 @@ permissions:
   packages: write
 
 env:
-  BACKEND_IMAGE: ghcr.io/eddinerabii/trinyx-backend
+  BACKEND_IMAGE: ghcr.io/trinyxai/trinyx-backend
 
 jobs:
   test:

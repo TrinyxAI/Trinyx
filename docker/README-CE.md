@@ -68,9 +68,9 @@ Browser (:3000)
 | `livecontext-redis` | `redis:7-alpine` | 6379 (internal) | Cache, pub/sub, streaming |
 | `livecontext-minio` | `minio/minio` | 9000 (internal) | S3-compatible file storage |
 | `livecontext-minio-init` | `minio/mc` | - | Creates `workflow-files` bucket, then exits |
-| `livecontext-bridge` | `ghcr.io/eddinerabii/trinyx-ce-bridge` | 8093 (internal) | CLI adapters + MCP tools |
-| `livecontext-app` | `ghcr.io/eddinerabii/trinyx-ce` | **8080** | All backend services in one JAR |
-| `livecontext-frontend` | `ghcr.io/eddinerabii/trinyx-ce-frontend` | **3000** | Next.js app (embedded auth) |
+| `livecontext-bridge` | `ghcr.io/trinyxai/trinyx-ce-bridge` | 8093 (internal) | CLI adapters + MCP tools |
+| `livecontext-app` | `ghcr.io/trinyxai/trinyx-ce` | **8080** | All backend services in one JAR |
+| `livecontext-frontend` | `ghcr.io/trinyxai/trinyx-ce-frontend` | **3000** | Next.js app (embedded auth) |
 
 Only ports **3000** (frontend, the app) and **8080** (backend API) are exposed to the host.
 

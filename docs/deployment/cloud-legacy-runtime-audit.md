@@ -70,7 +70,7 @@ explicit Git release-tag push; a main push or manual dispatch cannot publish.
 This removes the configured `ghcr.io/livecontext-ai/*` supply-chain dependency, but
 the new manifests do not become deployable merely because their names are present in
 source. Before any CLI release or production deployment, all five images must be
-successfully built from the final release commit, published under `ghcr.io/eddinerabii/*`, pulled by digest in a
+successfully built from the final release commit, published under `ghcr.io/trinyxai/*`, pulled by digest in a
 staging installation, and checked for database/volume compatibility. Until that
 external publication and verification succeeds, supply-chain independence remains a
 deployment blocker rather than a completed operational fact.

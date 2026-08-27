@@ -8,9 +8,9 @@ Chat, Workflow, Agent and App in one self-hosted platform. No code to write, not
 
 **An open-source, self-hosted alternative to n8n, Zapier and Make, with AI agents built in.**
 
-[![GitHub stars](https://img.shields.io/github/stars/eddinerabii/Trinyx?style=flat&logo=github&color=e11d48)](https://github.com/eddinerabii/Trinyx/stargazers)
-[![Latest release](https://img.shields.io/github/v/release/eddinerabii/Trinyx?color=16a34a)](https://github.com/eddinerabii/Trinyx/releases/latest)
-[![Discussions](https://img.shields.io/github/discussions/eddinerabii/Trinyx?color=2496ED)](https://github.com/eddinerabii/Trinyx/discussions)
+[![GitHub stars](https://img.shields.io/github/stars/TrinyxAI/Trinyx?style=flat&logo=github&color=e11d48)](https://github.com/TrinyxAI/Trinyx/stargazers)
+[![Latest release](https://img.shields.io/github/v/release/TrinyxAI/Trinyx?color=16a34a)](https://github.com/TrinyxAI/Trinyx/releases/latest)
+[![Discussions](https://img.shields.io/github/discussions/TrinyxAI/Trinyx?color=2496ED)](https://github.com/TrinyxAI/Trinyx/discussions)
 [![License: AGPL v3](https://img.shields.io/badge/License-AGPL_v3-2496ED.svg)](LICENSE)
 ![Java 21](https://img.shields.io/badge/Java-21-e11d48.svg)
 ![Next.js](https://img.shields.io/badge/Next.js-16-000000.svg)
@@ -26,7 +26,7 @@ Chat, Workflow, Agent and App in one self-hosted platform. No code to write, not
 
 <sub>The builder, built by chat: one message in, a working automation out. Five real scenarios, one loop. <a href="frontend/public/landing/readme/hero-light.mp4">Watch it full size</a> &middot; <a href="https://trinyx.fr">Try the hosted version</a></sub>
 
-<sub>⭐ If Trinyx looks useful, <a href="https://github.com/eddinerabii/Trinyx">give it a star</a>. It helps other teams find it.</sub>
+<sub>⭐ If Trinyx looks useful, <a href="https://github.com/TrinyxAI/Trinyx">give it a star</a>. It helps other teams find it.</sub>
 
 ## Build it once. It runs as all four.
 
@@ -121,10 +121,11 @@ Deploying through Portainer, Coolify, Dokploy or a similar platform: see
 Built for **linux/amd64**. The Compose file pulls from GHCR:
 
 ```
-ghcr.io/eddinerabii/trinyx-ce
-ghcr.io/eddinerabii/trinyx-ce-frontend
-ghcr.io/eddinerabii/trinyx-ce-bridge
-ghcr.io/eddinerabii/trinyx-ce-screenshot-renderer   # opt-in renderer profile
+ghcr.io/trinyxai/trinyx-ce
+ghcr.io/trinyxai/trinyx-ce-frontend
+ghcr.io/trinyxai/trinyx-ce-bridge
+ghcr.io/trinyxai/trinyx-ce-screenshot-renderer   # opt-in renderer profile
+ghcr.io/trinyxai/trinyx-ce-websearch               # opt-in browser/web-search profile
 ```
 
 Each release is tagged `vX.Y.Z` (immutable) plus `vX.Y`, `vX` and `latest` if you would
@@ -212,4 +213,4 @@ See [NOTICE](NOTICE), [TRADEMARKS](TRADEMARKS) and
 ---
 
 ⭐ **If Trinyx is useful to you, star this repository.** Questions and proposals are
-welcome in [GitHub Discussions](https://github.com/eddinerabii/Trinyx/discussions).
+welcome in [GitHub Discussions](https://github.com/TrinyxAI/Trinyx/discussions).

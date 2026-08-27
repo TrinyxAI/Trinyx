@@ -14,8 +14,8 @@ permissions:
   id-token: write
 
 env:
-  APP_IMAGE: ghcr.io/eddinerabii/trinyx-frontend
-  LANDING_IMAGE: ghcr.io/eddinerabii/trinyx-landing
+  APP_IMAGE: ghcr.io/trinyxai/trinyx-frontend
+  LANDING_IMAGE: ghcr.io/trinyxai/trinyx-landing
   AWS_REGION: eu-north-1
   EC2_INSTANCE_ID: i-025faee9cb435ad89
 

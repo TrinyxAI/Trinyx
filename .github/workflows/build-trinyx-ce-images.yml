@@ -33,17 +33,17 @@ jobs:
           - name: backend
             context: ./backend
             file: ./backend/monolith-service/Dockerfile
-            image: ghcr.io/eddinerabii/trinyx-ce
+            image: ghcr.io/trinyxai/trinyx-ce
             build_args: ""
           - name: bridge
             context: ./mcp
             file: ./mcp/bridge/Dockerfile
-            image: ghcr.io/eddinerabii/trinyx-ce-bridge
+            image: ghcr.io/trinyxai/trinyx-ce-bridge
             build_args: ""
           - name: frontend
             context: ./frontend
             file: ./frontend/Dockerfile
-            image: ghcr.io/eddinerabii/trinyx-ce-frontend
+            image: ghcr.io/trinyxai/trinyx-ce-frontend
             build_args: |
               NEXT_PUBLIC_APP_EDITION=ce
               NEXT_PUBLIC_AUTH_MODE=embedded
@@ -51,12 +51,12 @@ jobs:
           - name: screenshot-renderer
             context: ./screenshot-renderer
             file: ./screenshot-renderer/Dockerfile
-            image: ghcr.io/eddinerabii/trinyx-ce-screenshot-renderer
+            image: ghcr.io/trinyxai/trinyx-ce-screenshot-renderer
             build_args: ""
           - name: websearch
             context: ./websearch-service
             file: ./websearch-service/Dockerfile
-            image: ghcr.io/eddinerabii/trinyx-ce-websearch
+            image: ghcr.io/trinyxai/trinyx-ce-websearch
             build_args: ""
     steps:
       - uses: actions/checkout@v4

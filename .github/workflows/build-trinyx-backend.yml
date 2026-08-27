@@ -216,5 +216,6 @@ jobs:
           echo "CE encryption keys survived container recreation"
 
           docker rm -f ce-smoke-backend >/dev/null
-          start_backend -e APP_EDITION=paid-monolith -e MARKETPLACE_MODE=local -e CLOUD_LINK_ENABLED=true
+          start_backend -e APP_EDITION=paid-monolith -e MARKETPLACE_MODE=local -e CLOUD_LINK_ENABLED=true \
+            -e CREDIT_UNLIMITED=false -e PLAN_LIMITS_ENABLED=true -e BILLING_PROVIDER=stripe
           wait_for_backend "Paid monolith local Marketplace + CloudLink"

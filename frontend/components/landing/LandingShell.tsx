@@ -159,7 +159,7 @@ export function LandingHeader({ extra, siteBaseUrl }: { extra?: React.ReactNode;
           <Link href={withBase(siteBaseUrl, '/changelog')} className="hover:opacity-80 transition-opacity">Changelog</Link>
           <Link href={docsHref(siteBaseUrl)} prefetch={false} className="hover:opacity-80 transition-opacity">Docs</Link>
           <a
-            href="https://github.com/eddinerabii/Trinyx"
+            href="https://github.com/TrinyxAI/Trinyx"
             target="_blank"
             rel="noopener noreferrer"
             aria-label="Self-hosted (GitHub)"
@@ -237,7 +237,7 @@ export function LandingFooter({ siteBaseUrl }: { siteBaseUrl?: string } = {}) {
               <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect width="20" height="20" x="2" y="2" rx="5" ry="5" /><path d="M16 11.37A4 4 0 1 1 12.63 8 4 4 0 0 1 16 11.37z" /><line x1="17.5" x2="17.51" y1="6.5" y2="6.5" /></svg>
             </a>
             <a
-              href="https://github.com/eddinerabii/Trinyx"
+              href="https://github.com/TrinyxAI/Trinyx"
               target="_blank"
               rel="noopener noreferrer"
               aria-label="GitHub"
@@ -302,7 +302,7 @@ export function LandingFooter({ siteBaseUrl }: { siteBaseUrl?: string } = {}) {
             <li><Link href={withBase(siteBaseUrl, '/changelog')}>Changelog</Link></li>
             <li><Link href={docsHref(siteBaseUrl)} prefetch={false}>Docs</Link></li>
             <li>
-              <a href="https://github.com/eddinerabii/Trinyx" target="_blank" rel="noopener noreferrer">
+              <a href="https://github.com/TrinyxAI/Trinyx" target="_blank" rel="noopener noreferrer">
                 Self-hosted
               </a>
             </li>

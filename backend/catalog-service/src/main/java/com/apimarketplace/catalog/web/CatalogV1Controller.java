@@ -204,6 +204,44 @@ public class CatalogV1Controller {
             // thread-pool task picks up this thread.
             com.apimarketplace.catalog.service.http.CredentialModeContext.setExplicitSource(safeRequest.getCredentialSource());
             com.apimarketplace.catalog.service.http.CredentialModeContext.setSelectedCredentialId(safeRequest.getSelectedCredentialId());
+            //   - setSelectedCredentialName / setSelectionStrict - a step whose
+            //     credential is decided at RUN time. The name is resolved against
+            //     the endpoint's own requirement, and "strict" makes an unmatched
+            //     choice refuse the call instead of quietly using the default key.
+            com.apimarketplace.catalog.service.http.CredentialModeContext.setSelectedCredentialName(safeRequest.getSelectedCredentialName());
+            com.apimarketplace.catalog.service.http.CredentialModeContext.setSelectionStrict(safeRequest.getCredentialSelectionStrict());
+            // Refused HERE and not only where the choice is read, because the branches
+            // that read it are not the only ones a caller can reach. The agentic
+            // branch (no explicit source) and the platform branch never consult the
+            // selection at all, so a request carrying "choose this account, strictly"
+            // on either of them would run on a different account and report success.
+            // Checking at the door makes the guarantee a property of the REQUEST.
+            boolean namesACredential = safeRequest.getSelectedCredentialName() != null
+                    && !safeRequest.getSelectedCredentialName().isBlank();
+            boolean statesASelection =
+                    Boolean.TRUE.equals(safeRequest.getCredentialSelectionStrict()) || namesACredential;
+            // A name without the strict flag would resolve, fail to match, and fall
+            // through to the account's default with nothing said. The two fields only
+            // mean something together, so the pair is required rather than assumed:
+            // the orchestrator always sends both, and a caller that sends one is told
+            // so instead of being served a different account.
+            if (namesACredential && !Boolean.TRUE.equals(safeRequest.getCredentialSelectionStrict())) {
+                throw new com.apimarketplace.catalog.service.exception.CredentialSelectionException(
+                        "This request names a credential to use for this run but does not mark the "
+                                + "selection as strict. The call was NOT made: without it an unmatched "
+                                + "name falls back to this account's default credential, which is a "
+                                + "different account from the one named. Send "
+                                + "credentialSelectionStrict=true alongside the name.");
+            }
+            if (statesASelection
+                    && !"user".equalsIgnoreCase(String.valueOf(safeRequest.getCredentialSource()))) {
+                throw new com.apimarketplace.catalog.service.exception.CredentialSelectionException(
+                        "This request selects a credential for this run but does not state that it "
+                                + "runs on the caller's own credentials. The call was NOT made: the "
+                                + "branches that would have served it never read the selection, so it "
+                                + "would have resolved an account the caller did not choose. Send "
+                                + "credentialSource='user' alongside the selection.");
+            }
             com.apimarketplace.catalog.service.http.CredentialModeContext.setOverride(safeRequest.getCredentialModeOverride());
 
             ToolExecutionResponse response = catalogV1Service.executeTool(toolId, safeRequest, userId, orgId, resolvedRequestId);
@@ -220,6 +258,19 @@ public class CatalogV1Controller {
                             "error", com.apimarketplace.catalog.service.exception.InsufficientCreditsException.ERROR_CODE,
                             "message", e.getMessage(),
                             "delinquent", e.isDelinquent(),
+                            "toolId", toolId
+                    ));
+        } catch (com.apimarketplace.catalog.service.exception.CredentialSelectionException e) {
+            // Refused BEFORE any external call: the step named a credential for this
+            // run and it could not be matched. 422 and not 401, because nothing was
+            // rejected by the provider - the request is well-formed, the platform
+            // simply will not substitute a different account for the one asked for.
+            log.warn("Tool {} refused - run-time credential selection unresolved: {}", toolId, e.getMessage());
+            return ResponseEntity.status(HttpStatus.UNPROCESSABLE_ENTITY)
+                    .body(Map.of(
+                            "success", false,
+                            "error", com.apimarketplace.catalog.service.exception.CredentialSelectionException.ERROR_CODE,
+                            "message", e.getMessage(),
                             "toolId", toolId
                     ));
         } catch (ApiAuthenticationException e) {

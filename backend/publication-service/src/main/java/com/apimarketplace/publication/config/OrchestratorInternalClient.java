@@ -569,6 +569,102 @@ public class OrchestratorInternalClient {
     }
 
     /**
+     * Like {@link #findBySourcePublication}, but a lookup FAILURE throws instead of
+     * answering "no clone".
+     *
+     * <p>The lenient variant is right for its callers (absent == not acquired), but the
+     * editable-copy path turns a {@code null} into "Application is not installed in this
+     * workspace" - so an orchestrator blip would tell a user who DOES own the app that they
+     * do not. Same rule as {@link #findEditableDuplicate}: only a 404 is an answer.
+     */
+    @SuppressWarnings("unchecked")
+    public Map<String, Object> findBySourcePublicationStrict(UUID publicationId, String tenantId,
+                                                              String organizationId) {
+        String url = UriComponentsBuilder
+                .fromHttpUrl(baseUrl + "/api/internal/publication-support/workflows/by-source-publication")
+                .queryParam("pubId", publicationId)
+                .queryParam("tenantId", tenantId)
+                .queryParam("organizationId", organizationId)
+                .toUriString();
+        HttpEntity<Void> entity = new HttpEntity<>(buildHeaders(tenantId, organizationId));
+        try {
+            ResponseEntity<Map<String, Object>> response = restTemplate.exchange(
+                    url, HttpMethod.GET, entity, new ParameterizedTypeReference<>() {});
+            return response.getBody();
+        } catch (HttpStatusCodeException e) {
+            if (e.getStatusCode().value() == 404) {
+                log.debug("No application clone for publication {} tenant {} org {}",
+                        publicationId, tenantId, organizationId);
+                return null;
+            }
+            log.error("Application-clone lookup failed for publication {} tenant {} org {}: {} {}",
+                    publicationId, tenantId, organizationId, e.getStatusCode(), e.getMessage());
+            throw new IllegalStateException(
+                    "Could not check whether the application is installed: " + e.getStatusCode(), e);
+        } catch (Exception e) {
+            log.error("Application-clone lookup failed for publication {} tenant {} org {}: {}",
+                    publicationId, tenantId, organizationId, e.getMessage());
+            throw new IllegalStateException("Could not check whether the application is installed", e);
+        }
+    }
+
+    /**
+     * The decoupled editable WORKFLOW twin previously created from an acquired
+     * APPLICATION clone, or {@code null} when the user never created one.
+     *
+     * <p>Makes the on-demand "create my editable copy" action idempotent: a twin clones
+     * the WHOLE resource set (interfaces, tables, agents), so a second call must hand
+     * back the existing twin instead of minting a second set - the exact duplication
+     * this feature exists to remove.
+     *
+     * <p><b>Only a 404 means "no twin".</b> Any other failure (5xx, timeout, a 400 from a
+     * missing org) THROWS: degrading it to {@code null} would answer "you have no copy" on
+     * a blip and clone a second full resource set behind the user's back - reintroducing
+     * the duplication through the error path. Refusing is the safe direction here, since
+     * the user can retry a refusal but cannot undo a duplicate set (deleting a workflow
+     * deletes neither interfaces nor datasources).
+     *
+     * <p>{@code organizationId} is sent unconditionally: the endpoint requires it, so
+     * omitting it on a blank value would produce a 400 - which is now an error, not a
+     * silent "no twin".
+     */
+    @SuppressWarnings("unchecked")
+    public Map<String, Object> findEditableDuplicate(UUID applicationWorkflowId, String tenantId,
+                                                      String organizationId, UUID publicationId) {
+        UriComponentsBuilder builder = UriComponentsBuilder
+                .fromHttpUrl(baseUrl + "/api/internal/publication-support/workflows/editable-duplicate")
+                .queryParam("applicationWorkflowId", applicationWorkflowId)
+                .queryParam("tenantId", tenantId)
+                .queryParam("organizationId", organizationId);
+        if (publicationId != null) {
+            // Also matches a copy made before an uninstall/reinstall (which changes the
+            // application clone id but not the publication).
+            builder.queryParam("publicationId", publicationId);
+        }
+        String url = builder.toUriString();
+        HttpEntity<Void> entity = new HttpEntity<>(buildHeaders(tenantId, organizationId));
+        try {
+            ResponseEntity<Map<String, Object>> response = restTemplate.exchange(
+                    url, HttpMethod.GET, entity, new ParameterizedTypeReference<>() {});
+            return response.getBody();
+        } catch (HttpStatusCodeException e) {
+            if (e.getStatusCode().value() == 404) {
+                log.debug("No editable duplicate for application {} tenant {} org {}",
+                        applicationWorkflowId, tenantId, organizationId);
+                return null;
+            }
+            log.error("Editable-duplicate lookup failed for application {} tenant {} org {}: {} {}",
+                    applicationWorkflowId, tenantId, organizationId, e.getStatusCode(), e.getMessage());
+            throw new IllegalStateException(
+                    "Could not check for an existing editable copy: " + e.getStatusCode(), e);
+        } catch (Exception e) {
+            log.error("Editable-duplicate lookup failed for application {} tenant {} org {}: {}",
+                    applicationWorkflowId, tenantId, organizationId, e.getMessage());
+            throw new IllegalStateException("Could not check for an existing editable copy", e);
+        }
+    }
+
+    /**
      * Count workflows in an organization (all types) - the WORKFLOW-quota count the
      * orchestrator's {@code saveWorkflow} entitlement gate uses
      * ({@code countByOrganizationIdStrict}). The duplicate-to-editable path needs it to

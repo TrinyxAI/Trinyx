@@ -153,6 +153,50 @@ public class StorageClient {
     }
 
     /**
+     * Record on a generated asset the recipe it was made from.
+     *
+     * <p>A generation is dispatched from catalog-service, which knows the model, the prompt and the
+     * parameters and gets a stored file back. Nothing on the file itself says where it came from,
+     * so the recipe is stamped onto its {@code storage.storage} row here, once the asset exists.
+     * That is what lets a reader recognise a generated asset among their files and run it again
+     * with one word changed.</p>
+     *
+     * <p>Best-effort by construction, exactly like {@link #adoptRunContext}: a failure returns 0 and
+     * is logged, never thrown. The generation has already run and been charged by the time this is
+     * called, so whether its recipe was recorded must not decide whether the caller gets the asset
+     * it paid for.</p>
+     *
+     * @return how many rows were stamped; 0 on any failure
+     */
+    public int stampGenerationProvenance(String tenantId, String organizationId,
+                                         java.util.Collection<String> fileIds,
+                                         java.util.Map<String, Object> provenance) {
+        if (fileIds == null || fileIds.isEmpty() || provenance == null || provenance.isEmpty()) {
+            return 0;
+        }
+        String url = baseUrl + "/api/internal/storage/generation-provenance";
+        try {
+            HttpHeaders headers = buildHeaders(tenantId, organizationId);
+            headers.setContentType(MediaType.APPLICATION_JSON);
+
+            java.util.Map<String, Object> body = new java.util.HashMap<>();
+            body.put(com.apimarketplace.common.storage.GenerationProvenanceFields.IDS,
+                    new java.util.ArrayList<>(fileIds));
+            body.put(com.apimarketplace.common.storage.GenerationProvenanceFields.PROVENANCE, provenance);
+
+            ResponseEntity<java.util.Map> response = restTemplate.exchange(
+                url, HttpMethod.POST, new HttpEntity<>(body, headers), java.util.Map.class);
+            Object stamped = response.getBody() == null
+                ? null
+                : response.getBody().get(com.apimarketplace.common.storage.GenerationProvenanceFields.STAMPED);
+            return (stamped instanceof Number n) ? n.intValue() : 0;
+        } catch (Exception e) {
+            log.warn("Failed to stamp generation provenance on {} file(s): {}", fileIds.size(), e.getMessage());
+            return 0;
+        }
+    }
+
+    /**
      * Generic upload without workflow context.
      *
      * <p>Returns the same {@link FileRefDto} shape as {@link #upload}: the

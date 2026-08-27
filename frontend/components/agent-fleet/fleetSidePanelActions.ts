@@ -1,6 +1,7 @@
 import React from 'react';
 import { Bot, Workflow, Table, Monitor } from 'lucide-react';
 import type { SidePanelTab } from '@/contexts/SidePanelContext';
+import { workflowPanelTabId } from '@/lib/sidePanel/tabResource';
 
 export interface FleetSidePanelAction {
   type: 'agent' | 'workflow' | 'table' | 'interface';
@@ -59,7 +60,7 @@ export function openFleetSidePanelTab(
       // eslint-disable-next-line @typescript-eslint/no-require-imports
       const { WorkflowBuilderPanelContent } = require('@/components/app/WorkflowBuilderPanelContent');
       sidePanel.openTab({
-        id: `workflow-${resourceId}`,
+        id: workflowPanelTabId(resourceId),
         label,
         icon: React.createElement(Workflow, { className: iconClass }),
         content: React.createElement(WorkflowBuilderPanelContent, { workflowId: resourceId }),

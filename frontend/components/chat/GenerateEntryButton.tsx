@@ -1,12 +1,13 @@
 'use client';
 
 import * as React from 'react';
-import { Sparkles } from 'lucide-react';
+import { WandSparkles } from 'lucide-react';
 import { useTranslations } from 'next-intl';
 import { Button } from '@/components/ui/button';
 import { useGenerationModels } from '@/hooks/useGenerationModels';
 import { useCanMutateInCurrentOrg } from '@/lib/stores/current-org-store';
 import { warmGenerationModal } from '@/components/chat/generationModalEntry';
+import { menuItemClass } from '@/components/ui/menu';
 
 /**
  * The control that opens the generation dialog, wherever one is offered.
@@ -20,8 +21,9 @@ import { warmGenerationModal } from '@/components/chat/generationModalEntry';
  * not styling differences, so they do not belong to the surfaces.
  *
  * <p>What DOES belong to the surface is how the control looks: a page toolbar
- * has room for a word, a composer's button row has room for an icon. That is
- * the only thing {@link GenerateEntryButtonProps.variant} decides.
+ * has room for a word, a composer's button row has room for an icon, and a
+ * composer too narrow for three icons has a menu row. That is the only thing
+ * {@link GenerateEntryButtonProps.variant} decides.
  *
  * <p>Renders NOTHING when a generation cannot be started here, and asks the
  * catalogue nothing on behalf of a reader who could not act on the answer.
@@ -29,9 +31,14 @@ import { warmGenerationModal } from '@/components/chat/generationModalEntry';
 export interface GenerateEntryButtonProps {
   /**
    * `toolbar` shows the word beside the icon (dropped under `sm`, where the row
-   * gets tight); `icon` is icon-only, for a row that is already all icons.
+   * gets tight); `icon` is icon-only, for a row that is already all icons;
+   * `menuitem` is a row of the app's action menu (`components/ui/menu`), for a
+   * composer whose button row got too narrow to hold three icons and merged them
+   * into one. The gate above is the reason this is a variant rather than a
+   * caller drawing its own row: a menu that listed generation on an install that
+   * does not serve it would offer a dead entry.
    */
-  variant: 'toolbar' | 'icon';
+  variant: 'toolbar' | 'icon' | 'menuitem';
   /** What the control is called, and its accessible name. */
   label: string;
   /** Open the dialog. The caller mounts it, so it can do its own thing with the result. */
@@ -78,11 +85,18 @@ export function GenerateEntryButton({ variant, label, onOpen }: GenerateEntryBut
     // carries `pointer-events-none`, so a title on it would never be shown to
     // the person hovering it, and an unavailable action with no reachable
     // explanation reads as a permission they lack.
-    <span className="inline-flex" title={empty ? tGeneration('empty') : label}>
+    <span
+      className={variant === 'menuitem' ? 'flex w-full' : 'inline-flex'}
+      title={empty ? tGeneration('empty') : label}
+    >
       <Button
         variant={variant === 'toolbar' ? 'outline' : 'ghost'}
         size={variant === 'toolbar' ? 'default' : 'icon'}
-        className={variant === 'toolbar' ? 'px-2.5 sm:px-4' : 'h-9 w-9'}
+        className={
+          variant === 'toolbar' ? 'px-2.5 sm:px-4'
+            : variant === 'menuitem' ? `${menuItemClass} h-auto min-h-9 justify-start`
+            : 'h-9 w-9'
+        }
         aria-label={label}
         onClick={onOpen}
         // Both, because they are two different readers: a pointer hovers, a
@@ -92,8 +106,18 @@ export function GenerateEntryButton({ variant, label, onOpen }: GenerateEntryBut
         disabled={empty}
         aria-describedby={empty ? reasonId : undefined}
       >
-        <Sparkles className={variant === 'toolbar' ? 'h-4 w-4 sm:mr-1.5' : 'h-4 w-4'} />
+        {/* A WAND, not the bare sparkle. `Sparkles` is this app's generic "AI"
+            badge - it marks skills, suggestions, onboarding, the avatar picker,
+            credits, thirty-odd places - so wearing it here said "something AI"
+            and nothing about producing a file. The wand keeps that lineage while
+            saying the control MAKES something, and it leaves the plain sparkle
+            free to go on meaning "AI" everywhere else. Deliberately not an image
+            glyph: this dialog also makes video, audio, voice and music, and
+            `ImagePlus` would both under-describe it and read as "upload" next to
+            the attachment button it sits beside. */}
+        <WandSparkles className={variant === 'toolbar' ? 'h-4 w-4 sm:mr-1.5' : 'h-4 w-4 flex-shrink-0'} />
         {variant === 'toolbar' && <span className="hidden sm:inline">{label}</span>}
+        {variant === 'menuitem' && <span>{label}</span>}
       </Button>
       {/* The same words, for a reader who never hovers anything. */}
       {empty && (

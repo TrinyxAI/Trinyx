@@ -5,6 +5,7 @@ import { resolveRequestLocale } from '@/i18n/resolveRequestLocale';
 import CeCloudCreditModal from '@/components/billing/CeCloudCreditModal';
 import ModelNotManagedModal from '@/components/billing/ModelNotManagedModal';
 import AgentErrorModal from '@/components/billing/AgentErrorModal';
+import InsufficientCreditsModal from '@/components/billing/InsufficientCreditsModal';
 import AccountRestoreModal from '@/components/auth/AccountRestoreModal';
 import { WorkflowLayoutDirectionProvider } from '@/contexts/WorkflowLayoutDirectionContext';
 
@@ -30,6 +31,11 @@ export default async function WorkflowsLayout({
         <CeCloudCreditModal />
         <ModelNotManagedModal />
         <AgentErrorModal />
+        {/* Same reason again, and this one was already firing into nothing:
+            `useWorkflowExecution` calls showInsufficientCreditsModal() when a
+            test-run is refused for want of credits, and the builder route never
+            mounted a listener, so the run simply stopped with no explanation. */}
+        <InsufficientCreditsModal />
         {/* Same reason: a deactivated person who opens a bookmarked builder URL gets every call
             refused here too, and without this listener the restore interstitial never appears,
             leaving them in an app where nothing loads and no path leads anywhere. */}

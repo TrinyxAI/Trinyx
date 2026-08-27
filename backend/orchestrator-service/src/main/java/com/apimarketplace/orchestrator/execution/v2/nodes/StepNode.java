@@ -108,6 +108,23 @@ public class StepNode extends BaseNode {
             logger.debug("Step input prepared: nodeId={}, inputKeys={}",
                 nodeId, inputData.keySet());
 
+            // The account decision comes BEFORE the passthrough check below. Evaluated
+            // after it, a step whose expression resolves to nothing came back SUCCESS
+            // whenever no gateway was injected, which is a green run on a choice that
+            // could not be honoured - the one outcome this feature exists to prevent.
+            String rawSelector = stepConfig.credentialSelector();
+            StepCredentialSelection selection = StepCredentialSelection.resolve(
+                    stepConfig,
+                    rawSelector == null ? null : resolveTemplateString(rawSelector, context));
+            if (selection.isFailure()) {
+                long failDuration = System.currentTimeMillis() - startTime;
+                logger.error("Step credential selection failed: nodeId={}, {}", nodeId, selection.error());
+                return NodeExecutionResult.failureWithOutput(
+                        nodeId, selection.error(),
+                        buildFailureOutput(context, inputData, selection.error()),
+                        failDuration);
+            }
+
             // Execute via ToolsGateway
             if (toolsGateway == null) {
                 logger.warn("⚠️  ToolsGateway not injected, using passthrough mode");
@@ -161,15 +178,14 @@ public class StepNode extends BaseNode {
             // absent (agent-driven calls including agents running inside a
             // workflow), the catalog applies the implicit fallback-if-priced
             // rule, same UX as the chat path.
-            if (stepConfig.usesPlatformCredential() && stepConfig.platformCredentialId() != null) {
-                billingIdentifiers.put("__credentialSource__", "platform");
-                billingIdentifiers.put("__platformCredentialId__", stepConfig.platformCredentialId());
-            } else {
-                billingIdentifiers.put("__credentialSource__", "user");
-                if (stepConfig.selectedCredentialId() != null) {
-                    billingIdentifiers.put("__selectedCredentialId__", stepConfig.selectedCredentialId());
-                }
-            }
+            //
+            // A step may instead decide its credential at RUN time, from an
+            // expression - see StepCredentialSelection, which owns both modes and
+            // is the only reason this block is not the if/else it used to be. A
+            // step with no selector produces exactly the markers it produced
+            // before that class existed. Already resolved above, before the
+            // passthrough branch, so a failed selection cannot slip past it.
+            selection.applyTo(billingIdentifiers);
             com.apimarketplace.orchestrator.services.interfaces.ExecutionResult result =
                 toolsGateway.executeTool(toolRef, inputData, tenantId, billingIdentifiers);
 
@@ -185,6 +201,12 @@ public class StepNode extends BaseNode {
 
             // Persist resolved input params so they are visible in the inspector panel
             enrichedOutput.put("resolved_params", inputData);
+            // And, when the credential was chosen at run time, WHICH account served.
+            // Null in static mode, so the output of every existing step is unchanged.
+            Map<String, Object> credentialSelection = selection.describe(rawSelector);
+            if (credentialSelection != null) {
+                enrichedOutput.put("credential_selection", credentialSelection);
+            }
 
             if (result.isSuccess()) {
                 adoptProducedFiles(context, result.output());

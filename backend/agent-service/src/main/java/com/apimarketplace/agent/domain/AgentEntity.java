@@ -305,6 +305,14 @@ public class AgentEntity implements OrgScopedEntity {
     @Column(name = "project_id")
     private UUID projectId;
 
+    /**
+     * Folder this agent is filed under on the /app/agent list ({@code agent.agent_folders},
+     * V449), or {@code null} for the top level. A folder organises the LIST; a project is a
+     * shared space for a piece of work - an agent can be in both.
+     */
+    @Column(name = "folder_id")
+    private UUID folderId;
+
     @Column(name = "organization_id")
     private String organizationId;
 
@@ -769,6 +777,14 @@ public class AgentEntity implements OrgScopedEntity {
 
     public UUID getProjectId() {
         return projectId;
+    }
+
+    public UUID getFolderId() {
+        return folderId;
+    }
+
+    public void setFolderId(UUID folderId) {
+        this.folderId = folderId;
     }
 
     public void setProjectId(UUID projectId) {

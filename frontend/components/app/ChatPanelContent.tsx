@@ -12,6 +12,8 @@ import { ChatCore } from '@/components/chat/ChatCore';
 import { WelcomeTitle } from '@/app/shared/components';
 import { ModelSelectorDropdown, PROVIDER_ICON_MAP } from '@/components/chat/ModelSelectorDropdown';
 import { NoProviderCta } from '@/components/ai/NoProviderCta';
+import { UpgradeRequiredNotice } from '@/components/billing/UpgradeRequiredBadge';
+import { useMonthlyCreditsCannotPay } from '@/lib/hooks/useMonthlyCreditsCannotPay';
 import { useStreaming } from '@/contexts/StreamingContext';
 import { useVisibleModels, AIModel, SelectedModel, EMPTY_SELECTED_MODEL, modelMatches, selectedModelFromAIModel, selectedModelEquals, getEffectiveDefaultSelectedModel } from '@/hooks/useModels';
 import { useUnifiedAppSafe } from '@/contexts/UnifiedAppContext';
@@ -52,6 +54,9 @@ export function ChatPanelContent() {
   // Same gate as ModelPicker: never show the no-provider empty state while the
   // catalog is loading or after a fetch error - only once it RESOLVED empty.
   const modelsResolvedEmpty = !modelsLoading && !modelsError;
+  // Asked once for the whole menu: the answer is about the account, not
+  // about any one model.
+  const { blocked: creditsCannotPay } = useMonthlyCreditsCannotPay();
   const appContext = useUnifiedAppSafe();
   const pathname = usePathname();
   // Seed the side-panel composer's new conversations with the user's per-workspace defaults (V312).
@@ -107,6 +112,8 @@ export function ChatPanelContent() {
       changeModelTitle={t('actions.changeModel')}
       noModelsLabel={modelsResolvedEmpty ? t('aiProviders.noProviderCta.noModels') : undefined}
       emptyState={modelsResolvedEmpty ? <NoProviderCta variant="menu" /> : undefined}
+      upgradeRequired={creditsCannotPay}
+      upgradeNotice={<UpgradeRequiredNotice blocked={creditsCannotPay} />}
     />
   );
 

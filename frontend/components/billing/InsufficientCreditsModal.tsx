@@ -15,6 +15,9 @@ import { useSubscription, usePaygTiers } from '@/lib/hooks/smart-hooks-complete'
 import { isCeMode } from '@/lib/format-cost';
 import DeploymentBadge from '@/components/pricing/DeploymentBadge';
 import FeatureLabel from '@/components/pricing/FeatureLabel';
+import FoundingPriceNote from '@/components/pricing/FoundingPriceNote';
+import ReferencePrice from '@/components/pricing/ReferencePrice';
+import { usePricingEvent } from '@/hooks/usePricingEvent';
 import TopUpModal from './TopUpModal';
 
 /**
@@ -112,6 +115,11 @@ export default function InsufficientCreditsModal() {
       setProcessingPlanId(null);
     }
   }, [createSubscription, billingCycle, creditTierIndex, router]);
+
+  // Same server-resolved window as the pricing page, so the two never disagree.
+  // Declared with the other hooks, ABOVE the CE early return: a hook after a
+  // conditional return breaks the Rules of Hooks.
+  const { event: pricingEvent } = usePricingEvent();
 
   // Defense-in-depth: never render the Stripe-pricing modal in CE.
   if (isCeMode) return null;
@@ -299,14 +307,29 @@ export default function InsufficientCreditsModal() {
                     <h3 className="text-sm font-bold text-theme-primary mb-1">
                       {plan.name}
                     </h3>
-                    <div className="text-2xl font-bold text-theme-primary">
-                      {plan.monthlyPrice === 0 ? '$0' : `$${plan.monthlyPrice}`}
-                      {plan.monthlyPrice > 0 && (
-                        <span className="text-xs text-theme-muted font-normal">
-                          /{t('mo')}
-                        </span>
-                      )}
+                    <div className="text-2xl font-bold text-theme-primary flex items-baseline justify-center gap-2">
+                      <ReferencePrice
+                        planId={plan.id}
+                        cycle={billingCycle}
+                        creditTierIndex={creditTierIndex}
+                        event={pricingEvent}
+                        size="sm"
+                      />
+                      <span>
+                        {plan.monthlyPrice === 0 ? '$0' : `$${plan.monthlyPrice}`}
+                        {plan.monthlyPrice > 0 && (
+                          <span className="text-xs text-theme-muted font-normal">
+                            /{t('mo')}
+                          </span>
+                        )}
+                      </span>
                     </div>
+                    <FoundingPriceNote
+                      planId={plan.id}
+                      cycle={billingCycle}
+                      creditTierIndex={creditTierIndex}
+                      event={pricingEvent}
+                    />
                   </div>
 
                   <ul className="space-y-1.5 mb-4">

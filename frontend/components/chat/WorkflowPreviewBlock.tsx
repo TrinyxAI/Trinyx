@@ -13,6 +13,7 @@ import { PreviewActionMenu, ActionIcons } from './PreviewActionMenu';
 import { ConfirmDeleteModal } from './ConfirmDeleteModal';
 import { SimpleToast } from './SimpleToast';
 import { useDeleteFlow } from '@/hooks/useDeleteFlow';
+import { workflowPanelTabId } from '@/lib/sidePanel/tabResource';
 
 interface WorkflowPreviewBlockProps {
   workflowId: string;
@@ -38,7 +39,7 @@ export function WorkflowPreviewBlock({ workflowId, onError, onDelete, onRun, rea
   const [notFound, setNotFound] = useState(false);
   const sidePanel = useSidePanelSafe();
 
-  const tabId = `workflow-${workflowId}`;
+  const tabId = workflowPanelTabId(workflowId);
   const isTabActive = sidePanel?.isOpen && sidePanel?.activeTabId === tabId;
 
   const deleteFn = useCallback(async () => { await orchestratorApi.deleteWorkflow(workflowId); }, [workflowId]);

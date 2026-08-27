@@ -50,7 +50,11 @@ public class HttpExecutionService {
 
     /**
      * Cache of resource-scoped sub-tokens (e.g. Facebook Page tokens) resolved via the generic
-     * {@code sub_resource_token} credential-resolution rule. Keyed by {@code user|credential|matchValue},
+     * {@code sub_resource_token} credential-resolution rule. Keyed by
+     * {@code user|requirement|account|baseUrl|matchValue} - the account is part of the
+     * key because two credentials of one integration can be admin on the same
+     * sub-resource, and serving one account's sub-token to the other would substitute
+     * the account after the selection had already been honoured,
      * short TTL. See {@link #resolveSubResourceToken}.
      */
     private final Map<String, CachedSubToken> subResourceTokenCache = new java.util.concurrent.ConcurrentHashMap<>();
@@ -268,6 +272,7 @@ public class HttpExecutionService {
             if (byId.isPresent()) {
                 return byId;
             }
+            refuseSubstitutionIfStrict(selectedCredentialId, credentialName);
             // Pinned credential deleted → fall through to the user's default
             // credential for this integration (take pinned, else default).
         }
@@ -284,6 +289,7 @@ public class HttpExecutionService {
             if (byId.isPresent()) {
                 return byId;
             }
+            refuseSubstitutionIfStrict(selectedCredentialId, credentialName);
             // Pinned credential deleted → fall back to the integration default.
         }
         return userCredentialService.getAccessTokenInfo(userId, credentialName);
@@ -299,6 +305,7 @@ public class HttpExecutionService {
             if (!byId.isEmpty()) {
                 return byId;
             }
+            refuseSubstitutionIfStrict(selectedCredentialId, credentialName);
             // Pinned credential deleted → fall back to the integration default.
         }
         return credentialName != null ? userCredentialService.getCredentialDataMap(userId, credentialName) : Map.of();
@@ -332,17 +339,257 @@ public class HttpExecutionService {
      */
     private Long selectedUserCredentialId(String userId, String credentialName) {
         if (!"user".equals(CredentialModeContext.getExplicitSource())) {
+            // A run-time choice with no explicit user source would otherwise fall
+            // through to the agentic user-then-platform fallback and run on the
+            // default key, silently. This covers callers that REACH this method; the
+            // request-level guarantee lives at CatalogV1Controller, which refuses a
+            // strict selection without credentialSource=user before anything runs,
+            // because the agentic and platform branches of tryGetCredentialResolution
+            // never consult the selection at all. A future IN-PROCESS caller that sets
+            // the thread-locals directly and takes one of those branches would still
+            // degrade silently: it has to go through the door, or add its own check.
+            if (CredentialModeContext.isSelectionStrict()) {
+                throw new com.apimarketplace.catalog.service.exception.CredentialSelectionException(
+                        "This step selects its credential at run time, but the request does not "
+                                + "state that it runs on the caller's own credentials. The call was NOT "
+                                + "made: it would have resolved a credential the step did not choose.");
+            }
             return null;
         }
         Long pinned = CredentialModeContext.getSelectedCredentialId();
-        if (pinned == null) {
+        String namedChoice = CredentialModeContext.getSelectedCredentialName();
+        boolean strict = CredentialModeContext.isSelectionStrict();
+        if (pinned == null && namedChoice == null) {
+            // Strict with nothing to be strict ABOUT is a caller contradiction, and
+            // ignoring it would run on the integration default while the request said
+            // the account had been chosen for this run. Refused rather than dropped.
+            if (strict) {
+                throw new com.apimarketplace.catalog.service.exception.CredentialSelectionException(
+                        "This request states that its credential was selected for this run but "
+                                + "names none. The call was NOT made: it would have run on this "
+                                + "account's default credential for the integration while reporting "
+                                + "that a specific one had been chosen.");
+            }
             return null;
         }
         if (userId == null || credentialName == null || credentialName.isBlank()
                 || userCredentialService == null) {
+            return refuseIfStrict(strict, describeChoice(pinned, namedChoice),
+                    "this call carries no credential requirement to match it against");
+        }
+        // A NAME rather than an id: what an author has to hand when the choice is
+        // made at run time. Resolved HERE and not by the caller, because deciding
+        // whether a name belongs to this endpoint's provider needs the requirement,
+        // which is catalog-side knowledge.
+        if (namedChoice != null) {
+            Long named = credentialIdNamed(userId, credentialName, namedChoice);
+            if (named == null) {
+                // Two refusals, one null. They need opposite advice, so the reason and the
+                // advice travel together rather than the second being inferred back out of
+                // the wording of the first.
+                boolean ambiguous =
+                        CredentialModeContext.namedCredentialWasAmbiguous(credentialName.trim());
+                return ambiguous
+                        ? refuseIfStrict(strict, describeChoice(null, namedChoice),
+                                "two or more ACTIVE credentials of this integration carry that name, "
+                                        + "so picking one would have picked at random and none was used",
+                                Advice.RENAME_THE_DUPLICATE)
+                        : refuseIfStrict(strict, describeChoice(null, namedChoice),
+                                "no active credential of this integration is named that (either the "
+                                        + "name does not match one, ignoring capitalisation and "
+                                        + "surrounding spaces, or the credential service could not "
+                                        + "be reached)",
+                                Advice.FROM_THE_CHOICE);
+            }
+            return named;
+        }
+        if (pinnedCredentialBelongsTo(userId, pinned, credentialName)) {
+            return pinned;
+        }
+        return refuseIfStrict(strict, describeChoice(pinned, null),
+                "it could not be identified as a credential of this integration");
+    }
+
+    /**
+     * Null for an author-time pin, an exception for a run-time choice.
+     *
+     * <p>Returning null here is what every caller reads as "no pin", and they all
+     * go on to use the integration's default key. That is the right answer for a pin
+     * written months ago. It is the wrong answer for a choice made for THIS run,
+     * which is why strict callers get a refusal instead: the alternative is a call
+     * that succeeds against an account nobody asked for.
+     */
+    private Long refuseIfStrict(boolean strict, String choice, String reason) {
+        return refuseIfStrict(strict, choice, reason, Advice.FROM_THE_CHOICE);
+    }
+
+    private Long refuseIfStrict(boolean strict, String choice, String reason, Advice adviceKind) {
+        if (!strict) {
             return null;
         }
-        return pinnedCredentialBelongsTo(userId, pinned, credentialName) ? pinned : null;
+        // The closing advice is about NAME matching, so it only belongs on a choice
+        // that was made by name. Appended to a numeric-id refusal it sent the reader
+        // to check the spelling of a name the step never used.
+        String advice;
+        if (adviceKind == Advice.RENAME_THE_DUPLICATE) {
+            advice = " Rename one of them so the name identifies a single account, or select "
+                    + "by credential id instead of by name.";
+        } else if (choice != null && choice.startsWith("name ")) {
+            advice = " Check that a credential with that name exists and is active for this "
+                    + "integration. Capitalisation and surrounding spaces do not matter; "
+                    + "nothing else about the name is ignored.";
+        } else {
+            advice = " Check that this credential still exists, is active, and belongs to this "
+                    + "integration.";
+        }
+        throw new com.apimarketplace.catalog.service.exception.CredentialSelectionException(
+                "This step selects its credential at run time (" + choice + ") but " + reason
+                        + ". The call was NOT made: running it would have used this account's "
+                        + "default credential for the integration, which is a different account from the one "
+                        + "the workflow asked for." + advice);
+    }
+
+    /**
+     * Which closing advice a refusal carries.
+     *
+     * <p>Passed rather than inferred. The first version re-derived it by testing whether
+     * the reason string began with certain words, so a reword or a rewrap would silently
+     * return a duplicate-name refusal to advising a spelling check: the exact misdirection
+     * the split was written to remove, reappearing as a formatting accident.
+     */
+    private enum Advice {
+        /** The name is right and two accounts answer to it, so checking spelling cannot help. */
+        RENAME_THE_DUPLICATE,
+        /** Derive it from the choice: a name refusal is about names, an id refusal is not. */
+        FROM_THE_CHOICE
+    }
+
+    /**
+     * Refuses the substitution each fall-through above would otherwise make.
+     *
+     * <p>{@link #refuseIfStrict} covers the half where the credential cannot be
+     * IDENTIFIED. This covers the half where it was identified and then could not be
+     * USED: the account exists and carries the right name, but the lookup for its
+     * token, scopes or data map comes back empty because it was revoked, never
+     * completed its authorisation, or holds no material of that kind.
+     *
+     * <p>Both halves end in the same place if left alone, the integration default
+     * key, so hardening only the first would leave the feature claiming a guarantee
+     * it does not have. A no-op unless a credential was actually selected AND the
+     * choice was made for this run, so every author-time pin keeps its fallback.
+     */
+    private void refuseSubstitutionIfStrict(Long selectedCredentialId, String credentialName) {
+        if (selectedCredentialId == null || !CredentialModeContext.isSelectionStrict()) {
+            return;
+        }
+        throw new com.apimarketplace.catalog.service.exception.CredentialSelectionException(
+                "This step selects its credential at run time and credential " + selectedCredentialId
+                        + " was found, but no usable key could be read from it. The call was NOT made: "
+                        + "running it would have used this account's default credential for the "
+                        + "integration, which is a different account from the one the workflow asked "
+                        + "for. Either the selected credential needs to be reconnected, or the "
+                        + "credential service could not be reached just now; the call is refused "
+                        + "in both cases rather than run on another account.");
+    }
+
+    private static String describeChoice(Long pinned, String namedChoice) {
+        if (namedChoice != null) {
+            return "name " + quotedIdentifier(namedChoice);
+        }
+        return "credential " + pinned;
+    }
+
+    private static String quotedIdentifier(String value) {
+        return "\"" + value + "\"";
+    }
+
+    /**
+     * The id of the caller's credential NAMED {@code chosenName}, among those this
+     * endpoint integration would have offered.
+     *
+     * <p>Two refusals matter as much as the match. Nothing found means the name is
+     * wrong, or the credential belongs to another provider, and guessing past that
+     * is the whole failure this exists to prevent. SEVERAL found means the account
+     * holds two credentials of this integration under one name: picking either
+     * would be picking at random, so it refuses too, rather than being right half
+     * the time.
+     *
+     * <p>Works off identities only ({@code CredentialIdentityDto}): id, name,
+     * integration. No secret material is fetched in order to decide which
+     * credential was meant, which is the same rule
+     * {@link #resolvePinnedCredentialOwnership} follows for the id path.
+     */
+    /**
+     * Whether the caller meant THIS credential by name.
+     *
+     * <p>Deliberately not {@link #sameCredentialIdentity}, which collapses to the
+     * canonical icon slug. That normalisation is right for deciding whether two
+     * PROVIDER identifiers name the same provider ({@code stability-ai} against
+     * {@code stabilityai}), and wrong for a label a person typed: it deletes
+     * punctuation and spacing, so {@code Client 1} and {@code Client-1} become the
+     * same credential and an account holding both can never select either. It also
+     * strips a trailing {@code -api}, which would silently equate {@code Shop} and
+     * {@code Shop-API}.
+     *
+     * <p>So: trimmed and case-insensitive, and nothing else. That is what the refusal
+     * message and the field help both promise, and a promise about matching has to be
+     * the matcher that runs.
+     */
+    private static boolean sameChosenName(String chosenName, String credentialName) {
+        return chosenName != null && credentialName != null
+                && chosenName.trim().equalsIgnoreCase(credentialName.trim());
+    }
+
+    private Long credentialIdNamed(String userId, String credentialName, String chosenName) {
+        String requirement = credentialName.trim();
+        if (CredentialModeContext.hasNamedCredentialVerdict(requirement)) {
+            return CredentialModeContext.namedCredentialId(requirement);
+        }
+        NamedVerdict verdict = resolveNamedCredential(userId, requirement, chosenName);
+        CredentialModeContext.rememberNamedCredentialVerdict(
+                requirement, verdict.id(), verdict.ambiguous());
+        return verdict.id();
+    }
+
+    /**
+     * A resolved id, or a refusal that knows WHY it refused.
+     *
+     * <p>"Nothing matched" and "two things matched" both refuse and both leave no id,
+     * but they need opposite advice: fix the name, or stop using a name the workspace
+     * gives to two accounts. Carried out of the resolver rather than recomputed, because
+     * counting again would cost a second credential-service round trip on a path whose
+     * whole point is to make exactly one.
+     */
+    private record NamedVerdict(Long id, boolean ambiguous) {
+    }
+
+    private NamedVerdict resolveNamedCredential(String userId, String requirement, String chosenName) {
+        String integration = requirement.replaceAll("-credential$", "");
+        java.util.List<com.apimarketplace.credential.client.dto.CredentialIdentityDto> matches =
+                userCredentialService.listIdentities(userId).stream()
+                        .filter(c -> c.getId() != null)
+                        // ACTIVE only, because that is the set the id path
+                        // resolves from (auth-side findActiveCredentialById and
+                        // its by-name sibling both filter on it). Without this
+                        // the two paths disagree: a revoked account would be
+                        // SELECTED here and then fail to produce a key, and a
+                        // revoked namesake would make an unambiguous choice look
+                        // ambiguous.
+                        .filter(c -> "active".equalsIgnoreCase(c.getStatus()))
+                        .filter(c -> credentialIdentityMatchesRequirement(
+                                integration, requirement, c.getIntegration(), c.getName()))
+                        .filter(c -> sameChosenName(chosenName, c.getName()))
+                        .toList();
+        if (matches.size() == 1) {
+            return new NamedVerdict(matches.get(0).getId(), false);
+        }
+        if (matches.isEmpty()) {
+            log.warn("No credential named {} for a {} call.", quotedIdentifier(chosenName), integration);
+            return new NamedVerdict(null, false);
+        }
+        log.warn("{} credentials of {} carry the name {}, so the run-time choice is ambiguous "
+                + "and none was used.", matches.size(), integration, quotedIdentifier(chosenName));
+        return new NamedVerdict(null, true);
     }
 
     /**
@@ -375,6 +622,27 @@ public class HttpExecutionService {
         String left = com.apimarketplace.catalog.util.IconSlugNormalizer.normalizeForKey(a);
         String right = com.apimarketplace.catalog.util.IconSlugNormalizer.normalizeForKey(b);
         return !left.isBlank() && left.equals(right);
+    }
+
+    /**
+     * Whether a credential's own identifiers say it belongs to the integration this
+     * endpoint requires.
+     *
+     * <p>One matcher, used by both ways of choosing a credential (by id and by
+     * name), because a name path that matched more loosely than the id path would
+     * be a way to reach a credential the id path exists to keep out. The rules it
+     * encodes are documented at its caller
+     * {@link #resolvePinnedCredentialOwnership}: {@code integration} is system-set
+     * and decides whenever it is present; the label is admitted only for a
+     * credential that carries no integration at all, which is how the
+     * workflow-native connectors identify themselves.
+     */
+    private static boolean credentialIdentityMatchesRequirement(
+            String integration, String requirement, String foundIntegration, String foundName) {
+        return sameCredentialIdentity(integration, foundIntegration)
+                || sameCredentialIdentity(requirement, foundIntegration)
+                || (isBlankIdentifier(foundIntegration)
+                        && sameCredentialIdentity(requirement, foundName));
     }
 
     private boolean pinnedCredentialBelongsTo(String userId, Long credentialId, String credentialName) {
@@ -439,10 +707,8 @@ public class HttpExecutionService {
         // from the API's own name, and both sides collapse to the same slug, so
         // anyone able to register an API could name it after a colleague's
         // org-shared credential and have that key answer their own endpoint.
-        boolean matches = sameCredentialIdentity(integration, found.getIntegration())
-                || sameCredentialIdentity(requirement, found.getIntegration())
-                || (isBlankIdentifier(found.getIntegration())
-    && sameCredentialIdentity(requirement, found.getName()));
+        boolean matches = credentialIdentityMatchesRequirement(
+                integration, requirement, found.getIntegration(), found.getName());
         if (!matches) {
             log.warn("Ignoring pinned credential {} on a '{}' call: it belongs to '{}'. "
                             + "Falling back to the default key for this integration.",
@@ -709,6 +975,11 @@ public class HttpExecutionService {
                         // Pinned credential gone (or had no token) → refresh the
                         // integration default. Mirrors the resolution fallback so the
                         // 401-retry path picks the same credential.
+                        // Same refusal as the resolution path. An expired token
+                        // answering 401 is routine on OAuth integrations, so
+                        // without this the retry is the likeliest way of all to
+                        // end up acting on the wrong account.
+                        refuseSubstitutionIfStrict(selectedCredentialId, credentialName);
                         newToken = userCredentialService.forceRefreshAndGetToken(userId, credentialName);
                     }
                 }
@@ -825,6 +1096,14 @@ public class HttpExecutionService {
                 return result;
             }
 
+        } catch (com.apimarketplace.catalog.service.exception.CredentialSelectionException e) {
+            // Refusal, not a failure of the tool: the step named a credential for
+            // this run, it could not be honoured, and the provider was never called.
+            // Rethrown for the same reason InsufficientCreditsException is: swallowed
+            // into a generic error envelope, the refusal reads as "the API failed",
+            // which sends the reader looking at the provider instead of at the
+            // account the workflow asked for.
+            throw e;
         } catch (Exception e) {
             // Non-HTTP error (network, etc.)
             Map<String, Object> result = new HashMap<>();
@@ -1343,7 +1622,18 @@ public class HttpExecutionService {
                 return baseValue;
             }
             String apiKey = api == null ? "" : String.valueOf(api.getBaseUrl());
-            String cacheKey = userId + "|" + credentialName + "|" + apiKey + "|" + matchValue;
+            // Keyed by the ACCOUNT that produced the base token, not only by the
+            // endpoint's requirement. Two credentials of one integration can both be
+            // admin on the same sub-resource, and before run-time selection existed
+            // nothing in one tenant could ask for the same matchValue under two
+            // accounts within the TTL. Now it can: an agency runs this workflow for
+            // account A then for account B, and B would be served the sub-token minted
+            // from A's user token - a strict choice honoured at resolution and quietly
+            // substituted one layer down.
+            Long selectedForCache = selectedUserCredentialId(userId, credentialName);
+            String accountKey = selectedForCache != null ? String.valueOf(selectedForCache) : "default";
+            String cacheKey = userId + "|" + credentialName + "|" + accountKey
+                    + "|" + apiKey + "|" + matchValue;
             long now = System.currentTimeMillis();
             CachedSubToken cached = subResourceTokenCache.get(cacheKey);
             if (cached != null && cached.expiresAtMs() > now) {
@@ -1521,6 +1811,12 @@ public class HttpExecutionService {
                         // DEFAULT credential for this integration (take pinned, else
                         // default). Stays on the user pool - an explicit "user" source
                         // never leaks to platform.
+                        // Identifying the credential is only half of honouring it.
+                        // A name that matched an account whose token then comes
+                        // back empty (revoked, never authorised, no token of this
+                        // kind) lands here and would be served the DEFAULT
+                        // account: the substitution strict mode exists to refuse.
+                        refuseSubstitutionIfStrict(selectedCredentialId, credentialName);
                         v = tryGetUserCredential(userId, credentialName);
                     }
                     return v.map(s -> new CredentialResolution(s, CredentialSource.USER));
@@ -2951,6 +3247,13 @@ public class HttpExecutionService {
             String errorMessage = httpEx.getResponseBodyAsString();
             log.error("[HttpExecutionService.executeTyped] HTTP error: status={}, error={}", statusCode, errorMessage);
             return failure(statusCode, errorMessage, tool);
+        } catch (com.apimarketplace.catalog.service.exception.CredentialSelectionException e) {
+            // The typed path serves binary responses, multipart uploads, async
+            // polling and streaming, which is exactly the endpoint class a
+            // per-account publishing step uses. Swallowed here, the refusal became a
+            // generic tool failure and the reader was sent looking at the provider
+            // instead of at the account name that did not match.
+            throw e;
         } catch (Exception e) {
             log.error("[HttpExecutionService.executeTyped] Error: {}", e.getMessage(), e);
             return failure(0, e.getMessage() != null ? e.getMessage() : "Unknown error", tool);
@@ -3117,6 +3420,13 @@ public class HttpExecutionService {
             }
             byte[] bodyBytes = serializeBodyForSigning(body);
             awsSigV4Signer.sign(tool.getMethod(), url, headers, bodyBytes, credentialFields);
+        } catch (com.apimarketplace.catalog.service.exception.CredentialSelectionException e) {
+            // Signing needs the credential MATERIAL, so an unresolvable run-time choice
+            // surfaces here. Swallowed, the request went out UNSIGNED and failed at the
+            // provider with an auth error pointing at AWS instead of at the account
+            // name that did not match. It is the one credential-helper call site that
+            // still degraded rather than refused.
+            throw e;
         } catch (Exception e) {
             log.warn("[HttpExecutionService] AWS SigV4 signing failed for tool {}: {} - falling through unsigned", tool.getId(), e.getMessage());
         }

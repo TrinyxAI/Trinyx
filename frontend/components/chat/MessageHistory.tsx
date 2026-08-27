@@ -43,8 +43,7 @@ import { formatUtcDateTime, formatUtcTime, parseUtcAware } from '@/lib/utils/dat
  */
 async function downloadAuthenticatedAttachment(url: string, fileName: string): Promise<void> {
   try {
-    const tokenProvider = apiClient.getTokenProvider();
-    const token = tokenProvider ? await tokenProvider() : null;
+    const token = await apiClient.getAuthToken();
     const res = await fetch(url, {
       headers: token ? { Authorization: `Bearer ${token}` } : undefined,
     });

@@ -122,13 +122,17 @@ public class InterfaceController {
             @RequestParam(value = "includeTemplates", defaultValue = "true") boolean includeTemplates,
             @RequestParam(value = "sort", required = false) String sort,
             @RequestParam(value = "visibility", required = false) String visibility,
+            @RequestParam(value = "folderId", required = false) String folderId,
+            @RequestParam(value = "includeFolders", required = false, defaultValue = "false")
+            boolean includeFolders,
             HttpServletRequest request) {
         String tenantId = tenantResolver.resolve(request);
         String orgId = tenantResolver.resolveOrgId(request);
         String orgRole = tenantResolver.resolveOrgRole(request);
 
         InterfaceService.InterfacePage pageResult = interfaceService.listInterfacesPaged(
-                tenantId, interfaceType, excludeTableAttached, q, orgId, orgRole, page, size, sort, visibility);
+                tenantId, interfaceType, excludeTableAttached, q, orgId, orgRole, page, size, sort,
+                visibility, folderId, includeFolders);
 
         Map<String, Object> body = new java.util.LinkedHashMap<>();
         body.put("items", pageResult.items().stream()
@@ -140,6 +144,15 @@ public class InterfaceController {
         // Per-interface publication badge for the page (id -> {status, rejectionReason?}), batched
         // server-side - replaces the former full getAllMyPublications sweep on the client.
         body.put("publicationStatuses", pageResult.publicationStatuses());
+        if (includeFolders) {
+            // Tiles for THIS level (empty while searching, which looks through every folder)
+            // plus the trail, so the page can render the path it navigated into.
+            body.put("folders", pageResult.folders());
+            body.put("folderTrail", pageResult.folderTrail());
+            if (pageResult.folderMissing()) {
+                body.put("folderMissing", true);
+            }
+        }
         return ResponseEntity.ok(body);
     }
 

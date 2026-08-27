@@ -21,6 +21,7 @@ import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
+import org.mockito.InOrder;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
@@ -28,10 +29,14 @@ import java.util.*;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
+import java.util.concurrent.ForkJoinPool;
+import java.util.concurrent.ForkJoinTask;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicLong;
+import java.util.concurrent.atomic.AtomicReference;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.*;
@@ -1655,7 +1660,9 @@ class SubWorkflowNodeTest {
             NodeExecutionResult execResult = node.execute(context);
 
             assertTrue(execResult.isFailure());
-            assertTrue(execResult.errorMessage().orElse("").contains("timed out"));
+            // Wording owned by TimeoutHonestyTests: the point is that it names the budget and
+            // does not imply the child was stopped.
+            assertTrue(execResult.errorMessage().orElse("").contains("did not finish within"));
         }
     }
 
@@ -2112,6 +2119,855 @@ class SubWorkflowNodeTest {
 
             assertTrue(execResult.isFailure());
             assertTrue(execResult.errorMessage().orElse("").contains("No active run found"));
+        }
+    }
+
+    // ===============================================================
+    // Waiting for the child epoch to close
+    // ===============================================================
+
+    /**
+     * The bug these cover: the fire returning is not the child finishing. A node inside the child
+     * that yields (a wait past 3s, a user approval, an interface awaiting __continue, or an agent
+     * on the async queue) defers the rest of that DAG, and the node used to read the step rows
+     * present at that instant and publish them under success=true.
+     *
+     * <p>Note what is NOT simulated here: a step row in a non-terminal state. No such row exists
+     * in this system, which is precisely why the node has to ask the engine instead of inspecting
+     * the child's data. The scenarios below drive the real predicate,
+     * {@link ReusableTriggerService#isEpochStillOpen}.
+     */
+    @Nested
+    @DisplayName("execute() - Waits for the child epoch to close")
+    class ChildEpochWaitTests {
+
+        @Mock
+        private com.apimarketplace.orchestrator.services.streaming.redis.WorkflowRedisPublisher redisPublisher;
+
+        private SubWorkflowNode nodeWithTimeout(int timeoutSeconds) {
+            SubWorkflowNode node = createNode(new Core.SubWorkflowConfig(WORKFLOW_ID, null, timeoutSeconds, 5));
+            node.setWorkflowRedisPublisher(redisPublisher);
+
+            WorkflowEntity entity = createMockEntity();
+            when(workflowRepository.findById(UUID.fromString(WORKFLOW_ID))).thenReturn(Optional.of(entity));
+            WorkflowRunEntity run = createMockRun(RunStatus.WAITING_TRIGGER);
+            stubActiveRun(run);
+            // any(), not eq(run): the node re-reads the freshest child row inside the stripe lock,
+            // so a test that stubs that read would otherwise silently miss this stub.
+            when(reusableTriggerService.executeTriggerInternal(
+                any(WorkflowRunEntity.class), anyString(), any(), any(), eq(true), anyMap()))
+                .thenReturn(createSuccessTriggerResult(1));
+            return node;
+        }
+
+        @Test
+        @DisplayName("An agent in the child defers its epoch; the node waits and then succeeds with the FULL outputs")
+        void shouldWaitForADeferredChildEpochAndThenSucceed() {
+            // An agent node goes to the async queue BY DEFAULT (scaling.agent.queue.enabled=true),
+            // registers as pending and yields, so this is the ordinary shape of a called workflow,
+            // not an edge case. Pre-fix it produced a green node holding a prefix of the epoch.
+            SubWorkflowNode node = nodeWithTimeout(60);
+            when(reusableTriggerService.isEpochStillOpen(RUN_ID_PUBLIC, "trigger:start", 1))
+                .thenReturn(true, true, false);
+            when(workflowStepDataRepository.findCompletedOutputRefsByRunIdAndEpoch(RUN_ID_PUBLIC, 1))
+                .thenReturn(List.of());
+
+            NodeExecutionResult execResult = node.execute(context);
+
+            assertTrue(execResult.isSuccess(), "a child that finishes inside the budget is a success");
+            assertEquals(true, execResult.output().get("success"));
+            verify(reusableTriggerService, times(3)).isEpochStillOpen(RUN_ID_PUBLIC, "trigger:start", 1);
+        }
+
+        @Test
+        @DisplayName("Outputs are read only AFTER the epoch closed, never while it is still open")
+        void shouldNotReadOutputsBeforeTheEpochCloses() {
+            // This ordering IS the bug. Reading first is what shipped 4 of 11 steps as a success.
+            SubWorkflowNode node = nodeWithTimeout(60);
+            when(reusableTriggerService.isEpochStillOpen(RUN_ID_PUBLIC, "trigger:start", 1))
+                .thenReturn(true, false);
+            when(workflowStepDataRepository.findCompletedOutputRefsByRunIdAndEpoch(RUN_ID_PUBLIC, 1))
+                .thenReturn(List.of());
+
+            node.execute(context);
+
+            InOrder order = inOrder(reusableTriggerService, workflowStepDataRepository);
+            order.verify(reusableTriggerService, times(2)).isEpochStillOpen(RUN_ID_PUBLIC, "trigger:start", 1);
+            order.verify(workflowStepDataRepository).findCompletedOutputRefsByRunIdAndEpoch(RUN_ID_PUBLIC, 1);
+        }
+
+        @Test
+        @DisplayName("A child that already finished is not made to wait at all")
+        void shouldNotWaitWhenTheEpochIsAlreadyClosed() {
+            SubWorkflowNode node = nodeWithTimeout(60);
+            when(reusableTriggerService.isEpochStillOpen(RUN_ID_PUBLIC, "trigger:start", 1)).thenReturn(false);
+            when(workflowStepDataRepository.findCompletedOutputRefsByRunIdAndEpoch(RUN_ID_PUBLIC, 1))
+                .thenReturn(List.of());
+
+            NodeExecutionResult execResult = node.execute(context);
+
+            assertTrue(execResult.isSuccess());
+            verify(reusableTriggerService, times(1)).isEpochStillOpen(RUN_ID_PUBLIC, "trigger:start", 1);
+        }
+
+        @Test
+        @DisplayName("A child still unfinished when the budget runs out fails, and says nothing was stopped")
+        void shouldFailWhenTheBudgetRunsOutWithTheChildUnfinished() {
+            // The honest answer for a child parked on a person: no timeout can resolve an approval.
+            SubWorkflowNode node = nodeWithTimeout(1);
+            when(reusableTriggerService.isEpochStillOpen(RUN_ID_PUBLIC, "trigger:start", 1)).thenReturn(true);
+
+            NodeExecutionResult execResult = node.execute(context);
+
+            assertTrue(execResult.isFailure());
+            String message = execResult.errorMessage().orElse("");
+            assertTrue(message.contains("NOT stopped") && message.contains("still executing"),
+                "must not imply the child was cancelled: " + message);
+            assertTrue(message.contains(RUN_ID_PUBLIC), "must name the run that can be stopped: " + message);
+            assertTrue(message.contains("__continue") && message.contains("approval"),
+                "must name the causes no timeout can fix: " + message);
+        }
+
+        @Test
+        @DisplayName("Never publishes the child's partial outputs when it gave up on it")
+        void shouldNotCollectOutputsWhenTheChildNeverFinished() {
+            SubWorkflowNode node = nodeWithTimeout(1);
+            when(reusableTriggerService.isEpochStillOpen(RUN_ID_PUBLIC, "trigger:start", 1)).thenReturn(true);
+
+            node.execute(context);
+
+            verify(workflowStepDataRepository, never())
+                .findCompletedOutputRefsByRunIdAndEpoch(anyString(), anyInt());
+        }
+
+        @Test
+        @DisplayName("A child run that goes terminal ends the wait immediately instead of burning the budget")
+        void shouldStopWaitingWhenTheChildRunGoesTerminal() {
+            // A cancelled or failed child will never close that epoch. Waiting out a 300s budget
+            // would only delay the same answer. Pre-fix this case reported SUCCESS on the partial
+            // epoch of a cancelled run, which is worse than the bug being fixed.
+            SubWorkflowNode node = nodeWithTimeout(300);
+            when(reusableTriggerService.isEpochStillOpen(RUN_ID_PUBLIC, "trigger:start", 1)).thenReturn(true);
+            when(workflowRunRepository.findStatusByRunIdPublic(RUN_ID_PUBLIC))
+                .thenReturn(Optional.of(RunStatus.CANCELLED));
+
+            long startedAt = System.currentTimeMillis();
+            NodeExecutionResult execResult = node.execute(context);
+            long elapsed = System.currentTimeMillis() - startedAt;
+
+            assertTrue(execResult.isFailure());
+            assertTrue(elapsed < 10_000, "must not sit on the full 300s budget, took " + elapsed + "ms");
+            verify(workflowStepDataRepository, never())
+                .findCompletedOutputRefsByRunIdAndEpoch(anyString(), anyInt());
+        }
+
+        @Test
+        @DisplayName("WAITING_TRIGGER is not terminal: an ordinary resting child is still waited for")
+        void shouldKeepWaitingWhileTheChildRunRestsBetweenFires() {
+            // A reusable run sits in WAITING_TRIGGER between fires, which is where essentially
+            // every healthy child is when this check runs. Treating any non-null status as an
+            // ending would abandon the wait on all of them.
+            //
+            // The stub chain must be long enough to actually TRIP the status check: it fires on
+            // the Nth poll, so a two-value chain would leave this branch unexecuted and the test
+            // would pass without testing anything.
+            SubWorkflowNode node = nodeWithTimeout(60);
+            Boolean[] openUntilTheCheckFires =
+                new Boolean[SubWorkflowNode.TERMINAL_CHECK_EVERY_N_POLLS];
+            java.util.Arrays.fill(openUntilTheCheckFires, Boolean.TRUE);
+            openUntilTheCheckFires[openUntilTheCheckFires.length - 1] = Boolean.FALSE;
+            when(reusableTriggerService.isEpochStillOpen(RUN_ID_PUBLIC, "trigger:start", 1))
+                .thenReturn(Boolean.TRUE, openUntilTheCheckFires);
+            // The branch reads the STATUS projection, not the entity: stubbing the entity lookup
+            // would leave the scenario unwired to the code under test.
+            when(workflowRunRepository.findStatusByRunIdPublic(RUN_ID_PUBLIC))
+                .thenReturn(Optional.of(RunStatus.WAITING_TRIGGER));
+            when(workflowStepDataRepository.findCompletedOutputRefsByRunIdAndEpoch(RUN_ID_PUBLIC, 1))
+                .thenReturn(List.of());
+
+            assertTrue(node.execute(context).isSuccess(),
+                "a child resting in WAITING_TRIGGER has not ended, so the wait must continue");
+            verify(workflowRunRepository, atLeastOnce()).findStatusByRunIdPublic(RUN_ID_PUBLIC);
+        }
+
+        @Test
+        @DisplayName("A stop on this run abandons the wait instead of parking a worker")
+        void shouldAbandonTheWaitWhenThisRunIsCancelled() {
+            SubWorkflowNode node = nodeWithTimeout(300);
+            when(reusableTriggerService.isEpochStillOpen(RUN_ID_PUBLIC, "trigger:start", 1)).thenReturn(true);
+            when(redisPublisher.isAgentCancelSignalSet("run-1")).thenReturn(true);
+
+            long startedAt = System.currentTimeMillis();
+            NodeExecutionResult execResult = node.execute(context);
+            long elapsed = System.currentTimeMillis() - startedAt;
+
+            assertTrue(execResult.isFailure());
+            assertTrue(elapsed < 10_000, "a stop must be responsive, took " + elapsed + "ms");
+            // Without this the test would pass on any early failure, including a budget timeout.
+            String message = execResult.errorMessage().orElse("");
+            assertTrue(message.contains("This run was stopped"), message);
+            assertFalse(message.contains("did not finish within"),
+                "the budget was not spent, so it must not claim it was: " + message);
+        }
+
+        @Test
+        @DisplayName("An unreadable epoch check fails OPEN: the run proceeds exactly as before the check existed")
+        void shouldProceedWhenTheEpochCheckThrows() {
+            // Criterion: the fix must not become a new way for a healthy run to fail. A DB or
+            // Redis blip is not evidence that the child is unfinished.
+            SubWorkflowNode node = nodeWithTimeout(60);
+            when(reusableTriggerService.isEpochStillOpen(RUN_ID_PUBLIC, "trigger:start", 1))
+                .thenThrow(new IllegalStateException("redis down"));
+            when(workflowStepDataRepository.findCompletedOutputRefsByRunIdAndEpoch(RUN_ID_PUBLIC, 1))
+                .thenReturn(List.of());
+
+            NodeExecutionResult execResult = node.execute(context);
+
+            assertTrue(execResult.isSuccess(), "an unreadable check must not fail the run");
+            assertEquals(true, execResult.output().get("success"));
+        }
+
+        @Test
+        @DisplayName("Asks about the DAG key the fire actually ran under, not the node's own copy")
+        void shouldAskAboutTheDagKeyCarriedByTheResult() {
+            // A key that misses reports "nothing pending", so the whole guard would go silently
+            // inert rather than fail loudly. The result carries the string the engine indexed by.
+            SubWorkflowNode node = createNode(new Core.SubWorkflowConfig(WORKFLOW_ID, null, 60, 5));
+            node.setWorkflowRedisPublisher(redisPublisher);
+            WorkflowEntity entity = createMockEntity();
+            when(workflowRepository.findById(UUID.fromString(WORKFLOW_ID))).thenReturn(Optional.of(entity));
+            WorkflowRunEntity run = createMockRun(RunStatus.WAITING_TRIGGER);
+            stubActiveRun(run);
+            when(reusableTriggerService.executeTriggerInternal(
+                eq(run), anyString(), any(), any(), eq(true), anyMap()))
+                .thenReturn(TriggerExecutionResult.success(
+                    RUN_ID_PUBLIC, "trigger:some_other_dag", TriggerType.MANUAL, Set.of(), 4));
+            when(reusableTriggerService.isEpochStillOpen(RUN_ID_PUBLIC, "trigger:some_other_dag", 4))
+                .thenReturn(false);
+            when(workflowStepDataRepository.findCompletedOutputRefsByRunIdAndEpoch(RUN_ID_PUBLIC, 4))
+                .thenReturn(List.of());
+
+            assertTrue(node.execute(context).isSuccess());
+
+            verify(reusableTriggerService).isEpochStillOpen(RUN_ID_PUBLIC, "trigger:some_other_dag", 4);
+        }
+
+        @Test
+        @DisplayName("Clears the parent pointer on every exit, including the one where it gave up")
+        void shouldAlwaysClearTheParentPointer() {
+            // The pointer is scoped to the wait by design. Leaving it behind on a SHARED reusable
+            // child run would let a later stop of THIS run abort an unrelated fire of that child.
+            SubWorkflowNode node = nodeWithTimeout(1);
+            when(reusableTriggerService.isEpochStillOpen(RUN_ID_PUBLIC, "trigger:start", 1)).thenReturn(true);
+
+            assertTrue(node.execute(context).isFailure());
+
+            verify(redisPublisher).registerSubWorkflowParent(eq(RUN_ID_PUBLIC), anyString());
+            verify(redisPublisher).clearSubWorkflowParent(RUN_ID_PUBLIC);
+        }
+
+        @Test
+        @DisplayName("A closed epoch's completed rows are returned as a success")
+        void shouldReturnCompletedRowsOfAClosedEpoch() {
+            // Named for what it actually does. It cannot reproduce the failed-then-retried shape,
+            // because the only query this node uses returns COMPLETED rows by definition, so the
+            // extra FAILED row a retry leaves behind is never visible here. That is precisely why
+            // the node must take the verdict from the fire (which reports a failed EPOCH as a
+            // failed fire) and never re-derive it from row statuses.
+            SubWorkflowNode node = nodeWithTimeout(60);
+            when(reusableTriggerService.isEpochStillOpen(RUN_ID_PUBLIC, "trigger:start", 1)).thenReturn(false);
+            WorkflowStepDataRepository.EpochOutputProjection failedThenRetried = mock(
+                WorkflowStepDataRepository.EpochOutputProjection.class);
+            when(failedThenRetried.getStepAlias()).thenReturn("mcp:flaky_step");
+            UUID storageId = UUID.fromString("22222222-2222-2222-2222-222222222222");
+            when(failedThenRetried.getOutputStorageId()).thenReturn(storageId);
+            when(workflowStepDataRepository.findCompletedOutputRefsByRunIdAndEpoch(RUN_ID_PUBLIC, 1))
+                .thenReturn(List.of(failedThenRetried));
+            when(stepOutputService.loadRawOutput(storageId, TENANT_ID))
+                .thenReturn(Map.of("ok", true));
+
+            NodeExecutionResult execResult = node.execute(context);
+
+            assertTrue(execResult.isSuccess(), "a retried-then-successful child is a success");
+            assertEquals(true, execResult.output().get("success"));
+        }
+    }
+
+    @Nested
+    @DisplayName("execute() - Timeout does not stop the child")
+    class TimeoutHonestyTests {
+
+        @Test
+        @DisplayName("A fire that outlives the budget reports the child as still running")
+        void shouldNotClaimTheChildWasStoppedOnFireTimeout() {
+            Core.SubWorkflowConfig config = new Core.SubWorkflowConfig(WORKFLOW_ID, null, 1, 5);
+            SubWorkflowNode node = createNode(config);
+
+            WorkflowEntity entity = createMockEntity();
+            when(workflowRepository.findById(UUID.fromString(WORKFLOW_ID))).thenReturn(Optional.of(entity));
+            WorkflowRunEntity run = createMockRun(RunStatus.WAITING_TRIGGER);
+            stubActiveRun(run);
+
+            CountDownLatch release = new CountDownLatch(1);
+            when(reusableTriggerService.executeTriggerInternal(
+                eq(run), anyString(), any(), any(), eq(true), anyMap()))
+                .thenAnswer(invocation -> {
+                    release.await(30, TimeUnit.SECONDS);
+                    return createSuccessTriggerResult(1);
+                });
+
+            try {
+                NodeExecutionResult execResult = node.execute(context);
+
+                assertTrue(execResult.isFailure());
+                String message = execResult.errorMessage().orElse("");
+                assertTrue(message.contains("did not finish within 1 second"), message);
+                assertTrue(message.contains("NOT stopped") && message.contains("still executing"),
+                    "the child keeps running after a timeout and the message must say so: " + message);
+                assertTrue(message.contains(RUN_ID_PUBLIC), message);
+            } finally {
+                release.countDown();
+            }
+        }
+    }
+
+    @Nested
+    @DisplayName("execute() - Wait mechanics")
+    class WaitMechanicsTests {
+
+        @Mock
+        private com.apimarketplace.orchestrator.services.streaming.redis.WorkflowRedisPublisher redisPublisher;
+
+        private SubWorkflowNode nodeWithTimeout(int timeoutSeconds) {
+            SubWorkflowNode node = createNode(new Core.SubWorkflowConfig(WORKFLOW_ID, null, timeoutSeconds, 5));
+            node.setWorkflowRedisPublisher(redisPublisher);
+            WorkflowEntity entity = createMockEntity();
+            when(workflowRepository.findById(UUID.fromString(WORKFLOW_ID))).thenReturn(Optional.of(entity));
+            WorkflowRunEntity run = createMockRun(RunStatus.WAITING_TRIGGER);
+            stubActiveRun(run);
+            when(reusableTriggerService.executeTriggerInternal(
+                any(WorkflowRunEntity.class), anyString(), any(), any(), eq(true), anyMap()))
+                .thenReturn(createSuccessTriggerResult(1));
+            return node;
+        }
+
+        @Test
+        @DisplayName("The fire gets the REMAINING budget, so one call cannot spend the budget twice")
+        void shouldGiveTheFireOnlyTheRemainingBudget() throws Exception {
+            // Two calls against the SAME child run serialize on the node's per-sub-run lock, so
+            // the second one starts its fire with most of its budget already gone. Its deadline
+            // was set before the lock wait, which is the whole point: one timeoutSeconds covers
+            // waiting for the lock, firing, and waiting for the epoch.
+            //
+            // Sized so exactly one caller can afford the fire, with margin for a loaded machine.
+            // Budget 6s, fire 4s: the winner gets ~5s left (the remaining-seconds conversion
+            // truncates down) and fits; the loser reaches the lock 4s in, has ~2s left, and times
+            // out. The two only swap verdicts if they start more than ~2s apart, which is the
+            // tolerance. Hand the fire a fresh timeoutSeconds instead and BOTH succeed, which is
+            // the bug: a single node would run for close to twice its configured budget.
+            Core.SubWorkflowConfig config = new Core.SubWorkflowConfig(WORKFLOW_ID, null, 6, 5);
+            WorkflowEntity entity = createMockEntity();
+            when(workflowRepository.findById(UUID.fromString(WORKFLOW_ID))).thenReturn(Optional.of(entity));
+            WorkflowRunEntity run = createMockRun(RunStatus.WAITING_TRIGGER);
+            stubActiveRun(run);
+            when(reusableTriggerService.executeTriggerInternal(
+                any(WorkflowRunEntity.class), anyString(), any(), any(), eq(true), anyMap()))
+                .thenAnswer(invocation -> {
+                    Thread.sleep(4_000);
+                    return createSuccessTriggerResult(1);
+                });
+            lenient().when(reusableTriggerService.isEpochStillOpen(RUN_ID_PUBLIC, "trigger:start", 1))
+                .thenReturn(false);
+            lenient().when(workflowStepDataRepository.findCompletedOutputRefsByRunIdAndEpoch(RUN_ID_PUBLIC, 1))
+                .thenReturn(List.of());
+
+            SubWorkflowNode first = createNode(config);
+            SubWorkflowNode second = createNode(config);
+            first.setWorkflowRedisPublisher(redisPublisher);
+            second.setWorkflowRedisPublisher(redisPublisher);
+
+            ExecutorService pool = Executors.newFixedThreadPool(2);
+            try {
+                CountDownLatch bothReady = new CountDownLatch(2);
+                List<java.util.concurrent.Future<NodeExecutionResult>> runs = List.of(
+                    pool.submit(() -> { bothReady.countDown(); bothReady.await(5, TimeUnit.SECONDS); return first.execute(context); }),
+                    pool.submit(() -> { bothReady.countDown(); bothReady.await(5, TimeUnit.SECONDS); return second.execute(context); }));
+
+                List<NodeExecutionResult> results = new ArrayList<>();
+                for (java.util.concurrent.Future<NodeExecutionResult> r : runs) {
+                    results.add(r.get(60, TimeUnit.SECONDS));
+                }
+                List<NodeExecutionResult> failed = results.stream()
+                    .filter(NodeExecutionResult::isFailure).toList();
+
+                assertEquals(1, failed.size(),
+                    "the second caller waited out most of its budget on the lock, so its fire must "
+                    + "get only what is LEFT; a fresh budget there lets both succeed and lets a "
+                    + "single node run for nearly twice its setting");
+                assertEquals(1, results.stream().filter(NodeExecutionResult::isSuccess).count());
+                // Prove it failed for the RIGHT reason: a bare count would also be satisfied by a
+                // missed stub or an NPE inside execute().
+                String failureMessage = failed.get(0).errorMessage().orElse("");
+                assertTrue(failureMessage.contains("did not finish within"), failureMessage);
+                assertTrue(failureMessage.contains(RUN_ID_PUBLIC), failureMessage);
+            } finally {
+                pool.shutdownNow();
+            }
+        }
+
+        @Test
+        @DisplayName("A child that reached a SUCCESS status is never described as still executing")
+        void shouldNotClaimAStillRunningChildWhenTheChildCompleted() {
+            // COMPLETED is terminal too. The status read and the epoch read are not atomic, so a
+            // child that finished between them must not be reported with the "it is still
+            // executing and can still perform external actions" wording, which would be false.
+            SubWorkflowNode node = nodeWithTimeout(300);
+            // Polls keep it open until the terminal check trips, and the re-read that follows
+            // sees it closed. That is the race this branch exists to absorb. Sized from the
+            // constant so a cadence change fails here rather than quietly changing the scenario.
+            Boolean[] openUntilTheCheckFires =
+                new Boolean[SubWorkflowNode.TERMINAL_CHECK_EVERY_N_POLLS];
+            java.util.Arrays.fill(openUntilTheCheckFires, Boolean.TRUE);
+            openUntilTheCheckFires[openUntilTheCheckFires.length - 1] = Boolean.FALSE;
+            when(reusableTriggerService.isEpochStillOpen(RUN_ID_PUBLIC, "trigger:start", 1))
+                .thenReturn(Boolean.TRUE, openUntilTheCheckFires);
+            when(workflowRunRepository.findStatusByRunIdPublic(RUN_ID_PUBLIC))
+                .thenReturn(Optional.of(RunStatus.COMPLETED));
+            when(workflowStepDataRepository.findCompletedOutputRefsByRunIdAndEpoch(RUN_ID_PUBLIC, 1))
+                .thenReturn(List.of());
+
+            NodeExecutionResult execResult = node.execute(context);
+
+            assertTrue(execResult.isSuccess(),
+                "the re-read showed the epoch closed, so this is a success, not a false alarm");
+        }
+
+        @Test
+        @DisplayName("A FAILED child ends the wait rather than burning the whole budget")
+        void shouldStopWaitingWhenTheChildRunFailed() {
+            SubWorkflowNode node = nodeWithTimeout(300);
+            when(reusableTriggerService.isEpochStillOpen(RUN_ID_PUBLIC, "trigger:start", 1)).thenReturn(true);
+            when(workflowRunRepository.findStatusByRunIdPublic(RUN_ID_PUBLIC))
+                .thenReturn(Optional.of(RunStatus.FAILED));
+
+            long startedAt = System.currentTimeMillis();
+            NodeExecutionResult execResult = node.execute(context);
+            long elapsed = System.currentTimeMillis() - startedAt;
+
+            assertTrue(execResult.isFailure());
+            assertTrue(elapsed < 20_000, "must not sit on the full 300s budget, took " + elapsed + "ms");
+        }
+
+        @Test
+        @DisplayName("Reads the child status by scalar projection, never by re-loading the entity")
+        void shouldReadChildStatusWithoutTheEntityCache() {
+            // The child run row was already loaded earlier in this same call, so an entity lookup
+            // can be served from Hibernate's L1 cache and report the status as of that first load.
+            // This branch exists to observe a CHANGE, so a cached answer would make it dead code.
+            SubWorkflowNode node = nodeWithTimeout(300);
+            when(reusableTriggerService.isEpochStillOpen(RUN_ID_PUBLIC, "trigger:start", 1)).thenReturn(true);
+            when(workflowRunRepository.findStatusByRunIdPublic(RUN_ID_PUBLIC))
+                .thenReturn(Optional.of(RunStatus.CANCELLED));
+
+            node.execute(context);
+
+            verify(workflowRunRepository, atLeastOnce()).findStatusByRunIdPublic(RUN_ID_PUBLIC);
+        }
+
+        @Test
+        @DisplayName("An unreadable child status keeps the wait going instead of ending it")
+        void shouldKeepWaitingWhenTheChildStatusCannotBeRead() {
+            SubWorkflowNode node = nodeWithTimeout(60);
+            // Sized from the constant, like the other cadence-dependent tests, so a change to the
+            // polling period fails here instead of quietly changing the scenario.
+            Boolean[] openUntilTheCheckFires =
+                new Boolean[SubWorkflowNode.TERMINAL_CHECK_EVERY_N_POLLS];
+            java.util.Arrays.fill(openUntilTheCheckFires, Boolean.TRUE);
+            openUntilTheCheckFires[openUntilTheCheckFires.length - 1] = Boolean.FALSE;
+            when(reusableTriggerService.isEpochStillOpen(RUN_ID_PUBLIC, "trigger:start", 1))
+                .thenReturn(Boolean.TRUE, openUntilTheCheckFires);
+            when(workflowRunRepository.findStatusByRunIdPublic(RUN_ID_PUBLIC))
+                .thenThrow(new IllegalStateException("db blip"));
+            when(workflowStepDataRepository.findCompletedOutputRefsByRunIdAndEpoch(RUN_ID_PUBLIC, 1))
+                .thenReturn(List.of());
+
+            assertTrue(node.execute(context).isSuccess(),
+                "a failed status read is not evidence the child stopped");
+        }
+
+        @Test
+        @DisplayName("The child status is polled on a slower cadence than the epoch itself")
+        void shouldNotReadTheChildStatusOnEveryPoll() {
+            // It is a second DB round trip whose answer changes at most once per wait, and the
+            // deadline already bounds a missed transition.
+            SubWorkflowNode node = nodeWithTimeout(60);
+            // Derived from the constant, so changing the cadence FAILS this test instead of
+            // silently changing what it means.
+            Boolean[] openUntilJustBeforeTheCheck =
+                new Boolean[SubWorkflowNode.TERMINAL_CHECK_EVERY_N_POLLS - 1];
+            java.util.Arrays.fill(openUntilJustBeforeTheCheck, Boolean.TRUE);
+            openUntilJustBeforeTheCheck[openUntilJustBeforeTheCheck.length - 1] = Boolean.FALSE;
+            when(reusableTriggerService.isEpochStillOpen(RUN_ID_PUBLIC, "trigger:start", 1))
+                .thenReturn(Boolean.TRUE, openUntilJustBeforeTheCheck);
+            lenient().when(workflowRunRepository.findStatusByRunIdPublic(RUN_ID_PUBLIC))
+                .thenReturn(Optional.of(RunStatus.RUNNING));
+            when(workflowStepDataRepository.findCompletedOutputRefsByRunIdAndEpoch(RUN_ID_PUBLIC, 1))
+                .thenReturn(List.of());
+
+            node.execute(context);
+
+            verify(reusableTriggerService, times(SubWorkflowNode.TERMINAL_CHECK_EVERY_N_POLLS))
+                .isEpochStillOpen(RUN_ID_PUBLIC, "trigger:start", 1);
+            verify(workflowRunRepository, never()).findStatusByRunIdPublic(RUN_ID_PUBLIC);
+        }
+
+        @Test
+        @DisplayName("The wait compensates the pool instead of consuming one of its workers")
+        void compensatedSleepShouldNotConsumeAPoolWorker() throws Exception {
+            // Why this tests compensatedSleep directly rather than driving a node: execute() first
+            // blocks on CompletableFuture.get, which is ITSELF a compensating block, so the pool
+            // has already grown a spare worker by the time the poll loop sleeps. A node-level test
+            // therefore passes whether or not the sleep compensates, and proves nothing.
+            //
+            // execute() is dispatched onto ForkJoinPool.commonPool by every concurrent path (fork
+            // branches, split items, any cycle with more than one ready node), and that pool's
+            // parallelism is availableProcessors - 1, which is ONE on a 2-vCPU pod. A worker
+            // consumed by an uncompensated sleep stalls every other dispatch on the pod for the
+            // whole budget, including the child's own resume, which is what the wait depends on.
+            ForkJoinPool singleWorker = new ForkJoinPool(1);
+            try {
+                CountDownLatch sleeping = new CountDownLatch(1);
+                CountDownLatch otherTaskRan = new CountDownLatch(1);
+
+                ForkJoinTask<Boolean> sleeper = singleWorker.submit(() -> {
+                    sleeping.countDown();
+                    return SubWorkflowNode.compensatedSleep(3_000);
+                });
+                assertTrue(sleeping.await(10, TimeUnit.SECONDS), "the sleeping task should have started");
+                // Give the sleep a moment to actually enter the block before probing the pool.
+                Thread.sleep(300);
+
+                singleWorker.execute(otherTaskRan::countDown);
+
+                assertTrue(otherTaskRan.await(2, TimeUnit.SECONDS),
+                    "the pool's only worker is consumed by the wait: an uncompensated block here "
+                    + "stalls every other dispatch on the pod, including the child's own resume, "
+                    + "which turns the wait into a self-inflicted timeout");
+                assertTrue(sleeper.get(10, TimeUnit.SECONDS), "the sleep should complete normally");
+            } finally {
+                singleWorker.shutdownNow();
+            }
+        }
+
+        @Test
+        @DisplayName("Refuses to wait inside a transaction rather than pinning a DB connection")
+        void shouldNotWaitWhileATransactionIsOpen() {
+            // Stepping a workflow one node at a time runs this node inside a read-write
+            // @Transactional method. Sleeping there holds a pooled connection and an open session
+            // for the whole budget. Failing fast keeps the correctness guarantee (never publish a
+            // partial epoch) without that cost.
+            SubWorkflowNode node = nodeWithTimeout(300);
+            when(reusableTriggerService.isEpochStillOpen(RUN_ID_PUBLIC, "trigger:start", 1)).thenReturn(true);
+
+            org.springframework.transaction.support.TransactionSynchronizationManager
+                .setActualTransactionActive(true);
+            long startedAt;
+            NodeExecutionResult execResult;
+            try {
+                startedAt = System.currentTimeMillis();
+                execResult = node.execute(context);
+            } finally {
+                org.springframework.transaction.support.TransactionSynchronizationManager
+                    .setActualTransactionActive(false);
+            }
+            long elapsed = System.currentTimeMillis() - startedAt;
+
+            assertTrue(execResult.isFailure());
+            assertTrue(elapsed < 5_000, "must not block inside a transaction, took " + elapsed + "ms");
+            String message = execResult.errorMessage().orElse("");
+            assertTrue(message.contains("cannot wait"), message);
+            // It must NOT claim a budget was spent: none was.
+            assertFalse(message.contains("did not finish within"), message);
+            verify(workflowStepDataRepository, never())
+                .findCompletedOutputRefsByRunIdAndEpoch(anyString(), anyInt());
+        }
+
+        @Test
+        @DisplayName("A step-by-step run does not wait even when no transaction is visible on this thread")
+        void shouldNotWaitOnAStepByStepRunAcrossAThreadHop() {
+            // THE hop case, and the reason the thread-local check is not enough on its own.
+            // Stepping a workflow holds an open read-write transaction across the whole node call,
+            // but the node is not always reached on that thread: a split fans its items onto the
+            // common pool, and a node-level timeout policy hands the body to its own executor.
+            // Across either hop isActualTransactionActive() reads FALSE while the caller is still
+            // blocked on the join holding the transaction open, so polling there would pin a
+            // pooled connection for the whole budget anyway.
+            //
+            // The run's execution mode travels with the run rather than the thread, so it still
+            // answers correctly after a hop. No transaction is set on this test's thread, which is
+            // exactly the post-hop situation.
+            SubWorkflowNode node = nodeWithTimeout(300);
+            when(reusableTriggerService.isEpochStillOpen(RUN_ID_PUBLIC, "trigger:start", 1)).thenReturn(true);
+            WorkflowRunEntity steppedRun = mock(WorkflowRunEntity.class);
+            lenient().when(steppedRun.getExecutionMode())
+                .thenReturn(com.apimarketplace.orchestrator.domain.workflow.ExecutionMode.STEP_BY_STEP);
+            lenient().when(workflowRunRepository.findByRunIdPublic("run-1")).thenReturn(Optional.of(steppedRun));
+
+            long startedAt = System.currentTimeMillis();
+            NodeExecutionResult execResult = node.execute(context);
+            long elapsed = System.currentTimeMillis() - startedAt;
+
+            assertTrue(execResult.isFailure());
+            assertTrue(elapsed < 5_000,
+                "a stepped run must not be polled in: it holds a DB transaction open, took " + elapsed + "ms");
+            assertTrue(execResult.errorMessage().orElse("").contains("cannot wait"),
+                execResult.errorMessage().orElse(""));
+            // The correctness guarantee still held: no partial epoch was published.
+            verify(workflowStepDataRepository, never())
+                .findCompletedOutputRefsByRunIdAndEpoch(anyString(), anyInt());
+        }
+
+        @Test
+        @DisplayName("An AUTOMATIC run is waited for normally, so the guard is not over-broad")
+        void shouldStillWaitOnAnAutomaticRun() {
+            // The mode check must not accidentally disable the wait for ordinary runs, which are
+            // the whole point of the change.
+            SubWorkflowNode node = nodeWithTimeout(60);
+            when(reusableTriggerService.isEpochStillOpen(RUN_ID_PUBLIC, "trigger:start", 1))
+                .thenReturn(true, false);
+            WorkflowRunEntity automaticRun = mock(WorkflowRunEntity.class);
+            lenient().when(automaticRun.getExecutionMode())
+                .thenReturn(com.apimarketplace.orchestrator.domain.workflow.ExecutionMode.AUTOMATIC);
+            lenient().when(workflowRunRepository.findByRunIdPublic("run-1")).thenReturn(Optional.of(automaticRun));
+            when(workflowStepDataRepository.findCompletedOutputRefsByRunIdAndEpoch(RUN_ID_PUBLIC, 1))
+                .thenReturn(List.of());
+
+            assertTrue(node.execute(context).isSuccess());
+            verify(reusableTriggerService, times(2)).isEpochStillOpen(RUN_ID_PUBLIC, "trigger:start", 1);
+        }
+
+        @Test
+        @DisplayName("A finished child inside a transaction is still a normal success")
+        void shouldStillSucceedInsideATransactionWhenTheChildIsDone() {
+            // The single check always runs; only the LOOP is refused. An ordinary sub-workflow
+            // call stepped by hand must keep working exactly as before.
+            SubWorkflowNode node = nodeWithTimeout(300);
+            when(reusableTriggerService.isEpochStillOpen(RUN_ID_PUBLIC, "trigger:start", 1)).thenReturn(false);
+            when(workflowStepDataRepository.findCompletedOutputRefsByRunIdAndEpoch(RUN_ID_PUBLIC, 1))
+                .thenReturn(List.of());
+
+            org.springframework.transaction.support.TransactionSynchronizationManager
+                .setActualTransactionActive(true);
+            try {
+                assertTrue(node.execute(context).isSuccess());
+            } finally {
+                org.springframework.transaction.support.TransactionSynchronizationManager
+                    .setActualTransactionActive(false);
+            }
+        }
+
+        @Test
+        @DisplayName("Each way the wait ends gets its own message, none of them borrowed")
+        void shouldTellTheTruthForEachWayTheWaitEnds() {
+            // One shared wording is how an agent gets told to stop a run that already stopped.
+            String ended = SubWorkflowNode.waitFailureMessage(
+                SubWorkflowNode.WaitOutcome.CHILD_ENDED, 300, RUN_ID_PUBLIC);
+            String stopped = SubWorkflowNode.waitFailureMessage(
+                SubWorkflowNode.WaitOutcome.RUN_STOPPED, 300, RUN_ID_PUBLIC);
+            String spent = SubWorkflowNode.waitFailureMessage(
+                SubWorkflowNode.WaitOutcome.BUDGET_SPENT, 300, RUN_ID_PUBLIC);
+
+            // A child that ENDED is not "still executing", and no budget was spent on it.
+            assertFalse(ended.contains("still executing"), ended);
+            assertFalse(ended.contains("did not finish within"), ended);
+            assertTrue(ended.contains("ended before finishing"), ended);
+
+            // OUR run stopped: the child may well still be running, and no budget was spent.
+            assertFalse(stopped.contains("did not finish within"), stopped);
+            assertTrue(stopped.contains("This run was stopped"), stopped);
+
+            // Only the budget case may claim the budget.
+            assertTrue(spent.contains("did not finish within 300 seconds"), spent);
+            assertTrue(spent.contains("NOT stopped"), spent);
+
+            assertNotEquals(ended, stopped);
+            assertNotEquals(ended, spent);
+            assertNotEquals(stopped, spent);
+        }
+
+        @Test
+        @DisplayName("A terminal child's message points at that run, not at a phantom running one")
+        void shouldDescribeATerminalChildAsEnded() {
+            SubWorkflowNode node = nodeWithTimeout(300);
+            when(reusableTriggerService.isEpochStillOpen(RUN_ID_PUBLIC, "trigger:start", 1)).thenReturn(true);
+            when(workflowRunRepository.findStatusByRunIdPublic(RUN_ID_PUBLIC))
+                .thenReturn(Optional.of(RunStatus.CANCELLED));
+
+            String message = node.execute(context).errorMessage().orElse("");
+
+            assertTrue(message.contains("ended before finishing"), message);
+            assertFalse(message.contains("still executing"),
+                "the child is cancelled; warning about future side effects is false: " + message);
+        }
+
+        @Test
+        @DisplayName("An epoch of -1 (queued fire) is not waited on")
+        void shouldNotWaitForAnUnknownEpoch() {
+            // A fire dispatched to the queue reports epoch -1. There is no epoch to ask about, and
+            // reporting it open would park the node for the whole budget on an unanswerable question.
+            SubWorkflowNode node = createNode(new Core.SubWorkflowConfig(WORKFLOW_ID, null, 300, 5));
+            node.setWorkflowRedisPublisher(redisPublisher);
+            WorkflowEntity entity = createMockEntity();
+            when(workflowRepository.findById(UUID.fromString(WORKFLOW_ID))).thenReturn(Optional.of(entity));
+            WorkflowRunEntity run = createMockRun(RunStatus.WAITING_TRIGGER);
+            stubActiveRun(run);
+            when(reusableTriggerService.executeTriggerInternal(
+                any(WorkflowRunEntity.class), anyString(), any(), any(), eq(true), anyMap()))
+                .thenReturn(TriggerExecutionResult.accepted(RUN_ID_PUBLIC, "trigger:start", TriggerType.MANUAL));
+            when(workflowStepDataRepository.findCompletedOutputRefsByRunIdAndEpoch(RUN_ID_PUBLIC, -1))
+                .thenReturn(List.of());
+
+            long startedAt = System.currentTimeMillis();
+            assertTrue(node.execute(context).isSuccess());
+            assertTrue(System.currentTimeMillis() - startedAt < 5_000, "must not wait on epoch -1");
+
+            verify(reusableTriggerService, never()).isEpochStillOpen(anyString(), anyString(), anyInt());
+        }
+
+        @Test
+        @DisplayName("SleepBlocker carries its remainder across an early wake-up")
+        void sleepBlockerShouldCarryItsRemainder() throws Exception {
+            // A ManagedBlocker may be resumed BEFORE its time. If block() treated one call as
+            // having served the whole duration, an interrupted sleep would report itself finished,
+            // the backoff would collapse and the poll loop would spin.
+            //
+            // So the early exit has to be forced: sleeping the full duration and then checking
+            // isReleasable() proves nothing, because a mutation that simply zeroes the remainder
+            // passes that too.
+            SubWorkflowNode.SleepBlocker blocker =
+                new SubWorkflowNode.SleepBlocker(TimeUnit.SECONDS.toNanos(5));
+            assertFalse(blocker.isReleasable(), "a fresh blocker has time left to serve");
+
+            AtomicBoolean interruptedEarly = new AtomicBoolean(false);
+            AtomicBoolean releasableAfterEarlyExit = new AtomicBoolean(true);
+            Thread sleeper = new Thread(() -> {
+                try {
+                    blocker.block();
+                } catch (InterruptedException e) {
+                    interruptedEarly.set(true);
+                }
+                releasableAfterEarlyExit.set(blocker.isReleasable());
+            });
+            sleeper.start();
+            Thread.sleep(200);
+            sleeper.interrupt();
+            sleeper.join(10_000);
+
+            assertTrue(interruptedEarly.get(), "the blocker should have been woken early");
+            assertFalse(releasableAfterEarlyExit.get(),
+                "it served ~0.2s of a 5s sleep, so it still owes time; reporting itself releasable "
+                + "here is what would collapse the backoff into a spin");
+        }
+
+        @Test
+        @DisplayName("An interrupt while waiting restores the flag and does not claim a timeout")
+        void shouldRestoreTheInterruptFlagAndNotClaimATimeout() throws Exception {
+            SubWorkflowNode node = nodeWithTimeout(300);
+            when(reusableTriggerService.isEpochStillOpen(RUN_ID_PUBLIC, "trigger:start", 1)).thenReturn(true);
+
+            AtomicReference<NodeExecutionResult> result = new AtomicReference<>();
+            AtomicBoolean flagWasSet = new AtomicBoolean(false);
+            CountDownLatch started = new CountDownLatch(1);
+            Thread worker = new Thread(() -> {
+                started.countDown();
+                result.set(node.execute(context));
+                flagWasSet.set(Thread.currentThread().isInterrupted());
+            });
+            worker.start();
+            assertTrue(started.await(5, TimeUnit.SECONDS));
+            Thread.sleep(400);
+            worker.interrupt();
+            worker.join(15_000);
+
+            assertNotNull(result.get(), "the node should have returned rather than hanging");
+            assertTrue(result.get().isFailure());
+            assertTrue(flagWasSet.get(), "the interrupt flag must be restored for the caller");
+            String message = result.get().errorMessage().orElse("");
+            // Wording unique to the WAIT's interrupt path. The node also has an outer
+            // InterruptedException handler whose message merely contains "interrupted", so a
+            // looser assertion could not tell the two apart.
+            assertTrue(message.contains("was interrupted before it finished"), message);
+            assertTrue(message.contains("may still be running"), message);
+            assertFalse(message.contains("did not finish within"),
+                "no budget was spent, so it must not claim one: " + message);
+        }
+    }
+
+    // ===============================================================
+    // The timeout ceiling (enforced, not just documented)
+    // ===============================================================
+
+    @Nested
+    @DisplayName("timeoutSeconds ceiling")
+    class TimeoutCeilingTests {
+
+        @Test
+        @DisplayName("A value above the ceiling is reduced to it")
+        void shouldClampAnOversizedTimeout() {
+            // The node now genuinely parks a pooled worker for this long, so the value has to be
+            // bounded. Before the wait existed it bounded almost nothing and was never enforced.
+            assertEquals(Core.SubWorkflowConfig.MAX_TIMEOUT_SECONDS,
+                new Core.SubWorkflowConfig(WORKFLOW_ID, null, 86_400, 5).timeoutSeconds());
+        }
+
+        @Test
+        @DisplayName("The ceiling itself is allowed, not clamped off by one")
+        void shouldAllowExactlyTheCeiling() {
+            assertEquals(Core.SubWorkflowConfig.MAX_TIMEOUT_SECONDS,
+                new Core.SubWorkflowConfig(WORKFLOW_ID, null,
+                    Core.SubWorkflowConfig.MAX_TIMEOUT_SECONDS, 5).timeoutSeconds());
+        }
+
+        @Test
+        @DisplayName("Zero and negative still fall back to the default, not to the ceiling")
+        void shouldKeepTheZeroAndNegativeDefault() {
+            // The new Math.min sits next to the pre-existing default. A careless combination would
+            // turn "unset" into "the maximum", which is a 25-minute wait nobody asked for.
+            assertEquals(300, new Core.SubWorkflowConfig(WORKFLOW_ID, null, 0, 5).timeoutSeconds());
+            assertEquals(300, new Core.SubWorkflowConfig(WORKFLOW_ID, null, -5, 5).timeoutSeconds());
+        }
+
+        @Test
+        @DisplayName("A small value is untouched")
+        void shouldLeaveASmallTimeoutAlone() {
+            assertEquals(1, new Core.SubWorkflowConfig(WORKFLOW_ID, null, 1, 5).timeoutSeconds());
+            assertEquals(600, new Core.SubWorkflowConfig(WORKFLOW_ID, null, 600, 5).timeoutSeconds());
+        }
+
+        @Test
+        @DisplayName("An already-saved plan carrying an oversized value is clamped when it is read")
+        void shouldClampWhenDeserialisingAnExistingPlan() throws Exception {
+            // This is the enforcement point that matters for workflows saved BEFORE the ceiling
+            // existed: they reach the engine through Jackson, not through the node creator, so
+            // the compact constructor is the only thing standing between them and a 24h wait.
+            com.fasterxml.jackson.databind.ObjectMapper mapper =
+                new com.fasterxml.jackson.databind.ObjectMapper();
+            Core.SubWorkflowConfig restored = mapper.readValue(
+                "{\"workflowId\":\"" + WORKFLOW_ID + "\",\"timeoutSeconds\":86400,\"maxDepth\":5}",
+                Core.SubWorkflowConfig.class);
+
+            assertEquals(Core.SubWorkflowConfig.MAX_TIMEOUT_SECONDS, restored.timeoutSeconds());
+        }
+
+        @Test
+        @DisplayName("A node built from an oversized config carries the clamped value, not the requested one")
+        void shouldBuildTheNodeWithTheClampedBudget() {
+            // Named for what it checks: the record the node holds. It does not time a wait, so it
+            // is a wiring check, not a runtime one.
+            SubWorkflowNode node = createNode(new Core.SubWorkflowConfig(WORKFLOW_ID, null, 86_400, 5));
+
+            assertEquals(Core.SubWorkflowConfig.MAX_TIMEOUT_SECONDS,
+                node.getSubWorkflowConfig().timeoutSeconds());
         }
     }
 

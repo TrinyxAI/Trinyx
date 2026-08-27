@@ -568,6 +568,14 @@ public class ToolExecutionManager {
             // provider was never called. Rethrown so the controller answers 402
             // with the error + delinquent flag instead of a 200 envelope.
             throw e;
+        } catch (com.apimarketplace.catalog.service.exception.CredentialSelectionException e) {
+            // Refusal, not a failure of the tool: the step named a credential for
+            // this run, it could not be honoured, and the provider was never called.
+            // Rethrown for the same reason InsufficientCreditsException is: swallowed
+            // into a generic error envelope, the refusal reads as "the API failed",
+            // which sends the reader looking at the provider instead of at the
+            // account the workflow asked for.
+            throw e;
         } catch (Exception e) {
             long latency = System.currentTimeMillis() - start;
             log.error("Error while executing tool {}: {}", toolIdOrSlug, e.getMessage(), e);

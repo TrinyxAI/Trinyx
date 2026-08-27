@@ -75,6 +75,18 @@ interface ShowcasePreviewProps {
    * CE keeps the by-id proxy).
    */
   authenticated?: boolean;
+  /**
+   * Mute state for the previewed interface's own `<audio>`/`<video>`. Undefined
+   * = play as authored. A grid of cards should pass `true`: several previews
+   * talking at once the moment a page loads is what this exists to prevent.
+   */
+  mediaMuted?: boolean;
+  /**
+   * Fired with whether the previewed interface contains any `<audio>`/`<video>`.
+   * Only the frame can answer it, so this is what lets a card show a sound
+   * control on the apps that make sound and nothing on the ones that do not.
+   */
+  onMediaAudioPresence?: (hasAudio: boolean) => void;
 }
 
 // Skeleton component for loading state
@@ -90,7 +102,7 @@ function ShowcaseSkeleton() {
   );
 }
 
-export function ShowcasePreview({ runId, interfaceId, className = '', hidePagination = false, publicationId, epoch, onError, suppressErrorUi = false, remote = false, authenticated = false }: ShowcasePreviewProps) {
+export function ShowcasePreview({ runId, interfaceId, className = '', hidePagination = false, publicationId, epoch, onError, suppressErrorUi = false, remote = false, authenticated = false, mediaMuted, onMediaAudioPresence }: ShowcasePreviewProps) {
   const t = useTranslations('showcase');
   const { isLoading: isAuthLoading } = useAuthGuard();
 
@@ -258,6 +270,8 @@ export function ShowcasePreview({ runId, interfaceId, className = '', hidePagina
               // shows a blank form even when triggerData is on the snapshot.
               actionMapping={renderResult!.actionMappings || undefined}
               triggerData={triggerData}
+              mediaMuted={mediaMuted}
+              onMediaAudioPresence={onMediaAudioPresence}
               emptyLabel={t('noData')}
             />
           </div>

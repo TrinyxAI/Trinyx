@@ -106,7 +106,12 @@ class UtilityNodeCreatorGenerateTest {
 
         assertThat(result.success()).isFalse();
         assertThat(result.errorCode()).isEqualTo(ToolErrorCode.MISSING_PARAMETER);
-        assertThat(result.error()).contains("generation(action='models')");
+        // Points at the FREE read every builder holds, and must never order the
+        // generation tool: that one is opt-in per agent because creating spends
+        // credits, so an agent without it was being told, at the exact moment it
+        // was stuck, to run something it cannot run.
+        assertThat(result.error()).contains("workflow(action='help', topics=['generate'])");
+        assertThat(result.error()).doesNotContain("generation(action='models')");
         assertThat(session.getCores()).isEmpty();
     }
 

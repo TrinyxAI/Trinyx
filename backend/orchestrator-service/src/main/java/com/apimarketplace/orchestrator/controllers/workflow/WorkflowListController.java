@@ -3,7 +3,10 @@ package com.apimarketplace.orchestrator.controllers.workflow;
 import com.apimarketplace.auth.client.access.OrgAccessDeniedException;
 import com.apimarketplace.auth.client.access.OrgAccessGuard;
 import com.apimarketplace.common.scope.ScopeGuard;
+import com.apimarketplace.common.folder.FolderScope;
 import com.apimarketplace.orchestrator.controllers.dto.WorkflowSummary;
+import com.apimarketplace.common.folder.AbstractResourceFolderController;
+import com.apimarketplace.orchestrator.services.folder.WorkflowFolderService;
 import com.apimarketplace.orchestrator.domain.WorkflowEntity;
 import com.apimarketplace.orchestrator.domain.WorkflowRunEntity;
 import com.apimarketplace.publication.client.PublicationClient;
@@ -47,6 +50,7 @@ public class WorkflowListController {
     private final WorkflowManagementService workflowService;
     private final WorkflowBoardService boardService;
     private final OrgAccessGuard orgAccessService;
+    private final WorkflowFolderService folderService;
 
     public WorkflowListController(WorkflowRepository workflowRepository,
                                   WorkflowRunRepository workflowRunRepository,
@@ -55,7 +59,8 @@ public class WorkflowListController {
                                   PublicationClient publicationClient,
                                   WorkflowManagementService workflowService,
                                   WorkflowBoardService boardService,
-                                  OrgAccessGuard orgAccessService) {
+                                  OrgAccessGuard orgAccessService,
+                                  WorkflowFolderService folderService) {
         this.workflowRepository = workflowRepository;
         this.workflowRunRepository = workflowRunRepository;
         this.signalWaitRepository = signalWaitRepository;
@@ -64,6 +69,22 @@ public class WorkflowListController {
         this.workflowService = workflowService;
         this.boardService = boardService;
         this.orgAccessService = orgAccessService;
+        this.folderService = folderService;
+    }
+
+    /**
+     * The folder to narrow to, or {@code null} for the top level / no filter at all. An
+     * unparseable id is treated as the top level rather than a 400: the filter is a view
+     * preference, and a bad one must never take the list down.
+     */
+    private static UUID parseFolderId(String folderId) {
+        if (folderId == null || folderId.isBlank() || "root".equalsIgnoreCase(folderId.trim())) return null;
+        try {
+            return UUID.fromString(folderId.trim());
+        } catch (IllegalArgumentException e) {
+            logger.warn("Ignoring unparseable folderId '{}' on GET /api/workflows", folderId);
+            return null;
+        }
     }
 
     @GetMapping
@@ -77,7 +98,10 @@ public class WorkflowListController {
             @RequestParam(value = "page", defaultValue = "0") int page,
             @RequestParam(value = "q", required = false) String q,
             @RequestParam(value = "sort", required = false) String sort,
-            @RequestParam(value = "visibility", required = false) String visibility) {
+            @RequestParam(value = "visibility", required = false) String visibility,
+            @RequestParam(value = "folderId", required = false) String folderId,
+            @RequestParam(value = "includeFolders", required = false, defaultValue = "false")
+            boolean includeFolders) {
 
         // Audit 2026-05-17 round-5 - Bug-#4 closed. Header is the only source
         // of truth; the `?tenantId=` query param is no longer consulted, so a
@@ -149,6 +173,39 @@ public class WorkflowListController {
                 .collect(Collectors.toList());
         }
 
+        // FOLDERS (V448). Two rules decide what the page shows:
+        //   * A SEARCH looks everywhere. Someone typing a name wants the workflow, not a
+        //     lesson about where they filed it - so an active `q` ignores the folder filter
+        //     and the folder tiles step aside (they would advertise content the results
+        //     already list).
+        //   * Otherwise `folderId` narrows to one level: `root` = the workflows filed
+        //     nowhere, an id = that folder's own workflows (its subfolders show as tiles).
+        // The tiles are built from the set as it stands HERE - after search and visibility,
+        // before the folder narrowing - so a tile counts exactly what the caller may see,
+        // and counts it over the folder's whole subtree.
+        boolean searching = q != null && !q.isBlank();
+        UUID folderFilter = parseFolderId(folderId);
+        // Asked for a level but not for a folder id ("root", blank, or something
+        // unparseable) = the top level. Only an ABSENT parameter means "no folder filter",
+        // which is what every other caller of this endpoint (the board, the pickers) gets.
+        boolean rootOnly = folderId != null && folderFilter == null;
+        boolean folderMissing = false;
+        FolderScope folderScope = new FolderScope(decodedTenantId, orgId);
+        if (folderFilter != null && !folderService.existsInScope(folderFilter, folderScope)) {
+            // The folder was deleted (or belongs to another workspace): show the top level
+            // rather than an eternally empty page, and tell the caller to drop its filter.
+            folderFilter = null;
+            rootOnly = true;
+            folderMissing = true;
+        }
+        List<WorkflowEntity> folderAggregateSource = workflowEntities;
+        if (!searching && (rootOnly || folderFilter != null)) {
+            final UUID wanted = folderFilter;
+            workflowEntities = workflowEntities.stream()
+                .filter(w -> java.util.Objects.equals(w.getFolderId(), wanted))
+                .collect(Collectors.toList());
+        }
+
         // Order the full (filtered) set, then slice. name/lastModified/lastExecuted read entity
         // columns; runCount needs a batch run-count over the filtered set (one GROUP BY query, far
         // cheaper than the old per-row counts over EVERY workflow). Ordering matches the frontend
@@ -157,10 +214,13 @@ public class WorkflowListController {
         // no-search/no-filter path, is its own return value and may be an immutable view).
         workflowEntities = new ArrayList<>(workflowEntities);
         String sortKey = sort == null ? "lastmodified" : sort.trim().toLowerCase();
-        if (sortKey.equals("runcount")) {
-            Map<UUID, Long> runCounts = batchRunCounts(workflowEntities);
+        // Counted over the pre-folder set so the folder tiles and the rows are ordered by
+        // the same numbers - one GROUP BY for both, and only when this sort needs it.
+        Map<UUID, Long> runCounts = sortKey.equals("runcount") ? batchRunCounts(folderAggregateSource) : null;
+        if (runCounts != null) {
+            final Map<UUID, Long> counts = runCounts;
             workflowEntities.sort(Comparator
-                .comparingLong((WorkflowEntity w) -> runCounts.getOrDefault(w.getId(), 0L))
+                .comparingLong((WorkflowEntity w) -> counts.getOrDefault(w.getId(), 0L))
                 .reversed());
         } else {
             sortWorkflows(workflowEntities, sortKey);
@@ -206,6 +266,22 @@ public class WorkflowListController {
         response.put("totalCount", totalCount);
         response.put("page", safePage);
         response.put("size", safeSize);
+        if (includeFolders) {
+            // Tiles for THIS level, each ordered by the same key as the rows below them, plus
+            // the trail so the page can render the path it navigated into.
+            response.put("folders", searching
+                    ? List.of()
+                    : folderService.listFolderSummaries(
+                            folderScope, folderFilter, folderAggregateSource, sortKey, runCounts));
+            response.put("folderTrail", folderFilter == null
+                    ? List.of()
+                    : folderService.breadcrumb(folderService.listAll(folderScope), folderFilter).stream()
+                            .map(AbstractResourceFolderController::toBareMap)
+                            .toList());
+            if (folderMissing) {
+                response.put("folderMissing", true);
+            }
+        }
 
         return ResponseEntity.ok(response);
     }
@@ -515,7 +591,8 @@ public class WorkflowListController {
             entity.getPinnedVersion(),
             hasActiveRun,
             boardColumn,
-            entity.getBudgetCredits()
+            entity.getBudgetCredits(),
+            entity.getFolderId()
         );
     }
 }

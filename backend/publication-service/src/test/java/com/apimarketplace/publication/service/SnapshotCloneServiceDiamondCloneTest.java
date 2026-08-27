@@ -73,7 +73,8 @@ class SnapshotCloneServiceDiamondCloneTest {
         // sourcePublicationId + fileNamespaceId are threaded separately; the real acquire
         // path passes the publication id for both (the decoupled-duplicate path nulls the source).
         cloneSubWorkflowsForTenant = SnapshotCloneService.class.getDeclaredMethod(
-                "cloneSubWorkflowsForTenant", Map.class, String.class, UUID.class, UUID.class, String.class);
+                "cloneSubWorkflowsForTenant", Map.class, String.class, UUID.class, UUID.class, String.class,
+                SnapshotCloneService.ResourceTally.class);
         cloneSubWorkflowsForTenant.setAccessible(true);
     }
 
@@ -93,7 +94,16 @@ class SnapshotCloneServiceDiamondCloneTest {
         aSubs.put(C_ID, snapshot("C", childPlanReferencing(D_ID)));
         planA.put("_snapshot_subworkflows", aSubs);
 
-        cloneSubWorkflowsForTenant.invoke(service, planA, TENANT, PUBLICATION_ID, PUBLICATION_ID, ORG);
+        SnapshotCloneService.ResourceTally tally = new SnapshotCloneService.ResourceTally();
+        cloneSubWorkflowsForTenant.invoke(service, planA, TENANT, PUBLICATION_ID, PUBLICATION_ID, ORG, tally);
+
+        // The shared child D is cloned ONCE and reused by both parents, so the install
+        // summary must report three workflows (B, C, D) - not four. Counting from the
+        // per-parent id mapping instead would report D twice, and the user would be told
+        // their workspace gained a workflow that was never created.
+        assertThat(tally.toMap())
+                .as("B + C + the shared D, counted once")
+                .containsEntry("workflows", 3);
 
         @SuppressWarnings({"unchecked", "rawtypes"})
         ArgumentCaptor<Map<String, Object>> reqCaptor = ArgumentCaptor.forClass((Class) Map.class);

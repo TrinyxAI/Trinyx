@@ -935,11 +935,12 @@ class WorkflowCrudModuleTest {
         }
 
         @Test
-        @DisplayName("pin maps NoSuccessfulRun with guidance to execute first")
-        void pin_noSuccessfulRun() {
+        @DisplayName("pin maps ProductionRunUnavailable to the cause plus a retryable pin call")
+        void pin_productionRunUnavailable() {
             UUID workflowId = UUID.randomUUID();
             when(pinService.pin(eq(workflowId), eq(TENANT_ID), eq((String) null), eq(2)))
-                    .thenReturn(new WorkflowPinService.PinResult.NoSuccessfulRun(2));
+                    .thenReturn(new WorkflowPinService.PinResult.ProductionRunUnavailable(
+                            2, WorkflowPinService.PROVISIONING_FAILED_REASON));
 
             var result = module.execute("pin",
                     Map.of("workflow_id", workflowId.toString(), "version", 2),
@@ -947,8 +948,18 @@ class WorkflowCrudModuleTest {
 
             assertThat(result).isPresent();
             assertThat(result.get().success()).isFalse();
-            assertThat(result.get().error()).contains("execute");
             assertThat(result.get().error()).contains("v2");
+            assertThat(result.get().error()).contains(WorkflowPinService.PROVISIONING_FAILED_REASON);
+            // One retry is invited (some causes really are momentary), then escalation is
+            // named. Neither extreme is honest here: "fix it and retry" sends an agent
+            // into a loop it cannot escape, and "retrying will not change this" makes it
+            // give up on a transient infra blip that a second attempt would clear.
+            assertThat(result.get().error()).contains("Retry the pin once");
+            assertThat(result.get().error()).contains("person who owns this workflow");
+            // No dead-end either: the agent is told what to leave production on.
+            assertThat(result.get().error()).contains("already pinned to");
+            // And never the execute-then-pin dance that no longer exists.
+            assertThat(result.get().error()).doesNotContain("action='execute'");
         }
 
         @Test

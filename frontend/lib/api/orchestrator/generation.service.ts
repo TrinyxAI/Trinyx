@@ -16,8 +16,32 @@ import { apiClient } from '../api-client';
 
 /** Value restriction on one generation parameter, as declared by the model. */
 export interface GenerationLimit {
+  /**
+   * False when the values are a SUGGESTION rather than a rule: they come from
+   * the catalogue's description of the provider's parameter, and nothing
+   * refuses a value outside them. A surface that turns such a list into a
+   * closed choice forbids values the platform accepts, so the workflow builder
+   * keeps its expression field and only the dialog offers the list.
+   *
+   * <p>Absent means enforced, which is the ordinary case.
+   */
+  allowedEnforced?: boolean;
+  /** True when `allowed` is a sample of `allowedCount` values, not the whole set. */
+  allowedTruncated?: boolean;
+  allowedCount?: number;
   /** Discrete accepted values. Absent when the parameter is not an enumeration. */
   allowed?: (string | number)[];
+  /**
+   * True when the values exist but only the PROVIDER can name them, so they are
+   * fetched with the reader's own key rather than shipped in this row.
+   *
+   * <p>An ElevenLabs voice belongs to the account holding the key: the shared
+   * defaults, plus everything that account cloned or bought. No list written
+   * into the catalogue is true for two different readers, and a wrong voice id
+   * is opaque and fails at the provider after the call is paid for. So this row
+   * says only that asking is worth it; `getModelOptions` does the asking.
+   */
+  optionsAvailable?: boolean;
   /** Inclusive lower bound for a numeric parameter. */
   min?: number;
   /** Inclusive upper bound for a numeric parameter. */
@@ -137,6 +161,31 @@ export interface GenerationResult {
   errorCode?: string;
 }
 
+/** One value a provider offers for a parameter, and what to show for it. */
+export interface GenerationOption {
+  value: string;
+  /** What a person reads. A voice id is opaque; its name is the whole point. */
+  label: string;
+}
+
+export interface GenerationOptionsResponse {
+  success: boolean;
+  model?: string;
+  parameter?: string;
+  options?: GenerationOption[];
+  count?: number;
+  /** True when `options` is a sample of `total_count`, not the whole set. */
+  truncated?: boolean;
+  total_count?: number;
+  /**
+   * WHICH key answered. Voices differ per key, so a list read on one and a run
+   * dispatched on another offers an id the provider never had.
+   */
+  credential_source?: string;
+  /** Why there is nothing to offer, when `success` is false. */
+  error?: string;
+}
+
 /** What the caller asks for: a model, the unified params, and which key pays. */
 export interface GenerationRequest {
   model: string;
@@ -163,6 +212,34 @@ export class GenerationService {
       '/generation/models',
       kind ? { params: { kind } } : undefined,
     );
+  }
+
+  /**
+   * What one parameter accepts, asked of the provider with the reader's key.
+   *
+   * <p>Only worth calling for a parameter whose limit carries
+   * `optionsAvailable`. It costs a call to the provider, so it belongs to the
+   * moment a field is opened, not to loading the model list.
+   *
+   * <p>`credentialSource` is part of the question, not a detail: a voice list
+   * read on the platform's key is not the reader's own, so the answer changes
+   * when the payer toggle moves and the caller must re-ask.
+   *
+   * <p>Resolves with `success: false` and a reason rather than throwing. An
+   * empty dropdown says "there are none", which is a different fact from "no
+   * key is connected" or "we could not ask", and the caller has to be able to
+   * say which one happened.
+   */
+  async getModelOptions(
+    model: string,
+    parameter: string,
+    credentialSource?: 'platform' | 'user',
+    credentialId?: number | null,
+  ): Promise<GenerationOptionsResponse> {
+    const params: Record<string, string> = { model, parameter };
+    if (credentialSource) params.credential_source = credentialSource;
+    if (credentialId != null) params.credential_id = String(credentialId);
+    return apiClient.get<GenerationOptionsResponse>('/generation/model-options', { params });
   }
 
   /**

@@ -81,6 +81,14 @@ public class OpenAICompatibleProviderFactory {
             "kimi-k2.6,kimi-k2.5",
             16
         ));
+        // MiniMax's international endpoint (api.minimax.io). The .com host is
+        // the mainland-China deployment and takes a different key, so keep the
+        // .io default and let a mainland install override the api-url.
+        knownProviders.put("minimax", new ProviderDefaults(
+            "https://api.minimax.io/v1/chat/completions",
+            "MiniMax-M3,MiniMax-M2.5",
+            17
+        ));
 
         // CE boundary: a self-hosted (auth.mode=embedded) install must not be able
         // to register a multi-provider aggregator (openrouter) or the curated-out

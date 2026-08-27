@@ -504,17 +504,20 @@ public class CatalogToolBillingService {
         String unit = priceUnit == null || priceUnit.isBlank() ? "unit" : priceUnit;
         if (scope.generationModelId() == null) {
             return "GENERATION_SIZE_UNKNOWN: this generation is priced per " + unit + ", and this call "
-                    + "did not say how big it is, so it cannot be priced. Run it through "
-                    + "generation(action='create', model=...), which measures the call and prices it; "
-                    + "generation(action='models') lists the model ids and what each one costs. "
+                    + "did not say how big it is, so it cannot be priced. Name the model and the size: "
+                    + "on a workflow node, set 'model' plus duration_seconds (video, music, sound) or n "
+                    + "(images); in a chat, generation(action='create', model=...) measures the call for "
+                    + "you. The model ids and what each costs are in workflow(action='help', "
+                    + "topics=['generate']), which is free to read and needs no tool you may not hold. "
                     + "Nothing was charged and nothing was generated.";
         }
         return "GENERATION_SIZE_UNKNOWN: model '" + scope.generationModelId()
                 + "' is priced by the size of each call, and this call did not say "
                 + "how big it is, so it cannot be priced. State the size and run it "
                 + "again: duration_seconds for video, music and sound, n for a number "
-                + "of images. generation(action='models') lists what this model "
-                + "accepts and what it costs.";
+                + "of images. What this model accepts is in workflow(action='help', "
+                + "topics=['generate']), a free read; the generation tool's "
+                + "action='models' says the same with its limits, if you hold it.";
     }
 
     /**

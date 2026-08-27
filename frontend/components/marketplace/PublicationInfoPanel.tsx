@@ -440,6 +440,7 @@ export function PublicationInfoPanel({
 
   const [setupWizardOpen, setSetupWizardOpen] = useState(false);
 
+
   const [isOpen, setIsOpen] = useState(defaultOpen);
   const floatingRef = useRef<HTMLDivElement | null>(null);
 

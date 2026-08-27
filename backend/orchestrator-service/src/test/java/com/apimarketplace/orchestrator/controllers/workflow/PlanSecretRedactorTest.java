@@ -109,6 +109,15 @@ class PlanSecretRedactorTest {
         mcp.put("selectedCredentialId", "1");
         mcp.put("platformCredentialId", "2");
         mcp.put("credentialSource", "PLATFORM");
+        // A NAME is not a secret, but it is still a credential choice that resolves
+        // in the READER scope: the identity lookup is workspace-wide, so an exported
+        // plan naming "Acme IG" would authenticate with whichever credential the
+        // reader happens to have under that name. Dropped like the ids, so an
+        // acquirer states their own account instead of inheriting one by collision.
+        mcp.put("credentialSelector", "Acme IG");
+        // Both spellings: the plan parser reads either, so leaving the snake one would
+        // show a share-link visitor the author's expression.
+        mcp.put("credential_selector", "Acme IG");
         mcp.put("toolName", "search");
         plan.put("mcps", new ArrayList<>(List.of(mcp)));
 
@@ -117,6 +126,12 @@ class PlanSecretRedactorTest {
         @SuppressWarnings("unchecked")
         Map<String, Object> after = (Map<String, Object>) ((List<?>) plan.get("mcps")).get(0);
         assertThat(after).doesNotContainKeys("selectedCredentialId", "platformCredentialId", "credentialSource", "credentialId");
+        // REMOVED here, unlike publish and clone which blank it. This redactor only
+        // runs on a deep COPY served to a share-link visitor; execution reads the
+        // stored plan, so nothing here changes what a run does. Blanking would buy no
+        // safety and would cost the visitor a canvas error on a workflow that runs
+        // perfectly, because the blank state is a build-time error by design.
+        assertThat(after).doesNotContainKeys("credentialSelector", "credential_selector");
         assertThat(after).containsEntry("toolName", "search");
     }
 

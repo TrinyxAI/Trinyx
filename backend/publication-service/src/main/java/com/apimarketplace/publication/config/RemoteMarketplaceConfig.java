@@ -1,10 +1,10 @@
 package com.apimarketplace.publication.config;
 
 import com.apimarketplace.auth.client.AuthClient;
-import com.apimarketplace.auth.client.entitlement.EntitlementGuard;
 import com.apimarketplace.publication.repository.PublicationReceiptRepository;
 import com.apimarketplace.publication.service.AgentPublicationService;
 import com.apimarketplace.publication.service.CloudLinkService;
+import com.apimarketplace.publication.service.EditableWorkflowTwinService;
 import com.apimarketplace.publication.service.RemoteMarketplaceService;
 import com.apimarketplace.publication.service.ResourcePublicationService;
 import com.apimarketplace.publication.service.SnapshotCloneService;
@@ -37,10 +37,12 @@ public class RemoteMarketplaceConfig {
             AgentPublicationService agentPublicationService,
             ResourcePublicationService resourcePublicationService,
             OrchestratorInternalClient orchestratorClient,
-            ObjectProvider<EntitlementGuard> entitlementGuard) {
+            ObjectProvider<EditableWorkflowTwinService> editableWorkflowTwinService) {
         return new RemoteMarketplaceService(
                 cloudApiUrl, snapshotCloneService, receiptRepository, cloudLinkService, objectMapper, authClient,
                 agentPublicationService, resourcePublicationService, orchestratorClient,
-                entitlementGuard.getIfAvailable());
+                // Backs the ON-DEMAND editable copy (and owns its WORKFLOW-quota check).
+                // Acquire itself no longer needs it: it stopped minting a copy per install.
+                editableWorkflowTwinService.getIfAvailable());
     }
 }

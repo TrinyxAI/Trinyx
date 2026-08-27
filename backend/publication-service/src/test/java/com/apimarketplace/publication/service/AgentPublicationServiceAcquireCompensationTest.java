@@ -30,6 +30,7 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
 
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
@@ -127,6 +128,36 @@ class AgentPublicationServiceAcquireCompensationTest {
         // The partial interface + datasource rows are rolled back in the buyer's org scope.
         verify(interfaceClient).deleteInterface(CLONED_IFACE_ID, BUYER, BUYER_ORG);
         verify(dataSourceClient).deleteDataSource(CLONED_DS_ID, BUYER, BUYER_ORG);
+    }
+
+    @Test
+    @DisplayName("The install summary includes what a BUNDLED WORKFLOW cloned, not just the agent's own resources")
+    void installSummaryIncludesBundledWorkflowResources() {
+        // The bundled workflow's interfaces, tables and agents land in the acquirer's lists
+        // exactly like the agent's own. Reporting only the workflow row (and dropping the
+        // summary that clone returns) tells the user about 1 thing out of 7.
+        WorkflowPublicationEntity publication = agentPublication();
+        publication.setAgentSnapshot(buildSnapshotWithWorkflow());
+
+        when(publicationRepository.findById(PUBLICATION_ID)).thenReturn(Optional.of(publication));
+        when(receiptRepository.existsByOrganizationIdAndPublicationId(BUYER_ORG, PUBLICATION_ID)).thenReturn(false);
+        when(snapshotCloneService.cloneFromSnapshot(any(), eq(BUYER), eq(PUBLICATION_ID), any(), any(), any(),
+                eq(BUYER_ORG), eq(SnapshotCloneService.CLONE_TYPE_WORKFLOW)))
+                .thenReturn(Map.of(
+                        "workflowId", CLONE_WORKFLOW_ID.toString(),
+                        SnapshotCloneService.RESOURCES_KEY, Map.of("interfaces", 3, "tables", 2, "agents", 1)));
+        when(agentClient.cloneFromSnapshot(any()))
+                .thenReturn(Map.of("agentId", UUID.randomUUID().toString()));
+
+        Map<String, Object> result = service.acquireAgentPublication(PUBLICATION_ID, BUYER, BUYER_ORG);
+
+        @SuppressWarnings("unchecked")
+        Map<String, Object> resources = (Map<String, Object>) result.get(SnapshotCloneService.RESOURCES_KEY);
+        assertThat(resources)
+                .containsEntry("workflows", 1)
+                .containsEntry("interfaces", 3)
+                .containsEntry("tables", 2)
+                .containsEntry("agents", 1);
     }
 
     @Test

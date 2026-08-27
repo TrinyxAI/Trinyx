@@ -822,6 +822,7 @@
     "stopDictation": "Stop dictation",
     "dictationNotSupported": "Speech recognition is not supported in this browser",
     "attachFiles": "Attach files",
+    "moreActions": "More actions",
     "imageViewer": {
       "enlarge": "Enlarge"
     },
@@ -1492,6 +1493,17 @@
     "retry": "Retry"
   },
   "marketplace": {
+    "editableCopy": {
+      "button": "Create an editable copy",
+      "description": "Copies this application into your workflows so you can edit it. The installed application keeps running untouched.",
+      "creating": "Creating the editable copy...",
+      "created": "Editable copy created",
+      "existing": "You already have an editable copy",
+      "open": "Open it",
+      "error": "The editable copy could not be created",
+      "openCreated": "Open the editable copy",
+      "installFailed": "The editable copy could not be created. The application is installed: you can ask for the copy again from its settings menu."
+    },
     "screening": {
       "title": "{count, plural, one {# media resource to review} other {# media resources to review}}",
       "subtitle": "Heads-up: we detected the following media references in your publication. Confirm you have the right to use each - even internally-hosted files may originate from third-party copyrighted content. This is a reminder, not a block.",
@@ -1597,6 +1609,8 @@
     "priceFree": "Free",
     "pricePaid": "Paid",
     "resetFilters": "Reset filters",
+    "loadMore": "Load more",
+    "loadingMore": "Loading...",
     "noFilterResults": "No application matches these filters",
     "noFilterResultsHint": "Widen the rating, date or price filter to see more applications.",
     "filterTables": "Tables",
@@ -1731,6 +1745,9 @@
       "comingSoon": "Skills marketplace coming soon.",
       "subtitle": "Discover agent skills shared by the community",
       "title": "Skills"
+    },
+    "settingsMenu": {
+      "label": "Application settings"
     }
   },
   "reviews": {
@@ -1787,6 +1804,8 @@
   "applications": {
     "favorite": "Add to favorites",
     "unfavorite": "Remove from favorites",
+    "unmuteSound": "Turn sound on",
+    "muteSound": "Turn sound off",
     "favoriteErrorTitle": "Could not update favorites",
     "favoriteErrorMessage": "Please try again.",
     "filterAll": "All",
@@ -1946,6 +1965,19 @@
       "dismiss": "Got it"
     },
     "acquire": {
+      "installedTitle": "Installation complete",
+      "installedIntro": "\"{title}\" was added to your workspace:",
+      "installedPrimaryApplication": "1 application",
+      "installedPrimaryWorkflow": "1 workflow",
+      "installedPrimaryAgent": "1 agent",
+      "installedPrimarySkill": "1 skill",
+      "installedPrimaryTable": "1 table",
+      "installedPrimaryInterface": "1 interface",
+      "installedWorkflows": "{count, plural, one {# workflow} other {# workflows}}",
+      "installedInterfaces": "{count, plural, one {# interface} other {# interfaces}}",
+      "installedTables": "{count, plural, one {# table} other {# tables}}",
+      "installedAgents": "{count, plural, one {# agent} other {# agents}}",
+      "installBusy": "Another installation is in progress",
       "titleFree": "Install Application",
       "titlePaid": "Purchase Application",
       "anonymous": "Anonymous",
@@ -3286,7 +3318,7 @@
     },
     "catalogSync": {
       "title": "Refresh from live feeds",
-      "subtitle": "Pull current models and prices from LiteLLM + OpenRouter, preview the diff, then apply.",
+      "subtitle": "Pull current models and prices from LiteLLM, OpenRouter and each provider's own model list, preview the diff, then apply.",
       "refresh": "Refresh from providers",
       "modalTitle": "Sync preview",
       "modalSubtitle": "Review the diff and any guard failures before applying.",
@@ -3305,7 +3337,11 @@
       "cancel": "Cancel",
       "apply": "Apply",
       "applied": "Applied {inserted} new, {updated} updated, {deprecated} deprecated. Build a new bundle to distribute.",
-      "applyRejected": "Apply was rejected - check the guard failures above."
+      "applyRejected": "Apply was rejected - check the guard failures above.",
+      "discoveryTitle": "Discovered from the providers themselves",
+      "discoveryPricedFromOpenRouter": "Prices come from OpenRouter, which quotes a resale rate. Check them against the provider's own pricing before enabling a model.",
+      "discoveryCount": "{count, plural, one {# new model} other {# new models}}",
+      "discoverySkipped": "No API key for: {providers}. Their model lists could not be read."
     },
     "bridge": {
       "claudeCode": {
@@ -3712,6 +3748,24 @@
       "cannotRemoveDefault": "Cannot remove default",
       "onlyCredentialForIntegration": "This is the only credential for this service. Add another credential before removing this one as default.",
       "cannotRemoveOnlyCredential": "Cannot remove default: this is the only credential for this service",
+      "rename": "Rename",
+      "renameAriaLabel": "Rename {name}",
+      "renameDialog": {
+        "title": "Rename credential",
+        "description": "Only the display name changes: the connection, its permissions and its default status stay as they are.",
+        "label": "Name",
+        "placeholder": "e.g. Gmail (work account)",
+        "save": "Save",
+        "saving": "Saving...",
+        "cancel": "Cancel",
+        "successTitle": "Credential renamed",
+        "success": "Renamed to \"{name}\"",
+        "cannotRename": "This connection is identified by its name, so it cannot be renamed: the workflow nodes that use it match it by that name, and renaming it would detach them.",
+        "duplicateName": "This name is already used by another credential of the same owner for the same service, possibly in another workspace. Pick a different one.",
+        "failed": "Could not rename this credential. Please try again.",
+        "emptyName": "The name cannot be empty.",
+        "tooLong": "The name cannot exceed {max} characters."
+      },
       "noMatchingCredentials": "No credentials match your filters.",
       "noCredentialsYet": "No credentials configured yet.",
       "addFirstIntegration": "Add your first integration from the Available tab.",
@@ -5141,6 +5195,13 @@
       "planDescription": "Description",
       "price": "Price",
       "tools": "Tools"
+    },
+    "event": {
+      "card": {
+        "referenceTitle": "Price after the founding period: {price} per month",
+        "foundingUntilKept": "Founding price guaranteed until <b>{date}</b>, then kept for as long as you stay subscribed",
+        "foundingUntil": "Founding price guaranteed until <b>{date}</b>"
+      }
     }
   },
   "storage": {
@@ -5292,7 +5353,8 @@
     "moveHere": "Move here",
     "noFoldersYet": "No folders yet - create one first, or move to the top level.",
     "backToParent": "Up one level",
-    "generate": "Generate"
+    "generate": "Generate",
+    "generatedAssets": "Generated"
   },
   "fileDetail": {
     "download": "Download {name}",
@@ -6830,7 +6892,7 @@
       "mappingValuePlaceholder": "Expression or value",
       "timeout": "Timeout (seconds)",
       "timeoutPlaceholder": "e.g. 300",
-      "timeoutHelp": "Maximum execution time in seconds",
+      "timeoutHelp": "How long to wait for the sub-workflow to finish. It keeps running if this runs out.",
       "maxDepth": "Max depth",
       "maxDepthPlaceholder": "e.g. 5",
       "maxDepthHelp": "Maximum nesting depth for recursive sub-workflows",
@@ -6952,6 +7014,11 @@
       "timeout": "Timeout (seconds)",
       "timeoutPlaceholder": "e.g. 30",
       "timeoutHelp": "Maximum execution time in seconds"
+    },
+    "rerunConfirm": {
+      "title": "Restart from this step?",
+      "message": "This run is automatic. Restarting here re-runs this step, then lets the rest of the workflow run again on its own, which can call paid tools and send real messages.",
+      "confirm": "Restart"
     },
     "canvas": {
       "portSingleTargetHint": "This output is already connected. One port goes to a single node - add a Fork node to run several in parallel.",
@@ -7788,6 +7855,15 @@
       "selectAll": "Select all",
       "autoLayout": "Auto-layout",
       "fitView": "Fit view"
+    },
+    "credentialSelector": {
+      "accountLabel": "Account used by this step",
+      "toggleAriaLabel": "Choose the account at run time",
+      "toggleHelpOff": "The account is chosen now, in the picker below. Turn this on to choose it at run time instead.",
+      "toggleHelpOn": "The account is chosen at run time, from the expression below. Turn this off to pick one now.",
+      "expressionLabel": "Account expression",
+      "expressionCaution": "Whoever can write this value chooses the account, so bind it to something you control.",
+      "expressionHelp": "Resolves to the NAME of one of your credentials for this integration (or its id). Use a table row, a trigger field or a split item to run one workflow across several accounts. If it resolves to nothing, the step fails instead of falling back to your default account. Only an account whose status is active can be selected, its name must not be shared with another active account of the same integration, and a name that is a positive whole number is read as a credential id. Bind it to something the workflow owner controls (a table row, a variable) rather than to a field an untrusted visitor can fill in, such as a public webhook body or a form on a shared application."
     }
   },
   "webhookTrigger": {
@@ -8271,6 +8347,7 @@
     "systemPrompt": "System prompt"
   },
   "serviceApproval": {
+    "waitingForYou": "The assistant is waiting for your answer to continue.",
     "title": "Connect Services",
     "subtitle": "Connect the following services to complete your request",
     "reason": "Why this is needed",
@@ -8288,6 +8365,7 @@
     "deniedMessage": "Connection request was cancelled"
   },
   "toolAuthorization": {
+    "waitingForYou": "The assistant is waiting for your answer to continue.",
     "runTitle": "Run this action?",
     "runSubtitle": "The agent wants to run a sensitive action",
     "resolveApprovalTitle": "Resolve this approval?",
@@ -8829,6 +8907,12 @@
           "generic": "Something went wrong. Please try again."
         }
       }
+    },
+    "upgradeRequired": {
+      "label": "Paid credits required",
+      "title": "Your credits cannot pay for this model",
+      "explanation": "Your monthly credits cover running workflow nodes, but not what a model does (chat, agents, generation). That comes out of pay-as-you-go credits, and you have none left.",
+      "cta": "See plans or top up"
     }
   },
   "localMcp": {
@@ -10230,7 +10314,10 @@
       "providerPlaceholder": "Choose a provider",
       "chooseFile": "Choose a file",
       "replaceFile": "Replace",
-      "noFile": "No file chosen"
+      "noFile": "No file chosen",
+      "optionsLoading": "Loading values...",
+      "optionsTruncated": "Showing the first values of {count}. Type a value if the one you want is not listed.",
+      "optionsEmpty": "The provider returned no values for this field. Type one if you know it."
     },
     "modelCount": "{count} models",
     "empty": "No generation model is available yet.",
@@ -10238,6 +10325,8 @@
     "done": "Done",
     "billedOn": "Billed on {quantity} {unit}",
     "download": "Download",
+    "openInFiles": "See it in Files",
+    "savedNoPreview": "The generation finished, but nothing came back that this page can show. If an asset was produced, it is in your files.",
     "generate": "Generate",
     "again": "Change something",
     "back": "Back",
@@ -10248,14 +10337,65 @@
       "stillRunning": "The connection dropped, but the generation is still running on the server and will be charged. Your file will appear in your files once it is finished.",
       "unreadable": "The generation was refused and nothing was produced, but the reason came back in a form this page cannot show. Try another model, or try again in a moment."
     },
-    "payer": {
-      "monthlyCreditsOnly": "Your monthly credits fund workflow runs, not generation. Use your own key, or subscribe or top up to pay with credits."
-    },
     "assetRoles": {
       "source": "Source image",
       "first_frame": "First frame",
       "reference": "Reference image",
       "mask": "Mask"
+    },
+    "history": {
+      "toggle": "Past generations",
+      "title": "Past generations",
+      "subtitle": "Pick one to start from what it was made with"
     }
+  },
+  "generationHistory": {
+    "allFormats": "All",
+    "empty": "Nothing has been generated here yet. What you generate shows up here, with the model and the words that made it.",
+    "emptyForFormat": "No {format} has been generated here yet.",
+    "error": "The past generations could not be loaded. Try again in a moment.",
+    "untitled": "Untitled generation",
+    "reuse": "Reuse",
+    "reuseUnavailable": "This model is no longer available, so this one cannot be run again.",
+    "open": "Open {name}",
+    "previous": "Previous",
+    "next": "Next",
+    "range": "{from}-{to}",
+    "generatedWith": "Generated with {model}",
+    "regenerate": "Change something and generate again"
+  },
+  "folders": {
+    "newFolder": "New folder",
+    "createFolder": "Create folder",
+    "renameFolder": "Rename folder",
+    "folderName": "Folder name",
+    "cancel": "Cancel",
+    "deleteFolder": "Delete folder",
+    "deleteFolderConfirm": "Delete the folder \"{name}\"? What it holds moves back to the top level, nothing is deleted.",
+    "moveToFolder": "Move to folder",
+    "back": "Back",
+    "upOneLevel": "Up one level",
+    "allWorkflows": "All workflows",
+    "allAgents": "All agents",
+    "allTables": "All tables",
+    "allInterfaces": "All pages",
+    "allApplications": "All apps",
+    "workflowCount": "{count, plural, =0 {Empty} one {# workflow} other {# workflows}}",
+    "agentCount": "{count, plural, =0 {Empty} one {# agent} other {# agents}}",
+    "tableCount": "{count, plural, =0 {Empty} one {# table} other {# tables}}",
+    "interfaceCount": "{count, plural, =0 {Empty} one {# page} other {# pages}}",
+    "applicationCount": "{count, plural, =0 {Empty} one {# app} other {# apps}}",
+    "subfolderCount": "{count, plural, one {# folder} other {# folders}}",
+    "emptyFolderTitle": "This folder is empty",
+    "emptyFolderSubtitle": "Drag cards onto a folder, or use Move to folder on a selection.",
+    "moved": "Moved",
+    "movedToFolder": "{count, plural, one {# item} other {# items}} moved to {name}",
+    "movedToTopLevel": "{count, plural, one {# item} other {# items}} moved back to the top level",
+    "draggingCount": "{count, plural, one {# item} other {# items}}",
+    "actionFailed": "Folder action failed",
+    "createFailed": "The folder could not be created.",
+    "renameFailed": "The folder could not be renamed.",
+    "deleteFailed": "The folder could not be deleted.",
+    "moveFailed": "The move could not be completed."
   }
 }

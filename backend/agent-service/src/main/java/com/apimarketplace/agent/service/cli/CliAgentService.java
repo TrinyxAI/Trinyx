@@ -16,6 +16,7 @@ import com.apimarketplace.agent.service.AgentService;
 import com.apimarketplace.agent.service.execution.AgentToolsConfigCredentials;
 import com.apimarketplace.agent.service.execution.CoreToolsCache;
 import com.apimarketplace.agent.tool.ToolExecutionService;
+import com.apimarketplace.agent.tools.authz.ToolAuthorizationScope;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.annotation.PostConstruct;
 import lombok.RequiredArgsConstructor;
@@ -196,6 +197,23 @@ public class CliAgentService {
         if (request != null && request.approvedToolActions() != null
                 && !request.approvedToolActions().isEmpty()) {
             credentials.put("__approvedToolActions__", request.approvedToolActions());
+        }
+
+        // This session's tool calls are held open by a CLI at the other end of an MCP call.
+        // The approval gate needs to KNOW that, not infer it: it caps how long it may hold a
+        // call on this route, and inferring the route from the watchdog window got it wrong
+        // twice - the window is absent when the watchdog is disabled (a legal setting, so
+        // the cap vanished exactly where it was needed) and present on the direct route when
+        // an agent configures one (so the cap applied where it should not).
+        credentials.put(ToolAuthorizationScope.KEY_CLI_BRIDGE_SESSION, true);
+
+        // The bridge's inactivity watchdog window for this run. Every tool call on this
+        // session goes through RemoteToolExecutionService, and one that parks on an approval
+        // card is silent for its whole wait - so the gate needs to know how much silence the
+        // watchdog tolerates, or it sizes the park against its own default and the run is
+        // killed mid-execution just after the user approved.
+        if (request != null && request.inactivityTimeoutSeconds() != null) {
+            credentials.put("__inactivityTimeoutSeconds__", request.inactivityTimeoutSeconds());
         }
 
         // Store conversation-service callback URL for conversation tool routing

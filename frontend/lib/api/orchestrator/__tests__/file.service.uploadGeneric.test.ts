@@ -2,10 +2,10 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
 // Mock the auth/token + org-header deps so uploadGeneric runs without a real session.
-const { getTokenProviderMock } = vi.hoisted(() => ({
-  getTokenProviderMock: vi.fn(() => async () => 'test-token'),
+const { getAuthTokenMock } = vi.hoisted(() => ({
+  getAuthTokenMock: vi.fn(async () => 'test-token'),
 }));
-vi.mock('@/lib/api/api-client', () => ({ apiClient: { getTokenProvider: getTokenProviderMock } }));
+vi.mock('@/lib/api/api-client', () => ({ apiClient: { getAuthToken: getAuthTokenMock } }));
 vi.mock('@/lib/stores/current-org-store', () => ({ getActiveOrgHeaderForRequest: () => ({}) }));
 
 import { fileService } from '../file.service';

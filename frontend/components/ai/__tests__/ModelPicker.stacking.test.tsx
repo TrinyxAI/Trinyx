@@ -16,6 +16,12 @@ import { cleanup, render, screen } from '@testing-library/react';
 import * as React from 'react';
 import type { AIModel, AIProvider } from '@/hooks/useModels';
 
+// The picker asks once, for the whole list, whether this account's credits
+// can pay for what a model does. Stubbed: these suites are about the
+// catalog and the stacking, not about billing.
+vi.mock('@/lib/hooks/useMonthlyCreditsCannotPay', () => ({
+  useMonthlyCreditsCannotPay: () => ({ blocked: false, isLoading: false }),
+}));
 vi.mock('next/image', () => ({ default: () => null }));
 // Inline the Radix Select and capture the className handed to SelectContent -
 // the portal/positioning internals are irrelevant to the stacking contract.

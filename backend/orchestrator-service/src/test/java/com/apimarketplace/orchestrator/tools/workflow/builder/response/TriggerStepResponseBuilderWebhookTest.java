@@ -254,12 +254,17 @@ class TriggerStepResponseBuilderWebhookTest {
             assertThat(production).containsKey("requires_pin");
             assertThat(production).containsKey("flow");
             assertThat(production).containsKey("see_also");
-            // The flow string must name the three actions in order - these are the
-            // exact MCP actions the agent has access to.
+            // The flow string must name the actions in order - these are the exact MCP
+            // actions the agent has access to. It must NOT name execute: pin prepares
+            // its own production run (2026-08-25), and telling a builder agent to
+            // execute first sends it to make a real fire with real side effects.
             String flow = (String) production.get("flow");
             assertThat(flow).contains("finish");
-            assertThat(flow).contains("execute");
             assertThat(flow).contains("pin");
+            // Match the CALL, not the word: the sentence legitimately says "you do NOT
+            // have to execute the workflow first". What must never reappear is the step
+            // that tells the agent to make a real fire before pinning.
+            assertThat(flow).doesNotContain("action='execute'");
         }
 
         @Test

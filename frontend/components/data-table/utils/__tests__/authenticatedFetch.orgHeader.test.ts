@@ -14,12 +14,12 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
  * X-Active-Organization-ID still wins. That is the precedence apiClient's executeFetch
  * gives, and the per-request override (Quota / Storage workspace filters) depends on it.
  */
-const mockGetTokenProvider = vi.fn();
+const mockGetAuthToken = vi.fn();
 const mockGetActiveOrgHeaderForRequest = vi.fn();
 
 vi.mock('@/lib/api', () => ({
   apiClient: {
-    getTokenProvider: () => mockGetTokenProvider(),
+    getAuthToken: () => mockGetAuthToken(),
   },
 }));
 
@@ -38,7 +38,7 @@ function sentHeaders(): Record<string, string> {
 describe('authenticatedFetch active-workspace header', () => {
   beforeEach(() => {
     global.fetch = vi.fn().mockResolvedValue(new Response('{}', { status: 200 }));
-    mockGetTokenProvider.mockReturnValue(async () => 'test-token');
+    mockGetAuthToken.mockResolvedValue('test-token');
     mockGetActiveOrgHeaderForRequest.mockReturnValue({ 'X-Active-Organization-ID': 'org-active' });
   });
 
@@ -84,10 +84,11 @@ describe('authenticatedFetch active-workspace header', () => {
     });
   });
 
-  it('still scopes the request when no token provider is installed', async () => {
+  it('still scopes the request when there is no token to be had', async () => {
     // The workspace header and the bearer come from different sources; losing one
-    // must not silently drop the other back to the default workspace.
-    mockGetTokenProvider.mockReturnValue(null);
+    // must not silently drop the other back to the default workspace. getAuthToken
+    // answers null only once its wait for the auth bootstrap is exhausted.
+    mockGetAuthToken.mockResolvedValue(null);
 
     await authenticatedFetch('/api/proxy/rows');
 
@@ -95,16 +96,8 @@ describe('authenticatedFetch active-workspace header', () => {
     expect(sentHeaders()).not.toHaveProperty('Authorization');
   });
 
-  it('still scopes the request when the token provider throws', async () => {
-    mockGetTokenProvider.mockReturnValue(async () => {
-      throw new Error('token refresh failed');
-    });
-    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
-
-    await authenticatedFetch('/api/proxy/rows');
-
-    expect(sentHeaders()['X-Active-Organization-ID']).toBe('org-active');
-    expect(sentHeaders()).not.toHaveProperty('Authorization');
-    warn.mockRestore();
-  });
+  // The case this replaces mocked getAuthToken REJECTING. That cannot happen: ApiClient.getToken
+  // catches a throwing provider and returns null, so the old assertion pinned a contract the real
+  // object does not have. What is worth pinning is that a failed refresh, which surfaces as null,
+  // still leaves the workspace scoping intact - covered by the test above.
 });

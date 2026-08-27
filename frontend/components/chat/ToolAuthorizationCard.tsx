@@ -156,6 +156,13 @@ export function ToolAuthorizationCard({
             <p className="text-xs text-theme-secondary">
               {t(subtitleKey)}
             </p>
+            {/* The agent is holding this call: say so, otherwise the tool above just looks
+                stuck spinning and the user has no reason to connect the two. */}
+            {pendingAuthorization.blocking && (
+              <p className="text-xs text-theme-muted mt-0.5" data-testid="tool-authorization-waiting">
+                {t('waitingForYou')}
+              </p>
+            )}
           </div>
         </div>
 

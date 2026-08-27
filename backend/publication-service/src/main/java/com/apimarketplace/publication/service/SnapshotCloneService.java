@@ -19,6 +19,7 @@ import org.springframework.stereotype.Service;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -77,6 +78,64 @@ public class SnapshotCloneService {
      */
     public static final String ROOT_TYPE_APPLICATION = "APPLICATION";
     public static final String CLONE_TYPE_WORKFLOW = "WORKFLOW";
+
+    /**
+     * Key under which a clone result carries the per-type count of what it created
+     * ({@code workflows} = sub-workflows, {@code interfaces}, {@code tables}, {@code agents}).
+     * Surfaced all the way to the acquire response so the install can show the user what
+     * landed in their workspace. Zero-valued types are OMITTED: the consumer lists the keys
+     * it receives, so an absent type simply isn't mentioned.
+     */
+    public static final String RESOURCES_KEY = "resources";
+
+    /**
+     * Running tally of what a clone created, accumulated across the whole recursion so a
+     * sub-workflow's own interfaces / tables / agents are reported too (they land in the
+     * acquirer's lists exactly like the root's, and a summary that ignored them would be
+     * the same half-truth this feature exists to remove).
+     */
+    static final class ResourceTally {
+        int subWorkflows;
+        int interfaces;
+        int tables;
+        int agents;
+
+        void addResources(int interfaces, int tables, int agents) {
+            this.interfaces += interfaces;
+            this.tables += tables;
+            this.agents += agents;
+        }
+
+        /**
+         * Fold in a nested clone's own summary (the {@link #RESOURCES_KEY} map a
+         * {@code cloneFromSnapshot} returns). Used where a clone is driven from OUTSIDE
+         * this service - an agent publication clones its bundled workflows one by one, and
+         * everything those workflows carry lands in the acquirer's lists too. Dropping it
+         * would report the bundled workflow while staying silent about its interfaces,
+         * tables and agents.
+         */
+        void addNested(Map<String, Object> counts) {
+            if (counts == null || counts.isEmpty()) return;
+            subWorkflows += intValue(counts.get("workflows"));
+            interfaces += intValue(counts.get("interfaces"));
+            tables += intValue(counts.get("tables"));
+            agents += intValue(counts.get("agents"));
+        }
+
+        private static int intValue(Object value) {
+            return value instanceof Number n ? n.intValue() : 0;
+        }
+
+        /** Per-type counts, zero-valued types omitted (see {@link #RESOURCES_KEY}). */
+        Map<String, Object> toMap() {
+            Map<String, Object> counts = new LinkedHashMap<>();
+            if (subWorkflows > 0) counts.put("workflows", subWorkflows);
+            if (interfaces > 0) counts.put("interfaces", interfaces);
+            if (tables > 0) counts.put("tables", tables);
+            if (agents > 0) counts.put("agents", agents);
+            return counts;
+        }
+    }
 
     /**
      * Clone a planSnapshot into the given tenant's workspace.
@@ -145,9 +204,11 @@ public class SnapshotCloneService {
      * My-Applications/execute/uninstall lookup (they filter
      * {@code workflow_type='APPLICATION'}) and is exempt from the V268 partial unique
      * index (which is {@code WHERE workflow_type='APPLICATION' AND source_publication_id
-     * IS NOT NULL}). The lineage to the application it was duplicated from is carried
-     * in {@code metadata.duplicatedFromApplicationId} (a key nothing reads today),
-     * NEVER in {@code source_publication_id}.
+     * IS NOT NULL}). The lineage to the application it was duplicated from is carried in
+     * {@code metadata.duplicatedFromApplicationId} (plus {@code duplicatedFromPublicationId},
+     * which survives an uninstall/reinstall), NEVER in {@code source_publication_id}. Both
+     * keys are READ by {@code WorkflowRepository.findEditableDuplicateOfApplication}, which
+     * is what keeps "create my editable copy" from cloning a second resource set.
      *
      * @param fileNamespaceId the {@code _publications/{id}/} namespace the embedded
      *        file refs in {@code planSnapshot} live under. When the duplicate is sourced
@@ -157,6 +218,11 @@ public class SnapshotCloneService {
      *        so the file namespace never degrades to {@code _publications/null/}.
      * @param duplicatedFromApplicationId the APPLICATION clone this workflow was
      *        duplicated from - stored under {@code metadata.duplicatedFromApplicationId}.
+     *        The publication behind it is stored alongside as
+     *        {@code metadata.duplicatedFromPublicationId}: the application clone gets a NEW
+     *        id when the user uninstalls and reinstalls, so keying the "do I already have a
+     *        copy?" lookup on the clone alone would hand them a second full resource set
+     *        after a reinstall.
      */
     public Map<String, Object> duplicateToEditableWorkflow(Map<String, Object> planSnapshot,
                                                             String tenantId,
@@ -169,6 +235,11 @@ public class SnapshotCloneService {
         Map<String, Object> metadata = new HashMap<>();
         if (hasText(duplicatedFromApplicationId)) {
             metadata.put("duplicatedFromApplicationId", duplicatedFromApplicationId);
+        }
+        // Survives a reinstall (the application clone id does not). fileNamespaceId IS the
+        // publication id on every path that creates an editable copy.
+        if (fileNamespaceId != null) {
+            metadata.put("duplicatedFromPublicationId", fileNamespaceId.toString());
         }
         // sourcePublicationId = null -> a decoupled, editable WORKFLOW row.
         return cloneFromSnapshotInternal(planSnapshot, tenantId, null, fileNamespaceId,
@@ -232,7 +303,8 @@ public class SnapshotCloneService {
         try {
         // Clone sub-workflows FIRST (created as standard WORKFLOW rows - only the
         // root below is an APPLICATION - returns old->new mapping)
-        Map<String, String> workflowMapping = cloneSubWorkflowsForTenant(clonedPlan, tenantId, sourcePublicationId, fileNamespaceId, organizationId);
+        ResourceTally tally = new ResourceTally();
+        Map<String, String> workflowMapping = cloneSubWorkflowsForTenant(clonedPlan, tenantId, sourcePublicationId, fileNamespaceId, organizationId, tally);
         createdWorkflowIds.addAll(workflowMapping.values());
 
         // Remap __self__ sentinel to the actual workflow ID (self-referencing sub-workflows)
@@ -245,7 +317,7 @@ public class SnapshotCloneService {
         // Clone datasource structure (schema + row data) FIRST so the cloned
         // datasource ids are available to remap interface FORM bindings (below)
         // and datasource triggers.
-        Map<String, String> acquireDsMapping = cloneDatasourcesForTenant(clonedPlan, tenantId, sourcePublicationId, fileNamespaceId, organizationId);
+        Map<String, String> acquireDsMapping = cloneDatasourcesForTenant(tally, clonedPlan, tenantId, sourcePublicationId, fileNamespaceId, organizationId);
 
         // Remap datasource trigger ids - triggers[type=datasource].id is the
         // numeric DataSource PK (DataSourceTriggerResolver does
@@ -257,14 +329,14 @@ public class SnapshotCloneService {
         // dsMapping is passed so a FORM interface's dataSourceId binding is
         // remapped to the cloned datasource - otherwise the cloned form binds the
         // SOURCE tenant's datasource id and fails to load its table at render time.
-        Map<String, String> acquireInterfaceMapping = cloneInterfacesForTenant(clonedPlan, tenantId, fileNamespaceId, organizationId, acquireDsMapping);
+        Map<String, String> acquireInterfaceMapping = cloneInterfacesForTenant(tally, clonedPlan, tenantId, fileNamespaceId, organizationId, acquireDsMapping);
         // Remap deprecated triggers[]/mcps[].interfaceIds[] back-references to the
         // cloned interface ids - InterfacePlanExtractor still reads them at run time.
         remapInterfaceIdRefs(clonedPlan, acquireInterfaceMapping);
 
         // Clone agents (after interfaces/datasources so we can remap IDs in toolsConfig)
-        cloneAgentsForTenant(clonedPlan, tenantId, fileNamespaceId, tempWorkflowId,
-                acquireInterfaceMapping, acquireDsMapping, organizationId);
+        cloneAgentsForTenant(tally, clonedPlan, tenantId, fileNamespaceId,
+                tempWorkflowId, acquireInterfaceMapping, acquireDsMapping, organizationId);
 
         // Clone DataInput files (S3 blobs) so the acquirer owns independent copies
         cloneDataInputFilesForTenant(clonedPlan, tenantId, tempWorkflowId, organizationId);
@@ -313,6 +385,11 @@ public class SnapshotCloneService {
         Map<String, Object> acquireResult = new HashMap<>();
         acquireResult.put("workflowId", result.get("id"));
         acquireResult.put("title", title);
+        // What this clone actually created in the acquirer's workspace, so the install can
+        // TELL the user ("1 application, 2 interfaces, 1 table") instead of leaving them to
+        // discover new rows in three different lists. Counts come from the id mappings, i.e.
+        // from resources that were really created - never from what the plan declared.
+        acquireResult.put(RESOURCES_KEY, tally.toMap());
         return acquireResult;
         } catch (RuntimeException e) {
             // Surface the exact ids created so far so the acquire caller runs a SCOPED compensation
@@ -326,7 +403,8 @@ public class SnapshotCloneService {
     // ========================================================================
 
     @SuppressWarnings("unchecked")
-    private Map<String, String> cloneInterfacesForTenant(Map<String, Object> plan,
+    private Map<String, String> cloneInterfacesForTenant(ResourceTally tally,
+                                                          Map<String, Object> plan,
                                                           String tenantId,
                                                           UUID fileNamespaceId,
                                                           String organizationId,
@@ -410,6 +488,10 @@ public class SnapshotCloneService {
                 continue;
             }
             String newId = saved.getId().toString();
+            // Counted at CREATION, not from the mapping below: the mapping only records
+            // nodes that carried an old id, so a node without one would land in the
+            // acquirer's list yet never be reported to them.
+            tally.interfaces++;
 
             if (oldId != null) {
                 interfaceMapping.put(oldId, newId);
@@ -439,7 +521,8 @@ public class SnapshotCloneService {
     // ========================================================================
 
     @SuppressWarnings("unchecked")
-    private Map<String, String> cloneDatasourcesForTenant(Map<String, Object> plan,
+    private Map<String, String> cloneDatasourcesForTenant(ResourceTally tally,
+                                                           Map<String, Object> plan,
                                                            String tenantId,
                                                            UUID sourcePublicationId,
                                                            UUID fileNamespaceId,
@@ -510,6 +593,9 @@ public class SnapshotCloneService {
             }
 
             String newDsId = saved.id().toString();
+            // Counted at CREATION (see the interface loop): a table node without an old
+            // dataSourceId is still a real table in the acquirer's workspace.
+            tally.tables++;
 
             injectSnapshotItems(tableNode, saved.id(), tenantId);
 
@@ -559,14 +645,21 @@ public class SnapshotCloneService {
     // Agent cloning
     // ========================================================================
 
+    /**
+     * @return old-agent-id → new-agent-id for every agent actually cloned. Callers that
+     *         need to remap ids use it; the install summary does NOT (it counts each
+     *         creation into {@code tally}, so an agent whose snapshot carried no old id is
+     *         still reported).
+     */
     @SuppressWarnings("unchecked")
-    private void cloneAgentsForTenant(Map<String, Object> plan, String tenantId, UUID fileNamespaceId,
+    private Map<String, String> cloneAgentsForTenant(ResourceTally tally,
+                                       Map<String, Object> plan, String tenantId, UUID fileNamespaceId,
                                        String acquiredWorkflowId,
                                        Map<String, String> interfaceMapping,
                                        Map<String, String> dsMapping,
                                        String organizationId) {
         Object agentsRaw = plan.get("agents");
-        if (!(agentsRaw instanceof List)) return;
+        if (!(agentsRaw instanceof List)) return Map.of();
 
         List<Map<String, Object>> agents = new ArrayList<>((List<Map<String, Object>>) agentsRaw);
         plan.put("agents", agents);
@@ -664,6 +757,16 @@ public class SnapshotCloneService {
             }
 
             String newConfigId = (String) result.get("agentId");
+            if (newConfigId == null) {
+                // A 200 with no agentId is not an agent: counting it would tell the user
+                // about a row that does not exist.
+                logger.warn("Agent clone for {} returned no agentId for tenant {}", oldConfigId, tenantId);
+                removeSnapshotAgentFields(agentNode);
+                continue;
+            }
+            // Counted at CREATION (see the interface loop): an agent node without an old
+            // agentConfigId is still a real agent in the acquirer's workspace.
+            tally.agents++;
 
             if (oldConfigId != null && newConfigId != null) {
                 agentMapping.put(oldConfigId, newConfigId);
@@ -706,6 +809,7 @@ public class SnapshotCloneService {
         // These literal agent-entity UUIDs live in cores[], not agents[], so the
         // agentConfigId rewrite above does not cover them.
         remapAgentReferencesInCores(plan, agentMapping);
+        return agentMapping;
     }
 
     private void removeSnapshotAgentFields(Map<String, Object> agentNode) {
@@ -1039,6 +1143,12 @@ public class SnapshotCloneService {
                 mutableStep.remove("credentialSource");
             }
         }
+        // Blanked rather than removed, by the one rule both services share: removing
+        // it drops the step back to the acquirer's DEFAULT account and every run is
+        // green, which is this feature's own headline failure relocated to the clone
+        // boundary. A present-but-blank selector keeps the step saying it chooses its
+        // account at run time, so it fails loudly until the acquirer writes theirs.
+        WorkflowPublicationService.blankStepCredentialSelectors(plan);
     }
 
     // ========================================================================
@@ -1049,8 +1159,10 @@ public class SnapshotCloneService {
                                                             String tenantId,
                                                             UUID sourcePublicationId,
                                                             UUID fileNamespaceId,
-                                                            String organizationId) {
-        return cloneSubWorkflowsForTenant(plan, tenantId, sourcePublicationId, fileNamespaceId, organizationId, new HashMap<>());
+                                                            String organizationId,
+                                                            ResourceTally tally) {
+        return cloneSubWorkflowsForTenant(plan, tenantId, sourcePublicationId, fileNamespaceId, organizationId,
+                new HashMap<>(), tally);
     }
 
     @SuppressWarnings("unchecked")
@@ -1059,7 +1171,8 @@ public class SnapshotCloneService {
                                                             UUID sourcePublicationId,
                                                             UUID fileNamespaceId,
                                                             String organizationId,
-                                                            Map<String, String> clonedWorkflowIds) {
+                                                            Map<String, String> clonedWorkflowIds,
+                                                            ResourceTally tally) {
         Object subWfsRaw = plan.get("_snapshot_subworkflows");
         if (!(subWfsRaw instanceof Map<?, ?> subWfsMap)) return Map.of();
 
@@ -1096,15 +1209,19 @@ public class SnapshotCloneService {
             clonedWorkflowIds.put(oldWorkflowId, tempId);
 
             Map<String, String> nestedWfMapping = cloneSubWorkflowsForTenant(
-                    subPlan, tenantId, sourcePublicationId, fileNamespaceId, organizationId, clonedWorkflowIds);
+                    subPlan, tenantId, sourcePublicationId, fileNamespaceId, organizationId, clonedWorkflowIds, tally);
             remapTriggerWorkflowIds(subPlan, nestedWfMapping);
             remapAgentSnapshotWorkflows(subPlan, nestedWfMapping);
 
-            Map<String, String> subDsMapping = cloneDatasourcesForTenant(subPlan, tenantId, sourcePublicationId, fileNamespaceId, organizationId);
+            Map<String, String> subDsMapping = cloneDatasourcesForTenant(tally, subPlan, tenantId, sourcePublicationId, fileNamespaceId, organizationId);
             remapDatasourceTriggerIds(subPlan, subDsMapping);
-            Map<String, String> subIfaceMapping = cloneInterfacesForTenant(subPlan, tenantId, fileNamespaceId, organizationId, subDsMapping);
+            Map<String, String> subIfaceMapping = cloneInterfacesForTenant(tally, subPlan, tenantId, fileNamespaceId, organizationId, subDsMapping);
             remapInterfaceIdRefs(subPlan, subIfaceMapping);
-            cloneAgentsForTenant(subPlan, tenantId, fileNamespaceId, tempId, subIfaceMapping, subDsMapping, organizationId);
+            // A sub-workflow's resources land in the acquirer's lists like any other, so the
+            // SAME tally is threaded through the recursion: each is counted as it is created
+            // (even if the workflow row below then fails - the resources exist either way).
+            cloneAgentsForTenant(tally, subPlan, tenantId, fileNamespaceId, tempId,
+                    subIfaceMapping, subDsMapping, organizationId);
             cloneDataInputFilesForTenant(subPlan, tenantId, tempId, organizationId);
             stripSensitiveCredentials(subPlan);
             // F4 PUB-HIJACK fix: same as the top-level cloneFromSnapshot strip -
@@ -1135,6 +1252,10 @@ public class SnapshotCloneService {
             if (result != null && result.get("id") != null) {
                 String newId = result.get("id").toString();
                 workflowMapping.put(oldWorkflowId, newId);
+                // Counted here, not from workflowMapping.size(): a diamond / cycle
+                // back-reference maps a second parent onto an ALREADY cloned child and must
+                // not be reported as a second workflow.
+                tally.subWorkflows++;
                 // Finalize the reservation with the created id (== tempId, the id we provided) so
                 // sibling parents and cycle back-references all remap to the same clone.
                 clonedWorkflowIds.put(oldWorkflowId, newId);

@@ -203,7 +203,8 @@ interface WidgetConfig {
 
 interface CreateAgentModalProps {
   onClose: () => void;
-  onAgentCreated: () => void;
+  /** Called after a save. Carries the new agent's id on a CREATE, nothing on an edit. */
+  onAgentCreated: (agentId?: string) => void;
   agent?: AgentData;
   /** Step to open on (1=Basic Info, 2=Configuration, 3=Integration). Defaults to 1. */
   initialStep?: number;
@@ -1558,7 +1559,9 @@ export const CreateAgentModal: React.FC<CreateAgentModalProps> = ({
       if (!isEditMode) {
         queryClient.invalidateQueries({ queryKey: ['conversations'] });
       }
-      onAgentCreated();
+      // The id only travels on a CREATE: on an edit the agent already sits where it sits,
+      // and handing its id to the list would refile it under whatever folder is open.
+      onAgentCreated(isEditMode ? undefined : savedAgent?.id);
       onClose();
     } catch (err) {
       console.error('Error creating agent:', err);

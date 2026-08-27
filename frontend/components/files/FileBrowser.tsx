@@ -3,13 +3,18 @@
 import * as React from 'react';
 import { useRouter, usePathname, useSearchParams } from 'next/navigation';
 import { useTranslations } from 'next-intl';
-import { Folder, FolderOpen, FolderPlus, FolderInput, Upload, Download, Trash2, Pencil, ArrowLeft, ChevronRight } from 'lucide-react';
+import { Folder, FolderOpen, FolderPlus, FolderInput, History, Upload, Download, Trash2, Pencil, ArrowLeft, ChevronRight } from 'lucide-react';
 
 // The dialog and the control that opens it are stated once, for every surface
 // that offers a way in. The dialog stays behind React.lazy, so its chunk is
 // fetched on hover or on the click, never as part of this page's first load.
 import { CreateGenerationModal } from '@/components/chat/generationModalEntry';
 import { GenerateEntryButton } from '@/components/chat/GenerateEntryButton';
+// What this workspace has generated, and the recipe behind each asset. The SAME list the generation
+// dialog shows, so a past generation is one thing wherever it is looked at.
+import { GenerationHistoryList } from '@/components/generation/GenerationHistoryList';
+import { useGenerationModels } from '@/hooks/useGenerationModels';
+import type { GenerationHistoryEntry, GenerationProvenance } from '@/lib/api/storage-api';
 import {
   DndContext,
   DragOverlay,
@@ -636,6 +641,62 @@ export function FileBrowser() {
   const fileInputRef = React.useRef<HTMLInputElement>(null);
   const [uploading, setUploading] = React.useState(false);
   const [generationOpen, setGenerationOpen] = React.useState(false);
+  /**
+   * The recipe the dialog should open with, when it was opened to RE-run something.
+   *
+   * <p>Held here rather than passed at the call site because the dialog is mounted once for both
+   * ways in: "make something new" (no recipe) and "make this again, with one thing changed" (the
+   * recipe of the asset being looked at).
+   */
+  const [regenerateRecipe, setRegenerateRecipe] = React.useState<GenerationProvenance | null>(null);
+  /** True while the generated assets are shown INSTEAD of the file grid. */
+  const [showGenerations, setShowGenerations] = React.useState(false);
+
+  // Through the SAME cache the Generate button and the dialog read, so the three cost one request
+  // between them. Only used here to decide whether a history is worth offering at all: an install
+  // that does not serve generation has nothing to look back at.
+  const { availability: generationAvailability } = useGenerationModels(canMutate);
+  const canBrowseGenerations = canMutate && generationAvailability !== 'absent';
+
+  /**
+   * Open the generation dialog on an asset's own recipe.
+   *
+   * <p>This is the whole point of recording one: the reader is looking at something they made,
+   * changes a word, and runs it again - instead of retyping from memory and hoping.
+   */
+  const regenerate = React.useCallback((provenance: GenerationProvenance) => {
+    setRegenerateRecipe(provenance);
+    setGenerationOpen(true);
+  }, []);
+
+  /**
+   * Open a generated asset in the file viewer.
+   *
+   * <p>A history entry is a file, so it is shown by the ONE viewer every other file goes through.
+   * The prev/next arrows walk the file GRID, which this entry is usually not part of - the viewer
+   * resolves them by looking the open file up in the loaded page, so they simply go quiet here, and
+   * light up only for a generated asset that happens to be on that page too.
+   */
+  const openGeneratedAsset = React.useCallback((entry: GenerationHistoryEntry) => {
+    setDetailEntry({
+      id: entry.id,
+      storageType: 'S3_FILE',
+      sourceType: 'S3_FILE',
+      fileName: entry.fileName,
+      mimeType: entry.mimeType,
+      sizeBytes: entry.sizeBytes,
+      formattedSize: entry.formattedSize,
+      createdAt: entry.createdAt,
+      workflowId: null,
+      workflowName: null,
+      projectId: null,
+      runId: null,
+      stepKey: null,
+      epoch: null,
+      s3Key: entry.s3Key,
+      contentType: entry.mimeType,
+    });
+  }, []);
   const [isDragging, setIsDragging] = React.useState(false);
   const handleFiles = React.useCallback(async (files: FileList | File[]) => {
     // VIEWER (org workspace) cannot upload - also blocks OS drag-and-drop, which
@@ -810,6 +871,10 @@ export function FileBrowser() {
           onBack={() => setDetailEntry(null)}
           onPrev={goPrev}
           onNext={goNext}
+          // Only where a generation can actually be started. Passing it unconditionally would have
+          // the viewer ask for a recipe on every file opened by a reader who could not act on it,
+          // and offer a button that leads to a dialog they may not open.
+          onRegenerate={canBrowseGenerations ? regenerate : undefined}
         />
       ) : (
         <>
@@ -881,6 +946,29 @@ export function FileBrowser() {
                 label={t('generate')}
                 onOpen={() => setGenerationOpen(true)}
               />
+              {/* What has already been generated, beside the control that generates. A generated
+                  asset is a file like any other once it lands here, so without this the model and
+                  the words that produced it were only ever visible by opening the file one by one.
+                  Offered only where a generation could be started: an install that does not serve
+                  generation has nothing to look back at. */}
+              {canBrowseGenerations && (
+                <Button
+                  variant={showGenerations ? 'default' : 'outline'}
+                  className="px-2.5 sm:px-4"
+                  aria-pressed={showGenerations}
+                  title={t('generatedAssets')}
+                  onClick={() => {
+                    const next = !showGenerations;
+                    setShowGenerations(next);
+                    // A selection made in the grid means nothing over a list the bulk actions
+                    // cannot address, and the floating bar would still offer to delete it.
+                    if (next) clearSelection();
+                  }}
+                >
+                  <History className="h-4 w-4 sm:mr-1.5" />
+                  <span className="hidden sm:inline">{t('generatedAssets')}</span>
+                </Button>
+              )}
               {/* New folder - inline name input (V313). Opens an input that creates
                   the folder in the current location on Enter / blur. Hidden inside a
                   computed VIRTUAL workflow folder (no real parent to attach to) and
@@ -934,6 +1022,19 @@ export function FileBrowser() {
             </div>
           </div>
 
+          {/* The generated assets, in place of the file grid. Same list the generation dialog
+              shows; opening one lands in the ordinary file viewer, reusing one opens the form
+              filled in with what produced it. */}
+          {showGenerations && (
+            <GenerationHistoryList
+              className="flex-shrink-0"
+              onOpen={openGeneratedAsset}
+              onReuse={(entry) => regenerate(entry.provenance)}
+            />
+          )}
+
+          {!showGenerations && (
+          <>
           {/* Filters + view toggle */}
           <div className="flex-shrink-0 mb-3">
             <FileFilterBar
@@ -1156,6 +1257,8 @@ export function FileBrowser() {
             pageSizeOptions={[50, 100]}
             sticky
           />
+          </>
+          )}
         </>
       )}
 
@@ -1197,7 +1300,15 @@ export function FileBrowser() {
         <React.Suspense fallback={null}>
           <CreateGenerationModal
             isOpen
-            onClose={() => setGenerationOpen(false)}
+            onClose={() => {
+              setGenerationOpen(false);
+              // Cleared on the way out, or the NEXT "Generate" would open on the last asset's
+              // recipe instead of an empty form.
+              setRegenerateRecipe(null);
+            }}
+            // Set only when the dialog was opened to run something again: the form then opens
+            // filled in with what produced the asset being looked at.
+            initialRecipe={regenerateRecipe}
             // The asset lands in this workspace, so the list it landed in
             // refreshes rather than making the reader wonder where it went.
             onGenerated={() => refresh()}

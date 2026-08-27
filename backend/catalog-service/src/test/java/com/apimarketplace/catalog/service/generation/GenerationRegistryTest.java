@@ -4,6 +4,8 @@ import com.apimarketplace.catalog.domain.ApiEntity;
 import com.apimarketplace.catalog.domain.ApiToolEntity;
 import com.apimarketplace.catalog.repository.ApiRepository;
 import com.apimarketplace.catalog.repository.ApiToolRepository;
+import com.apimarketplace.catalog.domain.ApiToolParameterEntity;
+import com.apimarketplace.catalog.repository.ApiToolParameterRepository;
 import org.springframework.data.jdbc.repository.query.Query;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.BeforeEach;
@@ -50,13 +52,18 @@ class GenerationRegistryTest {
 
     private ApiToolRepository toolRepo;
     private ApiRepository apiRepo;
+    private ApiToolParameterRepository paramRepo;
     private GenerationRegistry registry;
 
     @BeforeEach
     void setUp() {
         toolRepo = mock(ApiToolRepository.class);
         apiRepo = mock(ApiRepository.class);
-        registry = new GenerationRegistry(toolRepo, apiRepo, new ObjectMapper());
+        // Answers with no parameters by default: inheriting a catalogue list is
+        // an enrichment, and every test here is about resolving models.
+        paramRepo = mock(ApiToolParameterRepository.class);
+        when(paramRepo.findByApiToolId(any())).thenReturn(List.of());
+        registry = new GenerationRegistry(toolRepo, apiRepo, paramRepo, new ObjectMapper());
     }
 
     private ApiToolEntity tool(UUID apiId, String slug, String spec) {
@@ -267,6 +274,151 @@ class GenerationRegistryTest {
             assertThat(registry.resolve("tts-1")).isEmpty();
             registry.invalidate();
             assertThat(registry.resolve("tts-1")).isPresent();
+        }
+    }
+
+    @Nested
+    @DisplayName("Values inherited from the catalogue")
+    class CatalogAllowedValues {
+
+        private ApiToolParameterEntity param(String name, String allowedValuesJson) {
+            ApiToolParameterEntity p = new ApiToolParameterEntity();
+            p.setName(name);
+            p.setAllowedValues(allowedValuesJson);
+            return p;
+        }
+
+        /** A descriptor whose `voice` writes to the endpoint parameter `model`. */
+        private static final String MAPPED_VOICE_SPEC = """
+                {"kind":"voice","assetPath":"$binary",
+                 "paramMap":{"prompt":"text","voice":"model"},
+                 "models":[{"id":"aura","capabilities":["prompt","voice"],
+                            "price":{"unit":"character","unitCredits":0.2}}]}
+                """;
+
+        @Test
+        @DisplayName("a mapped parameter picks up the values the catalogue already knows")
+        void inheritsCatalogAllowedValues() {
+            // The seed documents the provider's voices on the endpoint parameter,
+            // and the importer normalises them into allowed_values. Before this,
+            // the dialog still drew a free-text box for a required opaque id while
+            // the list sat one table away.
+            UUID apiId = givenApi("deepgram", "Deepgram");
+            ApiToolEntity t = tool(apiId, "text_to_speech", MAPPED_VOICE_SPEC);
+            when(toolRepo.findGenerationEndpoints()).thenReturn(List.of(t));
+            when(paramRepo.findByApiToolId(t.getId()))
+                    .thenReturn(List.of(param("model", "[\"aura-asteria-en\",\"aura-luna-en\"]")));
+
+            GenerationRegistry.GenerationModel m = registry.resolve("aura").orElseThrow();
+
+            assertThat(m.catalogAllowed())
+                    .containsEntry("voice", List.of("aura-asteria-en", "aura-luna-en"));
+        }
+
+        @Test
+        @DisplayName("regression: a nested write path is never matched against a parameter name")
+        void ignoresNonScalarBindingPaths() {
+            // `content[0].text` addresses a place INSIDE a body; the row that owns
+            // it is stored under a different name. Matching by string would attach
+            // one parameter's list to another, which is worse than no list.
+            UUID apiId = givenApi("acme", "Acme");
+            String spec = """
+                    {"kind":"image","assetPath":"$binary",
+                     "paramMap":{"prompt":"content[0].text","style":"config.style"},
+                     "models":[{"id":"acme-1","capabilities":["prompt","style"],
+                                "price":{"unit":"call","baseCredits":1}}]}
+                    """;
+            ApiToolEntity t = tool(apiId, "generate", spec);
+            when(toolRepo.findGenerationEndpoints()).thenReturn(List.of(t));
+            when(paramRepo.findByApiToolId(t.getId())).thenReturn(List.of(
+                    param("content[0].text", "[\"nope\"]"),
+                    param("config.style", "[\"nope\"]")));
+
+            GenerationRegistry.GenerationModel m = registry.resolve("acme-1").orElseThrow();
+
+            assertThat(m.catalogAllowed()).isEmpty();
+        }
+
+        @Test
+        @DisplayName("a model that states its own list keeps it")
+        void declaredConstraintIsNotInherited() {
+            UUID apiId = givenApi("openai", "OpenAI");
+            String spec = """
+                    {"kind":"voice","assetPath":"$binary",
+                     "paramMap":{"prompt":"text","voice":"voice"},
+                     "models":[{"id":"tts","capabilities":["prompt","voice"],
+                                "constraints":{"voice":{"allowed":["alloy"]}},
+                                "price":{"unit":"character","unitCredits":0.2}}]}
+                    """;
+            ApiToolEntity t = tool(apiId, "speech", spec);
+            when(toolRepo.findGenerationEndpoints()).thenReturn(List.of(t));
+            when(paramRepo.findByApiToolId(t.getId()))
+                    .thenReturn(List.of(param("voice", "[\"alloy\",\"echo\",\"nova\"]")));
+
+            GenerationRegistry.GenerationModel m = registry.resolve("tts").orElseThrow();
+
+            // Nothing inherited: the descriptor narrowed the set on purpose.
+            assertThat(m.catalogAllowed()).isEmpty();
+        }
+
+        @Test
+        @DisplayName("a catalogue list for something the model does not accept is dropped")
+        void ignoresValuesForUnofferedCapabilities() {
+            // Advertising a field the model never sends would put a control on
+            // screen whose value goes nowhere.
+            UUID apiId = givenApi("acme", "Acme");
+            String spec = """
+                    {"kind":"image","assetPath":"$binary",
+                     "paramMap":{"prompt":"prompt","style":"style"},
+                     "models":[{"id":"plain","capabilities":["prompt"],
+                                "price":{"unit":"call","baseCredits":1}}]}
+                    """;
+            ApiToolEntity t = tool(apiId, "generate", spec);
+            when(toolRepo.findGenerationEndpoints()).thenReturn(List.of(t));
+            when(paramRepo.findByApiToolId(t.getId()))
+                    .thenReturn(List.of(param("style", "[\"anime\",\"cinematic\"]")));
+
+            GenerationRegistry.GenerationModel m = registry.resolve("plain").orElseThrow();
+
+            assertThat(m.catalogAllowed()).isEmpty();
+        }
+
+        @Test
+        @DisplayName("regression: a SCALED binding does not borrow the upstream unit's values")
+        void ignoresScaledBindings() {
+            // `duration_seconds` writing to `music_length_ms` multiplies by a
+            // thousand, so that parameter's own values are milliseconds.
+            // Offering them under a field labelled seconds would suggest 30000
+            // for a half-minute clip.
+            UUID apiId = givenApi("elevenlabs", "ElevenLabs");
+            String spec = """
+                    {"kind":"music","assetPath":"$binary",
+                     "paramMap":{"prompt":"prompt",
+                                 "duration_seconds":{"path":"music_length_ms","scale":1000}},
+                     "models":[{"id":"music-1","capabilities":["prompt","duration_seconds"],
+                                "price":{"unit":"second","unitCredits":1}}]}
+                    """;
+            ApiToolEntity t = tool(apiId, "compose_music", spec);
+            when(toolRepo.findGenerationEndpoints()).thenReturn(List.of(t));
+            when(paramRepo.findByApiToolId(t.getId()))
+                    .thenReturn(List.of(param("music_length_ms", "[\"30000\",\"60000\"]")));
+
+            GenerationRegistry.GenerationModel m = registry.resolve("music-1").orElseThrow();
+
+            assertThat(m.catalogAllowed()).isEmpty();
+        }
+
+        @Test
+        @DisplayName("a parameter lookup that fails costs a dropdown, never a model")
+        void survivesAParameterLookupFailure() {
+            UUID apiId = givenApi("deepgram", "Deepgram");
+            ApiToolEntity t = tool(apiId, "text_to_speech", MAPPED_VOICE_SPEC);
+            when(toolRepo.findGenerationEndpoints()).thenReturn(List.of(t));
+            when(paramRepo.findByApiToolId(t.getId())).thenThrow(new RuntimeException("db down"));
+
+            GenerationRegistry.GenerationModel m = registry.resolve("aura").orElseThrow();
+
+            assertThat(m.catalogAllowed()).isEmpty();
         }
     }
 }

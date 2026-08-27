@@ -3,7 +3,7 @@
  * Handles storage quota and usage operations.
  */
 
-import { apiClient } from './api-client';
+import { apiClient, ApiError } from './api-client';
 import { orgScopeRequestOptions } from '@/lib/stores/current-org-store';
 
 export type QuotaStatus = 'OK' | 'SOFT_LIMIT_REACHED' | 'HARD_LIMIT_REACHED';
@@ -95,6 +95,57 @@ export interface StorageExplorerEntry {
   spawn?: number | null;
   /** VIRTUAL ITERATION folders - the 0-based split iteration index. Null/absent otherwise. */
   itemIndex?: number | null;
+}
+
+/**
+ * The recipe a generated asset was made from, as it was stored on the asset itself.
+ *
+ * <p>`params` is deliberately open: its keys are the chosen model's own parameters, which differ
+ * per model and grow with the catalogue. Narrowing it here would drop the ones this build does not
+ * know about, and this object exists to be handed back verbatim to reproduce the asset - a dropped
+ * parameter means quietly generating something else.
+ */
+export interface GenerationProvenance {
+  /** Public model id. Without it nothing can be reproduced, so it is always present. */
+  model: string;
+  /** Format produced: image, video, audio, voice, music, ... */
+  kind?: string;
+  provider?: string;
+  prompt?: string;
+  params?: Record<string, unknown>;
+  /** Which pool paid: 'platform' or 'user', as REPORTED by the run that produced it. */
+  credentialSource?: string;
+  billedQuantity?: number;
+  billedUnit?: string;
+  /** ISO-8601 instant the asset was generated. */
+  at?: string;
+}
+
+/** One entry of the generation history: the asset, and the recipe it was made from. */
+export interface GenerationHistoryEntry {
+  id: string;
+  fileName: string | null;
+  mimeType: string | null;
+  sizeBytes: number | null;
+  formattedSize: string;
+  createdAt: string;
+  s3Key: string | null;
+  provenance: GenerationProvenance;
+}
+
+/**
+ * One page of the history, as a SLICE: what is on this page, and whether another follows.
+ *
+ * <p>There is deliberately no total. Counting the generated assets would cost a second pass over
+ * every file the workspace owns - one that, unlike the page query, cannot stop early - on every
+ * page view, to produce a single number. `last` is what a pager actually needs.
+ */
+export interface GenerationHistoryPage {
+  content: GenerationHistoryEntry[];
+  /** True when this is the final page. Spring's slice shape; `!last` means a next page exists. */
+  last: boolean;
+  number: number;
+  size: number;
 }
 
 export interface StorageExplorerParams {
@@ -392,6 +443,44 @@ class StorageApiService {
    */
   async getEntryPreview(id: string): Promise<StoragePreview> {
     return await apiClient.get<StoragePreview>(`/storage/explorer/${id}/preview`);
+  }
+
+  /**
+   * What this workspace has generated, newest first.
+   *
+   * The history is read off the assets themselves - a generated file carries the model, the prompt
+   * and the parameters it was made from - so an asset deleted from Files takes its entry with it,
+   * and no entry can point at a file that is gone.
+   *
+   * Answers a slice (`content` + `last`), not a counted page: see {@link GenerationHistoryPage}.
+   */
+  async getGenerationHistory(
+    params: { page?: number; size?: number; kind?: string } = {},
+  ): Promise<GenerationHistoryPage> {
+    const queryParams: Record<string, string> = {};
+    if (params.page !== undefined) queryParams.page = String(params.page);
+    if (params.size !== undefined) queryParams.size = String(params.size);
+    if (params.kind) queryParams.kind = params.kind;
+    return await apiClient.get<GenerationHistoryPage>('/storage/explorer/generations', {
+      params: queryParams,
+    });
+  }
+
+  /**
+   * The recipe one asset was made from, or null when it was not generated here.
+   *
+   * A 404 is the ORDINARY answer - almost every file in a workspace was uploaded or written by a
+   * workflow - so it resolves to null rather than throwing. Any other failure does throw: "we could
+   * not ask" is a different fact from "this file was not generated", and a caller that showed the
+   * second for the first would hide a Regenerate button that should be there.
+   */
+  async getGenerationProvenance(id: string): Promise<GenerationProvenance | null> {
+    try {
+      return await apiClient.get<GenerationProvenance>(`/storage/explorer/${id}/generation`);
+    } catch (error) {
+      if (error instanceof ApiError && error.status === 404) return null;
+      throw error;
+    }
   }
 
   /**

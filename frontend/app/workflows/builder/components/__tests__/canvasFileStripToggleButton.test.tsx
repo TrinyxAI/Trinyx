@@ -3,13 +3,15 @@
  * CanvasFileStripToggleButton - the toolbar control for whether file previews hang
  * open under the nodes.
  *
- * Pinned here: it is always on the toolbar (it used to hide itself with no strip on
- * screen, which made the preference unsettable exactly when you wanted to set it
- * ahead of a run), it falls back to the STORED preference when there is nothing to
- * count, and its intent is derived from how many are open, so the first click on a
- * partially-expanded canvas always OPENS rather than closing the one preview just
- * opened. Its look is pinned too - it is the only chrome control carrying two
- * glyphs, and that is where a hand-rolled className would drift from its siblings.
+ * Pinned here: it stays on the toolbar of a RUN that produced no file (it used to
+ * hide itself with no strip on screen, which made the preference unsettable exactly
+ * when you wanted to set it ahead of time) and it disappears in EDIT mode, where
+ * nothing it acts on can exist; it falls back to the STORED preference when there is
+ * nothing to count; and its intent is derived from how many are open, so the first
+ * click on a partially-expanded canvas always OPENS rather than closing the one
+ * preview just opened. Its look is pinned too - it is the only chrome control
+ * carrying two glyphs, and that is where a hand-rolled className would drift from
+ * its siblings.
  */
 import React from 'react';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
@@ -26,6 +28,16 @@ import {
 
 vi.mock('@/contexts/FileStripExpansionContext', () => ({
   useFileStripExpansionSafe: vi.fn(),
+}));
+
+/**
+ * The canvas mode. Everything below is about a RUN unless a test says otherwise:
+ * that is the only mode where a file strip can exist, so it is the only mode where
+ * the assertions about counts and intent mean anything.
+ */
+const mode = vi.hoisted(() => ({ isEditMode: false }));
+vi.mock('@/contexts/WorkflowModeContext', () => ({
+  useWorkflowMode: () => mode,
 }));
 
 const expandAll = vi.fn();
@@ -53,15 +65,34 @@ beforeEach(() => {
   expandAll.mockClear();
   collapseAll.mockClear();
   useCtx.mockReset();
+  mode.isEditMode = false;
 });
 
 describe('CanvasFileStripToggleButton - visibility', () => {
-  it('STAYS on the toolbar with no file strip on screen - that is when the preference is worth setting', () => {
+  it('STAYS on the toolbar of a run with no file strip on screen - that is when the preference is worth setting', () => {
     // It used to hide itself here, which meant the only moment you could state "I
     // want previews open" was a moment when they were already in front of you.
     useCtx.mockReturnValue(ctx(0, 0));
     const c = render(<CanvasFileStripToggleButton />);
     expect(c.queryByTestId('canvas-toggle-all-files')).not.toBeNull();
+  });
+
+  it('is NOT on the toolbar in edit mode, where nothing it acts on can exist', () => {
+    // File strips hang under nodes in run mode only, so in edit mode this was a
+    // permanently inert control describing a state the reader cannot see.
+    mode.isEditMode = true;
+    useCtx.mockReturnValue(ctx(0, 0));
+    const c = render(<CanvasFileStripToggleButton />);
+    expect(c.queryByTestId('canvas-toggle-all-files')).toBeNull();
+  });
+
+  it('stays away in edit mode even if strips somehow registered themselves', () => {
+    // The mode decides, not the registry: a stale registration from the run you
+    // just left must not put the control back on an editing toolbar.
+    mode.isEditMode = true;
+    useCtx.mockReturnValue(ctx(3, 2));
+    const c = render(<CanvasFileStripToggleButton />);
+    expect(c.queryByTestId('canvas-toggle-all-files')).toBeNull();
   });
 
   it('with nothing on screen, shows the STORED preference rather than a vacuous "all expanded"', () => {

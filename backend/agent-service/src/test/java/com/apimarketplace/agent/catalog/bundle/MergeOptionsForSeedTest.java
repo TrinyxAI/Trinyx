@@ -58,15 +58,34 @@ class MergeOptionsForSeedTest {
     }
 
     @Test
-    @DisplayName("Only the seed synthesises default categories on insert (bundle carries its own sidecar; sync doesn't)")
-    void onlySeedAssignsDefaultCategoriesOnInsert() {
+    @DisplayName("Seed and sync synthesise default categories on insert; only the bundle carries its own sidecar")
+    void seedAndSyncAssignDefaultCategoriesOnInsert() {
         assertThat(MergeOptions.forSeed().assignDefaultCategoriesOnInsert())
                 .as("seed doc omits the categories sidecar → merge must backfill mode defaults")
                 .isTrue();
         assertThat(MergeOptions.forBundle(7L).assignDefaultCategoriesOnInsert())
                 .as("a bundle payload always carries its own categories sidecar")
                 .isFalse();
-        assertThat(MergeOptions.forSync().assignDefaultCategoriesOnInsert()).isFalse();
+        // Regression: sync used to insert WITHOUT categories. The row landed
+        // disabled AND invisible to every category-scoped picker, so an admin
+        // enabling it changed nothing - V388 had to repair that class by hand
+        // once already, for the rows V384/V386 orphaned.
+        assertThat(MergeOptions.forSync().assignDefaultCategoriesOnInsert())
+                .as("a feed insert must still be selectable once an admin enables it")
+                .isTrue();
+    }
+
+    @Test
+    @DisplayName("Sync keeps its review gate: default categories do NOT imply an enabled row")
+    void syncStaysReviewGatedDespiteDefaultCategories() {
+        // The two flags are independent and must stay so: categories make an
+        // enabled row reachable, honorEnabledOnInsert decides whether it is
+        // enabled at all. Assigning categories must not have quietly opened
+        // the feed straight into the picker.
+        MergeOptions sync = MergeOptions.forSync();
+        assertThat(sync.assignDefaultCategoriesOnInsert()).isTrue();
+        assertThat(sync.honorEnabledOnInsert()).isFalse();
+        assertThat(sync.deprecateMissing()).isFalse();
     }
 
     @Test
@@ -76,5 +95,6 @@ class MergeOptionsForSeedTest {
         assertThat(seed.withDeprecateMissing(true).assignDefaultCategoriesOnInsert()).isTrue();
         assertThat(seed.withLabel("relabelled").assignDefaultCategoriesOnInsert()).isTrue();
         assertThat(MergeOptions.forBundle(7L).withLabel("x").assignDefaultCategoriesOnInsert()).isFalse();
+        assertThat(MergeOptions.forSync().withDeprecateMissing(true).assignDefaultCategoriesOnInsert()).isTrue();
     }
 }

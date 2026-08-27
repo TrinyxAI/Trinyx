@@ -272,7 +272,8 @@ public class WorkflowManagementService implements WorkflowCrud {
      *
      * <p>Note: the human {@code PUT /api/v2/workflows/dag/{id}/plan} edit path no longer
      * routes through this gate - applications are run-only there (it returns
-     * {@code 409 APPLICATION_PLAN_IMMUTABLE}); editing lives in the decoupled WORKFLOW twin.
+     * {@code 409 APPLICATION_PLAN_IMMUTABLE}); editing lives in the decoupled WORKFLOW copy,
+     * which the acquirer creates on request (installing no longer mints one).
      */
     public void assertApplicationInstanceWritable(WorkflowEntity workflow, String tenantId, String orgRole) {
         enforceApplicationWriteGate(workflow, tenantId, orgRole);

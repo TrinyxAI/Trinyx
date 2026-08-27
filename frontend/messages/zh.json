@@ -792,6 +792,7 @@
     "stopDictation": "停止语音输入",
     "dictationNotSupported": "此浏览器不支持语音识别",
     "attachFiles": "附加文件",
+    "moreActions": "更多操作",
     "imageViewer": {
       "enlarge": "放大"
     },
@@ -1424,6 +1425,17 @@
     "retry": "重试"
   },
   "marketplace": {
+    "editableCopy": {
+      "button": "创建可编辑副本",
+      "description": "将此应用复制到你的工作流中以便编辑。已安装的应用保持不变。",
+      "creating": "正在创建可编辑副本...",
+      "created": "可编辑副本已创建",
+      "existing": "你已经有一个可编辑副本",
+      "open": "打开",
+      "error": "无法创建可编辑副本",
+      "openCreated": "打开可编辑副本",
+      "installFailed": "无法创建可编辑副本。应用已安装：你可以在其设置菜单中重新申请副本。"
+    },
     "title": "市场",
     "subtitle": "发现并使用社区创建的工作流",
     "searchPlaceholder": "搜索工作流...",
@@ -1610,6 +1622,8 @@
     "priceFree": "免费",
     "pricePaid": "付费",
     "resetFilters": "重置筛选",
+    "loadMore": "加载更多",
+    "loadingMore": "加载中...",
     "noFilterResults": "没有应用符合这些筛选条件",
     "noFilterResultsHint": "放宽评分、日期或价格筛选条件即可看到更多应用。",
     "filterSkills": "Skills",
@@ -1663,7 +1677,10 @@
     "snapshotBadge": "快照",
     "snapshotEmpty": "此快照中没有数据",
     "snapshotPreview": "快照预览",
-    "viewRejectionReason": "查看拒绝原因"
+    "viewRejectionReason": "查看拒绝原因",
+    "settingsMenu": {
+      "label": "应用设置"
+    }
   },
   "reviews": {
     "title": "评论",
@@ -1719,6 +1736,8 @@
   "applications": {
     "favorite": "添加到收藏",
     "unfavorite": "从收藏中移除",
+    "unmuteSound": "开启声音",
+    "muteSound": "关闭声音",
     "favoriteErrorTitle": "无法更新收藏",
     "favoriteErrorMessage": "请重试。",
     "filterAll": "全部",
@@ -1878,6 +1897,19 @@
       "dismiss": "知道了"
     },
     "acquire": {
+      "installedTitle": "安装完成",
+      "installedIntro": "「{title}」已添加到你的工作区：",
+      "installedPrimaryApplication": "1 个应用",
+      "installedPrimaryWorkflow": "1 个工作流",
+      "installedPrimaryAgent": "1 个智能体",
+      "installedPrimarySkill": "1 个技能",
+      "installedPrimaryTable": "1 个数据表",
+      "installedPrimaryInterface": "1 个界面",
+      "installedWorkflows": "{count, plural, other {# 个工作流}}",
+      "installedInterfaces": "{count, plural, other {# 个界面}}",
+      "installedTables": "{count, plural, other {# 个数据表}}",
+      "installedAgents": "{count, plural, other {# 个智能体}}",
+      "installBusy": "另一个安装正在进行中",
       "titleFree": "安装应用",
       "titlePaid": "购买应用",
       "anonymous": "匿名",
@@ -3265,6 +3297,10 @@
       "applied": "已应用 {inserted} 个新增、{updated} 个更新、{deprecated} 个弃用。构建新包以进行分发。",
       "apply": "应用",
       "applyRejected": "应用被拒绝 - 请检查上方的守卫失败。",
+      "discoveryTitle": "直接从服务商处发现",
+      "discoveryPricedFromOpenRouter": "价格来自 OpenRouter，这是转售价。启用模型前，请对照服务商自己的价目表核对。",
+      "discoveryCount": "{count, plural, other {# 个新模型}}",
+      "discoverySkipped": "缺少 API 密钥：{providers}。无法读取它们的模型列表。",
       "cancel": "取消",
       "colModel": "模型",
       "colProvider": "提供商",
@@ -3278,7 +3314,7 @@
       "overridePriceSanity": "覆盖价格合理性守卫",
       "overridePriceSanityHint": "仍然应用被标记的行。仅在您已通过提供商的官方定价页面核实价格变更后才勾选此项。",
       "refresh": "从提供商刷新",
-      "subtitle": "从 LiteLLM + OpenRouter 拉取当前模型和价格，预览差异，然后应用。",
+      "subtitle": "从 LiteLLM、OpenRouter 以及各服务商自己的模型列表拉取当前模型和价格，预览差异，然后应用。",
       "title": "从实时数据源刷新",
       "unchanged": "未更改",
       "updated": "已更新"
@@ -3473,6 +3509,24 @@
       "cannotRemoveDefault": "无法移除默认",
       "onlyCredentialForIntegration": "这是此服务的唯一凭据。在移除此默认凭据之前，请先添加另一个凭据。",
       "cannotRemoveOnlyCredential": "无法移除默认：这是此服务的唯一凭据",
+      "rename": "重命名",
+      "renameAriaLabel": "重命名 {name}",
+      "renameDialog": {
+        "title": "重命名凭据",
+        "description": "仅显示名称会改变：连接、其权限和默认状态保持不变。",
+        "label": "名称",
+        "placeholder": "例如：Gmail（工作账号）",
+        "save": "保存",
+        "saving": "保存中...",
+        "cancel": "取消",
+        "successTitle": "凭据已重命名",
+        "success": "已重命名为“{name}”",
+        "cannotRename": "此连接以名称作为标识，因此无法重命名：使用它的工作流节点正是按该名称匹配的，重命名会使它们失去关联。",
+        "duplicateName": "同一所有者名下、面向同一服务的另一个凭据已在使用该名称（可能位于其他工作区），请换一个。",
+        "failed": "无法重命名此凭据，请重试。",
+        "emptyName": "名称不能为空。",
+        "tooLong": "名称不能超过 {max} 个字符。"
+      },
       "noMatchingCredentials": "没有凭据匹配您的筛选条件。",
       "noCredentialsYet": "尚未配置凭据。",
       "addFirstIntegration": "从可用标签页添加您的第一个集成。",
@@ -4927,6 +4981,13 @@
         "body": "一旦支付接通，将在此处启用一次性充值。",
         "title": "即将推出"
       }
+    },
+    "event": {
+      "card": {
+        "referenceTitle": "创始期结束后的价格：每月 {price}",
+        "foundingUntilKept": "创始价保证有效至 <b>{date}</b>，之后只要持续订阅即可一直保留",
+        "foundingUntil": "创始价保证有效至 <b>{date}</b>"
+      }
     }
   },
   "storage": {
@@ -5078,7 +5139,8 @@
     "moveHere": "移动到此处",
     "noFoldersYet": "暂无文件夹--请先创建一个，或移动到顶层。",
     "backToParent": "返回上一级",
-    "generate": "生成"
+    "generate": "生成",
+    "generatedAssets": "生成的文件"
   },
   "fileDetail": {
     "download": "下载 {name}",
@@ -6611,7 +6673,7 @@
       "mappingValuePlaceholder": "表达式或值",
       "timeout": "超时（秒）",
       "timeoutPlaceholder": "例如：300",
-      "timeoutHelp": "最大执行时间（秒）",
+      "timeoutHelp": "等待子工作流完成的时长。超时后它仍会继续运行。",
       "maxDepth": "最大深度",
       "maxDepthPlaceholder": "例如：5",
       "maxDepthHelp": "递归子工作流的最大嵌套深度",
@@ -6733,6 +6795,11 @@
       "timeout": "超时（秒）",
       "timeoutPlaceholder": "例如：30",
       "timeoutHelp": "最大执行时间（秒）"
+    },
+    "rerunConfirm": {
+      "title": "从此步骤重新开始？",
+      "message": "本次运行为自动模式。从这里重新开始会重跑该步骤，随后工作流的其余部分会自动继续运行，可能调用付费工具并发送真实消息。",
+      "confirm": "重新开始"
     },
     "canvas": {
       "portSingleTargetHint": "此输出已连接。一个端口只能连到一个节点--添加 Fork 节点即可并行运行多个节点。",
@@ -7569,6 +7636,15 @@
       "selectAll": "全选",
       "autoLayout": "自动布局",
       "fitView": "适应视图"
+    },
+    "credentialSelector": {
+      "accountLabel": "此步骤使用的账户",
+      "toggleAriaLabel": "在运行时选择账户",
+      "toggleHelpOff": "账户现在就在下方选择器中选定。开启后改为在运行时确定。",
+      "toggleHelpOn": "账户在运行时由下方表达式确定。关闭后可立即选定一个。",
+      "expressionLabel": "账户表达式",
+      "expressionCaution": "能写入该值的人即可决定使用哪个账户，请将其绑定到你可控的来源。",
+      "expressionHelp": "需解析为该集成下你某个凭据的名称（或其 id）。可使用表格行、触发器字段或拆分项，让同一个工作流在多个账户上运行。若解析为空，该步骤将直接失败，而不会退回到你的默认账户。仅可选择状态为活跃的账户，且其名称不得与同一集成下另一个活跃账户重名；名称若为正整数，将被视为凭据 id。 请将其绑定到工作流所有者可控的来源（表格行、变量），而不是不可信访问者能填写的字段，例如公开 webhook 的请求体或共享应用中的表单。"
     }
   },
   "webhookTrigger": {
@@ -8052,6 +8128,7 @@
     "warningCount": "警告"
   },
   "serviceApproval": {
+    "waitingForYou": "助手正在等待您的回复以继续。",
     "title": "连接服务",
     "subtitle": "连接以下服务以完成您的请求",
     "reason": "为什么需要此服务",
@@ -8575,6 +8652,12 @@
       "totalAvailable": "可用积分总数",
       "walletSubtitle": "您的套餐和充值中的积分",
       "walletTitle": "钱包"
+    },
+    "upgradeRequired": {
+      "label": "需要付费积分",
+      "title": "您的积分无法支付此模型",
+      "explanation": "您的每月积分覆盖工作流节点的运行，但不包括模型本身的工作（聊天、智能体、生成）。这部分需用按量付费积分支付，而您已没有余额。",
+      "cta": "查看套餐或充值"
     }
   },
   "localMcp": {
@@ -9615,6 +9698,7 @@
     }
   },
   "toolAuthorization": {
+    "waitingForYou": "助手正在等待您的回复以继续。",
     "actionLabel": "操作",
     "approve": "授权",
     "approved": "已授权",
@@ -10230,7 +10314,10 @@
       "providerPlaceholder": "选择服务商",
       "chooseFile": "选择文件",
       "replaceFile": "更换",
-      "noFile": "未选择文件"
+      "noFile": "未选择文件",
+      "optionsLoading": "正在加载可选值...",
+      "optionsTruncated": "仅显示 {count} 个值中的前几个。如果找不到需要的值，请直接输入。",
+      "optionsEmpty": "服务商未返回该字段的任何可选值。如果知道具体值，请直接输入。"
     },
     "modelCount": "{count} 个模型",
     "empty": "目前还没有可用的生成模型。",
@@ -10238,6 +10325,8 @@
     "done": "完成",
     "billedOn": "按 {quantity} {unit} 计费",
     "download": "下载",
+    "openInFiles": "在文件中查看",
+    "savedNoPreview": "生成已完成，但返回的内容本页面无法显示。如果确实产出了素材，它就在你的文件中。",
     "generate": "生成",
     "again": "修改",
     "back": "返回",
@@ -10248,14 +10337,65 @@
       "stillRunning": "连接已中断，但生成仍在服务器上继续，并会计费。完成后，您的文件将出现在文件列表中。",
       "unreadable": "本次生成被拒绝，未产出任何内容，但拒绝原因返回的格式无法在此页面显示。请换一个模型，或稍后重试。"
     },
-    "payer": {
-      "monthlyCreditsOnly": "您的每月积分用于工作流运行，不能用于生成。请使用自己的密钥，或订阅、充值后以积分支付。"
-    },
     "assetRoles": {
       "source": "源图片",
       "first_frame": "首帧",
       "reference": "参考图片",
       "mask": "蒙版"
+    },
+    "history": {
+      "toggle": "历史生成",
+      "title": "历史生成",
+      "subtitle": "选择一条，以它的设置为起点"
     }
+  },
+  "generationHistory": {
+    "allFormats": "全部",
+    "empty": "这里还没有生成过任何内容。你生成的内容会显示在这里，并附上所用的模型和提示词。",
+    "emptyForFormat": "这里还没有生成过{format}内容。",
+    "error": "无法加载历史生成，请稍后重试。",
+    "untitled": "未命名的生成",
+    "reuse": "再次使用",
+    "reuseUnavailable": "该模型已下架，这条生成无法重新运行。",
+    "open": "打开 {name}",
+    "previous": "上一页",
+    "next": "下一页",
+    "range": "第 {from}-{to} 条",
+    "generatedWith": "由 {model} 生成",
+    "regenerate": "修改后重新生成"
+  },
+  "folders": {
+    "newFolder": "新建文件夹",
+    "createFolder": "创建文件夹",
+    "renameFolder": "重命名文件夹",
+    "folderName": "文件夹名称",
+    "cancel": "取消",
+    "deleteFolder": "删除文件夹",
+    "deleteFolderConfirm": "删除文件夹“{name}”？其内容将回到顶层，不会被删除。",
+    "moveToFolder": "移动到文件夹",
+    "back": "返回",
+    "upOneLevel": "返回上一级",
+    "allWorkflows": "全部工作流",
+    "allAgents": "全部智能体",
+    "allTables": "全部表格",
+    "allInterfaces": "全部页面",
+    "allApplications": "全部应用",
+    "workflowCount": "{count, plural, =0 {空} other {# 个工作流}}",
+    "agentCount": "{count, plural, =0 {空} other {# 个智能体}}",
+    "tableCount": "{count, plural, =0 {空} other {# 个表格}}",
+    "interfaceCount": "{count, plural, =0 {空} other {# 个页面}}",
+    "applicationCount": "{count, plural, =0 {空} other {# 个应用}}",
+    "subfolderCount": "{count, plural, other {# 个文件夹}}",
+    "emptyFolderTitle": "此文件夹为空",
+    "emptyFolderSubtitle": "将卡片拖到文件夹上，或对所选项使用“移动到文件夹”。",
+    "moved": "已移动",
+    "movedToFolder": "已将 {count, plural, other {# 项}} 移动到 {name}",
+    "movedToTopLevel": "已将 {count, plural, other {# 项}} 移回顶层",
+    "draggingCount": "{count, plural, other {# 项}}",
+    "actionFailed": "文件夹操作失败",
+    "createFailed": "无法创建文件夹。",
+    "renameFailed": "无法重命名文件夹。",
+    "deleteFailed": "无法删除文件夹。",
+    "moveFailed": "无法完成移动。"
   }
 }

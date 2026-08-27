@@ -541,6 +541,13 @@ class WorkflowResumeServicePlanUpdateTest {
         // stampPlanVersion is pin-blind by design and must not second-guess the
         // number it is handed. The behavioural regression coverage lives in
         // WorkflowPlanVersionServiceTest, against the real resolver.
+        //
+        // 2026-08-26: the run is now explicitly an EDITOR run. It used to carry no
+        // marker, which after the demoted-run fix is the one shape the pin guard
+        // refuses, so the stamp was never reached and the stub went unused. That
+        // setup WAS the prod bug's shape; the contract itself is unchanged and stays
+        // reachable through the surviving exemption (a non-production editor run on a
+        // pinned workflow), which is what this now exercises.
         Map<String, Object> frozen = planWith(List.of(mcp("Fetch", Map.of("url", "pinned"))),
                 List.of(edge("trigger:start", "mcp:fetch")));
         Map<String, Object> workflowLive = planWith(List.of(mcp("Fetch", Map.of("url", "pinned"))),
@@ -550,6 +557,9 @@ class WorkflowResumeServicePlanUpdateTest {
         workflow.setPinnedVersion(17);
         WorkflowRunEntity run = runEntity(frozen);
         run.setPlanVersion(17);
+        Map<String, Object> editorMeta = new HashMap<>();
+        editorMeta.put("__editorRun__", Boolean.TRUE);
+        run.setMetadata(editorMeta);
         org.springframework.test.util.ReflectionTestUtils.setField(run, "workflow", workflow);
         when(runRepository.findByRunIdPublic(RUN_ID)).thenReturn(Optional.of(run));
         org.springframework.test.util.ReflectionTestUtils.setField(service, "planVersionService", planVersionService);
@@ -713,6 +723,399 @@ class WorkflowResumeServicePlanUpdateTest {
         metadata.put("__editorRun__", Boolean.TRUE);
         run.setMetadata(metadata);
         return run;
+    }
+
+    @Test
+    @DisplayName("Regression 2026-08-26: a DEMOTED production run of a pinned workflow keeps its frozen plan and its plan_version (was: 500 duplicate key on rerun from step)")
+    void refreshPlanKeepsFrozenPlanOnADemotedProductionRun() {
+        // Prod incident: pinning mints one flag-less production run per version
+        // (WorkflowPinService.provisionProductionRun) and retires none, so every pin
+        // leaves the previous one parked in WAITING_TRIGGER. "Re-run from step" on such
+        // a run had updateRunPlan refuse (pinned + non-editor), which handed control to
+        // THIS path - whose guard was keyed on the production_run_id FK alone and so
+        // did not fire. The run was synced to the draft and re-stamped onto the version
+        // the draft matches, the slot the CURRENT production run holds, and
+        // idx_runs_one_production_waiting rejected it at flush: five HTTP 500s.
+        //
+        // Pre-fix this test fails on the save(): the run is synced to the draft.
+        Map<String, Object> ownFrozen = planWith(List.of(mcp("Fetch", Map.of("url", "v5-content"))),
+                List.of(edge("trigger:start", "mcp:fetch")));
+        Map<String, Object> draft = planWith(List.of(mcp("Fetch", Map.of("url", "draft"))),
+                List.of(edge("trigger:start", "mcp:fetch")));
+
+        WorkflowEntity workflow = workflowEntity(draft);
+        workflow.setPinnedVersion(6);
+        // The FK points at ANOTHER run: this one was demoted by a later pin.
+        workflow.setProductionRunId(UUID.randomUUID());
+
+        WorkflowRunEntity run = runEntity(ownFrozen);
+        org.springframework.test.util.ReflectionTestUtils.setField(run, "id", UUID.randomUUID());
+        run.setPlanVersion(5);
+        // The prod shape exactly: parked in WAITING_TRIGGER with no __editorRun__ marker,
+        // which is what pin-minted production runs look like and what puts the row inside
+        // idx_runs_one_production_waiting.
+        //
+        // Being faithful to prod costs isolation, and that trade is deliberate: BOTH
+        // guard terms fire here, so no single-term mutation is uniquely caught by this
+        // test. It earns its place by failing on the pre-fix code, reproducing the
+        // incident as it actually happened. The terms are pinned one at a time by the
+        // tests below (index term) and by the null-plan tests (pin contract).
+        run.setStatus(com.apimarketplace.orchestrator.domain.workflow.RunStatus.WAITING_TRIGGER);
+        assertThat(run.getMetadata() == null || run.getMetadata().get("__editorRun__") == null)
+                .as("fixture must carry no editor marker, or it is not the bug's shape")
+                .isTrue();
+        org.springframework.test.util.ReflectionTestUtils.setField(run, "workflow", workflow);
+        when(runRepository.findByRunIdPublic(RUN_ID)).thenReturn(Optional.of(run));
+        org.springframework.test.util.ReflectionTestUtils.setField(service, "planVersionService", planVersionService);
+
+        WorkflowPlan result = service.refreshPlanFromWorkflowDefinition(RUN_ID);
+
+        verify(runRepository, never()).save(any());
+        Object step = ((List<?>) run.getPlan().get("mcps")).get(0);
+        assertThat((Map<String, Object>) ((Map<?, ?>) step).get("params"))
+                .as("a demoted production run replays its own frozen content, not the draft")
+                .containsEntry("url", "v5-content");
+        assertThat(result).isNotNull();
+        assertThat(result.getMcps()).hasSize(1);
+        // The load-bearing half: the version must never be moved onto another run's
+        // slot. Asserting the resolver is never consulted is stronger than asserting
+        // the field's value, because the field only moves when the resolver answers.
+        assertThat(run.getPlanVersion()).as("plan_version is not re-stamped").isEqualTo(5);
+        verify(planVersionService, never())
+                .resolveContentVersionForExecutionInNewTransaction(any(), any(), any());
+    }
+
+    @Test
+    @DisplayName("Pinned workflow - a NON-production EDITOR run still tracks the draft (the exemption must survive the fix)")
+    void refreshPlanStillSyncsNonProductionEditorRunsOnPinnedWorkflow() {
+        // The counterweight to the regression above. Over-blocking here would break the
+        // builder's iterate-against-a-draft loop on every pinned workflow, which is the
+        // normal way a user prepares the next version. Mirrors the sibling exemption
+        // already asserted for updateRunPlan.
+        Map<String, Object> frozen = planWith(List.of(mcp("Fetch", Map.of("url", "old"))),
+                List.of(edge("trigger:start", "mcp:fetch")));
+        Map<String, Object> draft = planWith(List.of(mcp("Fetch", Map.of("url", "draft"))),
+                List.of(edge("trigger:start", "mcp:fetch")));
+
+        WorkflowEntity workflow = workflowEntity(draft);
+        workflow.setPinnedVersion(6);
+        workflow.setProductionRunId(UUID.randomUUID());
+
+        WorkflowRunEntity run = runEntity(frozen);
+        org.springframework.test.util.ReflectionTestUtils.setField(run, "id", UUID.randomUUID());
+        Map<String, Object> editorMeta = new HashMap<>();
+        editorMeta.put("__editorRun__", true);
+        run.setMetadata(editorMeta);
+        org.springframework.test.util.ReflectionTestUtils.setField(run, "workflow", workflow);
+        when(runRepository.findByRunIdPublic(RUN_ID)).thenReturn(Optional.of(run));
+
+        WorkflowPlan result = service.refreshPlanFromWorkflowDefinition(RUN_ID);
+
+        verify(runRepository).save(run);
+        Object step = ((List<?>) run.getPlan().get("mcps")).get(0);
+        assertThat((Map<String, Object>) ((Map<?, ?>) step).get("params"))
+                .as("an editor run that is not production may still follow the draft")
+                .containsEntry("url", "draft");
+        assertThat(result).isNotNull();
+    }
+
+    @Test
+    @DisplayName("UNPINNED workflow - a flag-less run that is NOT parked still syncs to the draft (the fix must not freeze the unpinned lane wholesale)")
+    void refreshPlanStillSyncsFlaglessRunWhenWorkflowIsNotPinned() {
+        // Neither guard term applies: no pin, and the run is not WAITING_TRIGGER so it
+        // is outside idx_runs_one_production_waiting and cannot collide. Refusing here
+        // would freeze reruns that have every right to follow the draft. Dropping the
+        // `pinned` term from the pin-contract clause fails this test among others.
+        Map<String, Object> frozen = planWith(List.of(mcp("Fetch", Map.of("url", "old"))),
+                List.of(edge("trigger:start", "mcp:fetch")));
+        Map<String, Object> draft = planWith(List.of(mcp("Fetch", Map.of("url", "draft"))),
+                List.of(edge("trigger:start", "mcp:fetch")));
+
+        WorkflowEntity workflow = workflowEntity(draft);
+        workflow.setPinnedVersion(null);
+
+        WorkflowRunEntity run = runEntity(frozen);
+        org.springframework.test.util.ReflectionTestUtils.setField(run, "id", UUID.randomUUID());
+        run.setStatus(com.apimarketplace.orchestrator.domain.workflow.RunStatus.PAUSED);
+        org.springframework.test.util.ReflectionTestUtils.setField(run, "workflow", workflow);
+        when(runRepository.findByRunIdPublic(RUN_ID)).thenReturn(Optional.of(run));
+
+        WorkflowPlan result = service.refreshPlanFromWorkflowDefinition(RUN_ID);
+
+        verify(runRepository).save(run);
+        Object step = ((List<?>) run.getPlan().get("mcps")).get(0);
+        assertThat((Map<String, Object>) ((Map<?, ?>) step).get("params"))
+                .containsEntry("url", "draft");
+        assertThat(result).isNotNull();
+    }
+
+    @Test
+    @DisplayName("UNPINNED workflow - an EDITOR run parked in WAITING_TRIGGER still tracks the draft (the index term must not swallow the builder lane)")
+    void refreshPlanStillSyncsParkedEditorRunWhenWorkflowIsNotPinned() {
+        // The boundary the index term introduces, and the most common shape in the
+        // product: a reusable trigger parks the builder's own run in WAITING_TRIGGER
+        // between fires. It carries __editorRun__, so it sits OUTSIDE
+        // idx_runs_one_production_waiting and cannot collide - it must keep following
+        // the draft. Dropping `!isEditorRun &&` from the index term freezes this lane
+        // wholesale, and before this test the entire suite stayed green when it did.
+        Map<String, Object> frozen = planWith(List.of(mcp("Fetch", Map.of("url", "old"))),
+                List.of(edge("trigger:start", "mcp:fetch")));
+        Map<String, Object> draft = planWith(List.of(mcp("Fetch", Map.of("url", "draft"))),
+                List.of(edge("trigger:start", "mcp:fetch")));
+
+        WorkflowEntity workflow = workflowEntity(draft);
+        workflow.setPinnedVersion(null);
+
+        WorkflowRunEntity run = runEntity(frozen);
+        org.springframework.test.util.ReflectionTestUtils.setField(run, "id", UUID.randomUUID());
+        run.setStatus(com.apimarketplace.orchestrator.domain.workflow.RunStatus.WAITING_TRIGGER);
+        Map<String, Object> editorMeta = new HashMap<>();
+        editorMeta.put("__editorRun__", Boolean.TRUE);
+        run.setMetadata(editorMeta);
+        org.springframework.test.util.ReflectionTestUtils.setField(run, "workflow", workflow);
+        when(runRepository.findByRunIdPublic(RUN_ID)).thenReturn(Optional.of(run));
+
+        WorkflowPlan result = service.refreshPlanFromWorkflowDefinition(RUN_ID);
+
+        verify(runRepository).save(run);
+        Object step = ((List<?>) run.getPlan().get("mcps")).get(0);
+        assertThat((Map<String, Object>) ((Map<?, ?>) step).get("params"))
+                .as("a parked EDITOR run is outside the index and must still follow the draft")
+                .containsEntry("url", "draft");
+        assertThat(result).isNotNull();
+    }
+
+    @Test
+    @DisplayName("Reload picks the run's own version when the production FK outlives the pin (corrupt state the branch exists for)")
+    void refreshPlanReloadsOwnVersionWhenProductionFkOutlivesThePin() {
+        // The reload chooses the pinned version only when the workflow is ACTUALLY
+        // pinned. Reducing that test to `isProductionRun` alone is invisible in the
+        // healthy case, because pin() writes pinned_version and production_run_id
+        // together - but this branch exists precisely for the corrupt case, where the
+        // FK survives an unpin. There the mutant reads a null pinned version, reloads
+        // nothing, and silently falls through to the draft.
+        // Structural marker: the run's own v5 content has ONE mcp, the draft has TWO.
+        Map<String, Object> ownVersionContent = planWith(List.of(mcp("Fetch", Map.of("url", "v5-content"))),
+                List.of(edge("trigger:start", "mcp:fetch")));
+        Map<String, Object> draft = planWith(
+                List.of(mcp("Fetch", Map.of("url", "draft")), mcp("Extra", Map.of())),
+                List.of(edge("trigger:start", "mcp:fetch"), edge("mcp:fetch", "mcp:extra")));
+
+        WorkflowEntity workflow = workflowEntity(draft);
+        workflow.setPinnedVersion(null);
+
+        WorkflowRunEntity run = runEntity(draft);
+        run.setPlan(null);
+        run.setPlanVersion(5);
+        // Parked and flag-less, so the index term carries the guard with no pin present.
+        run.setStatus(com.apimarketplace.orchestrator.domain.workflow.RunStatus.WAITING_TRIGGER);
+        UUID staleProductionRunId = UUID.randomUUID();
+        org.springframework.test.util.ReflectionTestUtils.setField(run, "id", staleProductionRunId);
+        workflow.setProductionRunId(staleProductionRunId);
+        org.springframework.test.util.ReflectionTestUtils.setField(run, "workflow", workflow);
+        when(runRepository.findByRunIdPublic(RUN_ID)).thenReturn(Optional.of(run));
+        org.springframework.test.util.ReflectionTestUtils.setField(service, "planVersionService", planVersionService);
+        com.apimarketplace.orchestrator.domain.WorkflowPlanVersionEntity ownRow =
+                mock(com.apimarketplace.orchestrator.domain.WorkflowPlanVersionEntity.class);
+        when(ownRow.getPlan()).thenReturn(ownVersionContent);
+        when(planVersionService.getVersion(workflow.getId(), 5)).thenReturn(Optional.of(ownRow));
+
+        WorkflowPlan result = service.refreshPlanFromWorkflowDefinition(RUN_ID);
+
+        assertThat(result).isNotNull();
+        assertThat(result.getMcps())
+                .as("reloads its own v5 content (1 mcp), not the draft (2 mcps)")
+                .hasSize(1);
+        verify(planVersionService).getVersion(workflow.getId(), 5);
+        verify(runRepository, never()).save(any());
+    }
+
+    @Test
+    @DisplayName("Regression 2026-08-26 (b): UNPINNED workflow, parked flag-less run - the SAME collision is reachable with no pin, so the index term is not gated on the pin")
+    void refreshPlanKeepsFrozenPlanOnAParkedFlaglessRunEvenWhenUnpinned() {
+        // Found by the review of the first fix. Unpinning clears pinned_version AND
+        // production_run_id but retires none of the runs pinning minted, so a workflow
+        // that was pinned several times and then unpinned still carries parked flag-less
+        // WAITING_TRIGGER rows. idx_runs_one_production_waiting has no pin condition:
+        // re-stamping one of those onto the draft's version hits whichever parked run
+        // already holds it, and the rerun 500s exactly as it did while pinned. A guard
+        // gated on the pin would have shipped this half of the bug still open.
+        Map<String, Object> ownFrozen = planWith(List.of(mcp("Fetch", Map.of("url", "v5-content"))),
+                List.of(edge("trigger:start", "mcp:fetch")));
+        Map<String, Object> draft = planWith(List.of(mcp("Fetch", Map.of("url", "draft"))),
+                List.of(edge("trigger:start", "mcp:fetch")));
+
+        WorkflowEntity workflow = workflowEntity(draft);
+        workflow.setPinnedVersion(null);
+        workflow.setProductionRunId(null);
+
+        WorkflowRunEntity run = runEntity(ownFrozen);
+        org.springframework.test.util.ReflectionTestUtils.setField(run, "id", UUID.randomUUID());
+        run.setPlanVersion(5);
+        run.setStatus(com.apimarketplace.orchestrator.domain.workflow.RunStatus.WAITING_TRIGGER);
+        org.springframework.test.util.ReflectionTestUtils.setField(run, "workflow", workflow);
+        when(runRepository.findByRunIdPublic(RUN_ID)).thenReturn(Optional.of(run));
+        org.springframework.test.util.ReflectionTestUtils.setField(service, "planVersionService", planVersionService);
+
+        WorkflowPlan result = service.refreshPlanFromWorkflowDefinition(RUN_ID);
+
+        verify(runRepository, never()).save(any());
+        Object step = ((List<?>) run.getPlan().get("mcps")).get(0);
+        assertThat((Map<String, Object>) ((Map<?, ?>) step).get("params"))
+                .as("a parked flag-less run replays its own content even with no pin in sight")
+                .containsEntry("url", "v5-content");
+        assertThat(run.getPlanVersion()).as("plan_version is not re-stamped").isEqualTo(5);
+        verify(planVersionService, never())
+                .resolveContentVersionForExecutionInNewTransaction(any(), any(), any());
+        assertThat(result).isNotNull();
+    }
+
+    @Test
+    @DisplayName("Regression 2026-07-20 companion: the production run of a pinned workflow is protected even though pinning PROMOTES an editor run and leaves __editorRun__ on it")
+    void refreshPlanKeepsFrozenPlanOnAProductionRunThatStillCarriesTheEditorMarker() {
+        // The disjunct `|| isProductionRun` exists solely for this shape, and without
+        // this test it is dead weight: a mutation reducing the pin clause to
+        // `!isEditorRun` passed the entire services.resume package. Pinning promotes an
+        // existing editor run and never strips the marker (see updateRunPlan's comment),
+        // so THE production run of a pinned workflow normally carries __editorRun__=true
+        // and the marker alone cannot protect it. Dropping the disjunct reintroduces the
+        // 2026-07-20 bug: production silently synced onto the draft.
+        //
+        // Note the run is deliberately NOT WAITING_TRIGGER, so the index term cannot
+        // rescue the assertion and only the pin clause can satisfy it.
+        Map<String, Object> pinnedFrozen = planWith(List.of(mcp("Fetch", Map.of("url", "pinned"))),
+                List.of(edge("trigger:start", "mcp:fetch")));
+        Map<String, Object> draft = planWith(List.of(mcp("Fetch", Map.of("url", "draft"))),
+                List.of(edge("trigger:start", "mcp:fetch")));
+
+        WorkflowEntity workflow = workflowEntity(draft);
+        workflow.setPinnedVersion(17);
+
+        WorkflowRunEntity run = runEntity(pinnedFrozen);
+        UUID productionRunId = UUID.randomUUID();
+        org.springframework.test.util.ReflectionTestUtils.setField(run, "id", productionRunId);
+        workflow.setProductionRunId(productionRunId);
+        run.setStatus(com.apimarketplace.orchestrator.domain.workflow.RunStatus.PAUSED);
+        Map<String, Object> promotedEditorMeta = new HashMap<>();
+        promotedEditorMeta.put("__editorRun__", Boolean.TRUE);
+        run.setMetadata(promotedEditorMeta);
+        org.springframework.test.util.ReflectionTestUtils.setField(run, "workflow", workflow);
+        when(runRepository.findByRunIdPublic(RUN_ID)).thenReturn(Optional.of(run));
+
+        service.refreshPlanFromWorkflowDefinition(RUN_ID);
+
+        verify(runRepository, never()).save(any());
+        Object step = ((List<?>) run.getPlan().get("mcps")).get(0);
+        assertThat((Map<String, Object>) ((Map<?, ?>) step).get("params"))
+                .as("a promoted (still flagged) production run stays on the pinned plan")
+                .containsEntry("url", "pinned");
+    }
+
+    @Test
+    @DisplayName("Demoted run with a NULL cached plan AND a null plan_version - executes the draft once, never persists it")
+    void refreshPlanFallsBackToDraftWhenDemotedRunHasNoVersionToReloadFrom() {
+        // The `safeVersion != null` fallthrough. A demoted run with no plan_version has
+        // nothing to reload, so the loud last-resort branch runs. What matters is that
+        // the draft is only EXECUTED: pre-fix this shape was synced, saved AND
+        // re-stamped, turning a one-shot fallback into a durable divergence plus the
+        // very collision this change exists to prevent.
+        Map<String, Object> draft = planWith(
+                List.of(mcp("Fetch", Map.of("url", "draft")), mcp("Extra", Map.of())),
+                List.of(edge("trigger:start", "mcp:fetch"), edge("mcp:fetch", "mcp:extra")));
+
+        WorkflowEntity workflow = workflowEntity(draft);
+        workflow.setPinnedVersion(6);
+        workflow.setProductionRunId(UUID.randomUUID());
+
+        WorkflowRunEntity run = runEntity(draft);
+        run.setPlan(null);
+        run.setPlanVersion(null);
+        org.springframework.test.util.ReflectionTestUtils.setField(run, "id", UUID.randomUUID());
+        org.springframework.test.util.ReflectionTestUtils.setField(run, "workflow", workflow);
+        when(runRepository.findByRunIdPublic(RUN_ID)).thenReturn(Optional.of(run));
+        org.springframework.test.util.ReflectionTestUtils.setField(service, "planVersionService", planVersionService);
+
+        WorkflowPlan result = service.refreshPlanFromWorkflowDefinition(RUN_ID);
+
+        assertThat(result).isNotNull();
+        assertThat(result.getMcps()).hasSize(2);
+        verify(runRepository, never()).save(any());
+        // No version to ask for, so the history is never consulted - asserting this
+        // pins the fallthrough rather than the mere fact that something was returned.
+        // anyInt(), not any(): getVersion takes a primitive int and any() would unbox null.
+        verify(planVersionService, never()).getVersion(any(), anyInt());
+    }
+
+    @Test
+    @DisplayName("Demoted run with a NULL cached plan whose own version row is MISSING - executes the draft once, never persists it")
+    void refreshPlanFallsBackToDraftWhenDemotedRunsOwnVersionRowIsMissing() {
+        Map<String, Object> draft = planWith(
+                List.of(mcp("Fetch", Map.of("url", "draft")), mcp("Extra", Map.of())),
+                List.of(edge("trigger:start", "mcp:fetch"), edge("mcp:fetch", "mcp:extra")));
+
+        WorkflowEntity workflow = workflowEntity(draft);
+        workflow.setPinnedVersion(6);
+        workflow.setProductionRunId(UUID.randomUUID());
+
+        WorkflowRunEntity run = runEntity(draft);
+        run.setPlan(null);
+        run.setPlanVersion(5);
+        org.springframework.test.util.ReflectionTestUtils.setField(run, "id", UUID.randomUUID());
+        org.springframework.test.util.ReflectionTestUtils.setField(run, "workflow", workflow);
+        when(runRepository.findByRunIdPublic(RUN_ID)).thenReturn(Optional.of(run));
+        org.springframework.test.util.ReflectionTestUtils.setField(service, "planVersionService", planVersionService);
+        when(planVersionService.getVersion(workflow.getId(), 5)).thenReturn(Optional.empty());
+
+        WorkflowPlan result = service.refreshPlanFromWorkflowDefinition(RUN_ID);
+
+        assertThat(result).isNotNull();
+        assertThat(result.getMcps()).hasSize(2);
+        verify(planVersionService).getVersion(workflow.getId(), 5);
+        // Never the currently pinned version: that content belongs to another run.
+        verify(planVersionService, never()).getVersion(workflow.getId(), 6);
+        verify(runRepository, never()).save(any());
+    }
+
+    @Test
+    @DisplayName("Demoted run with a NULL cached plan reloads its OWN version, never the currently pinned one")
+    void refreshPlanReloadsTheDemotedRunsOwnVersionWhenFrozenPlanIsNull() {
+        // The reload branch answers "which stored content may this run execute?", and
+        // for a demoted run that is the version it CLAIMS (plan_version), not the one
+        // the workflow is pinned to now. Handing it the pinned content would make the
+        // run execute bytes it never ran while still labelled v5 - the version
+        // divergence the surrounding code exists to prevent.
+        // Structural marker: v5 content has ONE mcp, the pinned v6 content has TWO.
+        Map<String, Object> ownVersionContent = planWith(List.of(mcp("Fetch", Map.of("url", "v5-content"))),
+                List.of(edge("trigger:start", "mcp:fetch")));
+        Map<String, Object> draft = planWith(
+                List.of(mcp("Fetch", Map.of("url", "draft")), mcp("Extra", Map.of())),
+                List.of(edge("trigger:start", "mcp:fetch"), edge("mcp:fetch", "mcp:extra")));
+
+        WorkflowEntity workflow = workflowEntity(draft);
+        workflow.setPinnedVersion(6);
+        workflow.setProductionRunId(UUID.randomUUID());
+
+        WorkflowRunEntity run = runEntity(draft);
+        run.setPlan(null);
+        run.setPlanVersion(5);
+        org.springframework.test.util.ReflectionTestUtils.setField(run, "id", UUID.randomUUID());
+        org.springframework.test.util.ReflectionTestUtils.setField(run, "workflow", workflow);
+        when(runRepository.findByRunIdPublic(RUN_ID)).thenReturn(Optional.of(run));
+        org.springframework.test.util.ReflectionTestUtils.setField(service, "planVersionService", planVersionService);
+        com.apimarketplace.orchestrator.domain.WorkflowPlanVersionEntity ownRow =
+                mock(com.apimarketplace.orchestrator.domain.WorkflowPlanVersionEntity.class);
+        when(ownRow.getPlan()).thenReturn(ownVersionContent);
+        when(planVersionService.getVersion(workflow.getId(), 5)).thenReturn(Optional.of(ownRow));
+
+        WorkflowPlan result = service.refreshPlanFromWorkflowDefinition(RUN_ID);
+
+        assertThat(result).isNotNull();
+        assertThat(result.getMcps())
+                .as("executes its own v5 content (1 mcp), not the draft (2 mcps)")
+                .hasSize(1);
+        verify(planVersionService).getVersion(workflow.getId(), 5);
+        verify(planVersionService, never()).getVersion(workflow.getId(), 6);
+        verify(runRepository, never()).save(any());
     }
 
     private WorkflowRunEntity runEntity(Map<String, Object> plan) {

@@ -181,7 +181,26 @@ public class StepRerunService {
     @Transactional
     @AdvisoryLockHolding
     public RerunResult rerunFromStep(String runId, String stepId, boolean planFromPayload) {
-        logger.info("[RerunService] Re-running from step: {} for run: {} (planFromPayload={})", stepId, runId, planFromPayload);
+        return rerunFromStep(runId, stepId, planFromPayload, /* requestedEpoch */ null);
+    }
+
+    /**
+     * Re-runs a workflow from a specific step, optionally in a CHOSEN epoch.
+     *
+     * @param requestedEpoch the epoch to replay in, or {@code null} to keep the default: the
+     *     epoch the run last executed for this step's DAG (step 5b resolves it, reopening it
+     *     when the cycle already closed). A run accumulates one epoch per trigger fire and
+     *     each keeps its own outputs, so a caller that wants to repair an OLD fire has to say
+     *     which one - without this the rerun always lands on the most recent, silently
+     *     replaying work that was already correct while the epoch that actually failed stays
+     *     untouched.
+     */
+    @Transactional
+    @AdvisoryLockHolding
+    public RerunResult rerunFromStep(String runId, String stepId, boolean planFromPayload,
+                                     Integer requestedEpoch) {
+        logger.info("[RerunService] Re-running from step: {} for run: {} (planFromPayload={}, requestedEpoch={})",
+                stepId, runId, planFromPayload, requestedEpoch);
 
         // Serialise against a concurrent fire / cycle reset on the same run, the same way
         // executeTriggerInternal and resetForNextCycle do. Taken first so it covers the
@@ -264,14 +283,11 @@ public class StepRerunService {
 
         logger.info("[RerunService] Steps to reset: {}", stepsToReset);
 
-        // 5. Increment spawn (NOT epoch) for the owning trigger's DAG
+        // 5. Resolve the DAG that owns the target and the epoch to replay in.
         String ownerTriggerId = dagIndependenceValidator.findOwnerTrigger(plan, stepId)
                 .orElse(plan.getTriggers() != null && !plan.getTriggers().isEmpty()
                         ? plan.getTriggers().get(0).getNormalizedKey()
                         : null);
-        int newSpawn = ownerTriggerId != null
-                ? triggerEpochManager.incrementSpawn(runEntity, ownerTriggerId)
-                : 0;
         int currentEpoch = ownerTriggerId != null
                 ? triggerEpochManager.getGlobalEpochForDag(runId, ownerTriggerId)
                 : triggerEpochManager.getCurrentEpoch(runId);
@@ -291,8 +307,24 @@ public class StepRerunService {
         //    dagLastEpoch, and storage reads are epoch-filtered, so syncing to the dormant
         //    epoch makes each {{upstream.output.x}} resolve EMPTY while every node still
         //    reports success. Reopen the executed epoch instead of following the dormant one.
+        //
+        // A caller that NAMED an epoch skips ALL of it - including the case where the epoch it
+        // named happens to equal dagLastEpoch. That equality says nothing: the resolution below
+        // is free to move off dagLastEpoch (it syncs to DagState.currentEpoch whenever the two
+        // disagree and the snapshot epoch is live), so treating "same as the pointer" as "not a
+        // choice" would send a named epoch through a branch that can silently execute a
+        // different one - and past none of the checks a named epoch is supposed to go through.
         EpochState executedEpoch = null;
-        if (ownerTriggerId != null) {
+        boolean reopenTargetEpoch = false;
+        final int dagLastEpochBeforeChoice = currentEpoch;
+        boolean epochChosenByCaller = requestedEpoch != null;
+        if (epochChosenByCaller) {
+            EpochTarget target = resolveRequestedEpoch(runId, runEntity, snapshot, ownerTriggerId,
+                    stepId, requestedEpoch);
+            currentEpoch = target.epoch();
+            executedEpoch = target.restoredState();
+            reopenTargetEpoch = target.reopen();
+        } else if (ownerTriggerId != null) {
             var dagState = snapshot.getDags().get(ownerTriggerId);
             if (dagState != null && dagState.getCurrentEpoch() != currentEpoch) {
                 int snapshotEpoch = dagState.getCurrentEpoch();
@@ -311,6 +343,7 @@ public class StepRerunService {
                     executedEpoch = workflowEpochService.getFullEpochState(runId, ownerTriggerId, currentEpoch);
                 }
                 if (executedEpoch != null) {
+                    reopenTargetEpoch = true;
                     logger.info("[RerunService] Cycle already closed: reopening executed epoch {} "
                             + "(snapshot pointed at dormant epoch {}) for runId={}, triggerId={}",
                             currentEpoch, snapshotEpoch, runId, ownerTriggerId);
@@ -334,6 +367,32 @@ public class StepRerunService {
                             currentEpoch, snapshotEpoch, snapshotEpoch);
                     currentEpoch = snapshotEpoch;
                 }
+            }
+        }
+
+        // 5b-bis. Increment the spawn (NOT the epoch) for the owning DAG.
+        //
+        // Placed AFTER the epoch is resolved so that a refusal above leaves the counter untouched
+        // without relying on the rollback of this method's transaction. The counter is a
+        // coordinate every later read and write of the epoch in flight resolves through, so the
+        // invariant is worth being able to state (and assert) directly rather than infer.
+        //
+        // dagCurrentSpawn is per DAG and is RESET to 0 by every fire, so "current + 1" is only
+        // known-unused in the epoch the LAST fire opened. Replaying an older epoch therefore
+        // starts above that epoch's own highest spawn: rows tied at the max spawn all survive the
+        // supersede filter, so a collision would resurrect the previous attempt's rows beside the
+        // new ones (a branch this replay deactivates would keep reporting COMPLETED).
+        int newSpawn = 0;
+        if (ownerTriggerId != null) {
+            if (epochChosenByCaller) {
+                Integer maxSpawnInEpoch = stepDataRepository.findMaxSpawnForEpoch(runId, currentEpoch);
+                newSpawn = triggerEpochManager.incrementSpawnAtLeast(runEntity, ownerTriggerId,
+                        (maxSpawnInEpoch == null ? 0 : maxSpawnInEpoch) + 1);
+            } else {
+                // The default path keeps calling the method it always called: it targets the epoch
+                // the last fire opened, whose spawn counter was reset for it and only ever
+                // advances, so no floor applies and nothing about it changes.
+                newSpawn = triggerEpochManager.incrementSpawn(runEntity, ownerTriggerId);
             }
         }
 
@@ -406,8 +465,20 @@ public class StepRerunService {
         // Store reset steps for state reconstruction (avoids recomputation)
         metadata.put("resetSteps", new ArrayList<>(stepsToReset));
 
-        // Sync dagLastEpoch and global currentEpoch in metadata to match snapshot
-        if (ownerTriggerId != null) {
+        // Sync dagLastEpoch and global currentEpoch in metadata to match snapshot.
+        //
+        // NOT when the caller chose the epoch. dagLastEpoch is what the NEXT trigger fire
+        // counts from (resetDagWithRerunPattern: nextEpoch = getCurrentEpoch + 1), so pointing
+        // it at an older fire would make the next fire reuse an epoch number that already has
+        // history - its rows would be written under a higher spawn and supersede that epoch's
+        // real outputs in every per-epoch view. The replay itself does not need the pointer:
+        // AutoRestartExecutionService drives it with the explicit (epoch, triggerId) this
+        // method returns, and a node that yields records that same epoch on its signal.
+        if (ownerTriggerId != null && epochChosenByCaller) {
+            logger.info("[RerunService] Replaying chosen epoch {} for runId={}, triggerId={}: "
+                    + "metadata.dagLastEpoch stays at {} so the next fire keeps counting forward",
+                    currentEpoch, runId, ownerTriggerId, dagLastEpochBeforeChoice);
+        } else if (ownerTriggerId != null) {
             @SuppressWarnings("unchecked")
             Map<String, Object> dagLastEpoch = metadata.get("dagLastEpoch") instanceof Map
                     ? new HashMap<>((Map<String, Object>) metadata.get("dagLastEpoch"))
@@ -442,9 +513,10 @@ public class StepRerunService {
         // This is more efficient (1 DB operation instead of 2) and eliminates sync issues.
         // ownerTriggerId targets the READY marker at the rerun target's own DAG - the flat
         // fallback resolves an arbitrary DAG in multi-trigger workflows.
-        // When the cycle already closed (step 5b), the same atomic write also reopens the
-        // executed epoch and restores its real state from the workflow_epochs header.
-        if (executedEpoch != null) {
+        // When the cycle already closed (step 5b), or when the caller chose an epoch that is
+        // not the DAG's current one, the same atomic write also reopens that epoch and
+        // restores its real state from the workflow_epochs header.
+        if (reopenTargetEpoch) {
             stateSnapshotService.reopenEpochResetDagAndSetReady(
                     runId, ownerTriggerId, currentEpoch, executedEpoch, stepsToReset, stepId);
         } else {
@@ -457,8 +529,8 @@ public class StepRerunService {
             // removed and the drive loop replays the node to its wave cap.
             stateSnapshotService.resetDagAndSetReady(runId, stepsToReset, stepId, ownerTriggerId, currentEpoch);
         }
-        logger.info("[RerunService] Reset StateSnapshot: removed {} steps, marked {} as READY (ownerTriggerId={}, epoch={}, reopened={})",
-                stepsToReset.size(), stepId, ownerTriggerId, currentEpoch, executedEpoch != null);
+        logger.info("[RerunService] Reset StateSnapshot: removed {} steps, marked {} as READY (ownerTriggerId={}, epoch={}, reopened={}, epochChosenByCaller={})",
+                stepsToReset.size(), stepId, ownerTriggerId, currentEpoch, reopenTargetEpoch, epochChosenByCaller);
 
         // 9. Reconstruct state and get new ready steps
         WorkflowRunState newState = resumeService.reconstructStateForApi(runId);
@@ -493,6 +565,198 @@ public class StepRerunService {
                 currentSeq,
                 ownerTriggerId
         );
+    }
+
+    /**
+     * Where an explicitly requested rerun epoch lands.
+     *
+     * @param epoch         the epoch the replay will execute in
+     * @param restoredState the epoch's durable state, read from the {@code workflow_epochs}
+     *                      header because the snapshot no longer carries it; {@code null} when
+     *                      the snapshot still has the epoch and nothing needs restoring
+     * @param reopen        {@code true} when the epoch must become the DAG's current, active
+     *                      one before the reset (it is not the epoch the snapshot points at)
+     */
+    private record EpochTarget(int epoch, EpochState restoredState, boolean reopen) {}
+
+    /**
+     * Resolve an epoch the caller named, refusing the cases a replay cannot honour.
+     *
+     * <p>Every refusal here is a message the caller can act on, because the alternative is
+     * worse than an error: an epoch that does not exist would be materialised EMPTY and the
+     * replay would run with every upstream template resolving to nothing, on a run that still
+     * reports success.
+     *
+     * <p>Refused: a negative epoch; a DAG that could not be resolved (nothing to address the
+     * epoch within); a step-by-step run (nothing there ever closes the epoch this would reopen,
+     * so the run would keep an old epoch current for as long as the user takes); an epoch that
+     * never executed, whether it is unknown or merely STAGED for the next fire; an epoch where
+     * the target node did not run, or ran only on a branch that was not taken; and an epoch
+     * chosen while ANOTHER epoch of the same DAG is still executing - reopening the old one moves
+     * {@code DagState.currentEpoch} backward, and every write that resolves through "current" (a
+     * ready marker, a node completion) would then land in the epoch being replayed instead of the
+     * live one.
+     */
+    private EpochTarget resolveRequestedEpoch(String runId, WorkflowRunEntity runEntity,
+                                              StateSnapshot snapshot, String ownerTriggerId,
+                                              String stepId, int requestedEpoch) {
+        if (requestedEpoch < 0) {
+            throw new IllegalArgumentException(
+                "Cannot restart epoch " + requestedEpoch + ": an epoch is a positive number, "
+                + "or omit it to replay the run's most recent one.");
+        }
+        // Defence in depth: a plan with no trigger is already refused by the graph build several
+        // steps earlier, so this is not a reachable path today. Kept because ownerTriggerId is
+        // nullable by type and everything below dereferences it.
+        if (ownerTriggerId == null) {
+            throw new IllegalStateException(
+                "Cannot restart epoch " + requestedEpoch + ": this run has no trigger owning that "
+                + "node, so there is no epoch history to address. Omit the epoch to replay the "
+                + "run's most recent state.");
+        }
+        // Every hazard below is a hazard OF REOPENING: moving DagState.currentEpoch onto an older
+        // epoch. Naming the epoch the DAG is already on reopens nothing and is the same work as
+        // omitting the parameter, so refusing it would punish a caller for following the help
+        // ("pass the epoch exactly as get_run reports it") with an error that does not apply to
+        // its call. The guards are therefore scoped to the reopening case, and the same flag
+        // becomes the reopen decision itself further down.
+        var dagState = snapshot.getDags().get(ownerTriggerId);
+        boolean reopenNeeded = dagState == null || dagState.getCurrentEpoch() != requestedEpoch;
+
+        if (reopenNeeded) {
+            // A stepped run advances one node per user click and nothing on that path closes a
+            // cycle, so an epoch reopened here would stay the DAG's current epoch for as long as
+            // the user takes - every later write on the run landing in the replayed epoch. On an
+            // automatic run the post-replay drive closes it (or the resume path does, once the
+            // work it yielded on resolves), which is what makes the same move safe there.
+            //
+            // One automatic outcome is knowingly left out of that promise: AutoRestartExecutionService
+            // returns WAVE_CAP (and UNAVAILABLE) WITHOUT closing the cycle, so a reopened epoch can
+            // dangle there too. That exposure is not new - the pre-existing reopen branch below has
+            // it identically for the epoch dagLastEpoch names - and closing the cycle on a truncated
+            // drive would report a clean cycle end over unfinished work, which is the opposite of
+            // what that outcome exists to say. Left as is deliberately, recorded here so the next
+            // reader does not take the guard above as a claim that the automatic path always closes.
+            if (runEntity.getExecutionMode() == ExecutionMode.STEP_BY_STEP) {
+                throw new IllegalStateException(
+                    "Cannot restart epoch " + requestedEpoch + ": this run is stepped by hand, so it "
+                    + "has no cycle that would close the epoch again. Omit the epoch to restart from "
+                    + "the run's current state.");
+            }
+
+            // The migration sentinel beside a real DAG cannot host a targeted replay: resetDag()
+            // deliberately closes ALL of the sentinel's active epochs, so the epoch reopened here
+            // would be closed again in the same write and the replay would run against nothing.
+            // The default resolution already declines to reopen in that shape; here the caller
+            // asked for something specific, so say it is impossible instead of quietly doing
+            // something else.
+            boolean sentinelWithRealDag = StateSnapshot.DEFAULT_TRIGGER_SENTINEL.equals(ownerTriggerId)
+                    && snapshot.getDags().keySet().stream()
+                            .anyMatch(key -> !StateSnapshot.DEFAULT_TRIGGER_SENTINEL.equals(key));
+            if (sentinelWithRealDag) {
+                throw new IllegalStateException(
+                    "Cannot restart epoch " + requestedEpoch + ": this node is not attached to any of "
+                    + "the run's triggers, so its epochs cannot be addressed one by one. Omit the "
+                    + "epoch to replay the run's most recent state.");
+            }
+
+            Set<Integer> otherActive = new LinkedHashSet<>(
+                    dagState != null ? dagState.getActiveEpochs() : Set.<Integer>of());
+            otherActive.remove(requestedEpoch);
+            if (!otherActive.isEmpty()) {
+                throw new IllegalStateException(
+                    "Cannot restart epoch " + requestedEpoch + " while epoch(s) " + otherActive
+                    + " are still executing on the same trigger. Wait for the run to settle (poll "
+                    + "workflow(action='get_run', run_id='" + runId + "')), or end it with "
+                    + "workflow(action='stop_run', run_id='" + runId + "'), then restart. Omitting the "
+                    + "epoch always replays the one that is running.");
+            }
+        }
+
+        // An epoch the snapshot carries with REAL work in it needs nothing restored; it only has
+        // to become current before the reset writes into it. isEmpty() ignores readyNodeIds on
+        // purpose, so the epoch prepareNextCycle STAGES for the next fire (nothing but the
+        // trigger's ready marker) reads as empty here and falls through to the header check
+        // below, which it cannot pass - staging does not write one. That epoch is the number the
+        // next fire is about to open: replaying in it would resolve every upstream template to
+        // nothing AND leave rows in a fire that has not happened.
+        EpochState inSnapshot = dagState != null ? dagState.getEpochState(requestedEpoch) : null;
+        if (inSnapshot != null && !inSnapshot.isEmpty()) {
+            requireNodeRanInEpoch(runId, inSnapshot, stepId, requestedEpoch);
+            logger.info("[RerunService] Replaying epoch {} chosen by the caller (still in the snapshot, reopen={}) "
+                    + "for runId={}, triggerId={}", requestedEpoch, reopenNeeded, runId, ownerTriggerId);
+            return new EpochTarget(requestedEpoch, null, reopenNeeded);
+        }
+
+        if (workflowEpochService == null) {
+            throw new IllegalStateException(
+                "Cannot restart epoch " + requestedEpoch + ": this run's epoch history is not "
+                + "available here. Omit the epoch to replay the run's most recent state.");
+        }
+        EpochState header = workflowEpochService.getFullEpochState(runId, ownerTriggerId, requestedEpoch);
+        if (header == null) {
+            throw new IllegalArgumentException(
+                "Epoch " + requestedEpoch + " does not exist on this run for trigger " + ownerTriggerId
+                + ". Read the epochs the run actually has with workflow(action='get_run', run_id='"
+                + runId + "') and pass one of those, or omit the epoch to replay the most recent one.");
+        }
+        // A header with nothing in it is a fire that opened and executed nothing yet, so get_run
+        // DOES list it - saying "does not exist" there would send the agent back to a list that
+        // contains it. Distinct wording, same refusal: there is no result in it to redo.
+        if (header.isEmpty()) {
+            throw new IllegalArgumentException(
+                "Epoch " + requestedEpoch + " has not executed anything on this run yet, so there is "
+                + "nothing in it to restart. Pick an epoch that produced results with "
+                + "workflow(action='get_run', run_id='" + runId
+                + "'), or omit the epoch to replay the most recent one.");
+        }
+        requireNodeRanInEpoch(runId, header, stepId, requestedEpoch);
+        logger.info("[RerunService] Replaying epoch {} chosen by the caller (restored from its header) "
+                + "for runId={}, triggerId={}", requestedEpoch, runId, ownerTriggerId);
+        // reopen=true unconditionally here, NOT reopenNeeded, and the asymmetry is load-bearing.
+        // Reaching this line means the snapshot no longer carries the epoch, so its state has to be
+        // restored from the header - and that restore only happens on the reopen path. Returning
+        // reopenNeeded "for symmetry" would, in the narrow shape where the epoch was pruned before
+        // currentEpoch advanced, skip the restore and run the replay against an epoch with no
+        // state: every upstream template resolving empty on a run that reports success. Nothing is
+        // moved by the flag in that shape either way, since reopenEpochForDag no-ops when the epoch
+        // already is the current one.
+        return new EpochTarget(requestedEpoch, header, true);
+    }
+
+    /**
+     * Apply the rerunnable-state rule INSIDE the chosen epoch.
+     *
+     * <p>Step 3b answers "is this node rerunnable on this run at all", from the flat view plus
+     * cumulative counts that carry across every fire. That is the right question when the replay
+     * targets the current epoch and the wrong one as soon as an epoch is named: a node that
+     * completed in fire 7 passes it while, in the epoch being replayed, it sat on a branch that
+     * was never taken or never ran at all. Replaying it there would execute a node whose
+     * predecessors did not run in that epoch, on a run that reports success.
+     *
+     * <p>The wording of the last refusal says "no result was recorded", not "it never ran": an
+     * epoch's durable state is a point-in-time record, and a node still executing when the epoch
+     * closed, or one a previous rerun cleared without re-executing, is absent from it while its
+     * step rows exist. Refusing is still right (there is nothing in that epoch to redo), but
+     * telling the agent it never ran would be a claim this check cannot make.
+     */
+    private void requireNodeRanInEpoch(String runId, EpochState epochState, String stepId, int epoch) {
+        if (epochState.getCompletedNodeIds().contains(stepId)
+                || epochState.getFailedNodeIds().contains(stepId)
+                || epochState.getAwaitingSignalNodeIds().contains(stepId)
+                || epochState.getReadyNodeIds().contains(stepId)) {
+            return;
+        }
+        if (epochState.getSkippedNodeIds().contains(stepId)) {
+            throw new IllegalStateException(
+                "Cannot restart " + stepId + " in epoch " + epoch + ": its branch was not taken in that "
+                + "epoch, so it has no result there to redo. Restart from the decision node above it, "
+                + "or pass the epoch where it did run.");
+        }
+        throw new IllegalStateException(
+            "Cannot restart " + stepId + " in epoch " + epoch + ": that epoch recorded no result for "
+            + "it. See which epochs did run it with workflow(action='get_run', run_id='" + runId
+            + "') and pass one of those, or omit the epoch to replay the run's most recent one.");
     }
 
     /**

@@ -3,7 +3,7 @@
 import * as React from 'react';
 import { useTranslations } from 'next-intl';
 import { ChevronLeft, ChevronRight, Download, File as FileIcon } from 'lucide-react';
-import { getFileUrlById } from '@/lib/api/orchestrator/file.service';
+import { downloadStoredFile, getFileUrlById } from '@/lib/api/orchestrator/file.service';
 import { apiClient } from '@/lib/api/api-client';
 import { getActiveOrgHeaderForRequest } from '@/lib/stores/current-org-store';
 import { useAuthedObjectUrl } from '@/hooks/useAuthedObjectUrl';
@@ -11,6 +11,8 @@ import LoadingSpinner from '@/components/LoadingSpinner';
 import MarkdownRender from '@/components/MarkdownRender';
 import { CodePreview } from '@/components/files/CodePreview';
 import { formatUtcDateTime } from '@/lib/utils/dateFormatters';
+import { GenerationRecipeCard } from '@/components/generation/GenerationRecipeCard';
+import type { GenerationProvenance } from '@/lib/api/storage-api';
 import {
   detectPreviewKind,
   resolveMediaMimeType,
@@ -73,6 +75,32 @@ interface FileDetailViewProps {
    * media can occupy the full viewport when details are hidden.
    */
   showMetadata?: boolean;
+  /**
+   * Bound the media by the HOST BOX instead of by the viewport. Defaults to
+   * {@code false}, which is right for the side panel: it is a full-height column,
+   * so viewport-relative caps and the box agree.
+   *
+   * <p>A host that is shorter than the viewport - a dialog - does not have that
+   * luxury: an image capped at 82vh inside a 52vh box renders taller than its
+   * frame and the reader scrolls a small window to see a portrait asset, which
+   * is the common output shape of a generation. With this set, the media flexes
+   * to the space actually available.
+   */
+  fitMediaToHost?: boolean;
+  /**
+   * Offer to run this asset's generation again, with its recipe in hand.
+   *
+   * <p>Only a GENERATED asset has one, and the viewer says so on screen: which model made it and
+   * from which words, over a file that would otherwise be indistinguishable from an upload. The
+   * callback receives the recipe, so the caller can open the generation form with everything
+   * already filled in and the reader changes only what they came to change.
+   *
+   * <p>Omitted, nothing is asked of the server at all. That is the point of the prop: the recipe is
+   * fetched only where there is somewhere for the button to lead, so the chat cards and the
+   * generation dialog's own result preview - which mount this same viewer - cost no extra request
+   * and cannot end up offering a dialog on top of themselves.
+   */
+  onRegenerate?: (provenance: GenerationProvenance) => void;
 }
 
 /**
@@ -98,6 +126,8 @@ export function FileDetailView({
   onNext,
   chromeless = false,
   showMetadata = true,
+  fitMediaToHost = false,
+  onRegenerate,
 }: FileDetailViewProps) {
   const t = useTranslations('fileDetail');
   const [downloading, setDownloading] = React.useState(false);
@@ -128,27 +158,12 @@ export function FileDetailView({
     setDownloading(true);
     setDownloadError(null);
     try {
-      // Download through the opaque id-based endpoint (no s3 key in the URL). Auth travels in the
-      // Authorization header, never the URL - resolved fresh at click time.
-      const url = entryId ? getFileUrlById(entryId, { inline: false }) : null;
-      if (!url) { setDownloadError(t('downloadFailed')); return; }
-      const tok = await apiClient.getTokenProvider()?.();
-      const headers: Record<string, string> = { ...getActiveOrgHeaderForRequest() };
-      if (tok) headers['Authorization'] = `Bearer ${tok}`;
-      const res = await fetch(url, { headers });
-      if (!res.ok) {
-        setDownloadError(`HTTP ${res.status}`);
-        return;
-      }
-      const blob = await res.blob();
-      const objectUrl = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = objectUrl;
-      a.download = fileName ?? displayName ?? 'download';
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-      URL.revokeObjectURL(objectUrl);
+      // Through the shared helper: the opaque id-based endpoint, with auth in
+      // the header and never in the URL. The generation dialog performs the same
+      // action from its own button, and one implementation is what keeps the
+      // token-handling rule in a single place.
+      if (!entryId) { setDownloadError(t('downloadFailed')); return; }
+      await downloadStoredFile(entryId, fileName ?? displayName);
     } catch (err) {
       // Surface 401 (token expired), 403 (cross-tenant), network errors. Without this, the spinner
       // just vanishes and the user has no signal.
@@ -162,8 +177,13 @@ export function FileDetailView({
   // Preview body - shared by both the boxed (side-panel/visualize) layout and
   // the chromeless full-page Files layout. In chromeless mode the media fills its
   // flex region (max-h-full) so it shrinks to leave the metadata visible under it
-  // without page scroll; the boxed layout keeps its fixed viewport-relative caps.
-  const imageMaxH = chromeless ? 'max-h-full' : 'max-h-[82vh]';
+  // without page scroll; the boxed layout keeps its fixed viewport-relative caps,
+  // which are right for a full-height column and wrong for a host shorter than
+  // the viewport - hence `fitMediaToHost`, which bounds it by the box instead.
+  const fitsHost = chromeless || fitMediaToHost;
+  const imageMaxH = fitsHost ? 'max-h-full' : 'max-h-[82vh]';
+  const videoMaxH = fitsHost ? 'max-h-full' : 'max-h-[70vh]';
+  const pdfHeight = fitsHost ? 'h-full' : 'h-[75vh]';
   const previewBody = (
     <>
       {needsMediaUrl && !mediaUrl && entryId ? (
@@ -182,7 +202,7 @@ export function FileDetailView({
             controls
             preload="metadata"
             src={mediaUrl}
-            className={`max-w-full ${chromeless ? 'max-h-full' : 'max-h-[70vh]'} rounded shadow-md bg-black/5 dark:bg-white/5`}
+            className={`max-w-full ${videoMaxH} rounded shadow-md bg-black/5 dark:bg-white/5`}
           />
         ) : kind === 'audio' && mediaUrl ? (
           <audio
@@ -195,7 +215,7 @@ export function FileDetailView({
           <iframe
             src={mediaUrl}
             title={displayName}
-            className={`w-full ${chromeless ? 'h-full' : 'h-[75vh]'} rounded border border-theme bg-white`}
+            className={`w-full ${pdfHeight} rounded border border-theme bg-white`}
           />
         ) : isTextualKind(kind) && entryId ? (
           <DocumentTextPreview
@@ -248,6 +268,20 @@ export function FileDetailView({
     </div>
   ) : null;
 
+  /**
+   * "Generated with X, from these words", and the way to run it again.
+   *
+   * <p>Mounted only where a Regenerate control was actually asked for, so the viewer costs no extra
+   * request on the files - almost all of them - that were never generated, and a leaf component
+   * that renders a PNG does not come to depend on the query cache being present for every caller.
+   *
+   * <p>Shown WITH the details and hidden by the same Info toggle: it belongs to what this file IS,
+   * and a reader who hid the details asked for the asset alone.
+   */
+  const generationCard = showMetadata && onRegenerate && entryId ? (
+    <GenerationRecipeCard entryId={entryId} onRegenerate={onRegenerate} />
+  ) : null;
+
   const errorNotice = downloadError ? (
     <p
       role="alert"
@@ -265,12 +299,17 @@ export function FileDetailView({
     // media flex to fill it, so it shrinks just enough to keep the size / type /
     // created / path metadata visible right under it WITHOUT page scroll. The
     // media itself is capped with max-h-full / h-full above.
+    //
+    // `fitMediaToHost` swaps that viewport arithmetic for the host's own height:
+    // the page is not the only chromeless caller any more, and a dialog knows
+    // how much room it has better than a formula about the app header does.
     if (needsMediaUrl) {
       return (
-        <div className="w-full flex flex-col items-center gap-3 h-[calc(100vh-8.5rem)]">
+        <div className={`w-full flex flex-col items-center gap-3 ${fitMediaToHost ? 'h-full' : 'h-[calc(100vh-8.5rem)]'}`}>
           <div className="flex-1 min-h-0 w-full flex items-center justify-center overflow-hidden">
             {previewBody}
           </div>
+          {generationCard}
           {metadataGrid}
           {errorNotice}
         </div>
@@ -282,6 +321,7 @@ export function FileDetailView({
     return (
       <div className="w-full flex flex-col items-center gap-4 py-2">
         {previewBody}
+        {generationCard}
         {metadataGrid}
         {errorNotice}
       </div>
@@ -344,6 +384,7 @@ export function FileDetailView({
       {/* Body - preview + metadata + bottom CTA */}
       <div className="flex-1 overflow-auto p-4 flex flex-col items-center gap-4">
         {previewBody}
+        {generationCard}
         {metadataGrid}
         {/* Bottom CTA - duplicates the header icon as a full-width action so it's
             obvious on non-image previews and reachable without scrolling back up. */}
@@ -405,8 +446,11 @@ function DocumentTextPreview({
     setError(false);
     (async () => {
       try {
-        const tokenProvider = apiClient.getTokenProvider();
-        const tok = tokenProvider ? await tokenProvider() : null;
+        // getAuthToken, rather than reading the provider: this effect is keyed [entryId, tooLarge] and never
+        // retries, so a request that leaves during the auth bootstrap 401s and the preview stays
+        // broken until a reload - the same defect that made /api/files/by-id/<id>/raw the
+        // gateway's most frequent error in prod.
+        const tok = await apiClient.getAuthToken();
         const headers: Record<string, string> = { ...getActiveOrgHeaderForRequest() };
         if (tok) headers['Authorization'] = `Bearer ${tok}`;
         const res = await fetch(getFileUrlById(entryId, { inline: true }), { headers });

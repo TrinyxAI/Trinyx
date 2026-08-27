@@ -1161,9 +1161,13 @@ public class WorkflowBuilderModifier {
         // nodes that already went through the nested-config block above) and
         // when the node is an agent (agents store fields top-level).
         boolean isAgentNode = Boolean.TRUE.equals(node.get("isAgent"));
+        // A node imported through set_plan can arrive without a `type` key at all, and
+        // gating on an explicit "mcp" skipped the whole block for it: its selector
+        // stayed undeletable and an incoming one was buried in params. The node id
+        // already says it is an mcp step, so an ABSENT type is treated as one.
         boolean isMcpToolNode = LabelNormalizer.isMcpKey(nodeId)
                 && !isAgentNode
-                && "mcp".equals(nodeType);
+                && (nodeType == null || "mcp".equals(nodeType));
         if (isMcpToolNode) {
             // Pull tool_id out of harmonized and treat it as a canonical id swap.
             // Done FIRST so the canonical id update survives the tool-param split below.
@@ -1185,6 +1189,52 @@ public class WorkflowBuilderModifier {
             // UUID instead.
             Set<String> mcpTopLevelStays = new HashSet<>(TOP_LEVEL_NODE_KEYS);
             mcpTopLevelStays.remove("id");
+            // WHICH account the step runs on configures the STEP, it is not an
+            // argument for the provider. Without these two the loop below would
+            // bury it in params, where the plan parser never looks and from where
+            // it WOULD be sent to the provider as an undeclared argument - the
+            // same failure McpCreator.RESERVED_PARAMS exists to prevent on the add
+            // half, arrived at from the modify side. The snake_case spelling is
+            // normalised to the one the parser reads, so an agent can use either.
+            mcpTopLevelStays.add("credentialSelector");
+            // camelCase wins, but only when it actually carries a value: gating on
+            // containsKey alone let {credentialSelector: null, credential_selector: "x"}
+            // delete the selector here while add_node created it, which is one input
+            // meaning two things on the two agent surfaces.
+            if (harmonized.containsKey("credential_selector")
+                    && harmonized.get("credentialSelector") == null) {
+                harmonized.put("credentialSelector", harmonized.get("credential_selector"));
+            }
+            harmonized.remove("credential_selector");
+            // Normalise the NODE's own spelling too. set_plan imports node maps
+            // verbatim, so a session node can hold credential_selector - which the
+            // plan parser reads as a live selector. The merger deletes by exact key,
+            // so without this a delete reported success, removed a key that was not
+            // there, and left the selector running. A rename, not a deletion: it
+            // cannot lose a value even if the modify later fails validation.
+            if (node.containsKey("credential_selector")) {
+                Object existing = node.remove("credential_selector");
+                node.putIfAbsent("credentialSelector", existing);
+            }
+            // Trimmed, the way the add surface trims, so the same input does not show
+            // up as "   " through one door and "" through the other.
+            // Stringified, the way the add surface stringifies: a number is a valid
+            // value here (a credential id), and leaving it typed on one door only
+            // makes the two surfaces differ over the same input.
+            Object selectorValue = harmonized.get("credentialSelector");
+            if (selectorValue != null) {
+                harmonized.put("credentialSelector", String.valueOf(selectorValue).trim());
+            }
+            // An explicit null REMOVES the selector and returns the step to the
+            // account picked in the builder; NodeFieldMerger already treats null as a
+            // delete, so it is left in place for the merge rather than taken off the
+            // node here. Mutating the node during harmonisation would delete it even
+            // when the modify goes on to FAIL validation further down.
+            //
+            // A blank string is a different thing on purpose: the step is set to
+            // choose at run time and the expression has not been written yet, which
+            // fails the run rather than quietly using the default account. One value,
+            // one meaning.
 
             Map<String, Object> mcpToolParams = new LinkedHashMap<>();
             Iterator<Map.Entry<String, Object>> it = harmonized.entrySet().iterator();

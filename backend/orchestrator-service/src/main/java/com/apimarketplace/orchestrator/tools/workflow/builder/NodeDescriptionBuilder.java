@@ -269,7 +269,41 @@ public class NodeDescriptionBuilder {
         // Tool parameters
         Object params = node.get("params");
         addIfPresent(config, node, "params");
+        // An agent that sets this with modify must be able to read it back, or the
+        // only way to check the change is to run the workflow. Same asymmetry class
+        // as the parameters this project has already been bitten by.
+        // One name in and out, and it reads whichever spelling the node carries: a
+        // plan imported through set_plan can hold either, and showing the value under
+        // one name while declaring a different one modifiable makes an agent read two
+        // fields where there is one.
+        // A table step authenticates against no provider, so the field can only ever
+        // fail there. Withheld from BOTH the value and the permission: shown in one
+        // and not the other, an agent reads a field it is not told it may remove.
+        boolean isTableStep = node.get("type") != null
+            && node.get("type").toString().startsWith("crud-");
+        Object credentialSelector = node.get("credentialSelector") != null
+            ? node.get("credentialSelector") : node.get("credential_selector");
+        if (credentialSelector != null && !isTableStep) {
+            config.put("credential_selector", credentialSelector);
+        }
         modifiableFields.put("params", new ModifiableField(params, "params", "Tool parameters with {{...}} variables"));
+        // Declared modifiable, not merely shown: an agent that can read a value and
+        // is not told it can change it has to guess that modify accepts it.
+        // Keyed the way the node documentation and every fix string spell it, so an
+        // agent reading describe and an agent reading the docs use one name.
+        if (!isTableStep) {
+            modifiableFields.put("credential_selector", new ModifiableField(
+                credentialSelector, "credential_selector",
+                "Expression choosing WHICH of the owner's accounts this step runs on, resolved at "
+                    + "run time to a credential name (or id). get_connected_services, or "
+                    + "credential(action='list') where that is what you have, lists the names that "
+                    + "exist, and this matches an ACTIVE one whose integration is this step's. "
+                    + "A name shared by two active accounts of that integration selects neither, "
+                    + "and a name that is a positive whole number is read as a credential id. "
+                    + "Resolving to nothing, or to none of them, FAILS the step rather than falling "
+                    + "back to the default account. "
+                    + "Send null to remove it and go back to a fixed account."));
+        }
 
         // Expose dataSourceId for CRUD steps
         Object dataSourceIdObj = node.get("dataSourceId");

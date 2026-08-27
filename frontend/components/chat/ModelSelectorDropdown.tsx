@@ -63,6 +63,8 @@ export function ModelSelectorDropdown({
   changeModelTitle,
   noModelsLabel,
   emptyState,
+  upgradeRequired = false,
+  upgradeNotice,
   reasoningEffort,
   onReasoningEffortChange,
   reasoningEffortLabel,
@@ -84,6 +86,13 @@ export function ModelSelectorDropdown({
    *  unconfigured CE gets a way out instead of a blank menu. Injected as a
    *  node (not imported) to keep this component translation-free. */
   emptyState?: React.ReactNode;
+  /** True when this account's credits cannot pay for what a model does, which
+   *  marks every row. The verdict is the CALLER's to fetch: this component
+   *  stays free of both translations and data hooks. */
+  upgradeRequired?: boolean;
+  /** Rendered under the model list, saying why and linking to the plans. A
+   *  node rather than an import, for the same reason as {@code emptyState}. */
+  upgradeNotice?: React.ReactNode;
   /** Per-conversation reasoning-effort override. When `onReasoningEffortChange`
    *  is provided and the selected provider supports effort, an effort control is
    *  rendered at the top of the open menu. Omitted by the panel chats. */
@@ -181,20 +190,25 @@ export function ModelSelectorDropdown({
     && supportsReasoningEffort({ provider: selectedModel.provider });
 
   return (
-    <div ref={modelSelectorRef} data-model-selector>
+    // The composer's button row hosts this beside the mic and the send button
+    // and can be as narrow as a 320px side panel, so the model NAME is the row's
+    // elastic part: `min-w-0` lets it shrink to an ellipsis rather than push the
+    // send button out of the bubble's `overflow-hidden`. The chevron keeps its
+    // size, so the control still reads as a menu at every width.
+    <div ref={modelSelectorRef} data-model-selector className="flex min-w-0">
       <button
         type="button"
         onClick={() => setShowModelSelector(!showModelSelector)}
-        className="flex h-9 items-center gap-2 transition-colors duration-150 cursor-pointer rounded-lg px-2.5 text-theme-primary hover:bg-theme-secondary"
+        className="flex h-9 min-w-0 items-center gap-2 transition-colors duration-150 cursor-pointer rounded-lg px-2.5 text-theme-primary hover:bg-theme-secondary"
         title={changeModelTitle}
       >
-        <span className="truncate max-w-[180px] text-sm">
+        <span className="truncate min-w-0 max-w-[180px] text-sm">
           {selectedModelData?.name
             || selectedModel.id
             || (availableModels.length === 0 ? noModelsLabel : '')}
         </span>
         <ChevronDown className={cn(
-          "w-3.5 h-3.5 transition-transform duration-200",
+          "w-3.5 h-3.5 shrink-0 transition-transform duration-200",
           showModelSelector && "rotate-180"
         )} />
       </button>
@@ -260,7 +274,7 @@ export function ModelSelectorDropdown({
                     className="w-[18px] h-[18px] flex-shrink-0 mt-0.5"
                   />
                   <div className="flex-1 min-w-0">
-                    <ModelOptionDisplay model={model} />
+                    <ModelOptionDisplay model={model} upgradeRequired={upgradeRequired} />
                   </div>
                   <div className="flex-shrink-0 opacity-0 group-hover:opacity-100 transition-opacity">
                     <ModelInfoPopover model={model} />
@@ -269,6 +283,15 @@ export function ModelSelectorDropdown({
               );
             })}
           </div>
+          {/* Under the list, never in a row: a row is an option, and this menu
+              keeps itself open for anything clicked inside it, so a dialog
+              opened from a row would sit underneath the menu it came from. */}
+          {upgradeRequired && upgradeNotice && (
+            /* Gated on the VERDICT, not on the node: the node is always handed
+               down and returns null on its own, so keying the wrapper off it
+               left an empty bordered strip at the foot of every menu. */
+            <div className="shrink-0 border-t border-theme px-3 py-2">{upgradeNotice}</div>
+          )}
         </div>,
         document.body,
       )}

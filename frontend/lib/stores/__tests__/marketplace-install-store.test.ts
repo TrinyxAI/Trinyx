@@ -16,6 +16,7 @@ const svc = vi.hoisted(() => ({
   acquireAgentPublication: vi.fn(),
   acquireResourcePublication: vi.fn(),
   acquirePublication: vi.fn(),
+  createEditableWorkflowCopy: vi.fn(),
 }));
 vi.mock('@/lib/api/orchestrator/publication.service', () => ({ publicationService: svc }));
 const trackMock = vi.hoisted(() => vi.fn());
@@ -51,6 +52,7 @@ describe('marketplace-install store - state machine', () => {
     svc.acquireAgentPublication.mockResolvedValue({ agentId: 'a1' });
     svc.acquireResourcePublication.mockResolvedValue({ resourceId: 'r1', type: 'TABLE' });
     svc.acquirePublication.mockResolvedValue({ workflowId: 'w1' });
+    svc.createEditableWorkflowCopy.mockResolvedValue({ workflowId: 'wf-copy', created: true });
   });
 
   afterEach(() => {
@@ -184,6 +186,33 @@ describe('marketplace-install store - state machine', () => {
     expect(svc.acquirePublication).toHaveBeenCalledTimes(1);
   });
 
+  it('captures the acquire response resource summary so the post-install screen can name what landed', async () => {
+    svc.acquirePublication.mockResolvedValue({
+      workflowId: 'w1',
+      resources: { interfaces: 2, tables: 1 },
+    });
+    store().startInstall(pub());
+    await driveToSuccess();
+
+    expect(store().active!.resources).toEqual({ interfaces: 2, tables: 1 });
+  });
+
+  it('drops zero and non-numeric counts, and tolerates a backend that omits the summary', async () => {
+    svc.acquirePublication.mockResolvedValue({
+      workflowId: 'w1',
+      resources: { interfaces: 1, tables: 0, agents: 'two' },
+    });
+    store().startInstall(pub());
+    await driveToSuccess();
+    expect(store().active!.resources).toEqual({ interfaces: 1 });
+
+    store().clear();
+    svc.acquirePublication.mockResolvedValue({ workflowId: 'w1' }); // older backend
+    store().startInstall(pub());
+    await driveToSuccess();
+    expect(store().active!.resources).toEqual({});
+  });
+
   it('records the inline origin flag (marketplace-card rendering vs full-modal consumers)', () => {
     svc.acquirePublication.mockReturnValue(new Promise(() => {}));
     store().startInstall(pub(), { inline: true });
@@ -229,6 +258,102 @@ describe('marketplace-install store - state machine', () => {
     expect(store().active).toBeNull();
 
     await driveToSuccess();
+    expect(store().active).toBeNull();
+    expect(trackMock).not.toHaveBeenCalledWith('app_install_succeeded', expect.anything());
+  });
+});
+
+/**
+ * Opt-in editable WORKFLOW copy, requested from the acquire modal's checkbox.
+ *
+ * The copy re-clones the whole snapshot, so it is only made when asked for, and only
+ * AFTER the acquire itself succeeded. It is best-effort by design: the application is
+ * installed either way, so a copy failure must not turn a working install into an error.
+ */
+describe('marketplace-install store - opt-in editable copy', () => {
+  let nowValue = 0;
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    store().clear();
+    nowValue = 0;
+    vi.useFakeTimers();
+    vi.spyOn(Math, 'random').mockReturnValue(0);
+    vi.spyOn(performance, 'now').mockImplementation(() => nowValue);
+    svc.acquirePublication.mockResolvedValue({ workflowId: 'w1' });
+    svc.acquireRemotePublication.mockResolvedValue({ workflowId: 'w1' });
+    svc.createEditableWorkflowCopy.mockResolvedValue({ workflowId: 'wf-copy', created: true });
+  });
+
+  afterEach(() => {
+    store().clear();
+    vi.restoreAllMocks();
+    vi.useRealTimers();
+  });
+
+  async function finish() {
+    nowValue = 6000;
+    await vi.advanceTimersByTimeAsync(6000);
+  }
+
+  it('does not touch the copy endpoint when the copy was not requested', async () => {
+    store().startInstall(pub());
+    await finish();
+
+    expect(svc.createEditableWorkflowCopy).not.toHaveBeenCalled();
+    expect(store().active!.status).toBe('success');
+    expect(store().active!.editableCopyWorkflowId).toBeNull();
+    expect(store().active!.editableCopyFailed).toBe(false);
+  });
+
+  it('creates the copy after a successful acquire and reports its workflow id', async () => {
+    store().startInstall(pub(), { withEditableCopy: true });
+    await finish();
+
+    expect(svc.createEditableWorkflowCopy).toHaveBeenCalledWith('pub-1', false);
+    expect(store().active!.status).toBe('success');
+    expect(store().active!.editableCopyWorkflowId).toBe('wf-copy');
+    expect(store().active!.editableCopyFailed).toBe(false);
+  });
+
+  it('never asks for a copy when the acquire itself FAILED (nothing to copy from)', async () => {
+    svc.acquirePublication.mockRejectedValueOnce(Object.assign(new Error('boom'), { status: 500 }));
+    store().startInstall(pub(), { withEditableCopy: true });
+    await vi.advanceTimersByTimeAsync(10);
+
+    expect(store().active!.status).toBe('error');
+    expect(svc.createEditableWorkflowCopy).not.toHaveBeenCalled();
+  });
+
+  it('keeps the install SUCCESSFUL when the copy fails, and flags the failure separately', async () => {
+    svc.createEditableWorkflowCopy.mockRejectedValue(Object.assign(new Error('quota'), { status: 409 }));
+    store().startInstall(pub(), { withEditableCopy: true });
+    await finish();
+
+    expect(store().active!.status).toBe('success');
+    expect(store().active!.acquiredId).toBe('w1');
+    expect(store().active!.editableCopyWorkflowId).toBeNull();
+    expect(store().active!.editableCopyFailed).toBe(true);
+  });
+
+  it('routes the copy through the remote endpoint in ceMode, like the acquire itself', async () => {
+    store().startInstall(pub(), { ceMode: true, withEditableCopy: true });
+    await finish();
+
+    expect(svc.acquireRemotePublication).toHaveBeenCalledWith('pub-1');
+    expect(svc.createEditableWorkflowCopy).toHaveBeenCalledWith('pub-1', true);
+  });
+
+  it('clear() during the copy stops the machine: a late copy cannot resurrect state', async () => {
+    let resolveCopy: (v: unknown) => void = () => {};
+    svc.createEditableWorkflowCopy.mockReturnValue(new Promise((r) => { resolveCopy = r; }));
+    store().startInstall(pub(), { withEditableCopy: true });
+    await vi.advanceTimersByTimeAsync(10); // acquire resolved, copy in flight
+    store().clear();
+
+    resolveCopy({ workflowId: 'wf-copy', created: true });
+    await finish();
+
     expect(store().active).toBeNull();
     expect(trackMock).not.toHaveBeenCalledWith('app_install_succeeded', expect.anything());
   });

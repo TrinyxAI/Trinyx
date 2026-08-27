@@ -23,6 +23,7 @@ import { useInterfacePaginationStore } from '@/lib/stores/interface-pagination-s
 import { normalizeLabel } from '@/app/workflows/builder/utils/labelNormalizer';
 import { isNavigateRef, navigateTargetLabel } from '@/app/workflows/builder/utils/interfaceActionRefs';
 import { PublicationInfoPanel } from '@/components/marketplace/PublicationInfoPanel';
+import { ApplicationSettingsMenu } from '@/components/marketplace/ApplicationSettingsMenu';
 import { PublisherAvatar } from '@/components/marketplace/PublisherAvatar';
 import { useOrgScopedReset } from '@/lib/hooks/useOrgScopedReset';
 
@@ -30,12 +31,12 @@ import { WorkflowLoadingState } from '../workflow/WorkflowLoadingState';
 import { WorkflowUnauthorizedState } from '../workflow/WorkflowUnauthorizedState';
 import { useAutoCollapseSidebar } from '../workflow/hooks';
 import { OPEN_TRIGGER_TAB_EVENT, findTriggerTabConfig, type OpenTriggerTabDetail } from '@/lib/workflow/triggerTabEvent';
+import { APPLICATION_PANEL_TAB_ID } from '@/lib/sidePanel/tabResource';
 
 // ============================================
 // Constants
 // ============================================
 
-const APPLICATION_PANEL_TAB_ID = 'application-panel';
 
 // ============================================
 // Types
@@ -122,7 +123,7 @@ function TabContentDebugWrapper({ children, tabContentKey }: { children: React.R
 }
 
 export function ApplicationDetailView({ workflowId, runId, title, publisherName, publisherId, planOverride, publication, showInfoPanel = true, publicPreviewMode = false, canEdit = false, canPublish = false, remote }: ApplicationDetailViewProps) {
-  const { isAuthenticated, isAuthChecking } = useAuthGuard();
+  const { isAuthenticated, isAuthChecking, numericUserId } = useAuthGuard();
   const { setRunId: setContextRunId, isPreviewOnly } = useWorkflowMode();
   const sidePanel = useSidePanelSafe();
   const t = useTranslations('common');
@@ -235,6 +236,17 @@ export function ApplicationDetailView({ workflowId, runId, title, publisherName,
   const [workflowName, setWorkflowName] = useState<string | undefined>(title);
   const [triggerData, setTriggerData] = useState<TriggerDataForPanel | null>(null);
   const [applicationConfigs, setApplicationConfigs] = useState<ApplicationConfig[]>([]);
+
+  // Sound. The application starts MUTED and the visitor turns it on from the
+  // settings cog: an app that plays audio the moment its page opens is startling,
+  // and on a shared link the visitor did not choose to be there yet.
+  //
+  // `hasAudio` is reported by the interface's own frame - it is sandboxed and
+  // cross-origin, so this page can neither inspect nor silence it directly. It is
+  // also what decides whether the cog offers a sound entry at all.
+  const [hasAudio, setHasAudio] = useState(false);
+  const [soundMuted, setSoundMuted] = useState(true);
+  const toggleSound = useCallback(() => setSoundMuted((muted) => !muted), []);
 
   // Phase 6c (2026-05-19) - clear workflow-bound config arrays on
   // workspace switch. The application view can remain on the same
@@ -517,6 +529,22 @@ export function ApplicationDetailView({ workflowId, runId, title, publisherName,
       }
     : undefined;
 
+  // The application's own clone, when this page is showing a genuine acquisition.
+  // Public previews never load auth'd user state, so they get nothing.
+  const acquiredWorkflowId =
+    !publicPreviewMode && publication?.displayMode === 'APPLICATION' && workflowId
+      ? workflowId
+      : undefined;
+
+  // "Create an editable copy" lives in the bottom-right settings cog, not in the Info
+  // panel: making a copy is an action on the application, not part of reading its
+  // description. Only an ACQUIRED application has a copy to make - the publisher of
+  // the app owns the source workflow directly (no APPLICATION clone), so offering it
+  // to them would only ever produce "Application is not installed in this workspace".
+  const isPublisher =
+    numericUserId != null && publication?.publisherId === String(numericUserId);
+  const canCreateEditableCopy = !!acquiredWorkflowId && !isPublisher;
+
   return (
     <div className="absolute inset-0 overflow-hidden flex flex-col">
       {/* Publish-update button intentionally not rendered. The publish logic
@@ -528,12 +556,6 @@ export function ApplicationDetailView({ workflowId, runId, title, publisherName,
           (APPLICATION display mode + non-preview). Public previews never
           load auth'd user creds. */}
       {(() => {
-        const acquiredWorkflowId =
-          !publicPreviewMode &&
-          publication?.displayMode === 'APPLICATION' &&
-          workflowId
-            ? workflowId
-            : undefined;
         if (!showInfoPanel) return null;
         if (isPreviewOnly) {
           return (
@@ -572,6 +594,28 @@ export function ApplicationDetailView({ workflowId, runId, title, publisherName,
         );
       })()}
 
+      {/* Application settings - bottom right, opposite the Info panel. Renders
+          nothing at all when there is no action to take (marketplace previews,
+          publisher self-views, non-application publications).
+
+          The condition is a DISJUNCTION: an application with audio gets the cog
+          even when no editable copy is on offer, because the cog is the only
+          place its sound can be turned on. */}
+      {publication && (canCreateEditableCopy || hasAudio) && (
+        <div className="absolute bottom-4 right-4 z-[40]">
+          <ApplicationSettingsMenu
+            publicationId={publication.id}
+            remote={effectiveRemote}
+            canCreateEditableCopy={canCreateEditableCopy}
+            // undefined (not false) when the app has no media: that is what tells
+            // the menu there is no sound entry to offer, as opposed to "there is
+            // sound and it is currently on".
+            soundMuted={hasAudio ? soundMuted : undefined}
+            onToggleSound={toggleSound}
+          />
+        </div>
+      )}
+
       {/* Interface content - main view */}
       {applicationConfigs.length === 0 ? (
         (() => {
@@ -596,6 +640,8 @@ export function ApplicationDetailView({ workflowId, runId, title, publisherName,
               // result, not a pager spanning every fire the workflow ever had.
               openOnLatestEpoch
               templateSource={templateSource}
+              mediaMuted={soundMuted}
+              onMediaAudioPresence={setHasAudio}
             />
           );
         })()

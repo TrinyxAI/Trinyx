@@ -15,6 +15,14 @@ import { cleanup, render } from '@testing-library/react';
 
 const h = vi.hoisted(() => ({ chatCoreProps: [] as Array<Record<string, unknown>> }));
 
+// The composer fetches the verdict for its model menu and hands it to the
+// dropdown, which is deliberately free of translations and data hooks. Driven
+// from here rather than stubbed to a constant, because those two props are
+// hand-passed and nothing else in the suite would notice one going missing.
+const credits = vi.hoisted(() => ({ blocked: false }));
+vi.mock('@/lib/hooks/useMonthlyCreditsCannotPay', () => ({
+  useMonthlyCreditsCannotPay: () => ({ blocked: credits.blocked, isLoading: false }),
+}));
 vi.mock('next-intl', () => ({ useTranslations: () => (k: string) => k }));
 vi.mock('next/navigation', () => ({ usePathname: () => '/en/app/chat' }));
 vi.mock('@/hooks/useModels', () => ({
@@ -80,5 +88,35 @@ describe('ChatPanelContent centered welcome composer', () => {
     // regression, e.g. reusing the workflow namespace).
     const el = welcomeTitle as React.ReactElement<{ children?: React.ReactNode }>;
     expect(el.props.children).toBe('sidePanel.welcomeTitle');
+  });
+
+  /** The model menu the composer builds, read as the element it handed down. */
+  function leadingControlProps(): Record<string, unknown> {
+    const props = h.chatCoreProps[h.chatCoreProps.length - 1];
+    const leading = props?.leadingControl as React.ReactElement<Record<string, unknown>>;
+    return leading?.props ?? {};
+  }
+
+  it('hands the verdict and the notice down to the model menu', () => {
+    // The dropdown cannot ask this itself: it carries no translations and no
+    // data hooks by design, so the host asks and passes both down. Nothing else
+    // in the app would notice either prop going missing.
+    credits.blocked = true;
+    render(<ChatPanelContent />);
+
+    const menu = leadingControlProps();
+    expect(menu.upgradeRequired).toBe(true);
+    const notice = menu.upgradeNotice as React.ReactElement<{ blocked?: boolean }>;
+    expect(notice?.props?.blocked).toBe(true);
+  });
+
+  it('hands down a clear verdict for an account that can pay', () => {
+    credits.blocked = false;
+    render(<ChatPanelContent />);
+
+    const menu = leadingControlProps();
+    expect(menu.upgradeRequired).toBe(false);
+    const notice = menu.upgradeNotice as React.ReactElement<{ blocked?: boolean }>;
+    expect(notice?.props?.blocked).toBe(false);
   });
 });

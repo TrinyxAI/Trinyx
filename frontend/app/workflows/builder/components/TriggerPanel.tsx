@@ -18,6 +18,41 @@ import { orchestratorApi } from '@/lib/api';
 import { conversationApi, type Message } from '@/lib/api/conversationApi';
 import { fileService, type PendingFileUpload } from '@/lib/api/orchestrator/file.service';
 
+/**
+ * Resting gap between the panel's bottom edge and the bottom of the viewport,
+ * in px. The clamp works in px, so this gap does too, and the `bottom` style
+ * is written from this same constant: the two can never drift apart. The cost
+ * is that this one gap no longer follows a non-16px root font-size, unlike the
+ * card's other spacing.
+ */
+export const BASE_BOTTOM_PX = 16;
+
+/** Minimum gap kept between the panel and every viewport edge while clamping. */
+export const VIEWPORT_MARGIN_PX = 8;
+
+/** `dragStartRef.pointerId` when no drag is in flight. No real pointerId is negative. */
+const NO_POINTER = -1;
+
+/**
+ * Both observers below degrade to the window listeners when the API is absent,
+ * rather than throwing on mount: this panel opens on every application surface,
+ * and losing "re-measure when a box resizes" is a far smaller loss than losing
+ * the panel. One posture for both, deliberately.
+ */
+const hasResizeObserver = () => typeof ResizeObserver !== 'undefined';
+
+/**
+ * Floor for the anchor-derived width cap below. A very narrow application
+ * should leave a cramped panel, not a sliver: below this the panel stops
+ * following the anchor and is only bounded by the viewport.
+ *
+ * This is a deliberate exception to "the panel fits the application": under
+ * 280px + margins the panel would stop being usable as a form, so it is allowed
+ * to overhang instead. It still never leaves the VIEWPORT - the clamp is
+ * unconditional.
+ */
+const MIN_PANEL_WIDTH_PX = 280;
+
 interface FormField {
   id: string;
   name: string;
@@ -134,7 +169,11 @@ export function TriggerPanel({
     const btn = menuButtonRef.current;
     if (!btn) return;
     const r = btn.getBoundingClientRect();
-    setMenuRect({ top: r.bottom + 4, right: window.innerWidth - r.right });
+    // Layout box, not the window: a `fixed` element is placed against the
+    // initial containing block, which excludes a classic scrollbar. Same rule
+    // as clampPosition below.
+    const viewportWidth = document.documentElement?.clientWidth || window.innerWidth;
+    setMenuRect({ top: r.bottom + 4, right: viewportWidth - r.right });
     setIsMenuOpen(true);
   }, []);
   React.useEffect(() => {
@@ -199,11 +238,40 @@ export function TriggerPanel({
     return false;
   }, [readySteps, selectedTriggerId, isStepByStepMode, runStatus]);
 
+  /**
+   * The single condition under which this component renders anything. Every
+   * effect that installs a listener or an observer guards on THIS, not on
+   * `isOpen` alone: a panel whose configs momentarily empty (the application
+   * swaps them asynchronously when the user switches app) renders null while
+   * still being "open", and watching the viewport for it is pure waste - and
+   * observing its absent element would throw.
+   */
+  const isMounted = isOpen && triggerConfigs.length > 0 && !!selectedConfig;
+
   // Drag state
   const [position, setPosition] = React.useState({ x: 0, y: 0 });
+  // Read by the drag start handler so its identity is stable: keying it on
+  // `position` rebuilt the header's onPointerDown prop on every pointermove,
+  // the hottest path in this component.
+  const positionRef = React.useRef(position);
+  React.useEffect(() => { positionRef.current = position; }, [position]);
   const [isDragging, setIsDragging] = React.useState(false);
-  const dragStartRef = React.useRef({ x: 0, y: 0, posX: 0, posY: 0 });
-  const panelRef = React.useRef<HTMLDivElement>(null);
+  // `pointerId` pins the drag to ONE pointer: on a tablet a second finger (or a
+  // resting palm) would otherwise teleport the panel to its coordinates, and
+  // lifting that finger would end a drag the first one is still performing.
+  // `NO_POINTER` means "no drag in flight" and is what the ownership guard
+  // reads, so releasing a drag MUST restore it.
+  const dragStartRef = React.useRef({ pointerId: NO_POINTER, x: 0, y: 0, posX: 0, posY: 0 });
+  // Element state, not just a ref: the re-clamp effect observes the panel with a
+  // ResizeObserver, and a ref read at effect time leaves that observer attached
+  // to a detached node if the element is ever replaced. The ref is kept for the
+  // clamp, which only ever reads the CURRENT element.
+  const panelRef = React.useRef<HTMLDivElement | null>(null);
+  const [panelEl, setPanelEl] = React.useState<HTMLDivElement | null>(null);
+  const attachPanel = React.useCallback((el: HTMLDivElement | null) => {
+    panelRef.current = el;
+    setPanelEl(el);
+  }, []);
   const wasOpenRef = React.useRef(false);
 
   // Anchor-rect tracking - when an anchorElement is provided, the panel
@@ -216,26 +284,66 @@ export function TriggerPanel({
   //   5. panel opening (fresh measurement when the user clicks "Trigger").
   // Null when anchorElement is absent → falls back to viewport-center.
   const [anchorRect, setAnchorRect] = React.useState<{ left: number; width: number } | null>(null);
-  React.useEffect(() => {
-    if (!anchorElement) {
+  // useLayoutEffect, not useEffect: `maxWidth` is undefined until this commits,
+  // so a passive effect lets the browser paint one full-width frame first -
+  // a visible flash of exactly the overflow this change exists to remove.
+  // ApplicationTabContent measures its own letterbox the same way.
+  React.useLayoutEffect(() => {
+    // `isOpen` is a guard, not just a re-measure trigger: a closed panel needs
+    // no rect, and every mounted application tab would otherwise carry a
+    // capture-phase window scroll listener and a ResizeObserver for nothing.
+    if (!anchorElement || !isMounted) {
       setAnchorRect(null);
       return;
     }
+    // Publish only a CHANGED rect. `scroll` is observed in the capture phase on
+    // every scroller, so a fresh object per event would re-render (and, through
+    // `clampPosition`'s identity, tear down and rebuild the re-clamp effect's
+    // listeners and ResizeObserver) dozens of times a second during a touch
+    // scroll over the application.
     const measure = () => {
       const rect = anchorElement.getBoundingClientRect();
-      setAnchorRect({ left: rect.left, width: rect.width });
+      setAnchorRect(prev =>
+        prev && prev.left === rect.left && prev.width === rect.width
+          ? prev
+          : { left: rect.left, width: rect.width },
+      );
+    };
+    // rAF-coalesced: `getBoundingClientRect` forces a synchronous reflow, and
+    // the scroll listener below is capture-phase on every scroller, so an
+    // un-throttled measure lays the page out dozens of times per touch scroll.
+    // At most one measurement per frame is all the position can consume.
+    let frame = 0;
+    const scheduleMeasure = () => {
+      if (frame) return;
+      frame = requestAnimationFrame(() => { frame = 0; measure(); });
     };
     measure();
-    const ro = new ResizeObserver(measure);
-    ro.observe(anchorElement);
-    window.addEventListener('resize', measure);
-    window.addEventListener('scroll', measure, true);
+    const ro = hasResizeObserver() ? new ResizeObserver(scheduleMeasure) : null;
+    ro?.observe(anchorElement);
+    window.addEventListener('resize', scheduleMeasure);
+    window.addEventListener('scroll', scheduleMeasure, true);
     return () => {
-      ro.disconnect();
-      window.removeEventListener('resize', measure);
-      window.removeEventListener('scroll', measure, true);
+      if (frame) cancelAnimationFrame(frame);
+      ro?.disconnect();
+      window.removeEventListener('resize', scheduleMeasure);
+      window.removeEventListener('scroll', scheduleMeasure, true);
     };
-  }, [anchorElement, isOpen]);
+  }, [anchorElement, isMounted]);
+
+  /**
+   * Width cap derived from the anchor, on top of the viewport one.
+   *
+   * The panel is a control surface FOR the application it floats over, so it
+   * has to fit that application and not merely the window: an app rendered at
+   * phone format (390px wide) inside a 1400px browser would otherwise get the
+   * full 32rem panel spilling past both its edges - the reported symptom, and
+   * one a viewport-only cap never sees. `min()` keeps the viewport cap in
+   * force too, since an inline style would otherwise beat the class.
+   */
+  const maxWidth = anchorRect
+    ? `min(calc(100vw - 1rem), ${Math.max(MIN_PANEL_WIDTH_PX, anchorRect.width - 2 * VIEWPORT_MARGIN_PX)}px)`
+    : undefined;
 
   // Chat state
   const [chatMessage, setChatMessage] = React.useState('');
@@ -429,53 +537,183 @@ export function TriggerPanel({
       // Transitioning from closed to open - reset position
       setPosition({ x: 0, y: 0 });
       setIsCollapsed(false);
+      // A drag whose pointerup was lost (closed mid-gesture, a browser that
+      // swallowed the event) would otherwise reopen with the full-viewport
+      // drag shield still up, swallowing every click on the page.
+      dragStartRef.current.pointerId = NO_POINTER;
+      setIsDragging(false);
     }
     wasOpenRef.current = isOpen;
   }, [isOpen]);
 
-  // Drag handlers
-  const handleDragStart = React.useCallback((e: React.MouseEvent) => {
+  /**
+   * Keep a drag offset inside the viewport.
+   *
+   * The panel is `position: fixed`, so nothing brings it back once it leaves
+   * the screen: no scrollbar reaches it, and the offset only resets on the
+   * next open. Two things push it out - a drag, and a viewport change
+   * (rotation, side-panel resize, and on Android the on-screen keyboard, which
+   * does shrink `innerHeight`) that shrinks the space the offset was chosen
+   * against. Both go through this clamp.
+   *
+   * iOS Safari is the known gap: its keyboard shrinks only the VISUAL viewport,
+   * while `innerHeight` and a `fixed` element's containing block both stay on
+   * the layout viewport, so no offset we could compute here would lift the
+   * panel above the keyboard. Getting that right means moving the panel off
+   * `position: fixed`, which is a bigger change than this one.
+   *
+   * Horizontally the panel's visual left edge is `base + x - width / 2`
+   * (`base` = the anchor's centre, or the viewport's); vertically its gap to
+   * the bottom of the viewport is `BASE_BOTTOM_PX - y`.
+   *
+   * If the panel is bigger than the viewport on an axis, the window is empty
+   * and no offset is in bounds. The CSS caps below should make that
+   * unreachable, so this is defence in depth for a cap that failed to apply
+   * (an ancestor forcing a width, a browser without `dvh`): pin the axis to
+   * the edge that matters - the left edge horizontally, and the BOTTOM edge
+   * vertically, since the bottom is where the submit button lives.
+   */
+  const clampPosition = React.useCallback((next: { x: number; y: number }) => {
+    if (typeof window === 'undefined') return next;
+    const el = panelRef.current;
+    if (!el) return next;
+    const { width, height } = el.getBoundingClientRect();
+    // A panel that has not been laid out yet reports a zero rect; clamping a
+    // real offset against it would snap the panel to a meaningless position.
+    if (width === 0 || height === 0) return next;
+
+    // `clientWidth`/`clientHeight` of the root, not `innerWidth`/`innerHeight`:
+    // a `fixed` element is laid out against the initial containing block, which
+    // EXCLUDES a classic scrollbar, while the window dimensions include it.
+    // Measuring against the window puts the right-edge margin out by the
+    // scrollbar's width - about the whole margin - so the panel sits flush
+    // against it. (Overlay scrollbars make the two identical.)
+    const viewportWidth = document.documentElement?.clientWidth || window.innerWidth;
+    const viewportHeight = document.documentElement?.clientHeight || window.innerHeight;
+    const base = anchorRect
+      ? anchorRect.left + anchorRect.width / 2
+      : viewportWidth / 2;
+    const minX = VIEWPORT_MARGIN_PX + width / 2 - base;
+    const maxX = viewportWidth - VIEWPORT_MARGIN_PX - width / 2 - base;
+    const minY = BASE_BOTTOM_PX - (viewportHeight - height - VIEWPORT_MARGIN_PX);
+    const maxY = BASE_BOTTOM_PX - VIEWPORT_MARGIN_PX;
+
+    return {
+      x: maxX < minX ? minX : Math.min(maxX, Math.max(minX, next.x)),
+      y: maxY < minY ? maxY : Math.min(maxY, Math.max(minY, next.y)),
+    };
+  }, [anchorRect]);
+
+  // Re-clamp on every viewport change: a panel dragged to an edge in landscape
+  // must not be stranded off-screen after a rotation, and the pass on open
+  // pulls the panel back in when the anchor it centres on (a phone-format
+  // application container, say) sits near a viewport edge. The ResizeObserver
+  // covers the panel's OWN size changes too - collapse/expand, switching to a
+  // taller tab - which move its edges just as much as a rotation does.
+  // Clamping only ever rewrites the offset, never the size, so this cannot
+  // feed itself.
+  React.useEffect(() => {
+    if (!isMounted) return;
+    const reclamp = () => setPosition(prev => {
+      const next = clampPosition(prev);
+      return next.x === prev.x && next.y === prev.y ? prev : next;
+    });
+    reclamp();
+    window.addEventListener('resize', reclamp);
+    window.addEventListener('orientationchange', reclamp);
+    // Deliberately NOT listening on `visualViewport`: the clamp is expressed in
+    // `innerWidth`/`innerHeight`, which the events unique to that object
+    // (pinch-zoom, the iOS keyboard) do not move - the callback would be a
+    // no-op, and the events that DO move them already fire `window.resize`.
+    const ro = hasResizeObserver() && panelEl ? new ResizeObserver(reclamp) : null;
+    if (ro && panelEl) ro.observe(panelEl);
+    return () => {
+      window.removeEventListener('resize', reclamp);
+      window.removeEventListener('orientationchange', reclamp);
+      ro?.disconnect();
+    };
+  }, [isMounted, panelEl, clampPosition]);
+
+  // Drag handlers - POINTER events, not mouse ones. A finger never synthesises
+  // `mousemove`, so the mouse-only version simply could not be dragged on a
+  // touch screen; pointer events cover mouse, touch and pen in one path.
+  const handleDragStart = React.useCallback((e: React.PointerEvent) => {
     // Don't start drag if clicking on a tab button
     if ((e.target as HTMLElement).closest('[data-tab-button]')) {
       return;
     }
-    e.preventDefault();
+    // A second finger, or a palm, landing ON the header must not overwrite the
+    // owning pointer: that would hijack the gesture from the finger already
+    // dragging, and lifting the newcomer would end a drag still in progress.
+    // Guarded on the REF rather than on `isDragging`, so two pointerdowns
+    // inside one React batch cannot both read a not-yet-updated state and pass.
+    //
+    // The menu is dismissed BEFORE the guards below, not after: it is positioned
+    // from a rect captured when it opened, and a press that does not win
+    // ownership (a right-click, a second finger while a first one drags) still
+    // means the user is done with it - and can still be the press that carries
+    // the panel out from under it.
+    setIsMenuOpen(false);
+    if (dragStartRef.current.pointerId !== NO_POINTER) return;
+    // Primary button only. A right-click otherwise starts a drag that runs
+    // until the next pointerup, with the context menu free to eat it.
+    if (e.button !== 0) return;
+    // NO preventDefault here. Cancelling a `pointerdown` suppresses the whole
+    // compatibility mouse sequence for that gesture - `mousedown` included -
+    // and outside-click dismissal is built on `document` mousedown listeners
+    // all over this app (this panel's own 3-dots menu among them). Pressing
+    // the header would leave every one of those popovers open. Text selection
+    // is handled by `select-none` on the header instead, which costs nothing.
     setIsDragging(true);
     dragStartRef.current = {
+      pointerId: e.pointerId,
       x: e.clientX,
       y: e.clientY,
-      posX: position.x,
-      posY: position.y,
+      posX: positionRef.current.x,
+      posY: positionRef.current.y,
     };
-  }, [position]);
+  }, []);
 
   React.useEffect(() => {
     if (!isDragging) return;
 
-    const handleMouseMove = (e: MouseEvent) => {
+    const handlePointerMove = (e: PointerEvent) => {
+      if (e.pointerId !== dragStartRef.current.pointerId) return;
       const deltaX = e.clientX - dragStartRef.current.x;
       const deltaY = e.clientY - dragStartRef.current.y;
-      setPosition({
+      setPosition(clampPosition({
         x: dragStartRef.current.posX + deltaX,
         y: dragStartRef.current.posY + deltaY,
-      });
+      }));
     };
 
-    const stopDrag = () => setIsDragging(false);
+    const release = () => {
+      dragStartRef.current.pointerId = NO_POINTER;
+      setIsDragging(false);
+    };
+    const stopDrag = (e: PointerEvent) => {
+      if (e.pointerId !== dragStartRef.current.pointerId) return;
+      release();
+    };
+    const stopDragUnconditionally = () => release();
 
     // Window-level listeners so iframes / ReactFlow inside the canvas
-    // cannot swallow mousemove/mouseup and leave the panel stuck to cursor.
-    window.addEventListener('mousemove', handleMouseMove);
-    window.addEventListener('mouseup', stopDrag);
+    // cannot swallow the move/up events and leave the panel stuck to cursor.
+    window.addEventListener('pointermove', handlePointerMove);
     window.addEventListener('pointerup', stopDrag);
-    window.addEventListener('blur', stopDrag);
+    // A touch drag interrupted by the browser (scroll takeover, gesture
+    // cancel) fires `pointercancel` and NO `pointerup`: without this the
+    // panel would stay glued to the finger.
+    window.addEventListener('pointercancel', stopDrag);
+    // A lost window focus ends the drag whatever the pointer was.
+    window.addEventListener('blur', stopDragUnconditionally);
     return () => {
-      window.removeEventListener('mousemove', handleMouseMove);
-      window.removeEventListener('mouseup', stopDrag);
+      window.removeEventListener('pointermove', handlePointerMove);
       window.removeEventListener('pointerup', stopDrag);
-      window.removeEventListener('blur', stopDrag);
+      window.removeEventListener('pointercancel', stopDrag);
+      window.removeEventListener('blur', stopDragUnconditionally);
     };
-  }, [isDragging]);
+  }, [isDragging, clampPosition]);
 
   // Chat attachments (uploaded via fileService to S3)
   const [chatAttachments, setChatAttachments] = React.useState<PendingFileUpload[]>([]);
@@ -720,7 +958,7 @@ export function TriggerPanel({
   const handleKeyPress = React.useCallback(() => {}, []);
   const handleShowAttachmentMenu = React.useCallback(() => {}, []);
 
-  if (!isOpen || triggerConfigs.length === 0 || !selectedConfig) return null;
+  if (!isMounted) return null;
 
   // Shimmer color based on selected trigger type
   const shimmerColor = selectedConfig.type === 'chat'
@@ -731,7 +969,7 @@ export function TriggerPanel({
 
   // Render tab buttons for multiple triggers
   const renderTabs = () => (
-    <div className="flex flex-wrap gap-1">
+    <div className="flex flex-wrap gap-1 min-w-0">
       {triggerConfigs.map((config, index) => {
         const isActive = index === selectedIndex;
         return (
@@ -744,19 +982,22 @@ export function TriggerPanel({
             }}
             className={cn(
               "flex items-center gap-1.5 px-3 py-1 text-xs rounded-md transition-colors",
+              // A single long trigger label must truncate rather than widen the
+              // row past the panel: wrapping only helps when there are several.
+              "min-w-0 max-w-full",
               isActive
                 ? "bg-primary text-primary-foreground"
                 : "bg-slate-100 dark:bg-slate-700 hover:bg-slate-200 dark:hover:bg-slate-600 text-slate-700 dark:text-slate-200"
             )}
           >
             {config.type === 'chat' ? (
-              <MessageSquare className="h-3 w-3" />
+              <MessageSquare className="h-3 w-3 shrink-0" />
             ) : config.type === 'webhook' ? (
-              <Webhook className="h-3 w-3" />
+              <Webhook className="h-3 w-3 shrink-0" />
             ) : (
-              <FileText className="h-3 w-3" />
+              <FileText className="h-3 w-3 shrink-0" />
             )}
-            {config.triggerLabel}
+            <span className="truncate">{config.triggerLabel}</span>
           </button>
         );
       })}
@@ -765,15 +1006,17 @@ export function TriggerPanel({
 
   // Render single trigger header (no tabs)
   const renderSingleHeader = () => (
-    <div className="flex items-center gap-2 relative z-10">
+    // min-w-0 + truncate: on a narrow panel a long trigger label would
+    // otherwise push the 3-dots menu out of the header.
+    <div className="flex items-center gap-2 relative z-10 min-w-0 flex-1">
       {selectedConfig.type === 'chat' ? (
-        <MessageSquare className="h-4 w-4 text-slate-600 dark:text-slate-300" />
+        <MessageSquare className="h-4 w-4 shrink-0 text-slate-600 dark:text-slate-300" />
       ) : selectedConfig.type === 'webhook' ? (
-        <Webhook className="h-4 w-4 text-slate-600 dark:text-slate-300" />
+        <Webhook className="h-4 w-4 shrink-0 text-slate-600 dark:text-slate-300" />
       ) : (
-        <FileText className="h-4 w-4 text-slate-600 dark:text-slate-300" />
+        <FileText className="h-4 w-4 shrink-0 text-slate-600 dark:text-slate-300" />
       )}
-      <span className="font-medium text-sm text-slate-700 dark:text-slate-200">
+      <span className="font-medium text-sm text-slate-700 dark:text-slate-200 truncate">
         {selectedConfig.type === 'chat'
           ? selectedConfig.triggerLabel || t('chatTriggerTitle')
           : selectedConfig.type === 'webhook'
@@ -785,23 +1028,26 @@ export function TriggerPanel({
 
   return (
     <>
-    {/* Full-viewport overlay during drag - neutralizes iframes / ReactFlow
-     *  so mousemove/mouseup always reach the window listeners above. */}
+    {/* Full-viewport overlay during drag - neutralizes iframes / ReactFlow so
+     *  pointermove/pointerup/pointercancel always reach the window listeners
+     *  above. `touch-none` so a finger dragging over it cannot hand the
+     *  gesture back to the page as a scroll. */}
     {isDragging && (
       <div
-        className="fixed inset-0 z-[49]"
+        className="fixed inset-0 z-[49] touch-none"
         style={{ cursor: 'grabbing' }}
         aria-hidden="true"
       />
     )}
     <div
-      ref={panelRef}
+      ref={attachPanel}
+      data-testid="trigger-panel"
       className={cn(
         "fixed z-50",
         isDragging && "select-none"
       )}
       style={{
-        bottom: `calc(1rem - ${position.y}px)`,
+        bottom: `${BASE_BOTTOM_PX - position.y}px`,
         // When an anchorElement was provided the panel centers on the
         // application iframe's bounding rect (rect.left + rect.width/2)
         // instead of the viewport-center. translateX(-50%) re-centers the
@@ -813,19 +1059,49 @@ export function TriggerPanel({
       }}
     >
       <div
+        data-testid="trigger-panel-card"
+        style={maxWidth ? { maxWidth } : undefined}
         className={cn(
+          // `max-w` / `max-h`: the panel floats over an application that may be
+          // rendered at phone or tablet size, on a viewport narrower and
+          // shorter than the panel's natural 32rem x content-height. Without
+          // the caps it spilled past both side edges and, on a form with a few
+          // fields, grew off the TOP of the screen - taking the submit button
+          // with it, since the panel is anchored to the bottom. `dvh` rather
+          // than `vh` so the mobile browser's collapsing address bar is
+          // accounted for. flex-col + the scrolling body below turn the
+          // overflow into a scroll instead of a clip.
+          //
+          // The caps reserve the same AMOUNTS the clamp reserves - 1rem =
+          // VIEWPORT_MARGIN_PX each side horizontally, 1.5rem = the
+          // BASE_BOTTOM_PX resting gap plus one VIEWPORT_MARGIN_PX at the top -
+          // and a test pins that arithmetic, because Tailwind literals cannot be
+          // derived from the constants. They are not measured against the same
+          // BOX, though: `vw` includes a classic scrollbar while the clamp uses
+          // the layout box, which excludes it. The caps are the CSS backstop and
+          // the clamp is the authority; where they disagree, by a scrollbar's
+          // width, the clamp simply pins the panel one margin further in.
           "bg-white dark:bg-slate-900 rounded-xl shadow-2xl border border-slate-200 dark:border-slate-700 overflow-hidden transition-all duration-200",
+          "flex flex-col max-w-[calc(100vw-1rem)] max-h-[calc(100dvh-1.5rem)]",
           isCollapsed ? "w-64" : "w-[32rem]"
         )}
       >
         {/* Header with shimmer effect */}
         <div
+          data-testid="trigger-panel-drag-handle"
           className={cn(
             "relative flex items-center justify-between px-4 py-3 border-b border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/50 overflow-hidden",
+            // shrink-0: the header must keep its height when the body scrolls.
+            // touch-none: claim the touch gesture for the drag, otherwise the
+            // browser scrolls the page under the finger and the panel never moves.
+            // select-none unconditionally, not only while dragging: the state
+            // flip only reaches the DOM on the next render, by which time the
+            // compatibility mousedown has already started a text selection.
+            "shrink-0 touch-none select-none",
             isDragging && "cursor-grabbing",
             !isDragging && "cursor-grab"
           )}
-          onMouseDown={handleDragStart}
+          onPointerDown={handleDragStart}
         >
           {/* Shimmer effect - same speed as NodePlayButton (2.5s) */}
           <div
@@ -844,7 +1120,10 @@ export function TriggerPanel({
 
           {/* Tabs (if multiple) or single header */}
           {triggerConfigs.length > 1 ? (
-            <div className="flex items-center gap-2 relative z-10 flex-1 mt-2">
+            // min-w-0: a flex child defaults to min-width:auto and refuses to
+            // shrink below its widest tab, which on a narrow panel pushes the
+            // tabs under the header's overflow-hidden and out of reach.
+            <div className="flex items-center gap-2 relative z-10 flex-1 min-w-0 mt-2">
               {renderTabs()}
             </div>
           ) : (
@@ -854,8 +1133,8 @@ export function TriggerPanel({
           {/* 3-dots overflow menu: single entry-point for Expand/Collapse +
               Close. The previous standalone chevron button next to this was
               removed - it duplicated the first menu item and added visual
-              noise. stopPropagation on mouseDown so clicking doesn't start
-              a panel drag (parent has onMouseDown=drag). */}
+              noise. stopPropagation on pointerDown so clicking doesn't start
+              a panel drag (the header has onPointerDown=drag). */}
           <div className="flex items-center gap-1 relative z-10 shrink-0 ml-2">
             <Button
               ref={menuButtonRef}
@@ -869,7 +1148,7 @@ export function TriggerPanel({
                   openMenu();
                 }
               }}
-              onMouseDown={(e) => e.stopPropagation()}
+              onPointerDown={(e) => e.stopPropagation()}
               className="h-7 w-7 p-0"
               title={t('menu')}
               aria-haspopup="menu"
@@ -891,7 +1170,14 @@ export function TriggerPanel({
               ref={menuPanelRef}
               role="menu"
               className="fixed min-w-[140px] rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 shadow-lg overflow-hidden z-[10000]"
+              // Both families, each for its own reason: pointerDown matches the
+              // header's drag handler (today this portal is a React SIBLING of
+              // the handle, but the guard must stay true if the JSX ever moves
+              // inside it), and mouseDown still shields the menu from any
+              // document-level outside-click handler - stopping pointerDown
+              // does not stop the compatibility mouseDown that follows.
               style={{ top: menuRect.top, right: menuRect.right }}
+              onPointerDown={(e) => e.stopPropagation()}
               onMouseDown={(e) => e.stopPropagation()}
             >
               <button
@@ -927,9 +1213,25 @@ export function TriggerPanel({
           )
         }
 
-        {/* Content - only visible when not collapsed */}
+        {/* Content - only visible when not collapsed. Scrolls in place once the
+            card hits its max height (long form, small screen) so the submit
+            button stays reachable instead of being pushed off the viewport. */}
         {!isCollapsed && (
-          <div className={selectedConfig.type === 'chat' ? 'pt-4' : 'p-4'}>
+          <div data-testid="trigger-panel-body" className={cn(
+            "min-h-0 overscroll-contain",
+            // Chat scrolls INSIDE its message list, not as a whole: the
+            // composer is the point of the tab and must stay pinned at the
+            // bottom of the card. Form and webhook are a single block, so the
+            // whole body scrolls and their submit button rides along.
+            // Chat: a column, so the composer stays pinned under a message list
+            // that shrinks and scrolls on its own. `overflow-y-auto` on top of
+            // that is the last resort - if the card is squeezed below even the
+            // composer's own height, the body scrolls to it rather than
+            // clipping the one control the tab exists for.
+            selectedConfig.type === 'chat'
+              ? 'pt-4 flex flex-col overflow-y-auto'
+              : 'p-4 overflow-y-auto',
+          )}>
             {selectedConfig.type === 'webhook' ? (
               /* Webhook HTTP playground */
               <form onSubmit={handleWebhookSubmit} className="space-y-3">
@@ -985,10 +1287,13 @@ export function TriggerPanel({
               </form>
             ) : selectedConfig.type === 'chat' ? (
               /* Chat Input using MessageComposer */
-              <div>
+              <div className="flex flex-col min-h-0 flex-1">
                 {/* Chat message history */}
                 {chatMessages.length > 0 && (
-                  <div className="px-4 pb-2 max-h-64 overflow-y-auto space-y-2">
+                  <div
+                    data-testid="trigger-panel-chat-messages"
+                    className="px-4 pb-2 min-h-0 flex-1 max-h-64 overflow-y-auto overscroll-contain space-y-2"
+                  >
                     {chatMessages.map((msg) => (
                       <div
                         key={msg.id}
@@ -1014,7 +1319,7 @@ export function TriggerPanel({
                 )}
                 {/* Chat attachment previews */}
                 {chatAttachments.length > 0 && (
-                  <div className="px-4 pb-2 flex flex-wrap gap-2">
+                  <div className="px-4 pb-2 shrink-0 flex flex-wrap gap-2">
                     {chatAttachments.map((attachment, index) => (
                       <div key={index} className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs bg-slate-100 dark:bg-slate-800">
                         {attachment.status === 'uploading' && <LoadingSpinner size="xs" />}
@@ -1035,22 +1340,26 @@ export function TriggerPanel({
                   className="hidden"
                   onChange={handleChatFileSelect}
                 />
-                <MessageComposer
-                  inputValue={chatMessage}
-                  onInputChange={setChatMessage}
-                  onSendMessage={handleChatSubmit}
-                  onKeyPress={handleKeyPress}
-                  isStreaming={isSubmitting}
-                  onStopStream={() => {}}
-                  showAttachmentMenu={!!workflowId}
-                  onShowAttachmentMenu={(show) => {
-                    if (show && chatFileInputRef.current) {
-                      chatFileInputRef.current.click();
-                    }
-                  }}
-                  fullWidth={true}
-                  disabled={isTriggerDisabled || hasChatUploading}
-                />
+                {/* shrink-0: the composer is what the tab is FOR - it must not
+                    be the thing that gets squeezed out on a short screen. */}
+                <div className="shrink-0">
+                  <MessageComposer
+                    inputValue={chatMessage}
+                    onInputChange={setChatMessage}
+                    onSendMessage={handleChatSubmit}
+                    onKeyPress={handleKeyPress}
+                    isStreaming={isSubmitting}
+                    onStopStream={() => {}}
+                    showAttachmentMenu={!!workflowId}
+                    onShowAttachmentMenu={(show) => {
+                      if (show && chatFileInputRef.current) {
+                        chatFileInputRef.current.click();
+                      }
+                    }}
+                    fullWidth={true}
+                    disabled={isTriggerDisabled || hasChatUploading}
+                  />
+                </div>
               </div>
             ) : (
               /* Form */

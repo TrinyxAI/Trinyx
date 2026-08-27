@@ -20,6 +20,7 @@ import { useNodeExecutionStatus } from '../../contexts/StepByStepContext';
 
 import { useWorkflowLayoutDirectionSafe } from '@/contexts/WorkflowLayoutDirectionContext';
 import { getSourceHandleGeometry, getTargetHandleGeometry } from './handleGeometry';
+import { workflowPanelTabId } from '@/lib/sidePanel/tabResource';
 /**
  * WorkflowNode - A specialized node for workflow triggers
  *
@@ -153,7 +154,7 @@ export function WorkflowNode({ data, selected, id }: NodeProps<BuilderNodeData>)
                 window.dispatchEvent(new CustomEvent('workflowOpenSubWorkflow', { detail: { workflowId: referencedWorkflowId, workflowName: referencedWorkflowName, nodeId: id } }));
               } else {
                 import('@/components/app/WorkflowBuilderPanelContent').then(({ WorkflowBuilderPanelContent }) => {
-                  sidePanel?.openTab({ id: `workflow-builder-${referencedWorkflowId}`, label: referencedWorkflowName, icon: React.createElement(Workflow, { className: 'w-4 h-4' }), content: React.createElement(WorkflowBuilderPanelContent, { workflowId: referencedWorkflowId }), preferredWidth: 0.5, keepMounted: true });
+                  sidePanel?.openTab({ id: workflowPanelTabId(referencedWorkflowId), label: referencedWorkflowName, icon: React.createElement(Workflow, { className: 'w-4 h-4' }), content: React.createElement(WorkflowBuilderPanelContent, { workflowId: referencedWorkflowId }), preferredWidth: 0.5, keepMounted: true });
                 });
               }
             },

@@ -8,6 +8,7 @@ import com.apimarketplace.orchestrator.repository.WorkflowRepository;
 import com.apimarketplace.orchestrator.repository.WorkflowRunRepository;
 import com.apimarketplace.orchestrator.services.WorkflowBoardService;
 import com.apimarketplace.orchestrator.services.WorkflowManagementService;
+import com.apimarketplace.orchestrator.services.folder.WorkflowFolderService;
 import com.apimarketplace.publication.client.PublicationClient;
 import com.apimarketplace.trigger.client.TriggerClient;
 import org.junit.jupiter.api.BeforeEach;
@@ -63,7 +64,8 @@ class WorkflowListControllerPagedTest {
                 publicationClient,
                 workflowService,
                 mock(WorkflowBoardService.class),
-                mock(OrgAccessGuard.class));
+                mock(OrgAccessGuard.class),
+                mock(WorkflowFolderService.class));
         // Page badges are always batched; default to "nothing shared" so the non-visibility paths
         // never NPE on a null map. Specific tests override this with explicit statuses.
         lenient().when(publicationClient.findPublicationStatusesByWorkflowIds(any(), any()))
@@ -80,7 +82,7 @@ class WorkflowListControllerPagedTest {
     @SuppressWarnings("unchecked")
     private List<WorkflowSummary> listWith(String sort, String visibility) {
         ResponseEntity<Map<String, Object>> resp = controller.listWorkflows(
-                TENANT, null, null, null, null, 25, 0, null, sort, visibility);
+                TENANT, null, null, null, null, 25, 0, null, sort, visibility, null, false);
         return (List<WorkflowSummary>) resp.getBody().get("workflows");
     }
 

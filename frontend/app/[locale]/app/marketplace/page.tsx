@@ -18,12 +18,14 @@ import LoadingSpinner from '@/components/LoadingSpinner';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { matchesVisibilityFilter, type VisibilityFilter } from '@/lib/utils/visibility';
 import AcquirePublicationModal from '@/components/marketplace/AcquirePublicationModal';
+import { InstallSummaryModal, type InstallSummaryTarget } from '@/components/marketplace/InstallSummaryModal';
 import { useMarketplaceInstallStore } from '@/lib/stores/marketplace-install-store';
 import { IS_CE } from '@/lib/edition';
 import { useCeCloudLinkStatus } from '@/hooks/useCeCloudLinkStatus';
 import { cloudLinkService } from '@/lib/api/cloud-link.service';
 import { clearModelsCache } from '@/hooks/useModels';
 import { PublicationCard, PublicationCardSkeleton } from '@/components/marketplace/PublicationCard';
+import type { MarketplaceRefinements } from '@/lib/api/orchestrator/publication.service';
 
 // Card + preview helpers extracted to a shared component so the onboarding
 // "suggested apps" modal reuses the exact same markup (no style fork).
@@ -45,29 +47,38 @@ const DISPLAY_FILTER_ICONS: Record<DisplayFilter, typeof Bot> = {
   skills: Zap,
 };
 
+/** DisplayMode each type filter maps to in the marketplace query. */
+const DISPLAY_FILTER_MODES: Record<DisplayFilter, string> = {
+  apps: 'APPLICATION',
+  agents: 'AGENT',
+  interfaces: 'INTERFACE',
+  tables: 'TABLE',
+  skills: 'SKILL',
+};
+
 // ---------------------------------------------------------------------------
 // Explore refinements - sort + rating / date / price filters
 //
-// All four are applied CLIENT-side, on the page the backend already returned,
-// for the same reason the type filter is: the marketplace read is a single
-// 50-row fetch and every card carries the fields these need (averageRating,
-// reviewCount, publishedAt, creditsPerUse, useCount). Pushing them into the
-// query would mean a round trip per select change and four new backend
-// parameters for a set that fits in memory.
+// All of them, the type filter included, are answered by the BACKEND: they go
+// out as query params and come back as a page of exactly the publications that
+// match.
 //
-// 'rating' is the DEFAULT: the marketplace leads with what people rated best.
-// It composes with the server order rather than replacing it - the sort is
-// stable and unrated publications all share the same key, so everything without
-// a rating keeps the backend's popularity sequence behind the rated ones.
+// They used to be applied client-side, over a single popularity-ordered
+// `page=0&size=50` fetch. That silently redefined each one as "...among the 50
+// most popular publications": with 76 public publications, 26 could not be
+// reached by any combination of clicks, "recent" could not surface anything
+// newer than that window (a just-published app has no installs, favorites or
+// reviews, so it sorts last and is exactly what falls off the end), and "last 7
+// days" came back empty on the day something was published. Only the search box
+// hit a different endpoint, which is why searching found apps the grid swore did
+// not exist.
 //
-// 'popular' deliberately does NOT re-sort: it is the backend's own popularity
-// ordering (favorites, installs, rating mass - see
-// PublicationListQueryService.POPULARITY_ORDER_BY), which knows the favorite
-// counts the client never receives. Re-sorting it here would silently drop
-// that term.
+// 'popular' is the DEFAULT and is the backend's own ordering (favorites,
+// installs, rating mass - see PublicationListQueryService.POPULARITY_ORDER_BY),
+// which knows the favorite counts the client never receives.
 // ---------------------------------------------------------------------------
 
-const SORT_OPTIONS = ['rating', 'popular', 'recent', 'installs'] as const;
+const SORT_OPTIONS = ['popular', 'rating', 'recent', 'installs'] as const;
 type SortOption = (typeof SORT_OPTIONS)[number];
 
 const RATING_FILTERS = ['any', 'rated', 'rating4', 'rating3'] as const;
@@ -79,12 +90,12 @@ type DateFilter = (typeof DATE_FILTERS)[number];
 const PRICE_FILTERS = ['any', 'free', 'paid'] as const;
 type PriceFilter = (typeof PRICE_FILTERS)[number];
 
-/** Minimum average rating a publication must reach to pass the rating filter. */
-const RATING_THRESHOLDS: Record<RatingFilter, number> = {
-  any: 0,
-  rated: 0,
-  rating4: 4,
-  rating3: 3,
+/** Backend `rating` param each rating filter maps to. */
+const RATING_PARAMS: Record<RatingFilter, string> = {
+  any: 'any',
+  rated: 'rated',
+  rating4: 'min_4',
+  rating3: 'min_3',
 };
 
 /** Query params cleared together by the "reset filters" action. */
@@ -98,6 +109,12 @@ const DATE_WINDOW_DAYS: Record<DateFilter, number | null> = {
   d90: 90,
   y1: 365,
 };
+
+/**
+ * One grid page. 24 is six full rows at the lg 4-column breakpoint, so "Load
+ * more" always extends the grid by whole rows instead of leaving a ragged one.
+ */
+const PAGE_SIZE = 24;
 
 /**
  * Enum-valued state that lives in the URL query string instead of component
@@ -212,9 +229,17 @@ function RefinementSelect<T extends string>({
 // and installs go through the CE remote acquire path (ceMode).
 function ExploreTab({ remote = false }: { remote?: boolean }) {
   const t = useTranslations('marketplace');
+  // Navigates to the editable copy the install-time opt-in may have created.
+  const router = useRouter();
   const { isLoading: isAuthLoading, isAuthenticated, numericUserId } = useAuth();
   const [publications, setPublications] = useState<WorkflowPublication[]>([]);
+  // How many publications match the current query server-side, which is what
+  // decides whether there is a next page to offer - `publications` only holds
+  // the pages fetched so far.
+  const [totalCount, setTotalCount] = useState(0);
+  const [page, setPage] = useState(0);
   const [isLoading, setIsLoading] = useState(true);
+  const [isLoadingMore, setIsLoadingMore] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedCategory, setSelectedCategory] = useState<string | undefined>();
   const [error, setError] = useState<string | null>(null);
@@ -231,10 +256,17 @@ function ExploreTab({ remote = false }: { remote?: boolean }) {
   const activeInstall = rawActiveInstall?.inline ? rawActiveInstall : null;
   const clearInstall = useMarketplaceInstallStore((s) => s.clear);
   const consumeInstallSuccess = useMarketplaceInstallStore((s) => s.consumeSuccess);
+  // Post-install summary of what landed in the workspace. Held locally (not read from
+  // the store) so it survives consuming the success, and so a NEXT install can start
+  // while the user is still reading it.
+  const [installSummary, setInstallSummary] = useState<InstallSummaryTarget | null>(null);
+  // Which install has already been summarised, so closing the modal is final (see the
+  // success effect). Not state: it must not trigger a render of its own.
+  const summarisedInstallRef = useRef<string | null>(null);
   const [displayFilter, setDisplayFilter] = useQueryParamState<DisplayFilter>('type', DISPLAY_FILTERS, 'apps');
   // Refinements live in the URL like `type` does, so a filtered grid survives
   // a Back/forward, a breadcrumb return, or a pasted link.
-  const [sortOption, setSortOption] = useQueryParamState<SortOption>('sort', SORT_OPTIONS, 'rating');
+  const [sortOption, setSortOption] = useQueryParamState<SortOption>('sort', SORT_OPTIONS, 'popular');
   const [ratingFilter, setRatingFilter] = useQueryParamState<RatingFilter>('rating', RATING_FILTERS, 'any');
   const [dateFilter, setDateFilter] = useQueryParamState<DateFilter>('date', DATE_FILTERS, 'any');
   const [priceFilter, setPriceFilter] = useQueryParamState<PriceFilter>('price', PRICE_FILTERS, 'any');
@@ -285,9 +317,13 @@ function ExploreTab({ remote = false }: { remote?: boolean }) {
   // doesn't hide rows acquired in another workspace.
   useOrgScopedReset(() => {
     setPublications([]);
+    setTotalCount(0);
+    setPage(0);
     setAcquiredIds(new Set());
     setJustInstalledIds(new Set());
     setError(null);
+    // The summary describes what landed in the PREVIOUS workspace - drop it.
+    setInstallSummary(null);
     // An install finishing after the switch belongs to the PREVIOUS workspace:
     // kill it so its success can't mark a card installed under the new one.
     clearInstall();
@@ -349,43 +385,72 @@ function ExploreTab({ remote = false }: { remote?: boolean }) {
     }
   }, [isAuthenticated]);
 
-  const fetchPublications = useCallback(async (categorySlug?: string) => {
-    setIsLoading(true);
-    setError(null);
-    try {
-      const response = remote
-        ? await publicationService.getRemoteMarketplacePublications(0, 50, categorySlug)
-        : await orchestratorApi.getMarketplacePublications(0, 50, categorySlug);
-      setPublications(response.publications || []);
-    } catch (err: any) {
-      console.error('Error fetching marketplace publications:', err);
-      setError(err.message || t('loadError'));
-    } finally {
-      setIsLoading(false);
-    }
-  }, [remote, t]);
+  /** The active refinements, in the shape the marketplace endpoints take. */
+  const refinements = useMemo<MarketplaceRefinements>(() => ({
+    displayMode: DISPLAY_FILTER_MODES[displayFilter],
+    sort: sortOption,
+    rating: RATING_PARAMS[ratingFilter],
+    days: DATE_WINDOW_DAYS[dateFilter] ?? undefined,
+    price: priceFilter,
+  }), [displayFilter, sortOption, ratingFilter, dateFilter, priceFilter]);
 
-  const searchPublications = useCallback(async (query: string) => {
-    if (!query.trim()) {
-      fetchPublications(selectedCategory);
-      return;
-    }
-    setIsLoading(true);
+  /**
+   * Load one page of the grid.
+   *
+   * `append` separates "Load more" (keep what is on screen and add the next
+   * page) from every other trigger - a new query, category or refinement
+   * replaces the grid and starts again at page 0.
+   *
+   * Search stays ONE unpaginated call because the endpoint answers with the
+   * whole match set, so it reports its own length as the total and never offers
+   * a next page. It carries the same refinements as the grid: the search box
+   * sits inside the filtered view, so typing must narrow what is on screen
+   * rather than reset it to every publication.
+   */
+  const loadPage = useCallback(async (targetPage: number, append: boolean) => {
+    // Only the newest request may write. Typing while a "Load more" is in flight,
+    // or flipping a filter, leaves an older fetch resolving afterwards: without
+    // this it would append rows the visitor no longer asked for, or replace the
+    // grid with a set matching a query they have since changed.
+    const requestId = ++latestRequestRef.current;
+    if (append) setIsLoadingMore(true);
+    else setIsLoading(true);
     setError(null);
+    const query = searchQuery.trim();
     try {
-      // Forward the active category so typing into the search bar doesn't
-      // silently drop a pre-selected category filter (D-3 bug fix).
-      const results = remote
-        ? await publicationService.searchRemotePublications(query, selectedCategory)
-        : await orchestratorApi.searchPublications(query, selectedCategory);
-      setPublications(results?.publications || []);
+      if (query) {
+        const results = remote
+          ? await publicationService.searchRemotePublications(query, selectedCategory, refinements)
+          : await orchestratorApi.searchPublications(query, selectedCategory, refinements);
+        if (requestId !== latestRequestRef.current) return;
+        const found = results?.publications || [];
+        setPublications(found);
+        setTotalCount(found.length);
+        setPage(0);
+        return;
+      }
+      const response = remote
+        ? await publicationService.getRemoteMarketplacePublications(targetPage, PAGE_SIZE, selectedCategory, refinements)
+        : await orchestratorApi.getMarketplacePublications(targetPage, PAGE_SIZE, selectedCategory, refinements);
+      if (requestId !== latestRequestRef.current) return;
+      const batch = response.publications || [];
+      // Functional update: a "Load more" resolving after another state change
+      // must extend whatever is on screen now, not the array this closure saw.
+      setPublications((prev) => (append ? [...prev, ...batch] : batch));
+      setTotalCount(typeof response.count === 'number' ? response.count : batch.length);
+      setPage(targetPage);
     } catch (err: any) {
-      console.error('Error searching publications:', err);
-      setError(err.message || t('searchError'));
+      if (requestId !== latestRequestRef.current) return;
+      console.error('Error loading marketplace publications:', err);
+      setError(err.message || (query ? t('searchError') : t('loadError')));
     } finally {
-      setIsLoading(false);
+      // A superseded request must not clear the spinner the CURRENT one raised.
+      if (requestId === latestRequestRef.current) {
+        setIsLoading(false);
+        setIsLoadingMore(false);
+      }
     }
-  }, [fetchPublications, remote, selectedCategory, t]);
+  }, [remote, searchQuery, selectedCategory, refinements, t]);
 
   const handleCategoryChange = useCallback((categorySlug?: string) => {
     setSelectedCategory(categorySlug);
@@ -393,23 +458,28 @@ function ExploreTab({ remote = false }: { remote?: boolean }) {
   }, []);
 
   const initialLoadDone = useRef(false);
+  // Sequence number of the most recent grid request (see loadPage).
+  const latestRequestRef = useRef(0);
 
   useEffect(() => {
     if (!isAuthLoading) fetchAcquiredIds();
   }, [isAuthLoading, fetchAcquiredIds]);
 
+  // Any change to what is being asked for - query, category, or a refinement -
+  // reloads from page 0, since `loadPage` closes over all three.
   useEffect(() => {
     if (isAuthLoading) return;
     const timer = setTimeout(() => {
-      if (searchQuery) {
-        searchPublications(searchQuery);
-      } else {
-        fetchPublications(selectedCategory);
-      }
+      loadPage(0, false);
       initialLoadDone.current = true;
     }, initialLoadDone.current ? 300 : 0);
     return () => clearTimeout(timer);
-  }, [isAuthLoading, searchQuery, searchPublications, fetchPublications, selectedCategory]);
+  }, [isAuthLoading, loadPage]);
+
+  // A search returns its whole match set at once, so only the browse grid has a
+  // next page. `totalCount` is the server's count of everything that matches,
+  // not just what has been fetched.
+  const hasMore = !searchQuery.trim() && publications.length < totalCount;
 
   // Install completed (the machine runs in the shared store, the modal is
   // already closed): flip the card to installed/"Open" right away, refresh the
@@ -417,15 +487,48 @@ function ExploreTab({ remote = false }: { remote?: boolean }) {
   // (parked at 100%) disappears. consumeSuccess (not clear) because the finally
   // runs after an async refetch: by then the user may have started installing
   // another app, and clear() would kill that machine.
+  //
+  // The summary is captured into LOCAL state first: consuming the success wipes
+  // the store entry, and the user must still be able to read what was installed
+  // (and start another install) while the summary is on screen.
   useEffect(() => {
     if (activeInstall?.status !== 'success') return;
     const pubId = activeInstall.publication.id;
+    // Dismissed stays dismissed: `installSummary` is null once closed, so without this
+    // the effect would happily build a fresh summary and re-open the modal on its next
+    // run (it re-runs while the store still holds the success).
+    if (summarisedInstallRef.current !== pubId) {
+      summarisedInstallRef.current = pubId;
+      // Functional + identity-preserving: if this success is already summarised, keep the
+      // SAME object so React bails out of the re-render. A fresh object here would make
+      // every re-render that re-runs this effect schedule another one.
+      setInstallSummary((prev) => (prev?.publication.id === pubId
+        ? prev
+        : {
+            publication: activeInstall.publication,
+            resources: activeInstall.resources,
+            // Only when the user asked for it: an absent block means "no copy was
+            // requested", which the summary renders as nothing at all.
+            editableCopy: activeInstall.withEditableCopy
+              ? {
+                  workflowId: activeInstall.editableCopyWorkflowId,
+                  failed: activeInstall.editableCopyFailed,
+                }
+              : undefined,
+          }));
+    }
     setJustInstalledIds((prev) => {
       const next = new Set(prev);
       next.add(pubId);
       return next;
     });
     void fetchAcquiredIds().finally(() => consumeInstallSuccess(pubId));
+    // `resources` is READ here but deliberately NOT a dependency: it is an object the
+    // store writes in the same transition that sets status='success', so the status +
+    // publication-id keys already cover it - while adding it would re-run this effect on
+    // every render that hands back a fresh object, and each run sets state (an infinite
+    // render loop; it hangs the page silently).
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeInstall?.status, activeInstall?.publication.id, fetchAcquiredIds, consumeInstallSuccess]);
 
   // Terminal install errors surface through the SAME modal (error /
@@ -438,62 +541,6 @@ function ExploreTab({ remote = false }: { remote?: boolean }) {
       : null;
 
 
-  const filteredPublications = useMemo(() => {
-    const cutoff = (() => {
-      const days = DATE_WINDOW_DAYS[dateFilter];
-      return days == null ? null : Date.now() - days * 24 * 60 * 60 * 1000;
-    })();
-
-    const matching = publications.filter((p) => {
-      const mode = p.displayMode || 'WORKFLOW';
-      const typeMatches =
-        displayFilter === 'agents' ? mode === 'AGENT'
-        : displayFilter === 'apps' ? mode === 'APPLICATION'
-        : displayFilter === 'interfaces' ? mode === 'INTERFACE'
-        : displayFilter === 'tables' ? mode === 'TABLE'
-        : mode === 'SKILL';
-      if (!typeMatches) return false;
-
-      // Rating: an unrated publication has no average to compare, so it fails
-      // every rating filter rather than passing as a silent 0.
-      if (ratingFilter !== 'any') {
-        const reviews = p.reviewCount ?? 0;
-        if (reviews === 0) return false;
-        if ((p.averageRating ?? 0) < RATING_THRESHOLDS[ratingFilter]) return false;
-      }
-
-      // Date: a publication with no publishedAt cannot be placed in a window.
-      if (cutoff != null) {
-        const publishedAt = p.publishedAt ? Date.parse(p.publishedAt) : NaN;
-        if (Number.isNaN(publishedAt) || publishedAt < cutoff) return false;
-      }
-
-      if (priceFilter === 'free' && (p.creditsPerUse ?? 0) > 0) return false;
-      if (priceFilter === 'paid' && (p.creditsPerUse ?? 0) <= 0) return false;
-
-      return true;
-    });
-
-    // 'popular' keeps the server order (it carries the favorite counts the
-    // client never sees), so only the explicit sorts reorder - and they copy
-    // first, because sort() mutates and `publications` is state.
-    if (sortOption === 'popular') return matching;
-
-    return [...matching].sort((a, b) => {
-      if (sortOption === 'rating') {
-        // Unrated last, then by average, then by how many people backed it.
-        const ra = (a.reviewCount ?? 0) > 0 ? (a.averageRating ?? 0) : -1;
-        const rb = (b.reviewCount ?? 0) > 0 ? (b.averageRating ?? 0) : -1;
-        if (rb !== ra) return rb - ra;
-        return (b.reviewCount ?? 0) - (a.reviewCount ?? 0);
-      }
-      if (sortOption === 'installs') return (b.useCount ?? 0) - (a.useCount ?? 0);
-      // 'recent' - missing dates sort last instead of jumping to the top as 0.
-      const da = a.publishedAt ? Date.parse(a.publishedAt) : Number.NEGATIVE_INFINITY;
-      const db = b.publishedAt ? Date.parse(b.publishedAt) : Number.NEGATIVE_INFINITY;
-      return db - da;
-    });
-  }, [publications, displayFilter, sortOption, ratingFilter, dateFilter, priceFilter]);
 
   const SelectedTypeIcon = DISPLAY_FILTER_ICONS[displayFilter];
 
@@ -611,7 +658,7 @@ function ExploreTab({ remote = false }: { remote?: boolean }) {
         </div>
       )}
 
-      {!isLoading && filteredPublications.length === 0 && (() => {
+      {!isLoading && publications.length === 0 && (() => {
         const emptyIcon =
           displayFilter === 'agents' ? <Bot className="h-7 w-7 text-theme-muted" />
           : displayFilter === 'apps' ? <AppWindow className="h-7 w-7 text-theme-muted" />
@@ -671,13 +718,17 @@ function ExploreTab({ remote = false }: { remote?: boolean }) {
         );
       })()}
 
-      {!isLoading && filteredPublications.length > 0 && (
+      {!isLoading && publications.length > 0 && (
         <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
-          {filteredPublications.map((publication) => {
+          {publications.map((publication) => {
             const isInstalled = acquiredIds.has(publication.id) || justInstalledIds.has(publication.id);
             const isThisInstalling =
               activeInstall?.publication.id === publication.id &&
               (activeInstall.status === 'installing' || activeInstall.status === 'success');
+            // Single-flight: while ANY install runs (including one started from a modal
+            // elsewhere - hence the RAW store entry), every other Install is refused.
+            const otherInstallRunning =
+              rawActiveInstall?.status === 'installing' && rawActiveInstall.publication.id !== publication.id;
             return (
             <PublicationCard
               key={publication.id}
@@ -704,6 +755,7 @@ function ExploreTab({ remote = false }: { remote?: boolean }) {
               // (kept through the brief 'success' window at 100% so the card
               // never flashes back to an Install button before the flip).
               installProgress={isThisInstalling ? activeInstall.progress : null}
+              installBlocked={otherInstallRunning}
               // Installed application → the Install slot becomes "Open". The
               // applications route resolves the acquired clone from the
               // publication id, so no clone id is needed here.
@@ -715,6 +767,26 @@ function ExploreTab({ remote = false }: { remote?: boolean }) {
             />
             );
           })}
+        </div>
+      )}
+
+      {/* Load more. The grid is server-paged, so this is the only way to reach
+          past the first page. The button's PRESENCE is the whole signal that
+          there is more: the catalogue size is deliberately not published - how
+          many apps exist is the marketplace's business, not a number to put
+          under every grid. `totalCount` therefore only ever decides whether this
+          renders, and is never shown. */}
+      {!isLoading && hasMore && (
+        <div className="flex justify-center pt-2">
+          <Button
+            variant="outline"
+            onClick={() => loadPage(page + 1, true)}
+            disabled={isLoadingMore}
+            data-testid="marketplace-load-more"
+            className="rounded-xl"
+          >
+            {isLoadingMore ? t('loadingMore') : t('loadMore')}
+          </Button>
         </div>
       )}
 
@@ -730,6 +802,24 @@ function ExploreTab({ remote = false }: { remote?: boolean }) {
           onClose={() => setAcquireTarget(null)}
           publication={acquireTarget ?? installErrorPublication!}
           ceMode={remote}
+        />
+      )}
+
+      {/* Post-install summary: names every resource the install created, so the
+          workspace never gains interfaces / tables / agents silently. */}
+      {installSummary && (
+        <InstallSummaryModal
+          publication={installSummary.publication}
+          resources={installSummary.resources}
+          editableCopy={installSummary.editableCopy}
+          onOpenEditableCopy={installSummary.editableCopy?.workflowId
+            ? () => {
+                const copyId = installSummary.editableCopy!.workflowId!;
+                setInstallSummary(null);
+                router.push(`/app/workflow/${copyId}`);
+              }
+            : undefined}
+          onClose={() => setInstallSummary(null)}
         />
       )}
     </div>
@@ -858,6 +948,8 @@ function MyPublicationsTab() {
 // Exported for unit testing the cloud-acquired-purchase enrichment in isolation.
 export function MyPurchasesTab({ remote = false }: { remote?: boolean }) {
   const t = useTranslations('marketplace');
+  // Navigates to the editable copy the install-time opt-in may have created.
+  const router = useRouter();
   const { isLoading: isAuthLoading } = useAuth();
   const [purchases, setPurchases] = useState<Purchase[]>([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -872,10 +964,15 @@ export function MyPurchasesTab({ remote = false }: { remote?: boolean }) {
   const activeInstall = rawActiveInstall?.inline ? rawActiveInstall : null;
   const clearInstall = useMarketplaceInstallStore((s) => s.clear);
   const consumeInstallSuccess = useMarketplaceInstallStore((s) => s.consumeSuccess);
+  // Same post-install summary as Explore: a re-install re-creates the whole resource
+  // set, so the user is told what it put back.
+  const [installSummary, setInstallSummary] = useState<InstallSummaryTarget | null>(null);
+  const summarisedInstallRef = useRef<string | null>(null);
 
   // A workspace switch orphans any in-flight install started here.
   useOrgScopedReset(() => {
     clearInstall();
+    setInstallSummary(null);
   });
 
   const fetchPurchases = useCallback(async () => {
@@ -952,8 +1049,29 @@ export function MyPurchasesTab({ remote = false }: { remote?: boolean }) {
   useEffect(() => {
     if (activeInstall?.status !== 'success') return;
     const pubId = activeInstall.publication.id;
+    // Dismissed stays dismissed (see the same guard in ExploreTab).
+    if (summarisedInstallRef.current !== pubId) {
+      summarisedInstallRef.current = pubId;
+      setInstallSummary((prev) => (prev?.publication.id === pubId
+        ? prev
+        : {
+            publication: activeInstall.publication,
+            resources: activeInstall.resources,
+            // Only when the user asked for it: an absent block means "no copy was
+            // requested", which the summary renders as nothing at all.
+            editableCopy: activeInstall.withEditableCopy
+              ? {
+                  workflowId: activeInstall.editableCopyWorkflowId,
+                  failed: activeInstall.editableCopyFailed,
+                }
+              : undefined,
+          }));
+    }
     setReinstallTarget(null);
     void fetchPurchases().finally(() => consumeInstallSuccess(pubId));
+    // `resources` read but NOT a dependency - see the same note in ExploreTab: an object
+    // dependency re-runs this state-setting effect on every render and hangs the page.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeInstall?.status, activeInstall?.publication.id, fetchPurchases, consumeInstallSuccess]);
 
   // Same error-surfacing contract as the Explore tab: terminal install errors
@@ -1015,6 +1133,9 @@ export function MyPurchasesTab({ remote = false }: { remote?: boolean }) {
         const isThisInstalling =
           activeInstall?.publication.id === pub.id &&
           (activeInstall.status === 'installing' || activeInstall.status === 'success');
+        // Single-flight, same rule as Explore (RAW store: an install started anywhere counts).
+        const otherInstallRunning =
+          rawActiveInstall?.status === 'installing' && rawActiveInstall.publication.id !== pub.id;
         return (
           <PublicationCard
             key={purchase.publicationId}
@@ -1031,6 +1152,7 @@ export function MyPurchasesTab({ remote = false }: { remote?: boolean }) {
             remote={pub.remote}
             // Reinstall in progress → same un-greying preview + gauge as Explore.
             installProgress={isThisInstalling ? activeInstall.progress : null}
+            installBlocked={otherInstallRunning}
             // Installed application purchase → jump straight to the app.
             openHref={
               purchase.hasActiveWorkflow && (pub.displayMode || 'WORKFLOW') === 'APPLICATION'
@@ -1047,6 +1169,21 @@ export function MyPurchasesTab({ remote = false }: { remote?: boolean }) {
           onClose={() => setReinstallTarget(null)}
           publication={reinstallTarget ?? installErrorPublication!}
           ceMode={remote}
+        />
+      )}
+      {installSummary && (
+        <InstallSummaryModal
+          publication={installSummary.publication}
+          resources={installSummary.resources}
+          editableCopy={installSummary.editableCopy}
+          onOpenEditableCopy={installSummary.editableCopy?.workflowId
+            ? () => {
+                const copyId = installSummary.editableCopy!.workflowId!;
+                setInstallSummary(null);
+                router.push(`/app/workflow/${copyId}`);
+              }
+            : undefined}
+          onClose={() => setInstallSummary(null)}
         />
       )}
     </div>

@@ -99,6 +99,15 @@ public class WorkflowEntity implements OrgScopedEntity {
     @Column(name = "project_id")
     private UUID projectId;
 
+    /**
+     * Folder this workflow is filed under on the /app/workflow list
+     * ({@code orchestrator.workflow_folders}, V448), or {@code null} for the top level.
+     * Independent of {@link #projectId}: a project is a shared workspace for a piece of
+     * work, a folder is how the list itself is organised, and a workflow can be in both.
+     */
+    @Column(name = "folder_id")
+    private UUID folderId;
+
     @Column(name = "organization_id")
     private String organizationId;
 
@@ -338,6 +347,14 @@ public class WorkflowEntity implements OrgScopedEntity {
 
     public UUID getProjectId() {
         return projectId;
+    }
+
+    public UUID getFolderId() {
+        return folderId;
+    }
+
+    public void setFolderId(UUID folderId) {
+        this.folderId = folderId;
     }
 
     public void setProjectId(UUID projectId) {

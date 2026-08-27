@@ -27,6 +27,14 @@ import { useCanMutateInCurrentOrg } from '@/lib/stores/current-org-store';
 import { useOrgScopedReset } from '@/lib/hooks/useOrgScopedReset';
 import { createEmptyWorkflowPlan } from '@/lib/workflows/defaultWorkflowPlan';
 import { TemplateGallery } from '@/components/templates/TemplateGallery';
+import { DndContext, DragOverlay } from '@dnd-kit/core';
+import { FolderPlus } from 'lucide-react';
+import { WorkflowFolderFace } from '@/components/folders/WorkflowFolderFace';
+import { FolderBreadcrumb } from '@/components/folders/FolderBreadcrumb';
+import { FolderTilesGrid } from '@/components/folders/FolderTilesGrid';
+import { FolderDialogs } from '@/components/folders/FolderDialogs';
+import { DraggableResourceCard } from '@/components/folders/DraggableResourceCard';
+import { useListFolders } from '@/hooks/useListFolders';
 
 
 
@@ -77,6 +85,38 @@ export default function WorkflowTable({
   const [newWorkflowDescription, setNewWorkflowDescription] = useState('');
   const [showCreateWorkflowModal, setShowCreateWorkflowModal] = useState(false);
 
+  // FOLDERS. The level being shown is a fetch parameter like the page number; the tiles and
+  // the trail come back WITH the list, since that response already holds the workflows they
+  // are computed from. `reloadRef` breaks the loop between the two: the hook needs a way to
+  // reload, and the fetch needs the hook's level.
+  const reloadRef = useRef<() => void>(() => {});
+  const searching = debouncedSearch.trim().length > 0;
+  const folders = useListFolders({
+    kind: 'workflow',
+    reload: useCallback(() => reloadRef.current(), []),
+    selectedIds: selectedWorkflows,
+    clearSelection: clearWorkflowSelection,
+    searching,
+    busy: loading,
+    canMutate,
+    labels: {
+      actionFailed: t('folders.actionFailed'),
+      createFailed: t('folders.createFailed'),
+      renameFailed: t('folders.renameFailed'),
+      deleteFailed: t('folders.deleteFailed'),
+      moveFailed: t('folders.moveFailed'),
+      moved: t('folders.moved'),
+      movedToFolder: (count, name) => t('folders.movedToFolder', { count, name }),
+      movedToTopLevel: (count) => t('folders.movedToTopLevel', { count }),
+    },
+    notify: addToast,
+  });
+  const folderCountLabel = useCallback(
+    (count: number) => t('folders.workflowCount', { count }),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [],
+  );
+
   // Personal favorites (workspace-scoped): float favorited workflows to the top
   // and paint a star on each card. Refetched on workspace switch by the hook.
   const handleFavoriteError = useCallback(() => {
@@ -101,11 +141,16 @@ export default function WorkflowTable({
         q: debouncedSearch,
         sort: sortBy,
         visibility: visibilityFilter,
+        // `root` = the workflows filed nowhere. A search overrides this server-side and
+        // looks through every folder, so a name is always findable.
+        folderId: folders.folderIdParam,
+        includeFolders: true,
       });
       // A newer request superseded this one - drop its (now stale) result.
       if (reqId !== requestIdRef.current) return;
       setWorkflows(result.workflows ?? []);
       setTotalCount(result.totalCount ?? 0);
+      folders.applyListResponse(result);
     } catch (err) {
       if (reqId !== requestIdRef.current) return;
       console.error('Error fetching workflows:', err);
@@ -124,13 +169,16 @@ export default function WorkflowTable({
     // render under test mocks, and the load effect keys on this callback's identity - listing them
     // would refire the fetch on every render. Mirrors AgentTable.fetchAgents.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [page, pageSize, debouncedSearch, sortBy, visibilityFilter]);
+  }, [page, pageSize, debouncedSearch, sortBy, visibilityFilter, folders.folderIdParam]);
 
   // Reset to page 0 when the search term, sort, or visibility filter changes - the visible set
   // differs so the current page index may be out of range.
   useEffect(() => {
     setPage(0);
-  }, [debouncedSearch, sortBy, visibilityFilter]);
+  }, [debouncedSearch, sortBy, visibilityFilter, folders.folderIdParam]);
+
+  // The hook reloads through this ref, so it can be created before the fetch it triggers.
+  reloadRef.current = fetchWorkflows;
 
   // Clone selected workflows
   const cloneSelectedWorkflows = async () => {
@@ -326,10 +374,23 @@ export default function WorkflowTable({
           state). The create button lives in the header only when there are items; when empty the
           EmptyState carries the create CTA (so we don't show two create buttons). */}
       <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
-        <div>
-          <h1 className="text-lg font-semibold text-theme-primary">{t('workflow.title')}</h1>
-          <p className="text-sm text-theme-secondary mt-0.5">{t('workflow.subtitle')}</p>
-        </div>
+        {/* Inside a folder the PATH is the page title, with the folder mark and an
+            up-one-level arrow beside it - the same header the Files browser uses. */}
+        {folders.trail.length > 0 ? (
+          <FolderBreadcrumb
+            trail={folders.trail}
+            rootLabel={t('folders.allWorkflows')}
+            backLabel={t('folders.upOneLevel')}
+            subtitle={t('folders.workflowCount', { count: totalCount })}
+            onNavigate={folders.navigateToFolder}
+            droppable={folders.canOrganize}
+          />
+        ) : (
+          <div className="min-w-0">
+            <h1 className="text-lg font-semibold text-theme-primary">{t('workflow.title')}</h1>
+            <p className="text-sm text-theme-secondary mt-0.5">{t('workflow.subtitle')}</p>
+          </div>
+        )}
         {canMutate && !loading && (
           <div className="flex shrink-0 items-center gap-2">
             {/* Templates sit behind this button rather than in a permanent banner:
@@ -339,11 +400,22 @@ export default function WorkflowTable({
               kind="workflow"
               canMutate={canMutate}
               existingNames={workflows.map((w) => w.name).filter(Boolean) as string[]}
-              onWorkflowCreated={(id) => router.push(`/app/workflow/${id}`)}
+              onWorkflowCreated={async (id) => {
+                // Created while standing in a folder: file it there before leaving for
+                // the builder, or it would land back at the top level.
+                await folders.fileNewResource(id);
+                router.push(`/app/workflow/${id}`);
+              }}
               onError={(message) =>
                 addToast({ type: 'error', title: t('workflow.errorCreatingWorkflow'), message })
               }
             />
+            {folders.foldersEnabled && (
+              <Button variant="outline" size="sm" onClick={() => folders.setShowCreateDialog(true)}>
+                <FolderPlus className="h-4 w-4 mr-1.5" />
+                {t('folders.newFolder')}
+              </Button>
+            )}
             {(totalCount > 0 || debouncedSearch.trim().length > 0) && (
               <Button
                 variant="default"
@@ -360,7 +432,7 @@ export default function WorkflowTable({
 
       {/* Search + visibility filter + sort - visible whenever there is data or an active search.
           Both selects use the standard Applications-page select shape. */}
-      {(totalCount > 0 || debouncedSearch.trim().length > 0) && (
+      {(totalCount > 0 || folders.tiles.length > 0 || debouncedSearch.trim().length > 0) && (
         <div className="flex flex-col gap-4 md:flex-row md:items-center">
           <div className="relative flex-1 overflow-visible">
             <Search className="pointer-events-none absolute left-4 top-1/2 -translate-y-1/2 h-4 w-4 text-theme-secondary" />
@@ -402,6 +474,14 @@ export default function WorkflowTable({
       {/* Actions contextuelles - floating bottom-center bar (mirrors the task board). */}
       {selectedWorkflows.size > 0 && (
         <SelectionActionBar count={selectedWorkflows.size} onClear={clearWorkflowSelection}>
+          {/* Filing stays available while searching: you often find a workflow BECAUSE you
+              were looking for where to put it. Only the drag targets need a folder view. */}
+          {canMutate && (
+            <BulkBarButton onClick={folders.openMoveDialog}>
+              <FolderPlus className="h-3.5 w-3.5" />
+              {t('folders.moveToFolder')}
+            </BulkBarButton>
+          )}
           {canMutate && (
             <BulkBarButton onClick={cloneSelectedWorkflows}>
               <Copy className="h-3.5 w-3.5" />
@@ -421,15 +501,33 @@ export default function WorkflowTable({
       <div className="space-y-4 w-full overflow-visible">
         {loading ? (
           <CardSkeletonGrid />
-        ) : filteredWorkflows.length === 0 && !isAddingWorkflowInline ? (
+        ) : (
+          /* One drag context over the folders AND the cards: a card dropped on a tile is
+             filed there, a tile dropped on another tile is nested inside it. */
+          <DndContext
+            sensors={folders.sensors}
+            onDragStart={(event) => folders.handleDragStart(
+              event, (id) => workflows.find((w) => w.id === id)?.name)}
+            onDragEnd={folders.handleDragEnd}
+            onDragCancel={folders.cancelDrag}
+          >
+            <FolderTilesGrid
+              folders={folders}
+              countLabel={folderCountLabel}
+              renderFace={(folder) => <WorkflowFolderFace preview={folder.preview ?? []} />}
+            />
+
+            {filteredWorkflows.length === 0 && folders.tiles.length === 0 && !isAddingWorkflowInline ? (
           <EmptyState
             icon={<WorkflowIcon className="h-7 w-7 text-theme-muted" />}
             size="md"
-            title={t('workflow.noWorkflowsFound')}
-            subtitle={totalCount === 0 && debouncedSearch.trim().length === 0
-              ? t('workflow.createFirstWorkflow')
-              : t('workflow.noMatchingWorkflows')}
-            actions={canMutate && totalCount === 0 && debouncedSearch.trim().length === 0 ? (
+            title={folders.currentFolderId ? t('folders.emptyFolderTitle') : t('workflow.noWorkflowsFound')}
+            subtitle={folders.currentFolderId
+              ? t('folders.emptyFolderSubtitle')
+              : (totalCount === 0 && debouncedSearch.trim().length === 0
+                ? t('workflow.createFirstWorkflow')
+                : t('workflow.noMatchingWorkflows'))}
+            actions={canMutate && !folders.currentFolderId && totalCount === 0 && debouncedSearch.trim().length === 0 ? (
               <Button
                 variant="default"
                 onClick={() => setShowCreateWorkflowModal(true)}
@@ -440,7 +538,7 @@ export default function WorkflowTable({
               </Button>
             ) : undefined}
           />
-        ) : (
+            ) : (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
             {filteredWorkflows.map((w) => {
               // Count all nodes from plan
@@ -455,8 +553,8 @@ export default function WorkflowTable({
               }
 
               return (
+                <DraggableResourceCard key={w.id} id={w.id} disabled={!folders.canOrganize}>
                 <div
-                  key={w.id}
                   className="group rounded-[18px] border border-theme overflow-hidden bg-gradient-to-br from-slate-50 to-slate-100 dark:from-slate-800 dark:to-slate-900 hover:shadow-md transition-shadow cursor-pointer"
                   onClick={() => handleWorkflowClick(w)}
                 >
@@ -589,9 +687,24 @@ export default function WorkflowTable({
                     </div>
                   </div>
                 </div>
+                </DraggableResourceCard>
               );
             })}
           </div>
+            )}
+
+            {/* What is being dragged, following the pointer. A multi-selection drag says how
+                many cards are travelling, so a drop never moves more than you meant. */}
+            <DragOverlay>
+              {folders.activeDrag && (
+                <div className="rounded-xl border border-[var(--accent-primary)] bg-theme-secondary px-3 py-2 text-sm text-theme-primary shadow-lg">
+                  {folders.activeDrag.count > 1
+                    ? t('folders.draggingCount', { count: folders.activeDrag.count })
+                    : folders.activeDrag.label}
+                </div>
+              )}
+            </DragOverlay>
+          </DndContext>
         )}
 
       </div>
@@ -624,13 +737,16 @@ export default function WorkflowTable({
       {showCreateWorkflowModal && (
         <CreateWorkflowModal
           onClose={() => setShowCreateWorkflowModal(false)}
-          onWorkflowCreated={(workflowId) => {
+          onWorkflowCreated={async (workflowId) => {
             setShowCreateWorkflowModal(false);
+            await folders.fileNewResource(workflowId);
             // Jump straight into the new workflow's builder instead of staying on the list.
             router.push(`/app/workflow/${workflowId}`);
           }}
         />
       )}
+
+      <FolderDialogs folders={folders} selectedIds={selectedWorkflows} />
 
       <ToastContainer toasts={toasts} onRemoveToast={removeToast} />
     </div>

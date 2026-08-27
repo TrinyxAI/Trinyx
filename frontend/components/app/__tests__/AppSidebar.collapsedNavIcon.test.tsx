@@ -14,6 +14,8 @@
  * which was NOT part of the complaint and must not drift while fixing the colour.
  */
 import '@testing-library/jest-dom/vitest';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import React from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, render, screen } from '@testing-library/react';
@@ -39,9 +41,23 @@ vi.mock('@/lib/stores/current-org-store', () => ({
 import { Store } from 'lucide-react';
 import { NavIconButton } from '../AppSidebar';
 
-/** The row the expanded panel renders for the same entry, as its source writes it. */
-const EXPANDED_ROW_ICON =
-  'w-4 h-4 text-theme-secondary mr-2 group-hover:text-theme-primary group-[.bg-surface-hover]:text-theme-primary transition-colors';
+/**
+ * The row the expanded panel renders for the same entry, READ FROM ITS SOURCE.
+ *
+ * <p>It was a copied literal, with a comment claiming it tracked the row. It did
+ * not: restyling ConversationSidebar left this file untouched and the suite
+ * green, which is the exact drift the assertion says it prevents. Reading the
+ * class string out of the file makes the claim true, and the throw keeps a
+ * pattern that stops matching from turning the check into a no-op.
+ */
+function expandedRowIconClasses(): string[] {
+  const source = readFileSync(join(__dirname, '../../chat/ConversationSidebar.tsx'), 'utf8');
+  // The Marketplace row, one of eight identical ones; any of them pins the same
+  // treatment, and naming one keeps the pattern anchored to a real line.
+  const match = source.match(/<Store className="([^"]+)"/);
+  if (!match) throw new Error('The expanded nav row was not found in ConversationSidebar.tsx');
+  return match[1].split(/\s+/).filter(Boolean);
+}
 
 function renderRail(isActive = false) {
   render(<NavIconButton icon={Store} title="Marketplace" onClick={() => undefined} isActive={isActive} />);
@@ -106,12 +122,12 @@ describe('collapsed sidebar rail - a nav icon looks like its expanded row', () =
   });
 
   it('applies every colour rule the expanded row applies', () => {
-    // Read from the expanded row's own class string, so the day that row is
+    // Read out of ConversationSidebar.tsx at run time, so the day that row is
     // restyled this test says the rail drifted instead of quietly passing.
     const { icon } = renderRail();
     const railClasses = (icon.getAttribute('class') ?? '').split(/\s+/);
 
-    for (const cls of EXPANDED_ROW_ICON.split(/\s+/)) {
+    for (const cls of expandedRowIconClasses()) {
       if (cls === 'mr-2') continue; // spacing before the label; the rail has no label
       expect(railClasses, cls).toContain(cls);
     }

@@ -4,6 +4,7 @@ import * as React from 'react';
 import { AppWindow } from 'lucide-react';
 import { ApplicationPanelContent } from '@/components/app/ApplicationSidePanel';
 import type { SidePanelTab } from '@/contexts/SidePanelContext';
+import { applicationPanelTabId } from '@/lib/sidePanel/tabResource';
 
 export interface ApplicationPanelTabInput {
   /** Publication id of the application to open. */
@@ -14,21 +15,8 @@ export interface ApplicationPanelTabInput {
   runId?: string;
 }
 
-/**
- * Side-panel tab id for an application, scoped by publicationId AND runId.
- *
- * Each `application:execute` creates a NEW run, and the chat history renders one
- * preview card per execution. Keying the tab by publicationId alone collapsed
- * every execution of the same app onto a single panel tab: two cards from
- * different runs/epochs both drove that one tab, so the second card never showed
- * its own run - both "settled on the same epoch" (the user-reported bug).
- * Including runId gives each execution its own tab → independent run, independent
- * epoch selection. The runId-less form keeps the legacy id for the generic
- * "open the app" entries (AddTabPicker, project deep-links) that have no run.
- */
-export function applicationPanelTabId(publicationId: string, runId?: string | null): string {
-  return runId ? `application-${publicationId}-${runId}` : `application-${publicationId}`;
-}
+// Built next to the parser that reads it back, so the two cannot drift.
+export { applicationPanelTabId };
 
 /**
  * Build the side-panel tab descriptor for an auto-opened application.

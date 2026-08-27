@@ -34,8 +34,10 @@ import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyBoolean;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -109,8 +111,15 @@ class WorkflowCrudModuleRestartFromNodeTest {
     }
 
     private void rerunReturns(AutoRestartExecutionService.Outcome outcome) {
-        when(stepRerunService.rerunFromStep(RUN_ID, NODE)).thenReturn(new StepRerunService.RerunResult(
-                RUN_ID, NODE, 4, 1, Set.of(NODE, "mcp:downstream"), Set.of(NODE), "running", 42L, TRIGGER));
+        rerunReturns(outcome, 4);
+    }
+
+    /** @param epoch the epoch the service reports back, which is the one that actually ran */
+    private void rerunReturns(AutoRestartExecutionService.Outcome outcome, int epoch) {
+        when(stepRerunService.rerunFromStep(eq(RUN_ID), eq(NODE), eq(false), any()))
+                .thenReturn(new StepRerunService.RerunResult(
+                        RUN_ID, NODE, epoch, 1, Set.of(NODE, "mcp:downstream"), Set.of(NODE),
+                        "running", 42L, TRIGGER));
         when(autoRestartExecutionService.resumeAfterRerun(anyString(), any(), anyString(), anyInt()))
                 .thenReturn(outcome);
     }
@@ -138,7 +147,7 @@ class WorkflowCrudModuleRestartFromNodeTest {
         assertThat(result.success()).isFalse();
         assertThat(result.errorCode()).isEqualTo(ToolErrorCode.MISSING_PARAMETER);
         assertThat(result.error()).contains("action='runs'");
-        verify(stepRerunService, never()).rerunFromStep(anyString(), anyString());
+        verify(stepRerunService, never()).rerunFromStep(anyString(), anyString(), anyBoolean(), any());
     }
 
     @Test
@@ -150,7 +159,7 @@ class WorkflowCrudModuleRestartFromNodeTest {
         assertThat(result.errorCode()).isEqualTo(ToolErrorCode.MISSING_PARAMETER);
         assertThat(result.error()).contains("get_run");
         assertThat(result.error()).contains("mcp:fetch_data");
-        verify(stepRerunService, never()).rerunFromStep(anyString(), anyString());
+        verify(stepRerunService, never()).rerunFromStep(anyString(), anyString(), anyBoolean(), any());
     }
 
     @Test
@@ -159,7 +168,7 @@ class WorkflowCrudModuleRestartFromNodeTest {
         ToolExecutionResult result = restart(Map.of("run_id", RUN_ID, "node", "   "), context(null));
 
         assertThat(result.errorCode()).isEqualTo(ToolErrorCode.MISSING_PARAMETER);
-        verify(stepRerunService, never()).rerunFromStep(anyString(), anyString());
+        verify(stepRerunService, never()).rerunFromStep(anyString(), anyString(), anyBoolean(), any());
     }
 
     @Test
@@ -171,7 +180,7 @@ class WorkflowCrudModuleRestartFromNodeTest {
 
         assertThat(result.success()).isFalse();
         assertThat(result.errorCode()).isEqualTo(ToolErrorCode.RESOURCE_NOT_FOUND);
-        verify(stepRerunService, never()).rerunFromStep(anyString(), anyString());
+        verify(stepRerunService, never()).rerunFromStep(anyString(), anyString(), anyBoolean(), any());
     }
 
     @Test
@@ -183,7 +192,7 @@ class WorkflowCrudModuleRestartFromNodeTest {
                 context(List.of(UUID.randomUUID().toString())));
 
         assertThat(result.success()).isFalse();
-        verify(stepRerunService, never()).rerunFromStep(anyString(), anyString());
+        verify(stepRerunService, never()).rerunFromStep(anyString(), anyString(), anyBoolean(), any());
     }
 
     @Test
@@ -250,7 +259,7 @@ class WorkflowCrudModuleRestartFromNodeTest {
         // The service refuses a node that never settled; swallowing that message would leave the
         // agent retrying the same call forever.
         when(workflowRunRepository.findByRunIdPublic(RUN_ID)).thenReturn(Optional.of(run(TENANT_ID)));
-        when(stepRerunService.rerunFromStep(RUN_ID, NODE))
+        when(stepRerunService.rerunFromStep(eq(RUN_ID), eq(NODE), eq(false), any()))
                 .thenThrow(new IllegalStateException("Cannot rerun step mcp:fetch_data: not in rerunnable state."));
 
         ToolExecutionResult result = restart(Map.of("run_id", RUN_ID, "node", NODE), context(null));
@@ -258,6 +267,106 @@ class WorkflowCrudModuleRestartFromNodeTest {
         assertThat(result.success()).isFalse();
         assertThat(result.errorCode()).isEqualTo(ToolErrorCode.INVALID_PARAMETER_VALUE);
         assertThat(result.error()).contains("not in rerunnable state");
+    }
+
+    // ====================== epoch: which fire of the run to replay ======================
+
+    @Test
+    @DisplayName("Omitting epoch replays the run's most recent fire (null reaches the service)")
+    void omittedEpochMeansTheLatestFire() {
+        when(workflowRunRepository.findByRunIdPublic(RUN_ID)).thenReturn(Optional.of(run(TENANT_ID)));
+        rerunReturns(AutoRestartExecutionService.Outcome.QUIESCED);
+
+        restart(Map.of("run_id", RUN_ID, "node", NODE), context(null));
+
+        // null, not 0: epoch 0 is a real epoch, so it must not double as "unspecified".
+        verify(stepRerunService).rerunFromStep(RUN_ID, NODE, false, null);
+    }
+
+    @Test
+    @DisplayName("A chosen epoch reaches the service instead of being dropped")
+    void chosenEpochIsForwarded() {
+        // Regression: the action used to read only run_id and node, so an epoch passed by the
+        // agent was silently ignored and the replay landed on the latest fire - the caller saw a
+        // success carrying a different epoch than the one it asked to repair.
+        WorkflowRunEntity entity = run(TENANT_ID);
+        when(workflowRunRepository.findByRunIdPublic(RUN_ID)).thenReturn(Optional.of(entity));
+        rerunReturns(AutoRestartExecutionService.Outcome.QUIESCED, 11);
+
+        Map<String, Object> data = asMap(
+                restart(Map.of("run_id", RUN_ID, "node", NODE, "epoch", 11), context(null)).data());
+
+        verify(stepRerunService).rerunFromStep(RUN_ID, NODE, false, 11);
+        assertThat(data.get("epoch")).isEqualTo(11);
+    }
+
+    @Test
+    @DisplayName("The drive after the replay runs in the chosen epoch, not the run's latest")
+    void chosenEpochDrivesTheReplay() {
+        // The wave loop executes nodes with an explicit (epoch, trigger); handing it the wrong
+        // epoch would reset one fire and execute another.
+        when(workflowRunRepository.findByRunIdPublic(RUN_ID)).thenReturn(Optional.of(run(TENANT_ID)));
+        rerunReturns(AutoRestartExecutionService.Outcome.QUIESCED, 11);
+
+        restart(Map.of("run_id", RUN_ID, "node", NODE, "epoch", 11), context(null));
+
+        verify(autoRestartExecutionService).resumeAfterRerun(RUN_ID, Set.of(NODE), TRIGGER, 11);
+    }
+
+    @Test
+    @DisplayName("An epoch sent as a string still counts (models emit numbers as text)")
+    void numericStringEpochIsAccepted() {
+        when(workflowRunRepository.findByRunIdPublic(RUN_ID)).thenReturn(Optional.of(run(TENANT_ID)));
+        rerunReturns(AutoRestartExecutionService.Outcome.QUIESCED, 11);
+
+        restart(Map.of("run_id", RUN_ID, "node", NODE, "epoch", "11"), context(null));
+
+        verify(stepRerunService).rerunFromStep(RUN_ID, NODE, false, 11);
+    }
+
+    @Test
+    @DisplayName("An unusable epoch is REFUSED, never silently dropped")
+    void unusableEpochIsRefused() {
+        // Dropping it is the worst outcome available: the replay would redo a fire that was
+        // already correct, report success, and leave the broken fire exactly as it was.
+        // Refused on the parameter alone, before the run is even loaded - same as a missing node.
+        ToolExecutionResult result = restart(
+                Map.of("run_id", RUN_ID, "node", NODE, "epoch", "latest"), context(null));
+
+        assertThat(result.success()).isFalse();
+        assertThat(result.errorCode()).isEqualTo(ToolErrorCode.INVALID_PARAMETER_VALUE);
+        assertThat(result.error()).contains("epoch must be a number");
+        assertThat(result.error()).contains("Omit it");
+        verify(stepRerunService, never()).rerunFromStep(anyString(), anyString(), anyBoolean(), any());
+    }
+
+    @Test
+    @DisplayName("A fractional epoch is refused, not truncated into a different real epoch")
+    void fractionalEpochIsRefused() {
+        // 11.9 truncated is 11, a real and DIFFERENT epoch: the call would succeed and repair
+        // something the caller never named.
+        ToolExecutionResult result = restart(
+                Map.of("run_id", RUN_ID, "node", NODE, "epoch", 11.9), context(null));
+
+        assertThat(result.success()).isFalse();
+        assertThat(result.errorCode()).isEqualTo(ToolErrorCode.INVALID_PARAMETER_VALUE);
+        assertThat(result.error()).contains("whole number");
+        verify(stepRerunService, never()).rerunFromStep(anyString(), anyString(), anyBoolean(), any());
+    }
+
+    @Test
+    @DisplayName("An epoch the run does not have surfaces the backend's explanation")
+    void unknownEpochKeepsTheBackendExplanation() {
+        when(workflowRunRepository.findByRunIdPublic(RUN_ID)).thenReturn(Optional.of(run(TENANT_ID)));
+        when(stepRerunService.rerunFromStep(eq(RUN_ID), eq(NODE), eq(false), any()))
+                .thenThrow(new IllegalArgumentException("Epoch 99 does not exist on this run for trigger trigger:start."));
+
+        ToolExecutionResult result = restart(
+                Map.of("run_id", RUN_ID, "node", NODE, "epoch", 99), context(null));
+
+        assertThat(result.success()).isFalse();
+        assertThat(result.errorCode()).isEqualTo(ToolErrorCode.INVALID_PARAMETER_VALUE);
+        assertThat(result.error()).contains("does not exist on this run");
     }
 
     @SuppressWarnings("unchecked")

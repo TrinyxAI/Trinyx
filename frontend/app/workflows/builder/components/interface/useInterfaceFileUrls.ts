@@ -56,7 +56,13 @@ export function useInterfaceFileUrls(
     let cancelled = false;
 
     (async () => {
-      const token = await apiClient.getTokenProvider()?.();
+      // getAuthToken, rather than reading the provider, so this waits for the async auth bootstrap in
+      // smart-providers.tsx. Reading the provider directly made every file in the interface
+      // resolve anonymously during that window: the fetch 401s, the entry stays unresolved, and
+      // resolveFileUrl hands the iframe the RAW by-id URL - which a sandboxed iframe (no
+      // same-origin, no header) can only load anonymously too, for a second 401 and a
+      // permanently broken image. That pair of 401s per file was the top gateway error in prod.
+      const token = await apiClient.getAuthToken();
       const headers: Record<string, string> = { ...getActiveOrgHeaderForRequest() };
       if (token) headers['Authorization'] = `Bearer ${token}`;
 

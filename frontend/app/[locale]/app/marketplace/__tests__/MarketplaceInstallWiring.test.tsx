@@ -113,6 +113,7 @@ vi.mock('@/components/marketplace/PublicationCard', () => ({
     publication: { id: string; title: string };
     isAcquired?: boolean;
     installProgress?: number | null;
+    installBlocked?: boolean;
     openHref?: string;
     onAcquire?: (p: unknown) => void;
   }) => (
@@ -121,6 +122,7 @@ vi.mock('@/components/marketplace/PublicationCard', () => ({
       data-publication-id={props.publication.id}
       data-is-acquired={String(!!props.isAcquired)}
       data-install-progress={props.installProgress ?? ''}
+      data-install-blocked={String(!!props.installBlocked)}
       data-open-href={props.openHref ?? ''}
     >
       {props.publication.title}
@@ -150,6 +152,10 @@ function activeInstall(overrides: Partial<ActiveMarketplaceInstall> = {}): Activ
     progress: 37,
     acquiredId: null,
     error: null,
+    resources: {},
+    withEditableCopy: false,
+    editableCopyWorkflowId: null,
+    editableCopyFailed: false,
     ...overrides,
   };
 }
@@ -304,6 +310,119 @@ describe('ExploreTab - inline install wiring', () => {
     expect(survivor?.status).toBe('installing');
   });
 
+  it('on success: the summary names what the install created, and SURVIVES the store being consumed', async () => {
+    // Without this screen the workspace silently gains interfaces / tables / agents that
+    // the user never sees mentioned. It is held in local state on purpose: the store
+    // entry is dropped moments later (consumeSuccess) and the user must still be reading it.
+    useMarketplaceInstallStore.setState({
+      active: activeInstall({
+        status: 'success',
+        progress: 100,
+        acquiredId: 'wf-1',
+        resources: { interfaces: 2, tables: 1 },
+      }),
+    });
+
+    render(<MarketplacePage />);
+    await screen.findByText('Wired App');
+
+    expect(await screen.findByText('installedTitle')).toBeInTheDocument();
+    expect(screen.getByText('installedInterfaces')).toBeInTheDocument();
+    expect(screen.getByText('installedTables')).toBeInTheDocument();
+
+    await waitFor(() => {
+      expect(useMarketplaceInstallStore.getState().active).toBeNull();
+    });
+    expect(screen.getByText('installedTitle')).toBeInTheDocument();
+  });
+
+  it('the summary is dismissible and does not come back on later store activity (no re-open loop)', async () => {
+    useMarketplaceInstallStore.setState({
+      active: activeInstall({ status: 'success', progress: 100, acquiredId: 'wf-1' }),
+    });
+
+    render(<MarketplacePage />);
+    await screen.findByText('installedTitle');
+    await waitFor(() => expect(useMarketplaceInstallStore.getState().active).toBeNull());
+
+    fireEvent.click(screen.getByRole('button', { name: 'close' }));
+    expect(screen.queryByText('installedTitle')).not.toBeInTheDocument();
+
+    // A NEW install starting must not resurrect the dismissed summary.
+    act(() => {
+      useMarketplaceInstallStore.setState({ active: activeInstall({ progress: 5 }) });
+    });
+    act(() => {
+      useMarketplaceInstallStore.setState({ active: activeInstall({ progress: 40 }) });
+    });
+    expect(screen.queryByText('installedTitle')).not.toBeInTheDocument();
+  });
+
+  it('a success state that keeps being rewritten summarises ONCE (the update must not re-enter its own effect)', async () => {
+    // The success effect SETS state, so it must not schedule itself again on every render:
+    // a fresh summary object per run turns render -> effect -> render into an infinite loop
+    // that freezes the page with no error. Here the store keeps handing back an equal-but-new
+    // success entry; the page must settle instead of spinning.
+    useMarketplaceInstallStore.setState({
+      active: activeInstall({ status: 'success', progress: 100, acquiredId: 'wf-1' }),
+    });
+
+    render(<MarketplacePage />);
+    await screen.findByText('installedTitle');
+
+    for (let i = 0; i < 5; i++) {
+      act(() => {
+        useMarketplaceInstallStore.setState({
+          active: activeInstall({ status: 'success', progress: 100, acquiredId: 'wf-1' }),
+        });
+      });
+    }
+
+    // Exactly one summary, and the page is still responsive enough to answer.
+    expect(screen.getAllByText('installedTitle')).toHaveLength(1);
+    fireEvent.click(screen.getByRole('button', { name: 'close' }));
+    expect(screen.queryByText('installedTitle')).not.toBeInTheDocument();
+  });
+
+  it('blocks Install on every OTHER card while one publication is installing', async () => {
+    // The install machine is single-flight, so a second Install would be dropped with no
+    // visible effect - the cards must refuse it up front instead.
+    useMarketplaceInstallStore.setState({ active: activeInstall({ progress: 20 }) });
+
+    render(<MarketplacePage />);
+    await screen.findByText('Wired App');
+
+    expect(card('pub-app-1')).toHaveAttribute('data-install-blocked', 'false');
+    expect(card('pub-app-2')).toHaveAttribute('data-install-blocked', 'true');
+  });
+
+  it('does not block anything once the install reaches a terminal state', async () => {
+    useMarketplaceInstallStore.setState({
+      active: activeInstall({ status: 'error', error: 'boom' }),
+    });
+
+    render(<MarketplacePage />);
+    await screen.findByText('Wired App');
+
+    expect(card('pub-app-2')).toHaveAttribute('data-install-blocked', 'false');
+  });
+
+  it('an org switch drops the install summary with the rest of the workspace state', async () => {
+    useMarketplaceInstallStore.setState({
+      active: activeInstall({ status: 'success', progress: 100, acquiredId: 'wf-1' }),
+    });
+
+    render(<MarketplacePage />);
+    await screen.findByText('installedTitle');
+
+    act(() => {
+      orgResetCallbacks.list.forEach((cb) => cb());
+    });
+
+    // The summary describes what landed in the PREVIOUS workspace.
+    expect(screen.queryByText('installedTitle')).not.toBeInTheDocument();
+  });
+
   it('an org switch clears any in-flight install (audit D6)', async () => {
     useMarketplaceInstallStore.setState({ active: activeInstall({ progress: 20 }) });
 
@@ -344,6 +463,41 @@ describe('MyPurchasesTab - inline install wiring', () => {
 
     expect(card('pub-app-1')).toHaveAttribute('data-install-progress', '55');
     expect(screen.queryByTestId('acquire-modal')).not.toBeInTheDocument();
+  });
+
+  it('a reinstall gets the SAME summary treatment as a fresh install (it re-creates the whole resource set)', async () => {
+    // This tab duplicates ExploreTab's success wiring, so it needs its own pin: a
+    // reinstall clones every interface, table and agent again and must say so.
+    publicationServiceMock.getPurchases.mockResolvedValue({ purchases: [PURCHASE] });
+    useMarketplaceInstallStore.setState({
+      active: activeInstall({
+        status: 'success',
+        progress: 100,
+        acquiredId: 'wf-1',
+        resources: { interfaces: 1, tables: 2 },
+      }),
+    });
+
+    await openPurchasesTab();
+
+    expect(await screen.findByText('installedTitle')).toBeInTheDocument();
+    expect(screen.getByText('installedInterfaces')).toBeInTheDocument();
+    expect(screen.getByText('installedTables')).toBeInTheDocument();
+  });
+
+  it('blocks Install on the OTHER purchase cards while one reinstall runs', async () => {
+    publicationServiceMock.getPurchases.mockResolvedValue({
+      purchases: [
+        PURCHASE,
+        { ...PURCHASE, publicationId: 'pub-app-2', publication: { ...APP_PUB, id: 'pub-app-2', title: 'Other App' } },
+      ],
+    });
+    useMarketplaceInstallStore.setState({ active: activeInstall({ progress: 20 }) });
+
+    await openPurchasesTab();
+
+    expect(card('pub-app-1')).toHaveAttribute('data-install-blocked', 'false');
+    expect(card('pub-app-2')).toHaveAttribute('data-install-blocked', 'true');
   });
 
   it('an installed APPLICATION purchase exposes the /app/applications open link', async () => {
@@ -511,16 +665,24 @@ describe('Marketplace - tab and type filter survive a round trip (query params)'
   // remounted the page on Explore/Applications and the agent was off screen.
   it('renders the agent grid straight from ?type=agents', async () => {
     searchParamsState.params = new URLSearchParams('type=agents');
-    orchestratorApiMock.getMarketplacePublications.mockResolvedValue({
-      publications: [AGENT_PUB, APP_PUB],
-    });
+    // The type is a QUERY, so the mock answers it the way the backend does:
+    // asking for AGENT is what returns only the agent. A component that ignored
+    // the deep link would ask for APPLICATION and get the app instead.
+    orchestratorApiMock.getMarketplacePublications.mockImplementation(
+      async (_page: number, _size: number, _category?: string, refinements?: { displayMode?: string }) => {
+        const all = [AGENT_PUB, APP_PUB];
+        const rows = refinements?.displayMode
+          ? all.filter((p) => p.displayMode === refinements.displayMode)
+          : all;
+        return { publications: rows, count: rows.length };
+      });
 
     render(<MarketplacePage />);
 
-    // The agent shows, the application is filtered out - i.e. the deep link
-    // selected Agents in the type filter without any click.
     await screen.findByText('Wired Agent');
     expect(screen.queryByText('Wired App')).not.toBeInTheDocument();
+    expect(orchestratorApiMock.getMarketplacePublications).toHaveBeenCalledWith(
+      0, expect.any(Number), undefined, expect.objectContaining({ displayMode: 'AGENT' }));
   });
 
   it('writes the selected type into the URL so a return trip can restore it', async () => {

@@ -89,7 +89,7 @@ class InternalCredentialServiceTest {
         void getAccessToken_returnsAccessToken() {
             Credential cred = buildCredential(1L, USER_ID, "my-cred",
                     Map.of("access_token", "ENC:encrypted_token"));
-            when(credentialService.getCredentialByTenantAndName(USER_ID, "my-cred"))
+            when(credentialService.findByNameIdentifyingIntegration(USER_ID, "my-cred"))
                     .thenReturn(Optional.of(cred));
             when(encryptionService.decrypt("ENC:encrypted_token")).thenReturn("decrypted_token");
 
@@ -111,7 +111,7 @@ class InternalCredentialServiceTest {
 
             assertThat(result).isPresent();
             assertThat(result.get().accessToken()).isEqualTo("selected_token");
-            verify(credentialService, never()).getCredentialByTenantAndName(anyString(), anyString());
+            verify(credentialService, never()).findByNameIdentifyingIntegration(anyString(), anyString());
             verify(credentialService, never()).getCredentialsByIntegration(anyString(), anyString());
         }
 
@@ -120,7 +120,7 @@ class InternalCredentialServiceTest {
         void getAccessToken_fallsBackToApiKey() {
             Credential cred = buildCredential(1L, USER_ID, "my-cred",
                     Map.of("api_key", "ENC:enc_api_key"));
-            when(credentialService.getCredentialByTenantAndName(USER_ID, "my-cred"))
+            when(credentialService.findByNameIdentifyingIntegration(USER_ID, "my-cred"))
                     .thenReturn(Optional.of(cred));
             when(encryptionService.decrypt("ENC:enc_api_key")).thenReturn("my-api-key");
 
@@ -134,7 +134,7 @@ class InternalCredentialServiceTest {
         void getAccessToken_fallsBackToApiToken() {
             Credential cred = buildCredential(1L, USER_ID, "my-cred",
                     Map.of("api_token", "ENC:enc_api_token"));
-            when(credentialService.getCredentialByTenantAndName(USER_ID, "my-cred"))
+            when(credentialService.findByNameIdentifyingIntegration(USER_ID, "my-cred"))
                     .thenReturn(Optional.of(cred));
             when(encryptionService.decrypt("ENC:enc_api_token")).thenReturn("my-api-token");
 
@@ -148,7 +148,7 @@ class InternalCredentialServiceTest {
         void getAccessToken_fallsBackToBearerToken() {
             Credential cred = buildCredential(1L, USER_ID, "my-cred",
                     Map.of("bearer_token", "ENC:enc_bearer"));
-            when(credentialService.getCredentialByTenantAndName(USER_ID, "my-cred"))
+            when(credentialService.findByNameIdentifyingIntegration(USER_ID, "my-cred"))
                     .thenReturn(Optional.of(cred));
             when(encryptionService.decrypt("ENC:enc_bearer")).thenReturn("my-bearer");
 
@@ -165,7 +165,7 @@ class InternalCredentialServiceTest {
             Credential refreshed = buildCredential(1L, USER_ID, "my-cred",
                     Map.of("access_token", "ENC:new_token", "client_id", "cid"));
 
-            when(credentialService.getCredentialByTenantAndName(USER_ID, "my-cred"))
+            when(credentialService.findByNameIdentifyingIntegration(USER_ID, "my-cred"))
                     .thenReturn(Optional.of(cred));
             when(encryptionService.decrypt("ENC:csec")).thenReturn("csec");
             when(oAuth2Service.refreshToken(1L, USER_ID)).thenReturn(refreshed);
@@ -179,7 +179,7 @@ class InternalCredentialServiceTest {
         @Test
         @DisplayName("should return empty when credential not found")
         void getAccessToken_credentialNotFound() {
-            when(credentialService.getCredentialByTenantAndName(USER_ID, "missing"))
+            when(credentialService.findByNameIdentifyingIntegration(USER_ID, "missing"))
                     .thenReturn(Optional.empty());
             when(credentialService.getCredentialsByIntegration(USER_ID, "missing"))
                     .thenReturn(List.of());
@@ -190,10 +190,35 @@ class InternalCredentialServiceTest {
         }
 
         @Test
+        @DisplayName("a credential merely NAMED after another provider does not answer, and the "
+                + "real one is still found by integration")
+        void getAccessToken_mislabelledCredentialFallsBackToIntegration() {
+            // The shape that made this whole filter necessary: a Slack key the user happened
+            // to name "elevenlabs". The by-name lookup used to return it, and its token was
+            // then sent to ElevenLabs' endpoint - one provider's secret handed to another.
+            //
+            // What this pins is the OTHER half of that fix, the half a "returns empty" test
+            // cannot see: rejecting the mislabelled row must not cost the caller its token.
+            // The integration fallback has to produce the genuine ElevenLabs credential, or
+            // the narrowing would have traded a leak for a silent outage.
+            when(credentialService.findByNameIdentifyingIntegration(USER_ID, "elevenlabs"))
+                    .thenReturn(Optional.empty());
+            when(credentialService.getCredentialsByIntegration(USER_ID, "elevenlabs"))
+                    .thenReturn(List.of(buildCredentialWithIntegration(
+                            7L, USER_ID, "My TTS key", "elevenlabs",
+                            Map.of("access_token", "ENC:real_elevenlabs"))));
+            when(encryptionService.decrypt("ENC:real_elevenlabs")).thenReturn("REAL-ELEVENLABS");
+
+            Optional<String> result = service.getAccessToken(USER_ID, "elevenlabs");
+
+            assertThat(result).isPresent().contains("REAL-ELEVENLABS");
+        }
+
+        @Test
         @DisplayName("should return empty when credential data is null")
         void getAccessToken_nullCredentialData() {
             Credential cred = buildCredential(1L, USER_ID, "my-cred", null);
-            when(credentialService.getCredentialByTenantAndName(USER_ID, "my-cred"))
+            when(credentialService.findByNameIdentifyingIntegration(USER_ID, "my-cred"))
                     .thenReturn(Optional.of(cred));
 
             Optional<String> result = service.getAccessToken(USER_ID, "my-cred");
@@ -220,7 +245,7 @@ class InternalCredentialServiceTest {
         void getAccessToken_platformTenantFallback() {
             when(platformCredentialService.getRawCredential("unknown", null))
                     .thenReturn(Optional.empty());
-            when(credentialService.getCredentialByTenantAndName("PLATFORM", "unknown"))
+            when(credentialService.findByNameIdentifyingIntegration("PLATFORM", "unknown"))
                     .thenReturn(Optional.empty());
             when(credentialService.getCredentialsByIntegration("PLATFORM", "unknown"))
                     .thenReturn(List.of());
@@ -233,7 +258,7 @@ class InternalCredentialServiceTest {
         @Test
         @DisplayName("should find by integration when name match fails")
         void getAccessToken_fallsBackToIntegration() {
-            when(credentialService.getCredentialByTenantAndName(USER_ID, "gmail-credential"))
+            when(credentialService.findByNameIdentifyingIntegration(USER_ID, "gmail-credential"))
                     .thenReturn(Optional.empty());
             Credential cred = buildCredential(1L, USER_ID, "gmail",
                     Map.of("access_token", "ENC:tok"));
@@ -251,7 +276,7 @@ class InternalCredentialServiceTest {
         void getAccessToken_oauth2RefreshFails() {
             Credential cred = buildCredential(1L, USER_ID, "my-cred",
                     Map.of("client_id", "cid", "client_secret", "ENC:csec"));
-            when(credentialService.getCredentialByTenantAndName(USER_ID, "my-cred"))
+            when(credentialService.findByNameIdentifyingIntegration(USER_ID, "my-cred"))
                     .thenReturn(Optional.of(cred));
             when(encryptionService.decrypt("ENC:csec")).thenReturn("csec");
             when(oAuth2Service.refreshToken(1L, USER_ID))
@@ -272,7 +297,7 @@ class InternalCredentialServiceTest {
         void getAccessToken_skipsRefreshWhenCacheWarm() {
             Credential cred = buildCredential(1L, USER_ID, "my-cred",
                     Map.of("client_id", "cid", "client_secret", "ENC:csec"));
-            when(credentialService.getCredentialByTenantAndName(USER_ID, "my-cred"))
+            when(credentialService.findByNameIdentifyingIntegration(USER_ID, "my-cred"))
                     .thenReturn(Optional.of(cred));
             when(encryptionService.decrypt("ENC:csec")).thenReturn("csec");
             when(redisTemplate.hasKey("oauth2:client-creds-cache:1")).thenReturn(Boolean.TRUE);
@@ -295,7 +320,7 @@ class InternalCredentialServiceTest {
         void getAccessToken_onTerminalException_returnsEmpty() {
             Credential cred = buildCredential(1L, USER_ID, "my-cred",
                     Map.of("client_id", "cid", "client_secret", "ENC:csec"));
-            when(credentialService.getCredentialByTenantAndName(USER_ID, "my-cred"))
+            when(credentialService.findByNameIdentifyingIntegration(USER_ID, "my-cred"))
                     .thenReturn(Optional.of(cred));
             when(encryptionService.decrypt("ENC:csec")).thenReturn("csec");
             when(redisTemplate.hasKey(anyString())).thenReturn(Boolean.FALSE);
@@ -319,7 +344,7 @@ class InternalCredentialServiceTest {
         void getAccessToken_onTransientException_marksCache() {
             Credential cred = buildCredential(1L, USER_ID, "my-cred",
                     Map.of("client_id", "cid", "client_secret", "ENC:csec"));
-            when(credentialService.getCredentialByTenantAndName(USER_ID, "my-cred"))
+            when(credentialService.findByNameIdentifyingIntegration(USER_ID, "my-cred"))
                     .thenReturn(Optional.of(cred));
             when(encryptionService.decrypt("ENC:csec")).thenReturn("csec");
             when(redisTemplate.hasKey(anyString())).thenReturn(Boolean.FALSE);
@@ -365,7 +390,7 @@ class InternalCredentialServiceTest {
                             "client_id", "plain_cid",
                             "some_number", 42 // non-string value should be skipped
                     ));
-            when(credentialService.getCredentialByTenantAndName(USER_ID, "my-cred"))
+            when(credentialService.findByNameIdentifyingIntegration(USER_ID, "my-cred"))
                     .thenReturn(Optional.of(cred));
             when(encryptionService.decrypt("ENC:enc_token")).thenReturn("decrypted_token");
             when(encryptionService.decrypt("plain_cid")).thenReturn("plain_cid");
@@ -388,14 +413,14 @@ class InternalCredentialServiceTest {
             Map<String, String> result = service.getCredentialDataMapById(USER_ID, 42L, null);
 
             assertThat(result).containsEntry("api_key", "selected_key");
-            verify(credentialService, never()).getCredentialByTenantAndName(anyString(), anyString());
+            verify(credentialService, never()).findByNameIdentifyingIntegration(anyString(), anyString());
             verify(credentialService, never()).getCredentialsByIntegration(anyString(), anyString());
         }
 
         @Test
         @DisplayName("should return empty map when credential not found")
         void getCredentialDataMap_notFound() {
-            when(credentialService.getCredentialByTenantAndName(USER_ID, "missing"))
+            when(credentialService.findByNameIdentifyingIntegration(USER_ID, "missing"))
                     .thenReturn(Optional.empty());
             when(credentialService.getCredentialsByIntegration(USER_ID, "missing"))
                     .thenReturn(List.of());
@@ -409,7 +434,7 @@ class InternalCredentialServiceTest {
         @DisplayName("should return empty map when credential data is null")
         void getCredentialDataMap_nullData() {
             Credential cred = buildCredential(1L, USER_ID, "my-cred", null);
-            when(credentialService.getCredentialByTenantAndName(USER_ID, "my-cred"))
+            when(credentialService.findByNameIdentifyingIntegration(USER_ID, "my-cred"))
                     .thenReturn(Optional.of(cred));
 
             Map<String, String> result = service.getCredentialDataMap(USER_ID, "my-cred");
@@ -528,7 +553,7 @@ class InternalCredentialServiceTest {
             Credential refreshed = buildCredential(1L, USER_ID, "my-cred",
                     Map.of("access_token", "ENC:new_token"));
 
-            when(credentialService.getCredentialByTenantAndName(USER_ID, "my-cred"))
+            when(credentialService.findByNameIdentifyingIntegration(USER_ID, "my-cred"))
                     .thenReturn(Optional.of(cred));
             when(oAuth2Service.refreshToken(1L, USER_ID)).thenReturn(refreshed);
             when(encryptionService.decrypt("ENC:new_token")).thenReturn("new_decrypted");
@@ -542,7 +567,7 @@ class InternalCredentialServiceTest {
         @DisplayName("should return empty when refresh fails and no stored token is available")
         void forceRefresh_fails() {
             Credential cred = buildCredential(1L, USER_ID, "my-cred", Map.of());
-            when(credentialService.getCredentialByTenantAndName(USER_ID, "my-cred"))
+            when(credentialService.findByNameIdentifyingIntegration(USER_ID, "my-cred"))
                     .thenReturn(Optional.of(cred));
             when(oAuth2Service.refreshToken(1L, USER_ID))
                     .thenThrow(new RuntimeException("failed"));
@@ -566,7 +591,7 @@ class InternalCredentialServiceTest {
         void forceRefresh_onGenericException_fallsBackToStoredToken() {
             Credential cred = buildCredential(1L, USER_ID, "my-cred",
                     Map.of("access_token", "ENC:stored"));
-            when(credentialService.getCredentialByTenantAndName(USER_ID, "my-cred"))
+            when(credentialService.findByNameIdentifyingIntegration(USER_ID, "my-cred"))
                     .thenReturn(Optional.of(cred));
             when(oAuth2Service.refreshToken(1L, USER_ID))
                     .thenThrow(new RuntimeException("refresh_token_failed"));
@@ -581,7 +606,7 @@ class InternalCredentialServiceTest {
         @Test
         @DisplayName("should return empty when credential not found")
         void forceRefresh_notFound() {
-            when(credentialService.getCredentialByTenantAndName(USER_ID, "missing"))
+            when(credentialService.findByNameIdentifyingIntegration(USER_ID, "missing"))
                     .thenReturn(Optional.empty());
             when(credentialService.getCredentialsByIntegration(USER_ID, "missing"))
                     .thenReturn(List.of());
@@ -606,7 +631,7 @@ class InternalCredentialServiceTest {
             Credential afterWinner = buildCredential(1L, USER_ID, "my-cred",
                     Map.of("access_token", "ENC:fresh_from_winner"));
 
-            when(credentialService.getCredentialByTenantAndName(USER_ID, "my-cred"))
+            when(credentialService.findByNameIdentifyingIntegration(USER_ID, "my-cred"))
                     .thenReturn(Optional.of(cred));
             when(oAuth2Service.refreshToken(1L, USER_ID))
                     .thenThrow(new IllegalStateException("refresh_in_progress"));
@@ -632,7 +657,7 @@ class InternalCredentialServiceTest {
         void forceRefresh_onTerminalException_returnsEmptyWithoutFallback() {
             Credential cred = buildCredential(1L, USER_ID, "my-cred",
                     Map.of("access_token", "ENC:stored"));
-            when(credentialService.getCredentialByTenantAndName(USER_ID, "my-cred"))
+            when(credentialService.findByNameIdentifyingIntegration(USER_ID, "my-cred"))
                     .thenReturn(Optional.of(cred));
             when(oAuth2Service.refreshToken(1L, USER_ID))
                     .thenThrow(new RefreshTerminalException(
@@ -657,7 +682,7 @@ class InternalCredentialServiceTest {
         void forceRefresh_onTransientException_fallsBackToStored() {
             Credential cred = buildCredential(1L, USER_ID, "my-cred",
                     Map.of("access_token", "ENC:stored"));
-            when(credentialService.getCredentialByTenantAndName(USER_ID, "my-cred"))
+            when(credentialService.findByNameIdentifyingIntegration(USER_ID, "my-cred"))
                     .thenReturn(Optional.of(cred));
             when(oAuth2Service.refreshToken(1L, USER_ID))
                     .thenThrow(new RefreshTransientException(
@@ -686,7 +711,7 @@ class InternalCredentialServiceTest {
             Credential afterRaceTerminal = buildCredentialWithStatus(1L, USER_ID, "my-cred",
                     Map.of(), CredentialStatus.needs_reauth);
 
-            when(credentialService.getCredentialByTenantAndName(USER_ID, "my-cred"))
+            when(credentialService.findByNameIdentifyingIntegration(USER_ID, "my-cred"))
                     .thenReturn(Optional.of(cred));
             when(oAuth2Service.refreshToken(1L, USER_ID))
                     .thenThrow(new IllegalStateException("refresh_in_progress"));
@@ -712,7 +737,7 @@ class InternalCredentialServiceTest {
             Credential refreshedBySelf = buildCredential(1L, USER_ID, "my-cred",
                     Map.of("access_token", "ENC:self_refreshed"));
 
-            when(credentialService.getCredentialByTenantAndName(USER_ID, "my-cred"))
+            when(credentialService.findByNameIdentifyingIntegration(USER_ID, "my-cred"))
                     .thenReturn(Optional.of(cred));
             // First attempt: lock busy. Second attempt: we own it, succeeds.
             when(oAuth2Service.refreshToken(1L, USER_ID))
@@ -748,7 +773,7 @@ class InternalCredentialServiceTest {
             // Reproduces the prod report: a workflow owned by user A runs under A's
             // identity, but the Twitter credential was connected by member B and shared
             // in the workspace. The executing user A has no twitter credential of their own.
-            when(credentialService.getCredentialByTenantAndName(USER_ID, "twitter"))
+            when(credentialService.findByNameIdentifyingIntegration(USER_ID, "twitter"))
                     .thenReturn(Optional.empty());
             when(credentialService.getCredentialsByIntegration(USER_ID, "twitter"))
                     .thenReturn(List.of());
@@ -766,7 +791,7 @@ class InternalCredentialServiceTest {
         @Test
         @DisplayName("getAccessTokenInfo resolves the workspace-shared token via the org fallback")
         void getAccessTokenInfoResolvesOrgSharedToken() {
-            when(credentialService.getCredentialByTenantAndName(USER_ID, "twitter"))
+            when(credentialService.findByNameIdentifyingIntegration(USER_ID, "twitter"))
                     .thenReturn(Optional.empty());
             when(credentialService.getCredentialsByIntegration(USER_ID, "twitter"))
                     .thenReturn(List.of());
@@ -788,7 +813,7 @@ class InternalCredentialServiceTest {
         void ownCredentialTakesPrecedenceOverOrgShared() {
             Credential own = buildCredential(1L, USER_ID, "twitter",
                     Map.of("access_token", "ENC:own_token"));
-            when(credentialService.getCredentialByTenantAndName(USER_ID, "twitter"))
+            when(credentialService.findByNameIdentifyingIntegration(USER_ID, "twitter"))
                     .thenReturn(Optional.of(own));
             when(encryptionService.decrypt("ENC:own_token")).thenReturn("own_token");
 
@@ -802,7 +827,7 @@ class InternalCredentialServiceTest {
         @Test
         @DisplayName("no org fallback when organizationId is absent - back-compat tenant-only resolution")
         void noOrgFallbackWhenOrganizationIdMissing() {
-            when(credentialService.getCredentialByTenantAndName(USER_ID, "twitter"))
+            when(credentialService.findByNameIdentifyingIntegration(USER_ID, "twitter"))
                     .thenReturn(Optional.empty());
             when(credentialService.getCredentialsByIntegration(USER_ID, "twitter"))
                     .thenReturn(List.of());
@@ -817,7 +842,7 @@ class InternalCredentialServiceTest {
         @Test
         @DisplayName("org fallback skips inactive workspace credentials")
         void orgFallbackSkipsInactiveCredentials() {
-            when(credentialService.getCredentialByTenantAndName(USER_ID, "twitter"))
+            when(credentialService.findByNameIdentifyingIntegration(USER_ID, "twitter"))
                     .thenReturn(Optional.empty());
             when(credentialService.getCredentialsByIntegration(USER_ID, "twitter"))
                     .thenReturn(List.of());
@@ -834,7 +859,7 @@ class InternalCredentialServiceTest {
         @Test
         @DisplayName("forceRefreshAndGetToken refreshes the workspace-shared credential via the org fallback")
         void forceRefreshUsesOrgSharedCredential() {
-            when(credentialService.getCredentialByTenantAndName(USER_ID, "twitter"))
+            when(credentialService.findByNameIdentifyingIntegration(USER_ID, "twitter"))
                     .thenReturn(Optional.empty());
             when(credentialService.getCredentialsByIntegration(USER_ID, "twitter"))
                     .thenReturn(List.of());
@@ -873,7 +898,7 @@ class InternalCredentialServiceTest {
             // but last_used stayed empty because only the OAuth2-refresh path stamped it.
             Credential twilio = buildCredentialWithLastUsed(243L, USER_ID, "Twilio",
                     Map.of("username", "ENC:sid", "password", "ENC:token"), null);
-            when(credentialService.getCredentialByTenantAndName(USER_ID, "twilio"))
+            when(credentialService.findByNameIdentifyingIntegration(USER_ID, "twilio"))
                     .thenReturn(Optional.of(twilio));
             when(encryptionService.decrypt("ENC:sid")).thenReturn("ACxxxx");
             when(encryptionService.decrypt("ENC:token")).thenReturn("authtoken");
@@ -902,7 +927,7 @@ class InternalCredentialServiceTest {
         void accessTokenResolutionStampsLastUsed() {
             Credential cred = buildCredentialWithLastUsed(7L, USER_ID, "my-cred",
                     Map.of("api_key", "ENC:key"), null);
-            when(credentialService.getCredentialByTenantAndName(USER_ID, "my-cred"))
+            when(credentialService.findByNameIdentifyingIntegration(USER_ID, "my-cred"))
                     .thenReturn(Optional.of(cred));
             when(encryptionService.decrypt("ENC:key")).thenReturn("plain-key");
 
@@ -929,7 +954,7 @@ class InternalCredentialServiceTest {
         void forceRefreshResolutionStampsLastUsed() {
             Credential cred = buildCredentialWithLastUsed(243L, USER_ID, "my-cred",
                     Map.of("access_token", "ENC:tok"), null);
-            when(credentialService.getCredentialByTenantAndName(USER_ID, "my-cred"))
+            when(credentialService.findByNameIdentifyingIntegration(USER_ID, "my-cred"))
                     .thenReturn(Optional.of(cred));
             when(oAuth2Service.refreshToken(243L, USER_ID)).thenReturn(cred);
             when(encryptionService.decrypt("ENC:tok")).thenReturn("plain-tok");
@@ -943,7 +968,7 @@ class InternalCredentialServiceTest {
         @DisplayName("org-shared credential resolved cross-member is stamped (was the empty-last_used case in prod)")
         void orgSharedCredentialResolutionStampsLastUsed() {
             // Workflow owned by USER_ID, credential owned by OTHER_MEMBER, same workspace.
-            when(credentialService.getCredentialByTenantAndName(USER_ID, "twilio"))
+            when(credentialService.findByNameIdentifyingIntegration(USER_ID, "twilio"))
                     .thenReturn(Optional.empty());
             when(credentialService.getCredentialsByIntegration(USER_ID, "twilio"))
                     .thenReturn(List.of());
@@ -964,7 +989,7 @@ class InternalCredentialServiceTest {
         void lastUsedStampThrottledWhenRecentlyUsed() {
             Credential recentlyUsed = buildCredentialWithLastUsed(243L, USER_ID, "Twilio",
                     Map.of("api_key", "ENC:key"), Instant.now().minusSeconds(5));
-            when(credentialService.getCredentialByTenantAndName(USER_ID, "twilio"))
+            when(credentialService.findByNameIdentifyingIntegration(USER_ID, "twilio"))
                     .thenReturn(Optional.of(recentlyUsed));
             when(encryptionService.decrypt("ENC:key")).thenReturn("plain-key");
 
@@ -980,7 +1005,7 @@ class InternalCredentialServiceTest {
         void lastUsedReStampedWhenOlderThanThrottle() {
             Credential staleUse = buildCredentialWithLastUsed(243L, USER_ID, "Twilio",
                     Map.of("api_key", "ENC:key"), Instant.now().minusSeconds(120));
-            when(credentialService.getCredentialByTenantAndName(USER_ID, "twilio"))
+            when(credentialService.findByNameIdentifyingIntegration(USER_ID, "twilio"))
                     .thenReturn(Optional.of(staleUse));
             when(encryptionService.decrypt("ENC:key")).thenReturn("plain-key");
 
@@ -992,7 +1017,7 @@ class InternalCredentialServiceTest {
         @Test
         @DisplayName("no stamp when no credential resolves")
         void noStampWhenCredentialNotFound() {
-            when(credentialService.getCredentialByTenantAndName(USER_ID, "missing"))
+            when(credentialService.findByNameIdentifyingIntegration(USER_ID, "missing"))
                     .thenReturn(Optional.empty());
             when(credentialService.getCredentialsByIntegration(USER_ID, "missing"))
                     .thenReturn(List.of());
@@ -1007,7 +1032,7 @@ class InternalCredentialServiceTest {
         void stampFailureDoesNotBreakResolution() {
             Credential cred = buildCredentialWithLastUsed(243L, USER_ID, "Twilio",
                     Map.of("password", "ENC:token"), null);
-            when(credentialService.getCredentialByTenantAndName(USER_ID, "twilio"))
+            when(credentialService.findByNameIdentifyingIntegration(USER_ID, "twilio"))
                     .thenReturn(Optional.of(cred));
             when(encryptionService.decrypt("ENC:token")).thenReturn("authtoken");
             doThrow(new RuntimeException("db down")).when(credentialService).touchLastUsed(243L);
@@ -1023,6 +1048,21 @@ class InternalCredentialServiceTest {
 
     private Credential buildCredential(Long id, String tenantId, String name, Map<String, Object> data) {
         return buildCredentialWithStatus(id, tenantId, name, data, CredentialStatus.active);
+    }
+
+    /** Same shape as {@link #buildCredential}, with the integration the test is about. */
+    private Credential buildCredentialWithIntegration(Long id, String tenantId, String name,
+                                                      String integration, Map<String, Object> data) {
+        Instant now = Instant.now();
+        return new Credential(
+                id, tenantId, name, integration,
+                CredentialType.OAuth2, CredentialEnvironment.Production,
+                CredentialStatus.active, "Test credential",
+                data,
+                List.of("email"), List.of("oauth2"),
+                tenantId, "icon.url", true,
+                null, now, now
+        );
     }
 
     private Credential buildCredentialWithLastUsed(Long id, String tenantId, String name,

@@ -7,6 +7,10 @@ import { useLocale, useTranslations } from 'next-intl';
 import { useAuth } from '@/lib/providers/smart-providers';
 import { calcPrice, CREDIT_TIERS, PLAN_FEATURE_KEYS } from '@/lib/billing/pricing-constants';
 import DeploymentBadge from '@/components/pricing/DeploymentBadge';
+import ReferencePrice from '@/components/pricing/ReferencePrice';
+import FoundingPriceNote from '@/components/pricing/FoundingPriceNote';
+import { usePricingEvent } from '@/hooks/usePricingEvent';
+import type { ResolvedPricingEvent } from '@/lib/billing/pricing-events';
 import FeatureLabel from '@/components/pricing/FeatureLabel';
 
 type Cycle = 'monthly' | 'yearly';
@@ -38,6 +42,9 @@ export default function PricingSection() {
   // "5,000" in the server HTML vs "5 000" after hydration - a React #418
   // hydration mismatch on the whole landing page.
   const locale = useLocale();
+  // Window resolved against the SERVER clock, so every visitor sees the same deadline
+  // and the section cannot disagree with itself between server HTML and hydration.
+  const { event: pricingEvent } = usePricingEvent();
 
   // Entry tier credits, shared with the settings page so both stay in sync.
   const landingCredits = CREDIT_TIERS[TIER_INDEX].toLocaleString(locale);
@@ -136,7 +143,7 @@ export default function PricingSection() {
 
       <div className="mt-10 grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-4 md:gap-6 max-w-5xl mx-auto">
         {plans.map((p) => (
-          <PlanCardView key={p.id} plan={p} />
+          <PlanCardView key={p.id} plan={p} cycle={cycle} event={pricingEvent} />
         ))}
       </div>
 
@@ -154,7 +161,7 @@ export default function PricingSection() {
 
       <div className="mt-6 grid grid-cols-1 sm:grid-cols-2 gap-4 md:gap-6 max-w-5xl mx-auto">
         {businessPlans.map((p) => (
-          <PlanCardView key={p.id} plan={p} />
+          <PlanCardView key={p.id} plan={p} cycle={cycle} event={pricingEvent} />
         ))}
       </div>
 
@@ -189,7 +196,15 @@ function CycleButton({
   );
 }
 
-function PlanCardView({ plan }: { plan: PlanCard }) {
+function PlanCardView({
+  plan,
+  cycle,
+  event,
+}: {
+  plan: PlanCard;
+  cycle: Cycle;
+  event: ResolvedPricingEvent | null;
+}) {
   const isRecommended = !!plan.badge;
   const router = useRouter();
   const { isAuthenticated, isLoading, loginWithRedirect } = useAuth();
@@ -234,16 +249,30 @@ function PlanCardView({ plan }: { plan: PlanCard }) {
         >
           {plan.name}
         </h3>
-        <div className="flex items-baseline justify-center gap-1.5">
-          <span className="text-3xl font-bold" style={{ color: 'var(--text-primary)' }}>
-            {plan.priceLabel}
-          </span>
-          {plan.showSuffix && (
-            <span className="text-sm" style={{ color: 'var(--text-secondary)' }}>
-              /month
+        <div className="flex items-baseline justify-center gap-2">
+          <ReferencePrice
+            planId={plan.id}
+            cycle={cycle}
+            creditTierIndex={TIER_INDEX}
+            event={event}
+          />
+          <span className="flex items-baseline gap-1.5">
+            <span className="text-3xl font-bold" style={{ color: 'var(--text-primary)' }}>
+              {plan.priceLabel}
             </span>
-          )}
+            {plan.showSuffix && (
+              <span className="text-sm" style={{ color: 'var(--text-secondary)' }}>
+                /month
+              </span>
+            )}
+          </span>
         </div>
+        <FoundingPriceNote
+          planId={plan.id}
+          cycle={cycle}
+          creditTierIndex={TIER_INDEX}
+          event={event}
+        />
       </div>
 
       <div className="flex justify-center flex-1">

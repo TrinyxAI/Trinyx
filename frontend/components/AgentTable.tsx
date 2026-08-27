@@ -29,6 +29,14 @@ import { SelectionActionBar, BulkBarButton } from '@/components/ui/SelectionActi
 import { EmptyState } from '@/components/ui/EmptyState';
 import { CardSkeletonGrid } from '@/components/ui/CardSkeletonGrid';
 import { PaginationBar } from '@/components/ui/PaginationBar';
+import { DndContext, DragOverlay } from '@dnd-kit/core';
+import { FolderPlus } from 'lucide-react';
+import { AgentFolderFace } from '@/components/folders/AgentFolderFace';
+import { FolderBreadcrumb } from '@/components/folders/FolderBreadcrumb';
+import { FolderTilesGrid } from '@/components/folders/FolderTilesGrid';
+import { FolderDialogs } from '@/components/folders/FolderDialogs';
+import { DraggableResourceCard } from '@/components/folders/DraggableResourceCard';
+import { useListFolders } from '@/hooks/useListFolders';
 import { useDebouncedValue } from '@/hooks/useDebouncedValue';
 import { useSidePanelSafe } from '@/contexts/SidePanelContext';
 import { AgentPanelContent, AGENT_CONFIGURATION_TAB } from '@/components/app/AgentPanelContent';
@@ -108,6 +116,37 @@ export function AgentTable({ className = '' }: AgentTableProps) {
   // all 404). Same data shape as useAgentFleetState.triggersByAgent.
   const [triggersByAgent, setTriggersByAgent] = useState<Map<string, { hasWebhook: boolean; hasSchedule: boolean; cronExpression?: string; timezone?: string }>>(new Map());
 
+  // FOLDERS (V449). The level being shown is a fetch parameter like the page number; the
+  // tiles and the trail come back WITH the list. `reloadRef` breaks the loop between the
+  // two: the hook needs a way to reload, and the fetch needs the hook's level.
+  const reloadRef = useRef<() => void>(() => {});
+  const searching = debouncedSearch.trim().length > 0;
+  const folders = useListFolders({
+    kind: 'agent',
+    reload: useCallback(() => reloadRef.current(), []),
+    busy: loading,
+    selectedIds: selectedAgents,
+    clearSelection: clearAgentSelection,
+    searching,
+    canMutate,
+    labels: {
+      actionFailed: t('folders.actionFailed'),
+      createFailed: t('folders.createFailed'),
+      renameFailed: t('folders.renameFailed'),
+      deleteFailed: t('folders.deleteFailed'),
+      moveFailed: t('folders.moveFailed'),
+      moved: t('folders.moved'),
+      movedToFolder: (count, name) => t('folders.movedToFolder', { count, name }),
+      movedToTopLevel: (count) => t('folders.movedToTopLevel', { count }),
+    },
+    notify: addToast,
+  });
+  const folderCountLabel = useCallback(
+    (count: number) => t('folders.agentCount', { count }),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [],
+  );
+
   // Load ONE server page. The backend applies search (`q`), sort and the visibility filter over the
   // whole set and returns only the requested slice already enriched with each row's publication badge
   // (`publicationStatuses`), so the browser never loads more than it shows and never sweeps all
@@ -123,12 +162,17 @@ export function AgentTable({ className = '' }: AgentTableProps) {
         q: debouncedSearch,
         sort: sortBy,
         visibility: visibilityFilter,
+        // `root` = the agents filed nowhere. A search overrides this server-side and looks
+        // through every folder, so a name is always findable.
+        folderId: folders.folderIdParam,
+        includeFolders: true,
       });
       // A newer request superseded this one - drop its (now stale) result.
       if (reqId !== requestIdRef.current) return;
 
       setAgents((result.items || []) as AgentRow[]);
       setTotalCount(result.totalCount || 0);
+      folders.applyListResponse(result);
 
       // Publication badge straight off the page envelope (no per-row sweep): ACTIVE = shared,
       // PENDING_REVIEW = in review, REJECTED = rejected (with reason); absent = private.
@@ -150,12 +194,15 @@ export function AgentTable({ className = '' }: AgentTableProps) {
     } finally {
       if (reqId === requestIdRef.current) setLoading(false);
     }
-  }, [page, pageSize, debouncedSearch, sortBy, visibilityFilter]);
+  }, [page, pageSize, debouncedSearch, sortBy, visibilityFilter, folders.folderIdParam]);
 
-  // Reset to page 0 when the search term, sort, or visibility filter changes.
+  // Reset to page 0 when the search term, sort, visibility filter or folder changes.
   useEffect(() => {
     setPage(0);
-  }, [debouncedSearch, sortBy, visibilityFilter]);
+  }, [debouncedSearch, sortBy, visibilityFilter, folders.folderIdParam]);
+
+  // The hook reloads through this ref, so it can be created before the fetch it triggers.
+  reloadRef.current = fetchAgents;
 
   // Initial load + reload on page / size / search / sort / visibility / workspace switch. The fetch
   // callback already closes over those inputs, so keying on its identity fires exactly one page load
@@ -309,7 +356,11 @@ export function AgentTable({ className = '' }: AgentTableProps) {
     }
   };
 
-  const handleAgentCreated = () => {
+  // `agentId` is set only when an agent was CREATED (the same callback fires after an
+  // edit): created while standing in a folder, it is filed there rather than landing
+  // back at the top level.
+  const handleAgentCreated = async (agentId?: string) => {
+    if (agentId) await folders.fileNewResource(agentId);
     fetchAgents();
     setShowCreateModal(false);
     setEditingAgent(null);
@@ -382,19 +433,32 @@ export function AgentTable({ className = '' }: AgentTableProps) {
       {/* Header always rendered (mirrors WorkflowTable): the templates button must
           stay reachable when the list is empty, which is when it helps most. */}
       <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
-          <div className="flex items-center gap-3">
-            <div className="w-10 h-10 bg-theme-secondary rounded-xl flex items-center justify-center">
-              <Bot className="w-5 h-5 text-theme-primary" />
+          {/* Inside a folder the PATH is the page title, with the folder mark and an
+              up-one-level arrow beside it - the same header the Files browser uses. */}
+          {folders.trail.length > 0 ? (
+            <FolderBreadcrumb
+              trail={folders.trail}
+              rootLabel={t('folders.allAgents')}
+              backLabel={t('folders.upOneLevel')}
+              subtitle={loading ? undefined : t('folders.agentCount', { count: totalCount })}
+              onNavigate={folders.navigateToFolder}
+              droppable={folders.canOrganize}
+            />
+          ) : (
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 bg-theme-secondary rounded-xl flex items-center justify-center">
+                <Bot className="w-5 h-5 text-theme-primary" />
+              </div>
+              <div>
+                <h2 className="text-lg font-semibold text-theme-primary">{t('emptyState.agent.title')}</h2>
+                {loading ? (
+                  <div className="h-4 w-20 bg-theme-tertiary rounded animate-pulse mt-1"></div>
+                ) : (
+                  <p className="text-sm text-theme-secondary">{totalCount} agent{totalCount !== 1 ? 's' : ''}</p>
+                )}
+              </div>
             </div>
-            <div>
-              <h2 className="text-lg font-semibold text-theme-primary">{t('emptyState.agent.title')}</h2>
-              {loading ? (
-                <div className="h-4 w-20 bg-theme-tertiary rounded animate-pulse mt-1"></div>
-              ) : (
-                <p className="text-sm text-theme-secondary">{totalCount} agent{totalCount !== 1 ? 's' : ''}</p>
-              )}
-            </div>
-          </div>
+          )}
           {loading ? (
             <div className="h-8 w-28 bg-theme-tertiary rounded animate-pulse"></div>
           ) : canMutate ? (
@@ -416,6 +480,12 @@ export function AgentTable({ className = '' }: AgentTableProps) {
                   addToast({ type: 'error', title: t('templates.gallery.createFailed'), message })
                 }
               />
+              {folders.foldersEnabled && (
+                <Button variant="outline" size="sm" onClick={() => folders.setShowCreateDialog(true)}>
+                  <FolderPlus className="h-4 w-4 mr-1.5" />
+                  {t('folders.newFolder')}
+                </Button>
+              )}
               <Button
                 variant="default"
                 size="sm"
@@ -429,7 +499,7 @@ export function AgentTable({ className = '' }: AgentTableProps) {
       </div>
 
       {/* Search + visibility filter + sort */}
-      {(totalCount > 0 || debouncedSearch.trim().length > 0) && (
+      {(totalCount > 0 || folders.tiles.length > 0 || debouncedSearch.trim().length > 0) && (
         <div className="flex flex-col gap-4 md:flex-row md:items-center">
           <div className="relative flex-1 overflow-visible">
             <Search className="pointer-events-none absolute left-4 top-1/2 -translate-y-1/2 h-4 w-4 text-theme-secondary" />
@@ -469,6 +539,14 @@ export function AgentTable({ className = '' }: AgentTableProps) {
       {/* Contextual actions - floating bottom-center bar (mirrors the task board). */}
       {selectedAgents.size > 0 && (
         <SelectionActionBar count={selectedAgents.size} onClear={clearAgentSelection}>
+          {/* Filing stays available while searching: you often find an agent BECAUSE you
+              were looking for where to put it. Only the drag targets need a folder view. */}
+          {canMutate && (
+            <BulkBarButton onClick={folders.openMoveDialog}>
+              <FolderPlus className="h-3.5 w-3.5" />
+              {t('folders.moveToFolder')}
+            </BulkBarButton>
+          )}
           {/* Update (edit) - single selection only, mirrors the applications board. */}
           {canMutate && selectedAgents.size === 1 && (
             <BulkBarButton onClick={() => {
@@ -550,28 +628,47 @@ export function AgentTable({ className = '' }: AgentTableProps) {
       <div className="space-y-4 w-full overflow-visible">
         {loading ? (
           <CardSkeletonGrid columnsClassName="grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4" />
-        ) : filteredAgents.length === 0 ? (
+        ) : (
+          /* One drag context over the folders AND the cards: a card dropped on a tile is
+             filed there, a tile dropped on another tile is nested inside it. */
+          <DndContext
+            sensors={folders.sensors}
+            onDragStart={(event) => folders.handleDragStart(
+              event, (id) => agents.find((a) => a.id === id)?.name)}
+            onDragEnd={folders.handleDragEnd}
+            onDragCancel={folders.cancelDrag}
+          >
+            <FolderTilesGrid
+              folders={folders}
+              countLabel={folderCountLabel}
+              gridClassName="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4 mb-4"
+              renderFace={(folder) => <AgentFolderFace preview={folder.preview ?? []} />}
+            />
+
+            {filteredAgents.length === 0 && folders.tiles.length === 0 ? (
           <EmptyState
             icon={<Bot className="h-8 w-8 text-theme-tertiary" />}
-            title={t('emptyState.agent.noAgentsFound')}
-            subtitle={totalCount === 0 && debouncedSearch.trim().length === 0
-              ? t('emptyState.agent.createFirstAgent')
-              : t('emptyState.agent.noMatchingAgents')}
-            actions={canMutate && totalCount === 0 && debouncedSearch.trim().length === 0 ? (
+            title={folders.currentFolderId ? t('folders.emptyFolderTitle') : t('emptyState.agent.noAgentsFound')}
+            subtitle={folders.currentFolderId
+              ? t('folders.emptyFolderSubtitle')
+              : (totalCount === 0 && debouncedSearch.trim().length === 0
+                ? t('emptyState.agent.createFirstAgent')
+                : t('emptyState.agent.noMatchingAgents'))}
+            actions={canMutate && !folders.currentFolderId && totalCount === 0 && debouncedSearch.trim().length === 0 ? (
               <Button variant="default" onClick={openCreateModal}>
                 <Plus className="w-4 h-4 mr-1.5" />
                 {t('emptyState.agent.createButton')}
               </Button>
             ) : undefined}
           />
-        ) : (
+            ) : (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
             {filteredAgents.map((agent) => {
               const isSelected = selectedAgents.has(agent.id);
 
               return (
+                <DraggableResourceCard key={agent.id} id={agent.id} disabled={!folders.canOrganize}>
                 <div
-                  key={agent.id}
                   className={`group cursor-pointer rounded-[18px] border border-theme overflow-hidden bg-gradient-to-br from-slate-50 to-slate-100 dark:from-slate-800 dark:to-slate-900 hover:shadow-md transition-shadow ${
                     isSelected ? 'ring-2 ring-[var(--accent-primary)]' : ''
                   }`}
@@ -664,9 +761,24 @@ export function AgentTable({ className = '' }: AgentTableProps) {
                     </div>
                   </div>
                 </div>
+                </DraggableResourceCard>
               );
             })}
           </div>
+            )}
+
+            {/* What is being dragged, following the pointer. A multi-selection drag says how
+                many cards are travelling, so a drop never moves more than you meant. */}
+            <DragOverlay>
+              {folders.activeDrag && (
+                <div className="rounded-xl border border-[var(--accent-primary)] bg-theme-secondary px-3 py-2 text-sm text-theme-primary shadow-lg">
+                  {folders.activeDrag.count > 1
+                    ? t('folders.draggingCount', { count: folders.activeDrag.count })
+                    : folders.activeDrag.label}
+                </div>
+              )}
+            </DragOverlay>
+          </DndContext>
         )}
       </div>
 
@@ -741,6 +853,8 @@ export function AgentTable({ className = '' }: AgentTableProps) {
         </div>,
         document.body
       )}
+
+      <FolderDialogs folders={folders} selectedIds={selectedAgents} />
 
       <ToastContainer toasts={toasts} onRemoveToast={removeToast} />
     </div>

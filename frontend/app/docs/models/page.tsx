@@ -55,6 +55,7 @@ export default function ModelsPage() {
             ['OpenRouter', 'multi-provider aggregator'],
             ['Qwen', 'Alibaba'],
             ['Moonshot', 'Kimi'],
+            ['MiniMax', 'MiniMax M-series'],
           ]}
         />
         <p>

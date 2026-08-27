@@ -95,6 +95,22 @@ public class ToolExecutionRequest {
     private Long platformCredentialId;
 
     /**
+     * The caller's user credential named rather than numbered, for a step whose
+     * credential is chosen at RUN time (a table row, a trigger field, a split
+     * item - none of which know database ids). Resolved here, against the
+     * endpoint's own credential requirement, because the requirement is
+     * catalog-side knowledge. Honored only with {@code credentialSource="user"}.
+     */
+    private String selectedCredentialName;
+
+    /**
+     * Refuse rather than degrade when the named or numbered credential cannot be
+     * matched. Absent for every author-time pin, which keeps their deliberately
+     * forgiving fallback to the integration default exactly as it is.
+     */
+    private Boolean credentialSelectionStrict;
+
+    /**
      * Opt-out from inline-binary dehydration. By default catalog-service walks
      * the response and replaces any large base64 leaf with a {@code FileRef}
      * uploaded to MinIO, so the agent never sees megabytes of base64 (which

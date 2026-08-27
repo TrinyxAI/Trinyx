@@ -1413,8 +1413,13 @@ export function CredentialWizard({
               data-testid={`cred-step-${iconSlug}`}
               onClick={() => isClickable && goToCredential(index)}
               disabled={!isClickable}
+              // Same rung as the step pills of ModalStepIndicator, which this row
+              // visually rhymes with: it is the one progress row the extraction
+              // deliberately did NOT fold in (its items are SERVICES, with their
+              // own logos and their own per-service state, not the steps of this
+              // dialog), so it keeps its markup and takes only the shape.
               className={`
-                flex items-center gap-2 px-3 py-1.5 rounded-md text-xs font-medium transition-all
+                flex items-center gap-2 px-3 py-1.5 rounded-xl text-xs font-medium transition-all
                 ${state.status === "current" ? "bg-slate-100 dark:bg-slate-800 text-slate-900 dark:text-slate-100 ring-2 ring-slate-900 dark:ring-slate-100" : ""}
                 ${state.status === "completed" ? "bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-300" : ""}
                 ${state.status === "pending" ? "bg-slate-100 dark:bg-slate-800 text-slate-500 dark:text-slate-400 cursor-pointer hover:bg-slate-200 dark:hover:bg-slate-700" : ""}

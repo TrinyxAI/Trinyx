@@ -1,0 +1,161 @@
+/**
+ * @vitest-environment jsdom
+ */
+import React from 'react';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { cleanup, render, screen } from '@testing-library/react';
+
+/**
+ * The application settings cog, bottom-right of the application page.
+ *
+ * "Create an editable copy" used to sit INLINE in the Info panel's Info tab, above the
+ * app description, which every visitor had to scroll past for a one-shot action most
+ * never take. It now lives behind this cog (its behaviour is covered by
+ * ApplicationSettingsMenu's own suite). What this suite pins is the GATING and the
+ * placement: the cog is mounted only for a viewer who can actually make a copy, in its
+ * own bottom-right corner, and never for a preview / a publisher / a non-application.
+ */
+
+const cogProps = vi.hoisted(() => [] as Array<{ publicationId?: string; remote?: boolean }>);
+const isPreviewOnly = vi.hoisted(() => ({ value: false }));
+const numericUserId = vi.hoisted(() => ({ value: 42 as number | null }));
+
+vi.mock('@/lib/api', () => ({ orchestratorApi: { updatePublication: vi.fn() } }));
+vi.mock('next-intl', () => ({ useTranslations: () => (k: string) => k }));
+vi.mock('@/hooks/useAuthGuard', () => ({
+  useAuthGuard: () => ({
+    isAuthenticated: true,
+    isAuthChecking: false,
+    get numericUserId() { return numericUserId.value; },
+  }),
+}));
+vi.mock('@/contexts/WorkflowModeContext', () => ({
+  WorkflowModeProvider: ({ children }: { children: React.ReactNode }) => <>{children}</>,
+  useWorkflowMode: () => ({
+    setRunId: vi.fn(),
+    get isPreviewOnly() { return isPreviewOnly.value; },
+    setViewingEpoch: vi.fn(),
+  }),
+}));
+vi.mock('@/contexts/SidePanelContext', () => ({
+  useSidePanelSafe: () => ({ addTab: vi.fn(), setActiveTab: vi.fn(), open: vi.fn(), isOpen: true }),
+}));
+vi.mock('@/components/app/WorkflowPanelContent', () => ({
+  WorkflowPanelContent: () => null,
+  setPendingActivateTab: vi.fn(),
+}));
+vi.mock('@/components/workflow/WorkflowRunCanvas', () => ({ WorkflowRunCanvas: () => null }));
+vi.mock('@/components/chat/ApplicationCarousel', () => ({ ApplicationCarousel: () => null }));
+vi.mock('@/components/marketplace/PublisherAvatar', () => ({ PublisherAvatar: () => null }));
+vi.mock('@/components/marketplace/PublicationInfoPanel', () => ({ PublicationInfoPanel: () => null }));
+vi.mock('@/lib/hooks/useOrgScopedReset', () => ({ useOrgScopedReset: () => undefined }));
+vi.mock('@/lib/stores/interface-pagination-store', () => ({
+  useInterfacePaginationStore: { getState: () => ({ setCarouselIndex: vi.fn() }) },
+}));
+vi.mock('@/app/workflows/builder/utils/labelNormalizer', () => ({ normalizeLabel: (s: string) => s }));
+vi.mock('../workflow/WorkflowLoadingState', () => ({ WorkflowLoadingState: () => null }));
+vi.mock('../workflow/WorkflowUnauthorizedState', () => ({ WorkflowUnauthorizedState: () => null }));
+vi.mock('../workflow/hooks', () => ({ useAutoCollapseSidebar: () => undefined }));
+
+// Capture what the cog is mounted with (its own behaviour is tested separately).
+vi.mock('@/components/marketplace/ApplicationSettingsMenu', () => ({
+  ApplicationSettingsMenu: (p: { publicationId: string; remote?: boolean }) => {
+    cogProps.push({ publicationId: p.publicationId, remote: p.remote });
+    return <div data-testid="application-settings-menu" />;
+  },
+}));
+
+import { ApplicationDetailView } from '@/components/views/application/ApplicationDetailView';
+import type { WorkflowPublication } from '@/lib/api/orchestrator/types';
+
+function pub(over: Partial<WorkflowPublication> = {}): WorkflowPublication {
+  return {
+    id: 'p1',
+    title: 'X',
+    visibility: 'PRIVATE',
+    creditsPerUse: 0,
+    displayMode: 'APPLICATION',
+    publisherId: '999',
+    ...over,
+  } as WorkflowPublication;
+}
+
+function renderView(props: Partial<React.ComponentProps<typeof ApplicationDetailView>> = {}) {
+  cogProps.length = 0;
+  return render(
+    <ApplicationDetailView workflowId="wf-1" runId="run-1" publication={pub()} {...props} />,
+  );
+}
+
+/** The corner the cog is docked in, read off its wrapper. */
+const cogCorner = () => screen.getByTestId('application-settings-menu').parentElement?.className ?? '';
+
+beforeEach(() => {
+  cogProps.length = 0;
+  isPreviewOnly.value = false;
+  numericUserId.value = 42;
+});
+afterEach(cleanup);
+
+describe('ApplicationDetailView - the settings cog', () => {
+  it('mounts the cog for someone who installed the application', () => {
+    renderView();
+
+    expect(screen.getByTestId('application-settings-menu')).toBeDefined();
+    expect(cogProps.at(-1)).toEqual({ publicationId: 'p1', remote: false });
+  });
+
+  it('docks it in the BOTTOM-RIGHT corner, opposite the top-right Info panel', () => {
+    renderView();
+
+    expect(cogCorner()).toContain('bottom-4');
+    expect(cogCorner()).toContain('right-4');
+    expect(cogCorner()).not.toContain('top-4');
+  });
+
+  it('forwards the cloud-linked CE flag so the copy goes through the remote endpoint', () => {
+    renderView({ remote: true });
+
+    expect(cogProps.at(-1)?.remote).toBe(true);
+  });
+
+  it('forwards a publication-stamped remote flag too (cloud by-id fallback)', () => {
+    renderView({ publication: pub({ remote: true }) });
+
+    expect(cogProps.at(-1)?.remote).toBe(true);
+  });
+
+  it('is withheld on an anonymous marketplace PREVIEW (no acquired clone, no auth state)', () => {
+    renderView({ publicPreviewMode: true });
+
+    expect(screen.queryByTestId('application-settings-menu')).toBeNull();
+  });
+
+  it('is withheld from the PUBLISHER of the application (they own the source, no clone to copy)', () => {
+    // Offering it would only ever produce "Application is not installed in this workspace".
+    renderView({ publication: pub({ publisherId: '42' }) });
+
+    expect(screen.queryByTestId('application-settings-menu')).toBeNull();
+  });
+
+  it('is withheld for a non-APPLICATION publication (a plain workflow is already editable)', () => {
+    renderView({ publication: pub({ displayMode: 'WORKFLOW' }) });
+
+    expect(screen.queryByTestId('application-settings-menu')).toBeNull();
+  });
+
+  it('is withheld when the page carries no publication at all', () => {
+    renderView({ publication: undefined });
+
+    expect(screen.queryByTestId('application-settings-menu')).toBeNull();
+  });
+
+  it('stays mounted in preview-ONLY mode of an acquired app (isPreviewOnly is a layout switch, not a gate)', () => {
+    // isPreviewOnly only decides how the Info panel is framed; the viewer still owns
+    // the clone, so the copy action must not disappear with it.
+    isPreviewOnly.value = true;
+    renderView();
+
+    expect(screen.getByTestId('application-settings-menu')).toBeDefined();
+  });
+});

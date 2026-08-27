@@ -23,6 +23,12 @@ const h = vi.hoisted(() => ({
   dropdownProps: [] as Array<Record<string, unknown>>,
 }));
 
+// Both composers rendered here fetch the verdict for their model menu,
+// which needs a QueryClient this suite does not provide. Stubbed at the
+// rule; the rule has its own suite.
+vi.mock('@/lib/hooks/useMonthlyCreditsCannotPay', () => ({
+  useMonthlyCreditsCannotPay: () => ({ blocked: false, isLoading: false }),
+}));
 vi.mock('next-intl', () => ({ useTranslations: () => (k: string) => k }));
 vi.mock('next/navigation', () => ({ usePathname: () => '/en/app/chat' }));
 vi.mock('@/i18n/navigation', () => ({ usePathname: () => '/app/chat' }));
@@ -92,7 +98,16 @@ vi.mock('@/lib/stores/interface-pagination-store', () => ({
   ),
 }));
 vi.mock('@/app/workflows/builder/utils/labelNormalizer', () => ({ normalizeLabel: (s: string) => s }));
-vi.mock('@/contexts/workflow-run/RunStateStore', () => ({ TERMINAL_STATUSES: new Set<string>() }));
+// Stubbed to keep the real store (a stateful class with a module-level
+// registry) out of a composer test, and EMPTY so that no status reads as
+// terminal here. It has to name every constant this tree REACHES, not just
+// the ones this file reads: run-panel/runFormatting pulls UNREVIVABLE_STATUSES
+// in through WorkflowPanelContent, and a stub missing one does not fail an
+// assertion, it fails the whole FILE at import.
+vi.mock('@/contexts/workflow-run/RunStateStore', () => ({
+  TERMINAL_STATUSES: new Set<string>(),
+  UNREVIVABLE_STATUSES: new Set<string>(),
+}));
 vi.mock('@/components/chat/TriggerTabContent', () => ({ TriggerTabContent: () => <div data-testid="trigger-content" /> }));
 vi.mock('@/components/chat/ApplicationCarousel', () => ({ ApplicationCarousel: () => <div data-testid="app-carousel" /> }));
 

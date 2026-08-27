@@ -70,6 +70,36 @@ public class InternalCredentialLookupController {
         return ResponseEntity.ok(credentials);
     }
 
+    /**
+     * The IDENTITIES of the caller's credentials: id, name, integration, status.
+     *
+     * <p>Same scope rules as {@code /all} (workspace when an org is supplied,
+     * tenant otherwise) and deliberately the same READ, so the two can never
+     * disagree about which rows exist. What differs is the answer: no
+     * {@code credential_data}. A caller working out WHICH credential was meant
+     * must not receive the material of the ones it is about to reject, and this
+     * is the endpoint that lets it avoid doing so.
+     */
+    @GetMapping("/identities")
+    public ResponseEntity<List<CredentialIdentity>> getCredentialIdentities(
+            @RequestParam String userId,
+            @RequestHeader(value = "X-Organization-ID", required = false) String organizationId) {
+        List<Credential> credentials = (organizationId != null && !organizationId.isBlank())
+                ? credentialRepository.findByOrganizationIdStrict(organizationId, 1, 10_000)
+                : credentialRepository.findAllByTenantId(userId);
+        return ResponseEntity.ok(credentials.stream()
+                .map(c -> new CredentialIdentity(
+                        c.id(),
+                        c.name(),
+                        c.integration(),
+                        c.status() != null ? c.status().name() : null))
+                .toList());
+    }
+
+    /** Identity only. Adding a field that can carry secret material here is a bug. */
+    public record CredentialIdentity(Long id, String name, String integration, String status) {
+    }
+
     private static boolean matchesOwnerOrOrg(Credential c, String userId, String organizationId) {
         if (userId != null && userId.equals(c.tenantId())) {
             return true;

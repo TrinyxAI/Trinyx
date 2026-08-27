@@ -135,6 +135,84 @@ class CatalogExecuteModuleRefusalMessageTest {
         return module.execute("execute", params, "user-1", ToolExecutionContext.of("user-1")).orElseThrow();
     }
 
+    /**
+     * The upstream answer, verbatim from the live run that found this: HTTP 200
+     * carrying a REFUSAL BY THE PROVIDER. ElevenLabs answered 401 because the
+     * stored key had expired, and catalog-service reported that faithfully -
+     * success=false, the status, and the sentence a person needs.
+     */
+    private static final String PROVIDER_REFUSED_ENVELOPE = """
+            {"success":false,
+             "result":{"httpStatus":{"code":401,
+                       "error":"Authentication expired for elevenlabs. Please reconnect your account."}},
+             "error":"Authentication expired for elevenlabs. Please reconnect your account.",
+             "metadata":{"toolName":"sound_generation","endpoint":"/sound-generation",
+                         "method":"POST","apiId":"e3cd5dfb-1111-2222-3333-444455556666",
+                         "iconSlug":"elevenlabs","status":401,
+                         "httpStatus":{"code":401,"error":""}},
+             "executionTimeMs":392,
+             "toolId":"3e2f8ed3-e8d3-4f59-b1b5-0bd307784ee2",
+             "requestId":"14a708fb-7777-8888-9999-000011112222"}
+            """;
+
+    @Nested
+    @DisplayName("a provider that refuses the call is reported as a refusal, not as a success")
+    class ProviderRefused {
+
+        @Test
+        @DisplayName("REGRESSION: an upstream 401 inside a transport 200 fails, and does not claim a charge")
+        void upstreamRefusalIsAFailure() {
+            stubPreflightPasses();
+            stubExecuteAnswers(PROVIDER_REFUSED_ENVELOPE, HttpStatus.OK);
+
+            ToolExecutionResult result = run("user");
+
+            // Pre-fix this was ToolExecutionResult.success(envelope): the caller
+            // read success=true, and GenerationModule went on to blame its own
+            // descriptor - "no asset could be retrieved ... You have been
+            // charged for it" - for a call the provider had refused and that
+            // ToolExecutionManager had already released.
+            assertThat(result.success()).isFalse();
+            assertThat(result.errorCode()).isEqualTo(ToolErrorCode.EXECUTION_FAILED);
+            assertThat(result.error()).startsWith(CatalogExecuteModule.UPSTREAM_REJECTED_CODE);
+        }
+
+        @Test
+        @DisplayName("the provider's own sentence is what the reader gets, with the status and no false charge")
+        void carriesTheProvidersOwnSentence() {
+            stubPreflightPasses();
+            stubExecuteAnswers(PROVIDER_REFUSED_ENVELOPE, HttpStatus.OK);
+
+            ToolExecutionResult result = run("user");
+
+            assertThat(result.error())
+                    .contains("Please reconnect your account")
+                    .contains("HTTP 401")
+                    .contains("nothing was charged")
+                    .doesNotContain("You have been charged");
+            // Same rule as the sibling refusals: a sentence, never the envelope.
+            assertThat(result.error()).doesNotStartWith("{");
+            assertThat(result.error()).doesNotContain("requestId", "executionTimeMs", "apiId");
+        }
+
+        @Test
+        @DisplayName("an envelope that reports success is still a success")
+        void successEnvelopeStillSucceeds() {
+            stubPreflightPasses();
+            stubExecuteAnswers("""
+                    {"success":true,
+                     "result":{"audio":{"_type":"file","path":"1/general/catalog-binary/x.mp3",
+                                        "name":"x.mp3","mimeType":"audio/mpeg","size":1024}},
+                     "metadata":{"toolName":"sound_generation","status":200},
+                     "toolId":"3e2f8ed3-e8d3-4f59-b1b5-0bd307784ee2"}
+                    """, HttpStatus.OK);
+
+            ToolExecutionResult result = run("user");
+
+            assertThat(result.success()).isTrue();
+        }
+    }
+
     @Nested
     @DisplayName("a missing credential is refused in words, not with the upstream envelope")
     class CredentialsRequired {

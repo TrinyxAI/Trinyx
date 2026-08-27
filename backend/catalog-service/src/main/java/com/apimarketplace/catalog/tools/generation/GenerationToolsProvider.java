@@ -49,7 +49,7 @@ public class GenerationToolsProvider implements ToolsProvider {
     /** Canonical tool name. Format-neutral on purpose. */
     public static final String TOOL_NAME = "generation";
 
-    private static final List<String> VALID_ACTIONS = List.of("create", "models", "help");
+    private static final List<String> VALID_ACTIONS = List.of("create", "models", "options", "help");
 
     private final GenerationModule module;
 
@@ -100,7 +100,7 @@ public class GenerationToolsProvider implements ToolsProvider {
                 ToolParameter.builder()
                         .name("action")
                         .type("string")
-                        .description("create | models | help")
+                        .description("create | models | options | help")
                         .required(true)
                         .enumValues(VALID_ACTIONS)
                         .build(),
@@ -108,6 +108,14 @@ public class GenerationToolsProvider implements ToolsProvider {
                         + "(create). Determines the format, the accepted parameters and the price.", false),
                 stringParam("kind", "Narrow action='models' to one format: image, video, audio, "
                         + "voice, music. Omit to list everything.", false),
+                // Reachable, not only documented. This is the one argument
+                // action='options' cannot work without, and a schema that omits
+                // it leaves an agent unable to call an action it can see: the
+                // same gap that once made image-to-video unreachable from chat.
+                stringParam("parameter", "Which parameter to ask the provider about (options). "
+                        + "One of the names action='models' marked optionsAvailable in that "
+                        + "model's limits. Pass the value you get back as that same parameter to "
+                        + "action='create'.", false),
                 stringParam("prompt", "What to generate (create). Required by every model.", false),
                 stringParam("negative_prompt", "What to keep OUT of the result (create). Only "
                         + "models listing it in 'accepts' take it.", false),
@@ -198,7 +206,35 @@ public class GenerationToolsProvider implements ToolsProvider {
                         + "billed_on, default_<billed_on>, price{}, async}, count, kinds[], price_note, "
                         + "size_note }. A model's limits{} holds, per parameter, any of allowed[], "
                         + "min, max and maxLength; a parameter with nothing to restrict is absent "
-                        + "rather than present and empty."));
+                        + "rather than present and empty. A value outside a limit is normally "
+                        + "refused before the provider is called, so testing one costs nothing - "
+                        + "EXCEPT where the entry carries allowedEnforced:false. Those values are "
+                        + "what the provider documents rather than a rule this platform checks: a "
+                        + "value outside them is dispatched and fails at the provider, and you pay "
+                        + "for the attempt. Alongside it, allowedTruncated:true means allowed[] is "
+                        + "a SAMPLE of allowedCount values, not the whole set, because a provider "
+                        + "with a hundred voices would otherwise fill this answer. For either of "
+                        + "those, ask the person which value they want rather than inventing an "
+                        + "identifier or trying variations. A limit carrying "
+                        + "optionsAvailable:true carries no list here at all: those values live in "
+                        + "the provider account and action='options' fetches them. That is the "
+                        + "only way to learn a value such as a voice id, which cannot be guessed."));
+        actions.put("options", Map.of(
+                "summary", "Ask the provider what ONE parameter of ONE model accepts, when only "
+                        + "the account behind the key can say.",
+                "params", Map.of(
+                        "model", "required - an id from action='models'",
+                        "parameter", "required - a parameter that action='models' marked "
+                                + "optionsAvailable in its limits",
+                        "credential_source", "optional - 'user' | 'platform'. Use the SAME value "
+                                + "you will pass to action='create': these values belong to that "
+                                + "account, and another key has different ones."),
+                "returns", "{ model, parameter, options[]: {value, label}, count, credential_source, "
+                        + "note }, plus truncated + total_count when the account holds more than "
+                        + "the answer carries. Send a 'value' as the parameter; 'label' is what to "
+                        + "show a person and is never sent. When no key is connected the call "
+                        + "fails saying so: connecting one is the account owner's act, so report "
+                        + "it rather than retrying. Nothing is charged either way."));
         actions.put("create", Map.of(
                 "summary", "Generate one asset.",
                 "params", Map.of(

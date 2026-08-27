@@ -198,10 +198,15 @@ public class WorkflowCrudModule implements ToolModule {
                     ToolExecutionResult.failure(ToolErrorCode.WORKFLOW_NOT_FOUND, "Workflow not found: " + workflowIdStr);
             case WorkflowPinService.PinResult.VersionNotFound vnf ->
                     ToolExecutionResult.failure(ToolErrorCode.EXECUTION_FAILED, "Version " + vnf.version() + " not found for workflow " + workflowIdStr);
-            case WorkflowPinService.PinResult.NoSuccessfulRun nsr ->
-                    ToolExecutionResult.failure(ToolErrorCode.EXECUTION_FAILED, "Cannot pin v" + nsr.version() + ": no successful run exists for this version. " +
-                            "Start a run with workflow(action='execute', id='" + workflowIdStr + "', version=" + nsr.version() +
-                            ") first, then retry the pin.");
+            case WorkflowPinService.PinResult.ProductionRunUnavailable pru ->
+                    ToolExecutionResult.failure(ToolErrorCode.EXECUTION_FAILED, "Cannot pin v" + pru.version()
+                            + ": " + pru.reason() + ". Pinning is refused rather than left half-done, because "
+                            + "a pinned version with no production run arms this workflow's webhook, schedule "
+                            + "and chained-workflow triggers with nothing to fire. Retry the pin once - some "
+                            + "causes are momentary. If it fails again it is not something you can repair "
+                            + "through any action available to you: tell the person who owns this workflow "
+                            + "that v" + pru.version() + " could not be put into production, and leave the "
+                            + "workflow on whatever version it was already pinned to.");
             case WorkflowPinService.PinResult.Success s -> {
                 Map<String, Object> data = new LinkedHashMap<>();
                 data.put("workflow_id", workflowIdStr);
@@ -1039,7 +1044,8 @@ public class WorkflowCrudModule implements ToolModule {
      * already produced upstream of it.
      *
      * <p>Params: {@code run_id} (required), {@code node} (required, the node key as it appears
-     * in {@code get_run}, e.g. {@code mcp:fetch_data}).
+     * in {@code get_run}, e.g. {@code mcp:fetch_data}), {@code epoch} (optional, which fire of
+     * the run to replay - omitted means the most recent one).
      */
     private ToolExecutionResult executeRestartFromNode(Map<String, Object> parameters, String tenantId,
                                                        ToolExecutionContext context) {
@@ -1054,6 +1060,27 @@ public class WorkflowCrudModule implements ToolModule {
             return ToolExecutionResult.failure(ToolErrorCode.MISSING_PARAMETER,
                     "node is required: the node to restart from, exactly as it appears in "
                     + "workflow(action='get_run') (for example 'mcp:fetch_data').");
+        }
+        // Optional. A run accumulates one epoch per fire and each keeps its own outputs, so an
+        // agent repairing an OLD fire has to be able to name it; omitted keeps the default, the
+        // most recent one. Rejected explicitly when unusable rather than dropped: a silently
+        // ignored epoch replays a fire that was already correct and leaves the broken one
+        // untouched, which reads as "the restart did nothing".
+        Object rawEpoch = parameters.get("epoch");
+        Integer epoch = getIntParam(parameters, "epoch");
+        if (rawEpoch != null && epoch == null) {
+            return ToolExecutionResult.failure(ToolErrorCode.INVALID_PARAMETER_VALUE,
+                    "epoch must be a number (the epoch as workflow(action='get_run') reports it), "
+                    + "got: " + rawEpoch + ". Omit it to restart the run's most recent epoch.");
+        }
+        // A fractional epoch would otherwise be truncated and replay a real, DIFFERENT epoch
+        // without a word: 11.9 is not epoch 11, it is a caller who does not know which epoch it
+        // wants.
+        if (rawEpoch instanceof Number number && number.doubleValue() != number.intValue()) {
+            return ToolExecutionResult.failure(ToolErrorCode.INVALID_PARAMETER_VALUE,
+                    "epoch must be a whole number, got: " + rawEpoch
+                    + ". Pass an epoch exactly as workflow(action='get_run') reports it, "
+                    + "or omit it to restart the run's most recent epoch.");
         }
 
         try {
@@ -1071,7 +1098,7 @@ public class WorkflowCrudModule implements ToolModule {
                     workflow != null && workflow.getId() != null ? workflow.getId().toString() : null);
             if (workflowDenied.isPresent()) return workflowDenied.get();
 
-            var result = stepRerunService.rerunFromStep(runId, nodeId);
+            var result = stepRerunService.rerunFromStep(runId, nodeId, /* planFromPayload */ false, epoch);
             var outcome = autoRestartExecutionService.resumeAfterRerun(
                     runId, result.readySteps(), result.ownerTriggerId(), result.epoch());
 

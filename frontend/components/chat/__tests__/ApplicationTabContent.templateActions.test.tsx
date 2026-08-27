@@ -102,7 +102,7 @@ vi.mock('@/components/app/WorkflowPanelContent', () => ({
 }));
 
 vi.mock('@/lib/api/api-client', () => ({
-  apiClient: { get: vi.fn(), post: vi.fn(), put: vi.fn(), delete: vi.fn(), getTokenProvider: () => null },
+  apiClient: { get: vi.fn(), post: vi.fn(), put: vi.fn(), delete: vi.fn(), getTokenProvider: () => null, getAuthToken: async () => null },
 }));
 
 vi.mock('@/lib/api', () => ({ orchestratorApi: {} }));

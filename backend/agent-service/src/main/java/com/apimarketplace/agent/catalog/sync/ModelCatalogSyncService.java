@@ -84,6 +84,7 @@ public class ModelCatalogSyncService {
     private final LiteLlmFeedParser liteLlmParser;
     private final OpenRouterFeedParser openRouterParser;
     private final BridgeModelDeriver bridgeModelDeriver;
+    private final NativeModelDiscoveryService discoveryService;
     private final CatalogMergeService mergeService;
     private final CatalogSyncMergeRunner mergeRunner;
     private final ModelConfigOverrideRepository modelRepo;
@@ -129,13 +130,22 @@ public class ModelCatalogSyncService {
                             Map<String, Integer> liteLlmRejected,
                             Map<String, Integer> openRouterRejected) {}
 
-    /** Full sync plan - shown to the admin in dry-run mode. */
+    /**
+     * Full sync plan - shown to the admin in dry-run mode.
+     *
+     * <p>{@code discovery} reports the third source (each provider's own
+     * {@code /models} endpoint). Its rows are already counted inside
+     * {@code added}; the separate breakdown is what tells an admin that the
+     * new rows need a price before they can be enabled, and which providers
+     * were skipped for want of a key.
+     */
     public record SyncPlan(FeedStats stats,
                            List<Map<String, Object>> added,
                            List<Map<String, Object>> updated,
                            int unchanged,
                            List<FlaggedRow> flagged,
-                           List<GuardFailure> guardFailures) {}
+                           List<GuardFailure> guardFailures,
+                           NativeModelDiscoveryService.DiscoveryResult discovery) {}
 
     /** Full result - includes the plan + applied counts (zero if dry-run). */
     public record SyncResult(SyncPlan plan, boolean applied,
@@ -206,6 +216,27 @@ public class ModelCatalogSyncService {
         // 3. Load existing non-bridge rows for diff + guards.
         Map<String, ModelConfigOverrideEntity> existing = loadExistingNonBridge();
 
+        // 3b. Third source: ask each configured provider what it actually serves.
+        // Both feeds are third-party mirrors and lag per vendor (Z.AI shipped
+        // glm-5.2/5.3 and Moonshot shipped Kimi K3 while LiteLLM's blocks still
+        // ended at glm-5.1 / kimi-k2.6), so a mirror-only catalog is
+        // permanently behind for the fastest-moving vendors. Discovery only
+        // fills gaps: anything a feed already covers is suppressed, and the
+        // rows it emits carry NO price by construction - see
+        // NativeModelDiscoveryService for the authority split.
+        NativeModelDiscoveryService.DiscoveryResult discovery;
+        try {
+            discovery = discoveryService.discover(
+                    allFeedModels, existing.keySet(),
+                    orouter != null ? orouter.models() : List.of());
+        } catch (Exception e) {
+            // A vendor endpoint misbehaving must never fail a catalog refresh:
+            // the feeds' contribution is already computed and still valid.
+            log.warn("catalog-sync: native discovery pass failed, continuing with feeds only", e);
+            discovery = NativeModelDiscoveryService.DiscoveryResult.empty();
+        }
+        allFeedModels.addAll(discovery.models());
+
         // 4. Guards.
         List<GuardFailure> guardFailures = new ArrayList<>();
 
@@ -261,7 +292,7 @@ public class ModelCatalogSyncService {
                 ) : Map.of()
         );
 
-        SyncPlan plan = new SyncPlan(stats, added, updatedModels, unchanged, flagged, guardFailures);
+        SyncPlan plan = new SyncPlan(stats, added, updatedModels, unchanged, flagged, guardFailures, discovery);
 
         Integer liteLlmCount  = litellm != null ? litellm.models().size() : null;
         Integer openRouterCount = orouter != null ? orouter.models().size() : null;
@@ -635,7 +666,8 @@ public class ModelCatalogSyncService {
         SyncPlan emptyPlan = new SyncPlan(
                 new FeedStats(0, 0, Map.of(), Map.of()),
                 List.of(), List.of(), 0, List.of(),
-                List.of(new GuardFailure("fetch-or-parse", detail, Map.of())));
+                List.of(new GuardFailure("fetch-or-parse", detail, Map.of())),
+                NativeModelDiscoveryService.DiscoveryResult.empty());
         return new SyncResult(emptyPlan, false, 0, 0, 0, logged.getId());
     }
 

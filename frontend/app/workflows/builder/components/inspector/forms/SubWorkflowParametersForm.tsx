@@ -9,6 +9,9 @@ import { Textarea } from '@/components/ui/textarea';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import type { BuilderNodeData } from '../../../types';
 
+/** Mirrors Core.SubWorkflowConfig.MAX_TIMEOUT_SECONDS: the longest the node may wait. */
+const MAX_SUB_WORKFLOW_TIMEOUT_SECONDS = 1500;
+
 interface SubWorkflowParametersFormProps {
   node: Node<BuilderNodeData>;
   data: BuilderNodeData;
@@ -70,7 +73,12 @@ export function SubWorkflowParametersForm({
     }
     const numValue = parseInt(value, 10);
     if (isNaN(numValue) || numValue < 1) return;
-    onUpdate({ ...data, subWorkflowTimeoutSeconds: numValue } as BuilderNodeData);
+    // Clamp to the same ceiling the backend enforces, so the field cannot show a number the run
+    // will not honour. Above it the node would also outlive the engine's own branch joins.
+    onUpdate({
+      ...data,
+      subWorkflowTimeoutSeconds: Math.min(numValue, MAX_SUB_WORKFLOW_TIMEOUT_SECONDS),
+    } as BuilderNodeData);
   }, [data, isRunMode, onUpdate]);
 
   const handleMaxDepthChange = React.useCallback((event: React.ChangeEvent<HTMLInputElement>) => {
@@ -146,6 +154,7 @@ export function SubWorkflowParametersForm({
         <Input
           type="number"
           min="1"
+          max={MAX_SUB_WORKFLOW_TIMEOUT_SECONDS}
           value={timeout}
           onChange={handleTimeoutChange}
           className="w-full"

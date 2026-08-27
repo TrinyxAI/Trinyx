@@ -628,7 +628,12 @@ public class ApplicationCrudModule implements ToolModule {
             String orgId = context != null ? context.orgId() : null;
             Map<String, Object> acquireResult = publicationClient.acquirePublication(id, tenantId, orgId);
 
-            String workflowId = (String) acquireResult.get("id");
+            // The acquire response keys the clone as "workflowId"; reading only "id" handed
+            // the agent workflowId=null on every successful acquire. "id" stays as a fallback
+            // for any caller shape that still uses it.
+            Object rawWorkflowId = acquireResult.get("workflowId") != null
+                    ? acquireResult.get("workflowId") : acquireResult.get("id");
+            String workflowId = rawWorkflowId != null ? rawWorkflowId.toString() : null;
             String workflowTitle = (String) acquireResult.get("title");
 
             Map<String, Object> result = new LinkedHashMap<>();
@@ -636,6 +641,13 @@ public class ApplicationCrudModule implements ToolModule {
             result.put("message", "Application acquired successfully");
             result.put("workflowId", workflowId);
             result.put("workflowName", workflowTitle);
+            // What the install created besides the application itself (interfaces / tables /
+            // agents / sub-workflows), so the agent can tell the user what landed in their
+            // workspace instead of leaving them to notice new rows in three different lists.
+            Object installed = acquireResult.get("resources");
+            if (installed instanceof Map<?, ?> counts && !counts.isEmpty()) {
+                result.put("installed_resources", counts);
+            }
             // Acquire surfaces ONLY the application card - the underlying workflow is an
             // implementation detail cloned during acquisition (and may still be settling),
             // so visualizing it shows a workflow the user neither asked for nor can open.

@@ -17,6 +17,12 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 const mocks = vi.hoisted(() => ({ getWorkflowsPage: vi.fn() }));
 const favs = vi.hoisted(() => ({ getFavoriteIds: vi.fn(), addFavorite: vi.fn(), removeFavorite: vi.fn() }));
 
+// The lists keep the open folder in the address, so they read next/navigation. This fake
+// router is URL-backed and re-renders on navigation, the way the real one does.
+vi.mock('next/navigation', async () => {
+  const mod = await import('@/lib/folders/testing/fakeFolderRouter');
+  return mod.fakeFolderRouter.nextNavigationModule();
+});
 vi.mock('next-intl', () => ({
   // .raw mirrors the real next-intl API: template copy is read verbatim through it
   // so workflow expressions like {{item}} are not parsed as ICU arguments.
@@ -55,6 +61,7 @@ vi.mock('@/components/ui/select', () => ({
   SelectItem: () => null,
 }));
 
+import { fakeFolderRouter } from '@/lib/folders/testing/fakeFolderRouter';
 import WorkflowTable from '../WorkflowTable';
 
 const wf = (over: Record<string, unknown>) => ({
@@ -69,6 +76,9 @@ function expectOrder(...names: string[]) {
 }
 
 beforeEach(() => {
+  // The address is shared state: without this, a test that opened a folder leaves the
+  // next one starting inside it.
+  fakeFolderRouter.reset();
   favs.addFavorite.mockResolvedValue(undefined);
   favs.removeFavorite.mockResolvedValue(undefined);
   // Alpha is newest (leads the default lastModified sort); Bravo is older.

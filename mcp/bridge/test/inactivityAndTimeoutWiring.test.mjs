@@ -22,6 +22,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, resolve } from 'node:path';
+import { DEFAULT_INACTIVITY_MS } from '../lib/inactivityResolver.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const serverSource = readFileSync(resolve(__dirname, '..', 'server.mjs'), 'utf8');
@@ -131,4 +132,56 @@ test('the bridge hard cap default covers the 7200s executionTimeout/inactivityTi
   const minutes = parseInt(match[1], 10);
   assert.ok(minutes * 60 > 7200,
     `MAX_TIMEOUT_MS default (${minutes} min) must exceed the 7200s contract max - under the old 65-min cap a valid 2h budget could never elapse on the bridge`);
+});
+
+// ── the server-side approval park must expire BEFORE the inactivity watchdog ──
+
+test('the approval-gate park budget stays under the bridge inactivity watchdog', () => {
+  // A parked tool call produces no CLI stdout, and stdout is the only thing that resets
+  // this watchdog. So the two windows race on every gated bridge call, and if the park is
+  // not strictly shorter the watchdog always wins: the run is killed as INACTIVITY_TIMEOUT
+  // instead of the park expiring cleanly - and an approval clicked just before that spends
+  // real credits on a tool whose result nobody is left to read. The two values live in
+  // different languages and different services, so only a check like this keeps them honest.
+  const gateSource = readFileSync(
+    resolve(__dirname, '..', '..', '..', 'backend', 'agent-service', 'src', 'main', 'java',
+      'com', 'apimarketplace', 'agent', 'service', 'execution', 'ToolApprovalGate.java'), 'utf8');
+  const match = gateSource.match(/agent\.tool\.approval-gate\.timeout-ms:(\d+)/);
+  assert.ok(match, 'approval-gate.timeout-ms default not found in ToolApprovalGate.java');
+  const parkMs = parseInt(match[1], 10);
+
+  assert.ok(parkMs < DEFAULT_INACTIVITY_MS,
+    `the park budget (${parkMs}ms) must be shorter than the inactivity watchdog (${DEFAULT_INACTIVITY_MS}ms)`);
+  // Not merely shorter: the watchdog is armed when the CLI last spoke, which is strictly
+  // before the tool call reaches the gate, so an equal-ish value still loses the race.
+  assert.ok(DEFAULT_INACTIVITY_MS - parkMs >= 30_000,
+    `leave at least 30s of margin - the watchdog starts counting before the park does (park=${parkMs}ms)`);
+
+  // The gate ALSO caps a park at half of whatever window it is told about, which is what
+  // leaves room for the tool to actually run after the approval - a park sized to the whole
+  // window would be killed mid-execution, right after the user said yes.
+  assert.match(gateSource, /inactivityWindowMs\(\)\s*\/\s*2/,
+    'the park must be capped at half the run inactivity window, leaving the other half for the tool to run');
+});
+
+// ── the watchdog window must actually REACH the server-side gate ──────────────
+
+test('the run inactivity window is threaded bridge -> CLI server -> session credentials', () => {
+  // Three links, three files, two languages. Break any one and every bridge park silently
+  // reverts to the gate's own default, losing the race with the watchdog - with nothing
+  // failing anywhere, because each side keeps working on its own.
+  assert.match(serverSource, /AGENT_INACTIVITY_SECONDS:\s*String\(/,
+    'the bridge must hand the resolved window to the CLI child');
+
+  const cliServerSource = readFileSync(resolve(__dirname, '..', '..', 'agent-cli-server.mjs'), 'utf8');
+  assert.match(cliServerSource, /process\.env\.AGENT_INACTIVITY_SECONDS/,
+    'agent-cli-server must read the window off its env');
+  assert.match(cliServerSource, /body\.inactivityTimeoutSeconds\s*=/,
+    'agent-cli-server must forward it in the session body');
+
+  const cliAgentServiceSource = readFileSync(
+    resolve(__dirname, '..', '..', '..', 'backend', 'agent-service', 'src', 'main', 'java',
+      'com', 'apimarketplace', 'agent', 'service', 'cli', 'CliAgentService.java'), 'utf8');
+  assert.match(cliAgentServiceSource, /credentials\.put\("__inactivityTimeoutSeconds__"/,
+    'CliAgentService must put it in the session credentials the gate reads');
 });

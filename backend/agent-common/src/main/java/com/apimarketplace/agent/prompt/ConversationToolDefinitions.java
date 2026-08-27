@@ -101,7 +101,18 @@ public final class ConversationToolDefinitions {
                   Response: {connected:[{name,integration,status,isDefault,account}],count,defaultCount,hint}.
                   status: active (ready) | expiring (still works) | needs_reauth (only the user can
                   Reconnect - you cannot fix it) | error (an admin must fix the configuration).
-                  Only isDefault=true credentials are used when executing tools.
+                  Executing a tool directly always uses the isDefault=true one. The others are
+                  not dead: a workflow mcp step runs on one of them by naming it in its
+                  credential_selector, which is how one workflow serves several accounts of the
+                  same integration. The hint names the NON-DEFAULT ones you may pick (the default
+                  is nameable too, it just needs no naming). These make an entry unpickable, and
+                  each FAILS the step rather than falling back to the default: a status other
+                  than 'active', a name shared with another active entry of the same integration
+                  (naming it selects neither), and a name that is a positive whole number (read
+                  as a credential id instead). Copy the name from here: matching ignores
+                  capitalisation and surrounding spaces, nothing else. This lists what YOUR
+                  workspace holds, and a workflow runs under its owner's, so a name taken from
+                  here resolves only if you are building for the same workspace.
                 - variables: the workflow variables usable in any workflow expression as {{$vars.name}}.
                   Response: {variables:[{name,value,type,scope,secret,description}],count}. scope:
                   workspace (shared with the workspace) | personal. type: STRING|NUMBER|BOOLEAN|JSON.
@@ -126,6 +137,9 @@ public final class ConversationToolDefinitions {
                 Situation                                  | Call you must make
                 -------------------------------------------|-----------------------------------------------
                 Tool returned "credentialsRequired"        | credential(action="require", services=["X"], reason="...")
+                Tool returned status "approval_needed"     | NOTHING. That call already asked for this
+                  (executed:false)                         | service, so asking again adds nothing.
+                                                           | Report it and move on.
                 Tool returned 401/403, FIRST attempt       | credential(action="require", services=["X"], reason="...")
                 Token clearly rejected (old lastUsedAt,    | credential(action="require", services=["X"],
                   401 says "expired"/"revoked"/            |            reason="token expired", force=true)

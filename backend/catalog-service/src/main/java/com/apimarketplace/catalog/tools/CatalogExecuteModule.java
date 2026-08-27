@@ -103,6 +103,24 @@ public class CatalogExecuteModule implements ToolModule {
     public static final String CREDENTIAL_ID_CONTEXT_KEY = "__credentialId__";
 
     /**
+     * The context keys a charge can land on.
+     *
+     * <p>Named here because this is the class that turns them into billing
+     * headers. A caller doing something that is NOT the work being paid for
+     * (reading a list to fill a dropdown) drops them, so the read cannot reserve
+     * and commit against the turn or the run the caller happens to be inside.
+     *
+     * <p><b>They mean more than billing elsewhere.</b> Two of them are also
+     * {@code ToolAuthorizationScope}'s test for whether an approval card can be
+     * raised. Nothing on this path consults that today (the approval gate here
+     * is {@code approvedServices()}, which a caller dropping these keeps), but a
+     * future gate that did would be silently relaxed by the same drop. Anything
+     * removing these must check what else reads them first.
+     */
+    public static final java.util.Set<String> BILLING_SCOPE_KEYS =
+            java.util.Set.of("__streamId__", "__workflowRunId__", "__nodeId__");
+
+    /**
      * Stable codes that LEAD a refusal message on this path.
      *
      * <p>They are part of the message and not only of {@code errorCode} because
@@ -654,10 +672,82 @@ public class CatalogExecuteModule implements ToolModule {
                 return credentialsRequired(toolId, detail, metadata, requestedCredentialSource);
             }
 
+            // A 200 FROM CATALOG-SERVICE MEANS THE REQUEST WAS HANDLED, NOT
+            // THAT THE PROVIDER ACCEPTED IT.
+            //
+            // The envelope carries the upstream's own verdict - success=false
+            // with the provider's status and message - and reading only the
+            // transport status published a refusal as a success. Downstream
+            // that was not survivable: GenerationModule checks result.success(),
+            // saw true, ran the asset resolver on an empty body and reported
+            // "the generation ran but no asset could be retrieved. You have
+            // been charged for it", blaming the descriptor. Both halves were
+            // false. ToolExecutionManager RELEASES the reservation whenever the
+            // upstream call fails, so nothing was charged, and the real remedy
+            // was sitting unread in this envelope's `error` - for an expired
+            // ElevenLabs key, "Please reconnect your account".
+            //
+            // So the upstream message LEADS. It is the only text that names
+            // what the provider objected to, and both readers get it: an agent
+            // reads `error` and nothing else, and the generation dialog renders
+            // it verbatim to a person.
+            int upstreamStatus = upstreamStatusOf(resultMap, metadata);
+            boolean envelopeFailed = Boolean.FALSE.equals(resultMap.get("success")) || upstreamStatus >= 400;
+            if (envelopeFailed) {
+                String detail = upstreamMessageOf(resultMap);
+                String status = upstreamStatus > 0 ? " with HTTP " + upstreamStatus : "";
+                log.warn("catalog_call: tool {} refused upstream{} - {}", toolId, status, detail);
+                return ToolExecutionResult.failure(
+                        ToolErrorCode.EXECUTION_FAILED,
+                        UPSTREAM_REJECTED_CODE + ": the provider refused this call" + status
+                                + ", so it produced nothing and nothing was charged."
+                                + (detail.isEmpty() ? "" : " The provider said: " + detail)
+                                + " Retrying unchanged is refused the same way.",
+                        metadata);
+            }
+
             return ToolExecutionResult.success(resultMap, metadata);
         }
 
         return ToolExecutionResult.success(Map.of("result", parsed));
+    }
+
+    /**
+     * The status the PROVIDER answered with, read from the envelope rather than
+     * from the transport. Zero when the envelope names none.
+     */
+    @SuppressWarnings("unchecked")
+    private static int upstreamStatusOf(Map<String, Object> resultMap, Map<String, Object> metadata) {
+        for (Map<String, Object> source : List.of(metadata, resultMap)) {
+            Object status = source.get("status");
+            if (status instanceof Number n) return n.intValue();
+            Object http = source.get("httpStatus");
+            if (http instanceof Map<?, ?> m && m.get("code") instanceof Number n) return n.intValue();
+        }
+        Object nested = resultMap.get("result");
+        if (nested instanceof Map<?, ?> m) {
+            return upstreamStatusOf((Map<String, Object>) m, Map.of());
+        }
+        return 0;
+    }
+
+    /**
+     * The provider's own sentence, from wherever the envelope put it. Empty
+     * rather than a placeholder: a made-up explanation is worse than none.
+     */
+    @SuppressWarnings("unchecked")
+    private static String upstreamMessageOf(Map<String, Object> resultMap) {
+        Object error = resultMap.get("error");
+        if (error != null && !String.valueOf(error).isBlank()) return String.valueOf(error).trim();
+        Object nested = resultMap.get("result");
+        if (nested instanceof Map<?, ?> m) {
+            Object http = ((Map<String, Object>) m).get("httpStatus");
+            if (http instanceof Map<?, ?> h && h.get("error") != null
+                    && !String.valueOf(h.get("error")).isBlank()) {
+                return String.valueOf(h.get("error")).trim();
+            }
+        }
+        return "";
     }
 
     @SuppressWarnings("unchecked")
@@ -880,6 +970,11 @@ public class CatalogExecuteModule implements ToolModule {
 
             Map<String, Object> softWarning = new LinkedHashMap<>();
             softWarning.put("status", "approval_needed");
+            // The SAME flag the two authorization refusals carry, so "did this run?" has one
+            // answer everywhere instead of one per payload shape. Without it an agent taught
+            // to branch on `executed` finds nothing here, reads a success, and narrates an
+            // API outcome for a call that never left the building.
+            softWarning.put("executed", false);
             softWarning.put("serviceType", serviceType);
             softWarning.put("serviceName", serviceName);
             softWarning.put("iconSlug", iconSlug);
@@ -893,10 +988,21 @@ public class CatalogExecuteModule implements ToolModule {
             // anything, connect a key", and those need opposite advice.
             softWarning.put("platformKeyAvailable", platformKeyAvailable);
             softWarning.put("message", "Credential required for " + serviceName);
-            softWarning.put("action", String.format(
-                "credential(action=\"require\", services=[\"%s\"], reason=\"...\")",
-                serviceType
-            ));
+            // What to DO, not which call to make - and written for the moment this text is
+            // actually READ. In a chat the user is asked to connect, and if they do in time
+            // this payload is discarded and the real API response is returned instead; the
+            // agent sees these words only once that chance is gone. Elsewhere (workflow
+            // run, task, sub-agent) the same payload is produced with nobody to ask at all.
+            // So it must claim neither that a result is still coming nor that anyone was
+            // prompted - only what is true in both: the call did not run, and connecting is
+            // not something the agent can do. That is also why the old
+            // "call credential(require)" instruction is gone.
+            softWarning.put("next", String.format(
+                "The call did NOT run: nothing was sent to %s and no result exists. Connecting %s is the "
+                + "user's own act, not a call you can make, and asking for it again only stacks a second "
+                + "request. Do not re-send this call. Say plainly that %s is not connected, then continue "
+                + "with other work or finish.",
+                serviceName, serviceName, serviceName));
 
             Map<String, Object> metadata = new LinkedHashMap<>();
             metadata.put("credentialNeeded", true);

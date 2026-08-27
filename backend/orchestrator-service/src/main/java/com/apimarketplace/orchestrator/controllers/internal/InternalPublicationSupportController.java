@@ -457,6 +457,43 @@ public class InternalPublicationSupportController {
     }
 
     /**
+     * Find the decoupled editable WORKFLOW twin previously created from an acquired
+     * APPLICATION clone. 404 when the user never created one.
+     *
+     * <p>Backs the IDEMPOTENCE of publication-service's on-demand "create my editable
+     * copy" action: cloning a twin duplicates the whole resource set (interfaces,
+     * tables, agents), so a second call must return the existing twin rather than mint
+     * a second set. The lineage key lives in {@code metadata.duplicatedFromApplicationId}
+     * because a twin carries {@code source_publication_id = NULL} by design.
+     */
+    @GetMapping("/workflows/editable-duplicate")
+    public ResponseEntity<?> findEditableDuplicate(
+            @RequestParam UUID applicationWorkflowId,
+            @RequestParam String tenantId,
+            @RequestParam("organizationId") String organizationId,
+            // Optional so an older caller still resolves by application clone alone; when
+            // present it also matches a copy made before an uninstall/reinstall, which
+            // gives the application a new clone id.
+            @RequestParam(value = "publicationId", required = false) UUID publicationId) {
+        TenantResolver.requireOrgId(organizationId);
+        Optional<WorkflowEntity> twinOpt = workflowRepository
+                .findEditableDuplicateOfApplication(organizationId, applicationWorkflowId.toString(),
+                        publicationId != null ? publicationId.toString() : null);
+        if (twinOpt.isEmpty()) {
+            return ResponseEntity.notFound().build();
+        }
+        WorkflowEntity twin = twinOpt.get();
+        // Deliberately NOT echoing the row's tenant/organization: the caller only needs the
+        // id (and the title for its message), the query already scoped the lookup, and
+        // returning both scope fields would read as a hand-rolled scope predicate here
+        // (OrgScopePredicateInvariantTest rule 1) for data nobody consumes.
+        Map<String, Object> result = new HashMap<>();
+        result.put("id", twin.getId().toString());
+        result.put("title", twin.getName());
+        return ResponseEntity.ok(result);
+    }
+
+    /**
      * Check if tenant has a workflow from a specific publication.
      */
     @GetMapping("/workflows/exists-by-source")

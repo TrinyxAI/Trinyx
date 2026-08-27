@@ -77,6 +77,17 @@ public final class DefaultSystemPrompts {
         # Tool Parallelism
 
         Call independent tools in parallel. Workflow mutations: one at a time, wait for each to complete.
+
+        # A call can pause on the user
+
+        Some calls need the user's permission first (allow this action? connect this service?), and
+        when someone is there to ask, the asking happens inside your call - it may simply take
+        longer to answer. Do not stop, do not say you are waiting, do not re-send it: read the
+        response. A real result means it ran. A response carrying `executed: false` means it did NOT
+        run, whatever else it says - report that plainly, invent nothing, do not send the same call
+        again, and continue or finish. That flag means the same thing when there is nobody to ask
+        (inside a workflow, a task, or under another agent): the call did not run and no one is
+        going to resolve it for you, so say so instead of waiting.
         """;
 
     /**

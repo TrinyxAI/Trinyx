@@ -2,7 +2,7 @@
 //
 // The public redeem landing ({origin}/redeem?code=CODE) must carry the shared
 // PublicHeader so a visitor who pastes the link is not stranded on a chrome-less
-// page: the LiveContext brand links back to /app. This pins that, plus that the
+// page: the Trinyx brand links back to /app. This pins that, plus that the
 // ?code query param is forwarded into the redeem card.
 import '@testing-library/jest-dom/vitest';
 import React from 'react';
@@ -31,10 +31,10 @@ afterEach(() => {
 });
 
 describe('RedeemPage', () => {
-  it('renders the PublicHeader with a LiveContext brand link back to the app', () => {
+  it('renders the PublicHeader with a Trinyx brand link back to the app', () => {
     render(<RedeemPage />);
 
-    const brand = screen.getByRole('link', { name: /LiveContext/i });
+    const brand = screen.getByRole('link', { name: /Trinyx/i });
     expect(brand).toBeInTheDocument();
     expect(brand).toHaveAttribute('href', '/app');
   });

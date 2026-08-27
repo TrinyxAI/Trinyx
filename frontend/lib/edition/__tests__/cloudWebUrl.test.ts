@@ -27,28 +27,28 @@ describe('cloudWebUrl - CE rewrites onto the cloud origin', () => {
 
   it('rewrites a relative path onto the cloud origin, preserving query', async () => {
     const { cloudWebUrl, CLOUD_WEB_BASE_URL } = await importCloudWebUrl('ce');
-    expect(CLOUD_WEB_BASE_URL).toBe('https://livecontext.ai');
+    expect(CLOUD_WEB_BASE_URL).toBe('https://app.trinyx.fr');
     expect(cloudWebUrl('/contact?category=abuse&message=hello')).toBe(
-      'https://livecontext.ai/contact?category=abuse&message=hello',
+      'https://app.trinyx.fr/contact?category=abuse&message=hello',
     );
   });
 
   it('swaps the origin of an absolute same-origin (localhost) URL for the cloud', async () => {
     const { cloudWebUrl } = await importCloudWebUrl('ce');
     expect(cloudWebUrl('http://localhost:3000/en/app/marketplace/pub-1/preview')).toBe(
-      'https://livecontext.ai/en/app/marketplace/pub-1/preview',
+      'https://app.trinyx.fr/en/app/marketplace/pub-1/preview',
     );
   });
 
   it('preserves the hash fragment', async () => {
     const { cloudWebUrl } = await importCloudWebUrl('ce');
-    expect(cloudWebUrl('/legal/terms#takedown')).toBe('https://livecontext.ai/legal/terms#takedown');
+    expect(cloudWebUrl('/legal/terms#takedown')).toBe('https://app.trinyx.fr/legal/terms#takedown');
   });
 
   it('is idempotent for a URL already on the cloud origin', async () => {
     const { cloudWebUrl } = await importCloudWebUrl('ce');
-    expect(cloudWebUrl('https://livecontext.ai/contact?category=bug')).toBe(
-      'https://livecontext.ai/contact?category=bug',
+    expect(cloudWebUrl('https://app.trinyx.fr/contact?category=bug')).toBe(
+      'https://app.trinyx.fr/contact?category=bug',
     );
   });
 
@@ -59,8 +59,8 @@ describe('cloudWebUrl - CE rewrites onto the cloud origin', () => {
 
   it('passes opaque non-web schemes (mailto:, tel:) through untouched', async () => {
     const { cloudWebUrl } = await importCloudWebUrl('ce');
-    expect(cloudWebUrl('mailto:abuse@livecontext.ai?subject=Report')).toBe(
-      'mailto:abuse@livecontext.ai?subject=Report',
+    expect(cloudWebUrl('mailto:abuse@example.com?subject=Report')).toBe(
+      'mailto:abuse@example.com?subject=Report',
     );
     expect(cloudWebUrl('tel:+33123456789')).toBe('tel:+33123456789');
   });

@@ -54,7 +54,7 @@ final class AuthenticatedGatewayFilter implements GlobalFilter, Ordered {
             exchange.getResponse().setStatusCode(HttpStatus.NOT_FOUND);
             return exchange.getResponse().setComplete();
         }
-        if (isPublic(path)) {
+        if (isPublic(exchange)) {
             return chain.filter(stripSpoofable(exchange));
         }
 
@@ -272,8 +272,9 @@ final class AuthenticatedGatewayFilter implements GlobalFilter, Ordered {
         return values.isEmpty() ? null : values.iterator().next();
     }
 
-    private boolean isPublic(String path) {
-        return GatewayPublicRoutes.matches(path);
+    private boolean isPublic(ServerWebExchange exchange) {
+        return GatewayPublicRoutes.matches(
+                exchange.getRequest().getMethod(), exchange.getRequest().getURI().getPath());
     }
 
     private EntitlementPolicy policyFor(String path) {

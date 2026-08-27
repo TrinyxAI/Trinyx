@@ -13,7 +13,7 @@ import { RewardRedeemCard } from '@/components/reward/RewardRedeemCard';
  *
  * Like the other top-level public pages (shared chat/form), it carries the
  * PublicHeader so a visitor landing here from a pasted link can reach the app
- * via the LiveContext brand. The card keeps its own heading.
+ * via the Trinyx brand. The card keeps its own heading.
  */
 function RedeemInner() {
   const params = useSearchParams();

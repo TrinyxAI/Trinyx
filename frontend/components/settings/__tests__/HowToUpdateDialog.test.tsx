@@ -12,7 +12,7 @@ import HowToUpdateDialog from '../HowToUpdateDialog';
 const labels: Record<string, string> = {
   howToUpdate: 'How to update',
   updateIntro: 'Get the latest release and restart your stack.',
-  updateRunFrom: 'Run these from your cloned LiveContext folder:',
+  updateRunFrom: 'Run these from your cloned Trinyx folder:',
   copy: 'Copy',
   copied: 'Copied',
   releaseNotes: 'Release notes',

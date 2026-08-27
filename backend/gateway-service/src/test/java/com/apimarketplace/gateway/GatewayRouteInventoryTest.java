@@ -53,6 +53,13 @@ class GatewayRouteInventoryTest {
     }
 
     @Test
+    void routesCeMarketplaceToPublicationWithoutBroadeningTheEdge() {
+        assertThat(route("publication-application"))
+                .contains("PUBLICATION_SERVICE_URL", "/api/ce-marketplace/**");
+        assertThat(routes).doesNotContain("Path=/api/ce-marketplace/**,/api/**");
+    }
+
+    @Test
     void workflowDagAndKnownCollisionsReachTheirFacadeServices() {
         assertThat(route("orchestrator-workflows-v2"))
                 .contains("ORCHESTRATOR_SERVICE_URL", "Path=/api/v2/workflows/**");

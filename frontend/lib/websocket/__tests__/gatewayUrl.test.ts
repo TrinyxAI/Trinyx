@@ -94,8 +94,8 @@ describe('resolveGatewayHttpUrl', () => {
 
     it('falls back to the baked URL when the runtime config could not be fetched', () => {
         // Cloud path, and the CE path when /api/runtime-config is unreachable.
-        expect(resolveGatewayHttpUrl(null, 'https://gateway.livecontext.ai', NAS))
-            .toBe('https://gateway.livecontext.ai');
+        expect(resolveGatewayHttpUrl(null, 'https://gateway.example.com', NAS))
+            .toBe('https://gateway.example.com');
     });
 
     // ── Regression: a deliberate build-time URL must outrank the derived origin ──
@@ -137,8 +137,8 @@ describe('resolveGatewayHttpUrl', () => {
     });
 
     it('keeps the baked URL winning on cloud, where gatewayPort is null', () => {
-        expect(resolveGatewayHttpUrl(config(), 'https://gateway.livecontext.ai', DOMAIN))
-            .toBe('https://gateway.livecontext.ai');
+        expect(resolveGatewayHttpUrl(config(), 'https://gateway.example.com', DOMAIN))
+            .toBe('https://gateway.example.com');
     });
 
     it('falls back to the current origin when nothing is configured at all', () => {

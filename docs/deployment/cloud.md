@@ -527,3 +527,43 @@ restrictive host permissions. Compose mounts both files read-only only into Clou
 Never put the password in an environment variable or JVM startup option. Certificate rotation must
 publish the new CA alongside the old one, restart the Cloud auth container, rotate the server
 certificate, then remove the retired CA. Never use an insecure trust-all client.
+
+## v0.2.13 provider parity
+
+The managed Cloud Compose forwards credentials for every provider declared by
+`CloudRelaySupport`: Anthropic, OpenAI, Google, Mistral, DeepSeek, xAI,
+Perplexity, Cohere, Z.AI, OpenRouter, Qwen, Moonshot and MiniMax. A blank key is
+an explicit disabled state; the provider remains unavailable and Native Model
+Discovery skips it without failing the catalog sync. This preserves the upstream
+fail-soft behavior while preventing a supported provider from being silently
+omitted by deployment wiring.
+
+MiniMax defaults to the international
+`https://api.minimax.io/v1/chat/completions` endpoint. Operators using the
+mainland-China service must supply its matching key and override
+`MINIMAX_API_URL`; the two key domains are not interchangeable. The CI contract
+derives the provider inventory from `CloudRelaySupport` and fails whenever
+`application.yml`, the Cloud Compose environment or `.env.cloud.example` drifts.
+There is no GitHub deployment workflow in this repository: production secrets are
+provisioned by the operator through the external environment, never committed or
+copied into a build workflow.
+
+## CloudLink topology and smoke contracts
+
+Remote Marketplace makes the CloudLink capability available but creates no linked
+account, OAuth state or network call at boot. With no links, the heartbeat performs
+only the local repository read and returns. OAuth state/PKCE data is intentionally
+process-local for the current single-node CE and paid-monolith topology; restarting
+mid-flow invalidates that pending flow. Horizontal replicas require sticky routing
+or a shared state store before they are supported.
+
+The backend PR workflow now smoke-boots three profiles from the built merge candidate:
+
+1. CE defaults, without overriding `MARKETPLACE_MODE` or `CLOUD_LINK_ENABLED`;
+2. a recreated CE container using the same key volume, asserting that
+   `encryption.env` is byte-identical;
+3. paid-monolith with `marketplace=local` and `cloud-link.enabled=true`.
+
+These are boot and key-continuity contracts, not a claim that a production OAuth,
+paid acquisition or token-refresh flow has run. Those require the distributed
+staging identity, DNS, TLS and secret environment.

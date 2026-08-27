@@ -19,7 +19,7 @@ export function showCeCloudCreditModal() {
 
 /**
  * CE-only modal shown when a chat / agent / workflow LLM call relayed to the linked
- * LiveContext Cloud account is refused for INSUFFICIENT_CREDITS. CE has no local Stripe
+ * Trinyx Cloud account is refused for INSUFFICIENT_CREDITS. CE has no local Stripe
  * checkout, so the action sends the user to the cloud billing page (new tab) to top up or
  * upgrade - mirroring how CE pricing already delegates payments to the cloud account.
  *

@@ -1,5 +1,5 @@
 # ============================================================
-# LiveContext Community Edition - Single JAR + PostgreSQL
+# Trinyx Community Edition - Single JAR + PostgreSQL
 # ============================================================
 # This profile activates when running the monolith.
 # All services share one port, one database, one JVM.

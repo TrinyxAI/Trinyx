@@ -18,7 +18,7 @@ vi.mock('next-intl', () => ({
       title: 'SAML SSO',
       description: 'Connect this workspace to an enterprise identity provider.',
       lockedDescription: 'SAML SSO is available on Team and Enterprise workspaces.',
-      ceUnavailable: "SAML SSO is only available on LiveContext Cloud. Self-hosted installs can't enable SSO.",
+      ceUnavailable: "SAML SSO is only available on Trinyx Cloud. Self-hosted installs can't enable SSO.",
       ownerOnly: 'Only workspace owners and admins can manage SAML SSO.',
       displayName: 'Provider name',
       displayNamePlaceholder: 'Company SSO',
@@ -81,8 +81,8 @@ const samlConnection = {
   status: 'NOT_CONFIGURED',
   hideOnLoginPage: true,
   ssoStartPath: '/auth/sso?org=org-1&hint=org-org1-saml',
-  serviceProviderEntityId: 'https://auth.example.com/realms/livecontext',
-  assertionConsumerServiceUrl: 'https://auth.example.com/realms/livecontext/broker/org-org1-saml/endpoint',
+  serviceProviderEntityId: 'https://auth.example.com/realms/trinyx',
+  assertionConsumerServiceUrl: 'https://auth.example.com/realms/trinyx/broker/org-org1-saml/endpoint',
   serviceProviderMetadataUrl: '',
   certificateFingerprintSha256: null,
   lastSyncedAt: null,
@@ -151,7 +151,7 @@ describe('OrganizationSsoPanel', () => {
 
     expect(screen.getByRole('heading', { name: 'SAML SSO' })).toBeInTheDocument();
     expect(
-      screen.getByText("SAML SSO is only available on LiveContext Cloud. Self-hosted installs can't enable SSO."),
+      screen.getByText("SAML SSO is only available on Trinyx Cloud. Self-hosted installs can't enable SSO."),
     ).toBeInTheDocument();
     // No SAML form, and no backend call (the query is disabled in CE).
     expect(screen.queryByLabelText('Provider name')).not.toBeInTheDocument();

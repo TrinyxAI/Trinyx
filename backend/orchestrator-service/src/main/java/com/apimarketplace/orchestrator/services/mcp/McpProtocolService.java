@@ -269,7 +269,7 @@ public class McpProtocolService {
 
     private String generateToolsDocumentation() {
         StringBuilder sb = new StringBuilder();
-        sb.append("# LiveContext Agent Tools\n\n");
+        sb.append("# Trinyx Agent Tools\n\n");
         sb.append("This document lists all available tools for AI agents.\n\n");
 
         for (ToolCategory category : ToolCategory.values()) {

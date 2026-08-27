@@ -70,7 +70,7 @@ class PostHogAnalyticsClientTest {
         Map<String, Object> out = (Map<String, Object>) body.get("properties");
         assertEquals("COMPLETED", out.get("status"));
         assertEquals("org-1", out.get("organization_id"));
-        assertEquals("livecontext-backend", out.get("$lib"));
+        assertEquals("trinyx-backend", out.get("$lib"));
     }
 
     @Test

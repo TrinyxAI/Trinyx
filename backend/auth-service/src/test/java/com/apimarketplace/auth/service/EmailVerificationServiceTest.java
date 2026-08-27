@@ -57,7 +57,7 @@ class EmailVerificationServiceTest {
         testUser.setProviderId("kc-uuid-123");
 
         ReflectionTestUtils.setField(emailVerificationService, "mailFrom", "noreply@livecontext.io");
-        ReflectionTestUtils.setField(emailVerificationService, "mailFromName", "LiveContext");
+        ReflectionTestUtils.setField(emailVerificationService, "mailFromName", "Trinyx");
         ReflectionTestUtils.setField(emailVerificationService, "authMode", "keycloak");
         ReflectionTestUtils.setField(emailVerificationService, "mailConsoleFallbackEnabled", false);
         // Mockito @InjectMocks performs constructor injection but does not always

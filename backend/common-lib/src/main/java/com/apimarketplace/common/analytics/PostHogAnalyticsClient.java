@@ -110,7 +110,7 @@ public class PostHogAnalyticsClient {
                 if (k != null && v != null) props.put(k, v);
             });
         }
-        props.putIfAbsent("$lib", "livecontext-backend");
+        props.putIfAbsent("$lib", "trinyx-backend");
 
         Map<String, Object> body = new HashMap<>();
         body.put("api_key", apiKey);

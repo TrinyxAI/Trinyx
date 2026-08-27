@@ -1,5 +1,7 @@
 package com.apimarketplace.gateway;
 
+import org.springframework.http.HttpMethod;
+
 import java.util.Arrays;
 import java.util.stream.Stream;
 
@@ -35,6 +37,13 @@ final class GatewayPublicRoutes {
             "/api/websearch/screenshots"
     };
 
+    private static final String[] GET_PATTERNS = {
+            "/api/ce-marketplace/*/snapshot"
+    };
+
+    private static final String CE_MARKETPLACE_PREFIX = "/api/ce-marketplace/";
+    private static final String SNAPSHOT_SUFFIX = "/snapshot";
+
     private static final String[] PREFIX = {
             "/actuator/health/",
             "/cdp/",
@@ -54,14 +63,32 @@ final class GatewayPublicRoutes {
 
     private GatewayPublicRoutes() {}
 
-    static boolean matches(String path) {
+    static boolean matches(HttpMethod method, String path) {
+        return matchesAnyMethod(path)
+                || (HttpMethod.GET.equals(method) && matchesCeMarketplaceSnapshot(path));
+    }
+
+    private static boolean matchesAnyMethod(String path) {
         return Arrays.asList(EXACT).contains(path)
                 || Arrays.stream(PREFIX).anyMatch(path::startsWith);
+    }
+
+    private static boolean matchesCeMarketplaceSnapshot(String path) {
+        if (!path.startsWith(CE_MARKETPLACE_PREFIX) || !path.endsWith(SNAPSHOT_SUFFIX)) {
+            return false;
+        }
+        String publicationId = path.substring(
+                CE_MARKETPLACE_PREFIX.length(), path.length() - SNAPSHOT_SUFFIX.length());
+        return !publicationId.isBlank() && publicationId.indexOf('/') < 0;
     }
 
     static String[] securityMatchers() {
         return Stream.concat(Arrays.stream(EXACT),
                         Arrays.stream(PREFIX).map(prefix -> prefix + "**"))
                 .toArray(String[]::new);
+    }
+
+    static String[] getSecurityMatchers() {
+        return GET_PATTERNS.clone();
     }
 }

@@ -181,13 +181,13 @@ public class EmailVerificationService {
             MimeMessageHelper helper = new MimeMessageHelper(message, true, "UTF-8");
             helper.setFrom(mailFrom, mailFromName);
             helper.setTo(email);
-            helper.setSubject("Welcome to LiveContext - your verification code");
+            helper.setSubject("Welcome to Trinyx - your verification code");
 
-            String plain = "Welcome to LiveContext!\n\n" +
+            String plain = "Welcome to Trinyx!\n\n" +
                     "Your verification code is: " + code + "\n\n" +
                     "This code expires in " + EXPIRY_MINUTES + " minutes.\n\n" +
                     "If you did not request this code, please ignore this email.\n\n" +
-                    "- LiveContext";
+                    "- Trinyx";
 
             String html = buildVerificationHtml(code);
             helper.setText(plain, html);
@@ -236,9 +236,9 @@ public class EmailVerificationService {
                 <!DOCTYPE html>
                 <html lang="en"><head><meta charset="UTF-8">
                 <meta name="viewport" content="width=device-width,initial-scale=1">
-                <title>Welcome to LiveContext</title></head>
+                <title>Welcome to Trinyx</title></head>
                 <body style="margin:0;padding:0;">
-                <span style="display:none!important;font-size:1px;line-height:1px;color:#ffffff;mso-hide:all;">Your LiveContext verification code</span>
+                <span style="display:none!important;font-size:1px;line-height:1px;color:#ffffff;mso-hide:all;">Your Trinyx verification code</span>
                 <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background:#f5f5f4;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;color:#111827;">
                   <tr><td align="center" style="padding:40px 16px;">
                     <table role="presentation" width="560" cellpadding="0" cellspacing="0" border="0" style="max-width:560px;width:100%;background:#ffffff;border:1px solid #e7e5e4;border-radius:12px;">
@@ -246,13 +246,13 @@ public class EmailVerificationService {
                         <img src="{{LOGO}}" alt="Trinyx" height="32" style="display:block;height:32px;width:auto;border:0;text-decoration:none;">
                       </td></tr>
                       <tr><td style="padding:32px 40px;font-size:15px;line-height:1.6;color:#111827;">
-                        <h1 style="margin:0 0 16px 0;font-size:22px;font-weight:600;color:#111827;">Welcome to LiveContext</h1>
+                        <h1 style="margin:0 0 16px 0;font-size:22px;font-weight:600;color:#111827;">Welcome to Trinyx</h1>
                         <p style="margin:0 0 8px 0;">Thanks for signing up. Use the code below to verify your email address and finish creating your account.</p>
                         <div style="margin:24px 0;padding:20px;background:#f5f5f4;border:1px solid #e7e5e4;border-radius:8px;text-align:center;font-size:28px;font-weight:600;letter-spacing:6px;color:#111827;">{{CODE}}</div>
                         <p style="margin:0;font-size:13px;color:#6b7280;">This code expires in {{MINUTES}} minutes. If you didn't request it, you can safely ignore this email.</p>
                       </td></tr>
                       <tr><td style="padding:24px 40px 32px 40px;border-top:1px solid #e7e5e4;font-size:12px;line-height:1.5;color:#6b7280;">
-                        You are receiving this email because someone signed up for a LiveContext account with this address.<br><br>&copy; LiveContext
+                        You are receiving this email because someone signed up for a Trinyx account with this address.<br><br>&copy; Trinyx
                       </td></tr>
                     </table>
                   </td></tr>

@@ -9,7 +9,7 @@
  * hint of what to do. This component replaces that emptiness with the two
  * ways out, mirroring the ce-setup wizard's ordering:
  *
- *  - PRIMARY: "Connect to LiveContext Cloud" - one-click OAuth kickoff via
+ *  - PRIMARY: "Connect to Trinyx Cloud" - one-click OAuth kickoff via
  *    {@link cloudLinkService.getAuthUrl}. No returnPath is passed on purpose:
  *    the backend only whitelists pages that HANDLE the ?cloud_link_callback
  *    (ce-setup / marketplace / settings cloud-account), so the flow lands on

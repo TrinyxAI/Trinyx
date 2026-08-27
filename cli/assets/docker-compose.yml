@@ -1,12 +1,13 @@
 # Trinyx Community Edition: Docker Compose (prebuilt images)
 # Usage:
-#   git clone https://github.com/eddinerabii/Trinyx
+#   git clone https://github.com/TrinyxAI/Trinyx
 #   cd Trinyx
 #   docker compose -f cli/assets/docker-compose.yml up -d
 #   Open http://localhost:3000
 #
 # This compose PULLS prebuilt images from GHCR (no local build). The image tag is
-# pinned to this release, so a clone always runs the matching version.
+# pinned to the CLI runtime tag. The release process must publish all five images
+# from the final tagged commit and verify their digests before publishing the CLI.
 #
 # Configuration (cloud connection, SMTP, ports): copy docker/.env.ce.example to
 # docker/.env.ce and pass it with `--env-file docker/.env.ce`. For agents to run, connect
@@ -35,7 +36,7 @@
 # Those env files ship with the git repository, NOT with the npm package, and
 # `npx trinyx` passes no --env-file. So if you started this stack with npx,
 # clone the repo and use `docker compose` directly to enable either add-on:
-#   https://github.com/eddinerabii/Trinyx
+#   https://github.com/TrinyxAI/Trinyx
 # See README.md ("Optional features") and docker/README-CE.md for details.
 
 name: livecontext-ce

@@ -2,7 +2,7 @@
  * @vitest-environment jsdom
  *
  * Cloud-account page - model-cache invalidation on link changes. Linking or
- * unlinking LiveContext Cloud changes which model catalog /v3/chat/models
+ * unlinking Trinyx Cloud changes which model catalog /v3/chat/models
  * returns (BYOK vs cloud), and useModels holds a module-level cache with a
  * 5-minute TTL: without an explicit clearModelsCache() the pickers keep
  * showing the stale (possibly empty) catalog after the OAuth callback - the

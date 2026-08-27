@@ -28,7 +28,7 @@ const SESSION_KEY_PREFIX = 'lc_share_chat_';
 
 /**
  * Full-page public chat component.
- * Matches the main LiveContext chat styling: MarkdownRender, theme-aware bubbles,
+ * Matches the main Trinyx chat styling: MarkdownRender, theme-aware bubbles,
  * pill-shaped MessageComposer input.
  * Uses raw fetch (no auth) through gateway: /chat/{token}/*
  */
@@ -317,7 +317,7 @@ export default function PublicChat({ resourceToken, title }: PublicChatProps) {
 }
 
 // ============================================================
-// Message row - matches main LiveContext chat styling
+// Message row - matches main Trinyx chat styling
 // Same as SharedConversation's MessageRow
 // ============================================================
 

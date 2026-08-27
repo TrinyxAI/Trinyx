@@ -1,6 +1,7 @@
 package com.apimarketplace.gateway;
 
 import org.junit.jupiter.api.Test;
+import org.springframework.http.HttpMethod;
 import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.security.oauth2.jwt.JwtValidators;
 import org.springframework.security.oauth2.server.resource.authentication.BearerTokenAuthenticationToken;
@@ -71,21 +72,33 @@ class GatewaySecurityConfigTest {
 
     @Test
     void publicAllowlistCoversOnlyAuditedSelfAuthenticatingRoutes() {
-        assertThat(GatewayPublicRoutes.matches("/webhooks/stripe")).isTrue();
-        assertThat(GatewayPublicRoutes.matches("/actuator/health")).isTrue();
-        assertThat(GatewayPublicRoutes.matches("/actuator/health/readiness")).isTrue();
-        assertThat(GatewayPublicRoutes.matches("/api/public")).isTrue();
-        assertThat(GatewayPublicRoutes.matches("/api/public/showcase")).isTrue();
-        assertThat(GatewayPublicRoutes.matches("/api/shared/token")).isTrue();
-        assertThat(GatewayPublicRoutes.matches("/api/files/proxy-signed")).isTrue();
-        assertThat(GatewayPublicRoutes.matches("/api/webhooks")).isFalse();
-        assertThat(GatewayPublicRoutes.matches("/api/webhooks/arbitrary")).isFalse();
-        assertThat(GatewayPublicRoutes.matches("/api/v2/workflows/dag")).isFalse();
-        assertThat(GatewayPublicRoutes.matches("/api/internal/credentials")).isFalse();
+        assertThat(GatewayPublicRoutes.matches(HttpMethod.POST, "/webhooks/stripe")).isTrue();
+        assertThat(GatewayPublicRoutes.matches(HttpMethod.GET, "/actuator/health")).isTrue();
+        assertThat(GatewayPublicRoutes.matches(HttpMethod.GET, "/actuator/health/readiness")).isTrue();
+        assertThat(GatewayPublicRoutes.matches(HttpMethod.GET, "/api/public")).isTrue();
+        assertThat(GatewayPublicRoutes.matches(HttpMethod.GET, "/api/public/showcase")).isTrue();
+        assertThat(GatewayPublicRoutes.matches(HttpMethod.GET, "/api/shared/token")).isTrue();
+        assertThat(GatewayPublicRoutes.matches(HttpMethod.GET, "/api/files/proxy-signed")).isTrue();
+        assertThat(GatewayPublicRoutes.matches(HttpMethod.GET,
+                "/api/ce-marketplace/00000000-0000-0000-0000-000000000001/snapshot")).isTrue();
+        assertThat(GatewayPublicRoutes.matches(HttpMethod.POST,
+                "/api/ce-marketplace/00000000-0000-0000-0000-000000000001/snapshot")).isFalse();
+        assertThat(GatewayPublicRoutes.matches(HttpMethod.POST,
+                "/api/ce-marketplace/00000000-0000-0000-0000-000000000001/acquire-with-auth")).isFalse();
+        assertThat(GatewayPublicRoutes.matches(HttpMethod.GET,
+                "/api/ce-marketplace/00000000-0000-0000-0000-000000000001/snapshot/extra")).isFalse();
+        assertThat(GatewayPublicRoutes.matches(HttpMethod.GET, "/api/cloud-link/callback")).isFalse();
+        assertThat(GatewayPublicRoutes.matches(HttpMethod.GET, "/api/webhooks")).isFalse();
+        assertThat(GatewayPublicRoutes.matches(HttpMethod.POST, "/api/webhooks/arbitrary")).isFalse();
+        assertThat(GatewayPublicRoutes.matches(HttpMethod.GET, "/api/v2/workflows/dag")).isFalse();
+        assertThat(GatewayPublicRoutes.matches(HttpMethod.GET, "/api/internal/credentials")).isFalse();
         assertThat(String.join(",", GatewayPublicRoutes.securityMatchers()))
                 .doesNotContain("/webhooks/**")
                 .doesNotContain("/actuator/health**")
+                .doesNotContain("/api/ce-marketplace/**")
                 .contains("/actuator/health/**");
+        assertThat(GatewayPublicRoutes.getSecurityMatchers())
+                .containsExactly("/api/ce-marketplace/*/snapshot");
     }
 
     private Jwt jwt(String issuer, List<String> audience, Instant issuedAt, Instant expiresAt) {

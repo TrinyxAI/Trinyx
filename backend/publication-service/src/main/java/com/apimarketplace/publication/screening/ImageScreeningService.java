@@ -22,7 +22,7 @@ import java.util.Set;
  * <p>This report drives a frontend WARNING, never a block. The publisher
  * can always proceed with publish; the decisions log records whether
  * they attested rights or just acknowledged the warning. Auto-blocking
- * here would convert LiveContext from "hébergeur" (LCEN safe harbor) to
+ * here would convert Trinyx from "hébergeur" (LCEN safe harbor) to
  * "éditeur" (full content liability).
  *
  * <p>Pure-function: no DB writes, no I/O. The audit-log decision

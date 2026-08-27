@@ -35,7 +35,7 @@ class McpMessageTypesTest {
         void shouldReturnDefaultInfo() {
             McpMessageTypes.ServerInfo info = McpMessageTypes.ServerInfo.defaultInfo();
 
-            assertThat(info.name()).isEqualTo("LiveContext Agent Tools");
+            assertThat(info.name()).isEqualTo("Trinyx Agent Tools");
             assertThat(info.version()).isEqualTo("1.0.0");
             assertThat(info.capabilities()).isNotNull();
             assertThat(info.capabilities().tools()).isTrue();

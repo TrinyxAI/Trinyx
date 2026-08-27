@@ -22,9 +22,9 @@
     "n8n-alternative"
   ],
   "license": "AGPL-3.0-only",
-  "homepage": "https://github.com/eddinerabii/Trinyx",
+  "homepage": "https://github.com/TrinyxAI/Trinyx",
   "repository": {
     "type": "git",
-    "url": "https://github.com/eddinerabii/Trinyx.git"
+    "url": "https://github.com/TrinyxAI/Trinyx.git"
   }
 }

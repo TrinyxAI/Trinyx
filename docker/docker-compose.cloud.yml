@@ -114,6 +114,15 @@ x-java-service: &java-service
     GEMINI_API_KEY: ${GEMINI_API_KEY:-}
     MISTRAL_API_KEY: ${MISTRAL_API_KEY:-}
     DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY:-}
+    XAI_API_KEY: ${XAI_API_KEY:-}
+    PERPLEXITY_API_KEY: ${PERPLEXITY_API_KEY:-}
+    COHERE_API_KEY: ${COHERE_API_KEY:-}
+    ZAI_API_KEY: ${ZAI_API_KEY:-}
+    OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-}
+    QWEN_API_KEY: ${QWEN_API_KEY:-}
+    MOONSHOT_API_KEY: ${MOONSHOT_API_KEY:-}
+    MINIMAX_API_KEY: ${MINIMAX_API_KEY:-}
+    MINIMAX_API_URL: ${MINIMAX_API_URL:-https://api.minimax.io/v1/chat/completions}
     OAUTH2_FRONTEND_URL: https://cloud.trinyx.fr
     OAUTH2_CALLBACK_URL: https://cloud.trinyx.fr/api/credentials/oauth2/callback
   depends_on: &java-dependencies

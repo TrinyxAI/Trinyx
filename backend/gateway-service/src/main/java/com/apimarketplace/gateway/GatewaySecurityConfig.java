@@ -3,6 +3,7 @@ package com.apimarketplace.gateway;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.http.HttpMethod;
 import org.springframework.security.config.web.server.ServerHttpSecurity;
 import org.springframework.security.oauth2.core.DelegatingOAuth2TokenValidator;
 import org.springframework.security.oauth2.core.OAuth2Error;
@@ -27,6 +28,7 @@ public class GatewaySecurityConfig {
         return http
                 .csrf(ServerHttpSecurity.CsrfSpec::disable)
                 .authorizeExchange(exchange -> exchange
+                        .pathMatchers(HttpMethod.GET, GatewayPublicRoutes.getSecurityMatchers()).permitAll()
                         .pathMatchers(GatewayPublicRoutes.securityMatchers()).permitAll()
                         .pathMatchers("/api/internal/**", "/internal/**").denyAll()
                         .anyExchange().authenticated())

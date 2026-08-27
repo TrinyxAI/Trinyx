@@ -52,7 +52,7 @@ public class McpServerController {
         return ResponseEntity.ok(JsonRpcResponse.success(Map.of(
             "protocolVersion", PROTOCOL_VERSION,
             "serverInfo", Map.of(
-                "name", "LiveContext Agent Tools",
+                "name", "Trinyx Agent Tools",
                 "version", "1.0.0"
             ),
             "capabilities", Map.of(
@@ -214,7 +214,7 @@ public class McpServerController {
     @GetMapping("/info")
     public ResponseEntity<Map<String, Object>> getServerInfo() {
         return ResponseEntity.ok(Map.of(
-            "name", "LiveContext Agent Tools",
+            "name", "Trinyx Agent Tools",
             "version", "1.0.0",
             "protocolVersion", PROTOCOL_VERSION,
             "capabilities", Map.of(

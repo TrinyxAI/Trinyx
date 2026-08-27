@@ -106,6 +106,33 @@ class AuthenticatedGatewayFilterTest {
     }
 
     @Test
+    void onlyFreeSnapshotReadBypassesCloudJwt() {
+        AuthenticatedGatewayFilter filter = new AuthenticatedGatewayFilter(null, 1024);
+        String snapshot = "/api/ce-marketplace/00000000-0000-0000-0000-000000000001/snapshot";
+        AtomicReference<ServerWebExchange> forwarded = new AtomicReference<>();
+
+        ServerWebExchange get = MockServerWebExchange.from(MockServerHttpRequest.get(snapshot)
+                .header("X-User-ID", "forged").build());
+        StepVerifier.create(filter.filter(get, candidate -> {
+            forwarded.set(candidate);
+            return Mono.empty();
+        })).verifyComplete();
+        assertThat(forwarded.get()).isNotNull();
+        assertThat(forwarded.get().getRequest().getHeaders().getFirst("X-User-ID")).isNull();
+
+        for (ServerWebExchange protectedExchange : List.of(
+                MockServerWebExchange.from(MockServerHttpRequest.post(snapshot).build()),
+                MockServerWebExchange.from(MockServerHttpRequest.post(
+                        snapshot.replace("/snapshot", "/acquire-with-auth")).build()),
+                MockServerWebExchange.from(MockServerHttpRequest.get("/api/cloud-link/callback").build()))) {
+            StepVerifier.create(filter.filter(protectedExchange, ignored -> Mono.error(
+                            new AssertionError("protected route must require authentication"))))
+                    .expectErrorMessage("JWT principal missing")
+                    .verify();
+        }
+    }
+
+    @Test
     void historicalCapabilityRoutesRemainPublicButIdentityHeadersAreStripped() {
         for (String path : List.of(
                 "/widget.js", "/widget/token/config", "/share/token", "/c/token",

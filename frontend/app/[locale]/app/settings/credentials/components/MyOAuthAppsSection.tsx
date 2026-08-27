@@ -39,7 +39,7 @@ interface Props {
  *
  * Lists tenant-owned BYOK platform_credential rows so a user can manage their
  * own OAuth apps (Google Cloud, GitHub OAuth App, etc.) registered with
- * LiveContext. Renders above {@code MyCredentialsList} in the "my" tab.
+ * Trinyx. Renders above {@code MyCredentialsList} in the "my" tab.
  *
  * <p><b>Discovery contract:</b> ~95% of users never register a custom OAuth
  * app. To stay invisible until needed, this component returns {@code null}

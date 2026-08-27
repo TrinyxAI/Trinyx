@@ -46,7 +46,7 @@ public class McpStreamableHttpController {
     /** Newest first; initialize echoes the client's version when supported. */
     static final List<String> SUPPORTED_PROTOCOL_VERSIONS =
             List.of("2025-06-18", "2025-03-26", "2024-11-05");
-    static final String SERVER_NAME = "LiveContext Agent Tools";
+    static final String SERVER_NAME = "Trinyx Agent Tools";
     static final String SERVER_VERSION = "1.0.0";
 
     // JSON-RPC 2.0 error codes (+ MCP's resource-not-found extension)
@@ -287,7 +287,7 @@ public class McpStreamableHttpController {
                 .body(Map.of(
                         "error", "Unauthorized",
                         "message", "Authentication required. Provide an X-API-Key header "
-                                + "(or Authorization: Bearer <api key>) with a LiveContext API key."
+                                + "(or Authorization: Bearer <api key>) with a Trinyx API key."
                 ));
     }
 

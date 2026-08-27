@@ -29,7 +29,9 @@ import java.util.*;
  * Manages the CE-to-cloud OAuth account link.
  * Handles code exchange, token storage (AES-GCM encrypted), refresh, and link status.
  *
- * Active when cloud-link.enabled=true (CE or paid-monolith instances).
+ * Available when the Marketplace is remote (the upstream LiveContext behavior) or when
+ * cloud-link.enabled=true explicitly enables it for a local Marketplace paid monolith.
+ * Bean availability never means that a tenant is already linked.
  */
 public class CloudLinkService {
 

@@ -1,5 +1,5 @@
 /**
- * Product-analytics facade (PostHog) for LiveContext.
+ * Product-analytics facade (PostHog) for Trinyx.
  *
  * Design guarantees:
  *  - **No-op unless configured**: if `NEXT_PUBLIC_POSTHOG_KEY` is unset, every

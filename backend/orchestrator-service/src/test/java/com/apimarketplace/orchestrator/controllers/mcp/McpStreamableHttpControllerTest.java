@@ -77,7 +77,7 @@ class McpStreamableHttpControllerTest {
         Map<String, Object> result = (Map<String, Object>) body(response).get("result");
         assertThat(result.get("protocolVersion")).isEqualTo("2025-03-26");
         Map<String, Object> serverInfo = (Map<String, Object>) result.get("serverInfo");
-        assertThat(serverInfo.get("name")).isEqualTo("LiveContext Agent Tools");
+        assertThat(serverInfo.get("name")).isEqualTo("Trinyx Agent Tools");
         Map<String, Object> capabilities = (Map<String, Object>) result.get("capabilities");
         assertThat(capabilities).containsKeys("tools", "resources");
     }

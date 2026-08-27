@@ -221,7 +221,7 @@ describe('CredentialValidationRule', () => {
         makeUserCredential({
           id: 12,
           integration: 'imap',
-          name: 'Hostinger IMAP (contact@livecontext.ai)',
+          name: 'Hostinger IMAP (contact@example.com)',
           type: 'API Key',
           is_default: true,
         }),

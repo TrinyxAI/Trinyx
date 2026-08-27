@@ -55,9 +55,14 @@ LICENSE, NOTICE and historical migration/test text are never rewritten.
 
 ## Trinyx-owned runtime artifacts
 
+Package metadata, clone instructions and crawler-facing source links use the canonical
+`TrinyxAI/Trinyx` repository. The historical GHCR owner is retained until replacement
+packages are actually published and verified; changing it in source first would make CE
+installs pull nonexistent images.
+
 The npm CLI Compose asset references only Trinyx-owned image names for the CE
 backend, frontend, MCP bridge, screenshot renderer and websearch service, pinned
-to the CLI release tag (`v0.2.11`). The `Build Trinyx CE runtime images`
+to the CLI release tag (`v0.2.12`). The `Build Trinyx CE runtime images`
 workflow builds every image on pull requests without publishing. It publishes
 the immutable commit tag, audited `v*` release tag and `latest` only for an
 explicit Git release-tag push; a main push or manual dispatch cannot publish.
@@ -65,7 +70,7 @@ explicit Git release-tag push; a main push or manual dispatch cannot publish.
 This removes the configured `ghcr.io/livecontext-ai/*` supply-chain dependency, but
 the new manifests do not become deployable merely because their names are present in
 source. Before any CLI release or production deployment, all five images must be
-successfully built, published under `ghcr.io/eddinerabii/*`, pulled by digest in a
+successfully built from the final release commit, published under `ghcr.io/eddinerabii/*`, pulled by digest in a
 staging installation, and checked for database/volume compatibility. Until that
 external publication and verification succeeds, supply-chain independence remains a
 deployment blocker rather than a completed operational fact.

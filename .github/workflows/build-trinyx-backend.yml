@@ -125,19 +125,22 @@ jobs:
           cache-from: type=gha,scope=trinyx-backend
           cache-to: type=gha,mode=max,scope=trinyx-backend
 
-      - name: Smoke boot CE with default Marketplace and CloudLink activation
+      - name: Smoke boot CE defaults, key persistence and paid-monolith CloudLink
         if: github.event_name == 'pull_request'
         shell: bash
         run: |
           set -euo pipefail
           network="trinyx-ce-smoke"
+          keys_volume="trinyx-ce-smoke-keys"
           cleanup() {
             docker rm -f ce-smoke-backend ce-smoke-postgres ce-smoke-redis ce-smoke-minio >/dev/null 2>&1 || true
             docker network rm "${network}" >/dev/null 2>&1 || true
+            docker volume rm -f "${keys_volume}" >/dev/null 2>&1 || true
           }
           trap cleanup EXIT
           cleanup
           docker network create "${network}" >/dev/null
+          docker volume create "${keys_volume}" >/dev/null
 
           docker run -d --name ce-smoke-postgres --network "${network}" \
             -e POSTGRES_DB=livecontext -e POSTGRES_USER=postgres -e POSTGRES_PASSWORD=postgres \
@@ -164,28 +167,54 @@ jobs:
             mc mb --ignore-existing smoke/workflow-files >/dev/null
           '
 
-          docker run -d --name ce-smoke-backend --network "${network}" -p 18080:8080 \
-            -e DB_HOST=ce-smoke-postgres -e DB_PORT=5432 -e DB_NAME=livecontext \
-            -e DB_USERNAME=postgres -e DB_PASSWORD=postgres \
-            -e REDIS_HOST=ce-smoke-redis -e REDIS_PORT=6379 \
-            -e STORAGE_S3_ENDPOINT=http://ce-smoke-minio:9000 \
-            -e STORAGE_S3_ACCESS_KEY=minioadmin -e STORAGE_S3_SECRET_KEY=minioadmin \
-            -e STORAGE_S3_BUCKET=workflow-files \
-            "${BACKEND_IMAGE}:${GITHUB_SHA}" >/dev/null
+          common_args=(
+            --network "${network}" -p 18080:8080
+            -e DB_HOST=ce-smoke-postgres -e DB_PORT=5432 -e DB_NAME=livecontext
+            -e DB_USERNAME=postgres -e DB_PASSWORD=postgres
+            -e REDIS_HOST=ce-smoke-redis -e REDIS_PORT=6379
+            -e STORAGE_S3_ENDPOINT=http://ce-smoke-minio:9000
+            -e STORAGE_S3_ACCESS_KEY=minioadmin -e STORAGE_S3_SECRET_KEY=minioadmin
+            -e STORAGE_S3_BUCKET=workflow-files
+            -v "${keys_volume}:/app/data/keys"
+          )
 
-          for attempt in {1..120}; do
-            if curl --fail --silent http://127.0.0.1:18080/actuator/health >/dev/null; then
-              echo "CE default smoke boot succeeded"
-              exit 0
-            fi
-            if ! docker ps --format '{{.Names}}' | grep -qx ce-smoke-backend; then
-              echo "CE backend exited during smoke boot" >&2
-              docker logs ce-smoke-backend >&2 || true
-              exit 1
-            fi
-            sleep 5
-          done
+          start_backend() {
+            docker run -d --name ce-smoke-backend "${common_args[@]}" "$@" \
+              "${BACKEND_IMAGE}:${GITHUB_SHA}" >/dev/null
+          }
 
-          echo "CE backend did not become healthy within 10 minutes" >&2
-          docker logs ce-smoke-backend >&2 || true
-          exit 1
+          wait_for_backend() {
+            label="$1"
+            for attempt in {1..120}; do
+              if curl --fail --silent http://127.0.0.1:18080/actuator/health >/dev/null; then
+                echo "${label} smoke boot succeeded"
+                return 0
+              fi
+              if ! docker ps --format '{{.Names}}' | grep -qx ce-smoke-backend; then
+                echo "${label} backend exited during smoke boot" >&2
+                docker logs ce-smoke-backend >&2 || true
+                return 1
+              fi
+              sleep 5
+            done
+            echo "${label} backend did not become healthy within 10 minutes" >&2
+            docker logs ce-smoke-backend >&2 || true
+            return 1
+          }
+
+          # Defaults are intentionally omitted: marketplace=remote and cloud-link.enabled=false.
+          start_backend
+          wait_for_backend "CE default"
+          first_key_checksum="$(docker exec ce-smoke-backend sha256sum /app/data/keys/encryption.env | awk '{print $1}')"
+          test -n "${first_key_checksum}"
+
+          docker rm -f ce-smoke-backend >/dev/null
+          start_backend
+          wait_for_backend "CE recreated"
+          second_key_checksum="$(docker exec ce-smoke-backend sha256sum /app/data/keys/encryption.env | awk '{print $1}')"
+          test "${first_key_checksum}" = "${second_key_checksum}"
+          echo "CE encryption keys survived container recreation"
+
+          docker rm -f ce-smoke-backend >/dev/null
+          start_backend -e APP_EDITION=paid-monolith -e MARKETPLACE_MODE=local -e CLOUD_LINK_ENABLED=true
+          wait_for_backend "Paid monolith local Marketplace + CloudLink"

@@ -49,7 +49,7 @@ class CeCatalogCloudRelayTest {
     private static final String REQUEST_ID = "req-1";
     private static final String INTEGRATION = "telegram";
     private static final CloudLlmRuntimeCredentials CREDENTIALS =
-            new CloudLlmRuntimeCredentials("token-1", "install-1", "https://livecontext.ai/api");
+            new CloudLlmRuntimeCredentials("token-1", "install-1", "https://cloud.trinyx.fr/api");
 
     @Mock
     private CloudLlmRuntimeAccess runtimeAccess;

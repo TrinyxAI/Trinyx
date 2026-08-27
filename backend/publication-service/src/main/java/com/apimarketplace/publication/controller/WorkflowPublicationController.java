@@ -1,6 +1,7 @@
 package com.apimarketplace.publication.controller;
 
 import com.apimarketplace.auth.client.access.OrgAccessGuard;
+import com.apimarketplace.publication.dto.MarketplaceQueryFilter;
 import com.apimarketplace.publication.dto.PublicationListItem;
 import com.apimarketplace.publication.domain.PublicationReviewEntity;
 import com.apimarketplace.publication.domain.WorkflowPublicationEntity;
@@ -12,6 +13,7 @@ import com.apimarketplace.publication.config.OrchestratorInternalClient;
 import com.apimarketplace.publication.service.AgentPublicationService;
 import com.apimarketplace.publication.service.ApplicationTemplateResetService;
 import com.apimarketplace.publication.service.CeExclusivePublicationException;
+import com.apimarketplace.publication.service.EditableWorkflowTwinService;
 import com.apimarketplace.publication.service.LandingInterfaceSnapshotter;
 import com.apimarketplace.publication.service.OnboardingCategoryMapper;
 import com.apimarketplace.publication.service.PublicationListQueryService;
@@ -23,6 +25,7 @@ import com.apimarketplace.publication.service.ReviewerIdentityResolver;
 import org.springframework.util.StringUtils;
 import com.apimarketplace.publication.service.ResourcePublicationService;
 import com.apimarketplace.publication.service.ShowcaseFileRefRewriter;
+import com.apimarketplace.publication.service.SnapshotCloneService;
 import com.apimarketplace.publication.service.ShowcaseSnapshotReader;
 import com.apimarketplace.publication.service.WorkflowPublicationService;
 import org.slf4j.Logger;
@@ -1166,27 +1169,48 @@ public class WorkflowPublicationController {
 
     /**
      * Get marketplace publications (public listing).
-     * Optional category filter via query param.
      * Uses lightweight query to avoid loading planSnapshot.
+     *
+     * <p>Every refinement the grid offers is a query param here (category, type,
+     * sort, rating, freshness, price) and is answered by the database. They used
+     * to be applied in the browser over one popularity-ordered page of rows,
+     * which made each of them mean "...among the rows that page happened to
+     * contain": publications past the page were unreachable however the visitor
+     * filtered, and a just-published app - no installs, no favorites, no reviews,
+     * so last in popularity order - was exactly what fell off the end. Answering
+     * them here also makes {@code count} / {@code totalPages} describe the
+     * filtered set, so a caller can page to the end of what it is showing.
+     *
+     * <p>Unknown values are not errors: each one falls back to its neutral
+     * default (see {@code MarketplaceQueryFilter}), so a stale bookmark or a
+     * hand-edited URL renders the unfiltered grid instead of an error page.
+     *
+     * @param displayMode {@code DisplayMode} name (APPLICATION, AGENT, ...); absent = every type
+     * @param sort        popular (default) | rating | recent | installs
+     * @param rating      any (default) | rated | min_3 | min_4
+     * @param days        only publications published within the last N days; absent = no window
+     * @param price       any (default) | free | paid
      */
     @GetMapping("/marketplace")
     public ResponseEntity<?> getMarketplacePublications(
             @RequestParam(defaultValue = "0") int page,
             @RequestParam(defaultValue = "20") int size,
             @RequestParam(required = false) String category,
+            @RequestParam(required = false) String displayMode,
+            @RequestParam(required = false) String sort,
+            @RequestParam(required = false) String rating,
+            @RequestParam(required = false) Integer days,
+            @RequestParam(required = false) String price,
             // Optional - present only for authenticated callers (the marketplace is public-browsable).
             // Used to flag publications the caller's ACTIVE workspace already owns (so the card shows
             // "Installed" instead of "Acquire"); absent → anonymous → ownedByMe stays false.
             @RequestHeader(value = "X-User-ID", required = false) String userId,
             @RequestHeader(value = "X-Organization-ID", required = false) String organizationId) {
         try {
-            Page<PublicationListItem> publications;
-
-            if (category != null && !category.isEmpty()) {
-                publications = listQueryService.findMarketplacePublicationsByCategory(category, page, size);
-            } else {
-                publications = listQueryService.findMarketplacePublications(page, size);
-            }
+            MarketplaceQueryFilter filter =
+                    MarketplaceQueryFilter.fromRequest(category, displayMode, sort, rating, days, price);
+            Page<PublicationListItem> publications =
+                    listQueryService.findMarketplacePublications(filter, page, size);
 
             List<Map<String, Object>> items = publications.getContent().stream()
                     .map(PublicationListItem::toResponseMap)
@@ -1207,6 +1231,7 @@ public class WorkflowPublicationController {
                     .body(Map.of("error", "Failed to get marketplace publications"));
         }
     }
+
 
     /**
      * Flags each publication the caller's ACTIVE workspace already owns, so the marketplace
@@ -1323,10 +1348,20 @@ public class WorkflowPublicationController {
     public ResponseEntity<?> searchPublications(
             @RequestParam String q,
             @RequestParam(required = false) String category,
+            @RequestParam(required = false) String displayMode,
+            @RequestParam(required = false) String sort,
+            @RequestParam(required = false) String rating,
+            @RequestParam(required = false) Integer days,
+            @RequestParam(required = false) String price,
             @RequestHeader(value = "X-User-ID", required = false) String userId,
             @RequestHeader(value = "X-Organization-ID", required = false) String organizationId) {
         try {
-            List<PublicationListItem> publications = listQueryService.searchByTitle(q, category);
+            // Same refinements as /marketplace, on purpose: the search box sits
+            // inside the filtered grid, so a query must narrow what the visitor is
+            // already looking at rather than reset it to every publication.
+            MarketplaceQueryFilter filter =
+                    MarketplaceQueryFilter.fromRequest(category, displayMode, sort, rating, days, price);
+            List<PublicationListItem> publications = listQueryService.searchMarketplace(q, filter);
 
             List<Map<String, Object>> response = publications.stream()
                     .map(PublicationListItem::toResponseMap)
@@ -1396,11 +1431,16 @@ public class WorkflowPublicationController {
             UUID pubId = UUID.fromString(publicationId);
             Map<String, Object> result = publicationService.acquirePublication(pubId, tenantId, organizationId);
 
-            return ResponseEntity.ok(Map.of(
-                    "workflowId", result.get("workflowId"),
-                    "publicationId", publicationId,
-                    "title", result.get("title")
-            ));
+            Map<String, Object> body = new LinkedHashMap<>();
+            body.put("workflowId", result.get("workflowId"));
+            body.put("publicationId", publicationId);
+            body.put("title", result.get("title"));
+            // Per-type count of what the clone created (interfaces / tables / agents /
+            // sub-workflows). The caller shows it to the user once the install completes -
+            // absent types are simply omitted, so an empty map means "just the application".
+            body.put(SnapshotCloneService.RESOURCES_KEY,
+                    result.getOrDefault(SnapshotCloneService.RESOURCES_KEY, Map.of()));
+            return ResponseEntity.ok(body);
         } catch (CeExclusivePublicationException e) {
             return ceExclusiveResponse(e);
         } catch (IllegalArgumentException e) {
@@ -1494,6 +1534,50 @@ public class WorkflowPublicationController {
     private static String errorMessageOr(Exception e, String fallback) {
         String message = e.getMessage();
         return message != null && !message.isBlank() ? message : fallback;
+    }
+
+    /**
+     * Create the caller's freely-editable WORKFLOW copy of an application they installed.
+     *
+     * <p>Replaces the copy that used to be minted automatically on every install: because a
+     * copy re-clones the whole snapshot, doing it eagerly gave every acquirer two of each
+     * interface / table / agent the app carries. Idempotent - a second call returns the
+     * existing copy ({@code created:false}) instead of a second resource set.
+     */
+    @PostMapping("/{publicationId}/editable-workflow")
+    public ResponseEntity<?> createEditableWorkflow(
+            @RequestHeader("X-User-ID") String tenantId,
+            @RequestHeader(value = "X-Organization-ID", required = false) String organizationId,
+            @RequestHeader(value = "X-Organization-Role", required = false) String organizationRole,
+            @PathVariable String publicationId) {
+        try {
+            // Creating a workflow is a write - same gate as acquire.
+            if (isViewerRole(organizationRole)) {
+                return ResponseEntity.status(HttpStatus.FORBIDDEN)
+                        .body(Map.of("error", "VIEWER role cannot create an editable copy"));
+            }
+            UUID pubId = UUID.fromString(publicationId);
+            Map<String, Object> result = publicationService.createEditableWorkflowTwin(pubId, tenantId, organizationId);
+            return ResponseEntity.ok(result);
+        } catch (com.apimarketplace.auth.client.entitlement.LimitExceededException e) {
+            // Rethrown, not mapped here: LimitExceededExceptionHandler turns it into the
+            // platform-wide 409 + LimitExceededError body every other quota refusal uses.
+            // Catching it explicitly is what keeps the generic catch below from burying a
+            // quota refusal in a 500 - the install-time copy used to swallow it entirely and
+            // silently create nothing.
+            throw e;
+        } catch (EditableWorkflowTwinService.CopyInProgressException e) {
+            // Another request is already creating this exact copy: 409, not 500. The copy
+            // IS coming, so "could not be created" would be a lie the user acts on.
+            return ResponseEntity.status(HttpStatus.CONFLICT)
+                    .body(Map.of("error", e.getMessage(), "code", "COPY_IN_PROGRESS"));
+        } catch (IllegalArgumentException e) {
+            return ResponseEntity.badRequest().body(Map.of("error", e.getMessage()));
+        } catch (Exception e) {
+            logger.error("Error creating editable workflow copy for publication {}", publicationId, e);
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
+                    .body(Map.of("error", "Failed to create the editable copy"));
+        }
     }
 
     /**

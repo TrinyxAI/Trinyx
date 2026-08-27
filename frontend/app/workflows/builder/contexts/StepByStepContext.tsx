@@ -3,9 +3,10 @@
 import * as React from 'react';
 import type { WorkflowRunState, StepState, CoreExecutionResponse, StepRerunResponse } from '@/lib/api';
 import type { PendingSignal } from '@/lib/websocket/ws-types';
-import { normalizeLabel } from '../utils/labelNormalizer';
+import { normalizeLabel, extractLabelFromKey } from '../utils/labelNormalizer';
 import { getPrefixForKind } from '../registry/nodeRegistry';
 import { useWorkflowMode } from '@/contexts/WorkflowModeContext';
+import { RerunConfirmModal } from '../components/RerunConfirmModal';
 
 export interface StepByStepContextValue {
   // Mode
@@ -107,6 +108,26 @@ interface StepByStepProviderProps {
   currentEpoch?: number;
 }
 
+/**
+ * A rerun waiting for the user's answer on an AUTOMATIC run: the caller's promise is
+ * parked here until the confirmation is accepted or dismissed.
+ */
+interface PendingRerun {
+  stepId: string;
+  resolve: (value: StepRerunResponse | null) => void;
+  reject: (reason: unknown) => void;
+}
+
+/**
+ * Human-readable name for a backend step id (`mcp:my_tool` -> `my tool`), shown in the
+ * rerun confirmation so the user can vet WHICH node the restart starts from. Falls back
+ * to the id itself when it carries no prefix.
+ */
+function stepDisplayLabel(stepId: string): string {
+  const label = extractLabelFromKey(stepId);
+  return label ? label.replace(/_/g, ' ') : stepId;
+}
+
 export function StepByStepProvider({
   children,
   isEnabled,
@@ -133,6 +154,18 @@ export function StepByStepProvider({
   currentEpoch = 0,
 }: StepByStepProviderProps) {
   const [executingStep, setExecutingStep] = React.useState<string | null>(null);
+  const [pendingRerun, setPendingRerun] = React.useState<PendingRerun | null>(null);
+  // Mirror of `pendingRerun` readable from callbacks and from the unmount cleanup, where
+  // the state value captured at render time would already be stale.
+  const pendingRerunRef = React.useRef<PendingRerun | null>(null);
+  React.useEffect(() => {
+    pendingRerunRef.current = pendingRerun;
+  }, [pendingRerun]);
+  // Never leave a caller awaiting a promise nobody can answer any more.
+  React.useEffect(() => () => {
+    pendingRerunRef.current?.resolve(null);
+    pendingRerunRef.current = null;
+  }, []);
 
   const executeStep = React.useCallback(async (stepId: string, epoch?: number) => {
     setExecutingStep(stepId);
@@ -200,10 +233,47 @@ export function StepByStepProvider({
   // For triggers: rerun = selective reset (same as other nodes), NOT re-fire.
   // This resets the trigger and all downstream to READY, showing PLAY buttons again.
   // The user then clicks PLAY to actually fire the trigger (new epoch).
+  //
+  // AUTOMATIC runs go through a confirmation first. On a stepped run the rerun stops at the
+  // target and waits for the user, so it costs nothing; in automatic mode the same click
+  // reruns the target AND lets the whole downstream chain run again unattended, which can
+  // spend paid calls and send real messages. That asymmetry is invisible on the button, so
+  // the gate lives here rather than on each surface: the canvas bar, the context menu and
+  // the inspector all call this one function and inherit it.
   const rerunStep = React.useCallback(async (stepId: string): Promise<StepRerunResponse | null> => {
     if (!onRerunStep) return null;
-    return await onRerunStep(stepId);
+    if (isEnabled) return await onRerunStep(stepId);
+    return await new Promise<StepRerunResponse | null>((resolve, reject) => {
+      setPendingRerun((previous) => {
+        // A second rerun click while the gate is open supersedes the first; the superseded
+        // caller must not be left awaiting forever.
+        previous?.resolve(null);
+        return { stepId, resolve, reject };
+      });
+    });
+  }, [onRerunStep, isEnabled]);
+
+  const confirmPendingRerun = React.useCallback(async () => {
+    const pending = pendingRerunRef.current;
+    if (!pending) return;
+    pendingRerunRef.current = null;
+    setPendingRerun(null);
+    try {
+      pending.resolve(onRerunStep ? await onRerunStep(pending.stepId) : null);
+    } catch (err) {
+      // Surface the failure to whoever awaited the rerun, exactly as the ungated path does.
+      pending.reject(err);
+    }
   }, [onRerunStep]);
+
+  const cancelPendingRerun = React.useCallback(() => {
+    const pending = pendingRerunRef.current;
+    pendingRerunRef.current = null;
+    setPendingRerun(null);
+    // A dismissed rerun is a no-op, not an error: resolve with the same "nothing happened"
+    // value the callers already handle.
+    pending?.resolve(null);
+  }, []);
 
   // Check if a step can be re-run (must be COMPLETED, FAILED, or RUNNING)
   // NOTE: SKIPPED steps cannot be retried (branch wasn't taken - retry from decision instead)
@@ -339,6 +409,13 @@ export function StepByStepProvider({
   return (
     <StepByStepContext.Provider value={value}>
       {children}
+      {pendingRerun && (
+        <RerunConfirmModal
+          stepLabel={stepDisplayLabel(pendingRerun.stepId)}
+          onConfirm={confirmPendingRerun}
+          onCancel={cancelPendingRerun}
+        />
+      )}
     </StepByStepContext.Provider>
   );
 }

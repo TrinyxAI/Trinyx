@@ -167,9 +167,18 @@ class LiteLlmFeedParserTest {
                 fixture.getBytes(StandardCharsets.UTF_8), "sha", "t");
 
         assertThat(result.isSuccess()).isTrue();
-        assertThat(result.models()).hasSize(5);
-        // minimax has no provider entry / relay support yet, so it stays out.
-        assertThat(result.rejectedProvider()).isEqualTo(1);
+        assertThat(result.models()).hasSize(6);
+        assertThat(result.rejectedProvider()).isZero();
+
+        // minimax was the last Chinese provider still unmapped: its rows pass
+        // every other filter untouched, so the entry alone is what let the
+        // M-series through.
+        Map<String, Object> m3 = findByModelId(result.models(), "MiniMax-M3");
+        assertThat(m3.get("provider")).isEqualTo("minimax");
+        assertThat((BigDecimal) m3.get("priceInput"))
+                .isEqualByComparingTo(new BigDecimal("0.30"));
+        assertThat((BigDecimal) m3.get("priceOutput"))
+                .isEqualByComparingTo(new BigDecimal("1.20"));
 
         // The "moonshot/" prefix is stripped, so the native id matches the
         // application.yml entry exactly and the merge updates rather than
@@ -222,16 +231,17 @@ class LiteLlmFeedParserTest {
     }
 
     @Test
-    @DisplayName("Unpriced Qwen / GLM preview rows are still dropped by the zero-price gate")
+    @DisplayName("Truly unpriced Qwen / GLM rows are still dropped by the zero-price gate")
     void dropsUnpricedChineseRows() {
-        // A sizeable slice of the dashscope + zai lines ships with no pricing
-        // at all (qwen3-max, qwen-flash) or an explicit 0/0 free tier
-        // (glm-4.7-flash). Widening PROVIDER_MAP must not let those past the
-        // price gate - a zero-priced row slips through the CreditService and
-        // enables free LLM use.
+        // Rows with NO price of any kind (qwen3-30b-a3b: no flat keys, no
+        // tiered ladder) and rows with an explicit 0/0 free tier
+        // (glm-4.5-flash, glm-4.7-flash) must stay out - a zero-priced row
+        // slips through the CreditService and enables free LLM use. This is
+        // the counterpart of acceptsTieredPricedChineseFlagships: the ladder
+        // fallback must not turn the gate into a rubber stamp.
         String fixture = """
             {
-              "dashscope/qwen3-max": {
+              "dashscope/qwen3-30b-a3b": {
                 "litellm_provider": "dashscope", "mode": "chat",
                 "supports_function_calling": true
               },
@@ -257,6 +267,142 @@ class LiteLlmFeedParserTest {
         assertThat(result.models()).hasSize(1);
         assertThat(result.models().get(0).get("modelId")).isEqualTo("glm-5.1");
         assertThat(result.rejectedProvider()).isZero();
+    }
+
+    @Test
+    @DisplayName("Regression: tiered_pricing rows are accepted at their base bracket - the gate used to delete qwen3-max")
+    void acceptsTieredPricedChineseFlagships() {
+        // Alibaba and ByteDance bill by context bracket, so LiteLLM publishes
+        // `tiered_pricing` INSTEAD of the flat cost keys. Reading only the flat
+        // keys made these rows look unpriced and the zero-price gate deleted
+        // them: 19 models on the live feed (2026-08-19), every one of them
+        // Chinese. Fixtures are the real feed shapes, trimmed.
+        String fixture = """
+            {
+              "dashscope/qwen3-max": {
+                "litellm_provider": "dashscope", "mode": "chat",
+                "max_input_tokens": 258048, "max_output_tokens": 65536,
+                "supports_function_calling": true, "supports_reasoning": true,
+                "tiered_pricing": [
+                  {"range": [0, 32000.0],       "input_cost_per_token": 1.2e-06, "output_cost_per_token": 6e-06},
+                  {"range": [32000.0, 128000.0],"input_cost_per_token": 2.4e-06, "output_cost_per_token": 1.2e-05},
+                  {"range": [128000.0, 252000.0],"input_cost_per_token": 3e-06,  "output_cost_per_token": 1.5e-05}
+                ]
+              },
+              "dashscope/qwen3-coder-plus": {
+                "litellm_provider": "dashscope", "mode": "chat",
+                "max_input_tokens": 997952, "max_output_tokens": 65536,
+                "supports_function_calling": true,
+                "tiered_pricing": [
+                  {"range": [0, 32000.0], "input_cost_per_token": 1e-06,
+                   "output_cost_per_token": 5e-06, "cache_read_input_token_cost": 1e-07},
+                  {"range": [32000.0, 128000.0], "input_cost_per_token": 1.8e-06,
+                   "output_cost_per_token": 9e-06, "cache_read_input_token_cost": 1.8e-07}
+                ]
+              }
+            }
+            """;
+
+        LiteLlmFeedParser.ParseResult result = parser.parse(
+                fixture.getBytes(StandardCharsets.UTF_8), "sha", "t");
+
+        assertThat(result.models()).hasSize(2);
+
+        Map<String, Object> max = findByModelId(result.models(), "qwen3-max");
+        assertThat(max.get("provider")).isEqualTo("qwen");
+        // Base bracket, i.e. the price Alibaba advertises - NOT the 3.00/15.00
+        // top bracket, which would misclassify the model as "top" tier.
+        assertThat(max.get("priceInput")).isEqualTo(new BigDecimal("1.2000"));
+        assertThat(max.get("priceOutput")).isEqualTo(new BigDecimal("6.0000"));
+        assertThat(max.get("tier")).isEqualTo("high");
+        assertThat(max.get("contextWindow")).isEqualTo(258048);
+        // The whole ladder survives for anyone who needs the upper brackets.
+        @SuppressWarnings("unchecked")
+        Map<String, Object> feedMeta = (Map<String, Object>) max.get("feedMetadata");
+        @SuppressWarnings("unchecked")
+        Map<String, Object> raw = (Map<String, Object>) feedMeta.get("raw");
+        assertThat(raw).containsKey("tiered_pricing");
+
+        // Cache rates live inside the brackets too - read them from the same
+        // base tier or a tiered model looks cache-free.
+        Map<String, Object> coder = findByModelId(result.models(), "qwen3-coder-plus");
+        assertThat(coder.get("priceInput")).isEqualTo(new BigDecimal("1.0000"));
+        assertThat(coder.get("priceOutput")).isEqualTo(new BigDecimal("5.0000"));
+        assertThat(coder.get("priceCacheRead")).isEqualTo(new BigDecimal("0.1000"));
+    }
+
+    @Test
+    @DisplayName("A flat price always wins over the ladder, and the base bracket is picked by range not by order")
+    void flatPriceWinsAndBaseBracketIsRangeBased() {
+        // Two independent guarantees of effectiveCost:
+        //  - western rows (flat keys, no ladder) are untouched by the fallback;
+        //  - when a feed lists brackets out of order, the [0, …] one is still
+        //    the base. Relying on index 0 would have billed doubao at its
+        //    long-context rate.
+        String fixture = """
+            {
+              "gpt-5.4": {
+                "litellm_provider": "openai", "mode": "chat",
+                "input_cost_per_token": 2.5e-06, "output_cost_per_token": 1.5e-05,
+                "supports_function_calling": true,
+                "tiered_pricing": [
+                  {"range": [0, 32000.0], "input_cost_per_token": 9.9e-05, "output_cost_per_token": 9.9e-05}
+                ]
+              },
+              "dashscope/qwen3.7-plus": {
+                "litellm_provider": "dashscope", "mode": "chat",
+                "supports_function_calling": true,
+                "tiered_pricing": [
+                  {"range": [128000.0, 991808.0], "input_cost_per_token": 1.2e-06, "output_cost_per_token": 4.8e-06},
+                  {"range": [0, 128000.0],        "input_cost_per_token": 4e-07,   "output_cost_per_token": 1.6e-06}
+                ]
+              }
+            }
+            """;
+
+        LiteLlmFeedParser.ParseResult result = parser.parse(
+                fixture.getBytes(StandardCharsets.UTF_8), "sha", "t");
+
+        assertThat(result.models()).hasSize(2);
+        Map<String, Object> gpt = findByModelId(result.models(), "gpt-5.4");
+        assertThat(gpt.get("priceInput")).isEqualTo(new BigDecimal("2.5000"));
+        assertThat(gpt.get("priceOutput")).isEqualTo(new BigDecimal("15.0000"));
+
+        Map<String, Object> plus = findByModelId(result.models(), "qwen3.7-plus");
+        assertThat(plus.get("priceInput")).isEqualTo(new BigDecimal("0.4000"));
+        assertThat(plus.get("priceOutput")).isEqualTo(new BigDecimal("1.6000"));
+    }
+
+    @Test
+    @DisplayName("A malformed ladder degrades to unpriced instead of throwing")
+    void malformedTieredPricingIsInert() {
+        // The feed is third-party input: a ladder that is a string, a list of
+        // strings, or empty must not crash the whole sync (one bad row used to
+        // be enough - see the fallback_generalizations NPE regression).
+        String fixture = """
+            {
+              "dashscope/a": {"litellm_provider": "dashscope", "mode": "chat",
+                              "supports_function_calling": true, "tiered_pricing": "nope"},
+              "dashscope/b": {"litellm_provider": "dashscope", "mode": "chat",
+                              "supports_function_calling": true, "tiered_pricing": []},
+              "dashscope/c": {"litellm_provider": "dashscope", "mode": "chat",
+                              "supports_function_calling": true, "tiered_pricing": ["x"]},
+              "dashscope/d": {"litellm_provider": "dashscope", "mode": "chat",
+                              "supports_function_calling": true,
+                              "tiered_pricing": [{"input_cost_per_token": 5e-07,
+                                                  "output_cost_per_token": 2e-06}]}
+            }
+            """;
+
+        LiteLlmFeedParser.ParseResult result = parser.parse(
+                fixture.getBytes(StandardCharsets.UTF_8), "sha", "t");
+
+        assertThat(result.isSuccess()).isTrue();
+        // a/b/c carry no usable price and are dropped; d has a single bracket
+        // with no range declared, so the first entry is the base.
+        assertThat(result.models()).hasSize(1);
+        assertThat(result.models().get(0).get("modelId")).isEqualTo("d");
+        assertThat(result.models().get(0).get("priceInput")).isEqualTo(new BigDecimal("0.5000"));
     }
 
     @Test

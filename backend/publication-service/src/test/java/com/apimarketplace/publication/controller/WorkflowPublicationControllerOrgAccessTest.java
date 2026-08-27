@@ -456,6 +456,32 @@ class WorkflowPublicationControllerOrgAccessTest {
     }
 
     @Test
+    @DisplayName("VIEWER cannot create the editable copy of an installed application (403, it clones a workflow into the workspace)")
+    void viewerCannotCreateEditableWorkflowCopy() {
+        String publicationId = UUID.randomUUID().toString();
+
+        ResponseEntity<?> response =
+                controller.createEditableWorkflow("viewer-1", "org-1", "VIEWER", publicationId);
+
+        assertThat(response.getStatusCode().value()).isEqualTo(403);
+        verify(publicationService, never()).createEditableWorkflowTwin(any(), any(), any());
+    }
+
+    @Test
+    @DisplayName("A non-VIEWER member DOES reach the editable-copy service (the gate is the role, not the endpoint)")
+    void memberCanCreateEditableWorkflowCopy() {
+        UUID publicationId = UUID.randomUUID();
+        when(publicationService.createEditableWorkflowTwin(publicationId, "member-1", "org-1"))
+                .thenReturn(Map.of("workflowId", "wf-copy", "created", true));
+
+        ResponseEntity<?> response =
+                controller.createEditableWorkflow("member-1", "org-1", "MEMBER", publicationId.toString());
+
+        assertThat(response.getStatusCode().value()).isEqualTo(200);
+        verify(publicationService).createEditableWorkflowTwin(publicationId, "member-1", "org-1");
+    }
+
+    @Test
     @DisplayName("VIEWER cannot acquire a resource publication (403, clone-into-workspace is a write)")
     void viewerCannotAcquireResource() {
         ResponseEntity<?> response =

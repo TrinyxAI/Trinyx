@@ -332,6 +332,40 @@ class ResourcePublicationServiceTest {
         return buildService();
     }
 
+    @Test
+    @DisplayName("A standalone TABLE / INTERFACE / SKILL acquire reports NO resource summary - the consumer falls back to naming the resource itself")
+    void resourceAcquireReportsNoResourceSummary() {
+        // Deliberate asymmetry, pinned so it cannot drift into a silent regression: the
+        // resource strategies return only the new id, so this path cannot count what it
+        // created the way the workflow clone does. Consumers therefore render the acquired
+        // resource itself and simply omit the extra lines - an ABSENT summary must never be
+        // mistaken for "the install created nothing".
+        UUID publicationId = UUID.randomUUID();
+        String skillId = UUID.randomUUID().toString();
+        WorkflowPublicationEntity publication = new WorkflowPublicationEntity();
+        publication.setId(publicationId);
+        publication.setPublicationType(PublicationType.SKILL);
+        publication.setStatus(WorkflowPublicationEntity.PublicationStatus.ACTIVE);
+        publication.setVisibility(WorkflowPublicationEntity.PublicationVisibility.PUBLIC);
+        publication.setPublisherId("publisher-1");
+        publication.setOwnerType(OwnerType.USER);
+        publication.setOwnerId("publisher-1");
+        publication.setCreditsPerUse(0);
+        publication.setPlanSnapshot(new LinkedHashMap<>(Map.of("name", "Skill")));
+
+        ResourcePublicationService service = newService();
+        when(publicationRepository.findById(publicationId)).thenReturn(Optional.of(publication));
+        when(receiptRepository.existsByOrganizationIdAndPublicationId(ORGANIZATION_ID, publicationId))
+                .thenReturn(false);
+        when(strategy.cloneFromSnapshot(any(), eq("buyer-7"), eq(publicationId), eq(ORGANIZATION_ID)))
+                .thenReturn(skillId);
+
+        Map<String, Object> result = service.acquireResource(publicationId, "buyer-7", ORGANIZATION_ID);
+
+        assertThat(result).containsEntry("resourceId", skillId).containsEntry("type", "SKILL");
+        assertThat(result).doesNotContainKey(SnapshotCloneService.RESOURCES_KEY);
+    }
+
     private ResourcePublicationService newService() {
         when(strategy.getPublicationType()).thenReturn(PublicationType.SKILL);
         lenient().when(strategy.getDisplayMode()).thenReturn(DisplayMode.SKILL);

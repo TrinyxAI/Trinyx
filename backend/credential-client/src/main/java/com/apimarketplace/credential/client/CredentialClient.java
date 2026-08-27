@@ -579,6 +579,33 @@ public class CredentialClient {
     }
 
     /**
+     * The IDENTITIES of a user's credentials: id, name, integration, status.
+     *
+     * <p>Deliberately NOT {@link #getAllCredentials}, which answers with whole
+     * records, decrypted secrets included. A caller that only needs to work out
+     * WHICH credential was meant must never receive the material of the ones it
+     * is about to reject.
+     *
+     * <p>Empty on any failure, like every other lookup here. Callers that must
+     * not proceed without an answer have to treat empty as "unknown" themselves.
+     */
+    public List<CredentialIdentityDto> getCredentialIdentities(String userId) {
+        try {
+            String url = UriComponentsBuilder.fromHttpUrl(baseUrl)
+                    .path("/api/internal/credentials/identities")
+                    .queryParam("userId", userId)
+                    .toUriString();
+            ResponseEntity<List<CredentialIdentityDto>> resp = restTemplate.exchange(
+                    url, HttpMethod.GET, new HttpEntity<>(buildHeaders(userId)),
+                    new ParameterizedTypeReference<>() {});
+            return resp.getBody() != null ? resp.getBody() : List.of();
+        } catch (Exception e) {
+            log.warn("Failed to list credential identities for user={}: {}", userId, e.getMessage());
+            return List.of();
+        }
+    }
+
+    /**
      * Get all credentials for a user.
      */
     public List<CredentialSummaryDto> getAllCredentials(String userId) {

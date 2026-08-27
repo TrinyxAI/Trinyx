@@ -27,6 +27,12 @@ const mocks = vi.hoisted(() => ({
   wfRemoveFavorite: vi.fn(),
 }));
 
+// The lists keep the open folder in the address, so they read next/navigation. This fake
+// router is URL-backed and re-renders on navigation, the way the real one does.
+vi.mock('next/navigation', async () => {
+  const mod = await import('@/lib/folders/testing/fakeFolderRouter');
+  return mod.fakeFolderRouter.nextNavigationModule();
+});
 vi.mock('@/i18n/navigation', () => ({ useRouter: () => ({ push: vi.fn() }) }));
 vi.mock('@/lib/providers/smart-providers', () => ({ useAuth: () => ({ isLoading: false }) }));
 vi.mock('@/lib/api/orchestrator/publication.service', () => ({
@@ -63,6 +69,7 @@ vi.mock('@/hooks/useSelectableItems', () => ({
   useSelectableItems: () => ({ selectedIds: new Set<string>(), toggle: vi.fn(), clear: vi.fn(), selectAll: vi.fn() }),
 }));
 
+import { fakeFolderRouter } from '@/lib/folders/testing/fakeFolderRouter';
 import ApplicationsPage from '../page';
 
 function renderPage() {
@@ -74,6 +81,9 @@ function renderPage() {
 }
 
 beforeEach(() => {
+  // The address is shared state: without this, a test that opened a folder leaves the
+  // next one starting inside it.
+  fakeFolderRouter.reset();
   vi.clearAllMocks();
   // single published app, no favorites
   mocks.getMyPublicationsPage.mockResolvedValue({ items: [{ id: 'p1', title: 'Pub One', workflowId: 'wf1', status: 'ACTIVE', visibility: 'PUBLIC' }], totalCount: 1 });

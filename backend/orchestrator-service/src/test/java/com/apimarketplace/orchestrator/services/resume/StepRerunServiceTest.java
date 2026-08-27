@@ -129,6 +129,19 @@ class StepRerunServiceTest {
         return WorkflowPlan.fromMap(data);
     }
 
+    /** mcp:step_a → mcp:step_b, with no trigger at all: nothing owns an epoch history. */
+    private WorkflowPlan buildTriggerlessPlan() {
+        Map<String, Object> data = new HashMap<>();
+        data.put("id", "test-plan");
+        data.put("tenant_id", "test-tenant");
+        data.put("triggers", List.of());
+        data.put("mcps", List.of(
+            Map.of("id", "s1", "label", "step_a", "type", "mcp"),
+            Map.of("id", "s2", "label", "step_b", "type", "mcp")));
+        data.put("edges", List.of(Map.of("from", "mcp:step_a", "to", "mcp:step_b")));
+        return WorkflowPlan.fromMap(data);
+    }
+
     /** trigger:start → mcp:step_a → {mcp:step_b, mcp:step_c} */
     private WorkflowPlan buildBranchingPlan() {
         Map<String, Object> data = new HashMap<>();
@@ -1510,6 +1523,544 @@ class StepRerunServiceTest {
                 anySet(), anyString());
             verify(mockEpochService, times(1))
                 .getFullEpochState("run-1", TRIGGER, EXECUTED_EPOCH);
+        }
+    }
+
+    /**
+     * The caller names WHICH fire of the run to replay.
+     *
+     * <p>A run fired N times keeps one epoch per fire, each with its own outputs. Without this
+     * the rerun always lands on the most recent epoch, so repairing an older one is impossible:
+     * the replay redoes work that was already correct, reports success, and the epoch that
+     * actually failed is left exactly as it was.
+     */
+    @Nested
+    @DisplayName("rerunFromStep - epoch chosen by the caller")
+    class CallerChosenEpochTests {
+
+        private static final String TRIGGER = "trigger:start";
+        /** What the run last fired: the epoch the default resolution would pick. */
+        private static final int LATEST_EPOCH = 20;
+        /** An older fire, closed and pruned from the snapshot, whose header still holds its state. */
+        private static final int OLD_EPOCH = 11;
+
+        @Mock private com.apimarketplace.orchestrator.services.epoch.WorkflowEpochService mockEpochService;
+
+        @BeforeEach
+        void injectEpochService() throws Exception {
+            setField("workflowEpochService", mockEpochService);
+        }
+
+        /** The run settled: only the latest epoch is left in the snapshot, nothing is active. */
+        private StateSnapshot settledSnapshot(Set<Integer> activeEpochs) {
+            EpochState latest = EpochState.fresh()
+                .markNodeCompleted(TRIGGER)
+                .markNodeCompleted("mcp:step_a")
+                .markNodeCompleted("mcp:step_b");
+            DagState dag = new DagState(LATEST_EPOCH, 2, 20, Map.of(LATEST_EPOCH, latest), activeEpochs);
+            Map<String, StateSnapshot.NodeCounts> nodes = new HashMap<>();
+            for (String node : List.of("mcp:step_a", "mcp:step_b", "mcp:step_c")) {
+                nodes.put(node, StateSnapshot.NodeCounts.zero().increment("COMPLETED"));
+            }
+            return new StateSnapshot(3, 5L, Map.of(TRIGGER, dag),
+                null, null, null, null, null, nodes, new HashMap<>(),
+                null, null, null, null, null, null);
+        }
+
+        private void latestEpochIsTwenty() {
+            when(mockTriggerEpochManager.getGlobalEpochForDag("run-1", TRIGGER)).thenReturn(LATEST_EPOCH);
+        }
+
+        /** The old fire, as workflow_epochs recorded it: the rerun target DID run in it. */
+        private EpochState oldEpochHeader() {
+            EpochState header = EpochState.fresh()
+                .markNodeCompleted(TRIGGER)
+                .markNodeCompleted("mcp:step_a")
+                .markNodeCompleted("mcp:step_b");
+            when(mockEpochService.getFullEpochState("run-1", TRIGGER, OLD_EPOCH)).thenReturn(header);
+            return header;
+        }
+
+        @Test
+        @DisplayName("Replays the epoch that was asked for, not the run's most recent one")
+        void replaysTheChosenEpoch() {
+            WorkflowRunEntity run = createRunEntity(RunStatus.WAITING_TRIGGER);
+            setupRerunMocks(buildLinearPlan(), run, settledSnapshot(Set.of()));
+            latestEpochIsTwenty();
+            oldEpochHeader();
+
+            StepRerunService.RerunResult result =
+                service.rerunFromStep("run-1", "mcp:step_b", false, OLD_EPOCH);
+
+            assertEquals(OLD_EPOCH, result.epoch(),
+                "the reported epoch is what the caller drives the replay with - it must be the chosen one");
+            verify(mockStateSnapshotService).reopenEpochResetDagAndSetReady(
+                eq("run-1"), eq(TRIGGER), eq(OLD_EPOCH),
+                argThat(state -> state.getCompletedNodeIds().contains("mcp:step_a")),
+                argThat(steps -> steps.contains("mcp:step_b") && steps.contains("mcp:step_c")),
+                eq("mcp:step_b"));
+            verify(mockStateSnapshotService, never())
+                .resetDagAndSetReady(anyString(), anySet(), anyString(), anyString(), anyInt());
+        }
+
+        @Test
+        @DisplayName("Scopes the signal cancel to the chosen epoch")
+        void scopesTheSignalCancelToTheChosenEpoch() {
+            // Signal waits are keyed by epoch. Cancelling in epoch 20 would strand the old epoch's
+            // waits and kill the latest fire's instead.
+            WorkflowRunEntity run = createRunEntity(RunStatus.WAITING_TRIGGER);
+            setupRerunMocks(buildLinearPlan(), run, settledSnapshot(Set.of()));
+            latestEpochIsTwenty();
+            oldEpochHeader();
+
+            service.rerunFromStep("run-1", "mcp:step_b", false, OLD_EPOCH);
+
+            verify(mockSignalService).cancelForNodes(eq("run-1"), anySet(), eq(OLD_EPOCH));
+        }
+
+        @Test
+        @DisplayName("Leaves metadata.dagLastEpoch alone: the next fire must keep counting forward")
+        void doesNotRegressTheDagEpochPointer() {
+            // dagLastEpoch is what the next cycle counts from (nextEpoch = it + 1). Pointing it at
+            // epoch 11 would make the next fire reuse epoch 12, which already has history: its rows
+            // would be rewritten under a higher spawn and supersede that fire's real outputs.
+            WorkflowRunEntity run = createRunEntity(RunStatus.WAITING_TRIGGER);
+            Map<String, Object> dagLastEpoch = new HashMap<>();
+            dagLastEpoch.put(TRIGGER, LATEST_EPOCH);
+            run.getMetadata().put("dagLastEpoch", dagLastEpoch);
+            setupRerunMocks(buildLinearPlan(), run, settledSnapshot(Set.of()));
+            latestEpochIsTwenty();
+            oldEpochHeader();
+
+            service.rerunFromStep("run-1", "mcp:step_b", false, OLD_EPOCH);
+
+            @SuppressWarnings("unchecked")
+            Map<String, Object> after = (Map<String, Object>) run.getMetadata().get("dagLastEpoch");
+            assertEquals(LATEST_EPOCH, after.get(TRIGGER),
+                "the pointer must still name the run's latest fire, not the replayed one");
+        }
+
+        @Test
+        @DisplayName("An epoch the run never had is refused, with where to find the real ones")
+        void refusesAnEpochThatDoesNotExist() {
+            // Materialising it would give the replay an EMPTY epoch: every upstream template
+            // resolves to nothing and every node still reports success.
+            WorkflowRunEntity run = createRunEntity(RunStatus.WAITING_TRIGGER);
+            setupRerunMocks(buildLinearPlan(), run, settledSnapshot(Set.of()));
+            latestEpochIsTwenty();
+            when(mockEpochService.getFullEpochState("run-1", TRIGGER, 99)).thenReturn(null);
+
+            IllegalArgumentException error = assertThrows(IllegalArgumentException.class,
+                () -> service.rerunFromStep("run-1", "mcp:step_b", false, 99));
+
+            assertTrue(error.getMessage().contains("does not exist"), error.getMessage());
+            assertTrue(error.getMessage().contains("get_run"), "the message must say where to read the real epochs");
+            verify(mockStateSnapshotService, never()).reopenEpochResetDagAndSetReady(
+                anyString(), anyString(), anyInt(), any(), anySet(), anyString());
+            // A refusal has to be a true no-op, provably and not by relying on this method's
+            // transaction rolling back: the spawn is a coordinate every later read and write of
+            // the epoch in flight resolves through. Both bump methods are verified, or moving the
+            // floor-aware one back above the validation would pass unnoticed.
+            verify(mockTriggerEpochManager, never()).incrementSpawn(any(WorkflowRunEntity.class), anyString());
+            verify(mockTriggerEpochManager, never())
+                .incrementSpawnAtLeast(any(WorkflowRunEntity.class), anyString(), anyInt());
+        }
+
+        @Test
+        @DisplayName("A negative epoch is refused instead of being read as 'unspecified'")
+        void refusesANegativeEpoch() {
+            WorkflowRunEntity run = createRunEntity(RunStatus.WAITING_TRIGGER);
+            setupRerunMocks(buildLinearPlan(), run, settledSnapshot(Set.of()));
+            latestEpochIsTwenty();
+
+            assertThrows(IllegalArgumentException.class,
+                () -> service.rerunFromStep("run-1", "mcp:step_b", false, -1));
+        }
+
+        @Test
+        @DisplayName("Refused while another epoch of the same trigger is still executing")
+        void refusesWhileAnotherEpochIsLive() {
+            // Reopening an old epoch moves DagState.currentEpoch BACKWARD, and every write that
+            // resolves through "current" would then land in the replayed epoch instead of the live
+            // one - a silent cross-epoch corruption, which is why this is a refusal and not a warning.
+            WorkflowRunEntity run = createRunEntity(RunStatus.RUNNING);
+            setupRerunMocks(buildLinearPlan(), run, settledSnapshot(Set.of(LATEST_EPOCH)));
+            latestEpochIsTwenty();
+
+            IllegalStateException error = assertThrows(IllegalStateException.class,
+                () -> service.rerunFromStep("run-1", "mcp:step_b", false, OLD_EPOCH));
+
+            assertTrue(error.getMessage().contains("still executing"), error.getMessage());
+            verify(mockStateSnapshotService, never()).reopenEpochResetDagAndSetReady(
+                anyString(), anyString(), anyInt(), any(), anySet(), anyString());
+            // Same no-op requirement as the unknown-epoch refusal, and it matters more here: the
+            // run has an epoch IN FLIGHT, whose reads and writes resolve through this counter.
+            verify(mockTriggerEpochManager, never()).incrementSpawn(any(WorkflowRunEntity.class), anyString());
+            verify(mockTriggerEpochManager, never())
+                .incrementSpawnAtLeast(any(WorkflowRunEntity.class), anyString(), anyInt());
+        }
+
+        @Test
+        @DisplayName("An epoch the snapshot still carries is reopened without restoring anything")
+        void reopensASnapshotCarriedEpochWithoutARestore() {
+            WorkflowRunEntity run = createRunEntity(RunStatus.WAITING_TRIGGER);
+            DagState dag = new DagState(LATEST_EPOCH, 2, 20, Map.of(
+                LATEST_EPOCH, EpochState.fresh().markNodeCompleted(TRIGGER),
+                OLD_EPOCH, EpochState.fresh().markNodeCompleted(TRIGGER)
+                    .markNodeCompleted("mcp:step_a").markNodeCompleted("mcp:step_b")),
+                Set.of());
+            Map<String, StateSnapshot.NodeCounts> nodes = new HashMap<>();
+            nodes.put("mcp:step_b", StateSnapshot.NodeCounts.zero().increment("COMPLETED"));
+            StateSnapshot snapshot = new StateSnapshot(3, 5L, Map.of(TRIGGER, dag),
+                null, null, null, null, null, nodes, new HashMap<>(),
+                null, null, null, null, null, null);
+            setupRerunMocks(buildLinearPlan(), run, snapshot);
+            latestEpochIsTwenty();
+
+            service.rerunFromStep("run-1", "mcp:step_b", false, OLD_EPOCH);
+
+            // Nothing to restore, so no header read at all - and null travels down, which the
+            // snapshot writer reads as "the epoch is already there".
+            verify(mockEpochService, never()).getFullEpochState(anyString(), anyString(), anyInt());
+            verify(mockStateSnapshotService).reopenEpochResetDagAndSetReady(
+                eq("run-1"), eq(TRIGGER), eq(OLD_EPOCH), isNull(), anySet(), eq("mcp:step_b"));
+        }
+
+        @Test
+        @DisplayName("Refused when the node hangs off the migration sentinel beside a real DAG")
+        void refusesUnderTheSentinelBesideARealDag() {
+            // resetDag() closes ALL of the sentinel's active epochs, so an epoch reopened for it
+            // would be closed again in the same write and the replay would run against nothing.
+            // Saying so beats reopening an epoch that cannot survive the next statement.
+            WorkflowRunEntity run = createRunEntity(RunStatus.WAITING_TRIGGER);
+            DagState sentinel = new DagState(LATEST_EPOCH, 0, 1,
+                Map.of(LATEST_EPOCH, EpochState.fresh()), Set.of());
+            DagState real = new DagState(LATEST_EPOCH, 0, 1,
+                Map.of(LATEST_EPOCH, EpochState.fresh()), Set.of());
+            Map<String, StateSnapshot.NodeCounts> nodes = new HashMap<>();
+            nodes.put("mcp:step_b", StateSnapshot.NodeCounts.zero().increment("COMPLETED"));
+            StateSnapshot snapshot = new StateSnapshot(3, 5L,
+                Map.of(StateSnapshot.DEFAULT_TRIGGER_SENTINEL, sentinel, TRIGGER, real),
+                null, null, null, null, null, nodes, new HashMap<>(),
+                null, null, null, null, null, null);
+            setupRerunMocks(buildLinearPlan(), run, snapshot);
+            when(mockDagValidator.findOwnerTrigger(any(), anyString()))
+                .thenReturn(Optional.of(StateSnapshot.DEFAULT_TRIGGER_SENTINEL));
+
+            IllegalStateException error = assertThrows(IllegalStateException.class,
+                () -> service.rerunFromStep("run-1", "mcp:step_b", false, OLD_EPOCH));
+
+            assertTrue(error.getMessage().contains("Omit the epoch"), error.getMessage());
+            verify(mockStateSnapshotService, never()).reopenEpochResetDagAndSetReady(
+                anyString(), anyString(), anyInt(), any(), anySet(), anyString());
+        }
+
+        @Test
+        @DisplayName("Omitting the epoch keeps the existing behaviour exactly")
+        void omittedEpochKeepsTheDefault() {
+            WorkflowRunEntity run = createRunEntity(RunStatus.WAITING_TRIGGER);
+            setupRerunMocks(buildLinearPlan(), run, settledSnapshot(Set.of()));
+            latestEpochIsTwenty();
+
+            StepRerunService.RerunResult result =
+                service.rerunFromStep("run-1", "mcp:step_b", false, null);
+
+            assertEquals(LATEST_EPOCH, result.epoch());
+            verify(mockEpochService, never()).getFullEpochState(anyString(), anyString(), anyInt());
+            verify(mockStateSnapshotService).resetDagAndSetReady(
+                eq("run-1"), anySet(), eq("mcp:step_b"), eq(TRIGGER), eq(LATEST_EPOCH));
+        }
+
+        @Test
+        @DisplayName("Naming the epoch the pointer already names replays there, and nowhere else")
+        void namingTheCurrentEpochStillReplaysThere() {
+            WorkflowRunEntity run = createRunEntity(RunStatus.WAITING_TRIGGER);
+            setupRerunMocks(buildLinearPlan(), run, settledSnapshot(Set.of()));
+            latestEpochIsTwenty();
+
+            StepRerunService.RerunResult result =
+                service.rerunFromStep("run-1", "mcp:step_b", false, LATEST_EPOCH);
+
+            assertEquals(LATEST_EPOCH, result.epoch());
+            verify(mockStateSnapshotService).resetDagAndSetReady(
+                eq("run-1"), anySet(), eq("mcp:step_b"), eq(TRIGGER), eq(LATEST_EPOCH));
+        }
+
+        @Test
+        @DisplayName("A named epoch is honoured even when it equals the run's epoch pointer but not the DAG's")
+        void namedEpochIsNotDivertedWhenItMatchesThePointer() {
+            // The regression this pins: deciding "the caller chose an epoch" by comparing against
+            // metadata.dagLastEpoch. The two pointers diverge (a previous targeted replay leaves
+            // DagState.currentEpoch on the epoch it reopened), and naming the epoch dagLastEpoch
+            // holds then read as "no choice made" and fell into the default resolution, which syncs
+            // to the DAG's current epoch: the caller named 20, the replay happened in 11, the
+            // response said 11, and none of the checks a named epoch owes ever ran.
+            WorkflowRunEntity run = createRunEntity(RunStatus.WAITING_TRIGGER);
+            EpochState reopenedOld = EpochState.fresh().markNodeCompleted(TRIGGER).markNodeCompleted("mcp:step_b");
+            EpochState latest = EpochState.fresh().markNodeCompleted(TRIGGER).markNodeCompleted("mcp:step_b");
+            // DagState.currentEpoch is the OLD epoch (reopened and active), dagLastEpoch is 20.
+            DagState dag = new DagState(OLD_EPOCH, 2, 20,
+                Map.of(OLD_EPOCH, reopenedOld, LATEST_EPOCH, latest), Set.of(OLD_EPOCH));
+            Map<String, StateSnapshot.NodeCounts> nodes = new HashMap<>();
+            nodes.put("mcp:step_b", StateSnapshot.NodeCounts.zero().increment("COMPLETED"));
+            StateSnapshot snapshot = new StateSnapshot(3, 5L, Map.of(TRIGGER, dag),
+                null, null, null, null, null, nodes, new HashMap<>(),
+                null, null, null, null, null, null);
+            setupRerunMocks(buildLinearPlan(), run, snapshot);
+            latestEpochIsTwenty();
+
+            IllegalStateException error = assertThrows(IllegalStateException.class,
+                () -> service.rerunFromStep("run-1", "mcp:step_b", false, LATEST_EPOCH));
+
+            // Epoch 11 is live, so naming 20 is REFUSED rather than silently executed in 11.
+            assertTrue(error.getMessage().contains("still executing"), error.getMessage());
+            assertTrue(error.getMessage().contains(String.valueOf(OLD_EPOCH)), error.getMessage());
+            // The way out has to be callable: both actions named, both with the run id.
+            assertTrue(error.getMessage().contains("stop_run") && error.getMessage().contains("get_run"),
+                error.getMessage());
+            verify(mockStateSnapshotService, never()).resetDagAndSetReady(
+                anyString(), anySet(), anyString(), anyString(), anyInt());
+            verify(mockStateSnapshotService, never()).reopenEpochResetDagAndSetReady(
+                anyString(), anyString(), anyInt(), any(), anySet(), anyString());
+        }
+
+        @Test
+        @DisplayName("Starts above the chosen epoch's own highest spawn, not the DAG counter")
+        void startsAboveTheChosenEpochsOwnSpawn() {
+            // dagCurrentSpawn is per DAG and every fire resets it to 0, so "the next spawn" is only
+            // known-unused in the epoch the last fire opened. Replaying an older epoch on the DAG
+            // counter can land on a spawn that epoch already used - and the supersede filter keeps
+            // ALL rows tied at the max spawn, so the previous attempt's rows would count again
+            // beside the new ones (a branch this replay deactivates keeps reporting COMPLETED).
+            WorkflowRunEntity run = createRunEntity(RunStatus.WAITING_TRIGGER);
+            setupRerunMocks(buildLinearPlan(), run, settledSnapshot(Set.of()));
+            latestEpochIsTwenty();
+            oldEpochHeader();
+            when(mockStepDataRepository.findMaxSpawnForEpoch("run-1", OLD_EPOCH)).thenReturn(3);
+
+            service.rerunFromStep("run-1", "mcp:step_b", false, OLD_EPOCH);
+
+            verify(mockTriggerEpochManager).incrementSpawnAtLeast(any(WorkflowRunEntity.class), eq(TRIGGER), eq(4));
+            verify(mockTriggerEpochManager, never()).incrementSpawn(any(WorkflowRunEntity.class), anyString());
+        }
+
+        @Test
+        @DisplayName("An epoch merely STAGED for the next fire is refused, not replayed into")
+        void refusesAnEpochStagedForTheNextFire() {
+            // prepareNextCycle leaves an epoch in the snapshot holding nothing but the trigger's
+            // ready marker, numbered dagLastEpoch + 1 - the number the NEXT fire will open.
+            // Replaying in it resolves every upstream template to nothing AND leaves rows in a
+            // fire that has not happened yet.
+            int stagedEpoch = LATEST_EPOCH + 1;
+            WorkflowRunEntity run = createRunEntity(RunStatus.WAITING_TRIGGER);
+            DagState dag = new DagState(stagedEpoch, 0, 20, Map.of(
+                LATEST_EPOCH, EpochState.fresh().markNodeCompleted(TRIGGER).markNodeCompleted("mcp:step_b"),
+                stagedEpoch, EpochState.fresh().addReadyNode(TRIGGER)), Set.of());
+            Map<String, StateSnapshot.NodeCounts> nodes = new HashMap<>();
+            nodes.put("mcp:step_b", StateSnapshot.NodeCounts.zero().increment("COMPLETED"));
+            StateSnapshot snapshot = new StateSnapshot(3, 5L, Map.of(TRIGGER, dag),
+                null, null, null, null, null, nodes, new HashMap<>(),
+                null, null, null, null, null, null);
+            setupRerunMocks(buildLinearPlan(), run, snapshot);
+            latestEpochIsTwenty();
+            when(mockEpochService.getFullEpochState("run-1", TRIGGER, stagedEpoch)).thenReturn(null);
+
+            IllegalArgumentException error = assertThrows(IllegalArgumentException.class,
+                () -> service.rerunFromStep("run-1", "mcp:step_b", false, stagedEpoch));
+
+            assertTrue(error.getMessage().contains("does not exist"), error.getMessage());
+            verify(mockStateSnapshotService, never()).resetDagAndSetReady(
+                anyString(), anySet(), anyString(), anyString(), anyInt());
+        }
+
+        @Test
+        @DisplayName("An epoch whose header exists but recorded nothing is refused, in its own words")
+        void refusesAnEpochWhoseHeaderIsEmpty() {
+            // openEpoch dual-writes a header as soon as a fire starts, so get_run lists an epoch
+            // that has executed nothing yet. Refusing it with "does not exist" would send the
+            // agent back to a list that contains it, which is why this case has its own message.
+            WorkflowRunEntity run = createRunEntity(RunStatus.WAITING_TRIGGER);
+            setupRerunMocks(buildLinearPlan(), run, settledSnapshot(Set.of()));
+            latestEpochIsTwenty();
+            when(mockEpochService.getFullEpochState("run-1", TRIGGER, OLD_EPOCH))
+                .thenReturn(EpochState.fresh());
+
+            IllegalArgumentException error = assertThrows(IllegalArgumentException.class,
+                () -> service.rerunFromStep("run-1", "mcp:step_b", false, OLD_EPOCH));
+
+            assertTrue(error.getMessage().contains("has not executed anything"), error.getMessage());
+            assertFalse(error.getMessage().contains("does not exist"),
+                "an epoch get_run lists must not be described as non-existent");
+        }
+
+        @Test
+        @DisplayName("Naming an epoch is honoured, not refused, when nothing has to be reopened")
+        void namingTheDagsOwnEpochSkipsTheReopenGuards() {
+            // The guards exist for reopening. Naming the epoch the DAG already sits on reopens
+            // nothing and is the same work as omitting the parameter, so refusing it would punish
+            // a caller for following the help. A stepped run is the sharpest case: omitting the
+            // epoch works there, so naming the current one must too.
+            WorkflowRunEntity run = createRunEntity(RunStatus.PAUSED);
+            run.setExecutionMode(ExecutionMode.STEP_BY_STEP);
+            setupRerunMocks(buildLinearPlan(), run, settledSnapshot(Set.of(LATEST_EPOCH)));
+            latestEpochIsTwenty();
+
+            StepRerunService.RerunResult result =
+                service.rerunFromStep("run-1", "mcp:step_b", false, LATEST_EPOCH);
+
+            assertEquals(LATEST_EPOCH, result.epoch());
+            verify(mockStateSnapshotService).resetDagAndSetReady(
+                eq("run-1"), anySet(), eq("mcp:step_b"), eq(TRIGGER), eq(LATEST_EPOCH));
+        }
+
+        @Test
+        @DisplayName("A named epoch that needs no reopen is executed even with the pointers divergent")
+        void namedEpochIsRoutedNotJustBlockedWhenPointersDiverge() {
+            // The counterpart of the refusal case: same divergence (DagState.currentEpoch on the
+            // old epoch, dagLastEpoch on 20) but nothing active, and the caller names the OLD
+            // epoch, which is the one the DAG is on. Proves the fix ROUTES the request rather than
+            // merely blocking the dangerous shape.
+            WorkflowRunEntity run = createRunEntity(RunStatus.WAITING_TRIGGER);
+            EpochState old = EpochState.fresh().markNodeCompleted(TRIGGER).markNodeCompleted("mcp:step_b");
+            DagState dag = new DagState(OLD_EPOCH, 2, 20, Map.of(OLD_EPOCH, old), Set.of());
+            Map<String, StateSnapshot.NodeCounts> nodes = new HashMap<>();
+            nodes.put("mcp:step_b", StateSnapshot.NodeCounts.zero().increment("COMPLETED"));
+            StateSnapshot snapshot = new StateSnapshot(3, 5L, Map.of(TRIGGER, dag),
+                null, null, null, null, null, nodes, new HashMap<>(),
+                null, null, null, null, null, null);
+            setupRerunMocks(buildLinearPlan(), run, snapshot);
+            latestEpochIsTwenty();
+
+            StepRerunService.RerunResult result =
+                service.rerunFromStep("run-1", "mcp:step_b", false, OLD_EPOCH);
+
+            assertEquals(OLD_EPOCH, result.epoch());
+            verify(mockStateSnapshotService).resetDagAndSetReady(
+                eq("run-1"), anySet(), eq("mcp:step_b"), eq(TRIGGER), eq(OLD_EPOCH));
+            verify(mockEpochService, never()).getFullEpochState(anyString(), anyString(), anyInt());
+        }
+
+        @Test
+        @DisplayName("A pruned epoch is restored from its header even when it is already the current one")
+        void restoresAPrunedEpochEvenWithNothingToReopen() {
+            // The shape a "symmetry" cleanup would break: the DAG still points AT the epoch (so
+            // nothing has to be reopened) but the snapshot no longer carries its state, because the
+            // prune ran before currentEpoch advanced. The restore only happens on the reopen path,
+            // so that path must be taken regardless - otherwise the replay runs against an epoch
+            // with no state and every upstream template resolves empty on a green run.
+            WorkflowRunEntity run = createRunEntity(RunStatus.WAITING_TRIGGER);
+            DagState dag = new DagState(OLD_EPOCH, 2, 20,
+                Map.of(LATEST_EPOCH, EpochState.fresh().markNodeCompleted(TRIGGER)), Set.of());
+            Map<String, StateSnapshot.NodeCounts> nodes = new HashMap<>();
+            nodes.put("mcp:step_b", StateSnapshot.NodeCounts.zero().increment("COMPLETED"));
+            StateSnapshot snapshot = new StateSnapshot(3, 5L, Map.of(TRIGGER, dag),
+                null, null, null, null, null, nodes, new HashMap<>(),
+                null, null, null, null, null, null);
+            setupRerunMocks(buildLinearPlan(), run, snapshot);
+            latestEpochIsTwenty();
+            oldEpochHeader();
+
+            StepRerunService.RerunResult result =
+                service.rerunFromStep("run-1", "mcp:step_b", false, OLD_EPOCH);
+
+            assertEquals(OLD_EPOCH, result.epoch());
+            verify(mockStateSnapshotService).reopenEpochResetDagAndSetReady(
+                eq("run-1"), eq(TRIGGER), eq(OLD_EPOCH),
+                argThat(state -> state.getCompletedNodeIds().contains("mcp:step_a")),
+                anySet(), eq("mcp:step_b"));
+            verify(mockStateSnapshotService, never())
+                .resetDagAndSetReady(anyString(), anySet(), anyString(), anyString(), anyInt());
+        }
+
+        @Test
+        @DisplayName("Refused when the node was SKIPPED in the chosen epoch, naming the fix")
+        void refusesANodeSkippedInThatEpoch() {
+            // The run-wide check passes (the node completed in ANOTHER fire), which is exactly why
+            // the rule has to be re-applied inside the epoch that was named.
+            WorkflowRunEntity run = createRunEntity(RunStatus.WAITING_TRIGGER);
+            setupRerunMocks(buildLinearPlan(), run, settledSnapshot(Set.of()));
+            latestEpochIsTwenty();
+            when(mockEpochService.getFullEpochState("run-1", TRIGGER, OLD_EPOCH)).thenReturn(
+                EpochState.fresh().markNodeCompleted(TRIGGER).markNodeSkipped("mcp:step_b"));
+
+            IllegalStateException error = assertThrows(IllegalStateException.class,
+                () -> service.rerunFromStep("run-1", "mcp:step_b", false, OLD_EPOCH));
+
+            assertTrue(error.getMessage().contains("branch was not taken"), error.getMessage());
+            assertTrue(error.getMessage().contains("decision node"), "the message must say what to do instead");
+            verify(mockStateSnapshotService, never()).reopenEpochResetDagAndSetReady(
+                anyString(), anyString(), anyInt(), any(), anySet(), anyString());
+        }
+
+        @Test
+        @DisplayName("Refused when the node never ran in the chosen epoch at all")
+        void refusesANodeThatNeverRanInThatEpoch() {
+            WorkflowRunEntity run = createRunEntity(RunStatus.WAITING_TRIGGER);
+            setupRerunMocks(buildLinearPlan(), run, settledSnapshot(Set.of()));
+            latestEpochIsTwenty();
+            when(mockEpochService.getFullEpochState("run-1", TRIGGER, OLD_EPOCH)).thenReturn(
+                EpochState.fresh().markNodeCompleted(TRIGGER).markNodeCompleted("mcp:step_a"));
+
+            IllegalStateException error = assertThrows(IllegalStateException.class,
+                () -> service.rerunFromStep("run-1", "mcp:step_b", false, OLD_EPOCH));
+
+            assertTrue(error.getMessage().contains("recorded no result"), error.getMessage());
+            assertTrue(error.getMessage().contains("get_run"),
+                "the message must name an action the agent can actually call, with its run id");
+            assertTrue(error.getMessage().contains("run-1"), error.getMessage());
+        }
+
+        @Test
+        @DisplayName("Refused on a stepped run: nothing there would ever close the reopened epoch")
+        void refusesOnAStepByStepRun() {
+            WorkflowRunEntity run = createRunEntity(RunStatus.PAUSED);
+            run.setExecutionMode(ExecutionMode.STEP_BY_STEP);
+            setupRerunMocks(buildLinearPlan(), run, settledSnapshot(Set.of()));
+            latestEpochIsTwenty();
+
+            IllegalStateException error = assertThrows(IllegalStateException.class,
+                () -> service.rerunFromStep("run-1", "mcp:step_b", false, OLD_EPOCH));
+
+            assertTrue(error.getMessage().contains("stepped by hand"), error.getMessage());
+            verify(mockEpochService, never()).getFullEpochState(anyString(), anyString(), anyInt());
+        }
+
+        @Test
+        @DisplayName("A plan with no trigger is refused before an epoch can even be addressed")
+        void aTriggerlessPlanIsRefusedUpstream() {
+            // Documents where the "no DAG owns this node" case actually lands: the graph build
+            // rejects a plan with no trigger, so the guard for a null owner inside the epoch
+            // resolution is defence in depth rather than a reachable path. Worth pinning, because
+            // the alternative reading (the guard is dead code, delete it) is wrong: ownerTriggerId
+            // is nullable by type and the resolution must not dereference it.
+            // Wired by hand: the shared fixture assumes the plan has a trigger, which is the very
+            // thing this case does not have.
+            WorkflowRunEntity run = createRunEntity(RunStatus.WAITING_TRIGGER);
+            when(mockRunRepository.findByRunIdPublic("run-1")).thenReturn(Optional.of(run));
+            when(mockResumeService.refreshPlanFromWorkflowDefinition("run-1", false))
+                .thenReturn(buildTriggerlessPlan());
+
+            IllegalStateException error = assertThrows(IllegalStateException.class,
+                () -> service.rerunFromStep("run-1", "mcp:step_b", false, OLD_EPOCH));
+
+            assertTrue(error.getMessage().contains("No trigger node found"), error.getMessage());
+            verify(mockEpochService, never()).getFullEpochState(anyString(), anyString(), anyInt());
+        }
+
+        @Test
+        @DisplayName("Refused when the epoch history is not wired: a chosen epoch cannot be verified")
+        void refusesWhenTheEpochServiceIsUnwired() throws Exception {
+            // The default path degrades with a warning here; a NAMED epoch must not, because there
+            // is then no way to tell an epoch that exists from one that never ran.
+            setField("workflowEpochService", null);
+            WorkflowRunEntity run = createRunEntity(RunStatus.WAITING_TRIGGER);
+            setupRerunMocks(buildLinearPlan(), run, settledSnapshot(Set.of()));
+            latestEpochIsTwenty();
+
+            IllegalStateException error = assertThrows(IllegalStateException.class,
+                () -> service.rerunFromStep("run-1", "mcp:step_b", false, OLD_EPOCH));
+
+            assertTrue(error.getMessage().contains("not available"), error.getMessage());
         }
     }
 }

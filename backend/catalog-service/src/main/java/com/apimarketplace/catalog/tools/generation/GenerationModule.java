@@ -7,9 +7,13 @@ import com.apimarketplace.agent.tools.ToolsProvider.ToolExecutionResult;
 import com.apimarketplace.agent.tools.common.ToolModule;
 import com.apimarketplace.agent.tools.common.ToolResultPersistEnricher;
 import com.apimarketplace.catalog.service.generation.GenerationAssetResolver;
+import com.apimarketplace.catalog.service.generation.GenerationLimits;
 import com.apimarketplace.catalog.service.generation.GenerationInputResolver;
 import com.apimarketplace.catalog.service.ResponseShaper;
+import com.apimarketplace.catalog.service.generation.DynamicOptionsResolver;
+import com.apimarketplace.catalog.service.generation.GenerationProvenanceRecorder;
 import com.apimarketplace.catalog.service.generation.GenerationRegistry;
+import com.apimarketplace.catalog.service.generation.PlatformSalesResolver;
 import com.apimarketplace.catalog.service.generation.GenerationRequestBuilder;
 import com.apimarketplace.catalog.service.generation.GenerationSpec;
 import com.apimarketplace.catalog.tools.CatalogExecuteModule;
@@ -49,7 +53,7 @@ import java.util.TreeSet;
 @Component
 public class GenerationModule implements ToolModule {
 
-    static final Set<String> HANDLED_ACTIONS = Set.of("create", "models", "generate");
+    static final Set<String> HANDLED_ACTIONS = Set.of("create", "models", "generate", "options");
 
     /**
      * Type discriminator of the chat card, deliberately still the historical
@@ -68,20 +72,29 @@ public class GenerationModule implements ToolModule {
     private final GenerationAssetResolver assetResolver;
     private final ResponseShaper responseShaper;
     private final GenerationInputResolver inputResolver;
+    private final DynamicOptionsResolver optionsResolver;
+    private final PlatformSalesResolver platformSales;
     private final InterfaceClient interfaceClient;
+    private final GenerationProvenanceRecorder provenanceRecorder;
 
     public GenerationModule(GenerationRegistry registry,
                              CatalogExecuteModule executeModule,
                              GenerationAssetResolver assetResolver,
                              ResponseShaper responseShaper,
                              GenerationInputResolver inputResolver,
-                             InterfaceClient interfaceClient) {
+                             DynamicOptionsResolver optionsResolver,
+                             PlatformSalesResolver platformSales,
+                             InterfaceClient interfaceClient,
+                             GenerationProvenanceRecorder provenanceRecorder) {
         this.registry = registry;
         this.executeModule = executeModule;
         this.assetResolver = assetResolver;
         this.responseShaper = responseShaper;
         this.inputResolver = inputResolver;
+        this.optionsResolver = optionsResolver;
+        this.platformSales = platformSales;
         this.interfaceClient = interfaceClient;
+        this.provenanceRecorder = provenanceRecorder;
     }
 
     @Override
@@ -100,12 +113,211 @@ public class GenerationModule implements ToolModule {
         if ("models".equals(action)) {
             return Optional.of(listModels(parameters));
         }
+        if ("options".equals(action)) {
+            return Optional.of(listOptions(parameters, tenantId, context));
+        }
         // 'generate' is the legacy verb from the image-only tool. Same behaviour.
         if ("create".equals(action) || "generate".equals(action)) {
             return Optional.of(create(parameters, tenantId, context));
         }
         return Optional.empty();
     }
+    // ── options ─────────────────────────────────────────────────────────────
+
+    /**
+     * What a parameter accepts, when only the provider can say.
+     *
+     * <p>An ElevenLabs voice belongs to the account holding the key, so no list
+     * can ship in the catalogue and no identifier can be guessed: it is twenty
+     * opaque characters, and a wrong one fails at the provider AFTER the call is
+     * charged. This asks, with the caller's own credential.
+     *
+     * <p>Separate from {@code models} on purpose. That answer is one snapshot
+     * shared by every reader; this one differs per account and per key, and
+     * costs a call to the provider. An agent reads {@code models} first, sees
+     * which parameters carry {@code optionsAvailable}, and asks about those.
+     */
+    private ToolExecutionResult listOptions(Map<String, Object> parameters,
+                                            String tenantId, ToolExecutionContext context) {
+        String modelId = str(parameters, "model");
+        String parameter = str(parameters, "parameter");
+        if (modelId == null || parameter == null) {
+            return ToolExecutionResult.failure(ToolErrorCode.MISSING_PARAMETER,
+                    "model and parameter are both required: action='options' answers for ONE "
+                    + "parameter of ONE model. action='models' lists the ids and marks the "
+                    + "parameters worth asking about with optionsAvailable.");
+        }
+        GenerationRegistry.GenerationModel target = registry.resolve(modelId).orElse(null);
+        if (target == null) {
+            return ToolExecutionResult.failure(ToolErrorCode.INVALID_PARAMETER_VALUE,
+                    "unknown model '" + modelId + "'. action='models' lists the ids.");
+        }
+        // The UNIFIED name is what a caller knows ('voice'); the catalogue knows
+        // the provider's own ('voice_id'). Translating here means a caller never
+        // has to learn the second.
+        GenerationSpec.ParamBinding binding = target.spec().paramMap().get(parameter);
+        if (binding == null || !target.model().capabilities().contains(parameter)) {
+            return ToolExecutionResult.failure(ToolErrorCode.INVALID_PARAMETER_VALUE,
+                    "model '" + modelId + "' does not accept '" + parameter + "'. Its accepts "
+                    + "list in action='models' is the set it takes.");
+        }
+
+        String source = str(parameters, CatalogExecuteModule.CREDENTIAL_SOURCE_KEY);
+        // WHICH of the caller's keys, when the surface pinned one. It reaches the
+        // fetch either way (it rides the context, which the delegated execute
+        // reads), so leaving it out of the cache key alone would serve one key's
+        // voices under another's: a reader with two ElevenLabs keys switches from
+        // A to B and gets A's list for five minutes, which is exactly the
+        // "list read on one key, run dispatched on another" this exists to stop.
+        String credentialId = pinnedCredentialId(context);
+        // What the caller's configuration is ABOUT, for a source that answers
+        // with every model at once. The upstream id is the one such an endpoint
+        // keys its rows on, because it is the one the provider itself receives;
+        // our public id ('eleven-v3' vs 'eleven_v3') would match nothing.
+        Map<String, String> knownValues = Map.of("model",
+                target.model().upstream() != null ? target.model().upstream() : target.modelId());
+        DynamicOptionsResolver.Resolution resolution = optionsResolver.resolve(
+                target.apiToolId(), binding.path(), tenantId, source, credentialId, knownValues,
+                (sourceToolId, credSource, credId) -> fetchSource(sourceToolId, credSource, tenantId, context));
+
+        if (!resolution.isAvailable()) {
+            return ToolExecutionResult.failure(ToolErrorCode.EXECUTION_FAILED,
+                    unavailableMessage(resolution.unavailable(), target, parameter));
+        }
+
+        Map<String, Object> data = new LinkedHashMap<>();
+        data.put("model", modelId);
+        data.put("parameter", parameter);
+        List<Map<String, Object>> rows = new ArrayList<>();
+        for (DynamicOptionsResolver.Option o : resolution.options()) {
+            Map<String, Object> row = new LinkedHashMap<>();
+            row.put("value", o.value());
+            row.put("label", o.label());
+            rows.add(row);
+        }
+        data.put("options", rows);
+        data.put("count", rows.size());
+        if (resolution.truncated()) {
+            data.put("truncated", true);
+            data.put("total_count", resolution.totalCount());
+        }
+        // WHICH key answered. Voices differ per key, so a list read on one and a
+        // run dispatched on another offers an id the provider never had. Stated
+        // so a caller can see the two agree.
+        if (resolution.credentialSource() != null) {
+            data.put("credential_source", resolution.credentialSource());
+        }
+        data.put("note", "These values belong to the provider account behind the key named in "
+                + "credential_source. Pass one as '" + parameter + "' to action='create' with the "
+                + "SAME credential_source: another key has different ones.");
+        return ToolExecutionResult.success(data);
+    }
+
+    /** Why there is nothing to offer, in terms of what the caller can do next. */
+    private String unavailableMessage(DynamicOptionsResolver.Unavailable reason,
+                                      GenerationRegistry.GenerationModel target, String parameter) {
+        switch (reason) {
+            case NOT_DYNAMIC:
+                return "'" + parameter + "' has no list to fetch: its values are not held by the "
+                        + "provider account. Any value the model accepts may be sent.";
+            case NO_CREDENTIAL:
+                return "no " + target.apiName() + " key is connected, so its account cannot be "
+                        + "asked what '" + parameter + "' accepts. Connecting one is the account "
+                        + "owner's act: report this rather than retrying.";
+            case NOT_LISTED:
+                // The one empty answer that is not about an empty account, and
+                // the one a blank field describes worst: the model is simply
+                // absent from what this key can see (limited release, or an
+                // account without access to it).
+                return target.apiName() + " does not list '" + target.modelId() + "' for the key "
+                        + "that answered, so it cannot say what '" + parameter + "' accepts for "
+                        + "it. Either that model is unavailable to this account, or another key "
+                        + "should be used. Any other model's values would not apply to it.";
+            default:
+                return "the " + target.apiName() + " account could not be asked what '" + parameter
+                        + "' accepts. Nothing was charged. Ask the person for the value rather "
+                        + "than trying identifiers.";
+        }
+    }
+
+    /**
+     * Run the source endpoint down the SAME delegated path a generation takes.
+     *
+     * <p>Not a direct call: this way the restriction list, the credential
+     * pre-flight and the credential-mode resolution are the ones the run itself
+     * would face, so a list can never come from a key the run would not use.
+     */
+    private DynamicOptionsResolver.SourceFetcher.Answer fetchSource(
+            java.util.UUID sourceToolId, String credentialSource,
+            String tenantId, ToolExecutionContext context) {
+        Map<String, Object> delegated = new LinkedHashMap<>();
+        delegated.put("tool_id", sourceToolId.toString());
+        delegated.put("params", Map.of());
+        if (credentialSource != null) {
+            delegated.put(CatalogExecuteModule.CREDENTIAL_SOURCE_KEY, credentialSource);
+        }
+
+        Optional<ToolExecutionResult> raw =
+                executeModule.execute("execute", delegated, tenantId, unbilled(context));
+        if (raw.isEmpty()) {
+            return new DynamicOptionsResolver.SourceFetcher.Answer(false, null, null, false);
+        }
+        ToolExecutionResult result = raw.get();
+        if (!result.success()) {
+            String message = result.error() == null ? "" : result.error();
+            boolean missingKey = message.contains(CatalogExecuteModule.CREDENTIALS_REQUIRED_CODE);
+            return new DynamicOptionsResolver.SourceFetcher.Answer(false, null, null, missingKey);
+        }
+        // The credential pre-flight answers with a SUCCESS that means the
+        // opposite of one when no key is connected: nothing ran, and the payload
+        // is an approval prompt rather than the endpoint's answer.
+        if (approvalNeededPayload(result) != null) {
+            return new DynamicOptionsResolver.SourceFetcher.Answer(false, null, null, true);
+        }
+        return new DynamicOptionsResolver.SourceFetcher.Answer(
+                true, result.data(), credentialSourceOf(result), false);
+    }
+
+    /** The pinned key the surface chose, or null for the account's default. */
+    private static String pinnedCredentialId(ToolExecutionContext context) {
+        if (context == null || context.credentials() == null) return null;
+        Object pinned = context.credentials().get(CatalogExecuteModule.CREDENTIAL_ID_CONTEXT_KEY);
+        if (pinned == null) return null;
+        String text = String.valueOf(pinned).trim();
+        return text.isEmpty() ? null : text;
+    }
+
+    /**
+     * The same caller, with nothing for a charge to land on.
+     *
+     * <p>Reading a list is not part of the work the caller is paying for. Passed
+     * through whole, the context carries the chat stream or the workflow run the
+     * caller is inside, and the delegated execute turns either into a billing
+     * scope: opening a dropdown would then reserve and commit against that turn,
+     * and an agent that asks in a loop would bill a loop. The GET-only rule keeps
+     * a source from MUTATING anything; this is what keeps it from costing
+     * anything. The key itself stays, because the answer depends on it.
+     */
+    private static ToolExecutionContext unbilled(ToolExecutionContext context) {
+        if (context == null || context.credentials() == null) return context;
+        Map<String, Object> credentials = new LinkedHashMap<>(context.credentials());
+        boolean removed = credentials.keySet().removeAll(CatalogExecuteModule.BILLING_SCOPE_KEYS);
+        if (!removed) return context;
+        return new ToolExecutionContext(
+                context.tenantId(), credentials, context.variables(), context.approvedServices(),
+                context.viewingWorkflowId(), context.viewingWorkflowName(), context.orgId(),
+                context.orgRole());
+    }
+
+    /** Which pool actually replied, when the execution reported it. */
+    private String credentialSourceOf(ToolExecutionResult result) {
+        if (result.data() instanceof Map<?, ?> data && data.get("metadata") instanceof Map<?, ?> meta) {
+            Object source = meta.get("credentialSource");
+            if (source != null) return String.valueOf(source);
+        }
+        return null;
+    }
+
 
     // ── models ──────────────────────────────────────────────────────────────
 
@@ -118,6 +330,9 @@ public class GenerationModule implements ToolModule {
         String kind = str(parameters, "kind");
         List<GenerationRegistry.GenerationModel> models = registry.list(kind);
 
+        Map<PlatformSalesResolver.ModelRef, PlatformSalesResolver.Verdict> sold =
+                platformSales.resolve(models.stream().map(PlatformSalesResolver.ModelRef::of).toList());
+
         List<Map<String, Object>> rows = new ArrayList<>(models.size());
         for (GenerationRegistry.GenerationModel m : models) {
             Map<String, Object> row = new LinkedHashMap<>();
@@ -125,23 +340,24 @@ public class GenerationModule implements ToolModule {
             row.put("kind", m.kind());
             row.put("label", m.label());
             row.put("provider", m.apiName());
+            // Which key can actually run it HERE, so a caller stops choosing a
+            // payer this installation does not have. Resolved for the whole list
+            // in one call above.
+            row.put("runs_on", sold.getOrDefault(PlatformSalesResolver.ModelRef.of(m),
+                    PlatformSalesResolver.Verdict.UNKNOWN).wire());
             row.put("accepts", new TreeSet<>(m.model().capabilities()));
             row.put("required", new TreeSet<>(m.model().required()));
-            Map<String, Object> limits = new LinkedHashMap<>();
-            m.model().constraints().forEach((param, c) -> {
-                Map<String, Object> lim = new LinkedHashMap<>();
-                if (!c.allowed().isEmpty()) lim.put("allowed", c.allowed());
-                if (c.min() != null) lim.put("min", c.min());
-                if (c.max() != null) lim.put("max", c.max());
-                // A text cap is a limit like any other, and the one an agent
-                // trips by accident rather than by guessing: a prompt assembled
-                // over several turns grows past it with nothing to signal it.
-                if (c.maxLength() != null) lim.put("maxLength", c.maxLength());
-                // An empty map would say "this parameter is restricted" and name
-                // no restriction, which is worse than saying nothing: every
-                // model with a cap-only constraint published a bare {}.
-                if (!lim.isEmpty()) limits.put(param, lim);
-            });
+            // Capped here and not in the app's copy: this payload is TOKENS and
+            // carries every model at once, so a provider's hundred-voice
+            // catalogue would crowd out the models it is meant to describe.
+            // WHICH parameters can be asked about is read from rows already in
+            // hand, so naming them costs no provider call: the call happens only
+            // when someone actually asks. Without it an agent has no way to know
+            // that action='options' would answer for 'voice', and is left
+            // inventing an opaque identifier.
+            Map<String, Object> limits = GenerationLimits.describe(
+                    m.model(), m.catalogAllowed(), GenerationLimits.AGENT_INLINE_CAP,
+                    optionsResolver.unifiedDynamicParameters(m));
             if (!limits.isEmpty()) row.put("limits", limits);
             // What each FILE this model takes actually IS, and how many of them.
             // The slot name alone ("input_image") says an image goes here; it
@@ -470,6 +686,26 @@ public class GenerationModule implements ToolModule {
                             + recoveryNote,
                     ToolErrorCode.EXECUTION_FAILED, Map.of());
         }
+
+        // Record on the asset the recipe that produced it, so the file can be told apart from an
+        // uploaded one, listed among what this account has generated, and run again with one word
+        // changed. Best-effort and AFTER the generation succeeded: it annotates a file that already
+        // exists and has already been paid for, so it can add nothing and must take nothing away.
+        //
+        // The credential source comes from what the execution REPORTED, not from what the caller
+        // asked for: an omitted source lets the catalog try the caller's own key and fall back to
+        // the platform, so the two legitimately differ and only one of them is what happened.
+        provenanceRecorder.record(
+                asset.fileRef(),
+                new GenerationProvenanceRecorder.Recipe(
+                        target.modelId(), target.kind(), target.apiName(), unified,
+                        credentialSourceOf(result), built.quantity(), built.quantityUnit()),
+                // The SAME tenant the asset was resolved (and stored) under, sixty lines up. The
+                // stamp looks the row up by (id, tenant), so reading the tenant differently here
+                // would turn it into a silent no-op the moment a caller passes a context whose
+                // tenant is not the outer one.
+                context == null ? tenantId : context.tenantId(),
+                context == null ? null : context.orgId());
 
         return persistCard(
                 ToolExecutionResult.success(decorate(payload, asset.fileRef(), target, built)),

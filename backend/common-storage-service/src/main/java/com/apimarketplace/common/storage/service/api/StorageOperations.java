@@ -125,6 +125,31 @@ public interface StorageOperations {
                         String stepKey, int epoch, int spawn, Integer itemIndex);
 
     /**
+     * Record on a generated asset the recipe it was made from.
+     *
+     * <p>A generation is dispatched from catalog-service, which knows the model, the prompt and the
+     * parameters, and gets a stored file back. Nothing in the file says where it came from, so a
+     * reader looking at a PNG in their workspace cannot tell it apart from one they uploaded, and
+     * cannot change one word of the prompt and run it again. The producer stamps the recipe here
+     * once the asset exists, under {@link com.apimarketplace.common.storage.GenerationProvenanceFields#METADATA_KEY}
+     * in the row's {@code metadata}.</p>
+     *
+     * <p>Write-once and never overwriting, exactly like {@link #adoptRunContext}: a row that already
+     * carries a provenance is left untouched, so a re-stamp cannot rewrite the recipe of an asset
+     * that was made from a different one. Other {@code metadata} keys are preserved. Unknown ids and
+     * ids belonging to another tenant are skipped rather than rejected - the generation has already
+     * run and been charged, and whether its recipe was recorded must never decide whether the
+     * caller gets the asset it paid for.</p>
+     *
+     * @param provenance the recipe, shaped by
+     *        {@link com.apimarketplace.common.storage.GenerationProvenanceFields}; an empty or
+     *        oversized one stamps nothing
+     * @return how many rows were actually stamped
+     */
+    int stampGenerationProvenance(String tenantId, Collection<UUID> ids,
+                                  java.util.Map<String, Object> provenance);
+
+    /**
      * Sauvegarde des donnees texte.
      */
     UUID saveText(String tenantId, String data, String fileName, String mimeType, Instant expiresAt);

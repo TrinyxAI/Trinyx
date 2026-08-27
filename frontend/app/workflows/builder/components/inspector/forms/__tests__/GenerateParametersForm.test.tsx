@@ -22,7 +22,34 @@ vi.mock('@/lib/api/orchestrator', async () => {
 });
 
 // The i18n key IS the rendered text, so an assertion names the key it depends on.
-vi.mock('next-intl', () => ({ useTranslations: () => (k: string) => k }));
+vi.mock('next-intl', () => ({ useTranslations: () => (k: string) => k, useLocale: () => 'en' }));
+
+// The upgrade notice builds a locale-prefixed link to the plans.
+vi.mock('next/link', () => ({
+  default: ({ href, children }: any) => <a href={href}>{children}</a>,
+}));
+
+// Whether this account's credits can pay for a generation. Stubbed at the RULE
+// rather than at the balance: what the rule decides has its own suite, and this
+// one is about what the inspector does with the verdict.
+const credits = vi.hoisted(() => ({ blocked: false }));
+
+// The rows are <option>s under this suite's native-select stand-in, and an
+// <option> does not expose markup nested inside it. So the marker reports the
+// verdict it was GIVEN, per row, which is the thing under test.
+const badges = vi.hoisted(() => ({ blocked: [] as boolean[] }));
+vi.mock('@/components/billing/UpgradeRequiredBadge', () => ({
+  UpgradeRequiredBadge: ({ blocked }: { blocked: boolean }) => {
+    badges.blocked.push(blocked);
+    return null;
+  },
+  UpgradeRequiredNotice: ({ blocked }: { blocked: boolean }) => (
+    blocked ? <a href="/en/app/settings/pricing">cta</a> : null
+  ),
+}));
+vi.mock('@/lib/hooks/useMonthlyCreditsCannotPay', () => ({
+  useMonthlyCreditsCannotPay: () => ({ blocked: credits.blocked, isLoading: false }),
+}));
 
 vi.mock('@/components/ui/expression-editor', () => ({
   ExpressionEditor: ({ value, onChange, placeholder, handleId }: any) => (
@@ -160,6 +187,8 @@ function renderForm(data: any, onUpdate = vi.fn()) {
 describe('GenerateParametersForm', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    credits.blocked = false;
+    badges.blocked = [];
     credentialSectionProps.last = null;
     apiMocks.getGenerationModels.mockResolvedValue({
       models: [VIDEO_MODEL, VOICE_MODEL],
@@ -315,5 +344,103 @@ describe('GenerateParametersForm', () => {
     renderForm({});
 
     expect(await screen.findByText('generate.noModels')).toBeTruthy();
+  });
+
+  /**
+   * A generate node splits its bill in two: the flat fee for RUNNING the node,
+   * which a Free plan's monthly credits do cover, and the generation itself on
+   * the platform's key, which they do not. The second half is what gets
+   * refused, and it used to be refused with no warning anywhere on this form.
+   */
+  it('warns that the generation itself cannot be paid for, and offers the way out', async () => {
+    credits.blocked = true;
+
+    renderForm({ generateModel: 'seedance-2.0-fast', generateParams: {} });
+
+    expect(await screen.findByRole('link', { name: 'cta' })).toBeTruthy();
+  });
+
+  it('says nothing to an account whose credits can pay', async () => {
+    renderForm({ generateModel: 'seedance-2.0-fast', generateParams: {} });
+    await screen.findByTestId('select');
+
+    expect(screen.queryByRole('link', { name: 'cta' })).toBeNull();
+  });
+
+  it('says nothing once the node runs on the reader’s OWN key', async () => {
+    // Their own key is billed by the provider directly, so no credits are
+    // involved and a warning about credits would be a lie.
+    credits.blocked = true;
+
+    renderForm({
+      generateModel: 'seedance-2.0-fast',
+      generateParams: {},
+      generateCredentialSource: 'user',
+    });
+    await screen.findByTestId('select');
+
+    expect(screen.queryByRole('link', { name: 'cta' })).toBeNull();
+  });
+
+  it('regression: marks only the models the platform can actually sell', async () => {
+    // A model with no platform credential behind it can only run on the
+    // reader's own key, so it costs no credits and a lock on its row would be
+    // the same lie the own-key branch already refuses. The list is unfiltered,
+    // so both kinds appear together.
+    credits.blocked = true;
+    apiMocks.getGenerationModels.mockResolvedValue({
+      models: [VIDEO_MODEL, { ...VOICE_MODEL, integrationName: null }],
+      count: 2,
+      kinds: ['video', 'voice'],
+    });
+
+    renderForm({ generateModel: 'seedance-2.0-fast', generateParams: {} });
+    // Waited on the ROWS, not on the control: the select exists while the
+    // catalogue is still on its way, and the rows are what carry the marker.
+    await waitFor(() => expect(badges.blocked.length).toBe(2));
+
+    // One row marked, one left clean: the sold model and the one the platform
+    // has no credential for.
+    expect(badges.blocked.filter(Boolean)).toHaveLength(1);
+    expect(badges.blocked.filter((b) => !b)).toHaveLength(1);
+  });
+
+  /**
+   * A list the platform ENFORCES is a closed choice; one it merely knows about
+   * is a suggestion. The difference matters most here, because this field is an
+   * expression editor: a workflow binds a parameter to runtime data far more
+   * often than it types one, and a closed select takes both the templating and
+   * the connection handle away. A node saved with a template would then read as
+   * unset, against a list that cannot contain it.
+   */
+  it('regression: an ADVISORY list leaves the expression field alone', async () => {
+    // A list the platform does not enforce must not close the field: this one
+    // is an expression editor, and a workflow binds a parameter to runtime data
+    // far more often than it types one. A node saved with a template would
+    // otherwise read as unset against a list that cannot contain it.
+    apiMocks.getGenerationModels.mockResolvedValue({
+      models: [{
+        ...VIDEO_MODEL,
+        limits: { aspect_ratio: { allowed: ['16:9', '9:16'], allowedEnforced: false } },
+      }],
+      count: 1,
+      kinds: ['video'],
+    });
+
+    renderForm({ generateModel: 'seedance-2.0-fast', generateParams: {} });
+    await waitFor(() => expect(screen.getByText('generate.params.aspect_ratio')).toBeTruthy());
+
+    // The handle is what a connection attaches to, and only the expression
+    // field carries one.
+    expect(screen.queryByTestId('generate-aspect_ratio-generate-1')).not.toBeNull();
+  });
+
+  it('an ENFORCED list still becomes a closed choice', async () => {
+    // The same parameter and the same values, one difference: this list is
+    // refused before the call is billed, so closing the field is honest.
+    renderForm({ generateModel: 'seedance-2.0-fast', generateParams: {} });
+    await waitFor(() => expect(screen.getByText('generate.params.aspect_ratio')).toBeTruthy());
+
+    expect(screen.queryByTestId('generate-aspect_ratio-generate-1')).toBeNull();
   });
 });

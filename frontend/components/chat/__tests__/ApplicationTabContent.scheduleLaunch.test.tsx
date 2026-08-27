@@ -99,10 +99,10 @@ vi.mock('@/lib/api/api-client', () => ({
     post: vi.fn(),
     put: vi.fn(),
     delete: vi.fn(),
-    // ApplicationTabContent reads getTokenProvider() in a passive effect for
+    // ApplicationTabContent resolves a token in a passive effect for
     // the iframe authToken. Returning null short-circuits the fetch and keeps
     // this test focused on the launch-button contract.
-    getTokenProvider: () => null,
+    getTokenProvider: () => null, getAuthToken: async () => null,
   },
 }));
 

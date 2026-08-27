@@ -23,6 +23,7 @@ import {
   Search,
   Trash2,
   KeyRound,
+  Pencil,
   Star,
 } from "lucide-react";
 import { ServiceIcon } from "@/components/ui/service-icon";
@@ -32,12 +33,22 @@ import {
   Credential,
   PaginatedCredentialsResponse,
 } from "@/lib/api/orchestrator";
+import { useQueryClient } from "@tanstack/react-query";
 import { useTranslations } from "next-intl";
 import { useToast, type ToastData } from "@/components/Toast";
 import { formatDateTime } from "@/lib/utils/dateFormatters";
+import { invalidateCredentialCaches } from "@/lib/credentials/invalidateCredentialCaches";
 import { ScopeStatusIndicator } from "./ScopeStatusIndicator";
 
 const ITEMS_PER_PAGE = 10;
+
+/**
+ * Mirrors `auth.credentials.name VARCHAR(255)` (and `CredentialService.MAX_NAME_LENGTH`),
+ * so an over-long rename is explained in the dialog instead of coming back as a 400.
+ * Deliberately NOT the input's `maxLength`: that truncates a paste in silence, which
+ * looks like the app mangling the name rather than refusing it.
+ */
+const MAX_CREDENTIAL_NAME_LENGTH = 255;
 
 /**
  * Pick the right Reconnect-required tooltip for a credential based on the
@@ -135,6 +146,7 @@ export function MyCredentialsList({
   // Prefer the page-level addToast so toasts actually render. Local useToast
   // is the dead-letter fallback (see prop javadoc above).
   const { addToast: addToastLocal } = useToast();
+  const queryClient = useQueryClient();
   const addToast = addToastProp ?? addToastLocal;
   const [credentials, setCredentials] = useState<Credential[]>([]);
   const [loading, setLoading] = useState(true);
@@ -147,6 +159,10 @@ export function MyCredentialsList({
     null
   );
   const [isDeleting, setIsDeleting] = useState(false);
+  const [renameTarget, setRenameTarget] = useState<Credential | null>(null);
+  const [renameValue, setRenameValue] = useState("");
+  const [renameError, setRenameError] = useState<string | null>(null);
+  const [isRenaming, setIsRenaming] = useState(false);
   const [defaultFilter, setDefaultFilter] = useState<"all" | "default" | "non-default">("all");
   const [togglingDefaultId, setTogglingDefaultId] = useState<number | null>(null);
 
@@ -342,6 +358,83 @@ export function MyCredentialsList({
     }
   };
 
+  // Handle rename. A rename only moves the label: everything that pins a credential
+  // pins its id (workflow nodes, agent tool configs, published apps). The backend
+  // refuses the two renames that would move more than a label, and each gets its own
+  // message here: a name that already IDENTIFIES another credential of the same owner
+  // and would identify this one too (409, the exact-name lookup would then pick between
+  // two keys on sort order), and a credential with no integration (422, its NAME is what
+  // identifies it to the nodes that pinned it). A name that identifies neither of them,
+  // or only the other one, is not refused: it cannot misdirect a lookup, and creating
+  // that same collision has always been allowed.
+  // A credential carrying no `integration` is matched BY ITS NAME, both by the
+  // builder's picker and by the server when it validates a pinned credential, so the
+  // backend refuses to rename it (422 name_is_identity). Reflect that on the row: the
+  // payload already carries `integration`, and offering a dialog that can only end in
+  // a refusal wastes the user's typing.
+  const canRename = (credential: Credential): boolean =>
+    Boolean(credential.integration && credential.integration.trim());
+
+  const openRename = (credential: Credential, e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (!canRename(credential)) return;
+    setRenameTarget(credential);
+    setRenameValue(credential.name || "");
+    setRenameError(null);
+  };
+
+  const handleRename = async () => {
+    if (!renameTarget) return;
+    const trimmed = renameValue.trim();
+    if (!trimmed) {
+      setRenameError(t('renameDialog.emptyName'));
+      return;
+    }
+    if (trimmed.length > MAX_CREDENTIAL_NAME_LENGTH) {
+      setRenameError(t('renameDialog.tooLong', { max: MAX_CREDENTIAL_NAME_LENGTH }));
+      return;
+    }
+    if (trimmed === renameTarget.name) {
+      setRenameTarget(null);
+      return;
+    }
+
+    setIsRenaming(true);
+    setRenameError(null);
+    try {
+      const updated = await orchestratorApi.renameCredential(renameTarget.id, trimmed);
+      // Patch the loaded page in place rather than refetching: the response is
+      // the same secret-stripped shape the list renders, and a refetch would
+      // reset the scroll position of a long list for a one-field change.
+      setCredentials((prev) =>
+        prev.map((c) => (c.id === updated.id ? { ...c, ...updated } : c))
+      );
+      setRenameTarget(null);
+      // Every credentials cache holds the OLD label otherwise: the builder inspector
+      // dropdown, the chat service cards and the missing-credential badges all read
+      // one of three query keys this helper covers.
+      void invalidateCredentialCaches(queryClient);
+      addToast({
+        type: "success",
+        title: t('renameDialog.successTitle'),
+        message: t('renameDialog.success', { name: trimmed }),
+      });
+    } catch (err: unknown) {
+      console.error("Error renaming credential:", err);
+      const code =
+        err && typeof err === 'object' && 'code' in err ? (err as { code?: string }).code : undefined;
+      setRenameError(
+        code === 'duplicate_name'
+          ? t('renameDialog.duplicateName')
+          : code === 'name_is_identity'
+            ? t('renameDialog.cannotRename')
+            : t('renameDialog.failed'),
+      );
+    } finally {
+      setIsRenaming(false);
+    }
+  };
+
   // Handle toggling default status
   const handleToggleDefault = async (credential: Credential, e: React.MouseEvent) => {
     e.stopPropagation();
@@ -497,7 +590,7 @@ export function MyCredentialsList({
                 <tr
                   key={credential.id}
                   id={`cred-row-${credential.id}`}
-                  className="hover:bg-theme-tertiary/50 transition-colors cursor-pointer"
+                  className="group hover:bg-theme-tertiary/50 transition-colors cursor-pointer"
                 >
                   <td className="px-3 py-3 w-12">
                     <div className="flex items-center justify-center">
@@ -524,7 +617,29 @@ export function MyCredentialsList({
                         }
                       />
                       <div>
-                        <div className="font-medium text-theme-primary">{credential.name}</div>
+                        <div className="flex items-center gap-1.5">
+                          <span className="font-medium text-theme-primary">{credential.name}</span>
+                          {/* Rename. Revealed on row hover, like every other
+                              hover-only action in the app, EXCEPT on a coarse
+                              pointer: a touch device never fires hover, so hiding
+                              it there would make renaming unreachable rather than
+                              discreet. pointer-coarse is the pointer type itself,
+                              not a width breakpoint standing in for it. */}
+                          <button
+                            type="button"
+                            onClick={(e) => openRename(credential, e)}
+                            disabled={!canRename(credential)}
+                            aria-label={t('renameAriaLabel', { name: credential.name })}
+                            title={canRename(credential) ? t('rename') : t('renameDialog.cannotRename')}
+                            className={`p-1 rounded-md transition-opacity ${
+                              canRename(credential)
+                                ? "text-theme-muted opacity-0 hover:text-theme-primary focus-visible:opacity-100 group-hover:opacity-100 pointer-coarse:opacity-60"
+                                : "text-theme-muted opacity-0 cursor-not-allowed group-hover:opacity-30 pointer-coarse:opacity-30"
+                            }`}
+                          >
+                            <Pencil className="h-3.5 w-3.5" />
+                          </button>
+                        </div>
                         {credential.description && (
                           <div className="text-sm text-theme-secondary truncate max-w-[200px]">
                             {credential.description}
@@ -671,6 +786,77 @@ export function MyCredentialsList({
           </div>
         </div>
       )}
+
+      {/* Rename Dialog */}
+      <Dialog
+        open={!!renameTarget}
+        onOpenChange={(open) => {
+          if (!open && !isRenaming) {
+            setRenameTarget(null);
+            setRenameError(null);
+          }
+        }}
+      >
+        <DialogContent className="border border-theme bg-theme-primary">
+          <DialogHeader>
+            <DialogTitle>{t('renameDialog.title')}</DialogTitle>
+            <DialogDescription className="text-theme-secondary">
+              {t('renameDialog.description')}
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-2">
+            <label htmlFor="credential-rename-input" className="text-sm text-theme-secondary">
+              {t('renameDialog.label')}
+            </label>
+            <Input
+              id="credential-rename-input"
+              autoFocus
+              value={renameValue}
+              onChange={(e) => {
+                setRenameValue(e.target.value);
+                if (renameError) setRenameError(null);
+              }}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" && !isRenaming) {
+                  e.preventDefault();
+                  handleRename();
+                }
+              }}
+              placeholder={t('renameDialog.placeholder')}
+              className="rounded-xl border border-theme bg-[var(--bg-primary)]"
+            />
+            {renameError && (
+              <p className="text-sm text-red-600 dark:text-red-400">{renameError}</p>
+            )}
+          </div>
+          <DialogFooter className="gap-3">
+            <Button
+              variant="outline"
+              size="sm"
+              className="h-8 px-3"
+              onClick={() => setRenameTarget(null)}
+              disabled={isRenaming}
+            >
+              {t('renameDialog.cancel')}
+            </Button>
+            <Button
+              size="sm"
+              className="h-8 px-3"
+              onClick={handleRename}
+              disabled={isRenaming || !renameValue.trim()}
+            >
+              {isRenaming ? (
+                <>
+                  <LoadingSpinner size="xs" className="mr-2" />
+                  {t('renameDialog.saving')}
+                </>
+              ) : (
+                t('renameDialog.save')
+              )}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       {/* Delete Confirmation Dialog */}
       <Dialog

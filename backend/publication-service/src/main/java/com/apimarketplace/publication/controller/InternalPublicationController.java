@@ -1,6 +1,7 @@
 package com.apimarketplace.publication.controller;
 
 import com.apimarketplace.publication.config.OrchestratorInternalClient;
+import com.apimarketplace.publication.dto.MarketplaceQueryFilter;
 import com.apimarketplace.publication.domain.WorkflowPublicationEntity;
 import com.apimarketplace.publication.repository.WorkflowPublicationRepository;
 import com.apimarketplace.publication.service.AgentPublicationService;
@@ -642,7 +643,7 @@ public class InternalPublicationController {
             @RequestParam(defaultValue = "10") int size) {
         RemoteMarketplaceService remote = remoteMarketplaceProvider.getIfAvailable();
         if (remote != null) {
-            return ResponseEntity.ok(remoteToInternalPage(remote.fetchMarketplacePublications(page, size, slug), page, size));
+            return ResponseEntity.ok(remoteToInternalPage(remote.fetchMarketplacePublications(page, size, MarketplaceQueryFilter.ofCategory(slug)), page, size));
         }
         Page<WorkflowPublicationEntity> results = publicationRepository.findMarketplacePublicationsByCategorySlug(
                 slug, PageRequest.of(page, size));

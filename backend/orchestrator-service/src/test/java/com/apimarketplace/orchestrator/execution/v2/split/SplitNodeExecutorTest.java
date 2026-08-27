@@ -20,6 +20,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.isNull;
+import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -39,10 +40,13 @@ class SplitNodeExecutorTest {
     private SplitNodeExecutor executor;
 
     private static final int WORKFLOW_ITEM_INDEX = 0;
+    /** Deliberately not 0, so "the executor forwards context.epoch()" cannot pass by default. */
+    private static final int EPOCH = 42;
 
     @BeforeEach
     void setUp() {
         executor = new SplitNodeExecutor(contextManager, templateAdapter);
+        lenient().when(context.epoch()).thenReturn(EPOCH);
     }
 
     @Nested
@@ -55,8 +59,8 @@ class SplitNodeExecutorTest {
             List<Object> items = List.of("item1", "item2", "item3");
             when(templateAdapter.evaluateTemplate(eq("{{trigger:webhook.messages}}"), any()))
                 .thenReturn(items);
-            when(contextManager.createContext(eq("run1"), eq("core:split1"), eq(WORKFLOW_ITEM_INDEX), isNull(), eq(items)))
-                .thenReturn(SplitContext.create("core:split1:0", items));
+            when(contextManager.createContext(eq("run1"), eq("core:split1"), eq(WORKFLOW_ITEM_INDEX), isNull(), eq(items), eq(EPOCH)))
+                .thenReturn(SplitContext.create("core:split1:0", items, EPOCH));
 
             NodeExecutionResult result = executor.execute(
                 "run1",
@@ -72,7 +76,9 @@ class SplitNodeExecutorTest {
             assertThat(result.output().get("terminated")).isEqualTo(true);
             assertThat(result.output().get("spawn_reason")).isEqualTo("items_spawned");
 
-            verify(contextManager).createContext("run1", "core:split1", WORKFLOW_ITEM_INDEX, null, items);
+            // The epoch is stamped on the context: it is what tells this context apart from the
+            // same split's context in an earlier epoch when a delivery lands on another replica.
+            verify(contextManager).createContext("run1", "core:split1", WORKFLOW_ITEM_INDEX, null, items, EPOCH);
         }
 
         @Test
@@ -81,7 +87,7 @@ class SplitNodeExecutorTest {
             List<Object> items = List.of("a", "b", "c");
             when(templateAdapter.evaluateTemplate(eq("{{trigger:webhook.messages}}"), any()))
                 .thenReturn(items);
-            when(contextManager.createContext(any(), any(), anyInt(), isNull(), any()))
+            when(contextManager.createContext(any(), any(), anyInt(), isNull(), any(), anyInt()))
                 .thenReturn(SplitContext.create("core:split1:0", items));
 
             NodeExecutionResult result = executor.execute(
@@ -110,7 +116,7 @@ class SplitNodeExecutorTest {
         void shouldReturnCompletedImmediately() {
             when(templateAdapter.evaluateTemplate(any(), any()))
                 .thenReturn(List.of("a", "b"));
-            when(contextManager.createContext(any(), any(), anyInt(), isNull(), any()))
+            when(contextManager.createContext(any(), any(), anyInt(), isNull(), any(), anyInt()))
                 .thenReturn(SplitContext.create("core:split1:0", List.of("a", "b")));
 
             NodeExecutionResult result = executor.execute(
@@ -125,7 +131,7 @@ class SplitNodeExecutorTest {
         void shouldHandleEmptyList() {
             when(templateAdapter.evaluateTemplate(any(), any()))
                 .thenReturn(List.of());
-            when(contextManager.createContext(any(), any(), anyInt(), isNull(), any()))
+            when(contextManager.createContext(any(), any(), anyInt(), isNull(), any(), anyInt()))
                 .thenReturn(SplitContext.create("core:split1:0", List.of()));
 
             NodeExecutionResult result = executor.execute(
@@ -134,6 +140,10 @@ class SplitNodeExecutorTest {
             assertThat(result.status()).isEqualTo(NodeStatus.COMPLETED);
             assertThat(result.output().get("item_count")).isEqualTo(0);
             assertThat(result.output().get("spawn_reason")).isEqualTo("empty_list");
+            // An empty spawn still REPLACES the scope, so it must be stamped like any other:
+            // an UNKNOWN stamp here leaves a permanently un-stale scope behind for the next epoch.
+            verify(contextManager).createContext(
+                "run1", "core:split1", WORKFLOW_ITEM_INDEX, null, List.of(), EPOCH);
         }
 
         @Test
@@ -141,10 +151,10 @@ class SplitNodeExecutorTest {
         void shouldApplyMaxItemsLimit() {
             List<Object> items = List.of("a", "b", "c", "d", "e");
             when(templateAdapter.evaluateTemplate(any(), any())).thenReturn(items);
-            when(contextManager.createContext(eq("run1"), eq("core:split1"), eq(WORKFLOW_ITEM_INDEX), isNull(), any()))
+            when(contextManager.createContext(eq("run1"), eq("core:split1"), eq(WORKFLOW_ITEM_INDEX), isNull(), any(), anyInt()))
                 .thenAnswer(inv -> {
                     List<Object> limited = inv.getArgument(4);
-                    return SplitContext.create("core:split1:0", limited);
+                    return SplitContext.create("core:split1:0", limited, inv.getArgument(5));
                 });
 
             NodeExecutionResult result = executor.execute(
@@ -153,7 +163,7 @@ class SplitNodeExecutorTest {
             assertThat(result.status()).isEqualTo(NodeStatus.COMPLETED);
             // The executor should limit items to 3
             verify(contextManager).createContext(eq("run1"), eq("core:split1"), eq(WORKFLOW_ITEM_INDEX),
-                isNull(), eq(List.of("a", "b", "c")));
+                isNull(), eq(List.of("a", "b", "c")), eq(EPOCH));
         }
 
         @Test
@@ -196,7 +206,7 @@ class SplitNodeExecutorTest {
                 "items", List.of("a", "b", "c"),
                 "status", "SUCCEEDED");
             when(templateAdapter.evaluateTemplate(any(), any())).thenReturn(wrapper);
-            when(contextManager.createContext(any(), any(), anyInt(), isNull(), any()))
+            when(contextManager.createContext(any(), any(), anyInt(), isNull(), any(), anyInt()))
                 .thenAnswer(inv -> SplitContext.create("core:split1:0", inv.getArgument(4)));
 
             NodeExecutionResult result = executor.execute(
@@ -205,7 +215,7 @@ class SplitNodeExecutorTest {
             assertThat(result.status()).isEqualTo(NodeStatus.COMPLETED);
             assertThat(result.output().get("item_count")).isEqualTo(3);
             verify(contextManager).createContext("run1", "core:split1", WORKFLOW_ITEM_INDEX, null,
-                List.of("a", "b", "c"));
+                List.of("a", "b", "c"), EPOCH);
         }
 
         @Test
@@ -213,7 +223,7 @@ class SplitNodeExecutorTest {
         void shouldUnwrapRecordsWrapperMap() {
             Map<String, Object> wrapper = Map.of("records", List.of(Map.of("id", 1), Map.of("id", 2)));
             when(templateAdapter.evaluateTemplate(any(), any())).thenReturn(wrapper);
-            when(contextManager.createContext(any(), any(), anyInt(), isNull(), any()))
+            when(contextManager.createContext(any(), any(), anyInt(), isNull(), any(), anyInt()))
                 .thenAnswer(inv -> SplitContext.create("core:split1:0", inv.getArgument(4)));
 
             NodeExecutionResult result = executor.execute(
@@ -303,6 +313,47 @@ class SplitNodeExecutorTest {
             executor.clearContext("run1", "core:split1", 0);
 
             verify(contextManager).removeContext("run1", "core:split1", 0);
+        }
+    }
+
+    /**
+     * The pre-resolved-items entry point. It has NO production caller today (verified
+     * 2026-08-14), so this is deliberately minimal: it pins the obligation a future caller
+     * inherits - the scope it builds must carry the epoch, or a delivery landing on a pod that
+     * holds an earlier epoch's scope reuses that one. BOTH branches are pinned because both
+     * write a scope: the empty one replaces it just as destructively as the populated one.
+     */
+    @Nested
+    @DisplayName("executeWithItems()")
+    class ExecuteWithItems {
+
+        @Test
+        @DisplayName("stamps the epoch on the empty-items branch, which also replaces the scope")
+        void stampsTheEpochOnTheEmptyBranch() {
+            when(contextManager.createContext(any(), any(), anyInt(), isNull(), any(), anyInt()))
+                .thenReturn(SplitContext.create("core:split1:0", List.of(), EPOCH));
+
+            NodeExecutionResult result = executor.executeWithItems(
+                "run1", "core:split1", List.of(), 0, WORKFLOW_ITEM_INDEX, context);
+
+            assertThat(result.output().get("spawn_reason")).isEqualTo("empty_list");
+            verify(contextManager).createContext(
+                "run1", "core:split1", WORKFLOW_ITEM_INDEX, null, List.of(), EPOCH);
+        }
+
+        @Test
+        @DisplayName("stamps the context with the execution context's epoch, after maxItems is applied")
+        void stampsTheEpoch() {
+            when(contextManager.createContext(any(), any(), anyInt(), isNull(), any(), anyInt()))
+                .thenAnswer(inv -> SplitContext.create("core:split1:0", inv.getArgument(4), inv.getArgument(5)));
+
+            NodeExecutionResult result = executor.executeWithItems(
+                "run1", "core:split1", List.of("a", "b", "c", "d"), 2, WORKFLOW_ITEM_INDEX, context);
+
+            assertThat(result.status()).isEqualTo(NodeStatus.COMPLETED);
+            assertThat(result.output().get("item_count")).isEqualTo(2);
+            verify(contextManager).createContext(
+                "run1", "core:split1", WORKFLOW_ITEM_INDEX, null, List.of("a", "b"), EPOCH);
         }
     }
 }

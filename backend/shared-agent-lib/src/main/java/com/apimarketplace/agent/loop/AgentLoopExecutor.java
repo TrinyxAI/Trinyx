@@ -8,6 +8,9 @@ import com.apimarketplace.agent.provider.LLMProviderException;
 import com.apimarketplace.agent.retry.RetryPolicy;
 import com.apimarketplace.agent.streaming.StreamingCallback;
 import com.apimarketplace.agent.tool.ToolExecutionService;
+import com.apimarketplace.agent.tools.authz.ToolAuthorizationGuard;
+import com.apimarketplace.agent.tools.authz.ToolAuthorizationPolicy;
+import com.apimarketplace.agent.tools.authz.ToolAuthorizationScope;
 import com.apimarketplace.agent.tools.common.ToolMediaMetadata;
 import com.apimarketplace.common.web.TenantResolver;
 import lombok.RequiredArgsConstructor;
@@ -44,6 +47,38 @@ public class AgentLoopExecutor {
     private static final int TRUNCATED_RESULT_LENGTH = 300;
     private static final String TASK_ID_CREDENTIAL = "__taskId__";
     private static final String STOP_AGENT_LOOP_METADATA = "stopAgentLoop";
+
+    /**
+     * Absolute wall-clock ceiling handed to the tool so an approval gate can park inside
+     * the call without ever outliving the budget after which this executor would discard
+     * its result as a timeout. Read by {@code RemoteToolExecutionService}.
+     */
+    private static final String TOOL_DEADLINE_CREDENTIAL = "__toolDeadlineEpochMs__";
+
+    /**
+     * How long the tool itself needs once a park releases it, so the gate can reserve that
+     * much of the deadline instead of a token margin. Read by
+     * {@code RemoteToolExecutionService}. Without it, a call that parks TWICE (authorize the
+     * action, then connect the service it needs) can spend the whole budget waiting and run
+     * the approved tool with seconds left - the call is charged and its result discarded as
+     * a timeout, which is the exact failure the budget exists to prevent.
+     */
+    private static final String TOOL_EXECUTION_RESERVE_CREDENTIAL = "__toolExecutionReserveMs__";
+
+    /**
+     * Extra budget granted to a call that may park on a user approval card. Without it the
+     * 30 s default would kill the call while the card is still on screen, and the user's
+     * approval would land on a call that no longer exists.
+     *
+     * <p>Who gets it is decided by {@link #effectiveTimeoutMs}, and deliberately narrowly:
+     * every other call keeps its usual timeout so a hung backend is still caught as fast as
+     * before.
+     *
+     * <p>It must stay comfortably above the gate's own park budget
+     * ({@code agent.tool.approval-gate.timeout-ms}, 240 s), so the park always ends first
+     * and reports its verdict instead of being cut off mid-wait.
+     */
+    private static final long APPROVAL_GATE_BUDGET_MS = 300_000;
 
     private final ToolExecutionService toolExecutionService;
     private final AgentLogger agentLogger;
@@ -524,7 +559,10 @@ public class AgentLoopExecutor {
         return results;
     }
 
-    private List<ToolResult> executeToolCallsParallel(
+    // Package-private as a test seam: this path computes its OWN per-call ceiling for the
+    // future it wraps, so it can silently disagree with the sequential path and cut a gated
+    // call short while its approval card is still on screen.
+    List<ToolResult> executeToolCallsParallel(
             List<ToolCall> toolCalls, List<ToolDefinition> tools,
             AgentLoopContext context, LoopExecutionState state,
             StreamingCallback callback) {
@@ -613,7 +651,7 @@ public class AgentLoopExecutor {
                 ToolDefinition toolDef = tools != null ? tools.stream()
                     .filter(t -> t.name().equals(toolCall.toolName()))
                     .findFirst().orElse(null) : null;
-                long timeout = toolDef != null ? toolDef.getEffectiveTimeoutMs(defaultToolTimeoutMs) : defaultToolTimeoutMs;
+                long timeout = effectiveTimeoutMs(toolCall, toolDef, context.credentials());
 
                 futures[i] = CompletableFuture.supplyAsync(
                     () -> executeSingleToolCall(toolCall, tools, context), toolExecutor
@@ -684,7 +722,10 @@ public class AgentLoopExecutor {
         return filtered;
     }
 
-    private ToolResult executeSingleToolCall(ToolCall toolCall, List<ToolDefinition> tools, AgentLoopContext context) {
+    // Package-private as a test seam: the deadline it hands the tool is the only thing
+    // binding an approval park to this loop's own budget, and a park outliving that budget
+    // returns a result nobody collects.
+    ToolResult executeSingleToolCall(ToolCall toolCall, List<ToolDefinition> tools, AgentLoopContext context) {
         if (toolExecutionService == null) {
             return ToolResult.failure(toolCall, "Tool execution service not configured");
         }
@@ -702,8 +743,11 @@ public class AgentLoopExecutor {
             return ToolResult.failure(toolCall, "Tool not found: '" + toolName + "'. Available: " + available);
         }
 
-        long timeout = toolDef.getEffectiveTimeoutMs(defaultToolTimeoutMs);
         Map<String, Object> credentials = enrichCredentials(context);
+        long timeout = effectiveTimeoutMs(toolCall, toolDef, credentials);
+        credentials.put(TOOL_DEADLINE_CREDENTIAL, startTime + timeout);
+        credentials.put(TOOL_EXECUTION_RESERVE_CREDENTIAL,
+                toolDef != null ? toolDef.getEffectiveTimeoutMs(defaultToolTimeoutMs) : defaultToolTimeoutMs);
 
         try {
             CompletableFuture<ToolResult> future = CompletableFuture.supplyAsync(() -> {
@@ -744,6 +788,85 @@ public class AgentLoopExecutor {
                 .durationMs(System.currentTimeMillis() - startTime)
                 .build();
         }
+    }
+
+    /**
+     * Per-call timeout, extended only for a call that can actually park on a user approval
+     * card. A gated call kept at the plain 30 s default would be discarded as timed out
+     * while its card was still waiting for a click, and the user's answer would then
+     * release a call whose result nobody collects.
+     *
+     * <p><b>Both conditions are required, and both are narrow on purpose.</b> The extension
+     * is a licence to hang for five more minutes, so it must not reach a call that could
+     * never raise a card:
+     * <ul>
+     *   <li>the exact {@code (tool, action)} pair must be gateable - keying on the tool NAME
+     *       alone would hand the budget to {@code catalog(action='search')},
+     *       {@code workflow(action='get')}, {@code agent(action='list')} and every other
+     *       read on the four busiest facade tools, turning a hung backend from a 30 s blip
+     *       into a 5 min stall on every call;</li>
+     *   <li>the context must be one where a card is raised at all - a scheduled workflow
+     *       run, a task, a sub-agent or an agent-backed chat is EXEMPT from the card, so
+     *       there is nobody to wait for and waiting would only delay the failure.</li>
+     * </ul>
+     *
+     * <p>An existing grant removes the budget too, with one exception: the calls that can
+     * ask the user to CONNECT A SERVICE keep it, because that card is raised by the tool
+     * result and not by the grant (see
+     * {@link ToolAuthorizationPolicy#canRaiseConnectCard}).
+     *
+     * <p>Both execution paths (sequential and parallel) must agree, hence one helper.
+     */
+    long effectiveTimeoutMs(ToolCall toolCall, ToolDefinition toolDef, Map<String, Object> credentials) {
+        long base = toolDef != null ? toolDef.getEffectiveTimeoutMs(defaultToolTimeoutMs) : defaultToolTimeoutMs;
+        boolean canPark = ToolAuthorizationGuard.requiresAuthorization(toolCall.toolName(), toolCall.arguments())
+                && ToolAuthorizationScope.isCardRaised(credentials)
+                // Already granted means no AUTHORIZATION card, so no wait for one. After the
+                // user ticks "always allow" that is every sensitive call in the conversation,
+                // and leaving the budget on would turn a hung backend from a 30 s blip into a
+                // 5.5 min stall for the rest of the chat.
+                //
+                // Except where the call can raise the OTHER card. A grant answers "may I run
+                // this"; it says nothing about a service the user never connected, and that
+                // card comes from the tool result. Without this the connect card had nothing
+                // holding the call and fell back to the old two-turn flow - silently, since
+                // everything else still worked. It hit more people than the ones who ticked
+                // "don't ask again": approving a single card writes a one-shot grant too, so
+                // a park that merely expired left the next turn already granted.
+                //
+                // The cost is one ceiling on those pairs: a hung catalog execute ends at
+                // base + budget rather than base, for a granted rule. That is the same
+                // ceiling an UNGRANTED catalog execute already carried, so this aligns the
+                // two rather than inventing a longer one.
+                && (!isAlreadyAuthorized(credentials, toolCall)
+                        || ToolAuthorizationPolicy.canRaiseConnectCard(toolCall.toolName(), actionOf(toolCall)))
+                // Raising a card is not the same as waiting on one: application:acquire is
+                // performed BY the user out of band, so it is never held and must not be
+                // given the budget for a wait that cannot happen.
+                && !ToolAuthorizationPolicy.isUserPerformedRule(toolCall.toolName(), actionOf(toolCall));
+        return canPark ? base + APPROVAL_GATE_BUDGET_MS : base;
+    }
+
+    /**
+     * True when this rule was already granted for the turn, so no card will be raised.
+     * Mirrors {@code RemoteToolExecutionService.isAlreadyAuthorized}, including the
+     * conversation-wide {@code "*"} wildcard the "always allow" toggle writes.
+     */
+    private static boolean isAlreadyAuthorized(Map<String, Object> credentials, ToolCall toolCall) {
+        if (credentials == null) {
+            return false;
+        }
+        Object approved = credentials.get("__approvedToolActions__");
+        if (!(approved instanceof java.util.Collection<?> granted)) {
+            return false;
+        }
+        String rule = ToolAuthorizationGuard.matchedRule(toolCall.toolName(), toolCall.arguments());
+        return granted.contains("*") || (rule != null && granted.contains(rule));
+    }
+
+    private static String actionOf(ToolCall toolCall) {
+        Object action = toolCall.arguments() != null ? toolCall.arguments().get("action") : null;
+        return action != null ? String.valueOf(action).trim() : null;
     }
 
     private ToolResult executeToolWithOrgScope(

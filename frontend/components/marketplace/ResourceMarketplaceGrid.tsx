@@ -10,6 +10,7 @@ import { useAuth } from '@/lib/providers/smart-providers';
 import { InterfacePreview, type InterfaceSnapshotLike } from '@/components/marketplace/InterfacePreview';
 import { PublisherAvatar } from '@/components/marketplace/PublisherAvatar';
 import AcquirePublicationModal from '@/components/marketplace/AcquirePublicationModal';
+import { useMarketplaceInstallStore } from '@/lib/stores/marketplace-install-store';
 import { CeExclusiveBadge } from '@/components/marketplace/CeExclusiveBadge';
 import { isCeExclusiveBlocked } from '@/lib/marketplace/ceExclusive';
 import { useOrgScopedReset } from '@/lib/hooks/useOrgScopedReset';
@@ -40,13 +41,17 @@ function PublicationCard({
   currentUserId,
   isAcquired,
   onAcquire,
+  installBlocked,
 }: {
   publication: WorkflowPublication;
   currentUserId?: string;
   isAcquired: boolean;
   onAcquire: (pub: WorkflowPublication) => void;
+  /** An install is already running: the machine is single-flight, so this one would be refused. */
+  installBlocked?: boolean;
 }) {
   const t = useTranslations('marketplace');
+  const tAcquire = useTranslations('modals.acquire');
   const [landing, setLanding] = useState<InterfaceSnapshotLike | null>(null);
   const [loadingLanding, setLoadingLanding] = useState(true);
 
@@ -129,8 +134,11 @@ function PublicationCard({
           {canAcquire ? (
             <button
               type="button"
-              onClick={() => onAcquire(publication)}
-              className="inline-flex items-center gap-1 h-[22px] px-2 rounded-lg text-[11px] font-medium bg-[var(--accent-primary)] text-[var(--bg-primary)] hover:brightness-110 active:scale-95 transition-[filter,transform] shrink-0"
+              data-testid="resource-card-acquire"
+              disabled={installBlocked}
+              title={installBlocked ? tAcquire('installBusy') : undefined}
+              onClick={() => { if (!installBlocked) onAcquire(publication); }}
+              className="inline-flex items-center gap-1 h-[22px] px-2 rounded-lg text-[11px] font-medium bg-[var(--accent-primary)] text-[var(--bg-primary)] hover:brightness-110 active:scale-95 transition-[filter,transform] shrink-0 disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:brightness-100 disabled:active:scale-100"
             >
               <Download className="h-3 w-3" />
               {t('acquire')}
@@ -164,6 +172,12 @@ export function ResourceMarketplaceGrid({ type, icon: Icon, title, subtitle, emp
   // install path shows the 5-10s download progress bar. The previous inline
   // flow used a bottom-right toast and skipped the bar entirely.
   const [acquireTarget, setAcquireTarget] = useState<WorkflowPublication | null>(null);
+  // Shared single-flight install state - an install started anywhere (this grid, the
+  // marketplace, the chat) blocks the others. Selected down to the installing
+  // publication ID rather than the whole `active` object: that object is rewritten every
+  // 50ms by the progress ticker, and this grid renders an iframe preview per card.
+  const installingPublicationId = useMarketplaceInstallStore(
+    (s) => (s.active?.status === 'installing' ? s.active.publication.id : null));
 
   const load = useCallback(async () => {
     try {
@@ -245,6 +259,9 @@ export function ResourceMarketplaceGrid({ type, icon: Icon, title, subtitle, emp
                   currentUserId={currentUserId}
                   isAcquired={acquiredIds.has(pub.id)}
                   onAcquire={handleAcquire}
+                  // One install at a time: while another one runs, this Install would be
+                  // dropped by the store, so it is disabled with the reason instead.
+                  installBlocked={!!installingPublicationId && installingPublicationId !== pub.id}
                 />
               ))}
             </div>

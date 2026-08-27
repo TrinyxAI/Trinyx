@@ -18,7 +18,7 @@ vi.mock('@/lib/api/orchestrator/file.service', () => ({
 // A non-null token so mediaUrl is built (the <img> renders instead of the spinner).
 vi.mock('@/hooks/useAuthToken', () => ({ useAuthToken: () => 'tok' }));
 vi.mock('@/lib/stores/current-org-store', () => ({ getActiveOrgHeaderForRequest: () => ({}) }));
-vi.mock('@/lib/api/api-client', () => ({ apiClient: { getTokenProvider: () => null } }));
+vi.mock('@/lib/api/api-client', () => ({ apiClient: { getTokenProvider: () => null, getAuthToken: async () => null } }));
 // Text-preview-only deps - never rendered on the image path, mocked to keep the
 // module graph light.
 vi.mock('@/components/MarkdownRender', () => ({ default: () => null }));
@@ -55,6 +55,18 @@ describe('FileDetailView - chromeless full-page viewer', () => {
     const img = container.querySelector('img')!;
     expect(img.className).toContain('object-contain');
     expect(img.className).toContain('max-h-full');
+  });
+
+  it('measures itself against the HOST when the caller is not the page', () => {
+    // The viewport arithmetic above describes the Files page: everything under
+    // the app header is the viewer's. A dialog that mounts it chromeless owns a
+    // box instead, and inheriting `100vh - 8.5rem` there overflows it. The page
+    // must keep its own rule, so both branches are pinned, not just the new one.
+    const { container } = render(<FileDetailView chromeless fitMediaToHost {...baseProps} />);
+    const root = container.firstElementChild as HTMLElement;
+
+    expect(root.className).toContain('h-full');
+    expect(root.className).not.toContain('h-[calc(100vh-8.5rem)]');
   });
 
   it('still honours showMetadata=false for non-Files callers (side panel / visualize cards)', () => {

@@ -571,4 +571,57 @@ class TriggerEpochManagerTest {
                 .isEqualTo(4);
         }
     }
+
+    /**
+     * The spawn counter is per DAG and every fire resets it, so it only guarantees an unused
+     * coordinate in the epoch that fire opened. A rerun aimed at an OLDER epoch passes that
+     * epoch's own highest spawn plus one as a floor, or it writes rows tied with an earlier
+     * attempt at the same max spawn - and the supersede filter keeps every row at that max.
+     */
+    @Nested
+    @DisplayName("incrementSpawnAtLeast(WorkflowRunEntity, String, int)")
+    class IncrementSpawnAtLeastTests {
+
+        private WorkflowRunEntity lockedRunWithSpawn(int spawn) {
+            Map<String, Object> dagCurrentSpawn = new HashMap<>(Map.of("trigger:wh_a", spawn));
+            Map<String, Object> metadata = new HashMap<>(Map.of("dagCurrentSpawn", dagCurrentSpawn));
+            WorkflowRunEntity lockedRun = createRun("run-1", metadata);
+            when(runRepository.findByRunIdPublicForUpdate("run-1")).thenReturn(Optional.of(lockedRun));
+            when(runRepository.save(any())).thenReturn(lockedRun);
+            return lockedRun;
+        }
+
+        @Test
+        @DisplayName("A floor below the next spawn changes nothing")
+        void floorBelowNextSpawnIsIgnored() {
+            WorkflowRunEntity lockedRun = lockedRunWithSpawn(5);
+
+            int newSpawn = epochManager.incrementSpawnAtLeast(lockedRun, "trigger:wh_a", 2);
+
+            assertThat(newSpawn).isEqualTo(6);
+        }
+
+        @Test
+        @DisplayName("A floor above the next spawn wins: the replayed epoch's own history sets it")
+        void floorAboveNextSpawnWins() {
+            // The DAG counter says 1 (a fire reset it), while the epoch being replayed already
+            // used spawns up to 3. Landing on 1 would tie with that attempt's rows.
+            WorkflowRunEntity lockedRun = lockedRunWithSpawn(0);
+
+            int newSpawn = epochManager.incrementSpawnAtLeast(lockedRun, "trigger:wh_a", 4);
+
+            assertThat(newSpawn).isEqualTo(4);
+            @SuppressWarnings("unchecked")
+            Map<String, Object> spawns = (Map<String, Object>) lockedRun.getMetadata().get("dagCurrentSpawn");
+            assertThat(spawns).containsEntry("trigger:wh_a", 4);
+        }
+
+        @Test
+        @DisplayName("incrementSpawn stays a plain increment: no floor, unchanged for every caller")
+        void plainIncrementIsUnchanged() {
+            WorkflowRunEntity lockedRun = lockedRunWithSpawn(2);
+
+            assertThat(epochManager.incrementSpawn(lockedRun, "trigger:wh_a")).isEqualTo(3);
+        }
+    }
 }

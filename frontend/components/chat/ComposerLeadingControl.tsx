@@ -33,7 +33,7 @@ export function ComposerLeadingControl({
       <button
         type="button"
         onClick={onOpenAgentPanel}
-        className="flex items-center rounded-full hover:opacity-80 transition-opacity duration-200 cursor-pointer"
+        className="flex shrink-0 items-center rounded-full hover:opacity-80 transition-opacity duration-200 cursor-pointer"
         title={agentName || ''}
         data-testid="composer-agent-avatar"
       >

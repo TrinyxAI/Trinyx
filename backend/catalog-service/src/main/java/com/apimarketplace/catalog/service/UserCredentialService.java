@@ -136,4 +136,19 @@ public class UserCredentialService {
         }
         return credentialClient.getCredentialScopesById(userId, credentialId);
     }
+
+    /**
+     * The caller's credential identities (id, name, integration, status).
+     *
+     * <p>Carries no secret material, deliberately: this answers "which credential
+     * did the caller mean", and fetching the material of the ones about to be
+     * rejected in order to answer it is the shape credential resolution refuses
+     * elsewhere. See {@code CredentialIdentityDto}.
+     */
+    public java.util.List<com.apimarketplace.credential.client.dto.CredentialIdentityDto> listIdentities(String userId) {
+        if (userId == null || userId.isBlank()) {
+            return java.util.List.of();
+        }
+        return credentialClient.getCredentialIdentities(userId);
+    }
 }

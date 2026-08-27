@@ -225,7 +225,11 @@ public class SplitContextManager implements RunScopedCache {
                                      String parentScopeKey, List<Object> items) {
         String runKey = buildRunKey(runId, epoch);
         String contextKey = buildContextKey(splitNodeId, workflowItemIndex, parentScopeKey);
-        SplitContext context = SplitContext.create(contextKey, items);
+        // Stamped, not only bucketed: the run-level copy written just below is keyed WITHOUT the
+        // epoch, and that copy is the one every reader on this pod resolves (nothing reads the
+        // runId:epoch bucket). Without the stamp it would read as UNKNOWN and be reused by a
+        // later epoch's delivery instead of rebuilt (see restoreContext).
+        SplitContext context = SplitContext.create(contextKey, items, epoch);
 
         contextsByRun
             .computeIfAbsent(runKey, k -> new ConcurrentHashMap<>())
@@ -255,15 +259,39 @@ public class SplitContextManager implements RunScopedCache {
      */
     public SplitContext createContext(String runId, String splitNodeId, int workflowItemIndex,
                                      String parentScopeKey, List<Object> items) {
+        return createContext(runId, splitNodeId, workflowItemIndex, parentScopeKey, items,
+            SplitContext.UNKNOWN_EPOCH);
+    }
+
+    /**
+     * Creates a new SplitContext for the given split node and workflow item, stamped with the
+     * epoch that spawned the items.
+     *
+     * <p>The stamp is what {@link #restoreContext(String, String, Map, int)} compares against to
+     * tell a context belonging to the CURRENT epoch (preserve it, it carries the per-item
+     * results) from one left behind by an earlier epoch of the same run (rebuild it). Callers
+     * that know their epoch MUST use this overload; the 5-arg one stamps
+     * {@link SplitContext#UNKNOWN_EPOCH}, which is never treated as stale.
+     *
+     * @param runId the workflow run ID
+     * @param splitNodeId the split node ID
+     * @param workflowItemIndex the workflow item index (from trigger)
+     * @param parentScopeKey the parent split scope suffix (e.g., "s0"), or null for top-level
+     * @param items the list of items to iterate over (spawned by split)
+     * @param epoch the epoch this split spawned in, or {@link SplitContext#UNKNOWN_EPOCH}
+     * @return the created SplitContext
+     */
+    public SplitContext createContext(String runId, String splitNodeId, int workflowItemIndex,
+                                     String parentScopeKey, List<Object> items, int epoch) {
         String contextKey = buildContextKey(splitNodeId, workflowItemIndex, parentScopeKey);
-        SplitContext context = SplitContext.create(contextKey, items);
+        SplitContext context = SplitContext.create(contextKey, items, epoch);
 
         contextsByRun
             .computeIfAbsent(runId, k -> new ConcurrentHashMap<>())
             .put(contextKey, context);
 
-        logger.info("[SplitContextManager] Created context: runId={}, key={}, itemCount={}, parentScope={}",
-            runId, contextKey, context.itemCount(), parentScopeKey);
+        logger.info("[SplitContextManager] Created context: runId={}, key={}, itemCount={}, parentScope={}, epoch={}",
+            runId, contextKey, context.itemCount(), parentScopeKey, epoch);
 
         return context;
     }
@@ -718,16 +746,73 @@ public class SplitContextManager implements RunScopedCache {
     }
 
     /**
-     * Restore split context from persisted signal data after restart.
-     * Called by SignalResumeService before resuming execution of a signal
-     * that was registered inside a split scope.
+     * Restore split context from persisted resume data, without epoch attribution.
+     *
+     * <p>NOT for production use: with no epoch this cannot tell a scope belonging to the resume
+     * from one an earlier epoch left on this pod, so it keeps the pre-2026-08-14 "already exists
+     * -> skip". Both production callers pass their epoch through
+     * {@link #restoreContext(String, String, Map, int)}, and
+     * {@code SplitContextEpochStampInvariantTest} fails the build if a new one does not.
      *
      * @param runId the workflow run ID
      * @param nodeId the node ID that had the signal (for logging)
-     * @param splitItemData persisted split context data from workflow_signal_waits.split_item_data
+     * @param splitItemData persisted split context data (splitNodeId + items + indices)
+     */
+    public void restoreContext(String runId, String nodeId, Map<String, Object> splitItemData) {
+        restoreContext(runId, nodeId, splitItemData, SplitContext.UNKNOWN_EPOCH);
+    }
+
+    /**
+     * Restore split context from persisted resume data, for a delivery known to belong to
+     * {@code epoch}.
+     *
+     * <p>Same contract as {@link #restoreContext(String, String, Map)} plus ONE rule: a context
+     * already in memory for this key is reused only when it belongs to the same (or a newer)
+     * epoch. A context left behind by an OLDER epoch is rebuilt from {@code splitItemData}.
+     *
+     * <p>Why this matters in production (proven on prod 2026-08-14, run
+     * {@code run_<id>}, on the pairs 80 -> 81 and 96 -> 97): the orchestrator
+     * runs several replicas, and an async agent delivery is handled by whichever pod consumes the
+     * Redis message, not by the pod that ran the split. The in-memory key carries no epoch, so a
+     * pod that ran epoch N and not epoch N+1 still holds epoch N's context. The pre-fix
+     * "already exists -> skip" then handed the N+1 fan-out epoch N's item list AND epoch N's
+     * per-item results: the run executed the previous epoch's items (prod symptom: a mail move
+     * addressing the UID of a mail filed six hours earlier, plus phantom SKIPPED rows at item
+     * indices no item justifies). Rebuilding drops {@code resultsByNode}, which is the CORRECT
+     * state for a pod that did not run this epoch: an empty map makes
+     * {@code SplitAwareNodeExecutor.inMemorySlotsComplete} return false, so the epoch-scoped
+     * durable backfill serves the real per-item values.
+     *
+     * <p><b>Scope, stated so nobody assumes more.</b> Two limits, both pre-existing:
+     * <ul>
+     *   <li><b>Base key only.</b> The lookup uses {@code splitNodeId:workflowItemIndex}; the
+     *       resume blob carries no parent scope, so a NESTED scope ({@code …:0/sN}) is neither
+     *       inspected nor rebuilt, and {@code findActiveContext} prefers that scoped key when a
+     *       {@code parentScopeKey} is in play. A nested split whose inner scope is stale is NOT
+     *       covered here.</li>
+     *   <li><b>One slot per key, all epochs.</b> Every epoch of a run shares this single
+     *       run-level entry (the {@code runId:epoch} bucket exists but nothing reads it), so a
+     *       rebuild takes the slot from an older epoch that is still in flight on this pod: its
+     *       results are recoverable from the epoch-scoped durable store, its item list is not.
+     *       The hazard CLASS is not new - the split node's own {@code createContext} already
+     *       overwrites that slot unconditionally when the next epoch's split runs on a pod, and
+     *       {@code SplitContextStaleEpochRestoreTest#olderInFlightEpochLosesTheSameThingEitherWay}
+     *       asserts both paths leave identical state - but this WIDENS where it can happen:
+     *       before, a pod that had not run epoch N+1's split kept epoch N's slot; now it drops
+     *       it on the first N+1 delivery. It is also the reason the comparison is strictly
+     *       "older loses" rather than "different loses": a late delivery for a PAST epoch must
+     *       not take the slot from the epoch currently executing.</li>
+     * </ul>
+     *
+     * <p>An {@link SplitContext#UNKNOWN_EPOCH} on either side keeps the pre-fix skip.
+     *
+     * @param runId the workflow run ID
+     * @param nodeId the node ID that had the signal/agent (for logging)
+     * @param splitItemData persisted split context data (splitNodeId + items + indices)
+     * @param epoch the epoch this delivery belongs to, or {@link SplitContext#UNKNOWN_EPOCH}
      */
     @SuppressWarnings("unchecked")
-    public void restoreContext(String runId, String nodeId, Map<String, Object> splitItemData) {
+    public void restoreContext(String runId, String nodeId, Map<String, Object> splitItemData, int epoch) {
         if (splitItemData == null || splitItemData.isEmpty()) {
             return;
         }
@@ -756,18 +841,55 @@ public class SplitContextManager implements RunScopedCache {
             return;
         }
 
-        // Check if context already exists (idempotent)
-        Optional<SplitContext> existing = getContext(runId, splitNodeId, workflowItemIndex);
-        if (existing.isPresent()) {
-            logger.debug("[SplitContextManager] restoreContext: Context already exists, skipping: runId={}, splitNodeId={}, workflowItemIndex={}",
-                runId, splitNodeId, workflowItemIndex);
-            return;
-        }
+        // Check if context already exists (idempotent), and whether the one in memory belongs to
+        // an OLDER epoch of this run - on another pod it can, and reusing it replays that epoch.
+        // Decided and applied under the map's own lock so two deliveries of the same new epoch
+        // racing on this pod cannot both rebuild (the second sees the first's fresh stamp).
+        final String contextKey = buildContextKey(splitNodeId, workflowItemIndex);
+        final List<Object> restoredItems = items;
+        // 0 = reused as-is, 1 = built (nothing in memory), 2 = rebuilt over an older epoch
+        int[] outcome = {0};
 
-        // Reconstruct SplitContext
-        createContext(runId, splitNodeId, workflowItemIndex, items);
-        logger.info("[SplitContextManager] Restored split context from DB: runId={}, nodeId={}, splitNodeId={}, workflowItemIndex={}",
-            runId, nodeId, splitNodeId, workflowItemIndex);
+        SplitContext resolved = contextsByRun
+            .computeIfAbsent(runId, k -> new ConcurrentHashMap<>())
+            .compute(contextKey, (k, current) -> {
+                if (current != null && !isStaleForEpoch(current, epoch)) {
+                    outcome[0] = 0;
+                    return current;
+                }
+                outcome[0] = (current == null) ? 1 : 2;
+                return SplitContext.create(contextKey, restoredItems, epoch);
+            });
+
+        switch (outcome[0]) {
+            case 2 -> logger.info(
+                "[SplitContextManager] Rebuilt a split context left behind by an older epoch: runId={}, nodeId={}, key={}, epoch={}, itemCount={}",
+                runId, nodeId, contextKey, epoch, resolved.itemCount());
+            // itemCount is on BOTH info lines on purpose: comparing the fan-out size a pod uses
+            // against the split's own "Created context ... itemCount=N" is how this class of bug
+            // is read off the logs.
+            case 1 -> logger.info(
+                "[SplitContextManager] Restored split context from the resume data: runId={}, nodeId={}, splitNodeId={}, workflowItemIndex={}, epoch={}, itemCount={}",
+                runId, nodeId, splitNodeId, workflowItemIndex, epoch, resolved.itemCount());
+            default -> logger.debug(
+                "[SplitContextManager] restoreContext: Context already exists for this epoch, skipping: runId={}, splitNodeId={}, workflowItemIndex={}, epoch={}",
+                runId, splitNodeId, workflowItemIndex, epoch);
+        }
+    }
+
+    /**
+     * Is {@code current} a context left behind by an EARLIER epoch than {@code epoch}?
+     *
+     * <p>Requires both stamps to be known: an {@link SplitContext#UNKNOWN_EPOCH} on either side
+     * means the caller could not attribute an epoch, and guessing there would rebuild a live
+     * context (dropping its per-item results) on a legitimate same-epoch re-entry. Strictly
+     * older, never merely different, so a late delivery for a past epoch cannot overwrite the
+     * context the current epoch is executing on.
+     */
+    private static boolean isStaleForEpoch(SplitContext current, int epoch) {
+        return epoch != SplitContext.UNKNOWN_EPOCH
+            && current.epoch() != SplitContext.UNKNOWN_EPOCH
+            && current.epoch() < epoch;
     }
 
     /**

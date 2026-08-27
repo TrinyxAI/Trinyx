@@ -100,6 +100,29 @@ class ToolAuthorizationPolicyTest {
     }
 
     @Test
+    @DisplayName("Both catalog execute spellings can raise a Connect card, and nothing else can")
+    void connectCardCapableCallsAreTheCatalogExecutePair() {
+        // This predicate is what keeps the connect hold alive for a user who already granted
+        // the rule, so each spelling has to be named. 'call' is an alias of 'execute' on the
+        // very same pre-flight, and it is the one an assertion about "execute" silently
+        // leaves out: drop it and those users go back to the two-turn flow with no test red.
+        assertThat(ToolAuthorizationPolicy.canRaiseConnectCard("catalog", "execute")).isTrue();
+        assertThat(ToolAuthorizationPolicy.canRaiseConnectCard("catalog", "call")).isTrue();
+        assertThat(ToolAuthorizationPolicy.canRaiseConnectCard("CATALOG", "Execute")).isTrue();
+
+        // The card comes from the catalog credential pre-flight, so no other tool produces
+        // one. Anything added here buys a longer ceiling on a hung backend for a card it can
+        // never raise - and would have to be added to the park guard in the same pass.
+        assertThat(ToolAuthorizationPolicy.canRaiseConnectCard("catalog", "search")).isFalse();
+        assertThat(ToolAuthorizationPolicy.canRaiseConnectCard("workflow", "execute")).isFalse();
+        assertThat(ToolAuthorizationPolicy.canRaiseConnectCard("agent", "execute")).isFalse();
+        assertThat(ToolAuthorizationPolicy.canRaiseConnectCard("application", "acquire")).isFalse();
+        // The fail-closed wildcard resolves no action; it must not throw either.
+        assertThat(ToolAuthorizationPolicy.canRaiseConnectCard("catalog", null)).isFalse();
+        assertThat(ToolAuthorizationPolicy.canRaiseConnectCard(null, "execute")).isFalse();
+    }
+
+    @Test
     @DisplayName("All listed actions are lowercase non-blank - keeps the list clean for matching")
     void listedActionsAreCleanLowercase() {
         for (Set<String> actions : ToolAuthorizationPolicy.SENSITIVE_ACTIONS.values()) {

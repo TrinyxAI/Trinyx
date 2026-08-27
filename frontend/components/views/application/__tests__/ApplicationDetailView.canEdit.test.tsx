@@ -20,6 +20,12 @@ const canvasProps = vi.hoisted(() => [] as Array<{ hideToggle?: boolean }>);
 const addTabMock = vi.hoisted(() => vi.fn());
 const updatePublicationMock = vi.hoisted(() => vi.fn());
 
+// The view mounts ApplicationSettingsMenu, whose "open the copy" link is a locale-aware
+// next-intl Link. That module resolves next/navigation from inside node_modules, which
+// vitest cannot do - stub it; the cog's own behaviour has its own suite.
+vi.mock('@/i18n/navigation', () => ({
+  Link: ({ href, children }: { href: string; children: React.ReactNode }) => <a href={href}>{children}</a>,
+}));
 vi.mock('@/lib/api', () => ({
   orchestratorApi: { updatePublication: updatePublicationMock },
 }));

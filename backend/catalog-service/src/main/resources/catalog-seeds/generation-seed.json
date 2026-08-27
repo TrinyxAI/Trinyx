@@ -1,5 +1,5 @@
 {
-  "version": 2026,
+  "version": 2027,
   "generatedFrom": "scripts/api-migrations/*.json",
   "generator": "scripts/api-migrations/generate_generation_seed.py",
   "endpointCount": 21,
@@ -195,8 +195,7 @@
             "capabilities": [
               "prompt",
               "voice",
-              "seed",
-              "language"
+              "seed"
             ],
             "required": [
               "prompt",

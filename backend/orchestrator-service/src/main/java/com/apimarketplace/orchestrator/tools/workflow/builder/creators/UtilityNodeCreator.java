@@ -504,7 +504,7 @@ public class UtilityNodeCreator extends CreatorBase {
         if (model == null || model.isBlank()) {
             return ToolExecutionResult.failure(ToolErrorCode.MISSING_PARAMETER, "GENERATE: 'model' is required.\n" +
                 "The model decides the format produced (image, video, audio, voice, music), the parameters "
-                + "it accepts and the price. Model ids cannot be guessed: call generation(action='models') "
+                + "it accepts and the price. Model ids cannot be guessed: workflow(action='help', topics=['generate']) "
                 + "to list them with what each accepts and what each costs.\n" +
                 "Example: params={model: 'seedance-2.0-fast', prompt: 'a paper boat in a rain gutter', "
                 + "duration_seconds: 5, aspect_ratio: '16:9'}");
@@ -575,7 +575,7 @@ public class UtilityNodeCreator extends CreatorBase {
                        + "costs more for a longer request: the node reports the size it billed on as "
                        + "{{core:" + normalizedLabel + ".output.billed_quantity}} in "
                        + "{{core:" + normalizedLabel + ".output.billed_unit}}. Call "
-                       + "generation(action='models') for each model's rate.",
+                       + "workflow(action='help', topics=['generate']) for the models this installation offers.",
                    "usage", "Parameters are checked against the model BEFORE the provider is called, so a "
                        + "rejected call costs nothing. Only the parameters listed in that model's 'accepts' "
                        + "are allowed; anything else is refused with the accepted list."),
@@ -2625,6 +2625,17 @@ public class UtilityNodeCreator extends CreatorBase {
         String inputMapping = getString(parameters, "inputMapping", "input_mapping", "input");
         Integer timeoutSeconds = getInt(parameters, "timeoutSeconds", "timeout_seconds", "timeout");
         if (timeoutSeconds == null) timeoutSeconds = 300;
+        // Clamp here as well as in the config record, so the value echoed back to the caller is
+        // the one that will actually be used rather than the one it asked for. Say so when it is
+        // reduced: silently returning a smaller number than was requested is how an author ends
+        // up believing a long wait is configured when it is not.
+        int requestedTimeoutSeconds = timeoutSeconds;
+        timeoutSeconds = Math.min(timeoutSeconds,
+            com.apimarketplace.orchestrator.domain.workflow.Core.SubWorkflowConfig.MAX_TIMEOUT_SECONDS);
+        String timeoutNote = requestedTimeoutSeconds > timeoutSeconds
+            ? " timeoutSeconds was reduced from " + requestedTimeoutSeconds + " to " + timeoutSeconds
+              + ", the maximum this node can wait."
+            : "";
         Integer maxDepth = getInt(parameters, "maxDepth", "max_depth");
         if (maxDepth == null) maxDepth = 5;
 
@@ -2668,6 +2679,9 @@ public class UtilityNodeCreator extends CreatorBase {
         return buildSuccessResponse("sub_workflow", nodeId, label, normalizedLabel, connectAfter,
             Map.of("workflowId", workflowId != null ? workflowId : "not_set",
                    "timeoutSeconds", timeoutSeconds,
+                   "waits_for_completion",
+                   "This node waits for the target to FINISH (up to " + timeoutSeconds
+                       + "s) and fails instead of returning a half-done result." + timeoutNote,
                    "access_result", "{{core:" + normalizedLabel + ".output.result}}"),
             config);
     }

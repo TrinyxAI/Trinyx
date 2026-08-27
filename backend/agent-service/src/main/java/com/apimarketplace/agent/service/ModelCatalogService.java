@@ -1109,6 +1109,8 @@ public class ModelCatalogService {
             entity.addUserModifiedField("rateLimitRpmPerTenant");
         }
 
+        requirePriceBeforeEnabling(entity, Boolean.TRUE.equals(entity.getEnabled()));
+
         ModelConfigOverrideEntity saved = repository.save(entity);
 
         // Sync pricing into auth.model_pricing for any row that carries a price -
@@ -1242,6 +1244,11 @@ public class ModelCatalogService {
         ModelConfigOverrideEntity parent = repository.findByProviderAndModelId(provider, modelId)
                 .orElseThrow(() -> new IllegalArgumentException(
                         "Unknown model: " + provider + ":" + modelId));
+        if (enabled) {
+            // Same rule as the global enable - a category sidecar is the other
+            // door into the picker, so an unpriced model must not slip through it.
+            requirePriceBeforeEnabling(parent, true);
+        }
 
         ModelCategorySettingsEntity setting = categoryRepository
                 .findById(new ModelCategorySettingsId(parent.getId(), category))
@@ -1255,6 +1262,46 @@ public class ModelCatalogService {
         setting.setEnabled(enabled);
         categoryRepository.save(setting);
         invalidateModelCaches();
+    }
+
+    /**
+     * Refuse to enable a model that carries no price.
+     *
+     * <p>An unpriced model does NOT bill zero: {@code ModelPricingService}
+     * falls back to its documented default rates (1.00 / 4.00 USD per 1M) and
+     * logs a warning, so enabling one silently charges every tenant a made-up
+     * rate that can be off in either direction. That was harmless while every
+     * row came from a feed that carries prices; it stopped being harmless when
+     * {@code NativeModelDiscoveryService} started adding rows from each
+     * provider's own {@code /models} endpoint, which publishes no pricing at
+     * all. Those rows land disabled by design, and this is what keeps them
+     * that way until an admin supplies the real rate.
+     *
+     * <p>Deliberately not a silent no-op: the caller gets a 400 naming the
+     * model, because "I enabled it and nothing happened" is the worse failure.
+     * A single price (input or output) is enough to pass - some models are
+     * genuinely free on one side.
+     *
+     * @param becomingEnabled the state the CALLER is moving the model to, which
+     *        is not always {@code entity.getEnabled()}: the category path flips
+     *        a sidecar row while the parent's global flag stays untouched (and
+     *        is typically null on a freshly discovered model). Reading the
+     *        parent's own flag there would let every category enable through.
+     */
+    private static void requirePriceBeforeEnabling(ModelConfigOverrideEntity entity,
+                                                   boolean becomingEnabled) {
+        if (!becomingEnabled) {
+            return;
+        }
+        if (entity.getPriceInput() != null || entity.getPriceOutput() != null) {
+            return;
+        }
+        throw new IllegalArgumentException(
+                "Cannot enable " + entity.getProvider() + ":" + entity.getModelId()
+                        + " - it has no price. Set priceInput and priceOutput first; "
+                        + "an unpriced model would be billed at the platform default rate, "
+                        + "not the provider's. Models discovered from a provider's own "
+                        + "/models endpoint always arrive unpriced.");
     }
 
     @Transactional

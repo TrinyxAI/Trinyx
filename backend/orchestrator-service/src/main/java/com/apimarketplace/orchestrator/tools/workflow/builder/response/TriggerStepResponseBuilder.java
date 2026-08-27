@@ -173,8 +173,8 @@ public class TriggerStepResponseBuilder {
                 "requires_pin", "This trigger fires in production ONLY against the pinned version. " +
                     "No pin → " + refusalDetail + ".",
                 "flow", "1) workflow(action='finish'). " +
-                    "2) workflow(action='execute', id='<uuid>') once to seed a WAITING_TRIGGER run at the new version. " +
-                    "3) workflow(action='pin', workflow_id='<uuid>', version=N) to promote it to production.",
+                    "2) workflow(action='pin', workflow_id='<uuid>', version=N) to promote it to production - "
+                    + "pin prepares the production run itself, so you do NOT have to execute the workflow first.",
                 "see_also", "workflow(action='help', topics=['pin']) for the full pin/unpin contract."
             ));
         }

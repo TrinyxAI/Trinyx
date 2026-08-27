@@ -223,11 +223,13 @@ describe('MarketplacePage - CE cloud-parity gate', () => {
     expect(screen.getByText('tabMyPublications')).toBeInTheDocument();
     expect(screen.getByText('tabMyPurchases')).toBeInTheDocument();
 
-    // Explore data comes from the CE backend remote proxy with the cloud's
-    // default pagination - never from the local orchestrator endpoint and
-    // never from a direct browser call to livecontext.ai.
+    // Explore data comes from the CE backend remote proxy - never from the local
+    // orchestrator endpoint and never from a direct browser call to
+    // livecontext.ai. The refinements ride along so the CLOUD answers them; a
+    // linked CE filtering the page it received would only ever filter that page.
     await waitFor(() => {
-      expect(publicationServiceMock.getRemoteMarketplacePublications).toHaveBeenCalledWith(0, 50, undefined);
+      expect(publicationServiceMock.getRemoteMarketplacePublications).toHaveBeenCalledWith(
+        0, expect.any(Number), undefined, expect.objectContaining({ displayMode: 'APPLICATION' }));
     });
     expect(await screen.findByText('Cloud Parity App')).toBeInTheDocument();
     expect(orchestratorApiMock.getMarketplacePublications).not.toHaveBeenCalled();
@@ -248,7 +250,8 @@ describe('MarketplacePage - CE cloud-parity gate', () => {
     expect(screen.getByText('tabMyPublications')).toBeInTheDocument();
     expect(screen.queryByText('cloudConnect.title')).not.toBeInTheDocument();
     await waitFor(() => {
-      expect(publicationServiceMock.getRemoteMarketplacePublications).toHaveBeenCalledWith(0, 50, undefined);
+      expect(publicationServiceMock.getRemoteMarketplacePublications).toHaveBeenCalledWith(
+        0, expect.any(Number), undefined, expect.objectContaining({ displayMode: 'APPLICATION' }));
     });
     expect(await screen.findByText('Cloud Parity App')).toBeInTheDocument();
   });

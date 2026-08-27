@@ -545,10 +545,33 @@ public final class WorkflowPlanParser {
                     safeString(data.get("graphNodeId")),
                     parseLong(data.get("selectedCredentialId")),
                     parseCredentialSource(data.get("credentialSource")),
-                    parseLong(data.get("platformCredentialId"))
+                    parseLong(data.get("platformCredentialId")),
+                    // Absent from every plan written before the field existed, which
+                    // is what keeps those plans resolving their credential exactly as
+                    // they did. Both spellings are accepted because a plan can be
+                    // written by the builder (camelCase) or by an agent (snake_case).
+                    firstPresentString(data.get("credentialSelector"), data.get("credential_selector"))
                 );
             })
             .collect(Collectors.toList());
+    }
+
+    /**
+     * First of the given values that is PRESENT as a string, blank included.
+     *
+     * <p>Blank is deliberately not the same as absent here: absent means the step
+     * has no dynamic credential selection, blank means one was chosen and left
+     * empty. Treating them alike is what let a cleared expression fall back to the
+     * account pin instead of failing.
+     */
+    private static String firstPresentString(Object... raws) {
+        for (Object raw : raws) {
+            String value = safeString(raw);
+            if (value != null) {
+                return value;
+            }
+        }
+        return null;
     }
 
     private static CredentialSource parseCredentialSource(Object raw) {

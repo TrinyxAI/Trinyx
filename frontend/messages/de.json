@@ -792,6 +792,7 @@
     "stopDictation": "Diktat stoppen",
     "dictationNotSupported": "Spracherkennung wird in diesem Browser nicht unterstützt",
     "attachFiles": "Dateien anhängen",
+    "moreActions": "Weitere Aktionen",
     "imageViewer": {
       "enlarge": "Vergrößern"
     },
@@ -1424,6 +1425,17 @@
     "retry": "Erneut versuchen"
   },
   "marketplace": {
+    "editableCopy": {
+      "button": "Bearbeitbare Kopie erstellen",
+      "description": "Kopiert diese Anwendung in Ihre Workflows, damit Sie sie bearbeiten können. Die installierte Anwendung bleibt unverändert.",
+      "creating": "Bearbeitbare Kopie wird erstellt...",
+      "created": "Bearbeitbare Kopie erstellt",
+      "existing": "Sie haben bereits eine bearbeitbare Kopie",
+      "open": "Öffnen",
+      "error": "Die bearbeitbare Kopie konnte nicht erstellt werden",
+      "openCreated": "Bearbeitbare Kopie öffnen",
+      "installFailed": "Die bearbeitbare Kopie konnte nicht erstellt werden. Die Anwendung ist installiert: Sie können die Kopie über das Einstellungsmenü erneut anfordern."
+    },
     "title": "Marktplatz",
     "subtitle": "Entdecken und nutzen Sie Workflows und Anwendungen, die von der Community erstellt wurden",
     "searchPlaceholder": "Workflows und Anwendungen suchen...",
@@ -1610,6 +1622,8 @@
     "priceFree": "Kostenlos",
     "pricePaid": "Kostenpflichtig",
     "resetFilters": "Filter zurücksetzen",
+    "loadMore": "Mehr laden",
+    "loadingMore": "Wird geladen...",
     "noFilterResults": "Keine Anwendung entspricht diesen Filtern",
     "noFilterResultsHint": "Erweitern Sie den Bewertungs-, Datums- oder Preisfilter, um mehr Anwendungen zu sehen.",
     "filterSkills": "Skills",
@@ -1663,7 +1677,10 @@
     "snapshotBadge": "Snapshot",
     "snapshotEmpty": "Keine Daten in diesem Snapshot",
     "snapshotPreview": "Snapshot-Vorschau",
-    "viewRejectionReason": "Ablehnungsgrund anzeigen"
+    "viewRejectionReason": "Ablehnungsgrund anzeigen",
+    "settingsMenu": {
+      "label": "Anwendungseinstellungen"
+    }
   },
   "reviews": {
     "title": "Bewertungen",
@@ -1719,6 +1736,8 @@
   "applications": {
     "favorite": "Zu Favoriten hinzufügen",
     "unfavorite": "Aus Favoriten entfernen",
+    "unmuteSound": "Ton einschalten",
+    "muteSound": "Ton ausschalten",
     "favoriteErrorTitle": "Favoriten konnten nicht aktualisiert werden",
     "favoriteErrorMessage": "Bitte versuchen Sie es erneut.",
     "filterAll": "Alle",
@@ -1878,6 +1897,19 @@
       "dismiss": "Verstanden"
     },
     "acquire": {
+      "installedTitle": "Installation abgeschlossen",
+      "installedIntro": "„{title}“ wurde zu Ihrem Arbeitsbereich hinzugefügt:",
+      "installedPrimaryApplication": "1 Anwendung",
+      "installedPrimaryWorkflow": "1 Workflow",
+      "installedPrimaryAgent": "1 Agent",
+      "installedPrimarySkill": "1 Skill",
+      "installedPrimaryTable": "1 Tabelle",
+      "installedPrimaryInterface": "1 Oberfläche",
+      "installedWorkflows": "{count, plural, one {# Workflow} other {# Workflows}}",
+      "installedInterfaces": "{count, plural, one {# Oberfläche} other {# Oberflächen}}",
+      "installedTables": "{count, plural, one {# Tabelle} other {# Tabellen}}",
+      "installedAgents": "{count, plural, one {# Agent} other {# Agenten}}",
+      "installBusy": "Eine andere Installation läuft gerade",
       "titleFree": "Anwendung installieren",
       "titlePaid": "Anwendung kaufen",
       "anonymous": "Anonym",
@@ -3265,6 +3297,10 @@
       "applied": "{inserted} neu, {updated} aktualisiert, {deprecated} veraltet angewendet. Erstellen Sie ein neues Bundle zur Verteilung.",
       "apply": "Anwenden",
       "applyRejected": "Die Anwendung wurde abgelehnt - prüfen Sie die Guard-Fehler oben.",
+      "discoveryTitle": "Direkt bei den Anbietern gefunden",
+      "discoveryPricedFromOpenRouter": "Die Preise stammen von OpenRouter, das einen Wiederverkaufstarif angibt. Prüfen Sie sie anhand der Preisliste des Anbieters, bevor Sie ein Modell aktivieren.",
+      "discoveryCount": "{count, plural, one {# neues Modell} other {# neue Modelle}}",
+      "discoverySkipped": "Kein API-Schlüssel für: {providers}. Ihre Modelllisten konnten nicht gelesen werden.",
       "cancel": "Abbrechen",
       "colModel": "Modell",
       "colProvider": "Anbieter",
@@ -3278,7 +3314,7 @@
       "overridePriceSanity": "Preisplausibilitäts-Guard überschreiben",
       "overridePriceSanityHint": "Markierte Zeilen trotzdem anwenden. Aktivieren Sie dies nur, wenn Sie die Preisänderungen mit der offiziellen Preisseite des Anbieters überprüft haben.",
       "refresh": "Von Anbietern aktualisieren",
-      "subtitle": "Rufen Sie aktuelle Modelle und Preise von LiteLLM + OpenRouter ab, prüfen Sie den Diff und wenden Sie ihn an.",
+      "subtitle": "Rufen Sie aktuelle Modelle und Preise von LiteLLM, OpenRouter und der Modellliste jedes Anbieters ab, prüfen Sie den Diff und wenden Sie ihn an.",
       "title": "Aus Live-Feeds aktualisieren",
       "unchanged": "Unverändert",
       "updated": "Aktualisiert"
@@ -3473,6 +3509,24 @@
       "cannotRemoveDefault": "Standard kann nicht entfernt werden",
       "onlyCredentialForIntegration": "Dies sind die einzigen Anmeldedaten für diesen Dienst. Fügen Sie weitere Anmeldedaten hinzu, bevor Sie diese als Standard entfernen.",
       "cannotRemoveOnlyCredential": "Standard kann nicht entfernt werden: Dies sind die einzigen Anmeldedaten für diesen Dienst",
+      "rename": "Umbenennen",
+      "renameAriaLabel": "{name} umbenennen",
+      "renameDialog": {
+        "title": "Anmeldedaten umbenennen",
+        "description": "Es ändert sich nur der angezeigte Name: Die Verbindung, ihre Berechtigungen und ihr Standard-Status bleiben unverändert.",
+        "label": "Name",
+        "placeholder": "z. B. Gmail (Arbeitskonto)",
+        "save": "Speichern",
+        "saving": "Wird gespeichert...",
+        "cancel": "Abbrechen",
+        "successTitle": "Anmeldedaten umbenannt",
+        "success": "In „{name}“ umbenannt",
+        "cannotRename": "Diese Verbindung wird über ihren Namen identifiziert und kann daher nicht umbenannt werden: Die Workflow-Knoten, die sie nutzen, erkennen sie an diesem Namen, und eine Umbenennung würde sie abkoppeln.",
+        "duplicateName": "Diesen Namen trägt bereits ein anderer Zugang desselben Besitzers für denselben Dienst, möglicherweise in einem anderen Workspace. Bitte einen anderen wählen.",
+        "failed": "Die Anmeldedaten konnten nicht umbenannt werden. Bitte erneut versuchen.",
+        "emptyName": "Der Name darf nicht leer sein.",
+        "tooLong": "Der Name darf höchstens {max} Zeichen lang sein."
+      },
       "noMatchingCredentials": "Keine Anmeldedaten entsprechen Ihren Filtern.",
       "noCredentialsYet": "Noch keine Anmeldedaten konfiguriert.",
       "addFirstIntegration": "Fügen Sie Ihre erste Integration über den Tab Verfügbar hinzu.",
@@ -4927,6 +4981,13 @@
         "body": "Einmalige Aufladungen werden hier aktiviert, sobald die Zahlung eingerichtet ist.",
         "title": "Bald verfügbar"
       }
+    },
+    "event": {
+      "card": {
+        "referenceTitle": "Preis nach der Gründerphase: {price} pro Monat",
+        "foundingUntilKept": "Gründerpreis garantiert bis <b>{date}</b>, danach behalten Sie ihn, solange Sie abonniert bleiben",
+        "foundingUntil": "Gründerpreis garantiert bis <b>{date}</b>"
+      }
     }
   },
   "storage": {
@@ -5078,7 +5139,8 @@
     "moveHere": "Hierher verschieben",
     "noFoldersYet": "Noch keine Ordner - erstellen Sie zuerst einen oder verschieben Sie auf die oberste Ebene.",
     "backToParent": "Eine Ebene nach oben",
-    "generate": "Generieren"
+    "generate": "Generieren",
+    "generatedAssets": "Generiert"
   },
   "fileDetail": {
     "download": "{name} herunterladen",
@@ -6611,7 +6673,7 @@
       "mappingValuePlaceholder": "Ausdruck oder Wert",
       "timeout": "Zeitüberschreitung (Sekunden)",
       "timeoutPlaceholder": "z. B. 300",
-      "timeoutHelp": "Maximale Ausführungszeit in Sekunden",
+      "timeoutHelp": "Wartezeit, bis der Sub-Workflow fertig ist. Er läuft weiter, wenn die Zeit abläuft.",
       "maxDepth": "Maximale Tiefe",
       "maxDepthPlaceholder": "z. B. 5",
       "maxDepthHelp": "Maximale Verschachtelungstiefe für rekursive Sub-Workflows",
@@ -6733,6 +6795,11 @@
       "timeout": "Zeitüberschreitung (Sekunden)",
       "timeoutPlaceholder": "z. B. 30",
       "timeoutHelp": "Maximale Ausführungszeit in Sekunden"
+    },
+    "rerunConfirm": {
+      "title": "Ab diesem Schritt neu starten?",
+      "message": "Dieser Lauf ist automatisch. Ein Neustart hier führt diesen Schritt erneut aus und lässt danach den Rest des Workflows von selbst weiterlaufen, was kostenpflichtige Tools aufrufen und echte Nachrichten senden kann.",
+      "confirm": "Neu starten"
     },
     "canvas": {
       "portSingleTargetHint": "Dieser Ausgang ist bereits verbunden. Ein Port führt zu genau einem Knoten - füge einen Fork-Knoten hinzu, um mehrere parallel auszuführen.",
@@ -7569,6 +7636,15 @@
       "selectAll": "Alle auswählen",
       "autoLayout": "Automatisches Layout",
       "fitView": "Ansicht anpassen"
+    },
+    "credentialSelector": {
+      "accountLabel": "Konto für diesen Schritt",
+      "toggleAriaLabel": "Konto zur Laufzeit wählen",
+      "toggleHelpOff": "Das Konto wird jetzt gewählt, in der Auswahl unten. Einschalten, um es zur Laufzeit zu bestimmen.",
+      "toggleHelpOn": "Das Konto wird zur Laufzeit aus dem Ausdruck unten bestimmt. Ausschalten, um jetzt eines zu wählen.",
+      "expressionLabel": "Konto-Ausdruck",
+      "expressionCaution": "Wer diesen Wert schreiben kann, wählt das Konto: binden Sie ihn an eine Quelle, die Sie kontrollieren.",
+      "expressionHelp": "Muss den NAMEN einer Ihrer Anmeldedaten für diese Integration ergeben (oder deren Id). Nutzen Sie eine Tabellenzeile, ein Trigger-Feld oder ein Split-Element, um einen Workflow über mehrere Konten laufen zu lassen. Ergibt sich nichts, schlägt der Schritt fehl, statt auf Ihr Standardkonto zurückzufallen. Wählbar ist nur ein Konto mit dem Status aktiv, dessen Name nicht mit einem anderen aktiven Konto derselben Integration geteilt wird; ein Name aus einer positiven ganzen Zahl wird als Id gelesen. Binden Sie ihn an etwas, das der Workflow-Eigentümer kontrolliert (eine Tabellenzeile, eine Variable), statt an ein Feld, das ein nicht vertrauenswürdiger Besucher ausfüllen kann, etwa den Body eines öffentlichen Webhooks oder ein Formular einer geteilten Anwendung."
     }
   },
   "webhookTrigger": {
@@ -8052,6 +8128,7 @@
     "browserAgent": "Browser-Agent"
   },
   "serviceApproval": {
+    "waitingForYou": "Der Assistent wartet auf Ihre Antwort, um fortzufahren.",
     "title": "Dienste verbinden",
     "subtitle": "Verbinden Sie die folgenden Dienste, um Ihre Anfrage abzuschließen",
     "reason": "Warum dies benötigt wird",
@@ -8575,6 +8652,12 @@
       "totalAvailable": "Insgesamt verfügbare Credits",
       "walletSubtitle": "Credits aus Ihrem Plan und Aufladungen",
       "walletTitle": "Wallet"
+    },
+    "upgradeRequired": {
+      "label": "Bezahlte Credits nötig",
+      "title": "Ihr Guthaben kann dieses Modell nicht bezahlen",
+      "explanation": "Ihre monatlichen Credits decken das Ausführen von Workflow-Knoten ab, aber nicht die Arbeit eines Modells (Chat, Agenten, Generierung). Diese wird aus dem Pay-as-you-go-Guthaben bezahlt, und davon haben Sie keines mehr.",
+      "cta": "Pläne ansehen oder aufladen"
     }
   },
   "localMcp": {
@@ -9615,6 +9698,7 @@
     }
   },
   "toolAuthorization": {
+    "waitingForYou": "Der Assistent wartet auf Ihre Antwort, um fortzufahren.",
     "actionLabel": "Aktion",
     "approve": "Autorisieren",
     "approved": "Autorisiert",
@@ -10230,7 +10314,10 @@
       "providerPlaceholder": "Anbieter auswählen",
       "chooseFile": "Datei auswählen",
       "replaceFile": "Ersetzen",
-      "noFile": "Keine Datei ausgewählt"
+      "noFile": "Keine Datei ausgewählt",
+      "optionsLoading": "Werte werden geladen...",
+      "optionsTruncated": "Es werden die ersten Werte von {count} angezeigt. Geben Sie einen Wert ein, wenn der gesuchte fehlt.",
+      "optionsEmpty": "Der Anbieter hat für dieses Feld keine Werte zurückgegeben. Geben Sie einen ein, wenn Sie ihn kennen."
     },
     "modelCount": "{count} Modelle",
     "empty": "Es ist noch kein Generierungsmodell verfügbar.",
@@ -10238,6 +10325,8 @@
     "done": "Fertig",
     "billedOn": "Abgerechnet über {quantity} {unit}",
     "download": "Herunterladen",
+    "openInFiles": "In Dateien ansehen",
+    "savedNoPreview": "Die Generierung ist abgeschlossen, aber es kam nichts zurück, was diese Seite anzeigen kann. Falls ein Asset entstanden ist, liegt es in Ihren Dateien.",
     "generate": "Generieren",
     "again": "Etwas ändern",
     "back": "Zurück",
@@ -10248,14 +10337,65 @@
       "stillRunning": "Die Verbindung wurde unterbrochen, die Generierung läuft aber auf dem Server weiter und wird abgerechnet. Ihre Datei erscheint in Ihren Dateien, sobald sie fertig ist.",
       "unreadable": "Die Generierung wurde abgelehnt und es wurde nichts erzeugt, doch der Grund kam in einer Form zurück, die diese Seite nicht anzeigen kann. Versuchen Sie ein anderes Modell oder versuchen Sie es gleich noch einmal."
     },
-    "payer": {
-      "monthlyCreditsOnly": "Ihre monatlichen Credits finanzieren Workflow-Ausführungen, keine Generierung. Nutzen Sie Ihren eigenen Schlüssel, oder schließen Sie ein Abo ab oder laden Sie auf, um mit Credits zu zahlen."
-    },
     "assetRoles": {
       "source": "Quellbild",
       "first_frame": "Erstes Bild",
       "reference": "Referenzbild",
       "mask": "Maske"
+    },
+    "history": {
+      "toggle": "Frühere Generierungen",
+      "title": "Frühere Generierungen",
+      "subtitle": "Wählen Sie eine aus, um mit ihren Einstellungen zu starten"
     }
+  },
+  "generationHistory": {
+    "allFormats": "Alle",
+    "empty": "Hier wurde noch nichts generiert. Was Sie generieren, erscheint hier, mit dem Modell und den Worten, die es erzeugt haben.",
+    "emptyForFormat": "Hier wurde noch kein Inhalt vom Typ {format} generiert.",
+    "error": "Die früheren Generierungen konnten nicht geladen werden. Versuchen Sie es gleich noch einmal.",
+    "untitled": "Generierung ohne Titel",
+    "reuse": "Wiederverwenden",
+    "reuseUnavailable": "Dieses Modell ist nicht mehr verfügbar, daher lässt sich diese Generierung nicht erneut ausführen.",
+    "open": "{name} öffnen",
+    "previous": "Zurück",
+    "next": "Weiter",
+    "range": "{from}-{to}",
+    "generatedWith": "Generiert mit {model}",
+    "regenerate": "Ändern und erneut generieren"
+  },
+  "folders": {
+    "newFolder": "Neuer Ordner",
+    "createFolder": "Ordner erstellen",
+    "renameFolder": "Ordner umbenennen",
+    "folderName": "Ordnername",
+    "cancel": "Abbrechen",
+    "deleteFolder": "Ordner löschen",
+    "deleteFolderConfirm": "Ordner „{name}“ löschen? Sein Inhalt wandert zurück auf die oberste Ebene, nichts wird gelöscht.",
+    "moveToFolder": "In Ordner verschieben",
+    "back": "Zurück",
+    "upOneLevel": "Eine Ebene höher",
+    "allWorkflows": "Alle Workflows",
+    "allAgents": "Alle Agenten",
+    "allTables": "Alle Tabellen",
+    "allInterfaces": "Alle Seiten",
+    "allApplications": "Alle Apps",
+    "workflowCount": "{count, plural, =0 {Leer} one {# Workflow} other {# Workflows}}",
+    "agentCount": "{count, plural, =0 {Leer} one {# Agent} other {# Agenten}}",
+    "tableCount": "{count, plural, =0 {Leer} one {# Tabelle} other {# Tabellen}}",
+    "interfaceCount": "{count, plural, =0 {Leer} one {# Seite} other {# Seiten}}",
+    "applicationCount": "{count, plural, =0 {Leer} one {# App} other {# Apps}}",
+    "subfolderCount": "{count, plural, one {# Ordner} other {# Ordner}}",
+    "emptyFolderTitle": "Dieser Ordner ist leer",
+    "emptyFolderSubtitle": "Ziehen Sie Karten auf einen Ordner oder nutzen Sie In Ordner verschieben für eine Auswahl.",
+    "moved": "Verschoben",
+    "movedToFolder": "{count, plural, one {# Element} other {# Elemente}} nach {name} verschoben",
+    "movedToTopLevel": "{count, plural, one {# Element} other {# Elemente}} zurück auf die oberste Ebene verschoben",
+    "draggingCount": "{count, plural, one {# Element} other {# Elemente}}",
+    "actionFailed": "Ordneraktion fehlgeschlagen",
+    "createFailed": "Der Ordner konnte nicht erstellt werden.",
+    "renameFailed": "Der Ordner konnte nicht umbenannt werden.",
+    "deleteFailed": "Der Ordner konnte nicht gelöscht werden.",
+    "moveFailed": "Das Verschieben konnte nicht abgeschlossen werden."
   }
 }

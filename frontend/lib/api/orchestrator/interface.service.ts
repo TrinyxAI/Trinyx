@@ -6,6 +6,7 @@
  */
 
 import { apiClient } from '../api-client';
+import type { ResourceFolder, ResourceFolderTile } from './resource-folder.service';
 import type { Interface, InterfaceRenderResult, InterfaceSnapshot } from './types';
 
 export class InterfaceService {
@@ -37,12 +38,22 @@ export class InterfaceService {
     includeTemplates?: boolean;
     sort?: string;
     visibility?: 'all' | 'public' | 'private';
+    /**
+     * Which folder to list: `'root'` for the pages filed nowhere, a folder id for that
+     * folder's own pages. Omit it to list everything. A search overrides it server-side.
+     */
+    folderId?: string | null;
+    /** Ask for the folder tiles of that level (and the trail leading to it). */
+    includeFolders?: boolean;
   } = {}): Promise<{
     items: Interface[];
     totalCount: number;
     page: number;
     size: number;
     publicationStatuses: Record<string, { status?: string; rejectionReason?: string | null }>;
+    folders: ResourceFolderTile[];
+    folderTrail: ResourceFolder[];
+    folderMissing?: boolean;
   }> {
     const params: Record<string, string> = {};
     if (options.page != null) params.page = String(options.page);
@@ -53,6 +64,8 @@ export class InterfaceService {
     params.includeTemplates = String(options.includeTemplates ?? false);
     if (options.sort) params.sort = options.sort;
     if (options.visibility) params.visibility = options.visibility;
+    if (options.folderId != null) params.folderId = options.folderId;
+    if (options.includeFolders) params.includeFolders = 'true';
     const data = await apiClient.get<any>('/interfaces/paged', { params });
     return {
       items: data.items ?? [],
@@ -60,6 +73,9 @@ export class InterfaceService {
       page: data.page ?? 0,
       size: data.size ?? 25,
       publicationStatuses: data.publicationStatuses ?? {},
+      folders: data.folders ?? [],
+      folderTrail: data.folderTrail ?? [],
+      folderMissing: data.folderMissing === true,
     };
   }
 

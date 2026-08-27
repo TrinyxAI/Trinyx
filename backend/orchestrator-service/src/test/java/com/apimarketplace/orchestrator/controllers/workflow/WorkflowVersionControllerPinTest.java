@@ -205,10 +205,11 @@ class WorkflowVersionControllerPinTest {
     class ErrorCaseTests {
 
         @Test
-        @DisplayName("Pin version with no run should return 400")
-        void shouldReturn400WhenNoRunExistsForVersion() {
+        @DisplayName("Pin whose production run could not be prepared returns 400 with the cause")
+        void shouldReturn400WhenProductionRunUnavailable() {
             when(pinService.pin(eq(WORKFLOW_ID), eq(TENANT_ID), isNull(), eq(5)))
-                    .thenReturn(new WorkflowPinService.PinResult.NoSuccessfulRun(5));
+                    .thenReturn(new WorkflowPinService.PinResult.ProductionRunUnavailable(
+                            5, WorkflowPinService.PROVISIONING_FAILED_REASON));
 
             ResponseEntity<?> response = controller.pinVersion(
                     WORKFLOW_ID_STR, TENANT_ID, null, null, Map.of("version", 5));
@@ -216,7 +217,11 @@ class WorkflowVersionControllerPinTest {
             assertThat(response.getStatusCode()).isEqualTo(HttpStatus.BAD_REQUEST);
             @SuppressWarnings("unchecked")
             Map<String, Object> body = (Map<String, Object>) response.getBody();
-            assertThat((String) body.get("error")).contains("No successful run exists for version 5");
+            // The version and the state both reach the caller - a bare "failed" would
+            // leave nothing to act on. The reason is a controlled phrase, never an
+            // exception message: this string is rendered verbatim in the UI.
+            assertThat((String) body.get("error")).contains("Version 5");
+            assertThat((String) body.get("error")).contains(WorkflowPinService.PROVISIONING_FAILED_REASON);
         }
 
         @Test

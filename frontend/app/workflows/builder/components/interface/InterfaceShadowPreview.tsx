@@ -39,6 +39,13 @@ export interface InterfaceShadowPreviewProps {
   onSizeChange?: (size: ContentSize) => void;
   /** Strip <script> + on* handlers from htmlTemplate (untrusted publisher contexts). */
   removeScripts?: boolean;
+  /**
+   * Mute state for the interface's own `<audio>`/`<video>`. Undefined = play as
+   * authored; a boolean hands the volume to the embedder (see `InterfaceIframe`).
+   */
+  mediaMuted?: boolean;
+  /** Fired with whether the interface contains any `<audio>`/`<video>` at all. */
+  onMediaAudioPresence?: (hasAudio: boolean) => void;
 }
 
 /**
@@ -68,6 +75,8 @@ export const InterfaceShadowPreview = React.memo(function InterfaceShadowPreview
   fileUploadContext,
   onSizeChange: externalSizeChange,
   removeScripts,
+  mediaMuted,
+  onMediaAudioPresence,
 }: InterfaceShadowPreviewProps) {
   const [contentHeight, setContentHeight] = React.useState(300);
 
@@ -115,6 +124,8 @@ export const InterfaceShadowPreview = React.memo(function InterfaceShadowPreview
       style={iframeStyle}
       fileUploadContext={fileUploadContext}
       removeScripts={removeScripts}
+      mediaMuted={mediaMuted}
+      onMediaAudioPresence={onMediaAudioPresence}
     />
   );
 });

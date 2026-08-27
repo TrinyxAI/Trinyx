@@ -82,13 +82,34 @@ describe('WorkflowNodeIcons - the bubble is square-rounded', () => {
     }
   });
 
-  it('keeps the corner under a third of the box, so no bubble reads as a circle', () => {
-    // The regression in one number: 12px of corner on the 28px bubble was 43%
-    // of its height, against 25-30% everywhere else on the ladder.
+  it('is the height it claims to be, so the rung is chosen against the real box', () => {
+    // The weak point of the whole design: production hands the helper a NUMBER
+    // beside a Tailwind height class, and nothing made the two agree. Change
+    // `h-7 w-7` to `h-9 w-9` and leave the 28, and the previous assertion still
+    // passes while the rendered box is a rung out. Read the class, and it cannot.
+    const H_CLASS_PX: Record<string, number> = { 'h-6': 24, 'h-7': 28, 'h-8': 32, 'h-9': 36, 'h-10': 40 };
+
     for (const { size, heightPx } of SIZES) {
-      const radiusPx = RUNG_PX[nodeIconBoxRadiusClass(heightPx)];
-      expect(radiusPx, size).toBeDefined();
-      expect(radiusPx / heightPx, size).toBeLessThanOrEqual(1 / 3);
+      for (const bubble of bubbles(size)) {
+        const heightClass = bubble.className.split(/\s+/).find((c) => c in H_CLASS_PX);
+        expect(heightClass, `${size}: no known height class`).toBeDefined();
+        expect(H_CLASS_PX[heightClass as string], size).toBe(heightPx);
+      }
+      cleanup();
+    }
+  });
+
+  it('keeps the corner under a third of every box it actually renders', () => {
+    // The regression in one number: 12px of corner on the 28px bubble was 43%
+    // of its height, against 25-30% everywhere else on the ladder. Measured on
+    // the RENDERED class rather than recomputed from the helper, which is what
+    // the ladder's own suite already does.
+    for (const { size, heightPx } of SIZES) {
+      for (const bubble of bubbles(size)) {
+        const radiusPx = RUNG_PX[radiiOf(bubble)[0]];
+        expect(radiusPx, size).toBeDefined();
+        expect(radiusPx / heightPx, size).toBeLessThanOrEqual(1 / 3);
+      }
       cleanup();
     }
   });

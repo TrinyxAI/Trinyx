@@ -32,6 +32,9 @@ const {
   drivePageForSmoothVideo,
   buildFfmpegArgs,
   buildImagePipeArgs,
+  buildAudioMuxArgs,
+  synthesizeClipAudio,
+  readPageAudioTimeline,
   createFrameSink,
   classifyRenderError,
   RenderPool,
@@ -212,9 +215,14 @@ app.post('/internal/render/video', async (req, res) => {
       // clip" apart from "we ran out of wall-clock budget".
       res.set(buildRenderOutcomeHeaders(rendered));
     } else {
+      let audioEvents = [];
       const webmPath = await pool.withVideoContext(
         { viewport: o.viewport, videoDir: workDir },
-        (page) => drivePageForVideo(page, o),
+        async (page) => {
+          await drivePageForVideo(page, o);
+          // Read before withVideoContext closes the context to finalise the recording.
+          if (o.audio) audioEvents = await readPageAudioTimeline(page, o.audioFlag);
+        },
       );
       if (!webmPath) throw new Error('recording produced no video file');
 
@@ -226,6 +234,7 @@ app.post('/internal/render/video', async (req, res) => {
           buildFfmpegArgs(webmPath, outPath, { fps: o.fps }),
           { timeout: FFMPEG_TIMEOUT_MS, maxBuffer: 8 * 1024 * 1024 },
         );
+        outPath = await muxPageAudio(outPath, audioEvents, workDir, o.maxDurationMs / 1000);
       }
       bytes = await fs.readFile(outPath);
     }
@@ -317,6 +326,7 @@ app.post('/internal/media', async (req, res) => {
 async function renderSmoothVideo(o, workDir) {
   const outPath = path.join(workDir, 'out.mp4');
   let outcome = { frames: 0, truncated: false };
+  let audioEvents = [];
   await pool.withContext(
     { viewport: o.viewport, initScript: VIRTUAL_TIME_INIT_SCRIPT },
     async (page) => {
@@ -335,13 +345,44 @@ async function renderSmoothVideo(o, workDir) {
           console.warn(`[render] smooth video hit the wall-clock budget (${SMOOTH_WALL_TIMEOUT_MS}ms) - finalising truncated clip (${result.frames} frames)`);
         }
         await sink.finalize();
+        // Must be read INSIDE the pool callback: the context (and the page with it) is
+        // closed as soon as this returns.
+        if (o.audio) audioEvents = await readPageAudioTimeline(page, o.audioFlag);
       } catch (err) {
         await sink.abort();
         throw err;
       }
     },
   );
-  return { bytes: await fs.readFile(outPath), ...outcome };
+  const finalPath = await muxPageAudio(outPath, audioEvents, workDir, outcome.frames / o.fps);
+  return { bytes: await fs.readFile(finalPath), ...outcome };
+}
+
+/**
+ * Lay the page's own soundtrack onto a finished clip. Best-effort by design: no events, a
+ * synth that produces nothing, or an ffmpeg failure all fall back to the silent clip that
+ * would have shipped anyway - a missing soundtrack must never turn a good render into a 502.
+ * Returns the path to use.
+ */
+async function muxPageAudio(videoPath, events, workDir, durationSeconds) {
+  if (!events || events.length === 0) return videoPath;
+  try {
+    const wav = synthesizeClipAudio(events, { durationSeconds });
+    if (!wav) return videoPath;
+    const wavPath = path.join(workDir, 'score.wav');
+    const withAudio = path.join(workDir, 'out-av.mp4');
+    await fs.writeFile(wavPath, wav);
+    await execFileAsync(
+      FFMPEG_PATH,
+      buildAudioMuxArgs(videoPath, wavPath, withAudio),
+      { timeout: FFMPEG_TIMEOUT_MS, maxBuffer: 8 * 1024 * 1024 },
+    );
+    console.log(`[render] muxed page audio: ${events.length} events`);
+    return withAudio;
+  } catch (err) {
+    console.warn(`[render] page audio mux failed, shipping the silent clip: ${err && err.message}`);
+    return videoPath;
+  }
 }
 
 app.listen(PORT, () => {

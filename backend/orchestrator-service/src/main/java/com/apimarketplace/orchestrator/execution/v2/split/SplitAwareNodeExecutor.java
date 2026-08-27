@@ -2852,13 +2852,17 @@ public class SplitAwareNodeExecutor {
         // and create ONE flat context with all N*M items
         contextManager.removeContext(runId, nodeId, workflowItemIndex);
 
+        // Epoch-stamped like every other creator: an UNKNOWN stamp here would make the flat
+        // context permanently un-stale, so a delivery landing on a pod that ran an earlier epoch
+        // would reuse it (SplitContextManager.restoreContext) and replay that epoch's items.
         if (allInnerItems.isEmpty()) {
-            contextManager.createContext(runId, nodeId, workflowItemIndex, allInnerItems);
+            contextManager.createContext(runId, nodeId, workflowItemIndex, null, allInnerItems, context.epoch());
             logger.info("[SplitAware] Nested split flat produced 0 inner items, marking as SKIPPED: nodeId={}", nodeId);
             return NodeExecutionResult.skippedWithCascade(nodeId, "No inner items for nested split");
         }
 
-        SplitContext flatContext = contextManager.createContext(runId, nodeId, workflowItemIndex, allInnerItems);
+        SplitContext flatContext = contextManager.createContext(
+            runId, nodeId, workflowItemIndex, null, allInnerItems, context.epoch());
 
         long duration = System.currentTimeMillis() - startTime;
 

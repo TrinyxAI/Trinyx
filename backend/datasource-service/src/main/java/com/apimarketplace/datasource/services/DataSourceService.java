@@ -3,6 +3,7 @@ package com.apimarketplace.datasource.services;
 import com.apimarketplace.auth.client.access.OrgAccessGuard;
 import com.apimarketplace.common.scope.ScopeGuard;
 import com.apimarketplace.common.storage.service.StorageBreakdownService;
+import com.apimarketplace.common.folder.FolderScope;
 import com.apimarketplace.common.web.TenantResolver;
 import com.apimarketplace.datasource.domain.DataSourceModels.*;
 import com.apimarketplace.datasource.persistence.DataSourceRepositories.DataSourceItemRepository;
@@ -21,6 +22,7 @@ import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.UUID;
 import java.util.Optional;
 import java.util.Set;
 
@@ -42,6 +44,13 @@ public class DataSourceService {
     // (already used by TablePublishModule).
     private final PublicationClient publicationClient;
 
+    /** Folders of the tables list (V451). Optional: absent in tests that don't exercise them. */
+    private final DataSourceFolderService folderService;
+
+    // Two constructors now (the second is the pre-folders one, kept for the unit tests), so
+    // Spring has to be told which one to inject - without this it looks for a no-arg one and
+    // the whole service context fails to start.
+    @org.springframework.beans.factory.annotation.Autowired
     public DataSourceService(DataSourceRepository dataSourceRepository,
                              DataSourceItemRepository dataSourceItemRepository,
                              StorageBreakdownService breakdownService,
@@ -50,7 +59,8 @@ public class DataSourceService {
                              com.apimarketplace.auth.client.entitlement.EntitlementGuard entitlementGuard,
                              VectorFeatureGate vectorFeatureGate,
                              org.springframework.context.ApplicationEventPublisher eventPublisher,
-                             PublicationClient publicationClient) {
+                             PublicationClient publicationClient,
+                             DataSourceFolderService folderService) {
         this.dataSourceRepository = dataSourceRepository;
         this.dataSourceItemRepository = dataSourceItemRepository;
         this.breakdownService = breakdownService;
@@ -60,6 +70,24 @@ public class DataSourceService {
         this.vectorFeatureGate = vectorFeatureGate;
         this.eventPublisher = eventPublisher;
         this.publicationClient = publicationClient;
+        this.folderService = folderService;
+    }
+
+    /**
+     * Back-compat constructor for callers that don't show folders (unit tests). The paged
+     * list then returns no folder view and no narrowing.
+     */
+    public DataSourceService(DataSourceRepository dataSourceRepository,
+                             DataSourceItemRepository dataSourceItemRepository,
+                             StorageBreakdownService breakdownService,
+                             ObjectMapper objectMapper,
+                             OrgAccessGuard orgAccessService,
+                             com.apimarketplace.auth.client.entitlement.EntitlementGuard entitlementGuard,
+                             VectorFeatureGate vectorFeatureGate,
+                             org.springframework.context.ApplicationEventPublisher eventPublisher,
+                             PublicationClient publicationClient) {
+        this(dataSourceRepository, dataSourceItemRepository, breakdownService, objectMapper,
+             orgAccessService, entitlementGuard, vectorFeatureGate, eventPublisher, publicationClient, null);
     }
 
     public DataSource createDataSource(String tenantId, String name, String description,
@@ -256,7 +284,20 @@ public class DataSourceService {
     public record DataSourcePage(List<DataSource> items, int totalCount, int page, int size,
                                  Map<Long, Long> rowCounts,
                                  Map<Long, List<Map<String, Object>>> sampleRows,
-                                 Map<String, Map<String, String>> publicationStatuses) {}
+                                 Map<String, Map<String, String>> publicationStatuses,
+                                 List<com.apimarketplace.common.folder.ResourceFolderDto> folders,
+                                 List<Map<String, Object>> folderTrail,
+                                 boolean folderMissing) {
+
+        /** A page with no folder view - what every caller that does not ask for folders gets. */
+        public DataSourcePage(List<DataSource> items, int totalCount, int page, int size,
+                              Map<Long, Long> rowCounts,
+                              Map<Long, List<Map<String, Object>>> sampleRows,
+                              Map<String, Map<String, String>> publicationStatuses) {
+            this(items, totalCount, page, size, rowCounts, sampleRows, publicationStatuses,
+                 List.of(), List.of(), false);
+        }
+    }
 
     /** Standalone-resource publication type for table (datasource) sharing badges. */
     private static final String TABLE_PUBLICATION_TYPE = "TABLE";
@@ -290,6 +331,19 @@ public class DataSourceService {
     public DataSourcePage getDataSourcesPaged(String userId, String orgId, String orgRole,
                                                 String q, int page, int size,
                                                 String sort, String visibility) {
+        return getDataSourcesPaged(userId, orgId, orgRole, q, page, size, sort, visibility, null, false);
+    }
+
+    /**
+     * Folder-aware overload (V451). A SEARCH looks everywhere (an active {@code q} ignores
+     * {@code folderId} and the tiles step aside); otherwise {@code folderId} narrows to one
+     * level ({@code "root"} = the tables filed nowhere). An ABSENT parameter means no folder
+     * filter at all, which is what every other caller gets.
+     */
+    public DataSourcePage getDataSourcesPaged(String userId, String orgId, String orgRole,
+                                                String q, int page, int size,
+                                                String sort, String visibility,
+                                                String folderId, boolean includeFolders) {
         TenantResolver.requireOrgId(orgId);
         boolean hasSearch = q != null && !q.isBlank();
 
@@ -320,6 +374,29 @@ public class DataSourceService {
                     .toList();
         }
 
+        // FOLDERS (V451). A table's filing lives in its own row, so the membership map is read
+        // once here and serves both the narrowing and the tiles. The tiles are built from the
+        // set as it stands at this point - after search and visibility, before the folder
+        // narrowing - so a tile counts exactly what the caller may see.
+        FolderScope folderScope = new FolderScope(userId, orgId);
+        Map<Long, UUID> memberships = folderService == null ? Map.of() : folderService.memberships(folderScope);
+        UUID folderFilter = parseFolderId(folderId);
+        boolean rootOnly = folderId != null && folderFilter == null;
+        boolean folderMissing = false;
+        if (folderFilter != null && folderService != null
+                && !folderService.existsInScope(folderFilter, folderScope)) {
+            folderFilter = null;
+            rootOnly = true;
+            folderMissing = true;
+        }
+        List<DataSource> folderAggregateSource = all;
+        if (!hasSearch && (rootOnly || folderFilter != null)) {
+            final UUID wanted = folderFilter;
+            all = all.stream()
+                    .filter(ds -> java.util.Objects.equals(memberships.get(ds.id()), wanted))
+                    .toList();
+        }
+
         // Order, then slice. Stable sort keeps the created_at-DESC base order as the tie-breaker,
         // matching the former client-side processList semantics exactly.
         all = sortDataSources(all, sort);
@@ -347,8 +424,36 @@ public class DataSourceService {
                         TABLE_PUBLICATION_TYPE, resourceIdsOf(pageItems), userId);
         Map<String, Map<String, String>> publicationStatuses = toPublicationStatusMap(pageItems, pageRefs);
 
+        List<com.apimarketplace.common.folder.ResourceFolderDto> folderTiles = List.of();
+        List<Map<String, Object>> folderTrail = List.of();
+        if (includeFolders && folderService != null) {
+            folderTiles = hasSearch
+                    ? List.of()
+                    : folderService.listFolderSummaries(
+                            folderScope, folderFilter, folderAggregateSource, memberships, sort);
+            folderTrail = folderFilter == null
+                    ? List.of()
+                    : folderService.breadcrumb(folderService.listAll(folderScope), folderFilter).stream()
+                            .map(com.apimarketplace.common.folder.AbstractResourceFolderController::toBareMap)
+                            .toList();
+        }
+
         return new DataSourcePage(pageItems, totalCount, safePage, safeSize, rowCounts, sampleRows,
-                publicationStatuses);
+                publicationStatuses, folderTiles, folderTrail, folderMissing);
+    }
+
+    /**
+     * The folder to narrow to, or {@code null} for the top level / no filter. An unparseable
+     * id is treated as the top level rather than an error: the filter is a view preference,
+     * and a bad one must never take the list down.
+     */
+    private static UUID parseFolderId(String folderId) {
+        if (folderId == null || folderId.isBlank() || "root".equalsIgnoreCase(folderId.trim())) return null;
+        try {
+            return UUID.fromString(folderId.trim());
+        } catch (IllegalArgumentException e) {
+            return null;
+        }
     }
 
     private static List<String> resourceIdsOf(List<DataSource> list) {

@@ -96,6 +96,12 @@ export function CatalogSyncPanel({ onAfterApply }: { onAfterApply?: () => void }
   const flagged = plan?.plan.flagged ?? [];
   const guardFailures = plan?.plan.guardFailures ?? [];
   const hasPriceSanityFailure = guardFailures.some((g) => g.guard === "price-sanity");
+  // Sorted so the panel does not reshuffle between two runs that found the
+  // same providers in a different map order.
+  const discoveredEntries = Object.entries(plan?.plan.discovery?.discoveredByProvider ?? {}).sort(
+    ([a], [b]) => a.localeCompare(b),
+  );
+  const discoverySkipped = plan?.plan.discovery?.skippedProviders ?? [];
 
   return (
     <>
@@ -178,6 +184,37 @@ export function CatalogSyncPanel({ onAfterApply }: { onAfterApply?: () => void }
                   <div className="text-2xl font-semibold text-theme-primary">{plan.plan.unchanged}</div>
                 </div>
               </div>
+
+              {/* Vendor-endpoint discovery. These rows are already inside
+                  "added" - what this block adds is the fact that they arrive
+                  unpriced and stay disabled until an admin sets a rate, which
+                  is not visible from the added count alone. */}
+              {discoveredEntries.length > 0 && (
+                <div className="rounded-lg bg-violet-50 dark:bg-violet-900/20 border border-violet-200 dark:border-violet-800 p-3">
+                  <h4 className="text-sm font-medium text-violet-800 dark:text-violet-300 mb-1">
+                    {t("discoveryTitle")}
+                  </h4>
+                  <p className="text-xs text-violet-800/80 dark:text-violet-300/80 mb-2">
+                    {t("discoveryPricedFromOpenRouter")}
+                  </p>
+                  <ul className="space-y-1 text-sm text-violet-800 dark:text-violet-300">
+                    {discoveredEntries.map(([provider, count]) => (
+                      <li key={provider} className="flex gap-2">
+                        <span className="font-mono text-xs bg-violet-200/60 dark:bg-violet-800/40 px-1.5 rounded">
+                          {provider}
+                        </span>
+                        <span>{t("discoveryCount", { count })}</span>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+
+              {discoverySkipped.length > 0 && (
+                <p className="text-xs text-theme-secondary">
+                  {t("discoverySkipped", { providers: discoverySkipped.join(", ") })}
+                </p>
+              )}
 
               {/* Guard failures */}
               {guardFailures.length > 0 && (

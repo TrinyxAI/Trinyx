@@ -7,6 +7,57 @@
 
 import { apiClient } from '../api-client';
 
+/**
+ * The refinements the marketplace grid can ask the SERVER for.
+ *
+ * They used to be applied in the browser, over whatever a single
+ * `page=0&size=50` popularity-ordered fetch happened to contain. That quietly
+ * redefined every one of them as "...among the 50 most popular publications":
+ * anything ranked below that could not be reached by any combination of clicks,
+ * "recent" could not surface a publication newer than that window, and a date
+ * filter came back empty on the very day something was published. Sending them
+ * to the backend is what makes each one mean what its label says - and what
+ * makes `count` / `totalPages` describe the set actually on screen, so the grid
+ * can page to the end of it.
+ *
+ * Values match the backend enums (parsed case-insensitively there); anything it
+ * does not recognise falls back to the neutral default rather than erroring, so
+ * a stale bookmark still renders a grid.
+ */
+export interface MarketplaceRefinements {
+  /** Publication display mode, e.g. `APPLICATION` / `AGENT`. Omit for every type. */
+  displayMode?: string;
+  /** `popular` (default) | `rating` | `recent` | `installs`. */
+  sort?: string;
+  /** `any` (default) | `rated` | `min_3` | `min_4`. */
+  rating?: string;
+  /** Only publications published within the last N days. Omit for no window. */
+  days?: number;
+  /** `any` (default) | `free` | `paid`. */
+  price?: string;
+}
+
+/**
+ * Drop the empty entries so a default refinement never reaches the URL.
+ *
+ * Not cosmetic: `apiClient` serialises whatever it is handed, so passing
+ * `sort: undefined` through would emit `sort=undefined`, which the backend reads
+ * as an unknown value. It recovers (unknown falls back to the default), but the
+ * request URL stops being a faithful description of what the grid asked for,
+ * which is exactly what makes this class of bug hard to see.
+ */
+function marketplaceRefinementParams(
+  refinements?: MarketplaceRefinements,
+): Record<string, string> {
+  if (!refinements) return {};
+  const params: Record<string, string> = {};
+  for (const [key, value] of Object.entries(refinements)) {
+    if (value === undefined || value === null || value === '') continue;
+    params[key] = String(value);
+  }
+  return params;
+}
+
 export type HighlightDisplayMode =
   | 'WORKFLOW'
   | 'INTERFACE'
@@ -91,6 +142,7 @@ import type {
   WorkflowCategory,
   CategoriesListResponse,
   AcquirePublicationResponse,
+  EditableWorkflowCopyResponse,
   ResetApplicationDataResponse,
   AcquiredApplication,
   AcquiredApplicationsResponse,
@@ -368,9 +420,14 @@ export class PublicationService {
    * active workspace and the server can mark apps owned by it as "Installed" (vs "Acquire").
    * Anonymous callers still work (no token → anonymous request).
    */
-  async getMarketplacePublications(page: number = 0, size: number = 20, categorySlug?: string): Promise<MarketplacePublicationsResponse> {
+  async getMarketplacePublications(
+    page: number = 0,
+    size: number = 20,
+    categorySlug?: string,
+    refinements?: MarketplaceRefinements,
+  ): Promise<MarketplacePublicationsResponse> {
     return apiClient.get<MarketplacePublicationsResponse>('/publications/marketplace', {
-      params: { page, size, category: categorySlug },
+      params: { page, size, category: categorySlug, ...marketplaceRefinementParams(refinements) },
       optionalAuth: true,
     });
   }
@@ -474,8 +531,12 @@ export class PublicationService {
    * signed-in caller's active workspace reaches the server for per-workspace ownership, while
    * anonymous search still works.
    */
-  async searchPublications(query: string, category?: string): Promise<PublicationsListResponse> {
-    const params: Record<string, string> = { q: query };
+  async searchPublications(
+    query: string,
+    category?: string,
+    refinements?: MarketplaceRefinements,
+  ): Promise<PublicationsListResponse> {
+    const params: Record<string, string> = { q: query, ...marketplaceRefinementParams(refinements) };
     if (category) params.category = category;
     return apiClient.get<PublicationsListResponse>('/publications/search', {
       params,
@@ -501,6 +562,29 @@ export class PublicationService {
    */
   async acquirePublication(publicationId: string): Promise<AcquirePublicationResponse> {
     return apiClient.post<AcquirePublicationResponse>(`/publications/${publicationId}/acquire`);
+  }
+
+  /**
+   * Create the caller's freely-editable WORKFLOW copy of an application they installed.
+   *
+   * <p>Installing no longer creates this copy on its own: the copy re-clones the whole
+   * snapshot, so making one per install gave every acquirer a second set of the app's
+   * interfaces, tables and agents. Idempotent - calling it again returns the existing
+   * copy with `created: false`.
+   *
+   * @param remote CE cloud-linked install: the publication lives on the cloud, so the
+   *        copy goes through the remote route (the local publication row doesn't exist).
+   */
+  async createEditableWorkflowCopy(
+    publicationId: string,
+    remote = false,
+  ): Promise<EditableWorkflowCopyResponse> {
+    return apiClient.post<EditableWorkflowCopyResponse>(
+      remote
+        ? `/publications/remote/${publicationId}/editable-workflow`
+        : `/publications/${publicationId}/editable-workflow`,
+      {}
+    );
   }
 
   /**
@@ -536,15 +620,24 @@ export class PublicationService {
    * configured via `marketplace.cloud-api-url`. The backend is fail-soft: an
    * unreachable cloud yields an empty payload, never an error.
    */
-  async getRemoteMarketplacePublications(page: number = 0, size: number = 50, categorySlug?: string): Promise<MarketplacePublicationsResponse> {
+  async getRemoteMarketplacePublications(
+    page: number = 0,
+    size: number = 50,
+    categorySlug?: string,
+    refinements?: MarketplaceRefinements,
+  ): Promise<MarketplacePublicationsResponse> {
     return apiClient.get<MarketplacePublicationsResponse>('/publications/remote/marketplace', {
-      params: { page, size, category: categorySlug },
+      params: { page, size, category: categorySlug, ...marketplaceRefinementParams(refinements) },
     });
   }
 
   /** CE remote mode - cloud-parity search proxy (see getRemoteMarketplacePublications). */
-  async searchRemotePublications(query: string, category?: string): Promise<PublicationsListResponse> {
-    const params: Record<string, string> = { q: query };
+  async searchRemotePublications(
+    query: string,
+    category?: string,
+    refinements?: MarketplaceRefinements,
+  ): Promise<PublicationsListResponse> {
+    const params: Record<string, string> = { q: query, ...marketplaceRefinementParams(refinements) };
     if (category) params.category = category;
     return apiClient.get<PublicationsListResponse>('/publications/remote/search', { params });
   }

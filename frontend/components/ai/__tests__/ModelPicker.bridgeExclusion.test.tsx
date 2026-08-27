@@ -19,6 +19,12 @@ const h = vi.hoisted(() => ({
   defaultModel: null as string | null,
 }));
 
+// The picker asks once, for the whole list, whether this account's credits
+// can pay for what a model does. Stubbed: these suites are about the
+// catalog and the stacking, not about billing.
+vi.mock('@/lib/hooks/useMonthlyCreditsCannotPay', () => ({
+  useMonthlyCreditsCannotPay: () => ({ blocked: false, isLoading: false }),
+}));
 vi.mock('next/image', () => ({ default: () => null }));
 // Radix Select renders options in a portal only when open - inline them so the
 // full option list is assertable.

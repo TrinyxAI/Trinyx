@@ -121,6 +121,10 @@ describe('AcquirePublicationModal - CE-exclusive', () => {
         progress: 0,
         acquiredId: null,
         error: 'self-hosted only',
+        resources: {},
+        withEditableCopy: false,
+        editableCopyWorkflowId: null,
+        editableCopyFailed: false,
       },
     });
     const Modal = (await import('../AcquirePublicationModal')).default;

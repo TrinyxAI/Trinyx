@@ -157,7 +157,16 @@ public class WorkflowBuilderHelpModule implements ToolModule {
             "everything the run already produced upstream of it. Use it instead of execute when a run got most of the way " +
             "and one node produced the wrong result or failed: execute fires the workflow from its trigger and redoes all " +
             "the work (and pays for it again), restart_from_node redoes only that node and what depends on it. " +
-            "Params: run_id (required), node (required - the node key exactly as get_run reports it, e.g. 'mcp:fetch_data'). " +
+            "Params: run_id (required), node (required - the node key exactly as get_run reports it, e.g. 'mcp:fetch_data'), " +
+            "epoch (optional - WHICH fire of the run to replay). " +
+            "WHICH EPOCH: a run that is fired several times keeps one epoch per fire, each with its own outputs. Omit epoch " +
+            "and the replay lands on the run's most recent one, which is what you want in the normal case. Pass epoch=N " +
+            "(exactly as get_run reports it) to repair an OLDER fire: without it you would replay a fire that was already " +
+            "correct while the broken one stays untouched. A chosen epoch is REFUSED, not ignored, when: it never executed " +
+            "on this run (unknown, or only staged for the next fire); the node you named did not run in it, or ran there " +
+            "only on a branch that was not taken; another epoch of the same trigger is still executing (wait for the run to " +
+            "settle, or stop_run first - the same call then works); or the run is stepped, where nothing would close the " +
+            "epoch again. The response's epoch field tells you which one actually ran, so check it. " +
             "WHAT IT TOUCHES: the node you name and every node downstream of it are cleared and re-executed; nodes upstream " +
             "keep their outputs, and templates pointing at them ({{mcp:earlier_node.output.field}}) resolve to those same " +
             "values. The run's history is kept: each attempt is a new 'spawn', and get_node_output still returns earlier ones. " +
@@ -174,7 +183,10 @@ public class WorkflowBuilderHelpModule implements ToolModule {
             "'NOTHING_TO_RUN' / 'UNAVAILABLE' = the reset happened but nothing advanced. The response also carries " +
             "replayed_nodes (what was cleared), epoch, attempt, status, and a one-sentence summary. " +
             "restart_from_node is a WRITE action, and on an automatic run it re-executes nodes without asking again: an " +
-            "agent granted read-only access to workflows cannot call it.");
+            "agent granted read-only access to workflows cannot call it. In an interactive chat it needs the user's " +
+            "authorization first, like execute: the ask happens inside your call, so it may take longer to answer - do " +
+            "not stop, do not announce that you are waiting, do not re-call. Read the response: an outcome means it " +
+            "replayed, executed:false means nothing did.");
         actions.put("run_inspection", runInspection);
 
         actions.put("node_operations", Map.of(
@@ -191,7 +203,10 @@ public class WorkflowBuilderHelpModule implements ToolModule {
                 + "the config echoed back with credentials redacted so you can paste it into add_node. "
                 + "Types that pause on a signal (approval, interface, wait) and types whose meaning is the "
                 + "surrounding graph (merge, aggregate, split, fork, loop) are refused with the reason. The "
-                + "user is asked to authorize it, as for execute."
+                + "user is asked to authorize it, as for execute: the ask happens inside your call, so it "
+                + "may take longer to answer. Read what comes back rather than waiting or re-calling. "
+                + "A response carrying output + duration_ms is the proof it ran; `executed:false` "
+                + "means it did not. A `status` field alone settles nothing, since the refusal has one too."
         ));
 
         actions.put("connection_operations", Map.of(
@@ -281,8 +296,10 @@ public class WorkflowBuilderHelpModule implements ToolModule {
         stepTypes.put("http_request", "Raw HTTP request to any URL");
         stepTypes.put("send_email", "Send email notification");
         stepTypes.put("email_inbox", "Read a mailbox and act on it (flag/move/delete a message, list or create folders) via IMAP");
-        stepTypes.put("sub_workflow", "Execute another workflow as a step. The target must already "
-            + "have a live run - this node never creates one. Run it once first with "
+        stepTypes.put("sub_workflow", "Execute another workflow as a step and WAIT for it to finish "
+            + "(up to timeoutSeconds, default 300, max 1500); if it has not finished by then this node "
+            + "fails instead of returning a partial result, and the target keeps running. The target must "
+            + "already have a live run - this node never creates one. Run it once first with "
             + "workflow(action='execute', id='<uuid>'), and if the target is pinned add "
             + "version=<its pinned version>, because only runs at the pinned version are eligible");
         stepTypes.put("respond_to_webhook", "Return response to the webhook that triggered this workflow");

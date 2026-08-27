@@ -120,6 +120,44 @@ export function getFileUrlById(fileId: string, options?: { inline?: boolean }): 
 }
 
 /**
+ * Save a stored file to disk, authenticated.
+ *
+ * <p>The bytes are fetched with the {@code Authorization} header and handed to
+ * the browser as an in-memory {@code blob:} URL, because the session token must
+ * never be stamped into a URL an anchor could expose. That is also why this
+ * cannot be a plain {@code <a download>}: the raw endpoint refuses an
+ * unauthenticated GET.
+ *
+ * <p>Lives here rather than in a component: {@link FileDetailView} had the only
+ * copy, and the generation dialog needs the same action beside its own button.
+ * Two hand-written copies of an auth-header fetch is how one of them ends up
+ * putting the token somewhere it should not be.
+ *
+ * @throws Error carrying {@code HTTP <status>} so the caller can show the code.
+ */
+export async function downloadStoredFile(fileId: string, fileName?: string): Promise<void> {
+  const token = await apiClient.getAuthToken();
+  const headers: Record<string, string> = { ...getActiveOrgHeaderForRequest() };
+  if (token) headers['Authorization'] = `Bearer ${token}`;
+
+  const response = await fetch(getFileUrlById(fileId, { inline: false }), { headers });
+  if (!response.ok) throw new Error(`HTTP ${response.status}`);
+
+  const objectUrl = URL.createObjectURL(await response.blob());
+  try {
+    const anchor = document.createElement('a');
+    anchor.href = objectUrl;
+    anchor.download = fileName ?? 'download';
+    document.body.appendChild(anchor);
+    anchor.click();
+    document.body.removeChild(anchor);
+  } finally {
+    // Revoked even if the click throws, or the blob is held for the tab's life.
+    URL.revokeObjectURL(objectUrl);
+  }
+}
+
+/**
  * Anonymous avatar URL - the ONE file class servable without auth, because avatars must render
  * from a plain {@code <img>} for viewers who are not the uploader (marketplace cards, shared
  * applications, widget embeds). The backend only resolves files uploaded through the generic
@@ -220,8 +258,9 @@ class FileService {
     file: File,
     context: { workflowId: string; runId: string; stepAlias?: string }
   ): Promise<FileRef> {
-    const tokenProvider = apiClient.getTokenProvider();
-    const token = tokenProvider ? await tokenProvider() : null;
+    // getAuthToken: without the wait, an upload fired during the auth bootstrap threw
+    // "Authentication required" at a signed-in user.
+    const token = await apiClient.getAuthToken();
     if (!token) throw new Error('Authentication required');
 
     const formData = new FormData();
@@ -256,8 +295,7 @@ class FileService {
     category: string = 'general',
     parentFolderId?: string | null,
   ): Promise<GenericUploadResponse> {
-    const tokenProvider = apiClient.getTokenProvider();
-    const token = tokenProvider ? await tokenProvider() : null;
+    const token = await apiClient.getAuthToken();
     if (!token) throw new Error('Authentication required');
 
     const formData = new FormData();
@@ -286,7 +324,7 @@ class FileService {
    * Downloads a file by its opaque {@code storage.storage} row id (no tenant id / s3 key).
    */
   private async downloadById(id: string): Promise<Blob> {
-    const token = await apiClient.getTokenProvider()?.();
+    const token = await apiClient.getAuthToken();
     if (!token) {
       throw new Error('Authentication required');
     }

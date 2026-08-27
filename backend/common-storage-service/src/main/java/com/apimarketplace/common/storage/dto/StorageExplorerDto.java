@@ -154,7 +154,12 @@ public record StorageExplorerDto(
             parentFolderId, childCount, previewFiles, virtualId, virtualKind, spawn, itemIndex);
     }
 
-    private static String formatBytes(Integer bytes) {
+    /**
+     * Package-visible so the generation history renders a size the SAME way. One file must not read
+     * as "2.0 KB" in the file grid and "2048" in the list of what was generated - they are the same
+     * row, seen from two screens.
+     */
+    static String formatBytes(Integer bytes) {
         if (bytes == null || bytes == 0) return "0 B";
         String[] units = {"B", "KB", "MB", "GB"};
         int unitIndex = 0;

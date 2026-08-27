@@ -12,8 +12,8 @@ describe('CE-hidden providers boundary', () => {
     expect(isProviderHiddenInCe('cohere')).toBe(true);
   });
 
-  it('does not hide any other provider, incl. the new qwen/moonshot', () => {
-    for (const p of ['openai', 'anthropic', 'google', 'deepseek', 'zai', 'qwen', 'moonshot']) {
+  it('does not hide any other provider, incl. the new qwen/moonshot/minimax', () => {
+    for (const p of ['openai', 'anthropic', 'google', 'deepseek', 'zai', 'qwen', 'moonshot', 'minimax']) {
       expect(isProviderHiddenInCe(p)).toBe(false);
     }
   });
@@ -36,5 +36,14 @@ describe('new Chinese providers are wired into the icon/label maps', () => {
     expect(PROVIDER_ICON_MAP.moonshot).toBe('moonshot');
     expect(PROVIDER_DISPLAY_NAMES.qwen).toBe('Qwen');
     expect(PROVIDER_DISPLAY_NAMES.moonshot).toBe('Moonshot');
+  });
+
+  // getProviderIconSlug falls back to the lowercased provider name, so a
+  // provider missing from the map renders a 404 <img> rather than nothing.
+  // Pin minimax explicitly: /icons/services/minimax.svg is the asset that has
+  // to exist for the MiniMax rows seeded by V437 to render.
+  it('minimax has an icon slug and a display name', () => {
+    expect(PROVIDER_ICON_MAP.minimax).toBe('minimax');
+    expect(PROVIDER_DISPLAY_NAMES.minimax).toBe('MiniMax');
   });
 });

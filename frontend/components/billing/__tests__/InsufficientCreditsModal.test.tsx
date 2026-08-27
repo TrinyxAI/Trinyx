@@ -26,6 +26,9 @@ const mocks = vi.hoisted(() => ({
 
 vi.mock('next-intl', () => ({
   useTranslations: (ns?: string) => (key: string) => (ns ? `${ns}.${key}` : key),
+  // The plan cards render FoundingPriceNote, which formats the announced price and
+  // the deadline in the APP locale.
+  useLocale: () => 'en',
 }));
 
 vi.mock('next/navigation', () => ({

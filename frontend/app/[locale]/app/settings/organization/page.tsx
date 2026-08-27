@@ -203,8 +203,9 @@ export default function OrganizationSettingsPage() {
 
         // Fetch member avatars
         if (fullOrg?.members) {
-          const tokenProvider = apiClient.getTokenProvider();
-          const token = tokenProvider ? await tokenProvider() : null;
+          // getAuthToken: without the wait this skipped every member avatar when the page was
+          // the first thing to load, and nothing re-ran it.
+          const token = await apiClient.getAuthToken();
           if (token) {
             const avatarEntries = await Promise.all(
               fullOrg.members

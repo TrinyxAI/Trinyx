@@ -20,9 +20,9 @@ vi.mock('../AuthenticatedImage', () => ({
   ),
 }));
 
-const getTokenProvider = vi.fn(() => async () => 'tok-123');
+const getAuthToken = vi.fn(async () => 'tok-123');
 vi.mock('@/lib/api/api-client', () => ({
-  apiClient: { getTokenProvider: () => getTokenProvider() },
+  apiClient: { getAuthToken: () => getAuthToken() },
 }));
 
 vi.mock('@/lib/stores/current-org-store', () => ({

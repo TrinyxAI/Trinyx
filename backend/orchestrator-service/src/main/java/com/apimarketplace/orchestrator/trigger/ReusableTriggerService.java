@@ -2037,6 +2037,43 @@ public class ReusableTriggerService {
     }
 
     /**
+     * Is this DAG epoch still in flight?
+     *
+     * <p>Public face of the predicate this class already uses to decide whether an epoch may be
+     * closed, exposed for callers that fire a trigger SYNCHRONOUSLY and then need to know whether
+     * the work they asked for has actually finished. {@code SubWorkflowNode} is the one caller.
+     *
+     * <p>Why a caller cannot answer this itself: a node that yields (a wait past
+     * {@code WaitNode.INLINE_THRESHOLD_MS}, a user approval, an interface awaiting
+     * {@code __continue}, an async agent handed to the queue) persists NO step row in any state,
+     * because every writer only ever records a terminal status. A deferred epoch is therefore
+     * indistinguishable, by inspection of the run's data, from a smaller epoch that ran to the
+     * end. The epoch header cannot answer it either: while the epoch is open, its persisted state
+     * is the snapshot taken when it was OPENED.
+     *
+     * <p>Deliberately a live re-read rather than a flag on {@link TriggerExecutionResult}: a fire
+     * can return with the epoch open in three different ways (the deferred-reset branch of
+     * {@code handleAutoMode}, the under-lock re-check in {@code resetForNextCycle}, and its
+     * terminal-status guard) and only the first is knowable when the result is built. Asking here
+     * covers all three with one mechanism.
+     *
+     * <p>Epoch-scoped throughout, so a later epoch of the same reusable run never makes an earlier
+     * one look busy.
+     *
+     * @param runId the run that was fired
+     * @param triggerId the DAG whose epoch was opened
+     * @param epoch the epoch reported by the fire
+     * @return true while the epoch still has blocking signals, pending or in-flight agents, or
+     *         running nodes; false once nothing is left for it
+     */
+    public boolean isEpochStillOpen(String runId, String triggerId, int epoch) {
+        if (runId == null || triggerId == null || epoch < 0) {
+            return false;
+        }
+        return hasActiveSignalsForTrigger(runId, triggerId, epoch);
+    }
+
+    /**
      * Check if there is ANY reason to keep this DAG epoch open: a blocking signal
      * (WaitNode, USER_APPROVAL, INTERFACE_SIGNAL with {@code __continue}, …) or an
      * async agent still in flight (scaling.agent.queue.enabled - the producer yields

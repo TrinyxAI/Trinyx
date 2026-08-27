@@ -496,11 +496,14 @@ class SignalResumeServiceTest {
         }
 
         @Test
-        @DisplayName("should restore split context when signal has split item data")
+        @DisplayName("should restore split context, for the signal's OWN epoch, when signal has split item data")
         void shouldRestoreSplitContext() {
             SignalWaitEntity signal = createMockSignal("run-1", "core:wait", "item-0");
             Map<String, Object> splitData = Map.of("splitNodeId", "core:split", "items", java.util.List.of("a"));
             when(signal.getSplitItemData()).thenReturn(splitData);
+            // The epoch is what lets the restore tell this resume's scope apart from a context an
+            // EARLIER epoch left on this replica (which it would otherwise reuse and replay).
+            when(signal.getEpoch()).thenReturn(7);
             lenient().when(signal.getDagTriggerId()).thenReturn("trigger:webhook");
 
             WorkflowRunEntity run = mock(WorkflowRunEntity.class);
@@ -508,11 +511,11 @@ class SignalResumeServiceTest {
             when(run.isStepByStepMode()).thenReturn(false);
             when(mockRunRepository.findByRunIdPublic("run-1")).thenReturn(Optional.of(run));
 
-            when(mockStepByStepService.getReadyNodes("run-1", "item-0", 0)).thenReturn(Set.of());
+            when(mockStepByStepService.getReadyNodes("run-1", "item-0", 7)).thenReturn(Set.of());
 
             resumeService.resumeAfterSignal(signal);
 
-            verify(mockSplitContextManager).restoreContext("run-1", "core:wait", splitData);
+            verify(mockSplitContextManager).restoreContext("run-1", "core:wait", splitData, 7);
         }
 
         @Test
@@ -531,7 +534,7 @@ class SignalResumeServiceTest {
 
             resumeService.resumeAfterSignal(signal);
 
-            verify(mockSplitContextManager, never()).restoreContext(any(), any(), any());
+            verify(mockSplitContextManager, never()).restoreContext(any(), any(), any(), anyInt());
         }
 
         @Test

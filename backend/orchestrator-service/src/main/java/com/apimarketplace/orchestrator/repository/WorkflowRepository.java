@@ -320,6 +320,37 @@ public interface WorkflowRepository extends JpaRepository<WorkflowEntity, UUID> 
             String organizationId, UUID sourcePublicationId, WorkflowEntity.WorkflowType workflowType);
 
     /**
+     * Find the decoupled editable WORKFLOW twin previously created from an acquired
+     * APPLICATION, if any. The lineage lives in {@code metadata} because a twin
+     * deliberately carries {@code source_publication_id = NULL} (that is what keeps it out
+     * of every My-Applications / execute / uninstall lookup and exempt from the V268
+     * unique index).
+     *
+     * <p>Used to make "create my editable copy" IDEMPOTENT: a second request returns the
+     * existing twin instead of cloning a second full set of interfaces / tables / agents.
+     * Matches EITHER lineage key: the application clone id (exact, same install) OR the
+     * publication id, because uninstalling and reinstalling gives the application a NEW
+     * clone id while the user's existing copy is still theirs - keying on the clone alone
+     * would hand them a second resource set after a reinstall.
+     *
+     * <p>Native (the lineage keys are inside a jsonb column) and scoped to the org
+     * workspace (post-V261 every row carries one), so another workspace's copy is never
+     * handed back.
+     */
+    @Query(value = "SELECT * FROM workflows w "
+            + "WHERE w.organization_id = :organizationId "
+            + "  AND w.workflow_type = 'WORKFLOW' "
+            + "  AND w.source_publication_id IS NULL "
+            + "  AND (w.metadata->>'duplicatedFromApplicationId' = :applicationWorkflowId "
+            + "       OR (CAST(:publicationId AS text) IS NOT NULL "
+            + "           AND w.metadata->>'duplicatedFromPublicationId' = CAST(:publicationId AS text))) "
+            + "ORDER BY w.created_at DESC LIMIT 1", nativeQuery = true)
+    Optional<WorkflowEntity> findEditableDuplicateOfApplication(
+            @Param("organizationId") String organizationId,
+            @Param("applicationWorkflowId") String applicationWorkflowId,
+            @Param("publicationId") String publicationId);
+
+    /**
      * Find workflows by tenant filtered by workflow type, ordered by update date descending.
      * <p>Retained only as the personal-scope fallback path for
      * {@link com.apimarketplace.orchestrator.tools.workflow.builder.WorkflowBuilderLoader}.
@@ -396,5 +427,54 @@ public interface WorkflowRepository extends JpaRepository<WorkflowEntity, UUID> 
            "SELECT 1 FROM jsonb_array_elements(COALESCE(w.plan->'interfaces', '[]'::jsonb)) AS i " +
            "WHERE i->>'id' = :interfaceId)", nativeQuery = true)
     List<WorkflowEntity> findByPlanInterfaceId(@Param("interfaceId") String interfaceId);
+
+    // ===================== List folders (V448) =====================
+
+    /**
+     * File the given workflows into {@code folderId} ({@code null} = back to the top
+     * level) inside ONE workspace. The organization predicate is the scope check itself,
+     * so a caller can never re-file a row belonging to another workspace, and the count
+     * returned tells the caller how many of the requested ids were actually theirs.
+     *
+     * <p>Deliberately does NOT touch {@code updatedAt}: filing a workflow is a change to
+     * the list's organisation, not to the workflow, and the folder tiles order themselves
+     * on the newest change INSIDE them - bumping it would make every re-filed workflow
+     * look freshly edited.
+     */
+    @Modifying
+    @Transactional
+    @Query("UPDATE WorkflowEntity w SET w.folderId = :folderId "
+            + "WHERE w.id IN :ids AND w.organizationId = :organizationId")
+    int assignFolderForOrganization(@Param("ids") Collection<UUID> ids,
+                                    @Param("folderId") UUID folderId,
+                                    @Param("organizationId") String organizationId);
+
+    /** Personal-workspace counterpart of {@link #assignFolderForOrganization}. */
+    @Modifying
+    @Transactional
+    @Query("UPDATE WorkflowEntity w SET w.folderId = :folderId "
+            + "WHERE w.id IN :ids AND w.tenantId = :ownerId AND w.organizationId IS NULL")
+    int assignFolderForOwner(@Param("ids") Collection<UUID> ids,
+                             @Param("folderId") UUID folderId,
+                             @Param("ownerId") String ownerId);
+
+    /**
+     * Empty the given folders: their workflows go back to the top level. Called when the
+     * folders are deleted - a folder never deletes what it holds.
+     */
+    @Modifying
+    @Transactional
+    @Query("UPDATE WorkflowEntity w SET w.folderId = null "
+            + "WHERE w.folderId IN :folderIds AND w.organizationId = :organizationId")
+    int clearFolderForOrganization(@Param("folderIds") Collection<UUID> folderIds,
+                                   @Param("organizationId") String organizationId);
+
+    /** Personal-workspace counterpart of {@link #clearFolderForOrganization}. */
+    @Modifying
+    @Transactional
+    @Query("UPDATE WorkflowEntity w SET w.folderId = null "
+            + "WHERE w.folderId IN :folderIds AND w.tenantId = :ownerId AND w.organizationId IS NULL")
+    int clearFolderForOwner(@Param("folderIds") Collection<UUID> folderIds,
+                            @Param("ownerId") String ownerId);
 
 }

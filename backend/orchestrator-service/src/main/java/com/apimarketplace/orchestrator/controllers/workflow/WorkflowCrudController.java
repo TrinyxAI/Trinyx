@@ -253,9 +253,11 @@ public class WorkflowCrudController {
             }
 
             // APPLICATION-type workflows are run-only acquired clones - their plan is the
-            // contract the marketplace acquirer received, not editable in place. Editing now
-            // lives in the DECOUPLED editable WORKFLOW twin that acquiring also creates
-            // (sourcePublicationId=null, visible in /app/workflows). If the acquirer wants the
+            // contract the marketplace acquirer received, not editable in place. Editing lives
+            // in the DECOUPLED editable WORKFLOW twin the acquirer creates ON DEMAND
+            // (sourcePublicationId=null, visible in /app/workflows). Acquiring stopped minting
+            // that twin automatically on 2026-08-14: it re-clones the whole snapshot, so every
+            // install was duplicating the app's interfaces, tables and agents. If the acquirer wants the
             // original published plan back on the application itself, they use
             // POST /workflows/{id}/reset-plan (restores from basePlan). Letting the plan drift
             // here would break the publish/acquire isolation guarantee and silently diverge
@@ -265,10 +267,13 @@ public class WorkflowCrudController {
                 logger.warn("Refused plan update on APPLICATION workflow {}: applications are run-only acquired clones",
                         workflowId);
                 return ResponseEntity.status(HttpStatus.CONFLICT).body(Map.of(
-                        "error", "Cannot update the plan of an APPLICATION workflow. " +
-                                 "Applications are run-only acquired clones - edit the decoupled workflow in " +
-                                 "/app/workflows, or use POST /workflows/" + workflowId +
-                                 "/reset-plan to restore from basePlan.",
+                        "error", "Cannot update the plan of an APPLICATION workflow. Applications are "
+                                 + "run-only acquired clones: this plan is the contract the acquirer "
+                                 + "received and it never changes in place. To customise it, the user "
+                                 + "creates an editable copy of the application from its page (this is "
+                                 + "theirs to do, and it is not created by installing); edits then live "
+                                 + "in that copy, which is a normal workflow. To undo drift on the "
+                                 + "application itself, restore it from its published plan.",
                         "code", "APPLICATION_PLAN_IMMUTABLE"));
             }
 

@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import '@testing-library/jest-dom/vitest';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi, beforeEach } from 'vitest';
 import React from 'react';
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { NextIntlClientProvider } from 'next-intl';
@@ -27,11 +27,12 @@ const mocks = vi.hoisted(() => ({
   selectedIds: new Set<string>(),
 }));
 
-vi.mock('next/navigation', () => ({
-  useSearchParams: () => new URLSearchParams(),
-  useRouter: () => ({ push: vi.fn(), replace: vi.fn() }),
-  usePathname: () => '/app/agent',
-}));
+// The lists keep the open folder in the address, so they read next/navigation. This fake
+// router is URL-backed and re-renders on navigation, the way the real one does.
+vi.mock('next/navigation', async () => {
+  const mod = await import('@/lib/folders/testing/fakeFolderRouter');
+  return mod.fakeFolderRouter.nextNavigationModule();
+});
 vi.mock('@/lib/api', () => ({
   orchestratorApi: {
     cloneAgent: vi.fn(),
@@ -77,6 +78,7 @@ vi.mock('@/hooks/useResourceFavorites', () => ({
   useResourceFavorites: () => ({ favoriteIds: new Set(), toggleFavorite: vi.fn() }),
 }));
 
+import { fakeFolderRouter } from '@/lib/folders/testing/fakeFolderRouter';
 import { AgentTable } from '../AgentTable';
 
 const TEMPLATE_TITLE = enMessages.templates.agent.basicAssistant.title;
@@ -118,6 +120,12 @@ afterEach(() => {
   cleanup();
   vi.clearAllMocks();
   mocks.selectedIds = new Set<string>();
+});
+
+beforeEach(() => {
+  // The address is shared state: without this, a test that opened a folder leaves the
+  // next one starting inside it.
+  fakeFolderRouter.reset();
 });
 
 describe('AgentTable - template gallery wiring', () => {

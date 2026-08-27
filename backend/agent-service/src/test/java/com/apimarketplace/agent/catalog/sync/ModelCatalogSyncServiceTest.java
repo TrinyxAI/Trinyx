@@ -68,6 +68,7 @@ class ModelCatalogSyncServiceTest {
     private LiteLlmFeedParser liteLlmParser;
     private OpenRouterFeedParser openRouterParser;
     private BridgeModelDeriver bridgeModelDeriver;
+    private NativeModelDiscoveryService discoveryService;
     private CatalogMergeService mergeService;
     private ModelConfigOverrideRepository modelRepo;
     private ModelCatalogSyncLogRepository syncLogRepo;
@@ -81,6 +82,7 @@ class ModelCatalogSyncServiceTest {
         liteLlmParser = mock(LiteLlmFeedParser.class);
         openRouterParser = mock(OpenRouterFeedParser.class);
         bridgeModelDeriver = mock(BridgeModelDeriver.class);
+        discoveryService = mock(NativeModelDiscoveryService.class);
         mergeService = mock(CatalogMergeService.class);
         modelRepo = mock(ModelConfigOverrideRepository.class);
         syncLogRepo = mock(ModelCatalogSyncLogRepository.class);
@@ -94,7 +96,7 @@ class ModelCatalogSyncServiceTest {
                 .thenAnswer(inv -> mergeService.merge(inv.getArgument(0), inv.getArgument(1)));
 
         syncService = spy(new ModelCatalogSyncService(
-                liteLlmParser, openRouterParser, bridgeModelDeriver, mergeService, mergeRunner,
+                liteLlmParser, openRouterParser, bridgeModelDeriver, discoveryService, mergeService, mergeRunner,
                 modelRepo, syncLogRepo, syncLogWriter, restTemplate));
 
         // Default: both feeds reachable. Individual tests override as needed.
@@ -103,6 +105,11 @@ class ModelCatalogSyncServiceTest {
 
         // Bridge deriver defaults to "no bridges" - tests that care stub it.
         when(bridgeModelDeriver.derive(any())).thenReturn(List.of());
+
+        // Discovery defaults to "asked nobody" - the vendor-endpoint pass is a
+        // separate source with its own test; tests that care stub it.
+        when(discoveryService.discover(any(), any(), any()))
+                .thenReturn(NativeModelDiscoveryService.DiscoveryResult.empty());
 
         // Log writer echoes back a populated entity so the service can extract
         // an id to return in the SyncResult - matches production behaviour

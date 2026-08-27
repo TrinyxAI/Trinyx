@@ -18,29 +18,7 @@ import { PanelResizeHandle } from '@/components/ui/PanelResizeHandle';
 import { AddTabPicker } from '@/components/app/AddTabPicker';
 import { useSharedConversation } from '@/contexts/SharedConversationContext';
 import { orchestratorApi } from '@/lib/api';
-
-/** Derive a full-page URL from a tab ID, or null if the resource has no dedicated page. */
-function getTabResourceUrl(tabId: string): string | null {
-  // workflow_run tabs: "workflow-run-{workflowId}-{runId}" → must be checked BEFORE generic workflow-
-  if (tabId.startsWith('workflow-run-')) {
-    // Extract workflowId and runId from "workflow-run-{workflowId}-{runId}"
-    const rest = tabId.slice('workflow-run-'.length);
-    // workflowId is a UUID (36 chars), runId is the remainder after the next dash
-    const uuidLen = 36;
-    const workflowId = rest.slice(0, uuidLen);
-    const runId = rest.slice(uuidLen + 1); // skip the dash separator
-    if (workflowId && runId) {
-      return `/app/workflow/${workflowId}/run/${runId}`;
-    }
-    return `/app/workflow/${workflowId}`;
-  }
-  if (tabId.startsWith('workflow-')) return `/app/workflow/${tabId.slice('workflow-'.length)}`;
-  if (tabId.startsWith('interface-')) return `/app/interface/${tabId.slice('interface-'.length)}`;
-  if (tabId.startsWith('application-')) return `/app/applications/${tabId.slice('application-'.length)}`;
-  if (tabId.startsWith('datasource-')) return `/app/data/${tabId.slice('datasource-'.length)}`;
-  if (tabId.startsWith('agent-')) return `/app/agent`;
-  return null;
-}
+import { getTabResourceUrl, parseTabResource } from '@/lib/sidePanel/tabResource';
 
 /**
  * SidePanel - the unified right panel for the entire app.
@@ -223,23 +201,26 @@ export function SidePanel() {
     if (tab.onDelete) {
       return async () => { tab.onDelete!(); closeTabAfterDelete(); };
     }
-    if (id.startsWith('workflow-')) {
-      const resourceId = id.slice('workflow-'.length);
-      return async () => { await orchestratorApi.deleteWorkflow(resourceId); closeTabAfterDelete(); };
+    const resource = parseTabResource(id);
+    if (!resource || !resource.id) return undefined;
+    // A run tab shows ONE execution, not the resource itself: deleting the whole
+    // workflow from it would be a surprise, so it gets no delete entry. Before the
+    // tab-id parsing was centralised it got one that always failed (it deleted the
+    // literal id "run-<wfId>-<runId>").
+    if (resource.runId) return undefined;
+    const resourceId = resource.id;
+    switch (resource.kind) {
+      case 'workflow':
+        return async () => { await orchestratorApi.deleteWorkflow(resourceId); closeTabAfterDelete(); };
+      case 'interface':
+        return async () => { await orchestratorApi.deleteInterface(resourceId); closeTabAfterDelete(); };
+      case 'datasource':
+        return async () => { await orchestratorApi.deleteDataSource(resourceId); closeTabAfterDelete(); };
+      case 'agent':
+        return async () => { await orchestratorApi.deleteAgent(resourceId); closeTabAfterDelete(); };
+      default:
+        return undefined;
     }
-    if (id.startsWith('interface-')) {
-      const resourceId = id.slice('interface-'.length);
-      return async () => { await orchestratorApi.deleteInterface(resourceId); closeTabAfterDelete(); };
-    }
-    if (id.startsWith('datasource-')) {
-      const resourceId = id.slice('datasource-'.length);
-      return async () => { await orchestratorApi.deleteDataSource(resourceId); closeTabAfterDelete(); };
-    }
-    if (id.startsWith('agent-')) {
-      const resourceId = id.slice('agent-'.length);
-      return async () => { await orchestratorApi.deleteAgent(resourceId); closeTabAfterDelete(); };
-    }
-    return undefined;
   };
 
   /** Resolve the delete handler for a tab - opens confirmation modal instead of deleting immediately */
@@ -251,21 +232,22 @@ export function SidePanel() {
     };
   };
 
-  /** Resolve the i18n delete title based on tab ID prefix */
+  /** Resolve the i18n delete title from the resource the tab shows */
   const getDeleteTitle = (tabId: string): string => {
-    if (tabId.startsWith('workflow-')) return tSidePanel('deleteWorkflowTitle');
-    if (tabId.startsWith('interface-')) return tSidePanel('deleteInterfaceTitle');
-    if (tabId.startsWith('datasource-')) return tSidePanel('deleteDatasourceTitle');
-    if (tabId.startsWith('agent-')) return tSidePanel('deleteAgentTitle');
+    const kind = parseTabResource(tabId)?.kind;
+    if (kind === 'workflow') return tSidePanel('deleteWorkflowTitle');
+    if (kind === 'interface') return tSidePanel('deleteInterfaceTitle');
+    if (kind === 'datasource') return tSidePanel('deleteDatasourceTitle');
+    if (kind === 'agent') return tSidePanel('deleteAgentTitle');
     return t('delete');
   };
 
-  /** Resolve the i18n delete confirm message based on tab ID prefix */
+  /** Resolve the i18n delete confirm message from the resource the tab shows */
   const getDeleteMessage = (tabId: string, label: string): string => {
-    if (tabId.startsWith('workflow-')) return tSidePanel('deleteWorkflowConfirm', { name: label });
-    if (tabId.startsWith('interface-')) return tSidePanel('deleteInterfaceConfirm', { name: label });
-    if (tabId.startsWith('datasource-')) return tSidePanel('deleteDatasourceConfirm', { name: label });
-    if (tabId.startsWith('agent-')) return tSidePanel('deleteAgentConfirm', { name: label });
+    const kind = parseTabResource(tabId)?.kind;
+    if (kind === 'interface') return tSidePanel('deleteInterfaceConfirm', { name: label });
+    if (kind === 'datasource') return tSidePanel('deleteDatasourceConfirm', { name: label });
+    if (kind === 'agent') return tSidePanel('deleteAgentConfirm', { name: label });
     return tSidePanel('deleteWorkflowConfirm', { name: label });
   };
 

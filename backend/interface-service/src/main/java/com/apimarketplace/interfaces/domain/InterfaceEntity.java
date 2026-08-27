@@ -111,6 +111,14 @@ public class InterfaceEntity implements OrgScopedEntity {
     @Column(name = "project_id")
     private UUID projectId;
 
+    /**
+     * Folder this page is filed under on the /app/interface list
+     * ({@code interface.interface_folders}, V450), or {@code null} for the top level. A
+     * folder organises the LIST; a project is a shared space for a piece of work.
+     */
+    @Column(name = "folder_id")
+    private java.util.UUID folderId;
+
     @Column(name = "organization_id")
     private String organizationId;
 
@@ -223,6 +231,10 @@ public class InterfaceEntity implements OrgScopedEntity {
     public void setConversationId(String conversationId) { this.conversationId = conversationId; }
 
     public UUID getProjectId() { return projectId; }
+
+    public java.util.UUID getFolderId() { return folderId; }
+
+    public void setFolderId(java.util.UUID folderId) { this.folderId = folderId; }
     public void setProjectId(UUID projectId) { this.projectId = projectId; }
 
     public String getOrganizationId() { return organizationId; }

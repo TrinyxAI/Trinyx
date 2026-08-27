@@ -221,6 +221,67 @@ class ApplicationCrudModuleTest {
         }
 
         @Test
+        @DisplayName("Reports the acquired clone id from the response's workflowId key (reading only 'id' returned null on every acquire)")
+        void acquireReportsTheClonedWorkflowId() {
+            // The publication service answers { workflowId, title, resources } - this is the
+            // real response shape, not the historical fixture that only carried "id".
+            Map<String, Object> stub = new HashMap<>();
+            stub.put("workflowId", "wf-9");
+            stub.put("title", "My Cloned App");
+            stub.put("resources", Map.of("interfaces", 2, "tables", 1));
+            when(publicationClient.acquirePublication(eq(APP_PUB_ID), eq(TENANT_ID), eq(CALLER_ORG_ID)))
+                    .thenReturn(stub);
+
+            ToolExecutionResult result = module.execute("acquire",
+                    Map.of("application_id", APP_PUB_ID.toString()),
+                    TENANT_ID, contextWithOrg()).orElseThrow();
+
+            assertThat(result.success()).isTrue();
+            @SuppressWarnings("unchecked")
+            Map<String, Object> data = (Map<String, Object>) result.data();
+            assertThat(data).containsEntry("workflowId", "wf-9");
+            // What else the install put in the workspace, so the agent can say so.
+            assertThat(data).containsEntry("installed_resources", Map.of("interfaces", 2, "tables", 1));
+        }
+
+        @Test
+        @DisplayName("Falls back to an 'id'-keyed response so an older/alternate acquire shape still yields a workflow id")
+        void acquireFallsBackToTheIdKey() {
+            Map<String, Object> stub = new HashMap<>();
+            stub.put("id", "wf-legacy");
+            stub.put("title", "My Cloned App");
+            when(publicationClient.acquirePublication(eq(APP_PUB_ID), eq(TENANT_ID), eq(CALLER_ORG_ID)))
+                    .thenReturn(stub);
+
+            ToolExecutionResult result = module.execute("acquire",
+                    Map.of("application_id", APP_PUB_ID.toString()),
+                    TENANT_ID, contextWithOrg()).orElseThrow();
+
+            @SuppressWarnings("unchecked")
+            Map<String, Object> data = (Map<String, Object>) result.data();
+            assertThat(data).containsEntry("workflowId", "wf-legacy");
+        }
+
+        @Test
+        @DisplayName("An install that created nothing beyond the application omits the resource summary entirely")
+        void acquireOmitsAnEmptyResourceSummary() {
+            Map<String, Object> stub = new HashMap<>();
+            stub.put("workflowId", "wf-9");
+            stub.put("title", "My Cloned App");
+            stub.put("resources", Map.of());
+            when(publicationClient.acquirePublication(eq(APP_PUB_ID), eq(TENANT_ID), eq(CALLER_ORG_ID)))
+                    .thenReturn(stub);
+
+            ToolExecutionResult result = module.execute("acquire",
+                    Map.of("application_id", APP_PUB_ID.toString()),
+                    TENANT_ID, contextWithOrg()).orElseThrow();
+
+            @SuppressWarnings("unchecked")
+            Map<String, Object> data = (Map<String, Object>) result.data();
+            assertThat(data).doesNotContainKey("installed_resources");
+        }
+
+        @Test
         @DisplayName("A CE-exclusive refusal is reported as PERMISSION_DENIED with the real reason, not a generic failure")
         void ceExclusiveRefusalIsPermissionDenied() {
             // The deployment cannot run the app: terminal for the agent. A generic

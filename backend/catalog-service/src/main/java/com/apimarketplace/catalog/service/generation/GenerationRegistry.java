@@ -2,6 +2,9 @@ package com.apimarketplace.catalog.service.generation;
 
 import com.apimarketplace.catalog.domain.ApiEntity;
 import com.apimarketplace.catalog.domain.ApiToolEntity;
+import com.apimarketplace.catalog.domain.ApiToolParameterEntity;
+import com.apimarketplace.catalog.repository.ApiToolParameterRepository;
+import com.apimarketplace.catalog.util.AllowedValuesParser;
 import com.apimarketplace.catalog.repository.ApiRepository;
 import com.apimarketplace.catalog.repository.ApiToolRepository;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -50,15 +53,18 @@ public class GenerationRegistry {
 
     private final ApiToolRepository apiToolRepository;
     private final ApiRepository apiRepository;
+    private final ApiToolParameterRepository parameterRepository;
     private final ObjectMapper objectMapper;
 
     private final AtomicReference<Snapshot> cache = new AtomicReference<>(null);
 
     public GenerationRegistry(ApiToolRepository apiToolRepository,
                                ApiRepository apiRepository,
+                               ApiToolParameterRepository parameterRepository,
                                ObjectMapper objectMapper) {
         this.apiToolRepository = apiToolRepository;
         this.apiRepository = apiRepository;
+        this.parameterRepository = parameterRepository;
         this.objectMapper = objectMapper;
     }
 
@@ -90,7 +96,32 @@ public class GenerationRegistry {
             String apiName,
             String iconSlug,
             String platformCredentialName,
-            String executionMode) {
+            String executionMode,
+            /**
+             * Values the CATALOGUE knows a parameter accepts, keyed by unified
+             * name, for the parameters this model's descriptor left
+             * unrestricted. Display only: they never reach
+             * {@link GenerationSpec.Constraint}, so nothing new is refused and
+             * no billed default moves. See {@link GenerationLimits}.
+             */
+            Map<String, List<String>> catalogAllowed) {
+
+        /**
+         * A model with nothing inherited from the catalogue.
+         *
+         * <p>Kept so a caller that builds one by hand, and every test that
+         * describes a model without caring where its lists came from, does not
+         * have to name an empty map. Inheritance is an enrichment: its absence
+         * is the ordinary case, not a special one.
+         */
+        public GenerationModel(String modelId, String kind, GenerationSpec.Model model,
+                               GenerationSpec spec, UUID apiToolId, String toolSlug,
+                               String apiSlug, String apiName, String iconSlug,
+                               String platformCredentialName, String executionMode) {
+            this(modelId, kind, model, spec, apiToolId, toolSlug, apiSlug, apiName,
+                    iconSlug, platformCredentialName, executionMode, Map.of());
+        }
+
 
         /**
          * True when the endpoint finishes the job asynchronously, which the
@@ -187,6 +218,7 @@ public class GenerationRegistry {
                 continue;
             }
             String composite = api.getApiSlug() + "/" + tool.getToolSlug();
+            Map<String, List<String>> catalogValues = catalogAllowedFor(tool, spec, composite);
 
             for (GenerationSpec.Model m : spec.models()) {
                 if (!m.canAlwaysStateItsSize()) {
@@ -205,7 +237,12 @@ public class GenerationRegistry {
                         m.id(), spec.kind(), m, spec,
                         tool.getId(), composite,
                         api.getApiSlug(), api.getApiName(), api.getIconSlug(),
-                        api.getPlatformCredentialName(), tool.getExecutionMode());
+                        api.getPlatformCredentialName(), tool.getExecutionMode(),
+                        // Only where the model states no list of its own: a
+                        // descriptor that narrows the provider's set did so on
+                        // purpose, and widening it back offers values this
+                        // model refuses.
+                        unrestrictedOnly(catalogValues, m));
                 GenerationModel clash = byId.putIfAbsent(m.id(), resolved);
                 if (clash != null) {
                     // Uniqueness is enforced per descriptor at import; a clash
@@ -223,6 +260,75 @@ public class GenerationRegistry {
         log.info("[GenerationRegistry] {} generation model(s) across {} endpoint(s)",
                 byId.size(), endpoints.size());
         return new Snapshot(Map.copyOf(byId), Instant.now());
+    }
+
+    /**
+     * The values the CATALOGUE already knows each mapped parameter accepts.
+     *
+     * <p>The seed carries them: a provider that documents a closed set of
+     * voices or formats has it on the endpoint parameter, and the importer
+     * normalises the legacy scalar-array {@code default} into
+     * {@code allowed_values}. The generation descriptor never read them, so a
+     * dialog offered a free-text box for a required opaque identifier while the
+     * admissible list sat one table away.
+     *
+     * <p>Read once per snapshot, so the extra query is paid every five minutes
+     * rather than per request. A failure here is not fatal: the surface loses a
+     * dropdown, not a model.
+     */
+    private Map<String, List<String>> catalogAllowedFor(ApiToolEntity tool, GenerationSpec spec, String context) {
+        List<ApiToolParameterEntity> params;
+        try {
+            params = parameterRepository.findByApiToolId(tool.getId());
+        } catch (Exception e) {
+            log.warn("[GenerationRegistry] could not read parameters of {}: {} - its models keep "
+                    + "free-text fields for anything the descriptor does not restrict", context, e.getMessage());
+            return Map.of();
+        }
+        Map<String, String> allowedByName = new LinkedHashMap<>();
+        for (ApiToolParameterEntity p : params) {
+            if (p.getName() != null && p.getAllowedValues() != null) {
+                allowedByName.put(p.getName(), p.getAllowedValues());
+            }
+        }
+        if (allowedByName.isEmpty()) return Map.of();
+
+        Map<String, List<String>> resolved = new LinkedHashMap<>();
+        spec.paramMap().forEach((unified, binding) -> {
+            String path = binding.path();
+            // A binding path is a WRITE path, not always a parameter name:
+            // `content[0].text` and `config.duration` address a place inside a
+            // body, and the row that owns them is stored under a different
+            // name. Matching those by string would attach one parameter's list
+            // to another, which is worse than no list at all.
+            if (path == null || path.indexOf('.') >= 0 || path.indexOf('[') >= 0) return;
+            // A SCALED binding writes a different unit from the one the field
+            // is labelled in: `duration_seconds` reaching `music_length_ms`
+            // multiplies by 1000, so the parameter's own values are
+            // milliseconds and offering them under a field that says seconds
+            // would suggest 30000 for a half-minute clip.
+            if (binding.scale() != null) return;
+            List<String> values = AllowedValuesParser.parseString(allowedByName.get(path));
+            if (values != null && !values.isEmpty()) resolved.put(unified, values);
+        });
+        return resolved;
+    }
+
+    /** Drops anything the model already restricts itself. */
+    private static Map<String, List<String>> unrestrictedOnly(Map<String, List<String>> catalogValues,
+                                                              GenerationSpec.Model model) {
+        if (catalogValues.isEmpty()) return Map.of();
+        Map<String, List<String>> kept = new LinkedHashMap<>();
+        catalogValues.forEach((unified, values) -> {
+            // Only for parameters this model actually offers: a catalogue list
+            // for something it does not accept would advertise a field that
+            // never reaches the provider.
+            if (!model.capabilities().contains(unified)) return;
+            GenerationSpec.Constraint own = model.constraints().get(unified);
+            if (own != null && !own.allowed().isEmpty()) return;
+            kept.put(unified, values);
+        });
+        return kept.isEmpty() ? Map.of() : Map.copyOf(kept);
     }
 
     private record Snapshot(Map<String, GenerationModel> byId, Instant builtAt) {

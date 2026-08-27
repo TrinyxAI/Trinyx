@@ -351,10 +351,10 @@ public class WorkflowVersionController {
                 case WorkflowPinService.PinResult.Forbidden ignored -> ResponseEntity.notFound().build();
                 case WorkflowPinService.PinResult.VersionNotFound vnf ->
                         ResponseEntity.badRequest().body(Map.of("error", "Version " + vnf.version() + " not found"));
-                case WorkflowPinService.PinResult.NoSuccessfulRun nsr ->
+                case WorkflowPinService.PinResult.ProductionRunUnavailable pru ->
                         ResponseEntity.badRequest().body(Map.of("error",
-                                "No successful run exists for version " + nsr.version()
-                                        + ". Start a run with this version first."));
+                                "Version " + pru.version() + " could not be put in production: "
+                                        + pru.reason()));
                 case WorkflowPinService.PinResult.Success s -> {
                     Map<String, Object> response = new LinkedHashMap<>();
                     response.put("success", true);

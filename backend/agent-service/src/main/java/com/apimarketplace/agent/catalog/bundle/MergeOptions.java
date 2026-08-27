@@ -83,7 +83,15 @@ public record MergeOptions(String source, String label,
         // 'manual' is the catch-all allowed by model_config_overrides_source_check;
         // individual rows will almost always override this with their feed's
         // own source ("litellm" / "openrouter") stamped by the parser.
-        return new MergeOptions("manual", "sync-feed", null, false, false, false, false);
+        //
+        // assignDefaultCategoriesOnInsert=true: a sync insert stays review-gated
+        // OFF (honorEnabledOnInsert=false), but it must still land WITH its
+        // mode-aware category rows. Without them the admin's "enable" click sets
+        // enabled=true on a row that every category-scoped selector still skips,
+        // because the picker reads model_category_settings - a dead end that
+        // V388 had to repair by hand for the rows V384/V386 orphaned. Categories
+        // on a disabled row expose nothing; they only make the enable work.
+        return new MergeOptions("manual", "sync-feed", null, false, false, false, true);
     }
 
     /**

@@ -120,3 +120,30 @@ describe('ServiceApprovalCard variants', () => {
     expect(screen.queryByRole('button', { name: 'Connect' })).not.toBeInTheDocument();
   });
 });
+
+describe('ServiceApprovalCard - saying that the agent is holding', () => {
+  it('says the assistant is waiting when the call is HELD', () => {
+    mocks.hasCredential.mockReturnValue(false);
+    render(
+      <ServiceApprovalCard
+        conversationId="conv-1"
+        pendingApproval={{ services, reason: 'Need both', needsAttention: false,
+                           blocking: true, gateKeys: ['call-1'], timestamp: 1 }}
+      />,
+    );
+
+    expect(screen.getByTestId('service-approval-waiting')).toBeInTheDocument();
+  });
+
+  it('stays silent when nothing is held', () => {
+    mocks.hasCredential.mockReturnValue(false);
+    render(
+      <ServiceApprovalCard
+        conversationId="conv-1"
+        pendingApproval={{ services, reason: 'Need both', needsAttention: false, timestamp: 1 }}
+      />,
+    );
+
+    expect(screen.queryByTestId('service-approval-waiting')).not.toBeInTheDocument();
+  });
+});

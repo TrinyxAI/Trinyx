@@ -12,11 +12,12 @@
  */
 
 import * as React from 'react';
+import { useTranslations } from 'next-intl';
 import { ArrowRight } from 'lucide-react';
 import Image from 'next/image';
 import clsx from 'clsx';
 import type { Node } from 'reactflow';
-import { Button } from '@/components/ui/button';
+import { InspectorToggleRow } from '../../InspectorToggleRow';
 import { Input } from '@/components/ui/input';
 import { ApiListSkeleton, ToolListSkeleton, ToolDetailsSkeleton } from '../../../SkeletonLoaders';
 import LoadingSpinner from '@/components/LoadingSpinner';
@@ -24,6 +25,12 @@ import { OptionalSection } from '../../OptionalSection';
 import { CredentialSection } from '../../CredentialSection';
 import { ExpressionField } from '../../ExpressionField';
 import type { BuilderNodeData } from '../../../../types';
+import {
+  credentialSelectorText,
+  isDynamicCredential as isDynamicCredentialMode,
+  toggleCredentialMode,
+  type CredentialToolData,
+} from './credentialSelectorMode';
 
 interface McpToolSelectorProps {
   node: Node<BuilderNodeData>;
@@ -120,6 +127,19 @@ export function McpToolSelector({
   findUnknownVariables,
   connectionProps,
 }: McpToolSelectorProps) {
+  const tCredSelector = useTranslations('workflowBuilder.credentialSelector');
+  // The MODE is the presence of the key, not the emptiness of its text. Derived
+  // from the text alone, clearing the field to retype swapped the whole control
+  // back to the picker mid-edit and dropped focus. It is also the only
+  // discriminator between the two modes, and the only one that is a deliberate
+  // gesture: selectedCredentialId is auto-filled on first render, with no user
+  // action, so its presence has never meant that anyone chose it.
+  // The three-state rules live in credentialSelectorMode, extracted so they can be
+  // tested without a render harness: this is where the states are produced, and
+  // inline they were verified by nobody.
+  const credentialToolData = (data as any)?.toolData as CredentialToolData | undefined;
+  const isDynamicCredential = isDynamicCredentialMode(credentialToolData);
+  const credentialSelector: string = credentialSelectorText(credentialToolData);
   return (
     <div className="space-y-4 pt-2">
       {/* Search - Hide for tool nodes */}
@@ -303,9 +323,71 @@ export function McpToolSelector({
         </div>
       )}
 
-      {/* Tool Credentials - Show at the top when credentials are required */}
-      {isToolNode && toolCredentials && toolCredentials.length > 0 && (
-        <div>
+      {/* WHICH account this step runs on. One question, so one control: the
+          picker when the answer is known now, an expression when it is only known
+          at run time. Never both at once - a visible picker showing one account
+          while the run used another is the confusion this replaces. */}
+      {/* Rendered when the tool HAS credentials, and also whenever a selector is
+          already set even if it has none. Gated on credentials alone, a step given an
+          expression on a credential-less endpoint showed a permanent canvas error
+          telling the author to remove something the screen offered no way to remove. */}
+      {isToolNode && ((toolCredentials && toolCredentials.length > 0) || isDynamicCredential) && (
+        <div className="space-y-2">
+          {/* The same control the node settings use, so the panel reads as one panel.
+              The long explanation lives in the field's info popover rather than here,
+              which keeps this scannable and the detail one click away. */}
+          <InspectorToggleRow
+            label={tCredSelector('accountLabel')}
+            // The label names the subject, not the state, so the switch gets its own
+            // announcement: "Account used by this step, switch, off" says nothing about
+            // what turning it on does.
+            ariaLabel={tCredSelector('toggleAriaLabel')}
+            // The help line names the current state and then offers the other, so it
+            // stays informative instead of reading as an instruction already followed.
+            help={tCredSelector(isDynamicCredential ? 'toggleHelpOn' : 'toggleHelpOff')}
+            checked={isDynamicCredential}
+            disabled={isRunMode}
+            testId="mcp-credential-selector-toggle"
+            onChange={() => {
+              if (!onUpdate || !node?.data) return;
+              onUpdate({
+                ...node.data,
+                toolData: toggleCredentialMode((node.data as any)?.toolData),
+              } as BuilderNodeData);
+            }}
+          />
+          {isDynamicCredential ? (
+            <ExpressionField
+              label={tCredSelector('expressionLabel')}
+              // The full explanation is five sentences and pushes the field off screen
+              // when printed inline, so it moves into the info popover. Its one line
+              // with a security consequence does NOT move: an author who never opens
+              // the popover still has to see who gets to choose the account.
+              description={tCredSelector('expressionCaution')}
+              infoContent={tCredSelector('expressionHelp')}
+              value={credentialSelector}
+              nodeId={node?.id ?? ''}
+              fieldName="credentialSelector"
+              // Blank in dynamic mode resolves to nothing at run time, which fails
+              // the step by design, so the builder has to say so before the run.
+              isRequired
+              isRunMode={isRunMode}
+              findUnknownVariables={findUnknownVariables}
+              // Not {{trigger.output.account}}: that is neither supported trigger form,
+              // so the one value the field offers to copy would resolve to nothing.
+              placeholder="{{item.ig_account}}"
+              onChange={(value) => {
+                if (!onUpdate || !node?.data) return;
+                onUpdate({
+                  ...node.data,
+                  toolData: {
+                    ...((node.data as any)?.toolData ?? {}),
+                    credentialSelector: value,
+                  },
+                } as BuilderNodeData);
+              }}
+            />
+          ) : (
           <CredentialSection
             toolCredentials={toolCredentials}
             selectedCredentialId={(data as any)?.toolData?.selectedCredentialId}
@@ -360,6 +442,7 @@ export function McpToolSelector({
               onUpdate({ ...node.data, toolData: nextToolData });
             }}
           />
+          )}
         </div>
       )}
 

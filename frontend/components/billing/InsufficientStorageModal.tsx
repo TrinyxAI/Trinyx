@@ -10,6 +10,9 @@ import { useTranslations } from 'next-intl';
 import { useRouter } from 'next/navigation';
 import { calcPrice as calcPriceBase } from '@/lib/billing/pricing-constants';
 import { useSubscription } from '@/lib/hooks/smart-hooks-complete';
+import FoundingPriceNote from '@/components/pricing/FoundingPriceNote';
+import ReferencePrice from '@/components/pricing/ReferencePrice';
+import { usePricingEvent } from '@/hooks/usePricingEvent';
 import { storageApi, type StorageQuota, type StorageBreakdown, type StorageCategory, STORAGE_CATEGORY_COLORS } from '@/lib/api/storage-api';
 
 /**
@@ -103,6 +106,8 @@ export default function InsufficientStorageModal() {
   }, [createSubscription, billingCycle, router]);
 
   const calcPrice = (planId: string) => calcPriceBase(planId, billingCycle, 0);
+  // Same server-resolved window as the pricing page, so the two never disagree.
+  const { event: pricingEvent } = usePricingEvent();
 
   const usagePercent = quota ? Math.min(quota.usagePercentage, 100) : 0;
 
@@ -274,14 +279,29 @@ export default function InsufficientStorageModal() {
                   <h3 className="text-sm font-bold text-theme-primary mb-1">
                     {plan.name}
                   </h3>
-                  <div className="text-2xl font-bold text-theme-primary">
-                    {plan.monthlyPrice === 0 ? '$0' : `$${plan.monthlyPrice}`}
-                    {plan.monthlyPrice > 0 && (
-                      <span className="text-xs text-theme-muted font-normal">
-                        /{t('mo')}
-                      </span>
-                    )}
+                  <div className="text-2xl font-bold text-theme-primary flex items-baseline justify-center gap-2">
+                    <ReferencePrice
+                      planId={plan.id}
+                      cycle={billingCycle}
+                      creditTierIndex={0}
+                      event={pricingEvent}
+                      size="sm"
+                    />
+                    <span>
+                      {plan.monthlyPrice === 0 ? '$0' : `$${plan.monthlyPrice}`}
+                      {plan.monthlyPrice > 0 && (
+                        <span className="text-xs text-theme-muted font-normal">
+                          /{t('mo')}
+                        </span>
+                      )}
+                    </span>
                   </div>
+                  <FoundingPriceNote
+                    planId={plan.id}
+                    cycle={billingCycle}
+                    creditTierIndex={0}
+                    event={pricingEvent}
+                  />
                 </div>
 
                 <ul className="space-y-1.5 mb-4">

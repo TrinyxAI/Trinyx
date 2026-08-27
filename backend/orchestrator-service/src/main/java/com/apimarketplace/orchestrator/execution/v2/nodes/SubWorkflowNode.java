@@ -21,6 +21,7 @@ import org.slf4j.LoggerFactory;
 
 import java.util.*;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ForkJoinPool;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 
@@ -28,7 +29,10 @@ import java.util.concurrent.TimeoutException;
  * SubWorkflow node - Executes another workflow by firing its trigger (reusable run pattern).
  *
  * The node loads the target workflow, finds its active run (respecting pinned versions),
- * fires the trigger via ReusableTriggerService, and collects the epoch outputs.
+ * fires the trigger via ReusableTriggerService, WAITS for that epoch to finish, and only then
+ * collects its outputs. The wait is the point: firing returns as soon as nothing is left to run
+ * inline, which also happens when a node in the child yields, so reading the outputs at that
+ * moment yields a prefix of the epoch rather than its result.
  *
  * Anti-recursion: Tracks call depth via ExecutionContext global data.
  * If the depth exceeds the configured maxDepth, the node fails immediately.
@@ -37,7 +41,8 @@ import java.util.concurrent.TimeoutException;
  * - Compose workflows by calling reusable sub-workflows
  * - Target workflow must have an active run (start it first)
  * - Pass data in via inputMapping, receive results as output
- * - Timeout protection prevents runaway sub-workflows
+ * - timeoutSeconds bounds how long THIS node waits, never the sub-workflow itself, which
+ *   keeps running after the wait gives up
  *
  * <p><b>Scope:</b> the target workflow id is resolvable at runtime (it goes through
  * {@code templateAdapter.resolveTemplates}, so it can come from an upstream node
@@ -282,91 +287,157 @@ public class SubWorkflowNode extends BaseNode {
             logger.info("SubWorkflow firing trigger: nodeId={}, subRunId={}, triggerId={}, type={}",
                 nodeId, subRunId, triggerId, triggerType);
 
+            int timeoutSeconds = config != null ? config.timeoutSeconds() : 300;
+            // ONE budget for the whole call, started before the fire. timeoutSeconds is documented
+            // as "maximum time to wait for the sub-workflow to complete", so it has to cover the
+            // fire AND the wait for the child epoch to close below; giving the wait its own fresh
+            // budget would silently double the ceiling an author configured. It also covers the
+            // wait for the per-sub-run lock, so sibling calls to one target share this budget.
+            final long deadlineNanos = System.nanoTime() + TimeUnit.SECONDS.toNanos(timeoutSeconds);
+            TriggerExecutionResult triggerResult;
+
             // F2.2 - register the parent→child link BEFORE firing so an in-flight
             // cancel on the parent run propagates downward. The engine's
             // isAgentCancelSignalSet walks workflow:parent:{childRunId} pointers
-            // up to find a cancelled ancestor. Cleared in finally below.
+            // up to find a cancelled ancestor.
+            //
+            // Cleared once the whole blocking section below is done, fire AND wait, which is what
+            // F2.2 meant by "around the blocking call". That used to be the fire alone; now the
+            // child does most of its work during the wait, so clearing when the fire returns would
+            // leave the longest part of the call with no route from a parent stop to the child.
+            // It must not outlive the section either: this is a SHARED reusable run, and a pointer
+            // left behind would let a later stop of THIS run abort somebody else's fire of it.
+            //
+            // The pointer is a single key per child, so two parents firing the same target still
+            // overwrite each other's and the first to finish clears the survivor's. That race
+            // predates this change, but widening the section from the fire to the whole wait makes
+            // a missing or mis-aimed pointer likelier, so a cancel reaching the child is
+            // best-effort, not a guarantee.
             if (workflowRedisPublisher != null && context.runId() != null
                     && subRunId != null && !subRunId.equals(context.runId())) {
                 workflowRedisPublisher.registerSubWorkflowParent(subRunId, context.runId());
             }
+            try {
 
-            int timeoutSeconds = config != null ? config.timeoutSeconds() : 300;
-            TriggerExecutionResult triggerResult;
-            // Between the "firing trigger" line above and the completion of the wait below, this
-            // node used to emit nothing, so a fire that never returned was indistinguishable in the
-            // logs from a fire that was never dispatched. The markers below close that gap: for a
-            // given (subRunId, epoch, spawn, itemIndex) tuple, the last marker emitted names the
-            // stage it is parked in.
-            //
-            // All four identifiers are needed. itemIndex separates concurrent split/fork branches;
-            // spawn separates re-executions of the same node, which is what a loop iteration is, so
-            // without it five sequential iterations emit byte-identical lines. epoch separates
-            // trigger fires of the same run.
-            //
-            // LEVELS: the two that answer "was it dispatched, and did the worker start" are INFO so
-            // they are usable on a default prod configuration (logging level for this package is
-            // INFO). The two lock markers are DEBUG: they only matter when contention is suspected,
-            // and reading them in prod needs a log-level change for this class.
-            logger.debug("SubWorkflow awaiting sub-run lock: nodeId={}, parentRunId={}, subRunId={}, epoch={}, spawn={}, itemIndex={}",
-                nodeId, context.runId(), subRunId, context.epoch(), context.spawn(), context.itemIndex());
-            synchronized (lockForSubRun(subRunId)) {
-                logger.debug("SubWorkflow holding sub-run lock: nodeId={}, parentRunId={}, subRunId={}, epoch={}, spawn={}, itemIndex={}",
+                // Between the "firing trigger" line above and the completion of the wait below, this
+                // node used to emit nothing, so a fire that never returned was indistinguishable in the
+                // logs from a fire that was never dispatched. The markers below close that gap: for a
+                // given (subRunId, epoch, spawn, itemIndex) tuple, the last marker emitted names the
+                // stage it is parked in.
+                //
+                // All four identifiers are needed. itemIndex separates concurrent split/fork branches;
+                // spawn separates re-executions of the same node, which is what a loop iteration is, so
+                // without it five sequential iterations emit byte-identical lines. epoch separates
+                // trigger fires of the same run.
+                //
+                // LEVELS: the two that answer "was it dispatched, and did the worker start" are INFO so
+                // they are usable on a default prod configuration (logging level for this package is
+                // INFO). The two lock markers are DEBUG: they only matter when contention is suspected,
+                // and reading them in prod needs a log-level change for this class.
+                logger.debug("SubWorkflow awaiting sub-run lock: nodeId={}, parentRunId={}, subRunId={}, epoch={}, spawn={}, itemIndex={}",
                     nodeId, context.runId(), subRunId, context.epoch(), context.spawn(), context.itemIndex());
-                // Re-read the freshest child run entity inside the stripe lock so
-                // concurrent fires of the same sub-run serialize on a single,
-                // up-to-date row instead of racing on a stale snapshot.
-                WorkflowRunEntity runForFire = workflowRunRepository.findByRunIdPublic(subRunId)
-                    .orElse(run);
-                // HOTFIX-2 (2026-05-20) - sub-workflow trigger executes step nodes
-                // that persist workflow_step_data + storage.storage; both are
-                // OrgScopedEntity and would trip V261 NOT NULL on the FJP worker
-                // without re-binding the org scope.
-                final String orgIdForWorker = runForFire.getOrganizationId();
-                logger.info("SubWorkflow awaiting child epoch: nodeId={}, subRunId={}, epoch={}, spawn={}, itemIndex={}, timeoutSeconds={}",
-                    nodeId, subRunId, context.epoch(), context.spawn(), context.itemIndex(), timeoutSeconds);
-                try {
-                    triggerResult = CompletableFuture.supplyAsync(() -> {
-                        // First statement on the worker: distinguishes "the task never got a
-                        // thread" (this line absent) from "the worker ran and then parked inside
-                        // the child DAG" (this line present, no completion line after it).
-                        logger.info("SubWorkflow worker entered: nodeId={}, subRunId={}, epoch={}, spawn={}, itemIndex={}, thread={}",
-                            nodeId, subRunId, context.epoch(), context.spawn(), context.itemIndex(),
-                            Thread.currentThread().getName());
-                        TriggerExecutionResult[] holder = new TriggerExecutionResult[1];
-                        com.apimarketplace.common.web.TenantResolver.runWithOrgScope(orgIdForWorker, () ->
-                            holder[0] = reusableTriggerService.executeTriggerInternal(
-                                runForFire, triggerId, triggerType, inputData, true, childGlobalData)
-                        );
-                        return holder[0];
-                    }).get(timeoutSeconds, TimeUnit.SECONDS);
-                } catch (TimeoutException e) {
-                    String msg = String.format(
-                        "Sub-workflow timed out after %d seconds (runId=%s)", timeoutSeconds, subRunId);
-                    logger.error("SubWorkflow timeout: nodeId={}, {}", nodeId, msg);
-                    if (workflowRedisPublisher != null) {
-                        workflowRedisPublisher.clearSubWorkflowParent(subRunId);
+                synchronized (lockForSubRun(subRunId)) {
+                    logger.debug("SubWorkflow holding sub-run lock: nodeId={}, parentRunId={}, subRunId={}, epoch={}, spawn={}, itemIndex={}",
+                        nodeId, context.runId(), subRunId, context.epoch(), context.spawn(), context.itemIndex());
+                    // Re-read the freshest child run entity inside the stripe lock so
+                    // concurrent fires of the same sub-run serialize on a single,
+                    // up-to-date row instead of racing on a stale snapshot.
+                    WorkflowRunEntity runForFire = workflowRunRepository.findByRunIdPublic(subRunId)
+                        .orElse(run);
+                    // HOTFIX-2 (2026-05-20) - sub-workflow trigger executes step nodes
+                    // that persist workflow_step_data + storage.storage; both are
+                    // OrgScopedEntity and would trip V261 NOT NULL on the FJP worker
+                    // without re-binding the org scope.
+                    final String orgIdForWorker = runForFire.getOrganizationId();
+                    // Seconds LEFT, not the full timeoutSeconds: acquiring the stripe lock above can
+                    // itself take time, and a fresh budget here would let one call consume the lock
+                    // wait PLUS the whole configured budget, and then hand a negative remainder to the
+                    // epoch wait. Floored at 1s so a call that arrives with the budget already gone
+                    // still gets one honest attempt rather than an instant timeout.
+                    long fireBudgetSeconds = Math.max(1L,
+                        TimeUnit.NANOSECONDS.toSeconds(deadlineNanos - System.nanoTime()));
+                    logger.info("SubWorkflow awaiting child epoch: nodeId={}, subRunId={}, epoch={}, spawn={}, itemIndex={}, fireBudgetSeconds={}",
+                        nodeId, subRunId, context.epoch(), context.spawn(), context.itemIndex(), fireBudgetSeconds);
+                    try {
+                        triggerResult = CompletableFuture.supplyAsync(() -> {
+                            // First statement on the worker: distinguishes "the task never got a
+                            // thread" (this line absent) from "the worker ran and then parked inside
+                            // the child DAG" (this line present, no completion line after it).
+                            logger.info("SubWorkflow worker entered: nodeId={}, subRunId={}, epoch={}, spawn={}, itemIndex={}, thread={}",
+                                nodeId, subRunId, context.epoch(), context.spawn(), context.itemIndex(),
+                                Thread.currentThread().getName());
+                            TriggerExecutionResult[] holder = new TriggerExecutionResult[1];
+                            com.apimarketplace.common.web.TenantResolver.runWithOrgScope(orgIdForWorker, () ->
+                                holder[0] = reusableTriggerService.executeTriggerInternal(
+                                    runForFire, triggerId, triggerType, inputData, true, childGlobalData)
+                            );
+                            return holder[0];
+                        }).get(fireBudgetSeconds, TimeUnit.SECONDS);
+                    } catch (TimeoutException e) {
+                        logger.error("SubWorkflow timeout during fire: nodeId={}, subRunId={}, timeoutSeconds={}",
+                            nodeId, subRunId, timeoutSeconds);
+                        Map<String, Object> failOutput = new HashMap<>();
+                        failOutput.put("resolved_params", resolvedParams);
+                        return NodeExecutionResult.failureWithOutput(
+                            nodeId, stillRunningMessage(timeoutSeconds, subRunId), failOutput, 0);
                     }
-                    Map<String, Object> failOutput = new HashMap<>();
-                    failOutput.put("resolved_params", resolvedParams);
-                    return NodeExecutionResult.failureWithOutput(nodeId, msg, failOutput, 0);
-                } finally {
-                    // Best-effort cleanup on the success path too (TTL backstops if missed).
-                    if (workflowRedisPublisher != null) {
-                        workflowRedisPublisher.clearSubWorkflowParent(subRunId);
+
+                    // 8. Check trigger result
+                    if (!triggerResult.success()) {
+                        String errorMsg = triggerResult.message() != null
+                            ? triggerResult.message()
+                            : "Sub-workflow trigger failed";
+                        logger.warn("SubWorkflow trigger failed: nodeId={}, subRunId={}, error={}",
+                            nodeId, subRunId, errorMsg);
+                        Map<String, Object> failOutput = new HashMap<>();
+                        failOutput.put("resolved_params", resolvedParams);
+                        return NodeExecutionResult.failureWithOutput(nodeId, errorMsg, failOutput, 0);
                     }
                 }
 
-                // 8. Check trigger result
-                if (!triggerResult.success()) {
-                    String errorMsg = triggerResult.message() != null
-                        ? triggerResult.message()
-                        : "Sub-workflow trigger failed";
-                    logger.warn("SubWorkflow trigger failed: nodeId={}, subRunId={}, error={}",
-                        nodeId, subRunId, errorMsg);
+                // 8b. The fire returned. That is NOT the same as the child having finished.
+                //
+                // The engine hands control back as soon as it has nothing left to run INLINE, which
+                // also happens when a node yields and the remainder of the child's DAG is deferred to
+                // the signal-resume path: a wait longer than 3 seconds, a user approval, an interface
+                // awaiting __continue, or an agent handed to the async queue (agent nodes take that
+                // path by DEFAULT, so this is the common case, not the exotic one). Reading the
+                // child's step rows at that instant yields a PREFIX of the epoch, and this node used
+                // to publish that prefix under success=true. In production it shipped a green run
+                // carrying 4 of the child's 11 steps.
+                //
+                // So wait for the epoch to actually close, inside the budget the author already
+                // configured for exactly this. A child that is merely slow now WORKS instead of
+                // returning half its data; a child parked on a human (approval, interface) spends the
+                // budget and fails honestly, which is the only truthful answer available.
+                // The DAG key comes from the RESULT, not from our local triggerId. The engine indexes
+                // an epoch's signals, agents and running nodes by the exact string the fire ran under,
+                // and the result carries that string. Passing our own copy would work only as long as
+                // the two never diverge, and a key that misses simply reports "nothing pending",
+                // which would make this whole guard silently inert rather than fail loudly.
+                String childDagId = triggerResult.triggerId() != null ? triggerResult.triggerId() : triggerId;
+                WaitOutcome waitOutcome =
+                    awaitChildEpochClosed(subRunId, childDagId, triggerResult.epoch(), deadlineNanos, context);
+                if (waitOutcome != WaitOutcome.CLOSED) {
                     Map<String, Object> failOutput = new HashMap<>();
                     failOutput.put("resolved_params", resolvedParams);
-                    return NodeExecutionResult.failureWithOutput(nodeId, errorMsg, failOutput, 0);
+                    return NodeExecutionResult.failureWithOutput(
+                        nodeId, waitFailureMessage(waitOutcome, timeoutSeconds, subRunId), failOutput, 0);
+                }
+            } finally {
+                // Best-effort (the key's TTL backstops a miss). Runs on every exit from the
+                // blocking section, including the early returns above.
+                //
+                // Guarded because a throw here would complete the finally ABRUPTLY and discard
+                // the pending return: a Redis blip during cleanup would turn a finished
+                // sub-workflow, or an honest failure message, into an unrelated Redis error.
+                if (workflowRedisPublisher != null) {
+                    try {
+                        workflowRedisPublisher.clearSubWorkflowParent(subRunId);
+                    } catch (Exception cleanupError) {
+                        logger.warn("SubWorkflow could not clear the parent pointer, TTL will reclaim it: subRunId={}, error={}",
+                            subRunId, cleanupError.getMessage());
+                    }
                 }
             }
 
@@ -387,11 +458,10 @@ public class SubWorkflowNode extends BaseNode {
             // with more than one orchestrator replica two fires of the same subRunId on different
             // pods have always run this read unsynchronised.
             //
-            // Pre-existing caveat, unchanged by this move and not introduced by it: when
-            // ReusableTriggerService short-circuits with the child epoch still open (a blocking
-            // signal or an in-flight async agent), it returns success while later signal resumes
-            // keep inserting COMPLETED rows at this same epoch. Such a late row can be missed
-            // here. The monitor never excluded that either, since the resume runs on its own path.
+            // The caveat that used to sit here - the fire short-circuiting with the child epoch
+            // still open, so that later resumes kept inserting COMPLETED rows this read had
+            // already missed - is gone: step 8b above does not let execution reach this line until
+            // the epoch is closed. Reaching it means the rows below are the whole epoch.
             logger.debug("SubWorkflow collecting epoch outputs: nodeId={}, subRunId={}, spawn={}, itemIndex={}, childEpoch={}",
                 nodeId, subRunId, context.spawn(), context.itemIndex(), triggerResult.epoch());
             Map<String, Object> resultOutputs = collectEpochOutputs(
@@ -605,8 +675,10 @@ public class SubWorkflowNode extends BaseNode {
         Integer pinnedVersion = entity.getPinnedVersion();
         Integer runVersion = live.getPlanVersion();
         if (pinnedVersion != null && !pinnedVersion.equals(runVersion)) {
-            // Same remedy idiom the pin action itself emits when it needs a run at a given version
-            // (see WorkflowCrudModule's NoSuccessfulRun branch), so the two stay consistent.
+            // "Start a run at the pinned version" stays the remedy HERE even though pin no
+            // longer asks for one (2026-08-25: pin provisions its own production run). This
+            // branch is the other failure: a run exists, it is simply at the wrong version,
+            // and re-pinning would move production rather than fix the call.
             String startAtPin = "Start a run with workflow(action='execute', id='" + workflowId
                 + "', version=" + pinnedVersion + ").";
             if (runVersion == null) {
@@ -672,6 +744,380 @@ public class SubWorkflowNode extends BaseNode {
             }
         }
         return TriggerType.MANUAL;
+    }
+
+    // ========================================================================
+    // WAITING FOR THE CHILD EPOCH TO CLOSE
+    // ========================================================================
+
+    /** First poll delay. Short, so a child that was almost done is not padded by a fixed tick. */
+    static final long EPOCH_POLL_MIN_MS = 200L;
+    /**
+     * Ceiling for the backoff, so a long wait settles at about one round of checks per second.
+     *
+     * <p>A "round" is not one read: the epoch predicate alone consults the signal table, both
+     * async-agent stores and the run's snapshot, and it logs at INFO when it finds work. A long
+     * wait is therefore chatty in the logs as well as on the wire, which is the price of asking
+     * the engine's own gate instead of inventing a second answer.
+     */
+    static final long EPOCH_POLL_MAX_MS = 1_000L;
+    /** How many polls between child-run status reads. The deadline bounds a missed transition. */
+    static final int TERMINAL_CHECK_EVERY_N_POLLS = 5;
+
+    /**
+     * How the wait ended. Each value gets its OWN message, because they are different facts about
+     * the child and imply different actions. Collapsing them into one wording is how an agent ends
+     * up being told to go stop a run that already stopped.
+     */
+    enum WaitOutcome {
+        /** The epoch closed. The only outcome that lets the node read the child's outputs. */
+        CLOSED,
+        /** The budget ran out with the child still working. */
+        BUDGET_SPENT,
+        /** The child run ended (cancelled/failed/...) without finishing this epoch. */
+        CHILD_ENDED,
+        /** THIS run was stopped while waiting. */
+        RUN_STOPPED,
+        /** The worker was interrupted (shutdown/drain). */
+        INTERRUPTED,
+        /** Cannot wait here: doing so would hold a database transaction open for the budget. */
+        CANNOT_WAIT_IN_TRANSACTION
+    }
+
+    /**
+     * Block until the child's epoch is no longer in flight, or the budget runs out.
+     *
+     * <p>The predicate is {@link ReusableTriggerService#isEpochStillOpen}, the very check the
+     * engine uses to decide whether that epoch may be closed. Re-reading it rather than trusting
+     * something the fire returned is deliberate: an epoch can be left open by three different
+     * paths (the deferred-reset branch, the under-lock re-check inside the reset, and the reset's
+     * terminal-status guard) and only the first is knowable when the result is built.
+     *
+     * <p>Fail-OPEN on everything it cannot determine. If the trigger service was never injected,
+     * or a read throws, this reports CLOSED and the node proceeds exactly as it did before this
+     * check existed. A diagnostic must not become a new way for a healthy run to fail.
+     */
+    private WaitOutcome awaitChildEpochClosed(String subRunId, String triggerId, int childEpoch,
+                                              long deadlineNanos, ExecutionContext context) {
+        if (reusableTriggerService == null || subRunId == null || triggerId == null || childEpoch < 0) {
+            // Nothing to ask. Pre-check behaviour: assume finished and read what is there.
+            //
+            // childEpoch < 0 is a real value: a fire dispatched to the QUEUE reports epoch -1.
+            // This node always fires with the queue bypassed, so that cannot happen today, and if
+            // it did the outcome would be exactly the pre-change behaviour. If the fire ever stops
+            // bypassing the queue, this line becomes a hole and must fail instead of proceeding.
+            return WaitOutcome.CLOSED;
+        }
+
+        // One check is always safe, and it carries the correctness guarantee: never publish a
+        // partial epoch as a success. Only the LOOP below is conditional.
+        //
+        // The guarantee is conditional on ONE thing, stated here rather than left implicit: the
+        // predicate must be readable. safeIsEpochStillOpen answers "closed" when the read throws,
+        // so a persistent Redis or DB failure degrades this node back to its old behaviour, a
+        // success over whatever rows exist. That is a deliberate availability-over-correctness
+        // choice, matching how the engine's own epoch gate fails open, and it is logged at WARN.
+        if (!safeIsEpochStillOpen(subRunId, triggerId, childEpoch)) {
+            return WaitOutcome.CLOSED;
+        }
+
+        // Refuse to poll while a transaction is pinned by this call chain. On the step-by-step
+        // lane this node runs inside a read-write @Transactional method, so sleeping here would
+        // hold a pooled DB connection and an open Hibernate session for the whole budget, which
+        // Postgres eventually kills on idle_in_transaction_session_timeout and which starves the
+        // pool for every other request meanwhile. Failing fast with the truth is strictly better,
+        // and the correctness guarantee above already held before we get here.
+        //
+        // TWO questions, because neither alone is sufficient:
+        //   - isInsideTransaction() catches the plain same-thread case, but it reads a
+        //     THREAD-LOCAL, and this node is not always reached on the thread that opened the
+        //     transaction: a split fans items onto the common pool, and a node-level timeout
+        //     policy hands the body to its own executor. Across either hop the flag reads false
+        //     while the caller is still blocked on the join holding the transaction open.
+        //   - the run's execution MODE travels with the run, not the thread, so it survives both
+        //     hops. It is the hop-proof half of the answer.
+        //
+        // One combination still slips past both: a run stored as AUTOMATIC that is nonetheless
+        // driven through the step-by-step executor AND crosses one of those hops. Nothing does
+        // that today, and closing it would mean threading the caller's transaction state through
+        // every dispatch, so it is recorded rather than coded around.
+        if (isInsideTransaction() || isStepByStepRun(context)) {
+            logger.warn("SubWorkflow will not wait inside a transaction: nodeId={}, subRunId={}, childEpoch={}",
+                nodeId, subRunId, childEpoch);
+            return WaitOutcome.CANNOT_WAIT_IN_TRANSACTION;
+        }
+
+        long pollMs = EPOCH_POLL_MIN_MS;
+        long startNanos = System.nanoTime();
+        int terminalCheckCountdown = TERMINAL_CHECK_EVERY_N_POLLS;
+        logger.info("SubWorkflow waiting for child epoch to close: nodeId={}, subRunId={}, childEpoch={}, budgetMs={}",
+            nodeId, subRunId, childEpoch, TimeUnit.NANOSECONDS.toMillis(deadlineNanos - System.nanoTime()));
+
+        while (true) {
+            // The child cannot finish this epoch any more: say so now rather than at the deadline.
+            //
+            // Checked on a slow cadence, not every poll. It is a second DB round trip whose answer
+            // changes at most once for the whole wait, and the deadline already bounds the case
+            // where it is missed.
+            if (--terminalCheckCountdown <= 0) {
+                terminalCheckCountdown = TERMINAL_CHECK_EVERY_N_POLLS;
+                RunStatus childStatus = readChildRunStatus(subRunId);
+                if (childStatus != null && childStatus.isTerminal()) {
+                    // Re-read the epoch ONCE before giving up. The two reads are not atomic, so a
+                    // child that finished between them would otherwise be reported as unfinished.
+                    if (!safeIsEpochStillOpen(subRunId, triggerId, childEpoch)) {
+                        return WaitOutcome.CLOSED;
+                    }
+                    logger.warn("SubWorkflow child run is terminal ({}) with its epoch unfinished: nodeId={}, subRunId={}, childEpoch={}",
+                        childStatus, nodeId, subRunId, childEpoch);
+                    return WaitOutcome.CHILD_ENDED;
+                }
+            }
+
+            // A stop on this run (or on an ancestor) must not be held up by a child we are only
+            // observing. The child keeps its own cancellation path; this is about OUR worker.
+            if (isCancelled(context)) {
+                logger.info("SubWorkflow wait abandoned, run stopped: nodeId={}, subRunId={}, childEpoch={}",
+                    nodeId, subRunId, childEpoch);
+                return WaitOutcome.RUN_STOPPED;
+            }
+
+            long remainingNanos = deadlineNanos - System.nanoTime();
+            if (remainingNanos <= 0) {
+                logger.error("SubWorkflow child epoch still open at the deadline: nodeId={}, subRunId={}, childEpoch={}, waitedMs={}",
+                    nodeId, subRunId, childEpoch,
+                    TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - startNanos));
+                return WaitOutcome.BUDGET_SPENT;
+            }
+
+            long sleepMs = Math.min(pollMs, TimeUnit.NANOSECONDS.toMillis(remainingNanos) + 1);
+            if (!compensatedSleep(sleepMs)) {
+                logger.warn("SubWorkflow wait interrupted: nodeId={}, subRunId={}, childEpoch={}", nodeId, subRunId, childEpoch);
+                return WaitOutcome.INTERRUPTED;
+            }
+            // Geometric backoff: responsive for a child that is nearly done, cheap for a long one.
+            pollMs = Math.min(pollMs * 2, EPOCH_POLL_MAX_MS);
+
+            if (!safeIsEpochStillOpen(subRunId, triggerId, childEpoch)) {
+                logger.info("SubWorkflow child epoch closed after waiting: nodeId={}, subRunId={}, childEpoch={}, waitedMs={}",
+                    nodeId, subRunId, childEpoch,
+                    TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - startNanos));
+                return WaitOutcome.CLOSED;
+            }
+        }
+    }
+
+    /**
+     * Is this run being stepped one node at a time?
+     *
+     * <p>Hop-proof companion to {@link #isInsideTransaction()}: the mode belongs to the run, so it
+     * still answers correctly on a thread the transactional caller merely dispatched to. That lane
+     * holds an open read-write transaction across the whole node call, so it must never be polled
+     * in.
+     *
+     * <p>Fail-safe direction matches its companion: an unreadable mode is treated as step-by-step,
+     * because wrongly skipping the wait costs one honest failure while wrongly waiting pins a
+     * pooled connection for up to the whole budget.
+     */
+    private boolean isStepByStepRun(ExecutionContext context) {
+        if (workflowRunRepository == null || context == null || context.runId() == null) {
+            return false;
+        }
+        try {
+            return workflowRunRepository.findByRunIdPublic(context.runId())
+                .map(WorkflowRunEntity::getExecutionMode)
+                .map(com.apimarketplace.orchestrator.domain.workflow.ExecutionMode::isStepByStep)
+                .orElse(false);
+        } catch (Exception e) {
+            logger.warn("SubWorkflow could not read this run's execution mode, not waiting: runId={}, error={}",
+                context.runId(), e.getMessage());
+            return true;
+        }
+    }
+
+    /**
+     * Is a real database transaction open on this thread?
+     *
+     * <p>Fail-safe direction is deliberately the opposite of the other checks here: if this cannot
+     * be determined, assume there IS one and skip the wait. Wrongly skipping costs one honest
+     * failure; wrongly waiting pins a pooled connection for up to the whole budget.
+     */
+    private static boolean isInsideTransaction() {
+        try {
+            return org.springframework.transaction.support.TransactionSynchronizationManager
+                .isActualTransactionActive();
+        } catch (Throwable t) {
+            return true;
+        }
+    }
+
+    /**
+     * The epoch predicate, with the fail-open policy applied in one place.
+     *
+     * <p>A read that throws is not evidence the child is unfinished, so it resolves to "closed"
+     * and the node proceeds exactly as it did before this check existed.
+     */
+    private boolean safeIsEpochStillOpen(String subRunId, String triggerId, int childEpoch) {
+        try {
+            return reusableTriggerService.isEpochStillOpen(subRunId, triggerId, childEpoch);
+        } catch (Exception e) {
+            logger.warn("SubWorkflow epoch-open check failed, proceeding as if closed: nodeId={}, subRunId={}, childEpoch={}, error={}",
+                nodeId, subRunId, childEpoch, e.getMessage());
+            return false;
+        }
+    }
+
+    /**
+     * The child run's CURRENT status, or null when it cannot be read.
+     *
+     * <p>Deliberately the scalar projection rather than {@code findByRunIdPublic}: the child run
+     * row was already loaded earlier in this same call, so an entity lookup can be served from
+     * Hibernate's first-level cache and keep reporting the status as of that first load. This
+     * method exists to observe a status CHANGE, so a cached answer would make it permanently
+     * blind and the branch it guards would be dead code that reads as coverage.
+     *
+     * <p>Callers must treat only {@link RunStatus#isTerminal()} as an ending. WAITING_TRIGGER is
+     * where a healthy reusable run rests between fires; reading it as an end would abandon the
+     * wait on essentially every child.
+     */
+    private RunStatus readChildRunStatus(String subRunId) {
+        if (workflowRunRepository == null) {
+            return null;
+        }
+        try {
+            return workflowRunRepository.findStatusByRunIdPublic(subRunId).orElse(null);
+        } catch (Exception e) {
+            logger.debug("SubWorkflow could not read child run status while waiting: subRunId={}, error={}",
+                subRunId, e.getMessage());
+            return null;
+        }
+    }
+
+    /** Was THIS run stopped while we were waiting? Fail-open, a missing publisher means no stop. */
+    private boolean isCancelled(ExecutionContext context) {
+        if (workflowRedisPublisher == null || context == null || context.runId() == null) {
+            return false;
+        }
+        try {
+            return workflowRedisPublisher.isAgentCancelSignalSet(context.runId());
+        } catch (Exception e) {
+            return false;
+        }
+    }
+
+    /**
+     * Sleep without stealing a worker from the pool this node runs on.
+     *
+     * <p>{@code SubWorkflowNode.execute} is dispatched onto {@link ForkJoinPool#commonPool} by
+     * every path that runs nodes concurrently (fork branches, split items, and any cycle with
+     * more than one ready node). A plain {@code Thread.sleep} there occupies a worker with no
+     * replacement, and the common pool's parallelism is {@code availableProcessors - 1}, which is
+     * ONE on a 2-vCPU pod: a single waiting sub-workflow node would stall every concurrent
+     * dispatch on that pod for the whole budget, including the child's own continuation, which
+     * needs the same pool. That turns the wait into a self-inflicted timeout.
+     *
+     * <p>{@link ForkJoinPool#managedBlock} tells the pool to compensate by starting a replacement
+     * worker for the duration. This is the same property the pre-existing
+     * {@code CompletableFuture.get(timeout)} relied on: its internal Signaller is itself a
+     * {@code ManagedBlocker}, which is why the previous blocking call was safe and a bare sleep
+     * would not have been.
+     *
+     * <p>Scope, so this comment does not claim more than it delivers: only the SLEEP is
+     * compensated. The three reads around it (the epoch predicate, the child status, the cancel
+     * key) are ordinary short JDBC/Redis calls on this worker, same as every other node in the
+     * engine does.
+     *
+     * @return false if interrupted (the interrupt flag is restored), true otherwise
+     */
+    static boolean compensatedSleep(long millis) {
+        try {
+            ForkJoinPool.managedBlock(new SleepBlocker(TimeUnit.MILLISECONDS.toNanos(millis)));
+            return true;
+        } catch (InterruptedException ie) {
+            Thread.currentThread().interrupt();
+            return false;
+        }
+    }
+
+    /** A timed sleep expressed as a {@link ForkJoinPool.ManagedBlocker}. */
+    static final class SleepBlocker implements ForkJoinPool.ManagedBlocker {
+        private long remainingNanos;
+
+        SleepBlocker(long nanos) {
+            this.remainingNanos = nanos;
+        }
+
+        @Override
+        public boolean block() throws InterruptedException {
+            long startedAt = System.nanoTime();
+            try {
+                TimeUnit.NANOSECONDS.sleep(remainingNanos);
+            } finally {
+                // A ManagedBlocker may be resumed early, so carry the remainder forward instead
+                // of assuming one call slept the whole duration.
+                remainingNanos -= (System.nanoTime() - startedAt);
+            }
+            return isReleasable();
+        }
+
+        @Override
+        public boolean isReleasable() {
+            return remainingNanos <= 0;
+        }
+    }
+
+    /**
+     * What to tell the author, per way the wait ended.
+     *
+     * <p>One message per outcome on purpose. They are different facts about the child and call
+     * for different actions: telling someone their sub-workflow "is still executing and can still
+     * perform external actions" when it was in fact CANCELLED sends them to stop a run that has
+     * already stopped, and reads as a warning about side effects that cannot happen.
+     */
+    static String waitFailureMessage(WaitOutcome outcome, int timeoutSeconds, String subRunId) {
+        String budget = timeoutSeconds + (timeoutSeconds == 1 ? " second" : " seconds");
+        switch (outcome) {
+            case CHILD_ENDED:
+                return String.format(
+                    "Sub-workflow run %s ended before finishing the work this node asked for, so its"
+                    + " outputs do not exist and nothing downstream of this node ran. Read that run"
+                    + " with workflow(action='get_run') to see which of its steps failed or was"
+                    + " cancelled.", subRunId);
+            case RUN_STOPPED:
+                return String.format(
+                    "This run was stopped while waiting for sub-workflow run %s, so its outputs were"
+                    + " never collected. The sub-workflow was not stopped by this node and may still"
+                    + " be running; stop it with workflow(action='stop_run', run_id='%s') if you need"
+                    + " it stopped.", subRunId, subRunId);
+            case INTERRUPTED:
+                return String.format(
+                    "Waiting for sub-workflow run %s was interrupted before it finished, so its"
+                    + " outputs were not collected. The sub-workflow itself was not stopped and may"
+                    + " still be running. Re-run this workflow to try again.", subRunId);
+            case CANNOT_WAIT_IN_TRANSACTION:
+                return String.format(
+                    "Sub-workflow run %s had not finished when this node was reached, and this"
+                    + " execution mode cannot wait for it. Run this workflow normally rather than"
+                    + " stepping through it, or make the sub-workflow finish in one pass by moving"
+                    + " any wait, user approval or interface step out of it.", subRunId);
+            case BUDGET_SPENT:
+            default:
+                return String.format(
+                    "Sub-workflow did not finish within %s. Run %s was NOT stopped: it is still"
+                    + " executing and can still perform external actions such as sending or"
+                    + " publishing. Nothing downstream of this node ran, because the sub-workflow's"
+                    + " outputs do not exist yet. Either raise timeoutSeconds if the sub-workflow is"
+                    + " simply slow, or stop it with workflow(action='stop_run', run_id='%s'). If it"
+                    + " is waiting on a person (a user"
+                    + " approval, or an interface waiting for __continue) no timeout will help:"
+                    + " resolve it, or move that step out of the sub-workflow and into this"
+                    + " workflow.", budget, subRunId, subRunId);
+        }
+    }
+
+    /** The fire itself outliving the budget: the child is still going, same as BUDGET_SPENT. */
+    private static String stillRunningMessage(int timeoutSeconds, String subRunId) {
+        return waitFailureMessage(WaitOutcome.BUDGET_SPENT, timeoutSeconds, subRunId);
     }
 
     /**
@@ -919,6 +1365,11 @@ public class SubWorkflowNode extends BaseNode {
 
     public void setWorkflowStepDataRepository(WorkflowStepDataRepository workflowStepDataRepository) {
         this.workflowStepDataRepository = workflowStepDataRepository;
+    }
+
+    public void setWorkflowRedisPublisher(
+            com.apimarketplace.orchestrator.services.streaming.redis.WorkflowRedisPublisher workflowRedisPublisher) {
+        this.workflowRedisPublisher = workflowRedisPublisher;
     }
 
     // Package-private getters for testing

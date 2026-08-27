@@ -124,11 +124,15 @@ public class DataSourceCrudController {
             @RequestParam(value = "page", defaultValue = "0") int page,
             @RequestParam(value = "size", defaultValue = "25") int size,
             @RequestParam(value = "sort", required = false) String sort,
-            @RequestParam(value = "visibility", required = false) String visibility) {
+            @RequestParam(value = "visibility", required = false) String visibility,
+            @RequestParam(value = "folderId", required = false) String folderId,
+            @RequestParam(value = "includeFolders", required = false, defaultValue = "false")
+            boolean includeFolders) {
         try {
             String tenantId = tenantIdResolver.resolveTenantId(request, tenantIdParam);
             com.apimarketplace.datasource.services.DataSourceService.DataSourcePage pageResult =
-                    dataSourceService.getDataSourcesPaged(tenantId, orgId, orgRole, q, page, size, sort, visibility);
+                    dataSourceService.getDataSourcesPaged(tenantId, orgId, orgRole, q, page, size, sort,
+                            visibility, folderId, includeFolders);
 
             java.util.Map<String, Object> body = new java.util.LinkedHashMap<>();
             body.put("items", pageResult.items());
@@ -143,6 +147,15 @@ public class DataSourceCrudController {
             // Per-datasource publication badge for the page (id -> {status, rejectionReason?}),
             // batched server-side - replaces the former per-row is-resource-published fan-out.
             body.put("publicationStatuses", pageResult.publicationStatuses());
+            if (includeFolders) {
+                // Tiles for THIS level (empty while searching, which looks through every folder)
+                // plus the trail, so the page can render the path it navigated into.
+                body.put("folders", pageResult.folders());
+                body.put("folderTrail", pageResult.folderTrail());
+                if (pageResult.folderMissing()) {
+                    body.put("folderMissing", true);
+                }
+            }
             return ResponseEntity.ok(body);
         } catch (Exception e) {
             logger.error("Error getting paged data sources: {}", e.getMessage());

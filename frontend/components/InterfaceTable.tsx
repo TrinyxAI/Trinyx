@@ -24,6 +24,14 @@ import { useCanMutateInCurrentOrg } from '@/lib/stores/current-org-store';
 import { useOrgScopedReset } from '@/lib/hooks/useOrgScopedReset';
 import { InterfaceThumbnail } from '@/app/workflows/builder/components/interface/InterfaceThumbnail';
 import { useSelectableItems } from '@/hooks/useSelectableItems';
+import { DndContext, DragOverlay } from '@dnd-kit/core';
+import { FolderPlus } from 'lucide-react';
+import { InterfaceFolderFace } from '@/components/folders/InterfaceFolderFace';
+import { FolderBreadcrumb } from '@/components/folders/FolderBreadcrumb';
+import { FolderTilesGrid } from '@/components/folders/FolderTilesGrid';
+import { FolderDialogs } from '@/components/folders/FolderDialogs';
+import { DraggableResourceCard } from '@/components/folders/DraggableResourceCard';
+import { useListFolders } from '@/hooks/useListFolders';
 import { BulkDeleteModal } from '@/components/ui/BulkDeleteModal';
 import { SelectionActionBar, BulkBarButton } from '@/components/ui/SelectionActionBar';
 import { EmptyState } from '@/components/ui/EmptyState';
@@ -329,6 +337,37 @@ export function InterfaceTable({ className = '', interfaceTypeFilter }: Interfac
   // publication-status sweep (which keys on `interfaces`).
   const [templatesById, setTemplatesById] = useState<Map<string, { htmlTemplate?: string; cssTemplate?: string; jsTemplate?: string }>>(new Map());
 
+  // FOLDERS (V450). The level being shown is a fetch parameter like the page number; the
+  // tiles and the trail come back WITH the list. `reloadRef` breaks the loop between the
+  // two: the hook needs a way to reload, and the fetch needs the hook's level.
+  const reloadRef = useRef<() => void>(() => {});
+  const searching = debouncedSearch.trim().length > 0;
+  const folders = useListFolders({
+    kind: 'interface',
+    reload: useCallback(() => reloadRef.current(), []),
+    busy: loading,
+    selectedIds: selectedInterfaces,
+    clearSelection: clearInterfaceSelection,
+    searching,
+    canMutate,
+    labels: {
+      actionFailed: t('folders.actionFailed'),
+      createFailed: t('folders.createFailed'),
+      renameFailed: t('folders.renameFailed'),
+      deleteFailed: t('folders.deleteFailed'),
+      moveFailed: t('folders.moveFailed'),
+      moved: t('folders.moved'),
+      movedToFolder: (count, name) => t('folders.movedToFolder', { count, name }),
+      movedToTopLevel: (count) => t('folders.movedToTopLevel', { count }),
+    },
+    notify: addToast,
+  });
+  const folderCountLabel = useCallback(
+    (count: number) => t('folders.interfaceCount', { count }),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [],
+  );
+
   // Load ONE server page. The backend applies search (`q`), type, sort and the visibility filter over
   // the whole set and returns only the requested slice already enriched with each row's publication
   // badge (`publicationStatuses`), so the browser never loads more than it shows and never sweeps all
@@ -352,12 +391,17 @@ export function InterfaceTable({ className = '', interfaceTypeFilter }: Interfac
         // template-prefetch effect below). The web_search / mixed views keep templates inline because
         // the list projection ALSO nulls `data`, which web_search cards need.
         includeTemplates: interfaceTypeFilter !== 'html',
+        // `root` = the pages filed nowhere. A search overrides this server-side and looks
+        // through every folder, so a name is always findable.
+        folderId: folders.folderIdParam,
+        includeFolders: true,
       });
       // A newer request superseded this one - drop its (now stale) result.
       if (reqId !== requestIdRef.current) return;
 
       setInterfaces((result.items || []) as InterfaceRow[]);
       setTotalCount(result.totalCount || 0);
+      folders.applyListResponse(result);
 
       // Publication badge straight off the page envelope (no per-row sweep): ACTIVE = shared,
       // PENDING_REVIEW = in review, REJECTED = rejected (with reason); absent = private.
@@ -379,12 +423,15 @@ export function InterfaceTable({ className = '', interfaceTypeFilter }: Interfac
     } finally {
       if (reqId === requestIdRef.current) setLoading(false);
     }
-  }, [page, pageSize, debouncedSearch, interfaceTypeFilter, sortBy, visibilityFilter]);
+  }, [page, pageSize, debouncedSearch, interfaceTypeFilter, sortBy, visibilityFilter, folders.folderIdParam]);
 
-  // Reset to page 0 when the search term, type, sort, or visibility filter changes.
+  // Reset to page 0 when the search term, type, sort, visibility filter or folder changes.
   useEffect(() => {
     setPage(0);
-  }, [debouncedSearch, interfaceTypeFilter, sortBy, visibilityFilter]);
+  }, [debouncedSearch, interfaceTypeFilter, sortBy, visibilityFilter, folders.folderIdParam]);
+
+  // The hook reloads through this ref, so it can be created before the fetch it triggers.
+  reloadRef.current = fetchInterfaces;
 
   // Initial load + reload on page / size / search / type / sort / visibility / workspace switch. The
   // fetch callback already closes over those inputs, so keying on its identity fires exactly one page
@@ -532,7 +579,11 @@ export function InterfaceTable({ className = '', interfaceTypeFilter }: Interfac
     }
   };
 
-  const handleInterfaceCreated = () => {
+  // `interfaceId` is set only when a page was CREATED (the same callback fires after an
+  // edit): created while standing in a folder, it is filed there rather than landing back
+  // at the top level.
+  const handleInterfaceCreated = async (interfaceId?: string) => {
+    if (interfaceId) await folders.fileNewResource(interfaceId);
     fetchInterfaces();
     setShowCreateModal(false);
   };
@@ -543,24 +594,47 @@ export function InterfaceTable({ className = '', interfaceTypeFilter }: Interfac
           state shows the same layout as the Applications page. The create button shows only when
           there are items (when empty the EmptyState carries the create CTA) and never for web_search. */}
       <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
-        <div>
-          <h1 className="text-lg font-semibold text-theme-primary">{t('emptyState.interface.title')}</h1>
-          <p className="text-sm text-theme-secondary mt-0.5">{t('emptyState.interface.subtitle')}</p>
-        </div>
-        {canMutate && !loading && interfaceTypeFilter !== 'web_search' && (totalCount > 0 || debouncedSearch.trim().length > 0) && (
-          <Button
-            variant="default"
-            size="sm"
-            onClick={() => setShowCreateModal(true)}
-          >
-            <Plus className="h-4 w-4 mr-1.5" />
-            {t('emptyState.interface.createButton')}
-          </Button>
+        {/* Inside a folder the PATH is the page title, with the folder mark and an
+            up-one-level arrow beside it - the same header the Files browser uses. */}
+        {folders.trail.length > 0 ? (
+          <FolderBreadcrumb
+            trail={folders.trail}
+            rootLabel={t('folders.allInterfaces')}
+            backLabel={t('folders.upOneLevel')}
+            subtitle={t('folders.interfaceCount', { count: totalCount })}
+            onNavigate={folders.navigateToFolder}
+            droppable={folders.canOrganize}
+          />
+        ) : (
+          <div className="min-w-0">
+            <h1 className="text-lg font-semibold text-theme-primary">{t('emptyState.interface.title')}</h1>
+            <p className="text-sm text-theme-secondary mt-0.5">{t('emptyState.interface.subtitle')}</p>
+          </div>
+        )}
+        {canMutate && !loading && interfaceTypeFilter !== 'web_search' && (
+          <div className="flex shrink-0 items-center gap-2">
+            {folders.foldersEnabled && (
+              <Button variant="outline" size="sm" onClick={() => folders.setShowCreateDialog(true)}>
+                <FolderPlus className="h-4 w-4 mr-1.5" />
+                {t('folders.newFolder')}
+              </Button>
+            )}
+            {(totalCount > 0 || debouncedSearch.trim().length > 0) && (
+              <Button
+                variant="default"
+                size="sm"
+                onClick={() => setShowCreateModal(true)}
+              >
+                <Plus className="h-4 w-4 mr-1.5" />
+                {t('emptyState.interface.createButton')}
+              </Button>
+            )}
+          </div>
         )}
       </div>
 
       {/* Search + visibility filter + sort - visible whenever there is data or an active query. */}
-      {(totalCount > 0 || debouncedSearch.trim().length > 0) && (
+      {(totalCount > 0 || folders.tiles.length > 0 || debouncedSearch.trim().length > 0) && (
         <div className="flex flex-col gap-4 md:flex-row md:items-center">
           <div className="relative flex-1">
             <Search className="pointer-events-none absolute left-4 top-1/2 -translate-y-1/2 h-4 w-4 text-theme-secondary" />
@@ -601,6 +675,14 @@ export function InterfaceTable({ className = '', interfaceTypeFilter }: Interfac
       {/* Contextual actions for selection - floating bottom-center bar (mirrors the task board). */}
       {selectedInterfaces.size > 0 && (
         <SelectionActionBar count={selectedInterfaces.size} onClear={clearInterfaceSelection}>
+          {/* Filing stays available while searching: you often find a page BECAUSE you were
+              looking for where to put it. Only the drag targets need a folder view. */}
+          {canMutate && (
+            <BulkBarButton onClick={folders.openMoveDialog}>
+              <FolderPlus className="h-3.5 w-3.5" />
+              {t('folders.moveToFolder')}
+            </BulkBarButton>
+          )}
           {canMutate && (
             <BulkBarButton onClick={cloneSelectedInterfaces}>
               <Copy className="h-3.5 w-3.5" />
@@ -665,19 +747,39 @@ export function InterfaceTable({ className = '', interfaceTypeFilter }: Interfac
             <InterfaceCardSkeleton key={i} />
           ))}
         </div>
-      ) : filteredInterfaces.length === 0 ? (
+      ) : (
+        /* One drag context over the folders AND the cards: a card dropped on a tile is filed
+           there, a tile dropped on another tile is nested inside it. */
+        <DndContext
+          sensors={folders.sensors}
+          onDragStart={(event) => folders.handleDragStart(
+            event, (id) => interfaces.find((i) => i.id === id)?.name)}
+          onDragEnd={folders.handleDragEnd}
+          onDragCancel={folders.cancelDrag}
+        >
+          <FolderTilesGrid
+            folders={folders}
+            countLabel={folderCountLabel}
+            renderFace={(folder) => <InterfaceFolderFace preview={folder.preview ?? []} />}
+          />
+
+          {filteredInterfaces.length === 0 && folders.tiles.length === 0 ? (
         <EmptyState
           icon={<Monitor className="h-7 w-7 text-theme-muted" />}
           size="md"
-          title={interfaceTypeFilter === 'web_search'
-            ? t('emptyState.interface.noWebSearchFound')
-            : t('emptyState.interface.noInterfacesFound')}
-          subtitle={totalCount === 0 && debouncedSearch.trim().length === 0
+          title={folders.currentFolderId
+            ? t('folders.emptyFolderTitle')
+            : (interfaceTypeFilter === 'web_search'
+              ? t('emptyState.interface.noWebSearchFound')
+              : t('emptyState.interface.noInterfacesFound'))}
+          subtitle={folders.currentFolderId
+            ? t('folders.emptyFolderSubtitle')
+            : totalCount === 0 && debouncedSearch.trim().length === 0
             ? (interfaceTypeFilter === 'web_search'
                 ? t('emptyState.interface.webSearchDescription')
                 : t('emptyState.interface.createFirstInterface'))
             : t('emptyState.interface.noMatchingInterfaces')}
-          actions={canMutate && totalCount === 0 && debouncedSearch.trim().length === 0 && interfaceTypeFilter !== 'web_search' ? (
+          actions={canMutate && !folders.currentFolderId && totalCount === 0 && debouncedSearch.trim().length === 0 && interfaceTypeFilter !== 'web_search' ? (
             <Button
               variant="default"
               onClick={() => setShowCreateModal(true)}
@@ -688,9 +790,10 @@ export function InterfaceTable({ className = '', interfaceTypeFilter }: Interfac
             </Button>
           ) : undefined}
         />
-      ) : (
+          ) : (
         <div className="columns-1 md:columns-2 lg:columns-3 gap-4">
           {filteredInterfaces.map((intf) => (
+            <DraggableResourceCard key={intf.id} id={intf.id} disabled={!folders.canOrganize}>
             <InterfaceCard
               key={intf.id}
               // Merge the lazily-loaded template (html view) so the thumbnail renders; a no-op for the
@@ -707,8 +810,23 @@ export function InterfaceTable({ className = '', interfaceTypeFilter }: Interfac
               onToggleSelect={toggleInterfaceSelection}
               onClick={() => router.push(`/app/interface/${intf.id}`)}
             />
+            </DraggableResourceCard>
           ))}
         </div>
+          )}
+
+          {/* What is being dragged, following the pointer. A multi-selection drag says how many
+              cards are travelling, so a drop never moves more than you meant. */}
+          <DragOverlay>
+            {folders.activeDrag && (
+              <div className="rounded-xl border border-[var(--accent-primary)] bg-theme-secondary px-3 py-2 text-sm text-theme-primary shadow-lg">
+                {folders.activeDrag.count > 1
+                  ? t('folders.draggingCount', { count: folders.activeDrag.count })
+                  : folders.activeDrag.label}
+              </div>
+            )}
+          </DragOverlay>
+        </DndContext>
       )}
 
       {!loading && totalCount > pageSize && (
@@ -781,6 +899,8 @@ export function InterfaceTable({ className = '', interfaceTypeFilter }: Interfac
         </div>,
         document.body
       )}
+
+      <FolderDialogs folders={folders} selectedIds={selectedInterfaces} />
 
       <ToastContainer toasts={toasts} onRemoveToast={removeToast} />
     </div>

@@ -80,13 +80,44 @@ class BinaryResponseHandlerTest {
     }
 
     @Test
-    @DisplayName("returns empty map when no fileRef field is declared in the schema")
-    void schemaWithoutFileRef() {
+    @DisplayName("a schema that declares no fileRef still stores the asset, under the fallback key")
+    void schemaWithoutFileRefStoresUnderFallbackKey() {
+        when(storageClient.genericUpload(any(), any(), any(), any(), any()))
+            .thenReturn(FileRefDto.of("tenant/general/catalog-binary/x_tool.png", "tool.png", "image/png", 3));
+
         String schema = "[{\"key\":\"text\",\"type\":\"string\",\"description\":\"x\"}]";
         Map<String, Object> projected = handler.handle(
             new byte[]{1, 2, 3}, "image/png", "tenant", schema, "tool");
-        assertTrue(projected.isEmpty());
-        verifyNoInteractions(storageClient);
+
+        assertEquals(1, projected.size());
+        Map<?, ?> ref = (Map<?, ?>) projected.get("file");
+        assertNotNull(ref, "the asset must be projected under the fallback key, not dropped");
+        assertEquals("file", ref.get("_type"));
+        verify(storageClient).genericUpload(eq("tenant"), anyString(), anyString(), anyString(), any(byte[].class));
+    }
+
+    @Test
+    @DisplayName("regression: a stale output_schema does not lose a generation the customer already paid for")
+    void staleOutputSchemaDoesNotLoseAPaidGeneration() {
+        // The exact shape prod carried for the ElevenLabs and Clipdrop binary
+        // endpoints: imported before those endpoints declared a fileRef, so the
+        // row describes the raw body instead of the stored file. Before the fix
+        // the bytes were dropped here and the generation surface reported
+        // "the response carries no stored file" - after the provider had run
+        // and the customer had been charged.
+        when(storageClient.genericUpload(any(), any(), any(), any(), any()))
+            .thenReturn(FileRefDto.of("1/general/catalog-binary/x_elevenlabs.mp3",
+                "elevenlabs.mp3", "audio/mpeg", 128));
+
+        String staleSchema = "[{\"key\":\"data\",\"type\":\"string\",\"description\":\"raw body\"},"
+            + "{\"key\":\"contentType\",\"type\":\"string\",\"description\":\"mime\"}]";
+        Map<String, Object> projected = handler.handle(
+            new byte[]{'I', 'D', '3'}, "audio/mpeg", "1", staleSchema, "elevenlabs-text-to-speech");
+
+        assertFalse(projected.isEmpty(), "a paid generation must never be dropped over a missing field name");
+        Map<?, ?> ref = (Map<?, ?>) projected.get("file");
+        assertEquals("audio/mpeg", ref.get("mimeType"));
+        assertEquals("1/general/catalog-binary/x_elevenlabs.mp3", ref.get("path"));
     }
 
     @Test
@@ -105,11 +136,15 @@ class BinaryResponseHandlerTest {
     }
 
     @Test
-    @DisplayName("malformed schema returns empty map")
-    void malformedSchema() {
+    @DisplayName("a malformed schema still stores the asset rather than dropping it")
+    void malformedSchemaStoresUnderFallbackKey() {
+        when(storageClient.genericUpload(any(), any(), any(), any(), any()))
+            .thenReturn(FileRefDto.of("tenant/general/catalog-binary/x_tool.png", "tool.png", "image/png", 1));
+
         Map<String, Object> projected = handler.handle(
             new byte[]{1}, "image/png", "tenant", "{not valid", "tool");
-        assertTrue(projected.isEmpty());
+
+        assertTrue(projected.containsKey("file"));
     }
 
     @Test

@@ -280,7 +280,11 @@ async function createStepNode(
   const hasStepCredentialFields =
     (step as any).credentialSource != null ||
     (step as any).platformCredentialId != null ||
-    (step as any).selectedCredentialId != null;
+    (step as any).selectedCredentialId != null ||
+    // A step that decides its account at RUN time carries this INSTEAD of a pin,
+    // so leaving it out of the test made a dynamic step look credential-less.
+    (step as any).credentialSelector != null ||
+    (step as any).credential_selector != null;
 
   // Create node
   const stepNode: Node<BuilderNodeData> = {
@@ -306,6 +310,20 @@ async function createStepNode(
             credentialSource: (step as any).credentialSource,
             selectedCredentialId: (step as any).selectedCredentialId ?? null,
             platformCredentialId: (step as any).platformCredentialId ?? null,
+            // Without this the round-trip DELETES the feature, silently: the
+            // inspector would render the picker, the picker auto-persists the
+            // account default id on first render with no user action, and the next
+            // save writes a pin with no selector. The multi-account workflow
+            // becomes a single-account one, on the wrong key, with a green run.
+            // Both spellings: the plan parser reads either, so a stored plan spelled
+            // credential_selector is a live selector at run time. Reading only the
+            // camel one rendered the credential PICKER for it, which auto-persists the
+            // account default, and the next save wrote a pin with no selector - the
+            // erase-itself defect, reached through the other spelling.
+            credentialSelector: ((): string | null => {
+              const raw = (step as any).credentialSelector ?? (step as any).credential_selector;
+              return raw === null || raw === undefined ? null : String(raw);
+            })(),
           }
         : toolDataResult.toolData,
       apiData: toolDataResult.apiData,

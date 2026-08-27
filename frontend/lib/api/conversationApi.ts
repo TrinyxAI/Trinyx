@@ -30,8 +30,14 @@ export class ConversationApiService {
     size = 10
   ) {
     try {
-      const tokenProvider = apiClient.getTokenProvider();
-      const token = tokenProvider ? await tokenProvider() : null;
+      // getAuthToken: returning an empty list because the provider was not installed YET made a
+      // signed-in user's conversation list render empty on a cold load, with nothing to correct it.
+      // The other side of that trade: an anonymous visitor now pays the wait before the empty-page
+      // short-circuit below. Accepted rather than avoided, because the two are indistinguishable
+      // from here - "no provider" is exactly what a booting session and a signed-out one look
+      // like - and this list only renders under /app/*, where an anonymous visitor is on their way
+      // to the login redirect anyway.
+      const token = await apiClient.getAuthToken();
       if (!token) {
         return { content: [] as unknown[], totalElements: 0, totalPages: 0, number: page, size };
       }
@@ -158,26 +164,94 @@ export class ConversationApiService {
   }
 
   /**
+   * Concurrent `findWorkflowConversation` calls for the same workflow, so a burst costs one HTTP.
+   * Same shape as {@code ExecutionService.inFlightStateGets} and
+   * {@code PublicationService}: private field, unconditional delete on settle.
+   */
+  private inFlightWorkflowConversationFinds = new Map<
+    string,
+    Promise<{ id: string; title?: string; workflowId?: string } | null>
+  >();
+
+  /**
    * Find an existing conversation for a specific workflow (does NOT create)
    * Returns null if no conversation exists
+   *
+   * <p>Concurrent callers for the same workflow share one request. Opening a workflow asks this
+   * from two places, {@code useWorkflowChat} and the trigger panel, each behind its own
+   * already-loaded guard, and `WorkflowPanelContent` mounts from more than one surface. Measured in
+   * prod 2026-08-26: 146 calls a day answered 404 on `route=conversation`, of which 145 were this
+   * endpoint; 31 of 56 gaps under 2 seconds, one workflow
+   * asked 57 times, arriving in bursts at ~0.05 s apart. The answer is a 404 in the normal case
+   * (the conversation is created on the first message), so a page load put several identical
+   * failed requests in the network log for a state that is not an error at all.
+   *
+   * <p><strong>Why not {@code useResourceQuery}</strong>, which AGENTS.md points at for fetches
+   * and which de-duplicates by {@code queryKey} across components. Two reasons, and the second is
+   * the one that settles it. Both callers are imperative sequences - find, then load messages,
+   * then reconnect the stream - and `loadConversation` is additionally exposed as a callable that
+   * is re-invoked after a trigger changes, so converting them means restructuring two stateful
+   * components. More importantly it CACHES ({@code staleTime}), and a cached negative is precisely
+   * what must not happen here (see below). So this is not "the cheap fix instead of the right
+   * layer": that layer would have to be used with caching disabled for this key, which is what
+   * sharing the in-flight request already achieves.
+   *
+   * <p>Only the IN-FLIGHT request is shared; nothing is cached. A negative answer stops being true
+   * the moment someone sends a message, and a cached null would hide the conversation that message
+   * created. Two callers therefore become advisory, and they cost differently:
+   *   - The SEND path reads this to decide whether to create. A stale null costs nothing:
+   *     `ConversationCommandService.createWorkflowConversation` is find-or-create, so the POST
+   *     returns the existing row rather than a duplicate.
+   *   - The REFRESH path (`loadConversation(force)`, re-invoked after a trigger changes) reads it
+   *     to DISPLAY. A stale null there means the panel shows no messages, and it does not retry on
+   *     its own because its already-loaded ref was set before the request went out - the next
+   *     run-status tick is what recovers it. Accepted rather than solved: giving this method a
+   *     `force` that bypasses sharing would drag back the identity guard that `useModels` needs and
+   *     that is dead weight here, to protect a window that in practice is closed by the create
+   *     landing hundreds of ms before the reload.
+   *
+   * <p>Note what this does NOT do: the structural cause is three call sites each behind their own
+   * per-mount guard, and it is untouched. Sharing only collapses callers that overlap in time, so
+   * it helps exactly while a request is open - which covers the measured bursts (~0.05 s apart,
+   * far inside one RTT) and nothing slower.
+   *
+   * <p>The twin {@code findAgentConversation} below is deliberately left alone: it has one mount
+   * point today, so its calls do not overlap. That is an observation about the current tree, not a
+   * property of the method - a second mount point would give it the same burst.
    */
   async findWorkflowConversation(
     workflowId: string
   ): Promise<{ id: string; title?: string; workflowId?: string } | null> {
-    try {
-      const response = await apiClient.get<{ id: string; title?: string; workflowId?: string }>(
-        `/conversations/workflow/${workflowId}`
-      );
-      return response;
-    } catch (error: any) {
-      // 404 means no conversation exists - this is expected and normal
-      const errorMessage = error?.message?.toLowerCase() || '';
-      if (errorMessage.includes('not found') || errorMessage.includes('404') || error?.status === 404) {
-        return null;
-      }
-      console.error('Error finding workflow conversation:', error);
-      throw new Error('Failed to find workflow conversation');
+    const existing = this.inFlightWorkflowConversationFinds.get(workflowId);
+    if (existing) {
+      return existing;
     }
+
+    const request = (async () => {
+      try {
+        return await apiClient.get<{ id: string; title?: string; workflowId?: string }>(
+          `/conversations/workflow/${workflowId}`
+        );
+      } catch (error: any) {
+        // 404 means no conversation exists - this is expected and normal
+        const errorMessage = error?.message?.toLowerCase() || '';
+        if (errorMessage.includes('not found') || errorMessage.includes('404') || error?.status === 404) {
+          return null;
+        }
+        console.error('Error finding workflow conversation:', error);
+        throw new Error('Failed to find workflow conversation');
+      }
+    })().finally(() => {
+      // Unconditional: nothing can overwrite the entry while a request is open. The map has
+      // exactly three references - the get above, the set below, and this delete - and there is no
+      // await between the get's miss and the set, so no caller can interleave. The guarded
+      // form in `useModels` exists because its `force` parameter bypasses the early return; there
+      // is no force here, and copying the guard would ship a branch no test can reach.
+      this.inFlightWorkflowConversationFinds.delete(workflowId);
+    });
+
+    this.inFlightWorkflowConversationFinds.set(workflowId, request);
+    return request;
   }
 
   /**
@@ -501,12 +575,22 @@ export class ConversationApiService {
    * @param rule - canonical rule key "tool:action" (e.g. "application:acquire")
    * @param remember - true to persist for the whole conversation ("Toujours autoriser"),
    *                   false for a single-shot grant consumed by the resume turn
+   * @param toolCallId - id of the call the agent is HOLDING on this card. Passing it lets
+   *                     the backend release that call so the assistant finishes its current
+   *                     turn; omitting it leaves the older resume-by-new-turn flow.
+   * @returns whether a held call was actually released. False means nobody was holding any
+   *          more (the hold timed out, or there never was one), so the caller must resume
+   *          the agent with a message or the approval visibly does nothing.
    */
-  async approveToolAuthorization(conversationId: string, rule: string, remember: boolean): Promise<void> {
-    await apiClient.post(`/conversations/${conversationId}/tool-authorization/approve`, {
-      rule,
-      remember,
-    });
+  async approveToolAuthorization(conversationId: string, rule: string, remember: boolean,
+                                 toolCallId?: string): Promise<boolean> {
+    const res = await apiClient.post<{ parkedCallReleased?: boolean }>(
+      `/conversations/${conversationId}/tool-authorization/approve`, {
+        rule,
+        remember,
+        toolCallId,
+      });
+    return res?.parkedCallReleased === true;
   }
 
   /**
@@ -515,9 +599,30 @@ export class ConversationApiService {
    *
    * @param conversationId - The conversation ID
    * @param rule - canonical rule key "tool:action" (for logging/correlation)
+   * @param toolCallId - id of the held call, so it stops immediately instead of waiting
+   *                     out the gate's deadline
    */
-  async denyToolAuthorization(conversationId: string, rule: string): Promise<void> {
-    await apiClient.post(`/conversations/${conversationId}/tool-authorization/deny`, { rule });
+  async denyToolAuthorization(conversationId: string, rule: string, toolCallId?: string): Promise<boolean> {
+    const res = await apiClient.post<{ parkedCallReleased?: boolean }>(
+      `/conversations/${conversationId}/tool-authorization/deny`, { rule, toolCallId });
+    return res?.parkedCallReleased === true;
+  }
+
+  /**
+   * Release a tool call the agent is holding on a connect-a-service card.
+   *
+   * <p>Used only for the credential card, which has no authorization rule to grant: once
+   * the service is connected there is just a held call to let through.
+   *
+   * @returns whether a held call was actually released - see approveToolAuthorization.
+   */
+  async resolveApprovalGate(conversationId: string, gateKey: string, approved: boolean): Promise<boolean> {
+    const res = await apiClient.post<{ parkedCallReleased?: boolean }>(
+      `/conversations/${conversationId}/approval-gate/resolve`, {
+        gateKey,
+        approved,
+      });
+    return res?.parkedCallReleased === true;
   }
 
 }

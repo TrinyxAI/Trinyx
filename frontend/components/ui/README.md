@@ -60,8 +60,13 @@ capsule est réservée aux formes qui sont réellement des cercles.
 atteint la moitié de la hauteur redessine une capsule, quel que soit son nom : les
 étapes de `ModalStepIndicator` font 32px de haut, et `rounded-2xl` (16px) en faisait
 donc exactement des pilules, alors que la classe disait « carré ». Même piège sur une
-bulle d'icône de 28px passée en `rounded-xl` (12px). Règle : rester **sous le tiers**
-de la hauteur, et si la boîte a une hauteur inhabituelle, faire le calcul.
+bulle d'icône de 28px passée en `rounded-xl` (12px).
+
+La règle dure est donc : **jamais la moitié de la hauteur**. Le repère de confort est
+**le tiers**, et c'est exactement là que se tient le Button (12px sur 36px) : au-dessus
+du tiers le coin commence à se lire comme une pilule, à la moitié c'en est une. Les
+tuiles d'icône, elles, sont tenues **sous** le tiers par leur échelle dédiée. Si la
+boîte a une hauteur inhabituelle, faire le calcul plutôt que de recopier un cran.
 
 **Une tuile d'icône monte d'un cran avec sa taille**, pour que le coin garde le même
 poids visuel : un rayon unique se lit comme un cercle sur une tuile de 24px et comme un

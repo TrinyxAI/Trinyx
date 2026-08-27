@@ -54,9 +54,9 @@ export function AvatarGallery() {
   const fetchBlobUrl = useCallback(async (avatar: AvatarInfo, force = false) => {
     if (!force && blobUrlsRef.current[avatar.id]) return;
 
-    const tokenProvider = apiClient.getTokenProvider();
-    if (!tokenProvider) return;
-    const token = await tokenProvider();
+    // getAuthToken: bailing out because the provider was not installed YET left the gallery on
+    // its animate-pulse placeholder with nothing scheduled to try again.
+    const token = await apiClient.getAuthToken();
     if (!token) return;
 
     // Retry: just-uploaded objects can race against storage commit, leaving
@@ -152,9 +152,7 @@ export function AvatarGallery() {
 
       setUploading(true);
       try {
-        const tokenProvider = apiClient.getTokenProvider();
-        if (!tokenProvider) return;
-        const token = await tokenProvider();
+        const token = await apiClient.getAuthToken();
         if (!token) return;
 
         const formData = new FormData();

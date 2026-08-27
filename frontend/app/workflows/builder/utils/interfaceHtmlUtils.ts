@@ -619,6 +619,95 @@ const HEIGHT_REPORTER_SCRIPT = `
 </script>`;
 
 /**
+ * Media-audio controller - injected into every interface iframe.
+ *
+ * Two jobs, both of which have to happen INSIDE the frame: the host cannot mute
+ * a sandboxed cross-origin document, and it cannot see whether the document even
+ * has a media element.
+ *
+ * 1. **Tells the host whether this interface can make noise**, by posting
+ *    `__iframe_audio` whenever the answer changes. Any `<audio>`/`<video>` counts:
+ *    a video's audio track cannot be inspected reliably before playback, so
+ *    "there is a media element" is the honest signal, and it is the one that
+ *    decides whether the host shows a sound control at all.
+ * 2. **Applies the host's mute preference.** `window.__LC_MEDIA_MUTED__` sets the
+ *    initial value (injected only when the embedder manages audio - everywhere
+ *    else this script only reports and changes nothing), and the host flips it at
+ *    runtime with `__iframe_set_muted`, which needs no reload.
+ *
+ * Muting rather than pausing: a muted `<video>` keeps animating, which is the
+ * point of a preview, and browsers only autoplay video that IS muted - so this
+ * makes a preview play where an unmuted one would have been blocked outright.
+ *
+ * A MutationObserver covers media added later by the interface's own JS, and the
+ * `loadstart` capture listener covers a `src` swapped on an element that already
+ * existed - neither shows up as a childList mutation.
+ *
+ * Not covered: an interface synthesising sound through the Web Audio API. There
+ * is no element to mute, so the host will not offer a control for it either.
+ */
+const MEDIA_AUDIO_SCRIPT = `
+<script>
+(function() {
+  var muted = !!window.__LC_MEDIA_MUTED__;
+  var lastReported = null;
+
+  function mediaElements() {
+    return document.querySelectorAll('audio, video');
+  }
+
+  function apply() {
+    var list = mediaElements();
+    // Only touch elements we are actually managing: with no flag injected, this
+    // script reports presence and leaves the page exactly as authored.
+    if (window.__LC_MEDIA_MUTED__ !== undefined) {
+      for (var i = 0; i < list.length; i++) {
+        list[i].muted = muted;
+        list[i].defaultMuted = muted;
+      }
+    }
+    var hasAudio = list.length > 0;
+    if (hasAudio !== lastReported) {
+      lastReported = hasAudio;
+      try { window.parent.postMessage({ type: '__iframe_audio', hasAudio: hasAudio }, '*'); } catch (e) {}
+    }
+  }
+
+  window.addEventListener('message', function(event) {
+    var data = event.data;
+    if (!data || data.type !== '__iframe_set_muted') return;
+    muted = !!data.muted;
+    window.__LC_MEDIA_MUTED__ = muted;
+    apply();
+    if (!muted) {
+      // Unmuting is always the result of a click in the host, so the frame has a
+      // user gesture to spend: resume anything autoplay left paused. A rejected
+      // play() is normal (nothing to resume) and must not throw into the page.
+      var list = mediaElements();
+      for (var i = 0; i < list.length; i++) {
+        try {
+          var p = list[i].play();
+          if (p && p.catch) p.catch(function() {});
+        } catch (e) {}
+      }
+    }
+  });
+
+  // A src set on an existing element is not a childList mutation, so observe the
+  // load itself. Capture phase: media events do not bubble.
+  document.addEventListener('loadstart', apply, true);
+  new MutationObserver(apply).observe(document.documentElement, { childList: true, subtree: true });
+
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', apply);
+  } else {
+    apply();
+  }
+  window.addEventListener('load', apply);
+})();
+</script>`;
+
+/**
  * Recursively replace FileRef objects in resolved data (for window.__RESOLVED_DATA__) with a
  * renderable file URL, so JS templates can use file URLs (e.g. dynamic <img src> injection).
  *
@@ -665,7 +754,7 @@ function injectFileProxyUrls(data: Record<string, unknown>, resolveFileUrl?: (ra
 /**
  * Wrap HTML fragment in a complete document structure
  */
-export function ensureCompleteHtml(html: string, customCss?: string, autoFit?: boolean, actionMapping?: Record<string, string>, triggerData?: Record<string, Record<string, unknown>>, jsTemplate?: string, resolvedData?: Record<string, unknown>, resolveFileUrl?: (rawUrl: string) => string): string {
+export function ensureCompleteHtml(html: string, customCss?: string, autoFit?: boolean, actionMapping?: Record<string, string>, triggerData?: Record<string, Record<string, unknown>>, jsTemplate?: string, resolvedData?: Record<string, unknown>, resolveFileUrl?: (rawUrl: string) => string, muteMedia?: boolean): string {
   if (!html) return '';
 
   const autoFitStyles = autoFit ? AUTO_FIT_CSS : '';
@@ -687,6 +776,14 @@ export function ensureCompleteHtml(html: string, customCss?: string, autoFit?: b
 
   // Generate bridge script if action mapping is provided
   const bridgeScriptHtml = actionMapping ? generateBridgeScript(actionMapping, triggerData) : '';
+
+  // Initial mute state, read by MEDIA_AUDIO_SCRIPT. Emitted ONLY when the
+  // embedder manages audio: leaving the global undefined is what tells the
+  // controller to report presence and otherwise not touch the page, so every
+  // surface that does not ask for this keeps playing exactly as authored.
+  const mediaMutedFlagHtml = muteMedia === undefined
+    ? ''
+    : `<script>window.__LC_MEDIA_MUTED__ = ${muteMedia ? 'true' : 'false'};</script>`;
 
   // Inject resolved data as a global variable so user JS can access complex objects
   // without HTML-escaping issues (escapeHtml breaks JSON inside <script> tags)
@@ -718,7 +815,7 @@ export function ensureCompleteHtml(html: string, customCss?: string, autoFit?: b
     // Inject scripts before </body>. AUTO_FIT_SCRIPT is deliberately absent:
     // only fragments get the #auto-fit-wrapper it targets, so on a complete
     // document it was dead weight shipped with every preview.
-    const scriptsToInject = [HEIGHT_REPORTER_SCRIPT, NAVIGATION_GATE_SCRIPT, BROKEN_IMG_SCRIPT, bridgeScriptHtml, dataScriptHtml, userJsScriptHtml].filter(Boolean).join('\n');
+    const scriptsToInject = [HEIGHT_REPORTER_SCRIPT, NAVIGATION_GATE_SCRIPT, BROKEN_IMG_SCRIPT, mediaMutedFlagHtml, MEDIA_AUDIO_SCRIPT, bridgeScriptHtml, dataScriptHtml, userJsScriptHtml].filter(Boolean).join('\n');
     if (scriptsToInject) {
       if (result.includes('</body>')) {
         result = injectBefore(result, '</body>', `${scriptsToInject}\n`);
@@ -731,7 +828,7 @@ export function ensureCompleteHtml(html: string, customCss?: string, autoFit?: b
 
   // Wrap content in auto-fit wrapper if needed
   const contentHtml = autoFit ? `<div id="auto-fit-wrapper">\n${renderedHtml}\n</div>` : renderedHtml;
-  const scriptHtml = [HEIGHT_REPORTER_SCRIPT, NAVIGATION_GATE_SCRIPT, BROKEN_IMG_SCRIPT, autoFit ? AUTO_FIT_SCRIPT : '', bridgeScriptHtml, dataScriptHtml, userJsScriptHtml].filter(Boolean).join('\n');
+  const scriptHtml = [HEIGHT_REPORTER_SCRIPT, NAVIGATION_GATE_SCRIPT, BROKEN_IMG_SCRIPT, autoFit ? AUTO_FIT_SCRIPT : '', mediaMutedFlagHtml, MEDIA_AUDIO_SCRIPT, bridgeScriptHtml, dataScriptHtml, userJsScriptHtml].filter(Boolean).join('\n');
 
   return `<!DOCTYPE html>
 <html lang="en">
@@ -1203,6 +1300,13 @@ export interface RenderOptions {
    * the embedding component (see {@code useInterfaceFileUrls}). Run mode only.
    */
   resolveFileUrl?: (rawUrl: string) => string;
+  /**
+   * Initial mute state for the interface's `<audio>`/`<video>`. Leave undefined
+   * (the default) to let the page play as authored; pass a boolean to hand the
+   * embedder control, which it then flips at runtime with an `__iframe_set_muted`
+   * message rather than by re-rendering the document.
+   */
+  muteMedia?: boolean;
 }
 
 /**
@@ -1226,6 +1330,7 @@ export function renderInterfaceTemplate(
     triggerData,
     jsTemplate,
     resolveFileUrl,
+    muteMedia,
   } = options;
 
   // Step 1: Remove user-provided scripts if needed (system scripts are added by ensureCompleteHtml)
@@ -1247,7 +1352,7 @@ export function renderInterfaceTemplate(
 
   // Step 3: Wrap in complete document if needed
   if (wrapInDocument) {
-    html = ensureCompleteHtml(html, resolvedCss, autoFit, actionMapping, triggerData, jsTemplate, mode === 'run' ? resolvedData : undefined, mode === 'run' ? resolveFileUrl : undefined);
+    html = ensureCompleteHtml(html, resolvedCss, autoFit, actionMapping, triggerData, jsTemplate, mode === 'run' ? resolvedData : undefined, mode === 'run' ? resolveFileUrl : undefined, muteMedia);
   }
 
   return html;

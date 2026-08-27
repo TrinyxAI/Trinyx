@@ -88,6 +88,40 @@ public final class ToolAuthorizationPolicy {
     }
 
     /**
+     * The one rule whose approval does NOT mean "now run the tool".
+     *
+     * <p>{@code application:acquire} hands the job to the USER, who installs from the
+     * marketplace modal in their own time; the agent must never acquire on their behalf. So
+     * this rule raises a card but can never WAIT on one, and anything sizing a budget or a
+     * timeout around "this call might be held" must exclude it - otherwise a hung install
+     * backend stalls the chat for the length of a wait that was never going to happen.
+     */
+    public static boolean isUserPerformedRule(String toolName, String action) {
+        return "application".equalsIgnoreCase(toolName) && "acquire".equalsIgnoreCase(action);
+    }
+
+    /**
+     * True for the calls that can ask the user to CONNECT A SERVICE, which is a different
+     * question from "may I run this" and gets a different card.
+     *
+     * <p>It matters because the two questions come apart. A granted rule raises no
+     * authorization card and needs no budget to wait for one - but the same call can still
+     * hit a service the user never connected, and THAT card comes from the tool result, not
+     * from the grant. Without this exception it had nothing holding the call and silently
+     * fell back to the two-turn flow. Not only for people who ticked "always allow":
+     * approving one card writes a one-shot grant as well, so anyone whose park expired
+     * arrived at the next turn already granted and lost the connect hold there too.
+     *
+     * <p>Deliberately the narrow set rather than "any sensitive call": the credential
+     * pre-flight lives in the catalog execute path, and every pair added here buys a longer
+     * ceiling on a hung backend for a card it may never raise.
+     */
+    public static boolean canRaiseConnectCard(String toolName, String action) {
+        return "catalog".equalsIgnoreCase(toolName)
+                && ("execute".equalsIgnoreCase(action) || "call".equalsIgnoreCase(action));
+    }
+
+    /**
      * Canonical rule key {@code "tool:action"} for a matching pair, else {@code null}.
      * This is the stable identifier used for approvals (transient and persisted)
      * and dedup - never use the LLM-generated {@code toolCallId}, which changes

@@ -1,6 +1,7 @@
 package com.apimarketplace.publication.service;
 
 import com.apimarketplace.auth.client.AuthClient;
+import com.apimarketplace.publication.dto.MarketplaceQueryFilter;
 import com.apimarketplace.publication.repository.PublicationReceiptRepository;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.BeforeEach;
@@ -84,7 +85,7 @@ class RemoteMarketplaceServiceReadProxyTest {
                     "count", 1);
             stubCloudResponse(cloudBody);
 
-            Map<String, Object> result = service.fetchMarketplacePublications(1, 20, "operations");
+            Map<String, Object> result = service.fetchMarketplacePublications(1, 20, MarketplaceQueryFilter.ofCategory("operations"));
 
             assertThat(result).isSameAs(cloudBody);
             URI uri = capturedUri();
@@ -107,7 +108,7 @@ class RemoteMarketplaceServiceReadProxyTest {
         void shouldFailSoftOnUpstreamFailure() {
             stubCloudFailure();
 
-            Map<String, Object> result = service.fetchMarketplacePublications(3, 10, "ai");
+            Map<String, Object> result = service.fetchMarketplacePublications(3, 10, MarketplaceQueryFilter.ofCategory("ai"));
 
             assertThat(result)
                     .containsEntry("publications", List.of())
@@ -126,6 +127,40 @@ class RemoteMarketplaceServiceReadProxyTest {
 
             assertThat(result).containsEntry("publications", List.of()).containsEntry("count", 0);
         }
+
+        @Test
+        @DisplayName("Should forward every refinement to the cloud URL so the CLOUD does the filtering")
+        void shouldForwardRefinementsUpstream() {
+            stubCloudResponse(Map.of("publications", List.of(), "count", 0));
+
+            service.fetchMarketplacePublications(0, 24, MarketplaceQueryFilter.fromRequest(
+                    "ai", "AGENT", "recent", "min_4", 7, "free"));
+
+            String query = capturedUri().getQuery();
+            assertThat(query)
+                    .contains("category=ai")
+                    .contains("displayMode=AGENT")
+                    .contains("sort=RECENT")
+                    .contains("rating=MIN_4")
+                    .contains("days=7")
+                    .contains("price=FREE");
+        }
+
+        @Test
+        @DisplayName("Should omit refinements left at their default so the URL says only what was chosen")
+        void shouldOmitDefaultRefinements() {
+            stubCloudResponse(Map.of("publications", List.of(), "count", 0));
+
+            service.fetchMarketplacePublications(0, 50, MarketplaceQueryFilter.unfiltered());
+
+            String query = capturedUri().getQuery();
+            assertThat(query)
+                    .doesNotContain("displayMode")
+                    .doesNotContain("sort")
+                    .doesNotContain("rating")
+                    .doesNotContain("days")
+                    .doesNotContain("price");
+        }
     }
 
     @Nested
@@ -138,7 +173,7 @@ class RemoteMarketplaceServiceReadProxyTest {
             Map<String, Object> cloudBody = Map.of("publications", List.of(Map.of("id", "p2")), "count", 1);
             stubCloudResponse(cloudBody);
 
-            Map<String, Object> result = service.searchMarketplacePublications("crm sync", "ai");
+            Map<String, Object> result = service.searchMarketplacePublications("crm sync", MarketplaceQueryFilter.ofCategory("ai"));
 
             assertThat(result).isSameAs(cloudBody);
             URI uri = capturedUri();
@@ -151,7 +186,7 @@ class RemoteMarketplaceServiceReadProxyTest {
         void shouldOmitBlankCategory() {
             stubCloudResponse(Map.of("publications", List.of(), "count", 0));
 
-            service.searchMarketplacePublications("alpha", "  ");
+            service.searchMarketplacePublications("alpha", MarketplaceQueryFilter.ofCategory("  "));
 
             assertThat(capturedUri().getQuery()).doesNotContain("category");
         }

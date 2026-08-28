@@ -332,7 +332,7 @@ class AuthenticatedGatewayFilterTest {
                         .header("X-User-ID", "forged")
                         .header("X-User-Roles", "SUPERADMIN")
                         .header("X-Gateway-Secret", "forged")
-                        .body(body))
+                        .body(new String(body, StandardCharsets.UTF_8)))
                 .mutate().principal(Mono.just(new JwtAuthenticationToken(jwt))).build();
         exchange.getAttributes().put(GATEWAY_REQUEST_URL_ATTR,
                 URI.create("http://orchestrator-service:8099/final/path?b=2&a=1"));

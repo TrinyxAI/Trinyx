@@ -3,12 +3,14 @@ package com.apimarketplace.migration;
 import org.flywaydb.core.Flyway;
 import org.flywaydb.core.api.MigrationInfo;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.Timeout;
 import org.testcontainers.containers.PostgreSQLContainer;
 import org.testcontainers.utility.DockerImageName;
 
 import java.util.Arrays;
 import java.util.LinkedHashSet;
 import java.util.Set;
+import java.util.concurrent.TimeUnit;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -23,6 +25,7 @@ class FlywayLifecycleContractTest {
     private static final String EXPECTED_CURRENT_VERSION = "453.3";
 
     @Test
+    @Timeout(value = 10, unit = TimeUnit.MINUTES)
     void cleanMigrateValidateInfoAndSecondMigrateAreDeterministic() {
         FlywayTestSupport.assumeDockerAvailable();
         DockerImageName postgresWithVector = DockerImageName

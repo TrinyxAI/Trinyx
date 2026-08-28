@@ -36,6 +36,8 @@ import static org.springframework.test.web.client.response.MockRestResponseCreat
 class CreditConsumptionClientOrgScopeTest {
 
     private static final String GATEWAY_SECRET = "test-gateway-secret";
+    private static final String SERVICE_SECRET =
+            "orchestrator-service-test-secret-at-least-32-characters";
 
     @Mock
     private RestTemplate restTemplate;
@@ -85,7 +87,8 @@ class CreditConsumptionClientOrgScopeTest {
     @Test
     void requestlessWorkflowWorkerSignsUserAndOrganizationForBindingResolution() {
         CreditConsumptionClient client = new CreditConsumptionClient(
-                "http://auth:8083", true, GATEWAY_SECRET);
+                "http://auth:8083", true, GATEWAY_SECRET,
+                "orchestrator-service", SERVICE_SECRET);
         client.setBillingAuthorityMode("external-paid-monolith");
         RestTemplate real = (RestTemplate) ReflectionTestUtils.getField(client, "restTemplate");
         MockRestServiceServer server = MockRestServiceServer.bindTo(real).build();
@@ -111,7 +114,8 @@ class CreditConsumptionClientOrgScopeTest {
         assertThat(captured.get().getFirst("X-Organization-ID"))
                 .isEqualTo(organizationId.toString());
         assertThat(captured.get().getFirst("X-Principal-ID")).isNull();
-        assertV2(captured.get(), "POST", "/api/internal/cloud-credit-proxy/reserve-llm",
+        assertServiceV2(captured.get(), "POST",
+                "/api/internal/cloud-credit-proxy/reserve-llm",
                 "99", organizationId.toString(), "");
         server.verify();
     }
@@ -171,6 +175,28 @@ class CreditConsumptionClientOrgScopeTest {
                 "");
         assertThat(headers.getFirst("X-Gateway-Secret"))
                 .isEqualTo(GatewaySignatureV2.sign(GATEWAY_SECRET, context));
+    }
+
+    private void assertServiceV2(HttpHeaders headers, String method, String target,
+                                 String userId, String orgId, String orgRole) {
+        assertThat(headers.getFirst("X-Gateway-Signature-Version")).isEqualTo("2");
+        assertThat(headers.getFirst("X-Provider-ID")).isEqualTo("orchestrator-service");
+        GatewaySignatureV2.Context context = new GatewaySignatureV2.Context(
+                headers.getFirst("X-Gateway-Timestamp"),
+                headers.getFirst("X-Gateway-Nonce"),
+                method,
+                target,
+                headers.getFirst("X-Gateway-Body-SHA256"),
+                "orchestrator-service",
+                userId,
+                "",
+                "",
+                orgId,
+                orgRole,
+                "",
+                "");
+        assertThat(headers.getFirst("X-Gateway-Secret"))
+                .isEqualTo(GatewaySignatureV2.sign(SERVICE_SECRET, context));
     }
 
     private CreditConsumptionClient clientWithMockRestTemplate() {

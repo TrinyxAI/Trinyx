@@ -22,6 +22,8 @@ import org.springframework.http.HttpMethod;
 import org.springframework.web.client.RestTemplate;
 
 class CreditConsumptionClientAmbiguousOutcomeTest {
+    private static final String SERVICE_SECRET =
+            "orchestrator-service-test-secret-at-least-32-characters";
 
     @Test
     void ambiguousProviderOutcomeIsPersistedAndNeverConvertedToRelease() {
@@ -62,7 +64,8 @@ class CreditConsumptionClientAmbiguousOutcomeTest {
 
     @Test
     void providerCallIsBlockedUnlessLocalJournalAndPaidAuthorityBothAcknowledge() {
-        CreditConsumptionClient client = new CreditConsumptionClient("http://auth", true);
+        CreditConsumptionClient client = new CreditConsumptionClient(
+                "http://auth", true, null, "orchestrator-service", SERVICE_SECRET);
         FakeStore store = new FakeStore();
         client.setSettlementIntentStore(store);
         client.setBillingAuthorityMode("external-paid-monolith");
@@ -92,7 +95,8 @@ class CreditConsumptionClientAmbiguousOutcomeTest {
 
     @Test
     void acceptedHandoffKeepsProducerIntentUntilFinalAuthorityResponse() {
-        CreditConsumptionClient client = new CreditConsumptionClient("http://auth", true);
+        CreditConsumptionClient client = new CreditConsumptionClient(
+                "http://auth", true, null, "orchestrator-service", SERVICE_SECRET);
         FakeStore store = new FakeStore();
         client.setSettlementIntentStore(store);
         UUID operationId = UUID.randomUUID();

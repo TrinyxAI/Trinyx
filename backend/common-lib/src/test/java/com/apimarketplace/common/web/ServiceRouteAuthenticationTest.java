@@ -57,6 +57,9 @@ class ServiceRouteAuthenticationTest {
     @Test
     void singleSegmentTemplatesDoNotAuthorizeFutureNestedRoutesOrWrongMethods() {
         GatewayFilterProperties p = properties();
+        p.setServiceAuthenticatedPaths(List.of(
+                "/api/internal/credentials/",
+                "/api/internal/cloud-credit-proxy/"));
         p.setServiceRoutePermissions(Map.of("catalog-service", List.of(
                 "GET:/api/internal/credentials/{credentialId}",
                 "POST:/api/internal/cloud-credit-proxy/{operationId}/commit")));

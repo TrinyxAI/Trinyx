@@ -39,13 +39,6 @@ class WorkspaceDataPurgerTest {
     void setUp() {
         jdbc = new RecordingJdbc();
         purger = new WorkspaceDataPurger(jdbc, storageErasureOutbox);
-        doAnswer(invocation -> {
-            jdbc.events.add("OUTBOX " + invocation.getArgument(2));
-            return null;
-        }).when(storageErasureOutbox).enqueue(
-                org.mockito.ArgumentMatchers.anyString(),
-                org.mockito.ArgumentMatchers.anyString(),
-                org.mockito.ArgumentMatchers.anyString());
     }
 
     private List<String> capturePurgeSql() {
@@ -69,6 +62,11 @@ class WorkspaceDataPurgerTest {
         jdbc.storageRows = List.of(Map.of(
                 "s3_key", "tenant-9/report.pdf",
                 "tenant_id", "tenant-9"));
+        doAnswer(invocation -> {
+            jdbc.events.add("OUTBOX " + invocation.getArgument(2));
+            return null;
+        }).when(storageErasureOutbox).enqueue(
+                ORG_ID, "tenant-9", "tenant-9/report.pdf");
 
         purger.purgeOperationalData(ORG_ID);
 

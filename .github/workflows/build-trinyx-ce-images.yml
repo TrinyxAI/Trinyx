@@ -50,7 +50,7 @@ jobs:
           set -euo pipefail
 
           package_version="$(node -p "require('./cli/package.json').version")"
-          if [[ ! "${package_version}" =~ ^[0-9]+.[0-9]+.[0-9]+$ ]]; then
+          if [[ ! "${package_version}" =~ ^[0-9]+[.][0-9]+[.][0-9]+$ ]]; then
             echo "cli/package.json must contain an exact stable SemVer version" >&2
             exit 1
           fi
@@ -88,7 +88,7 @@ jobs:
             exit 0
           fi
 
-          if [[ ! "${GITHUB_REF_NAME}" =~ ^v([0-9]+).([0-9]+).([0-9]+)$ ]]; then
+          if [[ ! "${GITHUB_REF_NAME}" =~ ^v([0-9]+)[.]([0-9]+)[.]([0-9]+)$ ]]; then
             echo "Release tags must use exact stable SemVer: vX.Y.Z" >&2
             exit 1
           fi
@@ -114,7 +114,7 @@ jobs:
           fi
 
           latest_stable_tag="$(git tag --merged origin/main --list 'v*' |
-            grep -E '^v[0-9]+.[0-9]+.[0-9]+$' |
+            grep -E '^v[0-9]+[.][0-9]+[.][0-9]+$' |
             sort -V |
             tail -n 1)"
           if [[ "${latest_stable_tag}" != "${GITHUB_REF_NAME}" ]]; then
@@ -486,7 +486,7 @@ jobs:
             exit 1
           fi
           latest_stable_tag="$(git tag --merged origin/main --list 'v*' |
-            grep -E '^v[0-9]+.[0-9]+.[0-9]+$' |
+            grep -E '^v[0-9]+[.][0-9]+[.][0-9]+$' |
             sort -V |
             tail -n 1)"
           if [[ "${latest_stable_tag}" != "${PATCH_TAG}" ]]; then
@@ -547,7 +547,7 @@ jobs:
             echo ""
             echo "| Component | Immutable digest |"
             echo "| --- | --- |"
-            jq -r '.images[] | "| (.name) | (.image)@(.digest) |"' release-manifest.json
+            jq -r '.images[] | "| " + .name + " | " + .image + "@" + .digest + " |"' release-manifest.json
             echo ""
             echo "npm: trinyx@${RELEASE_VERSION}"
           } >> "${GITHUB_STEP_SUMMARY}"

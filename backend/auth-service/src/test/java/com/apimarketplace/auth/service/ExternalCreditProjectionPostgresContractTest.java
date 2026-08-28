@@ -61,7 +61,8 @@ class ExternalCreditProjectionPostgresContractTest {
                     postgres.getJdbcUrl(), postgres.getUsername(), postgres.getPassword());
             JdbcTemplate jdbc = new JdbcTemplate(dataSource);
             ExternalCreditProxyStateWriter writer =
-                    new ExternalCreditProxyStateWriter(jdbc, new ObjectMapper());
+                    new ExternalCreditProxyStateWriter(
+                            jdbc, new ObjectMapper().findAndRegisterModules());
 
             UUID operationId = UUID.randomUUID();
             UUID reservationId = UUID.randomUUID();

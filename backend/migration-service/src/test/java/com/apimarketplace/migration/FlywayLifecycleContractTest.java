@@ -2,6 +2,8 @@ package com.apimarketplace.migration;
 
 import org.flywaydb.core.Flyway;
 import org.flywaydb.core.api.MigrationInfo;
+import org.flywaydb.core.api.MigrationVersion;
+import org.flywaydb.core.api.configuration.FluentConfiguration;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Timeout;
 import org.testcontainers.containers.PostgreSQLContainer;
@@ -27,7 +29,7 @@ class FlywayLifecycleContractTest {
     private static final String EXPECTED_CURRENT_VERSION = "453.3";
 
     @Test
-    @Timeout(value = 10, unit = TimeUnit.MINUTES)
+    @Timeout(value = 15, unit = TimeUnit.MINUTES)
     void cleanMigrateValidateInfoAndSecondMigrateAreDeterministic() {
         FlywayTestSupport.assumeDockerAvailable();
         DockerImageName postgresWithVector = DockerImageName
@@ -36,26 +38,7 @@ class FlywayLifecycleContractTest {
 
         try (PostgreSQLContainer<?> postgres = new PostgreSQLContainer<>(postgresWithVector)) {
             postgres.start();
-            String jdbcUrl = postgres.getJdbcUrl()
-                    + "?currentSchema=orchestrator"
-                    + "&options=-c%20lc.migration.source_timezone%3DUTC";
-            Flyway flyway = Flyway.configure()
-                    // Mirror the migration service's production-critical Flyway settings.
-                    .configuration(Map.ofEntries(
-                            Map.entry("flyway.postgresql.transactional.lock", "false"),
-                            Map.entry("flyway.baselineOnMigrate", "true"),
-                            Map.entry("flyway.baselineVersion", "0"),
-                            Map.entry("flyway.outOfOrder", "true"),
-                            Map.entry("flyway.mixed", "true"),
-                            Map.entry("flyway.schemas",
-                                    "orchestrator,storage,agent,trigger,interface,publication,"
-                                            + "auth,datasource,catalog,conversation"),
-                            Map.entry("flyway.defaultSchema", "orchestrator"),
-                            Map.entry("flyway.table", "flyway_schema_history_orchestrator")))
-                    .dataSource(jdbcUrl, postgres.getUsername(), postgres.getPassword())
-                    .locations("classpath:db/migration")
-                    .cleanDisabled(false)
-                    .load();
+            Flyway flyway = configured(postgres, null);
 
             flyway.clean();
             var first = flyway.migrate();
@@ -100,6 +83,51 @@ class FlywayLifecycleContractTest {
             assertThat(second.success).isTrue();
             assertThat(second.migrationsExecuted).isZero();
             assertThat(flyway.validateWithResult().validationSuccessful).isTrue();
+
+            // Published pre-sync databases stop at V434. Replaying to that exact point and then
+            // applying the synchronized LiveContext + Trinyx tail proves an upgrade, not only a
+            // clean install. PR-only V435+ Trinyx migrations were never published.
+            flyway.clean();
+            Flyway preSync = configured(postgres, "434");
+            assertThat(preSync.migrate().success).isTrue();
+            assertThat(preSync.info().current().getVersion().toString()).isEqualTo("434");
+            assertThat(preSync.validateWithResult().validationSuccessful).isTrue();
+
+            Flyway upgrade = configured(postgres, null);
+            var upgraded = upgrade.migrate();
+            assertThat(upgraded.success).isTrue();
+            assertThat(upgraded.migrationsExecuted).isPositive();
+            assertThat(upgrade.info().current().getVersion().toString())
+                    .isEqualTo(EXPECTED_CURRENT_VERSION);
+            assertThat(upgrade.validateWithResult().validationSuccessful).isTrue();
+            assertThat(upgrade.migrate().migrationsExecuted).isZero();
         }
+    }
+
+    private static Flyway configured(
+            PostgreSQLContainer<?> postgres, String targetVersion) {
+        String jdbcUrl = postgres.getJdbcUrl()
+                + "?currentSchema=orchestrator"
+                + "&options=-c%20lc.migration.source_timezone%3DUTC";
+        FluentConfiguration configuration = Flyway.configure()
+                // Mirror the migration service's production-critical Flyway settings.
+                .configuration(Map.ofEntries(
+                        Map.entry("flyway.postgresql.transactional.lock", "false"),
+                        Map.entry("flyway.baselineOnMigrate", "true"),
+                        Map.entry("flyway.baselineVersion", "0"),
+                        Map.entry("flyway.outOfOrder", "true"),
+                        Map.entry("flyway.mixed", "true"),
+                        Map.entry("flyway.schemas",
+                                "orchestrator,storage,agent,trigger,interface,publication,"
+                                        + "auth,datasource,catalog,conversation"),
+                        Map.entry("flyway.defaultSchema", "orchestrator"),
+                        Map.entry("flyway.table", "flyway_schema_history_orchestrator")))
+                .dataSource(jdbcUrl, postgres.getUsername(), postgres.getPassword())
+                .locations("classpath:db/migration")
+                .cleanDisabled(false);
+        if (targetVersion != null) {
+            configuration.target(MigrationVersion.fromVersion(targetVersion));
+        }
+        return configuration.load();
     }
 }

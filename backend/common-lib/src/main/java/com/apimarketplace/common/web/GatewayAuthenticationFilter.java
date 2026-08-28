@@ -156,7 +156,14 @@ public class GatewayAuthenticationFilter implements Filter {
                 userRoles,
                 request.getHeader("X-Install-ID"));
 
-        String expected = GatewaySignatureV2.sign(properties.getSecretKey(), context);
+        String signingSecret = properties.secretFor(providerId, request.getRequestURI());
+        if (signingSecret == null
+                || !properties.serviceMayCall(providerId, request.getMethod(), request.getRequestURI())) {
+            rejectRequest(response, HttpServletResponse.SC_UNAUTHORIZED,
+                    "Invalid service identity or route audience");
+            return;
+        }
+        String expected = GatewaySignatureV2.sign(signingSecret, context);
         if (!GatewaySignatureV2.constantTimeEquals(signature, expected)) {
             rejectRequest(response, HttpServletResponse.SC_UNAUTHORIZED, "Invalid gateway signature");
             return;

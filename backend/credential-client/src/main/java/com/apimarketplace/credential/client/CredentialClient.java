@@ -6,6 +6,7 @@ import org.slf4j.LoggerFactory;
 import org.springframework.core.ParameterizedTypeReference;
 import org.springframework.http.*;
 import com.apimarketplace.common.web.OrgContextHeaderForwarder;
+import com.apimarketplace.common.web.ServiceRequestSigningInterceptor;
 import org.springframework.http.client.SimpleClientHttpRequestFactory;
 import org.springframework.web.client.RestTemplate;
 import org.springframework.web.util.UriComponentsBuilder;
@@ -42,12 +43,20 @@ public class CredentialClient {
     }
 
     public CredentialClient(String baseUrl, String gatewaySecretKey) {
+        this(baseUrl, gatewaySecretKey, "internal-credential-client");
+    }
+
+    public CredentialClient(String baseUrl, String serviceSecret, String serviceId) {
         SimpleClientHttpRequestFactory factory = new SimpleClientHttpRequestFactory();
         factory.setConnectTimeout((int) Duration.ofSeconds(2).toMillis());
         factory.setReadTimeout((int) Duration.ofSeconds(3).toMillis());
         this.restTemplate = new RestTemplate(factory);
         this.baseUrl = baseUrl;
-        this.gatewaySecretKey = gatewaySecretKey;
+        this.gatewaySecretKey = serviceSecret;
+        if (serviceSecret != null && !serviceSecret.isBlank()) {
+            this.restTemplate.getInterceptors().add(
+                    new ServiceRequestSigningInterceptor(serviceId, serviceSecret));
+        }
     }
 
     // ========== User Credentials ==========

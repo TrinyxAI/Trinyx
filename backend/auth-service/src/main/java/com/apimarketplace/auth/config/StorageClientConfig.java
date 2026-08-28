@@ -22,8 +22,9 @@ public class StorageClientConfig {
 
     @Bean
     public StorageClient storageClient(
-            @Value("${services.storage-url:http://localhost:8082}") String storageUrl) {
-        return new StorageClient(storageUrl);
+            @Value("${services.storage-url:http://localhost:8082}") String storageUrl,
+            @Value("${internal.s2s.service-secret:}") String serviceSecret) {
+        return new StorageClient(storageUrl, serviceSecret, "auth-service");
     }
 
     @Bean

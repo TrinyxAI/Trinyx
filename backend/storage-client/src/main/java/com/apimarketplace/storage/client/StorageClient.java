@@ -6,6 +6,7 @@ import org.slf4j.LoggerFactory;
 import org.springframework.core.io.ByteArrayResource;
 import org.springframework.http.*;
 import com.apimarketplace.common.web.OrgContextHeaderForwarder;
+import com.apimarketplace.common.web.ServiceRequestSigningInterceptor;
 import org.springframework.util.LinkedMultiValueMap;
 import org.springframework.util.MultiValueMap;
 import org.springframework.web.client.RestTemplate;
@@ -27,8 +28,15 @@ public class StorageClient {
     private final String baseUrl;
 
     public StorageClient(String storageServiceUrl) {
-        this.restTemplate = new RestTemplate();
-        this.baseUrl = storageServiceUrl;
+        this(new RestTemplate(), storageServiceUrl);
+    }
+
+    public StorageClient(String storageServiceUrl, String serviceSecret, String serviceId) {
+        this(new RestTemplate(), storageServiceUrl);
+        if (serviceSecret != null && !serviceSecret.isBlank()) {
+            this.restTemplate.getInterceptors().add(
+                    new ServiceRequestSigningInterceptor(serviceId, serviceSecret));
+        }
     }
 
     public StorageClient(RestTemplate restTemplate, String storageServiceUrl) {

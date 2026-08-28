@@ -15,7 +15,7 @@ public class CredentialClientConfig {
     @Bean
     public CredentialClient credentialClient(
             @Value("${services.auth-service.url:http://localhost:8083}") String authUrl,
-            @Value("${gateway.filter.secret-key:${GATEWAY_SECRET_KEY:}}") String gatewaySecretKey) {
-        return new CredentialClient(authUrl, gatewaySecretKey);
+            @Value("${internal.s2s.service-secret:}") String serviceSecret) {
+        return new CredentialClient(authUrl, serviceSecret, "catalog-service");
     }
 }

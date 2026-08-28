@@ -3,7 +3,9 @@ package com.apimarketplace.common.web;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 
 @ConfigurationProperties(prefix = "gateway.filter")
 public class GatewayFilterProperties {
@@ -12,6 +14,12 @@ public class GatewayFilterProperties {
 
     private List<String> publicPaths = new ArrayList<>();
     private List<String> hmacRequiredPaths = new ArrayList<>();
+    /** Routes that require a cryptographically distinct service identity. */
+    private List<String> serviceAuthenticatedPaths = new ArrayList<>();
+    /** Per-service HMAC keys. A caller cannot claim another serviceId without its key. */
+    private Map<String, String> serviceSecrets = new LinkedHashMap<>();
+    /** Exact METHOD:path or METHOD:/prefix/** permissions by serviceId. */
+    private Map<String, List<String>> serviceRoutePermissions = new LinkedHashMap<>();
     private boolean verificationEnabled = true;
     private String secretKey = DEFAULT_SECRET_KEY;
     private boolean rejectDefaultSecrets = false;
@@ -38,6 +46,53 @@ public class GatewayFilterProperties {
     public void setPublicPaths(List<String> publicPaths) { this.publicPaths = publicPaths; }
     public List<String> getHmacRequiredPaths() { return hmacRequiredPaths; }
     public void setHmacRequiredPaths(List<String> hmacRequiredPaths) { this.hmacRequiredPaths = hmacRequiredPaths; }
+    public List<String> getServiceAuthenticatedPaths() { return serviceAuthenticatedPaths; }
+    public void setServiceAuthenticatedPaths(List<String> value) { this.serviceAuthenticatedPaths = value; }
+    public Map<String, String> getServiceSecrets() { return serviceSecrets; }
+    public void setServiceSecrets(Map<String, String> value) {
+        this.serviceSecrets = value == null ? new LinkedHashMap<>() : value;
+    }
+    public Map<String, List<String>> getServiceRoutePermissions() { return serviceRoutePermissions; }
+    public void setServiceRoutePermissions(Map<String, List<String>> value) {
+        this.serviceRoutePermissions = value == null ? new LinkedHashMap<>() : value;
+    }
+
+    public boolean serviceAuthenticationRequired(String path) {
+        return matchesPrefix(path, serviceAuthenticatedPaths);
+    }
+
+    public String secretFor(String serviceId, String path) {
+        if (!serviceAuthenticationRequired(path)) return secretKey;
+        String secret = serviceSecrets.get(serviceId);
+        return secret == null || secret.isBlank() ? null : secret;
+    }
+
+    public boolean serviceMayCall(String serviceId, String method, String path) {
+        if (!serviceAuthenticationRequired(path)) return true;
+        List<String> permissions = serviceRoutePermissions.get(serviceId);
+        if (permissions == null || permissions.isEmpty()) return false;
+        String actualMethod = method == null ? "" : method.toUpperCase(java.util.Locale.ROOT);
+        for (String permission : permissions) {
+            if (permission == null) continue;
+            int separator = permission.indexOf(':');
+            if (separator <= 0) continue;
+            String allowedMethod = permission.substring(0, separator).toUpperCase(java.util.Locale.ROOT);
+            String allowedPath = permission.substring(separator + 1);
+            if (!"*".equals(allowedMethod) && !allowedMethod.equals(actualMethod)) continue;
+            if (allowedPath.endsWith("/**")) {
+                String prefix = allowedPath.substring(0, allowedPath.length() - 2);
+                if (path.startsWith(prefix)) return true;
+            } else if (allowedPath.equals(path)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static boolean matchesPrefix(String path, List<String> prefixes) {
+        if (path == null || prefixes == null) return false;
+        return prefixes.stream().filter(java.util.Objects::nonNull).anyMatch(path::startsWith);
+    }
     public boolean isVerificationEnabled() { return verificationEnabled; }
     public void setVerificationEnabled(boolean verificationEnabled) { this.verificationEnabled = verificationEnabled; }
     public String getSecretKey() { return secretKey; }

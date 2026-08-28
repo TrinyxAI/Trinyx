@@ -122,6 +122,39 @@ gateway:
       - /api/auth/openid-configuration
     hmac-required-paths:
       - /api/credits/
+      - /api/internal/credentials/
+    service-authenticated-paths:
+      - /api/internal/credentials/
+    service-secrets:
+      catalog-service: ${CATALOG_SERVICE_S2S_SECRET:}
+      orchestrator-service: ${ORCHESTRATOR_SERVICE_S2S_SECRET:}
+      agent-service: ${AGENT_SERVICE_S2S_SECRET:}
+    service-route-permissions:
+      catalog-service:
+        - "GET:/api/internal/credentials/**"
+        - "POST:/api/internal/credentials/**"
+        - "DELETE:/api/internal/credentials/**"
+      orchestrator-service:
+        - "GET:/api/internal/credentials/configured-integrations/**"
+        - "GET:/api/internal/credentials/state-version"
+        - "GET:/api/internal/credentials/access-token"
+        - "GET:/api/internal/credentials/access-token/by-id"
+        - "GET:/api/internal/credentials/data-map"
+        - "GET:/api/internal/credentials/data-map/by-id"
+        - "GET:/api/internal/credentials/scopes"
+        - "GET:/api/internal/credentials/scopes/by-id"
+        - "GET:/api/internal/credentials/default"
+        - "GET:/api/internal/credentials/all"
+        - "GET:/api/internal/credentials/identities"
+        - "GET:/api/internal/credentials/**"
+        - "POST:/api/internal/credentials/refresh-token"
+        - "POST:/api/internal/credentials/force-refresh-token"
+        - "POST:/api/internal/credentials/force-refresh-token/by-id"
+      agent-service:
+        - "GET:/api/internal/credentials/configured-integrations/**"
+        - "GET:/api/internal/credentials/state-version"
+        - "GET:/api/internal/credentials/identities"
+
       - /api/internal/credentials/access-token
       - /api/internal/credentials/data-map
       - /api/internal/credentials/force-refresh-token

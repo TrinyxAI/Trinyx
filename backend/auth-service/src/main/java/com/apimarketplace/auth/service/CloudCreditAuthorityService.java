@@ -101,7 +101,6 @@ public class CloudCreditAuthorityService {
         Existing operation = required(operationId);
         requireSame(operation.requestHash(), request.requestHash(),
                 "REQUEST_HASH_MISMATCH");
-        credits.requireReservationPayer(sourceId(operationId), operation.payerUserId());
         if (!java.util.Objects.equals(operation.provider(), request.provider())
                 || !java.util.Objects.equals(operation.model(), request.model())) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
@@ -113,6 +112,8 @@ public class CloudCreditAuthorityService {
         if (!"RESERVED".equals(operation.state())) {
             throw conflict("DISPATCH_AFTER_" + operation.state());
         }
+
+        credits.requireReservationPayer(sourceId(operationId), operation.payerUserId());
 
         SettlementResponse response = new SettlementResponse(operationId,
                 "DISPATCHING", BigDecimal.ZERO,
@@ -135,7 +136,6 @@ public class CloudCreditAuthorityService {
         lock(operationId);
         Existing operation = required(operationId);
         requireSame(operation.requestHash(), request.requestHash(), "REQUEST_HASH_MISMATCH");
-        credits.requireReservationPayer(sourceId(operationId), operation.payerUserId());
         validateCommit(operation, request);
         String settlementHash = CanonicalJson.sha256(json.valueToTree(request));
 
@@ -163,6 +163,7 @@ public class CloudCreditAuthorityService {
             throw conflict("LATE_SETTLEMENT_WINDOW_CLOSED");
         }
 
+        credits.requireReservationPayer(sourceId(operationId), operation.payerUserId());
         BigDecimal authoritativeActual = authoritativeActual(operation, request);
         CreditService.CommitOutcome outcome = credits.settleExternalReservation(
                 sourceId(operationId), authoritativeActual, request.provider(),
@@ -196,7 +197,6 @@ public class CloudCreditAuthorityService {
         lock(operationId);
         Existing operation = required(operationId);
         requireSame(operation.requestHash(), request.requestHash(), "REQUEST_HASH_MISMATCH");
-        credits.requireReservationPayer(sourceId(operationId), operation.payerUserId());
         String settlementHash = CanonicalJson.sha256(json.valueToTree(request));
 
         if ("RELEASED".equals(operation.state())) {
@@ -204,6 +204,7 @@ public class CloudCreditAuthorityService {
             return readSettlement(operation.responsePayload());
         }
         if (operation.state().startsWith("COMMITTED")) throw conflict("RELEASE_AFTER_COMMIT");
+        credits.requireReservationPayer(sourceId(operationId), operation.payerUserId());
         CreditService.ReleaseOutcome outcome = credits.releaseReservation(
                 sourceId(operationId), "cloud-release:" + safeReason(request.reason()));
         SettlementResponse response = new SettlementResponse(operationId, "RELEASED",
@@ -249,6 +250,7 @@ public class CloudCreditAuthorityService {
             throw conflict("OUTCOME_UNKNOWN_FROM_" + operation.state());
         }
 
+        credits.requireReservationPayer(sourceId(operationId), operation.payerUserId());
         SettlementResponse response = new SettlementResponse(operationId, "OUTCOME_UNKNOWN",
                 BigDecimal.ZERO,
                 balanceForPayer(operation.payerUserId()),

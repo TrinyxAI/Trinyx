@@ -40,15 +40,37 @@ public class CloudLinkConfig {
     @Value("${billing.authority.mode:native}")
     private String billingAuthorityMode;
 
+    @Value("${cloud-link.pending-state-store:in-memory}")
+    private String pendingStateStore;
+
+    @Value("${cloud-link.replica-count:1}")
+    private int replicaCount;
+
     @Bean
     public CloudLinkService cloudLinkService(
             CeCloudLinkRepository cloudLinkRepository,
             ObjectMapper objectMapper,
             AuthClient authClient) {
+        requireSupportedTopology(pendingStateStore, replicaCount);
         return new CloudLinkService(
                 cloudLinkRepository, keycloakUrl, clientId, redirectUri, encryptionKey,
                 cloudApiUrl, ceVersion, objectMapper, authClient,
                 "paid-monolith-authority".equalsIgnoreCase(billingAuthorityMode));
+    }
+
+    static void requireSupportedTopology(String pendingStateStore, int replicaCount) {
+        String normalizedStore = pendingStateStore == null
+                ? ""
+                : pendingStateStore.trim().toLowerCase();
+        if (!"in-memory".equals(normalizedStore)) {
+            throw new IllegalStateException(
+                    "Unsupported cloud-link.pending-state-store: " + pendingStateStore);
+        }
+        if (replicaCount != 1) {
+            throw new IllegalStateException(
+                    "CloudLink pending OAuth state is process-local; "
+                            + "cloud-link.replica-count must remain 1 until a shared store is implemented");
+        }
     }
 
     @Bean

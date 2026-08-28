@@ -148,7 +148,7 @@ jobs:
           docker run -d --name ce-smoke-redis --network "${network}" redis:7-alpine >/dev/null
           docker run -d --name ce-smoke-minio --network "${network}" \
             -e MINIO_ROOT_USER=minioadmin -e MINIO_ROOT_PASSWORD=minioadmin \
-            minio/minio:latest server /data >/dev/null
+            minio/minio:RELEASE.2025-07-23T15-54-02Z server /data >/dev/null
 
           for attempt in {1..60}; do
             if docker exec ce-smoke-postgres pg_isready -U postgres >/dev/null 2>&1 \
@@ -162,7 +162,7 @@ jobs:
             sleep 2
           done
 
-          docker run --rm --network "${network}" --entrypoint /bin/sh minio/mc:latest -c '
+          docker run --rm --network "${network}" --entrypoint /bin/sh minio/mc:RELEASE.2025-07-21T05-28-08Z -c '
             until mc alias set smoke http://ce-smoke-minio:9000 minioadmin minioadmin >/dev/null 2>&1; do sleep 2; done
             mc mb --ignore-existing smoke/workflow-files >/dev/null
           '

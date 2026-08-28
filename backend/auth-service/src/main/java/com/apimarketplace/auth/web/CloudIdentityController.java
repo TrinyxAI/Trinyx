@@ -25,19 +25,14 @@ public class CloudIdentityController {
     @GetMapping("/context")
     public CloudIdentityBindingService.BindingContext context(
             @RequestParam String keycloakSubject,
-            @RequestParam(required = false) UUID installId,
-            @RequestHeader("X-Provider-ID") String signedProviderId) {
-        if (!keycloakSubject.equals(signedProviderId)) {
-            throw new org.springframework.web.server.ResponseStatusException(
-                    org.springframework.http.HttpStatus.FORBIDDEN, "SIGNED_SUBJECT_MISMATCH");
-        }
+            @RequestParam(required = false) UUID installId) {
         return bindings.context(keycloakSubject, installId);
     }
 
     @PostMapping("/bind")
     public CloudIdentityBindingService.BindingContext bind(
             @Valid @RequestBody BindRequest request,
-            @RequestHeader("X-Provider-ID") String keycloakSubject,
+            @RequestParam String keycloakSubject,
             @RequestHeader("X-User-ID") long cloudUserId) {
         return bindings.bind(request.identityBinding(), keycloakSubject, cloudUserId);
     }

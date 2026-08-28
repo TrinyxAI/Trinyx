@@ -22,13 +22,21 @@ final class GatewayIdentityClient {
     private final WebClient auth;
     private final ObjectMapper mapper;
     private final String secret;
+    private final String serviceSecret;
 
     GatewayIdentityClient(WebClient.Builder builder, ObjectMapper mapper,
                           @Value("${trinyx.gateway.auth-service-url}") String authServiceUrl,
-                          @Value("${trinyx.gateway.hmac-secret}") String secret) {
+                          @Value("${trinyx.gateway.hmac-secret}") String secret,
+                          @Value("${internal.s2s.service-secret:${INTERNAL_S2S_SERVICE_SECRET:}}")
+                          String serviceSecret) {
         this.auth = builder.baseUrl(authServiceUrl).build();
         this.mapper = mapper;
         this.secret = secret;
+        if (serviceSecret == null || serviceSecret.length() < 32) {
+            throw new IllegalStateException(
+                    "gateway-service requires a distinct internal S2S HMAC key");
+        }
+        this.serviceSecret = serviceSecret;
     }
 
     Mono<GatewayUserContext> resolve(String bearerToken, String providerId, String bindingJws,
@@ -83,7 +91,8 @@ final class GatewayIdentityClient {
             UserResolution user, String providerId, String bindingJws) {
         try {
             byte[] body = mapper.writeValueAsBytes(java.util.Map.of("identityBinding", bindingJws));
-            String target = "/api/internal/cloud-identity/bind";
+            String target = "/api/internal/cloud-identity/bind?keycloakSubject="
+                    + URLEncoder.encode(providerId, StandardCharsets.UTF_8);
             HttpHeaders headers = signed("POST", target, body, providerId,
                     String.valueOf(user.userId()), user.principalId(), user.billingSubjectId(),
                     user.defaultOrganizationId(), user.defaultOrganizationRole(),
@@ -175,8 +184,12 @@ final class GatewayIdentityClient {
         String timestamp = String.valueOf(System.currentTimeMillis());
         String nonce = UUID.randomUUID().toString();
         String hash = GatewaySignatureV2.sha256Hex(body);
+        boolean serviceRoute = target.startsWith("/api/internal/cloud-identity/")
+                || target.startsWith("/api/internal/v1/entitlement-projections/");
+        String signingProvider = serviceRoute ? "gateway-service" : providerId;
+        String signingSecret = serviceRoute ? serviceSecret : secret;
         GatewaySignatureV2.Context context = new GatewaySignatureV2.Context(
-                timestamp, nonce, method, target, hash, providerId, userId,
+                timestamp, nonce, method, target, hash, signingProvider, userId,
                 principalId, billingSubjectId, organizationId, organizationRole,
                 userRoles, installId);
         HttpHeaders headers = new HttpHeaders();
@@ -184,8 +197,8 @@ final class GatewayIdentityClient {
         headers.set("X-Gateway-Timestamp", timestamp);
         headers.set("X-Gateway-Nonce", nonce);
         headers.set("X-Gateway-Body-SHA256", hash);
-        headers.set("X-Gateway-Secret", GatewaySignatureV2.sign(secret, context));
-        headers.set("X-Provider-ID", providerId);
+        headers.set("X-Gateway-Secret", GatewaySignatureV2.sign(signingSecret, context));
+        headers.set("X-Provider-ID", signingProvider);
         set(headers, "X-User-ID", userId);
         set(headers, "X-Principal-ID", principalId);
         set(headers, "X-Billing-Subject-ID", billingSubjectId);

@@ -79,14 +79,31 @@ public class GatewayFilterProperties {
             String allowedMethod = permission.substring(0, separator).toUpperCase(java.util.Locale.ROOT);
             String allowedPath = permission.substring(separator + 1);
             if (!"*".equals(allowedMethod) && !allowedMethod.equals(actualMethod)) continue;
-            if (allowedPath.endsWith("/**")) {
-                String prefix = allowedPath.substring(0, allowedPath.length() - 2);
-                if (path.startsWith(prefix)) return true;
-            } else if (allowedPath.equals(path)) {
+            if (pathMatches(allowedPath, path)) {
                 return true;
             }
         }
         return false;
+    }
+
+    private static boolean pathMatches(String pattern, String path) {
+        if (pattern == null || path == null) return false;
+        if (pattern.endsWith("/**")) {
+            String prefix = pattern.substring(0, pattern.length() - 2);
+            return path.startsWith(prefix);
+        }
+        String[] allowed = pattern.split("/", -1);
+        String[] actual = path.split("/", -1);
+        if (allowed.length != actual.length) return false;
+        for (int i = 0; i < allowed.length; i++) {
+            String segment = allowed[i];
+            boolean template = "*".equals(segment)
+                    || (segment.startsWith("{") && segment.endsWith("}")
+                    && segment.length() > 2);
+            if (!template && !segment.equals(actual[i])) return false;
+            if (template && actual[i].isEmpty()) return false;
+        }
+        return true;
     }
 
     private static boolean matchesPrefix(String path, List<String> prefixes) {

@@ -27,8 +27,11 @@ public class CreditClientConfig {
     public CreditConsumptionClient creditConsumptionClient(
             @Value("${services.auth-service.url:http://localhost:8083}") String authServiceUrl,
             @Value("${credit.consumption.enabled:true}") boolean enabled,
-            @Value("${gateway.filter.secret-key:${GATEWAY_SECRET_KEY:}}") String gatewaySecretKey) {
-        CreditConsumptionClient client = new CreditConsumptionClient(authServiceUrl, enabled, gatewaySecretKey);
+            @Value("${gateway.filter.secret-key:${GATEWAY_SECRET_KEY:}}") String gatewaySecretKey,
+            @Value("${spring.application.name}") String serviceId,
+            @Value("${internal.s2s.service-secret:${INTERNAL_S2S_SERVICE_SECRET:}}") String serviceSecret) {
+        CreditConsumptionClient client = new CreditConsumptionClient(
+                authServiceUrl, enabled, gatewaySecretKey, serviceId, serviceSecret);
         client.setDeadLetterHandler(
                 new HttpCreditDeadLetterHandler(new RestTemplate(), authServiceUrl));
         return client;

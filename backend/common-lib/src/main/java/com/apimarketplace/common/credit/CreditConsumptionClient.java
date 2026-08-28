@@ -3,6 +3,7 @@ package com.apimarketplace.common.credit;
 import com.apimarketplace.common.web.OrgContextHeaderForwarder;
 import com.apimarketplace.common.web.TenantResolver;
 import com.apimarketplace.common.web.GatewaySignatureV2;
+import com.apimarketplace.common.web.ServiceRequestSigningInterceptor;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.boot.web.client.RestTemplateBuilder;
@@ -68,6 +69,7 @@ public class CreditConsumptionClient {
     private final String authServiceUrl;
     private final boolean enabled;
     private final String gatewaySecretKey;
+    private final ServiceRequestSigningInterceptor serviceRequestSigner;
     private String billingAuthorityMode = "native-cloud";
     private String gatewaySignatureVersion = "2";
     private ExternalSettlementIntentStore settlementIntentStore;
@@ -166,8 +168,23 @@ public class CreditConsumptionClient {
     }
 
     public CreditConsumptionClient(String authServiceUrl, boolean enabled, String gatewaySecretKey) {
+        this(authServiceUrl, enabled, gatewaySecretKey, null, null);
+    }
+
+    public CreditConsumptionClient(
+            String authServiceUrl, boolean enabled, String gatewaySecretKey,
+            String serviceId, String serviceSecret) {
         this.enabled = enabled;
         this.gatewaySecretKey = gatewaySecretKey;
+        boolean hasServiceId = serviceId != null && !serviceId.isBlank();
+        boolean hasServiceSecret = serviceSecret != null && !serviceSecret.isBlank();
+        if (hasServiceId != hasServiceSecret) {
+            throw new IllegalStateException(
+                    "Internal service identity and HMAC key must be configured together");
+        }
+        this.serviceRequestSigner = hasServiceId
+                ? new ServiceRequestSigningInterceptor(serviceId, serviceSecret)
+                : null;
         if (enabled) {
             this.restTemplate = new RestTemplateBuilder()
                     .connectTimeout(CONNECT_TIMEOUT)
@@ -1395,6 +1412,14 @@ public class CreditConsumptionClient {
             org.springframework.http.HttpRequest request, byte[] body,
             org.springframework.http.client.ClientHttpRequestExecution execution)
             throws java.io.IOException {
+        String path = request.getURI().getRawPath();
+        if (path != null && path.startsWith("/api/internal/cloud-credit-proxy/")) {
+            if (serviceRequestSigner == null) {
+                throw new java.io.IOException(
+                        "Service-specific signing is required for the financial proxy");
+            }
+            return serviceRequestSigner.intercept(request, body, execution);
+        }
         if (gatewaySecretKey == null || gatewaySecretKey.isBlank()) {
             return execution.execute(request, body);
         }

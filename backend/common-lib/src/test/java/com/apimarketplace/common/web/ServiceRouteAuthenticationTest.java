@@ -16,7 +16,7 @@ class ServiceRouteAuthenticationTest {
     private static final String SECRET = "catalog-service-secret-at-least-32-characters";
 
     @Test
-    void missingWrongServiceReplayAndWrongTenantAreDeniedButExactCallerSucceeds() throws Exception {
+    void missingWrongServiceReplayAndPostSignatureTenantTamperingAreDeniedButExactCallerSucceeds() throws Exception {
         GatewayFilterProperties properties = properties();
         GatewayNonceStore nonces = mock(GatewayNonceStore.class);
         when(nonces.consume(anyString(), anyString(), any())).thenReturn(true, false, true);
@@ -53,6 +53,48 @@ class ServiceRouteAuthenticationTest {
         verify(chain, times(1)).doFilter(any(), any());
     }
 
+
+    @Test
+    void singleSegmentTemplatesDoNotAuthorizeFutureNestedRoutesOrWrongMethods() {
+        GatewayFilterProperties p = properties();
+        p.setServiceRoutePermissions(Map.of("catalog-service", List.of(
+                "GET:/api/internal/credentials/{credentialId}",
+                "POST:/api/internal/cloud-credit-proxy/{operationId}/commit")));
+
+        assertThat(p.serviceMayCall("catalog-service", "GET",
+                "/api/internal/credentials/5f65f98d")).isTrue();
+        assertThat(p.serviceMayCall("catalog-service", "GET",
+                "/api/internal/credentials/future/nested")).isFalse();
+        assertThat(p.serviceMayCall("catalog-service", "DELETE",
+                "/api/internal/credentials/5f65f98d")).isFalse();
+        assertThat(p.serviceMayCall("catalog-service", "POST",
+                "/api/internal/cloud-credit-proxy/9c63/commit")).isTrue();
+        assertThat(p.serviceMayCall("catalog-service", "POST",
+                "/api/internal/cloud-credit-proxy/9c63/future/commit")).isFalse();
+    }
+
+    @Test
+    void genericGatewaySecretCannotAuthenticateFinancialServiceRoute() throws Exception {
+        GatewayFilterProperties p = properties();
+        p.setServiceAuthenticatedPaths(List.of("/api/internal/cloud-credit-proxy/"));
+        p.setHmacRequiredPaths(List.of("/api/internal/cloud-credit-proxy/"));
+        p.setServiceRoutePermissions(Map.of("catalog-service",
+                List.of("POST:/api/internal/cloud-credit-proxy/reserve")));
+
+        GatewayAuthenticationFilter filter =
+                new GatewayAuthenticationFilter(p, mock(GatewayNonceStore.class));
+        FilterChain chain = mock(FilterChain.class);
+        MockHttpServletRequest request = signedRequest(
+                "POST", "/api/internal/cloud-credit-proxy/reserve",
+                "catalog-service", p.getSecretKey(), "victim");
+        MockHttpServletResponse response = new MockHttpServletResponse();
+
+        filter.doFilter(request, response, chain);
+
+        assertThat(response.getStatus()).isEqualTo(401);
+        verifyNoInteractions(chain);
+    }
+
     private static GatewayFilterProperties properties() {
         GatewayFilterProperties p = new GatewayFilterProperties();
         p.setSecretKey("gateway-secret-at-least-32-characters");
@@ -77,6 +119,27 @@ class ServiceRouteAuthenticationTest {
         String hash = GatewaySignatureV2.sha256Hex(new byte[0]);
         GatewaySignatureV2.Context context = new GatewaySignatureV2.Context(
                 timestamp, nonce, "GET", path, hash, service, tenant,
+                null, null, null, null, null, null);
+        request.addHeader("X-Provider-ID", service);
+        request.addHeader("X-Gateway-Signature-Version", "2");
+        request.addHeader("X-Gateway-Timestamp", timestamp);
+        request.addHeader("X-Gateway-Nonce", nonce);
+        request.addHeader("X-Gateway-Body-SHA256", hash);
+        request.addHeader("X-Gateway-Secret", GatewaySignatureV2.sign(secret, context));
+        return request;
+    }
+
+
+    private static MockHttpServletRequest signedRequest(
+            String method, String path, String service, String secret, String tenant) {
+        MockHttpServletRequest request = new MockHttpServletRequest(method, path);
+        request.setRequestURI(path);
+        request.addHeader("X-User-ID", tenant);
+        String timestamp = Long.toString(System.currentTimeMillis());
+        String nonce = UUID.randomUUID().toString();
+        String hash = GatewaySignatureV2.sha256Hex(new byte[0]);
+        GatewaySignatureV2.Context context = new GatewaySignatureV2.Context(
+                timestamp, nonce, method, path, hash, service, tenant,
                 null, null, null, null, null, null);
         request.addHeader("X-Provider-ID", service);
         request.addHeader("X-Gateway-Signature-Version", "2");

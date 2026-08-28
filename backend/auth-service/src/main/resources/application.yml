@@ -123,23 +123,73 @@ gateway:
     hmac-required-paths:
       - /api/credits/
       - /api/internal/credentials/
-      - /api/internal/auth/workspace/
-      - /api/internal/cloud-identity/
+      - /api/internal/variables/
       - /api/internal/cloud-credit-proxy/
+      - /api/internal/cloud-identity/
       - /api/internal/v1/entitlement-projections
+      - /api/internal/auth/workspace/
     service-authenticated-paths:
       - /api/internal/credentials/
+      - /api/internal/variables/
+      - /api/internal/cloud-credit-proxy/
+      - /api/internal/cloud-identity/
+      - /api/internal/v1/entitlement-projections
+      - /api/internal/auth/workspace/
     service-secrets:
       catalog-service: ${CATALOG_SERVICE_S2S_SECRET:}
       orchestrator-service: ${ORCHESTRATOR_SERVICE_S2S_SECRET:}
       agent-service: ${AGENT_SERVICE_S2S_SECRET:}
+      gateway-service: ${GATEWAY_SERVICE_S2S_SECRET:}
+      auth-service: ${AUTH_SERVICE_S2S_SECRET:}
     service-route-permissions:
       catalog-service:
-        - "GET:/api/internal/credentials/**"
-        - "POST:/api/internal/credentials/**"
-        - "DELETE:/api/internal/credentials/**"
+        - "GET:/api/internal/credentials/configured-integrations/{tenantId}"
+        - "GET:/api/internal/credentials/state-version"
+        - "GET:/api/internal/credentials/access-token"
+        - "GET:/api/internal/credentials/access-token/by-id"
+        - "POST:/api/internal/credentials/refresh-token"
+        - "POST:/api/internal/credentials/force-refresh-token"
+        - "POST:/api/internal/credentials/force-refresh-token/by-id"
+        - "GET:/api/internal/credentials/data-map"
+        - "GET:/api/internal/credentials/data-map/by-id"
+        - "GET:/api/internal/credentials/scopes"
+        - "GET:/api/internal/credentials/scopes/by-id"
+        - "DELETE:/api/internal/credentials/by-integration/{integrationName}"
+        - "GET:/api/internal/credentials/platform"
+        - "GET:/api/internal/credentials/platform/{name}"
+        - "POST:/api/internal/credentials/platform"
+        - "POST:/api/internal/credentials/platform-tenant"
+        - "DELETE:/api/internal/credentials/platform-tenant/{integrationName}"
+        - "DELETE:/api/internal/credentials/platform/{name}"
+        - "GET:/api/internal/credentials/platform-integration/{integrationName}"
+        - "GET:/api/internal/credentials/{credentialId}"
+        - "GET:/api/internal/credentials/default"
+        - "GET:/api/internal/credentials/all"
+        - "GET:/api/internal/credentials/identities"
+        - "POST:/api/internal/credentials/run-pricing-pin"
+        - "DELETE:/api/internal/credentials/run-pricing-pin/{runId}"
+        - "GET:/api/internal/credentials/resolve-markup"
+        - "GET:/api/internal/credentials/markup/run-rate"
+        - "GET:/api/internal/credentials/markup/scope-rate"
+        - "GET:/api/internal/credentials/markup/scope-pin-exists"
+        - "DELETE:/api/internal/credentials/markup/scope-pin"
+        - "POST:/api/internal/credentials/pricing-versions/bootstrap"
+        - "POST:/api/internal/credentials/pricing-versions/published-prices"
+        - "POST:/api/internal/credentials/pricing-versions/apply-catalog-bundle"
+        - "GET:/api/internal/credentials/platform/by-name"
+        - "GET:/api/internal/credentials/pricing/{credentialId}/latest"
+        - "GET:/api/internal/variables/bundle"
+        - "POST:/api/internal/cloud-credit-proxy/reserve"
+        - "POST:/api/internal/cloud-credit-proxy/reserve-llm"
+        - "POST:/api/internal/cloud-credit-proxy/{operationId}/dispatching"
+        - "POST:/api/internal/cloud-credit-proxy/{operationId}/commit"
+        - "POST:/api/internal/cloud-credit-proxy/{operationId}/commit-llm"
+        - "POST:/api/internal/cloud-credit-proxy/{operationId}/commit-amount"
+        - "POST:/api/internal/cloud-credit-proxy/{operationId}/release"
+        - "POST:/api/internal/cloud-credit-proxy/{operationId}/release-local"
+        - "POST:/api/internal/cloud-credit-proxy/{operationId}/outcome-unknown"
       orchestrator-service:
-        - "GET:/api/internal/credentials/configured-integrations/**"
+        - "GET:/api/internal/credentials/configured-integrations/{tenantId}"
         - "GET:/api/internal/credentials/state-version"
         - "GET:/api/internal/credentials/access-token"
         - "GET:/api/internal/credentials/access-token/by-id"
@@ -147,17 +197,47 @@ gateway:
         - "GET:/api/internal/credentials/data-map/by-id"
         - "GET:/api/internal/credentials/scopes"
         - "GET:/api/internal/credentials/scopes/by-id"
+        - "GET:/api/internal/credentials/{credentialId}"
         - "GET:/api/internal/credentials/default"
         - "GET:/api/internal/credentials/all"
         - "GET:/api/internal/credentials/identities"
-        - "GET:/api/internal/credentials/**"
         - "POST:/api/internal/credentials/refresh-token"
         - "POST:/api/internal/credentials/force-refresh-token"
         - "POST:/api/internal/credentials/force-refresh-token/by-id"
+        - "GET:/api/internal/variables/bundle"
+        - "POST:/api/internal/cloud-credit-proxy/reserve"
+        - "POST:/api/internal/cloud-credit-proxy/reserve-llm"
+        - "POST:/api/internal/cloud-credit-proxy/{operationId}/dispatching"
+        - "POST:/api/internal/cloud-credit-proxy/{operationId}/commit"
+        - "POST:/api/internal/cloud-credit-proxy/{operationId}/commit-llm"
+        - "POST:/api/internal/cloud-credit-proxy/{operationId}/commit-amount"
+        - "POST:/api/internal/cloud-credit-proxy/{operationId}/release"
+        - "POST:/api/internal/cloud-credit-proxy/{operationId}/release-local"
+        - "POST:/api/internal/cloud-credit-proxy/{operationId}/outcome-unknown"
       agent-service:
-        - "GET:/api/internal/credentials/configured-integrations/**"
+        - "GET:/api/internal/credentials/configured-integrations/{tenantId}"
         - "GET:/api/internal/credentials/state-version"
         - "GET:/api/internal/credentials/identities"
+        - "GET:/api/internal/variables/bundle"
+        - "POST:/api/internal/cloud-credit-proxy/reserve"
+        - "POST:/api/internal/cloud-credit-proxy/reserve-llm"
+        - "POST:/api/internal/cloud-credit-proxy/{operationId}/dispatching"
+        - "POST:/api/internal/cloud-credit-proxy/{operationId}/commit"
+        - "POST:/api/internal/cloud-credit-proxy/{operationId}/commit-llm"
+        - "POST:/api/internal/cloud-credit-proxy/{operationId}/commit-amount"
+        - "POST:/api/internal/cloud-credit-proxy/{operationId}/release"
+        - "POST:/api/internal/cloud-credit-proxy/{operationId}/release-local"
+        - "POST:/api/internal/cloud-credit-proxy/{operationId}/outcome-unknown"
+      gateway-service:
+        - "GET:/api/internal/cloud-identity/context"
+        - "POST:/api/internal/cloud-identity/bind"
+        - "POST:/api/internal/cloud-identity/revoke"
+        - "PUT:/api/internal/v1/entitlement-projections/repair"
+        - "GET:/api/internal/v1/entitlement-projections/decision"
+      auth-service:
+        - "POST:/api/internal/auth/workspace/{organizationId}/purge"
+        - "POST:/api/internal/auth/workspace/reconcile/{userId}"
+        - "POST:/api/internal/auth/workspace/reconcile-all"
 
 oauth2:
   callback-url: ${OAUTH2_CALLBACK_URL:http://localhost:8083/api/credentials/oauth2/callback}

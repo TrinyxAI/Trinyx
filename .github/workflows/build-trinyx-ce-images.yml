@@ -60,6 +60,38 @@ jobs:
             build_args: ""
     steps:
       - uses: actions/checkout@v4
+      - name: Resolve and validate release aliases
+        id: release
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ "${GITHUB_REF}" != refs/tags/v* ]]; then
+            {
+              echo "patch="
+              echo "minor="
+              echo "major="
+            } >> "${GITHUB_OUTPUT}"
+            exit 0
+          fi
+
+          if [[ ! "${GITHUB_REF_NAME}" =~ ^v([0-9]+)\.([0-9]+)\.([0-9]+)$ ]]; then
+            echo "Release tags must use exact stable semver: vX.Y.Z" >&2
+            exit 1
+          fi
+
+          release_major="${BASH_REMATCH[1]}"
+          release_minor="${BASH_REMATCH[2]}"
+          package_version="$(node -p "require('./cli/package.json').version")"
+          if [[ "v${package_version}" != "${GITHUB_REF_NAME}" ]]; then
+            echo "Tag ${GITHUB_REF_NAME} does not match cli/package.json version ${package_version}" >&2
+            exit 1
+          fi
+
+          {
+            echo "patch=${GITHUB_REF_NAME}"
+            echo "minor=v${release_major}.${release_minor}"
+            echo "major=v${release_major}"
+          } >> "${GITHUB_OUTPUT}"
       - uses: docker/setup-buildx-action@v3
       - name: Log in to GHCR
         if: startsWith(github.ref, 'refs/tags/v')
@@ -69,6 +101,7 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
       - name: Build ${{ matrix.name }}
+        id: build
         uses: docker/build-push-action@v6
         with:
           context: ${{ matrix.context }}
@@ -77,8 +110,19 @@ jobs:
           push: ${{ startsWith(github.ref, 'refs/tags/v') }}
           tags: |
             ${{ matrix.image }}:${{ github.sha }}
-            ${{ startsWith(github.ref, 'refs/tags/v') && format('{0}:{1}', matrix.image, github.ref_name) || '' }}
+            ${{ steps.release.outputs.patch != '' && format('{0}:{1}', matrix.image, steps.release.outputs.patch) || '' }}
+            ${{ steps.release.outputs.minor != '' && format('{0}:{1}', matrix.image, steps.release.outputs.minor) || '' }}
+            ${{ steps.release.outputs.major != '' && format('{0}:{1}', matrix.image, steps.release.outputs.major) || '' }}
             ${{ startsWith(github.ref, 'refs/tags/v') && format('{0}:latest', matrix.image) || '' }}
+          provenance: ${{ startsWith(github.ref, 'refs/tags/v') && 'mode=max' || 'false' }}
+          sbom: ${{ startsWith(github.ref, 'refs/tags/v') }}
           build-args: ${{ matrix.build_args }}
           cache-from: type=gha,scope=trinyx-ce-${{ matrix.name }}
           cache-to: type=gha,mode=max,scope=trinyx-ce-${{ matrix.name }}
+
+      - name: Record immutable release digest
+        if: startsWith(github.ref, 'refs/tags/v')
+        shell: bash
+        run: |
+          echo "### ${{ matrix.name }}" >> "${GITHUB_STEP_SUMMARY}"
+          echo "\`${{ matrix.image }}@${{ steps.build.outputs.digest }}\`" >> "${GITHUB_STEP_SUMMARY}"

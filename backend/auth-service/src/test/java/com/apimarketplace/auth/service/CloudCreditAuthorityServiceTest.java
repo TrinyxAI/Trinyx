@@ -618,8 +618,8 @@ class CloudCreditAuthorityServiceTest {
         wallet.setRemainingCredits(new BigDecimal("20"));
         wallet.setPaygRemainingCredits(BigDecimal.ZERO);
         wallet.setDelinquent(false);
-        when(subscriptions.findActiveByUserIdForUpdate(42L)).thenReturn(Optional.of(wallet));
-        when(subscriptions.findActiveByUserId(42L)).thenReturn(Optional.of(wallet));
+        when(subscriptions.findActiveByUserIdForUpdate(84L)).thenReturn(Optional.of(wallet));
+        when(subscriptions.findActiveByUserId(84L)).thenReturn(Optional.of(wallet));
 
         UUID operationId = UUID.randomUUID();
         String sourceId = "cloud-reservation:" + operationId;
@@ -636,7 +636,7 @@ class CloudCreditAuthorityServiceTest {
         when(ledger.findFirstBySourceId(sourceId))
                 .thenAnswer(ignored -> Optional.ofNullable(held[0]));
 
-        assertThat(realCredits.tryReserveMarkup(42L, sourceId, "vendor", "tool",
+        assertThat(realCredits.tryReserveMarkupForExactPayer(42L, 84L, sourceId, "vendor", "tool",
                 BigDecimal.TEN, null, 10, "CLOUD", operationId.toString(), false).success())
                 .isTrue();
         held[0].setExpiresAt(LocalDateTime.now().minusMinutes(10));

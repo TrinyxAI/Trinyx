@@ -1,14 +1,19 @@
 package com.apimarketplace.auth.service;
 
+import com.apimarketplace.auth.config.PaidMonolithSslContextFactory;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.web.client.RestTemplateBuilder;
 import org.springframework.http.*;
+import org.springframework.http.client.JdkClientHttpRequestFactory;
 import org.springframework.stereotype.Service;
 import org.springframework.web.client.ResourceAccessException;
 import org.springframework.web.client.RestClientException;
 import org.springframework.web.client.RestClientResponseException;
 import org.springframework.web.client.RestTemplate;
 
+import javax.net.ssl.SSLContext;
+import java.net.http.HttpClient;
 import java.time.Duration;
 import java.util.UUID;
 
@@ -25,14 +30,38 @@ public class PaidMonolithCreditClient {
     private final WorkloadAuthenticationService workloads;
     private final String baseUrl;
 
+    @Autowired
     public PaidMonolithCreditClient(
             RestTemplateBuilder builder,
             WorkloadAuthenticationService workloads,
-            @Value("${paid-monolith.billing-url:https://billing-internal.trinyx.private}") String baseUrl) {
-        this.http = builder.connectTimeout(Duration.ofSeconds(5))
-                .readTimeout(Duration.ofSeconds(15)).build();
+            @Value("${paid-monolith.billing-url:https://billing-internal.trinyx.private}") String baseUrl,
+            @Value("${PAID_MONOLITH_TRUSTSTORE_FILE:}") String trustStoreFile,
+            @Value("${PAID_MONOLITH_TRUSTSTORE_PASSWORD_FILE:}") String passwordFile) {
+        SSLContext sslContext =
+                PaidMonolithSslContextFactory.create(trustStoreFile, passwordFile);
+        RestTemplateBuilder configured = builder
+                .connectTimeout(Duration.ofSeconds(5))
+                .readTimeout(Duration.ofSeconds(15));
+        if (sslContext != null) {
+            HttpClient client = HttpClient.newBuilder()
+                    .connectTimeout(Duration.ofSeconds(5))
+                    .sslContext(sslContext)
+                    .build();
+            JdkClientHttpRequestFactory requestFactory =
+                    new JdkClientHttpRequestFactory(client);
+            requestFactory.setReadTimeout(Duration.ofSeconds(15));
+            configured = configured.requestFactory(() -> requestFactory);
+        }
+        this.http = configured.build();
         this.workloads = workloads;
         this.baseUrl = strip(baseUrl);
+    }
+
+    PaidMonolithCreditClient(
+            RestTemplateBuilder builder,
+            WorkloadAuthenticationService workloads,
+            String baseUrl) {
+        this(builder, workloads, baseUrl, "", "");
     }
 
     public CloudCreditAuthorityService.ReserveResponse reserve(

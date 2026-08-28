@@ -257,6 +257,68 @@ class AuthenticatedGatewayFilterTest {
     }
 
     @Test
+    void bodyBufferCapacityIsNonBlockingAndReleasedOnCancelErrorAndCompletion() {
+        GatewayIdentityClient identity = mock(GatewayIdentityClient.class);
+        GatewayRequestRateLimiter limiter = mock(GatewayRequestRateLimiter.class);
+        GatewayUserContext context = new GatewayUserContext(
+                1L, "subject", Set.of("USER"), "org", "OWNER",
+                List.of(new GatewayUserContext.Membership("org", "OWNER")),
+                "principal", "payer", "install");
+        when(limiter.allow("subject")).thenReturn(Mono.just(true));
+        when(identity.resolve(eq("jwt"), eq("subject"), isNull(), isNull(), isNull()))
+                .thenReturn(Mono.just(context));
+        when(identity.authorize(eq(context), isNull(), eq(false)))
+                .thenReturn(Mono.just(new GatewayIdentityClient.EntitlementDecision(
+                        true, "AUTHORIZED", 1L, Instant.now().plusSeconds(60))));
+        when(identity.signed(anyString(), anyString(), any(byte[].class),
+                anyString(), anyString(), anyString(), anyString(), anyString(),
+                anyString(), anyString(), anyString())).thenReturn(new HttpHeaders());
+
+        AuthenticatedGatewayFilter filter =
+                new AuthenticatedGatewayFilter(identity, limiter, 1024, 1);
+        java.util.function.Supplier<ServerWebExchange> request = () -> {
+            Jwt jwt = Jwt.withTokenValue("jwt")
+                    .header("alg", "none")
+                    .subject("subject")
+                    .issuedAt(Instant.now())
+                    .expiresAt(Instant.now().plusSeconds(60))
+                    .build();
+            return MockServerWebExchange.from(
+                    MockServerHttpRequest.post("/api/users/profile").body("payload"))
+                    .mutate().principal(Mono.just(new JwtAuthenticationToken(jwt))).build();
+        };
+
+        java.util.concurrent.atomic.AtomicBoolean firstEntered =
+                new java.util.concurrent.atomic.AtomicBoolean();
+        reactor.core.Disposable held = filter.filter(request.get(), ignored -> {
+            firstEntered.set(true);
+            return Mono.never();
+        }).subscribe();
+        assertThat(firstEntered).isTrue();
+
+        ServerWebExchange rejected = request.get();
+        StepVerifier.create(filter.filter(rejected, ignored -> Mono.error(
+                        new AssertionError("capacity-rejected request must not reach downstream"))))
+                .verifyComplete();
+        assertThat(rejected.getResponse().getStatusCode())
+                .isEqualTo(HttpStatus.SERVICE_UNAVAILABLE);
+
+        held.dispose();
+        StepVerifier.create(filter.filter(request.get(), ignored -> Mono.empty()))
+                .verifyComplete();
+
+        StepVerifier.create(filter.filter(request.get(),
+                        ignored -> Mono.error(new IllegalStateException("downstream failure"))))
+                .expectErrorMessage("downstream failure")
+                .verify();
+
+        for (int attempt = 0; attempt < 100; attempt++) {
+            StepVerifier.create(filter.filter(request.get(), ignored -> Mono.empty()))
+                    .verifyComplete();
+        }
+    }
+
+    @Test
     void downstreamFailureIsNotRewrittenAsAuthenticationFailure() {
         GatewayIdentityClient identity = mock(GatewayIdentityClient.class);
         AuthenticatedGatewayFilter filter = new AuthenticatedGatewayFilter(identity, 1024);

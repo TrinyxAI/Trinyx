@@ -182,6 +182,10 @@ final class AuthenticatedGatewayFilter implements GlobalFilter, Ordered {
 
     private Mono<Void> withBody(ServerWebExchange exchange, GatewayFilterChain chain,
                                 String providerId, GatewayUserContext context) {
+        if (!bodyBufferPermits.tryAcquire()) {
+            return writeError(exchange, HttpStatus.SERVICE_UNAVAILABLE,
+                    "gateway_body_buffer_capacity_exhausted");
+        }
         return DataBufferUtils.join(exchange.getRequest().getBody(), maxBodyBytes)
                 .defaultIfEmpty(exchange.getResponse().bufferFactory().wrap(new byte[0]))
                 .flatMap(buffer -> {

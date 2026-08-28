@@ -89,9 +89,20 @@ class WorkspaceDataPurgerPostgresContractTest {
     }
 
     static boolean dockerAvailable() {
+        boolean required = Boolean.getBoolean("trinyx.contract.docker.required");
         try {
-            return DockerClientFactory.instance().isDockerAvailable();
+            boolean available = DockerClientFactory.instance().isDockerAvailable();
+            if (required && !available) {
+                throw new IllegalStateException(
+                        "WorkspaceDataPurgerPostgresContractTest requires Docker in the CI contract gate");
+            }
+            return available;
         } catch (Throwable unavailable) {
+            if (required) {
+                throw new IllegalStateException(
+                        "WorkspaceDataPurgerPostgresContractTest requires Docker in the CI contract gate",
+                        unavailable);
+            }
             return false;
         }
     }

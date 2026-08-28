@@ -22,7 +22,7 @@ import static org.assertj.core.api.Assertions.assertThat;
  */
 class FlywayLifecycleContractTest {
 
-    private static final int EXPECTED_VERSIONED_MIGRATIONS = 440; // 439 SQL + V151 Java
+    private static final int EXPECTED_APPLIED_MIGRATIONS = 441; // baseline V0 + 439 SQL + V151 Java
     private static final String EXPECTED_CURRENT_VERSION = "453.3";
 
     @Test
@@ -59,7 +59,7 @@ class FlywayLifecycleContractTest {
             flyway.clean();
             var first = flyway.migrate();
             assertThat(first.success).isTrue();
-            assertThat(first.migrationsExecuted).isEqualTo(EXPECTED_VERSIONED_MIGRATIONS);
+            assertThat(first.migrationsExecuted).isEqualTo(EXPECTED_APPLIED_MIGRATIONS);
 
             var validation = flyway.validateWithResult();
             assertThat(validation.validationSuccessful)
@@ -67,7 +67,7 @@ class FlywayLifecycleContractTest {
                     .isTrue();
 
             MigrationInfo[] applied = flyway.info().applied();
-            assertThat(applied).hasSize(EXPECTED_VERSIONED_MIGRATIONS);
+            assertThat(applied).hasSize(EXPECTED_APPLIED_MIGRATIONS);
             assertThat(flyway.info().current().getVersion().toString())
                     .isEqualTo(EXPECTED_CURRENT_VERSION);
 
@@ -86,8 +86,8 @@ class FlywayLifecycleContractTest {
                 }
             });
             assertThat(migrationsWithoutChecksum)
-                    .as("all SQL migrations have checksums; Flyway's BaseJavaMigration V151 does not")
-                    .containsExactly("151");
+                    .as("SQL migrations have checksums; baseline V0 and BaseJavaMigration V151 do not")
+                    .containsExactly("0", "151");
 
             var second = flyway.migrate();
             assertThat(second.success).isTrue();

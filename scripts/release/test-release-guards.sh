@@ -11,10 +11,32 @@ chmod +x "${tmp}/inspect"; export INSPECT_DIGEST_COMMAND="${tmp}/inspect" MAP_FI
 for n in 1 2 3 4 5; do printf 'registry/image%s:staging	sha256:%s%s%s
 ' "${n}" "${n}" "${n}" "${n}" >>"${MAP_FILE}"; done
 bash "${root}/scripts/release/preflight-immutable-images.sh" "${tmp}/digests" v1.2.3 abc
-for n in 1 2 3 4 5; do printf 'registry/image%s:v1.2.3	sha256:%s%s%s
-' "${n}" "${n}" "${n}" "${n}" >>"${MAP_FILE}"; printf 'registry/image%s:abc	sha256:%s%s%s
-' "${n}" "${n}" "${n}" "${n}" >>"${MAP_FILE}"; done
+
+# A rerun after an interrupted immutable promotion must accept matching refs already created
+# while leaving the remaining refs available for creation.
+printf 'registry/image1:v1.2.3\tsha256:111\n' >>"${MAP_FILE}"
+printf 'registry/image1:abc\tsha256:111\n' >>"${MAP_FILE}"
+printf 'registry/image2:v1.2.3\tsha256:222\n' >>"${MAP_FILE}"
 bash "${root}/scripts/release/preflight-immutable-images.sh" "${tmp}/digests" v1.2.3 abc
+
+for n in 1 2 3 4 5; do
+  for tag in v1.2.3 abc; do
+    ref="registry/image${n}:${tag}"
+    if ! awk -F '\t' -v ref="${ref}" '$1 == ref { found=1 } END { exit !found }' "${MAP_FILE}"; then
+      printf '%s\tsha256:%s%s%s\n' "${ref}" "${n}" "${n}" "${n}" >>"${MAP_FILE}"
+    fi
+  done
+done
+bash "${root}/scripts/release/preflight-immutable-images.sh" "${tmp}/digests" v1.2.3 abc
+
+# Fail closed when any staged image differs, or when the five-component manifest is incomplete.
+cp "${MAP_FILE}" "${tmp}/clean"
+awk -F '\t' 'BEGIN{OFS="\t"} $1=="registry/image4:staging"{$2="sha256:conflict"} {print}' "${tmp}/clean" >"${MAP_FILE}"
+! bash "${root}/scripts/release/preflight-immutable-images.sh" "${tmp}/digests" v1.2.3 abc
+mv "${tmp}/clean" "${MAP_FILE}"
+mv "${tmp}/digests/5.json" "${tmp}/5.json.held"
+! bash "${root}/scripts/release/preflight-immutable-images.sh" "${tmp}/digests" v1.2.3 abc
+mv "${tmp}/5.json.held" "${tmp}/digests/5.json"
 for ref in registry/image1:v1.2.3 registry/image5:v1.2.3 registry/image3:abc; do
   cp "${MAP_FILE}" "${tmp}/clean"; awk -F '	' -v ref="${ref}" 'BEGIN{OFS="\t"} $1==ref{$2="sha256:conflict"} {print}' "${tmp}/clean" >"${MAP_FILE}"
   ! bash "${root}/scripts/release/preflight-immutable-images.sh" "${tmp}/digests" v1.2.3 abc

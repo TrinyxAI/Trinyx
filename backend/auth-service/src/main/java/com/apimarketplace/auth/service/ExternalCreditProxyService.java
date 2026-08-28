@@ -268,7 +268,8 @@ public class ExternalCreditProxyService {
         }
     }
     public record Context(UUID principalId, UUID billingSubjectId,
-                          UUID organizationId, UUID installId) {}
+                          UUID organizationId, UUID installId,
+                          String originServiceId) {}
     public record ReserveCommand(UUID operationId, String feature, String sourceType,
                                  BigDecimal estimatedCredits, BigDecimal maximumCredits,
                                  String provider, String model, Integer estimatedPromptTokens,

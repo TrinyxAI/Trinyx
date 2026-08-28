@@ -100,8 +100,8 @@ class CreditServiceExactPayerTest {
                 42L, 84L, "cloud-reservation:disabled", "vendor", "model",
                 BigDecimal.ONE, null, 10, "CLOUD", "disabled", false);
 
-        assertThat(zeroProjection.remainingBalance()).isEqualByComparingTo("17");
-        assertThat(markupDisabled.remainingBalance()).isEqualByComparingTo("17");
+        assertThat(zeroProjection.remainingCredits()).isEqualByComparingTo("17");
+        assertThat(markupDisabled.remainingCredits()).isEqualByComparingTo("17");
         verify(subscriptions, never()).findActiveByUserId(42L);
         verifyNoInteractions(ledger);
     }

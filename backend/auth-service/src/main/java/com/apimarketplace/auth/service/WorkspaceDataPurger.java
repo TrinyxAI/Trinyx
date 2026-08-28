@@ -1,12 +1,12 @@
 package com.apimarketplace.auth.service;
 
-import jakarta.persistence.EntityManager;
-import jakarta.persistence.PersistenceContext;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Component;
 
 import java.util.List;
+import java.util.Map;
 
 /**
  * Single source of truth for deleting all OPERATIONAL org-scoped data across every
@@ -24,11 +24,10 @@ import java.util.List;
  * its schema" rule, exactly like the account-purge path. The CALLER owns the surrounding
  * {@code @Transactional}.
  *
- * <p><b>Per-statement isolation via SAVEPOINT.</b> Each {@code nativeExec} runs inside its own
- * JDBC savepoint, so a single failing statement (a future schema/type drift, a missing table)
- * rolls back ONLY that statement and the purge continues - without it, Postgres aborts the whole
- * transaction on any error and every later statement (plus the caller's commit) would fail.
- * Statements are also type-safe: org-id columns are a UUID/VARCHAR mix across schemas, so
+ * <p><b>Fail-closed transaction.</b> Every required delete participates in the caller's single
+ * transaction. A schema/type/permission failure is rethrown immediately, so the whole purge rolls
+ * back and the caller cannot mark the workspace {@code PURGED} while data remains. Statements are
+ * type-safe: org-id columns are a UUID/VARCHAR mix across schemas, so
  * predicates cast {@code organization_id::text = ?}; the one UUID column uses {@code = ?::uuid}.
  *
  * <p><b>Storage:</b> records every immutable tenant/key tuple in a durable erasure outbox
@@ -36,30 +35,31 @@ import java.util.List;
  * the purge transaction until confirmed. An enumeration or enqueue failure aborts the
  * surrounding purge transaction so metadata can never disappear without a recovery record.
  *
- * <p>⚠️ <b>Custom APIs:</b> {@code catalog.apis} (user-created custom APIs carry an
- * {@code organization_id}; the 700+ global third-party APIs are {@code organization_id
- * NULL}) is intentionally NOT purged here - same as the account-purge path - because that
- * table is the global catalog and a mistyped predicate would be catastrophic. The org's
- * custom APIs become invisible orphans (org tombstoned). Tracked as a follow-up.
+ * <p><b>Custom APIs:</b> workspace-owned rows are deleted only through the exact
+ * {@code organization_id::text = ?} predicate. Imported global APIs have a NULL organization and
+ * are therefore structurally outside this purge. Tool mappings are deleted before the API row;
+ * the remaining tool children cascade from {@code catalog.apis}.
  *
  * <p>{@link #PURGED_ORG_SCOPED_TABLES} declares every table this purges; the
  * {@code WorkspaceDataPurgerTest} captures the issued SQL and asserts (a) every statement is
  * org-scoped, (b) the retained financial/audit tables are never touched, and (c) every declared
- * table is actually hit. Thanks to the per-statement savepoint isolation, adding a new org-scoped
- * table here is always safe - a wrong/missing table name rolls back only its own statement.
+ * table is actually hit. A wrong/missing table is intentionally fatal and rolls the transaction
+ * back, leaving the workspace retryable.
  */
 @Component
 public class WorkspaceDataPurger {
 
     private static final Logger logger = LoggerFactory.getLogger(WorkspaceDataPurger.class);
 
-    @PersistenceContext
-    private EntityManager em;
+    private final JdbcTemplate jdbc;
 
     /** Durable handoff for stored bytes; the rows below only reference them. */
     private final WorkspaceStorageErasureOutbox storageErasureOutbox;
 
-    public WorkspaceDataPurger(WorkspaceStorageErasureOutbox storageErasureOutbox) {
+    public WorkspaceDataPurger(
+            JdbcTemplate jdbc,
+            WorkspaceStorageErasureOutbox storageErasureOutbox) {
+        this.jdbc = jdbc;
         this.storageErasureOutbox = storageErasureOutbox;
     }
 
@@ -97,6 +97,7 @@ public class WorkspaceDataPurger {
             "storage.org_storage_usage_history",
             "publication.workflow_publications",
             "publication.publication_receipts",
+            "catalog.apis",
             "auth.org_resource_restrictions",
             "auth.org_member_quota_limit",
             "auth.credentials"
@@ -111,24 +112,23 @@ public class WorkspaceDataPurger {
      * commits and can resume after a restart.
      */
     private void enqueueStorageErasures(String orgId) {
-        final List<Object[]> objects;
+        final List<Map<String, Object>> objects;
         try {
-            @SuppressWarnings("unchecked")
-            List<Object[]> rows = em.createNativeQuery(
+            objects = jdbc.queryForList(
                     "SELECT s3_key, tenant_id FROM storage.storage "
-                            + "WHERE organization_id::text = ?1 AND s3_key IS NOT NULL")
-                    .setParameter(1, orgId)
-                    .getResultList();
-            objects = rows;
+                            + "WHERE organization_id::text = ? AND s3_key IS NOT NULL",
+                    orgId);
         } catch (Exception failure) {
             throw new IllegalStateException(
                     "Could not enumerate workspace storage objects before purge", failure);
         }
 
         int queued = 0;
-        for (Object[] row : objects) {
-            String key = row[0] == null ? null : row[0].toString();
-            String tenantId = row[1] == null ? null : row[1].toString();
+        for (Map<String, Object> row : objects) {
+            Object rawKey = row.get("s3_key");
+            Object rawTenantId = row.get("tenant_id");
+            String key = rawKey == null ? null : rawKey.toString();
+            String tenantId = rawTenantId == null ? null : rawTenantId.toString();
             storageErasureOutbox.enqueue(orgId, tenantId, key);
             queued++;
         }
@@ -207,6 +207,12 @@ public class WorkspaceDataPurger {
         nativeExec("DELETE FROM publication.workflow_publications WHERE owner_type = 'ORG' AND owner_id::text = ?", orgId);
         nativeExec("DELETE FROM publication.publication_receipts WHERE organization_id::text = ?", orgId);
 
+        // catalog schema - only workspace custom APIs. Global imported APIs have organization_id NULL.
+        nativeExec("DELETE FROM catalog.mapping_definitions WHERE tool_id IN "
+                + "(SELECT t.id FROM catalog.api_tools t JOIN catalog.apis a ON a.id=t.api_id "
+                + "WHERE a.organization_id::text = ?)", orgId);
+        nativeExec("DELETE FROM catalog.apis WHERE organization_id::text = ?", orgId);
+
         // auth schema - org-scoped OPERATIONAL rows (NOT the financial ledger / audit).
         // org_member_quota_limit.org_id is UUID (not organization_id VARCHAR); it has an
         // ON DELETE CASCADE on the org row, but the workspace flow keeps that row, so we
@@ -217,34 +223,25 @@ public class WorkspaceDataPurger {
     }
 
     /**
-     * Execute one delete inside its OWN SAVEPOINT, so a single failing statement (e.g. a future
-     * schema/type drift, or a missing table) rolls back ONLY that statement instead of poisoning
-     * the whole purge transaction - Postgres aborts a transaction on any error, so a plain
-     * try/catch swallow does NOT keep "best-effort per statement". Best-effort: a failure is
-     * rolled back to the savepoint and logged, and the purge continues with the next table. The
-     * SQL uses one positional JDBC {@code ?} bound to the org-id string; returns the row count.
+     * Executes one required org-scoped delete. Any failure is fatal: the caller's
+     * {@code @Transactional} boundary rolls back every prior delete and leaves the purge retryable.
      */
     private int nativeExec(String sql, String orgId) {
-        final int[] rows = {0};
-        em.unwrap(org.hibernate.Session.class).doWork(conn -> {
-            java.sql.Savepoint sp = conn.setSavepoint();
-            try (java.sql.PreparedStatement ps = conn.prepareStatement(sql)) {
-                ps.setString(1, orgId);
-                rows[0] = ps.executeUpdate();
-                conn.releaseSavepoint(sp);
-            } catch (Exception e) {
-                // Best-effort per statement: roll back ONLY this statement (catch any error, not just
-                // SQLException, so a RuntimeException can't leak the savepoint and poison the tx).
-                conn.rollback(sp);
-                try {
-                    conn.releaseSavepoint(sp);
-                } catch (java.sql.SQLException ignore) {
-                    // savepoint already gone after the rollback - nothing to release
-                }
-                logger.warn("Workspace purge statement rolled back [{}] org={}: {}",
-                        sql.substring(0, Math.min(sql.length(), 60)), orgId, e.getMessage());
-            }
-        });
-        return rows[0];
+        try {
+            return jdbc.update(sql, orgId);
+        } catch (RuntimeException failure) {
+            logger.error("Workspace purge failed closed [{}] org={}: {}",
+                    sql.substring(0, Math.min(sql.length(), 80)), orgId,
+                    failure.getMessage());
+            throw new WorkspacePurgeIncompleteException(sql, orgId, failure);
+        }
     }
+
+    static final class WorkspacePurgeIncompleteException extends IllegalStateException {
+        WorkspacePurgeIncompleteException(String sql, String orgId, Throwable cause) {
+            super("Workspace purge incomplete for org " + orgId + " at statement: "
+                    + sql.substring(0, Math.min(sql.length(), 120)), cause);
+        }
+    }
+
 }

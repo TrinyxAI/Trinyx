@@ -9,6 +9,7 @@ import org.testcontainers.utility.DockerImageName;
 
 import java.util.Arrays;
 import java.util.LinkedHashSet;
+import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.TimeUnit;
 
@@ -21,7 +22,7 @@ import static org.assertj.core.api.Assertions.assertThat;
  */
 class FlywayLifecycleContractTest {
 
-    private static final int EXPECTED_VERSIONED_MIGRATIONS = 441; // 440 SQL + V151 Java
+    private static final int EXPECTED_VERSIONED_MIGRATIONS = 440; // 439 SQL + V151 Java
     private static final String EXPECTED_CURRENT_VERSION = "453.3";
 
     @Test
@@ -35,6 +36,10 @@ class FlywayLifecycleContractTest {
         try (PostgreSQLContainer<?> postgres = new PostgreSQLContainer<>(postgresWithVector)) {
             postgres.start();
             Flyway flyway = Flyway.configure()
+                    // Mirror spring.flyway.postgresql.transactional-lock=false from application.yml.
+                    // Without it Flyway's advisory-lock transaction can block its own
+                    // CREATE INDEX CONCURRENTLY migrations on a reused connection.
+                    .configuration(Map.of("flyway.postgresql.transactional.lock", "false"))
                     .dataSource(postgres.getJdbcUrl(), postgres.getUsername(), postgres.getPassword())
                     .locations("classpath:db/migration")
                     .cleanDisabled(false)

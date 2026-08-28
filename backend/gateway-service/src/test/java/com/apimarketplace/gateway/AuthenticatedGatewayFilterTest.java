@@ -12,6 +12,8 @@ import org.springframework.security.oauth2.server.resource.authentication.JwtAut
 import reactor.core.publisher.Mono;
 import reactor.test.StepVerifier;
 
+import java.net.URI;
+import java.nio.charset.StandardCharsets;
 import java.time.Instant;
 import java.util.List;
 import java.util.Set;
@@ -19,8 +21,11 @@ import java.util.concurrent.atomic.AtomicReference;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.*;
+import static org.mockito.AdditionalMatchers.aryEq;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
+import static org.springframework.cloud.gateway.support.ServerWebExchangeUtils.GATEWAY_REQUEST_URL_ATTR;
 
 class AuthenticatedGatewayFilterTest {
 
@@ -48,6 +53,44 @@ class AuthenticatedGatewayFilterTest {
                 .verifyComplete();
 
         assertThat(exchange.getResponse().getStatusCode()).isEqualTo(HttpStatus.NOT_FOUND);
+    }
+
+    @Test
+    void ambiguousPathRepresentationsAreRejectedBeforeAuthenticationOrRouting() {
+        AuthenticatedGatewayFilter filter = new AuthenticatedGatewayFilter(null, 1024);
+
+        for (String path : List.of(
+                "/api//internal/entitlements",
+                "/api/%2Finternal/entitlements",
+                "/api/%5Cinternal/entitlements",
+                "/api/%252Finternal/entitlements",
+                "/api/%2e%2e/internal/entitlements",
+                "/api/./internal/entitlements")) {
+            ServerWebExchange exchange = MockServerWebExchange.from(
+                    MockServerHttpRequest.get(path).build());
+
+            StepVerifier.create(filter.filter(exchange, ignored -> Mono.error(
+                            new AssertionError("ambiguous path must never reach the chain: " + path))))
+                    .verifyComplete();
+
+            assertThat(exchange.getResponse().getStatusCode())
+                    .as(path)
+                    .isEqualTo(HttpStatus.NOT_FOUND);
+        }
+    }
+
+    @Test
+    void internalPrefixCollisionIsProtectedButNotMisclassifiedAsAnInternalRoute() {
+        AuthenticatedGatewayFilter filter = new AuthenticatedGatewayFilter(null, 1024);
+        ServerWebExchange exchange = MockServerWebExchange.from(
+                MockServerHttpRequest.get("/api/internalized/resource").build());
+
+        StepVerifier.create(filter.filter(exchange, ignored -> Mono.error(
+                        new AssertionError("protected prefix collision must require JWT"))))
+                .expectErrorMessage("JWT principal missing")
+                .verify();
+
+        assertThat(exchange.getResponse().getStatusCode()).isNull();
     }
 
     @Test
@@ -267,6 +310,62 @@ class AuthenticatedGatewayFilterTest {
                 .getFirst("X-LiveContext-Install-Id")).isNull();
         assertThat(forwarded.get().getRequest().getHeaders()
                 .getFirst("X-Install-ID")).isEqualTo(install);
+    }
+
+    @Test
+    void signsTheFinalRewrittenTargetExactBodyAndResolvedIdentityInsteadOfForgedHeaders() {
+        GatewayIdentityClient identity = mock(GatewayIdentityClient.class);
+        AuthenticatedGatewayFilter filter = new AuthenticatedGatewayFilter(identity, 1024);
+        GatewayUserContext context = new GatewayUserContext(
+                7L, "subject", Set.of("USER", "ADMIN"), "org", "OWNER",
+                List.of(new GatewayUserContext.Membership("org", "OWNER")),
+                "principal", "payer", "install");
+        Jwt jwt = Jwt.withTokenValue("jwt")
+                .header("alg", "none")
+                .subject("subject")
+                .issuedAt(Instant.now())
+                .expiresAt(Instant.now().plusSeconds(60))
+                .build();
+        byte[] body = "{\"exact\":true}".getBytes(StandardCharsets.UTF_8);
+        ServerWebExchange exchange = MockServerWebExchange.from(
+                MockServerHttpRequest.post("/entry?client=ignored")
+                        .header("X-User-ID", "forged")
+                        .header("X-User-Roles", "SUPERADMIN")
+                        .header("X-Gateway-Secret", "forged")
+                        .body(body))
+                .mutate().principal(Mono.just(new JwtAuthenticationToken(jwt))).build();
+        exchange.getAttributes().put(GATEWAY_REQUEST_URL_ATTR,
+                URI.create("http://orchestrator-service:8099/final/path?b=2&a=1"));
+
+        when(identity.resolve("jwt", "subject", null, null, null))
+                .thenReturn(Mono.just(context));
+        when(identity.authorize(context, null, false))
+                .thenReturn(Mono.just(new GatewayIdentityClient.EntitlementDecision(
+                        true, "AUTHORIZED", 1L, Instant.now().plusSeconds(60))));
+        HttpHeaders signed = new HttpHeaders();
+        signed.set("X-Gateway-Secret", "trusted-signature");
+        signed.set("X-User-ID", "7");
+        signed.set("X-User-Roles", "ADMIN,USER");
+        when(identity.signed(anyString(), anyString(), any(byte[].class),
+                anyString(), anyString(), anyString(), anyString(), anyString(),
+                anyString(), anyString(), anyString())).thenReturn(signed);
+        AtomicReference<ServerWebExchange> forwarded = new AtomicReference<>();
+
+        StepVerifier.create(filter.filter(exchange, candidate -> {
+            forwarded.set(candidate);
+            return Mono.empty();
+        })).verifyComplete();
+
+        verify(identity).signed(
+                eq("POST"), eq("/final/path?b=2&a=1"), aryEq(body),
+                eq("subject"), eq("7"), eq("principal"), eq("payer"), eq("org"),
+                eq("OWNER"), eq("ADMIN,USER"), eq("install"));
+        assertThat(forwarded.get().getRequest().getHeaders().getFirst("X-Gateway-Secret"))
+                .isEqualTo("trusted-signature");
+        assertThat(forwarded.get().getRequest().getHeaders().getFirst("X-User-ID"))
+                .isEqualTo("7");
+        assertThat(forwarded.get().getRequest().getHeaders().getFirst("X-User-Roles"))
+                .isEqualTo("ADMIN,USER");
     }
 
     @Test

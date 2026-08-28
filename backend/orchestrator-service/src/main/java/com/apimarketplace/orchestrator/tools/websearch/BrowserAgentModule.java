@@ -536,7 +536,7 @@ public class BrowserAgentModule extends WebJobModule {
             return BrowserAccountingValidation.invalid(
                     "browser-result-malformed-accounting");
         }
-        if (llmCalls == 0 || promptTokens + completionTokens == 0) {
+        if (llmCalls == 0 || (promptTokens == 0 && completionTokens == 0)) {
             return BrowserAccountingValidation.invalid(
                     "browser-result-ambiguous-provider-accounting");
         }

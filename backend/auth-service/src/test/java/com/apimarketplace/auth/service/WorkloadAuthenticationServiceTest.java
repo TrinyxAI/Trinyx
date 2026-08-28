@@ -60,7 +60,7 @@ class WorkloadAuthenticationServiceTest {
     }
 
     @Test
-    void expiredWrongIssuerAndWrongAudienceAreAuthenticationFailures() throws Exception {
+    void invalidTemporalIssuerAndAudienceClaimsAreAuthenticationFailures() throws Exception {
         KeyPair pair = keyPair();
         WorkloadAuthenticationService service = service(redis(true), pair);
         Instant now = Instant.now();
@@ -71,10 +71,17 @@ class WorkloadAuthenticationServiceTest {
                 "trinyx-cloud-runtime", now.minusSeconds(1), now.plusSeconds(60));
         String wrongAudience = token(pair, "trinyx-cloud", "other-audience",
                 "trinyx-cloud-runtime", now.minusSeconds(1), now.plusSeconds(60));
+        String futureNotBefore = token(pair, "trinyx-cloud", "trinyx-billing-authority",
+                "trinyx-cloud-runtime", now.minusSeconds(1), now.plusSeconds(60),
+                now.plusSeconds(30));
+        String excessiveLifetime = token(pair, "trinyx-cloud", "trinyx-billing-authority",
+                "trinyx-cloud-runtime", now.minusSeconds(1), now.plusSeconds(121));
 
         assertAuthenticationFailure(() -> service.authenticate("Bearer " + expired));
         assertAuthenticationFailure(() -> service.authenticate("Bearer " + wrongIssuer));
         assertAuthenticationFailure(() -> service.authenticate("Bearer " + wrongAudience));
+        assertAuthenticationFailure(() -> service.authenticate("Bearer " + futureNotBefore));
+        assertAuthenticationFailure(() -> service.authenticate("Bearer " + excessiveLifetime));
     }
 
     private static void assertAuthenticationFailure(
@@ -116,13 +123,20 @@ class WorkloadAuthenticationServiceTest {
     private static String token(
             KeyPair pair, String issuer, String audience, String serviceId,
             Instant issuedAt, Instant expiresAt) {
+        return token(pair, issuer, audience, serviceId, issuedAt, expiresAt,
+                issuedAt.minusSeconds(1));
+    }
+
+    private static String token(
+            KeyPair pair, String issuer, String audience, String serviceId,
+            Instant issuedAt, Instant expiresAt, Instant notBefore) {
         var claims = new ObjectMapper().createObjectNode();
         claims.put("iss", issuer);
         claims.put("aud", audience);
         claims.put("serviceId", serviceId);
         claims.put("jti", UUID.randomUUID().toString());
         claims.put("iat", issuedAt.getEpochSecond());
-        claims.put("nbf", issuedAt.minusSeconds(1).getEpochSecond());
+        claims.put("nbf", notBefore.getEpochSecond());
         claims.put("exp", expiresAt.getEpochSecond());
         return Ed25519Jws.sign(claims, "cloud-1", pair.getPrivate());
     }

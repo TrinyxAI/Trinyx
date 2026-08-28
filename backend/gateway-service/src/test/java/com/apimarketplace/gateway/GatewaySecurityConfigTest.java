@@ -44,6 +44,18 @@ class GatewaySecurityConfigTest {
     }
 
     @Test
+    void workloadJwtClaimsCannotSatisfyTheBrowserUserJwtContract() {
+        Instant now = Instant.now();
+        Jwt workload = jwt("trinyx-cloud", List.of("trinyx-billing-authority"),
+                now.minusSeconds(1), now.plusSeconds(60));
+
+        assertThat(JwtValidators.createDefaultWithIssuer(ISSUER)
+                .validate(workload).hasErrors()).isTrue();
+        assertThat(GatewaySecurityConfig.audienceValidator("trinyx-frontend")
+                .validate(workload).hasErrors()).isTrue();
+    }
+
+    @Test
     void websocketUpgradeAuthenticatesExistingJwtSubprotocol() {
         var exchange = MockServerWebExchange.from(MockServerHttpRequest.get("/ws")
                 .header("Sec-WebSocket-Protocol",

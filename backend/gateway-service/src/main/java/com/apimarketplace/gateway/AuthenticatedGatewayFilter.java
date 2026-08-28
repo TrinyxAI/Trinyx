@@ -21,6 +21,7 @@ import reactor.core.publisher.Mono;
 import java.nio.charset.StandardCharsets;
 import java.net.URI;
 import java.util.List;
+import java.util.Locale;
 import java.util.Set;
 
 import static org.springframework.cloud.gateway.support.ServerWebExchangeUtils.GATEWAY_REQUEST_URL_ATTR;
@@ -49,7 +50,12 @@ final class AuthenticatedGatewayFilter implements GlobalFilter, Ordered {
 
     @Override
     public Mono<Void> filter(ServerWebExchange exchange, GatewayFilterChain chain) {
-        String path = exchange.getRequest().getURI().getPath();
+        URI requestUri = exchange.getRequest().getURI();
+        if (hasAmbiguousPath(requestUri)) {
+            exchange.getResponse().setStatusCode(HttpStatus.NOT_FOUND);
+            return exchange.getResponse().setComplete();
+        }
+        String path = requestUri.getPath();
         if (path.startsWith("/api/internal/") || path.startsWith("/internal/")) {
             exchange.getResponse().setStatusCode(HttpStatus.NOT_FOUND);
             return exchange.getResponse().setComplete();
@@ -270,6 +276,34 @@ final class AuthenticatedGatewayFilter implements GlobalFilter, Ordered {
             throw new IllegalArgumentException("Conflicting installation selectors");
         }
         return values.isEmpty() ? null : values.iterator().next();
+    }
+
+    /**
+     * Reject path forms whose interpretation can differ between the edge, route predicates,
+     * downstream HTTP stacks, and application routers. Ordinary percent-encoded characters remain
+     * valid; encoded separators, double encoding, duplicate separators and dot segments do not.
+     */
+    private static boolean hasAmbiguousPath(URI uri) {
+        String rawPath = uri.getRawPath();
+        if (rawPath == null || rawPath.isEmpty() || rawPath.charAt(0) != '/') {
+            return true;
+        }
+        String lowerRawPath = rawPath.toLowerCase(Locale.ROOT);
+        if (rawPath.contains("//") || rawPath.indexOf('\\') >= 0
+                || lowerRawPath.contains("%2f") || lowerRawPath.contains("%5c")
+                || lowerRawPath.contains("%25")) {
+            return true;
+        }
+        String decodedPath = uri.getPath();
+        if (decodedPath == null) {
+            return true;
+        }
+        for (String segment : decodedPath.split("/", -1)) {
+            if (".".equals(segment) || "..".equals(segment)) {
+                return true;
+            }
+        }
+        return false;
     }
 
     private boolean isPublic(ServerWebExchange exchange) {

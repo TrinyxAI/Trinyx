@@ -43,6 +43,10 @@ jobs:
         with:
           fetch-depth: 0
 
+      - name: Test fail-closed release guard fixtures
+        shell: bash
+        run: bash scripts/release/test-release-guards.sh
+
       - name: Validate source and release contract
         id: release
         shell: bash
@@ -313,6 +317,9 @@ jobs:
       - package-npm
     if: needs.prepare.outputs.release == 'true'
     steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       - uses: actions/download-artifact@v4
         with:
           pattern: ce-release-digest-*
@@ -345,6 +352,10 @@ jobs:
               awk '$1 == "Digest:" { print $2; exit }'
           }
 
+          bash scripts/release/revalidate-release-source.sh "${PATCH_TAG}" "${RELEASE_COMMIT}"
+          bash scripts/release/preflight-immutable-images.sh release-digests "${PATCH_TAG}" "${RELEASE_COMMIT}"
+
+          # No immutable mutation is permitted until all five images pass.
           for file in "${digest_files[@]}"; do
             image="$(jq -er '.image' "${file}")"
             expected="$(jq -er '.digest' "${file}")"
@@ -397,6 +408,9 @@ jobs:
       - package-npm
     if: needs.prepare.outputs.release == 'true'
     steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       - uses: actions/download-artifact@v4
         with:
           name: trinyx-npm-release-candidate
@@ -411,8 +425,11 @@ jobs:
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
           RELEASE_VERSION: ${{ needs.prepare.outputs.version }}
+          PATCH_TAG: ${{ needs.prepare.outputs.patch }}
+          RELEASE_COMMIT: ${{ needs.prepare.outputs.release_commit }}
         run: |
           set -euo pipefail
+          bash scripts/release/revalidate-release-source.sh "${PATCH_TAG}" "${RELEASE_COMMIT}"
           metadata="npm-package/npm-release-metadata.json"
           tarball="$(find npm-package -maxdepth 1 -name '*.tgz' -type f -print -quit)"
           if [[ -z "${tarball}" || ! -f "${metadata}" ]]; then
@@ -479,12 +496,7 @@ jobs:
           RELEASE_COMMIT: ${{ needs.prepare.outputs.release_commit }}
         run: |
           set -euo pipefail
-          git fetch --force --no-tags origin             '+refs/heads/main:refs/remotes/origin/main'
-          git fetch --force --tags origin
-          if ! git merge-base --is-ancestor "${RELEASE_COMMIT}" origin/main; then
-            echo "Release commit is no longer contained in origin/main" >&2
-            exit 1
-          fi
+          bash scripts/release/revalidate-release-source.sh "${PATCH_TAG}" "${RELEASE_COMMIT}"
           latest_stable_tag="$(git tag --merged origin/main --list 'v*' |
             grep -E '^v[0-9]+[.][0-9]+[.][0-9]+$' |
             sort -V |

@@ -123,6 +123,10 @@ gateway:
     hmac-required-paths:
       - /api/credits/
       - /api/internal/credentials/
+      - /api/internal/auth/workspace/
+      - /api/internal/cloud-identity/
+      - /api/internal/cloud-credit-proxy/
+      - /api/internal/v1/entitlement-projections
     service-authenticated-paths:
       - /api/internal/credentials/
     service-secrets:
@@ -154,24 +158,6 @@ gateway:
         - "GET:/api/internal/credentials/configured-integrations/**"
         - "GET:/api/internal/credentials/state-version"
         - "GET:/api/internal/credentials/identities"
-
-      - /api/internal/credentials/access-token
-      - /api/internal/credentials/data-map
-      - /api/internal/credentials/force-refresh-token
-      - /api/internal/credentials/refresh-token
-      - /api/internal/credentials/by-integration
-      - /api/internal/credentials/platform
-      # FOLLOW-UP (CRED-1, parity audit 2026-06-16): the lookup resolvers /all, /default, /{id},
-      # /scopes return DECRYPTED Credential objects but are NOT HMAC-gated here. Widening to the
-      # whole /api/internal/credentials/ prefix is the right end-state, but several in-cluster
-      # callers still hit them UNSIGNED (conversation-service findExistingCredential -> /default;
-      # catalog-import -> /pricing-versions/bootstrap), so it must be done AFTER those callers sign.
-      # External access is already blocked (gateway does not route /api/internal/**); this is
-      # in-cluster defense-in-depth only.
-      - /api/internal/auth/workspace/
-      - /api/internal/cloud-identity/
-      - /api/internal/cloud-credit-proxy/
-      - /api/internal/v1/entitlement-projections
 
 oauth2:
   callback-url: ${OAUTH2_CALLBACK_URL:http://localhost:8083/api/credentials/oauth2/callback}

@@ -21,6 +21,7 @@ class ExternalBillingAuthorityMigrationTest {
                 .contains("auth.entitlement_outbox")
                 .contains("auth.identity_binding_outbox")
                 .contains("auth.cloud_credit_operation")
+                .contains("payer_user_id BIGINT NOT NULL REFERENCES auth.users(id)")
                 .contains("auth.cloud_settlement_outbox")
                 .contains("UNIQUE(operation_id, action, request_hash)");
         assertThat(sql).contains("gen_random_uuid()")

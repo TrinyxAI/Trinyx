@@ -54,9 +54,10 @@ public class CloudCreditAuthorityService {
             return reserveResponse(existing);
         }
 
-        long executorUserId = validateAuthorityContext(request);
+        AuthorityContext authority = validateAuthorityContext(request);
         BigDecimal authoritativeMaximum = authoritativeMaximum(request);
-        var result = reserveForOrganization(executorUserId, request, authoritativeMaximum);
+        var result = reserveForOrganization(authority.executorUserId(), authority.payerUserId(),
+                request, authoritativeMaximum);
         if (!result.success()) {
             throw new ResponseStatusException(HttpStatus.PAYMENT_REQUIRED,
                     result.delinquent() ? "WALLET_DELINQUENT" : "INSUFFICIENT_CREDITS");
@@ -68,13 +69,14 @@ public class CloudCreditAuthorityService {
         jdbc.update("""
                 INSERT INTO auth.cloud_credit_operation
                 (operation_id, reservation_id, request_hash, principal_id, billing_subject_id,
-                 organization_id, install_id, entitlement_sequence, source_type,
+                 organization_id, payer_user_id, install_id, entitlement_sequence, source_type,
                  estimated_credits, maximum_credits, provider, model, state,
                  response_payload, expires_at, late_settlement_until)
-                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,'RESERVED',CAST(? AS jsonb),?,?)
+                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,'RESERVED',CAST(? AS jsonb),?,?)
                 """, request.operationId(), request.operationId(), request.requestHash(),
                 request.principalId(), request.billingSubjectId(), request.organizationId(),
-                request.installId(), request.entitlementSequence(), request.sourceType(),
+                authority.payerUserId(), request.installId(), request.entitlementSequence(),
+                request.sourceType(),
                 request.estimatedCredits().min(authoritativeMaximum), authoritativeMaximum,
                 request.provider(), request.model(),
                 write(response), Timestamp.from(response.expiresAt()),
@@ -99,6 +101,7 @@ public class CloudCreditAuthorityService {
         Existing operation = required(operationId);
         requireSame(operation.requestHash(), request.requestHash(),
                 "REQUEST_HASH_MISMATCH");
+        credits.requireReservationPayer(sourceId(operationId), operation.payerUserId());
         if (!java.util.Objects.equals(operation.provider(), request.provider())
                 || !java.util.Objects.equals(operation.model(), request.model())) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
@@ -113,7 +116,7 @@ public class CloudCreditAuthorityService {
 
         SettlementResponse response = new SettlementResponse(operationId,
                 "DISPATCHING", BigDecimal.ZERO,
-                balanceForOrganization(operation.executorUserId(), operation.organizationId()),
+                balanceForPayer(operation.payerUserId()),
                 false, "PROVIDER_DISPATCH_AUTHORIZED_HOLD_RETAINED");
         int updated = jdbc.update("""
                 UPDATE auth.cloud_credit_operation
@@ -132,6 +135,7 @@ public class CloudCreditAuthorityService {
         lock(operationId);
         Existing operation = required(operationId);
         requireSame(operation.requestHash(), request.requestHash(), "REQUEST_HASH_MISMATCH");
+        credits.requireReservationPayer(sourceId(operationId), operation.payerUserId());
         validateCommit(operation, request);
         String settlementHash = CanonicalJson.sha256(json.valueToTree(request));
 
@@ -169,7 +173,7 @@ public class CloudCreditAuthorityService {
         boolean delinquent = outcome == CreditService.CommitOutcome.COMMITTED_PARTIAL
                 || outcome == CreditService.CommitOutcome.COMMITTED_FLOORED;
         String state = delinquent ? "COMMITTED_DELINQUENT" : "COMMITTED";
-        BigDecimal balance = balanceForOrganization(operation.executorUserId(), operation.organizationId());
+        BigDecimal balance = balanceForPayer(operation.payerUserId());
         SettlementResponse response = new SettlementResponse(operationId, state,
                 authoritativeActual, balance, delinquent, outcome.name());
         jdbc.update("""
@@ -192,6 +196,7 @@ public class CloudCreditAuthorityService {
         lock(operationId);
         Existing operation = required(operationId);
         requireSame(operation.requestHash(), request.requestHash(), "REQUEST_HASH_MISMATCH");
+        credits.requireReservationPayer(sourceId(operationId), operation.payerUserId());
         String settlementHash = CanonicalJson.sha256(json.valueToTree(request));
 
         if ("RELEASED".equals(operation.state())) {
@@ -202,8 +207,7 @@ public class CloudCreditAuthorityService {
         CreditService.ReleaseOutcome outcome = credits.releaseReservation(
                 sourceId(operationId), "cloud-release:" + safeReason(request.reason()));
         SettlementResponse response = new SettlementResponse(operationId, "RELEASED",
-                BigDecimal.ZERO, balanceForOrganization(operation.executorUserId(),
-                        operation.organizationId()), false, outcome.name());
+                BigDecimal.ZERO, balanceForPayer(operation.payerUserId()), false, outcome.name());
         jdbc.update("""
                 UPDATE auth.cloud_credit_operation
                 SET state='RELEASED', settlement_hash=?, response_payload=CAST(? AS jsonb), updated_at=now()
@@ -247,7 +251,7 @@ public class CloudCreditAuthorityService {
 
         SettlementResponse response = new SettlementResponse(operationId, "OUTCOME_UNKNOWN",
                 BigDecimal.ZERO,
-                balanceForOrganization(operation.executorUserId(), operation.organizationId()),
+                balanceForPayer(operation.payerUserId()),
                 false, "RECONCILIATION_REQUIRED_HOLD_RETAINED");
         jdbc.update("""
                 UPDATE auth.cloud_credit_operation
@@ -295,24 +299,29 @@ public class CloudCreditAuthorityService {
                 UNKNOWN_RECONCILIATION_SLA.toSeconds());
     }
 
-    private long validateAuthorityContext(ReserveRequest request) {
+    private AuthorityContext validateAuthorityContext(ReserveRequest request) {
         var users = jdbc.query("""
                 SELECT actor.id
                 FROM auth.users actor
                 JOIN auth.organization_member member ON member.user_id=actor.id
                 WHERE actor.principal_id=? AND member.organization_id=?
                 """, (rs, row) -> rs.getLong(1), request.principalId(), request.organizationId());
-        if (users.size() != 1) throw new ResponseStatusException(HttpStatus.FORBIDDEN, "ACTOR_BINDING_INVALID");
-        long userId = users.getFirst();
+        if (users.size() != 1) {
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "ACTOR_BINDING_INVALID");
+        }
+        long executorUserId = users.getFirst();
 
-        Integer payer = jdbc.queryForObject("""
-                SELECT count(*) FROM auth.organization organization_row
+        var payers = jdbc.query("""
+                SELECT owner_row.id
+                FROM auth.organization organization_row
                 JOIN auth.users owner_row ON owner_row.id=organization_row.owner_id
                 WHERE organization_row.id=? AND owner_row.billing_subject_id=?
-                """, Integer.class, request.organizationId(), request.billingSubjectId());
-        if (payer == null || payer != 1) {
+                """, (rs, row) -> rs.getLong(1),
+                request.organizationId(), request.billingSubjectId());
+        if (payers.size() != 1) {
             throw new ResponseStatusException(HttpStatus.FORBIDDEN, "PAYER_BINDING_INVALID");
         }
+        long payerUserId = payers.getFirst();
 
         Integer linked = jdbc.queryForObject("""
                 SELECT count(*)
@@ -322,9 +331,10 @@ public class CloudCreditAuthorityService {
                 JOIN auth.users owner_row ON owner_row.id=organization_row.owner_id
                 WHERE link.install_id=?
                   AND link.tenant_id=owner_row.id
+                  AND owner_row.id=?
                   AND owner_row.billing_subject_id=?
                 """, Integer.class, request.organizationId(), request.installId(),
-                request.billingSubjectId());
+                payerUserId, request.billingSubjectId());
         if (linked == null || linked != 1) {
             throw new ResponseStatusException(HttpStatus.FORBIDDEN, "INSTALL_BINDING_INVALID");
         }
@@ -339,7 +349,7 @@ public class CloudCreditAuthorityService {
         if (entitled == null || entitled != 1) {
             throw new ResponseStatusException(HttpStatus.FORBIDDEN, "ENTITLEMENT_SEQUENCE_INVALID");
         }
-        return userId;
+        return new AuthorityContext(executorUserId, payerUserId);
     }
 
     private void validateReserve(ReserveRequest request) {
@@ -376,7 +386,8 @@ public class CloudCreditAuthorityService {
         var rows = jdbc.query("""
                 SELECT o.operation_id, o.request_hash, o.settlement_hash, o.state,
                        o.response_payload::text, o.late_settlement_until, o.organization_id,
-                       o.source_type, o.provider, o.model, u.id AS executor_user_id
+                       o.payer_user_id, o.source_type, o.provider, o.model,
+                       u.id AS executor_user_id
                 FROM auth.cloud_credit_operation o
                 JOIN auth.users u ON u.principal_id=o.principal_id
                 WHERE o.operation_id=? FOR UPDATE
@@ -385,19 +396,29 @@ public class CloudCreditAuthorityService {
                 rs.getString("response_payload"),
                 rs.getTimestamp("late_settlement_until") == null ? null
                         : rs.getTimestamp("late_settlement_until").toInstant(),
-                rs.getLong("executor_user_id"), rs.getObject("organization_id", UUID.class),
-                rs.getString("source_type"), rs.getString("provider"), rs.getString("model")), id);
+                rs.getLong("executor_user_id"), rs.getLong("payer_user_id"),
+                rs.getObject("organization_id", UUID.class), rs.getString("source_type"),
+                rs.getString("provider"), rs.getString("model")), id);
         return rows.isEmpty() ? null : rows.getFirst();
     }
 
     private CreditService.CreditConsumeResult reserveForOrganization(
-            long executorUserId, ReserveRequest request, BigDecimal maximumCredits) {
+            long executorUserId, long payerUserId, ReserveRequest request,
+            BigDecimal maximumCredits) {
         AtomicReference<CreditService.CreditConsumeResult> result = new AtomicReference<>();
         TenantResolver.runWithOrgScope(request.organizationId().toString(), () -> result.set(
-                credits.tryReserveMarkup(executorUserId, sourceId(request.operationId()),
-                        request.provider(), request.model(), maximumCredits, null,
-                        10, "CLOUD", request.operationId().toString(), false)));
-        return result.get();
+                credits.tryReserveMarkupForExactPayer(executorUserId, payerUserId,
+                        sourceId(request.operationId()), request.provider(), request.model(),
+                        maximumCredits, null, 10, "CLOUD",
+                        request.operationId().toString(), false)));
+        CreditService.CreditConsumeResult reserved = result.get();
+        if (reserved == null) {
+            throw new IllegalStateException("Exact payer reservation returned no result");
+        }
+        if (reserved.success()) {
+            credits.requireReservationPayer(sourceId(request.operationId()), payerUserId);
+        }
+        return reserved;
     }
 
     private BigDecimal authoritativeMaximum(ReserveRequest request) {
@@ -479,11 +500,8 @@ public class CloudCreditAuthorityService {
         }
     }
 
-    private BigDecimal balanceForOrganization(long executorUserId, UUID organizationId) {
-        AtomicReference<BigDecimal> result = new AtomicReference<>();
-        TenantResolver.runWithOrgScope(organizationId.toString(),
-                () -> result.set(credits.getBalance(executorUserId)));
-        return result.get();
+    private BigDecimal balanceForPayer(long payerUserId) {
+        return credits.getBalance(payerUserId);
     }
 
     private ReserveResponse reserveResponse(Existing existing) {
@@ -521,10 +539,12 @@ public class CloudCreditAuthorityService {
         return reason.replaceAll("[^A-Za-z0-9._:-]", "_").substring(0, Math.min(reason.length(), 64));
     }
 
+    private record AuthorityContext(long executorUserId, long payerUserId) {}
+
     private record Existing(UUID operationId, String requestHash, String settlementHash,
                             String state, String responsePayload, Instant lateSettlementUntil,
-                            long executorUserId, UUID organizationId, String sourceType,
-                            String provider, String model) {}
+                            long executorUserId, long payerUserId, UUID organizationId,
+                            String sourceType, String provider, String model) {}
 
     public record ReserveRequest(UUID operationId, UUID principalId, UUID billingSubjectId,
                                  UUID organizationId, UUID installId, long entitlementSequence,

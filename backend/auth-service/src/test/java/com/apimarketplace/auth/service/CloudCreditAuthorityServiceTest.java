@@ -118,7 +118,7 @@ class CloudCreditAuthorityServiceTest {
     void reserveThenProviderCommitConsumesAuthoritativeWalletExactlyOnce() {
         UUID operationId = UUID.randomUUID();
         String hash = "e".repeat(64);
-        when(credits.tryReserveMarkup(eq(42L), eq("cloud-reservation:" + operationId),
+        when(credits.tryReserveMarkupForExactPayer(eq(42L), eq(84L), eq("cloud-reservation:" + operationId),
                 eq("openai"), eq("gpt"), eq(BigDecimal.TEN), isNull(), eq(10),
                 eq("CLOUD"), eq(operationId.toString()), eq(false)))
                 .thenReturn(CreditService.CreditConsumeResult.success(BigDecimal.TEN,
@@ -126,7 +126,7 @@ class CloudCreditAuthorityServiceTest {
         when(credits.settleExternalReservation(eq("cloud-reservation:" + operationId),
                 eq(new BigDecimal("3.25")), eq("openai"), eq("gpt"), eq(false)))
                 .thenReturn(CreditService.CommitOutcome.COMMITTED);
-        when(credits.getBalance(42L)).thenReturn(new BigDecimal("96.75"));
+        when(credits.getBalance(84L)).thenReturn(new BigDecimal("96.75"));
 
         var held = service.reserve(reserve(operationId, hash));
         service.dispatching(operationId,
@@ -140,7 +140,7 @@ class CloudCreditAuthorityServiceTest {
         assertThat(held.state()).isEqualTo("RESERVED");
         assertThat(committed.state()).isEqualTo("COMMITTED");
         assertThat(retried).isEqualTo(committed);
-        verify(credits, times(1)).tryReserveMarkup(anyLong(), anyString(), anyString(),
+        verify(credits, times(1)).tryReserveMarkupForExactPayer(anyLong(), anyLong(), anyString(), anyString(),
                 anyString(), any(), any(), anyInt(), anyString(), anyString(), anyBoolean());
         verify(credits, times(1)).settleExternalReservation(anyString(), any(), anyString(),
                 anyString(), anyBoolean());
@@ -174,7 +174,7 @@ class CloudCreditAuthorityServiceTest {
         when(credits.releaseReservation("cloud-reservation:" + operationId,
                 "cloud-release:provider_failure"))
                 .thenReturn(CreditService.ReleaseOutcome.RELEASED);
-        when(credits.getBalance(42L)).thenReturn(BigDecimal.TEN);
+        when(credits.getBalance(84L)).thenReturn(BigDecimal.TEN);
         var command = new CloudCreditAuthorityService.ReleaseRequest("provider failure", hash);
 
         var released = service.release(operationId, command);
@@ -192,7 +192,7 @@ class CloudCreditAuthorityServiceTest {
         UUID operationId = UUID.randomUUID();
         String hash = "0".repeat(64);
         jdbc.row = ExistingRow.reserved(operationId, hash, "{}");
-        when(credits.getBalance(42L)).thenReturn(BigDecimal.TEN);
+        when(credits.getBalance(84L)).thenReturn(BigDecimal.TEN);
         service.dispatching(operationId,
                 new CloudCreditAuthorityService.DispatchingRequest(
                         hash, "openai", "gpt"));
@@ -215,7 +215,7 @@ class CloudCreditAuthorityServiceTest {
         UUID operationId = UUID.randomUUID();
         String hash = "a".repeat(64);
         jdbc.row = ExistingRow.reserved(operationId, hash, "{}");
-        when(credits.getBalance(42L)).thenReturn(BigDecimal.TEN);
+        when(credits.getBalance(84L)).thenReturn(BigDecimal.TEN);
         service.dispatching(operationId,
                 new CloudCreditAuthorityService.DispatchingRequest(
                         hash, "openai", "gpt"));
@@ -243,7 +243,7 @@ class CloudCreditAuthorityServiceTest {
         UUID operationId = UUID.randomUUID();
         String hash = "b".repeat(64);
         jdbc.row = ExistingRow.reserved(operationId, hash, "{}");
-        when(credits.getBalance(42L)).thenReturn(BigDecimal.TEN);
+        when(credits.getBalance(84L)).thenReturn(BigDecimal.TEN);
         service.dispatching(operationId,
                 new CloudCreditAuthorityService.DispatchingRequest(
                         hash, "openai", "gpt"));
@@ -332,7 +332,7 @@ class CloudCreditAuthorityServiceTest {
     void organizationMemberUsesPayerOwnedInstallInsteadOfActorOwnedInstall() {
         UUID operationId = UUID.randomUUID();
         String hash = "7".repeat(64);
-        when(credits.tryReserveMarkup(eq(42L), eq("cloud-reservation:" + operationId),
+        when(credits.tryReserveMarkupForExactPayer(eq(42L), eq(84L), eq("cloud-reservation:" + operationId),
                 eq("openai"), eq("gpt"), eq(BigDecimal.TEN), isNull(), eq(10),
                 eq("CLOUD"), eq(operationId.toString()), eq(false)))
                 .thenReturn(CreditService.CreditConsumeResult.success(
@@ -352,7 +352,7 @@ class CloudCreditAuthorityServiceTest {
         UUID operationId = UUID.randomUUID();
         String hash = "8".repeat(64);
         when(credits.getWebSearchCreditsPerSearch()).thenReturn(new BigDecimal("4.5"));
-        when(credits.tryReserveMarkup(eq(42L), eq("cloud-reservation:" + operationId),
+        when(credits.tryReserveMarkupForExactPayer(eq(42L), eq(84L), eq("cloud-reservation:" + operationId),
                 eq("websearch"), eq("default"), eq(new BigDecimal("4.5")), isNull(), eq(10),
                 eq("CLOUD"), eq(operationId.toString()), eq(false)))
                 .thenReturn(CreditService.CreditConsumeResult.success(
@@ -360,7 +360,7 @@ class CloudCreditAuthorityServiceTest {
         when(credits.settleExternalReservation(eq("cloud-reservation:" + operationId),
                 eq(new BigDecimal("4.5")), eq("websearch"), eq("default"), eq(false)))
                 .thenReturn(CreditService.CommitOutcome.COMMITTED);
-        when(credits.getBalance(42L)).thenReturn(new BigDecimal("95.5"));
+        when(credits.getBalance(84L)).thenReturn(new BigDecimal("95.5"));
 
         var request = new CloudCreditAuthorityService.ReserveRequest(
                 operationId, UUID.randomUUID(), UUID.randomUUID(), UUID.randomUUID(),
@@ -388,7 +388,7 @@ class CloudCreditAuthorityServiceTest {
         when(credits.calculateExternalLlmCredits(
                 "openai", "gpt", 100, 50, null, null, null, null))
                 .thenReturn(new BigDecimal("10"));
-        when(credits.tryReserveMarkup(eq(42L), eq("cloud-reservation:" + operationId),
+        when(credits.tryReserveMarkupForExactPayer(eq(42L), eq(84L), eq("cloud-reservation:" + operationId),
                 eq("openai"), eq("gpt"), eq(new BigDecimal("12.500000")), isNull(), eq(10),
                 eq("CLOUD"), eq(operationId.toString()), eq(false)))
                 .thenReturn(CreditService.CreditConsumeResult.success(
@@ -403,7 +403,7 @@ class CloudCreditAuthorityServiceTest {
         assertThat(result.state()).isEqualTo("RESERVED");
         verify(credits).calculateExternalLlmCredits(
                 "openai", "gpt", 100, 50, null, null, null, null);
-        verify(credits).tryReserveMarkup(eq(42L), eq("cloud-reservation:" + operationId),
+        verify(credits).tryReserveMarkupForExactPayer(eq(42L), eq(84L), eq("cloud-reservation:" + operationId),
                 eq("openai"), eq("gpt"), eq(new BigDecimal("12.500000")), isNull(), eq(10),
                 eq("CLOUD"), eq(operationId.toString()), eq(false));
     }
@@ -421,7 +421,7 @@ class CloudCreditAuthorityServiceTest {
                 "cloud-reservation:" + operationId, new BigDecimal("7.50"),
                 "openai", "gpt", false))
                 .thenReturn(CreditService.CommitOutcome.COMMITTED);
-        when(credits.getBalance(42L)).thenReturn(new BigDecimal("92.50"));
+        when(credits.getBalance(84L)).thenReturn(new BigDecimal("92.50"));
 
         var command = new CloudCreditAuthorityService.CommitRequest(
                 new BigDecimal("999"), "openai", "gpt", "provider-request",
@@ -443,7 +443,7 @@ class CloudCreditAuthorityServiceTest {
         when(credits.calculateExternalLlmCredits(
                 "openai", "gpt", 400, 200, null, null, null, null))
                 .thenReturn(new BigDecimal("8"));
-        when(credits.tryReserveMarkup(eq(42L), eq("cloud-reservation:" + operationId),
+        when(credits.tryReserveMarkupForExactPayer(eq(42L), eq(84L), eq("cloud-reservation:" + operationId),
                 eq("openai"), eq("gpt"), eq(new BigDecimal("10.000000")), isNull(), eq(10),
                 eq("CLOUD"), eq(operationId.toString()), eq(false)))
                 .thenReturn(CreditService.CreditConsumeResult.success(
@@ -455,7 +455,7 @@ class CloudCreditAuthorityServiceTest {
                 "cloud-reservation:" + operationId, new BigDecimal("3.75"),
                 "openai", "gpt", false))
                 .thenReturn(CreditService.CommitOutcome.COMMITTED);
-        when(credits.getBalance(42L)).thenReturn(new BigDecimal("96.25"));
+        when(credits.getBalance(84L)).thenReturn(new BigDecimal("96.25"));
 
         service.reserve(new CloudCreditAuthorityService.ReserveRequest(
                 operationId, UUID.randomUUID(), UUID.randomUUID(), UUID.randomUUID(),
@@ -471,7 +471,7 @@ class CloudCreditAuthorityServiceTest {
                         120L, 80L, hash));
 
         assertThat(result.actualCredits()).isEqualByComparingTo("3.75");
-        verify(credits).tryReserveMarkup(eq(42L), eq("cloud-reservation:" + operationId),
+        verify(credits).tryReserveMarkupForExactPayer(eq(42L), eq(84L), eq("cloud-reservation:" + operationId),
                 eq("openai"), eq("gpt"), eq(new BigDecimal("10.000000")), isNull(), eq(10),
                 eq("CLOUD"), eq(operationId.toString()), eq(false));
         verify(credits).settleExternalReservation(
@@ -495,7 +495,7 @@ class CloudCreditAuthorityServiceTest {
         UUID operationId = UUID.randomUUID();
         String hash = "8".repeat(64);
         jdbc.row = ExistingRow.reserved(operationId, hash, "{}");
-        when(credits.getBalance(42L)).thenReturn(BigDecimal.TEN);
+        when(credits.getBalance(84L)).thenReturn(BigDecimal.TEN);
         var request = new CloudCreditAuthorityService.DispatchingRequest(
                 hash, "openai", "gpt");
 
@@ -554,7 +554,7 @@ class CloudCreditAuthorityServiceTest {
                 "cloud-reservation:" + operationId, BigDecimal.ONE,
                 "vendor", "tool", true))
                 .thenReturn(CreditService.CommitOutcome.COMMITTED);
-        when(credits.getBalance(42L)).thenReturn(BigDecimal.TEN);
+        when(credits.getBalance(84L)).thenReturn(BigDecimal.TEN);
 
         assertThat(service.escalateStaleUnknownOutcomes()).isEqualTo(1);
         assertThat(jdbc.row.state()).isEqualTo("OUTCOME_UNKNOWN_EXPIRED");
@@ -725,6 +725,11 @@ class CloudCreditAuthorityServiceTest {
                     when(actor.getLong(1)).thenReturn(42L);
                     return List.of(mapper.mapRow(actor, 0));
                 }
+                if (sql.contains("SELECT owner_row.id")) {
+                    ResultSet payer = mock(ResultSet.class);
+                    when(payer.getLong(1)).thenReturn(84L);
+                    return List.of(mapper.mapRow(payer, 0));
+                }
                 if (row == null || !sql.contains("auth.cloud_credit_operation")) return List.of();
                 if (sql.contains("WHERE state='RESERVED' AND expires_at <= now()")) {
                     if (!"RESERVED".equals(row.state())) return List.of();
@@ -741,6 +746,7 @@ class CloudCreditAuthorityServiceTest {
                 when(rs.getTimestamp("late_settlement_until"))
                         .thenReturn(Timestamp.from(row.lateSettlementUntil()));
                 when(rs.getLong("executor_user_id")).thenReturn(42L);
+                when(rs.getLong("payer_user_id")).thenReturn(84L);
                 when(rs.getObject("organization_id", UUID.class)).thenReturn(UUID.randomUUID());
                 when(rs.getString("source_type")).thenReturn(row.sourceType());
                 when(rs.getString("provider")).thenReturn(row.provider());
@@ -763,8 +769,8 @@ class CloudCreditAuthorityServiceTest {
             lastUpdateSql = sql;
             if (sql.contains("INSERT INTO auth.cloud_credit_operation")) {
                 row = new ExistingRow((UUID) args[0], (String) args[2], null, "RESERVED",
-                        (String) args[13], ((Timestamp) args[15]).toInstant(), (String) args[8],
-                        (String) args[11], (String) args[12]);
+                        (String) args[14], ((Timestamp) args[16]).toInstant(), (String) args[9],
+                        (String) args[12], (String) args[13]);
             } else if (sql.contains("SET state='DISPATCHING'") && row != null) {
                 row = new ExistingRow(row.operationId(), row.requestHash(),
                         row.settlementHash(), "DISPATCHING", (String) args[0],

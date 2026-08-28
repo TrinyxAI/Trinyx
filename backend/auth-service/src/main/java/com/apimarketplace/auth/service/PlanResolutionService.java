@@ -301,10 +301,14 @@ public class PlanResolutionService {
             if (workspaceMembership.isEmpty()) return executorUserId;
 
             Organization workspaceOrg = workspaceMembership.get().getOrganization();
-            if (workspaceOrg == null || workspaceOrg.isDeleted()) return executorUserId;
+            if (workspaceOrg == null || workspaceOrg.isDeleted()) {
+                throw new IllegalStateException("Current workspace is missing or deleted");
+            }
 
             User owner = workspaceOrg.getOwner();
-            if (owner == null || owner.getId() == null) return executorUserId;
+            if (owner == null || owner.getId() == null) {
+                throw new IllegalStateException("Current workspace has no authoritative payer");
+            }
 
             // Executor IS the owner - no redirect, same wallet. Covers both
             // solo workspaces (owner==self) AND owner running in their own
@@ -314,9 +318,9 @@ public class PlanResolutionService {
             if (executorUserId.equals(owner.getId())) return executorUserId;
 
             return owner.getId();
-        } catch (Exception e) {
-            // Hot path - fall back to self-billing on any lookup glitch.
-            return executorUserId;
+        } catch (RuntimeException e) {
+            throw new IllegalStateException(
+                    "Payer resolution failed closed for executor " + executorUserId, e);
         }
     }
 

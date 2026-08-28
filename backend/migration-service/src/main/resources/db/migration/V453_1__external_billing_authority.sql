@@ -148,6 +148,7 @@ CREATE TABLE IF NOT EXISTS auth.cloud_credit_operation (
     principal_id UUID NOT NULL,
     billing_subject_id UUID NOT NULL,
     organization_id UUID NOT NULL,
+    payer_user_id BIGINT NOT NULL REFERENCES auth.users(id),
     install_id UUID NOT NULL,
     entitlement_sequence BIGINT NOT NULL CHECK (entitlement_sequence > 0),
     source_type VARCHAR(64) NOT NULL,

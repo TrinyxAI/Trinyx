@@ -203,9 +203,13 @@ public class CreditService {
         }
         try {
             Long payer = planResolutionService.resolvePayerUserId(executorUserId);
-            return payer != null ? payer : executorUserId;
-        } catch (Exception e) {
-            return executorUserId;
+            if (payer == null) {
+                throw new IllegalStateException("Payer resolution returned null");
+            }
+            return payer;
+        } catch (RuntimeException e) {
+            throw new IllegalStateException(
+                    "Payer resolution failed closed for executor " + executorUserId, e);
         }
     }
 
@@ -1602,6 +1606,25 @@ public class CreditService {
                                                   int ttlMinutes,
                                                   String scopeKind, String scopeId,
                                                   boolean hasExistingPin) {
+        Long payerUserId = resolvePayer(executorUserId);
+        return tryReserveMarkupForExactPayer(executorUserId, payerUserId, sourceId,
+                provider, model, projected, pinId, ttlMinutes, scopeKind, scopeId,
+                hasExistingPin);
+    }
+
+    /**
+     * External-authority reservation with a payer already proven against the
+     * signed billing subject. This method never resolves or substitutes a wallet.
+     */
+    @Transactional(noRollbackFor = DataIntegrityViolationException.class)
+    public CreditConsumeResult tryReserveMarkupForExactPayer(
+            Long executorUserId, Long payerUserId, String sourceId,
+            String provider, String model, BigDecimal projected, Long pinId,
+            int ttlMinutes, String scopeKind, String scopeId,
+            boolean hasExistingPin) {
+        if (executorUserId == null || payerUserId == null) {
+            throw new IllegalStateException("Authoritative executor and payer are required");
+        }
         if (!markupEnabled) {
             return CreditConsumeResult.success(BigDecimal.ZERO, getBalance(executorUserId));
         }
@@ -1613,12 +1636,8 @@ public class CreditService {
             ttlMinutes = 15;
         }
 
-        // Owner-pays: redirect to the workspace owner's wallet before any
-        // subscription lock / debit / ledger write. Reserve + commit + release
-        // all key off the row's user_id (= payer), so resolving once at entry
-        // makes the entire lifecycle consistent. The cap-enforcement sum query
-        // attributes consumption to executor_user_id (= executorUserId).
-        Long payerUserId = resolvePayer(executorUserId);
+        // payerUserId is authoritative and was resolved by the caller. Never
+        // substitute executorUserId here: external billing must fail closed.
 
         // Idempotency fast-path
         if (sourceId != null && ledgerRepository.existsBySourceId(sourceId)) {
@@ -1728,6 +1747,24 @@ public class CreditService {
             throw dive;
         }
         return CreditConsumeResult.success(projected, newBalance);
+    }
+
+    /**
+     * Proves that an existing reservation is still owned by the authoritative
+     * payer captured by the external billing operation.
+     */
+    @Transactional(readOnly = true)
+    public void requireReservationPayer(String sourceId, Long expectedPayerUserId) {
+        if (sourceId == null || expectedPayerUserId == null) {
+            throw new IllegalStateException("Reservation source and payer are required");
+        }
+        CreditLedgerEntry reservation = ledgerRepository.findFirstBySourceId(sourceId)
+                .orElseThrow(() -> new IllegalStateException(
+                        "Authoritative reservation is missing: " + sourceId));
+        if (!expectedPayerUserId.equals(reservation.getUserId())) {
+            throw new IllegalStateException(
+                    "Authoritative reservation payer mismatch for " + sourceId);
+        }
     }
 
     private CreditLedgerEntry buildReserveEntry(Long payerUserId, Long executorUserId,

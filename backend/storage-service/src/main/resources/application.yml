@@ -119,8 +119,8 @@ gateway:
         - "GET:/api/internal/storage/exists"
       auth-service:
         - "DELETE:/api/internal/storage/delete"
-        - "POST:/api/internal/storage/quota/tenant/**"
-        - "POST:/api/internal/storage/quota/org/**"
+        - "POST:/api/internal/storage/quota/tenant/{tenantId}/limits"
+        - "POST:/api/internal/storage/quota/org/{organizationId}/limits"
 
 logging:
   level:

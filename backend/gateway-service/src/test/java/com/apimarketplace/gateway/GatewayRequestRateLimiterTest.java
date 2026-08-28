@@ -26,7 +26,7 @@ class GatewayRequestRateLimiterTest {
         ReactiveStringRedisTemplate redis = mock(ReactiveStringRedisTemplate.class);
         AtomicReference<RedisScript<Long>> capturedScript = new AtomicReference<>();
         AtomicReference<List<String>> capturedKeys = new AtomicReference<>();
-        AtomicReference<Object[]> capturedArguments = new AtomicReference<>();
+        AtomicReference<String> capturedWindow = new AtomicReference<>();
         AtomicInteger executions = new AtomicInteger();
 
         when(redis.execute(any(RedisScript.class), anyList(), any(Object[].class)))
@@ -34,7 +34,7 @@ class GatewayRequestRateLimiterTest {
                     executions.incrementAndGet();
                     capturedScript.set(invocation.getArgument(0));
                     capturedKeys.set(invocation.getArgument(1));
-                    capturedArguments.set(invocation.getArgument(2));
+                    capturedWindow.set(invocation.getArgument(2, String.class));
                     return Flux.just(1L);
                 });
 
@@ -50,7 +50,7 @@ class GatewayRequestRateLimiterTest {
                         "subject".getBytes(StandardCharsets.UTF_8));
         assertThat(executions).hasValue(1);
         assertThat(capturedKeys.get()).containsExactly(expectedKey);
-        assertThat(capturedArguments.get()).containsExactly("60000");
+        assertThat(capturedWindow.get()).isEqualTo("60000");
 
         String lua = capturedScript.get().getScriptAsString();
         assertThat(lua)

@@ -9,6 +9,7 @@ import org.testcontainers.utility.DockerImageName;
 
 import java.util.Arrays;
 import java.util.LinkedHashSet;
+import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.TimeUnit;
@@ -22,7 +23,7 @@ import static org.assertj.core.api.Assertions.assertThat;
  */
 class FlywayLifecycleContractTest {
 
-    private static final int EXPECTED_APPLIED_MIGRATIONS = 441; // baseline V0 + 439 SQL + V151 Java
+    private static final int EXPECTED_VERSIONED_HISTORY_ENTRIES = 441; // baseline V0 + 439 SQL + V151 Java
     private static final String EXPECTED_CURRENT_VERSION = "453.3";
 
     @Test
@@ -59,7 +60,7 @@ class FlywayLifecycleContractTest {
             flyway.clean();
             var first = flyway.migrate();
             assertThat(first.success).isTrue();
-            assertThat(first.migrationsExecuted).isEqualTo(EXPECTED_APPLIED_MIGRATIONS);
+            assertThat(first.migrationsExecuted).isEqualTo(EXPECTED_VERSIONED_HISTORY_ENTRIES);
 
             var validation = flyway.validateWithResult();
             assertThat(validation.validationSuccessful)
@@ -67,16 +68,22 @@ class FlywayLifecycleContractTest {
                     .isTrue();
 
             MigrationInfo[] applied = flyway.info().applied();
-            assertThat(applied).hasSize(EXPECTED_APPLIED_MIGRATIONS);
+            List<MigrationInfo> versionedApplied = Arrays.stream(applied)
+                    .filter(info -> info.getVersion() != null)
+                    .toList();
+            long schemaCreationMarkers = Arrays.stream(applied)
+                    .filter(info -> info.getVersion() == null)
+                    .count();
+            assertThat(versionedApplied).hasSize(EXPECTED_VERSIONED_HISTORY_ENTRIES);
+            assertThat(schemaCreationMarkers)
+                    .as("Flyway records exactly one non-versioned schema-creation marker")
+                    .isEqualTo(1);
             assertThat(flyway.info().current().getVersion().toString())
                     .isEqualTo(EXPECTED_CURRENT_VERSION);
 
             Set<String> versions = new LinkedHashSet<>();
             Set<String> migrationsWithoutChecksum = new LinkedHashSet<>();
-            Arrays.stream(applied).forEach(info -> {
-                assertThat(info.getVersion())
-                        .as("every packaged migration is versioned: %s", info.getDescription())
-                        .isNotNull();
+            versionedApplied.forEach(info -> {
                 String version = info.getVersion().toString();
                 assertThat(versions.add(version))
                         .as("migration version is unique: %s", info.getVersion())

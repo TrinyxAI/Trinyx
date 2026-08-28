@@ -228,6 +228,34 @@ class AuthenticatedGatewayFilterTest {
                 .isEqualTo("trinyx.events");
     }
 
+
+    @Test
+    void distributedRateLimitRejectsBeforeIdentityResolutionOrBodyBuffering() {
+        GatewayIdentityClient identity = mock(GatewayIdentityClient.class);
+        GatewayRequestRateLimiter limiter = mock(GatewayRequestRateLimiter.class);
+        when(limiter.allow("subject")).thenReturn(Mono.just(false));
+        AuthenticatedGatewayFilter filter =
+                new AuthenticatedGatewayFilter(identity, limiter, 1024, 1);
+        Jwt jwt = Jwt.withTokenValue("jwt")
+                .header("alg", "none")
+                .subject("subject")
+                .issuedAt(Instant.now())
+                .expiresAt(Instant.now().plusSeconds(60))
+                .build();
+        ServerWebExchange exchange = MockServerWebExchange.from(
+                MockServerHttpRequest.post("/api/users/profile")
+                        .body("payload"))
+                .mutate().principal(Mono.just(new JwtAuthenticationToken(jwt))).build();
+
+        StepVerifier.create(filter.filter(exchange, ignored -> Mono.error(
+                        new AssertionError("rate-limited request must not reach downstream"))))
+                .verifyComplete();
+
+        assertThat(exchange.getResponse().getStatusCode())
+                .isEqualTo(HttpStatus.TOO_MANY_REQUESTS);
+        org.mockito.Mockito.verifyNoInteractions(identity);
+    }
+
     @Test
     void downstreamFailureIsNotRewrittenAsAuthenticationFailure() {
         GatewayIdentityClient identity = mock(GatewayIdentityClient.class);

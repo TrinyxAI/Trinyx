@@ -180,6 +180,10 @@ trinyx:
     auth-service-url: ${AUTH_SERVICE_URL:http://auth-service:8083}
     hmac-secret: ${GATEWAY_SECRET_KEY:}
     max-body-bytes: ${CLOUD_GATEWAY_MAX_BODY_BYTES:52428800}
+    max-buffered-requests: ${CLOUD_GATEWAY_MAX_BUFFERED_REQUESTS:8}
+    rate-limit:
+      requests-per-window: ${CLOUD_GATEWAY_RATE_LIMIT_REQUESTS:120}
+      window-ms: ${CLOUD_GATEWAY_RATE_LIMIT_WINDOW_MS:60000}
 
 management:
   endpoints:

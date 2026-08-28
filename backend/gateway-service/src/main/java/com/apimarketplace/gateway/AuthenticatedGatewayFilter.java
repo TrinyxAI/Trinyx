@@ -9,6 +9,7 @@ import org.springframework.core.io.buffer.DataBuffer;
 import org.springframework.core.io.buffer.DataBufferUtils;
 import org.springframework.core.io.buffer.DataBufferLimitException;
 import org.springframework.http.HttpStatus;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.server.reactive.ServerHttpRequest;
 import org.springframework.http.server.reactive.ServerHttpRequestDecorator;
@@ -23,6 +24,7 @@ import java.net.URI;
 import java.util.List;
 import java.util.Locale;
 import java.util.Set;
+import java.util.concurrent.Semaphore;
 
 import static org.springframework.cloud.gateway.support.ServerWebExchangeUtils.GATEWAY_REQUEST_URL_ATTR;
 
@@ -39,13 +41,26 @@ final class AuthenticatedGatewayFilter implements GlobalFilter, Ordered {
             "x-trinyx-organization-id");
 
     private final GatewayIdentityClient identityClient;
+    private final GatewayRequestRateLimiter rateLimiter;
     private final int maxBodyBytes;
+    private final Semaphore bodyBufferPermits;
+
+    @Autowired
+    AuthenticatedGatewayFilter(
+            GatewayIdentityClient identityClient,
+            GatewayRequestRateLimiter rateLimiter,
+            @Value("${trinyx.gateway.max-body-bytes:52428800}") int maxBodyBytes,
+            @Value("${trinyx.gateway.max-buffered-requests:8}") int maxBufferedRequests) {
+        this.identityClient = identityClient;
+        this.rateLimiter = rateLimiter;
+        this.maxBodyBytes = Math.max(1, maxBodyBytes);
+        this.bodyBufferPermits = new Semaphore(Math.max(1, maxBufferedRequests), true);
+    }
 
     AuthenticatedGatewayFilter(
             GatewayIdentityClient identityClient,
-            @Value("${trinyx.gateway.max-body-bytes:52428800}") int maxBodyBytes) {
-        this.identityClient = identityClient;
-        this.maxBodyBytes = Math.max(1, maxBodyBytes);
+            int maxBodyBytes) {
+        this(identityClient, null, maxBodyBytes, 8);
     }
 
     @Override
@@ -67,42 +82,58 @@ final class AuthenticatedGatewayFilter implements GlobalFilter, Ordered {
         return exchange.getPrincipal()
                 .cast(JwtAuthenticationToken.class)
                 .switchIfEmpty(Mono.error(new IllegalStateException("JWT principal missing")))
-                .flatMap(authentication -> {
-                    String token = authentication.getToken().getTokenValue();
-                    String subject = authentication.getToken().getSubject();
-                    String binding = exchange.getRequest().getHeaders()
-                            .getFirst("X-Trinyx-Identity-Binding");
-                    String entitlement = exchange.getRequest().getHeaders()
-                            .getFirst("X-Trinyx-Entitlement-Projection");
-                    String installSelector;
-                    try {
-                        installSelector = installSelector(exchange.getRequest().getHeaders());
-                    } catch (IllegalArgumentException conflictingSelector) {
-                        return forbidden(exchange, "conflicting_install_selector");
-                    }
-                    EntitlementPolicy policy = policyFor(path);
+                .flatMap(authentication ->
+                        authorizeAuthenticated(exchange, chain, path, authentication));
+    }
 
-                    Mono<GatewayUserContext> authorized = identityClient
-                            .resolve(token, subject, binding, entitlement, installSelector)
-                            .flatMap(context -> {
-                                if (policy.identityOnly()) {
-                                    return Mono.just(context);
-                                }
-                                return identityClient.authorize(
-                                                context, policy.feature(), policy.paidOperation())
-                                        .flatMap(decision -> decision.allowed()
-                                                ? Mono.just(context)
-                                                : Mono.error(new EntitlementDeniedException(
-                                                        decision.reason())));
-                            });
+    private Mono<Void> authorizeAuthenticated(
+            ServerWebExchange exchange,
+            GatewayFilterChain chain,
+            String path,
+            JwtAuthenticationToken authentication) {
+        String token = authentication.getToken().getTokenValue();
+        String subject = authentication.getToken().getSubject();
+        Mono<Boolean> admitted = rateLimiter == null
+                ? Mono.just(true) : rateLimiter.allow(subject);
+        return admitted.flatMap(allowed -> {
+            if (!allowed) {
+                return writeError(exchange, HttpStatus.TOO_MANY_REQUESTS,
+                        "gateway_rate_limited");
+            }
 
-                    // Only identity/entitlement resolution errors are translated here. Downstream
-                    // routing/provider failures happen in withBody() after this boundary and must
-                    // retain their real 5xx/error semantics instead of being mislabeled as 401.
-                    return authorized
-                            .onErrorResume(error -> rejectIdentity(exchange, error))
-                            .flatMap(context -> withBody(exchange, chain, subject, context));
-                });
+            String binding = exchange.getRequest().getHeaders()
+                    .getFirst("X-Trinyx-Identity-Binding");
+            String entitlement = exchange.getRequest().getHeaders()
+                    .getFirst("X-Trinyx-Entitlement-Projection");
+            String installSelector;
+            try {
+                installSelector = installSelector(exchange.getRequest().getHeaders());
+            } catch (IllegalArgumentException conflictingSelector) {
+                return forbidden(exchange, "conflicting_install_selector");
+            }
+            EntitlementPolicy policy = policyFor(path);
+
+            Mono<GatewayUserContext> authorized = identityClient
+                    .resolve(token, subject, binding, entitlement, installSelector)
+                    .flatMap(context -> {
+                        if (policy.identityOnly()) {
+                            return Mono.just(context);
+                        }
+                        return identityClient.authorize(
+                                        context, policy.feature(), policy.paidOperation())
+                                .flatMap(decision -> decision.allowed()
+                                        ? Mono.just(context)
+                                        : Mono.error(new EntitlementDeniedException(
+                                                decision.reason())));
+                    });
+
+            // Only identity/entitlement resolution errors are translated here. Downstream
+            // routing/provider failures happen in withBody() after this boundary and must
+            // retain their real 5xx/error semantics instead of being mislabeled as 401.
+            return authorized
+                    .onErrorResume(error -> rejectIdentity(exchange, error))
+                    .flatMap(context -> withBody(exchange, chain, subject, context));
+        });
     }
 
     private Mono<GatewayUserContext> rejectIdentity(ServerWebExchange exchange, Throwable error) {
@@ -221,7 +252,8 @@ final class AuthenticatedGatewayFilter implements GlobalFilter, Ordered {
                 .onErrorResume(DataBufferLimitException.class, error -> {
                     exchange.getResponse().setStatusCode(HttpStatus.PAYLOAD_TOO_LARGE);
                     return exchange.getResponse().setComplete();
-                });
+                })
+                .doFinally(ignored -> bodyBufferPermits.release());
     }
 
     private Mono<Void> forbidden(ServerWebExchange exchange, String code) {

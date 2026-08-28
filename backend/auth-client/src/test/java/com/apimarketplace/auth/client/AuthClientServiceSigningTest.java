@@ -36,10 +36,19 @@ class AuthClientServiceSigningTest {
     }
 
     @Test
-    void partialSigningConfigurationFailsClosed() {
+    void ceServiceIdentityWithoutSecretKeepsUnsignedCompatibility() {
+        RestTemplate http = new RestTemplate();
+
+        new AuthClient(http, "http://auth", "monolith-service", "");
+
+        assertThat(http.getInterceptors()).isEmpty();
+    }
+
+    @Test
+    void secretWithoutServiceIdentityFailsClosed() {
         org.assertj.core.api.Assertions.assertThatThrownBy(() ->
-                new AuthClient(new RestTemplate(), "http://auth", "agent-service", ""))
+                new AuthClient(new RestTemplate(), "http://auth", "", "s".repeat(32)))
                 .isInstanceOf(IllegalStateException.class)
-                .hasMessageContaining("configured together");
+                .hasMessageContaining("identity is required");
     }
 }

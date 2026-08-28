@@ -96,12 +96,12 @@ public class AuthClient {
             RestTemplate target, String serviceId, String serviceSecret) {
         boolean missingId = serviceId == null || serviceId.isBlank();
         boolean missingSecret = serviceSecret == null || serviceSecret.isBlank();
-        if (missingId && missingSecret) {
+        if (missingSecret) {
             return; // CE/monolith: downstream verification is disabled.
         }
-        if (missingId || missingSecret) {
+        if (missingId) {
             throw new IllegalStateException(
-                    "Internal auth service identity and HMAC secret must be configured together");
+                    "Internal auth service identity is required when the HMAC secret is configured");
         }
         target.getInterceptors().add(
                 new ServiceRequestSigningInterceptor(serviceId, serviceSecret));

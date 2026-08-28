@@ -42,8 +42,12 @@ class ExternalCreditProjectionPostgresContractTest {
                     updated_at TIMESTAMP WITHOUT TIME ZONE NOT NULL DEFAULT now()
                 );
                 """);
-        Files.copy(productionMigration(), migrations.resolve(
-                "V453_1__external_billing_authority.sql"));
+        Files.copy(productionMigration(
+                        "V453_1__external_billing_authority.sql"),
+                migrations.resolve("V453_1__external_billing_authority.sql"));
+        Files.copy(productionMigration(
+                        "V453_2__cloud_settlement_outbox_fencing.sql"),
+                migrations.resolve("V453_2__cloud_settlement_outbox_fencing.sql"));
 
         try (PostgreSQLContainer<?> postgres =
                      new PostgreSQLContainer<>("postgres:16-alpine")) {
@@ -112,9 +116,9 @@ class ExternalCreditProjectionPostgresContractTest {
                 """, String.class, operationId);
     }
 
-    private static Path productionMigration() {
+    private static Path productionMigration(String fileName) {
         String relative = "migration-service/src/main/resources/db/migration/"
-                + "V453_1__external_billing_authority.sql";
+                + fileName;
         Path here = Path.of(System.getProperty("user.dir")).toAbsolutePath();
         for (Path candidate = here; candidate != null; candidate = candidate.getParent()) {
             Path file = candidate.resolve(relative);

@@ -3,9 +3,9 @@ name: Build Trinyx Frontends
 on:
   push:
     branches: [main]
-    paths: ['frontend/**', '.github/workflows/build-trinyx-frontend.yml']
+    paths: ['frontend/**', 'scripts/deploy/**', '.github/workflows/build-trinyx-frontend.yml']
   pull_request:
-    paths: ['frontend/**', '.github/workflows/build-trinyx-frontend.yml']
+    paths: ['frontend/**', 'scripts/deploy/**', '.github/workflows/build-trinyx-frontend.yml']
   workflow_dispatch:
     inputs:
       deploy_production:
@@ -34,6 +34,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: docker/setup-buildx-action@v3
+      - name: Test remote deployment command rendering
+        shell: bash
+        run: bash scripts/deploy/test-render-frontend-ssm-command.sh
       - name: Log in to GHCR
         if: github.event_name != 'pull_request'
         uses: docker/login-action@v3
@@ -85,6 +88,7 @@ jobs:
       group: trinyx-production-frontends
       cancel-in-progress: false
     steps:
+      - uses: actions/checkout@v4
       - name: Validate immutable build outputs
         shell: bash
         env:
@@ -107,25 +111,8 @@ jobs:
           set -euo pipefail
           app_ref="${APP_IMAGE}@${APP_DIGEST}"
           landing_ref="${LANDING_IMAGE}@${LANDING_DIGEST}"
-          remote_command=$(cat <<COMMAND
-          set -euo pipefail
-          cd /home/ubuntu/Trinyx
-          docker pull '${app_ref}'
-          docker pull '${landing_ref}'
-          override=$(mktemp)
-          trap 'rm -f "${override}"' EXIT
-          cat >"${override}" <<YAML
-          services:
-            frontend:
-              image: ${app_ref}
-            landing:
-              image: ${landing_ref}
-          YAML
-          docker compose -f docker-compose.yml -f "${override}" --env-file docker/.env.ce up -d --no-deps frontend landing
-          test "$(docker inspect "$(docker compose -f docker-compose.yml -f "${override}" --env-file docker/.env.ce ps -q frontend)" --format '{{.Config.Image}}')" = '${app_ref}'
-          test "$(docker inspect "$(docker compose -f docker-compose.yml -f "${override}" --env-file docker/.env.ce ps -q landing)" --format '{{.Config.Image}}')" = '${landing_ref}'
-          COMMAND
-          )
+          remote_command="$(bash scripts/deploy/render-frontend-ssm-command.sh \
+            "${app_ref}" "${landing_ref}")"
           parameters=$(jq -n --arg command "${remote_command}" '{commands: [$command]}')
           command_id=$(aws ssm send-command --region "${AWS_REGION}" --instance-ids "${EC2_INSTANCE_ID}"             --document-name AWS-RunShellScript --comment "Controlled Trinyx frontend digest deployment"             --parameters "${parameters}" --query 'Command.CommandId' --output text)
           if ! aws ssm wait command-executed --region "${AWS_REGION}" --command-id "${command_id}"             --instance-id "${EC2_INSTANCE_ID}"; then

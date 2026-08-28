@@ -325,6 +325,22 @@ jobs:
           pattern: ce-release-digest-*
           path: release-digests
           merge-multiple: true
+      - uses: actions/download-artifact@v4
+        with:
+          name: trinyx-npm-release-candidate
+          path: npm-package
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          registry-url: https://registry.npmjs.org
+      - name: Preflight immutable npm package
+        shell: bash
+        env:
+          RELEASE_VERSION: ${{ needs.prepare.outputs.version }}
+        run: >-
+          bash scripts/release/preflight-npm-package.sh
+          npm-package/npm-release-metadata.json
+          "${RELEASE_VERSION}"
       - uses: docker/setup-buildx-action@v3
       - uses: docker/login-action@v3
         with:

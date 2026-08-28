@@ -29,3 +29,20 @@ git -C "${work}" commit --allow-empty -m moved >/dev/null; git -C "${work}" tag 
 ! ( cd "${work}" && bash "${root}/scripts/release/revalidate-release-source.sh" v1.2.3 "${commit}" )
 git -C "${work}" push --delete origin v1.2.3 >/dev/null
 ! ( cd "${work}" && bash "${root}/scripts/release/revalidate-release-source.sh" v1.2.3 "${commit}" )
+
+cat >"${tmp}/npm-metadata.json" <<'JSON'
+[{"name":"trinyx","version":"1.2.3","integrity":"sha512-expected"}]
+JSON
+cat >"${tmp}/npm-view" <<'STUB'
+#!/usr/bin/env bash
+printf '%s' "${NPM_VIEW_RESULT:-}"
+STUB
+chmod +x "${tmp}/npm-view"
+NPM_VIEW_COMMAND="${tmp}/npm-view" NPM_VIEW_RESULT="" \
+  bash "${root}/scripts/release/preflight-npm-package.sh" "${tmp}/npm-metadata.json" 1.2.3
+NPM_VIEW_COMMAND="${tmp}/npm-view" NPM_VIEW_RESULT="sha512-expected" \
+  bash "${root}/scripts/release/preflight-npm-package.sh" "${tmp}/npm-metadata.json" 1.2.3
+! NPM_VIEW_COMMAND="${tmp}/npm-view" NPM_VIEW_RESULT="sha512-conflict" \
+  bash "${root}/scripts/release/preflight-npm-package.sh" "${tmp}/npm-metadata.json" 1.2.3
+! NPM_VIEW_COMMAND="${tmp}/npm-view" NPM_VIEW_RESULT="" \
+  bash "${root}/scripts/release/preflight-npm-package.sh" "${tmp}/npm-metadata.json" 9.9.9

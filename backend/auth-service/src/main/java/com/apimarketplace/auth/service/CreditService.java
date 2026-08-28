@@ -203,13 +203,13 @@ public class CreditService {
         }
         try {
             Long payer = planResolutionService.resolvePayerUserId(executorUserId);
-            if (payer == null) {
-                throw new IllegalStateException("Payer resolution returned null");
-            }
-            return payer;
+            return payer != null ? payer : executorUserId;
         } catch (RuntimeException e) {
-            throw new IllegalStateException(
-                    "Payer resolution failed closed for executor " + executorUserId, e);
+            // Preserve the historical native billing contract. External paid authority
+            // never calls this resolver: it supplies a separately proven exact payer to
+            // tryReserveMarkupForExactPayer and therefore remains fail-closed.
+            log.warn("Payer resolution failed for executor {}; retaining self-pay", executorUserId, e);
+            return executorUserId;
         }
     }
 
@@ -1626,10 +1626,10 @@ public class CreditService {
             throw new IllegalStateException("Authoritative executor and payer are required");
         }
         if (!markupEnabled) {
-            return CreditConsumeResult.success(BigDecimal.ZERO, getBalance(executorUserId));
+            return CreditConsumeResult.success(BigDecimal.ZERO, getBalanceForSelf(payerUserId));
         }
         if (projected == null || projected.signum() <= 0) {
-            return CreditConsumeResult.success(BigDecimal.ZERO, getBalance(executorUserId));
+            return CreditConsumeResult.success(BigDecimal.ZERO, getBalanceForSelf(payerUserId));
         }
         if (ttlMinutes <= 0 || ttlMinutes > 1440) {
             log.warn("Invalid ttlMinutes={} for reserve sourceId={} - clamping to 15", ttlMinutes, sourceId);

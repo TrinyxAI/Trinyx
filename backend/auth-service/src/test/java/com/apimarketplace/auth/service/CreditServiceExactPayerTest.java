@@ -53,18 +53,57 @@ class CreditServiceExactPayerTest {
     }
 
     @Test
-    void resolverFailureNeverFallsBackToExecutor() {
+    void legacyGenericReservationKeepsSelfPayFallbackOnResolverFailure() {
         SubscriptionRepository subscriptions = mock(SubscriptionRepository.class);
-        CreditService service = new CreditService(subscriptions, mock(CreditLedgerRepository.class),
+        CreditLedgerRepository ledger = mock(CreditLedgerRepository.class);
+        CreditService service = new CreditService(subscriptions, ledger,
                 mock(ModelPricingService.class), false);
         PlanResolutionService resolver = mock(PlanResolutionService.class);
-        when(resolver.resolvePayerUserId(42L)).thenThrow(new IllegalStateException("membership unavailable"));
+        when(resolver.resolvePayerUserId(42L))
+                .thenThrow(new IllegalStateException("membership unavailable"));
         service.setPlanResolutionService(resolver);
+        Subscription executorWallet = wallet(false, "10");
+        when(subscriptions.findActiveByUserIdForUpdate(42L))
+                .thenReturn(Optional.of(executorWallet));
+        when(ledger.existsBySourceId("legacy-reservation:test")).thenReturn(false);
+        AtomicReference<CreditLedgerEntry> saved = new AtomicReference<>();
+        when(ledger.save(any(CreditLedgerEntry.class))).thenAnswer(call -> {
+            saved.set(call.getArgument(0));
+            return saved.get();
+        });
 
-        assertThatThrownBy(() -> service.tryReserveMarkup(42L, "cloud-reservation:test",
-                "vendor", "model", BigDecimal.ONE, null, 10, "CLOUD", "test", false))
-                .isInstanceOf(IllegalStateException.class).hasMessageContaining("failed closed");
-        verifyNoInteractions(subscriptions);
+        var result = service.tryReserveMarkup(42L, "legacy-reservation:test",
+                "vendor", "model", BigDecimal.ONE, null, 10, "LEGACY", "test", false);
+
+        assertThat(result.success()).isTrue();
+        assertThat(executorWallet.getTotalBalance()).isEqualByComparingTo("9");
+        assertThat(saved.get().getUserId()).isEqualTo(42L);
+        assertThat(saved.get().getExecutorUserId()).isEqualTo(42L);
+    }
+
+    @Test
+    void exactPayerNoOpBranchesReturnThePayerBalance() {
+        SubscriptionRepository subscriptions = mock(SubscriptionRepository.class);
+        CreditLedgerRepository ledger = mock(CreditLedgerRepository.class);
+        Subscription payerWallet = wallet(false, "17");
+        when(subscriptions.findActiveByUserId(84L)).thenReturn(Optional.of(payerWallet));
+
+        CreditService enabled = new CreditService(subscriptions, ledger,
+                mock(ModelPricingService.class), false);
+        var zeroProjection = enabled.tryReserveMarkupForExactPayer(
+                42L, 84L, "cloud-reservation:zero", "vendor", "model",
+                BigDecimal.ZERO, null, 10, "CLOUD", "zero", false);
+
+        CreditService disabled = new CreditService(subscriptions, ledger,
+                mock(ModelPricingService.class), false, false, false);
+        var markupDisabled = disabled.tryReserveMarkupForExactPayer(
+                42L, 84L, "cloud-reservation:disabled", "vendor", "model",
+                BigDecimal.ONE, null, 10, "CLOUD", "disabled", false);
+
+        assertThat(zeroProjection.remainingBalance()).isEqualByComparingTo("17");
+        assertThat(markupDisabled.remainingBalance()).isEqualByComparingTo("17");
+        verify(subscriptions, never()).findActiveByUserId(42L);
+        verifyNoInteractions(ledger);
     }
 
     @Test

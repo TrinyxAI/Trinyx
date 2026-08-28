@@ -86,6 +86,7 @@ gateway:
       - /health
       - /actuator
       - /api/internal/
+      - /api/files/proxy-signed
     hmac-required-paths:
       - /api/internal/storage/
     service-authenticated-paths:
@@ -120,11 +121,6 @@ gateway:
         - "DELETE:/api/internal/storage/delete"
         - "POST:/api/internal/storage/quota/tenant/**"
         - "POST:/api/internal/storage/quota/org/**"
-
-      # HMAC-signed marketplace showcase file proxy. The path is reachable
-      # without a JWT (signature is the auth) AND must skip the gateway-secret
-      # check downstream - both ends must allowlist it.
-      - /api/files/proxy-signed
 
 logging:
   level:

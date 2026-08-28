@@ -27,7 +27,7 @@ import java.util.UUID;
 /**
  * Internal API controller for inter-service file operations.
  * Used by orchestrator-service (via storage-client) and other services.
- * No gateway auth required (internal endpoints bypass GatewayAuthenticationFilter).
+ * Every route requires service-specific HMAC authentication and an explicit method/path permission.
  * Disabled in monolith mode (direct service calls replace HTTP).
  */
 @RestController

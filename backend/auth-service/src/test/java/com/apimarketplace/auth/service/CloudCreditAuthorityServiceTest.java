@@ -746,7 +746,7 @@ class CloudCreditAuthorityServiceTest {
                 when(rs.getTimestamp("late_settlement_until"))
                         .thenReturn(Timestamp.from(row.lateSettlementUntil()));
                 when(rs.getLong("executor_user_id")).thenReturn(42L);
-                when(rs.getLong("payer_user_id")).thenReturn(84L);
+                when(rs.getLong("authority_payer_user_id")).thenReturn(84L);
                 when(rs.getObject("organization_id", UUID.class)).thenReturn(UUID.randomUUID());
                 when(rs.getString("source_type")).thenReturn(row.sourceType());
                 when(rs.getString("provider")).thenReturn(row.provider());

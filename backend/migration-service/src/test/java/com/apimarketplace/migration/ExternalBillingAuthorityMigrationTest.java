@@ -21,7 +21,9 @@ class ExternalBillingAuthorityMigrationTest {
                 .contains("auth.entitlement_outbox")
                 .contains("auth.identity_binding_outbox")
                 .contains("auth.cloud_credit_operation")
-                .contains("payer_user_id BIGINT NOT NULL REFERENCES auth.users(id)")
+                .contains("authority_payer_user_id BIGINT REFERENCES auth.users(id)")
+                .contains("billing_status_changed_at TIMESTAMP WITHOUT TIME ZONE")
+                .contains("ALTER COLUMN billing_status_changed_at SET NOT NULL")
                 .contains("auth.cloud_settlement_outbox")
                 .contains("UNIQUE(operation_id, action, request_hash)");
         assertThat(sql).contains("gen_random_uuid()")
@@ -29,7 +31,8 @@ class ExternalBillingAuthorityMigrationTest {
                 .doesNotContain("md5('trinyx-billing:'")
                 .doesNotContain("DROP TABLE auth.subscription")
                 .doesNotContain("DROP TABLE auth.credit_ledger")
-                .doesNotContain("DROP COLUMN remaining_credits");
+                .doesNotContain("DROP COLUMN remaining_credits")
+                .doesNotContain("payer_user_id BIGINT NOT NULL");
     }
 
     @Test

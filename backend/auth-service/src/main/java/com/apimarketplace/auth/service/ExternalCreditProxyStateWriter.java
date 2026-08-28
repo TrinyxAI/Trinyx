@@ -93,9 +93,11 @@ public class ExternalCreditProxyStateWriter {
                 UPDATE auth.cloud_credit_operation
                 SET state=?, response_payload=CAST(? AS jsonb), updated_at=now()
                 WHERE operation_id=?
-                  AND (state NOT IN ('COMMITTED','COMMITTED_DELINQUENT','RELEASED')
-                       OR state=?)
-                """, state, write(response), operationId, state);
+                  AND (state NOT IN ('COMMITTED','COMMITTED_DELINQUENT','RELEASED','SETTLEMENT_FAILED')
+                       OR state=?
+                       OR (state='SETTLEMENT_FAILED'
+                           AND ? IN ('COMMITTED','COMMITTED_DELINQUENT','RELEASED')))
+                """, state, write(response), operationId, state, state);
     }
 
     @Transactional

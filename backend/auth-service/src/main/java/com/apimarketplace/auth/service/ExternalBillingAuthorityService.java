@@ -288,16 +288,16 @@ public class ExternalBillingAuthorityService {
         return null;
     }
 
-    private String accessState(Subscription subscription) {
+    String accessState(Subscription subscription) {
         if (subscription == null) return "DENIED";
         if (Boolean.TRUE.equals(subscription.getDelinquent())) return "DENIED";
         if ("active".equals(subscription.getStatus()) || "trialing".equals(subscription.getStatus())) {
             return "ACTIVE";
         }
         if ("past_due".equals(subscription.getStatus())) {
-            Instant changedAt = subscription.getUpdatedAt() == null
+            Instant changedAt = subscription.getBillingStatusChangedAt() == null
                     ? Instant.EPOCH
-                    : subscription.getUpdatedAt().toInstant(ZoneOffset.UTC);
+                    : subscription.getBillingStatusChangedAt().toInstant(ZoneOffset.UTC);
             Instant graceEnd = changedAt.plus(pastDueGrace);
             return Instant.now().isBefore(graceEnd) ? "GRACE" : "DENIED";
         }

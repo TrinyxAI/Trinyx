@@ -44,9 +44,11 @@ public class CloudSettlementResultWriter {
                 UPDATE auth.cloud_credit_operation
                 SET state=?, response_payload=CAST(? AS jsonb), updated_at=now()
                 WHERE operation_id=?
-                  AND (state NOT IN ('COMMITTED','COMMITTED_DELINQUENT','RELEASED')
-                       OR state=?)
-                """, state, responseJson, operationId, state);
+                  AND (state NOT IN ('COMMITTED','COMMITTED_DELINQUENT','RELEASED','SETTLEMENT_FAILED')
+                       OR state=?
+                       OR (state='SETTLEMENT_FAILED'
+                           AND ? IN ('COMMITTED','COMMITTED_DELINQUENT','RELEASED')))
+                """, state, responseJson, operationId, state, state);
     }
 
     private static boolean terminalState(String state) {

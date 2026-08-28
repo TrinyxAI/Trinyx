@@ -13,6 +13,16 @@ ALTER TABLE auth.users ALTER COLUMN billing_subject_id SET NOT NULL;
 CREATE UNIQUE INDEX IF NOT EXISTS uq_users_principal_id ON auth.users(principal_id);
 CREATE INDEX IF NOT EXISTS idx_users_billing_subject_id ON auth.users(billing_subject_id);
 
+-- A billing grace period must be anchored to the lifecycle transition itself.
+-- updated_at is intentionally generic and changes for unrelated subscription writes.
+ALTER TABLE auth.subscription
+    ADD COLUMN IF NOT EXISTS billing_status_changed_at TIMESTAMP WITHOUT TIME ZONE;
+UPDATE auth.subscription
+   SET billing_status_changed_at = COALESCE(updated_at, created_at, now())
+ WHERE billing_status_changed_at IS NULL;
+ALTER TABLE auth.subscription
+    ALTER COLUMN billing_status_changed_at SET NOT NULL;
+
 CREATE TABLE IF NOT EXISTS auth.cloud_identity_binding (
     id UUID PRIMARY KEY,
     schema_version INTEGER NOT NULL DEFAULT 2 CHECK (schema_version = 2),
@@ -148,7 +158,9 @@ CREATE TABLE IF NOT EXISTS auth.cloud_credit_operation (
     principal_id UUID NOT NULL,
     billing_subject_id UUID NOT NULL,
     organization_id UUID NOT NULL,
-    payer_user_id BIGINT NOT NULL REFERENCES auth.users(id),
+    -- Local only to the paid authority. Cloud projections leave this NULL and use
+    -- billing_subject_id as the durable cross-environment payer identity.
+    authority_payer_user_id BIGINT REFERENCES auth.users(id),
     install_id UUID NOT NULL,
     entitlement_sequence BIGINT NOT NULL CHECK (entitlement_sequence > 0),
     source_type VARCHAR(64) NOT NULL,
@@ -178,6 +190,9 @@ CREATE UNIQUE INDEX IF NOT EXISTS uq_cloud_credit_reservation_id
     ON auth.cloud_credit_operation(reservation_id) WHERE reservation_id IS NOT NULL;
 CREATE INDEX IF NOT EXISTS idx_cloud_credit_operation_expiry
     ON auth.cloud_credit_operation(state, expires_at);
+COMMENT ON COLUMN auth.cloud_credit_operation.authority_payer_user_id IS
+    'Paid-authority-local auth.users id; NULL in Cloud projection databases. '
+    'billing_subject_id is the cross-environment payer identity.';
 
 CREATE TABLE IF NOT EXISTS auth.cloud_settlement_outbox (
     id UUID PRIMARY KEY,

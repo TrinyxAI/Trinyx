@@ -113,10 +113,15 @@ public class Subscription {
     @Column(name = "updated_at", nullable = false)
     private LocalDateTime updatedAt;
 
+    @Column(name = "billing_status_changed_at", nullable = false)
+    private LocalDateTime billingStatusChangedAt;
+
     // Constructeurs
     public Subscription() {
-        this.createdAt = LocalDateTime.now();
-        this.updatedAt = LocalDateTime.now();
+        LocalDateTime now = LocalDateTime.now();
+        this.createdAt = now;
+        this.updatedAt = now;
+        this.billingStatusChangedAt = now;
     }
 
     // Getters et Setters
@@ -181,6 +186,9 @@ public class Subscription {
     }
 
     public void setStatus(String status) {
+        if (!java.util.Objects.equals(this.status, status)) {
+            this.billingStatusChangedAt = LocalDateTime.now();
+        }
         this.status = status;
     }
 
@@ -281,6 +289,14 @@ public class Subscription {
         this.updatedAt = updatedAt;
     }
 
+    public LocalDateTime getBillingStatusChangedAt() {
+        return billingStatusChangedAt;
+    }
+
+    public void setBillingStatusChangedAt(LocalDateTime billingStatusChangedAt) {
+        this.billingStatusChangedAt = billingStatusChangedAt;
+    }
+
     // Methodes utilitaires
     public boolean isActive() {
         return "trialing".equals(status) || "active".equals(status);
@@ -299,6 +315,9 @@ public class Subscription {
         LocalDateTime now = LocalDateTime.now();
         this.createdAt = now;
         this.updatedAt = now;
+        if (this.billingStatusChangedAt == null) {
+            this.billingStatusChangedAt = now;
+        }
     }
 
     @PreUpdate

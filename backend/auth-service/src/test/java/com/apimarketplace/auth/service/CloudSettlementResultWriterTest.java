@@ -59,7 +59,39 @@ class CloudSettlementResultWriterTest {
         assertThat(jdbc.operationState).isEqualTo("COMMITTED");
         assertThat(jdbc.sql).hasSize(2);
         assertThat(jdbc.sql.get(1))
-                .contains("state NOT IN ('COMMITTED','COMMITTED_DELINQUENT','RELEASED')");
+                .contains("state NOT IN ('COMMITTED','COMMITTED_DELINQUENT','RELEASED','SETTLEMENT_FAILED')");
+    }
+
+
+    @Test
+    void staleUnknownDeliveryCannotOverwriteSettlementFailedProjection() {
+        FakeJdbc jdbc = new FakeJdbc();
+        jdbc.operationState = "SETTLEMENT_FAILED";
+        UUID token = UUID.randomUUID();
+        jdbc.currentClaimToken = token;
+        CloudSettlementResultWriter writer = new CloudSettlementResultWriter(jdbc);
+
+        writer.delivered(UUID.randomUUID(), UUID.randomUUID(),
+                "f".repeat(64), token, "OUTCOME_UNKNOWN", "{}");
+
+        assertThat(jdbc.operationState).isEqualTo("SETTLEMENT_FAILED");
+        assertThat(jdbc.sql.get(1)).contains(
+                "state NOT IN ('COMMITTED','COMMITTED_DELINQUENT','RELEASED','SETTLEMENT_FAILED')");
+    }
+
+
+    @Test
+    void authoritativeTerminalMayResolveSettlementFailedProjection() {
+        FakeJdbc jdbc = new FakeJdbc();
+        jdbc.operationState = "SETTLEMENT_FAILED";
+        UUID token = UUID.randomUUID();
+        jdbc.currentClaimToken = token;
+        CloudSettlementResultWriter writer = new CloudSettlementResultWriter(jdbc);
+
+        writer.delivered(UUID.randomUUID(), UUID.randomUUID(),
+                "g".repeat(64), token, "COMMITTED", "{}");
+
+        assertThat(jdbc.operationState).isEqualTo("COMMITTED");
     }
 
     @Test
@@ -127,8 +159,10 @@ class CloudSettlementResultWriterTest {
                     && statement.contains("SET state=?")) {
                 String incoming = (String) args[0];
                 if (statement.contains("state NOT IN")
-                        && terminal(operationState)
-                        && !operationState.equals(incoming)) {
+                        && !operationState.equals(incoming)
+                        && (terminal(operationState)
+                            || ("SETTLEMENT_FAILED".equals(operationState)
+                                && !terminal(incoming)))) {
                     return 0;
                 }
                 operationState = incoming;

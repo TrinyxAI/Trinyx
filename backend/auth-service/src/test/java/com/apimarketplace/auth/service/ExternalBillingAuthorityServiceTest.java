@@ -11,6 +11,7 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.core.RowMapper;
 
 import java.sql.ResultSet;
+import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
@@ -53,6 +54,42 @@ class ExternalBillingAuthorityServiceTest {
     void unsupportedHistoryDoesNotBecomeAuthoritative() {
         assertThat(ExternalBillingAuthorityService.selectAuthoritativeSubscription(
                 List.of(subscription("incomplete"), subscription("paused")))).isNull();
+    }
+
+
+    @Test
+    void pastDueGraceIsAnchoredToStatusTransitionNotGenericUpdates() {
+        ExternalBillingAuthorityService service = new ExternalBillingAuthorityService(
+                mock(JdbcTemplate.class), mock(UserRepository.class),
+                mock(SubscriptionRepository.class), mock(PlanRepository.class),
+                mock(PlanResolutionService.class), mock(TrinyxAssertionService.class),
+                new ObjectMapper(), 72);
+        Subscription pastDue = subscription("past_due");
+        LocalDateTime transition = LocalDateTime.now().minusHours(73);
+        pastDue.setBillingStatusChangedAt(transition);
+
+        // A generic entity update must not reopen a grace window.
+        pastDue.setUpdatedAt(LocalDateTime.now());
+        pastDue.preUpdate();
+
+        assertThat(pastDue.getBillingStatusChangedAt()).isEqualTo(transition);
+        assertThat(service.accessState(pastDue)).isEqualTo("DENIED");
+    }
+
+    @Test
+    void repeatedPastDueStatusDoesNotMoveTheGraceClockButRecoveryAndRelapseDo() {
+        Subscription value = subscription("past_due");
+        LocalDateTime firstPastDue = LocalDateTime.now().minusHours(2);
+        value.setBillingStatusChangedAt(firstPastDue);
+
+        value.setStatus("past_due");
+        assertThat(value.getBillingStatusChangedAt()).isEqualTo(firstPastDue);
+
+        value.setStatus("active");
+        LocalDateTime recoveredAt = value.getBillingStatusChangedAt();
+        value.setStatus("past_due");
+
+        assertThat(value.getBillingStatusChangedAt()).isAfterOrEqualTo(recoveredAt);
     }
 
     @Test

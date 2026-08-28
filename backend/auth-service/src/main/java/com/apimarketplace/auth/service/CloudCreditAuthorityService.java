@@ -69,7 +69,7 @@ public class CloudCreditAuthorityService {
         jdbc.update("""
                 INSERT INTO auth.cloud_credit_operation
                 (operation_id, reservation_id, request_hash, principal_id, billing_subject_id,
-                 organization_id, payer_user_id, install_id, entitlement_sequence, source_type,
+                 organization_id, authority_payer_user_id, install_id, entitlement_sequence, source_type,
                  estimated_credits, maximum_credits, provider, model, state,
                  response_payload, expires_at, late_settlement_until)
                 VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,'RESERVED',CAST(? AS jsonb),?,?)
@@ -388,7 +388,7 @@ public class CloudCreditAuthorityService {
         var rows = jdbc.query("""
                 SELECT o.operation_id, o.request_hash, o.settlement_hash, o.state,
                        o.response_payload::text, o.late_settlement_until, o.organization_id,
-                       o.payer_user_id, o.source_type, o.provider, o.model,
+                       o.authority_payer_user_id, o.source_type, o.provider, o.model,
                        u.id AS executor_user_id
                 FROM auth.cloud_credit_operation o
                 JOIN auth.users u ON u.principal_id=o.principal_id
@@ -398,7 +398,7 @@ public class CloudCreditAuthorityService {
                 rs.getString("response_payload"),
                 rs.getTimestamp("late_settlement_until") == null ? null
                         : rs.getTimestamp("late_settlement_until").toInstant(),
-                rs.getLong("executor_user_id"), rs.getLong("payer_user_id"),
+                rs.getLong("executor_user_id"), rs.getLong("authority_payer_user_id"),
                 rs.getObject("organization_id", UUID.class), rs.getString("source_type"),
                 rs.getString("provider"), rs.getString("model")), id);
         return rows.isEmpty() ? null : rows.getFirst();

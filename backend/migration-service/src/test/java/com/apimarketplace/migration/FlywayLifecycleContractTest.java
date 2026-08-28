@@ -93,8 +93,8 @@ class FlywayLifecycleContractTest {
                 }
             });
             assertThat(migrationsWithoutChecksum)
-                    .as("SQL migrations have checksums; baseline V0 and BaseJavaMigration V151 do not")
-                    .containsExactly("0", "151");
+                    .as("all SQL history entries have checksums; BaseJavaMigration V151 does not")
+                    .containsExactly("151");
 
             var second = flyway.migrate();
             assertThat(second.success).isTrue();

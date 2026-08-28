@@ -19,7 +19,7 @@ import static org.assertj.core.api.Assertions.assertThat;
  */
 class FlywayLifecycleContractTest {
 
-    private static final int EXPECTED_VERSIONED_MIGRATIONS = 439;
+    private static final int EXPECTED_VERSIONED_MIGRATIONS = 440; // 439 SQL + V151 Java
     private static final String EXPECTED_CURRENT_VERSION = "453.3";
 
     @Test

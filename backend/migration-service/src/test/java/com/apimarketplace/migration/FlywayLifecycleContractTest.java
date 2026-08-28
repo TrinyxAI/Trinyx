@@ -53,17 +53,22 @@ class FlywayLifecycleContractTest {
                     .isEqualTo(EXPECTED_CURRENT_VERSION);
 
             Set<String> versions = new LinkedHashSet<>();
+            Set<String> migrationsWithoutChecksum = new LinkedHashSet<>();
             Arrays.stream(applied).forEach(info -> {
                 assertThat(info.getVersion())
                         .as("every packaged migration is versioned: %s", info.getDescription())
                         .isNotNull();
-                assertThat(versions.add(info.getVersion().toString()))
+                String version = info.getVersion().toString();
+                assertThat(versions.add(version))
                         .as("migration version is unique: %s", info.getVersion())
                         .isTrue();
-                assertThat(info.getChecksum())
-                        .as("migration checksum is recorded: %s", info.getScript())
-                        .isNotNull();
+                if (info.getChecksum() == null) {
+                    migrationsWithoutChecksum.add(version);
+                }
             });
+            assertThat(migrationsWithoutChecksum)
+                    .as("all SQL migrations have checksums; Flyway's BaseJavaMigration V151 does not")
+                    .containsExactly("151");
 
             var second = flyway.migrate();
             assertThat(second.success).isTrue();

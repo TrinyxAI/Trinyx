@@ -6,6 +6,7 @@ import com.apimarketplace.agent.tools.ToolsProvider.ToolExecutionResult;
 import com.apimarketplace.agent.client.AgentClient;
 import com.apimarketplace.agent.client.dto.AgentObservabilityRequest;
 import com.apimarketplace.agent.resolver.LlmCredentialResolver;
+import com.apimarketplace.common.credit.CreditConsumptionClient;
 import com.apimarketplace.common.credit.PricingSnapshotClient;
 import com.apimarketplace.common.credit.PricingSnapshotClient.PricingRates;
 import com.apimarketplace.orchestrator.config.WebSearchConfig;
@@ -29,6 +30,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
@@ -3291,4 +3293,162 @@ class BrowserAgentModuleTest {
         verify(listOps).leftPop(eq("agent:browser:result:job-cap"), eq(Duration.ofSeconds(205)));
         verify(listOps, never()).leftPop(anyString(), eq(Duration.ofSeconds(999)));
     }
+
+    @Test
+    @DisplayName("external browser settlement: valid runner accounting enqueues the authoritative commit")
+    void externalBrowserValidAccountingCommits() {
+        CreditConsumptionClient credits = mock(CreditConsumptionClient.class);
+        module.setCreditConsumptionClient(credits);
+        UUID operationId = UUID.randomUUID();
+        BrowserAgentModule.ExternalBrowseReservation reservation =
+                new BrowserAgentModule.ExternalBrowseReservation(
+                        true, operationId, "hash-1", "openai", "gpt-4o", null);
+        ToolExecutionResult result = ToolExecutionResult.success(Map.of(
+                "session_id", "ses-valid",
+                "cost", Map.of("tokens_in", 120, "tokens_out", 30, "llm_calls", 2)));
+        when(credits.commitExternalLlm(
+                operationId, "hash-1", "openai", "gpt-4o", "ses-valid", 120, 30))
+                .thenReturn(true);
+
+        BrowserAgentModule.BrowserSettlementOutcome outcome =
+                module.settleExternalBrowserReservation(reservation, result);
+
+        assertThat(outcome).isEqualTo(BrowserAgentModule.BrowserSettlementOutcome.COMMIT_ENQUEUED);
+        verify(credits).commitExternalLlm(
+                operationId, "hash-1", "openai", "gpt-4o", "ses-valid", 120, 30);
+        verify(credits, never()).recordExternalOutcomeUnknown(any(), any(), any(), any(), any());
+        verify(credits, never()).releaseExternal(any(), any(), any());
+    }
+
+    @Test
+    @DisplayName("external browser settlement: missing cost after dispatch becomes OUTCOME_UNKNOWN, never COMMIT(0,0)")
+    void externalBrowserMissingCostRequiresReconciliation() {
+        CreditConsumptionClient credits = mock(CreditConsumptionClient.class);
+        module.setCreditConsumptionClient(credits);
+        UUID operationId = UUID.randomUUID();
+        BrowserAgentModule.ExternalBrowseReservation reservation =
+                new BrowserAgentModule.ExternalBrowseReservation(
+                        true, operationId, "hash-2", "google", "gemini-2.5-flash", null);
+
+        BrowserAgentModule.BrowserSettlementOutcome outcome =
+                module.settleExternalBrowserReservation(
+                        reservation, ToolExecutionResult.success(Map.of("session_id", "ses-missing")));
+
+        assertThat(outcome).isEqualTo(
+                BrowserAgentModule.BrowserSettlementOutcome.RECONCILIATION_REQUIRED);
+        verify(credits).recordExternalOutcomeUnknown(
+                operationId, "hash-2", "google", "gemini-2.5-flash",
+                "browser-result-missing-accounting");
+        verify(credits, never()).commitExternalLlm(
+                any(), any(), any(), any(), any(), org.mockito.ArgumentMatchers.anyInt(),
+                org.mockito.ArgumentMatchers.anyInt());
+        verify(credits, never()).releaseExternal(any(), any(), any());
+    }
+
+    @Test
+    @DisplayName("external browser settlement: malformed accounting fails closed")
+    void externalBrowserMalformedCostRequiresReconciliation() {
+        CreditConsumptionClient credits = mock(CreditConsumptionClient.class);
+        module.setCreditConsumptionClient(credits);
+        UUID operationId = UUID.randomUUID();
+        BrowserAgentModule.ExternalBrowseReservation reservation =
+                new BrowserAgentModule.ExternalBrowseReservation(
+                        true, operationId, "hash-3", "openai", "gpt-4o", null);
+        ToolExecutionResult result = ToolExecutionResult.success(Map.of(
+                "session_id", "ses-malformed",
+                "cost", Map.of("tokens_in", "120", "tokens_out", 30, "llm_calls", 2)));
+
+        BrowserAgentModule.BrowserSettlementOutcome outcome =
+                module.settleExternalBrowserReservation(reservation, result);
+
+        assertThat(outcome).isEqualTo(
+                BrowserAgentModule.BrowserSettlementOutcome.RECONCILIATION_REQUIRED);
+        verify(credits).recordExternalOutcomeUnknown(
+                operationId, "hash-3", "openai", "gpt-4o",
+                "browser-result-malformed-accounting");
+        verify(credits, never()).releaseExternal(any(), any(), any());
+    }
+
+    @Test
+    @DisplayName("external browser settlement: runner fallback counters are valid accounting")
+    void externalBrowserFallbackCountersCommit() {
+        CreditConsumptionClient credits = mock(CreditConsumptionClient.class);
+        module.setCreditConsumptionClient(credits);
+        UUID operationId = UUID.randomUUID();
+        BrowserAgentModule.ExternalBrowseReservation reservation =
+                new BrowserAgentModule.ExternalBrowseReservation(
+                        true, operationId, "hash-4", "anthropic", "claude-sonnet-4-6", null);
+        // This is the exact shape emitted when runner.py falls back from TokenCost
+        // history to the per-step session counters: by_model can be empty while
+        // aggregate tokens and llm_calls remain authoritative.
+        ToolExecutionResult result = ToolExecutionResult.success(Map.of(
+                "session_id", "ses-fallback",
+                "cost", Map.of(
+                        "tokens_in", 80L, "tokens_out", 12L, "llm_calls", 1L,
+                        "by_model", Map.of())));
+        when(credits.commitExternalLlm(
+                operationId, "hash-4", "anthropic", "claude-sonnet-4-6",
+                "ses-fallback", 80, 12)).thenReturn(true);
+
+        assertThat(module.settleExternalBrowserReservation(reservation, result))
+                .isEqualTo(BrowserAgentModule.BrowserSettlementOutcome.COMMIT_ENQUEUED);
+    }
+
+    @Test
+    @DisplayName("external browser settlement: completed provider with zero/missing usage stays ambiguous")
+    void externalBrowserCompletedButAmbiguousAccountingDoesNotBecomeFree() {
+        CreditConsumptionClient credits = mock(CreditConsumptionClient.class);
+        module.setCreditConsumptionClient(credits);
+        UUID operationId = UUID.randomUUID();
+        BrowserAgentModule.ExternalBrowseReservation reservation =
+                new BrowserAgentModule.ExternalBrowseReservation(
+                        true, operationId, "hash-5", "openai", "gpt-4o", null);
+        ToolExecutionResult result = ToolExecutionResult.success(Map.of(
+                "session_id", "ses-zero",
+                "stop_reason", "COMPLETED",
+                "cost", Map.of("tokens_in", 0, "tokens_out", 0, "llm_calls", 1)));
+
+        assertThat(module.settleExternalBrowserReservation(reservation, result))
+                .isEqualTo(BrowserAgentModule.BrowserSettlementOutcome.RECONCILIATION_REQUIRED);
+        verify(credits).recordExternalOutcomeUnknown(
+                operationId, "hash-5", "openai", "gpt-4o",
+                "browser-result-ambiguous-provider-accounting");
+        verify(credits, never()).commitExternalLlm(
+                any(), any(), any(), any(), any(), org.mockito.ArgumentMatchers.anyInt(),
+                org.mockito.ArgumentMatchers.anyInt());
+        verify(credits, never()).releaseExternal(any(), any(), any());
+    }
+
+    @Test
+    @DisplayName("external browser settlement: delayed valid accounting can reconcile an earlier UNKNOWN")
+    void externalBrowserDelayedAccountingReconcilesWithoutRelease() {
+        CreditConsumptionClient credits = mock(CreditConsumptionClient.class);
+        module.setCreditConsumptionClient(credits);
+        UUID operationId = UUID.randomUUID();
+        BrowserAgentModule.ExternalBrowseReservation reservation =
+                new BrowserAgentModule.ExternalBrowseReservation(
+                        true, operationId, "hash-6", "openai", "gpt-4o", null);
+        ToolExecutionResult ambiguous = ToolExecutionResult.success(Map.of(
+                "session_id", "ses-delayed", "stop_reason", "COMPLETED"));
+        ToolExecutionResult reconciled = ToolExecutionResult.success(Map.of(
+                "session_id", "ses-delayed",
+                "cost", Map.of("tokens_in", 200, "tokens_out", 40, "llm_calls", 3)));
+        when(credits.commitExternalLlm(
+                operationId, "hash-6", "openai", "gpt-4o", "ses-delayed", 200, 40))
+                .thenReturn(true);
+
+        assertThat(module.settleExternalBrowserReservation(reservation, ambiguous))
+                .isEqualTo(BrowserAgentModule.BrowserSettlementOutcome.RECONCILIATION_REQUIRED);
+        assertThat(module.settleExternalBrowserReservation(reservation, reconciled))
+                .isEqualTo(BrowserAgentModule.BrowserSettlementOutcome.COMMIT_ENQUEUED);
+
+        org.mockito.InOrder order = org.mockito.Mockito.inOrder(credits);
+        order.verify(credits).recordExternalOutcomeUnknown(
+                operationId, "hash-6", "openai", "gpt-4o",
+                "browser-result-missing-accounting");
+        order.verify(credits).commitExternalLlm(
+                operationId, "hash-6", "openai", "gpt-4o", "ses-delayed", 200, 40);
+        verify(credits, never()).releaseExternal(any(), any(), any());
+    }
+
 }

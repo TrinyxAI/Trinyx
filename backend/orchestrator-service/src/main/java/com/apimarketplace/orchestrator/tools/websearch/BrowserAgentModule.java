@@ -423,9 +423,10 @@ public class BrowserAgentModule extends WebJobModule {
                         "provider-outcome-unknown-after-dispatch");
                 throw failure;
             }
-            settleExternalBrowserReservation(externalReservation, runResult);
+            BrowserSettlementOutcome settlementOutcome =
+                    settleExternalBrowserReservation(externalReservation, runResult);
             if (externalReservation != null) {
-                runResult = withExternalBillingMetadata(runResult);
+                runResult = withExternalBillingMetadata(runResult, settlementOutcome);
             }
             // Plumb the substitution notice into the result so the LLM sees
             // which model was actually used. Only present when a swap happened.
@@ -489,32 +490,67 @@ public class BrowserAgentModule extends WebJobModule {
                 : ExternalBrowseReservation.rejected(result.error());
     }
 
-    private void settleExternalBrowserReservation(
+    BrowserSettlementOutcome settleExternalBrowserReservation(
             ExternalBrowseReservation reservation, ToolExecutionResult result) {
-        if (reservation == null || !reservation.accepted()) return;
-        Map<String, Object> payload = result != null && result.data() instanceof Map<?, ?> raw
-                ? castStringMap(raw) : Map.of();
-        Map<String, Object> cost = payload.get("cost") instanceof Map<?, ?> rawCost
-                ? castStringMap(rawCost) : Map.of();
-        int promptTokens = saturatingInt(longField(cost, "tokens_in"));
-        int completionTokens = saturatingInt(longField(cost, "tokens_out"));
-        boolean providerCostIncurred = promptTokens > 0 || completionTokens > 0
-                || longField(cost, "llm_calls") > 0;
-        if (result != null && (result.success() || providerCostIncurred)) {
-            String providerRequestId = stringFieldFromObj(payload.get("session_id"));
-            boolean acknowledged = creditConsumptionClient.commitExternalLlm(
-                    reservation.operationId(), reservation.requestHash(),
-                    reservation.provider(), reservation.model(), providerRequestId,
-                    promptTokens, completionTokens);
-            if (!acknowledged) {
-                log.error("Browser-agent external settlement was not acknowledged: operationId={}",
-                        reservation.operationId());
-            }
-        } else {
-            // A failed/empty runner result does not prove that its upstream LLM was
-            // never invoked. Keep the hold and create a durable reconciliation item.
-            recordAmbiguousBrowserOutcome(reservation,
+        if (reservation == null || !reservation.accepted()) {
+            return BrowserSettlementOutcome.NOT_APPLICABLE;
+        }
+        BrowserAccountingValidation accounting = validateBrowserAccounting(result);
+        if (!accounting.valid()) {
+            // Provider dispatch has already been durably acknowledged. Missing or malformed
+            // accounting therefore cannot prove zero usage and must never become COMMIT(0, 0)
+            // or an automatic RELEASE. Preserve the hold for evidence-based reconciliation.
+            recordAmbiguousBrowserOutcome(reservation, accounting.reason());
+            return BrowserSettlementOutcome.RECONCILIATION_REQUIRED;
+        }
+
+        Map<String, Object> payload = castStringMap((Map<?, ?>) result.data());
+        String providerRequestId = stringFieldFromObj(payload.get("session_id"));
+        boolean acknowledged = creditConsumptionClient.commitExternalLlm(
+                reservation.operationId(), reservation.requestHash(),
+                reservation.provider(), reservation.model(), providerRequestId,
+                accounting.promptTokens(), accounting.completionTokens());
+        if (!acknowledged) {
+            log.error("Browser-agent external settlement was not acknowledged: operationId={}",
+                    reservation.operationId());
+            return BrowserSettlementOutcome.COMMIT_NOT_ACKNOWLEDGED;
+        }
+        return BrowserSettlementOutcome.COMMIT_ENQUEUED;
+    }
+
+    static BrowserAccountingValidation validateBrowserAccounting(ToolExecutionResult result) {
+        if (result == null || !(result.data() instanceof Map<?, ?> payload)) {
+            return BrowserAccountingValidation.invalid(
                     "browser-result-without-verifiable-provider-usage");
+        }
+        Object rawCost = payload.get("cost");
+        if (!(rawCost instanceof Map<?, ?> cost)) {
+            return BrowserAccountingValidation.invalid(
+                    "browser-result-missing-accounting");
+        }
+
+        Long promptTokens = nonNegativeWholeNumber(cost.get("tokens_in"));
+        Long completionTokens = nonNegativeWholeNumber(cost.get("tokens_out"));
+        Long llmCalls = nonNegativeWholeNumber(cost.get("llm_calls"));
+        if (promptTokens == null || completionTokens == null || llmCalls == null) {
+            return BrowserAccountingValidation.invalid(
+                    "browser-result-malformed-accounting");
+        }
+        if (llmCalls == 0 || promptTokens + completionTokens == 0) {
+            return BrowserAccountingValidation.invalid(
+                    "browser-result-ambiguous-provider-accounting");
+        }
+        return BrowserAccountingValidation.valid(
+                saturatingInt(promptTokens), saturatingInt(completionTokens));
+    }
+
+    private static Long nonNegativeWholeNumber(Object value) {
+        if (!(value instanceof Number number)) return null;
+        try {
+            long parsed = new BigDecimal(number.toString()).longValueExact();
+            return parsed < 0 ? null : parsed;
+        } catch (ArithmeticException | NumberFormatException invalid) {
+            return null;
         }
     }
 
@@ -537,10 +573,14 @@ public class BrowserAgentModule extends WebJobModule {
     }
 
     private static ToolExecutionResult withExternalBillingMetadata(
-            ToolExecutionResult result) {
+            ToolExecutionResult result, BrowserSettlementOutcome settlementOutcome) {
         Map<String, Object> metadata = new LinkedHashMap<>();
         if (result.metadata() != null) metadata.putAll(result.metadata());
         metadata.put("externalBillingManaged", true);
+        metadata.put("externalBillingSettlement", settlementOutcome.name());
+        metadata.put("externalBillingReconciliationPending",
+                settlementOutcome == BrowserSettlementOutcome.RECONCILIATION_REQUIRED
+                        || settlementOutcome == BrowserSettlementOutcome.COMMIT_NOT_ACKNOWLEDGED);
         return new ToolExecutionResult(result.success(), result.data(), result.error(),
                 result.errorCode(), Map.copyOf(metadata));
     }
@@ -571,11 +611,29 @@ public class BrowserAgentModule extends WebJobModule {
         return (Map<String, Object>) value;
     }
 
-    private record ExternalBrowseReservation(
+    record ExternalBrowseReservation(
             boolean accepted, java.util.UUID operationId, String requestHash,
             String provider, String model, String error) {
         static ExternalBrowseReservation rejected(String error) {
             return new ExternalBrowseReservation(false, null, null, null, null, error);
+        }
+    }
+
+    enum BrowserSettlementOutcome {
+        NOT_APPLICABLE,
+        COMMIT_ENQUEUED,
+        COMMIT_NOT_ACKNOWLEDGED,
+        RECONCILIATION_REQUIRED
+    }
+
+    record BrowserAccountingValidation(
+            boolean valid, int promptTokens, int completionTokens, String reason) {
+        static BrowserAccountingValidation valid(int promptTokens, int completionTokens) {
+            return new BrowserAccountingValidation(true, promptTokens, completionTokens, null);
+        }
+
+        static BrowserAccountingValidation invalid(String reason) {
+            return new BrowserAccountingValidation(false, 0, 0, reason);
         }
     }
 

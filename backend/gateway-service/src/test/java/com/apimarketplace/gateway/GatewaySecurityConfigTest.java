@@ -56,6 +56,47 @@ class GatewaySecurityConfigTest {
     }
 
     @Test
+    void phaseTwoApplicationSurfaceRequiresUserAuthentication() {
+        for (String path : List.of(
+                "/api/v2/workflows/dag/execute",
+                "/api/v2/workflows/dag/runs/run/signals",
+                "/api/agents",
+                "/api/interfaces",
+                "/api/data-sources",
+                "/api/publications",
+                "/api/publications/remote/marketplace",
+                "/api/application-folders",
+                "/api/agent-folders",
+                "/api/table-folders",
+                "/api/interface-folders",
+                "/api/workflow-folders",
+                "/api/credentials",
+                "/api/conversations",
+                "/api/generation/models",
+                "/api/storage",
+                "/api/storage/explorer/generations",
+                "/api/model-config/catalog-sync",
+                "/api/mcp/tools/list",
+                "/api/ce-websearch/search",
+                "/api/browser-agent/llm/v1/chat/completions",
+                "/api/webhooks",
+                "/api/organizations/00000000-0000-0000-0000-000000000001",
+                "/ws/conversations")) {
+            assertThat(GatewayPublicRoutes.matches(HttpMethod.POST, path))
+                    .as("POST %s", path)
+                    .isFalse();
+        }
+
+        assertThat(GatewayPublicRoutes.matches(
+                HttpMethod.GET, "/app/public/capability-token/config")).isTrue();
+        assertThat(GatewayPublicRoutes.matches(
+                HttpMethod.GET, "/api/publications/remote/marketplace")).isFalse();
+        assertThat(GatewayPublicRoutes.matches(
+                HttpMethod.DELETE, "/api/organizations/00000000-0000-0000-0000-000000000001"))
+                .isFalse();
+    }
+
+    @Test
     void websocketUpgradeAuthenticatesExistingJwtSubprotocol() {
         var exchange = MockServerWebExchange.from(MockServerHttpRequest.get("/ws")
                 .header("Sec-WebSocket-Protocol",

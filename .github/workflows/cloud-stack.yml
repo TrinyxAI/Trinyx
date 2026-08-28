@@ -20,6 +20,7 @@ on:
       - "docker/README-CE.md"
       - ".github/workflows/**"
       - "scripts/validate-trinyx-branding.sh"
+      - "scripts/validate-phase2-reachability.mjs"
   workflow_dispatch:
 
 permissions:
@@ -269,6 +270,10 @@ jobs:
           distribution: temurin
           java-version: "21"
           cache: maven
+
+      - name: Validate Phase 2 route-to-controller reachability
+        shell: bash
+        run: node scripts/validate-phase2-reachability.mjs
 
       - name: Test Cloud edition and gateway contracts
         working-directory: backend

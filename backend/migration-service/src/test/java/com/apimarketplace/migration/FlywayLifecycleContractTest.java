@@ -35,12 +35,23 @@ class FlywayLifecycleContractTest {
 
         try (PostgreSQLContainer<?> postgres = new PostgreSQLContainer<>(postgresWithVector)) {
             postgres.start();
+            String jdbcUrl = postgres.getJdbcUrl()
+                    + "?currentSchema=orchestrator"
+                    + "&options=-c%20lc.migration.source_timezone%3DUTC";
             Flyway flyway = Flyway.configure()
-                    // Mirror spring.flyway.postgresql.transactional-lock=false from application.yml.
-                    // Without it Flyway's advisory-lock transaction can block its own
-                    // CREATE INDEX CONCURRENTLY migrations on a reused connection.
-                    .configuration(Map.of("flyway.postgresql.transactional.lock", "false"))
-                    .dataSource(postgres.getJdbcUrl(), postgres.getUsername(), postgres.getPassword())
+                    // Mirror the migration service's production-critical Flyway settings.
+                    .configuration(Map.ofEntries(
+                            Map.entry("flyway.postgresql.transactional.lock", "false"),
+                            Map.entry("flyway.baselineOnMigrate", "true"),
+                            Map.entry("flyway.baselineVersion", "0"),
+                            Map.entry("flyway.outOfOrder", "true"),
+                            Map.entry("flyway.mixed", "true"),
+                            Map.entry("flyway.schemas",
+                                    "orchestrator,storage,agent,trigger,interface,publication,"
+                                            + "auth,datasource,catalog,conversation"),
+                            Map.entry("flyway.defaultSchema", "orchestrator"),
+                            Map.entry("flyway.table", "flyway_schema_history_orchestrator")))
+                    .dataSource(jdbcUrl, postgres.getUsername(), postgres.getPassword())
                     .locations("classpath:db/migration")
                     .cleanDisabled(false)
                     .load();

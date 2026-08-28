@@ -101,7 +101,6 @@ gateway:
     verification-enabled: ${GATEWAY_VERIFICATION_ENABLED:true}
     public-paths:
       - /actuator/
-      - /api/internal/
       - /internal/v1/credit-reservations
       - /internal/v1/entitlement-projections
       - /api/users/health
@@ -122,23 +121,18 @@ gateway:
       - /api/auth/openid-configuration
     hmac-required-paths:
       - /api/credits/
-      - /api/internal/credentials/
-      - /api/internal/variables/
-      - /api/internal/cloud-credit-proxy/
-      - /api/internal/cloud-identity/
-      - /api/internal/v1/entitlement-projections
-      - /api/internal/auth/workspace/
+      - /api/internal/
     service-authenticated-paths:
-      - /api/internal/credentials/
-      - /api/internal/variables/
-      - /api/internal/cloud-credit-proxy/
-      - /api/internal/cloud-identity/
-      - /api/internal/v1/entitlement-projections
-      - /api/internal/auth/workspace/
+      - /api/internal/
     service-secrets:
       catalog-service: ${CATALOG_SERVICE_S2S_SECRET:}
       orchestrator-service: ${ORCHESTRATOR_SERVICE_S2S_SECRET:}
       agent-service: ${AGENT_SERVICE_S2S_SECRET:}
+      datasource-service: ${DATASOURCE_SERVICE_S2S_SECRET:}
+      interface-service: ${INTERFACE_SERVICE_S2S_SECRET:}
+      publication-service: ${PUBLICATION_SERVICE_S2S_SECRET:}
+      storage-service: ${STORAGE_SERVICE_S2S_SECRET:}
+      trigger-service: ${TRIGGER_SERVICE_S2S_SECRET:}
       gateway-service: ${GATEWAY_SERVICE_S2S_SECRET:}
       auth-service: ${AUTH_SERVICE_S2S_SECRET:}
     service-route-permissions:
@@ -188,6 +182,19 @@ gateway:
         - "POST:/api/internal/cloud-credit-proxy/{operationId}/release"
         - "POST:/api/internal/cloud-credit-proxy/{operationId}/release-local"
         - "POST:/api/internal/cloud-credit-proxy/{operationId}/outcome-unknown"
+        - "GET:/api/internal/auth/plans/limits/{resourceType}"
+        - "GET:/api/internal/auth/org-restrictions"
+        - "GET:/api/internal/auth/org-restrictions/write"
+        - "GET:/api/internal/auth/org-restrictions/member"
+        - "GET:/api/internal/auth/users/{userId}/default-organization"
+        - "GET:/api/internal/auth/users/{userId}/roles"
+        - "GET:/api/internal/auth/organizations/{orgId}/member-ids"
+        - "GET:/api/internal/auth/users/{userId}/display-name"
+        - "GET:/api/internal/auth/users/{userId}/publisher-profile"
+        - "POST:/api/internal/auth/users/resolve-batch"
+        - "GET:/api/internal/auth/ce-link/{installId}/active"
+        - "GET:/api/internal/auth/ce-link/{installId}/entitlements"
+        - "POST:/api/internal/auth/credit/dead-letter"
       orchestrator-service:
         - "GET:/api/internal/credentials/configured-integrations/{tenantId}"
         - "GET:/api/internal/credentials/state-version"
@@ -214,6 +221,20 @@ gateway:
         - "POST:/api/internal/cloud-credit-proxy/{operationId}/release"
         - "POST:/api/internal/cloud-credit-proxy/{operationId}/release-local"
         - "POST:/api/internal/cloud-credit-proxy/{operationId}/outcome-unknown"
+        - "GET:/api/internal/auth/plans/limits/{resourceType}"
+        - "GET:/api/internal/auth/org-restrictions"
+        - "GET:/api/internal/auth/org-restrictions/write"
+        - "GET:/api/internal/auth/org-restrictions/member"
+        - "GET:/api/internal/auth/users/{userId}/default-organization"
+        - "GET:/api/internal/auth/users/{userId}/roles"
+        - "GET:/api/internal/auth/organizations/{orgId}/member-ids"
+        - "GET:/api/internal/auth/users/{userId}/display-name"
+        - "GET:/api/internal/auth/users/{userId}/publisher-profile"
+        - "POST:/api/internal/auth/users/resolve-batch"
+        - "POST:/api/internal/auth/org-restrictions"
+        - "DELETE:/api/internal/auth/org-restrictions"
+        - "PUT:/api/internal/auth/org-restrictions/bulk"
+        - "POST:/api/internal/auth/credit/dead-letter"
       agent-service:
         - "GET:/api/internal/credentials/configured-integrations/{tenantId}"
         - "GET:/api/internal/credentials/state-version"
@@ -228,12 +249,91 @@ gateway:
         - "POST:/api/internal/cloud-credit-proxy/{operationId}/release"
         - "POST:/api/internal/cloud-credit-proxy/{operationId}/release-local"
         - "POST:/api/internal/cloud-credit-proxy/{operationId}/outcome-unknown"
+        - "GET:/api/internal/auth/plans/limits/{resourceType}"
+        - "GET:/api/internal/auth/org-restrictions"
+        - "GET:/api/internal/auth/org-restrictions/write"
+        - "GET:/api/internal/auth/org-restrictions/member"
+        - "GET:/api/internal/auth/users/{userId}/default-organization"
+        - "GET:/api/internal/auth/users/{userId}/roles"
+        - "GET:/api/internal/auth/organizations/{orgId}/member-ids"
+        - "GET:/api/internal/auth/users/{userId}/display-name"
+        - "GET:/api/internal/auth/users/{userId}/publisher-profile"
+        - "POST:/api/internal/auth/users/resolve-batch"
+        - "POST:/api/internal/auth/org-restrictions"
+        - "DELETE:/api/internal/auth/org-restrictions"
+        - "PUT:/api/internal/auth/org-restrictions/bulk"
+        - "POST:/api/internal/auth/credit/dead-letter"
+        - "POST:/api/internal/auth/model-pricing/sync"
+      datasource-service:
+        - "GET:/api/internal/auth/plans/limits/{resourceType}"
+        - "GET:/api/internal/auth/org-restrictions"
+        - "GET:/api/internal/auth/org-restrictions/write"
+        - "GET:/api/internal/auth/org-restrictions/member"
+        - "GET:/api/internal/auth/users/{userId}/default-organization"
+        - "GET:/api/internal/auth/users/{userId}/roles"
+        - "GET:/api/internal/auth/organizations/{orgId}/member-ids"
+        - "GET:/api/internal/auth/users/{userId}/display-name"
+        - "GET:/api/internal/auth/users/{userId}/publisher-profile"
+        - "POST:/api/internal/auth/users/resolve-batch"
+        - "POST:/api/internal/auth/org-restrictions"
+        - "DELETE:/api/internal/auth/org-restrictions"
+        - "PUT:/api/internal/auth/org-restrictions/bulk"
+      interface-service:
+        - "GET:/api/internal/auth/plans/limits/{resourceType}"
+        - "GET:/api/internal/auth/org-restrictions"
+        - "GET:/api/internal/auth/org-restrictions/write"
+        - "GET:/api/internal/auth/org-restrictions/member"
+        - "GET:/api/internal/auth/users/{userId}/default-organization"
+        - "GET:/api/internal/auth/users/{userId}/roles"
+        - "GET:/api/internal/auth/organizations/{orgId}/member-ids"
+        - "GET:/api/internal/auth/users/{userId}/display-name"
+        - "GET:/api/internal/auth/users/{userId}/publisher-profile"
+        - "POST:/api/internal/auth/users/resolve-batch"
+        - "POST:/api/internal/auth/org-restrictions"
+        - "DELETE:/api/internal/auth/org-restrictions"
+        - "PUT:/api/internal/auth/org-restrictions/bulk"
+      publication-service:
+        - "GET:/api/internal/auth/plans/limits/{resourceType}"
+        - "GET:/api/internal/auth/org-restrictions"
+        - "GET:/api/internal/auth/org-restrictions/write"
+        - "GET:/api/internal/auth/org-restrictions/member"
+        - "GET:/api/internal/auth/users/{userId}/default-organization"
+        - "GET:/api/internal/auth/users/{userId}/roles"
+        - "GET:/api/internal/auth/organizations/{orgId}/member-ids"
+        - "GET:/api/internal/auth/users/{userId}/display-name"
+        - "GET:/api/internal/auth/users/{userId}/publisher-profile"
+        - "POST:/api/internal/auth/users/resolve-batch"
+        - "POST:/api/internal/auth/credit/dead-letter"
+      storage-service:
+        - "GET:/api/internal/auth/plans/limits/{resourceType}"
+        - "GET:/api/internal/auth/org-restrictions"
+        - "GET:/api/internal/auth/org-restrictions/write"
+        - "GET:/api/internal/auth/org-restrictions/member"
+        - "GET:/api/internal/auth/users/{userId}/default-organization"
+        - "GET:/api/internal/auth/users/{userId}/roles"
+        - "GET:/api/internal/auth/organizations/{orgId}/member-ids"
+        - "GET:/api/internal/auth/users/{userId}/display-name"
+        - "GET:/api/internal/auth/users/{userId}/publisher-profile"
+        - "POST:/api/internal/auth/users/resolve-batch"
+      trigger-service:
+        - "GET:/api/internal/auth/plans/limits/{resourceType}"
+        - "GET:/api/internal/auth/org-restrictions"
+        - "GET:/api/internal/auth/org-restrictions/write"
+        - "GET:/api/internal/auth/org-restrictions/member"
+        - "GET:/api/internal/auth/users/{userId}/default-organization"
+        - "GET:/api/internal/auth/users/{userId}/roles"
+        - "GET:/api/internal/auth/organizations/{orgId}/member-ids"
+        - "GET:/api/internal/auth/users/{userId}/display-name"
+        - "GET:/api/internal/auth/users/{userId}/publisher-profile"
+        - "POST:/api/internal/auth/users/resolve-batch"
       gateway-service:
         - "GET:/api/internal/cloud-identity/context"
         - "POST:/api/internal/cloud-identity/bind"
         - "POST:/api/internal/cloud-identity/revoke"
         - "PUT:/api/internal/v1/entitlement-projections/repair"
         - "GET:/api/internal/v1/entitlement-projections/decision"
+        - "GET:/api/internal/auth/ce-link/{installId}/active"
+        - "GET:/api/internal/auth/ce-link/{installId}/entitlements"
       auth-service:
         - "POST:/api/internal/auth/workspace/{organizationId}/purge"
         - "POST:/api/internal/auth/workspace/reconcile/{userId}"

@@ -6,6 +6,7 @@ import org.springframework.core.ParameterizedTypeReference;
 import org.springframework.http.HttpEntity;
 import org.springframework.http.HttpHeaders;
 import com.apimarketplace.common.web.OrgContextHeaderForwarder;
+import com.apimarketplace.common.web.ServiceRequestSigningInterceptor;
 import org.springframework.http.HttpMethod;
 import org.springframework.http.ResponseEntity;
 import org.springframework.http.client.SimpleClientHttpRequestFactory;
@@ -75,15 +76,35 @@ public class AuthClient {
     }
 
     public AuthClient(String authServiceUrl) {
-        this.restTemplate = new RestTemplate();
-        this.boundedRestTemplate = createBoundedRestTemplate();
-        this.baseUrl = authServiceUrl;
+        this(new RestTemplate(), authServiceUrl, "", "");
     }
 
     public AuthClient(RestTemplate restTemplate, String authServiceUrl) {
+        this(restTemplate, authServiceUrl, "", "");
+    }
+
+    AuthClient(RestTemplate restTemplate, String authServiceUrl,
+               String serviceId, String serviceSecret) {
         this.restTemplate = restTemplate;
         this.boundedRestTemplate = createBoundedRestTemplate();
+        configureSigning(this.restTemplate, serviceId, serviceSecret);
+        configureSigning(this.boundedRestTemplate, serviceId, serviceSecret);
         this.baseUrl = authServiceUrl;
+    }
+
+    private static void configureSigning(
+            RestTemplate target, String serviceId, String serviceSecret) {
+        boolean missingId = serviceId == null || serviceId.isBlank();
+        boolean missingSecret = serviceSecret == null || serviceSecret.isBlank();
+        if (missingId && missingSecret) {
+            return; // CE/monolith: downstream verification is disabled.
+        }
+        if (missingId || missingSecret) {
+            throw new IllegalStateException(
+                    "Internal auth service identity and HMAC secret must be configured together");
+        }
+        target.getInterceptors().add(
+                new ServiceRequestSigningInterceptor(serviceId, serviceSecret));
     }
 
     private static RestTemplate createBoundedRestTemplate() {

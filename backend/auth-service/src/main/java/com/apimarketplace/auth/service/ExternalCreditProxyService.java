@@ -98,6 +98,22 @@ public class ExternalCreditProxyService {
 
 
     @Transactional(readOnly = true)
+    public void assertOrigin(UUID operationId, String originServiceId) {
+        if (originServiceId == null || originServiceId.isBlank()) {
+            throw new ResponseStatusException(HttpStatus.UNAUTHORIZED,
+                    "MISSING_ORIGIN_SERVICE");
+        }
+        Integer matches = jdbc.queryForObject("""
+                SELECT count(*) FROM auth.cloud_credit_operation
+                 WHERE operation_id=? AND origin_service_id=?
+                """, Integer.class, operationId, originServiceId);
+        if (matches == null || matches != 1) {
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN,
+                    "ORIGIN_SERVICE_MISMATCH");
+        }
+    }
+
+    @Transactional(readOnly = true)
     public String requestHash(UUID operationId) {
         var values = jdbc.query("SELECT request_hash FROM auth.cloud_credit_operation WHERE operation_id=?",
                 (rs, row) -> rs.getString(1), operationId);
@@ -198,6 +214,7 @@ public class ExternalCreditProxyService {
     private void validate(Context context, ReserveCommand command) {
         if (context == null || context.principalId() == null || context.billingSubjectId() == null
                 || context.organizationId() == null || context.installId() == null
+                || context.originServiceId() == null || context.originServiceId().isBlank()
                 || command == null || command.operationId() == null
                 || command.sourceType() == null || command.sourceType().isBlank()
                 || command.maximumCredits() == null || command.maximumCredits().signum() <= 0

@@ -38,14 +38,14 @@ public class ExternalCreditProxyStateWriter {
         jdbc.update("""
                 INSERT INTO auth.cloud_credit_operation
                 (operation_id, reservation_id, request_hash, principal_id, billing_subject_id,
-                 organization_id, install_id, entitlement_sequence, source_type,
+                 organization_id, install_id, origin_service_id, entitlement_sequence, source_type,
                  estimated_credits, maximum_credits, provider, model, state,
                  response_payload, expires_at, late_settlement_until)
-                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,'RESERVED',CAST(? AS jsonb),?,?)
+                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,'RESERVED',CAST(? AS jsonb),?,?)
                 ON CONFLICT (operation_id) DO NOTHING
                 """, command.operationId(), response.reservationId(), requestHash,
                 context.principalId(), context.billingSubjectId(), context.organizationId(),
-                context.installId(), entitlementSequence, command.sourceType(),
+                context.installId(), context.originServiceId(), entitlementSequence, command.sourceType(),
                 command.estimatedCredits(), command.maximumCredits(), command.provider(),
                 command.model(), write(response), Timestamp.from(response.expiresAt()),
                 Timestamp.from(response.expiresAt().plus(Duration.ofHours(24))));

@@ -68,7 +68,8 @@ class ExternalCreditProjectionPostgresContractTest {
             UUID billingSubjectId = UUID.randomUUID();
             Instant expiresAt = Instant.now().plusSeconds(900);
             var context = new ExternalCreditProxyService.Context(
-                    UUID.randomUUID(), billingSubjectId, UUID.randomUUID(), UUID.randomUUID());
+                    UUID.randomUUID(), billingSubjectId, UUID.randomUUID(), UUID.randomUUID(),
+                    "orchestrator-service");
             var command = new ExternalCreditProxyService.ReserveCommand(
                     operationId, "browser", "BROWSER_AGENT_EXECUTION",
                     BigDecimal.ONE, BigDecimal.TEN, "openai", "gpt");
@@ -79,12 +80,14 @@ class ExternalCreditProjectionPostgresContractTest {
             writer.reserved(context, command, 1L, "a".repeat(64), response);
 
             Map<String, Object> persisted = jdbc.queryForMap("""
-                    SELECT billing_subject_id, authority_payer_user_id, state
+                    SELECT billing_subject_id, authority_payer_user_id, origin_service_id, state
                       FROM auth.cloud_credit_operation
                      WHERE operation_id=?
                     """, operationId);
             assertThat(persisted.get("billing_subject_id")).isEqualTo(billingSubjectId);
             assertThat(persisted.get("authority_payer_user_id")).isNull();
+            assertThat(persisted.get("origin_service_id"))
+                    .isEqualTo("orchestrator-service");
             assertThat(persisted.get("state")).isEqualTo("RESERVED");
 
             jdbc.update("""

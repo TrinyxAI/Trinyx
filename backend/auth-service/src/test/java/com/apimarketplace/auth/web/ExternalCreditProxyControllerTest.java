@@ -21,8 +21,9 @@ class ExternalCreditProxyControllerTest {
         var command = new ExternalCreditProxyService.DispatchingCommand(
                 "a".repeat(64), "openai", "gpt");
 
-        controller.dispatching(operationId, command);
+        controller.dispatching("orchestrator-service", operationId, command);
 
+        verify(proxy).assertOrigin(operationId, "orchestrator-service");
         verify(proxy).dispatching(operationId, command);
     }
 
@@ -44,13 +45,15 @@ class ExternalCreditProxyControllerTest {
                 UUID.randomUUID(), "cloudWebSearchRelay", "BROWSER_AGENT_EXECUTION",
                 "openai", "gpt", 100, 50);
 
-        controller.reserveLlm(42L, null, null, organization, null, command);
+        controller.reserveLlm(42L, "agent-service", null, null,
+                organization, null, command);
 
         ArgumentCaptor<ExternalCreditProxyService.Context> context =
                 ArgumentCaptor.forClass(ExternalCreditProxyService.Context.class);
         verify(proxy).reserveLlm(context.capture(), same(command));
         assertThat(context.getValue()).isEqualTo(
-                new ExternalCreditProxyService.Context(principal, payer, organization, install));
+                new ExternalCreditProxyService.Context(
+                        principal, payer, organization, install, "agent-service"));
     }
 
     @Test
@@ -59,7 +62,7 @@ class ExternalCreditProxyControllerTest {
                 mock(ExternalCreditProxyService.class), mock(CloudIdentityBindingService.class));
 
         org.assertj.core.api.Assertions.assertThatThrownBy(() -> controller.reserveLlm(
-                42L, UUID.randomUUID(), null, UUID.randomUUID(), null,
+                42L, "agent-service", UUID.randomUUID(), null, UUID.randomUUID(), null,
                 new ExternalCreditProxyService.LlmReserveCommand(
                         UUID.randomUUID(), "cloudWebSearchRelay", "BROWSER_AGENT_EXECUTION",
                         "openai", "gpt", 1, 1)))

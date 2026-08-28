@@ -162,6 +162,10 @@ CREATE TABLE IF NOT EXISTS auth.cloud_credit_operation (
     -- billing_subject_id as the durable cross-environment payer identity.
     authority_payer_user_id BIGINT REFERENCES auth.users(id),
     install_id UUID NOT NULL,
+    -- Signed Cloud caller that created the projection. NULL in the paid-authority DB,
+    -- whose only caller is the authenticated trinyx-cloud-runtime workload.
+    origin_service_id VARCHAR(64)
+        CHECK (origin_service_id ~ '^[a-z0-9][a-z0-9-]{1,63}$'),
     entitlement_sequence BIGINT NOT NULL CHECK (entitlement_sequence > 0),
     source_type VARCHAR(64) NOT NULL,
     estimated_credits NUMERIC(19,6) NOT NULL CHECK (estimated_credits >= 0),

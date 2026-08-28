@@ -28,6 +28,21 @@ class ExternalCreditProxyServiceTest {
     private final ExternalCreditProxyService service = new ExternalCreditProxyService(
             entitlements, authority, jdbc, json, stateWriter);
 
+
+    @Test
+    void settlementOriginMustMatchTheServiceThatReservedTheOperation() {
+        UUID operationId = UUID.randomUUID();
+        jdbc.originMatches = 0;
+
+        assertThatThrownBy(() ->
+                service.assertOrigin(operationId, "agent-service"))
+                .isInstanceOfSatisfying(ResponseStatusException.class,
+                        failure -> assertThat(failure.getStatusCode().value()).isEqualTo(403));
+
+        jdbc.originMatches = 1;
+        service.assertOrigin(operationId, "orchestrator-service");
+    }
+
     @Test
     void dispatchingMustBeAcknowledgedSynchronouslyAndIsNeverQueued() {
         UUID operationId = UUID.randomUUID();
@@ -182,6 +197,16 @@ class ExternalCreditProxyServiceTest {
     private static final class RecordingJdbc extends JdbcTemplate {
         private final List<String> sql = new ArrayList<>();
         private final List<SqlCall> calls = new ArrayList<>();
+        private Integer originMatches = 1;
+
+        @Override
+        public <T> T queryForObject(
+                String statement, Class<T> requiredType, Object... args) {
+            if (statement.contains("origin_service_id")) {
+                return requiredType.cast(originMatches);
+            }
+            throw new AssertionError("Unexpected query: " + statement);
+        }
 
         @Override
         public int update(String statement, Object... args) {

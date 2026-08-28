@@ -23,6 +23,7 @@ class ExternalBillingAuthorityMigrationTest {
                 .contains("auth.cloud_credit_operation")
                 .contains("authority_payer_user_id BIGINT REFERENCES auth.users(id)")
                 .contains("billing_status_changed_at TIMESTAMP WITHOUT TIME ZONE")
+                .contains("origin_service_id VARCHAR(64)")
                 .contains("ALTER COLUMN billing_status_changed_at SET NOT NULL")
                 .contains("auth.cloud_settlement_outbox")
                 .contains("UNIQUE(operation_id, action, request_hash)");

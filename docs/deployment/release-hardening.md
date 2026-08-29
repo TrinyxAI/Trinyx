@@ -45,7 +45,11 @@ references, OCI SBOM and provenance subjects, and npm package version,
 integrity, tarball and provenance references. The workflow retains the Actions
 artifact for 365 days and attaches the identical file to the GitHub Release.
 The workflow code may be reviewed on a pull request, but publication is gated
-to an exact stable tag and is never executed by PR validation.
+to an exact stable tag and is never executed by PR validation. If a registry
+mutation succeeded before a later job failed, use **Re-run failed jobs** so the
+original staged digests and provenance remain the recovery source. Do not use
+**Re-run all jobs** after partial immutable promotion; rebuilding can produce a
+new digest that the immutable-tag preflight must correctly refuse.
 
 ## CloudLink topology
 
@@ -53,7 +57,9 @@ CloudLink pending OAuth state contains the tenant binding, PKCE verifier,
 expiry and single-consumption state in one process-local map. The supported
 topology is therefore exactly one CloudLink-enabled publication runtime.
 `cloud-link.replica-count=1` and
-`cloud-link.pending-state-store=in-memory` are startup invariants.
+`cloud-link.pending-state-store=in-memory` are startup configuration invariants.
+They are a declared topology contract, not physical singleton discovery: every
+runtime must receive the truthful replica count from deployment configuration.
 
 Do not horizontally scale a CloudLink-enabled publication service and do not
 work around the guard with a false replica count. Before multi-replica support,

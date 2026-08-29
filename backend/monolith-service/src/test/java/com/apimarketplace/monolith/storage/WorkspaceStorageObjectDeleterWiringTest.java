@@ -50,10 +50,10 @@ class WorkspaceStorageObjectDeleterWiringTest {
                             context.getBean(WorkspaceStorageObjectDeleter.class);
                     assertThat(deleter)
                             .isInstanceOf(MonolithWorkspaceStorageObjectDeleter.class);
-                    assertThat(deleter.delete("tenant-1", "tenant-1/report.pdf")).isTrue();
+                    assertThat(deleter.delete(java.util.UUID.randomUUID(), "org-1", "tenant-1", "tenant-1/report.pdf")).isTrue();
                     verify(fileStorageService).delete("tenant-1/report.pdf");
 
-                    assertThat(deleter.delete("tenant-2", "tenant-1/report.pdf")).isFalse();
+                    assertThat(deleter.delete(java.util.UUID.randomUUID(), "org-1", "tenant-2", "tenant-1/report.pdf")).isFalse();
                     verify(fileStorageService, times(1)).delete("tenant-1/report.pdf");
                 });
     }

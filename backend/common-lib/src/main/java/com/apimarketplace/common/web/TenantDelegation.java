@@ -10,7 +10,7 @@ import java.util.Base64;
 import java.util.UUID;
 
 /**
- * Short-lived tenant-context capability minted only by the authenticated edge.
+ * Short-lived tenant-context capability normally minted by the authenticated edge and verified by trusted auth/storage roots.
  *
  * <p>Service HMAC authenticates the calling workload. This envelope separately proves that
  * the tenant tuple came through a browser-authenticated Gateway request, so an allowed

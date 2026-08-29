@@ -90,7 +90,7 @@ jobs:
             exit 0
           fi
 
-          if [[ ! "${GITHUB_REF_NAME}" =~ ^v([0-9]+)[.]([0-9]+)[.]([0-9]+)$ ]]; then
+          if [[ ! "${GITHUB_REF_NAME}" =~ ^v(0|[1-9][0-9]*)[.](0|[1-9][0-9]*)[.](0|[1-9][0-9]*)$ ]]; then
             echo "Release tags must use exact stable SemVer: vX.Y.Z" >&2
             exit 1
           fi
@@ -116,7 +116,7 @@ jobs:
           fi
 
           latest_stable_tag="$(git tag --merged origin/main --list 'v*' |
-            grep -E '^v[0-9]+[.][0-9]+[.][0-9]+$' |
+            grep -E '^v(0|[1-9][0-9]*)[.](0|[1-9][0-9]*)[.](0|[1-9][0-9]*)$' |
             sort -V |
             tail -n 1)"
           if [[ "${latest_stable_tag}" != "${GITHUB_REF_NAME}" ]]; then
@@ -548,7 +548,7 @@ jobs:
           set -euo pipefail
           bash scripts/release/revalidate-release-source.sh "${PATCH_TAG}" "${RELEASE_COMMIT}"
           latest_stable_tag="$(git tag --merged origin/main --list 'v*' |
-            grep -E '^v[0-9]+[.][0-9]+[.][0-9]+$' |
+            grep -E '^v(0|[1-9][0-9]*)[.](0|[1-9][0-9]*)[.](0|[1-9][0-9]*)$' |
             sort -V |
             tail -n 1)"
           if [[ "${latest_stable_tag}" != "${PATCH_TAG}" ]]; then

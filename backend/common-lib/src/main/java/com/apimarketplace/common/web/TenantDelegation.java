@@ -10,7 +10,7 @@ import java.util.Base64;
 import java.util.UUID;
 
 /**
- * Short-lived tenant capability minted only by the authenticated edge.
+ * Short-lived tenant-context capability minted only by the authenticated edge.
  *
  * <p>Service HMAC authenticates the calling workload. This envelope separately proves that
  * the tenant tuple came through a browser-authenticated Gateway request, so an allowed
@@ -35,7 +35,7 @@ public final class TenantDelegation {
                 Long.toString(issuedAt),
                 Long.toString(expiresAt),
                 UUID.randomUUID().toString(),
-                "storage-delete",
+                "tenant-context",
                 safe(userId),
                 safe(principalId),
                 safe(billingSubjectId),
@@ -72,7 +72,7 @@ public final class TenantDelegation {
                 return false;
             }
             UUID.fromString(claims[2]);
-            return constant(claims[3], "storage-delete")
+            return constant(claims[3], "tenant-context")
                     && constant(claims[4], userId)
                     && constant(claims[5], principalId)
                     && constant(claims[6], billingSubjectId)

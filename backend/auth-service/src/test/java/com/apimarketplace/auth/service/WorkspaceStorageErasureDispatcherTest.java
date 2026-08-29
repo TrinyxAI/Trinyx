@@ -19,7 +19,7 @@ class WorkspaceStorageErasureDispatcherTest {
         var erasure = erasure("tenant-1", "tenant-1/report.pdf");
         when(outbox.claimDue(25)).thenReturn(List.of(erasure));
         // S3-compatible DELETE is idempotent: true also covers an absent object.
-        when(deleter.delete(erasure.tenantId(), erasure.storageKey()))
+        when(deleter.delete(erasure.id(), erasure.organizationId(), erasure.tenantId(), erasure.storageKey()))
                 .thenReturn(true);
 
         new WorkspaceStorageErasureDispatcher(outbox, deleter).dispatch();
@@ -38,7 +38,7 @@ class WorkspaceStorageErasureDispatcherTest {
         when(outbox.claimDue(25))
                 .thenReturn(List.of(firstClaim))
                 .thenReturn(List.of(retryClaim));
-        when(deleter.delete("tenant-1", "tenant-1/report.pdf"))
+        when(deleter.delete(any(), eq("org-1"), eq("tenant-1"), eq("tenant-1/report.pdf")))
                 .thenReturn(false)
                 .thenReturn(true);
 
@@ -50,7 +50,7 @@ class WorkspaceStorageErasureDispatcherTest {
         verify(outbox).failed(firstClaim, "storage deletion was not confirmed");
         verify(outbox).delivered(retryClaim);
         verify(deleter, times(2)).delete(
-                "tenant-1", "tenant-1/report.pdf");
+                any(), eq("org-1"), eq("tenant-1"), eq("tenant-1/report.pdf"));
     }
 
     @Test

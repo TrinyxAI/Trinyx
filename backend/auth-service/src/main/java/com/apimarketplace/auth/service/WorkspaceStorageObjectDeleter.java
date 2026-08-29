@@ -1,7 +1,7 @@
 package com.apimarketplace.auth.service;
 
 /**
- * Deletes one workspace-owned storage object while preserving tenant/key ownership checks.
+ * Deletes one workspace-owned storage object under an exact durable erasure authority.
  *
  * <p>The auth purge flow owns this port because storage access differs by deployment mode:
  * microservices use the internal storage HTTP client, while the monolith delegates directly
@@ -12,5 +12,5 @@ package com.apimarketplace.auth.service;
 @FunctionalInterface
 public interface WorkspaceStorageObjectDeleter {
 
-    boolean delete(String tenantId, String key);
+    boolean delete(java.util.UUID erasureId, String organizationId, String tenantId, String key);
 }

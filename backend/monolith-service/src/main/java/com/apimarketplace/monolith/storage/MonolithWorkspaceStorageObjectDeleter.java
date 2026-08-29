@@ -28,8 +28,9 @@ public final class MonolithWorkspaceStorageObjectDeleter
     }
 
     @Override
-    public boolean delete(String tenantId, String key) {
-        if (tenantId == null || tenantId.isBlank()
+    public boolean delete(java.util.UUID erasureId, String organizationId, String tenantId, String key) {
+        if (erasureId == null || organizationId == null || organizationId.isBlank()
+                || tenantId == null || tenantId.isBlank()
                 || key == null || !key.startsWith(tenantId + "/")) {
             logger.warn("Workspace purge refused storage key outside tenant ownership: tenant={} key={}",
                     tenantId, key);

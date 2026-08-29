@@ -147,7 +147,7 @@ jobs:
             if (!compose.includes(composeBinding)) {
               throw new Error('Cloud Compose does not forward ' + name);
             }
-            if (!new RegExp('^' + name + '=' + fallback + '\\$', 'm').test(envExample)) {
+            if (!new RegExp('^' + name + '=' + fallback + '$', 'm').test(envExample)) {
               throw new Error('.env.cloud.example does not document ' + name);
             }
           }

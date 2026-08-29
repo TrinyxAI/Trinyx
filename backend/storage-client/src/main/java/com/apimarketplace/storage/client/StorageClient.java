@@ -51,9 +51,16 @@ public class StorageClient {
     }
 
     public StorageClient(RestTemplate restTemplate, String storageServiceUrl) {
+        this(restTemplate, storageServiceUrl, "");
+    }
+
+    StorageClient(
+            RestTemplate restTemplate, String storageServiceUrl,
+            String workspaceErasureSecret) {
         this.restTemplate = restTemplate;
         this.baseUrl = storageServiceUrl;
-        this.workspaceErasureSecret = "";
+        this.workspaceErasureSecret =
+                workspaceErasureSecret == null ? "" : workspaceErasureSecret;
     }
 
     /**

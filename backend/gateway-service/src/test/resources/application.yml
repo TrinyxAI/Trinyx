@@ -1,0 +1,3 @@
+trinyx:
+  gateway:
+    tenant-delegation-secret: test-tenant-delegation-key-000000000000

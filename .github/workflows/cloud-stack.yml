@@ -147,7 +147,7 @@ jobs:
           }
           const delegationBindings = compose.match(/TRINYX_TENANT_DELEGATION_SECRET: \$\{TRINYX_TENANT_DELEGATION_SECRET:/g) || [];
           if (delegationBindings.length !== 3) {
-            throw new Error('Tenant delegation key must be exposed only to gateway-service and storage-service');
+            throw new Error('Tenant delegation key must be exposed only to gateway, auth and storage');
           }
           for (const [name, fallback] of gatewayControls) {
             const composeBinding = name + ': ' + '${' + name + ':-' + fallback + '}';

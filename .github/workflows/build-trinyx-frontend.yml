@@ -25,6 +25,7 @@ env:
 
 jobs:
   build-and-push:
+    if: github.event_name != 'pull_request'
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -127,3 +128,45 @@ jobs:
         run: |
           curl --fail --silent --show-error --retry 10 --retry-delay 3 https://trinyx.fr/ > /dev/null
           curl --fail --silent --show-error --retry 10 --retry-delay 3 https://app.trinyx.fr/ > /dev/null
+
+
+  build-pr:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # actions/checkout v4
+      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # docker/setup-buildx-action v3
+      - name: Test remote deployment command rendering
+        shell: bash
+        run: bash scripts/deploy/test-render-frontend-ssm-command.sh
+      - name: Build Trinyx app without publication
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # docker/build-push-action v6
+        with:
+          context: ./frontend
+          file: ./frontend/Dockerfile
+          platforms: linux/amd64
+          push: false
+          tags: ${{ env.APP_IMAGE }}:${{ github.sha }}
+          build-args: |
+            NEXT_PUBLIC_APP_EDITION=paid-monolith
+            NEXT_PUBLIC_AUTH_MODE=embedded
+            NEXT_PUBLIC_BILLING_ENABLED=true
+            NEXT_PUBLIC_SPRING_BASE_URL=http://livecontext-app:8080
+          cache-from: type=gha,scope=app
+          cache-to: type=gha,mode=max,scope=app
+      - name: Build Trinyx landing without publication
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # docker/build-push-action v6
+        with:
+          context: ./frontend
+          file: ./frontend/Dockerfile
+          platforms: linux/amd64
+          push: false
+          tags: ${{ env.LANDING_IMAGE }}:${{ github.sha }}
+          build-args: |
+            NEXT_PUBLIC_APP_EDITION=cloud
+            NEXT_PUBLIC_AUTH_MODE=oidc
+            NEXT_PUBLIC_SPRING_BASE_URL=http://livecontext-app:8080
+          cache-from: type=gha,scope=landing
+          cache-to: type=gha,mode=max,scope=landing

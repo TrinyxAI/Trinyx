@@ -113,12 +113,13 @@ gateway:
         - "GET:/api/internal/storage/exists"
         - "DELETE:/api/internal/storage/delete"
         - "DELETE:/api/internal/storage/delete-run-files"
+        - "DELETE:/api/internal/storage/delete-run-files-job"
       publication-service:
         - "POST:/api/internal/storage/presign"
         - "GET:/api/internal/storage/download"
         - "GET:/api/internal/storage/exists"
       auth-service:
-        - "DELETE:/api/internal/storage/delete"
+        - "DELETE:/api/internal/storage/workspace-erasure"
         - "POST:/api/internal/storage/quota/tenant/{tenantId}/limits"
         - "POST:/api/internal/storage/quota/org/{organizationId}/limits"
 

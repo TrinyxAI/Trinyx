@@ -397,8 +397,11 @@ public class StorageClient {
      * is empty, so organizationId must be passed explicitly.
      */
     public int deleteRunFiles(String tenantId, String workflowId, String runId, String organizationId) {
+        boolean asynchronousJob = organizationId != null && !organizationId.isBlank();
         String url = UriComponentsBuilder.fromHttpUrl(baseUrl)
-            .path("/api/internal/storage/delete-run-files")
+            .path(asynchronousJob
+                    ? "/api/internal/storage/delete-run-files-job"
+                    : "/api/internal/storage/delete-run-files")
             .queryParam("workflowId", workflowId)
             .queryParam("runId", runId)
             .toUriString();

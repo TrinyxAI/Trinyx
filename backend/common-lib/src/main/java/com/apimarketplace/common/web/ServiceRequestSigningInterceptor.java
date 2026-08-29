@@ -23,11 +23,19 @@ public final class ServiceRequestSigningInterceptor implements ClientHttpRequest
         if (serviceId == null || !serviceId.matches("[a-z0-9][a-z0-9-]{1,63}")) {
             throw new IllegalArgumentException("Invalid internal service identity");
         }
-        if (secret == null || secret.length() < 32) {
-            throw new IllegalArgumentException("Internal service HMAC key must be at least 32 characters");
+        if (secret == null || secret.length() < 32 || looksLikePlaceholder(secret)) {
+            throw new IllegalArgumentException(
+                    "Internal service HMAC key must be at least 32 non-placeholder characters");
         }
         this.serviceId = serviceId;
         this.secret = secret;
+    }
+
+    private static boolean looksLikePlaceholder(String value) {
+        String normalized = value.trim().toLowerCase(java.util.Locale.ROOT);
+        return normalized.startsWith("replace-with")
+                || normalized.startsWith("ci-")
+                || normalized.contains("changeme");
     }
 
     @Override

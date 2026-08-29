@@ -149,7 +149,9 @@ class InternalCredentialLookupControllerTest {
 
         ResponseEntity<List<Credential>> resp = controller.getAllCredentials(OTHER_MEMBER, ORG);
 
-        assertThat(resp.getBody()).containsExactly(a, b);
+        assertThat(resp.getBody()).extracting(Credential::id).containsExactly(1L, 2L);
+        assertThat(resp.getBody()).allSatisfy(item ->
+                assertThat(item.credentialData()).isEmpty());
         verify(credentialRepository, never()).findAllByTenantId(OTHER_MEMBER);
     }
 
@@ -161,7 +163,8 @@ class InternalCredentialLookupControllerTest {
 
         ResponseEntity<List<Credential>> resp = controller.getAllCredentials(OTHER_MEMBER, null);
 
-        assertThat(resp.getBody()).containsExactly(a);
+        assertThat(resp.getBody()).extracting(Credential::id).containsExactly(1L);
+        assertThat(resp.getBody().getFirst().credentialData()).isEmpty();
         verify(credentialRepository, never()).findByOrganizationIdStrict(ORG, 1, 10_000);
     }
 

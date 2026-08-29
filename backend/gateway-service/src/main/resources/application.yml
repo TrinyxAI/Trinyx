@@ -179,6 +179,7 @@ trinyx:
       audience: ${KEYCLOAK_AUDIENCE:trinyx-frontend}
     auth-service-url: ${AUTH_SERVICE_URL:http://auth-service:8083}
     hmac-secret: ${GATEWAY_SECRET_KEY:}
+    tenant-delegation-secret: ${TRINYX_TENANT_DELEGATION_SECRET:}
     max-body-bytes: ${CLOUD_GATEWAY_MAX_BODY_BYTES:52428800}
     max-buffered-requests: ${CLOUD_GATEWAY_MAX_BUFFERED_REQUESTS:8}
     rate-limit:

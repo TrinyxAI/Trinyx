@@ -67,7 +67,11 @@ public class InternalCredentialLookupController {
         List<Credential> credentials = (organizationId != null && !organizationId.isBlank())
                 ? credentialRepository.findByOrganizationIdStrict(organizationId, 1, 10_000)
                 : credentialRepository.findAllByTenantId(userId);
-        return ResponseEntity.ok(credentials);
+        // Bulk discovery must never become a bulk secret-export primitive. Callers that
+        // need one selected credential use the exact id/name endpoints after selection.
+        return ResponseEntity.ok(credentials.stream()
+                .map(Credential::withoutSecrets)
+                .toList());
     }
 
     /**

@@ -49,7 +49,16 @@ public class GatewayAuthenticationFilter implements Filter {
         this.nonceStore = nonceStore;
         if (properties.isVerificationEnabled() && isUnsafeSecret(properties.getSecretKey())) {
             throw new IllegalStateException(
-                    "gateway.filter.secret-key must be configured when gateway verification is enabled");
+                    "gateway.filter.secret-key must be a non-placeholder key when verification is enabled");
+        }
+        if (properties.isVerificationEnabled()) {
+            properties.getServiceSecrets().forEach((serviceId, serviceSecret) -> {
+                if (isUnsafeSecret(serviceSecret)) {
+                    throw new IllegalStateException(
+                            "gateway.filter.service-secrets." + serviceId
+                                    + " must be a non-placeholder key");
+                }
+            });
         }
         if (properties.isVerificationEnabled()
                 && properties.isRequireDistributedNonceStore()
@@ -219,8 +228,14 @@ public class GatewayAuthenticationFilter implements Filter {
     }
 
     private boolean isUnsafeSecret(String secret) {
-        return secret == null || secret.isBlank()
-                || GatewayFilterProperties.DEFAULT_SECRET_KEY.equals(secret);
+        if (secret == null || secret.isBlank()
+                || GatewayFilterProperties.DEFAULT_SECRET_KEY.equals(secret)) {
+            return true;
+        }
+        String normalized = secret.trim().toLowerCase(java.util.Locale.ROOT);
+        return normalized.startsWith("replace-with")
+                || normalized.startsWith("ci-")
+                || normalized.contains("changeme");
     }
 
     boolean isValidGatewaySecret(String receivedSecret, String providerId, String timestamp,

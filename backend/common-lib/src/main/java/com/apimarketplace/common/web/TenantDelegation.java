@@ -35,6 +35,7 @@ public final class TenantDelegation {
                 Long.toString(issuedAt),
                 Long.toString(expiresAt),
                 UUID.randomUUID().toString(),
+                "storage-delete",
                 safe(userId),
                 safe(principalId),
                 safe(billingSubjectId),
@@ -61,7 +62,7 @@ public final class TenantDelegation {
             String decoded = new String(Base64.getUrlDecoder().decode(parts[1]),
                     StandardCharsets.UTF_8);
             String[] claims = decoded.split("\n", -1);
-            if (claims.length != 8) return false;
+            if (claims.length != 9) return false;
             long issuedAt = Long.parseLong(claims[0]);
             long expiresAt = Long.parseLong(claims[1]);
             long nowEpoch = now.getEpochSecond();
@@ -71,11 +72,12 @@ public final class TenantDelegation {
                 return false;
             }
             UUID.fromString(claims[2]);
-            return constant(claims[3], userId)
-                    && constant(claims[4], principalId)
-                    && constant(claims[5], billingSubjectId)
-                    && constant(claims[6], organizationId)
-                    && constant(claims[7], installId);
+            return constant(claims[3], "storage-delete")
+                    && constant(claims[4], userId)
+                    && constant(claims[5], principalId)
+                    && constant(claims[6], billingSubjectId)
+                    && constant(claims[7], organizationId)
+                    && constant(claims[8], installId);
         } catch (RuntimeException invalid) {
             return false;
         }

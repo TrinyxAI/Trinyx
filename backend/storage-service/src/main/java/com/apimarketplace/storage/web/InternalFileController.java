@@ -2,6 +2,7 @@ package com.apimarketplace.storage.web;
 
 import com.apimarketplace.common.storage.AdoptRunContextFields;
 import com.apimarketplace.common.web.TenantDelegation;
+import com.apimarketplace.common.web.StorageOperationCapability;
 import com.apimarketplace.storage.domain.FileRef;
 import com.apimarketplace.storage.service.file.DownloadStream;
 import com.apimarketplace.storage.service.file.FileStorageService;
@@ -347,14 +348,81 @@ public class InternalFileController {
     }
 
     /**
-     * Delete all files for a specific workflow run.
+     * Execute one durable workspace-erasure delivery.
+     *
+     * <p>The auth outbox is the durable authority. Each retry receives a fresh,
+     * short-lived capability bound to the immutable outbox id, organization,
+     * tenant and object key, so it never depends on servlet request context.
+     */
+    @DeleteMapping("/workspace-erasure")
+    public ResponseEntity<Map<String, Object>> deleteWorkspaceErasure(
+            @RequestParam UUID erasureId,
+            @RequestParam String key,
+            @RequestHeader("X-User-ID") String tenantId,
+            @RequestHeader("X-Organization-ID") String organizationId,
+            @RequestHeader(StorageOperationCapability.HEADER) String capability,
+            @RequestHeader(value = "X-Provider-ID", required = false) String providerId) {
+
+        if (!"auth-service".equals(providerId)
+                || !isKeyOwnedByTenant(key, tenantId)
+                || !StorageOperationCapability.verifyWorkspaceErasure(
+                capability, tenantDelegationSecret, erasureId, organizationId,
+                tenantId, key, java.time.Instant.now())) {
+            logger.warn("Workspace erasure refused: authority or resource scope is invalid");
+            return ResponseEntity.status(403).build();
+        }
+        boolean deleted = fileStorageService.delete(key);
+        return ResponseEntity.ok(Map.of("deleted", deleted));
+    }
+
+    /**
+     * Interactive run deletion. Cloud callers must carry the exact delegation
+     * minted from the authenticated edge identity.
      */
     @DeleteMapping("/delete-run-files")
     public ResponseEntity<Map<String, Object>> deleteRunFiles(
             @RequestParam String workflowId,
             @RequestParam String runId,
-            @RequestHeader("X-User-ID") String tenantId) {
+            @RequestHeader("X-User-ID") String tenantId,
+            @RequestHeader(value = TenantDelegation.HEADER, required = false) String delegation,
+            @RequestHeader(value = "X-Principal-ID", required = false) String principalId,
+            @RequestHeader(value = "X-Billing-Subject-ID", required = false) String billingSubjectId,
+            @RequestHeader(value = "X-Organization-ID", required = false) String organizationId,
+            @RequestHeader(value = "X-Install-ID", required = false) String installId) {
 
+        if ("cloud".equalsIgnoreCase(appEdition)
+                && !TenantDelegation.verify(delegation, tenantDelegationSecret,
+                tenantId, principalId, billingSubjectId, organizationId, installId,
+                java.time.Instant.now())) {
+            return ResponseEntity.status(403).build();
+        }
+        int count = fileStorageService.deleteRunFiles(tenantId, workflowId, runId);
+        return ResponseEntity.ok(Map.of("deletedCount", count));
+    }
+
+    /**
+     * Explicit asynchronous job authority.
+     *
+     * <p>There is no browser token on cascade workers. This route therefore has
+     * a deliberately different trust boundary: the service-HMAC filter admits
+     * only orchestrator-service and binds method, route, query and tenant
+     * headers. It must never be exposed to another service or the public edge.
+     */
+    @DeleteMapping("/delete-run-files-job")
+    public ResponseEntity<Map<String, Object>> deleteRunFilesJob(
+            @RequestParam String workflowId,
+            @RequestParam String runId,
+            @RequestHeader("X-User-ID") String tenantId,
+            @RequestHeader(value = "X-Organization-ID", required = false) String organizationId,
+            @RequestHeader(value = "X-Provider-ID", required = false) String providerId) {
+
+        if (!"orchestrator-service".equals(providerId)
+                || tenantId == null || tenantId.isBlank()
+                || organizationId == null || organizationId.isBlank()
+                || workflowId == null || workflowId.isBlank()
+                || runId == null || runId.isBlank()) {
+            return ResponseEntity.status(403).build();
+        }
         int count = fileStorageService.deleteRunFiles(tenantId, workflowId, runId);
         return ResponseEntity.ok(Map.of("deletedCount", count));
     }

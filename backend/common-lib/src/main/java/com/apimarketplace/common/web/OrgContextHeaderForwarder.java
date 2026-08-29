@@ -93,6 +93,10 @@ public final class OrgContextHeaderForwarder {
                         copyHeaderIfPresent(outbound, getHeader, req, "X-Organization-ID");
                         copyHeaderIfPresent(outbound, getHeader, req, "X-Organization-Role");
                         copyHeaderIfPresent(outbound, getHeader, req, "X-User-Roles");
+                        copyHeaderIfPresent(outbound, getHeader, req, "X-Principal-ID");
+                        copyHeaderIfPresent(outbound, getHeader, req, "X-Billing-Subject-ID");
+                        copyHeaderIfPresent(outbound, getHeader, req, "X-Install-ID");
+                        copyHeaderIfPresent(outbound, getHeader, req, TenantDelegation.HEADER);
                     }
                 }
             }

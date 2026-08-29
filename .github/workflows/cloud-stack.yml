@@ -146,7 +146,7 @@ jobs:
             throw new Error('.env.cloud.example does not document the distinct tenant delegation key');
           }
           const delegationBindings = compose.match(/TRINYX_TENANT_DELEGATION_SECRET: \$\{TRINYX_TENANT_DELEGATION_SECRET:/g) || [];
-          if (delegationBindings.length !== 2) {
+          if (delegationBindings.length !== 3) {
             throw new Error('Tenant delegation key must be exposed only to gateway-service and storage-service');
           }
           for (const [name, fallback] of gatewayControls) {

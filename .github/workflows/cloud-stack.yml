@@ -147,7 +147,13 @@ jobs:
             if (!compose.includes(composeBinding)) {
               throw new Error('Cloud Compose does not forward ' + name);
             }
-            if (!new RegExp('^' + name + '=' + fallback + '
+            if (!new RegExp('^' + name + '=' + fallback + '\\$', 'm').test(envExample)) {
+              throw new Error('.env.cloud.example does not document ' + name);
+            }
+          }
+          NODE
+
+      - name: Verify external image manifests
         shell: bash
         run: |
           set -euo pipefail

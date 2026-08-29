@@ -156,9 +156,10 @@ ENV DB_HOST=localhost
 ENV DB_PORT=5432
 ENV DB_NAME=livecontext
 ENV DB_USERNAME=postgres
-ENV DB_PASSWORD=postgres
+# Keep password and JWT-key path defaults at runtime instead of baking
+# sensitive-named values into image metadata. Spring already defaults DB_PASSWORD
+# to postgres for standalone CE; ce-entrypoint.sh defaults AUTH_JWT_KEYS_PATH.
 ENV STORAGE_PATH=/app/data/files
-ENV AUTH_JWT_KEYS_PATH=/app/data/keys
 
 EXPOSE 8080
 

@@ -1,6 +1,7 @@
 package com.apimarketplace.gateway;
 
 import com.apimarketplace.common.web.GatewaySignatureV2;
+import com.apimarketplace.common.web.TenantDelegation;
 import org.reactivestreams.Publisher;
 import org.springframework.cloud.gateway.filter.GatewayFilterChain;
 import org.springframework.cloud.gateway.filter.GlobalFilter;
@@ -21,6 +22,7 @@ import reactor.core.publisher.Mono;
 
 import java.nio.charset.StandardCharsets;
 import java.net.URI;
+import java.time.Instant;
 import java.util.List;
 import java.util.Locale;
 import java.util.Set;
@@ -38,23 +40,35 @@ final class AuthenticatedGatewayFilter implements GlobalFilter, Ordered {
             "x-organization-role", "x-user-roles", "x-install-id",
             "x-livecontext-install-id", "x-trinyx-install-id",
             "x-trinyx-identity-binding", "x-trinyx-entitlement-projection",
-            "x-trinyx-organization-id");
+            "x-trinyx-organization-id", "x-trinyx-tenant-delegation");
 
     private final GatewayIdentityClient identityClient;
     private final GatewayRequestRateLimiter rateLimiter;
     private final int maxBodyBytes;
     private final Semaphore bodyBufferPermits;
+    private final String tenantDelegationSecret;
 
     @Autowired
     AuthenticatedGatewayFilter(
             GatewayIdentityClient identityClient,
             GatewayRequestRateLimiter rateLimiter,
             @Value("${trinyx.gateway.max-body-bytes:52428800}") int maxBodyBytes,
-            @Value("${trinyx.gateway.max-buffered-requests:8}") int maxBufferedRequests) {
+            @Value("${trinyx.gateway.max-buffered-requests:8}") int maxBufferedRequests,
+            @Value("${trinyx.gateway.tenant-delegation-secret}") String tenantDelegationSecret) {
         this.identityClient = identityClient;
         this.rateLimiter = rateLimiter;
         this.maxBodyBytes = Math.max(1, maxBodyBytes);
         this.bodyBufferPermits = new Semaphore(Math.max(1, maxBufferedRequests), true);
+        TenantDelegation.requireSecret(tenantDelegationSecret);
+        this.tenantDelegationSecret = tenantDelegationSecret;
+    }
+
+    AuthenticatedGatewayFilter(
+            GatewayIdentityClient identityClient,
+            GatewayRequestRateLimiter rateLimiter,
+            int maxBodyBytes,
+            int maxBufferedRequests) {
+        this(identityClient, rateLimiter, maxBodyBytes, maxBufferedRequests, "t".repeat(32));
     }
 
     AuthenticatedGatewayFilter(
@@ -219,6 +233,10 @@ final class AuthenticatedGatewayFilter implements GlobalFilter, Ordered {
                             String.valueOf(context.userId()), context.principalId(),
                             context.billingSubjectId(), organizationId, organizationRole,
                             roles, context.installId());
+                    signed.set(TenantDelegation.HEADER, TenantDelegation.issue(
+                            tenantDelegationSecret, String.valueOf(context.userId()),
+                            context.principalId(), context.billingSubjectId(),
+                            organizationId, context.installId(), Instant.now()));
 
                     ServerHttpRequest request = new ServerHttpRequestDecorator(exchange.getRequest()) {
                         @Override

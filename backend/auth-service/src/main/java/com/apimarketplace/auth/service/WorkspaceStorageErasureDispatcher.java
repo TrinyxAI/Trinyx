@@ -32,7 +32,8 @@ public class WorkspaceStorageErasureDispatcher {
                 WorkspaceStorageErasureOutbox.validateOwnership(
                         erasure.organizationId(), erasure.tenantId(),
                         erasure.storageKey());
-                if (deleter.delete(erasure.tenantId(), erasure.storageKey())) {
+                if (deleter.delete(erasure.id(), erasure.organizationId(),
+                        erasure.tenantId(), erasure.storageKey())) {
                     if (!outbox.delivered(erasure)) {
                         log.debug("Workspace erasure lease was reclaimed before completion id={}",
                                 erasure.id());

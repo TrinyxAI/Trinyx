@@ -90,9 +90,14 @@ vi.mock('@/hooks/useSelectableItems', () => ({
   }),
 }));
 vi.mock('@dnd-kit/core', () => ({
-  DndContext: ({ children }: { children: React.ReactNode }) => <>{children}</>,
+  // A real element, not a fragment: what the drag context CONTAINS is the point (the folder
+  // path has to be inside it to be a drop target).
+  DndContext: ({ children }: { children: React.ReactNode }) => <div data-testid="drag-context">{children}</div>,
   DragOverlay: ({ children }: { children: React.ReactNode }) => <>{children}</>,
-  PointerSensor: class {},
+  MouseSensor: class {},
+  TouchSensor: class {},
+  pointerWithin: () => [],
+  rectIntersection: () => [],
   useSensor: () => ({}),
   useSensors: () => [],
   useDroppable: () => ({ setNodeRef: () => {}, isOver: false }),
@@ -278,5 +283,23 @@ describe('AgentTable - folders', () => {
 
     await waitFor(() => expect(mocks.getAgentsPage).toHaveBeenCalled());
     expect(mocks.assign).not.toHaveBeenCalled();
+  });
+});
+
+/**
+ * A drop target only exists inside the context that owns the drag, and the folder path lives
+ * in the page HEADER. With the drag context around the cards alone every crumb was inert, so
+ * dragging a card out of a folder - the one move a folder path is there to offer - did nothing.
+ */
+describe('AgentTable - the drag surface', () => {
+  it('covers the folder path, so a card can be dragged out of a folder onto it', async () => {
+    mocks.getAgentsPage.mockResolvedValue(
+      page({ folders: [], folderTrail: [{ id: 'f1', name: 'Support crew', parentFolderId: null }] }),
+    );
+
+    renderTable();
+
+    const crumb = await screen.findByRole('button', { name: 'All agents' });
+    expect(screen.getByTestId('drag-context')).toContainElement(crumb);
   });
 });

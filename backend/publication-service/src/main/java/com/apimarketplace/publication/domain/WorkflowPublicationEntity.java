@@ -285,9 +285,30 @@ public class WorkflowPublicationEntity {
         this.ownerId = publisherId;
     }
 
+    /**
+     * The id, assigning one if the entity does not have it yet.
+     *
+     * <p>Exists because the id is the publication's storage namespace
+     * ({@code _publications/{id}/}), and the publish flow needs that namespace BEFORE the
+     * first save: it copies the plan's files while enriching the snapshot. With the id
+     * assigned only by {@code @PrePersist}, those copy passes read {@code getId() == null}
+     * and returned at their first line, so on a FIRST publish no data-input file and no
+     * plan-embedded FileRef was ever copied - silently, and only on the path where it
+     * mattered most.
+     *
+     * <p>Safe to call early: Spring Data decides insert-vs-update from the {@code @Version}
+     * field (a non-primitive {@code Long}, still null here), not from the id, so
+     * {@code save} still persists. Even if it merged, a merge of an absent row is an insert
+     * after one extra select.
+     */
+    public UUID ensureId() {
+        if (this.id == null) this.id = UUID.randomUUID();
+        return this.id;
+    }
+
     @PrePersist
     private void ensureIdentifiers() {
-        if (this.id == null) this.id = UUID.randomUUID();
+        ensureId();
         if (this.publishedAt == null) this.publishedAt = Instant.now();
         if (this.updatedAt == null) this.updatedAt = this.publishedAt;
         // V223 / #151 - defensive default: if owner_type / owner_id are unset

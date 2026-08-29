@@ -52,7 +52,8 @@ class WorkflowPublicationServiceScopeToolsConfigTest {
                 mock(PublicationReceiptRepository.class), mock(PublicationReviewRepository.class),
                 mock(OrchestratorInternalClient.class), mock(AgentClient.class), mock(InterfaceClient.class),
                 mock(DataSourceClient.class), mock(StorageBreakdownService.class), new ObjectMapper(),
-                mock(SnapshotCloneService.class), mock(EntitlementGuard.class), mock(AuthClient.class));
+                mock(SnapshotCloneService.class), mock(EntitlementGuard.class), mock(AuthClient.class),
+                new com.apimarketplace.publication.service.PublicationFileUrlResolver(new com.apimarketplace.common.storage.signing.ShowcaseUrlSigner("test-secret-32-bytes-long-enough-for-hmac")));
         scopeToolsConfig = WorkflowPublicationService.class.getDeclaredMethod(
                 "scopeToolsConfig", Map.class, Set.class, Set.class, Set.class);
         scopeToolsConfig.setAccessible(true);

@@ -319,6 +319,9 @@ function DataInputItemEditor({
 
   const handleStorageSelect = useCallback((entry: StorageExplorerEntry) => {
     if (isRunMode) return;
+    // The picker lists folders. A folder row has no s3Key and no id, so accepting one would pin
+    // a FileRef that can never resolve - silently, with no throw.
+    if (entry.isFolder) return;
     const fileRef: FileRef = {
       _type: 'file',
       path: entry.s3Key!,

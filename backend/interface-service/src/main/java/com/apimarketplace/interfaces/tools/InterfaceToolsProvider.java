@@ -134,7 +134,7 @@ public class InterfaceToolsProvider implements ToolsProvider {
                 "content EXACTLY (copy it verbatim - indentation and whitespace included), and by default must be " +
                 "UNIQUE; if it appears multiple times, add surrounding context or set replace_all=true. 'new' may be " +
                 "an empty string to delete. Edits apply in order, all-or-nothing - if any 'old' is not found, NOTHING " +
-                "is written. Tip: call interface(action='get') first to copy exact text.", false),
+                "is written. Tip: call interface(action='get') first to copy exact text.", false, "object"),
             boolParam("replace_all", "For patch: if true, replace EVERY occurrence of each edit's 'old' " +
                 "(default false = each 'old' must match exactly once).", false, false),
 

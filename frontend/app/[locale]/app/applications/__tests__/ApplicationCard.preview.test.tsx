@@ -42,7 +42,7 @@ vi.mock('@/lib/providers/smart-providers', () => ({ useAuth: () => ({ isLoading:
 vi.mock('@/i18n/navigation', () => ({ useRouter: () => ({ push: () => undefined }) }));
 vi.mock('@/lib/api', () => ({ orchestratorApi: {} }));
 vi.mock('@/lib/api/orchestrator/publication.service', () => ({ publicationService: {} }));
-vi.mock('@/lib/api/orchestrator/workflow.service', () => ({ workflowService: {} }));
+vi.mock('@/lib/api/orchestrator/workflow.service', () => ({ workflowService: { getWorkflowRelationsBatch: vi.fn().mockResolvedValue({}), } }));
 vi.mock('@/lib/api/orchestrator/version.service', () => ({ versionService: {} }));
 // The page imports the heavy `@/components/workflow` barrel (ShareWorkflowModal), which transitively
 // evaluates the aggregated orchestrator API index against the empty service mocks above (import-time

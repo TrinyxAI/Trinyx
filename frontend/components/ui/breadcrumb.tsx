@@ -16,6 +16,13 @@ export interface BreadcrumbItem {
   /** Callback when editing is complete */
   onEditComplete?: (newValue: string) => void;
   /**
+   * Keep this segment clickable even in the LAST position. The last crumb is normally the page
+   * you are on, so it does not navigate - but a crumb can be last and still be the way OUT: a
+   * list showing a folder it cannot name yet prints no folder segment after its own, and
+   * without this the only exit is the browser's Back button.
+   */
+  alwaysClickable?: boolean;
+  /**
    * When set, renders a favorite-toggle star on this segment: filled (amber) when
    * favorited, hover/focus-revealed otherwise. The accessible label is localized
    * by the component (common.addToFavorites / common.removeFromFavorites).
@@ -226,7 +233,9 @@ export function Breadcrumb({
       {items.map((item, index) => {
         const isLast = index === items.length - 1;
         // Editable items with onClick remain clickable even on the last position (opens edit modal)
-        const isClickable = (item.onClick || item.href) && (!isLast || !!item.editable) && !item.isLoading;
+        const isClickable = (item.onClick || item.href)
+          && (!isLast || !!item.editable || !!item.alwaysClickable)
+          && !item.isLoading;
         const displayLabel = truncateLabel(item.label, item.truncate, isLast);
         const variantClasses = getVariantClasses(isLast, !!isClickable);
 

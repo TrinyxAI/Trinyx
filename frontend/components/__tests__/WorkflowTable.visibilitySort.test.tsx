@@ -19,7 +19,12 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
  * native <select> so the dropdowns can be driven deterministically (Radix needs real pointer events).
  */
 
-const mocks = vi.hoisted(() => ({ getWorkflowsPage: vi.fn() }));
+const mocks = vi.hoisted(() => ({
+  getWorkflowsPage: vi.fn(),
+  // Relations are secondary card data, resolved for the whole page in one call.
+  // Stubbed empty here: no card in these fixtures calls a sub-workflow.
+  getWorkflowRelationsBatch: vi.fn().mockResolvedValue({}),
+}));
 
 // The lists keep the open folder in the address, so they read next/navigation. This fake
 // router is URL-backed and re-renders on navigation, the way the real one does.

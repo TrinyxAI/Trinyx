@@ -19,10 +19,12 @@ import {
 import { useCurrentOrgStore } from '@/lib/stores/current-org-store';
 
 function Consumer() {
-  const { position, setPosition, defaultPosition, setDefaultPosition, bottomMode, setBottomMode } = useSidePanelLayout();
+  const { position, setPosition, lastDock, defaultPosition, setDefaultPosition, bottomMode, setBottomMode } = useSidePanelLayout();
   return (
     <div>
       <span data-testid="pos">{position}</span>
+      <span data-testid="last-dock" data-last={lastDock} />
+      <button onClick={() => setPosition('floating')}>floating</button>
       {/* bottomMode + defaultPosition exposed as attributes so getByText('bottom-full')
           / getByText('right') in the position tests keep matching ONLY the buttons. */}
       <span data-testid="mode" data-mode={bottomMode} />
@@ -348,5 +350,153 @@ describe('useSidePanelLayoutSafe outside a provider', () => {
     // No provider: the setter is a no-op and nothing is persisted.
     expect(screen.getByTestId('safe-mode')).toHaveAttribute('data-mode', 'bottom-full');
     expect(window.localStorage.getItem(MODE_KEY('personal'))).toBeNull();
+  });
+});
+
+describe('SidePanelLayoutContext - detached panel', () => {
+  it('remembers the dock a detach came from, so re-attaching restores it', () => {
+    render(<SidePanelLayoutProvider><Consumer /></SidePanelLayoutProvider>);
+
+    act(() => screen.getByText('bottom').click());
+    act(() => screen.getByText('floating').click());
+
+    expect(screen.getByTestId('pos')).toHaveTextContent('floating');
+    // Not 'right' (the default) and not 'floating' itself: the dock the panel was
+    // actually on when the user detached it.
+    expect(screen.getByTestId('last-dock')).toHaveAttribute('data-last', 'bottom');
+  });
+
+  it('persists the detach and restores it on the next mount', () => {
+    const { unmount } = render(<SidePanelLayoutProvider><Consumer /></SidePanelLayoutProvider>);
+    act(() => screen.getByText('floating').click());
+    expect(window.localStorage.getItem(KEY('personal'))).toBe('floating');
+    unmount();
+
+    render(<SidePanelLayoutProvider><Consumer /></SidePanelLayoutProvider>);
+    expect(screen.getByTestId('pos')).toHaveTextContent('floating');
+    // A reload has no session to remember, so re-attaching falls back to the
+    // default-opening preference rather than to a stale dock.
+    expect(screen.getByTestId('last-dock')).toHaveAttribute('data-last', 'right');
+  });
+
+  it('remembers the dock across a reload, so re-attaching does not land on a dock nobody chose', () => {
+    // Detaching overwrites the position bucket with 'floating', which erases where
+    // the panel came from. Without its own bucket, a user whose habitual dock is
+    // the bottom one detaches, reloads, presses re-attach, and lands on a right
+    // dock they never picked.
+    const { unmount } = render(<SidePanelLayoutProvider><Consumer /></SidePanelLayoutProvider>);
+    act(() => screen.getByText('bottom-full').click());
+    act(() => screen.getByText('floating').click());
+    expect(window.localStorage.getItem(KEY('personal'))).toBe('floating');
+    unmount();
+
+    render(<SidePanelLayoutProvider><Consumer /></SidePanelLayoutProvider>);
+
+    expect(screen.getByTestId('pos')).toHaveTextContent('floating');
+    expect(screen.getByTestId('last-dock')).toHaveAttribute('data-last', 'bottom-full');
+  });
+
+  it('seeds the return dock from the default-opening preference, resolved through the bottom variant', () => {
+    // The case the test above cannot see, because 'right' is also the fallback:
+    // a user whose default is a bottom dock reloads into a detached panel, and
+    // re-attaching has to land on THEIR variant, not on the global default.
+    // No remembered dock: this is an install whose stored 'floating' predates the
+    // separate bucket, so the default-opening preference is the only signal left.
+    window.localStorage.setItem(DEF_KEY('personal'), 'bottom');
+    window.localStorage.setItem(MODE_KEY('personal'), 'bottom-full');
+    window.localStorage.setItem(KEY('personal'), 'floating');
+    render(<SidePanelLayoutProvider><Consumer /></SidePanelLayoutProvider>);
+
+    expect(screen.getByTestId('pos')).toHaveTextContent('floating');
+    expect(screen.getByTestId('last-dock')).toHaveAttribute('data-last', 'bottom-full');
+  });
+
+  it('does not re-dock a detached panel when the bottom-variant preference changes', () => {
+    // The reposition rule used to read "anything that is not the right dock is a
+    // bottom dock", which swallowed the detached state and slammed the window back
+    // into a dock the user never asked for.
+    render(<SidePanelLayoutProvider><Consumer /></SidePanelLayoutProvider>);
+    act(() => screen.getByText('floating').click());
+
+    act(() => screen.getByText('mode-bottom').click());
+
+    expect(screen.getByTestId('pos')).toHaveTextContent('floating');
+    expect(screen.getByTestId('mode')).toHaveAttribute('data-mode', 'bottom');
+  });
+
+  it('still repositions a real bottom dock when the bottom-variant preference changes', () => {
+    render(<SidePanelLayoutProvider><Consumer /></SidePanelLayoutProvider>);
+    act(() => screen.getByText('bottom-full').click());
+
+    act(() => screen.getByText('mode-bottom').click());
+
+    expect(screen.getByTestId('pos')).toHaveTextContent('bottom');
+  });
+
+  it('restores a stored detach even for a user who has set a default-opening dock', () => {
+    // The default-opening preference answers "which DOCK does the panel open on",
+    // and a detached panel is on none: resolving the preference over the stored
+    // detach silently re-docked the panel on reload for exactly the users who had
+    // ever touched that setting, and left it detached for everyone else.
+    window.localStorage.setItem(DEF_KEY('personal'), 'right');
+    window.localStorage.setItem(KEY('personal'), 'floating');
+    render(<SidePanelLayoutProvider><Consumer /></SidePanelLayoutProvider>);
+    expect(screen.getByTestId('pos')).toHaveTextContent('floating');
+  });
+
+  it('lets the default-opening preference take over again once the panel is re-attached', () => {
+    window.localStorage.setItem(DEF_KEY('personal'), 'bottom');
+    window.localStorage.setItem(KEY('personal'), 'floating');
+    const { unmount } = render(<SidePanelLayoutProvider><Consumer /></SidePanelLayoutProvider>);
+    act(() => screen.getByText('right').click()); // re-attach writes a real dock back
+    unmount();
+
+    render(<SidePanelLayoutProvider><Consumer /></SidePanelLayoutProvider>);
+    expect(screen.getByTestId('pos')).toHaveTextContent('bottom-full');
+  });
+
+  it('FREEZES the return dock while detached, even when the bottom variant changes', () => {
+    // The app shell arranges itself around `lastDock` while the panel floats, and
+    // the two bottom variants mount the panel in different places - so rewriting
+    // it mid-detach tears the panel subtree down and takes a running canvas, an
+    // SSE stream or an interface iframe with it. The new preference is applied on
+    // RE-ATTACH instead (see the panel's detach toggle), where the panel moves
+    // anyway. Rewriting it here was a real remount bug, caught in review.
+    render(<SidePanelLayoutProvider><Consumer /></SidePanelLayoutProvider>);
+    act(() => screen.getByText('bottom-full').click());
+    act(() => screen.getByText('floating').click());
+
+    act(() => screen.getByText('mode-bottom').click());
+
+    expect(screen.getByTestId('pos'), 'still detached').toHaveTextContent('floating');
+    expect(screen.getByTestId('last-dock'), 'the arrangement the shell branches on is untouched')
+      .toHaveAttribute('data-last', 'bottom-full');
+    expect(screen.getByTestId('mode'), 'but the preference itself is recorded')
+      .toHaveAttribute('data-mode', 'bottom');
+  });
+
+  it('leaves the return dock alone when the panel was detached from the RIGHT dock', () => {
+    // Same freeze, and here the preference is irrelevant anyway.
+    // The bottom-variant preference says nothing about a right dock.
+    // (The panel already opens on 'right', and the `pos` readout renders that
+    // word too, so re-clicking the button would be an ambiguous no-op.)
+    render(<SidePanelLayoutProvider><Consumer /></SidePanelLayoutProvider>);
+    expect(screen.getByTestId('pos')).toHaveTextContent('right');
+    act(() => screen.getByText('floating').click());
+
+    act(() => screen.getByText('mode-bottom').click());
+
+    expect(screen.getByTestId('last-dock')).toHaveAttribute('data-last', 'right');
+  });
+
+  it('re-docks a detached panel when the default-opening preference is changed', () => {
+    // setDefaultPosition is WYSIWYG by design - it applies the new default to the
+    // ACTIVE dock - so it is the one setting that legitimately ends a detach.
+    render(<SidePanelLayoutProvider><Consumer /></SidePanelLayoutProvider>);
+    act(() => screen.getByText('floating').click());
+
+    act(() => screen.getByText('set-def-right').click());
+
+    expect(screen.getByTestId('pos')).toHaveTextContent('right');
   });
 });

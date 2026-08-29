@@ -5,13 +5,14 @@ import { Info } from 'lucide-react';
 import type { Node } from 'reactflow';
 import { useTranslations } from 'next-intl';
 import { Input } from '@/components/ui/input';
-import { Textarea } from '@/components/ui/textarea';
+import { ExpressionEditor } from '@/components/ui/expression-editor';
 import {
   Popover,
   PopoverContent,
   PopoverTrigger,
 } from '@/components/ui/popover';
 import type { BuilderNodeData } from '../../../types';
+import type { ConnectionProps } from '../ExpressionField';
 import { CredentialSection } from '../CredentialSection';
 
 interface SshParametersFormProps {
@@ -19,6 +20,8 @@ interface SshParametersFormProps {
   data: BuilderNodeData;
   isRunMode?: boolean;
   onUpdate: (data: BuilderNodeData) => void;
+  connectionProps: ConnectionProps;
+  findUnknownVariables: (expressions: Record<string, string>) => string[];
 }
 
 /** SSH credential requirement passed to CredentialSection */
@@ -36,6 +39,8 @@ export function SshParametersForm({
   data,
   isRunMode = false,
   onUpdate,
+  connectionProps,
+  findUnknownVariables,
 }: SshParametersFormProps) {
   const t = useTranslations('workflowBuilder.sshNode');
 
@@ -97,12 +102,22 @@ export function SshParametersForm({
         <span className="text-sm font-semibold text-slate-500 dark:text-slate-400">
           {t('command')} <span className="text-red-500">*</span>
         </span>
-        <Textarea
+        <ExpressionEditor
           value={command}
-          onChange={(e) => handleChange('sshCommand', e.target.value)}
+          onChange={(value) => handleChange('sshCommand', value)}
           placeholder={t('commandPlaceholder')}
-          disabled={isRunMode}
-          className="text-sm font-mono min-h-[80px]"
+          className="w-full min-h-[80px]"
+          unknownVariables={findUnknownVariables({ sshCommand: command })}
+          handleId={`ssh-command-${node.id}`}
+          connections={connectionProps.connections}
+          onHandleClick={connectionProps.handleHandleClick}
+          draggingFromHandle={connectionProps.draggingFromHandle}
+          onHandleMouseDown={connectionProps.handleHandleMouseDown}
+          onHandleMouseUp={connectionProps.handleHandleMouseUp}
+          hoveredTargetHandle={connectionProps.hoveredTargetHandle}
+          onSetHandleRef={connectionProps.handleSetHandleRef}
+          readOnly={isRunMode}
+          isRequired
         />
       </div>
 

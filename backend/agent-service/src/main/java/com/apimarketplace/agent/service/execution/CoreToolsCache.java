@@ -413,6 +413,7 @@ public class CoreToolsCache {
             .description((String) map.get("description"))
             .required(Boolean.TRUE.equals(map.get("required")))
             .enumValues(map.get("enumValues") instanceof List<?> ev ? (List<String>) ev : null)
+            .itemType((String) map.get("itemType"))
             .build();
     }
 }

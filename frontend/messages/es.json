@@ -419,7 +419,6 @@
     "noImage": "No image",
     "view": "View",
     "download": "Download",
-    "removeImage": "Eliminar imagen",
     "noFile": "No file",
     "removeFile": "Eliminar archivo",
     "file": "File",
@@ -431,7 +430,16 @@
     "noRows": "Sin filas",
     "showingRows": "Mostrando {visible} de {total} filas",
     "previous": "Anterior",
-    "next": "Siguiente"
+    "next": "Siguiente",
+    "pickFromFiles": "Archivos",
+    "pickFromFilesTitle": "Elegir un archivo",
+    "assetUrl": "Usar un enlace",
+    "assetUrlPlaceholder": "Pega la URL de una imagen o un archivo",
+    "assetUrlConfirm": "Usar",
+    "assetUrlInvalid": "Esta URL no parece utilizable",
+    "assetExternal": "Enlace externo",
+    "assetUnresolvableHint": "Este archivo ya no está disponible. Puede que se haya eliminado de Archivos.",
+    "uploadFailed": "Error al subir"
   },
   "auth": {
     "signIn": "Iniciar sesion",
@@ -484,6 +492,13 @@
     "addTab": "Agregar pestaña",
     "openRight": "Abrir el panel a la derecha",
     "openBottom": "Abrir el panel abajo",
+    "detach": "Desacoplar el panel",
+    "attach": "Volver a acoplar el panel",
+    "moveWindow": "Mover el panel",
+    "moveWindowHint": "Mover el panel: arrástralo o usa las flechas (Mayús para redimensionar desde la esquina inferior derecha, Ctrl+Mayús desde la superior izquierda, Alt para pasos de 1px)",
+    "collapseWindow": "Contraer el panel",
+    "expandWindow": "Expandir el panel",
+    "expandWindowHint": "Expandir el panel: haz clic, arrástralo para moverlo o usa las flechas (Alt para pasos de 1px)",
     "searchPlaceholder": "Buscar...",
     "applications": "Aplicaciones",
     "interfaces": "Interfaces",
@@ -1134,12 +1149,23 @@
       "budgetBlockedTitle": "Presupuesto alcanzado",
       "budgetBlockedMessage": "Gastado {spent} de {budget}. No se inició ninguna ejecución nueva.",
       "openInPanel": "Abrir los detalles de la ejecución en el panel",
+      "backToWorkflow": "Volver al workflow",
       "scrollLeft": "Mostrar los detalles anteriores",
       "scrollRight": "Mostrar más detalles",
       "cost": "Coste",
       "scopeAll": "todas las épocas",
       "scopeEpoch": "época {epoch}"
     }
+  },
+  "workflowRelations": {
+    "menuLabel": "{count, plural, one {# workflow vinculado} other {# workflows vinculados}}",
+    "parentsTitle": "Llamado por",
+    "parentsHint": "Workflows cuyo plan ejecuta este como subworkflow",
+    "childrenTitle": "Llama a",
+    "childrenHint": "Workflows que este ejecuta como subworkflows",
+    "openHint": "Abrir en el panel lateral",
+    "unavailable": "Workflow no disponible",
+    "unavailableHint": "Este workflow no está en tu espacio de trabajo o ha sido eliminado"
   },
   "data": {
     "title": "Tablas",
@@ -1248,6 +1274,8 @@
   "actions": {
     "running": "En ejecución",
     "edit": "Editar",
+    "interfaceControls": "Controles de la página",
+    "interfaceControlsSoundOn": "Controles de la página (sonido activado)",
     "save": "Guardar",
     "run": "Ejecutar",
     "share": "Compartir",
@@ -2218,11 +2246,11 @@
         },
         "file": {
           "label": "Adjunto",
-          "description": "Subir o vincular un documento"
+          "description": "Un archivo, mostrado como tarjeta con su nombre y tamaño"
         },
         "image": {
-          "label": "Vista previa imagen",
-          "description": "Miniatura adaptable"
+          "label": "Imagen",
+          "description": "La misma columna de archivo, mostrada como miniatura"
         },
         "date": {
           "label": "Fecha",
@@ -2264,7 +2292,12 @@
       "configVectorDimension": "Dimensión de embedding",
       "configVectorMetric": "Métrica de distancia",
       "ceOnlyBadge": "Solo CE",
-      "ceOnlyTooltip": "Disponible solo en la Community Edition autoalojada"
+      "ceOnlyTooltip": "Disponible solo en la Community Edition autoalojada",
+      "mediaRender": {
+        "label": "Mostrar como",
+        "thumbnail": "Miniatura",
+        "card": "Tarjeta con nombre y tamaño"
+      }
     },
     "createAgent": {
       "title": "Crear nuevo agente",
@@ -2413,6 +2446,10 @@
       "agentUpdated": "Agente actualizado exitosamente",
       "error": "Error",
       "createFailed": "Error al crear el agente",
+      "deleteAgent": "Eliminar agente",
+      "deleteTitle": "Eliminar agente",
+      "deleteConfirmation": "¿Seguro que quieres eliminar «{name}»? Esta acción no se puede deshacer.",
+      "deleteFailed": "Error al eliminar el agente",
       "widgetCreateFailed": "Error al guardar la configuración del widget",
       "skillsLabel": "Habilidades",
       "skillsInfo": "Asigna paquetes de habilidades reutilizables para mejorar las capacidades del agente.",
@@ -9895,7 +9932,8 @@
     "updateIntro": "Obtén la última versión y reinicia tu stack. El archivo Compose fija la etiqueta de imagen de la versión, así que ejecuta primero git pull. Tus datos se conservan y las migraciones de base de datos se ejecutan automáticamente al iniciar.",
     "updateRunFrom": "Ejecuta estos comandos desde tu carpeta clonada de LiveContext:",
     "copy": "Copiar",
-    "copied": "Copiado"
+    "copied": "Copiado",
+    "anonymousCheckNotice": "La comprobación diaria de actualizaciones envía esta versión y un identificador de instalación aleatorio, para poder contar las instalaciones autoalojadas activas. El registro que se conserva no contiene ninguna dirección IP, ningún nombre de host ni ninguna cuenta. Configure CE_VERSIONCHECK_SENDINSTALLID=false para dejar de enviar el identificador, o CE_VERSIONCHECK_ENABLED=false para desactivar la comprobación."
   },
   "optionalComponents": {
     "title": "Componentes opcionales",

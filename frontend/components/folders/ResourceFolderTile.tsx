@@ -5,6 +5,7 @@ import { Folder, Pencil, Trash2 } from 'lucide-react';
 import { useDroppable, useDraggable } from '@dnd-kit/core';
 import { useTranslations } from 'next-intl';
 import { formatRelativeDate } from '@/lib/utils/dateFormatters';
+import { DRAG_GUARD_PROPS } from '@/lib/dnd/dragGuards';
 import type { ResourceFolderTile as FolderTileData } from '@/lib/api/orchestrator/resource-folder.service';
 
 interface ResourceFolderTileProps {
@@ -50,7 +51,9 @@ export function ResourceFolderTile({
   });
   const { setNodeRef: setDragRef, attributes, listeners, isDragging } = useDraggable({
     id: `folder-drag:${folder.id}`,
-    data: { type: 'folder', folderId: folder.id },
+    // The name travels with the drag so the floating preview can say what is being moved -
+    // nothing else knows a folder's name once the tile is the thing under the pointer.
+    data: { type: 'folder', folderId: folder.id, name: folder.name },
     disabled: !draggable,
   });
 
@@ -74,7 +77,9 @@ export function ResourceFolderTile({
       role="button"
       tabIndex={0}
       aria-label={folder.name}
-      className={`group relative rounded-[18px] border overflow-hidden bg-gradient-to-br from-slate-50 to-slate-100 dark:from-slate-800 dark:to-slate-900 hover:shadow-md transition-shadow cursor-pointer ${
+      // `touch-manipulation`: see DraggableResourceCard - the hold that starts a drag must not
+      // compete with a gesture the browser might still claim.
+      className={`group relative touch-manipulation rounded-[18px] border overflow-hidden bg-gradient-to-br from-slate-50 to-slate-100 dark:from-slate-800 dark:to-slate-900 hover:shadow-md transition-shadow cursor-pointer ${
         isOver
           ? 'border-[var(--accent-primary)] ring-2 ring-[var(--accent-primary)]'
           : 'border-theme'
@@ -103,7 +108,7 @@ export function ResourceFolderTile({
                 e.stopPropagation();
                 onRename(folder);
               }}
-              onPointerDown={(e) => e.stopPropagation()}
+              {...DRAG_GUARD_PROPS}
             >
               <Pencil className="h-3.5 w-3.5" />
             </button>
@@ -118,7 +123,7 @@ export function ResourceFolderTile({
                 e.stopPropagation();
                 onDelete(folder);
               }}
-              onPointerDown={(e) => e.stopPropagation()}
+              {...DRAG_GUARD_PROPS}
             >
               <Trash2 className="h-3.5 w-3.5" />
             </button>

@@ -8,6 +8,7 @@ import { getFileUrlById } from '@/lib/api/orchestrator/file.service';
 import { useAuthedObjectUrl } from '@/hooks/useAuthedObjectUrl';
 import { getFileTypeIcon } from '@/lib/files/fileTypes';
 import { detectPreviewKind } from '@/lib/files/filePreview';
+import { DRAG_GUARD_PROPS } from '@/lib/dnd/dragGuards';
 
 /** Shared face + footer for both the manual and the virtual folder tile. */
 interface FolderFaceProps {
@@ -60,7 +61,7 @@ export function FolderFace({ previewFiles, label, countLabel }: FolderFaceProps)
 interface FolderCardProps {
   entry: StorageExplorerEntry;
   selected: boolean;
-  onToggleSelect: (id: string) => void;
+  onToggleSelect?: (id: string) => void;
   /** Open the folder (navigate into it). */
   onOpen: (entry: StorageExplorerEntry) => void;
   /** Localized display label (manual = the folder's name). */
@@ -115,7 +116,7 @@ export const FolderCard = React.memo(function FolderCard({
       ref={setRefs}
       {...attributes}
       {...listeners}
-      className={`group relative rounded-xl border bg-theme-secondary overflow-hidden cursor-pointer transition-colors ${
+      className={`group relative touch-manipulation rounded-xl border bg-theme-secondary overflow-hidden cursor-pointer transition-colors ${
         isOver
           ? 'border-[var(--accent-primary)] ring-2 ring-[var(--accent-primary)] ring-offset-1'
           : selected
@@ -125,19 +126,23 @@ export const FolderCard = React.memo(function FolderCard({
       onClick={() => onOpen(entry)}
       title={label}
     >
-      {/* Selection checkbox - always visible when selected, on hover otherwise */}
+      {/* Selection checkbox, only where selection is offered. A folder is never selectable in
+          the picker, and the box rendered there could not even be ticked: the selection map is
+          built from files only, so the change handler found nothing and the state never moved. */}
+      {onToggleSelect && (
       <div
         className={`absolute top-2 left-2 z-10 transition-opacity ${selected ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'}`}
         onClick={(e) => e.stopPropagation()}
-        onPointerDown={(e) => e.stopPropagation()}
+        {...DRAG_GUARD_PROPS}
       >
         <input
           type="checkbox"
           checked={selected}
-          onChange={() => onToggleSelect(entry.id)}
+          onChange={() => onToggleSelect?.(entry.id)}
           className="rounded border-slate-300 dark:border-slate-600 bg-white/80 dark:bg-slate-900/80"
         />
       </div>
+      )}
 
       <FolderFace previewFiles={previewFiles} label={label} countLabel={countLabel} />
     </div>
@@ -188,7 +193,7 @@ export const VirtualFolderCard = React.memo(function VirtualFolderCard({
 
   return (
     <div
-      className={`group relative rounded-xl border bg-theme-secondary overflow-hidden cursor-pointer transition-colors ${
+      className={`group relative touch-manipulation rounded-xl border bg-theme-secondary overflow-hidden cursor-pointer transition-colors ${
         selected
           ? 'border-[var(--accent-primary)] ring-2 ring-[var(--accent-primary)]'
           : 'border-theme hover:border-[var(--accent-primary)]'
@@ -201,7 +206,7 @@ export const VirtualFolderCard = React.memo(function VirtualFolderCard({
         <div
           className={`absolute top-2 left-2 z-10 transition-opacity ${selected ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'}`}
           onClick={(e) => e.stopPropagation()}
-          onPointerDown={(e) => e.stopPropagation()}
+          {...DRAG_GUARD_PROPS}
         >
           <input
             type="checkbox"
@@ -221,7 +226,7 @@ export const VirtualFolderCard = React.memo(function VirtualFolderCard({
             e.stopPropagation();
             onDelete(entry);
           }}
-          onPointerDown={(e) => e.stopPropagation()}
+          {...DRAG_GUARD_PROPS}
         >
           <Trash2 className="h-3.5 w-3.5" />
         </button>

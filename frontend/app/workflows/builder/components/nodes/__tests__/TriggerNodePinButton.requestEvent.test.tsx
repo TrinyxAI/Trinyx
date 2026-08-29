@@ -16,7 +16,11 @@ const mockListVersions = vi.fn();
 let mockMode: Record<string, unknown>;
 
 vi.mock('next-intl', () => ({ useTranslations: () => (k: string) => k }));
-vi.mock('next/navigation', () => ({ useRouter: () => ({ push: vi.fn() }) }));
+vi.mock('next/navigation', () => ({
+  useRouter: () => ({ push: vi.fn() }),
+  // The pin path asks where it is before deciding to route or bind in place.
+  usePathname: () => '/en/app/workflow/wf-1',
+}));
 vi.mock('@/contexts/WorkflowModeContext', () => ({ useWorkflowMode: () => mockMode }));
 vi.mock('@/contexts/WorkflowRunContext', () => ({ useRun: () => [null, null] }));
 vi.mock('@/lib/api', () => ({ orchestratorApi: { listVersions: (...a: unknown[]) => mockListVersions(...a), pinVersion: vi.fn() } }));

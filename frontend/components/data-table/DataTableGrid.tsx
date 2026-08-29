@@ -17,6 +17,7 @@ import { FIXED_COLUMNS } from '@/components/data-table/hooks/useColumnOperations
 import { PreviewActionMenu } from '@/components/chat/PreviewActionMenu';
 import { Button } from '@/components/ui/button';
 import { getRenderer, NoData } from '@/components/data-table/columnRenderers';
+import { serializeEditValue } from '@/components/data-table/utils/dataTableUtils';
 import { LoadOlderSentinel } from '@/components/agent-fleet/LoadOlderSentinel';
 import type { LucideIcon } from 'lucide-react';
 import {
@@ -235,7 +236,11 @@ export function DataTableGrid({ controller, workflowContext, jsonPath, dataSourc
     const exitEditing = () => setEditingCellKey(null);
     const saveAndExit = (editedValue: any) => {
       if (readOnly) return;
-      handleSaveEdit(row.id, col.field, String(editedValue), row.data?.array_index);
+      // String() on an object writes the literal "[object Object]": handleSaveEdit takes text and
+      // runs it back through parseEditValue, so a structured value has to be serialized, not
+      // stringified. Media cells hand back an asset map, and this is the ONE path every inline
+      // edit in the grid goes through.
+      handleSaveEdit(row.id, col.field, serializeEditValue(editedValue), row.data?.array_index);
       exitEditing();
     };
 

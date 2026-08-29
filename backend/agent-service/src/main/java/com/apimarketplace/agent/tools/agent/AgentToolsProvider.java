@@ -309,7 +309,7 @@ public class AgentToolsProvider implements ToolsProvider {
             intParam("estimate_minutes", "Estimated effort in minutes. (for: assign, task_update)", false, null),
             intParam("time_spent_minutes", "Logged time spent in minutes. (for: assign, task_update)", false, null),
             arrayParam("blocked_by", "Task UUIDs that must finish before this one. Replaces the set; empty clears. Self-reference and cycles are rejected. (for: assign, task_update)", false),
-            arrayParam("checklist", "Checklist items, each an object {text, done}. Replaces the list; empty clears. (for: assign, task_update)", false),
+            arrayParam("checklist", "Checklist items, each an object {text, done}. Replaces the list; empty clears. (for: assign, task_update)", false, "object"),
             stringParam("cron", "Cron expression for recurring tasks, e.g. '0 9 * * *' (for: recurrence_create, recurrence_update)", false),
             stringParam("timezone", "IANA timezone for cron, e.g. 'Europe/Paris' (default: UTC) (for: recurrence_create)", false),
             stringParam("recurrence_id", "Recurrence UUID (for: recurrence_update, recurrence_delete)", false),

@@ -1,7 +1,8 @@
 'use client';
 
 import { useCallback } from 'react';
-import { useSearchParams, useRouter, usePathname } from 'next/navigation';
+import { useSearchParams, usePathname } from 'next/navigation';
+import { samePageUrl, showSamePageUrl } from '@/lib/navigation/showSamePageUrl';
 import { AgentTable } from '@/components/AgentTable';
 import { SkillTab } from '@/components/SkillTab';
 import { AuthenticatedView } from './AuthenticatedView';
@@ -22,7 +23,6 @@ const tabFromView = (view: string | null): LocalTab =>
  */
 export function AgentView() {
   const searchParams = useSearchParams();
-  const router = useRouter();
   const pathname = usePathname();
 
   // The active tab is derived DIRECTLY from the URL (?view=) at render time -
@@ -37,13 +37,17 @@ export function AgentView() {
   const handleTabChange = useCallback((tab: LocalTab) => {
     // 'agents' is the default - keep its URL clean (no ?view=). Every other tab
     // (skills/fleet/metrics) is encoded in the URL so it stays the single source
-    // of truth and is deep-linkable.
-    if (tab === 'agents') {
-      router.replace(pathname);
-    } else {
-      router.replace(`${pathname}?view=${tab}`);
-    }
-  }, [router, pathname]);
+    // of truth and is deep-linkable. It is a change of ADDRESS on the page already on
+    // screen, and going back to the default removes the last param - which a router push of
+    // the bare pathname cannot do when the page was loaded at it. That is the "nothing
+    // happens" the comment above describes, and reading the param at render did not cure it
+    // because the address itself never changed.
+    showSamePageUrl(
+      tab === 'agents' ? pathname : `${pathname}?view=${tab}`,
+      samePageUrl(pathname, searchParams),
+      'replace',
+    );
+  }, [pathname, searchParams]);
 
   // Fleet tab → full-screen canvas (no AuthenticatedView wrapper)
   if (activeTab === 'fleet') {

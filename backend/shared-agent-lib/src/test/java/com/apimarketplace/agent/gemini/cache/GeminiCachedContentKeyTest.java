@@ -164,6 +164,28 @@ class GeminiCachedContentKeyTest {
     }
 
     @Test
+    @DisplayName("different array item type -> different hash (schema drift invalidates cache)")
+    void differentArrayItemTypeChangesHash() {
+        // Same reason as the parameter type above: the item type is part of the schema that gets
+        // cached, so it has to be part of what identifies the cache entry. Omitted here, a tool
+        // whose array changed from strings to objects would be served content built from the old
+        // declaration for the whole life of the cache, with nothing failing to say so.
+        List<ToolDefinition> asStrings = List.of(ToolDefinition.builder().name("alpha")
+                .description("a")
+                .parameters(List.of(ToolParameter.builder().name("rows").type("array")
+                        .description("Rows").required(false).build()))
+                .build());
+        List<ToolDefinition> asObjects = List.of(ToolDefinition.builder().name("alpha")
+                .description("a")
+                .parameters(List.of(ToolParameter.builder().name("rows").type("array")
+                        .description("Rows").required(false).itemType("object").build()))
+                .build());
+
+        assertThat(GeminiCachedContentKey.compute("block", asStrings))
+                .isNotEqualTo(GeminiCachedContentKey.compute("block", asObjects));
+    }
+
+    @Test
     @DisplayName("null block text throws IllegalArgumentException - fail loud, not silently 'empty'")
     void nullBlockTextThrows() {
         // Empty string is fine ('no system prompt' is a valid state),

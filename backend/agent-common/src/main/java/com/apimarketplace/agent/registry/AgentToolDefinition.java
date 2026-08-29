@@ -111,6 +111,13 @@ public record AgentToolDefinition(
                     if (p.enumValues() != null && !p.enumValues().isEmpty()) {
                         paramMap.put("enum", p.enumValues());
                     }
+                    // What one element of an array is. Dropping it here would strand the
+                    // declaration at the tool: every consumer rebuilds its own schema from THIS
+                    // payload, so an array of objects would still be advertised as an array of
+                    // strings to the model that has to fill it in.
+                    if (p.itemType() != null) {
+                        paramMap.put("itemType", p.itemType());
+                    }
                     return paramMap;
                 })
                 .toList()

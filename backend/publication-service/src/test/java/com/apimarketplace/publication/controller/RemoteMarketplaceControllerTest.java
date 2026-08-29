@@ -325,6 +325,17 @@ class RemoteMarketplaceControllerTest {
         }
 
         @Test
+        @DisplayName("GET /by-id/{id}/step-files should delegate the step-files sub-path - a cloud publication's node file pills live in the CLOUD's namespace, so the read has to leave this install")
+        void stepFilesShouldDelegate() {
+            when(remoteMarketplaceService.proxyPublicByIdJson(PUB_ID, "step-files", null))
+                    .thenReturn(ResponseEntity.ok("{}"));
+
+            controller.remoteStepFiles(PUB_ID);
+
+            verify(remoteMarketplaceService).proxyPublicByIdJson(PUB_ID, "step-files", null);
+        }
+
+        @Test
         @DisplayName("GET /by-id/{id}/epochs/{epoch}/state should build the epoch sub-path from the typed path variable")
         void epochStateShouldBuildSubPath() {
             when(remoteMarketplaceService.proxyPublicByIdJson(PUB_ID, "epochs/5/state", null))

@@ -30,6 +30,16 @@ export interface FileStripFile {
   mimeType: string;
   size: number;
   id?: string;
+  /**
+   * A ready-to-render URL for the bytes, used INSTEAD of resolving them from `path`/`id`.
+   *
+   * Set on a marketplace showcase canvas, where the file lives in the publication's storage
+   * namespace and the visitor's only channel to it is an HMAC-signed `proxy-signed` URL minted
+   * server-side. Such a URL carries its own authorization, so it must be handed to the media
+   * element verbatim: routing it through the authenticated blob fetch would rewrite the path and
+   * attach a token the visitor does not have.
+   */
+  previewUrl?: string;
 }
 
 /** Round icon-button used inside the pill / preview-card header. */
@@ -51,7 +61,8 @@ export function FileRefPill({
   file: FileStripFile;
   expanded: boolean;
   onToggleExpand: () => void;
-  onOpenPanel: () => void;
+  /** Null hides the control: on a showcase canvas there is no Files panel to open. */
+  onOpenPanel: (() => void) | null;
 }) {
   const t = useTranslations('workflowBuilder.nodes.filePreview');
   const IconComp = getFileKindIcon(file.mimeType);
@@ -85,15 +96,17 @@ export function FileRefPill({
       >
         <ChevronComp className="h-3 w-3" />
       </button>
-      <button
-        type="button"
-        title={t('openInPanel')}
-        aria-label={t('openInPanel')}
-        className={PILL_BTN_CLS}
-        onClick={(e) => { e.stopPropagation(); onOpenPanel(); }}
-      >
-        <PanelRight className="h-3 w-3" />
-      </button>
+      {onOpenPanel && (
+        <button
+          type="button"
+          title={t('openInPanel')}
+          aria-label={t('openInPanel')}
+          className={PILL_BTN_CLS}
+          onClick={(e) => { e.stopPropagation(); onOpenPanel(); }}
+        >
+          <PanelRight className="h-3 w-3" />
+        </button>
+      )}
     </div>
   );
 }
@@ -122,14 +135,22 @@ export function FilePreviewCard({
 }: {
   file: FileStripFile;
   onCollapse: () => void;
-  onOpenPanel: () => void;
+  /** Null hides the control: on a showcase canvas there is no Files panel to open. */
+  onOpenPanel: (() => void) | null;
 }) {
   const t = useTranslations('workflowBuilder.nodes.filePreview');
   const kind = inlineKindOf(file);
-  // Header-authenticated fetch -> blob: URL (no session token in the URL).
-  // 'other' kinds pass null: no media bytes are fetched for them at all.
-  const mediaSrc = kind !== 'other' ? (fileRefToUrl(file, { inline: true }) || null) : null;
-  const { url, loading, error } = useAuthedObjectUrl(mediaSrc, resolveMediaMimeType(file.mimeType, file.name));
+  // A pre-signed URL (showcase canvas) IS the authorization and is loaded by the element
+  // directly. Everything else goes through the header-authenticated fetch -> blob: URL, so no
+  // session token ever appears in a URL. The hook is still called with null in the signed case:
+  // its own contract for a falsy src is "no fetch", and skipping the call would break hook order.
+  // 'other' kinds pass null too: no media bytes are fetched for them at all.
+  const signedSrc = kind !== 'other' ? (file.previewUrl || null) : null;
+  const mediaSrc = kind !== 'other' && !signedSrc ? (fileRefToUrl(file, { inline: true }) || null) : null;
+  const authed = useAuthedObjectUrl(mediaSrc, resolveMediaMimeType(file.mimeType, file.name));
+  const url = signedSrc ?? authed.url;
+  const loading = signedSrc ? false : authed.loading;
+  const error = signedSrc ? false : authed.error;
 
   // While expanded, the card hangs below the node into the inter-node gap and
   // can overlap the NEIGHBORING node's box. ReactFlow stacks nodes by their own
@@ -158,7 +179,7 @@ export function FilePreviewCard({
   // kind whose ref has no usable source (fileRefToUrl returns '' for a legacy
   // id-less FileRef) - without the !mediaSrc arm that last case showed the
   // loading skeleton forever (url stays null, loading never starts).
-  const showHint = kind === 'other' || error || !mediaSrc;
+  const showHint = kind === 'other' || error || (!mediaSrc && !signedSrc);
 
   return (
     <div
@@ -181,15 +202,17 @@ export function FilePreviewCard({
         >
           <ChevronUp className="h-3 w-3" />
         </button>
-        <button
-          type="button"
-          title={t('openInPanel')}
-          aria-label={t('openInPanel')}
-          className={PILL_BTN_CLS}
-          onClick={(e) => { e.stopPropagation(); onOpenPanel(); }}
-        >
-          <PanelRight className="h-3 w-3" />
-        </button>
+        {onOpenPanel && (
+          <button
+            type="button"
+            title={t('openInPanel')}
+            aria-label={t('openInPanel')}
+            className={PILL_BTN_CLS}
+            onClick={(e) => { e.stopPropagation(); onOpenPanel(); }}
+          >
+            <PanelRight className="h-3 w-3" />
+          </button>
+        )}
       </div>
 
       {/* Inline preview body */}
@@ -276,6 +299,11 @@ export function FileResultStrip({ file }: { file: FileStripFile }) {
 
   // Same opener as the bottom-bar "Files" button (useNodeContextualButtons):
   // opens the side-panel Files tab focused on THIS file.
+  // No path and no id means the strip is showing a showcase file: it exists only as a signed URL,
+  // there is no storage row for the Files panel to open, and the panel's own reads are tenant-
+  // scoped anyway. Hand the pill a null opener so it drops the control instead of offering a
+  // button that would open an empty panel.
+  const canOpenPanel = !!file.path || !!file.id;
   const openPanel = React.useCallback(() => {
     openFilesPanel(sidePanel, {
       path: file.path,
@@ -285,6 +313,7 @@ export function FileResultStrip({ file }: { file: FileStripFile }) {
       size: file.size,
     });
   }, [sidePanel, file.path, file.id, file.name, file.mimeType, file.size]);
+  const onOpenPanel = canOpenPanel ? openPanel : null;
 
   // pointer-events-none on the wrapper so the strip never STEALS clicks from
   // whatever it happens to overlap (edges, handles, a close neighbor); the
@@ -303,9 +332,9 @@ export function FileResultStrip({ file }: { file: FileStripFile }) {
     >
       <div className="pointer-events-auto">
         {expanded ? (
-          <FilePreviewCard file={file} onCollapse={() => setExpanded(false)} onOpenPanel={openPanel} />
+          <FilePreviewCard file={file} onCollapse={() => setExpanded(false)} onOpenPanel={onOpenPanel} />
         ) : (
-          <FileRefPill file={file} expanded={false} onToggleExpand={() => setExpanded(true)} onOpenPanel={openPanel} />
+          <FileRefPill file={file} expanded={false} onToggleExpand={() => setExpanded(true)} onOpenPanel={onOpenPanel} />
         )}
       </div>
     </div>

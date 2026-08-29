@@ -88,7 +88,10 @@ vi.mock('next/navigation', () => ({
 vi.mock('@dnd-kit/core', () => ({
   DndContext: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
   DragOverlay: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
-  PointerSensor: class {},
+  MouseSensor: class {},
+  TouchSensor: class {},
+  pointerWithin: () => [],
+  rectIntersection: () => [],
   useSensor: () => ({}),
   useSensors: () => [],
 }));

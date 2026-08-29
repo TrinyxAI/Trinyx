@@ -235,6 +235,12 @@ public class RemoteMarketplaceController {
         return remoteMarketplaceService.proxyPublicByIdJson(publicationId, "run-state", null);
     }
 
+    /** GET /api/publications/remote/by-id/{id}/step-files - frozen per-node file results (signed URLs). */
+    @GetMapping("/by-id/{publicationId}/step-files")
+    public ResponseEntity<String> remoteStepFiles(@PathVariable UUID publicationId) {
+        return remoteMarketplaceService.proxyPublicByIdJson(publicationId, "step-files", null);
+    }
+
     /** GET /api/publications/remote/by-id/{id}/aggregated-steps - showcase step rows (optional epoch). */
     @GetMapping("/by-id/{publicationId}/aggregated-steps")
     public ResponseEntity<String> remoteAggregatedSteps(@PathVariable UUID publicationId,

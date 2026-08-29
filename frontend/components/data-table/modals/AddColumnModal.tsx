@@ -154,6 +154,31 @@ export const DateFormatConfig: React.FC<DateFormatConfigProps> = ({ dateFormat, 
   </div>
 );
 
+export interface MediaRenderConfigProps {
+  render: 'thumbnail' | 'card';
+  onChange: (render: 'thumbnail' | 'card') => void;
+  labels: { label: string; thumbnail: string; card: string };
+}
+
+/**
+ * How a media column draws its file. Both media presets create the SAME column type, so this is
+ * purely presentational: switching it cannot invalidate a single stored value, which is why it is
+ * offered on an EXISTING column while changing an actual type still is not.
+ */
+export const MediaRenderConfig: React.FC<MediaRenderConfigProps> = ({ render, onChange, labels }) => (
+  <div>
+    <label className="block text-sm font-medium text-theme-primary mb-2">{labels.label}</label>
+    <select
+      value={render}
+      onChange={(e) => onChange(e.target.value as 'thumbnail' | 'card')}
+      className="w-48 h-9 rounded-md border border-theme bg-theme-primary px-2 text-sm text-theme-primary"
+    >
+      <option value="card">{labels.card}</option>
+      <option value="thumbnail">{labels.thumbnail}</option>
+    </select>
+  </div>
+);
+
 export type NumberFormatType = 'plain' | 'currency' | 'percentage';
 
 export interface NumberFormatConfigProps {

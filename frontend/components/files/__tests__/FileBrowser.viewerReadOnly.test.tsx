@@ -71,7 +71,10 @@ vi.mock('@/lib/api/storage-api', () => ({
 vi.mock('@dnd-kit/core', () => ({
   DndContext: ({ children }: { children: React.ReactNode }) => <div data-testid="dnd">{children}</div>,
   DragOverlay: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
-  PointerSensor: class {},
+  MouseSensor: class {},
+  TouchSensor: class {},
+  pointerWithin: () => [],
+  rectIntersection: () => [],
   useSensor: () => ({}),
   useSensors: () => [],
 }));

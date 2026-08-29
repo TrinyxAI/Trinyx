@@ -147,7 +147,7 @@ public final class DefaultSystemPrompts {
 
     public static final PromptModule WORKFLOW = new PromptModule(
         "workflow",
-        "\n        - workflow - Multi-step automation builder (stateful: init/load before add_node). Also inspect, execute and stop runs: when an execution goes wrong, workflow(action='stop_run', run_id=…, reason='…') ends it instead of letting it run on (same action on application).\n",
+        "\n        - workflow - Multi-step automation builder (stateful: init/load before add_node). Also inspect, execute and stop runs: when an execution goes wrong, workflow(action='stop_run', run_id=…, reason='…') ends it instead of letting it run on (same action on application). run_node with run_inputs=[{...}] runs one node config over several inputs in a single call.\n",
         Set.of("workflow")
     );
 

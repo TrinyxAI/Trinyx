@@ -179,6 +179,17 @@ export default function VersionCard() {
             </div>
           )}
 
+          {/* Disclosure for the request that produces the badge above. Driven by whether this
+              install actually sends an id, not by its edition: managed cloud never polls,
+              self-hosted enterprise runs no poller either, and either opt-out removes the identity.
+              Telling an operator who turned it off that they are counted would be worse than
+              saying nothing. */}
+          {version.identifiesInstall && (
+            <p className="mt-4 border-t border-theme pt-3 text-sm text-theme-muted">
+              {t('anonymousCheckNotice')}
+            </p>
+          )}
+
           <HowToUpdateDialog
             open={showUpdate}
             onOpenChange={setShowUpdate}

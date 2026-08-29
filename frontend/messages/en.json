@@ -419,7 +419,6 @@
     "noImage": "No image",
     "view": "View",
     "download": "Download",
-    "removeImage": "Remove image",
     "noFile": "No file",
     "removeFile": "Remove file",
     "file": "File",
@@ -431,7 +430,16 @@
     "noRows": "No rows",
     "showingRows": "Showing {visible} of {total} rows",
     "previous": "Previous",
-    "next": "Next"
+    "next": "Next",
+    "pickFromFiles": "Files",
+    "pickFromFilesTitle": "Choose a file",
+    "assetUrl": "Use a link",
+    "assetUrlPlaceholder": "Paste an image or file URL",
+    "assetUrlConfirm": "Use",
+    "assetUrlInvalid": "This does not look like a usable URL",
+    "assetExternal": "External link",
+    "assetUnresolvableHint": "This file is no longer available. It may have been deleted from Files.",
+    "uploadFailed": "Upload failed"
   },
   "auth": {
     "signIn": "Sign In",
@@ -484,6 +492,13 @@
     "addTab": "Add tab",
     "openRight": "Open panel on the right",
     "openBottom": "Open panel at the bottom",
+    "detach": "Detach panel",
+    "attach": "Dock panel back",
+    "moveWindow": "Move panel",
+    "moveWindowHint": "Move the panel: drag it, or use the arrow keys (Shift to resize from the bottom-right, Ctrl+Shift from the top-left, Alt for a 1px step)",
+    "collapseWindow": "Collapse the panel",
+    "expandWindow": "Expand the panel",
+    "expandWindowHint": "Expand the panel: click it, drag to move it, or use the arrow keys (Alt for a 1px step)",
     "searchPlaceholder": "Search...",
     "applications": "Applications",
     "interfaces": "Interfaces",
@@ -1139,12 +1154,23 @@
       "budgetBlockedTitle": "Budget reached",
       "budgetBlockedMessage": "Spent {spent} of {budget}. No new run was started.",
       "openInPanel": "Open run details in the panel",
+      "backToWorkflow": "Back to the workflow",
       "scrollLeft": "Show previous details",
       "scrollRight": "Show more details",
       "cost": "Cost",
       "scopeAll": "all epochs",
       "scopeEpoch": "epoch {epoch}"
     }
+  },
+  "workflowRelations": {
+    "menuLabel": "{count, plural, one {# linked workflow} other {# linked workflows}}",
+    "parentsTitle": "Called by",
+    "parentsHint": "Workflows whose plan runs this one as a sub-workflow",
+    "childrenTitle": "Calls",
+    "childrenHint": "Workflows this one runs as sub-workflows",
+    "openHint": "Open in the side panel",
+    "unavailable": "Unavailable workflow",
+    "unavailableHint": "This workflow is not in your workspace, or has been deleted"
   },
   "data": {
     "title": "Tables",
@@ -1316,6 +1342,8 @@
   "actions": {
     "running": "Running",
     "edit": "Edit",
+    "interfaceControls": "Page controls",
+    "interfaceControlsSoundOn": "Page controls (sound on)",
     "save": "Save",
     "run": "Run",
     "share": "Share",
@@ -2312,11 +2340,11 @@
         },
         "file": {
           "label": "Attachment",
-          "description": "Upload or link a document"
+          "description": "A file, shown as a card with its name and size"
         },
         "image": {
-          "label": "Image preview",
-          "description": "Responsive thumbnail for visuals"
+          "label": "Image",
+          "description": "The same file column, shown as a thumbnail"
         },
         "date": {
           "label": "Date",
@@ -2358,7 +2386,12 @@
       "configVectorDimension": "Embedding dimension",
       "configVectorMetric": "Distance metric",
       "ceOnlyBadge": "CE only",
-      "ceOnlyTooltip": "Available on the self-hosted Community Edition only"
+      "ceOnlyTooltip": "Available on the self-hosted Community Edition only",
+      "mediaRender": {
+        "label": "Show as",
+        "thumbnail": "Thumbnail",
+        "card": "Card with name and size"
+      }
     },
     "createAgent": {
       "title": "Create New Agent",
@@ -2517,6 +2550,10 @@
       "agentUpdated": "Agent updated successfully",
       "error": "Error",
       "createFailed": "Failed to create agent",
+      "deleteAgent": "Delete agent",
+      "deleteTitle": "Delete agent",
+      "deleteConfirmation": "Are you sure you want to delete \"{name}\"? This action cannot be undone.",
+      "deleteFailed": "Failed to delete agent",
       "widgetCreateFailed": "Failed to save widget configuration",
       "scheduleLabel": "Schedule",
       "scheduleDescription": "Run this agent automatically on a schedule",
@@ -9895,7 +9932,8 @@
     "updateIntro": "Get the latest release and restart your stack. The Compose file pins the release image tag, so run git pull first. Your data is kept, and database migrations run automatically on startup.",
     "updateRunFrom": "Run these from your cloned LiveContext folder:",
     "copy": "Copy",
-    "copied": "Copied"
+    "copied": "Copied",
+    "anonymousCheckNotice": "The daily update check sends this version and a random install id, so live self-hosted installs can be counted. The record kept contains no IP address, hostname or account. Set CE_VERSIONCHECK_SENDINSTALLID=false to stop sending the id, or CE_VERSIONCHECK_ENABLED=false to disable the check."
   },
   "optionalComponents": {
     "title": "Optional components",

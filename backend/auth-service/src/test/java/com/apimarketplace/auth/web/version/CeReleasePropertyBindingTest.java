@@ -37,7 +37,7 @@ class CeReleasePropertyBindingTest {
                         "ce.release.published-at=2026-07-31T00:00:00Z")
                 .run(context -> {
                     CeReleaseController.LatestRelease r =
-                            context.getBean(CeReleaseController.class).latest(null);
+                            context.getBean(CeReleaseController.class).latest(null, null);
                     assertThat(r.latestVersion()).isEqualTo("0.9.9");
                     assertThat(r.releaseUrl()).isEqualTo("https://example.test/v0.9.9");
                     assertThat(r.securityFix()).isTrue();
@@ -65,7 +65,7 @@ class CeReleasePropertyBindingTest {
                     org.springframework.boot.context.properties.source.ConfigurationPropertySources
                             .attach(context.getEnvironment());
                 })
-                .run(context -> assertThat(context.getBean(CeReleaseController.class).latest(null).latestVersion())
+                .run(context -> assertThat(context.getBean(CeReleaseController.class).latest(null, null).latestVersion())
                         .isEqualTo("0.9.9"));
     }
 
@@ -146,7 +146,7 @@ class CeReleasePropertyBindingTest {
     @DisplayName("with no property set the feed advertises no release, which is every CE install")
     void noPropertiesMeansNoRelease() {
         runner.withBean(CeReleaseController.class)
-                .run(context -> assertThat(context.getBean(CeReleaseController.class).latest(null).latestVersion())
+                .run(context -> assertThat(context.getBean(CeReleaseController.class).latest(null, null).latestVersion())
                         .isNull());
     }
 }

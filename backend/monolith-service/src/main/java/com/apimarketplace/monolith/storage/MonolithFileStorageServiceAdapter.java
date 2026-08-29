@@ -133,7 +133,13 @@ public class MonolithFileStorageServiceAdapter implements com.apimarketplace.orc
         return storageFileStorageService.exists(key);
     }
 
+    /**
+     * Carries the {@code storage.storage} row id across the CE boundary. Dropping it (the 4-arg
+     * {@code of}) left every CE workflow FileRef id-less, so anything keyed on the id was inert
+     * on self-hosted: {@code FileRefScanner} adopted nothing, and a table asset cell could not
+     * build its {@code /api/proxy/files/by-id/{id}/raw} URL.
+     */
     private static FileRef toOrchestratorRef(com.apimarketplace.storage.domain.FileRef ref) {
-        return FileRef.of(ref.path(), ref.name(), ref.mimeType(), ref.size());
+        return FileRef.of(ref.path(), ref.name(), ref.mimeType(), ref.size(), ref.id());
     }
 }

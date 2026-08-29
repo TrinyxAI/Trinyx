@@ -5,7 +5,7 @@ import { Info } from 'lucide-react';
 import type { Node } from 'reactflow';
 import { useTranslations } from 'next-intl';
 import { Input } from '@/components/ui/input';
-import { Textarea } from '@/components/ui/textarea';
+import { ExpressionEditor } from '@/components/ui/expression-editor';
 import {
   Select,
   SelectContent,
@@ -19,6 +19,7 @@ import {
   PopoverTrigger,
 } from '@/components/ui/popover';
 import type { BuilderNodeData } from '../../../types';
+import type { ConnectionProps } from '../ExpressionField';
 import { CredentialSection } from '../CredentialSection';
 
 interface SftpParametersFormProps {
@@ -26,6 +27,8 @@ interface SftpParametersFormProps {
   data: BuilderNodeData;
   isRunMode?: boolean;
   onUpdate: (data: BuilderNodeData) => void;
+  connectionProps: ConnectionProps;
+  findUnknownVariables: (expressions: Record<string, string>) => string[];
 }
 
 const OPERATIONS = [
@@ -52,6 +55,8 @@ export function SftpParametersForm({
   data,
   isRunMode = false,
   onUpdate,
+  connectionProps,
+  findUnknownVariables,
 }: SftpParametersFormProps) {
   const t = useTranslations('workflowBuilder.sftpNode');
 
@@ -139,12 +144,21 @@ export function SftpParametersForm({
         <span className="text-sm font-semibold text-slate-500 dark:text-slate-400">
           {t('remotePath')} <span className="text-red-500">*</span>
         </span>
-        <Input
+        <ExpressionEditor
           value={remotePath}
-          onChange={(e) => handleChange('sftpRemotePath', e.target.value)}
+          onChange={(value) => handleChange('sftpRemotePath', value)}
           placeholder={t('remotePathPlaceholder')}
-          disabled={isRunMode}
-          className="text-sm"
+          className="w-full"
+          unknownVariables={findUnknownVariables({ sftpRemotePath: remotePath })}
+          handleId={`sftp-remotepath-${node.id}`}
+          connections={connectionProps.connections}
+          onHandleClick={connectionProps.handleHandleClick}
+          draggingFromHandle={connectionProps.draggingFromHandle}
+          onHandleMouseDown={connectionProps.handleHandleMouseDown}
+          onHandleMouseUp={connectionProps.handleHandleMouseUp}
+          hoveredTargetHandle={connectionProps.hoveredTargetHandle}
+          onSetHandleRef={connectionProps.handleSetHandleRef}
+          readOnly={isRunMode}
         />
       </div>
 
@@ -154,12 +168,21 @@ export function SftpParametersForm({
           <span className="text-sm font-semibold text-slate-500 dark:text-slate-400">
             {t('localContent')}
           </span>
-          <Textarea
+          <ExpressionEditor
             value={localContent}
-            onChange={(e) => handleChange('sftpLocalContent', e.target.value)}
+            onChange={(value) => handleChange('sftpLocalContent', value)}
             placeholder={t('localContentPlaceholder')}
-            disabled={isRunMode}
-            className="text-sm min-h-[80px]"
+            className="w-full min-h-[80px]"
+            unknownVariables={findUnknownVariables({ sftpLocalContent: localContent })}
+            handleId={`sftp-localcontent-${node.id}`}
+            connections={connectionProps.connections}
+            onHandleClick={connectionProps.handleHandleClick}
+            draggingFromHandle={connectionProps.draggingFromHandle}
+            onHandleMouseDown={connectionProps.handleHandleMouseDown}
+            onHandleMouseUp={connectionProps.handleHandleMouseUp}
+            hoveredTargetHandle={connectionProps.hoveredTargetHandle}
+            onSetHandleRef={connectionProps.handleSetHandleRef}
+            readOnly={isRunMode}
           />
         </div>
       )}
@@ -170,12 +193,21 @@ export function SftpParametersForm({
           <span className="text-sm font-semibold text-slate-500 dark:text-slate-400">
             {t('newPath')} <span className="text-red-500">*</span>
           </span>
-          <Input
+          <ExpressionEditor
             value={newPath}
-            onChange={(e) => handleChange('sftpNewPath', e.target.value)}
+            onChange={(value) => handleChange('sftpNewPath', value)}
             placeholder={t('newPathPlaceholder')}
-            disabled={isRunMode}
-            className="text-sm"
+            className="w-full"
+            unknownVariables={findUnknownVariables({ sftpNewPath: newPath })}
+            handleId={`sftp-newpath-${node.id}`}
+            connections={connectionProps.connections}
+            onHandleClick={connectionProps.handleHandleClick}
+            draggingFromHandle={connectionProps.draggingFromHandle}
+            onHandleMouseDown={connectionProps.handleHandleMouseDown}
+            onHandleMouseUp={connectionProps.handleHandleMouseUp}
+            hoveredTargetHandle={connectionProps.hoveredTargetHandle}
+            onSetHandleRef={connectionProps.handleSetHandleRef}
+            readOnly={isRunMode}
           />
         </div>
       )}

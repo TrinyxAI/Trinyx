@@ -546,8 +546,11 @@ public class DataSourceTableModule implements ToolModule {
             Map.entry("rating", "Star rating. display: {max: 5, color: '#fbbf24'}"),
             Map.entry("sentiment", "Thumbs up/down. Values: 'up', 'down', 'neutral'. display: {labels: {up: 'Good', down: 'Bad'}}"),
             Map.entry("progress", "Progress bar 0-max. display: {max: 100}"),
-            Map.entry("file", "File link/attachment"),
-            Map.entry("image", "Image thumbnail. display: {imageFit: 'cover', ratio: '4:3'}"),
+            Map.entry("file", "A file: an upload, a file already in storage, or a link. Write the ref "
+                + "returned by files(action='get') as the cell value, or a public URL string. Reading the "
+                + "row back gives {_type:'file', id, url, name, mimeType, size}. See help.mediaColumns."),
+            Map.entry("image", "Same value as 'file', shown as a round thumbnail instead of a file card. "
+                + "display: {render: 'thumbnail'|'card'}. See help.mediaColumns."),
             Map.entry("email", "Email address with mailto: link"),
             Map.entry("phone", "Phone number with tel: link"),
             Map.entry("url", "Clickable URL (opens in new tab)")
@@ -558,6 +561,27 @@ public class DataSourceTableModule implements ToolModule {
                 "Use with crud-find + similarity config for nearest-neighbor queries.");
         }
         help.put("columnTypes", columnTypes);
+
+        // The value shape of a media cell was documented nowhere, so an agent could see that the
+        // column type existed and had to guess what to write into it.
+        help.put("mediaColumns", Map.of(
+            "appliesTo", "Columns of type 'file' and 'image'. They are ONE value contract; 'image' only "
+                + "changes how the cell is drawn.",
+            "whatToWrite", "Any of: (1) the ref object returned by files(action='get') - the usual case "
+                + "when the file already exists or a workflow produced it; (2) a public URL string such as "
+                + "'https://example.com/photo.png'; (3) an object {url, name, mimeType, size}.",
+            "whatYouReadBack", "{_type:'file', id, url, name, mimeType, size}. 'id' identifies a file held "
+                + "in this workspace and is absent when the cell holds an external link. 'url' is what "
+                + "renders the file.",
+            "externalUrls", "A URL that is not ours is stored as a link, not copied. It keeps working only "
+                + "as long as that address does, and it has no 'id'.",
+            "example", Map.of(
+                "step1", "files(action='list', query='invoice') then files(action='get', file_id=...) to get the ref",
+                "step2", "insert_rows with rows=[{columns: {invoice: <the ref from step 1>, customer: 'ACME'}}]"
+            ),
+            "commonMistake", "Do not write the file's name or its storage path on its own: neither can be "
+                + "resolved back to a file. Write the ref, or a URL."
+        ));
 
         help.put("examples", List.of(
             Map.of("action", "create (data + columns with types)",

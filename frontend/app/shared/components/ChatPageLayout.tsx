@@ -16,6 +16,8 @@ import { DashboardContent } from '@/components/chat/DashboardContent';
 import { ConversationActivityCard } from '@/components/chat/ConversationActivityCard';
 import { useConversationActivity } from '@/contexts/ConversationActivityContext';
 import { useSidePanelSafe } from '@/contexts/SidePanelContext';
+import { useSidePanelLayoutSafe } from '@/contexts/SidePanelLayoutContext';
+import { useMobileDetection } from '@/hooks/useMobileDetection';
 import { scrollToAndHighlightMessage } from '@/lib/chat/messageActivity';
 import { HighlightedApps } from '@/components/chat/HighlightedApps';
 import { HomeDynamicTitle } from '@/components/chat/HomeDynamicTitle';
@@ -79,9 +81,18 @@ export function ChatPageLayout({
   // Closing is done from the focused AppHeader toggle (desktop) or the
   // tablet/mobile focus backdrop (onClose).
   const { isOpen: activityOpen, setOpen: setActivityOpen } = useConversationActivity();
-  // When the right side panel is open, center the activity card in the (shrunken)
-  // conversation area instead of docking it top-right over the panel.
-  const sidePanelOpen = useSidePanelSafe()?.isOpen ?? false;
+  // When the right side panel SHRINKS the conversation area, center the activity
+  // card in what is left instead of docking it top-right over the panel.
+  //
+  // "Shrinks" is the question, not "is open". Two ways a panel can be open and take
+  // no layout space, and centering for either moves the card away from its corner
+  // for nothing: a DETACHED panel is a fixed card out of flow, and below the mobile
+  // breakpoint EVERY dock renders as a fixed full-screen overlay, so no dock value
+  // reshapes the area there. (A collapsed panel is always detached, so the first
+  // test covers it too.)
+  const sidePanelDock = useSidePanelLayoutSafe().position;
+  const isMobile = useMobileDetection();
+  const sidePanelOpen = (useSidePanelSafe()?.isOpen ?? false) && sidePanelDock !== 'floating' && !isMobile;
   // Scroll to the sent message and flash a ring on its bubble (shared helper, unit-tested).
   const handleActivityJump = (messageId: string) => scrollToAndHighlightMessage(messageId);
 

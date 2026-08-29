@@ -16,9 +16,14 @@ import enMessages from '@/messages/en.json';
 import type { ResourceFolderTile as FolderTileData } from '@/lib/api/orchestrator/resource-folder.service';
 import { ResourceFolderTile } from '../ResourceFolderTile';
 
+const dnd = vi.hoisted(() => ({ draggable: null as Record<string, unknown> | null }));
+
 vi.mock('@dnd-kit/core', () => ({
   useDroppable: () => ({ setNodeRef: () => {}, isOver: false }),
-  useDraggable: () => ({ setNodeRef: () => {}, attributes: {}, listeners: {}, isDragging: false }),
+  useDraggable: (args: Record<string, unknown>) => {
+    dnd.draggable = args;
+    return { setNodeRef: () => {}, attributes: {}, listeners: {}, isDragging: false };
+  },
 }));
 
 afterEach(() => cleanup());
@@ -120,5 +125,81 @@ describe('ResourceFolderTile', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Rename folder' }));
 
     expect(onOpen).not.toHaveBeenCalled();
+  });
+});
+
+describe('ResourceFolderTile - what a drag of the tile carries', () => {
+  it('carries the folder name, so the floating preview can say what is being moved', () => {
+    // Once the tile is the thing under the pointer, nothing else knows its name: without this
+    // the preview of a folder being nested was blank.
+    renderTile({ folder: folder({ id: 'f7', name: 'Q4 campaign' }) });
+
+    expect(dnd.draggable?.data).toEqual({ type: 'folder', folderId: 'f7', name: 'Q4 campaign' });
+  });
+});
+
+describe('ResourceFolderTile - pressing an action must not pick the folder up', () => {
+  // The tile root IS the drag handle, so a press that reaches it arms a drag. Which event
+  // arms it depends on the list's sensors - `mousedown` for a mouse, `touchstart` for a
+  // finger - so the guard has to stop all of them, not just `pointerdown`.
+  it.each([
+    ['pointerDown', 'Rename folder'],
+    ['mouseDown', 'Rename folder'],
+    ['touchStart', 'Rename folder'],
+    ['pointerDown', 'Delete folder'],
+    ['mouseDown', 'Delete folder'],
+    ['touchStart', 'Delete folder'],
+  ] as const)(
+    'stops %s on %s from reaching the tile',
+    (event, control) => {
+      const onTilePress = vi.fn();
+      render(
+        <NextIntlClientProvider locale="en" messages={enMessages as Record<string, unknown>}>
+          <div onPointerDown={onTilePress} onMouseDown={onTilePress} onTouchStart={onTilePress}>
+            <ResourceFolderTile
+              folder={folder()}
+              face={null}
+              countLabel="3 workflows"
+              onOpen={vi.fn()}
+              onRename={vi.fn()}
+              onDelete={vi.fn()}
+            />
+          </div>
+        </NextIntlClientProvider>,
+      );
+
+      fireEvent[event](screen.getByRole('button', { name: control }));
+
+      expect(onTilePress).not.toHaveBeenCalled();
+    },
+  );
+
+  it('still renames when the button is clicked', () => {
+    const onRename = vi.fn();
+    renderTile({ onRename });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Rename folder' }));
+
+    expect(onRename).toHaveBeenCalledWith(expect.objectContaining({ id: 'f1' }));
+  });
+
+  it('still deletes when the button is clicked', () => {
+    const onDelete = vi.fn();
+    renderTile({ onDelete });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Delete folder' }));
+
+    expect(onDelete).toHaveBeenCalledWith(expect.objectContaining({ id: 'f1' }));
+  });
+
+});
+
+describe('ResourceFolderTile - scrolling past it on a phone', () => {
+  it('lets a finger scroll past the tile it makes draggable', () => {
+    // The touch sensor waits for a HOLD, and `touch-manipulation` tells the browser there is
+    // no double-tap gesture to reserve time for, so the wait is not competing with one.
+    renderTile();
+
+    expect(screen.getByRole('button', { name: 'Marketing' })).toHaveClass('touch-manipulation');
   });
 });

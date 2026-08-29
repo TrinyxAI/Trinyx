@@ -26,10 +26,12 @@ import {
 import { parseLocalePath } from '@/lib/utils/locale';
 import {
   onResourceFolderTrail,
-  folderUrl,
+  showFolderLevel,
+  FOLDER_QUERY_PARAM,
   type ResourceFolderCrumb,
   type ResourceFolderTrailState,
 } from '@/lib/folders/foldersHeaderBus';
+import { samePageUrl, showSamePageUrl } from '@/lib/navigation/showSamePageUrl';
 
 // Helper to build path with locale prefix. Kept local (not the shared
 // buildLocalePath): this one preserves the CURRENT prefix verbatim - when the
@@ -50,6 +52,13 @@ export interface BreadcrumbItem {
   editable?: boolean;
   /** Callback when editing is complete */
   onEditComplete?: (newValue: string) => void;
+  /**
+   * Keep this segment clickable even in the LAST position. The last crumb is normally the page
+   * you are on, so it does not navigate - but a crumb can be last and still be the way OUT: a
+   * list showing a folder it cannot name yet prints no folder segment after its own, and
+   * without this the only exit is the browser's Back button.
+   */
+  alwaysClickable?: boolean;
   /** When set, renders a favorite-toggle star on this segment (see breadcrumb.tsx). */
   favorite?: { isFavorite: boolean; onToggle: () => void };
 }
@@ -177,6 +186,34 @@ export function useBreadcrumbs(_options: UseBreadcrumbsOptions = {}): UseBreadcr
   }, [isResourceListView]);
 
   /**
+   * Go to a level of the list already on screen. Same page, only `?folder=` changes, so it
+   * goes through {@link showFolderLevel} rather than the router - see that helper for why a
+   * router push cannot leave a folder the page was loaded directly into.
+   */
+  const goToFolderLevel = useCallback((folderId: string | null) => {
+    showFolderLevel(pathname ?? '', searchParams, folderId);
+  }, [pathname, searchParams]);
+
+  /**
+   * Go to a list's own page, from wherever the crumb was clicked.
+   *
+   * <p>When that page is the one already on screen - a folder open on the workflows list, the
+   * Fleet tab of the agents list, a type filter on the marketplace - only the QUERY is being
+   * dropped, and routing to a pathname the page was loaded at is exactly the push Next drops.
+   * That is the whole bug this change exists for, and every crumb that says "take me back to
+   * the plain list" is the same shape of it. Off that page it is an ordinary route change.
+   */
+  const goToListPage = useCallback((path: string) => {
+    const target = buildLocalePath(locale, path);
+    const [targetPath] = target.split('?');
+    if (targetPath === pathname) {
+      showSamePageUrl(target, samePageUrl(pathname ?? '', searchParams));
+      return;
+    }
+    navigateTo(path);
+  }, [locale, pathname, searchParams, navigateTo]);
+
+  /**
    * The folder crumbs to append after a list's own crumb. Each one navigates by changing the
    * address (`?folder=<id>`), which is what the list itself listens to - so a crumb, a
    * shared link and the back button all take exactly the same path.
@@ -188,12 +225,45 @@ export function useBreadcrumbs(_options: UseBreadcrumbsOptions = {}): UseBreadcr
       label: crumb.name,
       truncate: true,
       // The last crumb IS the page being shown, so it does not navigate.
-      onClick: index === trail.length - 1
-        ? undefined
-        : () => safeNavigate(folderUrl(pathname ?? '', searchParams, crumb.id)),
+      onClick: index === trail.length - 1 ? undefined : () => goToFolderLevel(crumb.id),
     }));
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [folderTrailState, pathname, searchParams, safeNavigate]);
+  }, [folderTrailState, goToFolderLevel]);
+
+  /**
+   * A list's OWN crumb ("Workflows"). While a folder is open it is the way back to the TOP
+   * LEVEL of the page already on screen, which is a `?folder=` change and not a route change:
+   * routing to the list's own path leaves the address untouched (the pathname is already that
+   * one) and the crumb does nothing at all. Off a folder it is an ordinary link to the list.
+   *
+   * <p>Which of the two it is comes from the ADDRESS, never from the trail the list broadcasts.
+   * The trail is a repaint of names that can outlive the level it described - a list unmounting,
+   * a navigation the list has not caught up with - and reading it here would put the crumb back
+   * in the state this whole change exists to remove: a click that resolves to the address it is
+   * already on, and so does nothing at all.
+   *
+   * <p>The caller still passes the folder path it decided to SHOW, so a crumb cannot offer to
+   * leave a folder on a page that is not the list (a detail page hides the crumbs but sits on
+   * its own pathname, where a `?folder=` would be meaningless).
+   */
+  const listRootCrumb = useCallback(
+    (label: string, path: string, clickableAtRoot = true): BreadcrumbItem => {
+      // On the list's own page with a folder open, this is the way OUT: up one address,
+      // keeping whatever else the page carries (a search, a page number). It reads that from
+      // the ADDRESS, not from the trail the list broadcasts - the trail arrives after the
+      // first render and can outlive the level it described, and either way the exit must not
+      // wait for a name it does not need. `alwaysClickable` because until the trail lands
+      // there is no folder segment after this one, which would otherwise make it the last
+      // crumb and so inert, leaving the browser's Back button as the only escape.
+      const onListPage = buildLocalePath(locale, path).split('?')[0] === pathname;
+      if (onListPage && searchParams.get(FOLDER_QUERY_PARAM) !== null) {
+        return { label, onClick: () => goToFolderLevel(null), alwaysClickable: true };
+      }
+      // Anywhere else it is an ordinary link to the list. Some lists keep their own crumb
+      // inert at the top level rather than offering to go where you already are.
+      return { label, onClick: clickableAtRoot ? () => goToListPage(path) : undefined };
+    },
+    [goToFolderLevel, goToListPage, locale, pathname, searchParams],
+  );
 
 
   // Marketplace preview page detection: /app/marketplace/{publicationId}/preview
@@ -576,13 +646,13 @@ export function useBreadcrumbs(_options: UseBreadcrumbsOptions = {}): UseBreadcr
         }));
       };
 
+      // Inside a folder, the path continues: Workflows / Marketing / Q4.
+      const workflowFolderPath = workflowId ? [] : folderCrumbs('workflow');
       const items: BreadcrumbItem[] = [
         homeItem,
-        { label: 'Workflows', onClick: () => navigateTo('/app/workflow') },
+        listRootCrumb('Workflows', '/app/workflow'),
+        ...workflowFolderPath,
       ];
-
-      // Inside a folder, the path continues: Workflows / Marketing / Q4.
-      if (!workflowId) items.push(...folderCrumbs('workflow'));
 
       if (workflowId && workflowId !== 'new') {
         const isLoading = workflowName === null;
@@ -615,12 +685,12 @@ export function useBreadcrumbs(_options: UseBreadcrumbsOptions = {}): UseBreadcr
 
     // Data breadcrumbs
     if (isDataView) {
+      const tableFolderPath = dataSourceId ? [] : folderCrumbs('table');
       const items: BreadcrumbItem[] = [
         homeItem,
-        { label: 'Tables', onClick: () => navigateTo('/app/tables') },
+        listRootCrumb('Tables', '/app/tables'),
+        ...tableFolderPath,
       ];
-
-      if (!dataSourceId) items.push(...folderCrumbs('table'));
 
       if (dataSourceId && dataSourceId !== 'new') {
         const isLoading = dataSourceName === null;
@@ -679,7 +749,7 @@ export function useBreadcrumbs(_options: UseBreadcrumbsOptions = {}): UseBreadcr
     if (isMarketplaceView) {
       const items: BreadcrumbItem[] = [
         homeItem,
-        { label: 'Marketplace', onClick: () => navigateTo('/app/marketplace') },
+        { label: 'Marketplace', onClick: () => goToListPage('/app/marketplace') },
       ];
 
       if (isMarketplacePreview && previewPublicationId) {
@@ -696,7 +766,7 @@ export function useBreadcrumbs(_options: UseBreadcrumbsOptions = {}): UseBreadcr
         // landed the user back on Explore/Applications with the agent they had
         // just opened nowhere on screen.
         items.push(
-          { label: MARKETPLACE_LABELS['agents'], onClick: () => navigateTo('/app/marketplace?type=agents') },
+          { label: MARKETPLACE_LABELS['agents'], onClick: () => goToListPage('/app/marketplace?type=agents') },
         );
       } else if (normalizedPathname?.startsWith('/app/marketplace/')) {
         const category = normalizedPathname.replace('/app/marketplace/', '');
@@ -714,40 +784,41 @@ export function useBreadcrumbs(_options: UseBreadcrumbsOptions = {}): UseBreadcr
       if (view === 'fleet') {
         return [
           homeItem,
-          { label: 'Agents', onClick: () => navigateTo('/app/agent') },
+          { label: 'Agents', onClick: () => goToListPage('/app/agent') },
           { label: 'Fleet' },
         ];
       }
       if (view === 'metrics') {
         return [
           homeItem,
-          { label: 'Agents', onClick: () => navigateTo('/app/agent') },
+          { label: 'Agents', onClick: () => goToListPage('/app/agent') },
           { label: 'Metrics' },
         ];
       }
       if (view === 'skills') {
         return [
           homeItem,
-          { label: 'Agents', onClick: () => navigateTo('/app/agent') },
+          { label: 'Agents', onClick: () => goToListPage('/app/agent') },
           { label: 'Skills' },
         ];
       }
+      const agentFolderPath = folderCrumbs('agent');
       return [
         homeItem,
         // With a folder open, "Agents" goes back to the top level rather than sitting inert.
-        { label: 'Agents', onClick: folderCrumbs('agent').length > 0 ? () => navigateTo('/app/agent') : undefined },
-        ...folderCrumbs('agent'),
+        listRootCrumb('Agents', '/app/agent', false),
+        ...agentFolderPath,
       ];
     }
 
     // Interface breadcrumbs
     if (isInterfaceView) {
+      const interfaceFolderPath = isInterfacePage ? [] : folderCrumbs('interface');
       const items: BreadcrumbItem[] = [
         homeItem,
-        { label: 'Interfaces', onClick: () => navigateTo('/app/interface') },
+        listRootCrumb('Interfaces', '/app/interface'),
+        ...interfaceFolderPath,
       ];
-
-      if (!isInterfacePage) items.push(...folderCrumbs('interface'));
 
       if (isInterfacePage && interfaceId) {
         const isLoading = interfaceName === null;
@@ -779,18 +850,12 @@ export function useBreadcrumbs(_options: UseBreadcrumbsOptions = {}): UseBreadcr
 
     // Application breadcrumbs
     if (isApplicationView) {
-      const folderPath = folderCrumbs('application');
+      const folderPath = isApplicationPage ? [] : folderCrumbs('application');
       const items: BreadcrumbItem[] = [
         homeItem,
-        {
-          label: 'Applications',
-          onClick: (isApplicationPage || folderPath.length > 0)
-            ? () => navigateTo('/app/applications')
-            : undefined,
-        },
+        listRootCrumb('Applications', '/app/applications', isApplicationPage),
+        ...folderPath,
       ];
-
-      if (!isApplicationPage) items.push(...folderPath);
 
       if (isApplicationPage && publicationId) {
         const isLoading = publicationTitle === null;
@@ -935,8 +1000,11 @@ export function useBreadcrumbs(_options: UseBreadcrumbsOptions = {}): UseBreadcr
     isFilesView,
     filesDetail,
     // The folder path of a resource list: without this the header keeps the path it printed
-    // when the memo last ran, which is the whole point of the crumbs.
+    // when the memo last ran, which is the whole point of the crumbs. `listRootCrumb` and
+    // `goToListPage` carry the address those crumbs navigate to, so they belong here too.
     folderCrumbs,
+    listRootCrumb,
+    goToListPage,
     isProfileView,
     profileHandle,
     isAuthenticated,

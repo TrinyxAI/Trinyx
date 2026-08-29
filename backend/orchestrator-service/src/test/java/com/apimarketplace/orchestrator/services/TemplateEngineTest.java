@@ -1701,4 +1701,144 @@ class TemplateEngineTest {
             verify(pathNavigator).getVariableValueFromMap(eq("vars.x"), anyMap());
         }
     }
+
+    @Nested
+    @DisplayName("A file-shaped value in a string context")
+    class FileShapedValueInStringContext {
+
+        /**
+         * Regression: a table media cell became a MAP (one asset contract for file and image
+         * columns). Interpolating a map JSON-encodes it, so every already-published interface doing
+         * {@code <img src="{{photo}}">} would have rendered
+         * {@code <img src="{"url":"/api/..."}">} - a broken image, retroactively, with nothing in
+         * any log. Interpolating the URL is both the fix and the only sensible reading.
+         */
+        @Test
+        @DisplayName("interpolates as its URL, not as JSON")
+        void fileMapInterpolatesAsItsUrl() {
+            Map<String, Object> photo = new LinkedHashMap<>();
+            photo.put("_type", "file");
+            photo.put("id", "44444444-4444-4444-4444-444444444444");
+            photo.put("url", "/api/proxy/files/by-id/44444444-4444-4444-4444-444444444444/raw?disposition=inline");
+            photo.put("name", "photo.png");
+            when(spelEvaluator.evaluateWithMap(eq("photo"), anyMap(), any())).thenReturn(photo);
+
+            String result = templateEngine.resolveWithMap("<img src=\"{{photo}}\">", Map.of("photo", photo));
+
+            assertEquals("<img src=\"/api/proxy/files/by-id/44444444-4444-4444-4444-444444444444/raw?disposition=inline\">",
+                    result);
+        }
+
+        @Test
+        @DisplayName("also covers the DB-flattened file shape")
+        void dbFlattenedFileMapAlsoResolves() {
+            Map<String, Object> attachment = new LinkedHashMap<>();
+            attachment.put("file_url", "https://cdn.example.com/a.pdf");
+            attachment.put("file_name", "a.pdf");
+            when(spelEvaluator.evaluateWithMap(eq("doc"), anyMap(), any())).thenReturn(attachment);
+
+            String result = templateEngine.resolveWithMap("{{doc}}", Map.of("doc", attachment));
+
+            assertEquals("https://cdn.example.com/a.pdf", result);
+        }
+
+        @Test
+        @DisplayName("also covers the value serialized as a JSON string")
+        void serializedFileValueResolves() {
+            // The CRUD write path stringifies the map before the JSONB insert, so a cell written
+            // by an agent arrives as text. Covering only the Map form fixed the grid-written half
+            // and left the agent-written half rendering raw JSON into <img src>.
+            String serialized = "{\"_type\":\"file\",\"id\":\"44444444-4444-4444-4444-444444444444\","
+                    + "\"url\":\"/api/proxy/files/by-id/44444444-4444-4444-4444-444444444444/raw\","
+                    + "\"name\":\"photo.png\"}";
+            when(spelEvaluator.evaluateWithMap(eq("photo"), anyMap(), any())).thenReturn(serialized);
+
+            String result = templateEngine.resolveWithMap("<img src=\"{{photo}}\">", Map.of("photo", serialized));
+
+            // The canonical id-based URL, not the one stored in the value: the id is what still
+            // resolves, so a cell whose stored URL is a dead generation renders correctly anyway.
+            assertEquals("<img src=\"/api/proxy/files/by-id/44444444-4444-4444-4444-444444444444/raw"
+                    + "?disposition=inline\">", result);
+        }
+
+        @Test
+        @DisplayName("leaves an ordinary API object that merely has a url and a name encoded as JSON")
+        void objectWithUrlAndNameIsNotTreatedAsAFile() {
+            // The specimen that actually risks a false positive. A GitHub repo is {name, url}; if
+            // that interpolated as a bare URL, a JSON body template holding it would stop parsing,
+            // which is precisely what the JSON encoding exists to prevent.
+            Map<String, Object> repo = new LinkedHashMap<>();
+            repo.put("name", "repo");
+            repo.put("url", "https://api.github.com/repos/a/b");
+            when(spelEvaluator.evaluateWithMap(eq("repo"), anyMap(), any())).thenReturn(repo);
+
+            String result = templateEngine.resolveWithMap("{{repo}}", Map.of("repo", repo));
+
+            assertTrue(result.startsWith("{"), "an ordinary object keeps its JSON encoding, got: " + result);
+            assertTrue(result.contains("\"url\""));
+        }
+
+        /**
+         * The corpus this recognition rule must NOT claim. Every defect in this area came from a
+         * predicate tested only with the shape it was written for plus the single counter-example
+         * it was told to refuse. A value substituted as a bare URL in a string context is a whole
+         * record destroyed, so the refusals matter more than the acceptances.
+         */
+        @Test
+        @DisplayName("refuses every ordinary record, even when it has an id and a url")
+        void refusesOrdinaryRecords() {
+            String uuid = "9a443915-a594-48a1-9760-e7a1b4b2eaf7";
+            List<Map<String, Object>> notFiles = List.of(
+                    Map.of("id", uuid, "status", "COMPLETED"),
+                    Map.of("id", uuid, "name", "Acme Corp", "email", "a@acme.test"),
+                    Map.of("id", uuid, "title", "My App", "price", 10),
+                    Map.of("id", uuid, "url", "https://api.example.com/things/1", "name", "Thing"),
+                    Map.of("name", "repo", "url", "https://api.github.com/repos/a/b"),
+                    Map.of("foo", "bar"),
+                    // A download-file node's output carries _status FLAT beside its own fields, so
+                    // the envelope has a file_url at top level without being a file. Substituting
+                    // it would replace the whole step output with one of its URLs.
+                    Map.of("_status", "COMPLETED", "_duration_ms", 120,
+                            "file_url", "https://cdn.example.test/x.pdf", "file_name", "x.pdf",
+                            "content_type", "application/pdf", "source_url", "https://origin.test/x.pdf"));
+
+            for (Map<String, Object> candidate : notFiles) {
+                assertNull(com.apimarketplace.orchestrator.domain.file.FileRef.displayUrl(candidate),
+                        "must not be treated as a file: " + candidate);
+            }
+        }
+
+        @Test
+        @DisplayName("the id wins over a stored URL of a dead generation")
+        void idWinsOverADeadStoredUrl() {
+            Map<String, Object> legacy = new LinkedHashMap<>();
+            legacy.put("_type", "file");
+            legacy.put("id", "9a443915-a594-48a1-9760-e7a1b4b2eaf7");
+            legacy.put("url", "/api/proxy/files/proxy?key=t%2Fold.png");
+
+            assertEquals("/api/proxy/files/by-id/9a443915-a594-48a1-9760-e7a1b4b2eaf7/raw?disposition=inline",
+                    com.apimarketplace.orchestrator.domain.file.FileRef.displayUrl(legacy),
+                    "interpolating the dead URL renders nothing, and the id still resolves");
+        }
+
+        @Test
+        @DisplayName("accepts the legacy cell shape only through a URL addressing our storage")
+        void legacyShapeRecognisedByItsUrl() {
+            String byId = "/api/proxy/files/by-id/9a443915-a594-48a1-9760-e7a1b4b2eaf7/raw";
+            Map<String, Object> legacyCell = new LinkedHashMap<>();
+            legacyCell.put("url", byId);
+            legacyCell.put("name", "a.pdf");
+            legacyCell.put("size", 4);
+
+            assertEquals(byId, com.apimarketplace.orchestrator.domain.file.FileRef.displayUrl(legacyCell));
+        }
+
+        @Test
+        @DisplayName("leaves a plain string alone rather than trying to parse it")
+        void plainStringIsUntouched() {
+            when(spelEvaluator.evaluateWithMap(eq("s"), anyMap(), any())).thenReturn("{not json");
+
+            assertEquals("{not json", templateEngine.resolveWithMap("{{s}}", Map.of("s", "{not json")));
+        }
+    }
 }

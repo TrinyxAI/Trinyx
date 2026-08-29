@@ -401,9 +401,12 @@ public record ExecutionContext(
             return this;
         }
 
-        // Remove from step outputs
+        // Remove from step outputs. removeWithAlias is the counterpart of the
+        // writeWithAlias used by withResult: an output lives under BOTH its full key and
+        // its bare alias, so dropping only the full key would leave the alias holding the
+        // value this reset is meant to clear.
         Map<String, Object> newOutputs = new HashMap<>(stepOutputs);
-        nodeIds.forEach(newOutputs::remove);
+        StepOutputsWriter.removeWithAlias(newOutputs, nodeIds);
 
         // Remove from execution state
         ExecutionState newState = state.withoutNodes(nodeIds);

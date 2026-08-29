@@ -75,7 +75,15 @@ public class BackEdgeSafetyValidator {
                 continue;
             }
 
-            Set<String> span = graph.collectForwardSpan(targetKey, sourceKey);
+            // Walk from the loop's BODY entry, not from the hub. A loop-back into a hub's
+            // :iterate port re-enters the BODY; walking from the hub itself also descends the
+            // :exit port, so everything AFTER the loop looked like it was inside it - and a run
+            // report placed after a loop, the normal shape, was rejected as "inside" it.
+            // The engine resets the body span only, so reading the hub here also disagreed with
+            // what actually re-executes.
+            String spanStart = graph.getLoopBodyEntry(targetKey);
+            if (spanStart == null) spanStart = targetKey;
+            Set<String> span = graph.collectForwardSpan(spanStart, sourceKey);
 
             for (String nodeKey : span) {
                 if (nodeKey.startsWith("trigger:")) {

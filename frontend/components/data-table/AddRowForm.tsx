@@ -189,7 +189,11 @@ export function AddRowForm({
                   type: col.type,
                   displayConfig: col.displayConfig,
                   isEditing: true,
-                  onSaveAndExit: (val: any) => onRowDataChange(fieldKey, String(val)),
+                  // String() on an object writes the literal '[object Object]'. Media cells hand back
+                  // an asset map, so keep a non-string value structured and let the row serializer
+                  // encode it, exactly like the inline grid editor does.
+                  onSaveAndExit: (val: any) =>
+                    onRowDataChange(fieldKey, val !== null && typeof val === 'object' ? val : String(val)),
                   onStartEditing: noop,
                   onExitEditing: noop,
                   cellKey,

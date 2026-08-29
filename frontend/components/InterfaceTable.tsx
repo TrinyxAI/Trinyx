@@ -24,12 +24,12 @@ import { useCanMutateInCurrentOrg } from '@/lib/stores/current-org-store';
 import { useOrgScopedReset } from '@/lib/hooks/useOrgScopedReset';
 import { InterfaceThumbnail } from '@/app/workflows/builder/components/interface/InterfaceThumbnail';
 import { useSelectableItems } from '@/hooks/useSelectableItems';
-import { DndContext, DragOverlay } from '@dnd-kit/core';
 import { FolderPlus } from 'lucide-react';
-import { InterfaceFolderFace } from '@/components/folders/InterfaceFolderFace';
+import { InterfaceFolderFace, INTERFACE_FACE_CELLS } from '@/components/folders/InterfaceFolderFace';
 import { FolderBreadcrumb } from '@/components/folders/FolderBreadcrumb';
 import { FolderTilesGrid } from '@/components/folders/FolderTilesGrid';
 import { FolderDialogs } from '@/components/folders/FolderDialogs';
+import { FolderDragContext } from '@/components/folders/FolderDragContext';
 import { DraggableResourceCard } from '@/components/folders/DraggableResourceCard';
 import { useListFolders } from '@/hooks/useListFolders';
 import { BulkDeleteModal } from '@/components/ui/BulkDeleteModal';
@@ -38,6 +38,13 @@ import { EmptyState } from '@/components/ui/EmptyState';
 import { PaginationBar } from '@/components/ui/PaginationBar';
 import { useDebouncedValue } from '@/hooks/useDebouncedValue';
 import PublishResourceModal from '@/components/marketplace/PublishResourceModal';
+
+/**
+ * How many folder-preview pages one level of the list will render at most. A face draws
+ * {@code INTERFACE_FACE_CELLS} pages, so this is four folders' worth: past that the tiles keep
+ * their silhouettes rather than turning a folder-heavy page into dozens of template loads.
+ */
+const FOLDER_TEMPLATE_BUDGET = INTERFACE_FACE_CELLS * 4;
 
 export interface InterfaceRow {
   id: string;
@@ -491,21 +498,25 @@ export function InterfaceTable({ className = '', interfaceTypeFilter }: Interfac
     if (!loading && page > 0 && page > totalPages - 1) setPage(Math.max(0, totalPages - 1));
   }, [loading, page, totalPages]);
 
-  // Html view: the fetch-all loaded metadata only, so pull the full html/css/js for the VISIBLE page
-  // and stash it in `templatesById` (merged into the card at render). Deduped via fetchedTemplateIds
-  // so each template loads at most once; non-visible interfaces never load their (large) templates.
-  // The web_search / mixed views already carry templates inline (includeTemplates=true), so skip.
-  useEffect(() => {
-    if (interfaceTypeFilter !== 'html') return;
-    const toFetch = filteredInterfaces.filter((i) => !fetchedTemplateIds.current.has(i.id) && !i.htmlTemplate);
+  // Pull the full html/css/js of the given pages into `templatesById`, at most once each
+  // (deduped via fetchedTemplateIds). The list payload deliberately omits those heavy fields,
+  // and both surfaces that show a page draw the REAL page - the cards and the folder faces -
+  // so both load through here.
+  //
+  // The ids are CLAIMED before the request, not when it lands. Both callers' inputs change
+  // while a batch is in flight - the favourites arrive just after the list and rebuild the
+  // row array - and a claim made only on arrival means each such change re-requests the very
+  // templates already on the wire. A batch is never abandoned either: it is claimed, so
+  // dropping it would leave those pages with no template at all, and a batch that lands after
+  // the list moved on only writes keys nothing renders, which the next fetch clears anyway.
+  const loadTemplates = useCallback((ids: string[]) => {
+    const toFetch = ids.filter((id) => !fetchedTemplateIds.current.has(id));
     if (toFetch.length === 0) return;
-    let cancelled = false;
+    toFetch.forEach((id) => fetchedTemplateIds.current.add(id));
     void (async () => {
       const results = await Promise.all(
-        toFetch.map(async (i) => ({ id: i.id, full: await interfaceService.getInterface(i.id).catch(() => null) })),
+        toFetch.map(async (id) => ({ id, full: await interfaceService.getInterface(id).catch(() => null) })),
       );
-      if (cancelled) return;
-      toFetch.forEach((i) => fetchedTemplateIds.current.add(i.id));
       setTemplatesById((prev) => {
         const next = new Map(prev);
         for (const r of results) {
@@ -520,8 +531,32 @@ export function InterfaceTable({ className = '', interfaceTypeFilter }: Interfac
         return next;
       });
     })();
-    return () => { cancelled = true; };
-  }, [filteredInterfaces, interfaceTypeFilter]);
+  }, []);
+
+  // Html view: the fetch-all loaded metadata only, so pull the full html/css/js for the VISIBLE page
+  // (merged into the card at render). Non-visible interfaces never load their (large) templates.
+  // The web_search / mixed views already carry templates inline (includeTemplates=true), so skip.
+  useEffect(() => {
+    if (interfaceTypeFilter !== 'html') return;
+    loadTemplates(filteredInterfaces.filter((i) => !i.htmlTemplate).map((i) => i.id));
+  }, [filteredInterfaces, interfaceTypeFilter, loadTemplates]);
+
+  // A folder tile previews the pages it holds by RENDERING them, so the few pages its face
+  // draws need their templates too - they are inside the folder, so they are never among the
+  // cards. Bounded twice: the face draws at most INTERFACE_FACE_CELLS per folder, and one
+  // level never loads more than FOLDER_TEMPLATE_BUDGET pages however many folders it shows.
+  useEffect(() => {
+    // Whole faces, never part of one: a face showing one rendered page beside three
+    // silhouettes reads as three pages that failed to load. Once the budget cannot take a
+    // whole face, that folder and the ones after it keep their silhouettes.
+    const previewIds: string[] = [];
+    for (const tile of folders.tiles) {
+      const face = (tile.preview ?? []).slice(0, INTERFACE_FACE_CELLS);
+      if (previewIds.length + face.length > FOLDER_TEMPLATE_BUDGET) break;
+      previewIds.push(...face.map((item) => item.id));
+    }
+    loadTemplates(previewIds);
+  }, [folders.tiles, loadTemplates]);
 
   const selectableInterfaces = filteredInterfaces;
 
@@ -589,6 +624,9 @@ export function InterfaceTable({ className = '', interfaceTypeFilter }: Interfac
   };
 
   return (
+    // The drag surface covers the header too: the folder path in it is a drop target, so a
+    // card can be dragged out of a folder onto the level it belongs to.
+    <FolderDragContext folders={folders} nameOf={(id) => interfaces.find((i) => i.id === id)?.name}>
     <div className={`space-y-6 w-full ${className}`}>
       {/* Header - Applications-style: page title + description below, ALWAYS visible so the empty
           state shows the same layout as the Applications page. The create button shows only when
@@ -748,19 +786,13 @@ export function InterfaceTable({ className = '', interfaceTypeFilter }: Interfac
           ))}
         </div>
       ) : (
-        /* One drag context over the folders AND the cards: a card dropped on a tile is filed
-           there, a tile dropped on another tile is nested inside it. */
-        <DndContext
-          sensors={folders.sensors}
-          onDragStart={(event) => folders.handleDragStart(
-            event, (id) => interfaces.find((i) => i.id === id)?.name)}
-          onDragEnd={folders.handleDragEnd}
-          onDragCancel={folders.cancelDrag}
-        >
+        <>
           <FolderTilesGrid
             folders={folders}
             countLabel={folderCountLabel}
-            renderFace={(folder) => <InterfaceFolderFace preview={folder.preview ?? []} />}
+            renderFace={(folder) => (
+              <InterfaceFolderFace preview={folder.preview ?? []} templates={templatesById} />
+            )}
           />
 
           {filteredInterfaces.length === 0 && folders.tiles.length === 0 ? (
@@ -815,18 +847,7 @@ export function InterfaceTable({ className = '', interfaceTypeFilter }: Interfac
         </div>
           )}
 
-          {/* What is being dragged, following the pointer. A multi-selection drag says how many
-              cards are travelling, so a drop never moves more than you meant. */}
-          <DragOverlay>
-            {folders.activeDrag && (
-              <div className="rounded-xl border border-[var(--accent-primary)] bg-theme-secondary px-3 py-2 text-sm text-theme-primary shadow-lg">
-                {folders.activeDrag.count > 1
-                  ? t('folders.draggingCount', { count: folders.activeDrag.count })
-                  : folders.activeDrag.label}
-              </div>
-            )}
-          </DragOverlay>
-        </DndContext>
+        </>
       )}
 
       {!loading && totalCount > pageSize && (
@@ -904,5 +925,6 @@ export function InterfaceTable({ className = '', interfaceTypeFilter }: Interfac
 
       <ToastContainer toasts={toasts} onRemoveToast={removeToast} />
     </div>
+    </FolderDragContext>
   );
 }

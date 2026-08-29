@@ -37,6 +37,7 @@ import { runRoutePathFor } from '@/lib/workflow/runRoutePath';
 import { useAutoCollapseSidebar } from './hooks';
 import { OPEN_TRIGGER_TAB_EVENT, findTriggerTabConfig, type OpenTriggerTabDetail } from '@/lib/workflow/triggerTabEvent';
 import { workflowPanelTabId } from '@/lib/sidePanel/tabResource';
+import { openWorkflowBuilderTab } from '@/lib/sidePanel/openWorkflowBuilderTab';
 
 // ============================================
 // Types
@@ -118,6 +119,11 @@ export function WorkflowDetailView({ workflowId, runId: runIdProp, autoOpenApp }
     // is the ACTIVE tab. "Panel open" is therefore not enough: open on a
     // sub-workflow / application / files tab means the body is unmounted and no
     // in-panel listener exists yet.
+    // isOpen-is-deliberate: the question here is whether that body is MOUNTED and
+    // listening, not whether the user can see it. Shading is a render mode over a
+    // panel whose active tab keeps its body, so a collapsed window still has a live
+    // listener and the event reaches it. Asking `isForward` would send this down the
+    // pending-tab branch instead, re-creating a listener that already exists.
     const isWorkflowPanelShowing = !!sidePanel?.isOpen
       && sidePanel.activeTabId === WORKFLOW_PANEL_TAB_ID;
 
@@ -401,16 +407,7 @@ export function WorkflowDetailView({ workflowId, runId: runIdProp, autoOpenApp }
           });
         });
       } else {
-        import('@/components/app/WorkflowBuilderPanelContent').then(({ WorkflowBuilderPanelContent }) => {
-          sidePanel.openTab({
-            id: workflowPanelTabId(subWfId),
-            label: wfName,
-            icon: React.createElement(Workflow, { className: 'w-4 h-4' }),
-            content: React.createElement(WorkflowBuilderPanelContent, { workflowId: subWfId, readOnly: isPreviewOnly }),
-            preferredWidth: 0.5,
-            keepMounted: true,
-          });
-        });
+        openWorkflowBuilderTab(sidePanel, { workflowId: subWfId, workflowName: wfName, readOnly: isPreviewOnly });
       }
     };
     window.addEventListener('workflowOpenSubWorkflow', handleOpenSubWorkflow as EventListener);

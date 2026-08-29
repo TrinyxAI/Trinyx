@@ -144,12 +144,14 @@ public class DataSourceToolsProvider implements ToolsProvider {
                 .type("array")
                 .description("Data rows as array of objects (for: create). Object keys become column names - use meaningful names from user context (e.g. {category: 'Food', price: 10}), NEVER generic names like 'Colonne 1' or 'col1'")
                 .required(false)
+                .itemType("object")
                 .build(),
             ToolParameter.builder()
                 .name("rows")
                 .type("array")
                 .description("Rows to insert (for: insert_rows). Flat format: [{name: 'Jane', age: 25}]. Keys must match existing column names.")
                 .required(false)
+                .itemType("object")
                 .build(),
             ToolParameter.builder()
                 .name("columns")
@@ -157,8 +159,10 @@ public class DataSourceToolsProvider implements ToolsProvider {
                 // Advertise vector only where the edition accepts it - an
                 // advertised-but-rejected type sends the agent into retries.
                 .description("Column schema [{name, type, display?, defaultValue?}]. Use alone for empty tables, or with data to set types. Column names must match data keys. Types: text, number, date, checkbox, select, multi_select, rating, sentiment, progress, file, image, email, phone, url"
+                    + " (file and image hold the same value - the ref from files(action='get'), or a URL - see action='help' -> mediaColumns)"
                     + (vectorFeatureGate.isVectorAllowed() ? ", vector" : ""))
                 .required(false)
+                .itemType("object")
                 .build(),
             ToolParameter.builder()
                 .name("where")

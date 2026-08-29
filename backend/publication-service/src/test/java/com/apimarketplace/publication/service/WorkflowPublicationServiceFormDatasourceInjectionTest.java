@@ -66,7 +66,8 @@ class WorkflowPublicationServiceFormDatasourceInjectionTest {
                 new ObjectMapper(),
                 mock(SnapshotCloneService.class),
                 mock(EntitlementGuard.class),
-                mock(AuthClient.class));
+                mock(AuthClient.class),
+                new com.apimarketplace.publication.service.PublicationFileUrlResolver(new com.apimarketplace.common.storage.signing.ShowcaseUrlSigner("test-secret-32-bytes-long-enough-for-hmac")));
     }
 
     private InterfaceDto formInterface(UUID id, Long dataSourceId) {

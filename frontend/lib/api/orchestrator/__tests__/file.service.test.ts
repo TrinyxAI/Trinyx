@@ -191,3 +191,20 @@ describe('findFileRefs - unified extraction across producer envelopes', () => {
     expect(isFileRef(stripped)).toBe(true);
   });
 });
+
+describe('fileRefToUrl - the url fallback', () => {
+  it('prefers the storage id, which is the form that resolves without leaking a tenant', () => {
+    expect(fileRefToUrl({ id: '9a443915-a594-48a1-9760-e7a1b4b2eaf7', url: 'https://elsewhere/x.png' }))
+      .toContain('/files/by-id/9a443915-a594-48a1-9760-e7a1b4b2eaf7/raw');
+  });
+
+  it('falls back to the ref\'s own url when there is no id', () => {
+    // A table asset holding an external link has no storage id; blanking it would hide a file
+    // that displays perfectly well.
+    expect(fileRefToUrl({ url: 'https://cdn.example.com/a.png' })).toBe('https://cdn.example.com/a.png');
+  });
+
+  it('is empty when the ref has neither', () => {
+    expect(fileRefToUrl({})).toBe('');
+  });
+});

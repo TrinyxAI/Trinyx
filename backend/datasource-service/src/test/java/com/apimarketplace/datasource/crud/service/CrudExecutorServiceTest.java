@@ -1083,4 +1083,94 @@ class CrudExecutorServiceTest {
         env.setProperty("app.edition", "ce");
         return new com.apimarketplace.datasource.services.VectorFeatureGate(new com.apimarketplace.common.web.AppEditionProvider(env));
     }
+
+    @Nested
+    @DisplayName("column spec lookup for coercion")
+    class ColumnSpecLookupTests {
+
+        private DataSource dataSourceWithFileColumn() {
+            var photo = new com.apimarketplace.datasource.domain.DataSourceModels.ColumnMappingSpec(
+                    "data.photo", com.apimarketplace.datasource.domain.ColumnType.FILE, null, null, null);
+            return new DataSource(1L, "tenant-1", "gallery", null, null, null, null, null, null, null, null,
+                    Map.of("photo", photo), null, null, null, null);
+        }
+
+        /**
+         * mapping_spec is keyed by the BARE column name, but a caller may address a column either
+         * way. The "data." strip happens later, in the repository, so looking the spec up on the
+         * raw key found nothing and the value skipped coercion - silently, and only for that one
+         * spelling. A media cell written that way kept whatever shape the caller sent.
+         */
+        @Test
+        @DisplayName("A set key written with the data. prefix is still coerced")
+        void dataPrefixedSetKeyIsCoerced() {
+            DataSource ds = dataSourceWithFileColumn();
+            when(dataSourceService.getDataSource(1L)).thenReturn(Optional.of(ds));
+            when(dataSourceColumnRepository.loadMappingSpec(1L, "tenant-1")).thenReturn(ds.mappingSpec());
+            when(columnValueCoercer.coerce(any(), any(), any()))
+                    .thenAnswer(inv -> CoercionResult.ok(inv.getArgument(0)));
+            when(crudRepository.updateRows(any(), any(), any(), any())).thenReturn(1);
+
+            WhereConditionDto where = new WhereConditionDto("id", "=", "1");
+            UpdateRowRequest request = mock(UpdateRowRequest.class);
+            when(request.getDataSourceId()).thenReturn(1L);
+            when(request.getOperation()).thenReturn(CrudOperation.UPDATE_ROW);
+            when(request.getWhere()).thenReturn(where);
+            Map<String, Object> set = new java.util.LinkedHashMap<>();
+            set.put("data.photo", "https://example.com/a.png");
+            when(request.getSet()).thenReturn(set);
+
+            executorService.execute(request, "tenant-1");
+
+            verify(columnValueCoercer).coerce(eq("https://example.com/a.png"),
+                    eq(com.apimarketplace.datasource.domain.ColumnType.FILE), any());
+        }
+
+        @Test
+        @DisplayName("The bare spelling keeps working exactly as before")
+        void bareSetKeyIsStillCoerced() {
+            DataSource ds = dataSourceWithFileColumn();
+            when(dataSourceService.getDataSource(1L)).thenReturn(Optional.of(ds));
+            when(dataSourceColumnRepository.loadMappingSpec(1L, "tenant-1")).thenReturn(ds.mappingSpec());
+            when(columnValueCoercer.coerce(any(), any(), any()))
+                    .thenAnswer(inv -> CoercionResult.ok(inv.getArgument(0)));
+            when(crudRepository.updateRows(any(), any(), any(), any())).thenReturn(1);
+
+            WhereConditionDto where = new WhereConditionDto("id", "=", "1");
+            UpdateRowRequest request = mock(UpdateRowRequest.class);
+            when(request.getDataSourceId()).thenReturn(1L);
+            when(request.getOperation()).thenReturn(CrudOperation.UPDATE_ROW);
+            when(request.getWhere()).thenReturn(where);
+            Map<String, Object> set = new java.util.LinkedHashMap<>();
+            set.put("photo", "https://example.com/a.png");
+            when(request.getSet()).thenReturn(set);
+
+            executorService.execute(request, "tenant-1");
+
+            verify(columnValueCoercer).coerce(eq("https://example.com/a.png"),
+                    eq(com.apimarketplace.datasource.domain.ColumnType.FILE), any());
+        }
+
+        @Test
+        @DisplayName("A column with no spec is left uncoerced, prefixed or not")
+        void unknownColumnIsNotCoerced() {
+            DataSource ds = dataSourceWithFileColumn();
+            when(dataSourceService.getDataSource(1L)).thenReturn(Optional.of(ds));
+            when(dataSourceColumnRepository.loadMappingSpec(1L, "tenant-1")).thenReturn(ds.mappingSpec());
+            when(crudRepository.updateRows(any(), any(), any(), any())).thenReturn(1);
+
+            WhereConditionDto where = new WhereConditionDto("id", "=", "1");
+            UpdateRowRequest request = mock(UpdateRowRequest.class);
+            when(request.getDataSourceId()).thenReturn(1L);
+            when(request.getOperation()).thenReturn(CrudOperation.UPDATE_ROW);
+            when(request.getWhere()).thenReturn(where);
+            Map<String, Object> set = new java.util.LinkedHashMap<>();
+            set.put("data.unknown", "x");
+            when(request.getSet()).thenReturn(set);
+
+            executorService.execute(request, "tenant-1");
+
+            verify(columnValueCoercer, never()).coerce(any(), any(), any());
+        }
+    }
 }

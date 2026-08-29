@@ -13,6 +13,7 @@ import {
   ProgressConfig,
   DateFormatConfig,
   NumberFormatConfig,
+  MediaRenderConfig,
   type SelectOptionItem,
   type NumberFormatType,
 } from '@/components/data-table/modals/AddColumnModal';
@@ -35,15 +36,33 @@ export interface EditColumnModalProps {
   onSave: (submission: EditColumnSubmission) => void;
 }
 
-/**
- * First preset whose visualType matches the column's type. Used to drive the
- * type-recap card visuals (icon, i18n label/description, preset preview). When
- * no exact match exists we fall back to the first text preset so the card still
- * renders something meaningful instead of crashing.
- */
-function pickRecapPreset(visualType: ColumnVisualType | undefined): ColumnStylePreset {
-  const match = visualType && COLUMN_STYLE_PRESETS.find((p) => p.visualType === visualType);
-  return match ?? COLUMN_STYLE_PRESETS[0];
+/** The two media column types share one value contract and differ only by how they are drawn. */
+function isMediaType(visualType: ColumnVisualType | undefined): boolean {
+  return visualType === 'file' || visualType === 'image';
+}
+
+function pickRecapPreset(
+  visualType: ColumnVisualType | undefined,
+  display?: ColumnDisplayConfig,
+): ColumnStylePreset {
+  if (!visualType) return COLUMN_STYLE_PRESETS[0];
+
+  // Media is the one family where several presets share a visual type: both create a `file`
+  // column and differ only by display.render. Two things follow, and each was a real defect.
+  //
+  //  - Matching on the type alone showed the "Attachment" recap for a column the user created as
+  //    a thumbnail, because find() returns the first preset declared with that type.
+  //  - A LEGACY column still typed `image` matches NO preset at all now that both are `file`, so
+  //    it fell through to the first preset in the catalogue, which is text.
+  if (isMediaType(visualType)) {
+    const render = display?.render ?? (visualType === 'image' ? 'thumbnail' : 'card');
+    const byRender = COLUMN_STYLE_PRESETS.find(
+      (p) => isMediaType(p.visualType) && p.display?.render === render,
+    );
+    if (byRender) return byRender;
+  }
+
+  return COLUMN_STYLE_PRESETS.find((p) => p.visualType === visualType) ?? COLUMN_STYLE_PRESETS[0];
 }
 
 /**
@@ -85,6 +104,10 @@ export function EditColumnModal({
       numberFormat: (display.format as NumberFormatType) ?? 'plain',
       numberDecimals: typeof display.decimals === 'number' ? display.decimals : 0,
       currencySymbol: typeof display.currencySymbol === 'string' ? display.currencySymbol : '$',
+      // A column created from the legacy `image` type carries no display.render; its look has
+      // always been the thumbnail, so that is what it must default to here.
+      mediaRender: (display.render as 'thumbnail' | 'card')
+        ?? (column?.type === 'image' ? 'thumbnail' : 'card'),
     };
   }, [column]);
 
@@ -96,6 +119,7 @@ export function EditColumnModal({
   const [numberFormat, setNumberFormat] = useState<NumberFormatType>(initial.numberFormat);
   const [numberDecimals, setNumberDecimals] = useState(initial.numberDecimals);
   const [currencySymbol, setCurrencySymbol] = useState(initial.currencySymbol);
+  const [mediaRender, setMediaRender] = useState<'thumbnail' | 'card'>(initial.mediaRender);
 
   // Reset state every time the modal opens or the column changes.
   // Without this, switching from one column to another while the modal is
@@ -110,6 +134,7 @@ export function EditColumnModal({
     setNumberFormat(initial.numberFormat);
     setNumberDecimals(initial.numberDecimals);
     setCurrencySymbol(initial.currencySymbol);
+    setMediaRender(initial.mediaRender);
   }, [isOpen, initial]);
 
   useEffect(() => {
@@ -123,10 +148,16 @@ export function EditColumnModal({
 
   // Recap preset reflects the column's CURRENT display so the preview pane
   // shows the user's actual options/max/format, not a generic placeholder.
-  const baseRecapPreset = pickRecapPreset(visualType);
+  // The recap reads the LIVE render, not the saved one. Built from the saved value it kept
+  // showing "Attachment / a card with its name and size" while the user had just picked
+  // Thumbnail - and this card is precisely the promise of what the column will look like.
+  const liveDisplay: ColumnDisplayConfig = isMediaType(visualType)
+    ? { ...(column.displayConfig ?? {}), render: mediaRender }
+    : (column.displayConfig ?? {});
+  const baseRecapPreset = pickRecapPreset(visualType, liveDisplay);
   const recapPreset: ColumnStylePreset = {
     ...baseRecapPreset,
-    display: { ...(baseRecapPreset.display ?? {}), ...(column.displayConfig ?? {}) },
+    display: { ...(baseRecapPreset.display ?? {}), ...liveDisplay },
   };
   const RecapIcon = recapPreset.icon;
 
@@ -161,6 +192,16 @@ export function EditColumnModal({
     } else if (visualType === 'date' && baseDisplay.dateFormat !== dateFormat) {
       baseDisplay.dateFormat = dateFormat;
       displayChanged = true;
+    } else if (isMediaType(visualType)) {
+      // Compared against what the user is LOOKING AT, not against what is stored. A legacy
+      // `image` column stores no render, so comparing with the stored value marked it dirty on
+      // mount: Save was live before the user touched anything, and pressing it fired a write
+      // nobody asked for. When the render really is changed, the explicit value IS written - so a
+      // legacy column gets its look pinned the moment someone moves this control, and not before.
+      if (mediaRender !== initial.mediaRender) {
+        baseDisplay.render = mediaRender;
+        displayChanged = true;
+      }
     } else if (visualType === 'number') {
       if (
         baseDisplay.format !== numberFormat ||
@@ -197,7 +238,8 @@ export function EditColumnModal({
     visualType === 'multi_select' ||
     visualType === 'progress' ||
     visualType === 'date' ||
-    visualType === 'number';
+    visualType === 'number' ||
+    isMediaType(visualType);
 
   // Best-effort i18n keys: fall back to the visualType string when the recap
   // preset id has no translation entry (e.g. uncommon legacy presets).
@@ -290,6 +332,17 @@ export function EditColumnModal({
             )}
             {visualType === 'date' && (
               <DateFormatConfig dateFormat={dateFormat} onChange={setDateFormat} label={t('configDateFormat')} />
+            )}
+            {isMediaType(visualType) && (
+              <MediaRenderConfig
+                render={mediaRender}
+                onChange={setMediaRender}
+                labels={{
+                  label: tAdd('mediaRender.label'),
+                  thumbnail: tAdd('mediaRender.thumbnail'),
+                  card: tAdd('mediaRender.card'),
+                }}
+              />
             )}
             {visualType === 'number' && (
               <NumberFormatConfig

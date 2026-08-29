@@ -1,19 +1,27 @@
 'use client';
 
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect } from 'react';
 import { AlertCircle } from 'lucide-react';
 import { publicationService } from '@/lib/api/orchestrator/publication.service';
 import { orchestratorApi } from '@/lib/api';
 import { workflowService } from '@/lib/api/orchestrator/workflow.service';
-import { WorkflowModeProvider } from '@/contexts/WorkflowModeContext';
-import { useRun } from '@/contexts/WorkflowRunContext';
-import { useWorkflowStreaming } from '@/app/workflows/builder/hooks/execution';
 import { getActivePublicPreview, usePublicationSnapshot } from '@/contexts/PublicationSnapshotContext';
-import { ApplicationTabContent, type ApplicationConfig, type ApplicationTemplateSource } from '@/components/chat/ApplicationTabContent';
-import { isNavigateRef } from '@/app/workflows/builder/utils/interfaceActionRefs';
+import { type ApplicationConfig, type ApplicationTemplateSource } from '@/components/chat/ApplicationTabContent';
+import { normalizeLabel } from '@/app/workflows/builder/utils/labelNormalizer';
 import LoadingSpinner from '@/components/LoadingSpinner';
 
-// ── Tab content: delegates to ApplicationTabContent with full interaction ──
+// Behind React.lazy: this pulls in the whole workflow builder, and the surfaces
+// that merely OFFER an application (a chat card, the tab picker, a project page)
+// must not carry that chunk. It is also the import shape the builder panel is
+// reached by everywhere else, which keeps it out of the static module cycle that
+// once left an inspector column undefined in a production build.
+const WorkflowBuilderPanelContent = React.lazy(() =>
+  import('@/components/app/WorkflowBuilderPanelContent')
+    .then((m) => ({ default: m.WorkflowBuilderPanelContent })),
+);
+
+// ── Tab content: resolves the publication, then hands it to the shared
+//    side-panel workflow composition (canvas + run + triggers + AI chat). ──
 
 interface ApplicationPanelContentProps {
   publicationId: string;
@@ -31,7 +39,17 @@ export function ApplicationPanelContent({ publicationId, runId: runIdOverride }:
   const [panelData, setPanelData] = useState<{
     runId: string;
     workflowId: string;
-    appConfig: ApplicationConfig;
+    /**
+     * Every interface of the application, in plan order, as the carousel's
+     * starting list. The canvas replaces it with its own (canvas x-order) as
+     * soon as it has loaded; this only exists so the Application sub-tab is
+     * there from the first frame instead of a second later.
+     */
+    appConfigs: ApplicationConfig[];
+    /** Frozen publication plan - the only one a preview visitor may render. */
+    planOverride?: any;
+    /** The caller may change this workflow: drives the canvas' edit toggle. */
+    canEdit: boolean;
     /**
      * Set only for an INSTALLED application: enables the toolbar's template
      * actions. Withheld in a preview context (read-only showcase) and for the
@@ -75,6 +93,12 @@ export function ApplicationPanelContent({ publicationId, runId: runIdOverride }:
         // see their own runs, so we resolve the cloned workflow + latest run.
         let effectiveWorkflowId = pub.workflowId;
         let runId: string | undefined = pub.showcaseRunId ?? undefined;
+        // Whether the workflow behind this application is the CALLER's to change.
+        // The panel now mounts a real canvas, so this decides whether it offers
+        // the edit toggle at all: on a publication the caller does not own, the
+        // resolver falls back to the PUBLISHER's workflow and every save there
+        // would 403. Owned publication, or an acquired clone found below.
+        let ownsWorkflow = pub.ownedByMe === true;
         const planFromSnapshot = snapshotCtx?.planSnapshot ?? null;
         let interfaces: any[] = Array.isArray(planFromSnapshot?.interfaces)
           ? planFromSnapshot.interfaces
@@ -92,7 +116,10 @@ export function ApplicationPanelContent({ publicationId, runId: runIdOverride }:
             const match = acquired.applications?.find(
               (app) => app.sourcePublicationId === publicationId
             );
-            if (match?.workflowId) effectiveWorkflowId = match.workflowId;
+            if (match?.workflowId) {
+              effectiveWorkflowId = match.workflowId;
+              ownsWorkflow = true;
+            }
           } catch { /* keep publisher's workflowId */ }
           if (interfaces.length === 0) {
             try {
@@ -110,6 +137,7 @@ export function ApplicationPanelContent({ publicationId, runId: runIdOverride }:
             );
             if (match?.workflowId) {
               effectiveWorkflowId = match.workflowId;
+              ownsWorkflow = true;
             }
           } catch {
             // Not acquired - keep publisher's workflow id (published variant).
@@ -171,26 +199,38 @@ export function ApplicationPanelContent({ publicationId, runId: runIdOverride }:
 
         if (!runId) { setError('No run available'); return; }
 
-        // The app's declared ENTRY page wins (same rule as the showcase/card previews:
-        // ApplicationShowcaseResolver = flagged entry, else first). Only when no entry
-        // is flagged fall back to the first interactive interface, then the showcase id.
-        const iface = interfaces.find((i: any) => i?.isEntryInterface === true)
-          ?? interfaces.find((i: any) =>
-            i?.actionMapping && Object.keys(i.actionMapping).length > 0
-          );
-
         if (!cancelled) {
-          const interfaceId = iface?.id || pub.showcaseInterfaceId || '';
           // The display format is not passed down: it belongs to the interface, and
           // ApplicationTabContent resolves it from the render/interface it already loads.
+          //
+          // Every interface, not just the entry one: the panel now shows the
+          // application as the carousel does everywhere else, and the entry page
+          // is the one the carousel opens on (it reads `isEntryInterface`).
+          const appConfigs: ApplicationConfig[] = interfaces.length > 0
+            ? interfaces.map((i: any) => ({
+              interfaceId: i?.id || '',
+              label: i?.label || pub.title || 'Application',
+              actionMapping: i?.actionMapping || {},
+              nodeId: `interface:${normalizeLabel(i?.label || '')}`,
+              isEntryInterface: i?.isEntryInterface === true,
+            }))
+            // No plan reachable at all (a preview whose snapshot is empty): the
+            // publication's own showcase interface is the only thing left to
+            // render. There is no entry flag to consult here - the list this
+            // would have searched is the empty one that led to this branch.
+            : [{
+              interfaceId: pub.showcaseInterfaceId || '',
+              label: pub.title || 'Application',
+              actionMapping: {},
+            }];
           setPanelData({
             runId,
             workflowId: effectiveWorkflowId,
-            appConfig: {
-              interfaceId,
-              label: iface?.label || pub.title || 'Application',
-              actionMapping: iface?.actionMapping || {},
-            },
+            appConfigs,
+            planOverride: inPreviewContext
+              ? (planFromSnapshot ?? pub.planSnapshot ?? undefined)
+              : undefined,
+            canEdit: !inPreviewContext && ownsWorkflow,
             // Same split as ApplicationDetailView: the example values help anyone whose
             // run has no data yet, the publisher included; the reset is withheld from the
             // publisher because this surface resolves their SOURCE workflow while the
@@ -227,68 +267,32 @@ export function ApplicationPanelContent({ publicationId, runId: runIdOverride }:
     );
   }
 
-  // WorkflowModeProvider with initialRunId activates run mode (isRunMode=true)
-  // WorkflowRunProvider is already in the app layout (or in PublicationPreviewShell when preview)
+  // The panel shows the application the way every other application surface does
+  // (ApplicationDetailView, the marketplace preview): the carousel of its pages,
+  // with the workflow canvas, the run, the triggers and the AI chat one sub-tab
+  // away. It used to render a single interface with no sub-tabs at all, so an
+  // application opened here could not be watched running.
+  //
+  // WorkflowBuilderPanelContent owns the composition (canvas + run binding +
+  // its own providers); `applicationFirst` is what makes the Application the
+  // tab it opens on rather than the canvas.
   const previewActive = !!getActivePublicPreview();
   return (
-    <WorkflowModeProvider workflowId={panelData.workflowId} initialRunId={panelData.runId} readOnly={previewActive}>
-      <ApplicationPanelInner
-        config={panelData.appConfig}
-        runId={panelData.runId}
+    <React.Suspense fallback={<div className="flex items-center justify-center h-full"><LoadingSpinner /></div>}>
+      <WorkflowBuilderPanelContent
         workflowId={panelData.workflowId}
-        templateSource={panelData.templateSource}
+        runId={panelData.runId}
+        readOnly={previewActive}
+        /* A publication the caller has not acquired resolves to the PUBLISHER's
+           workflow: readable, but every save, run and publish there would be
+           refused. The application itself stays interactive either way - that is
+           what the panel is for. */
+        canEditWorkflow={panelData.canEdit}
+        applicationFirst
+        initialApplicationConfigs={panelData.appConfigs}
+        applicationTemplateSource={panelData.templateSource}
+        planOverride={panelData.planOverride}
       />
-    </WorkflowModeProvider>
-  );
-}
-
-/** Inner component - has access to WorkflowRunContext from the layout */
-function ApplicationPanelInner({ config, runId, workflowId, templateSource }: {
-  config: ApplicationConfig;
-  runId: string;
-  workflowId: string;
-  templateSource?: ApplicationTemplateSource;
-}) {
-  const [, runContext] = useRun(runId);
-  const previewActive = !!getActivePublicPreview();
-  useWorkflowStreaming(runId, !previewActive);
-
-  const handleAction = useCallback(async (triggerRef: string, data: Record<string, unknown>) => {
-    if (!runContext) return;
-    // No actions in preview context - the showcase clone is read-only.
-    if (getActivePublicPreview()) return;
-
-    // A page switch is frontend-only and has no target here: this panel renders ONE
-    // interface, not the carousel. Falling through would strip the ':navigate' suffix
-    // and fire the remaining key as a manual trigger - a real backend call from what
-    // the author wrote as a navigation link.
-    if (isNavigateRef(triggerRef)) {
-      console.warn("[ApplicationSidePanel] Navigate ignored: this panel renders a single interface, there is no page to switch to:", triggerRef);
-      return;
-    }
-
-    // Parse triggerRef: "trigger:label:actiontype" → triggerKey + triggerType
-    // Same logic as WorkflowBuilder.handleApplicationAction
-    const parts = triggerRef.split(':');
-    const actionType = parts.length >= 3 ? parts[parts.length - 1] : 'click';
-    const triggerType = actionType === 'submit' ? 'form' :
-                        actionType === 'message' ? 'chat' : 'manual';
-    const triggerKey = parts.length >= 3 ? parts.slice(0, -1).join(':') : triggerRef;
-
-    await runContext.executeStep(runId, triggerKey, data, triggerType);
-  }, [runId, runContext]);
-
-  return (
-    <ApplicationTabContent
-      config={config}
-      runId={runId}
-      workflowId={workflowId}
-      onAction={handleAction}
-      // Opened by publication id (an agent's "here is the app" card, a project
-      // tab): the application IS what the user came for, so it shows the newest
-      // fire rather than a pager spanning every one of them.
-      openOnLatestEpoch
-      templateSource={templateSource}
-    />
+    </React.Suspense>
   );
 }

@@ -34,7 +34,7 @@ vi.mock('@/lib/stores/pending-interfaces-store', () => ({
 }));
 
 vi.mock('@/lib/stores/interface-pagination-store', () => ({
-  useInterfacePaginationStore: { getState: () => ({ clear: vi.fn() }) },
+  useInterfacePaginationStore: { getState: () => ({ clear: vi.fn(), clearForRunSwitch: vi.fn() }) },
 }));
 
 // Probe surfaces each provider's viewingEpoch + setViewingEpoch to the test.

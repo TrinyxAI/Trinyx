@@ -29,6 +29,35 @@ public class LandingInterfaceSnapshotter {
 
     private static final Logger logger = LoggerFactory.getLogger(LandingInterfaceSnapshotter.class);
 
+    /** Internal, never served: see where it is written. */
+    public static final String INTERNAL_SOURCE_TENANT_KEY = "_sourceTenantId";
+
+    /**
+     * Drop the internal keys from a landing map about to be served.
+     *
+     * <p>The landing map is echoed key-for-key by more than one anonymously readable
+     * endpoint, so a key added for the file copy reaches every marketplace visitor unless it
+     * is removed at each exit. Convention: internal keys start with {@code _}, and this is
+     * what enforces it. Returns a copy; the argument is not modified, because callers pass
+     * the map that lives inside the stored snapshot.
+     */
+    @SuppressWarnings("unchecked")
+    public static Map<String, Object> snapshotWithoutInternalLandingKeys(Map<String, Object> snapshot) {
+        if (snapshot == null) return null;
+        Object landing = snapshot.get("landingInterface");
+        if (!(landing instanceof Map<?, ?> landingMap)) return snapshot;
+        Map<String, Object> copy = new LinkedHashMap<>(snapshot);
+        copy.put("landingInterface", withoutInternalKeys((Map<String, Object>) landingMap));
+        return copy;
+    }
+
+    public static Map<String, Object> withoutInternalKeys(Map<String, Object> landing) {
+        if (landing == null) return null;
+        Map<String, Object> copy = new LinkedHashMap<>(landing);
+        copy.keySet().removeIf(k -> k != null && k.startsWith("_"));
+        return copy;
+    }
+
     private final InterfaceClient interfaceClient;
 
     public LandingInterfaceSnapshotter(InterfaceClient interfaceClient) {
@@ -78,6 +107,15 @@ public class LandingInterfaceSnapshotter {
         snapshot.put("format", iface.getFormat());
         snapshot.put("interfaceType", iface.getInterfaceType());
         snapshot.put("data", iface.getData());
+        // Who owns the interface this was built from. In the same organization that is not
+        // always the publisher, and publication-service needs it to tell a file the landing
+        // may legitimately copy from one a publisher merely named in a hand-written value.
+        // Underscore-prefixed because the landing map is echoed key-for-key by more than one
+        // anonymously readable endpoint (the landing-snapshot response, and the raw
+        // planSnapshot a non-WORKFLOW publication returns from /by-id). A plain key would
+        // publish the interface owner tenant - a third party in a cross-org publication - to
+        // every marketplace visitor. Readers strip any leading-underscore key.
+        snapshot.put(INTERNAL_SOURCE_TENANT_KEY, iface.getTenantId());
         logger.debug("Built landing-interface snapshot for {} (tenant {}, org {})",
                 interfaceId, tenantId, hasText(organizationId) ? organizationId : "personal");
         return snapshot;

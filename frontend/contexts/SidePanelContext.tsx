@@ -38,7 +38,7 @@ export interface SidePanelTab {
   onDelete?: () => void;
 }
 
-interface SidePanelContextValue {
+export interface SidePanelContextValue {
   // State
   isOpen: boolean;
   tabs: SidePanelTab[];
@@ -62,6 +62,37 @@ interface SidePanelContextValue {
 
   /** Convenience: addTab + setActiveTab + open in one call */
   openTab(tab: SidePanelTab): void;
+  /**
+   * The panel is present but shaded to a single row (the detached window's collapse
+   * mode). Distinct from `isOpen`: the panel is open, it just is not SHOWING
+   * anything, so "is the panel forward" is `isOpen && !collapsed`.
+   *
+   * Lives here rather than inside the panel because both halves of that question
+   * have consumers outside it: every surface that brings the panel forward has to
+   * un-shade it (a request that changes neither `isOpen` nor the active tab would
+   * otherwise just relabel a 36px strip while the thing it opened stayed hidden),
+   * and the app header's panel button has to know that a shaded window is not
+   * forward, or it dismisses what the user was asking to see.
+   */
+  collapsed: boolean;
+  setCollapsed(collapsed: boolean): void;
+  /**
+   * Is the panel actually SHOWING something? Open and shaded is neither.
+   *
+   * Derived here rather than at each surface, because "open" is the wrong question
+   * for every toggle in the app: branching on it dismisses a shaded window the user
+   * pressed the button to see.
+   */
+  isForward: boolean;
+  /**
+   * Un-shade a collapsed panel, and report whether that WAS the whole job.
+   *
+   * A toggle's open branch opens a specific tab, which is right for a closed panel
+   * and wrong for a shaded one: the user collapsed a window showing something, and
+   * the button must give that window back rather than swap them onto another tab.
+   * So a surface calls this first and returns when it answers true.
+   */
+  bringForward(): boolean;
 
   /** Add tab + set active but don't open - triggers peek animation on mobile */
   openTabDeferred(tab: SidePanelTab): void;
@@ -247,9 +278,46 @@ export function SidePanelProvider({ children }: { children: ReactNode }) {
     isOpenRef.current = isOpen;
   }, [isOpen]);
 
-  const open = useCallback(() => setIsOpen(true), []);
+  const [collapsed, setCollapsed] = useState(false);
+  // Read through a ref so `bringForward` keeps a stable identity: it lands in the
+  // dep array of every toggle in the app, and a new function on each flip would
+  // rebuild all of them for nothing. (`isOpenRef` already exists just below, for
+  // the navigation effect, and is kept current there.)
+  const collapsedRef = useRef(collapsed);
+  // Synced in an effect, like `isOpenRef` above and for the same reason: the only
+  // reader is a click handler, which runs long after effects have flushed.
+  useEffect(() => { collapsedRef.current = collapsed; }, [collapsed]);
+  /**
+   * Everything that brings the panel forward lifts the shade at the SOURCE.
+   *
+   * A counter the panel watched instead was one indirection and one missed route:
+   * `setActiveTab` alone is how a live run's interface node, a trigger card and the
+   * application tab all ask for attention when the panel is already open, and none
+   * of them bumped it.
+   */
+  const liftShade = useCallback(() => setCollapsed(false), []);
+  const open = useCallback(() => { liftShade(); setIsOpen(true); }, [liftShade]);
+  /**
+   * Bringing a tab forward, which is the ONLY reason anything calls this: a live
+   * run pausing on an interface node, a trigger card, the application tab. Every
+   * one of them takes this branch precisely BECAUSE the panel is already open,
+   * which is exactly the state a shaded window is in.
+   */
+  const setActiveTab = useCallback((tabId: string) => {
+    liftShade();
+    setActiveTabId(tabId);
+  }, [liftShade]);
   const close = useCallback(() => setIsOpen(false), []);
-  const toggle = useCallback(() => setIsOpen(prev => !prev), []);
+  // Opening half of the toggle is a bring-forward like any other; the closing half
+  // has nothing to un-shade. The un-shade happens BEFORE the setter, like the other
+  // four routes: a state updater must be pure, and StrictMode double-invokes it.
+  const toggle = useCallback(() => {
+    // Reads the ref, which a LAYOUT effect keeps in step with the state, so two
+    // panel calls in one tick cannot see a stale value. A passive effect would run
+    // after paint, and `open(); toggle();` would then un-shade on the wrong half.
+    if (!isOpenRef.current) liftShade();
+    setIsOpen(prev => !prev);
+  }, [liftShade]);
 
   const addTab = useCallback((tab: SidePanelTab) => {
     setTabs(prev => {
@@ -309,6 +377,7 @@ export function SidePanelProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const openTab = useCallback((tab: SidePanelTab) => {
+    liftShade();
     // Add or update the tab
     setTabs(prev => {
       const exists = prev.some(t => t.id === tab.id);
@@ -317,10 +386,15 @@ export function SidePanelProvider({ children }: { children: ReactNode }) {
     });
     setActiveTabId(tab.id);
     setIsOpen(true);
-  }, []);
+  }, [liftShade]);
 
-  // Add tab + set active without opening - triggers peek animation on mobile
+  // Add tab + set active without opening - triggers peek animation on mobile.
+  // Lifts the shade like every other route that brings content forward: unreachable
+  // today (its only caller is mobile-only and collapse is desktop-only), but a
+  // shade-clearing route that exists in four places and not the fifth is exactly how
+  // the flag gets stranded somewhere nobody looks.
   const openTabDeferred = useCallback((tab: SidePanelTab) => {
+    liftShade();
     setTabs(prev => {
       const exists = prev.some(t => t.id === tab.id);
       if (exists) return prev.map(t => t.id === tab.id ? { ...t, ...tab } : t);
@@ -334,7 +408,7 @@ export function SidePanelProvider({ children }: { children: ReactNode }) {
       setIsPeeking(false);
       peekTimerRef.current = null;
     }, 3000);
-  }, []);
+  }, [liftShade]);
 
   const dismissPeek = useCallback(() => {
     setIsPeeking(false);
@@ -351,6 +425,13 @@ export function SidePanelProvider({ children }: { children: ReactNode }) {
     };
   }, []);
 
+  const isForward = isOpen && !collapsed;
+  const bringForward = useCallback(() => {
+    if (!isOpenRef.current || !collapsedRef.current) return false;
+    setCollapsed(false);
+    return true;
+  }, []);
+
   const value = useMemo<SidePanelContextValue>(() => ({
     isOpen,
     tabs,
@@ -362,13 +443,17 @@ export function SidePanelProvider({ children }: { children: ReactNode }) {
     addTab,
     removeTab,
     updateTab,
-    setActiveTab: setActiveTabId,
+    setActiveTab,
     clearTabs,
     moveTab,
     openTab,
     openTabDeferred,
+    collapsed,
+    setCollapsed,
+    isForward,
+    bringForward,
     dismissPeek,
-  }), [isOpen, tabs, activeTabId, isPeeking, open, close, toggle, addTab, removeTab, updateTab, setActiveTabId, clearTabs, moveTab, openTab, openTabDeferred, dismissPeek]);
+  }), [isOpen, tabs, activeTabId, isPeeking, collapsed, isForward, bringForward, open, close, toggle, addTab, removeTab, updateTab, setActiveTab, clearTabs, moveTab, openTab, openTabDeferred, dismissPeek]);
 
   return (
     <SidePanelContext.Provider value={value}>

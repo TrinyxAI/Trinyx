@@ -363,6 +363,30 @@ public interface WorkflowStepDataRepository extends JpaRepository<WorkflowStepDa
     List<Integer> findTerminalItemIndicesByEpoch(@Param("runId") String runId, @Param("normalizedKey") String normalizedKey, @Param("epoch") int epoch);
 
     /**
+     * Terminal statuses of a SET of nodes, for one (epoch, item) coordinate.
+     *
+     * <p>Reads the durable per-item record rather than the in-memory execution state, which is
+     * node-level and therefore cannot tell "skipped for item 2" from "skipped for every item".
+     * Used by {@code MergeReachabilityGuard} to decide whether a merge node has any live
+     * predecessor for the item it is about to run for.
+     *
+     * <p>Deliberately NOT filtered on iteration or spawn: a loop turn, or a re-execution, that
+     * took a different branch leaves a COMPLETED row behind, and finding it makes the guard
+     * stand down. Erring towards "reachable" is the safe direction, since that is exactly
+     * what the engine does today.
+     *
+     * @return rows of {@code [normalizedKey, status]}
+     */
+    @Query("SELECT DISTINCT w.normalizedKey, w.status FROM WorkflowStepDataEntity w "
+         + "WHERE w.runId = :runId AND w.normalizedKey IN :normalizedKeys "
+         + "AND w.epoch = :epoch AND w.itemIndex = :itemIndex "
+         + "AND w.status IN ('COMPLETED', 'FAILED', 'SKIPPED')")
+    List<Object[]> findTerminalStatusesForItem(@Param("runId") String runId,
+                                               @Param("normalizedKeys") Collection<String> normalizedKeys,
+                                               @Param("epoch") int epoch,
+                                               @Param("itemIndex") int itemIndex);
+
+    /**
      * Phase 2.E aggregate query - count COMPLETED vs FAILED rows for a split-aware
      * node within one epoch. Used by {@code recordSplitAggregateIfMissing} to write
      * the global node status ONCE at barrier seal, instead of on every per-item completion

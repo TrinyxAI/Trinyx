@@ -419,7 +419,6 @@
     "noImage": "No image",
     "view": "View",
     "download": "Download",
-    "removeImage": "移除图片",
     "noFile": "No file",
     "removeFile": "移除文件",
     "file": "File",
@@ -431,7 +430,16 @@
     "noRows": "无数据行",
     "showingRows": "显示 {total} 行中的 {visible} 行",
     "previous": "上一页",
-    "next": "下一页"
+    "next": "下一页",
+    "pickFromFiles": "文件库",
+    "pickFromFilesTitle": "选择文件",
+    "assetUrl": "使用链接",
+    "assetUrlPlaceholder": "粘贴图片或文件的网址",
+    "assetUrlConfirm": "使用",
+    "assetUrlInvalid": "该网址似乎不可用",
+    "assetExternal": "外部链接",
+    "assetUnresolvableHint": "该文件已不可用，可能已从文件库中删除。",
+    "uploadFailed": "上传失败"
   },
   "auth": {
     "signIn": "登录",
@@ -484,6 +492,13 @@
     "addTab": "添加标签",
     "openRight": "在右侧打开面板",
     "openBottom": "在底部打开面板",
+    "detach": "分离面板",
+    "attach": "重新停靠面板",
+    "moveWindow": "移动面板",
+    "moveWindowHint": "移动面板：拖动，或使用方向键（Shift 从右下角调整大小，Ctrl+Shift 从左上角，Alt 以 1 像素为步长）",
+    "collapseWindow": "折叠面板",
+    "expandWindow": "展开面板",
+    "expandWindowHint": "展开面板：单击，拖动可移动，或使用方向键（Alt 以 1 像素为步长）",
     "searchPlaceholder": "搜索...",
     "applications": "应用",
     "interfaces": "界面",
@@ -1134,12 +1149,23 @@
       "budgetBlockedTitle": "已达预算",
       "budgetBlockedMessage": "已花费 {spent}/{budget}。未启动新的运行。",
       "openInPanel": "在侧边面板中打开运行详情",
+      "backToWorkflow": "返回工作流",
       "scrollLeft": "显示上一批详情",
       "scrollRight": "显示更多详情",
       "cost": "成本",
       "scopeAll": "所有轮次",
       "scopeEpoch": "轮次 {epoch}"
     }
+  },
+  "workflowRelations": {
+    "menuLabel": "{count, plural, other {# 个关联工作流}}",
+    "parentsTitle": "被调用于",
+    "parentsHint": "其计划将此工作流作为子工作流运行的工作流",
+    "childrenTitle": "调用",
+    "childrenHint": "此工作流作为子工作流运行的工作流",
+    "openHint": "在侧边面板中打开",
+    "unavailable": "工作流不可用",
+    "unavailableHint": "该工作流不在您的工作区中，或已被删除"
   },
   "data": {
     "title": "数据表",
@@ -1248,6 +1274,8 @@
   "actions": {
     "running": "运行中",
     "edit": "编辑",
+    "interfaceControls": "页面控件",
+    "interfaceControlsSoundOn": "页面控件（声音已开启）",
     "save": "保存",
     "run": "运行",
     "share": "分享",
@@ -2218,11 +2246,11 @@
         },
         "file": {
           "label": "附件",
-          "description": "上传或链接文档"
+          "description": "一个文件，以卡片形式显示名称和大小"
         },
         "image": {
-          "label": "图片预览",
-          "description": "响应式缩略图"
+          "label": "图片",
+          "description": "同一个文件列，以缩略图形式显示"
         },
         "date": {
           "label": "日期",
@@ -2264,7 +2292,12 @@
       "configVectorDimension": "嵌入维度",
       "configVectorMetric": "距离度量",
       "ceOnlyBadge": "仅限 CE",
-      "ceOnlyTooltip": "仅在自托管社区版中可用"
+      "ceOnlyTooltip": "仅在自托管社区版中可用",
+      "mediaRender": {
+        "label": "显示为",
+        "thumbnail": "缩略图",
+        "card": "带名称和大小的卡片"
+      }
     },
     "createAgent": {
       "title": "创建新代理",
@@ -2413,6 +2446,10 @@
       "agentUpdated": "代理更新成功",
       "error": "错误",
       "createFailed": "创建代理失败",
+      "deleteAgent": "删除代理",
+      "deleteTitle": "删除代理",
+      "deleteConfirmation": "您确定要删除「{name}」吗？此操作无法撤销。",
+      "deleteFailed": "删除代理失败",
       "widgetCreateFailed": "保存小部件配置失败",
       "skillsLabel": "技能",
       "skillsInfo": "分配可复用的技能包以增强代理能力。",
@@ -9895,7 +9932,8 @@
     "updateIntro": "获取最新版本并重启您的服务栈。Compose 文件固定了该版本的镜像标签，请先运行 git pull。您的数据会被保留，数据库迁移会在启动时自动执行。",
     "updateRunFrom": "在您克隆的 LiveContext 目录中运行以下命令：",
     "copy": "复制",
-    "copied": "已复制"
+    "copied": "已复制",
+    "anonymousCheckNotice": "每日更新检查会发送当前版本和一个随机的安装标识符，用于统计正在运行的自托管安装数量。所保存的记录不含任何 IP 地址、主机名或账号信息。设置 CE_VERSIONCHECK_SENDINSTALLID=false 可停止发送该标识符，设置 CE_VERSIONCHECK_ENABLED=false 可关闭该检查。"
   },
   "optionalComponents": {
     "title": "可选组件",

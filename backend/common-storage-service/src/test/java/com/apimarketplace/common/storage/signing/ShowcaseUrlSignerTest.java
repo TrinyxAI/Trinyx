@@ -111,4 +111,39 @@ class ShowcaseUrlSignerTest {
         assertThat(signer.verify("1/x.png", now + 900, "inline", null, now)).isFalse();
         assertThat(signer.verify("1/x.png", now + 900, "inline", "", now)).isFalse();
     }
+
+    @Test
+    @DisplayName("isAuthentic accepts an EXPIRED signature that we produced - provenance and permission-to-serve are different questions, and re-signing a dead marketplace link depends on the first one")
+    void isAuthenticIgnoresExpiry() {
+        ShowcaseUrlSigner signer = new ShowcaseUrlSigner("test-secret-32-bytes-long-enough-for-hmac");
+        long longGone = 1L;
+        String sig = signer.sign("1/run/clip.mp4", longGone, "inline");
+
+        assertThat(signer.isAuthentic("1/run/clip.mp4", longGone, "inline", sig)).isTrue();
+        // ...while verify, which decides whether bytes may be served NOW, still refuses it.
+        assertThat(signer.verify("1/run/clip.mp4", longGone, "inline", sig,
+                java.time.Instant.now().getEpochSecond())).isFalse();
+    }
+
+    @Test
+    @DisplayName("isAuthentic refuses a signature from another install, a tampered key, a tampered expiry and a tampered disposition - the payload covers all three")
+    void isAuthenticRefusesAnythingNotOurs() {
+        ShowcaseUrlSigner signer = new ShowcaseUrlSigner("test-secret-32-bytes-long-enough-for-hmac");
+        ShowcaseUrlSigner other = new ShowcaseUrlSigner("a-completely-different-secret-value-32b");
+        String sig = signer.sign("1/run/clip.mp4", 42L, "inline");
+
+        assertThat(signer.isAuthentic("1/run/clip.mp4", 42L, "inline",
+                other.sign("1/run/clip.mp4", 42L, "inline"))).isFalse();
+        assertThat(signer.isAuthentic("3/private/contract.pdf", 42L, "inline", sig)).isFalse();
+        assertThat(signer.isAuthentic("1/run/clip.mp4", 99L, "inline", sig)).isFalse();
+        assertThat(signer.isAuthentic("1/run/clip.mp4", 42L, "attachment", sig)).isFalse();
+    }
+
+    @Test
+    @DisplayName("isAuthentic fails closed with no signing key and on a blank signature")
+    void isAuthenticFailsClosed() {
+        assertThat(new ShowcaseUrlSigner("").isAuthentic("1/a.png", 1L, "inline", "anything")).isFalse();
+        assertThat(new ShowcaseUrlSigner("test-secret-32-bytes-long-enough-for-hmac")
+                .isAuthentic("1/a.png", 1L, "inline", "")).isFalse();
+    }
 }

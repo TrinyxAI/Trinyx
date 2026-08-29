@@ -34,6 +34,17 @@ function MainContentColumn({ children }: { children: React.ReactNode }) {
  *   - 'bottom-full' -> column root: [ row(sidebar + content) ][ panel ]. The panel spans
  *                      the FULL viewport width (edge to edge, under the sidebar too) and
  *                      the sidebar shrinks vertically to sit above it.
+ *   - 'floating'    -> DETACHED: arranged like the dock it was detached FROM, deliberately.
+ *                      The panel positions itself `fixed` in that mode, so it takes no
+ *                      layout space and renders identically from either branch - but which
+ *                      branch it renders from decides whether detaching REMOUNTS it. The
+ *                      two branches put different components at the same child positions,
+ *                      so React tears the subtree down when the branch changes, and with it
+ *                      everything the panel holds: a running canvas, an SSE stream, an
+ *                      interface iframe. Following `lastDock` is what keeps a detach a pure
+ *                      mode flip from every dock, including the full-width bottom one -
+ *                      which is the DEFAULT bottom variant, so pinning 'floating' to the
+ *                      'right' branch broke exactly the common case.
  *
  * The panel is mounted in exactly ONE place per mode (inside the content region, or at
  * the root for 'bottom-full'); its tab state lives in SidePanelContext, so switching
@@ -41,9 +52,11 @@ function MainContentColumn({ children }: { children: React.ReactNode }) {
  * arrangements are inert there.
  */
 export function AppShell({ children }: { children: React.ReactNode }) {
-  const { position } = useSidePanelLayoutSafe();
+  const { position, lastDock } = useSidePanelLayoutSafe();
+  // A detached panel keeps the arrangement of the dock it came from (see above).
+  const arrangement = position === 'floating' ? lastDock : position;
 
-  if (position === 'bottom-full') {
+  if (arrangement === 'bottom-full') {
     return (
       <div className="flex flex-col h-full relative">
         <div className="flex flex-1 min-h-0 relative">
@@ -59,8 +72,10 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   }
 
   // 'right' and 'bottom': the panel lives inside the content region, so it spans only
-  // the area to the right of the sidebar. Row for 'right', column for 'bottom'.
-  const isBottom = position === 'bottom';
+  // the area to the right of the sidebar. Row for 'right', column for 'bottom'. A
+  // detached panel is fixed and out of flow, so either arrangement renders it the
+  // same - it is here only to avoid changing branch, and remounting, on the flip.
+  const isBottom = arrangement === 'bottom';
   return (
     <div className="flex h-full relative">
       <AppSidebar />

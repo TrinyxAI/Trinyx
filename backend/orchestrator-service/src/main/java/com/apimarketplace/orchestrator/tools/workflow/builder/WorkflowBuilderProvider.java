@@ -371,6 +371,56 @@ public class WorkflowBuilderProvider implements ToolsProvider {
             ? new LinkedHashMap<>((Map<String, Object>) runInputObj)
             : new LinkedHashMap<>();
 
+        // run_inputs = the same config run once per entry. Parsed here, but nothing executes until
+        // EVERY gate below has passed: a batch must not be a way to get one item past a gate
+        // that the single-item path refuses. Note that this buys the EXECUTION order, not the
+        // diagnosis order: a call that is both oversized and of a type that cannot run standalone
+        // is told about the size first. Nothing runs either way, and reordering to fix the message
+        // would move the shape checks after the gates, which is the trade the wrong way round.
+        Object itemsObj = params.get("run_inputs");
+        List<Map<String, Object>> batchInputs = null;
+        if (itemsObj != null) {
+            if (runInputObj != null) {
+                return ToolExecutionResult.failure(ToolErrorCode.VALIDATION_ERROR,
+                    "Give 'run_inputs' or 'run_input', not both. 'run_input' runs the node once; 'run_inputs' runs it "
+                        + "once per entry. To batch, move the run_input into run_inputs as its first entry.");
+            }
+            // Defence in depth, not the agent's first line of defence: the tool layer declares
+            // 'run_inputs' as an array and type-checks it before this runs, so an agent sending a
+            // number or an object is already refused there, and a STRINGIFIED array is coerced
+            // into a real list (a platform-wide convenience) and arrives here as one. What
+            // survives to this branch is an in-process caller that skipped that layer.
+            if (!(itemsObj instanceof List)) {
+                return ToolExecutionResult.failure(ToolErrorCode.VALIDATION_ERROR,
+                    "'run_inputs' must be a list of objects, not " + itemsObj.getClass().getSimpleName()
+                        + ". Send run_inputs=[{...}, {...}].");
+            }
+            List<?> rawItems = (List<?>) itemsObj;
+            if (rawItems.isEmpty()) {
+                return ToolExecutionResult.failure(ToolErrorCode.VALIDATION_ERROR,
+                    "'run_inputs' is empty, so there is nothing to run. Omit 'run_inputs' to run the node once.");
+            }
+            if (rawItems.size() > AdHocNodeExecutionService.MAX_BATCH_ITEMS) {
+                return ToolExecutionResult.failure(ToolErrorCode.VALIDATION_ERROR,
+                    "'run_inputs' carries " + rawItems.size() + " entries; the limit is "
+                        + AdHocNodeExecutionService.MAX_BATCH_ITEMS + " because they share one call's time "
+                        + "budget. Send fewer, or build the node into a workflow with a split node and use "
+                        + "workflow(action='execute') to run over any number of inputs.");
+            }
+            batchInputs = new ArrayList<>(rawItems.size());
+            for (int i = 0; i < rawItems.size(); i++) {
+                Object item = rawItems.get(i);
+                if (!(item instanceof Map)) {
+                    return ToolExecutionResult.failure(ToolErrorCode.VALIDATION_ERROR,
+                        "run_inputs[" + i + "] must be an object mapping upstream names to values, not "
+                            + (item == null ? "null" : item.getClass().getSimpleName()) + ".");
+                }
+                @SuppressWarnings("unchecked")
+                Map<String, Object> itemMap = new LinkedHashMap<>((Map<String, Object>) item);
+                batchInputs.add(itemMap);
+            }
+        }
+
         String canonicalType = AdHocNodeTypeResolver.canonicalType(rawType);
         String refusal = AdHocNodeTypeResolver.refusalReason(canonicalType);
         if (refusal != null) {
@@ -412,6 +462,12 @@ public class WorkflowBuilderProvider implements ToolsProvider {
             ctx != null ? ctx.orgRole() : null,
             label != null && !label.isBlank() ? label : canonicalType);
 
+        if (batchInputs != null) {
+            List<AdHocNodeResult> outcomes = adHocNodeExecutionService.executeBatch(
+                request, batchInputs, AdHocNodeExecutionService.MAX_BATCH_PARALLELISM);
+            return buildRunNodeBatchResult(canonicalType, rawType, nodeConfig, outcomes);
+        }
+
         AdHocNodeResult outcome = adHocNodeExecutionService.execute(request);
         return buildRunNodeResult(canonicalType, rawType, nodeConfig, outcome);
     }
@@ -441,6 +497,190 @@ public class WorkflowBuilderProvider implements ToolsProvider {
                 + "the user can be asked to authorize it: an interactive conversation. This context "
                 + "(an external API key, a sub-agent, a task, or a workflow run) has no one to ask. "
                 + "Build the node into a workflow and use workflow(action='execute') instead.");
+    }
+
+    /**
+     * Report a batched {@code run_node}: one entry per item, and no top-level verdict.
+     *
+     * <p>There is deliberately NO top-level {@code output} or {@code error} key. An empty one
+     * would read as "no output" / "no error" and be false the moment any item disagrees; an
+     * agent that must look at {@code items} in the response to learn anything should not be handed a summary
+     * field that answers first and wrongly.
+     *
+     * <p><b>One authorization covers the whole batch.</b> The card is raised per tool call, so a
+     * user approving a 20-entry batch approves twenty real executions, where before they approved
+     * one per call. The entry cap exists partly for that reason; raising it raises what a single
+     * approval buys.
+     *
+     * <p><b>The agent's iteration cap is the second thing this dilutes</b>, and it is worth saying
+     * out loud because it is the less obvious half. A loop that runs away is stopped by the
+     * iteration ceiling, and batching turns twenty executions into one iteration against it, so
+     * the same ceiling now bounds twenty times the work. Both multipliers are the same 20, which
+     * is why the cap is deliberately a small number rather than "as many as fit in the budget":
+     * the deadline bounds how long a batch takes, and the entry cap bounds what a single consent
+     * and a single iteration are worth.
+     *
+     * <p>Note the deliberate asymmetry with the single-entry path: there, a node that timed out or
+     * suspended makes the tool call itself fail, because the response has nothing else in it. Here
+     * the same outcome SUCCEEDS, because the per-entry report is the thing worth reading. Both help
+     * surfaces say so rather than leaving the agent to discover it.
+     *
+     * <p>The call FAILS in exactly two cases, both of which leave nothing to read: every entry ran
+     * and failed, or none of them ever started. Anything else succeeds, including a batch that
+     * returned four usable results and two errors, because reporting that as a failed tool call
+     * would throw the four away; the caller reads {@code status} and the per-entry statuses to
+     * decide. A mix of failures and never-started entries succeeds for the same reason, and is why
+     * the all-failed message may not be used for it.
+     */
+    private ToolExecutionResult buildRunNodeBatchResult(String canonicalType, String rawType,
+                                                        Map<String, Object> nodeConfig,
+                                                        List<AdHocNodeResult> outcomes) {
+        if (outcomes.isEmpty()) {
+            // The surface refuses an empty list before calling the service, so this is reached
+            // only by a caller that skipped it. Worth keeping rather than trusting: with no
+            // entries the counters would call the batch "completed" and the verdict would call it
+            // all-failed, in one response.
+            return ToolExecutionResult.failure(ToolErrorCode.VALIDATION_ERROR,
+                "No entries were run, so there is nothing to report. Send at least one entry in "
+                    + "run_inputs, or omit it to run the node once.");
+        }
+        int completed = 0;
+        int failed = 0;
+        int timedOut = 0;
+        int notStarted = 0;
+        int awaitingSignal = 0;
+        int unknown = 0;
+        long totalDuration = 0L;
+        List<Map<String, Object>> items = new ArrayList<>(outcomes.size());
+        for (int i = 0; i < outcomes.size(); i++) {
+            AdHocNodeResult outcome = outcomes.get(i);
+            Map<String, Object> entry = new LinkedHashMap<>();
+            entry.put("index", i);
+            entry.put("status", outcome.status());
+            entry.put("duration_ms", outcome.durationMs());
+            // AWAITING_SIGNAL keeps its output too: the node ran and produced one, and the single
+            // path always emits it. Dropping it here would make the documented per-entry shape
+            // {output or error} carry neither for that status.
+            if (outcome.completed() || AdHocNodeResult.AWAITING_SIGNAL.equals(outcome.status())) {
+                entry.put("output", outcome.output());
+            }
+            if (outcome.error() != null) entry.put("error", outcome.error());
+            if (outcome.note() != null) entry.put("note", outcome.note());
+            items.add(entry);
+            totalDuration += outcome.durationMs();
+            if (outcome.completed()) completed++;
+            else if (AdHocNodeResult.NOT_STARTED.equals(outcome.status())) notStarted++;
+            else if (AdHocNodeResult.TIMED_OUT.equals(outcome.status())) timedOut++;
+            else if (AdHocNodeResult.AWAITING_SIGNAL.equals(outcome.status())) awaitingSignal++;
+            else if (AdHocNodeResult.FAILED.equals(outcome.status())) failed++;
+            // A status nobody here recognises is NOT a failure: counting it as one is how
+            // awaiting-signal came to be reported as "all failed", and the next status added
+            // would inherit the same bug. Unknown means unknown.
+            else unknown++;
+        }
+
+        // awaiting_signal is neither a success nor a failure and must not fall through to
+        // "failed": those items ran correctly and asked to be resumed, which only a real run can
+        // do. Folding them into the failure verdict made the message assert they failed, that
+        // there was no reason, and that every item failed the same way - none of it true.
+        // "failed" only when EVERY entry failed. With a mix of failures and entries whose outcome
+        // is unknown, calling the batch failed would assert something about the unknown ones that
+        // nothing proved - the per-entry statuses are the answer.
+        int size = outcomes.size();
+        String status = completed == size ? "completed"
+            : completed > 0 ? "partial"
+            : failed == size ? "failed"
+            : notStarted == size ? "not_started"
+            : timedOut == size ? "timed_out"
+            : awaitingSignal == size ? "awaiting_signal"
+            : "unknown";
+
+
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("node_type", canonicalType);
+        if (!canonicalType.equals(rawType)) {
+            body.put("resolved_from", rawType);
+        }
+        body.put("item_count", outcomes.size());
+        body.put("completed", completed);
+        body.put("failed", failed);
+        body.put("timed_out", timedOut);
+        // Counted apart from timed_out because the two call for opposite actions: a timed-out entry
+        // may already have had its effect, a never-started one had none and is safe to resend.
+        body.put("not_started", notStarted);
+        // Emitted ONLY when there is something to report: an always-present "unrecognised": 0 is
+        // one more field to interpret on every healthy batch.
+        if (unknown > 0) {
+            body.put("unrecognised", unknown);
+        }
+        // Its own count, never folded into timed_out: an awaiting-signal item is not "maybe still
+        // running", it is stopped for good, and only a real run can resume it.
+        body.put("awaiting_signal", awaitingSignal);
+        body.put("status", status);
+        // The SUM of the items, not elapsed time - they ran in parallel, so the call took far less.
+        // Named for what it is so it cannot be read as a wall clock.
+        body.put("total_item_duration_ms", totalDuration);
+        body.put("items", items);
+        // Redacted ONCE, on the shared config - the single-item path redacts the same map the
+        // same way. Per-item output is NOT redacted, matching that path exactly.
+        body.put("config", AdHocSecretRedactor.redactMap(nodeConfig, canonicalType));
+        body.put("hint", "Nothing was saved. To keep this node, reuse the same config: "
+            + "workflow(action='add_node', type='" + canonicalType + "', label='...', params={...}).");
+
+        // Metadata travels with BOTH outcomes, which is why `status` is computed for the two
+        // verdicts that never reach a body: a failed call carries no body at all, and this is then
+        // the only place the shape of that failure survives. It is not agent-facing text and is
+        // deliberately absent from the help, which enumerates what an agent can read.
+        Map<String, Object> metadata = new LinkedHashMap<>();
+        metadata.put("toolName", "Run node: " + canonicalType + " x" + outcomes.size());
+        metadata.put("adHocNodeType", canonicalType);
+        metadata.put("adHocStatus", status);
+        metadata.put("adHocItemCount", outcomes.size());
+
+        // Fail ONLY when there is nothing to read: every entry ran and failed, or none ever
+        // started. A MIX of failures and never-started entries still has results and reasons worth
+        // reading, and routing it here would print "all N failed" over entries that never ran.
+        if (!(failed == outcomes.size() || notStarted == outcomes.size())) {
+            // A batch that timed out is NOT a failed batch: those entries may still be running and
+            // may still have their effect, so calling it a failure would invite the agent to resend
+            // work that is in flight. The per-entry statuses say what is unknown. Entries that
+            // never STARTED are deliberately not counted here: a batch where nothing started
+            // produced nothing to read, so it is reported as a failure with the reason.
+            return ToolExecutionResult.success(body, metadata);
+        }
+        // Nothing to read: a failure result carries no body, so the reason has to be IN the
+        // message.
+        if (notStarted == outcomes.size()) {
+            // Carry the entries' OWN reasons rather than asserting the clock. This branch is also
+            // reached when the pool refused them or the call was interrupted, and a failure result
+            // has no body, so the reasons the service worked to tell apart would be lost exactly
+            // where they are the only thing left to read.
+            String why = String.join(" | ", outcomes.stream()
+                .map(AdHocNodeResult::error)
+                .filter(java.util.Objects::nonNull)
+                .collect(java.util.stream.Collectors.toCollection(java.util.LinkedHashSet::new)));
+            return ToolExecutionResult.failure(ToolErrorCode.EXECUTION_FAILED,
+                "None of the " + outcomes.size() + " entries started (" + canonicalType + "), so "
+                    + "nothing ran and nothing had an effect. "
+                    + (why.isBlank() ? "Send them again." : why), metadata);
+        }
+        // Every entry ran and failed: they share a configuration, so say what they failed on.
+        // Keep every DISTINCT reason: the items share a config but not their inputs, so they can
+        // fail for different reasons, and a failure result carries no body to look them up in.
+        java.util.LinkedHashSet<String> reasons = outcomes.stream()
+            // Only error(): this branch runs when EVERY entry failed, and no failed outcome
+            // carries a note - reading one would be dead code dressed as defensiveness.
+            .map(AdHocNodeResult::error)
+            .filter(java.util.Objects::nonNull)
+            .collect(java.util.stream.Collectors.toCollection(java.util.LinkedHashSet::new));
+        String detail = reasons.isEmpty()
+            ? "the node did not complete and gave no reason."
+            : String.join(" | ", reasons);
+        return ToolExecutionResult.failure(ToolErrorCode.EXECUTION_FAILED,
+            "All " + outcomes.size() + " items failed (" + canonicalType + "): " + detail
+                + (reasons.size() == 1
+                    ? " Every item failed the same way, so fix it once and retry."
+                    : " The reasons differ, so check each entry's input before retrying."), metadata);
     }
 
     /**

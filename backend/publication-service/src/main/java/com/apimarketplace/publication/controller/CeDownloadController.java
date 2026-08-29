@@ -4,6 +4,7 @@ import com.apimarketplace.auth.client.AuthClient;
 import com.apimarketplace.common.credit.CreditConsumptionClient;
 import com.apimarketplace.publication.domain.PublicationReceiptEntity;
 import com.apimarketplace.publication.domain.WorkflowPublicationEntity;
+import com.apimarketplace.publication.service.LandingInterfaceSnapshotter;
 import com.apimarketplace.publication.domain.WorkflowPublicationEntity.PublicationStatus;
 import com.apimarketplace.publication.domain.WorkflowPublicationEntity.PublicationVisibility;
 import com.apimarketplace.publication.repository.PublicationReceiptRepository;
@@ -191,9 +192,13 @@ public class CeDownloadController {
         return ResponseEntity.ok(response);
     }
 
+
     private Map<String, Object> buildSnapshotResponse(WorkflowPublicationEntity publication) {
         Map<String, Object> response = new HashMap<>();
-        response.put("planSnapshot", publication.getPlanSnapshot());
+        // Internal keys never leave the service, whatever the audience: a self-hosted install
+        // clones from _publications/ paths, so the landing owner tenant is useless to it and
+        // shipping it publishes an id belonging to a member of the publisher organization.
+        response.put("planSnapshot", LandingInterfaceSnapshotter.snapshotWithoutInternalLandingKeys(publication.getPlanSnapshot()));
         response.put("title", publication.getTitle());
         response.put("description", publication.getDescription());
         response.put("nodeIcons", publication.getNodeIcons());
@@ -209,7 +214,7 @@ public class CeDownloadController {
                 publication.getPublicationType() != null ? publication.getPublicationType().name() : "WORKFLOW");
         Map<String, Object> agentSnapshot = publication.getAgentSnapshot();
         if (agentSnapshot != null) {
-            response.put("agentSnapshot", agentSnapshot);
+            response.put("agentSnapshot", LandingInterfaceSnapshotter.snapshotWithoutInternalLandingKeys(agentSnapshot));
         }
         // CE-exclusive label. This endpoint deliberately does NOT gate on it: it
         // runs on cloud but SERVES self-hosted installs, which is exactly the

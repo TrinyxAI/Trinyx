@@ -44,7 +44,10 @@ export function AgentBrowseLivePreview({ toolId, session, isLive = true }: Agent
   // post-run AgentBrowseVisualizeCard open the SAME tab (one surface: live
   // during the run, final page after) instead of two different tabs.
   const tabId = `agent-browse-${session.sessionId}`;
-  const isTabActive = sidePanel?.isOpen && sidePanel?.activeTabId === tabId;
+  // `isForward`, not `isOpen`: a detached window collapsed to a strip is open and
+  // shows nothing, so this card would paint its "click to close" state over a panel
+  // nobody can see - and the click would then destroy the tab instead of revealing it.
+  const isTabActive = sidePanel?.isForward && sidePanel?.activeTabId === tabId;
 
   const handleOpen = () => {
     if (!sidePanel) return;

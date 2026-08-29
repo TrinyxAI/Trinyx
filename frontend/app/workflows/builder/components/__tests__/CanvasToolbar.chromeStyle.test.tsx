@@ -36,6 +36,14 @@ vi.mock('reactflow', () => ({
 // assertion below with nothing to measure.
 vi.mock('@/contexts/WorkflowModeContext', () => ({ useWorkflowMode: () => ({ isEditMode: false }) }));
 vi.mock('../CanvasRunTriggerButton', () => ({ CanvasRunTriggerButton: () => null }));
+// The relations menu renders only when the workflow HAS a neighbour, and resolving that
+// is a network read. Pin one parent so the trigger exists and its style can be measured.
+vi.mock('@/components/workflow/relations/useWorkflowRelations', () => ({
+  useWorkflowRelations: () => ({
+    relations: { parents: [{ id: 'wf-parent', name: 'Parent', resolved: true }], children: [] },
+    isLoading: false,
+  }),
+}));
 vi.mock('../nodes/TriggerNodePinButton', () => ({ TriggerNodePinButton: () => null }));
 
 import {
@@ -57,6 +65,10 @@ const baseProps = () => ({
   isSettingsOpen: false,
   nodes: [],
   showRunControls: false,
+  // ON by default: the relations trigger is a plain square chrome control like the rest,
+  // so it belongs INSIDE the "every control shares the style" invariant below rather than
+  // in an exception beside it (the mocked hook above gives it a relation to show).
+  showRelations: true,
   workflowId: 'wf-1',
   onUndo: vi.fn(),
   onRedo: vi.fn(),
@@ -97,12 +109,12 @@ describe('CanvasToolbar - canvas chrome style', () => {
   it('gives every control the shared chrome button style, not a local copy', () => {
     const { container } = render(<CanvasToolbar {...baseProps()} />);
     const buttons = iconButtons(container);
-    // Undo, redo, zoom in/out, fit, auto-layout, lock, settings, AI assistant.
+    // Undo, redo, zoom in/out, fit, auto-layout, lock, settings, relations, AI assistant.
     // The file-strip toggle is NOT among them: it renders nothing without a
     // FileStripExpansionProvider, and it is the one control with a documented
     // deviation from the shared class, so it gets its own case below rather than
     // silently escaping this one.
-    expect(buttons).toHaveLength(9);
+    expect(buttons).toHaveLength(10);
     // None of them is in its active state under these props.
     for (const button of buttons) {
       expect(button.className, `${button.getAttribute('title')} is off the shared style`)
@@ -123,6 +135,44 @@ describe('CanvasToolbar - canvas chrome style', () => {
 
     expect(toggle).not.toBeNull();
     expect(toggle!.className).toBe(canvasChromeCompactButtonClass(false, 'w-auto gap-0.5 px-1.5'));
+  });
+
+  it('draws the relations trigger as a plain square control, with no count painted on it', () => {
+    // It used to carry the relation count, which read as a notification badge - a thing that is
+    // unread and wants clearing. It is neither. The number lives in the accessible name instead,
+    // and the button is the same square as every other one.
+    const { container } = render(<CanvasToolbar {...baseProps()} />);
+    const trigger = container.querySelector<HTMLElement>('[data-testid="canvas-toolbar-relations"]');
+
+    expect(trigger).not.toBeNull();
+    expect(trigger!.className).toBe(canvasChromeCompactButtonClass(false));
+    expect(trigger!.textContent).toBe('');
+    expect(trigger!.getAttribute('aria-label')).toBeTruthy();
+  });
+
+  it('puts the relations trigger in the settings group, with no divider between the two', () => {
+    // Both are about THIS workflow rather than about the view, so they share one group; a
+    // separator between them would draw a boundary that is not there.
+    const { container } = render(<CanvasToolbar {...baseProps()} />);
+    const trigger = container.querySelector<HTMLElement>('[data-testid="canvas-toolbar-relations"]');
+    const settings = screen.getByTitle('settings');
+
+    expect(trigger!.parentElement).toBe(settings.parentElement);
+    // One divider on the group's right edge, and none inside it.
+    expect(settings.parentElement!.className).toContain('border-r');
+    expect(trigger!.previousElementSibling).toBe(settings);
+  });
+
+  it('offers the relations menu in BOTH modes, and never in a preview', () => {
+    // "What calls this?" is asked while reading a run as much as while editing, so the control
+    // is not run/edit gated - only `showRelations` (false in the marketplace preview) takes it away.
+    for (const isRunMode of [false, true]) {
+      const { container, unmount } = render(<CanvasToolbar {...baseProps()} isRunMode={isRunMode} />);
+      expect(container.querySelector('[data-testid="canvas-toolbar-relations"]'), `run mode: ${isRunMode}`).not.toBeNull();
+      unmount();
+    }
+    const { container } = render(<CanvasToolbar {...baseProps()} showRelations={false} />);
+    expect(container.querySelector('[data-testid="canvas-toolbar-relations"]')).toBeNull();
   });
 
   it('leaves nothing round behind, in either mode', () => {

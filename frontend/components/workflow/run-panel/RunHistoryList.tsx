@@ -8,6 +8,7 @@ import {
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { orchestratorApi, type WorkflowRun } from '@/lib/api/orchestrator';
+import { isEventForWorkflow } from '@/lib/workflow/workflowEventScope';
 import { getClientLocale } from '@/lib/utils/locale';
 import { formatRelativeDateI18n, formatUtcDateTime, parseUtcAware } from '@/lib/utils/dateFormatters';
 import { getRunDisplayStatus } from '@/lib/utils/runStatusUtils';
@@ -219,7 +220,11 @@ export function RunHistoryList({ workflowId, currentRunId, onSelectRun }: RunHis
   // Listen for pin/unpin changes
   useEffect(() => {
     const handler = (e: Event) => {
-      const newPinned = (e as CustomEvent).detail?.pinnedVersion ?? null;
+      const detail = (e as CustomEvent).detail;
+      // Another workflow's pin says nothing about this history, and refetching
+      // its production run on that signal is a request nobody asked for.
+      if (!isEventForWorkflow(detail, workflowId)) return;
+      const newPinned = detail?.pinnedVersion ?? null;
       setPinnedVersion(newPinned);
       if (workflowId && newPinned != null) {
         orchestratorApi.getPinnedWorkflowRun(workflowId)

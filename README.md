@@ -116,7 +116,9 @@ Deploying through Portainer, Coolify, Dokploy or a similar platform: see
 
 ### Images
 
-Built for **linux/amd64**. The Compose file pulls from GHCR:
+Built for **linux/amd64** and **linux/arm64**, so the same tag runs on an ordinary server
+and on Apple Silicon, a Raspberry Pi, Ampere or Graviton. Docker picks the right one for
+your machine. The Compose file pulls from GHCR:
 
 ```
 ghcr.io/livecontext-ai/livecontext-ce

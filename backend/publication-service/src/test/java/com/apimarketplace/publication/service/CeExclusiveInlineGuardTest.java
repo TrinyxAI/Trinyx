@@ -101,7 +101,8 @@ class CeExclusiveInlineGuardTest {
                 new ObjectMapper(),
                 mock(SnapshotCloneService.class),
                 null,
-                authClient);
+                authClient,
+                new com.apimarketplace.publication.service.PublicationFileUrlResolver(new com.apimarketplace.common.storage.signing.ShowcaseUrlSigner("test-secret-32-bytes-long-enough-for-hmac")));
         ReflectionTestUtils.setField(service, "ceExclusiveGuard",
                 new CeExclusiveAcquisitionGuard(edition(editionValue)));
         return service;

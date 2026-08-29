@@ -185,10 +185,15 @@ export function FilesExplorerBody({
           key={entryKey(entry)}
           entry={entry}
           selected={selectedIds.has(entry.id)}
-          onToggleSelect={onToggleSelect}
-          onOpen={(e) => onOpenFile?.(e)}
-          onDownload={(e) => onDownloadFile?.(e)}
-          downloadLabel={downloadLabel ?? ''}
+          // Only where the caller actually offers selection / download. Passing them
+          // unconditionally drew a checkbox nothing could act on and a dead download button.
+          onToggleSelect={selectable ? onToggleSelect : undefined}
+          // Picker mode has no detail view to open, so a tile click is the selection - the
+          // same contract the compact row already has. Without this a grid picker looked
+          // interactive and did nothing.
+          onOpen={(e) => (onSelectFile ? onSelectFile(e) : onOpenFile?.(e))}
+          onDownload={onDownloadFile ? (e) => onDownloadFile(e) : undefined}
+          downloadLabel={downloadLabel}
           draggable={gridDraggable}
         />
       );

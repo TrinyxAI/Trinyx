@@ -81,7 +81,10 @@ export function ApplicationVisualizeCard({ publicationId, title, runId, onDelete
   // executions (each `application:execute` = a new run/epoch) open independent
   // panel tabs instead of collapsing onto one tab that shows a single epoch.
   const tabId = applicationPanelTabId(publicationId, runId);
-  const isTabActive = sidePanel?.isOpen && sidePanel?.activeTabId === tabId;
+  // `isForward`, not `isOpen`: a detached window collapsed to a strip is open and
+  // shows nothing, so this card would paint its "click to close" state over a panel
+  // nobody can see - and the click would then destroy the tab instead of revealing it.
+  const isTabActive = sidePanel?.isForward && sidePanel?.activeTabId === tabId;
 
   // Open this application in the right side panel (LIVE mode - no
   // PublicationPreviewShell wrap). Acquired or self-published apps must run

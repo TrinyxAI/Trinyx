@@ -28,7 +28,7 @@ class ShowcaseImageReplacementTest {
     @BeforeEach
     void setUp() {
         signer = new ShowcaseUrlSigner(SECRET);
-        rewriter = new ShowcaseFileRefRewriter(signer, new ObjectMapper(), new SimpleMeterRegistry(), 15);
+        rewriter = new ShowcaseFileRefRewriter(signer, new PublicationFileUrlResolver(signer), new ObjectMapper(), new SimpleMeterRegistry(), 15);
         reader = new ShowcaseSnapshotReader(rewriter);
         pub = new WorkflowPublicationEntity();
         pub.setId(UUID.randomUUID());

@@ -8,6 +8,12 @@
 
 set -e
 
+# Keep the JWT key-path default at runtime so the Docker image does not bake a
+# sensitive-looking *_KEYS_* ENV value into its metadata. Explicit runtime
+# overrides still win exactly as before.
+AUTH_JWT_KEYS_PATH="${AUTH_JWT_KEYS_PATH:-/app/data/keys}"
+export AUTH_JWT_KEYS_PATH
+
 KEYS_DIR="/app/data/keys"
 ENCRYPTION_ENV="$KEYS_DIR/encryption.env"
 
@@ -216,7 +222,7 @@ if is_default_password "$CREDENTIAL_ENCRYPTION_PASSWORD"; then
   echo "    2. docker compose down"
   echo "    3. docker volume rm livecontext_keys"
   echo "    4. docker compose up -d"
-  echo "    5. Re-enter your credentials in the UI"
+  echo "    5. Re-enter all credentials in the UI"
   echo "================================================================="
   echo ""
 fi

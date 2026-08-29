@@ -27,7 +27,7 @@ class AuthClientServiceSigningTest {
                 .andExpect(header("X-Provider-ID", "datasource-service"))
                 .andExpect(header("X-Gateway-Signature-Version", "2"))
                 .andExpect(header("X-Gateway-Secret",
-                        org.hamcrest.Matchers.startsWith("v2=")))
+                        org.hamcrest.Matchers.startsWith("gw_")))
                 .andRespond(withSuccess("{\"roles\":[\"USER\"]}",
                         MediaType.APPLICATION_JSON));
 

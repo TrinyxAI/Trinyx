@@ -45,6 +45,15 @@ class AuthClientServiceSigningTest {
     }
 
     @Test
+    void publicCiPlaceholderSecretFailsClosed() {
+        org.assertj.core.api.Assertions.assertThatThrownBy(() ->
+                new AuthClient(new RestTemplate(), "http://auth", "catalog-service",
+                        "ci-catalog-service-s2s-secret-32chars"))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("non-placeholder");
+    }
+
+    @Test
     void secretWithoutServiceIdentityFailsClosed() {
         org.assertj.core.api.Assertions.assertThatThrownBy(() ->
                 new AuthClient(new RestTemplate(), "http://auth", "", "s".repeat(32)))

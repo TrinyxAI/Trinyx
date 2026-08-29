@@ -32,6 +32,20 @@ class GatewayAuthenticationFilterV2Test {
     }
 
     @Test
+    void rejectsKnownPlaceholderServiceSecretsAtStartup() {
+        GatewayFilterProperties unsafe = new GatewayFilterProperties();
+        unsafe.setSecretKey(SECRET);
+        unsafe.setVerificationEnabled(true);
+        unsafe.setServiceSecrets(java.util.Map.of(
+                "catalog-service", "ci-catalog-service-s2s-secret-32chars"));
+
+        org.assertj.core.api.Assertions.assertThatThrownBy(() ->
+                new GatewayAuthenticationFilter(unsafe, new InMemoryGatewayNonceStore()))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("non-placeholder");
+    }
+
+    @Test
     void defaultBodyLimitPreservesFiftyMiBStorageContract() {
         assertThat(properties.getMaxBodyBytes()).isEqualTo(50 * 1024 * 1024);
     }

@@ -23,13 +23,15 @@ public class StorageClientConfig {
     @Bean
     public StorageClient storageClient(
             @Value("${services.storage-url:http://localhost:8082}") String storageUrl,
-            @Value("${internal.s2s.service-secret:}") String serviceSecret) {
-        return new StorageClient(storageUrl, serviceSecret, "auth-service");
+            @Value("${internal.s2s.service-secret:}") String serviceSecret,
+            @Value("${trinyx.tenant-delegation.secret:}") String erasureAuthoritySecret) {
+        return new StorageClient(
+                storageUrl, serviceSecret, "auth-service", erasureAuthoritySecret);
     }
 
     @Bean
     public WorkspaceStorageObjectDeleter workspaceStorageObjectDeleter(
             StorageClient storageClient) {
-        return storageClient::delete;
+        return storageClient::deleteWorkspaceErasure;
     }
 }

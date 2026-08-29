@@ -12,7 +12,6 @@ import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.springframework.test.web.client.match.MockRestRequestMatchers.method;
-import static org.springframework.test.web.client.match.MockRestRequestMatchers.requestTo;
 import static org.springframework.test.web.client.response.MockRestResponseCreators.withSuccess;
 
 class StorageClientWorkspaceErasureTest {
@@ -25,8 +24,8 @@ class StorageClientWorkspaceErasureTest {
         StorageClient client = new StorageClient(rest, "http://storage.test", secret);
         UUID erasureId = UUID.randomUUID();
 
-        server.expect(requestTo(org.hamcrest.Matchers.containsString(
-                        "/api/internal/storage/workspace-erasure")))
+        server.expect(request -> assertThat(request.getURI().getPath())
+                        .isEqualTo("/api/internal/storage/workspace-erasure"))
                 .andExpect(method(HttpMethod.DELETE))
                 .andExpect(request -> {
                     assertThat(request.getHeaders().getFirst("X-User-ID"))

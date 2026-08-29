@@ -61,7 +61,7 @@ public final class TenantDelegation {
             String decoded = new String(Base64.getUrlDecoder().decode(parts[1]),
                     StandardCharsets.UTF_8);
             String[] claims = decoded.split("\n", -1);
-            if (claims.length != 9) return false;
+            if (claims.length != 8) return false;
             long issuedAt = Long.parseLong(claims[0]);
             long expiresAt = Long.parseLong(claims[1]);
             long nowEpoch = now.getEpochSecond();

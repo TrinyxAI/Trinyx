@@ -220,7 +220,72 @@ jobs:
           if-no-files-found: error
           retention-days: 30
 
+  build-validation:
+    if: needs.prepare.outputs.release != 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    needs:
+      - prepare
+      - release-preflight
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: backend
+            context: ./backend
+            file: ./backend/monolith-service/Dockerfile
+            image: ghcr.io/trinyxai/trinyx-ce
+            build_args: ""
+          - name: bridge
+            context: ./mcp
+            file: ./mcp/bridge/Dockerfile
+            image: ghcr.io/trinyxai/trinyx-ce-bridge
+            build_args: ""
+          - name: frontend
+            context: ./frontend
+            file: ./frontend/Dockerfile
+            image: ghcr.io/trinyxai/trinyx-ce-frontend
+            build_args: |
+              NEXT_PUBLIC_APP_EDITION=ce
+              NEXT_PUBLIC_AUTH_MODE=embedded
+              NEXT_PUBLIC_BILLING_ENABLED=false
+          - name: screenshot-renderer
+            context: ./screenshot-renderer
+            file: ./screenshot-renderer/Dockerfile
+            image: ghcr.io/trinyxai/trinyx-ce-screenshot-renderer
+            build_args: ""
+          - name: websearch
+            context: ./websearch-service
+            file: ./websearch-service/Dockerfile
+            image: ghcr.io/trinyxai/trinyx-ce-websearch
+            build_args: ""
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # actions/checkout v4
+      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # docker/setup-buildx-action v3
+
+      - name: Build ${{ matrix.name }}
+        id: build
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # docker/build-push-action v6
+        with:
+          context: ${{ matrix.context }}
+          file: ${{ matrix.file }}
+          platforms: linux/amd64
+          push: false
+          tags: ${{ matrix.image }}:${{ github.sha }}
+          labels: |
+            org.opencontainers.image.source=https://github.com/TrinyxAI/Trinyx
+            org.opencontainers.image.revision=${{ needs.prepare.outputs.release_commit }}
+            org.opencontainers.image.version=${{ needs.prepare.outputs.version }}
+          provenance: false
+          sbom: false
+          build-args: ${{ matrix.build_args }}
+          cache-from: type=gha,scope=trinyx-ce-${{ matrix.name }}
+          cache-to: type=gha,mode=max,scope=trinyx-ce-${{ matrix.name }}
+
+
   build:
+    if: needs.prepare.outputs.release == 'true'
     runs-on: ubuntu-latest
     permissions:
       contents: read

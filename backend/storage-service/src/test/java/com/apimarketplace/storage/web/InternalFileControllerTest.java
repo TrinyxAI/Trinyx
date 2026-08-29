@@ -1,5 +1,6 @@
 package com.apimarketplace.storage.web;
 
+import com.apimarketplace.common.web.TenantDelegation;
 import com.apimarketplace.storage.service.file.DownloadStream;
 import com.apimarketplace.storage.service.file.FileStorageService;
 import com.apimarketplace.storage.service.file.StorageStreamingMetrics;
@@ -55,6 +56,41 @@ class InternalFileControllerTest {
     @BeforeEach
     void setUp() {
         controller = new InternalFileController(fileStorageService, streamingMetrics);
+    }
+
+    @Test
+    @DisplayName("Cloud delete rejects a service-signed but edge-undelegated tenant")
+    void cloudDeleteRequiresEdgeTenantDelegation() {
+        org.springframework.test.util.ReflectionTestUtils.setField(controller, "appEdition", "cloud");
+        org.springframework.test.util.ReflectionTestUtils.setField(
+                controller, "tenantDelegationSecret", "d".repeat(32));
+
+        ResponseEntity<java.util.Map<String, Object>> response =
+                controller.delete("42/files/object", "42", null,
+                        "principal", "billing", "org", "install");
+
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.FORBIDDEN);
+        org.mockito.Mockito.verify(fileStorageService, org.mockito.Mockito.never())
+                .delete(org.mockito.ArgumentMatchers.anyString());
+    }
+
+    @Test
+    @DisplayName("Cloud delete accepts the exact short-lived edge delegation")
+    void cloudDeleteAcceptsExactEdgeTenantDelegation() {
+        String secret = "d".repeat(32);
+        org.springframework.test.util.ReflectionTestUtils.setField(controller, "appEdition", "cloud");
+        org.springframework.test.util.ReflectionTestUtils.setField(
+                controller, "tenantDelegationSecret", secret);
+        String token = TenantDelegation.issue(secret, "42", "principal", "billing",
+                "org", "install", java.time.Instant.now());
+        when(fileStorageService.delete("42/files/object")).thenReturn(true);
+
+        ResponseEntity<java.util.Map<String, Object>> response =
+                controller.delete("42/files/object", "42", token,
+                        "principal", "billing", "org", "install");
+
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(response.getBody()).containsEntry("deleted", true);
     }
 
     @Test

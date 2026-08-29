@@ -54,13 +54,20 @@ final class AuthenticatedGatewayFilter implements GlobalFilter, Ordered {
             GatewayRequestRateLimiter rateLimiter,
             @Value("${trinyx.gateway.max-body-bytes:52428800}") int maxBodyBytes,
             @Value("${trinyx.gateway.max-buffered-requests:8}") int maxBufferedRequests,
-            @Value("${trinyx.gateway.tenant-delegation-secret}") String tenantDelegationSecret) {
+            @Value("${trinyx.gateway.tenant-delegation-secret:}") String tenantDelegationSecret,
+            @Value("${app.edition:ce}") String appEdition) {
         this.identityClient = identityClient;
         this.rateLimiter = rateLimiter;
         this.maxBodyBytes = Math.max(1, maxBodyBytes);
         this.bodyBufferPermits = new Semaphore(Math.max(1, maxBufferedRequests), true);
-        TenantDelegation.requireSecret(tenantDelegationSecret);
-        this.tenantDelegationSecret = tenantDelegationSecret;
+        if ("cloud".equalsIgnoreCase(appEdition)) {
+            TenantDelegation.requireSecret(tenantDelegationSecret);
+            this.tenantDelegationSecret = tenantDelegationSecret;
+        } else {
+            this.tenantDelegationSecret =
+                    tenantDelegationSecret == null || tenantDelegationSecret.isBlank()
+                            ? "t".repeat(32) : tenantDelegationSecret;
+        }
     }
 
     AuthenticatedGatewayFilter(
@@ -68,7 +75,7 @@ final class AuthenticatedGatewayFilter implements GlobalFilter, Ordered {
             GatewayRequestRateLimiter rateLimiter,
             int maxBodyBytes,
             int maxBufferedRequests) {
-        this(identityClient, rateLimiter, maxBodyBytes, maxBufferedRequests, "t".repeat(32));
+        this(identityClient, rateLimiter, maxBodyBytes, maxBufferedRequests, "t".repeat(32), "ce");
     }
 
     AuthenticatedGatewayFilter(

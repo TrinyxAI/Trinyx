@@ -19,6 +19,36 @@ failure-mode exercises below. Source tests do not simulate those results.
 
 **No source correction is currently required before merging PR25 into main.**
 
+### Corrective security addendum
+
+The final corrective pass separates destructive Storage authorities instead of
+reusing a two-minute browser delegation for durable work:
+
+- interactive single-object and run deletion require the exact edge tenant
+  delegation in Cloud;
+- workspace erasure uses a dedicated auth-service-only route and a short-lived
+  capability bound to the immutable outbox id, organization, tenant and key;
+- asynchronous run cleanup uses a separate orchestrator-service-only job route,
+  with method, path, query and tenant context bound by service HMAC.
+
+The last route is an explicit trusted-compute boundary, not a claim that a fully
+compromised orchestrator is cryptographically unable to abuse its granted job
+authority. A future zero-trust design would persist independently issued,
+job-scoped deletion capabilities.
+
+Credential discovery routes `/all` and `/identities` require edge delegation,
+and bulk responses contain no secret material. Exact credential-consumption
+routes remain available only to their allowlisted compute services because
+those services must execute the selected integration. Preventing abuse by an
+already compromised authorized consumer requires a separate secret-broker and
+job-capability architecture; that stronger boundary is not silently claimed
+here.
+
+`TenantDelegation` is a symmetric short-lived bearer authority. Gateway
+normally issues it, while auth and storage are trusted verifiers that possess
+the same HMAC key. It is not described as cryptographic proof that only Gateway
+can sign.
+
 At the time of this audit the repository is public, no repository ruleset is
 visible, and branch-protection evidence is unavailable. Those are external
 NO-GO conditions, not source defects.
@@ -48,7 +78,7 @@ NO-GO conditions, not source defects.
 | Browser fail-closed accounting | PASS SOURCE / PASS RUNTIME CI | Cancellation and ambiguous provider outcomes remain staging. |
 | Redis and PostgreSQL settlement fencing | PASS SOURCE / PASS RUNTIME CI | AOF restart, HA and lost-ACK tests remain staging. |
 | Workspace purge and S3 erasure outbox | PASS SOURCE / PASS RUNTIME CI | Real MinIO/S3 retries and absent-object behavior remain staging. |
-| Cross-tenant isolation | PASS SOURCE / PASS RUNTIME CI | Full negative matrix across real services remains staging. |
+| Cross-tenant discovery and destructive routes | PASS SOURCE / PASS RUNTIME CI | Trusted compute-service compromise and the future job-capability model remain explicit boundaries; the full negative matrix remains staging. |
 | Gateway route inventory | PASS SOURCE / PASS RUNTIME CI | DNS, TLS, Caddy and security groups remain staging. |
 
 ### Deployment profiles

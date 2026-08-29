@@ -1,6 +1,7 @@
 package com.apimarketplace.storage.web;
 
 import com.apimarketplace.common.storage.AdoptRunContextFields;
+import com.apimarketplace.common.web.TenantDelegation;
 import com.apimarketplace.storage.domain.FileRef;
 import com.apimarketplace.storage.service.file.DownloadStream;
 import com.apimarketplace.storage.service.file.FileStorageService;
@@ -39,6 +40,12 @@ public class InternalFileController {
 
     private final FileStorageService fileStorageService;
     private final StorageStreamingMetrics streamingMetrics;
+
+    @org.springframework.beans.factory.annotation.Value("${app.edition:ce}")
+    private String appEdition;
+
+    @org.springframework.beans.factory.annotation.Value("${trinyx.tenant-delegation.secret:}")
+    private String tenantDelegationSecret;
 
     /** The {@code storage.storage} indexer. Optional for the same reason as in
      *  {@code S3FileStorageService}: some test profiles do not wire common-storage-service. */
@@ -312,14 +319,31 @@ public class InternalFileController {
     @DeleteMapping("/delete")
     public ResponseEntity<Map<String, Object>> delete(
             @RequestParam String key,
-            @RequestHeader(value = "X-User-ID", required = false) String tenantId) {
+            @RequestHeader(value = "X-User-ID", required = false) String tenantId,
+            @RequestHeader(value = TenantDelegation.HEADER, required = false) String delegation,
+            @RequestHeader(value = "X-Principal-ID", required = false) String principalId,
+            @RequestHeader(value = "X-Billing-Subject-ID", required = false) String billingSubjectId,
+            @RequestHeader(value = "X-Organization-ID", required = false) String organizationId,
+            @RequestHeader(value = "X-Install-ID", required = false) String installId) {
 
         if (!isKeyOwnedByTenant(key, tenantId)) {
             logger.warn("Internal delete refused: key='{}' not owned by tenantId='{}'", key, tenantId);
             return ResponseEntity.status(403).build();
         }
+        if ("cloud".equalsIgnoreCase(appEdition)
+                && !TenantDelegation.verify(delegation, tenantDelegationSecret,
+                tenantId, principalId, billingSubjectId, organizationId, installId,
+                java.time.Instant.now())) {
+            logger.warn("Internal delete refused: tenant delegation is missing or invalid");
+            return ResponseEntity.status(403).build();
+        }
         boolean deleted = fileStorageService.delete(key);
         return ResponseEntity.ok(Map.of("deleted", deleted));
+    }
+
+    /** Compatibility helper for CE/unit callers; Cloud HTTP requests use the mapped method above. */
+    public ResponseEntity<Map<String, Object>> delete(String key, String tenantId) {
+        return delete(key, tenantId, null, null, null, null, null);
     }
 
     /**

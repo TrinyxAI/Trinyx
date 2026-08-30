@@ -437,7 +437,7 @@ class ToolExecutionManagerBillingLifecycleTest {
             ToolExecutionResponse response = execute();
 
             assertThat(response.isSuccess()).isFalse();
-            verify(billingService).releaseOnFailure(eq(SOURCE_ID), contains("aborted before settlement"));
+            verify(billingService).releaseOnFailure(eq(SOURCE_ID), contains("before provider dispatch"));
             verify(billingService, never()).commitOnSuccess(any(), any(), any(), any());
         }
 

@@ -1,0 +1,54 @@
+name: Audit PR25 LiveContext v0.2.14 merge
+
+on:
+  pull_request:
+    branches:
+      - codex/trinyx-cloud-gateway-v2
+    paths:
+      - .github/workflows/audit-pr25-livecontext-v0.2.14-merge.yml
+
+permissions:
+  contents: read
+
+jobs:
+  merge-conflict-inventory:
+    if: github.head_ref == 'audit/pr25-livecontext-v0.2.14-merge'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout exact audit head
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 0
+
+      - name: Verify immutable inputs
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "${{ github.event.pull_request.head.sha }}"
+          test "$(git rev-parse HEAD^)" = "4282bee7c6021487d334b70cee8daef8e97ed95e"
+          git fetch --no-tags origin             99673e28981a861d1e51947bcbc3a18a5f4c06d1
+          test "$(git rev-parse FETCH_HEAD)" =             "99673e28981a861d1e51947bcbc3a18a5f4c06d1"
+
+      - name: Inventory the real three-way merge
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "Trinyx CI audit"
+          git config user.email "ci-audit@users.noreply.github.com"
+          set +e
+          git merge --no-ff             99673e28981a861d1e51947bcbc3a18a5f4c06d1             -m "Merge main LiveContext CE v0.2.14 into PR25"
+          status=$?
+          set -e
+          if [ "$status" -eq 0 ]; then
+            echo "MERGE_CLEAN"
+            git show --no-patch --format='commit=%H%ntree=%T%nparents=%P'
+            exit 0
+          fi
+          echo "MERGE_CONFLICTS_BEGIN"
+          git diff --name-only --diff-filter=U | LC_ALL=C sort
+          echo "MERGE_CONFLICTS_END"
+          echo "UNMERGED_STAGE_BLOBS_BEGIN"
+          git ls-files -u
+          echo "UNMERGED_STAGE_BLOBS_END"
+          exit 1

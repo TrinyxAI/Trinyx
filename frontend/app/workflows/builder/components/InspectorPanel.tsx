@@ -19,7 +19,6 @@ import { Textarea } from '@/components/ui/textarea';
 import { Input } from '@/components/ui/input';
 import { Breadcrumb } from '@/components/ui/breadcrumb';
 import { ExpressionEditor } from '@/components/ui/expression-editor';
-import { InputColumn } from './inspector/InputColumn';
 import { ParameterColumn } from './inspector/ParameterColumn';
 import { OutputColumn } from './inspector/OutputColumn';
 import { OptionalSection } from './inspector/OptionalSection';

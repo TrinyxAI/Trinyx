@@ -32,6 +32,15 @@ vi.mock('next/navigation', () => ({
   useRouter: () => ({ replace: routerState.replace, push: vi.fn() }),
 }));
 
+/**
+ * A refinement is a change of ADDRESS on the page already on screen, so it goes through the
+ * history API rather than the router: returning a select to its fallback removes the last
+ * query param, and a router replace of the bare pathname is dropped when the page was loaded
+ * at it - so on a page opened directly on `?type=agents`, clearing the filter did nothing.
+ */
+const historyReplace = vi.fn();
+const realReplaceState = window.history.replaceState;
+
 vi.mock('@tanstack/react-query', () => ({
   useQueryClient: () => ({ invalidateQueries: vi.fn().mockResolvedValue(undefined) }),
 }));
@@ -110,7 +119,12 @@ const AGENT_PUB = {
   creditsPerUse: 0,
 };
 
+afterEach(() => { window.history.replaceState = realReplaceState; });
+
 beforeEach(() => {
+  historyReplace.mockClear();
+  window.history.replaceState = ((_d: unknown, _u: string, url?: string) =>
+    historyReplace(url)) as unknown as typeof window.history.replaceState;
   vi.clearAllMocks();
   routerState.params = new URLSearchParams();
   // The type filter is a QUERY PARAM answered by the backend, so the mock
@@ -175,7 +189,7 @@ describe('Marketplace Explore - resource type is a select beside the category fi
 
     // replace, not push: flipping a filter is not a step Back should walk through.
     await waitFor(() => {
-      expect(routerState.replace).toHaveBeenCalledWith('/app/marketplace?type=agents', { scroll: false });
+      expect(historyReplace).toHaveBeenCalledWith('/app/marketplace?type=agents');
     });
   });
 

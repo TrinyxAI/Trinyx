@@ -17,6 +17,10 @@ const api = vi.hoisted(() => ({
   executeSingleStepInStepByStepMode: vi.fn(),
 }));
 
+const setRunId = vi.hoisted(() => vi.fn());
+const routerPush = vi.hoisted(() => vi.fn());
+let mockPathname: string;
+
 vi.mock('@/lib/api', () => ({ orchestratorApi: api }));
 vi.mock('@/lib/api/error-utils', () => ({
   is402Error: () => false,
@@ -37,8 +41,9 @@ vi.mock('@/lib/credentials/reconcilePlanCredentials', () => ({
 }));
 vi.mock('../useWorkflowLoader', () => ({ markRunAsJustExecuted: vi.fn() }));
 vi.mock('@/contexts/WorkflowModeContext', () => ({
-  useWorkflowMode: () => ({ isPreviewOnly: false }),
+  useWorkflowMode: () => ({ isPreviewOnly: false, setRunId, workflowId: 'wf-1' }),
 }));
+vi.mock('next/navigation', () => ({ usePathname: () => mockPathname, useRouter: () => ({ push: routerPush }) }));
 vi.mock('@/lib/stores/current-org-store', () => ({
   useCanMutateInCurrentOrg: () => true,
 }));
@@ -61,6 +66,7 @@ function renderExecutionHook() {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  mockPathname = '/en/app/workflow/wf-1';
   api.executeWorkflow.mockResolvedValue({ runId: 'run-1', status: 'running' });
   api.getAllCredentials.mockResolvedValue([]);
 });

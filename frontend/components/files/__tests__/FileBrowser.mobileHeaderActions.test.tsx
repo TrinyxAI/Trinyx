@@ -44,7 +44,8 @@ vi.mock('@/lib/api/storage-api', () => ({
 vi.mock('@dnd-kit/core', () => ({
   DndContext: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
   DragOverlay: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
-  PointerSensor: class {}, useSensor: () => ({}), useSensors: () => [],
+  MouseSensor: class {}, TouchSensor: class {}, useSensor: () => ({}), useSensors: () => [],
+  pointerWithin: () => [], rectIntersection: () => [],
 }));
 vi.mock('../FolderCard', () => ({ FolderCard: () => null, VirtualFolderCard: () => null }));
 vi.mock('../FileCard', () => ({ FileCard: () => null }));

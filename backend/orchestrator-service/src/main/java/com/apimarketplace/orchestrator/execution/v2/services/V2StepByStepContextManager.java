@@ -289,6 +289,7 @@ public class V2StepByStepContextManager implements RunScopedCache {
         // in globalData so that downstream nodes (e.g., decision conditions using
         // {{core:loop.iteration}}) see the correct iteration number instead of the
         // stale value loaded from DB.
+        dropStaleLoopBodyOutputs(stepOutputs, state, tree.plan());
         applyLoopCoreOutputOverrides(stepOutputs, cachedGlobalData);
 
         // Inject epoch and dagTriggerId into globalData for backward compat
@@ -414,6 +415,7 @@ public class V2StepByStepContextManager implements RunScopedCache {
         }
 
         // Apply loop core output overrides (same as non-epoch overload)
+        dropStaleLoopBodyOutputs(stepOutputs, state, tree.plan());
         applyLoopCoreOutputOverrides(stepOutputs, cachedGlobalData);
 
         state = state.withGlobalData("epoch", epoch);
@@ -466,6 +468,54 @@ public class V2StepByStepContextManager implements RunScopedCache {
      * {@code iteration=0} - would shadow the live counter for code-style access.
      */
     @SuppressWarnings("unchecked")
+
+    /**
+     * Drop the loaded outputs of loop-body nodes the back-edge has reset but that have not
+     * re-executed yet.
+     *
+     * <p>Step outputs are loaded fresh from the DB on every step, scoped by epoch/spawn/item but
+     * NOT by loop iteration, so a body node keeps answering with the row it wrote on the previous
+     * pass until it writes a new one. The back-edge reset only un-completes the node in the
+     * StateSnapshot; nothing cleared what the context serves. A body node therefore read the
+     * PREVIOUS iteration of its neighbours (and of itself) as if the pass had already happened,
+     * so anything a loop carried forward silently kept or dropped values at random - a green run
+     * with a result that is missing an item.
+     *
+     * <p>The rule applied here is the one the AUTO path gets from
+     * {@code ExecutionContext.withoutNodes}: an output is visible only while its node is
+     * COMPLETED for this epoch. It is scoped to loop-body spans on purpose - outside a loop a
+     * node with an output is completed, so this is a no-op there and cannot change any
+     * non-looping workflow.
+     */
+    void dropStaleLoopBodyOutputs(Map<String, Object> stepOutputs, ExecutionState state, WorkflowPlan plan) {
+        if (stepOutputs == null || stepOutputs.isEmpty() || state == null || plan == null) return;
+
+        java.util.Set<String> spanNodes = new java.util.HashSet<>();
+        try {
+            for (com.apimarketplace.orchestrator.domain.workflow.BackEdgeSpec spec
+                    : com.apimarketplace.orchestrator.domain.workflow.BackEdgeSpecs.all(plan)) {
+                spanNodes.addAll(
+                    com.apimarketplace.orchestrator.execution.v2.engine.BackEdgeSpanResolver.resolveSpan(plan, spec));
+            }
+        } catch (RuntimeException e) {
+            // A malformed plan must not stop the run from building its context: serving the
+            // outputs unchanged is exactly the previous behaviour.
+            log.warn("[ContextManager] Could not resolve loop spans, leaving step outputs untouched: {}", e.getMessage());
+            return;
+        }
+        if (spanNodes.isEmpty()) return;
+
+        java.util.Set<String> stale = new java.util.HashSet<>();
+        for (String nodeId : spanNodes) {
+            if (!stepOutputs.containsKey(nodeId)) continue;
+            if (!state.isCompleted(nodeId)) stale.add(nodeId);
+        }
+        if (stale.isEmpty()) return;
+
+        com.apimarketplace.orchestrator.services.context.StepOutputsWriter.removeWithAlias(stepOutputs, stale);
+        log.info("[ContextManager] Dropped {} reset loop-body outputs before they re-execute: {}", stale.size(), stale);
+    }
+
     void applyLoopCoreOutputOverrides(Map<String, Object> stepOutputs, Map<String, Object> cachedGlobalData) {  // package-private for tests
         Object raw = cachedGlobalData.get(
             com.apimarketplace.orchestrator.execution.v2.engine.BackEdgeHandler.LOOP_CORE_OUTPUT_OVERRIDES_KEY);

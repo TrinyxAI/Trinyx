@@ -9,11 +9,43 @@ vi.mock('next-intl', () => ({
   useTranslations: () => (key: string) => key,
 }));
 
+// The real editor is a contenteditable with a data-placeholder, which none of the
+// value-based queries below can drive. Same stand-in the other form specs use.
+vi.mock('@/components/ui/expression-editor', () => ({
+  ExpressionEditor: ({ value, onChange, placeholder, readOnly }: any) => (
+    <textarea
+      placeholder={placeholder}
+      value={value ?? ''}
+      onChange={(e) => onChange(e.target.value)}
+      readOnly={readOnly}
+    />
+  ),
+}));
+
 afterEach(cleanup);
+
+/** The expression plumbing every field-with-an-editor needs; inert here. */
+const connectionProps = {
+  connections: [],
+  draggingFromHandle: null,
+  hoveredTargetHandle: null,
+  handleHandleClick: vi.fn(),
+  handleHandleMouseDown: vi.fn(),
+  handleHandleMouseUp: vi.fn(),
+  handleSetHandleRef: vi.fn(),
+};
 
 function renderForm(data: any, onUpdate = vi.fn()) {
   const node = { id: 'core:publish_video', data } as any;
-  render(<SubWorkflowParametersForm node={node} data={data} onUpdate={onUpdate} />);
+  render(
+    <SubWorkflowParametersForm
+      node={node}
+      data={data}
+      onUpdate={onUpdate}
+      connectionProps={connectionProps}
+      findUnknownVariables={() => []}
+    />,
+  );
   return onUpdate;
 }
 

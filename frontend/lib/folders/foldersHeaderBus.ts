@@ -1,3 +1,4 @@
+import { samePageUrl, showSamePageUrl } from '@/lib/navigation/showSamePageUrl';
 import type { FolderResourceKind } from '@/lib/api/orchestrator/resource-folder.service';
 
 /**
@@ -63,6 +64,32 @@ export function folderUrl(
   else params.delete(FOLDER_QUERY_PARAM);
   const query = params.toString();
   return query ? `${pathname}?${query}` : pathname;
+}
+
+/**
+ * Show a level of the list that is ALREADY on screen: same page, only `?folder=` changes.
+ *
+ * <p>Which is a change of address, not a change of page, so it goes through
+ * {@link showSamePageUrl} rather than the router - see there for why a router push cannot leave
+ * a folder the page was loaded directly into. It bypasses the unsaved-changes guard, which is
+ * correct precisely BECAUSE it cannot leave the page: there is nothing to navigate away from.
+ *
+ * <p>`currentPathname` must be the page the user is looking at (i.e. `usePathname()`).
+ *
+ * <p>`replace` is for correcting an address that was never valid (the folder is gone); `push`
+ * is for a level the user chose, which Back must be able to return from.
+ */
+export function showFolderLevel(
+  currentPathname: string,
+  searchParams: URLSearchParams | ReadonlyURLSearchParamsLike,
+  folderId: string | null,
+  mode: 'push' | 'replace' = 'push',
+): void {
+  showSamePageUrl(
+    folderUrl(currentPathname, searchParams, folderId),
+    samePageUrl(currentPathname, searchParams),
+    mode,
+  );
 }
 
 /** Next's ReadonlyURLSearchParams, structurally - avoids importing it just for a type. */

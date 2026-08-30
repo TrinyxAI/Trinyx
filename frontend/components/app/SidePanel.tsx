@@ -1,8 +1,8 @@
 'use client';
 
-import React, { useState, useRef, useEffect, useCallback } from 'react';
+import React, { useState, useRef, useEffect, useCallback, useId } from 'react';
 import { useTranslations } from 'next-intl';
-import { X, GripVertical, Pin, MoreVertical, ExternalLink, Trash2, PanelRightOpen } from 'lucide-react';
+import { X, GripVertical, Pin, MoreVertical, ExternalLink, Trash2, PanelRightOpen, PanelRight, PanelBottom, PictureInPicture2, ChevronsUpDown, ChevronsDownUp } from 'lucide-react';
 import { BulkDeleteModal } from '@/components/ui/BulkDeleteModal';
 import { useRouter } from 'next/navigation';
 import { Button } from '@/components/ui/button';
@@ -14,11 +14,30 @@ import { useSidePanelSafe } from '@/contexts/SidePanelContext';
 import { useSidePanelLayoutSafe } from '@/contexts/SidePanelLayoutContext';
 import { useMouseResize } from '@/hooks/useMouseResize';
 import { useMobileDetection } from '@/hooks/useMobileDetection';
+import { FLOATING_DRAG_CURSOR, useFloatingPanelRect, type FloatingDragMode, type FloatingResizeMode } from '@/hooks/useFloatingPanelRect';
 import { PanelResizeHandle } from '@/components/ui/PanelResizeHandle';
 import { AddTabPicker } from '@/components/app/AddTabPicker';
 import { useSharedConversation } from '@/contexts/SharedConversationContext';
 import { orchestratorApi } from '@/lib/api';
 import { getTabResourceUrl, parseTabResource } from '@/lib/sidePanel/tabResource';
+
+/** Stable no-op for the render path outside a provider (shared conversations). */
+const noop = () => {};
+
+/**
+ * The collapsed detached window: one row, and no wider than a tab label needs.
+ *
+ * The tab bar is not rendered at this size, so the grip that normally lives in it
+ * is not either - the row itself is the drag surface, which is both smaller
+ * overall and a bigger target than a grip would be.
+ */
+const COLLAPSED_HEIGHT = 36;
+/** Wide enough for the chevron, a readable slice of the tab name and the close
+ *  button, and no wider: the strip is meant to get out of the way, and 260px of
+ *  it read as a window that had not really collapsed. A long tab name truncates,
+ *  which is what the tooltip and the expanded window are for. */
+const COLLAPSED_WIDTH = 180;
+const COLLAPSED_RENDER_SIZE = { width: COLLAPSED_WIDTH, height: COLLAPSED_HEIGHT };
 
 /**
  * SidePanel - the unified right panel for the entire app.
@@ -37,14 +56,56 @@ export function SidePanel() {
   const [panelWidth, setPanelWidth] = useState(0);
   const panelRef = useRef<HTMLDivElement>(null);
   const isMobile = useMobileDetection();
+  /** What the collapse and expand controls disclose, so they read as one pair.
+   *  Generated rather than a constant: a hardcoded id is only unique for as long
+   *  as nobody mounts a second panel, and `aria-controls` breaks silently if they do. */
+  const panelBodyId = useId();
 
   // Dock position preference (Settings > Preferences). Both bottom variants
   // ('bottom' = content width, 'bottom-full' = full viewport width) dock the panel at
   // the bottom and render it identically (full width of its container, height-sized);
   // only WHERE it is mounted differs (see AppShell). Bottom only takes effect on
   // desktop - on mobile the panel keeps its fixed full-screen overlay regardless.
-  const { position } = useSidePanelLayoutSafe();
+  const { position, setPosition, lastDock, bottomMode } = useSidePanelLayoutSafe();
   const isBottom = (position === 'bottom' || position === 'bottom-full') && !isMobile;
+  /**
+   * Detached: the panel is a movable card floating over the app instead of a dock.
+   *
+   * Gated on `!isMobile` like `isBottom`, and for the same reason: below the
+   * breakpoint the panel is already a full-screen overlay, so a stored 'floating'
+   * simply renders as the right dock there. That gate is also what keeps the
+   * feature off small screens without a second breakpoint to maintain - shrink the
+   * window under 768px while detached and the panel re-docks on its own.
+   */
+  const isFloating = position === 'floating' && !isMobile;
+  /**
+   * Collapsed = the detached window shaded down to one row.
+   *
+   * A pure RENDER mode: it changes neither the panel's open/closed state nor the
+   * stored rect, so expanding restores the exact window the user had sized, and
+   * `keepMounted` tab content is only hidden, never unmounted. Session-only on
+   * purpose - a reload should not bring the panel back as a strip the user has to
+   * find and expand.
+   *
+   * Held by the CONTEXT, not here: every surface that brings the panel forward has
+   * to lift the shade, and the app header has to know that a shaded window is not
+   * forward. Masked by `isFloating`, so a dock can never render shaded.
+   */
+  const collapsed = ctx?.collapsed ?? false;
+  const setCollapsed = ctx?.setCollapsed ?? noop;
+  const isCollapsed = isFloating && collapsed;
+  const {
+    rect: floatRect, dragMode: floatDragMode, viewport: floatViewport,
+    startDrag: startFloatDrag, nudge: nudgeFloat,
+  } = useFloatingPanelRect(
+    isFloating,
+    // Collapsed the card paints a strip, so the MOVE has to clamp against the
+    // strip: clamping against the expanded rect reserves room for a window that is
+    // not on screen, and the strip stops short of the right and bottom edges by its
+    // own expanded size - it cannot be parked in a corner, which is the point of it.
+    isCollapsed ? COLLAPSED_RENDER_SIZE : undefined,
+  );
+  const isFloatDragging = floatDragMode !== null;
 
   // Dispatch fitView so the workflow canvas recenters after the panel size changes
   const dispatchFitView = useCallback(() => {
@@ -60,6 +121,31 @@ export function SidePanel() {
     [dispatchFitView, isBottom],
   );
   const { isResizing, startResize, hasManuallyResizedRef } = useMouseResize(setPanelWidth, resizeOptions);
+
+  /**
+   * Recentre the canvas after a geometry change the `transitionend` listener below
+   * cannot see.
+   *
+   * That listener hangs off the panel's own width/height transition, which a
+   * detached window does not have: detaching swaps the main area's width in one
+   * frame, and a resize drag ends on a rect that is already final. Re-attaching IS
+   * covered by it (the docked style animates back), so this only fires on the way
+   * out and at the end of a floating drag.
+   */
+  const wasFloatingRef = useRef(isFloating);
+  const lastFloatDragModeRef = useRef<FloatingDragMode | null>(null);
+  useEffect(() => {
+    const justDetached = isFloating && !wasFloatingRef.current;
+    const endedMode = lastFloatDragModeRef.current;
+    // A MOVE is not a re-fit: a detached window is out of flow, so sliding it
+    // changes no element's box anywhere. Firing on it would re-fit (and animate)
+    // the canvas behind the window every time the user parks it, throwing away
+    // the pan and zoom they had set - on the most frequent gesture of the feature.
+    const justFinishedResize = isFloating && floatDragMode === null && !!endedMode && endedMode !== 'move';
+    wasFloatingRef.current = isFloating;
+    lastFloatDragModeRef.current = floatDragMode;
+    if (justDetached || justFinishedResize) dispatchFitView();
+  }, [isFloating, floatDragMode, dispatchFitView]);
 
   // Lazy rendering: track whether content has been mounted at least once
   const [hasBeenOpened, setHasBeenOpened] = useState(false);
@@ -120,12 +206,20 @@ export function SidePanel() {
 
   // Switching dock position (right <-> bottom) invalidates the stored px size, which is
   // axis-specific. Drop any manual resize and recompute the default for the new axis.
+  //
+  // Keyed on the DOCK's axis, not on `isBottom`: detaching forces `isBottom` false
+  // whatever dock it came from, so keying on that reset the size on the way out AND
+  // on the way back, handing a user who had dragged their bottom dock to a chosen
+  // height the 40%-of-viewport default after a detach round trip. A detached window
+  // owns its own rect and does not use this size at all.
+  const dockAxis = (isFloating ? lastDock !== 'right' : isBottom) ? 'y' : 'x';
   useEffect(() => {
+    if (isFloating) return;
     hasManuallyResizedRef.current = false;
     if (isOpen) setPanelWidth(calculatePanelWidth(activeTab?.preferredWidth));
     // Recompute only when the axis flips - not on every tab/size change.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isBottom]);
+  }, [dockAxis]);
 
   // Sync width with open/close
   useEffect(() => {
@@ -150,6 +244,34 @@ export function SidePanel() {
       hasManuallyResizedRef.current = false;
     }
   }, [isOpen]);
+
+  /**
+   * The shade lifts on the one route the context cannot see: the panel stops being
+   * detached.
+   *
+   * Collapsing is a WINDOW state and cannot outlive the window. `isCollapsed` only
+   * MASKS the flag while docked, so leaving it set would be invisible on screen and
+   * very loud everywhere else: `isForward` stays false, the header button's first
+   * press is spent un-shading nothing, every preview card loses its "click to close"
+   * state, and the empty-canvas composer comes back on top of the panel's own chat.
+   *
+   * Stated as a RULE about the docked state ("a dock is never shaded"), deliberately
+   * not as a transition. A transition needs a ref seeded at mount, and AppShell
+   * renders the panel in a different branch per dock, so crossing that boundary
+   * (`bottom` to `bottom-full`) remounts it: a ref seeded `false` on a docked mount
+   * then never fires, and the flag is stranded for the session. An earlier version
+   * did exactly that. The `isFloating` early return is what keeps the OTHER remount
+   * - one that lands still detached - from expanding a window the user collapsed.
+   *
+   * Every other route, anything that brings the panel forward, lifts the shade at
+   * its source in the context, so there is nothing else to watch here.
+   */
+  useEffect(() => {
+    if (isFloating) return;
+    // Reacts to state OUTSIDE this component (the dock), which is what the rule
+    // allows for. Nothing here reads `collapsed`, so it cannot cascade.
+    setCollapsed(false);
+  }, [isFloating, setCollapsed]);
 
   // Trigger fitView after open/close CSS transition ends
   useEffect(() => {
@@ -178,6 +300,187 @@ export function SidePanel() {
   const [isDeleting, setIsDeleting] = useState(false);
 
   const tSidePanel = useTranslations('sidePanel');
+
+  /**
+   * Keyboard placement for the detached window: arrows move it, Shift+arrows resize
+   * it from the bottom-right, Ctrl+Shift+arrows from the TOP-LEFT, and Alt drops the
+   * step to a single pixel. The pointer handles are the primary path, but detaching
+   * is the only way to place the panel freely, so it must not be pointer-only.
+   *
+   * Two anchors rather than one, because one only reaches two of the four edges: a
+   * single 'se' anchor left the north and west edges mouse-only, and moving the
+   * window instead is a different gesture - it does not hold the opposite edge still.
+   * The same pair of combinations window managers use, so it is not an invention.
+   */
+  const handleTitleBarKeyDown = useCallback((e: React.KeyboardEvent<HTMLElement>) => {
+    const step = e.altKey ? 1 : 16;
+    const delta: Record<string, [number, number]> = {
+      ArrowLeft: [-step, 0], ArrowRight: [step, 0], ArrowUp: [0, -step], ArrowDown: [0, step],
+    };
+    const move = delta[e.key];
+    if (!move) return;
+    e.preventDefault();
+    // The application carousel paginates on Left/Right from a WINDOW listener, so
+    // one keypress would both nudge the window and turn its page.
+    e.stopPropagation();
+    // Shift is not a verb the collapsed row has: it advertises the four arrows and
+    // nothing else, and the hook refuses a resize under a painted box. Letting it
+    // through would MOVE the strip, which is an unadvertised gesture rather than a
+    // no-op.
+    if (e.shiftKey && isCollapsed) return;
+    // The hook refuses a resize while collapsed anyway; this clause's own job is
+    // to stop the canvas behind the window being re-fitted for a gesture that
+    // changed nothing.
+    // Ctrl or Meta anchors on the opposite corner, so every edge is reachable:
+    // Ctrl+Shift+Left widens to the LEFT, where plain Shift+Left narrows from the
+    // right. `false` when not resizing, which is the move verb.
+    const resizing: false | FloatingResizeMode = e.shiftKey && !isCollapsed
+      ? ((e.ctrlKey || e.metaKey) ? 'nw' : 'se')
+      : false;
+    nudgeFloat(move[0], move[1], resizing);
+    // Same rule as the pointer path: a resize changes the box, a move does not -
+    // and collapsed there is no resize, so nothing to re-fit either.
+    if (resizing) dispatchFitView();
+  }, [nudgeFloat, dispatchFitView, isCollapsed]);
+
+  /**
+   * Collapsing and expanding each unmount the control that was activated, so a
+   * keyboard user's focus falls to `<body>` and they have to tab in from the top
+   * of the document. Focus is handed to the counterpart instead, which is also
+   * what makes the pair read as one disclosure control.
+   */
+  const collapseRef = useRef<HTMLButtonElement | null>(null);
+  const expandRef = useRef<HTMLButtonElement | null>(null);
+  const collapseWasFocusedRef = useRef(false);
+  /**
+   * ...including when the shade is lifted from OUTSIDE the panel.
+   *
+   * Collapsing focuses the row, and a live run pausing on an interface node un-shades
+   * the window without touching either local control - so the focused row unmounted
+   * under the user and dropped them on `<body>`, on the very route the feature is
+   * built around. Tracked from the row itself rather than from the controls.
+   */
+  const rowHadFocusRef = useRef(false);
+  useEffect(() => {
+    // A closed panel unmounts the row without firing `focusout`, so the claim would
+    // survive: the NEXT reopen, from anywhere, then yanks focus into the panel and
+    // the user's keystrokes stop reaching what they were typing in.
+    if (!isFloating || !isOpen) {
+      collapseWasFocusedRef.current = false;
+      rowHadFocusRef.current = false;
+      return;
+    }
+    const handoff = collapseWasFocusedRef.current || (!isCollapsed && rowHadFocusRef.current);
+    collapseWasFocusedRef.current = false;
+    rowHadFocusRef.current = false;
+    if (!handoff) return;
+    (isCollapsed ? expandRef : collapseRef).current?.focus();
+  }, [isCollapsed, isFloating, isOpen]);
+
+  /**
+   * The collapsed row is a drag surface AND a button, so a drag must not also fire
+   * its expand. Measured rather than flagged: a plain "did a drag start" test would
+   * swallow the press of anyone without a steady hand.
+   *
+   * Resolved on `pointerup` at the WINDOW rather than on the row's `click`, because
+   * a click needs press and release on the same element and the drag mounts a
+   * full-viewport overlay the instant the press lands. Pointer capture normally
+   * retargets the release back to the row, but capture is best-effort (it is wrapped
+   * in a try/catch precisely because a browser may refuse it), and when it is
+   * refused the release goes to the overlay, no click is dispatched, and the strip
+   * cannot be expanded by tapping AT ALL - the one gesture the collapsed window has.
+   *
+   * The listeners live on the same short leash as the drag itself, which is the part
+   * that is easy to get wrong: a press the window loses focus during never delivers
+   * a pointerup, so listeners that only remove themselves from inside their own
+   * handler outlive the gesture. The next unrelated release within 4px of a press
+   * the user has long forgotten then expands the window, and every such press leaks
+   * a pair for the session. Aborted on the release, on a cancel, on blur (which is
+   * how the drag tears itself down) and on unmount.
+   */
+  const tapAbortRef = useRef<AbortController | null>(null);
+  useEffect(() => () => tapAbortRef.current?.abort(), []);
+  const expand = useCallback(() => {
+    collapseWasFocusedRef.current = document.activeElement === expandRef.current;
+    setCollapsed(false);
+  }, [setCollapsed]);
+  const handleCollapsedPointerDown = useCallback((e: React.PointerEvent<HTMLElement>) => {
+    // Same reason as the title bar: the drag preventDefaults the pointerdown, which
+    // suppresses the default focus, so without this the row's arrow keys are dead
+    // after any mouse use.
+    if (e.button === 0) e.currentTarget.focus();
+    if (e.button !== 0) return;
+    // One gesture at a time, the same rule the drag itself enforces - and for a
+    // sharper reason here. A second finger landing on the strip cannot start a drag
+    // (the first one holds it), so if it armed its own tap it would release almost
+    // where it landed, pass the 4px test, and expand the window mid-drag, while
+    // silently disarming the finger that is actually moving it.
+    if (tapAbortRef.current) return;
+    const controller = new AbortController();
+    tapAbortRef.current = controller;
+    const { signal } = controller;
+    const press = { x: e.clientX, y: e.clientY };
+    const pointerId = e.pointerId;
+    const drop = () => {
+      controller.abort();
+      if (tapAbortRef.current === controller) tapAbortRef.current = null;
+    };
+    window.addEventListener('pointerup', (ev) => {
+      // The id test comes FIRST: on a multi-touch device a second finger lifting
+      // early would otherwise tear down the real press before it ever released.
+      if (ev.pointerId !== pointerId) return;
+      drop();
+      if (Math.hypot(ev.clientX - press.x, ev.clientY - press.y) > 4) return;
+      expand();
+    }, { signal });
+    // A cancelled pointer (a system gesture taking over) is not a tap.
+    window.addEventListener('pointercancel', (ev) => {
+      if (ev.pointerId === pointerId) drop();
+    }, { signal });
+    // Nor is a press the window loses focus during: the drag gives up there too.
+    window.addEventListener('blur', drop, { signal });
+    startFloatDrag('move')(e);
+  }, [startFloatDrag, expand]);
+  const handleCollapsedClick = useCallback((e: React.MouseEvent<HTMLElement>) => {
+    // Keyboard only. A pointer press is resolved above, and its synthesised click
+    // arrives afterwards with `detail > 0`: acting on it too would expand a window
+    // the pointer path had just decided to leave alone after a drag.
+    if (e.detail > 0) return;
+    expand();
+  }, [expand]);
+
+  /**
+   * Grab focus on the way into a drag.
+   *
+   * `startDrag` preventDefaults the pointerdown to stop the text selection a drag
+   * would otherwise paint, and that also suppresses the default focus - so after
+   * any mouse use the bar was not focused and its arrow keys did nothing until the
+   * user tabbed back to it.
+   */
+  const handleTitleBarPointerDown = useCallback((e: React.PointerEvent<HTMLElement>) => {
+    // Primary button only, like the drag itself: a right-click opens the context
+    // menu, and pulling focus onto a grab handle is not part of that.
+    if (e.button === 0) e.currentTarget.focus();
+    startFloatDrag('move')(e);
+  }, [startFloatDrag]);
+
+  /**
+   * Detach / re-attach. Re-attaching goes back to the dock the panel was on when
+   * it was detached - with the bottom VARIANT re-resolved through the current
+   * preference - rather than to the user's default, so the round trip is a no-op
+   * for someone who had overridden the dock.
+   */
+  const toggleFloating = useCallback(() => {
+    if (!isFloating) { setPosition('floating'); return; }
+    // Back to the dock it came from - but a bottom dock re-resolves through the
+    // CURRENT bottom-variant preference, in case the user changed it while the
+    // window was floating. That preference cannot be applied to `lastDock` live
+    // (the app shell arranges itself around it, and the two bottom variants mount
+    // the panel in different places, so a mid-detach change would remount it), so
+    // it is applied here, at the moment the panel moves anyway.
+    const isBottomDock = lastDock === 'bottom' || lastDock === 'bottom-full';
+    setPosition(isBottomDock ? bottomMode : lastDock);
+  }, [isFloating, lastDock, bottomMode, setPosition]);
 
   if (!ctx) return null;
 
@@ -341,8 +644,9 @@ export function SidePanel() {
         <div className="fixed inset-0 bg-black/50 z-[38] md:hidden" onClick={close} />
       )}
 
-      {/* Resize handle - left edge (right dock) or top edge (bottom dock) */}
-      {!isMobile && isOpen && isVisible && (
+      {/* Resize handle - left edge (right dock) or top edge (bottom dock). A detached
+          window is not welded to any edge, so it carries its own handles instead. */}
+      {!isMobile && !isFloating && isOpen && isVisible && (
         <PanelResizeHandle
           panelWidth={currentWidth}
           isResizing={isResizing}
@@ -351,13 +655,130 @@ export function SidePanel() {
         />
       )}
 
+      {/* Resize grips of the DETACHED window - all four edges and all four corners,
+          each corner pulling both axes at once.
+
+          Rendered OUTSIDE the card and positioned from its rect, exactly like the
+          docked panel's edge handle above: a grip laid over the card would sit on
+          top of the content's own right-edge scrollbar, and the card clips its
+          children (rounded + overflow-hidden), which would eat the corner targets
+          as well. Hence 1px of overlap and no more, enough to make the border
+          itself grabbable; the corners may overlap further, since the rounding
+          leaves no content under them. */}
+      {isFloating && isOpen && isVisible && !isCollapsed && (() => {
+        const GRIP = 9;
+        const CORNER = 20;
+        const { left, top, width, height } = floatRect;
+        const vw = floatViewport.width;
+        const vh = floatViewport.height;
+        /* Flush against a viewport edge - which the drag clamp actively produces,
+           since it stops the window exactly AT the edge - a band cannot keep its
+           full thickness outside the card, so it narrows to what is left with a
+           floor that keeps it a real target. Left as-is it would hang off screen
+           and become a 1px target: the one state in which that edge could no
+           longer be resized with a pointer at all. */
+        const band = (outer: number, limit: number) => Math.max(4, Math.min(GRIP, limit - outer));
+        const eastOuter = left + width - 1;
+        const southOuter = top + height - 1;
+        const eastW = band(eastOuter, vw);
+        const southH = band(southOuter, vh);
+        // Flush against the top or left there is no room outside the card, so the
+        // band narrows to what is left - with the SAME 4px floor as its east and
+        // south siblings, since a 1px band is the one state in which that edge can
+        // no longer be grabbed with a pointer at all. 4px onto the card is safe
+        // here: there is no scrollbar at the top-left, and the grip in the tab bar
+        // is 24x56 starting 6px in, so it stays usable.
+        const northH = Math.max(4, Math.min(GRIP, top + 1));
+        const westW = Math.max(4, Math.min(GRIP, left + 1));
+        /* Corners are placed first, then each band spans corner to corner and the
+           corners paint OVER its ends (z-63 against z-62). Insetting the bands by
+           the corner size instead left a gap on either end of every side - eight
+           strips where the pointer hit nothing - because the corners are not
+           anchored exactly `CORNER` px from the card. Letting them overlap costs
+           nothing and cannot leave a gap by construction. */
+        const cLeft = Math.max(0, left - (CORNER - 6));
+        const cTop = Math.max(0, top - (CORNER - 6));
+        // Every corner overlaps the card by 6px on both axes - except flush against a
+        // viewport edge, where there is no room outside the card at all: the corner
+        // then narrows to an 8px floor sitting entirely ON it, the same trade its
+        // band siblings make, because a target thinner than that cannot be grabbed
+        // with a pointer. 6px is what the rounding leaves with no content under it;
+        // 14 would reach the panel content's own scrollbar, which is the very thing
+        // rendering the grips outside the card exists to avoid, and would cover the
+        // grip at the head of the tab bar. The spans below are derived from these,
+        // so tightening the overlap cannot reopen a gap.
+        // Flush against a viewport edge there is no room for a full corner outside
+        // the card, so it narrows like the bands rather than sliding 20px INTO the
+        // card. All FOUR get this, not just the east and south pair: at `left: 0`
+        // the west corners kept their full width against a `cLeft` already clamped
+        // to 0, which put a 20px resize target over the top-left of the card and
+        // swallowed the grip at the head of the tab bar with it - the exact thing
+        // the comment above says the overlap must not do.
+        const cornerE = Math.max(8, Math.min(CORNER, vw - (left + width - 6)));
+        const cornerS = Math.max(8, Math.min(CORNER, vh - (top + height - 6)));
+        const cornerW = Math.max(8, Math.min(CORNER, left + 6));
+        const cornerN = Math.max(8, Math.min(CORNER, top + 6));
+        const cRight = Math.max(0, Math.min(left + width - 6, vw - cornerE));
+        const cBottom = Math.max(0, Math.min(top + height - 6, vh - cornerS));
+        const spanX = { left: cLeft, width: Math.max(0, cRight + cornerE - cLeft) };
+        const spanY = { top: cTop, height: Math.max(0, cBottom + cornerS - cTop) };
+
+        const edge = (
+          dir: 'n' | 's' | 'e' | 'w',
+          cursor: string,
+          style: React.CSSProperties,
+          accent: string,
+        ) => (
+          <div
+            key={dir}
+            data-side-panel-resize={dir}
+            onPointerDown={startFloatDrag(dir)}
+            /* Pointer affordance only, and an empty div at that: the keyboard route
+               to the same geometry is the title bar's arrow keys, which are labelled
+               and announced. Leaving these exposed adds eight unnamed nodes to the
+               tree for no verb anyone can reach. */
+            aria-hidden="true"
+            className={`fixed z-[62] ${cursor} touch-none group/grip flex items-center justify-center`}
+            style={style}
+          >
+            {/* Same hover accent the docked edge handle paints, so the detached
+                window is not the one resize surface with no feedback. */}
+            <span className={`${accent} bg-blue-500 transition-all`} />
+          </div>
+        );
+        const corner = (dir: 'ne' | 'nw' | 'se' | 'sw', cursor: string, style: React.CSSProperties) => (
+          <div
+            key={dir}
+            data-side-panel-resize={dir}
+            onPointerDown={startFloatDrag(dir)}
+            aria-hidden="true"
+            className={`fixed z-[63] ${cursor} touch-none`}
+            style={style}
+          />
+        );
+
+        return (
+          <>
+            {edge('n', 'cursor-ns-resize', { ...spanX, top: Math.max(0, top - northH + 1), height: northH }, 'w-full h-0 group-hover/grip:h-1')}
+            {edge('s', 'cursor-ns-resize', { ...spanX, top: Math.min(southOuter, vh - southH), height: southH }, 'w-full h-0 group-hover/grip:h-1')}
+            {edge('w', 'cursor-ew-resize', { ...spanY, left: Math.max(0, left - westW + 1), width: westW }, 'h-full w-0 group-hover/grip:w-1')}
+            {edge('e', 'cursor-ew-resize', { ...spanY, left: Math.min(eastOuter, vw - eastW), width: eastW }, 'h-full w-0 group-hover/grip:w-1')}
+            {corner('nw', 'cursor-nwse-resize', { left: cLeft, top: cTop, width: cornerW, height: cornerN })}
+            {corner('ne', 'cursor-nesw-resize', { left: cRight, top: cTop, width: cornerE, height: cornerN })}
+            {corner('sw', 'cursor-nesw-resize', { left: cLeft, top: cBottom, width: cornerW, height: cornerS })}
+            {corner('se', 'cursor-nwse-resize', { left: cRight, top: cBottom, width: cornerE, height: cornerS })}
+          </>
+        );
+      })()}
+
       {/* Full-viewport overlay during resize - neutralizes iframes / ReactFlow
        *  / any child element that would otherwise swallow mousemove/mouseup
        *  and leave the panel stuck to the cursor. */}
-      {isResizing && (
+      {(isResizing || isFloatDragging) && (
         <div
+          data-side-panel-drag-overlay
           className="fixed inset-0 z-[99]"
-          style={{ cursor: isBottom ? 'ns-resize' : 'ew-resize' }}
+          style={{ cursor: floatDragMode ? FLOATING_DRAG_CURSOR[floatDragMode] : (isBottom ? 'ns-resize' : 'ew-resize') }}
           aria-hidden="true"
         />
       )}
@@ -366,14 +787,41 @@ export function SidePanel() {
       <div
         ref={panelRef}
         data-testid="side-panel"
+        data-side-panel-floating={isFloating || undefined}
         className={cn(
           'bg-theme-primary overflow-hidden flex-shrink-0 border-theme',
-          isBottom ? 'w-full border-t' : 'border-l',
+          isFloating
+            // Chrome only while the window is actually open: closed, the card is a
+            // 0x0 box, and a border plus a shadow on it paints a dot on the page.
+            // Above the sidebar's own z-[60] (its open mobile-drawer state, which
+            // survives a resize up to desktop width): a window buried under an
+            // opaque sidebar cannot be grabbed by its title bar.
+            ? cn('fixed z-[61]', isVisible && 'border rounded-2xl shadow-2xl')
+            : (isBottom ? 'w-full border-t' : 'border-l'),
           isMobile && 'fixed right-0 top-0 h-full z-[40]',
         )}
         style={{
-          // Bottom dock resizes HEIGHT (full width); right dock resizes WIDTH (full height).
-          ...(isBottom
+          // Detached: a full rect, fixed, so it takes no layout space and the main
+          // area spans the whole width behind it. Docked: bottom resizes HEIGHT
+          // (full width), right resizes WIDTH (full height).
+          ...(isFloating
+            ? {
+                left: `${floatRect.left}px`,
+                top: `${floatRect.top}px`,
+                // Collapsed to nothing when closed - keepMounted tabs stay in the
+                // React tree (SSE, ReactFlow) exactly as they do in a dock.
+                // Collapsed the card renders at a fixed compact size instead of its
+                // rect. The rect itself is untouched, which is what makes expanding
+                // exact rather than approximate.
+                width: isVisible ? `${isCollapsed ? COLLAPSED_WIDTH : floatRect.width}px` : 0,
+                height: isVisible ? `${isCollapsed ? COLLAPSED_HEIGHT : floatRect.height}px` : 0,
+                // Never animated. left/top are set every frame by the drag and
+                // cannot transition, so animating only width/height gave half an
+                // animation - and left the (untransitioned) grips trailing the
+                // edges they sit on after a keyboard resize or a viewport clamp.
+                transition: 'none',
+              }
+            : isBottom
             ? { height: `${currentWidth}px`, transition: isResizing ? 'none' : 'height 0.3s ease-in-out' }
             : { width: `${currentWidth}px`, transition: isResizing ? 'none' : 'width 0.3s ease-in-out' }),
           // Safe area insets for notch devices
@@ -388,10 +836,115 @@ export function SidePanel() {
          *  - only their CSS visibility is toggled. */}
         {((hasBeenOpened && isVisible) || tabs.some(t => t.keepMounted)) && (
           <div className="h-full flex flex-col relative min-w-0 overflow-hidden">
+            {/* Collapsed window - the whole panel reduced to one row.
+                Kept OUTSIDE the `isVisible` tab-bar block below rather than folded
+                into it: collapsing must not touch the panel's open/closed state or
+                its tabs, so the tab bar and the content are simply not rendered and
+                everything they hold is restored untouched on expand. */}
+            {isCollapsed && isVisible && (
+              <div
+                data-side-panel-collapsed-row
+                /* Plays once, on mount, and this row is only ever mounted by a
+                   collapse - so the cue needs no state, no timer and nothing to
+                   reset. See `side-panel-collapse-hint` in globals.css for the
+                   reduced-motion variant. */
+                className="side-panel-collapse-hint flex-1 min-h-0 flex items-center pr-1 rounded-2xl"
+              >
+                {/* The row is BOTH the drag surface and the expand control: a click
+                    anywhere on it reopens the window, a drag moves it. The tab bar
+                    that carries the grip is not rendered at this size, and a strip
+                    of its own is height the collapsed window cannot afford, so the
+                    whole 36px row takes the job. */}
+                <button
+                  type="button"
+                  data-side-panel-expand
+                  aria-expanded={false}
+                  aria-controls={panelBodyId}
+                  /* Move only: the strip paints a fixed box, so a resize could not
+                     change anything on screen and is refused. */
+                  aria-keyshortcuts="ArrowLeft ArrowRight ArrowUp ArrowDown"
+                  /* The row's only text is the TAB's label, and text content wins
+                     over `title` for the accessible name - so without this a screen
+                     reader announced the tab and never the control's purpose. */
+                  /* Composed, not replaced: the tab label alone would read as a
+                     destination rather than an action, but dropping it tells a
+                     screen-reader user to "expand the panel" without ever saying
+                     WHICH panel, while the sighted user reads the name right there. */
+                  aria-label={activeTab
+                    ? `${tSidePanel('expandWindow')}: ${activeTab.label}`
+                    : tSidePanel('expandWindow')}
+                  title={tSidePanel('expandWindowHint')}
+                  ref={expandRef}
+                  onFocus={() => { rowHadFocusRef.current = true; }}
+                  onBlur={() => { rowHadFocusRef.current = false; }}
+                  onPointerDown={handleCollapsedPointerDown}
+                  onKeyDown={handleTitleBarKeyDown}
+                  onClick={handleCollapsedClick}
+                  /* The app clears every default outline, so a control the code
+                     deliberately focuses must bring its own indicator - and while
+                     collapsed this row is the entire window. */
+                  className="flex-1 min-w-0 h-full flex items-center gap-2 px-2 text-left rounded-lg touch-none cursor-grab active:cursor-grabbing hover:bg-[var(--bg-secondary)] transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--color-primary,#6366f1)]"
+                >
+                  <ChevronsUpDown className="side-panel-collapse-hint-chevron h-3.5 w-3.5 flex-shrink-0 text-theme-secondary" />
+                  {/* No fallback label: a panel with no tab has no name, and the
+                      nearest string ("Add tab") reads as an action while this row
+                      expands. The chevron and the tooltip carry the meaning. */}
+                  {activeTab && (
+                    <span className="flex-1 min-w-0 truncate text-sm font-medium text-theme-primary">
+                      {activeTab.label}
+                    </span>
+                  )}
+                </button>
+                {/* Kept in the row because the tab bar that normally carries it is
+                    not rendered while collapsed: a window nobody can close is worse
+                    than a slightly wider row. */}
+                <Button variant="ghost" size="icon" onClick={close} title={t('close')} className="w-7 h-7 flex-shrink-0">
+                  <X className="h-3.5 w-3.5" />
+                </Button>
+              </div>
+            )}
             {/* Tab bar - only when panel is visible */}
-            {isVisible && (
+            {isVisible && !isCollapsed && (
               <div className="flex-shrink-0 border-b border-theme bg-theme-primary">
                 <div className="flex items-center h-14 px-1.5">
+                  {/* Title bar - the window's drag surface, detached only.
+                      It rides IN the tab bar rather than in a strip above it: a
+                      dedicated strip is honest about being a title bar, but it
+                      also spends 16px of a window whose whole point is to stay
+                      small, and stacked above a 56px tab bar it read as padding.
+                      A fixed grip at the head of the row costs no height at all.
+                      It sits OUTSIDE the scrollable tab area on purpose - making
+                      the tab bar itself draggable would fight tab reorder with a
+                      mouse and swallow the touch scroll on a tablet, which are
+                      the two places this window is used. `self-stretch` gives it
+                      the row's full 56px, so the target is bigger than the strip
+                      it replaces even though it is narrower. */}
+                  {isFloating && (
+                    <div
+                      data-side-panel-titlebar
+                      /* Focusable, but NOT role="button": that promises Enter/Space
+                         activation to assistive tech, and this control has no action -
+                         it is a grab handle whose keyboard verbs are the arrow keys.
+                         `group` rather than no role at all, because `aria-label` is only
+                         reliably announced on an element whose role permits a name. */
+                      role="group"
+                      tabIndex={0}
+                      aria-label={tSidePanel('moveWindowHint')}
+                      aria-keyshortcuts="ArrowLeft ArrowRight ArrowUp ArrowDown Shift+ArrowLeft Shift+ArrowRight Shift+ArrowUp Shift+ArrowDown Control+Shift+ArrowLeft Control+Shift+ArrowRight Control+Shift+ArrowUp Control+Shift+ArrowDown"
+                      onPointerDown={handleTitleBarPointerDown}
+                      onKeyDown={handleTitleBarKeyDown}
+                      title={tSidePanel('moveWindow')}
+                      /* Same handle the inspector panel uses, down to the glyph,
+                         the grab cursor and the hover plate: two windows that move
+                         the same way should not look like two different controls. */
+                      className="flex-shrink-0 self-stretch w-6 pointer-coarse:w-7 flex items-center justify-center touch-none cursor-grab active:cursor-grabbing rounded-lg text-theme-secondary hover:text-theme-primary hover:bg-[var(--bg-secondary)] transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--color-primary,#6366f1)]"
+                    >
+                      {/* VERTICAL, like the inspector's: the dots run along the
+                          axis of the handle, and this handle is a tall narrow band
+                          at the head of the row, not a wide flat strip. */}
+                      <GripVertical className="h-4 w-4" />
+                    </div>
+                  )}
                   {/* Scrollable tab area */}
                   <div className="flex-1 min-w-0 flex items-center gap-1 overflow-x-auto overflow-y-hidden">
                     {tabs.map((tab, index) => {
@@ -547,8 +1100,43 @@ export function SidePanel() {
                       </div>
                     )}
                   </div>
-                  {/* Close panel button - always visible outside scroll area */}
+                  {/* Window controls - always visible outside the scroll area */}
                   <div className="flex items-center flex-shrink-0 pl-1">
+                    {/* Collapse - detached only, where a window can be in the way.
+                        A docked panel already has close and the dock buttons for that. */}
+                    {isFloating && !isSharedMode && (
+                      <Button
+                        ref={collapseRef}
+                        variant="ghost"
+                        size="icon"
+                        aria-expanded
+                        aria-controls={panelBodyId}
+                        onClick={() => { collapseWasFocusedRef.current = true; setCollapsed(true); }}
+                        title={tSidePanel('collapseWindow')}
+                        data-testid="side-panel-collapse"
+                        className="w-7 h-7"
+                      >
+                        <ChevronsDownUp className="h-3.5 w-3.5" />
+                      </Button>
+                    )}
+                    {/* Detach / re-attach. Desktop and tablet only: on a phone the
+                        panel is a full-screen overlay, so there is nothing to float
+                        it over. Hidden in shared mode like every other panel control. */}
+                    {!isMobile && !isSharedMode && (
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        onClick={toggleFloating}
+                        aria-pressed={isFloating}
+                        title={isFloating ? tSidePanel('attach') : tSidePanel('detach')}
+                        data-testid="side-panel-detach"
+                        className="w-7 h-7"
+                      >
+                        {isFloating
+                          ? (lastDock === 'right' ? <PanelRight className="h-3.5 w-3.5" /> : <PanelBottom className="h-3.5 w-3.5" />)
+                          : <PictureInPicture2 className="h-3.5 w-3.5" />}
+                      </Button>
+                    )}
                     <Button
                       variant="ghost"
                       size="icon"
@@ -567,7 +1155,7 @@ export function SidePanel() {
             )}
 
             {/* Tab content area */}
-            <div className="flex-1 min-h-0 flex flex-col overflow-hidden">
+            <div id={panelBodyId} className="flex-1 min-h-0 flex flex-col overflow-hidden" style={isCollapsed ? { display: 'none' } : undefined}>
               {/* keepMounted tabs: always in DOM, visibility toggled via display */}
               {tabs.filter(t => t.keepMounted).map(tab => (
                 <div

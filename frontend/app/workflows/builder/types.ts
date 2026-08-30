@@ -729,6 +729,20 @@ export function getFieldTypeColor(type: string | undefined): string {
 }
 
 /**
+ * Same palette as {@link getFieldTypeColor}, without the filled chip background.
+ *
+ * Used where a type label sits inside an already dense list (the Input column's variable
+ * rows), where a coloured block per line is noise rather than information. Derived from the
+ * chip classes rather than duplicated, so the two can never drift apart.
+ */
+export function getFieldTypeTextColor(type: string | undefined): string {
+  return getFieldTypeColor(type)
+    .split(' ')
+    .filter((cls) => !/(^|:)bg-/.test(cls))
+    .join(' ');
+}
+
+/**
  * Map legacy/alternative type names to unified FieldType.
  * Use this to normalize types from external sources (e.g., database columns).
  */

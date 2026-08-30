@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, type RefObject } from 'react';
+import { isEventForWorkflow } from '@/lib/workflow/workflowEventScope';
 /**
  * Shared event bridge hook for WorkflowDetailView and ApplicationDetailView.
  * Listens for 3 CustomEvents dispatched by WorkflowPanelContent and forwards
@@ -15,10 +16,18 @@ export function useWorkflowEventBridge(
   executeTriggerRef: RefObject<((triggerId: string, triggerType: 'chat' | 'form' | 'webhook', payload: Record<string, any>) => Promise<string[] | undefined>) | null>,
   applicationActionRef: RefObject<((triggerRef: string, data: Record<string, unknown>) => Promise<void>) | null>,
   runContext: { refreshState: (runId: string) => Promise<void> } | null,
+  /**
+   * The workflow this bridge answers for. Every mounted canvas subscribes to
+   * these events, so without it one button press in an application interface was
+   * handled by every bridge on screen - and the application panel now routes its
+   * actions through here, where it used to call its run context directly.
+   */
+  workflowId?: string,
 ) {
   // Listen for trigger execution requests from WorkflowPanelContent
   useEffect(() => {
     const handler = async (event: CustomEvent) => {
+      if (!isEventForWorkflow(event.detail, workflowId)) return;
       const { requestId, triggerId, triggerType, payload } = event.detail;
       let result: string[] | undefined;
       try {
@@ -34,11 +43,12 @@ export function useWorkflowEventBridge(
     };
     window.addEventListener('workflowExecuteTriggerRequest', handler as EventListener);
     return () => window.removeEventListener('workflowExecuteTriggerRequest', handler as EventListener);
-  }, [executeTriggerRef]);
+  }, [executeTriggerRef, workflowId]);
 
   // Listen for application action requests from WorkflowPanelContent
   useEffect(() => {
     const handler = async (event: CustomEvent) => {
+      if (!isEventForWorkflow(event.detail, workflowId)) return;
       const { triggerRef, data } = event.detail;
       try {
         if (applicationActionRef.current) {
@@ -50,11 +60,12 @@ export function useWorkflowEventBridge(
     };
     window.addEventListener('workflowApplicationActionRequest', handler as EventListener);
     return () => window.removeEventListener('workflowApplicationActionRequest', handler as EventListener);
-  }, [applicationActionRef]);
+  }, [applicationActionRef, workflowId]);
 
   // Listen for __continue events: resolve interface signal via fire API
   useEffect(() => {
-    const handler = async (event: CustomEvent<{ runId: string; nodeId: string; actionKey: string; data: Record<string, unknown>; itemIndex?: number }>) => {
+    const handler = async (event: CustomEvent<{ runId: string; nodeId: string; actionKey: string; data: Record<string, unknown>; itemIndex?: number; workflowId?: string }>) => {
+      if (!isEventForWorkflow(event.detail, workflowId)) return;
       const { runId, nodeId, actionKey, data, itemIndex } = event.detail;
       try {
         const { interfaceService } = await import('@/lib/api/orchestrator/interface.service');
@@ -74,5 +85,5 @@ export function useWorkflowEventBridge(
     };
     window.addEventListener('workflowInterfaceContinue', handler as EventListener);
     return () => window.removeEventListener('workflowInterfaceContinue', handler as EventListener);
-  }, [runContext]);
+  }, [runContext, workflowId]);
 }

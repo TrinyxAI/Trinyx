@@ -5,9 +5,10 @@ import { Info } from 'lucide-react';
 import type { Node } from 'reactflow';
 import { useTranslations } from 'next-intl';
 import { Input } from '@/components/ui/input';
-import { Textarea } from '@/components/ui/textarea';
+import { ExpressionEditor } from '@/components/ui/expression-editor';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import type { BuilderNodeData } from '../../../types';
+import type { ConnectionProps } from '../ExpressionField';
 
 /** Mirrors Core.SubWorkflowConfig.MAX_TIMEOUT_SECONDS: the longest the node may wait. */
 const MAX_SUB_WORKFLOW_TIMEOUT_SECONDS = 1500;
@@ -17,6 +18,8 @@ interface SubWorkflowParametersFormProps {
   data: BuilderNodeData;
   isRunMode?: boolean;
   onUpdate: (data: BuilderNodeData) => void;
+  connectionProps: ConnectionProps;
+  findUnknownVariables: (expressions: Record<string, string>) => string[];
 }
 
 /**
@@ -33,6 +36,8 @@ export function SubWorkflowParametersForm({
   data,
   isRunMode = false,
   onUpdate,
+  connectionProps,
+  findUnknownVariables,
 }: SubWorkflowParametersFormProps) {
   const t = useTranslations('workflowBuilder.subWorkflowNode');
 
@@ -54,14 +59,14 @@ export function SubWorkflowParametersForm({
   const timeout: number = (data as any).subWorkflowTimeoutSeconds ?? (data as any).subWorkflowTimeout ?? 300;
   const maxDepth: number = (data as any).subWorkflowMaxDepth ?? 3;
 
-  const handleWorkflowIdChange = React.useCallback((event: React.ChangeEvent<HTMLInputElement>) => {
+  const handleWorkflowIdChange = React.useCallback((value: string) => {
     if (isRunMode) return;
-    onUpdate({ ...data, subWorkflowId: event.target.value } as BuilderNodeData);
+    onUpdate({ ...data, subWorkflowId: value } as BuilderNodeData);
   }, [data, isRunMode, onUpdate]);
 
-  const handleInputMappingChange = React.useCallback((event: React.ChangeEvent<HTMLTextAreaElement>) => {
+  const handleInputMappingChange = React.useCallback((value: string) => {
     if (isRunMode) return;
-    onUpdate({ ...data, subWorkflowInputMapping: event.target.value } as BuilderNodeData);
+    onUpdate({ ...data, subWorkflowInputMapping: value } as BuilderNodeData);
   }, [data, isRunMode, onUpdate]);
 
   const handleTimeoutChange = React.useCallback((event: React.ChangeEvent<HTMLInputElement>) => {
@@ -125,11 +130,20 @@ export function SubWorkflowParametersForm({
             <span className="text-xs text-theme-muted font-mono">{workflowId.slice(0, 8)}</span>
           </div>
         ) : (
-          <Input
+          <ExpressionEditor
             value={workflowId}
             onChange={handleWorkflowIdChange}
             className="w-full"
             placeholder={t('workflowIdPlaceholder')}
+            unknownVariables={findUnknownVariables({ subWorkflowId: workflowId })}
+            handleId={`sub-workflow-id-${node.id}`}
+            connections={connectionProps.connections}
+            onHandleClick={connectionProps.handleHandleClick}
+            draggingFromHandle={connectionProps.draggingFromHandle}
+            onHandleMouseDown={connectionProps.handleHandleMouseDown}
+            onHandleMouseUp={connectionProps.handleHandleMouseUp}
+            hoveredTargetHandle={connectionProps.hoveredTargetHandle}
+            onSetHandleRef={connectionProps.handleSetHandleRef}
             readOnly={isRunMode}
           />
         )}
@@ -138,11 +152,20 @@ export function SubWorkflowParametersForm({
       {/* Input mapping (single SpEL expression) */}
       <div className="space-y-1">
         <span className="text-sm font-semibold text-slate-500 dark:text-slate-400">{t('inputMapping')}</span>
-        <Textarea
+        <ExpressionEditor
           value={inputMapping}
           onChange={handleInputMappingChange}
-          className="w-full font-mono text-sm min-h-[64px]"
+          className="w-full min-h-[64px]"
           placeholder={t('inputMappingPlaceholder')}
+          unknownVariables={findUnknownVariables({ subWorkflowInputMapping: inputMapping })}
+          handleId={`sub-workflow-input-mapping-${node.id}`}
+          connections={connectionProps.connections}
+          onHandleClick={connectionProps.handleHandleClick}
+          draggingFromHandle={connectionProps.draggingFromHandle}
+          onHandleMouseDown={connectionProps.handleHandleMouseDown}
+          onHandleMouseUp={connectionProps.handleHandleMouseUp}
+          hoveredTargetHandle={connectionProps.hoveredTargetHandle}
+          onSetHandleRef={connectionProps.handleSetHandleRef}
           readOnly={isRunMode}
         />
         <p className="text-sm text-slate-400 dark:text-slate-500">{t('inputMappingHelp')}</p>

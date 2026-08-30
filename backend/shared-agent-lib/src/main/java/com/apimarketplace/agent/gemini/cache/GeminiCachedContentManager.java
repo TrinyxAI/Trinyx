@@ -340,7 +340,10 @@ public class GeminiCachedContentManager {
         return model.startsWith("models/") ? model.substring("models/".length()) : model;
     }
 
-    private List<Map<String, Object>> buildFunctionDeclarations(List<ToolDefinition> tools) {
+    // Package-visible so a test can read the schema that is actually cached, rather than the
+    // layer above it. Cached content is built once and reused, so a wrong schema here is wrong
+    // for every call that hits the cache.
+    List<Map<String, Object>> buildFunctionDeclarations(List<ToolDefinition> tools) {
         List<Map<String, Object>> out = new java.util.ArrayList<>(tools.size());
         for (ToolDefinition t : tools) {
             Map<String, Object> decl = new HashMap<>();
@@ -359,6 +362,13 @@ public class GeminiCachedContentManager {
                     if (p.description() != null) pSchema.put("description", p.description());
                     if (p.enumValues() != null && !p.enumValues().isEmpty()) {
                         pSchema.put("enum", p.enumValues());
+                    }
+                    // An array says what it holds, the same as every other emitter. Cached content
+                    // is built once and reused for the lifetime of the cache, so a schema that
+                    // says an array of objects holds strings is wrong for every call that hits it.
+                    if ("array".equals(pSchema.get("type"))) {
+                        pSchema.put("items", Map.of("type",
+                            com.apimarketplace.agent.registry.ToolSchemaGenerator.itemTypeOf(p.itemType())));
                     }
                     props.put(p.name(), pSchema);
                     if (Boolean.TRUE.equals(p.required())) required.add(p.name());

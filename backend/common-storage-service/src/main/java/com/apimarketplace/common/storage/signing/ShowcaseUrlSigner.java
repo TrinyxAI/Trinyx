@@ -82,9 +82,26 @@ public class ShowcaseUrlSigner {
      */
     public boolean verify(String storageKey, long expiresAtEpochSeconds, String disposition,
                            String providedSignature, long nowEpochSeconds) {
+        if (expiresAtEpochSeconds <= nowEpochSeconds) return false;
+        return isAuthentic(storageKey, expiresAtEpochSeconds, disposition, providedSignature);
+    }
+
+    /**
+     * Constant-time check that THIS install produced the signature, <strong>ignoring the
+     * expiry</strong>.
+     *
+     * <p>Separate from {@link #verify} because the two questions are different. Serving a
+     * file asks "may this be fetched now", and a dead link must be refused. Establishing
+     * provenance asks "did we mint this", and there the link being dead is the whole point:
+     * it is how a frozen marketplace URL is recognised as ours before being re-signed. A
+     * caller that needs both must call {@link #verify}.
+     *
+     * @return {@code true} when the signature matches, whatever the expiry says
+     */
+    public boolean isAuthentic(String storageKey, long expiresAtEpochSeconds, String disposition,
+                                String providedSignature) {
         if (!enabled) return false;
         if (providedSignature == null || providedSignature.isEmpty()) return false;
-        if (expiresAtEpochSeconds <= nowEpochSeconds) return false;
         String expected = sign(storageKey, expiresAtEpochSeconds, disposition);
         if (expected == null) return false;
         // Decode both to bytes so the comparison is on raw HMAC output, not the

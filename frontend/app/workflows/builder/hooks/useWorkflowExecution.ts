@@ -17,6 +17,8 @@ import type { WorkflowExecutionMode } from './useWorkflowPauseResume';
 import { markRunAsJustExecuted } from './useWorkflowLoader';
 import { useWorkflowMode } from '@/contexts/WorkflowModeContext';
 import { useCanMutateInCurrentOrg } from '@/lib/stores/current-org-store';
+import { isEventForWorkflow } from '@/lib/workflow/workflowEventScope';
+import { useEnterRunMode } from '@/hooks/useEnterRunMode';
 
 export interface ValidationError {
   elementKey?: string;
@@ -148,6 +150,10 @@ export function useWorkflowExecution(config: UseWorkflowExecutionConfig): UseWor
   } = config;
 
   const { isPreviewOnly } = useWorkflowMode();
+  // Routes to the run URL from the workflow's own page, binds in place from an
+  // embedded canvas. Shared with the pin and restore controls, which reach run
+  // mode too and are equally mountable in the side panel.
+  const enterRunMode = useEnterRunMode(workflowId);
   // Audit 2026-07-02 - VIEWER role in an org workspace is read-only: the execute
   // endpoint auto-saves the plan, so the backend 403s VIEWER ("Workflow access is
   // read-only"). This is the single choke point for EVERY run dispatcher (header
@@ -211,7 +217,7 @@ export function useWorkflowExecution(config: UseWorkflowExecutionConfig): UseWor
   const navigateToRunMode = (runId: string) => {
     if (!workflowId) return;
     markRunAsJustExecuted(runId);
-    router.push(`/app/workflow/${workflowId}/run/${runId}`);
+    enterRunMode(runId);
   };
 
   /**
@@ -296,6 +302,10 @@ export function useWorkflowExecution(config: UseWorkflowExecutionConfig): UseWor
 
   React.useEffect(() => {
     const handleStartEvent = async (event: CustomEvent) => {
+      // Addressed to another workflow: the side panel mounts its own canvas, so
+      // several execution hooks listen at once and an unscoped Run started a run
+      // of every mounted workflow.
+      if (!isEventForWorkflow(event.detail, workflowId)) return;
       if (isPreviewOnly) {
         console.warn('Cannot start workflow: workflow is in preview-only mode');
         return;
@@ -402,12 +412,16 @@ export function useWorkflowExecution(config: UseWorkflowExecutionConfig): UseWor
     return () => {
       window.removeEventListener('workflowViewStart', handleStartEvent as EventListener);
     };
-  }, [workflowId, nodes, edges, layoutDirection, router, setWorkflowStatus, isPreviewOnly, canMutate]);
+  }, [workflowId, nodes, edges, layoutDirection, router, setWorkflowStatus, isPreviewOnly, canMutate, enterRunMode]);
 
   // ==================== Step-by-step execution ====================
 
   React.useEffect(() => {
     const handleStepByStepStart = async (event: CustomEvent) => {
+      // Addressed to another workflow: the side panel mounts its own canvas, so
+      // several execution hooks listen at once and an unscoped Run started a run
+      // of every mounted workflow.
+      if (!isEventForWorkflow(event.detail, workflowId)) return;
       if (isPreviewOnly) {
         console.warn('Cannot start workflow: workflow is in preview-only mode');
         return;
@@ -485,7 +499,7 @@ export function useWorkflowExecution(config: UseWorkflowExecutionConfig): UseWor
     return () => {
       window.removeEventListener('workflowStartStepByStep', handleStepByStepStart as EventListener);
     };
-  }, [workflowId, nodes, edges, layoutDirection, router, setWorkflowStatus, isPreviewOnly, canMutate]);
+  }, [workflowId, nodes, edges, layoutDirection, router, setWorkflowStatus, isPreviewOnly, canMutate, enterRunMode]);
 
   return {
     backendValidationErrors,

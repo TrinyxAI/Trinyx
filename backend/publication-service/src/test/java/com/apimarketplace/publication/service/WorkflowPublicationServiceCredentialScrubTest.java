@@ -66,7 +66,8 @@ class WorkflowPublicationServiceCredentialScrubTest {
                 publicationRepository, snapshotVersionRepository, receiptRepository,
                 reviewRepository, orchestratorClient, agentClient, interfaceClient,
                 dataSourceClient, breakdownService, new ObjectMapper(),
-                snapshotCloneService, entitlementGuard, authClient);
+                snapshotCloneService, entitlementGuard, authClient,
+                new com.apimarketplace.publication.service.PublicationFileUrlResolver(new com.apimarketplace.common.storage.signing.ShowcaseUrlSigner("test-secret-32-bytes-long-enough-for-hmac")));
     }
 
     @Test

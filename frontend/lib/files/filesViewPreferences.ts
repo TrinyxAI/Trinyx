@@ -23,6 +23,12 @@ export const FILES_VIEW_MODE_STORAGE_KEY = 'files.viewMode';
 /** localStorage key for the sort criterion + direction. */
 export const FILES_SORT_STORAGE_KEY = 'files.sort';
 
+/**
+ * The file PICKER's density, kept apart from {@link FILES_VIEW_MODE_STORAGE_KEY} on purpose:
+ * choosing a dense picker inside a modal should not also flatten the full-page browser.
+ */
+export const FILES_PICKER_VIEW_MODE_STORAGE_KEY = 'files.pickerViewMode';
+
 /** URL query param carrying the open folder (absent = root). */
 export const FILES_FOLDER_PARAM = 'folder';
 

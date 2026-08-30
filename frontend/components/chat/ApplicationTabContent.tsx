@@ -2,7 +2,7 @@
 
 import * as React from 'react';
 import { createPortal } from 'react-dom';
-import { AlertCircle, X, Lock, StepForward, Grip, Calendar, Play, FormInput, MessageCircle, Webhook, ChevronLeft, ChevronRight, Wand2, RotateCcw } from 'lucide-react';
+import { AlertCircle, X, Lock, StepForward, Grip, Calendar, Play, FormInput, MessageCircle, Webhook, ChevronLeft, ChevronRight, Wand2, RotateCcw, Volume2, VolumeX } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { useInterfaceRender, useInterfaceById } from '@/app/workflows/builder/hooks/useInterfaces';
 import { useRun } from '@/contexts/WorkflowRunContext';
@@ -141,10 +141,11 @@ interface ApplicationTabContentProps {
    */
   mediaMuted?: boolean;
   /**
-   * Fired with whether the application contains any audio/video at all. Only the
-   * frame can answer it (sandboxed, cross-origin), so it travels up from there.
+   * Flip {@link mediaMuted}. Given together with a defined {@code mediaMuted}, the
+   * controls toolbar grows a speaker button - the one place a visitor can turn the
+   * application's sound on. Omit it wherever nobody owns the volume.
    */
-  onMediaAudioPresence?: (hasAudio: boolean) => void;
+  onToggleMediaMuted?: () => void;
 }
 
 type ResolvedVariablePagination = {
@@ -163,7 +164,7 @@ function isExplicitFalse(value: unknown): boolean {
   return value === false || value === 'false';
 }
 
-export function ApplicationTabContent({ config, runId, workflowId, onAction, carouselControls, isExpanded: controlledExpanded, onExpandedChange, toolbarOpen: controlledToolbarOpen, onToolbarOpenChange, viewingEpoch: controlledViewingEpoch, onViewingEpochChange, openOnLatestEpoch = false, previewMode = false, templateSource, mediaMuted, onMediaAudioPresence }: ApplicationTabContentProps) {
+export function ApplicationTabContent({ config, runId, workflowId, onAction, carouselControls, isExpanded: controlledExpanded, onExpandedChange, toolbarOpen: controlledToolbarOpen, onToolbarOpenChange, viewingEpoch: controlledViewingEpoch, onViewingEpochChange, openOnLatestEpoch = false, previewMode = false, templateSource, mediaMuted, onToggleMediaMuted }: ApplicationTabContentProps) {
   const t = useTranslations('marketplace');
   const tActions = useTranslations('actions');
   const tCanvas = useTranslations('workflowBuilder.canvas');
@@ -171,6 +172,10 @@ export function ApplicationTabContent({ config, runId, workflowId, onAction, car
   // Root-scoped: the epoch status names live under `status.*`, shared with every other
   // run badge, so the epoch dropdown says exactly what the run panel says.
   const tRoot = useTranslations();
+  // Sound labels live in the applications namespace, shared with the app cards and
+  // the marketplace previews - one source of truth rather than the same sentence
+  // translated twice in two namespaces and drifting apart.
+  const tSound = useTranslations('applications');
   const openControlsLabel = tCanvas('openApplicationControls');
   const [isDragging, setIsDragging] = React.useState(false);
   const [actionError, setActionError] = React.useState<string | null>(null);
@@ -1025,6 +1030,12 @@ export function ApplicationTabContent({ config, runId, workflowId, onAction, car
     return () => clearTimeout(timeout);
   }, [isContinuing]);
 
+  // ── Does the application on screen carry any audio/video? ──
+  // Only the frame can answer (it is sandboxed and cross-origin), so it reports it
+  // up here. The answer is kept LOCAL because it is the toolbar that needs it: a
+  // speaker on a silent app promises a sound that does not exist.
+  const [hasMediaAudio, setHasMediaAudio] = React.useState(false);
+
   // ── Toolbar collapsed/expanded toggle - use controlled props if provided, otherwise local state ──
   const [localToolbarOpen, setLocalToolbarOpen] = React.useState(false);
   const toolbarOpen = controlledToolbarOpen ?? localToolbarOpen;
@@ -1503,12 +1514,36 @@ export function ApplicationTabContent({ config, runId, workflowId, onAction, car
       </button>
     ) : null;
 
+    // Sound: wherever the embedder owns the volume (the application page), the app
+    // starts muted, so this button is the one place a visitor turns it back on. It
+    // lives with the application controls rather than behind a separate floating cog:
+    // it is a view control, peer to pagination and fullscreen, not an action that runs
+    // something. Absent when nobody owns the volume (mediaMuted undefined = play as
+    // authored) or when the page holds no media at all - a speaker on a silent app
+    // promises a sound that does not exist.
+    const canToggleSound = mediaMuted !== undefined && !!onToggleMediaMuted && hasMediaAudio;
+    const soundLabel = mediaMuted ? tSound('unmuteSound') : tSound('muteSound');
+    const soundButton = canToggleSound ? (
+      <button
+        key="sound"
+        type="button"
+        onClick={onToggleMediaMuted}
+        aria-pressed={!mediaMuted}
+        aria-label={soundLabel}
+        title={soundLabel}
+        data-testid="application-sound-toggle"
+        className="w-7 h-7 p-0 rounded-xl transition-colors inline-flex items-center justify-center text-[var(--text-secondary)] hover:bg-[var(--text-primary)] hover:text-[var(--bg-primary)]"
+      >
+        {mediaMuted ? <VolumeX className="h-3.5 w-3.5" /> : <Volume2 className="h-3.5 w-3.5" />}
+      </button>
+    ) : null;
+
     if (!variablePaginationControl && !launchButton && !epochSelector && !continueButton
-        && !templateValuesButton && !resetDataButton) {
+        && !templateValuesButton && !resetDataButton && !soundButton) {
       return undefined;
     }
-    return <>{variablePaginationControl}{templateValuesButton}{resetDataButton}{launchButton}{epochSelector}{continueButton}</>;
-  }, [totalEpochs, epochTimestamps, sortedEpochs, maxDuration, viewingEpoch, showsAllEpochs, currentDisplayEpoch, displayedEpochStatus, epochDropdownOpen, handleViewEpoch, handleEpochPickedByUser, runId, isAwaitingSignal, config.nodeId, isContinuing, isCurrentItemPending, handleDefaultContinue, t, tRun, tRoot, currentItemTriple, pendingSignalCount, launchable, hasPanelTriggers, hasAnyLaunchable, handleLaunchTrigger, isLaunching, tActions, previewMode, activeVariablePage, variablePaginationItems, handleVariablePrevious, handleVariableNext, tCanvas, templateActionsAvailable, canResetData, handleLoadTemplateValues, isLoadingTemplateValues, handleResetData, isResettingData]);
+    return <>{soundButton}{variablePaginationControl}{templateValuesButton}{resetDataButton}{launchButton}{epochSelector}{continueButton}</>;
+  }, [mediaMuted, onToggleMediaMuted, hasMediaAudio, tSound, totalEpochs, epochTimestamps, sortedEpochs, maxDuration, viewingEpoch, showsAllEpochs, currentDisplayEpoch, displayedEpochStatus, epochDropdownOpen, handleViewEpoch, handleEpochPickedByUser, runId, isAwaitingSignal, config.nodeId, isContinuing, isCurrentItemPending, handleDefaultContinue, t, tRun, tRoot, currentItemTriple, pendingSignalCount, launchable, hasPanelTriggers, hasAnyLaunchable, handleLaunchTrigger, isLaunching, tActions, previewMode, activeVariablePage, variablePaginationItems, handleVariablePrevious, handleVariableNext, tCanvas, templateActionsAvailable, canResetData, handleLoadTemplateValues, isLoadingTemplateValues, handleResetData, isResettingData]);
 
   // ── The interface's display format - scale-to-fit virtual viewport ──
   // When the INTERFACE declares a format (preset name or "WxH"), the iframe renders inside a
@@ -1581,7 +1616,7 @@ export function ApplicationTabContent({ config, runId, workflowId, onAction, car
       onVariablePagination={handleVariablePagination}
       fileUploadContext={workflowId && runId ? { workflowId, runId } : undefined}
       mediaMuted={mediaMuted}
-      onMediaAudioPresence={onMediaAudioPresence}
+      onMediaAudioPresence={setHasMediaAudio}
     />
   );
   const iframeContent = (

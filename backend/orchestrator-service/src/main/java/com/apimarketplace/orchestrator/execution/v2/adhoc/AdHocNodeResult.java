@@ -13,7 +13,7 @@ import java.util.Map;
  * DSNs and credentials leak into a transcript.
  *
  * @param nodeType   the canonical type that ran
- * @param status     COMPLETED / FAILED / AWAITING_SIGNAL / TIMED_OUT
+ * @param status     COMPLETED / FAILED / AWAITING_SIGNAL / TIMED_OUT / NOT_STARTED
  * @param output     the node output, mapped to the shape a workflow would persist
  * @param error      human-readable reason when it did not complete, else null
  * @param durationMs wall-clock time of the whole call, build included
@@ -32,6 +32,14 @@ public record AdHocNodeResult(
     public static final String FAILED = "FAILED";
     public static final String AWAITING_SIGNAL = "AWAITING_SIGNAL";
     public static final String TIMED_OUT = "TIMED_OUT";
+    /**
+     * The batch ran out of time before this entry started.
+     *
+     * <p>Its own value rather than {@link #TIMED_OUT} because the two call for opposite actions: a
+     * timed-out entry was running and may already have had its effect, so resending it can double
+     * that effect, while a never-started one did nothing and is safe to resend.
+     */
+    public static final String NOT_STARTED = "NOT_STARTED";
 
     public AdHocNodeResult {
         output = output != null ? new LinkedHashMap<>(output) : new LinkedHashMap<>();
@@ -84,10 +92,52 @@ public record AdHocNodeResult(
         return new AdHocNodeResult(nodeType, FAILED, Map.of(), message, durationMs, null);
     }
 
+    /**
+     * A batch entry cut off by the whole-call deadline.
+     *
+     * <p>Quotes the milliseconds it actually consumed rather than a seconds figure: the message
+     * sits beside {@code duration_ms} in the report, and a rounded number there disagrees with the
+     * one next to it, which is the confusion the per-entry timing exists to remove. The
+     * single-entry {@link #timeout} quotes seconds instead because the figure it reports is the
+     * configured ceiling, not a measurement - the same sentence, one measured, one declared, which
+     * is why both render through {@link #stoppedAfter} rather than being written out twice.
+     */
+    static AdHocNodeResult timedOutAfter(String nodeType, long elapsedMs) {
+        return new AdHocNodeResult(nodeType, TIMED_OUT, Map.of(),
+                stoppedAfter(elapsedMs + "ms"), elapsedMs, null);
+    }
+
+    /**
+     * An item the batch never got to start before its budget ran out.
+     *
+     * <p>Distinct from {@link #timedOutAfter} on purpose: that one says the node was running and was
+     * stopped, which for an entry that never started is false in both halves and would send the
+     * agent looking for side effects that cannot exist. Its duration is 0 for the same reason: it
+     * consumed none, and the batch total is the sum of the entries.
+     */
+    static AdHocNodeResult neverStarted(String nodeType, String reason, String remedy) {
+        // The remedy goes in `note`, not appended to `error`: both agent-facing surfaces say
+        // `note` is where an entry says what to do about itself, and NOT_STARTED is the status
+        // whose whole point is that there IS something to do. It also travels with the reason
+        // rather than being a fixed suffix, because "send a smaller batch" is wrong for a pool
+        // refusal and for an interrupt, neither of which has to do with how many entries were sent.
+        return new AdHocNodeResult(nodeType, NOT_STARTED, Map.of(),
+                reason + ", so it never ran and had no effect.", 0L, remedy);
+    }
+
     static AdHocNodeResult timeout(String nodeType, long seconds, long durationMs) {
         return new AdHocNodeResult(nodeType, TIMED_OUT, Map.of(),
-                "The node was still running after " + seconds + " seconds and was stopped. "
-                        + "Whatever it had already done outside the platform (a request sent, a row "
-                        + "written) is NOT undone.", durationMs, null);
+                stoppedAfter(seconds + " seconds"), durationMs, null);
+    }
+
+    /**
+     * The one sentence a stopped node gets, whoever stopped it. The warning about effects already
+     * had is the part that must never drift between the two callers, since acting on it is what
+     * keeps an agent from resending work that may already have landed.
+     */
+    private static String stoppedAfter(String howLong) {
+        return "The node was still running after " + howLong + " and was stopped. "
+                + "Whatever it had already done outside the platform (a request sent, a row "
+                + "written) is NOT undone.";
     }
 }

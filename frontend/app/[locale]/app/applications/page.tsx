@@ -8,7 +8,7 @@ import { useAuth } from '@/lib/providers/smart-providers';
 import { publicationService } from '@/lib/api/orchestrator/publication.service';
 import { workflowService } from '@/lib/api/orchestrator/workflow.service';
 import { favoriteService } from '@/lib/api/orchestrator/favorite.service';
-import type { WorkflowPublication, AcquiredApplication } from '@/lib/api/orchestrator/types';
+import type { WorkflowPublication, AcquiredApplication, WorkflowRelations } from '@/lib/api/orchestrator/types';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { useToast } from '@/components/Toast';
@@ -25,12 +25,13 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { ShareWorkflowModal } from '@/components/workflow';
 import { processApps, type AppSortKey, type AppSourceFilter, type AppVisibilityFilter } from './applicationSort';
 import { deriveFavoritePubIds, favoriteTargetFor } from './applicationFavorites';
-import { DndContext, DragOverlay } from '@dnd-kit/core';
 import { FolderPlus } from 'lucide-react';
-import { ApplicationFolderFace } from '@/components/folders/ApplicationFolderFace';
+import { ApplicationFolderFace, APPLICATION_FACE_CELLS } from '@/components/folders/ApplicationFolderFace';
+import type { ShowcaseAppInput } from '@/lib/applications/showcasePreview';
 import { FolderBreadcrumb } from '@/components/folders/FolderBreadcrumb';
 import { FolderTilesGrid } from '@/components/folders/FolderTilesGrid';
 import { FolderDialogs } from '@/components/folders/FolderDialogs';
+import { FolderDragContext } from '@/components/folders/FolderDragContext';
 import { DraggableResourceCard } from '@/components/folders/DraggableResourceCard';
 import { useListFolders } from '@/hooks/useListFolders';
 import { resourceFolderService, type ResourceFolder } from '@/lib/api/orchestrator/resource-folder.service';
@@ -39,6 +40,12 @@ import { buildFolderTiles, buildFolderTrail } from '@/lib/folders/buildFolderTil
 import { ApplicationCard, PublicationCardSkeleton, type AppSource } from '@/components/applications/ApplicationCard';
 
 // ============== Page Content ==============
+
+/**
+ * How many folder-preview applications one level will render LIVE at most: four whole faces'
+ * worth. Past it a tile draws its apps' initials instead of their running pages.
+ */
+const FOLDER_SHOWCASE_BUDGET = APPLICATION_FACE_CELLS * 4;
 
 function ApplicationsPageContent() {
   const t = useTranslations('applications');
@@ -55,6 +62,9 @@ function ApplicationsPageContent() {
   // streams with a large size and paginate the merged set client-side.
   const FETCH_LIMIT = 100; // backend max
   const [allItems, setAllItems] = useState<{ pub: WorkflowPublication; source: AppSource; workflowId?: string; acquiredAt?: string; applicationRunId?: string; pinnedVersion?: number | null; lastExecutedAt?: string }[]>([]);
+  // Sub-workflow neighbourhood per application workflow, resolved for the whole grid in one
+  // request (see fetchApplications). Absent id = no relation, and the card shows no indicator.
+  const [relationsByWorkflow, setRelationsByWorkflow] = useState<Record<string, WorkflowRelations>>({});
   const [page, setPage] = useState(0);
   const [pageSize, setPageSize] = useState(25);
   const [isLoading, setIsLoading] = useState(true);
@@ -154,6 +164,13 @@ function ApplicationsPageContent() {
       const workflowIds = Array.from(new Set(
         items.map(resolveWorkflowId).filter((id): id is string => !!id),
       ));
+
+      // Sub-workflow neighbourhood per card, keyed by the same resolved workflowId. One request
+      // for the whole grid, and deliberately NOT part of the await below: a card reads perfectly
+      // without its relations indicator, so this must be unable to delay the grid or fail it.
+      workflowService.getWorkflowRelationsBatch(workflowIds)
+        .then(setRelationsByWorkflow)
+        .catch(() => { /* best-effort: the cards simply show no relations indicator */ });
 
       // Cloud-acquired apps (cloud-linked CE) carry only a MINIMAL synth publication (remote=true, no
       // showcase fields) because the source publication lives on the cloud, not locally. Enrich those
@@ -327,6 +344,48 @@ function ApplicationsPageContent() {
     [],
   );
 
+  // A folder tile previews the apps it holds by RENDERING them, the way their cards do, so
+  // it needs the same app rows the cards get - the tile itself only carries ids and names.
+  const appsById = useMemo(() => {
+    const byId = new Map<string, ShowcaseAppInput>();
+    for (const item of allItems) {
+      byId.set(item.pub.id, {
+        publication: item.pub,
+        source: item.source,
+        applicationRunId: item.applicationRunId,
+      });
+    }
+    return byId;
+  }, [allItems]);
+  /**
+   * The apps whose folder tile is allowed to run a live showcase, bounded for the whole level.
+   *
+   * <p>Each preview is a sandboxed iframe running a real page, and a level can show a lot of
+   * folders: without a ceiling, a folder-heavy page would mount dozens at once on top of the
+   * ones the cards already run. The pages list bounds itself the same way.
+   *
+   * <p>Whole tiles, never part of one: a face showing two running apps beside two initials
+   * would read as two apps that failed to load. Once the budget cannot take a whole face, that
+   * folder and the ones after it draw their apps' initials instead - the footer still says how
+   * many each holds. A publication carries no cover image, so the initial is all there is to
+   * fall back to, which is the reason to spend the budget on the first folders rather than
+   * spreading it thin.
+   */
+  const liveShowcaseIds = useMemo(() => {
+    const allowed = new Set<string>();
+    for (const tile of folders.tiles) {
+      const face = (tile.preview ?? []).slice(0, APPLICATION_FACE_CELLS);
+      if (allowed.size + face.length > FOLDER_SHOWCASE_BUDGET) break;
+      for (const item of face) allowed.add(item.id);
+    }
+    return allowed;
+  }, [folders.tiles]);
+
+  const resolveFolderApp = useCallback(
+    (id: string) => (liveShowcaseIds.has(id) ? appsById.get(id) : undefined),
+    [appsById, liveShowcaseIds],
+  );
+
   const totalCount = atLevel.length;
   const totalPages = Math.max(1, Math.ceil(totalCount / pageSize));
   const safePage = Math.min(page, totalPages - 1);
@@ -475,6 +534,12 @@ function ApplicationsPageContent() {
   };
 
   return (
+    // The drag surface covers the header too: the folder path in it is a drop target, so a
+    // card can be dragged out of a folder onto the level it belongs to.
+    <FolderDragContext
+      folders={folders}
+      nameOf={(id) => allItems.find((a) => id.endsWith(a.pub.id))?.pub.title}
+    >
     <div className="flex-1 overflow-y-auto min-h-0">
       <div className="min-h-full w-full p-6 pb-12">
         <div className="max-w-6xl mx-auto space-y-6 w-full">
@@ -665,7 +730,10 @@ function ApplicationsPageContent() {
           )}
 
           {/* Empty state */}
-          {!isLoading && filtered.length === 0 && !error && (
+          {/* A level holding folders is not empty - the other four lists already gate on their
+              tiles, and without it this page tells you it has no applications directly above
+              the folder holding them. */}
+          {!isLoading && filtered.length === 0 && folders.tiles.length === 0 && !error && (
             <EmptyState
               icon={<AppWindow className="h-7 w-7 text-theme-muted" />}
               title={debouncedSearch.trim().length > 0 ? t('noSearchResults') : t('empty')}
@@ -683,21 +751,17 @@ function ApplicationsPageContent() {
             />
           )}
 
-          {/* Folders + grid. One drag context over both: a card dropped on a tile is filed
-              there, a tile dropped on another tile is nested inside it. */}
+          {/* Folders + grid. Both are drop targets of the surrounding drag context: a card
+              dropped on a tile is filed there, a tile dropped on another tile is nested. */}
           {!isLoading && (
-            <DndContext
-              sensors={folders.sensors}
-              onDragStart={(event) => folders.handleDragStart(
-                event, (id) => allItems.find((a) => id.endsWith(a.pub.id))?.pub.title)}
-              onDragEnd={folders.handleDragEnd}
-              onDragCancel={folders.cancelDrag}
-            >
+            <>
               <FolderTilesGrid
                 folders={folders}
                 countLabel={folderCountLabel}
                 gridClassName="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4 mb-4"
-                renderFace={(folder) => <ApplicationFolderFace preview={folder.preview ?? []} />}
+                renderFace={(folder) => (
+                  <ApplicationFolderFace preview={folder.preview ?? []} resolveApp={resolveFolderApp} />
+                )}
               />
 
               {filtered.length > 0 && (
@@ -718,6 +782,11 @@ function ApplicationsPageContent() {
                     pinnedVersion={pinnedVersion}
                     isFavorite={favoritePubIds.has(pub.id)}
                     onToggleFavorite={() => handleToggleFavorite({ pub, source, workflowId })}
+                    /* Same resolution the run/version batch used: the acquired clone when there is
+                       one, else the published workflow. A remote (cloud-hosted) app has no local
+                       workflow, so it gets no relations - and never a row of dead entries. */
+                    workflowId={pub.remote ? undefined : (workflowId ?? pub.workflowId)}
+                    relations={relationsByWorkflow[workflowId ?? pub.workflowId ?? '']}
                   />
                   </DraggableResourceCard>
                 );
@@ -725,17 +794,7 @@ function ApplicationsPageContent() {
             </div>
               )}
 
-              {/* What is being dragged, following the pointer. */}
-              <DragOverlay>
-                {folders.activeDrag && (
-                  <div className="rounded-xl border border-[var(--accent-primary)] bg-theme-secondary px-3 py-2 text-sm text-theme-primary shadow-lg">
-                    {folders.activeDrag.count > 1
-                      ? tFolders('draggingCount', { count: folders.activeDrag.count })
-                      : folders.activeDrag.label}
-                  </div>
-                )}
-              </DragOverlay>
-            </DndContext>
+            </>
           )}
 
           {!isLoading && totalCount > pageSize && (
@@ -779,6 +838,7 @@ function ApplicationsPageContent() {
 
       <ToastContainer toasts={toasts} onRemoveToast={removeToast} />
     </div>
+    </FolderDragContext>
   );
 }
 

@@ -3,6 +3,8 @@
 import * as React from 'react';
 import { useTranslations } from 'next-intl';
 import {
+  LayoutGrid,
+  List,
   Search,
   ChevronLeft,
   ChevronRight,
@@ -27,6 +29,8 @@ import { useAuthToken } from '@/hooks/useAuthToken';
 import { FileDetailView } from '@/components/app/FileDetailView';
 import { FilesExplorerBody } from '@/components/files/FilesExplorerBody';
 import LoadingSpinner from '@/components/LoadingSpinner';
+import { usePersistentState } from '@/hooks/usePersistentState';
+import { FILES_PICKER_VIEW_MODE_STORAGE_KEY, normalizeViewMode, type FilesViewMode } from '@/lib/files/filesViewPreferences';
 
 
 interface StorageExplorerTabProps {
@@ -46,10 +50,11 @@ interface StorageExplorerTabProps {
    */
   focusEntryId?: string;
   /**
-   * Force the legacy FLAT (no folders) listing. The folder-aware grouping otherwise lists
+   * Force the FLAT (no folders) listing. Folder navigation is otherwise on for BOTH modes;
+   * this is the deep-link caller's opt-out. The folder-aware grouping otherwise lists
    * the CURRENT level only, so a deep-link to a file nested under a (virtual workflow) folder
    * couldn't surface it at root - the image-generation card opts in to flat so its generated
-   * image is findable wherever it lives. Default {@code false}: explorer mode shows folders.
+   * image is findable wherever it lives. Default {@code false}: both modes show folders.
    */
   flat?: boolean;
   /**
@@ -60,6 +65,17 @@ interface StorageExplorerTabProps {
   initialPage?: number;
   initialSearch?: string;
   initialFileType?: FileTypeCategory;
+  /**
+   * Picker mode only: which density to open in when the user has expressed no preference.
+   * Defaults to the dense list, which is safe in a narrow container; the media-cell dialog opts
+   * into tiles because seeing WHAT a file looks like is most of that decision.
+   */
+  defaultView?: FilesViewMode;
+  /**
+   * Which picker this is, so its density preference is remembered separately. The two callers
+   * have opposite geometry and must not share one stored choice.
+   */
+  viewScope?: 'dialog' | 'field';
 }
 
 /**
@@ -68,7 +84,7 @@ interface StorageExplorerTabProps {
  * (app/file). Both the explorer side-panel and the inline picker share this set,
  * filtered server-side by the {@link S3_FILES_FILTER} single source of truth.
  */
-export function StorageExplorerTab({ workflowId, onSelect, focusS3Key, focusEntryId, flat, initialPage, initialSearch, initialFileType }: StorageExplorerTabProps) {
+export function StorageExplorerTab({ workflowId, onSelect, focusS3Key, focusEntryId, flat, initialPage, initialSearch, initialFileType, defaultView = 'list', viewScope = 'field' }: StorageExplorerTabProps) {
   const t = useTranslations('storageExplorer');
   // Virtual/manual folder labels live in the `files` namespace (Epoch/Run/Item +
   // the "Files" root crumb), reused as-is from the full-page browser.
@@ -79,11 +95,43 @@ export function StorageExplorerTab({ workflowId, onSelect, focusS3Key, focusEntr
   // S3-backed file, including workflow outputs - with no source-type dropdown.
   const isExplorerMode = !onSelect;
   const explorerPageSize = isExplorerMode ? 50 : 20;
-  // Folder-tree navigation is offered in the explorer side-panel unless the caller forces
-  // FLAT (the image-gen deep-link, whose target may live under a virtual workflow folder).
-  // A focus key/id no longer flattens: folders + files share one per-day timeline, so a
-  // focused file at the current level is still visible AND highlighted. Picker mode stays flat.
-  const enableFolders = isExplorerMode && !flat;
+  // Folder-tree navigation, unless the caller forces FLAT (the image-gen deep-link, whose
+  // target may live under a virtual workflow folder). A focus key/id no longer flattens:
+  // folders + files share one per-day timeline, so a focused file at the current level is
+  // still visible AND highlighted.
+  //
+  // The PICKER used to be flat too, which meant it listed every file in the org as one
+  // undifferentiated stream: no folders, no way to narrow by where a file lives, and files
+  // nested inside folders mixed in with the rest. Folder-aware is how you find something.
+  const enableFolders = !flat;
+
+  // In the PICKER, browsing is folder-scoped but SEARCHING is not. The folder-aware root lists
+  // only files with no parent folder AND no workflow, so making the picker folder-aware shrank
+  // its search from "every file in the workspace" to "loose root files", losing precisely the
+  // workflow output a media cell most often wants. A picker is a find-one-thing surface, so a
+  // search there drops back to the flat listing - which is both its previous reach and what a
+  // search box is taken to mean.
+  //
+  // The EXPLORER deliberately does NOT do this. It is a browser: a search there filters the
+  // folder you are standing in, and flattening would discard that context mid-keystroke. It also
+  // has to keep agreeing with the full-page Files browser, which is hard-coded folder-aware and
+  // shares this very body - two surfaces with one body must not search by opposite rules.
+  const [searchActive, setSearchActive] = React.useState<boolean>(!!initialSearch?.trim());
+  const folderAware = enableFolders && !(searchActive && !isExplorerMode);
+
+  // Grid (thumbnails) or list (dense rows), offered in the picker only - the side-panel explorer
+  // keeps its narrow rows. Both the DEFAULT and the stored preference belong to the CALLER, not
+  // to "the picker", because the two callers have opposite geometry: the media-cell dialog is a
+  // wide modal where tiles are the point, the inspector's file field is a ~250px column where a
+  // five-across tile grid is unreadable. One shared key meant a single click in the modal
+  // re-imposed that grid on the narrow field, for a user who never opened the modal.
+  const [pickerViewMode, setPickerViewMode] = usePersistentState<FilesViewMode>(
+    `${FILES_PICKER_VIEW_MODE_STORAGE_KEY}.${viewScope}`,
+    defaultView,
+    { deserializer: normalizeViewMode },
+  );
+  const bodyVariant: 'grid' | 'compact' =
+    !isExplorerMode && pickerViewMode === 'grid' ? 'grid' : 'compact';
   const {
     entries,
     totalElements,
@@ -101,8 +149,8 @@ export function StorageExplorerTab({ workflowId, onSelect, focusS3Key, focusEntr
   } = useStorageExplorer(workflowId, undefined, undefined, {
     pageSize: explorerPageSize,
     initialPage,
-    folderAware: enableFolders,
-    virtualWorkflowFolders: enableFolders,
+    folderAware,
+    virtualWorkflowFolders: folderAware,
     // BOTH the explorer side-panel AND the picker list S3-BACKED files (s3Only), exactly like
     // /app/files - NOT sourceType='S3_FILE'. The latter excluded workflow OUTPUT files
     // (STEP_OUTPUT / INTERFACE_SCREENSHOT): they are S3-backed but not 'S3_FILE'-sourced, so
@@ -126,7 +174,7 @@ export function StorageExplorerTab({ workflowId, onSelect, focusS3Key, focusEntr
   const [expandedId, setExpandedId] = React.useState<string | null>(null);
   const [showDeleteModal, setShowDeleteModal] = React.useState(false);
 
-  // ---- Folder-tree navigation (explorer side-panel only; see enableFolders) ----
+  // ---- Folder-tree navigation (both modes; see enableFolders / folderAware) ----
   // The breadcrumb trail the user has navigated into (root → … → current). The
   // hook owns the real parentFolderId query param; this trail is the display +
   // navigation history. Mirrors FileBrowser, compacted for the narrow panel.
@@ -159,6 +207,7 @@ export function StorageExplorerTab({ workflowId, onSelect, focusS3Key, focusEntr
     initialSearchAppliedRef.current = true;
     if (initialSearch && initialSearch !== search) {
       setSearch(initialSearch);
+      setSearchActive(!!initialSearch.trim());
     }
   }, [initialSearch, search, setSearch]);
 
@@ -170,6 +219,10 @@ export function StorageExplorerTab({ workflowId, onSelect, focusS3Key, focusEntr
       }
       searchTimeoutRef.current = setTimeout(() => {
         setSearch(value);
+        // Flipped on the SAME debounce tick as the query, so browsing-vs-searching changes scope
+        // exactly once per search rather than on every keystroke. Deliberately inert in explorer
+        // mode: folderAware short-circuits before reading it there.
+        setSearchActive(!!value.trim());
       }, 300);
     },
     [setSearch]
@@ -183,24 +236,28 @@ export function StorageExplorerTab({ workflowId, onSelect, focusS3Key, focusEntr
     };
   }, []);
 
+  // Folders are NEVER filtered by file type. A folder carries no mime type, so an "images"
+  // filter matched none of them and silently emptied the folder list - which is exactly the
+  // state a thumbnail column's picker opens in, since it seeds that filter. The result was a
+  // breadcrumb with nothing to navigate into: the folder feature, inert on its main caller.
   const filteredEntries = React.useMemo(
-    () => entries.filter((e) => matchesFileType(e, fileTypeFilter)),
+    () => entries.filter((e) => e.isFolder || matchesFileType(e, fileTypeFilter)),
     [entries, fileTypeFilter]
   );
 
-  // File rows only (excludes folders in folder mode) - drives the SELECTION helpers
+  // File rows only (excludes folders when the listing is folder-aware) - drives the SELECTION helpers
   // below: a folder isn't selectable, and a VIRTUAL folder has id === null which must
   // never enter the selection Map. The shared body owns folder/file rendering itself.
   const fileEntries = React.useMemo(
-    () => (enableFolders ? filteredEntries.filter((e) => !e.isFolder) : filteredEntries),
-    [enableFolders, filteredEntries]
+    () => (folderAware ? filteredEntries.filter((e) => !e.isFolder) : filteredEntries),
+    [folderAware, filteredEntries]
   );
 
   // Selection helpers (only in explorer mode, not picker). Selection operates on
   // FILE rows only - a folder isn't selectable, and a VIRTUAL folder has id ===
   // null which must never enter the selection Map. In flat mode this is just
   // filteredEntries (no folders present).
-  const selectableEntries = enableFolders ? fileEntries : filteredEntries;
+  const selectableEntries = folderAware ? fileEntries : filteredEntries;
 
   // Lookup by id from the visible list - toggleSelection only has the id (from
   // the row), so we have to find the entry to cache it.
@@ -447,7 +504,31 @@ export function StorageExplorerTab({ workflowId, onSelect, focusS3Key, focusEntr
           />
         </div>
 
-        {/* Filter row */}
+        {/* Search, density (picker only) and file-type filter */}
+        {/* Grid / list, picker only. Same control and same i18n as the Files page so the two
+            do not drift into two different vocabularies for one idea. */}
+        {!isExplorerMode && (
+          <div className="flex items-center rounded-lg border border-theme overflow-hidden flex-shrink-0">
+            <button
+              type="button"
+              onClick={() => setPickerViewMode('grid')}
+              aria-pressed={pickerViewMode === 'grid'}
+              title={tFiles('viewGrid')}
+              className={`h-8 px-2.5 flex items-center justify-center transition-colors ${pickerViewMode === 'grid' ? 'bg-[var(--bg-tertiary)] text-[var(--text-primary)]' : 'text-[var(--text-secondary)] hover:bg-[var(--bg-tertiary)]/50'}`}
+            >
+              <LayoutGrid className="h-3.5 w-3.5" />
+            </button>
+            <button
+              type="button"
+              onClick={() => setPickerViewMode('list')}
+              aria-pressed={pickerViewMode === 'list'}
+              title={tFiles('viewList')}
+              className={`h-8 px-2.5 flex items-center justify-center transition-colors ${pickerViewMode === 'list' ? 'bg-[var(--bg-tertiary)] text-[var(--text-primary)]' : 'text-[var(--text-secondary)] hover:bg-[var(--bg-tertiary)]/50'}`}
+            >
+              <List className="h-3.5 w-3.5" />
+            </button>
+          </div>
+        )}
         <div className="flex gap-2">
           <Select value={fileTypeFilter} onValueChange={(v) => setFileTypeFilter(v as FileTypeCategory)}>
             <SelectTrigger className="flex-1">
@@ -545,7 +626,7 @@ export function StorageExplorerTab({ workflowId, onSelect, focusS3Key, focusEntr
           row: a back-up-one chevron + the "Files" root crumb + each trail
           segment, all clickable. Rendered only once the hook is folder-aware
           (parentFolderId !== undefined). */}
-      {enableFolders && parentFolderId !== undefined && (
+      {folderAware && parentFolderId !== undefined && (
         <div className="flex-shrink-0 flex items-center gap-1 px-3 py-1.5 border-b border-theme bg-[var(--bg-secondary)] overflow-x-auto whitespace-nowrap text-xs">
           <button
             type="button"
@@ -596,14 +677,15 @@ export function StorageExplorerTab({ workflowId, onSelect, focusS3Key, focusEntr
 
         {/* The shared FilesExplorerBody (compact density): folders first (sorted by last
             activity), then files grouped into collapsible per-day sections (newest first)
-            - the SAME body the full-page Files browser + project Files tab render, just at
-            a narrow row density. In picker mode (onSelect set) rows select + expand-preview;
-            in explorer mode they navigate to the per-file detail. */}
+            - the SAME body the full-page Files browser + project Files tab render. The picker
+            chooses its density (tiles or rows); the explorer is always rows. In picker mode
+            rows select (and expand-preview, rows only); in explorer mode they navigate to the
+            per-file detail. */}
         {filteredEntries.length > 0 && (
           <FilesExplorerBody
-            variant="compact"
+            variant={bodyVariant}
             entries={filteredEntries}
-            enableFolders={enableFolders}
+            enableFolders={folderAware}
             tFiles={tFiles}
             onOpenFolder={enterFolder}
             onOpenFile={isExplorerMode ? navigateToDetail : undefined}

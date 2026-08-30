@@ -139,6 +139,30 @@ class BackEdgeSafetyValidatorTest {
     }
 
     @Test
+    @DisplayName("Regression: an interface AFTER a loop is accepted - it is not inside it")
+    void interfaceAfterTheLoopIsAccepted() {
+        when(session.getMcps()).thenReturn(List.of(Map.of("label", "Fetch")));
+        when(session.getInterfaces()).thenReturn(List.of(Map.of("label", "Review")));
+        when(session.getCores()).thenReturn(List.of(Map.of("label", "Spin", "type", "loop")));
+
+        // A run report placed after a loop is the normal shape of every sequence workflow. The
+        // span was walked from the HUB, and once the port is stripped :body and :exit look the
+        // same, so the walk went down the exit path too and everything after the loop counted as
+        // inside it. Walking from the BODY entry - what the engine actually resets - keeps the
+        // tail out.
+        ValidationResult result = validateWith(List.of(
+            forward("trigger:start", "core:spin"),
+            forward("core:spin:body", "mcp:fetch"),
+            backEdge("mcp:fetch", "core:spin:iterate"),
+            forward("core:spin:exit", "interface:review")
+        ));
+
+        assertThat(result.getErrors())
+            .as("the interface sits on the exit path, not in the body")
+            .noneMatch(e -> e.code().equals("BACK_EDGE_INTERFACE_IN_LOOP"));
+    }
+
+    @Test
     @DisplayName("a repeated side effect is a warning, not an error")
     void repeatedSideEffectIsWarned() {
         when(session.getMcps()).thenReturn(List.of(Map.of("label", "Fetch")));

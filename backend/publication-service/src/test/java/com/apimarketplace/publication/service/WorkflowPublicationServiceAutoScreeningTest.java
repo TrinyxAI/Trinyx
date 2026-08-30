@@ -59,7 +59,8 @@ class WorkflowPublicationServiceAutoScreeningTest {
         // and the screening pair.
         service = new WorkflowPublicationService(
                 null, null, null, null, null, null, null, null,
-                null, null, null, null, null);
+                null, null, null, null, null,
+                new com.apimarketplace.publication.service.PublicationFileUrlResolver(new com.apimarketplace.common.storage.signing.ShowcaseUrlSigner("test-secret-32-bytes-long-enough-for-hmac")));
 
         injectField("imageScreeningService", screeningService);
         injectField("imageScreeningDecisionRepository", decisionRepository);

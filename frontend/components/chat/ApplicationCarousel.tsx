@@ -8,7 +8,7 @@ import { Button } from '@/components/ui/button';
 import { ApplicationTabContent, type ApplicationConfig, type ApplicationTemplateSource } from './ApplicationTabContent';
 import { useRun } from '@/contexts/WorkflowRunContext';
 import { useWorkflowMode } from '@/contexts/WorkflowModeContext';
-import { useInterfacePaginationStore } from '@/lib/stores/interface-pagination-store';
+import { useInterfacePaginationStore, carouselKeyFor } from '@/lib/stores/interface-pagination-store';
 
 interface ApplicationCarouselProps {
   configs: ApplicationConfig[];
@@ -49,10 +49,10 @@ interface ApplicationCarouselProps {
    */
   mediaMuted?: boolean;
   /**
-   * Fired with whether the application contains any audio/video at all. Only the
-   * frame can answer it (sandboxed, cross-origin), so it travels up from there.
+   * Flip {@link mediaMuted}. Forwarded to the tab, whose controls toolbar then
+   * carries the speaker button. Omit it wherever nobody owns the volume.
    */
-  onMediaAudioPresence?: (hasAudio: boolean) => void;
+  onToggleMediaMuted?: () => void;
 }
 
 export function ApplicationCarousel({
@@ -66,15 +66,38 @@ export function ApplicationCarousel({
   openOnLatestEpoch = false,
   templateSource,
   mediaMuted,
-  onMediaAudioPresence,
+  onToggleMediaMuted,
 }: ApplicationCarouselProps) {
   const t = useTranslations('chat.carousel');
   const { isRunMode } = useWorkflowMode();
   const [runState] = useRun(isRunMode ? runId || undefined : undefined);
 
-  // Carousel index persisted in Zustand store (survives panel close/open)
-  const carouselIndex = useInterfacePaginationStore((s) => s.carouselIndex);
-  const setCarouselIndex = useInterfacePaginationStore((s) => s.setCarouselIndex);
+  // Carousel index persisted in Zustand store (survives panel close/open), keyed
+  // by SURFACE: several carousels are mounted at once as soon as two side-panel
+  // tabs are open, and a single shared index moved them together.
+  const carouselKey = carouselKeyFor(workflowId, runId);
+  const carouselIndex = useInterfacePaginationStore((s) => s.carouselIndex[carouselKey] ?? 0);
+  const setIndexForKey = useInterfacePaginationStore((s) => s.setCarouselIndex);
+  const setCarouselIndex = React.useCallback(
+    (index: number) => setIndexForKey(carouselKey, index),
+    [setIndexForKey, carouselKey],
+  );
+
+  // Carry the page over when this surface gets its FIRST run.
+  //
+  // A panel can open before a run is bound (the `+` menu, a chat event), and the
+  // key is part workflow, part run: the moment the canvas binds one, the key
+  // moves and the page the user was on would read back as page one. This is the
+  // same surface continuing, not a new one, so it inherits. A later run-to-run
+  // switch is a genuine move and keeps its own page.
+  const runlessKey = carouselKeyFor(workflowId, null);
+  React.useEffect(() => {
+    if (!runId || carouselKey === runlessKey) return;
+    const state = useInterfacePaginationStore.getState();
+    const inherited = state.carouselIndex[runlessKey];
+    if (inherited === undefined || state.carouselIndex[carouselKey] !== undefined) return;
+    state.setCarouselIndex(carouselKey, inherited);
+  }, [runId, carouselKey, runlessKey]);
 
   // Clamp index to valid range
   const currentIndex = Math.min(Math.max(carouselIndex, 0), Math.max(configs.length - 1, 0));
@@ -268,7 +291,7 @@ export function ApplicationCarousel({
             previewMode={previewMode}
             templateSource={templateSource}
             mediaMuted={mediaMuted}
-            onMediaAudioPresence={onMediaAudioPresence}
+            onToggleMediaMuted={onToggleMediaMuted}
           />
         </div>
       )}

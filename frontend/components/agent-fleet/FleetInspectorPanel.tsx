@@ -31,6 +31,7 @@ import { AgentExecutionInspectorDetail } from './AgentExecutionInspectorDetail';
 import { StatusBadge } from '@/components/ui/StatusBadge';
 import { formatDuration, formatRelativeDateI18n } from '@/lib/utils/dateFormatters';
 import { cn } from '@/lib/utils';
+import { panelDragHandleClass } from '@/components/ui/panel-drag-handle';
 import { useAgentActivity } from './hooks/useAgentActivityStream';
 import { getProviderIconSlug, getProviderDisplayName } from '@/lib/ai-providers/providerIcons';
 import { useOrgScopedReset } from '@/lib/hooks/useOrgScopedReset';
@@ -1868,12 +1869,12 @@ export function FleetInspectorPanel({
             </button>
           </div>
 
-          {/* Drag handle - left edge, visible on hover (desktop only) */}
+          {/* Drag handle - left edge, always visible (desktop only) */}
           {onDragHandleMouseDown && (
             <div
               data-drag-handle
               onMouseDown={onDragHandleMouseDown}
-              className="hidden lg:flex absolute left-0 top-0 bottom-0 w-6 cursor-grab active:cursor-grabbing rounded-l-[32px] items-center justify-center opacity-0 group-hover/inspector:opacity-100 transition-opacity hover:bg-slate-100 dark:hover:bg-slate-800"
+              className={panelDragHandleClass}
               title={t('dragToMove')}
             >
               <GripVertical className="h-4 w-4 text-slate-400 dark:text-slate-500" />

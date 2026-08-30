@@ -50,6 +50,7 @@ import { useWorkflowLoader } from '../hooks/useWorkflowLoader';
 import { useWorkflowExecution } from '../hooks/useWorkflowExecution';
 import { useWorkflowStreaming } from '../hooks/execution';
 import { orchestratorApi, webhookSettingsService, chatEndpointSettingsService, formEndpointSettingsService } from '@/lib/api';
+import { isEventForWorkflow } from '@/lib/workflow/workflowEventScope';
 import { StepByStepProvider } from '../contexts/StepByStepContext';
 import { ValidationProvider } from '../contexts/ValidationContext';
 import { withDerivedBackEdges } from '../utils/backEdgeDetection';
@@ -271,6 +272,7 @@ export function WorkflowBuilder({
   const { isDirty, resetDirtyState } = useDirtyState({
     nodes,
     edges,
+    workflowId,
     workflowLoaded,
     isRunMode,
     onDirtyChange,
@@ -576,27 +578,31 @@ export function WorkflowBuilder({
   // play directly, so it dispatches this event and we reuse the exact same
   // firing path (handleExecuteStep → pauseResumeActions.executeStep) the node
   // bottom-bar play uses. epoch=undefined fires THIS trigger into a fresh epoch.
-  // The workflowId filter scopes the event so a concurrently mounted sub-workflow
-  // builder panel (its own WorkflowBuilder + listener) does not also fire - same
-  // guard the workflowViewSave / workflowNameChangeFromBreadcrumb handlers use.
+  // Scoped so a concurrently mounted sub-workflow builder panel (its own
+  // WorkflowBuilder + listener) does not also fire - the same rule every other
+  // broadcast workflow event goes through.
   React.useEffect(() => {
     const handler = (e: Event) => {
       const detail = (e as CustomEvent<{ stepId?: string; workflowId?: string }>).detail;
       if (!detail?.stepId) return;
-      if (detail.workflowId && detail.workflowId !== workflowId) return;
+      if (!isEventForWorkflow(detail, workflowId)) return;
       void handleExecuteStep(detail.stepId, undefined);
     };
     window.addEventListener('workflowExecuteStep', handler as EventListener);
     return () => window.removeEventListener('workflowExecuteStep', handler as EventListener);
   }, [handleExecuteStep, workflowId]);
 
-  // Dispatch event when step_by_step mode changes (for ChatHeader Save button)
+  // Broadcast step_by_step mode. Named, so a listener can tell WHICH canvas is
+  // in it - several are mounted at once now. Nothing consumes it today (the
+  // header's listener was reading it into a variable it never used); it is kept
+  // as the existing signal rather than removed, since removing a broadcast is a
+  // decision for whoever wants to add the consumer back.
   React.useEffect(() => {
     const isStepByStep = pauseResumeState.mode === 'step_by_step';
     window.dispatchEvent(new CustomEvent('workflowStepByStepModeChange', {
-      detail: { isEnabled: isStepByStep }
+      detail: { isEnabled: isStepByStep, workflowId }
     }));
-  }, [pauseResumeState.mode]);
+  }, [pauseResumeState.mode, workflowId]);
 
   // Workflow execution hook
   const { backendValidationErrors, setBackendValidationErrors } = useWorkflowExecution({
@@ -1261,9 +1267,13 @@ export function WorkflowBuilder({
     };
   }, []);
 
-  // Reset dirty state after version restore (plan re-imported by useWorkflowLoader)
+  // Reset dirty state after version restore (plan re-imported by useWorkflowLoader).
+  // Scoped like the import itself: another workflow's restore must not declare
+  // THIS canvas clean, which greys out its Save over unsaved work and silences
+  // the refresh guard.
   React.useEffect(() => {
-    const handlePlanRestored = () => {
+    const handlePlanRestored = (e: Event) => {
+      if (!isEventForWorkflow((e as CustomEvent).detail, workflowId)) return;
       // Use a short delay so nodes/edges are updated first
       setTimeout(() => {
         resetDirtyState(nodesRef.current, edgesRef.current);
@@ -1274,7 +1284,7 @@ export function WorkflowBuilder({
     return () => {
       window.removeEventListener('workflowPlanRestore', handlePlanRestored);
     };
-  }, [resetDirtyState, nodesRef, edgesRef]);
+  }, [resetDirtyState, nodesRef, edgesRef, workflowId]);
 
   // Save and update workflow name - used by breadcrumb edit.
   // Generates plan, saves with name, notifies parent.

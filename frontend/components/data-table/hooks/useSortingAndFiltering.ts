@@ -5,6 +5,7 @@ import type { DataSourceItemRow, PaginationState } from '../types';
 import { getValueAtPath } from '../visualHelpers';
 import type { SortConfig } from '../utils/dataTableUtils';
 import { getDefaultSortConfig } from '../utils/dataTableUtils';
+import { cellDisplayText as cellText } from '@/lib/datatable/assetValue';
 
 export interface UseSortingAndFilteringParams {
   rows: DataSourceItemRow[];
@@ -81,9 +82,10 @@ export function useSortingAndFiltering({
       if (aValue === null || aValue === undefined) aValue = '';
       if (bValue === null || bValue === undefined) bValue = '';
 
-      // String comparison
-      const aStr = String(aValue).toLowerCase();
-      const bStr = String(bValue).toLowerCase();
+      // String comparison. A media cell sorts by its file name: String() on the asset map gives
+      // '[object Object]' for every row, which is not an ordering at all.
+      const aStr = cellText(aValue).toLowerCase();
+      const bStr = cellText(bValue).toLowerCase();
 
       if (aStr < bStr) return sortConfig.direction === 'asc' ? -1 : 1;
       if (aStr > bStr) return sortConfig.direction === 'asc' ? 1 : -1;
@@ -136,7 +138,9 @@ export function useSortingAndFiltering({
       if (searchQuery) {
         const searchLower = searchQuery.toLowerCase();
         const matchesSearch = Object.values(row.data).some(value =>
-          String(value).toLowerCase().includes(searchLower)
+          // Media cells match on their file name, so a search for "invoice" finds the row with
+          // invoice.pdf instead of matching every asset row on "_type" or "disposition".
+          cellText(value).toLowerCase().includes(searchLower)
         );
         if (!matchesSearch) return false;
       }
@@ -146,7 +150,7 @@ export function useSortingAndFiltering({
         if (!filterValue) continue;
 
         const cellValue = getValueAtPath(row.data, columnKey.replace('data.', ''));
-        const cellValueStr = String(cellValue || '').toLowerCase();
+        const cellValueStr = cellText(cellValue).toLowerCase();
 
         if (!cellValueStr.includes(filterValue.toLowerCase())) {
           return false;

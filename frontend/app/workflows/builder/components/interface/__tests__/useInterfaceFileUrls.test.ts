@@ -113,4 +113,55 @@ describe('useInterfaceFileUrls', () => {
     renderHook(() => useInterfaceFileUrls({ title: 'hello', count: 3 }, true));
     expect(fetchMock).not.toHaveBeenCalled();
   });
+
+  // -- Where the session token may go -------------------------------------
+  //
+  // A file reference's `url` is DATA: a table row can be written by an agent, a workflow, or an
+  // acquired marketplace application, so it can name any origin. This fetch carries a long-lived,
+  // full-scope bearer, so it must never leave our own origin.
+
+  it('never sends the session token to a foreign origin named by a file reference', async () => {
+    const fetchMock = mockFetchOk();
+    const hostile = {
+      _type: 'file' as const,
+      path: 'a/b.png',
+      name: 'b.png',
+      mimeType: 'image/png',
+      size: 1,
+      url: 'https://attacker.example/x.png',
+    };
+
+    renderHook(() => useInterfaceFileUrls({ photo: hostile }, true));
+
+    await waitFor(() => expect(mockGetAuthToken).toHaveBeenCalledTimes(0), { timeout: 50 })
+      .catch(() => { /* the effect may still have run; the assertion below is what matters */ });
+    const fetchedUrls = fetchMock.mock.calls.map(([url]) => String(url));
+    expect(fetchedUrls).not.toContain('https://attacker.example/x.png');
+    expect(fetchedUrls.every((url) => url.startsWith('/api/'))).toBe(true);
+  });
+
+  it('leaves an external image to the iframe, unresolved and untouched', async () => {
+    mockFetchOk();
+    const external = { _type: 'file' as const, url: 'https://cdn.example.com/photo.png', name: 'photo.png' };
+
+    const { result } = renderHook(() => useInterfaceFileUrls({ photo: external }, true));
+
+    // Unresolved means the resolver hands back the raw URL, which the sandboxed iframe loads
+    // anonymously - correct for a public URL, and it carries no credential of ours.
+    expect(result.current.resolveFileUrl('https://cdn.example.com/photo.png'))
+      .toBe('https://cdn.example.com/photo.png');
+  });
+
+  it('pre-fetches a table asset that carries no path, mimeType or size', async () => {
+    // findFileRefs keys on the stricter FileRef shape, so a media cell picked from Files or
+    // repaired from a bare URL was never pre-fetched: the sandboxed iframe then received the
+    // authenticated URL and loaded it anonymously, which is the 401 pair this hook exists to stop.
+    const fetchMock = mockFetchOk();
+    const asset = { _type: 'file' as const, id: ID, url: RAW, name: 'photo.png' };
+
+    const { result } = renderHook(() => useInterfaceFileUrls({ photo: asset }, true));
+
+    await waitFor(() => expect(result.current.resolveFileUrl(RAW)).toMatch(/^data:/));
+    expect(fetchMock.mock.calls.map(([url]) => String(url))).toContain(RAW);
+  });
 });

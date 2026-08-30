@@ -450,6 +450,7 @@
 
                                 <include>**/e2e/nodes/ForkMergeE2ETest.java</include>
                                 <include>**/e2e/nodes/MergeEdgeCasesE2ETest.java</include>
+                                <include>**/e2e/nodes/UnreachableMergeAfterApprovalE2ETest.java</include>
                                 <include>**/e2e/nodes/SplitLoopEdgeCasesE2ETest.java</include>
                                 <!-- Declared (hub-less) back-edges. The handler-level unit tests
                                      mock WorkflowEventPublisher, so they cannot see an invariant the

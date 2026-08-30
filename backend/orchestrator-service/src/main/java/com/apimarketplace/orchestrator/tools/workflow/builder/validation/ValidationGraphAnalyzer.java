@@ -21,6 +21,8 @@ public class ValidationGraphAnalyzer {
     private final Map<String, List<String>> incoming = new HashMap<>();
     private final Set<String> allNodes = new HashSet<>();
     private final List<String[]> backEdges = new ArrayList<>();
+    /** Loop hub -> the node its :body port enters, so a span walk can skip the :exit path. */
+    private final Map<String, String> bodyEntryByHub = new HashMap<>();
 
     public ValidationGraphAnalyzer(WorkflowBuilderSession session) {
         this.session = session;
@@ -74,6 +76,13 @@ public class ValidationGraphAnalyzer {
             String baseFromNode = extractBaseNodeId(from);
             String baseToNode = extractBaseNodeId(to);
 
+            // Remember which successor the :body port leads to BEFORE the port is stripped.
+            // Afterwards body and exit are indistinguishable, and a span walk started at the hub
+            // descends both - which is what made everything after a loop look like it was inside.
+            if ("body".equals(EdgeRefParser.getPort(from))) {
+                bodyEntryByHub.putIfAbsent(baseFromNode, baseToNode);
+            }
+
             if (isBackEdge(edge, to)) {
                 // A loop-back is a re-entry, not a dependency: it must not make its target
                 // reachable, must not count as an incoming edge (which would make every
@@ -123,6 +132,17 @@ public class ValidationGraphAnalyzer {
      */
     public List<String> getOutgoingNodeIds(String nodeKey) {
         return outgoing.getOrDefault(nodeKey, List.of());
+    }
+
+    /**
+     * The node a loop hub enters its body with, i.e. the target of its {@code :body} port.
+     *
+     * <p>Returns null when {@code hubKey} is not a hub (a declared back-edge re-enters its own
+     * target directly, which is already the body entry).
+     */
+    public String getLoopBodyEntry(String hubKey) {
+        if (hubKey == null) return null;
+        return bodyEntryByHub.get(hubKey);
     }
 
     /**

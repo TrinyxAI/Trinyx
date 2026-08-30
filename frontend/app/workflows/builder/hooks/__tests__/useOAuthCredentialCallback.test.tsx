@@ -24,15 +24,22 @@
  * matching (a mock-stub client could not catch root cause (b)).
  */
 import React from 'react';
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { afterEach, describe, it, expect, vi, beforeEach } from 'vitest';
 import { renderHook, waitFor } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 
+const routerReplace = vi.fn();
+/**
+ * The callback param is stripped through the history API, not the router: the provider sends
+ * the browser back with a full LOAD onto `?success=true`, and from there a router replace of
+ * the bare pathname is dropped - so the param stuck and a reload re-showed the toast.
+ */
 const replace = vi.fn();
+const realReplaceState = window.history.replaceState;
 let currentSearch = new URLSearchParams();
 
 vi.mock('next/navigation', () => ({
-  useRouter: () => ({ replace }),
+  useRouter: () => ({ replace: routerReplace }),
   usePathname: () => '/app/workflows/builder',
   useSearchParams: () => currentSearch,
 }));
@@ -75,8 +82,13 @@ async function seedCredentialQueries(client: QueryClient) {
   return { inspectorFn, validatorFn };
 }
 
+afterEach(() => { window.history.replaceState = realReplaceState; });
+
 beforeEach(() => {
   replace.mockClear();
+  routerReplace.mockClear();
+  window.history.replaceState = ((_d: unknown, _u: string, url?: string) =>
+    replace(url)) as unknown as typeof window.history.replaceState;
   addToast.mockClear();
   currentSearch = new URLSearchParams();
 });
@@ -96,7 +108,9 @@ describe('useOAuthCredentialCallback', () => {
       expect(validatorFn).toHaveBeenCalledTimes(1); // the guard root cause (b) would fail
     });
     expect(addToast).toHaveBeenCalledWith(expect.objectContaining({ type: 'success' }));
-    expect(replace).toHaveBeenCalledWith('/app/workflows/builder', { scroll: false });
+    expect(replace).toHaveBeenCalledWith('/app/workflows/builder');
+    // Not the router: that call is the one the browser drops on a page loaded at this URL.
+    expect(routerReplace).not.toHaveBeenCalled();
   });
 
   it('on ?error=… shows an error toast and refetches neither credential query', async () => {

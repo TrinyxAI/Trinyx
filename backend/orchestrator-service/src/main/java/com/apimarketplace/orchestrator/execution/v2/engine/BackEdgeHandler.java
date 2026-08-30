@@ -1238,8 +1238,13 @@ public class BackEdgeHandler implements RunScopedCache {
         }
 
         try {
-            // Build evaluation context from step outputs
-            Map<String, Object> evalContext = new HashMap<>(context.getAllStepOutputs());
+            // The SAME context the loop node itself uses on entry. It was a bare copy of the raw
+            // step outputs, which resolves a literal bound ("{{core:loop.iteration}} < 3") but not
+            // a bound that comes from data ("... < {{core:plan.output.result.passes}}"): the extra
+            // keys that make a normal template resolve were missing here. So one expression was
+            // evaluated against two different contexts - true on entry, unresolvable on every
+            // back-edge - and a loop whose length came from the trigger silently ignored it.
+            Map<String, Object> evalContext = EvalContextBuilder.buildStandardEvalContext(context);
             if (loopCoreKey != null && prospectiveIteration != null && maxIterations != null) {
                 Map<String, Object> prospectiveOutput = buildLoopStepOutput(
                     prospectiveIteration, maxIterations, false, true, "body", null);

@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { apiClient } from '@/lib/api/api-client';
 import { getActiveOrgHeaderForRequest } from '@/lib/stores/current-org-store';
 import { findFileRefs, normalizeFileRef, fileRefToUrl } from '@/lib/api/orchestrator/file.service';
+import { assetDisplayUrl } from '@/lib/datatable/assetValue';
 
 /**
  * Pre-fetches every {@link FileRef} found in {@code resolvedData} as a base64 {@code data:} URI -
@@ -27,6 +28,25 @@ import { findFileRefs, normalizeFileRef, fileRefToUrl } from '@/lib/api/orchestr
  * @param resolvedData the run-mode data the interface renders from
  * @param enabled gate the work to run mode only (skip in edit/preview where data isn't rendered)
  */
+
+/**
+ * Walk the run data for table media assets, which {@link findFileRefs} does not report: it keys on
+ * the stricter FileRef shape (path + mimeType + size), and an asset picked from Files or pasted as
+ * a link may carry none of those.
+ */
+function collectAssetUrls(value: unknown, depth = 0, out: string[] = []): string[] {
+  if (depth > 12 || value === null || typeof value !== 'object') return out;
+  const url = assetDisplayUrl(value);
+  if (url) {
+    out.push(url);
+    return out;
+  }
+  for (const child of Object.values(value as Record<string, unknown>)) {
+    collectAssetUrls(child, depth + 1, out);
+  }
+  return out;
+}
+
 export function useInterfaceFileUrls(
   resolvedData: Record<string, unknown> | undefined,
   enabled: boolean,
@@ -37,7 +57,20 @@ export function useInterfaceFileUrls(
     const urls = new Set<string>();
     for (const { fileRef } of findFileRefs(resolvedData)) {
       const raw = fileRefToUrl(normalizeFileRef(fileRef), { inline: true });
-      if (raw) urls.add(raw);
+      // ONLY same-origin URLs may be fetched below, because that fetch carries the session
+      // bearer. A file reference can name any origin (its `url` is data, and a table row can be
+      // written by an agent, a workflow, or an acquired marketplace application), so without this
+      // filter a hostile row would make the browser hand a long-lived full-scope token to a
+      // server of the attacker's choosing. Same guard as fetchAuthedBlobUrl in lib/utils/url-auth.
+      // An external URL needs neither the token nor the data: conversion: resolveFileUrl falls
+      // back to the raw URL, which the iframe loads anonymously, which is correct for it.
+      if (raw && raw.startsWith('/api/')) urls.add(raw);
+    }
+    // A table media cell is an asset map: it always carries a URL but not always the path/mimeType/
+    // size that isFileRef demands, so findFileRefs alone would skip it and the sandboxed iframe
+    // would receive the authenticated URL and load it anonymously - the 401 pair described below.
+    for (const raw of collectAssetUrls(resolvedData)) {
+      if (raw.startsWith('/api/')) urls.add(raw);
     }
     return Array.from(urls).sort();
   }, [enabled, resolvedData]);

@@ -11,8 +11,6 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RestController;
 
-import java.nio.charset.StandardCharsets;
-import java.security.MessageDigest;
 import java.util.Map;
 
 /**
@@ -160,12 +158,7 @@ public class CeReleaseAnnounceController {
      * endpoint without setting a secret must fail closed rather than accept every caller.
      */
     private boolean authorized(String presented) {
-        if (sharedSecret == null || sharedSecret.isBlank() || presented == null) {
-            return false;
-        }
-        return MessageDigest.isEqual(
-                sharedSecret.getBytes(StandardCharsets.UTF_8),
-                presented.getBytes(StandardCharsets.UTF_8));
+        return InternalAuthSecret.matches(sharedSecret, presented);
     }
 
     private static String trimToNull(String s) {

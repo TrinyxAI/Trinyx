@@ -32,6 +32,20 @@ vi.mock('@/hooks/useResourceFavorites', () => ({
   useResourceFavorites: () => ({ favoriteIds: new Set(), toggleFavorite: vi.fn() }),
 }));
 
+
+// A real element in place of the drag context, so a test can assert what is INSIDE it: the
+// folder path has to be within the context that owns the drag or its crumbs are dead targets.
+vi.mock('@dnd-kit/core', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@dnd-kit/core')>();
+  return {
+    ...actual,
+    DndContext: ({ children }: { children: React.ReactNode }) => (
+      <div data-testid="drag-context">{children}</div>
+    ),
+    DragOverlay: ({ children }: { children: React.ReactNode }) => <>{children}</>,
+  };
+});
+
 import { fakeFolderRouter } from '@/lib/folders/testing/fakeFolderRouter';
 import DataSourceTable from '../DataSourceTable';
 import { dataSourceService } from '@/lib/api/orchestrator/datasource.service';
@@ -395,5 +409,25 @@ describe('DataSourceTable cards - mini-table preview (table-visualize-card style
     expect(screen.queryByText('No rows yet')).not.toBeInTheDocument();
     expect(screen.queryByTitle('text')).not.toBeInTheDocument();
     expect(container.querySelector('.lucide-table')).toBeInTheDocument();
+  });
+});
+
+/**
+ * A drop target only exists inside the context that owns the drag, and the folder path lives
+ * in the page HEADER. With the drag context around the cards alone every crumb was inert, so
+ * dragging a card out of a folder - the one move a folder path is there to offer - did nothing.
+ */
+describe('DataSourceTable - the drag surface', () => {
+  it('covers the folder path, so a card can be dragged out of a folder onto it', async () => {
+    mockGetPage.mockResolvedValue({
+      items: [], totalCount: 0, page: 0, size: 25, publicationStatuses: {},
+      folders: [], folderTrail: [{ id: 'f1', name: 'Sales', parentFolderId: null }],
+      rowCounts: {}, sampleRows: {},
+    } as any);
+
+    renderTable();
+
+    const crumb = await screen.findByRole('button', { name: 'All tables' });
+    expect(screen.getByTestId('drag-context')).toContainElement(crumb);
   });
 });

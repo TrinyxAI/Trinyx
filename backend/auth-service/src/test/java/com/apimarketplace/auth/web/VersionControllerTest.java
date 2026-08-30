@@ -66,13 +66,26 @@ class VersionControllerTest {
         return svc;
     }
 
+    /**
+     * No install identity, which is every context except a CE install that both polls and
+     * identifies itself. The card's disclosure is driven by this bean's presence, so the default in
+     * tests is the honest one: absent.
+     */
+    @SuppressWarnings("unchecked")
+    private static org.springframework.beans.factory.ObjectProvider<
+            com.apimarketplace.auth.web.version.CeInstallIdProvider> noInstallId() {
+        var provider = org.mockito.Mockito.mock(org.springframework.beans.factory.ObjectProvider.class);
+        org.mockito.Mockito.when(provider.getIfAvailable()).thenReturn(null);
+        return provider;
+    }
+
     @Test
     @DisplayName("cloud build with git info but no release tag: version is the from-source dev-<sha>")
     void cloudWithGitInfoNoReleaseTag() {
         VersionInfo info = VersionInfo.from(
                 editionFor("cloud"),
                 gitProperties("0.1.0-SNAPSHOT", "abc1234", "2026-06-25T10:30:00Z"),
-                VersionUpdateView.none());
+                VersionUpdateView.none(), false);
 
         // Maven SNAPSHOT version is never surfaced; the short sha identifies the build.
         assertThat(info.version()).isEqualTo("dev-abc1234");
@@ -93,7 +106,7 @@ class VersionControllerTest {
         VersionInfo info = VersionInfo.from(
                 editionFor("ce"),
                 gitProperties("0.1.0-SNAPSHOT", "abc1234", "2026-06-25T10:30:00Z"),
-                VersionUpdateView.none());
+                VersionUpdateView.none(), false);
 
         assertThat(info.version()).isEqualTo("v1.5.0");
         // The raw commit sha is still surfaced independently of the displayed version.
@@ -103,7 +116,7 @@ class VersionControllerTest {
     @Test
     @DisplayName("CE build without git info and no release tag: falls back to dev / null, marked self-hosted")
     void ceWithoutGitInfo() {
-        VersionInfo info = VersionInfo.from(editionFor("ce"), null, VersionUpdateView.none());
+        VersionInfo info = VersionInfo.from(editionFor("ce"), null, VersionUpdateView.none(), false);
 
         assertThat(info.version()).isEqualTo("dev");
         assertThat(info.gitSha()).isNull();
@@ -119,7 +132,7 @@ class VersionControllerTest {
         VersionInfo info = VersionInfo.from(
                 editionFor("cloud"),
                 gitProperties("   ", "", "2026-06-25T10:30:00Z"),
-                VersionUpdateView.none());
+                VersionUpdateView.none(), false);
 
         assertThat(info.version()).isEqualTo("dev");
     }
@@ -130,7 +143,7 @@ class VersionControllerTest {
         VersionInfo info = VersionInfo.from(
                 editionFor("self-hosted-enterprise"),
                 gitProperties("1.4.2", "abc1234", "2026-06-25T10:30:00Z"),
-                new VersionUpdateView(true, "1.5.0", "https://example.test/releases", true, "2026-06-25T11:00:00Z"));
+                new VersionUpdateView(true, "1.5.0", "https://example.test/releases", true, "2026-06-25T11:00:00Z"), false);
 
         assertThat(info.edition()).isEqualTo("self-hosted-enterprise");
         assertThat(info.selfHosted()).isTrue();
@@ -185,7 +198,7 @@ class VersionControllerTest {
         VersionUpdateService svc = updateServiceWith(
                 new UpdateStatus("0.2.0", "https://example.test/notes", false, null, Instant.parse("2026-06-25T11:00:00Z")));
 
-        VersionController controller = new VersionController(editionFor("ce"), svc, gitProvider);
+        VersionController controller = new VersionController(editionFor("ce"), svc, gitProvider, noInstallId());
         MockMvc mvc = MockMvcBuilders.standaloneSetup(controller).build();
 
         mvc.perform(get("/api/version"))
@@ -212,7 +225,7 @@ class VersionControllerTest {
         VersionUpdateService svc = updateServiceWith(
                 new UpdateStatus("9.9.9", "https://example.test/notes", true, null, Instant.now()));
 
-        VersionController controller = new VersionController(editionFor("ce"), svc, gitProvider);
+        VersionController controller = new VersionController(editionFor("ce"), svc, gitProvider, noInstallId());
         MockMvc mvc = MockMvcBuilders.standaloneSetup(controller).build();
 
         mvc.perform(get("/api/version"))
@@ -234,7 +247,7 @@ class VersionControllerTest {
         VersionUpdateService svc = updateServiceWith(
                 new UpdateStatus("9.9.9", "https://example.test/notes", true, null, Instant.now()));
 
-        VersionController controller = new VersionController(editionFor("cloud"), svc, gitProvider);
+        VersionController controller = new VersionController(editionFor("cloud"), svc, gitProvider, noInstallId());
         MockMvc mvc = MockMvcBuilders.standaloneSetup(controller).build();
 
         mvc.perform(get("/api/version"))
@@ -252,7 +265,7 @@ class VersionControllerTest {
         ObjectProvider<GitProperties> gitProvider = mock(ObjectProvider.class);
         when(gitProvider.getIfAvailable()).thenReturn(null);
 
-        VersionController controller = new VersionController(editionFor("ce"), updateServiceWith(null), gitProvider);
+        VersionController controller = new VersionController(editionFor("ce"), updateServiceWith(null), gitProvider, noInstallId());
         MockMvc mvc = MockMvcBuilders.standaloneSetup(controller).build();
 
         mvc.perform(get("/api/version"))

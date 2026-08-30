@@ -21,9 +21,8 @@ import { NoProviderCta } from '@/components/ai/NoProviderCta';
 import { UpgradeRequiredNotice } from '@/components/billing/UpgradeRequiredBadge';
 import { useMonthlyCreditsCannotPay } from '@/lib/hooks/useMonthlyCreditsCannotPay';
 import { TriggerTabContent } from '@/components/chat/TriggerTabContent';
-import { type ApplicationConfig } from '@/components/chat/ApplicationTabContent';
+import { type ApplicationConfig, type ApplicationTemplateSource } from '@/components/chat/ApplicationTabContent';
 import { ApplicationCarousel } from '@/components/chat/ApplicationCarousel';
-import { useInterfacePaginationStore } from '@/lib/stores/interface-pagination-store';
 import { cn } from '@/lib/utils';
 import { panelTabClass } from '@/components/ui/panel-tab';
 import { useTranslations } from 'next-intl';
@@ -39,6 +38,7 @@ import { TERMINAL_STATUSES } from '@/contexts/workflow-run/RunStateStore';
 import { useCurrentOrgStore } from '@/lib/stores/current-org-store';
 import { OPEN_TRIGGER_TAB_EVENT, findTriggerTabConfig, type OpenTriggerTabDetail } from '@/lib/workflow/triggerTabEvent';
 import { NodeCreatorPanelContent } from '@/components/app/NodeCreatorPanelContent';
+import { WorkflowPanelActions } from '@/components/app/WorkflowPanelActions';
 import { RunPanelContent, type RunPanelView } from '@/components/workflow/run-panel/RunPanelContent';
 import { resetEpochSelectionState } from '@/components/workflow/run-panel/useDefaultEpochSelection';
 import {
@@ -162,7 +162,7 @@ if (typeof window !== 'undefined') {
 
 // ── Inner content (rendered inside WorkflowModeProvider) ──
 
-function WorkflowPanelInner({ workflowId, runId: runIdProp, workflowCanvasSlot, isPreviewOnly = false, allowRunHistory: allowRunHistoryProp, runSurfaceId }: { workflowId: string; runId?: string; workflowCanvasSlot?: React.ReactNode; isPreviewOnly?: boolean; allowRunHistory?: boolean; runSurfaceId?: string }) {
+function WorkflowPanelInner({ workflowId, runId: runIdProp, workflowCanvasSlot, isPreviewOnly = false, allowRunHistory: allowRunHistoryProp, runSurfaceId, applicationFirst = false, initialApplicationConfigs, applicationTemplateSource, canEditWorkflow = true }: { workflowId: string; runId?: string; workflowCanvasSlot?: React.ReactNode; isPreviewOnly?: boolean; allowRunHistory?: boolean; runSurfaceId?: string; applicationFirst?: boolean; initialApplicationConfigs?: ApplicationConfig[]; applicationTemplateSource?: ApplicationTemplateSource; canEditWorkflow?: boolean }) {
   const t = useTranslations();
   const pathname = usePathname();
 
@@ -245,10 +245,12 @@ function WorkflowPanelInner({ workflowId, runId: runIdProp, workflowCanvasSlot, 
   const isStreaming = conversationId ? streaming.isStreamingConversation(conversationId) : false;
 
   useEffect(() => {
+    // Named: two panels (a page one and a side-panel one) can stream at once, and
+    // the Save controls disable themselves on THEIR workflow's stream only.
     window.dispatchEvent(new CustomEvent('workflowStreamingStateChange', {
-      detail: { isStreaming },
+      detail: { isStreaming, workflowId },
     }));
-  }, [isStreaming]);
+  }, [isStreaming, workflowId]);
 
   // Listen for stop stream request from canvas
   useEffect(() => {
@@ -268,7 +270,14 @@ function WorkflowPanelInner({ workflowId, runId: runIdProp, workflowCanvasSlot, 
   const [triggerRunStatus, setTriggerRunStatus] = useState<string | undefined>(() => myCache.triggerRunStatus);
   const [triggerRunId, setTriggerRunId] = useState<string | undefined>(() => myCache.triggerRunId);
   const [triggerStepByStep, setTriggerStepByStep] = useState(() => myCache.triggerStepByStep);
-  const [applicationConfigs, setApplicationConfigs] = useState<ApplicationConfig[]>(() => myCache.applicationConfigs);
+  // Seeded from the host when it has already resolved the interfaces (the
+  // application panel does, before it mounts this). Without a seed the
+  // Application sub-tab only exists once the canvas has loaded its plan and
+  // emitted them, so an application panel would open on the canvas and jump to
+  // the interface a second later.
+  const [applicationConfigs, setApplicationConfigs] = useState<ApplicationConfig[]>(
+    () => (myCache.applicationConfigs.length > 0 ? myCache.applicationConfigs : (initialApplicationConfigs ?? [])),
+  );
 
   // ── Run identity (drives the Run sub-tab and the edit/run split) ──
   // Published by WorkflowRunCanvas through the run-panel bus, with a cache so a
@@ -296,6 +305,29 @@ function WorkflowPanelInner({ workflowId, runId: runIdProp, workflowCanvasSlot, 
     adopt(getCachedRunPanelData(workflowId));
     return subscribeRunPanelData(workflowId, adopt);
   }, [workflowId]);
+
+  // ── Run ID the sub-tabs render against ──
+  // The CANVAS's own run wins: it is the run actually bound, whether it came from
+  // the /run/<id> URL, from an agent-launched overlay, or from the user picking a
+  // run in the panel's history (bound in place, so the URL still names the run the
+  // page was opened with). Reading the URL first left the Application carousel and
+  // the Trigger tabs on the PREVIOUS run after such a switch.
+  // Falls back to the URL, then to the prop (application mode / marketplace preview).
+  const runIdFromPath = pathname?.match(/\/workflow\/[^\/]+\/run\/([^\/]+)/)?.[1] || null;
+  const currentRunId = runData.runId || triggerRunId || runIdFromPath || runIdProp || null;
+
+  /**
+   * Which page of the application to show, named by INTERFACE rather than by
+   * position.
+   *
+   * The carousel already resolves this itself (`targetInterfaceId`), and going
+   * through it beats writing an index into the store: the store is keyed by
+   * workflow AND run, so a panel opened before its run was bound wrote the index
+   * under one key and the carousel then read another - the requested page
+   * silently became page one. An interface id does not move when the run does.
+   */
+  const [targetInterfaceId, setTargetInterfaceId] = useState<string | null>(null);
+  const clearCarouselTarget = useCallback(() => setTargetInterfaceId(null), []);
 
   // ── Reload chat messages when steps complete (SBS + AUTO) ──
   // The reloadConversation() call in TriggerTabContent fires right after trigger
@@ -382,7 +414,9 @@ function WorkflowPanelInner({ workflowId, runId: runIdProp, workflowCanvasSlot, 
   // `isAppTabDismissed` is re-armed on org switch so a default-hide in workspace A
   // doesn't leak into workspace B if the panel survives the transition.
   const isApplicationRoute = pathname?.includes('/app/applications/') ?? false;
-  const hideAppTabByDefault = hasWorkflowSlot && (isPreviewOnly || isApplicationRoute);
+  // `applicationFirst` overrides both: a panel opened ON an application exists to
+  // show that application, preview included.
+  const hideAppTabByDefault = !applicationFirst && hasWorkflowSlot && (isPreviewOnly || isApplicationRoute);
   const [isAppTabDismissed, setIsAppTabDismissed] = useState(hideAppTabByDefault);
   const currentOrgId = useCurrentOrgStore((s) => s.currentOrgId);
   useEffect(() => {
@@ -407,7 +441,15 @@ function WorkflowPanelInner({ workflowId, runId: runIdProp, workflowCanvasSlot, 
   const allowRunHistory = (allowRunHistoryProp ?? !hasWorkflowSlot) && !isPreviewOnly;
 
   const hasExtraTabs = visibleTriggerConfigs.length > 0 || showAppTab || hasWorkflowSlot || showRunTab || showNodeCreatorTab;
-  const [activeTabId, setActiveTabId] = useState(hasWorkflowSlot ? WORKFLOW_TAB_ID : CHAT_TAB_ID);
+  /**
+   * Tab to show when nothing else applies: the Application on a panel opened on
+   * an application, the canvas when this panel hosts one, else the AI chat.
+   * Also where the fallback effect below lands when the active tab disappears.
+   */
+  const defaultTabId = applicationFirst
+    ? APP_TAB_ID
+    : (hasWorkflowSlot ? WORKFLOW_TAB_ID : CHAT_TAB_ID);
+  const [activeTabId, setActiveTabId] = useState(defaultTabId);
   /** Which level the Run tab should show (history vs run detail). */
   const [runViewRequest, setRunViewRequest] = useState<{ view: RunPanelView; seq: number } | null>(
     () => {
@@ -449,10 +491,12 @@ function WorkflowPanelInner({ workflowId, runId: runIdProp, workflowCanvasSlot, 
   useEffect(() => {
     if (!hideAppTabByDefault && applicationConfigs.length > 0 && prevAppConfigCount.current === 0) {
       setIsAppTabDismissed(false);
-      if (!hasWorkflowSlot) setActiveTabId(APP_TAB_ID);
+      // ...unless this panel was opened ON the application, where the canvas is
+      // the secondary view and the interface is what the user asked for.
+      if (!hasWorkflowSlot || applicationFirst) setActiveTabId(APP_TAB_ID);
     }
     prevAppConfigCount.current = applicationConfigs.length;
-  }, [applicationConfigs.length, hideAppTabByDefault, hasWorkflowSlot]);
+  }, [applicationConfigs.length, hideAppTabByDefault, hasWorkflowSlot, applicationFirst]);
 
   // Fall back to a still-available sub-tab when the active one disappears - a
   // trigger that vanished, an interface that is gone, the run that ended (Run
@@ -469,9 +513,11 @@ function WorkflowPanelInner({ workflowId, runId: runIdProp, workflowCanvasSlot, 
       (activeTabId === RUN_TAB_ID && showRunTab) ||
       (activeTabId === NODE_CREATOR_TAB_ID && showNodeCreatorTab);
     if (!isActiveTabAvailable) {
-      setActiveTabId(hasWorkflowSlot ? WORKFLOW_TAB_ID : CHAT_TAB_ID);
+      // An application-first panel whose interfaces have not arrived yet keeps
+      // waiting on the Application tab rather than flashing the canvas.
+      setActiveTabId(applicationFirst && hasWorkflowSlot ? APP_TAB_ID : defaultTabId);
     }
-  }, [triggerConfigs, applicationConfigs.length, activeTabId, hasWorkflowSlot, showRunTab, showNodeCreatorTab]);
+  }, [triggerConfigs, applicationConfigs.length, activeTabId, hasWorkflowSlot, showRunTab, showNodeCreatorTab, applicationFirst, defaultTabId]);
 
   // Consume pending tab activation (set before panel was opened)
   useEffect(() => {
@@ -479,10 +525,9 @@ function WorkflowPanelInner({ workflowId, runId: runIdProp, workflowCanvasSlot, 
     if (pending) {
       if (pending.startsWith('app-')) {
         const interfaceId = pending.replace('app-', '');
-        const idx = applicationConfigs.findIndex(c => c.interfaceId === interfaceId);
-        if (idx >= 0) {
+        if (applicationConfigs.some(c => c.interfaceId === interfaceId)) {
           setActiveTabId(APP_TAB_ID);
-          useInterfacePaginationStore.getState().setCarouselIndex(idx);
+          setTargetInterfaceId(interfaceId);
         }
       } else {
         setActiveTabId(pending);
@@ -508,11 +553,10 @@ function WorkflowPanelInner({ workflowId, runId: runIdProp, workflowCanvasSlot, 
   // renders the ApplicationCarousel in its place inside the side panel.
   useEffect(() => {
     const handleOpenApplicationTab = (event: CustomEvent<{ interfaceId: string }>) => {
-      const idx = applicationConfigs.findIndex(c => c.interfaceId === event.detail.interfaceId);
-      if (idx >= 0) {
+      if (applicationConfigs.some(c => c.interfaceId === event.detail.interfaceId)) {
         setIsAppTabDismissed(false);
         setActiveTabId(APP_TAB_ID);
-        useInterfacePaginationStore.getState().setCarouselIndex(idx);
+        setTargetInterfaceId(event.detail.interfaceId);
       }
     };
     window.addEventListener('workflowOpenApplicationTab', handleOpenApplicationTab as EventListener);
@@ -601,7 +645,7 @@ function WorkflowPanelInner({ workflowId, runId: runIdProp, workflowCanvasSlot, 
       window.addEventListener('workflowExecuteTriggerResponse', responseHandler);
 
       window.dispatchEvent(new CustomEvent('workflowExecuteTriggerRequest', {
-        detail: { requestId, triggerId, triggerType, payload },
+        detail: { requestId, triggerId, triggerType, payload, workflowId },
       }));
 
       // Timeout after 30s
@@ -610,7 +654,7 @@ function WorkflowPanelInner({ workflowId, runId: runIdProp, workflowCanvasSlot, 
         resolve(undefined);
       }, 30_000);
     });
-  }, []);
+  }, [workflowId]);
 
   // ── Application action via event bridge ──
   const handleApplicationAction = useCallback(async (
@@ -623,13 +667,10 @@ function WorkflowPanelInner({ workflowId, runId: runIdProp, workflowCanvasSlot, 
       const targetLabel = navigateTargetLabel(triggerRef);
       if (targetLabel) {
         const normalizedTarget = normalizeLabel(targetLabel);
-        const idx = applicationConfigs.findIndex(c => {
-          const normalizedConfigLabel = normalizeLabel(c.label);
-          return normalizedConfigLabel === normalizedTarget;
-        });
-        if (idx >= 0) {
+        const target = applicationConfigs.find(c => normalizeLabel(c.label) === normalizedTarget);
+        if (target) {
           setActiveTabId(APP_TAB_ID);
-          useInterfacePaginationStore.getState().setCarouselIndex(idx);
+          setTargetInterfaceId(target.interfaceId);
           return;
         }
         console.warn('[WorkflowPanelContent] Navigate target not found:', targetLabel, 'normalized:', normalizedTarget);
@@ -638,9 +679,9 @@ function WorkflowPanelInner({ workflowId, runId: runIdProp, workflowCanvasSlot, 
     }
 
     window.dispatchEvent(new CustomEvent('workflowApplicationActionRequest', {
-      detail: { triggerRef, data },
+      detail: { triggerRef, data, workflowId },
     }));
-  }, [applicationConfigs]);
+  }, [applicationConfigs, workflowId]);
 
   // ── Suggestion prompt from canvas ──
   const [suggestionPrompt, setSuggestionPrompt] = useState<string | null>(null);
@@ -680,16 +721,6 @@ function WorkflowPanelInner({ workflowId, runId: runIdProp, workflowCanvasSlot, 
     return () => window.removeEventListener('workflowCanvasSendMessage', handleCanvasMessage as EventListener);
   }, []);
 
-  // ── Run ID the sub-tabs render against ──
-  // The CANVAS's own run wins: it is the run actually bound, whether it came from
-  // the /run/<id> URL, from an agent-launched overlay, or from the user picking a
-  // run in the panel's history (bound in place, so the URL still names the run the
-  // page was opened with). Reading the URL first left the Application carousel and
-  // the Trigger tabs on the PREVIOUS run after such a switch.
-  // Falls back to the URL, then to the prop (application mode / marketplace preview).
-  const runIdFromPath = pathname?.match(/\/workflow\/[^\/]+\/run\/([^\/]+)/)?.[1] || null;
-  const currentRunId = runData.runId || triggerRunId || runIdFromPath || runIdProp || null;
-
   // ── Tab count & position ──
   const tabCount = 1 /* AI Chat */ + visibleTriggerConfigs.length
     + (hasWorkflowSlot ? 1 : 0)
@@ -710,18 +741,36 @@ function WorkflowPanelInner({ workflowId, runId: runIdProp, workflowCanvasSlot, 
    * transitions and focus ring from one place, instead of each tab bar carrying
    * its own copy of the active/inactive pattern.
    */
+  const focusWorkflowTab = useCallback(() => setActiveTabId(WORKFLOW_TAB_ID), []);
+
   const subTabClass = (isActive: boolean) => cn(
     panelTabClass(isActive, 'sm'),
     "flex-shrink-0",
   );
 
+  /**
+   * Share / Save / Run of the embedded canvas, docked at the end of the sub-tab
+   * row while the Workflow tab is the one showing.
+   *
+   * Only when this panel HOSTS a canvas: on the standalone workflow page the
+   * page header already carries these three, and duplicating them there would
+   * put two Save buttons on screen. They are pinned to the Workflow tab because
+   * that is the tab they act on - in AI Chat or in the Application they would be
+   * three controls with no visible subject. And never in a marketplace preview,
+   * which can neither save, run nor publish someone else's frozen snapshot -
+   * checked here as well as inside, so the bar's separator does not survive as an
+   * empty bordered box.
+   */
+  const canHostCanvasActions = hasWorkflowSlot && !isPreviewOnly && canEditWorkflow;
+  const showCanvasActions = canHostCanvasActions && activeTabId === WORKFLOW_TAB_ID;
+
   // ── Tab bar rendering (shared between top and bottom positions) ──
   const renderTabBar = () => (
     <div className={cn(
-      "flex-shrink-0 bg-theme-primary",
+      "flex-shrink-0 bg-theme-primary flex items-center",
       tabsAtBottom ? "border-t border-theme" : "border-b border-theme"
     )}>
-      <div className="flex items-center gap-1 px-2 py-1.5 overflow-x-auto overflow-y-hidden">
+      <div className="flex-1 min-w-0 flex items-center gap-1 px-2 py-1.5 overflow-x-auto overflow-y-hidden">
         {/* AI Chat tab */}
         <button
           type="button"
@@ -844,6 +893,30 @@ function WorkflowPanelInner({ workflowId, runId: runIdProp, workflowCanvasSlot, 
         )}
 
       </div>
+
+      {/* Mounted for as long as the panel hosts a canvas, and merely HIDDEN off
+          the Workflow tab. Unmounting it looked equivalent and was not: its
+          dirty flag, save status and streaming gate are fed by events that fire
+          on CHANGE only, so a remount came back believing the canvas was clean
+          and left Save greyed out over unsaved work. Same reason the canvas slot
+          below is display-toggled rather than conditionally rendered. */}
+      {canHostCanvasActions && (
+        <div
+          className="flex-shrink-0 flex items-center gap-1 border-l border-theme pl-1.5 pr-2 py-1.5"
+          data-testid="panel-canvas-actions"
+          style={{ display: showCanvasActions ? undefined : 'none' }}
+        >
+          <WorkflowPanelActions
+            workflowId={workflowId}
+            /* The canvas' own run state (run-panel bus), the same signal that
+               decides between the Run and Add-node sub-tabs - so the bar and the
+               tabs can never disagree about which mode the canvas is in. */
+            isRunMode={hasRun}
+            isPreviewOnly={isPreviewOnly}
+            canEdit={canEditWorkflow}
+          />
+        </div>
+      )}
     </div>
   );
 
@@ -873,6 +946,15 @@ function WorkflowPanelInner({ workflowId, runId: runIdProp, workflowCanvasSlot, 
           runId={currentRunId}
           workflowId={workflowId}
           onAction={handleApplicationAction}
+          targetInterfaceId={targetInterfaceId}
+          onTargetConsumed={clearCarouselTarget}
+          /* A marketplace preview must not be able to fire the publisher's
+             workflow: the carousel hides Launch/Continue under this flag. */
+          previewMode={isPreviewOnly}
+          /* Where the application IS what the user opened, the newest fire is
+             what they came for; a workflow panel keeps the cumulative view. */
+          openOnLatestEpoch={applicationFirst}
+          templateSource={applicationTemplateSource}
         />
       ) : activeTabId === RUN_TAB_ID ? (
         <RunPanelContent
@@ -880,6 +962,9 @@ function WorkflowPanelInner({ workflowId, runId: runIdProp, workflowCanvasSlot, 
           allowHistory={allowRunHistory}
           viewRequest={runViewRequest ?? undefined}
           surfaceId={runSurfaceId}
+          /* Only when there IS a canvas sub-tab to go back to: without a slot the
+             Workflow tab does not exist and the button would lead nowhere. */
+          onBackToWorkflow={hasWorkflowSlot ? focusWorkflowTab : undefined}
         />
       ) : activeTabId === NODE_CREATOR_TAB_ID ? (
         <NodeCreatorPanelContent workflowId={workflowId} />
@@ -965,9 +1050,35 @@ interface WorkflowPanelContentProps {
    * route); a side-panel workflow tab passes its own id.
    */
   runSurfaceId?: string;
+  /**
+   * This panel was opened ON an application: the Application sub-tab is its
+   * default view and is never hidden by default, while the canvas becomes the
+   * secondary "what is it doing" tab. Without it an application tab in the side
+   * panel opens on the canvas, and in a preview context the Application sub-tab
+   * would not even be offered.
+   */
+  applicationFirst?: boolean;
+  /**
+   * Interfaces the host has ALREADY resolved, used until the canvas emits its
+   * own. The application panel resolves them to open its tab at all, so handing
+   * them over avoids a second of canvas before the interface appears.
+   */
+  initialApplicationConfigs?: ApplicationConfig[];
+  /**
+   * Publication this application was installed from - enables the interface
+   * toolbar's template actions (load the example inputs, reset the data).
+   * Forwarded verbatim to the carousel; omit it where those do not apply.
+   */
+  applicationTemplateSource?: ApplicationTemplateSource;
+  /**
+   * The caller may change this workflow. Only an application panel says
+   * otherwise, when its publication resolves to the PUBLISHER's workflow rather
+   * than an acquired clone.
+   */
+  canEditWorkflow?: boolean;
 }
 
-export function WorkflowPanelContent({ workflowId, runId, isPreviewOnly: isPreviewOnlyProp, workflowCanvasSlot, allowRunHistory, runSurfaceId }: WorkflowPanelContentProps) {
+export function WorkflowPanelContent({ workflowId, runId, isPreviewOnly: isPreviewOnlyProp, workflowCanvasSlot, allowRunHistory, runSurfaceId, applicationFirst, initialApplicationConfigs, applicationTemplateSource, canEditWorkflow }: WorkflowPanelContentProps) {
   // Try parent context first, then fall back to explicit prop.
   // SidePanel lives in AppLayout (outside WorkflowModeProvider), so the prop is needed for marketplace preview.
   const { isPreviewOnly: isPreviewFromContext, workflowId: parentWorkflowId } = useWorkflowMode();
@@ -977,12 +1088,12 @@ export function WorkflowPanelContent({ workflowId, runId, isPreviewOnly: isPrevi
   // reuse it so viewingEpoch and other state are shared with the canvas/RunInfo.
   // Only create a new provider when rendered outside (e.g. SidePanel in AppLayout).
   if (parentWorkflowId) {
-    return <WorkflowPanelInner workflowId={workflowId} runId={runId} workflowCanvasSlot={workflowCanvasSlot} isPreviewOnly={isPreview} allowRunHistory={allowRunHistory} runSurfaceId={runSurfaceId} />;
+    return <WorkflowPanelInner workflowId={workflowId} runId={runId} workflowCanvasSlot={workflowCanvasSlot} isPreviewOnly={isPreview} allowRunHistory={allowRunHistory} runSurfaceId={runSurfaceId} applicationFirst={applicationFirst} initialApplicationConfigs={initialApplicationConfigs} applicationTemplateSource={applicationTemplateSource} canEditWorkflow={canEditWorkflow} />;
   }
 
   return (
     <WorkflowModeProvider workflowId={workflowId} initialRunId={runId} readOnly={isPreview}>
-      <WorkflowPanelInner workflowId={workflowId} runId={runId} workflowCanvasSlot={workflowCanvasSlot} isPreviewOnly={isPreview} allowRunHistory={allowRunHistory} runSurfaceId={runSurfaceId} />
+      <WorkflowPanelInner workflowId={workflowId} runId={runId} workflowCanvasSlot={workflowCanvasSlot} isPreviewOnly={isPreview} allowRunHistory={allowRunHistory} runSurfaceId={runSurfaceId} applicationFirst={applicationFirst} initialApplicationConfigs={initialApplicationConfigs} applicationTemplateSource={applicationTemplateSource} canEditWorkflow={canEditWorkflow} />
     </WorkflowModeProvider>
   );
 }

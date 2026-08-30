@@ -175,8 +175,11 @@ export function getPublicAvatarUrlById(fileId: string): string {
  * without an id cannot be rendered (returns '' - re-run/republish to regenerate it with an id). The
  * URL carries no credential - render it with {@code useAuthedObjectUrl} (header-authenticated blob).
  */
-export function fileRefToUrl(ref: { id?: string }, options?: { inline?: boolean }): string {
-  return ref?.id ? getFileUrlById(ref.id, options) : '';
+export function fileRefToUrl(ref: { id?: string; url?: string }, options?: { inline?: boolean }): string {
+  if (ref?.id) return getFileUrlById(ref.id, options);
+  // A ref with no id but its own URL (an external link stored in a table asset) is displayable as
+  // it stands. Returning '' here would blank it out for no reason.
+  return typeof ref?.url === 'string' ? ref.url : '';
 }
 
 /**

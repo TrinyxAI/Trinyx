@@ -77,7 +77,10 @@ export function ImageGenerationVisualizeCard({ interfaceId, title }: ImageGenera
   }, [interfaceId, refreshKey]);
 
   const FILES_TAB_ID = 'files-panel';
-  const isTabActive = sidePanel?.isOpen && sidePanel?.activeTabId === FILES_TAB_ID;
+  // `isForward`, not `isOpen`: a detached window collapsed to a strip is open and
+  // shows nothing, so this card would paint its "click to close" state over a panel
+  // nobody can see - and the click would then destroy the tab instead of revealing it.
+  const isTabActive = sidePanel?.isForward && sidePanel?.activeTabId === FILES_TAB_ID;
 
   /** Switch the panel to the per-file detail view. */
   const openImageDetail = React.useCallback((img: GeneratedImage) => {
@@ -130,7 +133,18 @@ export function ImageGenerationVisualizeCard({ interfaceId, title }: ImageGenera
   const autoOpenedRef = React.useRef(false);
   useEffect(() => {
     if (autoOpenedRef.current || !sidePanel || !interfaceData) return;
-    if (!sidePanel.isOpen) return;
+    // `isForward`: a shaded window reads as open, so this would pop one the user
+    // deliberately collapsed - the opposite of the non-intrusive policy above.
+    //
+    // Declining CLAIMS the one-shot, it does not defer it. The effect depends on the
+    // context value, which changes the moment the shade lifts, so a merely-skipped
+    // pass fires again on the very next render - the one caused by the user pressing
+    // the header button. They would press to get their window back and land on the
+    // Files tab instead, which is the exact swap `bringForward` exists to prevent.
+    if (!sidePanel.isForward) {
+      autoOpenedRef.current = true;
+      return;
+    }
     const data = (interfaceData.data ?? {}) as Record<string, unknown>;
     const imgs = (Array.isArray(data.images) ? data.images : []) as GeneratedImage[];
     const first = imgs.find((i) => i.path);

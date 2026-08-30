@@ -7,8 +7,7 @@ import { resolveColumnType } from '@/utils/columnSpec';
 import type { VisualCellProps } from './types';
 import { RatingCell } from './RatingCell';
 import { SentimentCell } from './SentimentCell';
-import { FileCell } from './FileCell';
-import { ImageCell } from './ImageCell';
+import { AssetCell } from './AssetCell';
 import { SelectCell } from './SelectCell';
 import { ProgressCell, type ProgressCellExtraProps } from './ProgressCell';
 import { MultiSelectCell } from './MultiSelectCell';
@@ -66,11 +65,21 @@ export function renderVisualCellContent(opts: RenderVisualCellOptions): { conten
     case 'sentiment':
       return { content: <SentimentCell {...props} />, editable: false };
 
+    // ONE cell for both. `file` and `image` were never two data contracts, only two
+    // presentations of the same stored asset, so the only difference left is display.render.
     case 'file':
-      return { content: <FileCell {...props} />, editable: true };
-
-    case 'image':
-      return { content: <ImageCell {...props} />, editable: true };
+    case 'image': {
+      const assetProps: VisualCellProps = {
+        ...props,
+        displayConfig: {
+          // A legacy `image` column carries no display.render - keep the round thumbnail it
+          // has always had. An explicit render (set on the column) still wins.
+          render: resolved === 'image' ? 'thumbnail' : 'card',
+          ...(opts.displayConfig ?? {}),
+        },
+      };
+      return { content: <AssetCell {...assetProps} />, editable: true };
+    }
 
     case 'select':
       return { content: <SelectCell {...props} />, editable: false };

@@ -300,6 +300,20 @@ export function getDefaultSortConfig(): SortConfig {
 }
 
 /**
+ * Serialize an edited cell value for {@link parseEditValue}, its exact inverse.
+ *
+ * Cell editors may hand back a structured value (a media cell returns the asset map). `String()`
+ * on one yields "[object Object]", which parseEditValue cannot recover, so the cell is destroyed
+ * on save. Serializing keeps the round trip lossless.
+ */
+export function serializeEditValue(value: unknown): string {
+  if (value !== null && typeof value === 'object') {
+    return JSON.stringify(value);
+  }
+  return String(value);
+}
+
+/**
  * Parse value according to its type (for editing)
  */
 export function parseEditValue(val: string): any {

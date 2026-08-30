@@ -4,11 +4,12 @@
  * the open folder. The rule worth pinning is that navigating into a folder must not drop the
  * rest of the address - a list can be on a tab, a search, a page number at the same time.
  */
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   emitResourceFolderTrail,
   folderUrl,
   onResourceFolderTrail,
+  showFolderLevel,
   FOLDER_QUERY_PARAM,
 } from '../foldersHeaderBus';
 
@@ -76,5 +77,73 @@ describe('the trail channel', () => {
 
     expect(heard.map((s) => s.view)).toEqual(['table', 'interface']);
     stop();
+  });
+});
+
+/**
+ * Changing the level is a change of `?folder=` on the page ALREADY on screen, so it goes
+ * through the history API rather than the router. The bug that forced this: from a page loaded
+ * directly on `?folder=<id>` - a shared link, a reload, the browser restoring a tab - a router
+ * push of the bare pathname is dropped, and every way out of the folder does nothing at all.
+ */
+describe('showFolderLevel', () => {
+  const push = vi.fn();
+  const replace = vi.fn();
+  const originalPush = window.history.pushState;
+  const originalReplace = window.history.replaceState;
+
+  beforeEach(() => {
+    push.mockClear();
+    replace.mockClear();
+    window.history.pushState = push as unknown as typeof window.history.pushState;
+    window.history.replaceState = replace as unknown as typeof window.history.replaceState;
+  });
+  afterEach(() => {
+    window.history.pushState = originalPush;
+    window.history.replaceState = originalReplace;
+  });
+
+  it('opens a folder as a history STEP, so Back walks back out of it', () => {
+    showFolderLevel('/en/app/workflow', new URLSearchParams(), 'f1');
+
+    expect(push).toHaveBeenCalledWith(null, '', '/en/app/workflow?folder=f1');
+    expect(replace).not.toHaveBeenCalled();
+  });
+
+  it('leaves a folder for the top level, which no router push could do', () => {
+    showFolderLevel('/en/app/workflow', new URLSearchParams('folder=f1'), null);
+
+    expect(push).toHaveBeenCalledWith(null, '', '/en/app/workflow');
+  });
+
+  it('keeps every other parameter the page carries', () => {
+    showFolderLevel('/en/app/agent', new URLSearchParams('view=skills&folder=f1'), 'f2');
+
+    expect(push).toHaveBeenCalledWith(null, '', '/en/app/agent?view=skills&folder=f2');
+  });
+
+  it('corrects a dead folder in the address in place, so Back cannot return to it', () => {
+    showFolderLevel('/en/app/workflow', new URLSearchParams('folder=gone'), null, 'replace');
+
+    expect(replace).toHaveBeenCalledWith(null, '', '/en/app/workflow');
+    expect(push).not.toHaveBeenCalled();
+  });
+
+  it('does nothing on the server, where there is no history to write to', () => {
+    vi.stubGlobal('window', undefined);
+    try {
+      expect(() => showFolderLevel('/en/app/workflow', new URLSearchParams(), 'f1')).not.toThrow();
+    } finally {
+      vi.unstubAllGlobals();
+    }
+    expect(push).not.toHaveBeenCalled();
+  });
+
+  it('does nothing for the level already shown, so a crumb cannot stack a duplicate step', () => {
+    showFolderLevel('/en/app/workflow', new URLSearchParams('folder=f1'), 'f1');
+    showFolderLevel('/en/app/workflow', new URLSearchParams(), null);
+
+    expect(push).not.toHaveBeenCalled();
+    expect(replace).not.toHaveBeenCalled();
   });
 });

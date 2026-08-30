@@ -154,3 +154,6 @@ backend/build-ca.pem
 # contracts:validate:strict + contracts:test instead. Ignored so a stray `git add -A`
 # in a worktree cannot re-commit it and recreate the illusion of a drift gate.
 frontend/app/workflows/builder/contracts/
+
+# Playwright scratch captures written by e2e specs
+frontend/e2e/.artifacts/

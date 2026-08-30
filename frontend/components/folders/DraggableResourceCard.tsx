@@ -24,7 +24,15 @@ export function DraggableResourceCard({ id, disabled = false, children }: Dragga
   });
 
   return (
-    <div ref={setNodeRef} {...attributes} {...listeners} className={isDragging ? 'opacity-50' : undefined}>
+    // `touch-manipulation` is what dnd-kit asks for alongside a hold-to-drag touch sensor: it
+    // tells the browser this element has no double-tap zoom to wait for, so the hold is not
+    // competing with a gesture the page might still claim.
+    <div
+      ref={setNodeRef}
+      {...attributes}
+      {...listeners}
+      className={`touch-manipulation${isDragging ? ' opacity-50' : ''}`}
+    >
       {children}
     </div>
   );

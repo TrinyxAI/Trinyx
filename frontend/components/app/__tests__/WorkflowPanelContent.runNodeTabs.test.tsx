@@ -15,6 +15,12 @@ import { act, cleanup, render, screen } from '@testing-library/react';
 const runPanelProps = vi.hoisted(() => ({ current: null as any }));
 const nodeCreatorProps = vi.hoisted(() => ({ current: null as any }));
 
+// The canvas action cluster (Share / Save / Run) has its own suite; here it is a
+// marker so these tests keep exercising the tab bar rather than the publish
+// wizard and the version-history fetch it pulls in.
+vi.mock('@/components/app/WorkflowPanelActions', () => ({
+  WorkflowPanelActions: () => null,
+}));
 vi.mock('next-intl', () => ({ useTranslations: () => (key: string) => key }));
 vi.mock('@/i18n/navigation', () => ({ usePathname: () => '/app/workflow/wf-1' }));
 // Captures what the panel hands ChatCore, so the model menu it BUILDS can be
@@ -192,6 +198,29 @@ describe('WorkflowPanelContent - Run / Add Node sub-tabs', () => {
     render(<WorkflowPanelContent workflowId="wf-1" workflowCanvasSlot={<div />} />);
     act(() => openRunPanel({ workflowId: 'wf-1' }));
     expect(runPanelProps.current.allowHistory).toBe(false);
+  });
+
+  it('hands the Run tab a way back to the canvas when the panel hosts one', () => {
+    // The Workflow sub-tab lives at the BOTTOM of the panel, under a run's epochs
+    // and steps: from the top of a long run it is off screen, so the run header
+    // carries the same jump.
+    publishRun();
+    render(<WorkflowPanelContent workflowId="wf-1" workflowCanvasSlot={<div />} />);
+    act(() => openRunPanel({ workflowId: 'wf-1' }));
+    expect(typeof runPanelProps.current.onBackToWorkflow).toBe('function');
+
+    // ...and it really lands on the canvas tab: the Run panel stops rendering.
+    act(() => { runPanelProps.current.onBackToWorkflow(); });
+    expect(screen.queryByTestId('run-panel')).toBeNull();
+    expect(screen.getByText('common.workflow').closest('button')!.getAttribute('aria-pressed')).toBe('true');
+  });
+
+  it('withholds that jump when there is no canvas sub-tab to land on', () => {
+    // No slot means no Workflow sub-tab, so the control would lead nowhere.
+    publishRun();
+    render(<WorkflowPanelContent workflowId="wf-1" />);
+    act(() => openRunPanel({ workflowId: 'wf-1' }));
+    expect(runPanelProps.current.onBackToWorkflow).toBeUndefined();
   });
 
   it('hands the Run tab the surface id its host gave it, so a pick binds that host', () => {

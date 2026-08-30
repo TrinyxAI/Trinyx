@@ -16,7 +16,13 @@ vi.mock('next-intl', () => ({ useTranslations: () => (key: string) => key }));
 const getPublicationByIdMock = vi.hoisted(() => vi.fn());
 
 vi.mock('@/contexts/SidePanelContext', () => ({
-  useSidePanelSafe: () => ({ isOpen: false, activeTabId: null, openTab: vi.fn(), removeTab: vi.fn(), close: vi.fn() }),
+  // `isForward` is what the card asks, not `isOpen`: a detached window shaded to a
+  // strip is open and shows nothing. Omitting it left `isTabActive` resolving through
+  // `undefined`, which passes today and would quietly pass a real assertion too.
+  useSidePanelSafe: () => ({
+    isOpen: false, isForward: false, activeTabId: null,
+    openTab: vi.fn(), removeTab: vi.fn(), close: vi.fn(),
+  }),
 }));
 
 // Viewer (42) is NOT the publisher (999) → pre-removal this satisfied `canInstall`.

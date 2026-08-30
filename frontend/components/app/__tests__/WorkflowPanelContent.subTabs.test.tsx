@@ -12,6 +12,12 @@ import { act, cleanup, fireEvent, render, screen } from '@testing-library/react'
 
 // The composer fetches the verdict once for its model menu. Stubbed:
 // these suites are about layout, not billing.
+// The canvas action cluster (Share / Save / Run) has its own suite; here it is a
+// marker so these tests keep exercising the tab bar rather than the publish
+// wizard and the version-history fetch it pulls in.
+vi.mock('@/components/app/WorkflowPanelActions', () => ({
+  WorkflowPanelActions: () => null,
+}));
 vi.mock('@/lib/hooks/useMonthlyCreditsCannotPay', () => ({
   useMonthlyCreditsCannotPay: () => ({ blocked: false, isLoading: false }),
 }));
@@ -52,6 +58,7 @@ vi.mock('@/lib/stores/interface-pagination-store', () => ({
     () => ({}),
     { getState: () => ({ setCarouselIndex: vi.fn() }) },
   ),
+  carouselKeyFor: (workflowId?: string | null, runId?: string | null) => `${workflowId ?? ''}:${runId ?? ''}`,
 }));
 vi.mock('@/app/workflows/builder/utils/labelNormalizer', () => ({ normalizeLabel: (s: string) => s }));
 // Stubbed to keep the real store (a stateful class with a module-level

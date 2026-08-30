@@ -6,6 +6,8 @@ import com.apimarketplace.agent.client.dto.AgentSkillDto;
 import com.apimarketplace.auth.client.AuthClient;
 import com.apimarketplace.common.scope.ScopeGuard;
 import com.apimarketplace.common.storage.service.StorageBreakdownService;
+import com.apimarketplace.common.storage.url.FileProxyUrls;
+import com.apimarketplace.common.storage.url.StorageKeys;
 import com.apimarketplace.common.web.TenantResolver;
 import com.apimarketplace.datasource.client.DataSourceClient;
 import com.apimarketplace.datasource.client.dto.DataSourceDto;
@@ -36,6 +38,7 @@ import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Instant;
@@ -73,6 +76,7 @@ public class WorkflowPublicationService {
             UUID.fromString("a0000000-0000-4000-8000-000000000001");
 
     private final WorkflowPublicationRepository publicationRepository;
+    private final PublicationFileUrlResolver fileUrlResolver;
     private final PublicationSnapshotVersionRepository snapshotVersionRepository;
     private final PublicationReceiptRepository receiptRepository;
     private final PublicationReviewRepository reviewRepository;
@@ -145,8 +149,10 @@ public class WorkflowPublicationService {
                                        ObjectMapper objectMapper,
                                        SnapshotCloneService snapshotCloneService,
                                        com.apimarketplace.auth.client.entitlement.EntitlementGuard entitlementGuard,
-                                       AuthClient authClient) {
+                                       AuthClient authClient,
+                                     PublicationFileUrlResolver fileUrlResolver) {
         this.publicationRepository = publicationRepository;
+        this.fileUrlResolver = fileUrlResolver;
         this.snapshotVersionRepository = snapshotVersionRepository;
         this.receiptRepository = receiptRepository;
         this.reviewRepository = reviewRepository;
@@ -459,11 +465,17 @@ public class WorkflowPublicationService {
             throw new IllegalArgumentException("Workflow has no plan to publish");
         }
 
+        // The enrichment below copies the plan's files into `_publications/{id}/`, so the id
+        // has to exist before it runs. Left to @PrePersist it appears only at the save that
+        // happens AFTER, and every one of those copy passes silently no-ops on a first
+        // publish. See WorkflowPublicationEntity.ensureId.
+        publication.ensureId();
+
         // Enrich, compute resource counts, and set the public plan snapshot.
         // Keep a separate owner-only copy before credential scrubbing so the
         // publisher's APPLICATION workflow preserves exact credential pins.
         Map<String, Object> ownerApplicationSnapshot =
-                enrichAndSetPlanSnapshot(publication, planSnapshot, tenantId, organizationId);
+                enrichAndSetPlanSnapshot(publication, planSnapshot, tenantId, organizationId, workflowTenantId);
         publication.setPlanVersion(versionToStore);
 
         WorkflowPublicationEntity saved = publicationRepository.save(publication);
@@ -800,7 +812,8 @@ public class WorkflowPublicationService {
         Map<String, Object> currentPlan = (Map<String, Object>) workflowData.get("plan");
         Map<String, Object> ownerApplicationSnapshot = null;
         if (currentPlan != null && !currentPlan.isEmpty()) {
-            ownerApplicationSnapshot = enrichAndSetPlanSnapshot(publication, currentPlan, tenantId, organizationId);
+            ownerApplicationSnapshot = enrichAndSetPlanSnapshot(publication, currentPlan, tenantId, organizationId,
+                    (String) workflowData.get("tenantId"));
             Integer currentVersion = orchestratorClient.getLatestPlanVersion(workflowId, tenantId);
             publication.setPlanVersion(currentVersion);
         }
@@ -1616,10 +1629,19 @@ public class WorkflowPublicationService {
      */
     @SuppressWarnings("unchecked")
     private Map<String, Object> enrichAndSetPlanSnapshot(WorkflowPublicationEntity publication, Map<String, Object> planSnapshot, String tenantId) {
-        return enrichAndSetPlanSnapshot(publication, planSnapshot, tenantId, null);
+        return enrichAndSetPlanSnapshot(publication, planSnapshot, tenantId, null, null);
     }
 
     private Map<String, Object> enrichAndSetPlanSnapshot(WorkflowPublicationEntity publication, Map<String, Object> planSnapshot, String tenantId, String organizationId) {
+        return enrichAndSetPlanSnapshot(publication, planSnapshot, tenantId, organizationId, null);
+    }
+
+    /**
+     * @param workflowOwnerTenantId the tenant that owns the workflow this plan came from,
+     *        which in a cross-org publish is not the publishing tenant. It is the second
+     *        tenant whose files this publication may copy; see {@link CopyScope}.
+     */
+    private Map<String, Object> enrichAndSetPlanSnapshot(WorkflowPublicationEntity publication, Map<String, Object> planSnapshot, String tenantId, String organizationId, String workflowOwnerTenantId) {
         // Inject agent-referenced resources (tables/interfaces) that aren't already in the plan
         // so they get enriched and snapshotted for the acquirer
         injectAgentReferencedResources(planSnapshot, tenantId, organizationId);
@@ -1628,14 +1650,15 @@ public class WorkflowPublicationService {
         enrichPlanWithDatasourceData(planSnapshot, tenantId, organizationId);
         enrichPlanWithDatasourceItems(planSnapshot, tenantId, organizationId);
         enrichPlanWithAgentData(planSnapshot, tenantId, organizationId);
-        snapshotDataInputFiles(planSnapshot, publication.getId(), tenantId);
+        snapshotDataInputFiles(planSnapshot, publication.getId(),
+                CopyScope.of(tenantId, workflowOwnerTenantId, publication.getId()));
         // Audit D2 Gap#1: also scan interfaces[]._snapshot_data and
         // agents[]._snapshot_agent_{config,toolsConfig,skills} for FileRefs and
         // re-namespace them. Without this, FileRefs embedded in interface
         // variable_mapping resolutions or agent configs would survive at the
         // publisher's tenant path through publish, and the acquire-time
         // allowlist would refuse them, producing 401s on first render.
-        snapshotPlanEmbeddedFileRefs(planSnapshot, publication.getId(), tenantId);
+        snapshotPlanEmbeddedFileRefs(planSnapshot, publication.getId(), tenantId, workflowOwnerTenantId);
 
         // Snapshot sub-workflows referenced by cores, agents, and triggers
         // (recursive with cycle detection). publicationId is threaded so
@@ -2033,28 +2056,380 @@ public class WorkflowPublicationService {
      *
      * @return number of FileRef paths actually rewritten
      */
+    /**
+     * Whose files a publication is allowed to copy into its own storage namespace.
+     *
+     * <p>The copy pass had no such rule, on the stated grounds that "the snapshot was already
+     * captured from a validated run, so ALL FileRefs in it are legitimate". That premise does
+     * not hold: {@code items[].data} is interface data, and a {@code core:code} node's output
+     * lands there verbatim, so a publisher can author {@code {_type:"file",
+     * path:"3/private/contract.pdf"}} and publish it. The copy endpoint then infers the
+     * source tenant FROM THE PATH and downloads under it, the bytes land in
+     * {@code _publications/{pubId}/}, and from that moment the render-time ownership guard
+     * accepts them - so the file is HMAC-signed for every anonymous visitor, permanently.
+     *
+     * <p>The rule cannot simply be "the publisher's own tenant": a run, or a landing
+     * interface, in the same organization legitimately belongs to another member (see
+     * {@code ScopeGuard.isInStrictScope}), and refusing those would break cross-org
+     * publishing. So the second allowed tenant is stated by the component that can know it
+     * authoritatively - the orchestrator for a run snapshot, the snapshotter for a landing -
+     * rather than inferred from the very path being checked.
+     */
+    record CopyScope(String publisherTenantId, String sourceTenantId, String publicationNamespace) {
+
+        static CopyScope of(String publisherTenantId, String sourceTenantId, UUID publicationId) {
+            return new CopyScope(publisherTenantId, sourceTenantId, namespaceOf(publicationId));
+        }
+
+        boolean allows(String path) {
+            if (!StorageKeys.isWellFormed(path)) return false;
+            if (publicationNamespace != null && path.startsWith(publicationNamespace)) return true;
+            String owner = StorageKeys.namespaceOf(path);
+            if (owner == null) return false;
+            return owner.equals(publisherTenantId) || owner.equals(sourceTenantId);
+        }
+
+        String describe() {
+            return "publisher=" + publisherTenantId + " source=" + sourceTenantId;
+        }
+    }
+
+    /**
+     * Copy into {@code _publications/{pubId}/} the files referenced by the publication's
+     * LANDING interface, so a landing page stops rendering the publisher's live files.
+     *
+     * <p>A landing snapshot is presentation-only and never cloned into an acquirer, which is
+     * why {@code LandingInterfaceSnapshotter} embeds the interface's {@code data} verbatim.
+     * "Never cloned" is not "never read": the marketplace renders it for every visitor, so a
+     * file left at the publisher's path makes the card depend on the publisher not deleting
+     * it. This closes that, for AGENT ({@code agentSnapshot.landingInterface}) and for
+     * WORKFLOW / TABLE / SKILL ({@code planSnapshot.landingInterface}) alike.
+     *
+     * <p><strong>MUST be called AFTER the publication has been saved.</strong> The id is
+     * assigned by {@code @PrePersist}, so before the first save {@code getId()} is null and
+     * there is no namespace to copy into. Callers that got this wrong did not fail, they
+     * silently skipped, which is why this logs instead of returning quietly.
+     *
+     * <p>Idempotent: a path already under {@code _publications/} is skipped, so a re-publish
+     * copies nothing.
+     *
+     * <p>Mutates the entity; persisting it is the caller's business. On a publish the entity
+     * is managed, so the mutation is flushed at the caller's commit. On the repair sweep,
+     * which runs outside any transaction, {@code ShowcaseFileNamespaceRepairService} saves
+     * once after both passes - and {@code NOT_SUPPORTED} is what makes that ONE save true
+     * there: the class is {@code @Transactional}, so without it every call through the proxy
+     * opened its own transaction whose commit flushed the entity anyway, three writes per
+     * publication. (It does nothing for a caller inside this class, which bypasses the proxy;
+     * those are all inside a publish transaction that flushes at its own commit regardless.)
+     *
+     * <p>It also does not save. {@code SimpleJpaRepository.save} is a transaction boundary, so
+     * a failure inside it would mark a shared publish transaction rollback-only BEFORE the
+     * catch below could run, and "best-effort" would be a lie.
+     *
+     * <p><strong>This method never throws.</strong> That is not tidiness, it is the only
+     * thing that makes "best-effort" true here. The class is {@code @Transactional}, so a
+     * call from {@code AgentPublicationService} or {@code ResourcePublicationService} goes
+     * through the proxy and joins their publish transaction; an exception escaping would
+     * make the interceptor mark that transaction rollback-only BEFORE the caller's catch
+     * ever runs, and the publish would then die at commit with {@code
+     * UnexpectedRollbackException} - a successful publish destroyed because a file failed to
+     * be re-homed. Removing a method-level annotation does not help: the class-level one is
+     * what the proxy reads. {@code Propagation.REQUIRES_NEW} does not help either, because
+     * the publication row it needs was inserted by the still-uncommitted outer transaction.
+     * So: catch everything, log, return 0.
+     *
+     * @return number of files re-homed; 0 leaves the entity untouched and unsaved, and is
+     *         also what a failure reports
+     */
+    @Transactional(propagation = Propagation.NOT_SUPPORTED)
+    public int materializeLandingFiles(WorkflowPublicationEntity publication, String tenantId) {
+        return materializeLanding(publication, tenantId).copied();
+    }
+
+    /**
+     * The outcome of a landing pass: how many files moved, and what went wrong if anything.
+     *
+     * <p>A plain {@code int} could not tell "nothing to do" from "everything failed", and the
+     * repair sweep reported the second as the first.
+     */
+    public record LandingCopyResult(int copied, String error) {
+        public boolean failed() {
+            return error != null;
+        }
+    }
+
+    /**
+     * As {@link #materializeLandingFiles}, but saying whether it failed. Never throws, for the
+     * reason given there.
+     */
+    @Transactional(propagation = Propagation.NOT_SUPPORTED)
+    public LandingCopyResult materializeLanding(WorkflowPublicationEntity publication, String tenantId) {
+        try {
+            return new LandingCopyResult(doMaterializeLandingFiles(publication, tenantId), null);
+        } catch (RuntimeException e) {
+            logger.warn("[ShowcaseSnapshot/files] landing re-homing failed for pub {}: {}",
+                    publication == null ? null : publication.getId(), e.toString());
+            return new LandingCopyResult(0, e.toString());
+        }
+    }
+
+    private int doMaterializeLandingFiles(WorkflowPublicationEntity publication, String tenantId) {
+        if (publication == null) return 0;
+        UUID publicationId = publication.getId();
+        if (publicationId == null) {
+            logger.warn("[ShowcaseSnapshot/files] materializeLandingFiles called before the publication was saved "
+                    + "(publisher={}); landing files stay at the publisher's path", tenantId);
+            return 0;
+        }
+        // The publisher of record, not the caller: an ORG publication can be re-published by
+        // another member of the same org, and the files are still the original publisher's.
+        // Using the caller's tenant there would refuse every URL string as foreign and leave
+        // the publication reading live files - the exact invariant this exists to establish.
+        String publisherId = publication.getPublisherId() != null
+                ? publication.getPublisherId() : tenantId;
+        int copied = 0;
+        // Deep copies, for the reason spelled out in repairSnapshotFileNamespace: the pass
+        // rewrites as it goes, and mutating the entity own map persists those edits at
+        // commit even when nothing was copied and this method saved nothing.
+        Map<String, Object> agentSnapshot = hasLanding(publication.getAgentSnapshot(), false)
+                ? deepCopy(publication.getAgentSnapshot()) : null;
+        int agentCopied = copyLandingInterfaceFiles(agentSnapshot, publicationId, publisherId, "landing-agent");
+        if (agentCopied > 0) {
+            publication.setAgentSnapshot(agentSnapshot);
+            // The label is derived from the snapshot, so every write recomputes it
+            // (CeExclusiveApplyCallsiteInvariantTest). Re-homing a path cannot change the
+            // feature set, so on a publish this reasserts the value just computed. On the
+            // repair sweep it can genuinely move: an old publication is re-labelled with
+            // TODAY detector rules, which is the point of the invariant (a stale label lets
+            // an app that cannot run on managed cloud stay installable there) but is a real
+            // side effect of a file repair. Pinned by ShowcaseFileNamespaceRepairServiceTest
+            // so it stays a decision rather than a drift.
+            CeExclusiveFeatureDetector.applyTo(publication);
+            copied += agentCopied;
+        }
+        boolean planDataAtTopLevel =
+                publication.getPublicationType() == WorkflowPublicationEntity.PublicationType.INTERFACE;
+        Map<String, Object> planSnapshot = hasLanding(publication.getPlanSnapshot(), planDataAtTopLevel)
+                ? deepCopy(publication.getPlanSnapshot()) : null;
+        int planCopied = copyLandingFilesInPlan(planSnapshot, publication, publicationId, publisherId);
+        if (planCopied > 0) {
+            publication.setPlanSnapshot(planSnapshot);
+            CeExclusiveFeatureDetector.applyTo(publication);
+            copied += planCopied;
+        }
+        if (copied > 0) {
+            logger.info("[ShowcaseSnapshot/files] re-homed {} landing file(s) into the publication namespace pub={}",
+                    copied, publicationId);
+        }
+        return copied;
+    }
+
+    /**
+     * Where a plan-carried landing keeps its data depends on the publication type.
+     *
+     * <p>TABLE / SKILL attach a separate landing interface, so the payload sits under
+     * {@code landingInterface.data}. An INTERFACE publication has no separate landing: the
+     * resource IS the landing, and the marketplace reads {@code planSnapshot.data} at top
+     * level (see the landing-snapshot endpoint, which for this type reads {@code plan.data}
+     * directly). Handling only the first shape left the one type whose landing genuinely is
+     * an interface reading the publisher live files.
+     */
+    @SuppressWarnings("unchecked")
+    private int copyLandingFilesInPlan(Map<String, Object> planSnapshot,
+                                        WorkflowPublicationEntity publication,
+                                        UUID publicationId, String tenantId) {
+        if (planSnapshot == null) return 0;
+        if (publication.getPublicationType() == WorkflowPublicationEntity.PublicationType.INTERFACE) {
+            Object data = planSnapshot.get("data");
+            if (!(data instanceof Map<?, ?>)) return 0;
+            DataMapCopy result = copyDataMapFiles((Map<String, Object>) data, publicationId,
+                    CopyScope.of(tenantId, null, publicationId), "landing-interface");
+            planSnapshot.put("data", result.data());
+            return result.copied();
+        }
+        return copyLandingInterfaceFiles(planSnapshot, publicationId, tenantId, "landing-plan");
+    }
+
+    /**
+     * Cheap pre-check so the sweep does not Jackson round-trip a multi-MB snapshot for the
+     * large majority of publications that carry no landing payload at all.
+     */
+    private static boolean hasLanding(Map<String, Object> snapshot, boolean dataAtTopLevel) {
+        if (snapshot == null) return false;
+        return dataAtTopLevel ? snapshot.get("data") instanceof Map
+                : snapshot.get("landingInterface") instanceof Map;
+    }
+
+
+    /** The mapper the file passes use, so a dry run cannot disagree with the real run. */
+    public ObjectMapper fileWalkObjectMapper() {
+        return objectMapper;
+    }
+
+    /** The publication's own storage prefix, the second half of the ownership test. */
+    private static String namespaceOf(UUID publicationId) {
+        return publicationId == null ? null : "_publications/" + publicationId + "/";
+    }
+
+    /** Detached deep copy of a JSONB-backed map; {@code null} in, {@code null} out. */
+    private Map<String, Object> deepCopy(Map<String, Object> source) {
+        if (source == null) return null;
+        return objectMapper.convertValue(source, new TypeReference<Map<String, Object>>() {});
+    }
+
+    /**
+     * Copy the FileRefs held by {@code <snapshot>.landingInterface.data}.
+     *
+     * <p>Same trio as {@link #walkInterfaceRenderItems}, and for the same reason: a landing
+     * template reads its media out of {@code data}, where a reference can be a FileRef map,
+     * a proxy URL string, or a FileRef buried in a JSON-encoded string field.
+     */
+    @SuppressWarnings("unchecked")
+    private int copyLandingInterfaceFiles(Map<String, Object> snapshot, UUID publicationId,
+                                          String publisherId, String sourceLabel) {
+        if (snapshot == null) return 0;
+        Object landing = snapshot.get("landingInterface");
+        if (!(landing instanceof Map<?, ?> landingMap)) return 0;
+        Object data = ((Map<String, Object>) landingMap).get("data");
+        if (!(data instanceof Map<?, ?> dataMap)) return 0;
+        // The landing snapshot states which tenant owns the interface it was built from,
+        // so a cross-org landing keeps working without the scope having to guess.
+        String landingOwner = ((Map<String, Object>) landingMap)
+                .get(LandingInterfaceSnapshotter.INTERNAL_SOURCE_TENANT_KEY) instanceof String t ? t : null;
+        DataMapCopy result = copyDataMapFiles((Map<String, Object>) dataMap, publicationId,
+                CopyScope.of(publisherId, landingOwner, publicationId), sourceLabel);
+        ((Map<String, Object>) landingMap).put("data", result.data());
+        return result.copied();
+    }
+
+    /**
+     * The same trio {@link #walkInterfaceRenderItems} runs on {@code items[].data}, and for
+     * the same reason: a reference in an interface data map can be a FileRef, a proxy URL
+     * string, or a FileRef buried in a JSON-encoded string field.
+     */
+    private record DataMapCopy(int copied, Map<String, Object> data) {
+    }
+
+    /**
+     * The same trio {@link #walkInterfaceRenderItems} runs on {@code items[].data}: a
+     * reference in an interface data map can be a FileRef, a proxy URL string, or a FileRef
+     * buried in a JSON-encoded string field.
+     *
+     * <p>Works on a detached copy and hands it back only if something actually moved, for two
+     * reasons. The pass rewrites as it goes - a URL string becomes a FileRef map before any
+     * copy is attempted - and on an install with no signing key
+     * {@code ShowcaseFileRefRewriter} leaves a FileRef alone, so a rewrite that copied nothing
+     * turns a URL the template used to render into a serialized Map, immediately and for good.
+     * And the argument may be an immutable {@code Map.of} assembled by an enricher, so writing
+     * through it would throw inside the publish transaction.
+     *
+     * @return the rewritten map and how many files moved; the caller puts it back where the
+     *         original came from
+     */
+    private DataMapCopy copyDataMapFiles(Map<String, Object> data, UUID publicationId,
+                                          CopyScope scope, String sourceLabel) {
+        return copyDataMapFiles(data, publicationId, scope, sourceLabel, new HashMap<>());
+    }
+
+    private DataMapCopy copyDataMapFiles(Map<String, Object> data, UUID publicationId,
+                                          CopyScope scope, String sourceLabel,
+                                          Map<String, Map<String, Object>> copiedByPath) {
+        Map<String, Object> working = deepCopy(data);
+        int[] count = new int[]{0};
+        normalizeProxyUrlsInMap(working, scope);
+        walkAndCopyFileRefs(working, publicationId, scope, sourceLabel, count, copiedByPath);
+        copyFileRefsInJsonStrings(working, publicationId, scope, sourceLabel, count, copiedByPath);
+        return new DataMapCopy(count[0], count[0] > 0 ? working : data);
+    }
+
+    /**
+     * Re-run the publish-time file copy over a snapshot that is ALREADY stored, so a
+     * publication whose media still point at the publisher's own storage stops
+     * depending on files the publisher can delete.
+     *
+     * <p>A share is meant to be self-contained: {@code copyFileRefsInRunState} copies
+     * every referenced file into {@code _publications/{pubId}/} at publish time so the
+     * marketplace never reads the publisher's live tenant. Two populations escaped it and
+     * are still one deletion away from a broken page: publications made before that copy
+     * existed, and any publication whose interface data carried a file reference flattened
+     * into a URL string (a {@code core:public_link} output), which the normalizer did not
+     * recognise until {@link FileProxyUrls} taught it to.
+     *
+     * <p>Idempotent by construction: {@code walkAndCopyFileRefs} skips a path already under
+     * {@code _publications/}, so a second run copies nothing. Best-effort per file, exactly
+     * like the publish path: a copy failure leaves that one path pointing at the source.
+     *
+     * <p>Mutates, does not persist, and {@code NOT_SUPPORTED} is what makes that true. The
+     * class is {@code @Transactional}, so merely leaving the method unannotated gave it its
+     * OWN {@code REQUIRED} transaction on the request-bound EntityManager, whose commit
+     * dirty-checked and flushed the very entity this says it does not write - three writes per
+     * repaired publication, and a partial mutation persisted even when the method reported 0.
+     * Suspending instead means the caller decides, once, after both passes.
+     *
+     * <p>Scope is deliberately identical to the publish pass (runState, aggregatedSteps,
+     * interfaceRenders). {@code planSnapshot.landingInterface} is NOT walked here either;
+     * a file reference living only there is still served, because
+     * {@link ShowcaseFileRefRewriter} signs it fresh on every read.
+     *
+     * @return number of paths re-homed, 0 when the publication was already self-contained
+     */
+    @Transactional(propagation = Propagation.NOT_SUPPORTED)
+    public int repairSnapshotFileNamespace(WorkflowPublicationEntity pub) {
+        Map<String, Object> stored = pub.getShowcaseSnapshot();
+        if (stored == null || stored.isEmpty()) return 0;
+        // Work on a DETACHED deep copy, never on the entity own map. The pass rewrites as it
+        // goes - a URL string becomes a FileRef map before any copy is even attempted - and
+        // Hibernate deep-copies a JSONB-mapped Map at load, so mutating the live one makes
+        // those edits dirty and they are flushed at commit whatever this method returns. A
+        // publication reported as needing nothing would then be quietly rewritten, and on an
+        // install with no signing key that rewrite is a regression: the rewriter leaves the
+        // payload alone and the template renders a serialized Map where a working URL was.
+        Map<String, Object> snapshot = deepCopy(stored);
+        int copied = copyFileRefsInRunState(snapshot, pub.getId(), pub.getPublisherId(),
+                pub.getShowcaseRunId());
+        if (copied == 0) return 0;
+        pub.setShowcaseSnapshot(snapshot);
+        logger.info("[ShowcaseSnapshot/repair] re-homed {} file path(s) into the publication namespace pub={}",
+                copied, pub.getId());
+        return copied;
+    }
+
     @SuppressWarnings("unchecked")
     private int copyFileRefsInRunState(Map<String, Object> snapshot, UUID publicationId,
                                         String tenantId, String sourceRunIdPublic) {
         if (snapshot == null) return 0;
         // Scan the run-state branches that hold step outputs / global data PLUS
         // the interfaceRenders subtree the marketplace actually reads at render
-        // time (`ShowcaseSnapshotReader.readInterfaceRender` → items[].data).
+        // time (`ShowcaseSnapshotReader.readInterfaceRender` → items[].data) PLUS
+        // the stepFiles section behind the canvas node file pills.
+        // Adding a branch here means adding it to `ShowcaseFileNamespaceRepairService`
+        // too - it mirrors this method branch for branch to decide what is still
+        // pending, and a branch it does not know about reads as clean forever.
         // Without walking interfaceRenders, the captured items[].data keep the
         // publisher's tenant FileRef path - the marketplace `<img>` works only
         // as long as the publisher's source S3 file survives.
         // Touching planSnapshot here would re-copy data_input files which are
         // already handled by snapshotDataInputFiles() at publish time.
+        // The orchestrator states which tenant owns the captured run; it validated the
+        // caller's scope against it, so it is the authoritative second allowed tenant.
+        String runOwner = snapshot.get("_sourceTenantId") instanceof String t ? t : null;
+        CopyScope scope = CopyScope.of(tenantId, runOwner, publicationId);
         int[] count = new int[]{0};
+        // ONE memo for every branch below. The same file is legitimately reachable from
+        // several of them - on an unpinned capture a step's FileRef sits in
+        // `runState.steps[].output` AND in `stepFiles`, and an interface renders the very file
+        // its node produced - and each is a distinct map instance, so without this the bytes
+        // are downloaded and re-uploaded once per occurrence.
+        Map<String, Map<String, Object>> copiedByPath = new HashMap<>();
         Object runState = snapshot.get("runState");
         if (runState instanceof Map) {
-            walkAndCopyFileRefs((Map<String, Object>) runState, publicationId, tenantId,
-                    sourceRunIdPublic, count);
+            walkAndCopyFileRefs((Map<String, Object>) runState, publicationId, scope,
+                    sourceRunIdPublic, count, copiedByPath);
         }
         Object aggregatedSteps = snapshot.get("aggregatedSteps");
         if (aggregatedSteps instanceof Map) {
-            walkAndCopyFileRefs((Map<String, Object>) aggregatedSteps, publicationId, tenantId,
-                    sourceRunIdPublic, count);
+            walkAndCopyFileRefs((Map<String, Object>) aggregatedSteps, publicationId, scope,
+                    sourceRunIdPublic, count, copiedByPath);
         }
         // interfaceRenders.<id>.defaultRender.items[].data + byEpoch.<n>.items[].data:
         // canonical marketplace render surface. triggerData intentionally NOT
@@ -2067,19 +2442,29 @@ public class WorkflowPublicationService {
                 Map<String, Object> entry = (Map<String, Object>) entryMap;
                 Object defaultRender = entry.get("defaultRender");
                 if (defaultRender instanceof Map<?, ?> defMap) {
-                    walkInterfaceRenderItems((Map<String, Object>) defMap, publicationId, tenantId,
-                            sourceRunIdPublic, count);
+                    walkInterfaceRenderItems((Map<String, Object>) defMap, publicationId, scope,
+                            sourceRunIdPublic, count, copiedByPath);
                 }
                 Object byEpoch = entry.get("byEpoch");
                 if (byEpoch instanceof Map<?, ?> epochs) {
                     for (Object perEpoch : epochs.values()) {
                         if (perEpoch instanceof Map<?, ?> perEpochMap) {
                             walkInterfaceRenderItems((Map<String, Object>) perEpochMap, publicationId,
-                                    tenantId, sourceRunIdPublic, count);
+                                    scope, sourceRunIdPublic, count, copiedByPath);
                         }
                     }
                 }
             }
+        }
+        // stepFiles.<epoch>.<stepAlias>: the FileRef the canvas hangs under a node that
+        // produced a file. Same reason as interfaceRenders - the marketplace READS it, so a
+        // path left in the publisher's namespace makes the node preview depend on the
+        // publisher never deleting that file. The section is FileRefs and nothing else, so
+        // the generic walk covers it whole.
+        Object stepFiles = snapshot.get("stepFiles");
+        if (stepFiles instanceof Map) {
+            walkAndCopyFileRefs((Map<String, Object>) stepFiles, publicationId, scope,
+                    sourceRunIdPublic, count, copiedByPath);
         }
         return count[0];
     }
@@ -2097,61 +2482,88 @@ public class WorkflowPublicationService {
      */
     @SuppressWarnings("unchecked")
     private void walkInterfaceRenderItems(Map<String, Object> renderEntry, UUID publicationId,
-                                           String tenantId, String sourceRunIdPublic, int[] count) {
+                                           CopyScope scope, String sourceRunIdPublic, int[] count,
+                                           Map<String, Map<String, Object>> copiedByPath) {
         Object items = renderEntry.get("items");
         if (!(items instanceof List<?> itemList)) return;
         for (Object item : itemList) {
             if (!(item instanceof Map<?, ?> itemMap)) continue;
             Object data = ((Map<String, Object>) itemMap).get("data");
             if (data instanceof Map<?, ?> dataMap) {
-                normalizeProxyUrlsInMap((Map<String, Object>) dataMap);
-                walkAndCopyFileRefs(data, publicationId, tenantId, sourceRunIdPublic, count);
-                copyFileRefsInJsonStrings((Map<String, Object>) dataMap, publicationId, tenantId, sourceRunIdPublic, count);
+                DataMapCopy result = copyDataMapFiles((Map<String, Object>) dataMap,
+                        publicationId, scope, sourceRunIdPublic, copiedByPath);
+                count[0] += result.copied();
+                ((Map<String, Object>) itemMap).put("data", result.data());
             }
         }
     }
 
     // ─── Proxy URL → FileRef normalization ────────────────────────────────────
 
-    private static final String PROXY_PREFIX = "/api/files/proxy?";
+    /**
+     * Turn a string that is entirely a file-proxy URL into a structured FileRef,
+     * or return {@code null} when it is anything else.
+     *
+     * <p>Covers BOTH shapes {@link FileProxyUrls} knows: the authenticated
+     * {@code /api/files/proxy?key=…} baked in by the interface renderer, and the
+     * public {@code /api/files/proxy-signed?key=…&exp=…&sig=…} minted by the
+     * {@code core:public_link} node - the latter absolute, carrying the install's
+     * origin. Recognising only the first left every public-link URL out of the
+     * publish-time copy below, so the publication never owned those bytes and the
+     * frozen {@code exp} 403'd a few hours after publish with no way to refresh.
+     */
+    private Map<String, Object> fileRefFromProxyUrl(String value, CopyScope scope) {
+        // Trust, not just shape: this value is publisher input and the next thing that
+        // happens to the key is a file copy. See PublicationFileUrlResolver.
+        String key = fileUrlResolver.trustedStorageKeyOf(value, scope.publisherTenantId(),
+                scope.sourceTenantId(), scope.publicationNamespace());
+        if (key == null) return null;
+        Map<String, Object> fileRef = new LinkedHashMap<>();
+        fileRef.put("_type", "file");
+        fileRef.put("path", key);
+        fileRef.put("name", extractFileName(key));
+        fileRef.put("mimeType", guessMimeType(key));
+        return fileRef;
+    }
 
     /**
-     * Recursively walk a Map and convert any string value that looks like
-     * {@code /api/files/proxy?key=<encoded_key>&...} into a structured FileRef
-     * map {@code {_type:"file", path:<decoded_key>, name:<filename>}}.
-     * Also detects JSON-encoded strings (arrays/objects) that embed proxy URLs
-     * and normalizes them in-place.
+     * Recursively walk a Map and convert any string value that is a file-proxy URL
+     * ({@code /api/files/proxy?key=…} or {@code /api/files/proxy-signed?key=…}, relative
+     * or absolute) into a structured FileRef map
+     * {@code {_type:"file", path:<decoded_key>, name:<filename>}}, so the copy pass below
+     * sees it as a file. Also detects JSON-encoded strings (arrays/objects) that embed
+     * such URLs and normalizes them in-place.
      */
     @SuppressWarnings("unchecked")
-    private void normalizeProxyUrlsInMap(Map<String, Object> map) {
+    private void normalizeProxyUrlsInMap(Map<String, Object> map, CopyScope scope) {
         for (Map.Entry<String, Object> entry : map.entrySet()) {
             Object value = entry.getValue();
             if (value instanceof String s) {
-                Object normalized = normalizeProxyUrlValue(s);
+                Object normalized = normalizeProxyUrlValue(s, scope);
                 if (normalized != value) {
                     entry.setValue(normalized);
                 }
             } else if (value instanceof Map<?, ?> nested) {
-                normalizeProxyUrlsInMap((Map<String, Object>) nested);
+                normalizeProxyUrlsInMap((Map<String, Object>) nested, scope);
             } else if (value instanceof List<?> list) {
-                normalizeProxyUrlsInList((List<Object>) list);
+                normalizeProxyUrlsInList((List<Object>) list, scope);
             }
         }
     }
 
     @SuppressWarnings("unchecked")
-    private void normalizeProxyUrlsInList(List<Object> list) {
+    private void normalizeProxyUrlsInList(List<Object> list, CopyScope scope) {
         for (int i = 0; i < list.size(); i++) {
             Object value = list.get(i);
             if (value instanceof String s) {
-                Object normalized = normalizeProxyUrlValue(s);
+                Object normalized = normalizeProxyUrlValue(s, scope);
                 if (normalized != value) {
                     list.set(i, normalized);
                 }
             } else if (value instanceof Map<?, ?> nested) {
-                normalizeProxyUrlsInMap((Map<String, Object>) nested);
+                normalizeProxyUrlsInMap((Map<String, Object>) nested, scope);
             } else if (value instanceof List<?> nested) {
-                normalizeProxyUrlsInList((List<Object>) nested);
+                normalizeProxyUrlsInList((List<Object>) nested, scope);
             }
         }
     }
@@ -2162,24 +2574,15 @@ public class WorkflowPublicationService {
      * Otherwise return the original string (identity).
      */
     @SuppressWarnings("unchecked")
-    private Object normalizeProxyUrlValue(String s) {
+    private Object normalizeProxyUrlValue(String s, CopyScope scope) {
         // Direct proxy URL string → FileRef map
-        if (s.startsWith(PROXY_PREFIX)) {
-            String key = extractKeyFromProxyUrl(s);
-            if (key != null && !key.isBlank()) {
-                Map<String, Object> fileRef = new LinkedHashMap<>();
-                fileRef.put("_type", "file");
-                fileRef.put("path", key);
-                fileRef.put("name", extractFileName(key));
-                fileRef.put("mimeType", guessMimeType(key));
-                return fileRef;
-            }
-        }
+        Map<String, Object> direct = fileRefFromProxyUrl(s, scope);
+        if (direct != null) return direct;
         // JSON-encoded string that may contain embedded proxy URLs
-        if ((s.startsWith("[") || s.startsWith("{")) && s.contains(PROXY_PREFIX)) {
+        if ((s.startsWith("[") || s.startsWith("{")) && s.contains(FileProxyUrls.PATH_MARKER)) {
             try {
                 Object parsed = objectMapper.readValue(s, Object.class);
-                if (normalizeProxyUrlsInParsedJson(parsed)) {
+                if (normalizeProxyUrlsInParsedJson(parsed, scope)) {
                     return objectMapper.writeValueAsString(parsed);
                 }
             } catch (Exception ignored) {
@@ -2194,44 +2597,34 @@ public class WorkflowPublicationService {
      * proxy URL strings with FileRef maps. Returns true if any replacement was made.
      */
     @SuppressWarnings("unchecked")
-    private boolean normalizeProxyUrlsInParsedJson(Object node) {
+    private boolean normalizeProxyUrlsInParsedJson(Object node, CopyScope scope) {
         boolean changed = false;
         if (node instanceof Map<?, ?> map) {
             Map<String, Object> m = (Map<String, Object>) map;
             for (Map.Entry<String, Object> entry : m.entrySet()) {
                 Object value = entry.getValue();
-                if (value instanceof String s && s.startsWith(PROXY_PREFIX)) {
-                    String key = extractKeyFromProxyUrl(s);
-                    if (key != null && !key.isBlank()) {
-                        Map<String, Object> fileRef = new LinkedHashMap<>();
-                        fileRef.put("_type", "file");
-                        fileRef.put("path", key);
-                        fileRef.put("name", extractFileName(key));
-                        fileRef.put("mimeType", guessMimeType(key));
+                if (value instanceof String s) {
+                    Map<String, Object> fileRef = fileRefFromProxyUrl(s, scope);
+                    if (fileRef != null) {
                         entry.setValue(fileRef);
                         changed = true;
                     }
                 } else if (value instanceof Map || value instanceof List) {
-                    changed |= normalizeProxyUrlsInParsedJson(value);
+                    changed |= normalizeProxyUrlsInParsedJson(value, scope);
                 }
             }
         } else if (node instanceof List<?> list) {
             List<Object> mutableList = (List<Object>) list;
             for (int i = 0; i < mutableList.size(); i++) {
                 Object value = mutableList.get(i);
-                if (value instanceof String s && s.startsWith(PROXY_PREFIX)) {
-                    String key = extractKeyFromProxyUrl(s);
-                    if (key != null && !key.isBlank()) {
-                        Map<String, Object> fileRef = new LinkedHashMap<>();
-                        fileRef.put("_type", "file");
-                        fileRef.put("path", key);
-                        fileRef.put("name", extractFileName(key));
-                        fileRef.put("mimeType", guessMimeType(key));
+                if (value instanceof String s) {
+                    Map<String, Object> fileRef = fileRefFromProxyUrl(s, scope);
+                    if (fileRef != null) {
                         mutableList.set(i, fileRef);
                         changed = true;
                     }
                 } else if (value instanceof Map || value instanceof List) {
-                    changed |= normalizeProxyUrlsInParsedJson(value);
+                    changed |= normalizeProxyUrlsInParsedJson(value, scope);
                 }
             }
         }
@@ -2247,36 +2640,28 @@ public class WorkflowPublicationService {
      */
     @SuppressWarnings("unchecked")
     private void copyFileRefsInJsonStrings(Map<String, Object> map, UUID publicationId,
-                                            String tenantId, String sourceRunIdPublic, int[] count) {
+                                            CopyScope scope, String sourceRunIdPublic, int[] count) {
+        copyFileRefsInJsonStrings(map, publicationId, scope, sourceRunIdPublic, count, new HashMap<>());
+    }
+
+    /** @param copiedByPath see {@link #walkAndCopyFileRefs}: a file the caller has already
+     *  copied under this memo is adopted rather than transferred again. */
+    @SuppressWarnings("unchecked")
+    private void copyFileRefsInJsonStrings(Map<String, Object> map, UUID publicationId,
+                                            CopyScope scope, String sourceRunIdPublic, int[] count,
+                                            Map<String, Map<String, Object>> copiedByPath) {
         for (Map.Entry<String, Object> entry : map.entrySet()) {
             Object value = entry.getValue();
             if (value instanceof String s && (s.startsWith("[") || s.startsWith("{")) && s.contains("\"_type\":\"file\"")) {
                 try {
                     Object parsed = objectMapper.readValue(s, Object.class);
-                    walkAndCopyFileRefs(parsed, publicationId, tenantId, sourceRunIdPublic, count);
+                    walkAndCopyFileRefs(parsed, publicationId, scope, sourceRunIdPublic, count, copiedByPath);
                     // Re-serialize - walkAndCopyFileRefs mutates paths in-place
                     entry.setValue(objectMapper.writeValueAsString(parsed));
                 } catch (Exception ignored) {
                     // Not valid JSON - leave as-is
                 }
             }
-        }
-    }
-
-    /**
-     * Extract the S3 key from a proxy URL string like
-     * {@code /api/files/proxy?key=1%2Fworkflow%2Frun%2Fstep%2Ffile.jpg&disposition=inline}.
-     */
-    private static String extractKeyFromProxyUrl(String url) {
-        int keyStart = url.indexOf("key=");
-        if (keyStart < 0) return null;
-        keyStart += 4; // skip "key="
-        int keyEnd = url.indexOf('&', keyStart);
-        String encoded = keyEnd > 0 ? url.substring(keyStart, keyEnd) : url.substring(keyStart);
-        try {
-            return java.net.URLDecoder.decode(encoded, java.nio.charset.StandardCharsets.UTF_8);
-        } catch (Exception e) {
-            return encoded; // fallback to encoded value
         }
     }
 
@@ -2306,8 +2691,34 @@ public class WorkflowPublicationService {
     }
 
     @SuppressWarnings("unchecked")
-    private void walkAndCopyFileRefs(Object node, UUID publicationId, String tenantId,
+    private void walkAndCopyFileRefs(Object node, UUID publicationId, CopyScope scope,
                                       String sourceRunIdPublic, int[] count) {
+        walkAndCopyFileRefs(node, publicationId, scope, sourceRunIdPublic, count, new HashMap<>());
+    }
+
+    /**
+     * @param copiedByPath source path -> the {@code {path, id}} it was copied to. The same file
+     *        legitimately appears in several places (on an unpinned capture a step's FileRef
+     *        sits in {@code runState.steps[].output} AND in {@code stepFiles}; an interface
+     *        renders the file its node produced), and each is a DISTINCT map instance, so
+     *        without this the bytes are downloaded and re-uploaded once per occurrence - paying
+     *        the transfer twice and leaving two identical objects in the publication's
+     *        namespace.
+     *        <p>Its REACH is whatever the caller shares it across, and that is not the whole
+     *        publish: {@link #copyFileRefsInRunState} threads ONE across every branch of the
+     *        snapshot, while the plan passes give each subtree its own through the 5-arg
+     *        overload, so a file reachable from both a plan subtree and the snapshot is still
+     *        transferred twice. Widening it further is a change to make deliberately, not by
+     *        assuming this is already global.
+     *        <p>Every occurrence is still rewritten, and still COUNTED. That count is not
+     *        cosmetic: {@code ShowcaseFileNamespaceRepairService.countPending} tallies
+     *        occurrences, and {@link #repairSnapshotFileNamespace} discards its rewritten
+     *        snapshot when the count is 0, so charging a memo hit nothing would make the sweep
+     *        report work it did as work it skipped.
+     */
+    private void walkAndCopyFileRefs(Object node, UUID publicationId, CopyScope scope,
+                                      String sourceRunIdPublic, int[] count,
+                                      Map<String, Map<String, Object>> copiedByPath) {
         if (node instanceof Map<?, ?> map) {
             Map<String, Object> m = (Map<String, Object>) map;
             // FileRef detection: STRICT contract - `_type == "file"` + non-empty
@@ -2316,26 +2727,43 @@ public class WorkflowPublicationService {
             // silently breaks rendering: a Map with bare `type:"file"` would
             // get copied here but never HMAC-signed at render time.
             //
-            // No tenant-prefix guard: the snapshot was already captured from a
-            // validated run, so ALL FileRefs in it are legitimate for this
-            // publication. In cross-org scenarios the publishing user's tenantId
-            // differs from the file owner's tenant (files live under the
-            // workflow owner's path). Filtering on tenantId would silently skip
-            // those files, leaving raw FileRefs in the snapshot that the
-            // ShowcaseFileRefRewriter refuses to sign → broken marketplace images.
-            // The copy destination (_publications/{pubId}/...) is publication-
-            // scoped, so no cross-tenant leak is possible.
+            // Scope guard, below. The rule cannot be "the publisher's tenant" alone: in a
+            // cross-org publish the files live under the workflow owner's path, and refusing
+            // those would leave raw FileRefs the ShowcaseFileRefRewriter will not sign, i.e.
+            // broken marketplace images. So the second allowed owner is STATED by whoever can
+            // know it (see CopyScope) rather than inferred from the path being checked - which
+            // is what "the snapshot came from a validated run, so everything in it is
+            // legitimate" used to assume, wrongly: items[].data is interface data, and a
+            // core:code node's output lands there verbatim.
             if ("file".equals(m.get("_type")) && m.get("path") instanceof String oldPath
                     && !oldPath.isBlank() && !oldPath.startsWith("_publications/")) {
-                // Audit trail: log when the file belongs to a different tenant
-                // than the publisher (cross-org copy). This is expected and safe
-                // but worth tracking for diagnostics.
-                int slashIdx = oldPath.indexOf('/');
-                String fileOwnerTenant = slashIdx > 0 ? oldPath.substring(0, slashIdx) : null;
-                if (fileOwnerTenant != null && tenantId != null && !tenantId.isBlank()
-                        && !fileOwnerTenant.equals(tenantId)) {
-                    logger.warn("[ShowcaseSnapshot/files] cross-tenant copy: publisher={} fileOwner={} path={} (pub={})",
-                            tenantId, fileOwnerTenant, oldPath, publicationId);
+                // The one place every FileRef copy passes through, so the scope rule cannot
+                // be bypassed by a future caller forgetting it.
+                if (!scope.allows(oldPath)) {
+                    logger.warn("[ShowcaseSnapshot/files] refusing a file outside the publication's scope: "
+                            + "path={} {} (pub={}) - left pointing at its origin",
+                            oldPath, scope.describe(), publicationId);
+                    return;
+                }
+                String fileOwnerTenant = StorageKeys.namespaceOf(oldPath);
+                if (fileOwnerTenant != null && !fileOwnerTenant.equals(scope.publisherTenantId())) {
+                    // Allowed and expected in a cross-org publish, still worth an audit line.
+                    logger.info("[ShowcaseSnapshot/files] cross-tenant copy: fileOwner={} {} path={} (pub={})",
+                            fileOwnerTenant, scope.describe(), oldPath, publicationId);
+                }
+
+                Map<String, Object> already = copiedByPath.get(oldPath);
+                if (already != null) {
+                    // Same bytes, already in this publication's namespace: adopt the result
+                    // instead of paying a second download + upload for an identical object.
+                    m.put("path", already.get("path"));
+                    if (already.get("id") instanceof String reusedId) {
+                        m.put("id", reusedId);
+                    } else {
+                        m.remove("id");
+                    }
+                    count[0]++;
+                    return;
                 }
 
                 String fileName = m.get("name") instanceof String s && !s.isBlank()
@@ -2365,11 +2793,15 @@ public class WorkflowPublicationService {
                         // id). If the copy returned no id, DROP the stale source id rather than leave
                         // it pointing at the publisher's row → the authenticated snapshot preview would
                         // 403/404 cross-tenant.
+                        Map<String, Object> copied = new HashMap<>();
+                        copied.put("path", newPath);
                         if (result.get("newId") instanceof String newId) {
                             m.put("id", newId);
+                            copied.put("id", newId);
                         } else {
                             m.remove("id");
                         }
+                        copiedByPath.put(oldPath, copied);
                         count[0]++;
                     } else {
                         logger.debug("[ShowcaseSnapshot/files] copy returned no newPath for {} (run={})",
@@ -2384,11 +2816,11 @@ public class WorkflowPublicationService {
                 return;
             }
             for (Object v : m.values()) {
-                walkAndCopyFileRefs(v, publicationId, tenantId, sourceRunIdPublic, count);
+                walkAndCopyFileRefs(v, publicationId, scope, sourceRunIdPublic, count, copiedByPath);
             }
         } else if (node instanceof List<?> list) {
             for (Object item : list) {
-                walkAndCopyFileRefs(item, publicationId, tenantId, sourceRunIdPublic, count);
+                walkAndCopyFileRefs(item, publicationId, scope, sourceRunIdPublic, count, copiedByPath);
             }
         }
     }
@@ -2421,7 +2853,25 @@ public class WorkflowPublicationService {
         }
     }
 
+    /**
+     * Copy one AI-screening replacement image into the publication namespace.
+     *
+     * <p>{@code sourcePath} arrives from the CALLER: {@code imageReplacements} is a request
+     * field on the publish and update endpoints, so its {@code storageKey} is whatever the
+     * publisher sent. It used to be handed to the copy endpoint with no scope at all, and
+     * that endpoint infers the source tenant FROM THE PATH and downloads as that owner - so
+     * naming {@code 3/private/contract.pdf} copied a stranger's file into the publication,
+     * where the render-time guard then accepts it (it is in the namespace now) and
+     * {@code ShowcaseSnapshotReader} substitutes a freshly signed URL into the public
+     * template. Same scope rule as every other copy.
+     */
     private String copyReplacementImageToPublicationNamespace(String sourcePath, UUID publicationId, String tenantId) {
+        CopyScope scope = CopyScope.of(tenantId, null, publicationId);
+        if (!scope.allows(sourcePath)) {
+            logger.warn("[ShowcaseSnapshot/ai-replace] refusing a replacement image outside the "
+                    + "publication's scope: path={} {} (pub={})", sourcePath, scope.describe(), publicationId);
+            return null;
+        }
         String fileName = extractFileName(sourcePath);
         String stepAlias = "ai-replace-" + Integer.toHexString(sourcePath.hashCode());
         String mimeType = guessMimeType(fileName);
@@ -3506,13 +3956,20 @@ public class WorkflowPublicationService {
      * at publish time we copy them to a publication-owned path via orchestrator.
      */
     @SuppressWarnings("unchecked")
-    void snapshotDataInputFiles(Map<String, Object> plan, UUID publicationId, String sourceTenantId) {
+    void snapshotDataInputFiles(Map<String, Object> plan, UUID publicationId, CopyScope scope) {
         if (publicationId == null) return;
         // organizationId=null: snapshot files land under the `_publications` namespace and are
         // served by the anonymous marketplace showcase via HMAC-by-path (no by-id lookup), so an
         // org-scoped storage row isn't required. The acquirer later re-copies them by path and
         // mints a fresh org-scoped id (SnapshotCloneService forwards the acquirer's org).
-        copyDataInputFiles(plan, "_publications", sourceTenantId, publicationId.toString(), "snapshot", null);
+        // sourceTenantId is left null so the copy endpoint infers the owner from the path,
+        // exactly as walkAndCopyFileRefs does - which is only safe because `scope` has already
+        // decided the path is one this publication may read. Forcing the publisher here instead
+        // looked like a guard but was not one: it merely 403'd a legitimate cross-org file, and
+        // it 403'd the mirror case too (a member uploading into another member's workflow).
+        // It is also no guard at all on CE, where MonolithFileStorageServiceAdapter overrides
+        // only download(key) and the tenant argument is ignored.
+        copyDataInputFiles(plan, "_publications", null, publicationId.toString(), "snapshot", null, scope);
     }
 
     /**
@@ -3540,15 +3997,36 @@ public class WorkflowPublicationService {
      */
     @SuppressWarnings("unchecked")
     void snapshotPlanEmbeddedFileRefs(Map<String, Object> plan, UUID publicationId, String tenantId) {
+        snapshotPlanEmbeddedFileRefs(plan, publicationId, tenantId, null);
+    }
+
+    @SuppressWarnings("unchecked")
+    void snapshotPlanEmbeddedFileRefs(Map<String, Object> plan, UUID publicationId, String tenantId,
+                                       String workflowOwnerTenantId) {
         if (publicationId == null || plan == null) return;
+        CopyScope scope = CopyScope.of(tenantId, workflowOwnerTenantId, publicationId);
         int[] count = new int[]{0};
         Object interfaces = plan.get("interfaces");
         if (interfaces instanceof List<?> ifaceList) {
             for (Object ifaceNode : ifaceList) {
                 if (!(ifaceNode instanceof Map<?, ?> ifaceMap)) continue;
                 Object data = ((Map<String, Object>) ifaceMap).get("_snapshot_data");
-                if (data != null) {
-                    walkAndCopyFileRefs(data, publicationId, tenantId, "plan-iface-data", count);
+                if (data instanceof Map<?, ?>) {
+                    // The same trio as items[].data. This is interface data too, so a
+                    // reference here is equally likely to be a URL string or to hide inside a
+                    // JSON-encoded field - and this subtree is the one an ACQUIRER clones, so
+                    // a reference left uncopied is refused by SnapshotCloneService's
+                    // allowlist and the clone renders a dead link.
+                    // copyDataMapFiles works on its own detached copy and adopts it only if
+                    // something moved, so the plan's own (possibly immutable) subtree is never
+                    // written through. Deep-copying here as well was a second full Jackson
+                    // round-trip per subtree on every publish.
+                    DataMapCopy result = copyDataMapFiles((Map<String, Object>) data,
+                            publicationId, scope, "plan-iface-data");
+                    count[0] += result.copied();
+                    ((Map<String, Object>) ifaceMap).put("_snapshot_data", result.data());
+                } else if (data != null) {
+                    walkAndCopyFileRefs(data, publicationId, scope, "plan-iface-data", count);
                 }
             }
         }
@@ -3558,16 +4036,48 @@ public class WorkflowPublicationService {
                 if (!(agentNode instanceof Map<?, ?> agentMap)) continue;
                 Map<String, Object> a = (Map<String, Object>) agentMap;
                 Object config = a.get("_snapshot_agent_config");
-                if (config != null) {
-                    walkAndCopyFileRefs(config, publicationId, tenantId, "plan-agent-config", count);
+                if (config instanceof Map<?, ?>) {
+                    // Same trio, same reason as _snapshot_data above: an agent's config or a
+                    // skill body can carry a reference written as a URL string.
+                    DataMapCopy configResult = copyDataMapFiles((Map<String, Object>) config,
+                            publicationId, scope, "plan-agent-config");
+                    count[0] += configResult.copied();
+                    a.put("_snapshot_agent_config", configResult.data());
+                } else if (config != null) {
+                    walkAndCopyFileRefs(config, publicationId, scope, "plan-agent-config", count);
                 }
                 Object toolsConfig = a.get("_snapshot_agent_toolsConfig");
-                if (toolsConfig != null) {
-                    walkAndCopyFileRefs(toolsConfig, publicationId, tenantId, "plan-agent-toolsConfig", count);
+                if (toolsConfig instanceof Map<?, ?>) {
+                    // Same trio, same reason as _snapshot_data above: an agent's config or a
+                    // skill body can carry a reference written as a URL string.
+                    DataMapCopy toolsConfigResult = copyDataMapFiles((Map<String, Object>) toolsConfig,
+                            publicationId, scope, "plan-agent-toolsConfig");
+                    count[0] += toolsConfigResult.copied();
+                    a.put("_snapshot_agent_toolsConfig", toolsConfigResult.data());
+                } else if (toolsConfig != null) {
+                    walkAndCopyFileRefs(toolsConfig, publicationId, scope, "plan-agent-toolsConfig", count);
                 }
                 Object skills = a.get("_snapshot_agent_skills");
-                if (skills != null) {
-                    walkAndCopyFileRefs(skills, publicationId, tenantId, "plan-agent-skills", count);
+                if (skills instanceof List<?> skillList) {
+                    // Skills are a LIST of maps (see the snapshot writer), which is why the
+                    // Map-shaped branch used here for config/toolsConfig would never have run.
+                    // Each skill body is walked like any other data map, so a reference written
+                    // as a URL string is caught rather than silently left behind.
+                    List<Object> rewrittenSkills = new ArrayList<>(skillList.size());
+                    for (Object skill : skillList) {
+                        if (skill instanceof Map<?, ?>) {
+                            DataMapCopy result = copyDataMapFiles((Map<String, Object>) skill,
+                                    publicationId, scope, "plan-agent-skills");
+                            count[0] += result.copied();
+                            rewrittenSkills.add(result.data());
+                        } else {
+                            walkAndCopyFileRefs(skill, publicationId, scope, "plan-agent-skills", count);
+                            rewrittenSkills.add(skill);
+                        }
+                    }
+                    a.put("_snapshot_agent_skills", rewrittenSkills);
+                } else if (skills != null) {
+                    walkAndCopyFileRefs(skills, publicationId, scope, "plan-agent-skills", count);
                 }
             }
         }
@@ -3597,6 +4107,19 @@ public class WorkflowPublicationService {
     @SuppressWarnings("unchecked")
     private void copyDataInputFiles(Map<String, Object> plan, String tenantId, String sourceTenantId,
                                     String workflowId, String runId, String organizationId) {
+        copyDataInputFiles(plan, tenantId, sourceTenantId, workflowId, runId, organizationId, null);
+    }
+
+    /**
+     * @param scope when non-null, the only owners whose files this copy may read. The copy
+     *        endpoint performs NO authorization of its own - it takes the source tenant from
+     *        the request or infers it from the path - so a caller that omits this is trusting
+     *        whatever path it was handed.
+     */
+    @SuppressWarnings("unchecked")
+    private void copyDataInputFiles(Map<String, Object> plan, String tenantId, String sourceTenantId,
+                                    String workflowId, String runId, String organizationId,
+                                    CopyScope scope) {
         Object coresRaw = plan.get("cores");
         if (!(coresRaw instanceof List<?> cores)) return;
 
@@ -3620,6 +4143,12 @@ public class WorkflowPublicationService {
                 Map<String, Object> fileMap = (Map<String, Object>) fileRaw;
                 String sourcePath = fileMap.get("path") != null ? fileMap.get("path").toString() : null;
                 if (sourcePath == null || sourcePath.isBlank()) continue;
+                if (sourcePath.startsWith("_publications/")) continue; // already re-homed
+                if (scope != null && !scope.allows(sourcePath)) {
+                    logger.warn("[DataInput/files] refusing a file outside the publication's scope: "
+                            + "path={} {} - left pointing at its origin", sourcePath, scope.describe());
+                    continue;
+                }
 
                 String fileName = fileMap.get("name") != null ? fileMap.get("name").toString() : "file";
                 String mimeType = fileMap.get("mimeType") != null ? fileMap.get("mimeType").toString() : "application/octet-stream";
@@ -3655,8 +4184,11 @@ public class WorkflowPublicationService {
                         logger.warn("Failed to copy DataInput file {}: no newPath in response", sourcePath);
                     }
                 } catch (Exception e) {
+                    // Best-effort, like every other copy pass. This one used to be dormant on a
+                    // first publish (the id was null until ensureId), so letting it throw would
+                    // have turned an unreadable data-input file into a failed publish where it
+                    // had silently succeeded.
                     logger.error("Failed to copy DataInput file {}: {}", sourcePath, e.getMessage());
-                    throw new RuntimeException("DataInput file copy failed: " + sourcePath, e);
                 }
             }
         }
@@ -4105,13 +4637,20 @@ public class WorkflowPublicationService {
                 // error triggers pointing at the root are caught - not just core sub_workflow nodes.
                 markSelfRefNodes(subPlan, mainWorkflowId);
                 if (publicationId != null) {
-                    snapshotDataInputFiles(subPlan, publicationId, tenantId);
+                    snapshotDataInputFiles(subPlan, publicationId, CopyScope.of(tenantId,
+                            wfData.get("tenantId") instanceof String subOwner ? subOwner : tenantId,
+                            publicationId));
                     // H3: re-namespace FileRefs EMBEDDED in this sub-workflow's interface
                     // (_snapshot_data) and agent (_snapshot_agent_{config,toolsConfig,skills})
                     // into the publication namespace. Without this, only the top-level plan's
                     // embedded FileRefs are copied (line ~1454), so a nested interface/agent file
                     // stays at the publisher path and 401s for the acquirer.
-                    snapshotPlanEmbeddedFileRefs(subPlan, publicationId, tenantId);
+                    // The SUB-workflow's own owner, read from the response that was just
+                    // scope-checked above. It can be another member of the same organization,
+                    // and leaving it out of the scope would refuse every one of its files,
+                    // leaving the acquirer's clone with paths its allowlist then rejects.
+                    snapshotPlanEmbeddedFileRefs(subPlan, publicationId, tenantId,
+                            wfData.get("tenantId") instanceof String subOwner ? subOwner : tenantId);
                 }
                 // Recurse with a PER-BRANCH ancestor set (a copy) so sibling subtrees don't
                 // suppress one another's shared children, while a cycle on THIS path is still cut.

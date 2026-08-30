@@ -569,6 +569,17 @@ public class CatalogToolBillingService {
                 || creditClient.markExternalScopeProviderDispatching(sourceId);
     }
 
+    /**
+     * Provider delivery is ambiguous after the external authority acknowledged
+     * DISPATCHING. Persist OUTCOME_UNKNOWN and retain the hold; callers must
+     * never replace this with a release.
+     */
+    public void recordProviderOutcomeUnknown(
+            String sourceId, String provider, String model, String reason) {
+        if (sourceId == null) return;
+        creditClient.recordExternalScopeOutcomeUnknown(sourceId, provider, model, reason);
+    }
+
     /** Integration a caller's own credential for this endpoint would be filed under. */
     private String integrationOf(BillingScope scope) {
         String toolSlug = scope.toolSlug();

@@ -457,6 +457,101 @@ class ToolExecutionManagerBillingLifecycleTest {
     }
 
     @Nested
+    @DisplayName("external authority provider boundary")
+    class ExternalAuthorityProviderBoundary {
+
+        @BeforeEach
+        void externalAuthority() {
+            when(billingService.usesExternalAuthority()).thenReturn(true);
+            when(billingService.markProviderDispatching(SOURCE_ID)).thenReturn(true);
+        }
+
+        @Test
+        @DisplayName("provider failure after DISPATCHING becomes OUTCOME_UNKNOWN and never releases")
+        void failedResponseAfterDispatchIsUnknown() {
+            givenReservationTaken();
+            givenUpstreamReturns(Map.of("success", false, "error", "provider returned 500"));
+
+            ToolExecutionResponse response = execute();
+
+            assertThat(response.isSuccess()).isFalse();
+            InOrder order = inOrder(billingService, apiService);
+            order.verify(billingService).markProviderDispatching(SOURCE_ID);
+            order.verify(apiService).executeApiTool(anyString(), anyString(),
+                    any(JsonNode.class), anySet(), anyString());
+            verify(billingService).recordProviderOutcomeUnknown(
+                    eq(SOURCE_ID), eq("Seedance"), eq("create_video_task"), contains("after dispatch"));
+            verify(billingService, never()).releaseOnFailure(any(), any());
+            verify(billingService, never()).commitOnSuccess(any(), any(), any(), any());
+        }
+
+        @Test
+        @DisplayName("provider transport exception after DISPATCHING becomes OUTCOME_UNKNOWN and never releases")
+        void exceptionAfterDispatchIsUnknown() {
+            givenReservationTaken();
+            when(apiService.executeApiTool(anyString(), anyString(),
+                    any(JsonNode.class), anySet(), anyString()))
+                    .thenThrow(new IllegalStateException("provider response lost"));
+
+            ToolExecutionResponse response = execute();
+
+            assertThat(response.isSuccess()).isFalse();
+            verify(billingService).recordProviderOutcomeUnknown(
+                    eq(SOURCE_ID), eq("Seedance"), eq("create_video_task"), contains("after provider dispatch"));
+            verify(billingService, never()).releaseOnFailure(any(), any());
+            verify(billingService, never()).commitOnSuccess(any(), any(), any(), any());
+        }
+
+        @Test
+        @DisplayName("a rejected DISPATCHING journal blocks the provider and safely releases the RESERVED hold")
+        void dispatchJournalFailureReleasesBeforeProvider() {
+            givenReservationTaken();
+            when(billingService.markProviderDispatching(SOURCE_ID)).thenReturn(false);
+
+            ToolExecutionResponse response = execute();
+
+            assertThat(response.isSuccess()).isFalse();
+            verify(apiService, never()).executeApiTool(anyString(), anyString(),
+                    any(JsonNode.class), anySet(), anyString());
+            verify(billingService).releaseOnFailure(eq(SOURCE_ID), contains("before provider dispatch"));
+            verify(billingService, never()).recordProviderOutcomeUnknown(any(), any(), any(), any());
+            verify(billingService, never()).commitOnSuccess(any(), any(), any(), any());
+        }
+
+        @Test
+        @DisplayName("an uncertain commit after provider dispatch becomes OUTCOME_UNKNOWN and never releases")
+        void commitFailureAfterDispatchIsUnknown() {
+            givenReservationTaken();
+            givenUpstreamReturns(upstreamSuccess("platform"));
+            when(billingService.commitOnSuccess(any(), any(), any(), any()))
+                    .thenThrow(new IllegalStateException("authority response lost"));
+
+            ToolExecutionResponse response = execute();
+
+            assertThat(response.isSuccess()).isTrue();
+            verify(billingService).commitOnSuccess(eq(SOURCE_ID), eq(RESERVED),
+                    eq("Seedance"), eq("create_video_task"));
+            verify(billingService).recordProviderOutcomeUnknown(
+                    eq(SOURCE_ID), eq("Seedance"), eq("create_video_task"), contains("settlement outcome unknown"));
+            verify(billingService, never()).releaseOnFailure(any(), any());
+        }
+
+        @Test
+        @DisplayName("a successful caller-owned credential is positive BYOK proof and may release after dispatch")
+        void byokSuccessStillReleases() {
+            givenReservationTaken();
+            givenUpstreamReturns(upstreamSuccess("user"));
+
+            ToolExecutionResponse response = execute();
+
+            assertThat(response.isSuccess()).isTrue();
+            verify(billingService).releaseOnFailure(eq(SOURCE_ID), contains("BYOK"));
+            verify(billingService, never()).recordProviderOutcomeUnknown(any(), any(), any(), any());
+            verify(billingService, never()).commitOnSuccess(any(), any(), any(), any());
+        }
+    }
+
+    @Nested
     @DisplayName("the paths that must NOT change")
     class Unaffected {
 

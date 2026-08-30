@@ -75,6 +75,11 @@ jobs:
             docker compose --env-file docker/.env.cloud.example \
               -f docker/docker-compose.cloud.yml config --format json \
               > /tmp/trinyx-cloud.staging.json
+          PISTON_ENABLED=true \
+            PISTON_URL=https://piston-staging.example.invalid \
+            docker compose --env-file docker/.env.cloud.example \
+              -f docker/docker-compose.cloud.yml config --format json \
+              > /tmp/trinyx-cloud.piston-enabled.json
           docker compose -f docker-compose.yml config --format json \
             > /tmp/trinyx-paid.defaults.json
           env \
@@ -111,6 +116,7 @@ jobs:
           node <<'NODE'
           const fs = require('node:fs');
           const stagingCloud = JSON.parse(fs.readFileSync('/tmp/trinyx-cloud.staging.json', 'utf8'));
+          const pistonEnabledCloud = JSON.parse(fs.readFileSync('/tmp/trinyx-cloud.piston-enabled.json', 'utf8'));
           const paidDefaults = JSON.parse(fs.readFileSync('/tmp/trinyx-paid.defaults.json', 'utf8'));
           const paidCloudLink = JSON.parse(fs.readFileSync('/tmp/trinyx-paid.cloud-link.json', 'utf8'));
 
@@ -135,6 +141,19 @@ jobs:
               throw new Error('paid CloudLink render retained production origin ' + value);
             }
           }
+
+          const orchestrator = stagingCloud.services['orchestrator-service'].environment;
+          const remotePiston = pistonEnabledCloud.services['orchestrator-service'].environment;
+          assertEqual(orchestrator.PISTON_ENABLED, 'false', 'Cloud Piston opt-in');
+          assertEqual(orchestrator.PISTON_EMBEDDED, 'false', 'Cloud embedded code hard-disable');
+          assertEqual(orchestrator.PISTON_URL, '', 'Cloud disabled Piston URL');
+          assertEqual(remotePiston.PISTON_ENABLED, 'true', 'remote Piston opt-in');
+          assertEqual(remotePiston.PISTON_EMBEDDED, 'false', 'remote Piston must remain isolated');
+          assertEqual(
+            remotePiston.PISTON_URL,
+            'https://piston-staging.example.invalid',
+            'remote Piston URL',
+          );
 
           const auth = stagingCloud.services['auth-service'].environment;
           const trigger = stagingCloud.services['trigger-service'].environment;
@@ -551,7 +570,7 @@ jobs:
         run: >-
           mvn -B -Pce
           -pl common-lib,gateway-service,auth-client,auth-service,storage-client,storage-service,agent-client,agent-service,orchestrator-service,publication-service,migration-service -am
-          -Dtest=AppEditionProviderTest,TenantDelegationTest,StorageOperationCapabilityTest,StorageClientWorkspaceErasureTest,InternalFileControllerTest,AuthClientServiceSigningTest,InternalCredentialLookupControllerTest,AppEditionAutoConfigurationTest,GatewayAuthenticationFilterTest,GatewayAuthenticationFilterV2Test,ServiceRouteAuthenticationTest,MonolithSecurityFilterBillingWorkloadTest,GatewaySignatureV2Test,GatewaySignatureV2ParityTest,AuthenticatedGatewayFilterTest,GatewayRequestRateLimiterTest,GatewaySecurityConfigTest,GatewayRouteInventoryTest,GlobalExceptionHandlerTest,Ed25519JwsTest,WorkloadAuthenticationServiceTest,EntitlementProjectionServiceTest,CeLinkServiceTest,CeLinkEntitlementsServiceTest,CloudIdentityBindingServiceTest,CloudCreditAuthorityServiceTest,CreditServiceExactPayerTest,ExternalCloudCreditLifecycleTest,CloudCreditAuthorityControllerTest,WorkloadIngestControllerTest,PaidMonolithCreditClientTest,PaidMonolithSslContextFactoryTest,InternalServiceAuthenticationConfigurationTest,ExternalCreditProxyServiceTest,ExternalCreditProxyControllerTest,CreditConsumptionClientOrgScopeTest,CreditConsumptionClientAmbiguousOutcomeTest,ExternalSettlementIntentDispatcherTest,RedisExternalSettlementIntentStoreTest,CloudSettlementOutboxDispatcherTest,CloudSettlementResultWriterTest,WorkspacePurgeServiceTest,WorkspacePurgeSchedulerTest,WorkspacePurgeInternalControllerTest,WorkspaceDataPurgerTest,WorkspaceStorageErasureOutboxTest,WorkspaceStorageErasureDispatcherTest,StorageApplicationYamlTest,ProjectionOutboxDispatcherTest,ExternalBillingAuthorityServiceTest,CloudLinkServiceTest,CeCloudLinkHeartbeatSchedulerTest,CloudLinkControllerBeanGatingTest,RemoteMarketplaceConfigBeanGatingTest,RemoteMarketplaceServiceAcquireDispatchTest,RemoteMarketplaceServiceReadProxyTest,CloudLlmRelayControllerTest,CloudWebSearchRelayControllerTest,WebSearchModuleBillingTest,BrowserAgentModuleTest,BrowserAgentNodeObservabilityTest,AgentObservabilityServiceRecordFromRequestTest,ExternalBillingAuthorityMigrationTest,ExternalCreditProjectionPostgresContractTest,WorkspaceDataPurgerPostgresContractTest,UpstreamMigrationIntegrityTest,FlywayLifecycleContractTest
+          -Dtest=AppEditionProviderTest,TenantDelegationTest,StorageOperationCapabilityTest,StorageClientWorkspaceErasureTest,InternalFileControllerTest,AuthClientServiceSigningTest,InternalCredentialLookupControllerTest,AppEditionAutoConfigurationTest,GatewayAuthenticationFilterTest,GatewayAuthenticationFilterV2Test,ServiceRouteAuthenticationTest,MonolithSecurityFilterBillingWorkloadTest,GatewaySignatureV2Test,GatewaySignatureV2ParityTest,AuthenticatedGatewayFilterTest,GatewayRequestRateLimiterTest,GatewaySecurityConfigTest,GatewayRouteInventoryTest,GlobalExceptionHandlerTest,Ed25519JwsTest,WorkloadAuthenticationServiceTest,EntitlementProjectionServiceTest,CeLinkServiceTest,CeLinkEntitlementsServiceTest,CloudIdentityBindingServiceTest,CloudCreditAuthorityServiceTest,CreditServiceExactPayerTest,ExternalCloudCreditLifecycleTest,CloudCreditAuthorityControllerTest,WorkloadIngestControllerTest,PaidMonolithCreditClientTest,PaidMonolithSslContextFactoryTest,InternalServiceAuthenticationConfigurationTest,ExternalCreditProxyServiceTest,ExternalCreditProxyControllerTest,CreditConsumptionClientOrgScopeTest,CreditConsumptionClientAmbiguousOutcomeTest,ExternalSettlementIntentDispatcherTest,RedisExternalSettlementIntentStoreTest,CloudSettlementOutboxDispatcherTest,CloudSettlementResultWriterTest,WorkspacePurgeServiceTest,WorkspacePurgeSchedulerTest,WorkspacePurgeInternalControllerTest,WorkspaceDataPurgerTest,WorkspaceStorageErasureOutboxTest,WorkspaceStorageErasureDispatcherTest,StorageApplicationYamlTest,ProjectionOutboxDispatcherTest,ExternalBillingAuthorityServiceTest,CloudLinkServiceTest,CeCloudLinkHeartbeatSchedulerTest,CloudLinkControllerBeanGatingTest,RemoteMarketplaceConfigBeanGatingTest,RemoteMarketplaceServiceAcquireDispatchTest,RemoteMarketplaceServiceReadProxyTest,CloudLlmRelayControllerTest,CloudWebSearchRelayControllerTest,WebSearchModuleBillingTest,BrowserAgentModuleTest,BrowserAgentNodeObservabilityTest,AgentObservabilityServiceRecordFromRequestTest,ExternalBillingAuthorityMigrationTest,ExternalCreditProjectionPostgresContractTest,WorkspaceDataPurgerPostgresContractTest,UpstreamMigrationIntegrityTest,FlywayLifecycleContractTest,PistonRuntimeConfigurationTest,PistonClientTest,EmbeddedCodeExecutorTest,CodeNodeTest
           -Dtrinyx.contract.docker.required=true
           -Dsurefire.failIfNoSpecifiedTests=false
           test

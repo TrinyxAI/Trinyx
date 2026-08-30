@@ -190,8 +190,10 @@ storage:
     bucket: ${STORAGE_S3_BUCKET:workflow-files}
     path-style: true
 
-# Embedded code execution instead of Piston API
+# Preserve the existing self-hosted CE embedded executor. Cloud hard-disables
+# embedded execution and must explicitly opt into a separately operated Piston API.
 piston:
+  enabled: true
   embedded: true
 
 # WebSearch disabled in CE (requires external websearch-service + Redis)

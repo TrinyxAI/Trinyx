@@ -2,10 +2,11 @@ package com.apimarketplace.orchestrator.services.code;
 
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import jakarta.annotation.PostConstruct;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
-import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnExpression;
 import org.springframework.stereotype.Service;
 
 import java.net.URI;
@@ -19,15 +20,15 @@ import java.util.*;
  * Client for the Piston code execution engine (EE mode).
  * Sends code to Piston for sandboxed execution and returns the result.
  * <p>
- * Activated when piston.embedded is not set or false (default EE behavior).
+ * Activated only when remote execution is explicitly enabled and embedded execution is off.
  */
 @Service
-@ConditionalOnProperty(name = "piston.embedded", havingValue = "false", matchIfMissing = true)
+@ConditionalOnExpression("${piston.enabled:false} && !${piston.embedded:false}")
 public class PistonClient implements CodeExecutor {
 
     private static final Logger logger = LoggerFactory.getLogger(PistonClient.class);
 
-    @Value("${piston.url:http://localhost:2000}")
+    @Value("${piston.url:}")
     private String pistonUrl;
 
     @Value("${piston.run-timeout:10000}")
@@ -72,6 +73,44 @@ public class PistonClient implements CodeExecutor {
         this.pistonUrl = pistonUrl;
         this.defaultRunTimeout = defaultRunTimeout;
         this.defaultMemoryLimit = defaultMemoryLimit;
+    }
+
+    /**
+     * Fail closed before the orchestrator accepts work. A disabled remote executor has no bean;
+     * an enabled one must never fall back to localhost or another implicit endpoint.
+     */
+    @PostConstruct
+    void validateConfiguration() {
+        pistonUrl = requireRemoteUrl(pistonUrl);
+    }
+
+    static String requireRemoteUrl(String value) {
+        String candidate = value == null ? "" : value.trim();
+        if (candidate.isEmpty()) {
+            throw new IllegalStateException(
+                "piston.url must be configured when piston.enabled=true and piston.embedded=false");
+        }
+
+        final URI uri;
+        try {
+            uri = URI.create(candidate);
+        } catch (IllegalArgumentException invalid) {
+            throw new IllegalStateException(
+                "piston.url must be a valid absolute HTTP(S) URL when remote Piston is enabled", invalid);
+        }
+        String scheme = uri.getScheme();
+        if (uri.getHost() == null
+                || (!"http".equalsIgnoreCase(scheme) && !"https".equalsIgnoreCase(scheme))
+                || uri.getQuery() != null
+                || uri.getFragment() != null) {
+            throw new IllegalStateException(
+                "piston.url must be a valid absolute HTTP(S) URL without query or fragment when remote Piston is enabled");
+        }
+        return candidate;
+    }
+
+    String configuredPistonUrl() {
+        return pistonUrl;
     }
 
     /** Test seam: tune the connect-retry policy without a Spring context. */

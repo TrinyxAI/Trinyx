@@ -437,7 +437,10 @@ services:
       <<: *cloud-environment
       PORT: "8099"
       SPRING_DATASOURCE_URL: jdbc:postgresql://cloud-postgres:5432/${CLOUD_DB_NAME:-trinyx_cloud}?currentSchema=orchestrator
-      PISTON_URL: ${PISTON_URL:?set PISTON_URL to a compatible code-execution service}
+      # Remote code execution is opt-in. Cloud never falls back to the CE host executor.
+      PISTON_ENABLED: "${PISTON_ENABLED:-false}"
+      PISTON_EMBEDDED: "false"
+      PISTON_URL: "${PISTON_URL:-}"
       INTERNAL_S2S_SERVICE_SECRET: ${ORCHESTRATOR_SERVICE_S2S_SECRET:?set ORCHESTRATOR_SERVICE_S2S_SECRET}
     depends_on:
       <<: *java-dependencies

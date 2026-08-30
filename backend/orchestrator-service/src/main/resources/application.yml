@@ -27,9 +27,12 @@ posthog:
 #  - drain-timeout: how long AgentDrainCoordinator @PreDestroy waits for in-flight work
 #    to settle before logging the orphan list and exiting. 60 s pairs with the 90 s
 #    Spring lifecycle phase ceiling above.
-# Piston code execution engine
+# Code execution is opt-in outside CE. Cloud may boot without a remote executor.
+# When enabled with embedded=false, PISTON_URL is validated before startup completes.
 piston:
-  url: ${PISTON_URL:http://localhost:2000}
+  enabled: ${PISTON_ENABLED:false}
+  embedded: ${PISTON_EMBEDDED:false}
+  url: ${PISTON_URL:}
   run-timeout: ${PISTON_RUN_TIMEOUT:120000}
   memory-limit: ${PISTON_MEMORY_LIMIT:2147483648}
   # Bounded retry for transient CONNECT failures ("Connection refused") to the shared Piston edge

@@ -515,9 +515,21 @@ Do not run this stack on the current 2-vCPU/7.6-GiB/27-GiB-free host.
 - full Cloud with websearch/Chromium: 8 vCPU, 32 GiB RAM, 150 GiB disk after a
   real load test.
 
-A compatible Piston/code-execution service is not present in this repository
-and remains externally operated. Provider API keys, SMTP, TLS/DNS, backups,
-observability and production secret injection are operator responsibilities.
+Remote code execution is explicitly disabled in Cloud by default
+(`PISTON_ENABLED=false`). In that state the orchestrator creates neither the
+remote `PistonClient` nor the CE embedded executor; a code node fails clearly
+with `CodeExecutor is not available` and no network fallback is attempted.
+The CE profile remains unchanged and explicitly enables its embedded executor.
+
+A compatible Piston/code-execution service is not present in this repository.
+To opt in, set `PISTON_ENABLED=true` and provide `PISTON_URL` as a non-empty
+absolute private HTTP(S) URL. Startup fails deterministically if the URL is
+missing or invalid. Cloud Compose hard-sets `PISTON_EMBEDDED=false`, exposes no
+Piston port, and does not provide a public or placeholder endpoint. The external
+Piston service must be reviewed, isolated and operated separately.
+
+Provider API keys, SMTP, TLS/DNS, backups, observability and production secret
+injection are operator responsibilities.
 No standalone Cloud frontend is required for linked paid-monolith control-plane
 flows.
 

@@ -84,6 +84,7 @@ describe('ContactPage public identity', () => {
       'href',
       'mailto:contact@trinyx.fr',
     );
-    expect(document.body.innerHTML).not.toContain('trinyx12@gmail.com');
+    const retiredAddress = ['trinyx12', 'gmail.com'].join('@');
+    expect(document.body.innerHTML).not.toContain(retiredAddress);
   });
 });

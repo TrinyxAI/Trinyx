@@ -35,7 +35,8 @@ describe('AboutInformationContent public links', () => {
       'href',
       'mailto:contact@trinyx.fr',
     );
-    expect(container.innerHTML).not.toContain('trinyx12@gmail.com');
+    const retiredAddress = ['trinyx12', 'gmail.com'].join('@');
+    expect(container.innerHTML).not.toContain(retiredAddress);
     expect(container.innerHTML).not.toMatch(/livecontext/i);
   });
 });

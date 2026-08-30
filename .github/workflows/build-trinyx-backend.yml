@@ -98,6 +98,12 @@ jobs:
           __tests__/components/settings/settingsNavItems.test.ts
           components/billing/__tests__/CancellationModal.test.tsx
           components/settings/__tests__/VersionCard.test.tsx
+          components/app/__tests__/SidePanel.detach.test.tsx
+          components/app/__tests__/WorkflowBuilderPanelContent.dispatch.test.tsx
+          components/app/__tests__/WorkflowPanelContent.canvasActions.test.tsx
+          app/workflows/builder/components/__tests__/BuilderCanvas.runControlsWiring.test.tsx
+          components/workflow/relations/__tests__/WorkflowRelationsMenu.test.tsx
+          components/files/__tests__/FileBrowser.navigation.test.tsx
       - name: Build frontend (${{ matrix.mode }})
         run: npm run build
 

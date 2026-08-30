@@ -47,7 +47,11 @@ for (const field of ['name', 'service', 'package', 'environment', 'context', 'do
   if (values.some((value) => typeof value !== 'string' || value.length === 0)) {
     fail('every image must define ' + field);
   }
-  if (new Set(values).size !== values.length) fail('duplicate image ' + field);
+  // Backend services intentionally share one Docker build context. Their
+  // logical names, service bindings, packages, env keys and Dockerfiles do not.
+  if (field !== 'context' && new Set(values).size !== values.length) {
+    fail('duplicate image ' + field);
+  }
 }
 for (const item of inventory.images) {
   if (!/^ghcr\.io\/trinyxai\/trinyx-cloud-[a-z0-9-]+$/.test(item.package)) {

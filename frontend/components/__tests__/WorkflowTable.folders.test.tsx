@@ -15,6 +15,9 @@ import enMessages from '@/messages/en.json';
 
 const mocks = vi.hoisted(() => ({
   getWorkflowsPage: vi.fn(),
+  // Relations are secondary card data, resolved for the whole page in one call.
+  // Stubbed empty here: no card in these fixtures calls a sub-workflow.
+  getWorkflowRelationsBatch: vi.fn().mockResolvedValue({}),
   listFolders: vi.fn(),
   createFolder: vi.fn(),
   removeFolder: vi.fn(),
@@ -75,9 +78,14 @@ vi.mock('@/hooks/useSelectableItems', () => ({
 // dnd-kit needs a real DOM drag to do anything; render its context as a passthrough so the
 // tiles and cards mount, and cover the filing itself through the bulk "Move to folder" path.
 vi.mock('@dnd-kit/core', () => ({
-  DndContext: ({ children }: { children: React.ReactNode }) => <>{children}</>,
+  // A real element, not a fragment: what the drag context CONTAINS is the point (the folder
+  // path has to be inside it to be a drop target).
+  DndContext: ({ children }: { children: React.ReactNode }) => <div data-testid="drag-context">{children}</div>,
   DragOverlay: ({ children }: { children: React.ReactNode }) => <>{children}</>,
-  PointerSensor: class {},
+  MouseSensor: class {},
+  TouchSensor: class {},
+  pointerWithin: () => [],
+  rectIntersection: () => [],
   useSensor: () => ({}),
   useSensors: () => [],
   useDroppable: () => ({ setNodeRef: () => {}, isOver: false }),
@@ -342,5 +350,21 @@ describe('WorkflowTable - folders', () => {
         expect.objectContaining({ folderId: 'root' }),
       ),
     );
+  });
+});
+
+describe('WorkflowTable - the drag surface', () => {
+  it('covers the folder path, so a card can be dragged out of a folder onto it', async () => {
+    // A drop target only exists inside the context that owns the drag. The path lives in the
+    // page HEADER: with the context around the cards alone, every crumb was inert and the one
+    // move a folder path is there to offer - taking a card back out - did nothing.
+    mocks.getWorkflowsPage.mockResolvedValue(
+      page({ folders: [], folderTrail: [{ id: 'f1', name: 'Marketing', parentFolderId: null }] }),
+    );
+
+    renderTable();
+
+    const crumb = await screen.findByRole('button', { name: 'All workflows' });
+    expect(screen.getByTestId('drag-context')).toContainElement(crumb);
   });
 });

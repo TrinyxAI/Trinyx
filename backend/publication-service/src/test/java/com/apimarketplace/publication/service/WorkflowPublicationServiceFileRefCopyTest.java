@@ -68,6 +68,17 @@ class WorkflowPublicationServiceFileRefCopyTest {
     private static final UUID WORKFLOW_ID = UUID.fromString("22222222-2222-2222-2222-222222222222");
     private static final UUID INTERFACE_ID = UUID.fromString("33333333-3333-3333-3333-333333333333");
     private static final String PUBLISHER_TENANT = "8";
+    /** Same secret the resolver handed to the service under test uses, so a URL signed here verifies there. */
+    private static final com.apimarketplace.common.storage.signing.ShowcaseUrlSigner SIGNER =
+            new com.apimarketplace.common.storage.signing.ShowcaseUrlSigner("test-secret-32-bytes-long-enough-for-hmac");
+
+    /** An absolute public link exactly as a core:public_link node mints it, signed for real. */
+    private static String publicLink(String key) {
+        return "https://livecontext.ai/api/files/proxy-signed?key="
+                + java.net.URLEncoder.encode(key, java.nio.charset.StandardCharsets.UTF_8)
+                + "&exp=1787778662&disposition=inline&sig=" + SIGNER.sign(key, 1787778662L, "inline");
+    }
+
     private static final String FILE_OWNER_TENANT = "1";
 
     @BeforeEach
@@ -85,7 +96,8 @@ class WorkflowPublicationServiceFileRefCopyTest {
                 new ObjectMapper(),
                 snapshotCloneService,
                 entitlementGuard,
-                authClient);
+                authClient,
+                new com.apimarketplace.publication.service.PublicationFileUrlResolver(new com.apimarketplace.common.storage.signing.ShowcaseUrlSigner("test-secret-32-bytes-long-enough-for-hmac")));
         // Server-side publisher identity snapshot - every (re)publish path
         // calls AuthClient.getPublisherProfile. Lenient so non-publish tests
         // don't trip strict-stubbing.
@@ -351,6 +363,9 @@ class WorkflowPublicationServiceFileRefCopyTest {
         ifaceEntry.put("byEpoch", byEpoch);
 
         Map<String, Object> snapshot = new HashMap<>();
+        // Stated by the orchestrator, which validated the caller's scope against it. It is
+        // what makes a cross-org copy legitimate instead of a path the publisher just named.
+        snapshot.put("_sourceTenantId", FILE_OWNER_TENANT);
         snapshot.put("runState", Map.of("status", "COMPLETED"));
         snapshot.put("interfaceRenders", Map.of(INTERFACE_ID.toString(), ifaceEntry));
 
@@ -368,8 +383,10 @@ class WorkflowPublicationServiceFileRefCopyTest {
         verify(orchestratorClient, atLeastOnce()).copyFile(captor.capture(), any());
         assertThat(captor.getValue()).containsEntry("sourcePath", filePath);
 
-        // Verify path was rewritten in the snapshot
-        assertThat(fileRef.get("path")).isEqualTo(newPath);
+        // The item's data map is REPLACED by the rewritten copy, not mutated in place (the
+        // pass must not write through a subtree it does not own), so read it back from the map
+        // the fixture handed to the service.
+        assertThat(renderItemPath(item)).isEqualTo(newPath);
     }
 
     @Test
@@ -397,6 +414,9 @@ class WorkflowPublicationServiceFileRefCopyTest {
         ifaceEntry.put("defaultRender", defaultRender);
 
         Map<String, Object> snapshot = new HashMap<>();
+        // Stated by the orchestrator, which validated the caller's scope against it. It is
+        // what makes a cross-org copy legitimate instead of a path the publisher just named.
+        snapshot.put("_sourceTenantId", FILE_OWNER_TENANT);
         snapshot.put("runState", Map.of("status", "COMPLETED"));
         snapshot.put("interfaceRenders", Map.of(INTERFACE_ID.toString(), ifaceEntry));
 
@@ -413,7 +433,7 @@ class WorkflowPublicationServiceFileRefCopyTest {
         ArgumentCaptor<Map<String, Object>> captor = ArgumentCaptor.forClass(Map.class);
         verify(orchestratorClient, atLeastOnce()).copyFile(captor.capture(), any());
         assertThat(captor.getValue()).containsEntry("sourcePath", filePath);
-        assertThat(fileRef.get("path")).isEqualTo(newPath);
+        assertThat(renderItemPath(item)).isEqualTo(newPath);
     }
 
     @Test
@@ -423,6 +443,9 @@ class WorkflowPublicationServiceFileRefCopyTest {
         String generatedPath = PUBLISHER_TENANT + "/ai-generated/replacement.png";
         String publicationPath = "_publications/" + PUBLICATION_ID + "/snapshot/ai-replace/replacement.png";
         Map<String, Object> snapshot = new HashMap<>();
+        // Stated by the orchestrator, which validated the caller's scope against it. It is
+        // what makes a cross-org copy legitimate instead of a path the publisher just named.
+        snapshot.put("_sourceTenantId", FILE_OWNER_TENANT);
         snapshot.put("runState", Map.of("status", "COMPLETED"));
 
         stubPublishWorkflow(snapshot);
@@ -441,7 +464,7 @@ class WorkflowPublicationServiceFileRefCopyTest {
         assertThat(captor.getValue())
                 .containsEntry("sourcePath", generatedPath)
                 .containsEntry("tenantId", "_publications")
-                .containsEntry("workflowId", PUBLICATION_ID.toString())
+                .containsEntry("workflowId", publishedPublicationId())
                 .containsEntry("runId", "snapshot")
                 .containsEntry("fileName", "replacement.png")
                 .containsEntry("mimeType", "image/png");
@@ -456,33 +479,25 @@ class WorkflowPublicationServiceFileRefCopyTest {
     // ========================================================================
 
     @Test
-    @DisplayName("multiple FileRefs from different tenants are all copied")
-    void multipleFileRefsFromDifferentTenantsAreCopied() {
-        String path1 = FILE_OWNER_TENANT + "/general/img1.jpg";
-        String path2 = "42/general/img2.jpg";
-
-        Map<String, Object> fileRef1 = new HashMap<>();
-        fileRef1.put("_type", "file");
-        fileRef1.put("path", path1);
-        fileRef1.put("name", "img1.jpg");
-
-        Map<String, Object> fileRef2 = new HashMap<>();
-        fileRef2.put("_type", "file");
-        fileRef2.put("path", path2);
-        fileRef2.put("name", "img2.jpg");
+    @DisplayName("copies the publisher's own file and the captured run owner's, and REFUSES a third tenant's - a snapshot can legitimately carry two owners, never an arbitrary one")
+    void copiesTheTwoOwnersInScopeAndRefusesAnyOther() {
+        String ownFile = PUBLISHER_TENANT + "/general/own.jpg";
+        String runOwnerFile = FILE_OWNER_TENANT + "/general/from-the-run.jpg";
+        String strangerFile = "42/general/somebody-elses.jpg";
 
         Map<String, Object> runState = new HashMap<>();
         runState.put("status", "COMPLETED");
-        runState.put("file1", fileRef1);
-        runState.put("file2", fileRef2);
+        runState.put("own", fileRef(ownFile));
+        runState.put("fromRun", fileRef(runOwnerFile));
+        runState.put("stranger", fileRef(strangerFile));
 
         Map<String, Object> snapshot = new HashMap<>();
+        snapshot.put("_sourceTenantId", FILE_OWNER_TENANT);
         snapshot.put("runState", runState);
 
         stubPublishWorkflow(snapshot);
         when(orchestratorClient.copyFile(any(), any()))
-                .thenReturn(Map.of("newPath", "_publications/" + PUBLICATION_ID + "/img1.jpg"))
-                .thenReturn(Map.of("newPath", "_publications/" + PUBLICATION_ID + "/img2.jpg"));
+                .thenReturn(Map.of("newPath", "_publications/x/copied.jpg"));
 
         service.publishWorkflow(
                 WORKFLOW_ID, PUBLISHER_TENANT, null,
@@ -490,7 +505,19 @@ class WorkflowPublicationServiceFileRefCopyTest {
                 null, 0,
                 PublicationVisibility.PRIVATE, null, DisplayMode.INTERFACE, null, false, Map.of());
 
-        verify(orchestratorClient, times(2)).copyFile(any(), any());
+        @SuppressWarnings("unchecked")
+        ArgumentCaptor<Map<String, Object>> captor = ArgumentCaptor.forClass(Map.class);
+        verify(orchestratorClient, times(2)).copyFile(captor.capture(), any());
+        assertThat(captor.getAllValues())
+                .extracting(req -> req.get("sourcePath"))
+                .containsExactlyInAnyOrder(ownFile, runOwnerFile);
+        // The stranger's path is left exactly as it was, so nothing downstream can sign it:
+        // the render-time guard only accepts the publisher's tenant or this publication's
+        // namespace, and it is in neither.
+        assertThat(runState.get("stranger")).isInstanceOf(Map.class);
+        @SuppressWarnings("unchecked")
+        Map<String, Object> stranger = (Map<String, Object>) runState.get("stranger");
+        assertThat(stranger).containsEntry("path", strangerFile);
     }
 
     // ========================================================================
@@ -502,8 +529,11 @@ class WorkflowPublicationServiceFileRefCopyTest {
     void proxyUrlInInterfaceRenderDataIsNormalizedAndCopied() {
         // Simulates the Instagram Profile Scraper scenario:
         // profilePic is stored as "/api/files/proxy?key=1%2F...%2Ffile.jpg&disposition=inline"
-        String proxyUrl = "/api/files/proxy?key=1%2Fd1c0e41a%2Frun_123%2Fcore%3Adownload_avatar%2Fphoto.jpg&disposition=inline";
-        String decodedKey = "1/d1c0e41a/run_123/core:download_avatar/photo.jpg";
+        // Publisher-owned key: a URL STRING naming another tenant is refused outright now
+        // (see foreignTenantUrlStringIsRefused), unlike a FileRef map, which may legitimately
+        // name the workflow owner's tenant in a cross-org publish.
+        String proxyUrl = "/api/files/proxy?key=8%2Fd1c0e41a%2Frun_123%2Fcore%3Adownload_avatar%2Fphoto.jpg&disposition=inline";
+        String decodedKey = "8/d1c0e41a/run_123/core:download_avatar/photo.jpg";
         String newPath = "_publications/" + PUBLICATION_ID + "/snapshot/runout-abc/photo.jpg";
 
         Map<String, Object> data = new HashMap<>();
@@ -521,6 +551,9 @@ class WorkflowPublicationServiceFileRefCopyTest {
         ifaceEntry.put("byEpoch", byEpoch);
 
         Map<String, Object> snapshot = new HashMap<>();
+        // Stated by the orchestrator, which validated the caller's scope against it. It is
+        // what makes a cross-org copy legitimate instead of a path the publisher just named.
+        snapshot.put("_sourceTenantId", FILE_OWNER_TENANT);
         snapshot.put("runState", Map.of("status", "COMPLETED"));
         snapshot.put("interfaceRenders", Map.of(INTERFACE_ID.toString(), ifaceEntry));
 
@@ -544,8 +577,8 @@ class WorkflowPublicationServiceFileRefCopyTest {
     @DisplayName("JSON-encoded string field with embedded proxy URLs is normalized")
     void jsonEncodedStringWithProxyUrlsIsNormalized() {
         // postsJson field: a JSON array stored as a String, containing proxy URLs
-        String postsJson = "[{\"image\":\"/api/files/proxy?key=1%2Frun%2Fstep%2Fpost1.jpg&disposition=inline\",\"caption\":\"Hello\"},"
-                + "{\"image\":\"/api/files/proxy?key=1%2Frun%2Fstep%2Fpost2.jpg&disposition=inline\",\"caption\":\"World\"}]";
+        String postsJson = "[{\"image\":\"/api/files/proxy?key=8%2Frun%2Fstep%2Fpost1.jpg&disposition=inline\",\"caption\":\"Hello\"},"
+                + "{\"image\":\"/api/files/proxy?key=8%2Frun%2Fstep%2Fpost2.jpg&disposition=inline\",\"caption\":\"World\"}]";
         String newPath1 = "_publications/" + PUBLICATION_ID + "/snapshot/runout-1/post1.jpg";
         String newPath2 = "_publications/" + PUBLICATION_ID + "/snapshot/runout-2/post2.jpg";
 
@@ -564,6 +597,9 @@ class WorkflowPublicationServiceFileRefCopyTest {
         ifaceEntry.put("byEpoch", byEpoch);
 
         Map<String, Object> snapshot = new HashMap<>();
+        // Stated by the orchestrator, which validated the caller's scope against it. It is
+        // what makes a cross-org copy legitimate instead of a path the publisher just named.
+        snapshot.put("_sourceTenantId", FILE_OWNER_TENANT);
         snapshot.put("runState", Map.of("status", "COMPLETED"));
         snapshot.put("interfaceRenders", Map.of(INTERFACE_ID.toString(), ifaceEntry));
 
@@ -602,6 +638,9 @@ class WorkflowPublicationServiceFileRefCopyTest {
         ifaceEntry.put("byEpoch", byEpoch);
 
         Map<String, Object> snapshot = new HashMap<>();
+        // Stated by the orchestrator, which validated the caller's scope against it. It is
+        // what makes a cross-org copy legitimate instead of a path the publisher just named.
+        snapshot.put("_sourceTenantId", FILE_OWNER_TENANT);
         snapshot.put("runState", Map.of("status", "COMPLETED"));
         snapshot.put("interfaceRenders", Map.of(INTERFACE_ID.toString(), ifaceEntry));
 
@@ -615,6 +654,414 @@ class WorkflowPublicationServiceFileRefCopyTest {
 
         // No file copy should be triggered - no proxy URLs and no FileRefs
         verify(orchestratorClient, never()).copyFile(any(), any());
+    }
+
+    @Test
+    @DisplayName("ABSOLUTE core:public_link URL in interfaceRenders data is normalized to a FileRef and copied into the publication namespace")
+    void absolutePublicLinkUrlIsNormalizedAndCopied() {
+        // The shape a `core:public_link` node writes into interface data: absolute
+        // (it carries the install's public origin) and already signed. It was invisible
+        // to the normalizer, so the bytes were never copied into the publication and the
+        // frozen `exp` 403'd a few hours after publish with nothing able to refresh it.
+        String decodedKey = "8/d1c0e41a/run_123/core:watermark/clip.mp4";
+        String publicLink = publicLink(decodedKey);
+        String newPath = "_publications/" + PUBLICATION_ID + "/snapshot/runout-abc/clip.mp4";
+
+        Map<String, Object> data = new HashMap<>();
+        data.put("final_video", publicLink);
+
+        stubPublishWorkflow(snapshotWithInterfaceRenderData(data));
+        when(orchestratorClient.copyFile(any(), any())).thenReturn(Map.of("newPath", newPath));
+
+        service.publishWorkflow(
+                WORKFLOW_ID, PUBLISHER_TENANT, null,
+                "Title", "Desc", INTERFACE_ID, "run-1",
+                null, 0,
+                PublicationVisibility.PRIVATE, null, DisplayMode.INTERFACE, null, false, Map.of());
+
+        @SuppressWarnings("unchecked")
+        ArgumentCaptor<Map<String, Object>> captor = ArgumentCaptor.forClass(Map.class);
+        verify(orchestratorClient, atLeastOnce()).copyFile(captor.capture(), any());
+        assertThat(captor.getValue()).containsEntry("sourcePath", decodedKey);
+        // The mime type must survive the URL round-trip, or the browser gets
+        // application/octet-stream and refuses to play the video.
+        assertThat(captor.getValue()).containsEntry("mimeType", "video/mp4");
+        assertThat(captor.getValue()).containsEntry("fileName", "clip.mp4");
+    }
+
+    @Test
+    @DisplayName("public_link URLs nested in a JSON-encoded string field are normalized and copied")
+    void publicLinkUrlsInsideJsonStringAreNormalizedAndCopied() {
+        String postsJson = "[{\"clip\":\"" + publicLink("8/run/p1.mp4") + "\"}]";
+        Map<String, Object> data = new HashMap<>();
+        data.put("postsJson", postsJson);
+
+        stubPublishWorkflow(snapshotWithInterfaceRenderData(data));
+        when(orchestratorClient.copyFile(any(), any()))
+                .thenReturn(Map.of("newPath", "_publications/" + PUBLICATION_ID + "/snapshot/x/p1.mp4"));
+
+        service.publishWorkflow(
+                WORKFLOW_ID, PUBLISHER_TENANT, null,
+                "Title", "Desc", INTERFACE_ID, "run-1",
+                null, 0,
+                PublicationVisibility.PRIVATE, null, DisplayMode.INTERFACE, null, false, Map.of());
+
+        @SuppressWarnings("unchecked")
+        ArgumentCaptor<Map<String, Object>> captor = ArgumentCaptor.forClass(Map.class);
+        verify(orchestratorClient, atLeastOnce()).copyFile(captor.capture(), any());
+        assertThat(captor.getValue()).containsEntry("sourcePath", "8/run/p1.mp4");
+    }
+
+    @Test
+    @DisplayName("a caption that merely QUOTES a public link is left alone - no copy, no data loss")
+    void proseQuotingAPublicLinkIsNotNormalized() {
+        Map<String, Object> data = new HashMap<>();
+        data.put("caption", "Watch it here: " + publicLink("8/a.mp4"));
+
+        stubPublishWorkflow(snapshotWithInterfaceRenderData(data));
+
+        service.publishWorkflow(
+                WORKFLOW_ID, PUBLISHER_TENANT, null,
+                "Title", "Desc", INTERFACE_ID, "run-1",
+                null, 0,
+                PublicationVisibility.PRIVATE, null, DisplayMode.INTERFACE, null, false, Map.of());
+
+        verify(orchestratorClient, never()).copyFile(any(), any());
+    }
+
+    // ========================================================================
+    // Landing-interface files (AGENT / TABLE / SKILL / WORKFLOW landing page)
+    // ========================================================================
+
+    @Test
+    @DisplayName("a FileRef in agentSnapshot.landingInterface.data is copied into the publication namespace - the landing is rendered for every visitor, so it must not read the publisher's storage")
+    void agentLandingFileRefIsCopied() {
+        WorkflowPublicationEntity pub = savedPublicationWithAgentLanding(
+                fileRef(FILE_OWNER_TENANT + "/run/hero.png"));
+        when(orchestratorClient.copyFile(any(), any()))
+                .thenReturn(Map.of("newPath", "_publications/" + PUBLICATION_ID + "/snapshot/x/hero.png"));
+
+        int copied = service.materializeLandingFiles(pub, PUBLISHER_TENANT);
+
+        assertThat(copied).isEqualTo(1);
+        @SuppressWarnings("unchecked")
+        ArgumentCaptor<Map<String, Object>> captor = ArgumentCaptor.forClass(Map.class);
+        verify(orchestratorClient).copyFile(captor.capture(), any());
+        assertThat(captor.getValue()).containsEntry("sourcePath", FILE_OWNER_TENANT + "/run/hero.png");
+        assertThat(landingPath(pub.getAgentSnapshot()))
+                .isEqualTo("_publications/" + PUBLICATION_ID + "/snapshot/x/hero.png");
+    }
+
+    @Test
+    @DisplayName("a core:public_link URL in planSnapshot.landingInterface.data is normalized and copied too")
+    void planLandingPublicLinkUrlIsCopied() {
+        WorkflowPublicationEntity pub = new WorkflowPublicationEntity(
+                WORKFLOW_ID, "My App", landingSnapshot(publicLink("8/run/clip.mp4")), PUBLISHER_TENANT);
+        pub.setId(PUBLICATION_ID);
+        when(orchestratorClient.copyFile(any(), any()))
+                .thenReturn(Map.of("newPath", "_publications/" + PUBLICATION_ID + "/snapshot/x/clip.mp4"));
+
+        int copied = service.materializeLandingFiles(pub, PUBLISHER_TENANT);
+
+        assertThat(copied).isEqualTo(1);
+        @SuppressWarnings("unchecked")
+        ArgumentCaptor<Map<String, Object>> captor = ArgumentCaptor.forClass(Map.class);
+        verify(orchestratorClient).copyFile(captor.capture(), any());
+        assertThat(captor.getValue()).containsEntry("sourcePath", "8/run/clip.mp4");
+    }
+
+    @Test
+    @DisplayName("called BEFORE the publication is saved it copies nothing - the id is assigned by @PrePersist, so there is no namespace yet")
+    void doesNothingWhenCalledBeforeTheEntityHasAnId() {
+        WorkflowPublicationEntity pub = new WorkflowPublicationEntity(
+                WORKFLOW_ID, "My App", landingSnapshot(fileRef(FILE_OWNER_TENANT + "/run/hero.png")),
+                PUBLISHER_TENANT);
+        // No setId: exactly the state of a first publish before publicationRepository.save.
+
+        int copied = service.materializeLandingFiles(pub, PUBLISHER_TENANT);
+
+        assertThat(copied).isZero();
+        verify(orchestratorClient, never()).copyFile(any(), any());
+    }
+
+    @Test
+    @DisplayName("a landing file already inside the publication namespace is not re-copied - a re-publish must be free")
+    void alreadyNamespacedLandingFileIsNotRecopied() {
+        WorkflowPublicationEntity pub = savedPublicationWithAgentLanding(
+                fileRef("_publications/" + PUBLICATION_ID + "/snapshot/x/hero.png"));
+
+        int copied = service.materializeLandingFiles(pub, PUBLISHER_TENANT);
+
+        assertThat(copied).isZero();
+        verify(orchestratorClient, never()).copyFile(any(), any());
+    }
+
+    @Test
+    @DisplayName("a publication with no landing interface is left alone")
+    void noLandingIsANoOp() {
+        WorkflowPublicationEntity pub = new WorkflowPublicationEntity(
+                WORKFLOW_ID, "My App", new HashMap<>(), PUBLISHER_TENANT);
+        pub.setId(PUBLICATION_ID);
+
+        assertThat(service.materializeLandingFiles(pub, PUBLISHER_TENANT)).isZero();
+        verify(orchestratorClient, never()).copyFile(any(), any());
+    }
+
+    // ========================================================================
+    // repairSnapshotFileNamespace - the sweep's actual worker, exercised for real
+    // ========================================================================
+
+    @Test
+    @DisplayName("repair copies a showcase FileRef that still points at the publisher and rewrites the entity snapshot in memory - persistence is the sweep job, pinned by theWorkersSuspendTheirCallersTransaction")
+    void repairCopiesAndPersists() {
+        WorkflowPublicationEntity pub = publicationWithShowcase(fileRef(FILE_OWNER_TENANT + "/run/clip.mp4"));
+        String newPath = "_publications/" + PUBLICATION_ID + "/snapshot/x/clip.mp4";
+        when(orchestratorClient.copyFile(any(), any())).thenReturn(Map.of("newPath", newPath));
+
+        int copied = service.repairSnapshotFileNamespace(pub);
+
+        assertThat(copied).isEqualTo(1);
+        assertThat(showcasePath(pub)).isEqualTo(newPath);
+        // Mutates, does not persist: the sweep saves once after both passes, so two merges of
+        // the same entity cannot race each other's version.
+        verify(publicationRepository, never()).save(any());
+    }
+
+    @Test
+    @DisplayName("repair is free the second time - a path already in the publication namespace is not re-copied and the entity is not re-saved")
+    void repairIsIdempotent() {
+        WorkflowPublicationEntity pub = publicationWithShowcase(
+                fileRef("_publications/" + PUBLICATION_ID + "/snapshot/x/clip.mp4"));
+
+        assertThat(service.repairSnapshotFileNamespace(pub)).isZero();
+        verify(orchestratorClient, never()).copyFile(any(), any());
+        verify(publicationRepository, never()).save(any());
+    }
+
+    @Test
+    @DisplayName("when every copy FAILS the stored snapshot is left byte-identical - reporting 0 while still rewriting it would silently degrade a page the operator was told was untouched")
+    void failedCopyLeavesTheStoredSnapshotAlone() {
+        // A trusted relative proxy URL: the pass normalizes it into a FileRef map BEFORE
+        // attempting any copy, so an implementation that walks the entity's own map mutates
+        // it and the transaction flushes that rewrite even though nothing was copied. On an
+        // install with no signing key the rewriter then leaves the FileRef raw and the
+        // template renders a serialized Map where a working URL used to be.
+        WorkflowPublicationEntity pub = publicationWithShowcase("/api/files/proxy?key=8%2Frun%2Fclip.mp4");
+        when(orchestratorClient.copyFile(any(), any())).thenReturn(null); // copy endpoint refused
+
+        int copied = service.repairSnapshotFileNamespace(pub);
+
+        assertThat(copied).isZero();
+        assertThat(showcaseValue(pub)).isEqualTo("/api/files/proxy?key=8%2Frun%2Fclip.mp4");
+        verify(publicationRepository, never()).save(any());
+    }
+
+    @Test
+    @DisplayName("repair refuses a forged signed URL - the copy pass has no ownership guard of its own, so the trust decision has to happen before it")
+    void repairRefusesForgedSignedUrl() {
+        String forged = "https://livecontext.ai/api/files/proxy-signed?key=3%2Fprivate%2Fcontract.pdf"
+                + "&exp=99999999999&disposition=inline&sig=bm90LW91cnMtYXQtYWxs";
+        WorkflowPublicationEntity pub = publicationWithShowcase(forged);
+
+        assertThat(service.repairSnapshotFileNamespace(pub)).isZero();
+        verify(orchestratorClient, never()).copyFile(any(), any());
+    }
+
+    @Test
+    @DisplayName("an INTERFACE publication keeps its landing payload at planSnapshot.data, not under landingInterface - the one type whose landing IS the interface")
+    void interfaceLandingDataIsCopied() {
+        Map<String, Object> data = new HashMap<>();
+        // An INTERFACE publication's landing is planSnapshot.data at top level: there is no
+        // landingInterface wrapper to state an owner, so only the publisher's own files are
+        // in scope there.
+        data.put("hero", fileRef(PUBLISHER_TENANT + "/run/hero.png"));
+        Map<String, Object> plan = new HashMap<>();
+        plan.put("data", data);
+        WorkflowPublicationEntity pub = new WorkflowPublicationEntity(WORKFLOW_ID, "My Page", plan, PUBLISHER_TENANT);
+        pub.setId(PUBLICATION_ID);
+        pub.setPublicationType(WorkflowPublicationEntity.PublicationType.INTERFACE);
+        when(orchestratorClient.copyFile(any(), any()))
+                .thenReturn(Map.of("newPath", "_publications/" + PUBLICATION_ID + "/snapshot/x/hero.png"));
+
+        assertThat(service.materializeLandingFiles(pub, PUBLISHER_TENANT)).isEqualTo(1);
+
+        @SuppressWarnings("unchecked")
+        ArgumentCaptor<Map<String, Object>> captor = ArgumentCaptor.forClass(Map.class);
+        verify(orchestratorClient).copyFile(captor.capture(), any());
+        assertThat(captor.getValue()).containsEntry("sourcePath", PUBLISHER_TENANT + "/run/hero.png");
+    }
+
+    @Test
+    @DisplayName("re-homing a landing file recomputes the CE-exclusive label - a deliberate side effect on the repair path, where an old publication is re-labelled with today's rules")
+    void materializeLandingRecomputesCeExclusiveLabel() {
+        // A table carrying a vector column is CE-only. This publication is stored with the
+        // label unset, as one published before the detector knew that rule would be.
+        Map<String, Object> agentSnapshot = landingSnapshot(fileRef(FILE_OWNER_TENANT + "/run/hero.png"));
+        // In an AGENT snapshot a standalone table carries its spec under `mappingSpec`
+        // (the `_snapshot_ds_` prefix is the PLAN-side shape).
+        agentSnapshot.put("datasources", List.of(Map.of(
+                "mappingSpec", Map.of("embedding", Map.of("path", "embedding", "type", "vector")))));
+        WorkflowPublicationEntity pub = new WorkflowPublicationEntity(
+                WORKFLOW_ID, "My Agent", new HashMap<>(), PUBLISHER_TENANT);
+        pub.setId(PUBLICATION_ID);
+        pub.setAgentSnapshot(agentSnapshot);
+        assertThat(pub.isCeExclusive()).isFalse();
+        when(orchestratorClient.copyFile(any(), any()))
+                .thenReturn(Map.of("newPath", "_publications/" + PUBLICATION_ID + "/snapshot/x/hero.png"));
+
+        service.materializeLandingFiles(pub, PUBLISHER_TENANT);
+
+        assertThat(pub.isCeExclusive()).isTrue();
+        assertThat(pub.getCeExclusiveFeatures()).contains("VECTOR_SEARCH");
+    }
+
+    @Test
+    @DisplayName("a URL STRING naming another tenant is refused - the copy pass has no ownership test, so after a copy the key sits in the publication namespace and the render-time guard signs it happily")
+    void foreignTenantUrlStringIsRefused() {
+        // The publisher is tenant 8; this names tenant 3. A FileRef MAP naming tenant 3 is
+        // still copied (cross-org publishing), but a URL string is a value the publisher's
+        // own workflow wrote, so it gets the stricter rule.
+        WorkflowPublicationEntity pub = publicationWithShowcase(
+                "/api/files/proxy?key=3%2Fprivate%2Fcontract.pdf&disposition=inline");
+
+        assertThat(service.repairSnapshotFileNamespace(pub)).isZero();
+        verify(orchestratorClient, never()).copyFile(any(), any());
+        assertThat(showcaseValue(pub)).isEqualTo("/api/files/proxy?key=3%2Fprivate%2Fcontract.pdf&disposition=inline");
+    }
+
+    @Test
+    @DisplayName("materializeLandingFiles also leaves the entity untouched when every copy fails - same invariant as the showcase repair, same deep-copy defence")
+    void failedLandingCopyLeavesTheEntityAlone() {
+        WorkflowPublicationEntity pub = savedPublicationWithAgentLanding(
+                "/api/files/proxy?key=8%2Frun%2Fhero.png&disposition=inline");
+        when(orchestratorClient.copyFile(any(), any())).thenReturn(null);
+
+        assertThat(service.materializeLandingFiles(pub, PUBLISHER_TENANT)).isZero();
+        @SuppressWarnings("unchecked")
+        Map<String, Object> landing = (Map<String, Object>) pub.getAgentSnapshot().get("landingInterface");
+        @SuppressWarnings("unchecked")
+        Map<String, Object> data = (Map<String, Object>) landing.get("data");
+        assertThat(data.get("hero")).isEqualTo("/api/files/proxy?key=8%2Frun%2Fhero.png&disposition=inline");
+        verify(publicationRepository, never()).save(any());
+    }
+
+    @Test
+    @DisplayName("the landing pass uses the PUBLISHER of record, not the caller - an ORG publication can be re-published by another member, and the files are still the original publisher's")
+    void landingUsesThePublisherOfRecordNotTheCaller() {
+        WorkflowPublicationEntity pub = savedPublicationWithAgentLanding(
+                "/api/files/proxy?key=8%2Frun%2Fhero.png&disposition=inline");
+        when(orchestratorClient.copyFile(any(), any()))
+                .thenReturn(Map.of("newPath", "_publications/" + PUBLICATION_ID + "/snapshot/x/hero.png"));
+
+        // Called by a DIFFERENT member of the org. Keyed on the caller, the publisher's own
+        // file would read as foreign, nothing would be copied, and the publication would go
+        // on reading live files - the invariant this whole change exists to establish.
+        int copied = service.materializeLandingFiles(pub, "99");
+
+        assertThat(copied).isEqualTo(1);
+    }
+
+    /** The path as it now stands in the item, which the pass replaces rather than mutates. */
+    @SuppressWarnings("unchecked")
+    private static String renderItemPath(Map<String, Object> item) {
+        Map<String, Object> data = (Map<String, Object>) item.get("data");
+        Object first = data.values().iterator().next();
+        return (String) ((Map<String, Object>) first).get("path");
+    }
+
+    /** Showcase snapshot shaped like the real one: interfaceRenders to byEpoch to items[].data. */
+    private WorkflowPublicationEntity publicationWithShowcase(Object dataValue) {
+        Map<String, Object> data = new HashMap<>();
+        data.put("final_video", dataValue);
+        Map<String, Object> item = new HashMap<>();
+        item.put("data", data);
+        Map<String, Object> render = new HashMap<>();
+        render.put("items", List.of(item));
+        Map<String, Object> byEpoch = new HashMap<>();
+        byEpoch.put("1", render);
+        Map<String, Object> entry = new HashMap<>();
+        entry.put("byEpoch", byEpoch);
+        Map<String, Object> snapshot = new HashMap<>();
+        snapshot.put("_sourceTenantId", FILE_OWNER_TENANT);
+        snapshot.put("interfaceRenders", Map.of(INTERFACE_ID.toString(), entry));
+        WorkflowPublicationEntity pub = new WorkflowPublicationEntity(
+                WORKFLOW_ID, "My App", new HashMap<>(), PUBLISHER_TENANT);
+        pub.setId(PUBLICATION_ID);
+        pub.setShowcaseSnapshot(snapshot);
+        return pub;
+    }
+
+    @SuppressWarnings("unchecked")
+    private static Object showcaseValue(WorkflowPublicationEntity pub) {
+        Map<String, Object> renders = (Map<String, Object>) pub.getShowcaseSnapshot().get("interfaceRenders");
+        Map<String, Object> entry = (Map<String, Object>) renders.values().iterator().next();
+        Map<String, Object> byEpoch = (Map<String, Object>) entry.get("byEpoch");
+        Map<String, Object> render = (Map<String, Object>) byEpoch.get("1");
+        Map<String, Object> item = (Map<String, Object>) ((List<?>) render.get("items")).get(0);
+        return ((Map<String, Object>) item.get("data")).get("final_video");
+    }
+
+    @SuppressWarnings("unchecked")
+    private static String showcasePath(WorkflowPublicationEntity pub) {
+        return (String) ((Map<String, Object>) showcaseValue(pub)).get("path");
+    }
+
+    private WorkflowPublicationEntity savedPublicationWithAgentLanding(Object dataValue) {
+        WorkflowPublicationEntity pub = new WorkflowPublicationEntity(
+                WORKFLOW_ID, "My Agent", new HashMap<>(), PUBLISHER_TENANT);
+        pub.setId(PUBLICATION_ID);
+        pub.setAgentSnapshot(landingSnapshot(dataValue));
+        return pub;
+    }
+
+    /** {@code {landingInterface: {data: {hero: <value>}}}} - the shape the snapshotter embeds. */
+    private static Map<String, Object> landingSnapshot(Object dataValue) {
+        Map<String, Object> data = new HashMap<>();
+        data.put("hero", dataValue);
+        Map<String, Object> landing = new HashMap<>();
+        landing.put("data", data);
+        // Stated by LandingInterfaceSnapshotter, under the internal (underscore) key that
+        // every public exit strips.
+        landing.put(com.apimarketplace.publication.service.LandingInterfaceSnapshotter
+                .INTERNAL_SOURCE_TENANT_KEY, FILE_OWNER_TENANT);
+        Map<String, Object> snapshot = new HashMap<>();
+        snapshot.put("landingInterface", landing);
+        return snapshot;
+    }
+
+    private static Map<String, Object> fileRef(String path) {
+        Map<String, Object> ref = new HashMap<>();
+        ref.put("_type", "file");
+        ref.put("path", path);
+        ref.put("name", path.substring(path.lastIndexOf('/') + 1));
+        ref.put("mimeType", "image/png");
+        return ref;
+    }
+
+    @SuppressWarnings("unchecked")
+    private static String landingPath(Map<String, Object> snapshot) {
+        Map<String, Object> landing = (Map<String, Object>) snapshot.get("landingInterface");
+        Map<String, Object> data = (Map<String, Object>) landing.get("data");
+        return (String) ((Map<String, Object>) data.get("hero")).get("path");
+    }
+
+    /** Snapshot carrying one interface render whose single item holds {@code data}. */
+    private Map<String, Object> snapshotWithInterfaceRenderData(Map<String, Object> data) {
+        Map<String, Object> item = new HashMap<>();
+        item.put("data", data);
+        Map<String, Object> epochRender = new HashMap<>();
+        epochRender.put("items", List.of(item));
+        Map<String, Object> byEpoch = new HashMap<>();
+        byEpoch.put("0", epochRender);
+        Map<String, Object> ifaceEntry = new HashMap<>();
+        ifaceEntry.put("byEpoch", byEpoch);
+        Map<String, Object> snapshot = new HashMap<>();
+        // Stated by the orchestrator, which validated the caller's scope against it. It is
+        // what makes a cross-org copy legitimate instead of a path the publisher just named.
+        snapshot.put("_sourceTenantId", FILE_OWNER_TENANT);
+        snapshot.put("runState", Map.of("status", "COMPLETED"));
+        snapshot.put("interfaceRenders", Map.of(INTERFACE_ID.toString(), ifaceEntry));
+        return snapshot;
     }
 
     @Test
@@ -637,6 +1084,9 @@ class WorkflowPublicationServiceFileRefCopyTest {
         ifaceEntry.put("byEpoch", byEpoch);
 
         Map<String, Object> snapshot = new HashMap<>();
+        // Stated by the orchestrator, which validated the caller's scope against it. It is
+        // what makes a cross-org copy legitimate instead of a path the publisher just named.
+        snapshot.put("_sourceTenantId", FILE_OWNER_TENANT);
         snapshot.put("runState", Map.of("status", "COMPLETED"));
         snapshot.put("interfaceRenders", Map.of(INTERFACE_ID.toString(), ifaceEntry));
 
@@ -682,8 +1132,191 @@ class WorkflowPublicationServiceFileRefCopyTest {
     }
 
     // ========================================================================
+    // Signing and normalization guards
+    // ========================================================================
+
+    @Test
+    @DisplayName("a publish that copies NOTHING leaves the data exactly as it was - on an install with no signing key the rewriter leaves a FileRef alone, so replacing a working URL with one is an immediate, permanent regression")
+    void aPublishThatCopiesNothingDoesNotRewriteTheData() {
+        // The copy is refused (foreign tenant), so the normalization that turned the URL into
+        // a FileRef must not stick either. Same rule the repair pass applies to the stored
+        // snapshot; the publish path had no equivalent.
+        String url = "/api/files/proxy?key=3%2Fprivate%2Fcontract.pdf&disposition=inline";
+        Map<String, Object> data = new HashMap<>();
+        data.put("doc", url);
+
+        stubPublishWorkflow(snapshotWithInterfaceRenderData(data));
+
+        service.publishWorkflow(
+                WORKFLOW_ID, PUBLISHER_TENANT, null,
+                "Title", "Desc", INTERFACE_ID, "run-1",
+                null, 0,
+                PublicationVisibility.PRIVATE, null, DisplayMode.INTERFACE, null, false, Map.of());
+
+        verify(orchestratorClient, never()).copyFile(any(), any());
+        assertThat(data.get("doc")).isEqualTo(url);
+    }
+
+    // ========================================================================
+    // AI-screening replacement images - a CALLER-supplied storage key
+    // ========================================================================
+
+    @Test
+    @DisplayName("a replacement image naming another tenant's file is REFUSED - imageReplacements is a request field, so its storageKey is whatever the publisher sent, and the copy endpoint reads the owner off the path and downloads as them")
+    void replacementImageOutsideTheScopeIsRefused() {
+        // Left ungated, this was a straight cross-tenant read from a public endpoint: the
+        // bytes land in the publication namespace, the render-time guard then accepts them
+        // (they are in the namespace now), and ShowcaseSnapshotReader substitutes a freshly
+        // signed URL into the public template.
+        stubPublishWorkflow(snapshotWithRunStateFileRef(FILE_OWNER_TENANT + "/general/img.jpg"));
+        when(orchestratorClient.copyFile(any(), any()))
+                .thenReturn(Map.of("newPath", "_publications/x/snapshot/img.jpg"));
+
+        service.publishWorkflow(
+                WORKFLOW_ID, PUBLISHER_TENANT, null,
+                "Title", "Desc", INTERFACE_ID, "run-1",
+                null, 0,
+                PublicationVisibility.PRIVATE, null, DisplayMode.INTERFACE, null, false,
+                Map.of("__flagged__", "3/private/contract.pdf"));
+
+        @SuppressWarnings("unchecked")
+        ArgumentCaptor<Map<String, Object>> captor = ArgumentCaptor.forClass(Map.class);
+        verify(orchestratorClient, atLeastOnce()).copyFile(captor.capture(), any());
+        assertThat(captor.getAllValues())
+                .extracting(req -> req.get("sourcePath"))
+                .doesNotContain("3/private/contract.pdf");
+    }
+
+    @Test
+    @DisplayName("a replacement image the publisher owns is still copied - the guard must not break AI screening")
+    void replacementImageInsideTheScopeIsCopied() {
+        stubPublishWorkflow(new HashMap<>(Map.of("runState", Map.of("status", "COMPLETED"))));
+        when(orchestratorClient.copyFile(any(), any()))
+                .thenReturn(Map.of("newPath", "_publications/x/snapshot/ai-replace/clean.png"));
+
+        service.publishWorkflow(
+                WORKFLOW_ID, PUBLISHER_TENANT, null,
+                "Title", "Desc", INTERFACE_ID, "run-1",
+                null, 0,
+                PublicationVisibility.PRIVATE, null, DisplayMode.INTERFACE, null, false,
+                Map.of("__flagged__", PUBLISHER_TENANT + "/screening/clean.png"));
+
+        @SuppressWarnings("unchecked")
+        ArgumentCaptor<Map<String, Object>> captor = ArgumentCaptor.forClass(Map.class);
+        verify(orchestratorClient, atLeastOnce()).copyFile(captor.capture(), any());
+        assertThat(captor.getAllValues())
+                .extracting(req -> req.get("sourcePath"))
+                .contains(PUBLISHER_TENANT + "/screening/clean.png");
+    }
+
+    // ========================================================================
+    // First publish: the id has to exist before the plan is enriched
+    // ========================================================================
+
+    @Test
+    @DisplayName("a FIRST publish copies the files embedded in the plan - the id is the storage namespace, and while it was assigned only at save these passes read null and returned at their first line, silently, on the one path where it mattered")
+    void firstPublishCopiesPlanEmbeddedFileRefs() {
+        // No existing publication: this is a first publish, the case that used to no-op.
+        Map<String, Object> ifaceData = new HashMap<>();
+        ifaceData.put("hero", fileRef(PUBLISHER_TENANT + "/run/hero.png"));
+        Map<String, Object> iface = new HashMap<>();
+        iface.put("_snapshot_data", ifaceData);
+
+        Map<String, Object> plan = new HashMap<>();
+        plan.put("triggers", List.of());
+        plan.put("interfaces", List.of(iface));
+        plan.put("cores", List.of());
+        plan.put("edges", List.of());
+
+        Map<String, Object> workflowData = new HashMap<>();
+        workflowData.put("tenantId", PUBLISHER_TENANT);
+        workflowData.put("workflowType", "WORKFLOW");
+        workflowData.put("plan", plan);
+
+        when(orchestratorClient.getWorkflowForPublication(WORKFLOW_ID, PUBLISHER_TENANT, null))
+                .thenReturn(workflowData);
+        when(orchestratorClient.validateShowcaseRun("run-1", PUBLISHER_TENANT, null))
+                .thenReturn(Map.of("isStepByStep", false, "publishable", true, "status", "COMPLETED"));
+        when(publicationRepository.findByWorkflowId(WORKFLOW_ID)).thenReturn(Optional.empty());
+        when(publicationRepository.save(any(WorkflowPublicationEntity.class)))
+                .thenAnswer(invocation -> invocation.getArgument(0));
+        when(snapshotVersionRepository.getMaxVersion(any(UUID.class))).thenReturn(Optional.empty());
+        when(orchestratorClient.getLatestPlanVersion(WORKFLOW_ID, PUBLISHER_TENANT)).thenReturn(1);
+        when(orchestratorClient.captureShowcaseSnapshot("run-1", PUBLISHER_TENANT, null, null))
+                .thenReturn(Map.of("runState", Map.of("status", "COMPLETED")));
+        when(orchestratorClient.copyFile(any(), any()))
+                .thenReturn(Map.of("newPath", "_publications/x/snapshot/hero.png"));
+
+        service.publishWorkflow(
+                WORKFLOW_ID, PUBLISHER_TENANT, null,
+                "Title", "Desc", INTERFACE_ID, "run-1",
+                null, 0,
+                PublicationVisibility.PRIVATE, null, DisplayMode.INTERFACE, null, false, Map.of());
+
+        @SuppressWarnings("unchecked")
+        ArgumentCaptor<Map<String, Object>> captor = ArgumentCaptor.forClass(Map.class);
+        verify(orchestratorClient, atLeastOnce()).copyFile(captor.capture(), any());
+        assertThat(captor.getAllValues())
+                .extracting(req -> req.get("sourcePath"))
+                .contains(PUBLISHER_TENANT + "/run/hero.png");
+    }
+
+    @Test
+    @DisplayName("a core:public_link URL in interfaces[]._snapshot_data is copied too - that subtree is what an ACQUIRER clones, and a reference left there is refused by the clone allowlist and renders a dead link")
+    void publicLinkUrlInPlanInterfaceSnapshotDataIsCopied() {
+        Map<String, Object> ifaceData = new HashMap<>();
+        ifaceData.put("clip", publicLink(PUBLISHER_TENANT + "/run/clip.mp4"));
+        Map<String, Object> iface = new HashMap<>();
+        // List.of on purpose: a plan is partly assembled in Java by the enrichers, so the
+        // pass must not rewrite it in place.
+        iface.put("_snapshot_data", ifaceData);
+        Map<String, Object> plan = new HashMap<>();
+        plan.put("interfaces", List.of(iface));
+
+        when(orchestratorClient.copyFile(any(), any()))
+                .thenReturn(Map.of("newPath", "_publications/" + PUBLICATION_ID + "/snapshot/x/clip.mp4"));
+
+        service.snapshotPlanEmbeddedFileRefs(plan, PUBLICATION_ID, PUBLISHER_TENANT, PUBLISHER_TENANT);
+
+        @SuppressWarnings("unchecked")
+        ArgumentCaptor<Map<String, Object>> captor = ArgumentCaptor.forClass(Map.class);
+        verify(orchestratorClient).copyFile(captor.capture(), any());
+        assertThat(captor.getValue()).containsEntry("sourcePath", PUBLISHER_TENANT + "/run/clip.mp4");
+    }
+
+    @Test
+    @DisplayName("an IMMUTABLE collection inside the plan is not rewritten in place - doing so throws inside the publish transaction, turning a file-tidying step into a failed publish")
+    void immutablePlanSubtreeIsNotMutatedInPlace() {
+        Map<String, Object> iface = new HashMap<>();
+        // A URL STRING inside immutable containers. A FileRef map would not prove anything:
+        // walkAndCopyFileRefs only writes INSIDE the ref (a mutable HashMap), never through
+        // the container. It is normalizeProxyUrlsInMap/-List, which replace the entry itself,
+        // that would throw here - and that is the pass deepCopyValue exists to protect.
+        iface.put("_snapshot_data", Map.of(
+                "gallery", List.of("/api/files/proxy?key=" + PUBLISHER_TENANT + "%2Frun%2Fa.png")));
+        Map<String, Object> plan = new HashMap<>();
+        plan.put("interfaces", List.of(iface));
+
+        when(orchestratorClient.copyFile(any(), any()))
+                .thenReturn(Map.of("newPath", "_publications/" + PUBLICATION_ID + "/snapshot/x/a.png"));
+
+        // Would throw UnsupportedOperationException if the pass wrote through the Map.of.
+        service.snapshotPlanEmbeddedFileRefs(plan, PUBLICATION_ID, PUBLISHER_TENANT, PUBLISHER_TENANT);
+
+        verify(orchestratorClient).copyFile(any(), any());
+    }
+
+    // ========================================================================
     // Helpers
     // ========================================================================
+
+    /** The id the service assigned; captured from what it saved, not dictated by the test. */
+    private String publishedPublicationId() {
+        ArgumentCaptor<WorkflowPublicationEntity> captor =
+                ArgumentCaptor.forClass(WorkflowPublicationEntity.class);
+        verify(publicationRepository, atLeastOnce()).save(captor.capture());
+        return captor.getValue().getId().toString();
+    }
 
     private void stubPublishWorkflow(Map<String, Object> capturedSnapshot) {
         Map<String, Object> workflowData = new HashMap<>();
@@ -701,17 +1334,193 @@ class WorkflowPublicationServiceFileRefCopyTest {
                 .thenReturn(Map.of("isStepByStep", false, "publishable", true, "status", "COMPLETED"));
         when(publicationRepository.findByWorkflowId(WORKFLOW_ID)).thenReturn(Optional.empty());
         when(publicationRepository.save(any(WorkflowPublicationEntity.class)))
-                .thenAnswer(invocation -> {
-                    WorkflowPublicationEntity pub = invocation.getArgument(0);
-                    if (pub.getId() == null) {
-                        pub.setId(PUBLICATION_ID);
-                    }
-                    return pub;
-                });
-        when(snapshotVersionRepository.getMaxVersion(PUBLICATION_ID)).thenReturn(Optional.empty());
+                .thenAnswer(invocation -> invocation.getArgument(0));
+        // The id is assigned by the entity before the plan is enriched, because it IS the
+        // storage namespace the plan's files are copied into. A test that pins it through the
+        // save stub would be pinning the bug that made those copies no-op on a first publish.
+        when(snapshotVersionRepository.getMaxVersion(any(UUID.class))).thenReturn(Optional.empty());
         when(orchestratorClient.getLatestPlanVersion(WORKFLOW_ID, PUBLISHER_TENANT)).thenReturn(1);
         when(orchestratorClient.captureShowcaseSnapshot("run-1", PUBLISHER_TENANT, null, null))
                 .thenReturn(capturedSnapshot);
+    }
+
+    // ========================================================================
+    // stepFiles - the canvas node file pills
+    //
+    // The section the marketplace canvas reads to hang a file pill under a node.
+    // It is READ by every visitor, so a path left in the publisher's namespace
+    // makes the preview depend on the publisher never deleting that file - the
+    // exact failure the copy pass exists to prevent everywhere else.
+    // ========================================================================
+
+    @Test
+    @DisplayName("a FileRef in stepFiles is copied into the publication namespace and its path rewritten")
+    void stepFilesFileRefIsCopiedAndRewritten() {
+        String runOwnerFile = FILE_OWNER_TENANT + "/general/catalog-binary/clip.mp4";
+        String newPath = "_publications/" + PUBLICATION_ID + "/snapshot/runout-abc/clip.mp4";
+
+        Map<String, Object> perAlias = new HashMap<>();
+        perAlias.put("download_file", fileRef(runOwnerFile));
+        Map<String, Object> stepFiles = new HashMap<>();
+        stepFiles.put("1", perAlias);
+
+        Map<String, Object> snapshot = new HashMap<>();
+        snapshot.put("_sourceTenantId", FILE_OWNER_TENANT);
+        snapshot.put("runState", new HashMap<>(Map.of("status", "COMPLETED")));
+        snapshot.put("stepFiles", stepFiles);
+
+        stubPublishWorkflow(snapshot);
+        when(orchestratorClient.copyFile(any(), any())).thenReturn(Map.of("newPath", newPath));
+
+        service.publishWorkflow(
+                WORKFLOW_ID, PUBLISHER_TENANT, null,
+                "Title", "Desc", INTERFACE_ID, "run-1",
+                null, 0,
+                PublicationVisibility.PRIVATE, null, DisplayMode.INTERFACE, null, false, Map.of());
+
+        @SuppressWarnings("unchecked")
+        ArgumentCaptor<Map<String, Object>> captor = ArgumentCaptor.forClass(Map.class);
+        verify(orchestratorClient, atLeastOnce()).copyFile(captor.capture(), any());
+        assertThat(captor.getAllValues()).extracting(req -> req.get("sourcePath")).contains(runOwnerFile);
+
+        @SuppressWarnings("unchecked")
+        Map<String, Object> copied = (Map<String, Object>) perAlias.get("download_file");
+        assertThat(copied).containsEntry("path", newPath);
+    }
+
+    @Test
+    @DisplayName("a stepFiles path owned by a third tenant is refused, exactly as everywhere else in the snapshot")
+    void stepFilesForeignTenantIsRefused() {
+        // stepFiles is built from a node's own output, and a core:code node can author a
+        // FileRef pointing anywhere. It gets the same ownership gate as items[].data.
+        String strangerFile = "42/general/somebody-elses.jpg";
+
+        Map<String, Object> perAlias = new HashMap<>();
+        perAlias.put("code", fileRef(strangerFile));
+        Map<String, Object> stepFiles = new HashMap<>();
+        stepFiles.put("1", perAlias);
+
+        Map<String, Object> snapshot = new HashMap<>();
+        snapshot.put("_sourceTenantId", FILE_OWNER_TENANT);
+        snapshot.put("runState", new HashMap<>(Map.of("status", "COMPLETED")));
+        snapshot.put("stepFiles", stepFiles);
+
+        stubPublishWorkflow(snapshot);
+
+        service.publishWorkflow(
+                WORKFLOW_ID, PUBLISHER_TENANT, null,
+                "Title", "Desc", INTERFACE_ID, "run-1",
+                null, 0,
+                PublicationVisibility.PRIVATE, null, DisplayMode.INTERFACE, null, false, Map.of());
+
+        verify(orchestratorClient, never()).copyFile(any(), any());
+        @SuppressWarnings("unchecked")
+        Map<String, Object> untouched = (Map<String, Object>) perAlias.get("code");
+        assertThat(untouched).containsEntry("path", strangerFile);
+    }
+
+    @Test
+    @DisplayName("a file reachable from two branches is transferred ONCE, and every occurrence still lands on the copy")
+    void aFileReachableTwiceIsCopiedOnce() {
+        // On an unpinned capture a step's FileRef sits in runState.steps[].output AND in
+        // stepFiles - two distinct map instances of the same file. Without a per-pass memo the
+        // bytes are downloaded and re-uploaded once per occurrence, paying the transfer twice
+        // and leaving two identical objects in the publication's namespace.
+        String sharedPath = FILE_OWNER_TENANT + "/general/catalog-binary/clip.mp4";
+        String newPath = "_publications/" + PUBLICATION_ID + "/snapshot/runout-abc/clip.mp4";
+
+        Map<String, Object> inRunState = fileRef(sharedPath);
+        Map<String, Object> inStepFiles = fileRef(sharedPath);
+        Map<String, Object> runState = new HashMap<>();
+        runState.put("status", "COMPLETED");
+        runState.put("stepOutput", inRunState);
+        Map<String, Object> perAlias = new HashMap<>();
+        perAlias.put("download_file", inStepFiles);
+
+        Map<String, Object> snapshot = new HashMap<>();
+        snapshot.put("_sourceTenantId", FILE_OWNER_TENANT);
+        snapshot.put("runState", runState);
+        snapshot.put("stepFiles", new HashMap<>(Map.of("1", perAlias)));
+
+        stubPublishWorkflow(snapshot);
+        when(orchestratorClient.copyFile(any(), any()))
+                .thenReturn(Map.of("newPath", newPath, "newId", "st-new"));
+
+        service.publishWorkflow(
+                WORKFLOW_ID, PUBLISHER_TENANT, null,
+                "Title", "Desc", INTERFACE_ID, "run-1",
+                null, 0,
+                PublicationVisibility.PRIVATE, null, DisplayMode.INTERFACE, null, false, Map.of());
+
+        verify(orchestratorClient, times(1)).copyFile(any(), any());
+        assertThat(inRunState).containsEntry("path", newPath).containsEntry("id", "st-new");
+        assertThat(inStepFiles)
+                .as("the second occurrence must adopt the copy, not keep pointing at the publisher")
+                .containsEntry("path", newPath).containsEntry("id", "st-new");
+    }
+
+    @Test
+    @DisplayName("a memo hit is still COUNTED - the repair sweep tallies occurrences, and a count short of them makes it report work it did as work it skipped")
+    void aMemoHitIsStillCounted() {
+        // repairSnapshotFileNamespace discards its rewritten snapshot when the count is 0, and
+        // ShowcaseFileNamespaceRepairService.countPending counts every OCCURRENCE. If the memo
+        // hit stopped incrementing, a two-occurrence snapshot would repair and report 1 where
+        // the dry run promised 2 - and a snapshot whose only file was a repeat would be
+        // rewritten and then thrown away.
+        String sharedPath = FILE_OWNER_TENANT + "/general/catalog-binary/clip.mp4";
+        Map<String, Object> runState = new HashMap<>();
+        runState.put("status", "COMPLETED");
+        runState.put("stepOutput", fileRef(sharedPath));
+        Map<String, Object> snapshot = new HashMap<>();
+        snapshot.put("_sourceTenantId", FILE_OWNER_TENANT);
+        snapshot.put("runState", runState);
+        snapshot.put("stepFiles", new HashMap<>(Map.of("1",
+                new HashMap<>(Map.of("download_file", fileRef(sharedPath))))));
+
+        WorkflowPublicationEntity pub = new WorkflowPublicationEntity();
+        pub.setId(PUBLICATION_ID);
+        pub.setPublisherId(PUBLISHER_TENANT);
+        pub.setShowcaseSnapshot(snapshot);
+        when(orchestratorClient.copyFile(any(), any()))
+                .thenReturn(Map.of("newPath", "_publications/" + PUBLICATION_ID + "/clip.mp4"));
+
+        int copied = service.repairSnapshotFileNamespace(pub);
+
+        assertThat(copied).as("two occurrences, one transfer, still two rewrites").isEqualTo(2);
+        verify(orchestratorClient, times(1)).copyFile(any(), any());
+    }
+
+    @Test
+    @DisplayName("a reused copy drops the stale source id too, never leaves one pointing at the publisher's row")
+    void reusedCopyDropsAStaleId() {
+        // The by-id URL is built from the id, so a source id surviving on the second occurrence
+        // would 403 cross-tenant exactly like it would on the first.
+        String sharedPath = FILE_OWNER_TENANT + "/general/catalog-binary/clip.mp4";
+        Map<String, Object> first = fileRef(sharedPath);
+        first.put("id", "st-source");
+        Map<String, Object> second = fileRef(sharedPath);
+        second.put("id", "st-source");
+
+        Map<String, Object> runState = new HashMap<>();
+        runState.put("status", "COMPLETED");
+        runState.put("stepOutput", first);
+        Map<String, Object> snapshot = new HashMap<>();
+        snapshot.put("_sourceTenantId", FILE_OWNER_TENANT);
+        snapshot.put("runState", runState);
+        snapshot.put("stepFiles", new HashMap<>(Map.of("1", new HashMap<>(Map.of("download_file", second)))));
+
+        stubPublishWorkflow(snapshot);
+        when(orchestratorClient.copyFile(any(), any()))
+                .thenReturn(Map.of("newPath", "_publications/x/clip.mp4"));
+
+        service.publishWorkflow(
+                WORKFLOW_ID, PUBLISHER_TENANT, null,
+                "Title", "Desc", INTERFACE_ID, "run-1",
+                null, 0,
+                PublicationVisibility.PRIVATE, null, DisplayMode.INTERFACE, null, false, Map.of());
+
+        assertThat(first).doesNotContainKey("id");
+        assertThat(second).doesNotContainKey("id");
     }
 
     private Map<String, Object> snapshotWithRunStateFileRef(String filePath) {
@@ -726,6 +1535,9 @@ class WorkflowPublicationServiceFileRefCopyTest {
         runState.put("profilePic", fileRef);
 
         Map<String, Object> snapshot = new HashMap<>();
+        // Stated by the orchestrator, which validated the caller's scope against it. It is
+        // what makes a cross-org copy legitimate rather than a path the publisher just named.
+        snapshot.put("_sourceTenantId", FILE_OWNER_TENANT);
         snapshot.put("runState", runState);
         return snapshot;
     }

@@ -2,7 +2,7 @@
 
 import React, { useEffect, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { useRouter } from 'next/navigation';
+import { useEnterRunMode } from '@/hooks/useEnterRunMode';
 import { Pin, PinOff, Save, X } from 'lucide-react';
 import { useTranslations } from 'next-intl';
 import { Button } from '@/components/ui/button';
@@ -43,7 +43,7 @@ type ModalKind = 'pin-fresh' | 'pin-replace' | 'pin-save-then' | 'unpin';
  */
 export const TriggerNodePinButton: React.FC<TriggerNodePinButtonProps> = ({ workflowId, nodeId, borderColor, variant = 'node' }) => {
   const t = useTranslations();
-  const router = useRouter();
+  const enterRunMode = useEnterRunMode(workflowId);
   const {
     isRunMode,
     runId,
@@ -149,10 +149,11 @@ export const TriggerNodePinButton: React.FC<TriggerNodePinButtonProps> = ({ work
     const result = await orchestratorApi.pinVersion(workflowId, versionToPin);
     if (result.success) {
       window.dispatchEvent(new CustomEvent('workflowPinnedVersionChange', {
-        detail: { pinnedVersion: result.pinnedVersion },
+        detail: { pinnedVersion: result.pinnedVersion, workflowId },
       }));
       if (result.productionRunIdPublic) {
-        router.push(`/app/workflow/${workflowId}/run/${result.productionRunIdPublic}`);
+        // Binds in place on an embedded canvas rather than routing the app away.
+        enterRunMode(result.productionRunIdPublic);
       }
     }
   };

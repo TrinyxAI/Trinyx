@@ -20,7 +20,7 @@
  */
 import '@testing-library/jest-dom/vitest';
 import React from 'react';
-import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { describe, it, expect, afterEach, beforeEach, vi } from 'vitest';
 import { render, screen, cleanup, waitFor, fireEvent, act } from '@testing-library/react';
 
 vi.mock('next-intl', () => ({
@@ -34,6 +34,15 @@ vi.mock('next/navigation', () => ({
   usePathname: () => '/app/marketplace',
   useRouter: () => routerMock,
 }));
+
+/**
+ * A refinement is a change of ADDRESS on the page already on screen, so it goes through the
+ * history API rather than the router: returning a select to its fallback removes the last
+ * query param, and a router replace of the bare pathname is dropped when the page was loaded
+ * at it - so on a page opened directly on `?type=agents`, clearing the filter did nothing.
+ */
+const historyReplace = vi.fn();
+const realReplaceState = window.history.replaceState;
 vi.mock('@tanstack/react-query', () => ({
   useQueryClient: () => ({ invalidateQueries: vi.fn().mockResolvedValue(undefined) }),
 }));
@@ -200,7 +209,12 @@ const renderWith = async (query: string) => {
   await waitFor(() => expect(orchestratorApiMock.getMarketplacePublications).toHaveBeenCalled());
 };
 
+afterEach(() => { window.history.replaceState = realReplaceState; });
+
 beforeEach(() => {
+  historyReplace.mockClear();
+  window.history.replaceState = ((_d: unknown, _u: string, url?: string) =>
+    historyReplace(url)) as unknown as typeof window.history.replaceState;
   vi.clearAllMocks();
   cleanup();
   searchParamsState.params = new URLSearchParams();
@@ -358,8 +372,8 @@ describe('Marketplace Explore - filters combine and can be undone', () => {
 
     fireEvent.click(screen.getByTestId('marketplace-reset-filters-empty'));
 
-    expect(routerMock.replace).toHaveBeenCalledTimes(1);
-    expect(routerMock.replace).toHaveBeenCalledWith('/app/marketplace', { scroll: false });
+    expect(historyReplace).toHaveBeenCalledTimes(1);
+    expect(historyReplace).toHaveBeenCalledWith('/app/marketplace');
   });
 
   it('reset leaves unrelated params (tab, type, sort) untouched', async () => {
@@ -368,7 +382,7 @@ describe('Marketplace Explore - filters combine and can be undone', () => {
 
     fireEvent.click(screen.getByTestId('marketplace-reset-filters-empty'));
 
-    expect(routerMock.replace).toHaveBeenCalledWith('/app/marketplace?type=apps&sort=recent', { scroll: false });
+    expect(historyReplace).toHaveBeenCalledWith('/app/marketplace?type=apps&sort=recent');
   });
 });
 

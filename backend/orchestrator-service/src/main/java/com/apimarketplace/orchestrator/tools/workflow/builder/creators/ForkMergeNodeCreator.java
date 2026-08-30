@@ -333,7 +333,7 @@ public class ForkMergeNodeCreator extends CreatorBase {
                 "workflow(action='connect', from='<node>', to='" + label + "')");
         }
         connectionInfo.put("add_more_inputs", "workflow(action='connect', from='Another Branch', to='" + label + "')");
-        connectionInfo.put("behavior", "AND mode - waits for ALL connected predecessors to complete (COMPLETED or SKIPPED)");
+        connectionInfo.put("behavior", "AND mode - waits for ALL connected predecessors to complete (COMPLETED or SKIPPED). If EVERY predecessor ends SKIPPED, no branch reached this merge: it is SKIPPED too and so is every node after it, so do not put a step that must always run here");
         response.put("connection", connectionInfo);
 
         // NEXT pattern (normalizedLabel already defined at line 210)

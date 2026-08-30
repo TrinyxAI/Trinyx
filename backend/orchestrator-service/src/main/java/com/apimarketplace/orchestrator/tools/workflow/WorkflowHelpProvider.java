@@ -877,7 +877,7 @@ public class WorkflowHelpProvider {
             "merge", "N streams → 1 (waits for ALL predecessors - completed OR skipped count as resolved)",
             "vs_decision", "Fork=ALL branches execute, Decision=ONE branch executes",
             "implicit_fork", "A PORT-LESS node (trigger or plain step) with multiple outgoing edges = implicit fork (all targets execute in parallel). A node's NAMED port connects to exactly one target - to fan a single port out, add a fork on it.",
-            "implicit_merge", "Any node with multiple incoming edges = implicit merge (waits for all predecessors)"
+            "implicit_merge", "Any node with multiple incoming edges = implicit merge (waits for all predecessors). If EVERY predecessor ends SKIPPED the merge is SKIPPED too, and the skip cascades to every node after it"
         ));
 
         result.put("builder_example", ordered(

@@ -143,4 +143,35 @@ class CeVersionCheckSchedulerTest {
 
         assertThat(feed.capturedCurrent).isEqualTo("dev");
     }
+
+    @Test
+    @DisplayName("the daily poll is boot-anchored, not on a clock time the whole fleet shares")
+    void pollIsBootAnchored() throws Exception {
+        org.springframework.scheduling.annotation.Scheduled scheduled =
+                CeVersionCheckScheduler.class.getMethod("checkPeriodically")
+                        .getAnnotation(org.springframework.scheduling.annotation.Scheduled.class);
+
+        // It used to be cron 0 0 5 * * *, which put every self-hosted install on earth inside one
+        // minute. That is a poor load profile on its own, and once the request carries an install
+        // id it is a correctness problem: the collector's per-minute budget would have to absorb
+        // the whole fleet in one window and would drop the rest silently, at DEBUG. Deleting this
+        // annotation, or putting a cron back, leaves every other test in the repo green.
+        assertThat(scheduled).isNotNull();
+        assertThat(scheduled.cron()).as("a shared cron time re-creates the herd").isEmpty();
+        assertThat(scheduled.fixedDelayString()).isNotEmpty();
+        assertThat(scheduled.initialDelayString())
+                .as("without an initial delay the fixed delay fires immediately on top of the "
+                        + "startup check")
+                .isNotEmpty();
+    }
+
+    @Test
+    @DisplayName("the startup check is still wired to ApplicationReadyEvent")
+    void startupCheckIsWired() throws Exception {
+        // The card must be accurate without waiting a day, and the first ledger sighting of a new
+        // install comes from this call rather than from the periodic one.
+        assertThat(CeVersionCheckScheduler.class.getMethod("checkOnStartup")
+                .getAnnotation(org.springframework.context.event.EventListener.class))
+                .isNotNull();
+    }
 }

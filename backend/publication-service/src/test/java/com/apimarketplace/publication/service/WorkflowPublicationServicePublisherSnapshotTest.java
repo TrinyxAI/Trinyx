@@ -91,7 +91,8 @@ class WorkflowPublicationServicePublisherSnapshotTest {
                 new ObjectMapper(),
                 snapshotCloneService,
                 entitlementGuard,
-                authClient);
+                authClient,
+                new com.apimarketplace.publication.service.PublicationFileUrlResolver(new com.apimarketplace.common.storage.signing.ShowcaseUrlSigner("test-secret-32-bytes-long-enough-for-hmac")));
     }
 
     @Test
@@ -211,7 +212,7 @@ class WorkflowPublicationServicePublisherSnapshotTest {
                     if (pub.getId() == null) pub.setId(PUBLICATION_ID);
                     return pub;
                 });
-        lenient().when(snapshotVersionRepository.getMaxVersion(PUBLICATION_ID)).thenReturn(Optional.empty());
+        lenient().when(snapshotVersionRepository.getMaxVersion(any(UUID.class))).thenReturn(Optional.empty());
         lenient().when(orchestratorClient.getLatestPlanVersion(WORKFLOW_ID, TENANT)).thenReturn(1);
         lenient().when(orchestratorClient.captureShowcaseSnapshot("run-1", TENANT, null, null))
                 .thenReturn(new HashMap<>(Map.of("runState", new HashMap<>())));
@@ -234,7 +235,7 @@ class WorkflowPublicationServicePublisherSnapshotTest {
         when(publicationRepository.findByWorkflowId(WORKFLOW_ID)).thenReturn(Optional.of(existing));
         when(publicationRepository.save(any(WorkflowPublicationEntity.class)))
                 .thenAnswer(invocation -> invocation.getArgument(0));
-        when(snapshotVersionRepository.getMaxVersion(PUBLICATION_ID)).thenReturn(Optional.empty());
+        when(snapshotVersionRepository.getMaxVersion(any(UUID.class))).thenReturn(Optional.empty());
         when(orchestratorClient.getLatestPlanVersion(WORKFLOW_ID, TENANT)).thenReturn(1);
         when(orchestratorClient.captureShowcaseSnapshot("run-1", TENANT, null, null))
                 .thenReturn(new HashMap<>(Map.of("runState", new HashMap<>())));

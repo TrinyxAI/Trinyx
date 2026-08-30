@@ -27,6 +27,14 @@ class CeReleaseControllerTest {
         return provider;
     }
 
+    /** No fleet collection, which is every deployment except the cloud one. */
+    @SuppressWarnings("unchecked")
+    private static ObjectProvider<CeInstallPingRecorder> noRecorder() {
+        ObjectProvider<CeInstallPingRecorder> provider = mock(ObjectProvider.class);
+        when(provider.getIfAvailable()).thenReturn(null);
+        return provider;
+    }
+
     /** A store bean holding {@code announced} (may be null for "nothing announced"). */
     @SuppressWarnings("unchecked")
     private static ObjectProvider<CeReleaseStore> storeWith(CeReleaseStore.Announced announced) {
@@ -41,9 +49,9 @@ class CeReleaseControllerTest {
     @DisplayName("configured release is advertised verbatim")
     void configuredRelease() {
         CeReleaseController controller = new CeReleaseController(
-                "0.3.0", "https://example.test/releases/0.3.0", true, "2026-06-25T09:00:00Z", noStore());
+                "0.3.0", "https://example.test/releases/0.3.0", true, "2026-06-25T09:00:00Z", noStore(), noRecorder());
 
-        LatestRelease r = controller.latest("0.2.0");
+        LatestRelease r = controller.latest("0.2.0", null);
 
         assertThat(r.latestVersion()).isEqualTo("0.3.0");
         assertThat(r.releaseUrl()).isEqualTo("https://example.test/releases/0.3.0");
@@ -54,9 +62,9 @@ class CeReleaseControllerTest {
     @Test
     @DisplayName("unconfigured (blank) release advertises no version (nulls), not empty strings")
     void unconfiguredRelease() {
-        CeReleaseController controller = new CeReleaseController("", "  ", false, "", noStore());
+        CeReleaseController controller = new CeReleaseController("", "  ", false, "", noStore(), noRecorder());
 
-        LatestRelease r = controller.latest(null);
+        LatestRelease r = controller.latest(null, null);
 
         assertThat(r.latestVersion()).isNull();
         assertThat(r.releaseUrl()).isNull();
@@ -71,9 +79,9 @@ class CeReleaseControllerTest {
         // impossible without a cloud deploy, which is the coupling this whole change removes.
         CeReleaseController controller = new CeReleaseController(
                 "0.3.0", "https://example.test/pinned", false, null,
-                storeWith(new CeReleaseStore.Announced("9.9.9", "https://example.test/announced", true, null)));
+                storeWith(new CeReleaseStore.Announced("9.9.9", "https://example.test/announced", true, null)), noRecorder());
 
-        LatestRelease r = controller.latest(null);
+        LatestRelease r = controller.latest(null, null);
 
         assertThat(r.latestVersion()).isEqualTo("0.3.0");
         assertThat(r.releaseUrl()).isEqualTo("https://example.test/pinned");
@@ -86,9 +94,9 @@ class CeReleaseControllerTest {
         CeReleaseController controller = new CeReleaseController(
                 "", "", false, "",
                 storeWith(new CeReleaseStore.Announced(
-                        "0.4.1", "https://example.test/releases/0.4.1", true, "2026-07-30T10:00:00Z")));
+                        "0.4.1", "https://example.test/releases/0.4.1", true, "2026-07-30T10:00:00Z")), noRecorder());
 
-        LatestRelease r = controller.latest("0.2.7");
+        LatestRelease r = controller.latest("0.2.7", null);
 
         assertThat(r.latestVersion()).isEqualTo("0.4.1");
         assertThat(r.releaseUrl()).isEqualTo("https://example.test/releases/0.4.1");
@@ -103,9 +111,9 @@ class CeReleaseControllerTest {
         // against a running "0.4.1" is the kind of mismatch that shows a permanent update banner.
         CeReleaseController controller = new CeReleaseController(
                 "", "", false, "",
-                storeWith(new CeReleaseStore.Announced("v0.4.1", null, false, null)));
+                storeWith(new CeReleaseStore.Announced("v0.4.1", null, false, null)), noRecorder());
 
-        assertThat(controller.latest(null).latestVersion()).isEqualTo("0.4.1");
+        assertThat(controller.latest(null, null).latestVersion()).isEqualTo("0.4.1");
     }
 
     @Test
@@ -114,9 +122,9 @@ class CeReleaseControllerTest {
         // The config path used to skip the strip. An operator pinning the tag verbatim would then
         // ship "v0.3.0" to the fleet, which never equals a running "0.3.0": a permanent banner
         // that no upgrade clears.
-        CeReleaseController controller = new CeReleaseController("v0.3.0", null, false, null, noStore());
+        CeReleaseController controller = new CeReleaseController("v0.3.0", null, false, null, noStore(), noRecorder());
 
-        assertThat(controller.latest(null).latestVersion()).isEqualTo("0.3.0");
+        assertThat(controller.latest(null, null).latestVersion()).isEqualTo("0.3.0");
     }
 
     @Test
@@ -132,9 +140,9 @@ class CeReleaseControllerTest {
         ObjectProvider<CeReleaseStore> provider = mock(ObjectProvider.class);
         when(provider.getIfAvailable()).thenReturn(store);
 
-        CeReleaseController controller = new CeReleaseController("", "", false, "", provider);
+        CeReleaseController controller = new CeReleaseController("", "", false, "", provider, noRecorder());
 
-        assertThatThrownBy(() -> controller.latest(null))
+        assertThatThrownBy(() -> controller.latest(null, null))
                 .isInstanceOf(CeReleaseStore.LookupUnavailableException.class);
     }
 
@@ -149,9 +157,9 @@ class CeReleaseControllerTest {
         ObjectProvider<CeReleaseStore> provider = mock(ObjectProvider.class);
         when(provider.getIfAvailable()).thenReturn(store);
 
-        CeReleaseController controller = new CeReleaseController("0.3.0", null, false, null, provider);
+        CeReleaseController controller = new CeReleaseController("0.3.0", null, false, null, provider, noRecorder());
 
-        assertThat(controller.latest(null).latestVersion()).isEqualTo("0.3.0");
+        assertThat(controller.latest(null, null).latestVersion()).isEqualTo("0.3.0");
     }
 
     @Test
@@ -162,8 +170,8 @@ class CeReleaseControllerTest {
         // banner on every install shipped before the poller's null-guard.
         for (String pin : new String[] { "v", "V", " v " }) {
             CeReleaseController controller = new CeReleaseController(
-                    pin, "https://example.test/x", true, null, noStore());
-            assertThat(controller.latest(null).latestVersion()).as("pin %s", pin).isNull();
+                    pin, "https://example.test/x", true, null, noStore(), noRecorder());
+            assertThat(controller.latest(null, null).latestVersion()).as("pin %s", pin).isNull();
         }
     }
 
@@ -171,9 +179,9 @@ class CeReleaseControllerTest {
     @DisplayName("a stored 'v' advertises nulls on the ROW branch too")
     void storedBareVAdvertisesNulls() {
         CeReleaseController controller = new CeReleaseController(
-                "", "", false, "", storeWith(new CeReleaseStore.Announced("v", "https://example.test/x", true, null)));
+                "", "", false, "", storeWith(new CeReleaseStore.Announced("v", "https://example.test/x", true, null)), noRecorder());
 
-        assertThat(controller.latest(null).latestVersion()).isNull();
+        assertThat(controller.latest(null, null).latestVersion()).isNull();
     }
 
     @Test
@@ -182,8 +190,8 @@ class CeReleaseControllerTest {
         // "latest" was served as-is: a CE install compares it numerically, finds nothing, and the
         // pin silently does nothing while looking set.
         for (String pin : new String[] { "latest", "2026.07.30.1", "next" }) {
-            CeReleaseController controller = new CeReleaseController(pin, null, false, null, noStore());
-            assertThat(controller.latest(null).latestVersion()).as("pin %s", pin).isNull();
+            CeReleaseController controller = new CeReleaseController(pin, null, false, null, noStore(), noRecorder());
+            assertThat(controller.latest(null, null).latestVersion()).as("pin %s", pin).isNull();
         }
     }
 
@@ -197,10 +205,10 @@ class CeReleaseControllerTest {
         for (String pin : new String[] { "v", "V", " v ", "latest", "2026.07.30.1" }) {
             CeReleaseController controller = new CeReleaseController(
                     pin, "https://example.test/pinned", false, null,
-                    storeWith(new CeReleaseStore.Announced("0.4.1", "https://example.test/4", true, null)));
+                    storeWith(new CeReleaseStore.Announced("0.4.1", "https://example.test/4", true, null)), noRecorder());
 
-            assertThat(controller.latest(null).latestVersion()).as("pin %s", pin).isEqualTo("0.4.1");
-            assertThat(controller.latest(null).releaseUrl()).as("pin %s", pin).isEqualTo("https://example.test/4");
+            assertThat(controller.latest(null, null).latestVersion()).as("pin %s", pin).isEqualTo("0.4.1");
+            assertThat(controller.latest(null, null).releaseUrl()).as("pin %s", pin).isEqualTo("https://example.test/4");
         }
     }
 
@@ -209,9 +217,9 @@ class CeReleaseControllerTest {
     void usablePinStillWins() {
         CeReleaseController controller = new CeReleaseController(
                 "0.3.0", "https://example.test/pinned", false, null,
-                storeWith(new CeReleaseStore.Announced("0.4.1", "https://example.test/4", true, null)));
+                storeWith(new CeReleaseStore.Announced("0.4.1", "https://example.test/4", true, null)), noRecorder());
 
-        assertThat(controller.latest(null).latestVersion()).isEqualTo("0.3.0");
+        assertThat(controller.latest(null, null).latestVersion()).isEqualTo("0.3.0");
     }
 
     @Test
@@ -221,9 +229,9 @@ class CeReleaseControllerTest {
         // absent link. Dropping the blank-to-null on these two fields turned nothing red.
         CeReleaseController controller = new CeReleaseController(
                 "", "", false, "",
-                storeWith(new CeReleaseStore.Announced("0.4.1", "   ", false, "  ")));
+                storeWith(new CeReleaseStore.Announced("0.4.1", "   ", false, "  ")), noRecorder());
 
-        LatestRelease r = controller.latest(null);
+        LatestRelease r = controller.latest(null, null);
 
         assertThat(r.latestVersion()).isEqualTo("0.4.1");
         assertThat(r.releaseUrl()).isNull();
@@ -241,8 +249,8 @@ class CeReleaseControllerTest {
         for (String pin : new String[] { "vv0.2.7", "vV0.2.7", "v0.2.7", "V0.2.7", "0.2.7" }) {
             boolean feedTreatsAsPin = new CeReleaseController(
                     pin, null, false, null,
-                    storeWith(new CeReleaseStore.Announced("0.4.1", null, false, null)))
-                    .latest(null).latestVersion().equals("0.4.1") ? false : true;
+                    storeWith(new CeReleaseStore.Announced("0.4.1", null, false, null)), noRecorder())
+                    .latest(null, null).latestVersion().equals("0.4.1") ? false : true;
 
             CeReleaseStore store = mock(CeReleaseStore.class);
             when(store.current()).thenReturn(new CeReleaseStore.Announced("0.4.1", null, false, null));
@@ -263,9 +271,9 @@ class CeReleaseControllerTest {
     @Test
     @DisplayName("config blank and nothing announced advertises nulls, exactly as CE does today")
     void nothingAnnouncedAdvertisesNulls() {
-        CeReleaseController controller = new CeReleaseController("", "", false, "", storeWith(null));
+        CeReleaseController controller = new CeReleaseController("", "", false, "", storeWith(null), noRecorder());
 
-        LatestRelease r = controller.latest(null);
+        LatestRelease r = controller.latest(null, null);
 
         assertThat(r.latestVersion()).isNull();
         assertThat(r.releaseUrl()).isNull();
@@ -279,9 +287,9 @@ class CeReleaseControllerTest {
         // binaries, so the cloud must never emit one.
         CeReleaseController controller = new CeReleaseController(
                 "", "", false, "",
-                storeWith(new CeReleaseStore.Announced("  ", "https://example.test/x", true, null)));
+                storeWith(new CeReleaseStore.Announced("  ", "https://example.test/x", true, null)), noRecorder());
 
-        LatestRelease r = controller.latest(null);
+        LatestRelease r = controller.latest(null, null);
 
         assertThat(r.latestVersion()).isNull();
         assertThat(r.releaseUrl()).isNull();

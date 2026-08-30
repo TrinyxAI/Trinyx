@@ -369,11 +369,21 @@ export function HttpRequestParametersForm({
           <div className="space-y-2 p-3 bg-slate-50 dark:bg-slate-900 rounded-lg border border-slate-200 dark:border-slate-700">
             <div className="space-y-1">
               <label className="text-xs font-medium text-slate-500">{t('username')}</label>
-              <Input
+              <ExpressionEditor
                 value={httpData.authConfig?.username || ''}
-                onChange={(e) => handleAuthConfigChange('username', e.target.value)}
+                onChange={(value) => handleAuthConfigChange('username', value)}
                 placeholder={t('username')}
-                disabled={isRunMode}
+                className="w-full"
+                unknownVariables={findUnknownVariables({ username: httpData.authConfig?.username || '' })}
+                handleId={`http-request-basic-username-${node.id}`}
+                connections={connections}
+                onHandleClick={handleHandleClick}
+                draggingFromHandle={draggingFromHandle}
+                onHandleMouseDown={handleHandleMouseDown}
+                onHandleMouseUp={handleHandleMouseUp}
+                hoveredTargetHandle={hoveredTargetHandle}
+                onSetHandleRef={handleSetHandleRef}
+                readOnly={isRunMode}
               />
             </div>
             <div className="space-y-1">

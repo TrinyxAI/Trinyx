@@ -11,6 +11,8 @@ import {
   SelectContent,
   SelectItem,
 } from '@/components/ui/select';
+import { WorkflowRelationsAutoMenu } from '@/components/workflow/relations/WorkflowRelationsAutoMenu';
+import { requestOpenRelatedWorkflow } from '@/lib/sidePanel/openWorkflowBuilderTab';
 import { CanvasFileStripToggleButton } from './CanvasFileStripToggleButton';
 import { CanvasRunTriggerButton } from './CanvasRunTriggerButton';
 import { TriggerNodePinButton } from './nodes/TriggerNodePinButton';
@@ -32,6 +34,12 @@ interface CanvasToolbarProps {
    * False in the read-only marketplace preview, which can neither run nor pin.
    */
   showRunControls: boolean;
+  /**
+   * Offer the sub-workflow relations menu (which workflows call this one, which ones it calls).
+   * False in the read-only marketplace preview and in snapshot views: those render someone else's
+   * plan, whose neighbours are not workflows this viewer has, so every row would be a dead end.
+   */
+  showRelations: boolean;
   workflowId?: string;
   onUndo?: () => void;
   onRedo?: () => void;
@@ -54,6 +62,7 @@ export function CanvasToolbar({
   isSettingsOpen,
   nodes,
   showRunControls,
+  showRelations,
   workflowId,
   onUndo,
   onRedo,
@@ -227,7 +236,15 @@ export function CanvasToolbar({
           </button>
         </div>
 
-        {/* Settings */}
+        {/* Settings, and beside it the sub-workflow relations menu - ONE group, no divider
+            between them. Both are "about this workflow" rather than about the view, so a
+            separator would have suggested a boundary that is not there.
+
+            The relations menu is offered in BOTH modes: "what calls this?" is a question you ask
+            while reading a run as much as while editing. It renders nothing when the workflow has
+            no sub-workflow neighbour, so its mere presence is the indicator, and in run mode a
+            pick goes through the view's own opener, which resolves the target's PINNED RUN first -
+            the same route the sub-workflow button on a node takes. */}
         <div className="flex items-center gap-1 border-r border-[var(--border-color)] pr-1">
           <button
             type="button"
@@ -237,6 +254,16 @@ export function CanvasToolbar({
           >
             <Settings className="h-4 w-4" />
           </button>
+          {showRelations && workflowId && (
+            <WorkflowRelationsAutoMenu
+              workflowId={workflowId}
+              variant="toolbar"
+              side="top"
+              align="center"
+              data-testid="canvas-toolbar-relations"
+              onOpen={isRunMode ? (ref) => requestOpenRelatedWorkflow(ref.id, ref.name) : undefined}
+            />
+          )}
         </div>
 
         {/* AI Assistant */}

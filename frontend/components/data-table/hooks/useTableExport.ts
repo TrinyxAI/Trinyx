@@ -4,6 +4,7 @@ import { useCallback, useState } from 'react';
 import type { ColumnDefinition, DataSourceItemRow, PaginationState } from '../types';
 import { formatUtcDateTime } from '@/lib/utils/dateFormatters';
 import { authenticatedFetch } from '../utils/authenticatedFetch';
+import { cellDisplayText } from '@/lib/datatable/assetValue';
 
 export interface UseTableExportParams {
   dataSourceId?: number;
@@ -100,12 +101,14 @@ export function useTableExport({
             return '';
           }
 
-          if (typeof value === 'object') {
-            return JSON.stringify(value);
-          }
+          // A media cell exports as its file name, not as the serialized reference: a column of
+          // {"_type":"file","url":...} blobs is unreadable in a spreadsheet. Everything else keeps
+          // its previous encoding - in particular a url/text column must export its own text, not
+          // the file name a greedy parse would read out of it.
+          const stringValue = cellDisplayText(value);
 
-          // Escape quotes and commas for CSV
-          const stringValue = String(value);
+          // Escape quotes and commas for CSV. This used to be skipped for objects, so any
+          // serialized value carrying a comma produced a malformed row.
           if (stringValue.includes(',') || stringValue.includes('"') || stringValue.includes('\n')) {
             return `"${stringValue.replace(/"/g, '""')}"`;
           }

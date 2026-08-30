@@ -418,6 +418,33 @@ class AbstractLLMProviderTest {
         }
 
         @Test
+        @DisplayName("should tell the model an array of objects holds objects, not strings")
+        void arrayItemsFollowWhatTheParameterDeclares() {
+            // This schema is what a strict provider validates the call against, so a parameter
+            // that carries objects while its schema says strings can have its entries refused or
+            // stringified before the tool is ever reached - and the description telling the agent
+            // to send objects cannot override it. Undeclared stays "string", which is what every
+            // array parameter emitted before item types existed.
+            ToolParameter objects = ToolParameter.builder()
+                    .name("rows").type("array").description("Rows").required(false)
+                    .itemType("object").build();
+            ToolParameter strings = ToolParameter.builder()
+                    .name("tags").type("array").description("Tags").required(false).build();
+
+            Map<String, Object> schema = provider.buildParametersSchema(ToolDefinition.builder()
+                    .name("t").description("T").parameters(List.of(objects, strings)).build());
+
+            @SuppressWarnings("unchecked")
+            Map<String, Object> props = (Map<String, Object>) schema.get("properties");
+            @SuppressWarnings("unchecked")
+            Map<String, Object> rows = (Map<String, Object>) props.get("rows");
+            @SuppressWarnings("unchecked")
+            Map<String, Object> tags = (Map<String, Object>) props.get("tags");
+            assertThat(rows.get("items")).isEqualTo(Map.of("type", "object"));
+            assertThat(tags.get("items")).isEqualTo(Map.of("type", "string"));
+        }
+
+        @Test
         @DisplayName("should build empty properties for no parameters")
         void shouldBuildEmptyForNoParams() {
             ToolDefinition tool = ToolDefinition.builder()

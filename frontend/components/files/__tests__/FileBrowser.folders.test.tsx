@@ -78,16 +78,26 @@ vi.mock('@/lib/api/storage-api', () => ({
   S3_FILES_FILTER: { filesOnly: true, s3Only: true },
 }));
 
-// ---- dnd-kit DndContext: stub that captures onDragEnd so we can fire a drop ----
+// ---- dnd-kit DndContext: stub that captures onDragEnd so we can fire a drop, and the rest
+// of the drag wiring so a test can see it is there at all ----
 let capturedOnDragEnd: ((e: { active: { id: string }; over: { id: string } | null }) => void) | null = null;
+const dragProps = vi.hoisted(() => ({ captured: {} as Record<string, unknown> }));
+// What it TAKES to start a drag is pinned in useDragSensors' own test; here the point is only
+// that the Files grid uses it rather than rolling its own.
+const SHARED_SENSORS = vi.hoisted(() => ['shared-sensors']);
+vi.mock('@/lib/dnd/useDragSensors', () => ({ useDragSensors: () => SHARED_SENSORS }));
 vi.mock('@dnd-kit/core', () => ({
-  DndContext: ({ children, onDragEnd }: { children: React.ReactNode; onDragEnd: (e: { active: { id: string }; over: { id: string } | null }) => void }) => {
+  DndContext: ({ children, onDragEnd, ...rest }: { children: React.ReactNode; onDragEnd: (e: { active: { id: string }; over: { id: string } | null }) => void }) => {
     capturedOnDragEnd = onDragEnd;
+    dragProps.captured = rest;
     return <div data-testid="dnd">{children}</div>;
   },
   // DragOverlay (drag-preview thumbnail host) - passthrough so the grid still renders.
   DragOverlay: ({ children }: { children: React.ReactNode }) => <div data-testid="drag-overlay">{children}</div>,
-  PointerSensor: class {},
+  MouseSensor: class {},
+  TouchSensor: class {},
+  pointerWithin: vi.fn(),
+  rectIntersection: vi.fn(),
   useSensor: () => ({}),
   useSensors: () => [],
 }));
@@ -485,5 +495,31 @@ describe('FileBrowser - virtual workflow folders (Phase 2b)', () => {
     hookState.parentFolderId = 'manual-uuid'; // a real manual folder
     const { getByText } = render(<FileBrowser />);
     expect(getByText('newFolder')).toBeTruthy();
+  });
+
+  /**
+   * The Files grid got the same two drag fixes the resource lists did: the POINTER decides
+   * which card a drop lands on (dnd-kit's default measures the floating preview, which is
+   * anchored where the card was picked up plus the travel), and a finger gets a hold-to-drag
+   * sensor of its own. Without this, reverting either on this surface fails nothing.
+   */
+  it('lets the pointer decide which card a drop lands on, not the floating preview', async () => {
+    const { pointerWithin } = await import('@dnd-kit/core');
+    hookState.entries = [file('a', 'a.png')];
+
+    render(<FileBrowser />);
+
+    expect(dragProps.captured.collisionDetection).toBe(pointerWithin);
+  });
+
+  it('asks for a drag the same way the resource lists do, not with its own idea of one', () => {
+    // `toBeDefined()` would pass for any configuration, including the single pointer sensor
+    // that could not be dragged with a finger. What matters is that this surface takes its
+    // answer from the shared hook, which is where that answer is pinned.
+    hookState.entries = [file('a', 'a.png')];
+
+    render(<FileBrowser />);
+
+    expect(dragProps.captured.sensors).toBe(SHARED_SENSORS);
   });
 });

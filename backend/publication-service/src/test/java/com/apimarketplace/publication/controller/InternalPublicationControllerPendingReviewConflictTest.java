@@ -56,6 +56,7 @@ class InternalPublicationControllerPendingReviewConflictTest {
         controller = new InternalPublicationController(
                 publicationRepository, publicationService, agentPublicationService,
                 resourcePublicationService, orchestratorClient, backfillService,
+                org.mockito.Mockito.mock(com.apimarketplace.publication.service.ShowcaseFileNamespaceRepairService.class),
                 org.mockito.Mockito.mock(org.springframework.beans.factory.ObjectProvider.class));
     }
 

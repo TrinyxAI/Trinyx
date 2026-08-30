@@ -22,12 +22,12 @@ import { useTranslations } from 'next-intl';
 import { useCanMutateInCurrentOrg } from '@/lib/stores/current-org-store';
 import { useOrgScopedReset } from '@/lib/hooks/useOrgScopedReset';
 import { useSelectableItems } from '@/hooks/useSelectableItems';
-import { DndContext, DragOverlay } from '@dnd-kit/core';
 import { FolderPlus } from 'lucide-react';
 import { TableFolderFace } from '@/components/folders/TableFolderFace';
 import { FolderBreadcrumb } from '@/components/folders/FolderBreadcrumb';
 import { FolderTilesGrid } from '@/components/folders/FolderTilesGrid';
 import { FolderDialogs } from '@/components/folders/FolderDialogs';
+import { FolderDragContext } from '@/components/folders/FolderDragContext';
 import { DraggableResourceCard } from '@/components/folders/DraggableResourceCard';
 import { useListFolders } from '@/hooks/useListFolders';
 import { BulkDeleteModal } from '@/components/ui/BulkDeleteModal';
@@ -417,6 +417,9 @@ export default function DataSourceTable({
   }, [unshareConfirmDataSource, addToast, t]);
 
   return (
+    // The drag surface covers the header too: the folder path in it is a drop target, so a
+    // card can be dragged out of a folder onto the level it belongs to.
+    <FolderDragContext folders={folders} nameOf={(id) => dataSources.find((d) => String(d.id) === id)?.name}>
     <div className={`space-y-4 w-full overflow-visible ${className}`}>
       {/* Header - Applications-style: page title + description below, ALWAYS visible so the empty
           state shows the same layout as the Applications page. The create button shows only when
@@ -579,15 +582,7 @@ export default function DataSourceTable({
         {loading ? (
           <CardSkeletonGrid />
         ) : (
-          /* One drag context over the folders AND the cards: a card dropped on a tile is filed
-             there, a tile dropped on another tile is nested inside it. */
-          <DndContext
-            sensors={folders.sensors}
-            onDragStart={(event) => folders.handleDragStart(
-              event, (id) => dataSources.find((d) => String(d.id) === id)?.name)}
-            onDragEnd={folders.handleDragEnd}
-            onDragCancel={folders.cancelDrag}
-          >
+          <>
             <FolderTilesGrid
               folders={folders}
               countLabel={folderCountLabel}
@@ -644,18 +639,7 @@ export default function DataSourceTable({
           </div>
             )}
 
-            {/* What is being dragged, following the pointer. A multi-selection drag says how
-                many cards are travelling, so a drop never moves more than you meant. */}
-            <DragOverlay>
-              {folders.activeDrag && (
-                <div className="rounded-xl border border-[var(--accent-primary)] bg-theme-secondary px-3 py-2 text-sm text-theme-primary shadow-lg">
-                  {folders.activeDrag.count > 1
-                    ? t('folders.draggingCount', { count: folders.activeDrag.count })
-                    : folders.activeDrag.label}
-                </div>
-              )}
-            </DragOverlay>
-          </DndContext>
+          </>
         )}
 
       </div>
@@ -827,5 +811,6 @@ export default function DataSourceTable({
 
       <ToastContainer toasts={toasts} onRemoveToast={removeToast} />
     </div>
+    </FolderDragContext>
   );
 }

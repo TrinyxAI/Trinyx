@@ -49,6 +49,15 @@ vi.mock('next/navigation', () => ({
   usePathname: () => '/app/marketplace',
   useRouter: () => routerMock,
 }));
+
+/**
+ * A refinement is a change of ADDRESS on the page already on screen, so it goes through the
+ * history API rather than the router: returning a select to its fallback removes the last
+ * query param, and a router replace of the bare pathname is dropped when the page was loaded
+ * at it - so on a page opened directly on `?type=agents`, clearing the filter did nothing.
+ */
+const historyReplace = vi.fn();
+const realReplaceState = window.history.replaceState;
 vi.mock('@tanstack/react-query', () => ({
   useQueryClient: () => ({ invalidateQueries: vi.fn().mockResolvedValue(undefined) }),
 }));
@@ -184,6 +193,9 @@ const AGENT_PUB = {
 };
 
 beforeEach(() => {
+  historyReplace.mockClear();
+  window.history.replaceState = ((_d: unknown, _u: string, url?: string) =>
+    historyReplace(url)) as unknown as typeof window.history.replaceState;
   vi.clearAllMocks();
   searchParamsState.params = new URLSearchParams();
   orgResetCallbacks.list = [];
@@ -196,6 +208,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  window.history.replaceState = realReplaceState;
   cleanup();
   useMarketplaceInstallStore.setState({ active: null });
 });
@@ -695,10 +708,8 @@ describe('Marketplace - tab and type filter survive a round trip (query params)'
 
     await pickType(/agents/i);
 
-    expect(routerMock.replace).toHaveBeenCalledWith(
-      '/app/marketplace?type=agents',
-      { scroll: false },
-    );
+    expect(historyReplace).toHaveBeenCalledWith(
+      '/app/marketplace?type=agents');
   });
 });
 
@@ -727,10 +738,8 @@ describe('Marketplace - tab is query-param backed too', () => {
 
     // Selecting the fallback tab drops only `tab` and preserves `type`.
     fireEvent.click(screen.getByText('tabExplore'));
-    expect(routerMock.replace).toHaveBeenCalledWith(
-      '/app/marketplace?type=agents',
-      { scroll: false },
-    );
+    expect(historyReplace).toHaveBeenCalledWith(
+      '/app/marketplace?type=agents');
   });
 
   it('clicking My Purchases writes ?tab=purchases', async () => {
@@ -743,10 +752,8 @@ describe('Marketplace - tab is query-param backed too', () => {
 
     fireEvent.click(screen.getByText('tabMyPurchases'));
 
-    expect(routerMock.replace).toHaveBeenCalledWith(
-      '/app/marketplace?tab=purchases',
-      { scroll: false },
-    );
+    expect(historyReplace).toHaveBeenCalledWith(
+      '/app/marketplace?tab=purchases');
   });
 
   it('selecting the default type drops the param instead of writing type=apps', async () => {
@@ -760,6 +767,6 @@ describe('Marketplace - tab is query-param backed too', () => {
 
     await pickType(/applications/i);
 
-    expect(routerMock.replace).toHaveBeenCalledWith('/app/marketplace', { scroll: false });
+    expect(historyReplace).toHaveBeenCalledWith('/app/marketplace');
   });
 });

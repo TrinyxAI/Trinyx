@@ -133,6 +133,21 @@ export interface FavoritesResponse {
   favorites: PublicHighlightedPublication[];
 }
 
+/**
+ * One node's frozen file result on a showcase canvas: the fields the pill shows, plus a signed
+ * URL. Deliberately NOT a FileRef - the pill's only way to the bytes is that URL, so a storage
+ * id here would only invite a caller to try an authenticated route it has no token for.
+ */
+export interface ShowcaseStepFile {
+  name: string;
+  mimeType: string;
+  size: number;
+  url: string;
+}
+
+/** `epoch -> stepAlias -> file`, as served by `GET /publications/by-id/{id}/step-files`. */
+export type ShowcaseStepFiles = Record<string, Record<string, ShowcaseStepFile>>;
+
 import type {
   WorkflowPublication,
   PublishWorkflowRequest,
@@ -319,6 +334,30 @@ export class PublicationService {
       .finally(() => { this.inFlightShowcaseStates.delete(key); });
     this.inFlightShowcaseStates.set(key, p);
     return p;
+  }
+
+  /**
+   * The showcase run's frozen FILE RESULTS, per epoch and per node:
+   * `{ "<epoch>": { "<stepAlias>": { name, mimeType, size, url } } }`.
+   *
+   * Backs the file pill the canvas hangs under a node that produced a file. Each `url` is an
+   * HMAC-signed `/api/files/proxy-signed?...` minted for THIS read against the publication's own
+   * storage namespace: no session token, and it keeps resolving after the publisher deletes the
+   * source file (the bytes were copied at publish time).
+   *
+   * Returns `{}` for a publication with nothing to show - a 204 (no file result), a 403
+   * (non-public publication: this read has no auth'd twin, same as run-state), or a snapshot
+   * predating the section. The canvas simply shows no pills, which is what it did before this
+   * endpoint existed, so no caller needs to special-case the failure.
+   */
+  async getShowcaseStepFiles(publicationId: string, remote = false): Promise<ShowcaseStepFiles> {
+    const { path, skipAuth } = this.byIdRead(publicationId, '/step-files', remote);
+    try {
+      const data = await apiClient.get<ShowcaseStepFiles | null>(path, { skipAuth });
+      return data ?? {};
+    } catch {
+      return {};
+    }
   }
 
   /**

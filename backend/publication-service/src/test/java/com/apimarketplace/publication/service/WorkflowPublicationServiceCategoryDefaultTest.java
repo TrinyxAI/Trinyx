@@ -77,7 +77,8 @@ class WorkflowPublicationServiceCategoryDefaultTest {
         service = new WorkflowPublicationService(
                 publicationRepository, snapshotVersionRepository, receiptRepository, reviewRepository,
                 orchestratorClient, agentClient, interfaceClient, dataSourceClient, breakdownService,
-                new ObjectMapper(), snapshotCloneService, entitlementGuard, authClient);
+                new ObjectMapper(), snapshotCloneService, entitlementGuard, authClient,
+                new com.apimarketplace.publication.service.PublicationFileUrlResolver(new com.apimarketplace.common.storage.signing.ShowcaseUrlSigner("test-secret-32-bytes-long-enough-for-hmac")));
         lenient().when(authClient.getPublisherProfile(any()))
                 .thenReturn(new PublisherProfileDto(TENANT_ID, "Test Publisher", "test@publisher.com", "avatar-uuid", null));
     }
@@ -206,7 +207,7 @@ class WorkflowPublicationServiceCategoryDefaultTest {
                     if (p.getId() == null) p.setId(PUBLICATION_ID);
                     return p;
                 });
-        when(snapshotVersionRepository.getMaxVersion(PUBLICATION_ID)).thenReturn(Optional.empty());
+        when(snapshotVersionRepository.getMaxVersion(any(UUID.class))).thenReturn(Optional.empty());
         when(orchestratorClient.getLatestPlanVersion(WORKFLOW_ID, TENANT_ID)).thenReturn(1);
         when(orchestratorClient.createApplicationWorkflow(any(), eq(TENANT_ID)))
                 .thenReturn(Map.of("id", UUID.randomUUID().toString()));

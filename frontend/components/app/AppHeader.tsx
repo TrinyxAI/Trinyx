@@ -10,7 +10,8 @@ import { ChatHeader } from '@/components/chat/ChatHeader';
 import { GlobalSearchBar } from '@/components/search/GlobalSearchBar';
 import { useVisibleModels, AIModel, SelectedModel, EMPTY_SELECTED_MODEL, selectedModelFromAIModel, modelMatches, selectedModelEquals, getEffectiveDefaultSelectedModel } from '@/hooks/useModels';
 import { useSafeNavigate } from '@/contexts/NavigationGuardContext';
-import { useSidePanelSafe, stripLocale } from '@/contexts/SidePanelContext';
+import { useSidePanelSafe, stripLocale, type SidePanelContextValue } from '@/contexts/SidePanelContext';
+import { togglePanelFromHeader } from '@/lib/sidePanel/togglePanelFromHeader';
 import { useAuth } from '@/lib/providers/smart-providers';
 import { useMobileDetection } from '@/hooks/useMobileDetection';
 import { AgentPanelContent, AGENT_CONFIGURATION_TAB, AGENT_CONVERSATION_TAB } from '@/components/app/AgentPanelContent';
@@ -24,7 +25,6 @@ import {
 import { orchestratorApi } from '@/lib/api';
 import { storageApi } from '@/lib/api/storage-api';
 import { Workflow, Table, Monitor, Bot, Globe, Play } from 'lucide-react';
-import { WorkflowBuilderPanelContent } from '@/components/app/WorkflowBuilderPanelContent';
 
 import { DataSourcePanelContent } from '@/components/app/DataSourcePanelContent';
 import { InterfacePanelContent } from '@/components/app/InterfacePanelContent';
@@ -46,6 +46,18 @@ import {
   FILES_DETAIL_NEXT,
   FILES_DETAIL_DOWNLOAD,
 } from '@/lib/files/filesHeaderBus';
+import { useInterfaceViewerControls } from '@/hooks/useInterfaceViewerControls';
+
+/** The workflow/application pages' open branch, shared by the button and the event. */
+function openWorkflowPanel(panel: SidePanelContextValue, workflowId: string | null | undefined): void {
+  if (workflowId) {
+    panel.openTab(buildWorkflowPanelTab(workflowId));
+  } else {
+    // Application mode / marketplace preview: workflowId is not in the URL, the tab
+    // is already created by ApplicationDetailView.
+    panel.open();
+  }
+}
 
 export function AppHeader() {
   const safeNavigate = useSafeNavigate();
@@ -223,7 +235,7 @@ export function AppHeader() {
 
   const sidePanel = useSidePanelSafe();
   const isMobile = useMobileDetection();
-  const isAgentConfigOpen = sidePanel?.isOpen && sidePanel?.activeTabId?.startsWith('agent-');
+  const isAgentConfigOpen = sidePanel?.isForward && sidePanel?.activeTabId?.startsWith('agent-');
   const { isLoading: authLoading } = useAuth();
 
   // Auto-register the AI Chat tab on every page EXCEPT pages that:
@@ -262,16 +274,17 @@ export function AppHeader() {
     loadedAgentForConversationRef.current = null;
   }, []);
 
+  const panelIsForward = !!sidePanel?.isForward;
+
   // Side panel toggle - conversation pages: open agent tab when an agent is linked, otherwise just toggle
   const handleToggleRightPanel = useCallback(() => {
-    if (!sidePanel) return;
-    if (sidePanel.isOpen) {
-      sidePanel.close();
-    } else if (agentId) {
-      sidePanel.openTab(buildAgentConfigPanelTab({ agentId, agentName, agentAvatarUrl }));
-    } else {
-      sidePanel.open();
-    }
+    togglePanelFromHeader(sidePanel, (panel) => {
+      if (agentId) {
+        panel.openTab(buildAgentConfigPanelTab({ agentId, agentName, agentAvatarUrl }));
+      } else {
+        panel.open();
+      }
+    });
   }, [sidePanel, agentId, agentName, agentAvatarUrl]);
 
   // Routes where the AI Chat side-panel tab is hidden - used to wire the page-specific
@@ -283,37 +296,19 @@ export function AppHeader() {
   // The AI Chat tab is auto-registered globally (see effect above) so this handler
   // just makes sure the tab is open + active when the user clicks the toggle.
   const handleToggleSidePanel = useCallback(() => {
-    if (!sidePanel) return;
-    if (sidePanel.isOpen) {
-      sidePanel.close();
-    } else {
-      openAiChatTab(sidePanel);
-    }
+    togglePanelFromHeader(sidePanel, openAiChatTab);
   }, [sidePanel]);
 
   // Side panel toggle - chat pages: no default tab, just open/close
   const handleTogglePanelOnly = useCallback(() => {
-    if (!sidePanel) return;
-    if (sidePanel.isOpen) {
-      sidePanel.close();
-    } else {
-      sidePanel.open();
-    }
+    togglePanelFromHeader(sidePanel, (panel) => panel.open());
   }, [sidePanel]);
 
   // Side panel toggle - workflow/application pages: pinned "Workflow Panel" tab
   // For application mode and marketplace preview, workflowId is not in the URL -
   // ApplicationDetailView creates the tab directly, so we just toggle the panel open/close.
   const handleToggleWorkflowPanel = useCallback(() => {
-    if (!sidePanel) return;
-    if (sidePanel.isOpen) {
-      sidePanel.close();
-    } else if (workflowId) {
-      sidePanel.openTab(buildWorkflowPanelTab(workflowId));
-    } else {
-      // Application mode / marketplace preview: workflowId not in URL, tab already created by ApplicationDetailView
-      sidePanel.open();
-    }
+    togglePanelFromHeader(sidePanel, (panel) => openWorkflowPanel(panel, workflowId));
   }, [sidePanel, workflowId]);
 
   // Listen for programmatic open requests from WorkflowDetailView
@@ -326,29 +321,20 @@ export function AppHeader() {
 
       // Toggle mode: open if closed, close if open
       if (event.detail?.toggle) {
-        if (sidePanel.isOpen) {
-          sidePanel.close();
-        } else if (workflowId) {
-          sidePanel.openTab(buildWorkflowPanelTab(workflowId));
-        } else {
-          sidePanel.open();
-        }
+        togglePanelFromHeader(sidePanel, (panel) => openWorkflowPanel(panel, workflowId));
         return;
       }
 
-      // Open-only mode (legacy)
-      if (event.detail?.isOpen && !sidePanel.isOpen) {
-        if (workflowId) {
-          sidePanel.openTab(buildWorkflowPanelTab(workflowId));
-        } else {
-          sidePanel.open();
-        }
+      // Open-only mode (legacy). The guard means the close branch is unreachable, so
+      // the shared decision reduces to "un-shade, else open" - which is the intent.
+      if (event.detail?.isOpen && !panelIsForward) {
+        togglePanelFromHeader(sidePanel, (panel) => openWorkflowPanel(panel, workflowId));
       }
     };
 
     window.addEventListener('workflowViewToggleMessagesPanel', handler as EventListener);
     return () => window.removeEventListener('workflowViewToggleMessagesPanel', handler as EventListener);
-  }, [isWorkflowViewWithWorkflow, isApplicationPage, isMarketplacePreview, sidePanel, workflowId]);
+  }, [isWorkflowViewWithWorkflow, isApplicationPage, isMarketplacePreview, sidePanel, panelIsForward, workflowId]);
 
   // Handle toggle messages panel for data view
   // Uses CustomEvent for legacy support with existing components
@@ -375,6 +361,14 @@ export function AppHeader() {
   const handleEditInterface = useCallback(() => {
     window.dispatchEvent(new CustomEvent('interfaceEdit'));
   }, []);
+
+  // The controls the page being viewed can offer (its volume, today). Only that page knows
+  // whether pressing the button would show anything, so it tells us and we show the button only
+  // then. Gated on the same condition as Edit: a legacy `web_search` interface renders no page
+  // at all, so there is nothing there to control either.
+  const interfaceControls = useInterfaceViewerControls(
+    isInterfacePage && interfaceType !== 'web_search',
+  );
 
   // ============== METADATA EDIT MODAL (workflow / interface / datasource) ==============
   const tEdit = useTranslations('modals.editMetadata');
@@ -520,13 +514,17 @@ export function AppHeader() {
       switch (type) {
         case 'workflow': {
           const tabId = workflowPanelTabId(id);
-          openFn({
-            id: tabId,
-            label: title || 'Workflow',
-            icon: <Workflow className="w-4 h-4" />,
-            content: <WorkflowBuilderPanelContent workflowId={id} readOnly={false} />,
-            preferredWidth: 0.35,
-            keepMounted: true,
+          // Lazy: the builder panel pulls in the whole workflow canvas, and the app
+          // header must not carry it statically (same rule as openWorkflowBuilderTab).
+          void import('@/components/app/WorkflowBuilderPanelContent').then(({ WorkflowBuilderPanelContent }) => {
+            openFn({
+              id: tabId,
+              label: title || 'Workflow',
+              icon: <Workflow className="w-4 h-4" />,
+              content: <WorkflowBuilderPanelContent workflowId={id} readOnly={false} />,
+              preferredWidth: 0.35,
+              keepMounted: true,
+            });
           });
           break;
         }
@@ -607,13 +605,15 @@ export function AppHeader() {
         case 'workflow_run': {
           if (!eventRunId) break;
           const tabId = workflowPanelTabId(id);  // Deliberately NOT run-scoped: same id, so the run REPLACES the workflow tab
-          openFn({
-            id: tabId,
-            label: title || 'Workflow Run',
-            icon: <Play className="w-4 h-4" />,
-            content: <WorkflowBuilderPanelContent workflowId={id} runId={eventRunId} readOnly={false} />,
-            preferredWidth: 0.45,
-            keepMounted: true,
+          void import('@/components/app/WorkflowBuilderPanelContent').then(({ WorkflowBuilderPanelContent }) => {
+            openFn({
+              id: tabId,
+              label: title || 'Workflow Run',
+              icon: <Play className="w-4 h-4" />,
+              content: <WorkflowBuilderPanelContent workflowId={id} runId={eventRunId} readOnly={false} />,
+              preferredWidth: 0.45,
+              keepMounted: true,
+            });
           });
           break;
         }
@@ -740,6 +740,9 @@ export function AppHeader() {
       isInterfacePage={isInterfacePage}
       interfaceId={interfaceId}
       onEditInterface={isInterfacePage && interfaceType !== 'web_search' ? handleEditInterface : undefined}
+      onToggleInterfaceControls={interfaceControls.onToggle}
+      interfaceControlsOpen={interfaceControls.open}
+      interfaceSoundOn={interfaceControls.soundOn}
       // Files focused-viewer actions - header-driven back / prev-next / download.
       // Back is folder-aware (close viewer, else step up one folder); the
       // prev/next/download sub-controls stay gated to an open file (isFileOpen).
@@ -761,8 +764,8 @@ export function AppHeader() {
       // Conversation Activity toggle - only on a real conversation page (/app/c/<id>)
       showActivityToggle={isConversationPage}
       // Right panel props - dock buttons always visible; behavior varies by page type
-      isSidePanelOpen={sidePanel?.isOpen ?? false}
-      showAgentConfigPanel={isConversationPage ? !!isAgentConfigOpen : (sidePanel?.isOpen ?? false)}
+      isSidePanelOpen={panelIsForward}
+      showAgentConfigPanel={isConversationPage ? !!isAgentConfigOpen : panelIsForward}
       onToggleAgentConfigPanel={
         isConversationPage
           ? handleToggleRightPanel

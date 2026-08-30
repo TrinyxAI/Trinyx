@@ -14,7 +14,11 @@ const mockPinVersion = vi.fn();
 let mockMode: Record<string, unknown>;
 
 vi.mock('next-intl', () => ({ useTranslations: () => (k: string) => k }));
-vi.mock('next/navigation', () => ({ useRouter: () => ({ push: vi.fn() }) }));
+vi.mock('next/navigation', () => ({
+  useRouter: () => ({ push: vi.fn() }),
+  // The pin path asks where it is before deciding to route or bind in place.
+  usePathname: () => '/en/app/workflow/wf-1',
+}));
 vi.mock('@/contexts/WorkflowModeContext', () => ({ useWorkflowMode: () => mockMode }));
 vi.mock('@/contexts/WorkflowRunContext', () => ({ useRun: () => [{ rawRunState: { planVersion: 3 } }, null] }));
 vi.mock('@/lib/api', () => ({
@@ -92,7 +96,9 @@ describe('TriggerNodePinButton - toolbar variant', () => {
       render(<TriggerNodePinButton workflowId="wf1" variant="toolbar" />);
       fireEvent.click(toolbarButton());
       fireEvent.click(await screen.findByText('versionHistory.pin', { selector: 'button' }));
-      await waitFor(() => expect(events).toEqual([{ pinnedVersion: 3 }]));
+      // Named: several version controls can be on screen at once now (the page
+      // header and the side panel's), each for its own workflow.
+      await waitFor(() => expect(events).toEqual([{ pinnedVersion: 3, workflowId: 'wf1' }]));
     } finally {
       window.removeEventListener('workflowPinnedVersionChange', listener);
     }

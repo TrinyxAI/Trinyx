@@ -489,7 +489,10 @@ public class WorkflowPublicationController {
                 // Resource publications (TABLE/INTERFACE/SKILL) - and owners of
                 // any type - get the raw planSnapshot. For resources the snapshot
                 // IS the public content; sanitizing would return an empty map.
-                response.put("planSnapshot", pub.getPlanSnapshot());
+                // "Raw" still means without the internal keys the file copy stores on the
+                // embedded landing map: this branch is reachable anonymously for an ACTIVE
+                // public publication.
+                response.put("planSnapshot", LandingInterfaceSnapshotter.snapshotWithoutInternalLandingKeys(pub.getPlanSnapshot()));
             } else {
                 response.put("planSnapshot",
                         PlanSnapshotSanitizer.sanitizeForPreview(pub.getPlanSnapshot()));
@@ -508,12 +511,7 @@ public class WorkflowPublicationController {
         }
     }
 
-    /**
-     * Centralized visibility gate for anonymous read paths. A publication is
-     * fetchable by anyone (no auth) only when status=ACTIVE AND visibility
-     * is PUBLIC or UNLISTED. UNLISTED is link-only (no listing) but still
-     * readable by UUID - explicit semantics, not "leak by default".
-     */
+
     private static boolean isAnonymouslyReadable(WorkflowPublicationEntity pub) {
         if (pub.getStatus() != PublicationStatus.ACTIVE) return false;
         return pub.getVisibility() == PublicationVisibility.PUBLIC
@@ -2611,6 +2609,49 @@ public class WorkflowPublicationController {
         } catch (Exception e) {
             logger.error("Failed to fetch public run-state for {}", publicationId, e);
             return ResponseEntity.internalServerError().body(Map.of("error", "Failed to fetch run-state"));
+        }
+    }
+
+    /**
+     * Public per-node file results for a publication's showcase clone:
+     * {@code {"<epoch>": {"<stepAlias>": {name, mimeType, size, url}}}}.
+     *
+     * <p>Backs the file pill the canvas hangs under a node that produced a file. Every URL is
+     * HMAC-signed at THIS read against the publication's own {@code _publications/{id}/}
+     * namespace, so a visitor never touches the publisher's live storage and the pill keeps
+     * working after the publisher deletes the source file.
+     *
+     * <p>Guards are the run-state ones: ACTIVE + PUBLIC publication with a captured snapshot.
+     * Answers 204 rather than 404 when the publication is fine but has no file result to show,
+     * so the caller can tell "nothing to display" from "wrong id".
+     */
+    @GetMapping("/by-id/{publicationId}/step-files")
+    public ResponseEntity<?> getPublicShowcaseStepFiles(@PathVariable String publicationId) {
+        try {
+            UUID pubId = UUID.fromString(publicationId);
+            Optional<WorkflowPublicationEntity> maybePub = publicationService.getPublicationById(pubId);
+            if (maybePub.isEmpty()) {
+                return ResponseEntity.notFound().build();
+            }
+            WorkflowPublicationEntity pub = maybePub.get();
+
+            if (pub.getStatus() != PublicationStatus.ACTIVE
+                    || pub.getVisibility() != PublicationVisibility.PUBLIC) {
+                return ResponseEntity.status(HttpStatus.FORBIDDEN)
+                        .body(Map.of("error", "Publication is not publicly available"));
+            }
+            if (!showcaseSnapshotReader.hasSnapshot(pub)) {
+                return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE)
+                        .body(Map.of("error", "Snapshot not yet captured for this publication"));
+            }
+            return showcaseSnapshotReader.readStepFiles(pub)
+                    .<ResponseEntity<?>>map(ResponseEntity::ok)
+                    .orElseGet(() -> ResponseEntity.noContent().build());
+        } catch (IllegalArgumentException e) {
+            return ResponseEntity.badRequest().body(Map.of("error", e.getMessage()));
+        } catch (Exception e) {
+            logger.error("Failed to fetch public step-files for {}", publicationId, e);
+            return ResponseEntity.internalServerError().body(Map.of("error", "Failed to fetch step-files"));
         }
     }
 

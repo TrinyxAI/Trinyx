@@ -65,6 +65,59 @@ public interface WorkflowRepository extends JpaRepository<WorkflowEntity, UUID> 
     List<Object[]> findIdNamePairs(@Param("ids") Collection<UUID> ids);
 
     /**
+     * Every {@code core:sub_workflow} edge declared by the workspace's plans, as
+     * {@code [UUID parentId, String childWorkflowId]} rows.
+     *
+     * <p>A sub-workflow call is stored in the plan as
+     * {@code cores[] {type: "sub_workflow", subWorkflow: {workflowId: "<uuid>"}}}, which is the ONLY
+     * shape this reads - the same one the publication snapshot walker collects
+     * ({@code WorkflowPublicationService#collectCoreSubWorkflowIds}). There is no relation column and
+     * no relation table: the plan is the source of truth, so the edges are derived from it on read
+     * and a plan save can never leave a stale relation behind.
+     *
+     * <p>Both workflow types are returned (an APPLICATION-type row is a workflow too and can both
+     * call and be called), and the whole workspace is scanned because the PARENT direction is not
+     * knowable from the child's own plan - only from every other plan that names it.
+     *
+     * <p>The {@code @>} containment test is a pre-filter, not a duplicate of the per-element
+     * {@code type} test below it: it discards a whole plan before the lateral expands its cores, and
+     * is the one predicate here that a GIN index on {@code plan} could serve. Containment against a
+     * missing or non-array {@code cores} is false/unknown, never an error.
+     *
+     * <p>{@code jsonb_typeof} guards the lateral: {@code jsonb_array_elements} raises on a non-array,
+     * so a plan whose {@code cores} is absent, null or (malformed) an object degrades to zero rows
+     * instead of failing the whole query for the workspace.
+     *
+     * <p>Scope is the strict org match used by {@code WorkflowManagementService#listWorkflows}; the
+     * caller still has to subtract its own per-member restrictions
+     * ({@code OrgAccessGuard#getRestrictedResourceIds}), which this query knows nothing about.
+     */
+    @Query(value = "SELECT w.id AS parent_id, c->'subWorkflow'->>'workflowId' AS child_id "
+            + "FROM workflows w "
+            + "CROSS JOIN LATERAL jsonb_array_elements("
+            + "  CASE WHEN jsonb_typeof(w.plan->'cores') = 'array' THEN w.plan->'cores' ELSE '[]'::jsonb END) AS c "
+            + "WHERE w.is_active = true "
+            + "  AND w.organization_id = :orgId "
+            + "  AND w.plan->'cores' @> '[{\"type\": \"sub_workflow\"}]'::jsonb "
+            + "  AND c->>'type' = 'sub_workflow' "
+            + "  AND c->'subWorkflow'->>'workflowId' IS NOT NULL "
+            + "  AND c->'subWorkflow'->>'workflowId' <> '__self__'", nativeQuery = true)
+    List<Object[]> findSubWorkflowEdgesByOrganization(@Param("orgId") String orgId);
+
+    /**
+     * Batch (id, name) pairs restricted to ONE organization - the scoped sibling of
+     * {@link #findIdNamePairs}, which resolves any id it is handed.
+     *
+     * <p>Relation names go over the wire, so a child id that a plan names but that lives in another
+     * workspace must resolve to NOTHING rather than to its real name. Filtering in the query (not in
+     * Java) is what makes that a non-decision at the call site.
+     */
+    @Query("SELECT w.id, w.name FROM WorkflowEntity w "
+            + "WHERE w.id IN :ids AND w.organizationId = :orgId AND w.isActive = true")
+    List<Object[]> findIdNamePairsInOrganization(@Param("ids") Collection<UUID> ids,
+                                                 @Param("orgId") String orgId);
+
+    /**
      * Batch (id, pinnedVersion) pairs for a set of workflow ids - the Applications page reads each
      * card's pinned version to draw the Live/Active badge, and used to fire one
      * {@code /v2/workflows/dag/{id}/versions} request PER card (an N+1 over ~200). Each row is an

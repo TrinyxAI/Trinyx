@@ -8,15 +8,20 @@ import com.apimarketplace.orchestrator.domain.execution.DagState;
 import com.apimarketplace.orchestrator.domain.execution.EpochState;
 import com.apimarketplace.orchestrator.domain.execution.SignalWaitEntity;
 import com.apimarketplace.orchestrator.domain.execution.StateSnapshot;
+import com.apimarketplace.orchestrator.domain.file.FileRefScanner;
 import com.apimarketplace.orchestrator.domain.workflow.RunStatus;
+import com.apimarketplace.orchestrator.persistence.WorkflowStepDataRepository;
 import com.apimarketplace.orchestrator.repository.SignalWaitRepository;
 import com.apimarketplace.orchestrator.repository.WorkflowRunRepository;
 import com.apimarketplace.orchestrator.services.InterfaceRenderService;
 import com.apimarketplace.orchestrator.services.StepAggregationService;
+import com.apimarketplace.orchestrator.services.StorageSkeletonService;
 import com.apimarketplace.orchestrator.services.epoch.WorkflowEpochService;
 import com.apimarketplace.orchestrator.services.resume.WorkflowResumeService;
 import com.apimarketplace.orchestrator.services.resume.WorkflowRunState;
 import com.apimarketplace.orchestrator.services.state.StateSnapshotService;
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
@@ -52,6 +57,9 @@ public class ShowcaseSnapshotBuilder {
     private final SignalWaitRepository signalWaitRepository;
     private final InterfaceRenderService interfaceRenderService;
     private final InterfaceClient interfaceClient;
+    private final WorkflowStepDataRepository workflowStepDataRepository;
+    private final StorageSkeletonService storageSkeletonService;
+    private final ObjectMapper objectMapper;
     private static final int RENUMBERED_EPOCH = 1;
 
     public ShowcaseSnapshotBuilder(
@@ -62,7 +70,10 @@ public class ShowcaseSnapshotBuilder {
             StepAggregationService stepAggregationService,
             SignalWaitRepository signalWaitRepository,
             InterfaceRenderService interfaceRenderService,
-            InterfaceClient interfaceClient) {
+            InterfaceClient interfaceClient,
+            WorkflowStepDataRepository workflowStepDataRepository,
+            StorageSkeletonService storageSkeletonService,
+            ObjectMapper objectMapper) {
         this.workflowRunRepository = workflowRunRepository;
         this.workflowResumeService = workflowResumeService;
         this.stateSnapshotService = stateSnapshotService;
@@ -71,6 +82,9 @@ public class ShowcaseSnapshotBuilder {
         this.signalWaitRepository = signalWaitRepository;
         this.interfaceRenderService = interfaceRenderService;
         this.interfaceClient = interfaceClient;
+        this.workflowStepDataRepository = workflowStepDataRepository;
+        this.storageSkeletonService = storageSkeletonService;
+        this.objectMapper = objectMapper;
     }
 
     /**
@@ -119,6 +133,15 @@ public class ShowcaseSnapshotBuilder {
         snapshot.put("version", SCHEMA_VERSION);
         snapshot.put("capturedAt", Instant.now().toString());
         snapshot.put("sourceRunId", runIdPublic);
+        // Underscore-prefixed like every other internal key: it must never be echoed to a
+        // marketplace reader. ShowcaseSnapshotReader only ever reads named sections, so this
+        // is belt and braces, but the two halves of the same rule must not disagree.
+        // The tenant that OWNS the captured run, which is not always the caller: a run in the
+        // same organization belongs to whichever member created it (see the ScopeGuard check
+        // above). publication-service needs it to tell a file the publication may legitimately
+        // copy from one a publisher merely named in a hand-written value, so it is stated here
+        // by the only component that can know it authoritatively.
+        snapshot.put("_sourceTenantId", run.getTenantId());
         if (epochFilter != null) {
             snapshot.put("sourceEpoch", epochFilter);
         }
@@ -133,6 +156,7 @@ public class ShowcaseSnapshotBuilder {
         snapshot.put("epochSignals", buildEpochSignals(runIdPublic, epochFilter, snapshotEpochKey));
         snapshot.put("epochStates", buildEpochStates(runIdPublic, epochFilter, snapshotEpochKey));
         snapshot.put("interfaceRenders", buildInterfaceRenders(run, runIdPublic, tenantId, organizationId, epochFilter, snapshotEpochKey));
+        snapshot.put("stepFiles", buildStepFiles(run, runIdPublic, epochFilter, snapshotEpochKey));
 
         return Optional.of(snapshot);
     }
@@ -917,6 +941,225 @@ public class ShowcaseSnapshotBuilder {
             }
         }
         renderMap.put("items", renumbered);
+    }
+
+    /**
+     * Epochs frozen for the node file strips when the publication pins no epoch, newest first.
+     * A long-lived reusable trigger accumulates epochs without bound and only the recent ones
+     * are worth carrying in the JSONB.
+     *
+     * <p>It is a SECOND ceiling, not a redundant one: {@link #STEP_FILE_READ_BUDGET} bounds the
+     * work, this bounds the breadth, and either can bite first. A run with 25 epochs of a few
+     * steps each stays far inside the budget and is still cut here, so an epoch outside the
+     * newest 20 carries no pills - and a visitor who selects it sees none.
+     */
+    private static final int STEP_FILE_EPOCH_CAP = 20;
+
+    /**
+     * Storage reads the WHOLE capture may spend resolving node file results, across every
+     * epoch together rather than per epoch.
+     *
+     * <p>Per-epoch would be the wrong unit: the multiplier is epochs x steps, so a per-epoch
+     * cap of 200 over 20 epochs authorises 4,000 reads inside one read-only transaction, each
+     * materialising a step's output as a String.
+     *
+     * <p><b>What 400 buys, in the units actually consumed.</b> A step costs ONE read when it
+     * writes the canonical {@link #STEP_FILE_FAST_PATH} (every static file producer does) and
+     * TWO when it does not (catalog and MCP tools, which nest their ref). So the budget covers
+     * 400 static steps, or 200 catalog steps of which only 200 are the expensive whole-output
+     * extraction - fewer round trips AND fewer big reads than the 300 whole-output extractions
+     * this replaced. A publication past that ceiling is not broken, it is truncated
+     * newest-epoch-first: the recent epochs a visitor actually opens keep their pills.
+     */
+    private static final int STEP_FILE_READ_BUDGET = 400;
+
+    /**
+     * The narrow path tried FIRST on each step, before reading its whole output.
+     *
+     * <p>Every static file producer ({@code download_file}, {@code convert_to_file},
+     * compression, sftp, {@code core:media}) puts its canonical FileRef exactly here, so the
+     * common case extracts a few hundred bytes instead of the entire output - which for a
+     * scraper or an LLM step is measured in megabytes and is read only to be thrown away.
+     * A tool that nests its ref deeper still falls back to the full read.
+     *
+     * <p><b>This is a selection rule, not only a shortcut.</b> An output carrying BOTH a
+     * canonical {@code file} and refs elsewhere (say {@code {"images":[A],"file":B}}) freezes
+     * B, where a walk of the whole output would have taken A - the first in encounter order,
+     * which is what the owner's canvas picks. Treating the canonical field as authoritative is
+     * the deliberate answer: it is the field the platform itself writes, and the alternative
+     * is a choice that depends on JSON key order. The two only disagree on a shape no producer
+     * in the catalogue emits today.
+     */
+    private static final String STEP_FILE_FAST_PATH = "output.file";
+
+    /**
+     * The FILE RESULTS of the run, per epoch and per node: {@code {"<epoch>": {"<stepAlias>":
+     * FileRef}}}.
+     *
+     * <p>This is the canvas file strip ({@code FileResultStrip}, the pill hanging under a node
+     * that produced a file) frozen for the marketplace. It cannot be read back out of the other
+     * sections: {@code runState.steps[].output} is dropped entirely on the epoch-pinned capture
+     * path ({@link #aggregatedStepsForRunState}), and {@code aggregatedSteps} never carried
+     * outputs at all. Without this section an anonymous visitor sees a canvas whose file nodes
+     * show nothing, and the publish-time copy pass has no step FileRef to preserve - so deleting
+     * the source file is indistinguishable from never having published it.
+     *
+     * <p><b>FileRefs only, deliberately.</b> The step outputs themselves stay out of the
+     * snapshot: they are unbounded, they are execution payloads the marketplace has no business
+     * showing, and the interesting part for a visitor is the artifact. Publishing the whole
+     * output to get at the file would trade a bounded section for an unbounded one.
+     *
+     * <p><b>One file per node per epoch.</b> The projection is ordered by row id, so the last
+     * row of an alias is its most recently WRITTEN execution. That is close to, but not
+     * identical to, what the owner's canvas opens on: its navigator sorts by
+     * {@code (epoch, itemIndex)} and lands on the last of THAT ordering, so under a split whose
+     * items finish out of order the two can pick different items. Both are "a file this node
+     * produced"; in-epoch item navigation is not part of the frozen view, so the difference has
+     * nowhere to show.
+     *
+     * <p><b>Known gap.</b> The owner's canvas has a second source this does not: it falls back
+     * to the step row's {@code metadata} blob when the output carries no ref. Reading metadata
+     * here would mean loading the row's JSONB for every step of every epoch, which is the cost
+     * this section is built to avoid, and the projection below does not even return a row whose
+     * output was never stored. A node whose ref lives ONLY in metadata therefore shows a pill
+     * for its owner and none on the showcase.
+     *
+     * <p>Best-effort throughout: a storage read that fails costs that one node its preview and
+     * nothing else. The capture never fails over a file.
+     *
+     * @param run the run entity, read for the OWNER tenant - the outputs belong to whoever ran
+     *            the workflow, which is not necessarily the caller asking for the capture
+     */
+    private Map<String, Object> buildStepFiles(WorkflowRunEntity run, String runIdPublic,
+                                               Integer epochFilter, String snapshotEpochKey) {
+        Map<String, Object> result = new LinkedHashMap<>();
+        String ownerTenantId = run.getTenantId();
+        if (ownerTenantId == null || ownerTenantId.isBlank()) {
+            // Storage reads are tenant-scoped; with no tenant every read returns empty anyway.
+            return result;
+        }
+
+        List<Integer> epochs;
+        if (epochFilter != null) {
+            epochs = List.of(epochFilter);
+        } else {
+            List<Integer> discovered = new ArrayList<>(discoverEpochsForInterface(runIdPublic));
+            if (discovered.isEmpty()) {
+                discovered.add(0);
+            }
+            discovered.sort(Comparator.reverseOrder());
+            epochs = discovered.size() > STEP_FILE_EPOCH_CAP
+                    ? discovered.subList(0, STEP_FILE_EPOCH_CAP)
+                    : discovered;
+        }
+
+        // The budget is spent across epochs, newest first, so an exhausted one costs the
+        // OLDEST epochs their pills rather than the epoch a visitor is most likely to open.
+        int[] readBudget = new int[]{STEP_FILE_READ_BUDGET};
+        for (int epoch : epochs) {
+            if (readBudget[0] <= 0) {
+                log.debug("[ShowcaseSnapshot] stepFiles read budget exhausted for {} at epoch {}",
+                        runIdPublic, epoch);
+                break;
+            }
+            Map<String, Object> perAlias = stepFilesForEpoch(runIdPublic, ownerTenantId, epoch, readBudget);
+            if (perAlias.isEmpty()) {
+                continue;
+            }
+            String key = (snapshotEpochKey != null) ? snapshotEpochKey : String.valueOf(epoch);
+            result.put(key, perAlias);
+        }
+        return result;
+    }
+
+    /**
+     * One epoch's {@code stepAlias -> FileRef} map. Empty when no node of that epoch produced
+     * a file.
+     *
+     * @param readBudget storage reads still available to the whole capture, decremented here
+     */
+    private Map<String, Object> stepFilesForEpoch(String runIdPublic, String ownerTenantId, int epoch,
+                                                   int[] readBudget) {
+        Map<String, Object> perAlias = new LinkedHashMap<>();
+
+        List<WorkflowStepDataRepository.EpochOutputProjection> rows;
+        try {
+            rows = workflowStepDataRepository.findCompletedOutputRefsByRunIdAndEpoch(runIdPublic, epoch);
+        } catch (Exception e) {
+            log.debug("[ShowcaseSnapshot] stepFiles row lookup failed for {} epoch {}: {}",
+                    runIdPublic, epoch, e.getMessage());
+            return perAlias;
+        }
+
+        // The projection loads no JSONB and is ordered by id ASC, so overwriting on each hit
+        // leaves the alias pointing at its most recent output.
+        Map<String, UUID> latestOutputByAlias = new LinkedHashMap<>();
+        for (WorkflowStepDataRepository.EpochOutputProjection row : rows) {
+            String alias = row.getStepAlias();
+            UUID storageId = row.getOutputStorageId();
+            if (alias == null || alias.isBlank() || storageId == null) {
+                continue;
+            }
+            latestOutputByAlias.put(alias, storageId);
+        }
+
+        for (Map.Entry<String, UUID> entry : latestOutputByAlias.entrySet()) {
+            if (readBudget[0] <= 0) {
+                log.debug("[ShowcaseSnapshot] stepFiles read budget reached for {} epoch {}", runIdPublic, epoch);
+                break;
+            }
+            Map<String, Object> ref = firstFileRefInOutput(entry.getValue(), ownerTenantId, readBudget);
+            if (ref != null) {
+                perAlias.put(entry.getKey(), ref);
+            }
+        }
+        return perAlias;
+    }
+
+    /**
+     * The FileRef this step contributes: the canonical {@code output.file} when it carries a
+     * storage path, else the first path-carrying ref anywhere in the output.
+     *
+     * <p>The path is what makes a ref usable downstream: the publish-time copy pass keys the
+     * namespace copy on it, and the render-time signer mints the visitor's URL from it. A ref
+     * with no path can be neither preserved nor served, so it is skipped rather than frozen into
+     * a preview that would render nothing.
+     *
+     * <p>See {@link #STEP_FILE_FAST_PATH} for why the canonical field wins rather than merely
+     * being read first, and {@code readBudget} for how the two reads are charged.
+     */
+    private Map<String, Object> firstFileRefInOutput(UUID outputStorageId, String ownerTenantId,
+                                                     int[] readBudget) {
+        try {
+            // Decremented per READ, not per step: a step whose fast path misses costs two, and
+            // charging it one would let the budget authorise twice the round trips it names.
+            if (readBudget[0] <= 0) return null;
+            readBudget[0]--;
+            Map<String, Object> fast = firstFileRefAt(outputStorageId, ownerTenantId, STEP_FILE_FAST_PATH);
+            if (fast != null) return fast;
+            if (readBudget[0] <= 0) return null;
+            readBudget[0]--;
+            return firstFileRefAt(outputStorageId, ownerTenantId, "output");
+        } catch (Exception e) {
+            log.debug("[ShowcaseSnapshot] stepFiles output read failed for storage {}: {}",
+                    outputStorageId, e.getMessage());
+            return null;
+        }
+    }
+
+    /** The first path-carrying FileRef under one JSON path of a stored output, or null. */
+    private Map<String, Object> firstFileRefAt(UUID outputStorageId, String ownerTenantId, String jsonPath) {
+        Optional<JsonNode> output = storageSkeletonService.getObjectAtPath(outputStorageId, ownerTenantId, jsonPath);
+        if (output.isEmpty() || output.get().isNull()) {
+            return null;
+        }
+        Object plain = objectMapper.convertValue(output.get(), Object.class);
+        for (Map<String, Object> ref : FileRefScanner.collectRefs(plain)) {
+            if (ref.get("path") instanceof String path && !path.isBlank()) {
+                return ref;
+            }
+        }
+        return null;
     }
 
     private Set<Integer> discoverEpochsForInterface(String runIdPublic) {

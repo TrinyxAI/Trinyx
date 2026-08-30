@@ -570,4 +570,99 @@ class ShowcaseSnapshotReaderTest {
         pub.setShowcaseSnapshot(snapshot);
         return pub;
     }
+
+    @Nested
+    @DisplayName("readStepFiles")
+    class ReadStepFiles {
+
+        /** A rewriter that signs by convention, so the test can tell "signed" from "passed through". */
+        private ShowcaseSnapshotReader readerSigning(Map<String, Object> signed) {
+            ShowcaseFileRefRewriter m = mock(ShowcaseFileRefRewriter.class);
+            when(m.rewriteStepFiles(any(), any())).thenReturn(signed);
+            return new ShowcaseSnapshotReader(m);
+        }
+
+        private WorkflowPublicationEntity pubWith(Map<String, Object> stepFiles) {
+            WorkflowPublicationEntity pub = new WorkflowPublicationEntity();
+            Map<String, Object> snap = new LinkedHashMap<>();
+            snap.put("runState", Map.of("runId", "run_42"));
+            if (stepFiles != null) snap.put("stepFiles", stepFiles);
+            pub.setShowcaseSnapshot(snap);
+            return pub;
+        }
+
+        @Test
+        @DisplayName("Serves the SIGNED shape, never the stored FileRef - a visitor gets a URL, not a storage path")
+        void servesTheSignedShape() {
+            Map<String, Object> stored = Map.of("1", Map.of("download_file",
+                    Map.of("_type", "file", "path", "_publications/p/clip.mp4", "name", "clip.mp4")));
+            Map<String, Object> signed = Map.of("1", Map.of("download_file",
+                    Map.of("name", "clip.mp4", "mimeType", "video/mp4", "size", 2048L,
+                            "url", "/api/files/proxy-signed?key=x&sig=y")));
+
+            Optional<Map<String, Object>> out = readerSigning(signed).readStepFiles(pubWith(stored));
+
+            assertThat(out).contains(signed);
+        }
+
+        @Test
+        @DisplayName("Empty when the publication predates the section - a legacy snapshot must not 500")
+        void emptyWhenSectionAbsent() {
+            assertThat(reader.readStepFiles(pubWith(null))).isEmpty();
+        }
+
+        @Test
+        @DisplayName("Empty when nothing in the section could be signed, rather than an empty map the caller must re-check")
+        void emptyWhenNothingSignable() {
+            Map<String, Object> stored = Map.of("1", Map.of("download_file",
+                    Map.of("_type", "file", "path", "42/somebody-elses.mp4")));
+
+            assertThat(readerSigning(Map.of()).readStepFiles(pubWith(stored))).isEmpty();
+        }
+
+        @Test
+        @DisplayName("A publisher who pinned an epoch after an unpinned capture gets that epoch and nothing else - the canvas must not offer files the pinned interface beside it does not show")
+        void pinnedEpochNarrowsTheSection() {
+            Map<String, Object> stored = new LinkedHashMap<>();
+            stored.put("1", Map.of("render", Map.of("_type", "file", "path", "_publications/p/one.mp4")));
+            stored.put("2", Map.of("render", Map.of("_type", "file", "path", "_publications/p/two.mp4")));
+            WorkflowPublicationEntity pub = pubWith(stored);
+            pub.setShowcaseChosenEpoch(2);
+
+            ShowcaseFileRefRewriter spy = mock(ShowcaseFileRefRewriter.class);
+            when(spy.rewriteStepFiles(any(), any())).thenAnswer(inv -> inv.getArgument(0));
+            new ShowcaseSnapshotReader(spy).readStepFiles(pub);
+
+            org.mockito.ArgumentCaptor<Map<String, Object>> captor =
+                    org.mockito.ArgumentCaptor.forClass(Map.class);
+            org.mockito.Mockito.verify(spy).rewriteStepFiles(captor.capture(), any());
+            assertThat(captor.getValue()).containsOnlyKeys("2");
+        }
+
+        @Test
+        @DisplayName("A pin whose number is not a key of the section leaves it whole - a capture made WITH a pin is RENUMBERED, so the two legitimately disagree")
+        void pinAbsentFromTheSectionDoesNotEmptyIt() {
+            // Narrowing on a missing key would answer "no files" for exactly the publications
+            // that pinned an epoch, which is most of them.
+            Map<String, Object> stored = new LinkedHashMap<>();
+            stored.put("1", Map.of("render", Map.of("_type", "file", "path", "_publications/p/one.mp4")));
+            WorkflowPublicationEntity pub = pubWith(stored);
+            pub.setShowcaseChosenEpoch(7);
+
+            ShowcaseFileRefRewriter spy = mock(ShowcaseFileRefRewriter.class);
+            when(spy.rewriteStepFiles(any(), any())).thenAnswer(inv -> inv.getArgument(0));
+            new ShowcaseSnapshotReader(spy).readStepFiles(pub);
+
+            org.mockito.ArgumentCaptor<Map<String, Object>> captor =
+                    org.mockito.ArgumentCaptor.forClass(Map.class);
+            org.mockito.Mockito.verify(spy).rewriteStepFiles(captor.capture(), any());
+            assertThat(captor.getValue()).containsOnlyKeys("1");
+        }
+
+        @Test
+        @DisplayName("Empty when the entity carries no snapshot at all")
+        void emptyWithoutSnapshot() {
+            assertThat(reader.readStepFiles(new WorkflowPublicationEntity())).isEmpty();
+        }
+    }
 }

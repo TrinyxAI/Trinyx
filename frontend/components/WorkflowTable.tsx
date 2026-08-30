@@ -27,12 +27,14 @@ import { useCanMutateInCurrentOrg } from '@/lib/stores/current-org-store';
 import { useOrgScopedReset } from '@/lib/hooks/useOrgScopedReset';
 import { createEmptyWorkflowPlan } from '@/lib/workflows/defaultWorkflowPlan';
 import { TemplateGallery } from '@/components/templates/TemplateGallery';
-import { DndContext, DragOverlay } from '@dnd-kit/core';
+import { WorkflowRelationsMenu } from '@/components/workflow/relations/WorkflowRelationsMenu';
+import type { WorkflowRelations } from '@/lib/api/orchestrator/types';
 import { FolderPlus } from 'lucide-react';
 import { WorkflowFolderFace } from '@/components/folders/WorkflowFolderFace';
 import { FolderBreadcrumb } from '@/components/folders/FolderBreadcrumb';
 import { FolderTilesGrid } from '@/components/folders/FolderTilesGrid';
 import { FolderDialogs } from '@/components/folders/FolderDialogs';
+import { FolderDragContext } from '@/components/folders/FolderDragContext';
 import { DraggableResourceCard } from '@/components/folders/DraggableResourceCard';
 import { useListFolders } from '@/hooks/useListFolders';
 
@@ -84,6 +86,9 @@ export default function WorkflowTable({
   const [newWorkflowName, setNewWorkflowName] = useState('');
   const [newWorkflowDescription, setNewWorkflowDescription] = useState('');
   const [showCreateWorkflowModal, setShowCreateWorkflowModal] = useState(false);
+  // Sub-workflow neighbourhood per card, resolved for the WHOLE page in one request rather than
+  // one per card. A workflow absent from the map has no relation and shows no indicator.
+  const [relationsByWorkflow, setRelationsByWorkflow] = useState<Record<string, WorkflowRelations>>({});
 
   // FOLDERS. The level being shown is a fetch parameter like the page number; the tiles and
   // the trail come back WITH the list, since that response already holds the workflows they
@@ -151,12 +156,25 @@ export default function WorkflowTable({
       setWorkflows(result.workflows ?? []);
       setTotalCount(result.totalCount ?? 0);
       folders.applyListResponse(result);
+      // Sub-workflow relations for the whole page in ONE request. Deliberately NOT awaited with
+      // the list: a card reads perfectly without its relations indicator, so resolving them must
+      // never hold the grid back. Same request-id guard as the page itself, so a superseded page
+      // cannot paint its relations over the current one.
+      const pageIds = (result.workflows ?? []).map((w) => w.id).filter(Boolean);
+      if (pageIds.length === 0) {
+        setRelationsByWorkflow({});
+      } else {
+        orchestratorApi.getWorkflowRelationsBatch(pageIds)
+          .then((map) => { if (reqId === requestIdRef.current) setRelationsByWorkflow(map); })
+          .catch(() => { /* best-effort: the cards simply show no relations indicator */ });
+      }
     } catch (err) {
       if (reqId !== requestIdRef.current) return;
       console.error('Error fetching workflows:', err);
       setError(t('workflow.failedToLoad'));
       setWorkflows([]);
       setTotalCount(0);
+      setRelationsByWorkflow({});
       addToast({
         type: 'error',
         title: t('workflow.errorLoadingWorkflows'),
@@ -368,6 +386,9 @@ export default function WorkflowTable({
   });
 
   return (
+    // The drag surface covers the header too: the folder path in it is a drop target, so a
+    // card can be dragged out of a folder onto the level it belongs to.
+    <FolderDragContext folders={folders} nameOf={(id) => workflows.find((w) => w.id === id)?.name}>
     <div className={`space-y-4 w-full overflow-visible ${className}`}>
       {/* Header - Applications-style: page title + description below, ALWAYS visible so the empty
           state shows the same layout as the Applications page (title + subtitle + centered empty
@@ -502,15 +523,7 @@ export default function WorkflowTable({
         {loading ? (
           <CardSkeletonGrid />
         ) : (
-          /* One drag context over the folders AND the cards: a card dropped on a tile is
-             filed there, a tile dropped on another tile is nested inside it. */
-          <DndContext
-            sensors={folders.sensors}
-            onDragStart={(event) => folders.handleDragStart(
-              event, (id) => workflows.find((w) => w.id === id)?.name)}
-            onDragEnd={folders.handleDragEnd}
-            onDragCancel={folders.cancelDrag}
-          >
+          <>
             <FolderTilesGrid
               folders={folders}
               countLabel={folderCountLabel}
@@ -683,6 +696,14 @@ export default function WorkflowTable({
                             <span title={t('common.visibilityPrivate')} aria-label={t('common.visibilityPrivate')}><Lock className="h-3 w-3" /></span>
                           </>
                         )}
+                        {/* Sub-workflow neighbourhood. Renders nothing unless this workflow calls
+                            another or is called by one, so its presence IS the mention. Pushed to
+                            the right edge: it is the one control in this row, not another marker. */}
+                        <WorkflowRelationsMenu
+                          relations={relationsByWorkflow[w.id]}
+                          className="ml-auto"
+                          data-testid={`workflow-relations-${w.id}`}
+                        />
                       </div>
                     </div>
                   </div>
@@ -693,18 +714,7 @@ export default function WorkflowTable({
           </div>
             )}
 
-            {/* What is being dragged, following the pointer. A multi-selection drag says how
-                many cards are travelling, so a drop never moves more than you meant. */}
-            <DragOverlay>
-              {folders.activeDrag && (
-                <div className="rounded-xl border border-[var(--accent-primary)] bg-theme-secondary px-3 py-2 text-sm text-theme-primary shadow-lg">
-                  {folders.activeDrag.count > 1
-                    ? t('folders.draggingCount', { count: folders.activeDrag.count })
-                    : folders.activeDrag.label}
-                </div>
-              )}
-            </DragOverlay>
-          </DndContext>
+          </>
         )}
 
       </div>
@@ -750,6 +760,7 @@ export default function WorkflowTable({
 
       <ToastContainer toasts={toasts} onRemoveToast={removeToast} />
     </div>
+    </FolderDragContext>
   );
 }
 

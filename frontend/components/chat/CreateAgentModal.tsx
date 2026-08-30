@@ -7,7 +7,7 @@ import {
   Bot, ChevronDown, ChevronRight, Check, Search, X, Loader2, Info, Workflow,
   Webhook, Copy, Pencil, ArrowRight, ArrowLeft, User, Settings,
   Puzzle, MessageCircle, Code, ExternalLink, Palette, Clock, Globe, Zap, Plus,
-  AppWindow, Table, Monitor, FileText, ShieldCheck, Sparkles
+  AppWindow, Table, Monitor, FileText, ShieldCheck, Sparkles, Trash2
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -30,6 +30,7 @@ import { getAllowedIds, buildToolsConfigPayload, isGenerationEnabled, getGrant, 
 import { initialTurnLimits, buildChangedTurnLimits } from '@/lib/agents/agentTurnLimits';
 import { initialCompaction, buildChangedCompaction } from '@/lib/agents/agentCompaction';
 import { Switch } from '@/components/ui/switch';
+import { ConfirmDeleteModal } from '@/components/chat/ConfirmDeleteModal';
 import { formatUtcDateTime } from '@/lib/utils/dateFormatters';
 
 /** UUID detector for legacy tools_config.tools[] entries - see useAgentFleetState.ts. */
@@ -559,6 +560,8 @@ export const CreateAgentModal: React.FC<CreateAgentModalProps> = ({
   // UI state
   const [isCreating, setIsCreating] = useState(false);
   const [mounted, setMounted] = useState(false);
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [isDeleting, setIsDeleting] = useState(false);
 
   // Fetch providers and models
   const { providers, defaultModel, defaultProvider, isLoading: modelsLoading } = useVisibleModels();
@@ -1576,6 +1579,26 @@ export const CreateAgentModal: React.FC<CreateAgentModalProps> = ({
       });
     } finally {
       setIsCreating(false);
+    }
+  };
+
+  // Delete the agent being edited. Same REST call as the list view, so both entry
+  // points stay on one code path; the parent's refresh callback closes the modal,
+  // which is why `isDeleting` is only reset on failure (success unmounts us).
+  const handleDelete = async () => {
+    if (!isEditMode || !agent?.id || !canMutate) return;
+    setIsDeleting(true);
+    try {
+      await orchestratorApi.deleteAgent(agent.id);
+      await queryClient.invalidateQueries({ queryKey: ['agents'] });
+      queryClient.invalidateQueries({ queryKey: ['conversations'] });
+      onAgentCreated();
+      onClose();
+    } catch (err) {
+      console.error('Error deleting agent:', err);
+      addToast({ type: 'error', title: t('error'), message: t('deleteFailed') });
+      setShowDeleteConfirm(false);
+      setIsDeleting(false);
     }
   };
 
@@ -3322,26 +3345,40 @@ export const CreateAgentModal: React.FC<CreateAgentModalProps> = ({
 
           {/* Footer */}
           <div className="px-8 py-4 border-t border-theme flex justify-between">
-            <Button
-              variant="ghost"
-              onClick={prevStep}
-              disabled={currentStep === 1 || isCreating}
-            >
-              <ArrowLeft className="h-4 w-4 mr-2" />
-              Back
-            </Button>
+            <div className="flex gap-2">
+              <Button
+                variant="ghost"
+                onClick={prevStep}
+                disabled={currentStep === 1 || isCreating || isDeleting}
+              >
+                <ArrowLeft className="h-4 w-4 mr-2" />
+                Back
+              </Button>
+              {/* Only an existing agent can be deleted, and only by a member who may mutate. */}
+              {isEditMode && canMutate && (
+                <Button
+                  variant="ghost"
+                  onClick={() => setShowDeleteConfirm(true)}
+                  disabled={isCreating || isDeleting}
+                  className="text-red-600 hover:text-red-700 hover:bg-red-50 dark:text-red-400 dark:hover:text-red-300 dark:hover:bg-red-950/40"
+                >
+                  <Trash2 className="h-4 w-4 mr-2" />
+                  {t('deleteAgent')}
+                </Button>
+              )}
+            </div>
 
             <div className="flex gap-2">
-              <Button variant="outline" onClick={onClose} disabled={isCreating}>
+              <Button variant="outline" onClick={onClose} disabled={isCreating || isDeleting}>
                 Cancel
               </Button>
               {currentStep < TOTAL_STEPS ? (
-                <Button onClick={nextStep} disabled={!canProceedFromStep(currentStep)}>
+                <Button onClick={nextStep} disabled={!canProceedFromStep(currentStep) || isDeleting}>
                   Next
                   <ArrowRight className="h-4 w-4 ml-2" />
                 </Button>
               ) : (
-                <Button onClick={handleSave} disabled={!name.trim() || isCreating || !canMutate}>
+                <Button onClick={handleSave} disabled={!name.trim() || isCreating || isDeleting || !canMutate}>
                   {isCreating ? (
                     <>
                       <Loader2 className="h-4 w-4 mr-2 animate-spin" />
@@ -3359,6 +3396,18 @@ export const CreateAgentModal: React.FC<CreateAgentModalProps> = ({
           </div>
         </div>
       </div>
+
+      {/* Delete confirmation - only reachable while editing an existing agent. */}
+      {isEditMode && agent?.id && (
+        <ConfirmDeleteModal
+          isOpen={showDeleteConfirm}
+          title={t('deleteTitle')}
+          message={t('deleteConfirmation', { name: agent.name || '' })}
+          isLoading={isDeleting}
+          onConfirm={handleDelete}
+          onCancel={() => { if (!isDeleting) setShowDeleteConfirm(false); }}
+        />
+      )}
 
       {/* Toast notifications */}
       <div className="fixed top-4 right-4 z-[10000] space-y-2">

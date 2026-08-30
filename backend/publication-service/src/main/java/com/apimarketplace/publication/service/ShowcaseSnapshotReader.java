@@ -242,6 +242,41 @@ public class ShowcaseSnapshotReader {
     }
 
     /**
+     * The run's frozen file results, per epoch and per node, ready for an anonymous canvas:
+     * {@code {"<epoch>": {"<stepAlias>": {name, mimeType, size, url}}}}.
+     *
+     * <p>This is what lets the marketplace canvas hang a file pill under a node the way the
+     * owner's canvas does. Every {@code url} is HMAC-signed for THIS read, which is also why the
+     * whole map is returned rather than one epoch: it is one entry per file-producing node per
+     * epoch, so the caller can switch epochs without a round trip, and a per-epoch endpoint
+     * would re-sign the same handful of keys on every pill.
+     *
+     * <p>A publisher who pinned an epoch AFTER an unpinned capture gets that epoch and nothing
+     * else, the same substitution {@link #readInterfaceRender} makes: the pin is the publisher
+     * saying which run the marketplace should show, and a canvas offering the other epochs'
+     * files would contradict the interface beside it. The narrowing is skipped when the pinned
+     * number is not a key of the section, because a capture made WITH a pin is renumbered to a
+     * single clean key and the publisher's original epoch number is absent from it by design.
+     *
+     * <p>Empty Optional when the publication predates the section, when no node produced a file,
+     * or when nothing in it could be signed - all three are the same thing to the caller: this
+     * canvas shows no file pills.
+     */
+    public Optional<Map<String, Object>> readStepFiles(WorkflowPublicationEntity pub) {
+        Optional<Map<String, Object>> section = readSection(pub, "stepFiles");
+        if (section.isEmpty()) return section;
+
+        Map<String, Object> stored = section.get();
+        Integer pinned = pub.getShowcaseChosenEpoch();
+        if (pinned != null && stored.get(String.valueOf(pinned)) instanceof Map<?, ?> pinnedEpoch) {
+            stored = Map.of(String.valueOf(pinned), pinnedEpoch);
+        }
+
+        Map<String, Object> rewritten = fileRefRewriter.rewriteStepFiles(stored, pub);
+        return rewritten.isEmpty() ? Optional.empty() : Optional.of(rewritten);
+    }
+
+    /**
      * Pre-rendered interface payload for a given (interface, page, size, epoch).
      * Mirrors {@code POST /api/internal/publication-support/showcase/render}
      * shape (htmlTemplate, cssTemplate, jsTemplate, items, pagination,

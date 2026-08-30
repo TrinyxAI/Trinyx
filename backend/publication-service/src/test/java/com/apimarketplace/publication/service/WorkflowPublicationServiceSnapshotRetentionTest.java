@@ -35,6 +35,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.atLeastOnce;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -80,7 +81,8 @@ class WorkflowPublicationServiceSnapshotRetentionTest {
         service = new WorkflowPublicationService(
                 publicationRepository, snapshotVersionRepository, receiptRepository, reviewRepository,
                 orchestratorClient, agentClient, interfaceClient, dataSourceClient, breakdownService,
-                new ObjectMapper(), snapshotCloneService, entitlementGuard, authClient);
+                new ObjectMapper(), snapshotCloneService, entitlementGuard, authClient,
+                new com.apimarketplace.publication.service.PublicationFileUrlResolver(new com.apimarketplace.common.storage.signing.ShowcaseUrlSigner("test-secret-32-bytes-long-enough-for-hmac")));
         lenient().when(authClient.getPublisherProfile(TENANT))
                 .thenReturn(new PublisherProfileDto(TENANT, "Publisher", "p@example.com", "avatar", null));
     }
@@ -93,7 +95,12 @@ class WorkflowPublicationServiceSnapshotRetentionTest {
 
         publish();
 
-        verify(snapshotVersionRepository).deleteAllByPublicationId(PUBLICATION_ID);
+        // The id is assigned by the entity before the plan is enriched (it is the storage
+        // namespace the plan's files are copied into), so it is read back rather than dictated.
+        ArgumentCaptor<WorkflowPublicationEntity> saved =
+                ArgumentCaptor.forClass(WorkflowPublicationEntity.class);
+        verify(publicationRepository, atLeastOnce()).save(saved.capture());
+        verify(snapshotVersionRepository).deleteAllByPublicationId(saved.getValue().getId());
         verify(snapshotVersionRepository, never()).save(any(PublicationSnapshotVersionEntity.class));
     }
 
@@ -191,7 +198,7 @@ class WorkflowPublicationServiceSnapshotRetentionTest {
                     if (pub.getId() == null) pub.setId(PUBLICATION_ID);
                     return pub;
                 });
-        lenient().when(snapshotVersionRepository.getMaxVersion(PUBLICATION_ID)).thenReturn(Optional.empty());
+        lenient().when(snapshotVersionRepository.getMaxVersion(any(UUID.class))).thenReturn(Optional.empty());
         lenient().when(orchestratorClient.getLatestPlanVersion(WORKFLOW_ID, TENANT)).thenReturn(1);
         lenient().when(orchestratorClient.captureShowcaseSnapshot("run-1", TENANT, null, null))
                 .thenReturn(new HashMap<>(Map.of("runState", new HashMap<>())));

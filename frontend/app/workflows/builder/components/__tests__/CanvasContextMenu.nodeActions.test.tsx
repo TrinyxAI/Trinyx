@@ -84,11 +84,12 @@ describe('NodeContextMenu - edit-mode trigger launcher', () => {
     expect(screen.getByText('runStepByStep')).toBeTruthy();
 
     fireEvent.click(screen.getByText('runAuto'));
-    expect(auto.detail()).toEqual({ startFromNode: 'n1' });
+    // Named: the side panel mounts a second canvas, and an unnamed start ran both.
+    expect(auto.detail()).toEqual({ workflowId: 'wf1', startFromNode: 'n1' });
     expect(onClose).toHaveBeenCalled();
 
     fireEvent.click(screen.getByText('runStepByStep'));
-    expect(sbs.detail()).toEqual({ startFromNode: 'n1' });
+    expect(sbs.detail()).toEqual({ workflowId: 'wf1', startFromNode: 'n1' });
   });
 
   it('does not show the launcher for a non-trigger node', () => {

@@ -8,7 +8,7 @@ import { DataSourcePanelContent } from '@/components/app/DataSourcePanelContent'
 import { openFilesPanel, type FilePanelTarget } from '@/lib/sidePanel/openFilesPanel';
 import type { BuilderNodeData } from '@/app/workflows/builder/types';
 import type { TriggerButtonVariant } from '../components/NodePlayButton';
-import { workflowPanelTabId } from '@/lib/sidePanel/tabResource';
+import { openWorkflowBuilderTab, requestOpenRelatedWorkflow } from '@/lib/sidePanel/openWorkflowBuilderTab';
 
 /**
  * Centralized derivation of the node-type flags that drive the contextual
@@ -244,12 +244,12 @@ export function useNodeContextualButtons({
       icon: <Workflow className="h-3 w-3" strokeWidth={2} />,
       title: referencedWorkflowName,
       onClick: () => {
+        // Run mode goes through the view, which resolves the target's PINNED RUN first; edit mode
+        // opens its builder straight away. Both shapes live in one place now.
         if (isRunMode) {
-          window.dispatchEvent(new CustomEvent('workflowOpenSubWorkflow', { detail: { workflowId: referencedWorkflowId, workflowName: referencedWorkflowName, nodeId: nodeUiId } }));
+          requestOpenRelatedWorkflow(referencedWorkflowId, referencedWorkflowName, nodeUiId);
         } else {
-          import('@/components/app/WorkflowBuilderPanelContent').then(({ WorkflowBuilderPanelContent }) => {
-            sidePanel?.openTab({ id: workflowPanelTabId(referencedWorkflowId), label: referencedWorkflowName, icon: <Workflow className="w-4 h-4" />, content: React.createElement(WorkflowBuilderPanelContent, { workflowId: referencedWorkflowId }), preferredWidth: 0.5, keepMounted: true });
-          });
+          openWorkflowBuilderTab(sidePanel, { workflowId: referencedWorkflowId, workflowName: referencedWorkflowName });
         }
       },
     });

@@ -16,6 +16,9 @@ import enMessages from '@/messages/en.json';
 
 const mocks = vi.hoisted(() => ({
   getWorkflowsPage: vi.fn(),
+  // Relations are secondary card data, resolved for the whole page in one call.
+  // Stubbed empty here: no card in these fixtures calls a sub-workflow.
+  getWorkflowRelationsBatch: vi.fn().mockResolvedValue({}),
   cloneWorkflow: vi.fn(),
   deleteWorkflow: vi.fn(),
   clear: vi.fn(),

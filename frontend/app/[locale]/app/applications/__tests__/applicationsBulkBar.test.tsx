@@ -49,7 +49,7 @@ vi.mock('@/lib/api/orchestrator/publication.service', () => ({
   },
 }));
 vi.mock('@/lib/api/orchestrator/workflow.service', () => ({
-  workflowService: { getApplicationRunVersionBatch: mocks.getApplicationRunVersionBatch, deleteWorkflow: mocks.deleteWorkflow },
+  workflowService: { getApplicationRunVersionBatch: mocks.getApplicationRunVersionBatch, getWorkflowRelationsBatch: vi.fn().mockResolvedValue({}), deleteWorkflow: mocks.deleteWorkflow },
 }));
 vi.mock('@/components/marketplace/ShowcasePreview', () => ({ ShowcasePreview: () => null }));
 vi.mock('@/components/WorkflowNodeIcons', () => ({ WorkflowNodeIcons: () => null }));

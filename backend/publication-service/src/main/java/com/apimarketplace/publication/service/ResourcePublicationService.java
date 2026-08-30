@@ -240,6 +240,13 @@ public class ResourcePublicationService {
                 .build(publication.getId(), type.name()));
 
         WorkflowPublicationEntity saved = publicationRepository.save(publication);
+
+        // After the save: the landing files are copied under `_publications/{id}/`, and that
+        // id only exists once @PrePersist has run. Without it the landing page keeps reading
+        // the publisher's own storage and breaks the day those files go away.
+        // Best-effort by construction - see the same call in AgentPublicationService.
+        workflowPublicationService.materializeLandingFiles(saved, tenantId);
+
         logger.info("Published {} resource {} as publication {} for tenant {}",
                 type, resourceId, saved.getId(), tenantId);
         return saved;

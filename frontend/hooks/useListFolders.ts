@@ -1,18 +1,13 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { usePathname, useRouter, useSearchParams } from 'next/navigation';
-import {
-  PointerSensor,
-  useSensor,
-  useSensors,
-  type DragEndEvent,
-  type DragStartEvent,
-} from '@dnd-kit/core';
+import { usePathname, useSearchParams } from 'next/navigation';
+import type { DragEndEvent, DragStartEvent } from '@dnd-kit/core';
 import { useResourceFolderActions } from '@/hooks/useResourceFolderActions';
+import { useDragSensors } from '@/lib/dnd/useDragSensors';
 import {
   emitResourceFolderTrail,
-  folderUrl,
+  showFolderLevel,
   FOLDER_QUERY_PARAM,
 } from '@/lib/folders/foldersHeaderBus';
 import type {
@@ -90,7 +85,6 @@ export function useListFolders({
   // WHICH folder is open lives in the URL, not in this hook: `?folder=<id>`. That is what
   // makes the path survive a reload, a shared link and the browser's back button, and what
   // lets the app header navigate the list by simply changing the address.
-  const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
   const currentFolderId = searchParams.get(FOLDER_QUERY_PARAM);
@@ -130,9 +124,8 @@ export function useListFolders({
     // answered with the top level, so take the address there rather than leaving a dead
     // folder id in it.
     if (response.folderMissing) {
-      router.replace(folderUrl(pathname, searchParams, null), { scroll: false });
+      showFolderLevel(pathname, searchParams, null, 'replace');
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pathname, searchParams]);
 
   /** What to send as the list's `folderId` parameter. */
@@ -149,9 +142,8 @@ export function useListFolders({
    */
   const navigateToFolder = useCallback((folderId: string | null) => {
     if ((folderId ?? null) === (currentFolderId ?? null)) return;
-    router.push(folderUrl(pathname, searchParams, folderId), { scroll: false });
+    showFolderLevel(pathname, searchParams, folderId);
     clearSelection();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pathname, searchParams, clearSelection, currentFolderId]);
 
   /**
@@ -221,20 +213,25 @@ export function useListFolders({
     setShowMoveDialog(true);
   }, [actions]);
 
-  // Six pixels of travel before a drag starts, so clicking a card still opens it.
-  const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 6 } }));
+  const sensors = useDragSensors();
 
   /**
    * Start of a drag. The caller resolves the dragged resource's display name; a drag that
    * starts on a selected card carries the whole selection.
+   *
+   * <p>A dragged FOLDER names itself (its tile carries its name), so nesting one shows the
+   * same picked-up preview a card does instead of dragging nothing visible.
    */
   const handleDragStart = useCallback((event: DragStartEvent, nameOf: (id: string) => string | undefined) => {
-    const data = event.active.data.current as { type?: string; resourceId?: string } | undefined;
+    const data = event.active.data.current as
+      { type?: string; resourceId?: string; name?: string } | undefined;
     if (data?.type === 'resource' && data.resourceId) {
       setActiveDrag({
         label: nameOf(data.resourceId) ?? '',
         count: selectedIds.has(data.resourceId) ? selectedIds.size : 1,
       });
+    } else if (data?.type === 'folder') {
+      setActiveDrag({ label: data.name ?? '', count: 1 });
     } else {
       setActiveDrag(null);
     }

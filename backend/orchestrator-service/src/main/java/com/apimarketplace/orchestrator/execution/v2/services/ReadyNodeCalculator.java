@@ -241,6 +241,13 @@ public class ReadyNodeCalculator {
                 });
 
             if (allPredecessorsResolved) {
+                // "Resolved" deliberately includes SKIPPED, and a merge whose predecessors are
+                // ALL skipped is still returned READY - do not "fix" that here. The node has to
+                // reach the executor to receive a status at all; suppressing it here would leave
+                // it, and its whole downstream chain, with no row in the epoch (the defect
+                // 54758d9a5 closed). Whether it actually RUNS is decided one step later by
+                // MergeReachabilityGuard, which reads the durable per-item rows and substitutes a
+                // cascading SKIPPED when no branch reached the node for this item.
                 logger.info("[ReadyNodeCalculator] Merge node {} is READY (all {} predecessors resolved)", nodeId, predecessors.size());
                 readyNodes.add(nodeId);
             } else {

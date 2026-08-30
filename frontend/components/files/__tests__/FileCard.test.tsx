@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import React from 'react';
-import { render, cleanup, waitFor, act } from '@testing-library/react';
+import { render, cleanup, waitFor, act, fireEvent, screen } from '@testing-library/react';
 import type { StorageExplorerEntry } from '@/lib/api/storage-api';
 import { FileCard } from '../FileCard';
 import { useAuthedObjectUrl } from '@/hooks/useAuthedObjectUrl';
@@ -153,5 +153,92 @@ describe('FileCard thumbnail', () => {
     } finally {
       (globalThis as { IntersectionObserver?: unknown }).IntersectionObserver = real;
     }
+  });
+});
+
+/**
+ * The card root is the drag handle, so a press that reaches it arms a drag. Which press arms
+ * it depends on the sensors the grid installed, and the card cannot see those - so the controls
+ * sitting ON the card have to stop all of them. A guard written for one event went dead the day
+ * the grid swapped its sensors, and pressing Download began dragging the file away instead.
+ */
+describe('FileCard - pressing a control must not pick the card up', () => {
+  const entry = (): StorageExplorerEntry => ({
+    id: 'f1',
+    fileName: 'report.png',
+    contentType: 'image/png',
+    mimeType: 'image/png',
+    s3Key: 'k',
+    sizeBytes: 10,
+    formattedSize: '10 B',
+    createdAt: '2026-06-01T00:00:00Z',
+    sourceType: null,
+    isFolder: false,
+    parentFolderId: null,
+  } as unknown as StorageExplorerEntry);
+
+  function renderGuarded(onCardPress: () => void, onDownload = vi.fn(), onToggleSelect = vi.fn()) {
+    return render(
+      <div onPointerDown={onCardPress} onMouseDown={onCardPress} onTouchStart={onCardPress}>
+        <FileCard
+          entry={entry()}
+          selected={false}
+          onToggleSelect={onToggleSelect}
+          onOpen={vi.fn()}
+          onDownload={onDownload}
+          downloadLabel="Download"
+        />
+      </div>,
+    );
+  }
+
+  it.each(['pointerDown', 'mouseDown', 'touchStart'] as const)(
+    'stops %s on the download button from reaching the card',
+    (event) => {
+      const onCardPress = vi.fn();
+      renderGuarded(onCardPress);
+
+      fireEvent[event](screen.getByRole('button', { name: 'Download' }));
+
+      expect(onCardPress).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each(['pointerDown', 'mouseDown', 'touchStart'] as const)(
+    'stops %s on the selection checkbox from reaching the card',
+    (event) => {
+      const onCardPress = vi.fn();
+      const { container } = renderGuarded(onCardPress);
+
+      fireEvent[event](container.querySelector('input[type="checkbox"]')!);
+
+      expect(onCardPress).not.toHaveBeenCalled();
+    },
+  );
+
+  it('still downloads when the button is clicked', () => {
+    const onDownload = vi.fn();
+    renderGuarded(vi.fn(), onDownload);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Download' }));
+
+    expect(onDownload).toHaveBeenCalled();
+  });
+
+  it('still selects when the checkbox is used', () => {
+    const onToggleSelect = vi.fn();
+    const { container } = renderGuarded(vi.fn(), vi.fn(), onToggleSelect);
+
+    fireEvent.click(container.querySelector('input[type="checkbox"]')!);
+
+    expect(onToggleSelect).toHaveBeenCalledWith('f1');
+  });
+});
+
+describe('FileCard - scrolling past it on a phone', () => {
+  it('lets a finger scroll past the card it makes draggable', () => {
+    const { container } = renderCard(makeEntry({ fileName: 'a.png', mimeType: 'image/png' }));
+
+    expect(container.firstElementChild?.className).toContain('touch-manipulation');
   });
 });

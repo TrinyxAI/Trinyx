@@ -18,12 +18,11 @@ import type { GenerationHistoryEntry, GenerationProvenance } from '@/lib/api/sto
 import {
   DndContext,
   DragOverlay,
-  PointerSensor,
-  useSensor,
-  useSensors,
+  pointerWithin,
   type DragEndEvent,
   type DragStartEvent,
 } from '@dnd-kit/core';
+import { useDragSensors } from '@/lib/dnd/useDragSensors';
 import { Button } from '@/components/ui/button';
 import { useStorageExplorer } from '@/app/workflows/builder/components/inspector/useStorageExplorer';
 import { storageApi, S3_FILES_FILTER, type StorageExplorerEntry } from '@/lib/api/storage-api';
@@ -486,9 +485,8 @@ export function FileBrowser() {
   }, [selected, selectedRealIds, selectedVirtual, clearSelection, refresh, addToast, t]);
 
   // ---- Folders (V313): drag-to-move, create, rename ----
-  // dnd-kit: require a small drag distance before a pointer-drag starts so a plain
-  // click still opens/selects a card (doesn't begin a move).
-  const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 6 } }));
+  // The same idea of what a drag is that the resource lists use - see useDragSensors.
+  const sensors = useDragSensors();
 
   // The card currently under the pointer during a dnd-kit drag - drives the
   // floating DragOverlay thumbnail. Set on drag start, cleared on end/cancel.
@@ -1131,6 +1129,9 @@ export function FileBrowser() {
             {entries.length > 0 && viewMode === 'grid' && (
               <DndContext
                 sensors={sensors}
+                // The pointer decides which card a drop lands on, not the floating preview,
+                // which is anchored where the card was picked up plus the travel.
+                collisionDetection={pointerWithin}
                 onDragStart={handleDragStart}
                 onDragEnd={handleDragEnd}
                 onDragCancel={() => setActiveDragEntry(null)}

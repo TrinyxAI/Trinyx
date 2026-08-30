@@ -422,6 +422,45 @@ class ExecutionContextTest {
         }
 
         @Test
+        @DisplayName("Regression: removing a node also drops its bare alias, so a loop body cannot read the previous iteration")
+        void shouldRemoveBareAliasAlongsideFullKey() {
+            // withResult writes every output under BOTH "core:step_a" and "step_a"
+            // (StepOutputsWriter contract). A reset that removes only the full key leaves
+            // the alias holding the PREVIOUS iteration's value: a loop body reading
+            // {{step_a.output}} or $input.step_a then sees stale data while
+            // {{core:step_a.output}} correctly sees nothing.
+            ExecutionContext ctx = createContext()
+                .withResult("core:step_a", NodeExecutionResult.success("core:step_a", Map.of("n", 1)));
+
+            assertTrue(ctx.getAllStepOutputs().containsKey("core:step_a"), "precondition: full key written");
+            assertTrue(ctx.getAllStepOutputs().containsKey("step_a"), "precondition: alias written");
+
+            ExecutionContext reset = ctx.withoutNodes(Set.of("core:step_a"));
+
+            assertFalse(reset.getAllStepOutputs().containsKey("core:step_a"), "full key must be cleared");
+            assertFalse(reset.getAllStepOutputs().containsKey("step_a"),
+                "the bare alias must be cleared too, otherwise the reset leaves stale data behind");
+        }
+
+        @Test
+        @DisplayName("An alias still owned by a node that is NOT reset survives")
+        void shouldKeepAliasOwnedByASurvivingNode() {
+            // Two nodes can share a bare alias (core:foo and mcp:foo). Resetting one must not
+            // blank the other's bare-form lookup, which would break a template that never
+            // referenced the reset node at all.
+            ExecutionContext ctx = createContext()
+                .withResult("mcp:foo", NodeExecutionResult.success("mcp:foo", Map.of("from", "mcp")))
+                .withResult("core:foo", NodeExecutionResult.success("core:foo", Map.of("from", "core")));
+
+            ExecutionContext reset = ctx.withoutNodes(Set.of("core:foo"));
+
+            assertFalse(reset.getAllStepOutputs().containsKey("core:foo"), "reset node's full key is cleared");
+            assertTrue(reset.getAllStepOutputs().containsKey("mcp:foo"), "the sibling's full key is untouched");
+            assertTrue(reset.getAllStepOutputs().containsKey("foo"),
+                "the shared alias is still owned by mcp:foo and must survive");
+        }
+
+        @Test
         @DisplayName("Should not modify original context")
         void shouldNotModifyOriginalContext() {
             ExecutionContext ctx = createContext()

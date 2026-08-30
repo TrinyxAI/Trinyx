@@ -7,7 +7,6 @@ import { Workflow, X } from 'lucide-react';
 import { WorkflowNodeIcons } from '@/components/WorkflowNodeIcons';
 import type { NodeIconData } from '@/lib/api/orchestrator/types';
 import { useSidePanelSafe } from '@/contexts/SidePanelContext';
-import { WorkflowBuilderPanelContent } from '@/components/app/WorkflowBuilderPanelContent';
 import LoadingSpinner from '@/components/LoadingSpinner';
 import { PreviewActionMenu, ActionIcons } from './PreviewActionMenu';
 import { ConfirmDeleteModal } from './ConfirmDeleteModal';
@@ -40,7 +39,15 @@ export function WorkflowPreviewBlock({ workflowId, onError, onDelete, onRun, rea
   const sidePanel = useSidePanelSafe();
 
   const tabId = workflowPanelTabId(workflowId);
-  const isTabActive = sidePanel?.isOpen && sidePanel?.activeTabId === tabId;
+  // `isForward`, not `isOpen`: a detached window collapsed to a strip is open and
+  // shows nothing, so this card would paint its "click to close" state over a panel
+  // nobody can see - and the click would then destroy the tab instead of revealing it.
+  //
+  // That is the whole fix. The handler needs no un-shade call of its own: shaded,
+  // this is false, so a click takes the `openTab` branch, which lifts the shade AND
+  // activates THIS card's tab. An un-shade up front would instead reveal whichever
+  // tab happened to be shaded and waste the click.
+  const isTabActive = sidePanel?.isForward && sidePanel?.activeTabId === tabId;
 
   const deleteFn = useCallback(async () => { await orchestratorApi.deleteWorkflow(workflowId); }, [workflowId]);
   const { isDeleted, showDeleteModal, isDeleting, toast, hideToast, handleDeleteClick, handleConfirmDelete, handleCancelDelete } = useDeleteFlow({
@@ -117,13 +124,17 @@ export function WorkflowPreviewBlock({ workflowId, onError, onDelete, onRun, rea
       }
     }
 
-    sidePanel.openTab({
-      id: tabId,
-      label: workflowData?.name || 'Workflow',
-      icon: <Workflow className="w-4 h-4" />,
-      content: <WorkflowBuilderPanelContent workflowId={workflowId} readOnly={readOnly} />,
-      preferredWidth: 0.35,
-      onDelete: handleDeleteClick,
+    // Lazy on purpose: the builder panel pulls in the whole workflow canvas, which a
+    // chat message block must not carry statically (same rule as openWorkflowBuilderTab).
+    void import('@/components/app/WorkflowBuilderPanelContent').then(({ WorkflowBuilderPanelContent }) => {
+      sidePanel.openTab({
+        id: tabId,
+        label: workflowData?.name || 'Workflow',
+        icon: <Workflow className="w-4 h-4" />,
+        content: <WorkflowBuilderPanelContent workflowId={workflowId} readOnly={readOnly} />,
+        preferredWidth: 0.35,
+        onDelete: handleDeleteClick,
+      });
     });
   };
 

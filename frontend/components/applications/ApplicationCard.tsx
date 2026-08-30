@@ -6,9 +6,12 @@ import { Package, CheckCircle, Clock, XCircle, Sparkles, Star, Volume2, VolumeX 
 import { useTranslations } from 'next-intl';
 import type { WorkflowPublication } from '@/lib/api/orchestrator/types';
 import { ShowcasePreview } from '@/components/marketplace/ShowcasePreview';
+import { showcaseBindingFor } from '@/lib/applications/showcasePreview';
 import { WorkflowNodeIcons } from '@/components/WorkflowNodeIcons';
 import { PublisherAvatar } from '@/components/marketplace/PublisherAvatar';
 import { VisibilityBadge } from '@/components/ui/VisibilityBadge';
+import { WorkflowRelationsMenu } from '@/components/workflow/relations/WorkflowRelationsMenu';
+import type { WorkflowRelations } from '@/lib/api/orchestrator/types';
 
 // ============== Skeleton ==============
 // Mirrors the live card layout: 16:10 thumbnail + footer rows below
@@ -91,17 +94,30 @@ interface ApplicationCardProps {
    * (e.g. anonymous / contexts without a favorites store).
    */
   onToggleFavorite?: (publicationId: string) => void;
+  /**
+   * The application's own workflow, when the caller has one locally: the acquired clone, else the
+   * published workflow. Absent for a cloud-hosted (remote) app, whose workflow is not this
+   * workspace's - and whose sub-workflow neighbours would therefore all be dead rows.
+   */
+  workflowId?: string;
+  /**
+   * Sub-workflow neighbourhood of {@code workflowId}, resolved by the page for the WHOLE grid in
+   * one request. Omitted, the relations indicator does not appear - the card never fetches its own.
+   */
+  relations?: WorkflowRelations;
 }
 
-export function ApplicationCard({ publication, source, isSelected, onToggleSelect, onCardClick, applicationRunId, acquiredAt, pinnedVersion, isFavorite, onToggleFavorite }: ApplicationCardProps) {
+export function ApplicationCard({ publication, source, isSelected, onToggleSelect, onCardClick, applicationRunId, acquiredAt, pinnedVersion, isFavorite, onToggleFavorite, workflowId, relations }: ApplicationCardProps) {
   const t = useTranslations('marketplace');
   const tApp = useTranslations('applications');
-  const previewRunId = applicationRunId || publication.showcaseRunId;
+  // How this app is previewed (own run vs the publisher's frozen showcase, local vs cloud)
+  // is decided in one place, shared with the face of an application FOLDER.
+  const showcase = showcaseBindingFor({ publication, source, applicationRunId });
   const cardId = source === 'acquired' ? `acquired-${publication.id}` : `published-${publication.id}`;
   const [rejectionDialogOpen, setRejectionDialogOpen] = useState(false);
   const isRejected = source === 'published' && publication.status === 'REJECTED';
   const isPending = source === 'published' && publication.status === 'PENDING_REVIEW';
-  const isAcquired = source === 'acquired';
+  const isAcquired = showcase.isAcquired;
   // Just-downloaded apps read "New" instead of "Installed" for a short window.
   // Capture "now" once at mount (useState initializer) so render stays pure.
   const [nowAtMount] = useState(() => Date.now());
@@ -123,8 +139,7 @@ export function ApplicationCard({ publication, source, isSelected, onToggleSelec
   // can actually make a sound rather than sitting dead on every card.
   const [hasAudio, setHasAudio] = useState(false);
   const [soundOn, setSoundOn] = useState(false);
-  const canPreview = !!previewRunId && !!publication.showcaseInterfaceId
-    && (!isAcquired || !acquiredPreviewFailed);
+  const canPreview = showcase.canPreview && (!isAcquired || !acquiredPreviewFailed);
 
   return (
     <div className="group block cursor-pointer" onClick={onCardClick}>
@@ -136,23 +151,23 @@ export function ApplicationCard({ publication, source, isSelected, onToggleSelec
         <div className="absolute inset-0">
           {canPreview ? (
             <ShowcasePreview
-              runId={previewRunId!}
-              interfaceId={publication.showcaseInterfaceId!}
+              runId={showcase.runId}
+              interfaceId={showcase.interfaceId}
               // Acquired apps render the publisher's frozen, publication-scoped
               // showcase (cross-tenant-safe); owned/published apps keep the
               // authenticated live render of their own run. On an acquired miss
               // (no snapshot) swap to the cover fallback.
-              publicationId={isAcquired ? publication.id : undefined}
+              publicationId={showcase.publicationId}
               // Local (non-remote) acquired apps read the showcase through the
               // AUTHENTICATED endpoint so the receipt bypass keeps the preview
               // working even after the publisher unpublishes / privatises the
               // source publication (the anonymous /by-id path 403s then, which is
               // what dropped the card onto the node-icon cover tile).
-              authenticated={isAcquired && !publication.remote}
+              authenticated={showcase.authenticated}
               // Cloud-acquired app (cloud-linked CE): its showcase clone lives on the
               // cloud, so route the render through the remote by-id proxy - a local
               // showcase-render would 404 and fall back to the empty cover tile.
-              remote={publication.remote}
+              remote={showcase.remote}
               mediaMuted={!soundOn}
               onMediaAudioPresence={setHasAudio}
               onError={isAcquired ? () => setAcquiredPreviewFailed(true) : undefined}
@@ -331,6 +346,20 @@ export function ApplicationCard({ publication, source, isSelected, onToggleSelec
             </span>
           )}
         </div>
+
+        {/* Sub-workflow neighbourhood of the app's own workflow. Renders nothing unless there is
+            one, so the row disappears entirely for the vast majority of apps. Requires BOTH a
+            local workflow and its resolved relations: a remote (cloud-hosted) app has neither. */}
+        {workflowId && relations && (
+          // empty:hidden - the vast majority of apps call no sub-workflow, and the menu removes
+          // itself for them; without this every one of those cards keeps a stray padded row.
+          <div className="flex items-center pt-0.5 empty:hidden">
+            <WorkflowRelationsMenu
+              relations={relations}
+              data-testid={`application-relations-${publication.id}`}
+            />
+          </div>
+        )}
       </div>
 
       {isRejected && (

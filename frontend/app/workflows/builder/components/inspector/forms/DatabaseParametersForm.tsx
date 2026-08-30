@@ -5,7 +5,7 @@ import { Info, Plus, X } from 'lucide-react';
 import type { Node } from 'reactflow';
 import { useTranslations } from 'next-intl';
 import { Input } from '@/components/ui/input';
-import { Textarea } from '@/components/ui/textarea';
+import { ExpressionEditor } from '@/components/ui/expression-editor';
 import { Button } from '@/components/ui/button';
 import {
   Select,
@@ -20,6 +20,7 @@ import {
   PopoverTrigger,
 } from '@/components/ui/popover';
 import type { BuilderNodeData } from '../../../types';
+import type { ConnectionProps } from '../ExpressionField';
 import { CredentialSection } from '../CredentialSection';
 
 interface DatabaseParametersFormProps {
@@ -27,6 +28,8 @@ interface DatabaseParametersFormProps {
   data: BuilderNodeData;
   isRunMode?: boolean;
   onUpdate: (data: BuilderNodeData) => void;
+  connectionProps: ConnectionProps;
+  findUnknownVariables: (expressions: Record<string, string>) => string[];
 }
 
 const DB_OPERATIONS = [
@@ -52,6 +55,8 @@ export function DatabaseParametersForm({
   data,
   isRunMode = false,
   onUpdate,
+  connectionProps,
+  findUnknownVariables,
 }: DatabaseParametersFormProps) {
   const t = useTranslations('workflowBuilder.databaseNode');
 
@@ -162,12 +167,22 @@ export function DatabaseParametersForm({
         <span className="text-sm font-semibold text-slate-500 dark:text-slate-400">
           {t('query')} <span className="text-red-500">*</span>
         </span>
-        <Textarea
+        <ExpressionEditor
           value={query}
-          onChange={(e) => handleChange('dbQuery', e.target.value)}
+          onChange={(value) => handleChange('dbQuery', value)}
           placeholder={t('queryPlaceholder')}
-          disabled={isRunMode}
-          className="text-sm font-mono min-h-[100px]"
+          className="w-full min-h-[100px]"
+          unknownVariables={findUnknownVariables({ dbQuery: query })}
+          handleId={`db-query-${node.id}`}
+          connections={connectionProps.connections}
+          onHandleClick={connectionProps.handleHandleClick}
+          draggingFromHandle={connectionProps.draggingFromHandle}
+          onHandleMouseDown={connectionProps.handleHandleMouseDown}
+          onHandleMouseUp={connectionProps.handleHandleMouseUp}
+          hoveredTargetHandle={connectionProps.hoveredTargetHandle}
+          onSetHandleRef={connectionProps.handleSetHandleRef}
+          readOnly={isRunMode}
+          isRequired
         />
       </div>
 
@@ -181,13 +196,24 @@ export function DatabaseParametersForm({
             <span className="text-xs text-slate-400 dark:text-slate-500 min-w-[24px]">
               ${index + 1}
             </span>
-            <Input
-              value={param}
-              onChange={(e) => handleParamChange(index, e.target.value)}
-              placeholder={t('queryParamPlaceholder')}
-              disabled={isRunMode}
-              className="text-sm flex-1"
-            />
+            <div className="flex-1 min-w-0">
+              <ExpressionEditor
+                value={param}
+                onChange={(value) => handleParamChange(index, value)}
+                placeholder={t('queryParamPlaceholder')}
+                className="w-full"
+                unknownVariables={findUnknownVariables({ [`dbQueryParam${index}`]: param })}
+                handleId={`db-query-param-${index}-${node.id}`}
+                connections={connectionProps.connections}
+                onHandleClick={connectionProps.handleHandleClick}
+                draggingFromHandle={connectionProps.draggingFromHandle}
+                onHandleMouseDown={connectionProps.handleHandleMouseDown}
+                onHandleMouseUp={connectionProps.handleHandleMouseUp}
+                hoveredTargetHandle={connectionProps.hoveredTargetHandle}
+                onSetHandleRef={connectionProps.handleSetHandleRef}
+                readOnly={isRunMode}
+              />
+            </div>
             <button
               onClick={() => handleRemoveParam(index)}
               disabled={isRunMode}

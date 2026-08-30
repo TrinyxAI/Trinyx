@@ -37,13 +37,14 @@ class CeReleaseEndpointWiringTest {
 
     static final String FEED_PATH = "/api/ce/releases/latest";
     static final String ANNOUNCE_PATH = "/api/ce/releases/announce";
+    static final String STATS_PATH = "/api/ce/installs/stats";
 
     private final WebApplicationContextRunner runner = new WebApplicationContextRunner()
             .withConfiguration(AutoConfigurations.of(
                     DispatcherServletAutoConfiguration.class, WebMvcAutoConfiguration.class))
             .withUserConfiguration(StubbedStore.class)
             .withBean(CeReleaseController.class, () ->
-                    new CeReleaseController("", "", false, "", null));
+                    new CeReleaseController("", "", false, "", null, null));
 
     @Configuration
     static class StubbedStore {
@@ -209,5 +210,54 @@ class CeReleaseEndpointWiringTest {
                                     + "makes every release announcement fail with a 401")
                             .contains(ANNOUNCE_PATH);
                 });
+    }
+
+    @Test
+    @DisplayName("the fleet read is mapped at the allowlisted path, by GET")
+    void statsIsMappedAtTheAllowlistedPath() {
+        // Same invisibility this class exists for: CeInstallStatsControllerTest calls stats()
+        // directly, so a typo in the mapping, or a GET flipped to POST, leaves it green while the
+        // gateway allowlists a 404 and the documented curl 405s.
+        new org.springframework.boot.test.context.runner.WebApplicationContextRunner()
+                .withConfiguration(AutoConfigurations.of(
+                        DispatcherServletAutoConfiguration.class, WebMvcAutoConfiguration.class))
+                .withPropertyValues("ce.installs.telemetry.enabled=true")
+                .withBean(CeInstallStatsController.class, () ->
+                        new CeInstallStatsController(
+                                mock(CeFleetReader.class),
+                                "secret-for-wiring-only"))
+                .run(context -> {
+                    RequestMappingHandlerMapping mapping = context.getBean(RequestMappingHandlerMapping.class);
+                    assertThat(mappedPatterns(mapping)).contains(STATS_PATH);
+
+                    Set<org.springframework.web.bind.annotation.RequestMethod> methods =
+                            mapping.getHandlerMethods().keySet().stream()
+                                    .filter(info -> patternsOf(info).anyMatch(STATS_PATH::equals))
+                                    .flatMap(info -> info.getMethodsCondition().getMethods().stream())
+                                    .collect(Collectors.toSet());
+                    assertThat(methods)
+                            .as("the fleet read must answer GET and only GET")
+                            .containsExactly(org.springframework.web.bind.annotation.RequestMethod.GET);
+                });
+    }
+
+    @Test
+    @DisplayName("the fleet read takes its secret from the X-Internal-Auth header, not a parameter")
+    void statsReadsTheInternalAuthHeader() throws Exception {
+        // A typo in the @RequestHeader name makes the argument always null, so EVERY read is 401
+        // for ever, and the direct-call test still passes because it hands the secret in as a
+        // method argument. Only a real request through the mapping can see it.
+        java.lang.reflect.Method method = CeInstallStatsController.class
+                .getMethod("stats", String.class);
+        org.springframework.web.bind.annotation.RequestHeader header =
+                method.getParameters()[0].getAnnotation(
+                        org.springframework.web.bind.annotation.RequestHeader.class);
+
+        assertThat(header).as("the secret must arrive as a request header").isNotNull();
+        assertThat(header.value()).isEqualTo("X-Internal-Auth");
+        assertThat(header.required())
+                .as("a missing header must reach the handler as null and be rejected there, "
+                        + "not 400 before the constant-time comparison runs")
+                .isFalse();
     }
 }

@@ -17,6 +17,7 @@ import { useAuthGuard } from '@/hooks/useAuthGuard';
 import { formatUtcDateTime } from '@/lib/utils/dateFormatters';
 import { useUserProfile } from '@/hooks/useUserProfile';
 import { useTranslations } from 'next-intl';
+import { isEventForWorkflow } from '@/lib/workflow/workflowEventScope';
 import {
   Globe, Coins, Layout, EyeOff, Check, AlertCircle, AlertTriangle,
   Play, ArrowLeft, ArrowRight, FileText, Lock,
@@ -632,14 +633,18 @@ export function PublishWorkflowModal({
     }
   }, [runs, selectedRunId]);
 
-  // Listen for activeVersion changes from WorkflowVersionHistory (save/restore)
+  // Listen for activeVersion changes from WorkflowVersionHistory (save/restore).
+  // Scoped: `activeVersion` seeds the version this wizard PUBLISHES, and a
+  // second version control now exists (the side panel's), for another workflow.
   useEffect(() => {
-    const handler = (e: CustomEvent) => {
-      setActiveVersion(e.detail.version);
+    const handler = (e: Event) => {
+      const detail = (e as CustomEvent).detail;
+      if (!isEventForWorkflow(detail, workflowId)) return;
+      setActiveVersion(detail?.version);
     };
-    window.addEventListener('workflowActiveVersionChange', handler as EventListener);
-    return () => window.removeEventListener('workflowActiveVersionChange', handler as EventListener);
-  }, []);
+    window.addEventListener('workflowActiveVersionChange', handler);
+    return () => window.removeEventListener('workflowActiveVersionChange', handler);
+  }, [workflowId]);
 
   // ============== Handlers ==============
 

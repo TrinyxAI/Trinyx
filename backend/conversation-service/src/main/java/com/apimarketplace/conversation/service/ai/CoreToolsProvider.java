@@ -352,6 +352,7 @@ public class CoreToolsProvider {
                         .description(paramDesc)
                         .required(paramRequired)
                         .enumValues(enumValues)
+                        .itemType(paramData.get("itemType") instanceof String it ? it : null)
                         .build());
                 }
             } else {

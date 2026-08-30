@@ -14,6 +14,7 @@ import type { ApplicationConfig } from '@/components/chat/ApplicationTabContent'
 import { WorkflowModeToggle } from '@/components/workflow/WorkflowModeToggle';
 import { orchestratorApi } from '@/lib/api';
 import { useWorkflowMode } from '@/contexts/WorkflowModeContext';
+import { isEventForWorkflow } from '@/lib/workflow/workflowEventScope';
 import { useWorkflowRunContext } from '@/contexts/WorkflowRunContext';
 import { useWorkflowEventBridge } from '@/components/views/workflow/hooks';
 import { streamDebug } from '@/contexts/workflow-run/streamingDebug';
@@ -124,13 +125,17 @@ export function WorkflowRunCanvas({
   }, [workflowMode, workflowId]);
 
   // ── Listen for pin/unpin changes from WorkflowVersionHistory ──
+  // Scoped: a second version control now exists in the side panel, for another
+  // workflow, and its pin must not show on this canvas' badge.
   useEffect(() => {
     const handler = (e: Event) => {
-      setPinnedVersion((e as CustomEvent).detail?.pinnedVersion ?? null);
+      const detail = (e as CustomEvent).detail;
+      if (!isEventForWorkflow(detail, workflowId)) return;
+      setPinnedVersion(detail?.pinnedVersion ?? null);
     };
     window.addEventListener('workflowPinnedVersionChange', handler);
     return () => window.removeEventListener('workflowPinnedVersionChange', handler);
-  }, []);
+  }, [workflowId]);
 
   // ── Internal refs (use external if provided) ──
   const internalExecuteTriggerRef = useRef<((triggerId: string, triggerType: 'chat' | 'form' | 'webhook', payload: Record<string, any>) => Promise<string[] | undefined>) | null>(null);
@@ -142,7 +147,7 @@ export function WorkflowRunCanvas({
   const canvasNodesRef = externalNodesRef ?? internalNodesRef;
 
   // ── Shared event bridge (trigger exec, application actions, __continue) ──
-  useWorkflowEventBridge(executeTriggerRef, applicationActionRef, runContext);
+  useWorkflowEventBridge(executeTriggerRef, applicationActionRef, runContext, workflowId);
 
   // ── Handle run info changes from WorkflowBuilder ──
   const handleRunInfoChange = useCallback((data: RunInfoData) => {

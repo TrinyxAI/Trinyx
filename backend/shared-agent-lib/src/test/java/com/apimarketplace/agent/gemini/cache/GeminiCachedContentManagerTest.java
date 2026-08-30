@@ -417,4 +417,33 @@ class GeminiCachedContentManagerTest {
         assertThat(body.get("systemInstruction")).isNotNull();
         assertThat(body.get("tools")).isNotNull();
     }
+    @org.junit.jupiter.api.Test
+    @DisplayName("an array parameter tells Gemini what it holds, and the default is unchanged")
+    void arrayItemTypeReachesTheCachedSchema() {
+        // This schema is built once and reused for the life of the cache entry, so an array of
+        // objects advertised as an array of strings is wrong for every call that hits it - and
+        // there is no per-call chance to notice. The undeclared case is asserted too: it must stay
+        // what every array emitted before item types existed.
+        var declared = com.apimarketplace.agent.domain.ToolParameter.builder()
+                .name("rows").type("array").description("Rows").required(false)
+                .itemType("object").build();
+        var undeclared = com.apimarketplace.agent.domain.ToolParameter.builder()
+                .name("tags").type("array").description("Tags").required(false).build();
+
+        List<Map<String, Object>> decls = manager.buildFunctionDeclarations(List.of(
+                com.apimarketplace.agent.domain.ToolDefinition.builder()
+                        .name("t").description("T")
+                        .parameters(List.of(declared, undeclared)).build()));
+
+        @SuppressWarnings("unchecked")
+        Map<String, Object> props = (Map<String, Object>)
+                ((Map<String, Object>) decls.get(0).get("parameters")).get("properties");
+        @SuppressWarnings("unchecked")
+        Map<String, Object> rows = (Map<String, Object>) props.get("rows");
+        @SuppressWarnings("unchecked")
+        Map<String, Object> tags = (Map<String, Object>) props.get("tags");
+        assertThat(rows.get("items")).isEqualTo(Map.of("type", "object"));
+        assertThat(tags.get("items")).isEqualTo(Map.of("type", "string"));
+    }
+
 }

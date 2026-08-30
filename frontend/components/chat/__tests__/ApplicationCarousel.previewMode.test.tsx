@@ -49,8 +49,10 @@ vi.mock('@/contexts/WorkflowModeContext', () => ({
   useWorkflowMode: () => ({ isRunMode: false }),
 }));
 vi.mock('@/lib/stores/interface-pagination-store', () => ({
-  useInterfacePaginationStore: (selector: (s: { carouselIndex: number; setCarouselIndex: (i: number) => void }) => unknown) =>
-    selector({ carouselIndex: 0, setCarouselIndex: () => undefined }),
+  useInterfacePaginationStore: (
+    selector: (s: { carouselIndex: Record<string, number>; setCarouselIndex: (key: string, i: number) => void }) => unknown,
+  ) => selector({ carouselIndex: {}, setCarouselIndex: () => undefined }),
+  carouselKeyFor: (workflowId?: string | null, runId?: string | null) => `${workflowId ?? ''}:${runId ?? ''}`,
 }));
 vi.mock('next-intl', () => ({
   useTranslations: () => (key: string) => key,

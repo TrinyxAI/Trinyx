@@ -27,20 +27,35 @@ vi.mock('@/lib/providers/smart-providers', () => ({
 vi.mock('next-intl', () => ({ useTranslations: () => (key: string) => key }));
 
 let searchParams = new URLSearchParams();
-const replace = vi.fn();
+const routerReplace = vi.fn();
 vi.mock('next/navigation', () => ({
   useSearchParams: () => searchParams,
-  useRouter: () => ({ replace, push: vi.fn() }),
+  useRouter: () => ({ replace: routerReplace, push: vi.fn() }),
   usePathname: () => '/app/agent',
 }));
+
+/**
+ * A tab is a change of ADDRESS on the page already on screen, so it goes through the history
+ * API. A router replace of the bare pathname - which is what returning to the default tab
+ * asks for - is dropped when the page was loaded at it, which is the "nothing happens" this
+ * view's own comment describes.
+ */
+const replace = vi.fn();
+const realReplaceState = window.history.replaceState;
 
 import { AgentView } from '../AgentView';
 
 beforeEach(() => {
   searchParams = new URLSearchParams();
   replace.mockClear();
+  routerReplace.mockClear();
+  window.history.replaceState = ((_data: unknown, _unused: string, url?: string) =>
+    replace(url)) as unknown as typeof window.history.replaceState;
 });
-afterEach(() => cleanup());
+afterEach(() => {
+  window.history.replaceState = realReplaceState;
+  cleanup();
+});
 
 describe('AgentView - URL is the single source of truth', () => {
   it('renders the Agents list when no ?view= is present', () => {
@@ -113,7 +128,8 @@ describe('AgentView - URL is the single source of truth', () => {
 
 describe('AgentView - tab clicks encode the choice in the URL', () => {
   // Regression: pre-fix, clicking Skills cleared the query (router.replace(pathname)).
-  // Skills must now be encoded as ?view=skills so the URL stays the source of truth.
+  // Skills must now be encoded as ?view=skills so the URL stays the source of truth - and it
+  // goes through the history API, because the router drops the push that clears the query.
   it('encodes Skills as ?view=skills', () => {
     render(<AgentView />);
     fireEvent.click(screen.getByText('tabSkills'));
@@ -137,5 +153,8 @@ describe('AgentView - tab clicks encode the choice in the URL', () => {
     render(<AgentView />);
     fireEvent.click(screen.getByText('tabAgents'));
     expect(replace).toHaveBeenCalledWith('/app/agent');
+    // Not the router: from a page loaded on `?view=skills` that call is dropped and the tab
+    // does nothing at all.
+    expect(routerReplace).not.toHaveBeenCalled();
   });
 });

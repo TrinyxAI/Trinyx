@@ -56,6 +56,7 @@ class InternalPublicationControllerRemoteMarketplaceTest {
                 mock(ResourcePublicationService.class),
                 mock(OrchestratorInternalClient.class),
                 mock(ShowcaseSnapshotBackfillService.class),
+                mock(com.apimarketplace.publication.service.ShowcaseFileNamespaceRepairService.class),
                 provider);
     }
 

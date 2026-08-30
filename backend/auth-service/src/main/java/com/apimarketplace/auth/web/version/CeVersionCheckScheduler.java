@@ -21,7 +21,9 @@ import java.time.Instant;
  *
  * <p>Gated to the embedded (CE) edition and to {@code ce.version-check.enabled}
  * (default on, opt-out for privacy). It never runs in cloud (keycloak mode). The
- * request carries only the running version and no install identifier.
+ * request carries the running version and, unless
+ * {@code ce.version-check.send-install-id=false}, this install's anonymous id
+ * (see {@link CeInstallIdProvider}), so live self-hosted installs can be counted.
  *
  * <p>Best-effort: a failed fetch is logged at debug and leaves the previously
  * known status untouched; the next run retries.
@@ -44,15 +46,29 @@ public class CeVersionCheckScheduler {
         this.gitProperties = gitProperties.getIfAvailable();
     }
 
-    /** Check once shortly after the app is ready, so the card is accurate without waiting for the daily cron. */
+    /** Check once shortly after the app is ready, so the card is accurate without waiting a day. */
     @EventListener(ApplicationReadyEvent.class)
     public void checkOnStartup() {
         checkNow();
     }
 
-    /** Daily refresh at 05:00 UTC (low-traffic window). */
-    @Scheduled(cron = "${ce.version-check.cron:0 0 5 * * *}", zone = "UTC")
-    public void checkDaily() {
+    /**
+     * Daily refresh, anchored on THIS install's startup rather than on a shared clock time.
+     *
+     * <p>It used to be a cron at 05:00 UTC, which meant every self-hosted install on earth called
+     * the same cloud endpoint inside the same minute. That was already a poor load profile; once
+     * the request began carrying an install id it became a correctness problem, because the
+     * collector's per-minute burst budget then had to absorb the entire fleet in one window and
+     * dropped whatever did not fit, silently and at DEBUG. Boot times are spread across the day by
+     * nature, so a fixed delay spreads the fleet with them and no coordination is needed.
+     *
+     * <p>The cost is that the poll drifts relative to wall-clock time. For a daily check on whether
+     * a newer release exists, that is not a property anyone depends on.
+     */
+    @Scheduled(
+            initialDelayString = "${ce.version-check.interval:PT24H}",
+            fixedDelayString = "${ce.version-check.interval:PT24H}")
+    public void checkPeriodically() {
         checkNow();
     }
 

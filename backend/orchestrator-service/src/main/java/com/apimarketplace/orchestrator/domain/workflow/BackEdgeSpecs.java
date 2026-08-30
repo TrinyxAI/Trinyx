@@ -28,21 +28,25 @@ public final class BackEdgeSpecs {
     public static List<BackEdgeSpec> forSource(WorkflowPlan plan, String sourceNodeId) {
         if (plan == null || sourceNodeId == null) return List.of();
 
-        List<BackEdgeSpec> specs = new ArrayList<>();
+        // Keyed by edge id: an edge into a hub's :iterate port that ALSO carries a marker
+        // matches both accessors below, and the workflow builder produces exactly that shape.
+        // Collected twice, one body completion advanced the loop twice - the iteration counter
+        // moved in steps of 2, so a loop asked for N passes did about half of them.
+        java.util.Map<String, BackEdgeSpec> byEdge = new java.util.LinkedHashMap<>();
 
         for (Edge edge : plan.getIterateEdgesForSource(sourceNodeId)) {
             BackEdgeSpec spec = resolve(plan, edge);
-            if (spec != null) specs.add(spec);
+            if (spec != null) byEdge.putIfAbsent(spec.edgeId(), spec);
         }
 
         for (Edge edge : plan.getEdges()) {
             if (edge.backEdge() == null) continue;
             if (!sourceNodeId.equals(EdgeRefParser.getNodeKey(edge.from()))) continue;
             BackEdgeSpec spec = resolve(plan, edge);
-            if (spec != null) specs.add(spec);
+            if (spec != null) byEdge.putIfAbsent(spec.edgeId(), spec);
         }
 
-        return specs;
+        return new ArrayList<>(byEdge.values());
     }
 
     /**
@@ -51,22 +55,22 @@ public final class BackEdgeSpecs {
     public static List<BackEdgeSpec> all(WorkflowPlan plan) {
         if (plan == null) return List.of();
 
-        List<BackEdgeSpec> specs = new ArrayList<>();
+        // Same two accessors as forSource(), in the same order and with the same de-duplication
+        // by edge id, so both entry points see the same loops exactly once each.
+        java.util.Map<String, BackEdgeSpec> byEdge = new java.util.LinkedHashMap<>();
 
-        // Same two accessors as forSource(), in the same order, so both entry points see the
-        // same loops.
         for (Edge edge : plan.getIterateEdges()) {
             BackEdgeSpec spec = resolve(plan, edge);
-            if (spec != null) specs.add(spec);
+            if (spec != null) byEdge.putIfAbsent(spec.edgeId(), spec);
         }
 
         for (Edge edge : plan.getEdges()) {
             if (edge.backEdge() == null) continue;
             BackEdgeSpec spec = resolve(plan, edge);
-            if (spec != null) specs.add(spec);
+            if (spec != null) byEdge.putIfAbsent(spec.edgeId(), spec);
         }
 
-        return specs;
+        return new ArrayList<>(byEdge.values());
     }
 
     /**
@@ -97,12 +101,33 @@ public final class BackEdgeSpecs {
                 plan.findLoopExitTarget(hubKey));
         }
 
+        Edge.BackEdge marker = edge.backEdge();
+
+        // An EMPTY marker carries no condition and no cap, so it says nothing about how the
+        // loop stops. The workflow builder stamps exactly that on the edge it draws into a
+        // hub's :iterate port, and reading the marker there would silently discard the loop
+        // Core's own loopCondition: the loop then ran on "no condition" until something else
+        // stopped it, whatever the author wrote in the node. An empty marker on an iterate
+        // edge is therefore treated as the hub shape it really is.
+        boolean emptyMarker = marker.condition() == null && marker.maxIterations() == null;
+        String iterateHubKey = EdgeRefParser.getNodeKey(edge.to());
+        if (emptyMarker && iterateHubKey != null) {
+            Optional<Core> hub = plan.findLoopCoreForIterateEdge(edge);
+            if (hub.isPresent()) {
+                return new BackEdgeSpec(
+                    edge, edge.getEdgeId(), sourceKey, sourcePort,
+                    plan.findLoopBodyTarget(iterateHubKey), iterateHubKey,
+                    hub.get().loopCondition(),
+                    hub.get().maxIterations(),
+                    plan.findLoopExitTarget(iterateHubKey));
+            }
+        }
+
         // Declared back-edge: its own target IS the re-entry point, and there is no exit port -
         // when the loop stops, the source node's other port has already routed.
         String bodyEntry = EdgeRefParser.getNodeKey(edge.to());
         if (bodyEntry == null) return null;
 
-        Edge.BackEdge marker = edge.backEdge();
         return new BackEdgeSpec(
             edge, edge.getEdgeId(), sourceKey, sourcePort,
             bodyEntry, null,

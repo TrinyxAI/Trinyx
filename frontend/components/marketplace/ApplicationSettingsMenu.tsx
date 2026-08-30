@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useCallback, useState } from 'react';
-import { Loader2, Settings, Volume2, VolumeX, Workflow } from 'lucide-react';
+import { Loader2, Settings, Workflow } from 'lucide-react';
 import { useTranslations } from 'next-intl';
 import { cn } from '@/lib/utils';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
@@ -16,23 +16,10 @@ interface ApplicationSettingsMenuProps {
    */
   remote?: boolean;
   /**
-   * Offer the "Create an editable copy" entry. When false, this entry is absent -
-   * but the cog can still exist for the sound entry below. It is the combination
-   * that decides: a menu with NO entry at all is a dead affordance and is not
-   * rendered.
+   * Offer the "Create an editable copy" entry. When false the menu has no entry at
+   * all, which is a dead affordance, so no cog is rendered either.
    */
   canCreateEditableCopy?: boolean;
-  /**
-   * Current mute state of the application's own audio/video, or {@code undefined}
-   * when this application has none - in which case no sound entry is offered.
-   *
-   * Only the interface's frame can tell us whether there is anything to hear (it
-   * is sandboxed and cross-origin), so the page reports it down to here rather
-   * than this component guessing.
-   */
-  soundMuted?: boolean;
-  /** Toggle the application's sound. Required for the sound entry to appear. */
-  onToggleSound?: () => void;
   className?: string;
 }
 
@@ -50,14 +37,9 @@ export function ApplicationSettingsMenu({
   publicationId,
   remote = false,
   canCreateEditableCopy = false,
-  soundMuted,
-  onToggleSound,
   className,
 }: ApplicationSettingsMenuProps) {
   const t = useTranslations('marketplace');
-  // Sound labels live in the applications namespace, shared with the app cards -
-  // one source of truth rather than the same sentence translated twice.
-  const tSound = useTranslations('applications');
   const [open, setOpen] = useState(false);
 
   const [editableCopy, setEditableCopy] = useState<{
@@ -80,13 +62,8 @@ export function ApplicationSettingsMenu({
     }
   }, [publicationId, remote]);
 
-  // The application has audio, so the menu has a sound entry to offer.
-  const canToggleSound = soundMuted !== undefined && !!onToggleSound;
-
-  // Nothing to put in the menu - render no cog rather than an empty popover. Note
-  // this is now a DISJUNCTION: an app with sound but no editable copy still gets a
-  // cog, because that is the only place its sound can be turned on.
-  if (!canCreateEditableCopy && !canToggleSound) return null;
+  // Nothing to put in the menu - render no cog rather than an empty popover.
+  if (!canCreateEditableCopy) return null;
 
   return (
     <Popover open={open} onOpenChange={setOpen}>
@@ -115,29 +92,7 @@ export function ApplicationSettingsMenu({
         sideOffset={6}
         className="w-[264px] p-1.5 bg-theme-primary rounded-xl border border-gray-300/70 dark:border-gray-600/70 z-[100000]"
       >
-        {/* Sound sits FIRST: it is the reversible, per-visit control, while the
-            editable copy is a one-shot action that leaves this page. It also
-            stays reachable in the "copy created" state below, which replaces the
-            copy entry entirely. */}
-        {canToggleSound && (
-          <div className={canCreateEditableCopy ? 'pb-1 mb-1 border-b border-gray-200 dark:border-gray-700' : ''}>
-            <button
-              type="button"
-              data-testid="application-settings-sound"
-              aria-pressed={!soundMuted}
-              onClick={onToggleSound}
-              className="w-full flex items-center gap-2 px-2.5 py-1.5 rounded-lg text-sm text-theme-primary transition-colors hover:bg-gray-100 dark:hover:bg-gray-700"
-            >
-              {soundMuted
-                ? <VolumeX className="h-3.5 w-3.5 shrink-0" />
-                : <Volume2 className="h-3.5 w-3.5 shrink-0" />}
-              <span className="text-left">
-                {soundMuted ? tSound('unmuteSound') : tSound('muteSound')}
-              </span>
-            </button>
-          </div>
-        )}
-        {!canCreateEditableCopy ? null : editableCopy.status === 'done' && editableCopy.workflowId ? (
+        {editableCopy.status === 'done' && editableCopy.workflowId ? (
           <div className="px-2.5 py-2 space-y-1">
             <p className="text-sm text-theme-primary leading-snug">
               {editableCopy.created ? t('editableCopy.created') : t('editableCopy.existing')}

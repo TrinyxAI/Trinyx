@@ -4,19 +4,22 @@ import * as React from 'react';
 import { Info } from 'lucide-react';
 import type { Node } from 'reactflow';
 import { useTranslations } from 'next-intl';
-import { Input } from '@/components/ui/input';
+import { ExpressionEditor } from '@/components/ui/expression-editor';
 import {
   Popover,
   PopoverContent,
   PopoverTrigger,
 } from '@/components/ui/popover';
 import type { BuilderNodeData } from '../../../types';
+import type { ConnectionProps } from '../ExpressionField';
 
 interface StopOnErrorParametersFormProps {
   node: Node<BuilderNodeData>;
   data: BuilderNodeData;
   isRunMode?: boolean;
   onUpdate: (data: BuilderNodeData) => void;
+  connectionProps: ConnectionProps;
+  findUnknownVariables: (expressions: Record<string, string>) => string[];
 }
 
 export function StopOnErrorParametersForm({
@@ -24,6 +27,8 @@ export function StopOnErrorParametersForm({
   data,
   isRunMode = false,
   onUpdate,
+  connectionProps,
+  findUnknownVariables,
 }: StopOnErrorParametersFormProps) {
   const t = useTranslations('workflowBuilder.stopOnErrorNode');
 
@@ -65,12 +70,22 @@ export function StopOnErrorParametersForm({
         <span className="text-sm font-semibold text-slate-500 dark:text-slate-400">
           {t('errorMessage')} <span className="text-red-500">*</span>
         </span>
-        <Input
+        <ExpressionEditor
           value={errorMessage}
-          onChange={(e) => handleChange('stopOnErrorMessage', e.target.value)}
+          onChange={(value) => handleChange('stopOnErrorMessage', value)}
           placeholder={t('errorMessagePlaceholder')}
-          disabled={isRunMode}
-          className="text-sm"
+          className="w-full"
+          unknownVariables={findUnknownVariables({ stopOnErrorMessage: errorMessage })}
+          handleId={`stop-on-error-message-${node.id}`}
+          connections={connectionProps.connections}
+          onHandleClick={connectionProps.handleHandleClick}
+          draggingFromHandle={connectionProps.draggingFromHandle}
+          onHandleMouseDown={connectionProps.handleHandleMouseDown}
+          onHandleMouseUp={connectionProps.handleHandleMouseUp}
+          hoveredTargetHandle={connectionProps.hoveredTargetHandle}
+          onSetHandleRef={connectionProps.handleSetHandleRef}
+          readOnly={isRunMode}
+          isRequired
         />
       </div>
 
@@ -80,12 +95,21 @@ export function StopOnErrorParametersForm({
           {t('errorCode')}
         </span>
         <span className="text-xs text-slate-400 dark:text-slate-500 ml-1">({t('optional')})</span>
-        <Input
+        <ExpressionEditor
           value={errorCode}
-          onChange={(e) => handleChange('stopOnErrorCode', e.target.value)}
+          onChange={(value) => handleChange('stopOnErrorCode', value)}
           placeholder={t('errorCodePlaceholder')}
-          disabled={isRunMode}
-          className="text-sm"
+          className="w-full"
+          unknownVariables={findUnknownVariables({ stopOnErrorCode: errorCode })}
+          handleId={`stop-on-error-code-${node.id}`}
+          connections={connectionProps.connections}
+          onHandleClick={connectionProps.handleHandleClick}
+          draggingFromHandle={connectionProps.draggingFromHandle}
+          onHandleMouseDown={connectionProps.handleHandleMouseDown}
+          onHandleMouseUp={connectionProps.handleHandleMouseUp}
+          hoveredTargetHandle={connectionProps.hoveredTargetHandle}
+          onSetHandleRef={connectionProps.handleSetHandleRef}
+          readOnly={isRunMode}
         />
       </div>
     </div>

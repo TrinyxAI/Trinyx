@@ -138,6 +138,32 @@ class AgentToolDefinitionTest {
         }
 
         @Test
+        @DisplayName("should carry an array's item type, since every consumer rebuilds its schema from this")
+        void shouldCarryItemTypeOverTheWire() {
+            // This payload is how the tool reaches the services that talk to a model, and each of
+            // them builds its own JSON Schema from it. Dropping the item type here strands the
+            // declaration at the tool: an array of objects is still advertised to the model as an
+            // array of strings, however carefully the tool declared it.
+            AgentToolDefinition tool = AgentToolDefinition.builder()
+                .name("t").description("T").category(ToolCategory.WORKFLOW)
+                .parameters(List.of(
+                    ToolParameter.builder().name("rows").type("array").description("Rows")
+                        .required(false).itemType("object").build(),
+                    ToolParameter.builder().name("tags").type("array").description("Tags")
+                        .required(false).build()))
+                .build();
+
+            @SuppressWarnings("unchecked")
+            List<Map<String, Object>> params =
+                (List<Map<String, Object>>) tool.toSummary().get("parameters");
+
+            assertThat(params.get(0)).containsEntry("itemType", "object");
+            // Absent rather than "string": the readers default it, and an always-present key
+            // would change every existing tool's payload for nothing.
+            assertThat(params.get(1)).doesNotContainKey("itemType");
+        }
+
+        @Test
         @DisplayName("should include enum values in parameters when present")
         void shouldIncludeEnumValues() {
             AgentToolDefinition tool = createSampleTool();

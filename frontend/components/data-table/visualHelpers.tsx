@@ -144,23 +144,27 @@ export const COLUMN_STYLE_PRESETS: ColumnStylePreset[] = [
     defaultValue: 0,
   },
   // Media
+  // Both media presets create the SAME column type. They differ only by display.render, because
+  // an attachment and an image preview were never two kinds of data - only two ways of drawing one
+  // stored file. Columns created before this still carry type 'image' and keep working: it resolves
+  // to the same cell and the same value contract.
   {
     id: 'file',
     label: 'Attachment',
-    description: 'Upload or link a document.',
+    description: 'Upload a file, pick one from Files, or link to a URL.',
     visualType: 'file',
     structure: 'scalar',
     icon: Paperclip,
-    display: { label: 'Attachment' },
+    display: { label: 'Attachment', render: 'card' },
   },
   {
     id: 'image',
     label: 'Image preview',
-    description: 'Responsive thumbnail for visuals.',
-    visualType: 'image',
+    description: 'Same as an attachment, shown as a round thumbnail.',
+    visualType: 'file',
     structure: 'scalar',
     icon: ImageIcon,
-    display: { ratio: '4:3', imageFit: 'cover' },
+    display: { ratio: '4:3', imageFit: 'cover', render: 'thumbnail' },
   },
   // Contact
   {
@@ -248,6 +252,18 @@ export const getDisplayOptions = (display?: ColumnDisplayConfig) => {
   return [];
 };
 
+/**
+ * The thumbnail preview shared by the image preset and any legacy `image` column. Kept a rounded
+ * square in step with the cell itself ({@code AssetCell}): the modal is a promise about what the
+ * column will look like, so the two shapes must not drift.
+ */
+const thumbnailPreview = () => (
+  <div className="mx-auto h-12 w-12 overflow-hidden rounded-xl border border-slate-200 dark:border-slate-700/50 bg-theme-secondary">
+    {/* eslint-disable-next-line @next/next/no-img-element */}
+    <img src="/examples/user-photo.jpg" alt="preview" className="h-full w-full object-cover" />
+  </div>
+);
+
 export const renderPresetPreview = (preset: ColumnStylePreset) => {
   switch (preset.visualType) {
     case 'rating': {
@@ -277,6 +293,7 @@ export const renderPresetPreview = (preset: ColumnStylePreset) => {
       );
     case 'file':
       return (
+        preset.display?.render === 'thumbnail' ? thumbnailPreview() : (
         <div className="flex items-center gap-3">
           <div className="flex items-center gap-2 rounded-lg bg-sky-50 dark:bg-sky-900/30 px-2.5 py-1.5">
             <Paperclip className="h-3.5 w-3.5 text-sky-600 dark:text-sky-400" />
@@ -287,14 +304,10 @@ export const renderPresetPreview = (preset: ColumnStylePreset) => {
             <span className="text-[10px]">Upload</span>
           </div>
         </div>
+        )
       );
     case 'image':
-      return (
-        <div className="mx-auto h-12 w-12 overflow-hidden rounded-full border border-slate-200 dark:border-slate-700/50 bg-theme-secondary">
-          {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img src="/examples/user-photo.jpg" alt="preview" className="h-full w-full object-cover" />
-        </div>
-      );
+      return thumbnailPreview();
     case 'select': {
       const selectOptions = getDisplayOptions(preset.display);
       const active = selectOptions[0];

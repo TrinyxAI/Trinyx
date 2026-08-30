@@ -8,7 +8,8 @@ import type { BuilderNodeData } from '../../types';
 import { useRunOutputData } from '../../hooks/useRunOutputData';
 import { normalizeLabel } from '../../utils/labelNormalizer';
 import { shouldFetchFileOutput } from './fileFetchPredicate';
-import { FileResultStrip } from './FileResultStrip';
+import { FileResultStrip, type FileStripFile } from './FileResultStrip';
+import { useShowcaseStepFiles, selectShowcaseStepFile } from '../../hooks/useShowcaseStepFiles';
 
 // ============================================================================
 // File-producing Node Preview (canvas)
@@ -175,6 +176,38 @@ export function FileNodePreview({
     return null;
   }, [outputData, currentItem]);
 
+  // ── Marketplace showcase fallback ──────────────────────────────────────────
+  // Every read above is disabled inside a publication preview (anonymous visitor, tenant-scoped
+  // endpoints), so `normalized` is always null there and the canvas of a PUBLISHED workflow used
+  // to show no file under any node. The publication carries its own frozen copy of those files
+  // instead - bytes copied into its storage namespace at publish time, served through a signed
+  // URL - which is also why deleting the source file afterwards does not blank the preview.
+  // Shared query, one fetch for the whole canvas; `{}` and therefore null outside a preview.
+  const showcaseStepFiles = useShowcaseStepFiles();
+  const showcaseFile = React.useMemo(
+    () => selectShowcaseStepFile(showcaseStepFiles, viewingEpoch, stepAlias),
+    [showcaseStepFiles, viewingEpoch, stepAlias],
+  );
+
+  // The showcase file carries no storage path and no storage id on purpose: the visitor's only
+  // channel to the bytes is the signed URL, and an empty path is what makes the strip drop its
+  // open-in-Files control rather than offer a panel that cannot read anything.
+  const stripFile = React.useMemo<FileStripFile | null>(() => {
+    // The live output wins whenever there is one: it is the file as it stands now, while the
+    // showcase copy is the file as it was at publish time. They never coexist today (the live
+    // reads are off inside a preview, and the showcase map is empty outside one), but stating
+    // the precedence keeps that an accident rather than a dependency.
+    if (normalized) return normalized;
+    if (!showcaseFile) return null;
+    return {
+      path: '',
+      name: showcaseFile.name,
+      mimeType: showcaseFile.mimeType,
+      size: showcaseFile.size,
+      previewUrl: showcaseFile.url,
+    };
+  }, [showcaseFile, normalized]);
+
   // The strip renders exactly when a file is resolved on a completed node in run
   // mode (the two early returns below). FlowNode keys BOTH the bottom-bar Files
   // button and the bar's row offset off currentFile, so currentFile must mean
@@ -182,16 +215,16 @@ export function FileNodePreview({
   // keeps that invariant exact. Without the isRunMode/isCompleted arms a rerun
   // (status back to running, strip unmounted) would leave currentFile set and
   // hide the Files button with no strip to replace it.
-  const stripVisible = isRunMode && isCompleted && !!normalized;
+  const stripVisible = isRunMode && isCompleted && !!stripFile;
 
   // Publish the resolved file to the parent while the strip is up, and clear it
   // on unmount so a node whose strip is gone stops claiming the bar's row.
   React.useEffect(() => {
-    setCurrentFile(stripVisible && normalized
-      ? { path: normalized.path, id: (normalized as { id?: string }).id, name: normalized.name, mimeType: normalized.mimeType, size: normalized.size }
+    setCurrentFile(stripVisible && stripFile
+      ? { path: stripFile.path, id: stripFile.id, name: stripFile.name, mimeType: stripFile.mimeType, size: stripFile.size }
       : null);
     return () => { setCurrentFile(null); };
-  }, [normalized, stripVisible, setCurrentFile]);
+  }, [stripFile, stripVisible, setCurrentFile]);
 
   // Don't show anything if not in run mode or not completed
   if (!isRunMode || !isCompleted) return null;
@@ -203,7 +236,7 @@ export function FileNodePreview({
   // file stays visible (outputData persists across refetches), and the preview
   // simply appears once resolved. The full loading state lives in the inspector
   // panel (RunOutputPreview / RunDataPreview), not on the always-on canvas card.
-  if (!normalized) return null;
+  if (!stripFile) return null;
 
   // Zero-layout-footprint strip (absolute, below the node border): the FileRef
   // arrives at run time, AFTER auto-layout measured the node, so the previous
@@ -212,5 +245,5 @@ export function FileNodePreview({
   // removed: multi-item navigation now lives in the inspector panel
   // (RunOutputPreview / RunDataPreview / ResolvedParamsView), where it's only
   // rendered when the user actually inspects a node.
-  return <FileResultStrip file={normalized} />;
+  return <FileResultStrip file={stripFile} />;
 }

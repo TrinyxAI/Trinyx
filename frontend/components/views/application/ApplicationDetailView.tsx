@@ -19,7 +19,7 @@ import {
   setPendingActivateTab,
 } from '@/components/app/WorkflowPanelContent';
 import { OPEN_RUN_PANEL_EVENT, type OpenRunPanelDetail } from '@/components/workflow/run-panel/runPanelBus';
-import { useInterfacePaginationStore } from '@/lib/stores/interface-pagination-store';
+import { useInterfacePaginationStore, carouselKeyFor } from '@/lib/stores/interface-pagination-store';
 import { normalizeLabel } from '@/app/workflows/builder/utils/labelNormalizer';
 import { isNavigateRef, navigateTargetLabel } from '@/app/workflows/builder/utils/interfaceActionRefs';
 import { PublicationInfoPanel } from '@/components/marketplace/PublicationInfoPanel';
@@ -238,13 +238,14 @@ export function ApplicationDetailView({ workflowId, runId, title, publisherName,
   const [applicationConfigs, setApplicationConfigs] = useState<ApplicationConfig[]>([]);
 
   // Sound. The application starts MUTED and the visitor turns it on from the
-  // settings cog: an app that plays audio the moment its page opens is startling,
-  // and on a shared link the visitor did not choose to be there yet.
+  // application controls: an app that plays audio the moment its page opens is
+  // startling, and on a shared link the visitor did not choose to be there yet.
   //
-  // `hasAudio` is reported by the interface's own frame - it is sandboxed and
-  // cross-origin, so this page can neither inspect nor silence it directly. It is
-  // also what decides whether the cog offers a sound entry at all.
-  const [hasAudio, setHasAudio] = useState(false);
+  // The speaker itself lives in the controls toolbar, next to pagination and
+  // fullscreen - it is a view control, peer to those, rather than an action. Only
+  // the interface's own frame can tell whether there is anything to hear (it is
+  // sandboxed and cross-origin), so the toolbar reads that from the frame directly
+  // and this page only owns the state.
   const [soundMuted, setSoundMuted] = useState(true);
   const toggleSound = useCallback(() => setSoundMuted((muted) => !muted), []);
 
@@ -349,6 +350,11 @@ export function ApplicationDetailView({ workflowId, runId, title, publisherName,
             workflowId={workflowId}
             runId={runId}
             isPreviewOnly={isPreviewOnly}
+            /* The same answer the canvas below uses for its edit toggle. An
+               acquired application resolves to a workflow the caller may not
+               change, and the panel's Share / version controls would be refused
+               there. */
+            canEditWorkflow={canEdit}
             workflowCanvasSlot={
               <WorkflowModeProvider workflowId={workflowId} initialRunId={runId} readOnly={isPreviewOnly}>
                 <div className="h-full w-full relative overflow-x-auto">
@@ -392,7 +398,7 @@ export function ApplicationDetailView({ workflowId, runId, title, publisherName,
           normalizeLabel(c.label) === normalizedTarget
         );
         if (idx >= 0) {
-          useInterfacePaginationStore.getState().setCarouselIndex(idx);
+          useInterfacePaginationStore.getState().setCarouselIndex(carouselKeyFor(workflowId, runId), idx);
           return;
         }
         console.warn('[ApplicationDetailView] Navigate target not found:', targetLabel);
@@ -407,7 +413,9 @@ export function ApplicationDetailView({ workflowId, runId, title, publisherName,
     } catch (err) {
       console.error('[ApplicationDetailView] Application action failed:', err);
     }
-  }, [applicationConfigs]);
+    // workflowId/runId: the carousel page is addressed per SURFACE now, so this
+    // closure reads them and must not capture a stale pair.
+  }, [applicationConfigs, workflowId, runId]);
 
   // ── Event bridges: dispatch data to WorkflowPanelContent ──
   useEffect(() => {
@@ -460,7 +468,7 @@ export function ApplicationDetailView({ workflowId, runId, title, publisherName,
     const handleOpenApplicationTab = (event: CustomEvent<{ interfaceId: string }>) => {
       const idx = applicationConfigs.findIndex(c => c.interfaceId === event.detail.interfaceId);
       if (idx >= 0) {
-        useInterfacePaginationStore.getState().setCarouselIndex(idx);
+        useInterfacePaginationStore.getState().setCarouselIndex(carouselKeyFor(workflowId, runId), idx);
       }
     };
 
@@ -470,7 +478,7 @@ export function ApplicationDetailView({ workflowId, runId, title, publisherName,
       window.removeEventListener(OPEN_TRIGGER_TAB_EVENT, handleOpenTriggerTab as EventListener);
       window.removeEventListener('workflowOpenApplicationTab', handleOpenApplicationTab as EventListener);
     };
-  }, [sidePanel, triggerData, applicationConfigs]);
+  }, [sidePanel, triggerData, applicationConfigs, workflowId, runId]);
 
   // ── Run tab requests from the embedded canvas (history button / version chip) ──
   // The application panel is keepMounted, so its own WorkflowPanelContent handles
@@ -596,22 +604,13 @@ export function ApplicationDetailView({ workflowId, runId, title, publisherName,
 
       {/* Application settings - bottom right, opposite the Info panel. Renders
           nothing at all when there is no action to take (marketplace previews,
-          publisher self-views, non-application publications).
-
-          The condition is a DISJUNCTION: an application with audio gets the cog
-          even when no editable copy is on offer, because the cog is the only
-          place its sound can be turned on. */}
-      {publication && (canCreateEditableCopy || hasAudio) && (
+          publisher self-views, non-application publications). */}
+      {publication && canCreateEditableCopy && (
         <div className="absolute bottom-4 right-4 z-[40]">
           <ApplicationSettingsMenu
             publicationId={publication.id}
             remote={effectiveRemote}
             canCreateEditableCopy={canCreateEditableCopy}
-            // undefined (not false) when the app has no media: that is what tells
-            // the menu there is no sound entry to offer, as opposed to "there is
-            // sound and it is currently on".
-            soundMuted={hasAudio ? soundMuted : undefined}
-            onToggleSound={toggleSound}
           />
         </div>
       )}
@@ -641,7 +640,7 @@ export function ApplicationDetailView({ workflowId, runId, title, publisherName,
               openOnLatestEpoch
               templateSource={templateSource}
               mediaMuted={soundMuted}
-              onMediaAudioPresence={setHasAudio}
+              onToggleMediaMuted={toggleSound}
             />
           );
         })()

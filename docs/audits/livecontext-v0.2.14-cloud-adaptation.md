@@ -181,12 +181,17 @@ Trinyx edition gates, Cloud OIDC, paid embedded auth, CloudLink, billing, Market
 
 ## Multi-architecture policy
 
-Status: **PASS SOURCE**
+Status: **AUDITED LIMITATION / AMD64 ONLY**
 
-- Trinyx CE build validation and release builds target `linux/amd64,linux/arm64`, matching upstream v0.2.14.
-- QEMU setup is pinned by full Action commit.
-- Distributed Trinyx Cloud remains `linux/amd64` for the current AWS topology.
-- No Cloud/Chromium/third-party ARM claim is made without a separate validation.
+LiveContext v0.2.14 upstream added amd64+arm64 images. Trinyx does not currently claim that parity:
+
+- the five-image Trinyx CE release set remains `linux/amd64`;
+- the attempted arm64 validation correctly failed because `websearch-service` installs Google Chrome from an `arch=amd64` repository and its amd64 dependencies are unavailable in an arm64 image;
+- partial multi-arch publication is rejected: one tag must not advertise arm64 when the opt-in browser image cannot build for it;
+- distributed Trinyx Cloud remains `linux/amd64` for the current AWS topology;
+- native arm64 requires a separate Chromium/browser packaging change plus all five CE runtime gates.
+
+No LiveContext engine behavior was changed to work around this packaging limitation.
 
 ## Caddy, TLS, Gateway and origins
 
@@ -235,7 +240,7 @@ The immutable runtime model requires full `package@sha256:digest` references, cl
 
 | Profile | Source | Runtime CI | Still requires staging |
 | --- | --- | --- | --- |
-| CE | PASS | compose/build/tests | real amd64+arm64 registry pulls and upgrade |
+| CE | PASS | amd64 compose/build/tests | arm64 browser packaging; real registry pull and upgrade |
 | paid-monolith | PASS | boot/liveness/contracts | Stripe, private TLS, CloudLink, process kills |
 | distributed Cloud | PASS | compose, TLS, security, PostgreSQL/Flyway contracts | full topology, Keycloak, Redis HA, providers, reconciliation |
 

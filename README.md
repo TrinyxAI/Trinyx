@@ -118,9 +118,12 @@ Deploying through Portainer, Coolify, Dokploy or a similar platform: see
 
 ### Images
 
-Built for **linux/amd64** and **linux/arm64**, so the same tag runs on an ordinary server
-and on Apple Silicon, a Raspberry Pi, Ampere or Graviton. Docker picks the right one for
-your machine. The Compose file pulls from GHCR:
+The current Trinyx CE release set is validated and published for **linux/amd64**.
+LiveContext v0.2.14 upstream added multi-architecture images, but the Trinyx websearch
+image still installs the amd64-only Google Chrome package. We therefore do not publish
+or advertise a partially working arm64 release set. Native arm64 support will be enabled
+only after the browser image and all five CE images pass the same runtime gate.
+The Compose file pulls from GHCR:
 
 ```
 ghcr.io/trinyxai/trinyx-ce

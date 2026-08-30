@@ -444,6 +444,69 @@ causes the TLS handshake to fail before trust verification. The public host
 never routes `/internal/**`. Workload JWT remains mandatory in addition to TLS
 and the network allowlist.
 
+## Immutable Cloud runtime images
+
+The development Compose file intentionally retains local `build:` definitions.
+Staging and production must additionally use
+`docker/docker-compose.cloud.runtime.yml`, which resets every repository build
+and requires one `package@sha256:digest` value per proprietary image. The
+machine-readable inventory is `docker/cloud-images.json`; it currently contains
+14 images:
+
+- `trinyx-cloud-agent`, `trinyx-cloud-auth`, `trinyx-cloud-catalog`;
+- `trinyx-cloud-conversation`, `trinyx-cloud-datasource`,
+  `trinyx-cloud-gateway`, `trinyx-cloud-interface`;
+- `trinyx-cloud-keycloak`, `trinyx-cloud-migration`,
+  `trinyx-cloud-orchestrator`, `trinyx-cloud-publication`;
+- `trinyx-cloud-storage`, `trinyx-cloud-trigger`,
+  `trinyx-cloud-websearch`.
+
+Pull requests build these images on `linux/amd64` without registry login or
+push. A manually selected ref in the **Build Trinyx Cloud runtime images**
+workflow builds exactly `GITHUB_SHA`, publishes only the full-SHA tag, records
+each produced digest, and uploads
+`trinyx-cloud-image-manifest-<full-sha>/cloud-image-manifest.json`. It creates
+no release, mutable alias or deployment.
+
+Materialize a separate image environment file from that manifest:
+
+```bash
+jq -r '.images[] | "\(.environment)=\(.immutableRef)"' \
+  cloud-image-manifest.json > /run/trinyx/cloud-images.env
+```
+
+The source checkout, application environment and manifest must all refer to the
+same commit. Validate and deploy without rebuilding:
+
+```bash
+docker compose \
+  --env-file /run/trinyx/cloud.env \
+  --env-file /run/trinyx/cloud-images.env \
+  -f docker/docker-compose.cloud.yml \
+  -f docker/docker-compose.cloud.runtime.yml \
+  config --quiet
+
+docker compose \
+  --env-file /run/trinyx/cloud.env \
+  --env-file /run/trinyx/cloud-images.env \
+  -f docker/docker-compose.cloud.yml \
+  -f docker/docker-compose.cloud.runtime.yml \
+  pull
+
+docker compose \
+  --env-file /run/trinyx/cloud.env \
+  --env-file /run/trinyx/cloud-images.env \
+  -f docker/docker-compose.cloud.yml \
+  -f docker/docker-compose.cloud.runtime.yml \
+  up -d --no-build
+```
+
+The runtime override uses Compose `!reset` and must be rendered successfully
+with the target host's Docker Compose version before any pull or startup. Never
+substitute `:local`, `:latest`, a full-SHA tag, or a locally built image for
+the digest references. Version-pinned pgvector, Redis, MinIO/mc, SearXNG and
+Caddy remain third-party images and are not republished as Trinyx packages.
+
 ## Validation and deployment commands
 
 These commands are documentation only; this PR does not run them:

@@ -5,6 +5,8 @@ on:
     paths:
       - "docker-compose.yml"
       - "docker/docker-compose.cloud.yml"
+      - "docker/docker-compose.cloud.runtime.yml"
+      - "docker/cloud-images.json"
       - "backend/**"
       - "frontend/**"
       - "mcp/**"
@@ -22,6 +24,7 @@ on:
       - ".github/workflows/**"
       - "scripts/validate-trinyx-branding.sh"
       - "scripts/validate-phase2-reachability.mjs"
+      - "scripts/validate-cloud-image-contract.mjs"
   workflow_dispatch:
 
 permissions:
@@ -50,6 +53,9 @@ jobs:
         run: |
           set -euo pipefail
           test -f docker/docker-compose.cloud.yml
+          test -f docker/docker-compose.cloud.runtime.yml
+          test -f docker/cloud-images.json
+          test -f scripts/validate-cloud-image-contract.mjs
           test -f docker/.env.cloud.example
           test -f docker/cloud/Caddyfile
           test -f docker/paid-monolith-internal/Caddyfile
@@ -69,6 +75,26 @@ jobs:
           set -euo pipefail
           docker compose             --env-file docker/.env.cloud.example             -f docker/docker-compose.cloud.yml             config --quiet
           docker compose             --env-file docker/.env.cloud.example             -f docker/docker-compose.cloud.yml             config > /tmp/trinyx-cloud.rendered.yml
+          node scripts/validate-cloud-image-contract.mjs
+          cp docker/.env.cloud.example /tmp/trinyx-cloud-runtime.env
+          node <<'NODE'
+          const fs = require('node:fs');
+          const inventory = JSON.parse(fs.readFileSync('docker/cloud-images.json', 'utf8'));
+          const imageEnv = inventory.images.map((item, index) => {
+            const digest = (index + 1).toString(16).padStart(64, '0');
+            return item.environment + '=' + item.package + '@sha256:' + digest;
+          });
+          fs.appendFileSync('/tmp/trinyx-cloud-runtime.env', '\n' + imageEnv.join('\n') + '\n');
+          NODE
+          docker compose --env-file /tmp/trinyx-cloud-runtime.env \
+            -f docker/docker-compose.cloud.yml \
+            -f docker/docker-compose.cloud.runtime.yml config --quiet
+          docker compose --env-file /tmp/trinyx-cloud-runtime.env \
+            -f docker/docker-compose.cloud.yml \
+            -f docker/docker-compose.cloud.runtime.yml \
+            config --format json > /tmp/trinyx-cloud-runtime.json
+          node scripts/validate-cloud-image-contract.mjs \
+            --rendered /tmp/trinyx-cloud-runtime.json
           CLOUD_PUBLIC_URL=https://cloud-staging.example.invalid \
             KEYCLOAK_PUBLIC_URL=https://auth-staging.example.invalid \
             PAID_PUBLIC_URL=https://app-staging.example.invalid \

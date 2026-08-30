@@ -177,15 +177,101 @@ jobs:
             docker buildx imagetools inspect "${image}" >/dev/null
           done
 
-      - name: Validate Keycloak realm and Caddy
+      - name: Validate Keycloak realm and Caddy policy
         shell: bash
         run: |
           set -euo pipefail
           python -m json.tool docker/cloud/keycloak/trinyx-realm.json >/dev/null
+          grep -Fq 'auto_https disable_redirects' docker/cloud/Caddyfile
+          if grep -Eq '^[[:space:]]*auto_https[[:space:]]+off([[:space:]]|$)' docker/cloud/Caddyfile; then
+            echo "Private TLS requires Caddy certificate automation; auto_https off is forbidden" >&2
+            exit 1
+          fi
+          grep -Eq '^[[:space:]]*admin[[:space:]]+off([[:space:]]|$)' docker/cloud/Caddyfile
+          grep -Fq 'https://{$CLOUD_INTERNAL_HOST:cloud-internal.trinyx.private}:8443' docker/cloud/Caddyfile
+          grep -Eq '^[[:space:]]*tls[[:space:]]+internal([[:space:]]|$)' docker/cloud/Caddyfile
           grep -q '/internal/v1/entitlement-projections' docker/cloud/Caddyfile
           grep -q '/internal/v1/identity-bindings/revocations' docker/cloud/Caddyfile
           grep -q '@billing_ingest' docker/cloud/Caddyfile
-          docker run --rm             -v "${PWD}/docker/cloud/Caddyfile:/etc/caddy/Caddyfile:ro"             caddy:2.11.4-alpine             caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile
+          grep -Eq '^[[:space:]]*respond[[:space:]]+404([[:space:]]|$)' docker/cloud/Caddyfile
+          docker run --rm \
+            -v "${PWD}/docker/cloud/Caddyfile:/etc/caddy/Caddyfile:ro" \
+            caddy:2.11.4-alpine \
+            caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile
+
+      - name: Prove private Caddy TLS handshake at runtime
+        shell: bash
+        run: |
+          set -euo pipefail
+          host=cloud-internal.trinyx.private
+          container=trinyx-cloud-caddy-tls-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}
+          volume=${container}-data
+          ca_file="${RUNNER_TEMP}/trinyx-cloud-caddy-root.crt"
+
+          cleanup() {
+            docker rm -f "${container}" >/dev/null 2>&1 || true
+            docker volume rm "${volume}" >/dev/null 2>&1 || true
+            rm -f "${ca_file}"
+          }
+          trap cleanup EXIT
+
+          docker volume create "${volume}" >/dev/null
+          docker run --detach --name "${container}" \
+            --publish 127.0.0.1::8443 \
+            --env CLOUD_INTERNAL_HOST="${host}" \
+            --volume "${PWD}/docker/cloud/Caddyfile:/etc/caddy/Caddyfile:ro" \
+            --volume "${volume}:/data" \
+            caddy:2.11.4-alpine >/dev/null
+
+          for attempt in $(seq 1 30); do
+            if docker exec "${container}" \
+              test -s /data/caddy/pki/authorities/local/root.crt; then
+              break
+            fi
+            if ! docker inspect --format '{{.State.Running}}' "${container}" | grep -qx true; then
+              docker logs "${container}" >&2
+              exit 1
+            fi
+            sleep 1
+          done
+          docker exec "${container}" \
+            test -s /data/caddy/pki/authorities/local/root.crt
+          docker cp "${container}:/data/caddy/pki/authorities/local/root.crt" "${ca_file}"
+
+          endpoint="$(docker port "${container}" 8443/tcp | head -n1)"
+          port="${endpoint##*:}"
+          test -n "${port}"
+
+          set +e
+          curl --silent --show-error --output /dev/null \
+            --resolve "${host}:${port}:127.0.0.1" \
+            "https://${host}:${port}/not-allowlisted"
+          curl_without_ca=$?
+          set -e
+          if [[ ${curl_without_ca} -ne 60 ]]; then
+            echo "Expected curl error 60 without the private CA, got ${curl_without_ca}" >&2
+            docker logs "${container}" >&2
+            exit 1
+          fi
+
+          status="$(curl --silent --show-error --output /dev/null \
+            --write-out '%{http_code}' \
+            --cacert "${ca_file}" \
+            --resolve "${host}:${port}:127.0.0.1" \
+            "https://${host}:${port}/not-allowlisted")"
+          test "${status}" = 404
+
+          openssl_output="$(openssl s_client \
+            -connect "127.0.0.1:${port}" \
+            -servername "${host}" \
+            -CAfile "${ca_file}" </dev/null 2>&1)"
+          printf '%s\n' "${openssl_output}"
+          grep -q 'TLSv1.3' <<<"${openssl_output}"
+          if grep -q 'Cipher is (NONE)' <<<"${openssl_output}"; then
+            echo "Caddy accepted TCP but did not negotiate a TLS cipher" >&2
+            exit 1
+          fi
+          grep -q 'Verify return code: 0 (ok)' <<<"${openssl_output}"
 
       - name: Reject legacy runtime domains and committed secrets
         shell: bash

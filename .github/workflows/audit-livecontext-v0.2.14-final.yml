@@ -1,0 +1,543 @@
+name: Audit final LiveContext CE v0.2.14 sync
+
+on:
+  push:
+    branches:
+      - audit/livecontext-v0.2.14-final
+    paths:
+      - .github/workflows/audit-livecontext-v0.2.14-final.yml
+
+permissions:
+  contents: read
+
+concurrency:
+  group: audit-livecontext-v0.2.14-final
+  cancel-in-progress: false
+
+jobs:
+  final-head-audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: trinyx_sync_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d trinyx_sync_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+    env:
+      FINAL_HEAD: 29ddb110502e1af49e80c0d9a6a9442a7b991c9c
+      FINAL_TREE: 5e768daf7885e19170e689e7d632ec41a7843d0c
+      TRINYX_MAIN: 4d46ffc586bb26cd56d313e314493b76a9260fad
+      UPSTREAM_HEAD: cda5dbe4293f099a7b3c4f8bfe02d44073029aa3
+      UPSTREAM_PARENT: 999aec1208a9eb1ddcc3691e466f0087fc819979
+      PR25_HEAD: 4282bee7c6021487d334b70cee8daef8e97ed95e
+      AUDIT_WORKFLOW: .github/workflows/audit-livecontext-v0.2.14-final.yml
+      CREDENTIAL_TEST_PG_URL: jdbc:postgresql://localhost:5432/trinyx_sync_test
+      CREDENTIAL_TEST_PG_USER: postgres
+      CREDENTIAL_TEST_PG_PASSWORD: postgres
+      ORCHESTRATOR_TEST_PG_URL: jdbc:postgresql://localhost:5432/trinyx_sync_test
+      ORCHESTRATOR_TEST_PG_USER: postgres
+      ORCHESTRATOR_TEST_PG_PASSWORD: postgres
+
+    steps:
+      - name: Check out isolated audit branch
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # actions/checkout v4.2.2
+        with:
+          fetch-depth: 0
+
+      - name: Gate 1 - verify Git identities and isolation
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p audit-output
+          test "$(git rev-parse HEAD^)" = "$FINAL_HEAD"
+          test "$(git rev-parse "$FINAL_HEAD^{tree}")" = "$FINAL_TREE"
+          test "$(git rev-list --parents -n 1 "$FINAL_HEAD")" = \
+            "$FINAL_HEAD $TRINYX_MAIN $UPSTREAM_HEAD"
+          test "$(git rev-list --parents -n 1 "$UPSTREAM_HEAD")" = \
+            "$UPSTREAM_HEAD $UPSTREAM_PARENT"
+          test "$(git show -s --format=%s "$UPSTREAM_HEAD")" = \
+            "LiveContext Community Edition v0.2.14"
+          test "$(git rev-list --reverse --topo-order "$TRINYX_MAIN..$FINAL_HEAD")" = \
+            "$(printf '%s\n%s' "$UPSTREAM_HEAD" "$FINAL_HEAD")"
+          test "$(git diff --name-only "$FINAL_HEAD..HEAD")" = "$AUDIT_WORKFLOW"
+          git fetch origin main codex/trinyx-cloud-gateway-v2
+          test "$(git rev-parse origin/main)" = "$TRINYX_MAIN"
+          test "$(git rev-parse origin/codex/trinyx-cloud-gateway-v2)" = "$PR25_HEAD"
+          printf '%s\n' \
+            "audit_head=$(git rev-parse HEAD)" \
+            "audit_parent=$(git rev-parse HEAD^)" \
+            "final_head=$FINAL_HEAD" \
+            "final_tree=$FINAL_TREE" \
+            "upstream_head=$UPSTREAM_HEAD" \
+            "upstream_parent=$UPSTREAM_PARENT" \
+            "trinyx_main=$TRINYX_MAIN" \
+            "pr25_head=$PR25_HEAD" > audit-output/git-identities.txt
+
+      - name: Verify official upstream repository
+        shell: bash
+        run: |
+          set -euo pipefail
+          git remote add livecontext-upstream https://github.com/livecontext-ai/livecontext-ce.git
+          git fetch --no-tags livecontext-upstream "$UPSTREAM_HEAD"
+          test "$(git rev-parse FETCH_HEAD^{commit})" = "$UPSTREAM_HEAD"
+          test "$(git rev-list --parents -n 1 FETCH_HEAD)" = \
+            "$UPSTREAM_HEAD $UPSTREAM_PARENT"
+
+      - name: Gates 2 and 3 - reproduce merge and classify every path
+        shell: bash
+        run: |
+          set -euo pipefail
+          repro="$RUNNER_TEMP/livecontext-final-repro"
+          git worktree add --detach "$repro" "$TRINYX_MAIN"
+          cd "$repro"
+          git config user.name "Trinyx final sync audit"
+          git config user.email "noreply@trinyx.local"
+          set +e
+          git merge --no-ff --no-commit "$UPSTREAM_HEAD"
+          merge_status=$?
+          set -e
+          test "$merge_status" -eq 1
+
+          actual_conflicts="$(git diff --name-only --diff-filter=U | LC_ALL=C sort)"
+          expected_conflicts="$(printf '%s\n' \
+            'docker-compose.yml' \
+            'frontend/components/chat/ChatPageV2/index.tsx')"
+          test "$actual_conflicts" = "$expected_conflicts"
+
+          git show "$FINAL_HEAD:docker-compose.yml" > docker-compose.yml
+          git show "$FINAL_HEAD:frontend/components/chat/ChatPageV2/index.tsx" \
+            > frontend/components/chat/ChatPageV2/index.tsx
+          git add docker-compose.yml frontend/components/chat/ChatPageV2/index.tsx
+          test -z "$(git diff --name-only --diff-filter=U)"
+          reproduced_tree="$(git write-tree)"
+          test "$reproduced_tree" = "$FINAL_TREE"
+          printf '%s\n' "$reproduced_tree" \
+            > "$GITHUB_WORKSPACE/audit-output/reproduced-tree.txt"
+
+          FINAL_HEAD="$FINAL_HEAD" FINAL_TREE="$FINAL_TREE" \
+          TRINYX_MAIN="$TRINYX_MAIN" UPSTREAM_HEAD="$UPSTREAM_HEAD" \
+          UPSTREAM_PARENT="$UPSTREAM_PARENT" python3 - <<'PY'
+          import json
+          import os
+          import subprocess
+          from pathlib import Path
+
+          def output(*args):
+              return subprocess.check_output(args, text=True).rstrip("\n")
+
+          def tree(commit):
+              raw = subprocess.check_output(["git", "ls-tree", "-r", "-z", commit]).decode()
+              result = {}
+              for entry in raw.split("\0"):
+                  if not entry:
+                      continue
+                  meta, path = entry.split("\t", 1)
+                  mode, kind, sha = meta.split()
+                  result[path] = {"mode": mode, "kind": kind, "sha": sha}
+              return result
+
+          final_head = os.environ["FINAL_HEAD"]
+          final_tree = os.environ["FINAL_TREE"]
+          main = os.environ["TRINYX_MAIN"]
+          upstream = os.environ["UPSTREAM_HEAD"]
+          upstream_parent = os.environ["UPSTREAM_PARENT"]
+          conflicts = {
+              "docker-compose.yml",
+              "frontend/components/chat/ChatPageV2/index.tsx",
+          }
+          upstream_delta = set(output(
+              "git", "diff", "--name-only", upstream_parent, upstream
+          ).splitlines())
+          if len(upstream_delta) != 453:
+              raise SystemExit(f"expected 453 upstream paths, got {len(upstream_delta)}")
+
+          maps = {
+              "main": tree(main),
+              "upstream": tree(upstream),
+              "final": tree(final_head),
+          }
+          all_paths = set().union(*(set(value) for value in maps.values()))
+          classes = {
+              "BYTE_IDENTICAL_UPSTREAM": [],
+              "INTENTIONAL_TRINYX_CONFLICT_RESOLUTION": [],
+              "UNCHANGED_TRINYX": [],
+          }
+          source_divergences = []
+
+          for path in sorted(all_paths):
+              if path in conflicts:
+                  classes["INTENTIONAL_TRINYX_CONFLICT_RESOLUTION"].append(path)
+              elif path in upstream_delta:
+                  classes["BYTE_IDENTICAL_UPSTREAM"].append(path)
+                  if maps["final"].get(path) != maps["upstream"].get(path):
+                      source_divergences.append(path)
+              else:
+                  if maps["final"].get(path) != maps["main"].get(path):
+                      raise SystemExit(f"unclassified non-upstream change: {path}")
+                  classes["UNCHANGED_TRINYX"].append(path)
+
+          if sum(map(len, classes.values())) != len(all_paths):
+              raise SystemExit("classification is not exhaustive")
+          if set(classes["INTENTIONAL_TRINYX_CONFLICT_RESOLUTION"]) != conflicts:
+              raise SystemExit("conflict classification changed")
+          if output("git", "write-tree") != final_tree:
+              raise SystemExit("reproduced index no longer matches final tree")
+
+          report = {
+              "definitions": {
+                  "BYTE_IDENTICAL_UPSTREAM":
+                      "Non-conflict upstream delta path, byte-identical to the independently "
+                      "reproduced deterministic Git merge result. source_blob_equal is reflected "
+                      "by absence from upstream_source_divergences.",
+                  "INTENTIONAL_TRINYX_CONFLICT_RESOLUTION":
+                      "One of the two reviewed conflicts resolved with final PR28 content.",
+                  "UNCHANGED_TRINYX":
+                      "Outside upstream delta and identical to Trinyx main.",
+              },
+              "final_head": final_head,
+              "final_tree": final_tree,
+              "upstream_delta_path_count": len(upstream_delta),
+              "all_path_count": len(all_paths),
+              "class_counts": {key: len(value) for key, value in classes.items()},
+              "classes": classes,
+              "upstream_source_divergence_count": len(source_divergences),
+              "upstream_source_divergences": source_divergences,
+          }
+          target = Path(os.environ["GITHUB_WORKSPACE"]) / \
+              "audit-output" / "merge-classification.json"
+          target.write_text(json.dumps(report, indent=2, sort_keys=True) + "\n")
+          print(json.dumps({
+              "upstream_delta_path_count": report["upstream_delta_path_count"],
+              "class_counts": report["class_counts"],
+              "upstream_source_divergence_count":
+                  report["upstream_source_divergence_count"],
+              "upstream_source_divergences": source_divergences,
+          }, indent=2))
+          PY
+
+          test "$(grep -Fc 'image: ${BACKEND_IMAGE:-ghcr.io/livecontext-ai/livecontext-ce:v0.2.14}' docker-compose.yml)" -eq 1
+          test "$(grep -Fc 'image: ${FRONTEND_IMAGE:-ghcr.io/livecontext-ai/livecontext-ce-frontend:v0.2.14}' docker-compose.yml)" -eq 1
+          test "$(grep -Fc 'APP_EDITION: ${APP_EDITION:-ce}' docker-compose.yml)" -eq 1
+          test "$(grep -Fc 'AUTH_MODE: ${AUTH_MODE:-embedded}' docker-compose.yml)" -eq 1
+          test "$(grep -Fc 'CE_VERSIONCHECK_ENABLED: ${CE_VERSIONCHECK_ENABLED:-true}' docker-compose.yml)" -eq 1
+          test "$(grep -Fc 'CE_VERSIONCHECK_SENDINSTALLID: ${CE_VERSIONCHECK_SENDINSTALLID:-true}' docker-compose.yml)" -eq 1
+          chat=frontend/components/chat/ChatPageV2/index.tsx
+          test "$(grep -Fc "import { useChatHandoff }" "$chat")" -eq 1
+          test "$(grep -Fc "import { togglePanelFromHeader }" "$chat")" -eq 1
+          test "$(grep -Fc "useChatHandoff({" "$chat")" -eq 1
+          test "$(grep -Fc "togglePanelFromHeader(sidePanel" "$chat")" -eq 1
+          ! grep -nE '^(<<<<<<<|[|]{7}|=======|>>>>>>>)' docker-compose.yml "$chat"
+
+      - name: Gate 4 - verify Flyway migrations byte for byte
+        shell: bash
+        run: |
+          set -euo pipefail
+          migration_dir=backend/migration-service/src/main/resources/db/migration
+          test "$(git hash-object "$migration_dir/V454__ce_install_telemetry.sql")" = \
+            "f2f8d8d8cb3babe6f68a1088eb5c32f429598a3d"
+          test "$(git hash-object "$migration_dir/V455__repair_table_media_cells.sql")" = \
+            "e1325db2ec5b3ca588f9d010e83313b04287abb0"
+          test "$(git hash-object "$migration_dir/V456__merge_docs_state_the_all_skipped_rule.sql")" = \
+            "303c5b1b7f5e179b13facffcbf26d23d109308f4"
+          for name in \
+            V454__ce_install_telemetry.sql \
+            V455__repair_table_media_cells.sql \
+            V456__merge_docs_state_the_all_skipped_rule.sql
+          do
+            test "$(git hash-object "$migration_dir/$name")" = \
+              "$(git rev-parse "$UPSTREAM_HEAD:$migration_dir/$name")"
+          done
+
+      - name: Set up Java 21
+        uses: actions/setup-java@cf277c60eb25467037889841efdb72551f06f6c3 # actions/setup-java v4.7.1
+        with:
+          distribution: temurin
+          java-version: '21'
+          cache: maven
+
+      - name: Gate 5 - compile complete CE reactor
+        working-directory: backend
+        run: mvn -B -Pce -DskipTests install
+
+      - name: Gate 5 - run every backend test changed upstream
+        working-directory: backend
+        shell: bash
+        run: |
+          set -euo pipefail
+          modules=(
+            agent-service
+            auth-service
+            common-storage-service
+            conversation-service
+            datasource-service
+            orchestrator-service
+            publication-service
+            shared-agent-lib
+          )
+          for module in "${modules[@]}"; do
+            mapfile -t tests < <(
+              git diff --name-only "$UPSTREAM_PARENT" "$UPSTREAM_HEAD" -- \
+                "$module/src/test/java" |
+              sed -nE 's#^.*/([^/]+Test)\.java$#\1#p' |
+              LC_ALL=C sort -u
+            )
+            test "${#tests[@]}" -gt 0
+            joined="$(IFS=,; echo "${tests[*]}")"
+            echo "Running $module tests: $joined"
+            mvn -B -Pce -pl "$module" \
+              -Dsurefire.failIfNoSpecifiedTests=true \
+              -Dtest="$joined" test
+          done
+
+      - name: Gate 5 - test affected services without changed tests
+        working-directory: backend
+        run: >-
+          mvn -B -Pce
+          -pl storage-service,interface-service,monolith-service
+          test
+
+      - name: Gate 5 - validate generation catalog and pricing
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+
+          seed = json.loads(Path(
+              "backend/catalog-service/src/main/resources/catalog-seeds/generation-seed.json"
+          ).read_text())
+          bundle = json.loads(Path("catalog-seeds/model-bundle.json").read_text())
+          models = [
+              model
+              for endpoint in seed["endpoints"]
+              for model in endpoint["generationSpec"]["models"]
+          ]
+          if seed["modelCount"] != len(models):
+              raise SystemExit("generation modelCount mismatch")
+          if seed["endpointCount"] != len(seed["endpoints"]):
+              raise SystemExit("generation endpointCount mismatch")
+          ids = [model["id"] for model in models]
+          if len(ids) != len(set(ids)):
+              raise SystemExit("duplicate generation model id")
+          seedance = [model for model in models if "seedance" in model["id"].lower()]
+          if not seedance:
+              raise SystemExit("Seedance models missing")
+          for model in seedance:
+              price = model.get("price")
+              numeric = [
+                  value for key, value in (price or {}).items()
+                  if key.endswith("Credits") and isinstance(value, (int, float))
+              ]
+              if not numeric or any(value <= 0 for value in numeric):
+                  raise SystemExit(f"invalid Seedance price: {model['id']}")
+          if not isinstance(bundle, (dict, list)):
+              raise SystemExit("model bundle is not an object or array")
+          report = {
+              "generation_seed_version": seed["version"],
+              "endpoint_count": len(seed["endpoints"]),
+              "model_count": len(models),
+              "seedance_models": [
+                  {"id": model["id"], "price": model["price"]}
+                  for model in seedance
+              ],
+              "model_bundle_valid_json": True,
+          }
+          Path("audit-output/generation-catalog-summary.json").write_text(
+              json.dumps(report, indent=2, sort_keys=True) + "\n"
+          )
+          print(json.dumps(report, indent=2))
+          PY
+
+      - name: Summarize backend test XML
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import json
+          import xml.etree.ElementTree as ET
+          from pathlib import Path
+
+          files = sorted(Path("backend").glob("*/target/surefire-reports/TEST-*.xml"))
+          tests = failures = errors = skipped = 0
+          for file in files:
+              root = ET.parse(file).getroot()
+              tests += int(root.attrib.get("tests", 0))
+              failures += int(root.attrib.get("failures", 0))
+              errors += int(root.attrib.get("errors", 0))
+              skipped += int(root.attrib.get("skipped", 0))
+          if not files or failures or errors:
+              raise SystemExit(
+                  f"bad reports: files={len(files)} failures={failures} errors={errors}"
+              )
+          report = {
+              "report_files": len(files),
+              "tests": tests,
+              "passed": tests - failures - errors - skipped,
+              "failures": failures,
+              "errors": errors,
+              "skipped": skipped,
+          }
+          Path("audit-output/backend-test-summary.json").write_text(
+              json.dumps(report, indent=2, sort_keys=True) + "\n"
+          )
+          print(json.dumps(report, indent=2))
+          PY
+
+      - name: Set up Node 22
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # actions/setup-node v4.4.0
+        with:
+          node-version: '22.13'
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install frontend dependencies
+        working-directory: frontend
+        run: |
+          npm ci
+          npm install --no-save @rolldown/binding-linux-x64-gnu
+
+      - name: Gate 6 - run frontend node contracts
+        working-directory: frontend
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm run contracts:check | tee ../audit-output/frontend-contracts.raw
+          python3 - <<'PY'
+          import re
+          from pathlib import Path
+
+          raw = Path("../audit-output/frontend-contracts.raw").read_text()
+          text = re.sub(chr(27) + r"\[[0-9;]*[mK]", "", raw)
+          Path("../audit-output/frontend-contracts.txt").write_text(text)
+          if "✓ Passed: 1645" not in text or "✗ Failed: 0" not in text:
+              raise SystemExit("frontend contract summary does not report 1645 pass / 0 fail")
+          PY
+
+      - name: Gate 6 - run exact upstream frontend test delta
+        working-directory: frontend
+        shell: bash
+        run: |
+          set -euo pipefail
+          mapfile -d '' changed < <(
+            git diff --name-only -z "$UPSTREAM_PARENT" "$UPSTREAM_HEAD"
+          )
+          tests=()
+          removed=()
+          for path in "${changed[@]}"; do
+            if [[ "$path" == frontend/* ]] && \
+               { [[ "$path" == */__tests__/* ]] || [[ "$path" == *.test.* ]] || [[ "$path" == *.spec.* ]]; }; then
+              if [[ -f "${GITHUB_WORKSPACE}/$path" ]]; then
+                tests+=("${path#frontend/}")
+              else
+                removed+=("$path")
+              fi
+            fi
+          done
+          test "${#tests[@]}" -eq 126
+          test "${#removed[@]}" -eq 2
+          test "${removed[0]}" = \
+            "frontend/components/app/__tests__/ApplicationSidePanel.navigateGuard.test.tsx"
+          test "${removed[1]}" = \
+            "frontend/components/marketplace/__tests__/ApplicationSettingsMenuSound.test.tsx"
+          npx vitest run "${tests[@]}" \
+            --reporter=json \
+            --outputFile=../audit-output/frontend-upstream-tests.json
+
+      - name: Gate 6 - run Trinyx compatibility contracts
+        working-directory: frontend
+        run: >-
+          npx vitest run
+          __tests__/lib/edition/edition.test.ts
+          __tests__/components/settings/settingsNavItems.test.ts
+          components/billing/__tests__/CancellationModal.test.tsx
+          components/settings/__tests__/VersionCard.test.tsx
+          --reporter=json
+          --outputFile=../audit-output/frontend-trinyx-compatibility.json
+
+      - name: Gate 6 - build CE frontend
+        working-directory: frontend
+        env:
+          NEXT_PUBLIC_APP_EDITION: ce
+          NEXT_PUBLIC_SPRING_BASE_URL: http://livecontext-app:8080
+        run: npm run build
+
+      - name: Gate 7 - render Compose defaults and overrides
+        shell: bash
+        run: |
+          set -euo pipefail
+          docker compose -f docker-compose.yml config --quiet
+          docker compose -f docker-compose.yml config --format json \
+            > audit-output/compose-default.json
+          BACKEND_IMAGE=example.invalid/backend@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa \
+          FRONTEND_IMAGE=example.invalid/frontend@sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb \
+            docker compose -f docker-compose.yml config --format json \
+            > audit-output/compose-overrides.json
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+
+          default = json.loads(Path("audit-output/compose-default.json").read_text())
+          override = json.loads(Path("audit-output/compose-overrides.json").read_text())
+          backend = default["services"]["livecontext"]
+          frontend = default["services"]["frontend"]
+          if backend["image"] != "ghcr.io/livecontext-ai/livecontext-ce:v0.2.14":
+              raise SystemExit("wrong backend default")
+          if frontend["image"] != \
+             "ghcr.io/livecontext-ai/livecontext-ce-frontend:v0.2.14":
+              raise SystemExit("wrong frontend default")
+          expected = {
+              "APP_EDITION": "ce",
+              "AUTH_MODE": "embedded",
+              "CE_VERSIONCHECK_ENABLED": "true",
+              "CE_VERSIONCHECK_SENDINSTALLID": "true",
+          }
+          for key, value in expected.items():
+              if str(backend["environment"].get(key)).lower() != value:
+                  raise SystemExit(f"wrong default {key}")
+          if override["services"]["livecontext"]["image"] != \
+             "example.invalid/backend@sha256:" + "a" * 64:
+              raise SystemExit("wrong backend override")
+          if override["services"]["frontend"]["image"] != \
+             "example.invalid/frontend@sha256:" + "b" * 64:
+              raise SystemExit("wrong frontend override")
+          PY
+
+      - name: Gate 8 - prove no product mutation
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD^)" = "$FINAL_HEAD"
+          test "$(git diff --name-only "$FINAL_HEAD..HEAD")" = "$AUDIT_WORKFLOW"
+          test -z "$(git status --porcelain --untracked-files=no)"
+          test "$(git rev-parse "$FINAL_HEAD^{tree}")" = "$FINAL_TREE"
+          git fetch origin main codex/trinyx-cloud-gateway-v2 \
+            audit/livecontext-v0.2.14-final
+          test "$(git rev-parse origin/main)" = "$TRINYX_MAIN"
+          test "$(git rev-parse origin/codex/trinyx-cloud-gateway-v2)" = "$PR25_HEAD"
+          test "$(git rev-parse origin/audit/livecontext-v0.2.14-final)" = \
+            "$(git rev-parse HEAD)"
+          cat audit-output/git-identities.txt
+          cat audit-output/merge-classification.json
+          cat audit-output/backend-test-summary.json
+          cat audit-output/generation-catalog-summary.json
+          cat audit-output/frontend-upstream-tests.json
+          cat audit-output/frontend-trinyx-compatibility.json
+
+      - name: Upload machine-readable audit report
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # actions/upload-artifact v4.6.2
+        with:
+          name: livecontext-v0.2.14-final-head-audit
+          path: audit-output/
+          if-no-files-found: error
+          retention-days: 365

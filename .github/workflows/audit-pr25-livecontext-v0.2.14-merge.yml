@@ -8,10 +8,10 @@ on:
       - .github/workflows/audit-pr25-livecontext-v0.2.14-merge.yml
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
-  merge-conflict-inventory:
+  materialize-reviewed-merge:
     if: github.head_ref == 'audit/pr25-livecontext-v0.2.14-merge'
     runs-on: ubuntu-latest
     steps:
@@ -26,29 +26,52 @@ jobs:
         run: |
           set -euo pipefail
           test "$(git rev-parse HEAD)" = "${{ github.event.pull_request.head.sha }}"
-          test "$(git rev-parse HEAD^)" = "4282bee7c6021487d334b70cee8daef8e97ed95e"
+          git merge-base --is-ancestor             4282bee7c6021487d334b70cee8daef8e97ed95e HEAD
+          test "$(git diff --name-only             4282bee7c6021487d334b70cee8daef8e97ed95e..HEAD)" =             ".github/workflows/audit-pr25-livecontext-v0.2.14-merge.yml"
           git fetch --no-tags origin             99673e28981a861d1e51947bcbc3a18a5f4c06d1
           test "$(git rev-parse FETCH_HEAD)" =             "99673e28981a861d1e51947bcbc3a18a5f4c06d1"
 
-      - name: Inventory the real three-way merge
+      - name: Merge main and resolve the two reviewed conflicts
         shell: bash
         run: |
           set -euo pipefail
-          git config user.name "Trinyx CI audit"
-          git config user.email "ci-audit@users.noreply.github.com"
+          git config user.name "Trinyx CI integration"
+          git config user.email "ci-integration@users.noreply.github.com"
           set +e
           git merge --no-ff             99673e28981a861d1e51947bcbc3a18a5f4c06d1             -m "Merge main LiveContext CE v0.2.14 into PR25"
           status=$?
           set -e
-          if [ "$status" -eq 0 ]; then
-            echo "MERGE_CLEAN"
-            git show --no-patch --format='commit=%H%ntree=%T%nparents=%P'
-            exit 0
-          fi
-          echo "MERGE_CONFLICTS_BEGIN"
-          git diff --name-only --diff-filter=U | LC_ALL=C sort
-          echo "MERGE_CONFLICTS_END"
-          echo "UNMERGED_STAGE_BLOBS_BEGIN"
-          git ls-files -u
-          echo "UNMERGED_STAGE_BLOBS_END"
-          exit 1
+          test "$status" -ne 0
+
+          actual="$(git diff --name-only --diff-filter=U | LC_ALL=C sort)"
+          expected="$(printf '%s\n'             backend/auth-service/src/main/java/com/apimarketplace/auth/web/version/HttpReleaseFeedClient.java             cli/package.json | LC_ALL=C sort)"
+          test "$actual" = "$expected"
+
+          # Upstream owns the new optional CE install-id behavior. Trinyx keeps only
+          # its existing release-feed endpoint override.
+          git checkout --theirs             backend/auth-service/src/main/java/com/apimarketplace/auth/web/version/HttpReleaseFeedClient.java
+          sed -i             's#https://livecontext.ai/api/ce/releases/latest#https://app.trinyx.fr/api/ce/releases/latest#'             backend/auth-service/src/main/java/com/apimarketplace/auth/web/version/HttpReleaseFeedClient.java
+          grep -Fq 'ObjectProvider<CeInstallIdProvider>'             backend/auth-service/src/main/java/com/apimarketplace/auth/web/version/HttpReleaseFeedClient.java
+          grep -Fq 'CeInstallHeaders.INSTALL_ID'             backend/auth-service/src/main/java/com/apimarketplace/auth/web/version/HttpReleaseFeedClient.java
+          grep -Fq 'https://app.trinyx.fr/api/ce/releases/latest'             backend/auth-service/src/main/java/com/apimarketplace/auth/web/version/HttpReleaseFeedClient.java
+          ! grep -Fq 'https://livecontext.ai/api/ce/releases/latest'             backend/auth-service/src/main/java/com/apimarketplace/auth/web/version/HttpReleaseFeedClient.java
+
+          # The CLI package is a Trinyx-owned release surface; importing v0.2.14
+          # must not revert its name, binary or repository namespace.
+          git checkout --ours cli/package.json
+          node -e "const p=require('./cli/package.json'); if(p.name!=='trinyx'||p.version!=='0.2.13'||p.bin.trinyx!=='bin/trinyx.mjs'||p.homepage!=='https://github.com/TrinyxAI/Trinyx') process.exit(1)"
+
+          git add             backend/auth-service/src/main/java/com/apimarketplace/auth/web/version/HttpReleaseFeedClient.java             cli/package.json
+          test -z "$(git diff --name-only --diff-filter=U)"
+          git commit --no-edit
+
+      - name: Prove merge ancestry and publish temporary reviewed tree
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD^1)" = "${{ github.event.pull_request.head.sha }}"
+          test "$(git rev-parse HEAD^2)" =             "99673e28981a861d1e51947bcbc3a18a5f4c06d1"
+          echo "MERGE_COMMIT=$(git rev-parse HEAD)"
+          echo "MERGE_TREE=$(git rev-parse HEAD^{tree})"
+          echo "MERGE_PARENTS=$(git show --no-patch --format=%P HEAD)"
+          git push origin             HEAD:refs/heads/audit/pr25-livecontext-v0.2.14-merged-tree

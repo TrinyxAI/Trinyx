@@ -11,14 +11,22 @@ on:
       - "docker/cloud-images.json"
       - "scripts/validate-cloud-image-contract.mjs"
       - ".github/workflows/build-trinyx-cloud-images.yml"
+      - ".github/workflows/build-trinyx-backend.yml"
+      - "scripts/validate-cloud-publisher-bootstrap.mjs"
   workflow_dispatch:
+  workflow_call:
+    inputs:
+      publish:
+        description: Publish the immutable Cloud image set for the caller commit
+        required: true
+        type: boolean
 
 permissions:
   contents: read
 
 concurrency:
-  group: trinyx-cloud-images-${{ github.event.pull_request.number || github.ref }}
-  cancel-in-progress: true
+  group: ${{ github.event_name == 'pull_request' && format('trinyx-cloud-images-pr-{0}', github.event.pull_request.number) || format('trinyx-cloud-images-publish-{0}', github.sha) }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   inventory:
@@ -32,8 +40,10 @@ jobs:
         run: |
           set -euo pipefail
           test "$(git rev-parse HEAD)" = "${GITHUB_SHA}"
-      - name: Validate source inventory
-        run: node scripts/validate-cloud-image-contract.mjs
+      - name: Validate source inventory and bootstrap contract
+        run: |
+          node scripts/validate-cloud-image-contract.mjs
+          node scripts/validate-cloud-publisher-bootstrap.mjs
       - name: Render development and immutable runtime Compose
         shell: bash
         run: |
@@ -96,7 +106,7 @@ jobs:
           cache-to: type=gha,mode=max,scope=trinyx-cloud-${{ matrix.name }}
 
   publish:
-    if: github.event_name == 'workflow_dispatch'
+    if: github.event_name == 'workflow_dispatch' || (github.event_name == 'workflow_call' && inputs.publish)
     needs: inventory
     runs-on: ubuntu-latest
     permissions:
@@ -184,7 +194,7 @@ jobs:
           retention-days: 30
 
   manifest:
-    if: github.event_name == 'workflow_dispatch'
+    if: github.event_name == 'workflow_dispatch' || (github.event_name == 'workflow_call' && inputs.publish)
     needs:
       - inventory
       - publish

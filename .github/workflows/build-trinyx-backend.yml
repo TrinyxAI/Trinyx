@@ -6,17 +6,21 @@ on:
       - 'backend/**'
       - 'docker-compose.yml'
       - '.github/workflows/build-trinyx-backend.yml'
+      - '.github/workflows/build-trinyx-cloud-images.yml'
+      - 'scripts/validate-cloud-publisher-bootstrap.mjs'
   push:
     branches: [main]
     paths:
       - 'backend/**'
       - 'docker-compose.yml'
       - '.github/workflows/build-trinyx-backend.yml'
+      - '.github/workflows/build-trinyx-cloud-images.yml'
+      - 'scripts/validate-cloud-publisher-bootstrap.mjs'
   workflow_dispatch:
 
 concurrency:
-  group: trinyx-backend-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
-  cancel-in-progress: true
+  group: ${{ github.event_name == 'workflow_dispatch' && format('trinyx-runtime-publish-{0}', github.sha) || format('trinyx-backend-{0}-{1}', github.workflow, github.event.pull_request.number || github.ref) }}
+  cancel-in-progress: ${{ github.event_name != 'workflow_dispatch' }}
 
 permissions:
   contents: read
@@ -244,13 +248,52 @@ jobs:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
-      - name: Build and publish backend monolith image
+      - name: Build and push backend monolith by digest
+        id: build
         uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # docker/build-push-action v6
         with:
           context: ./backend
           file: ./backend/monolith-service/Dockerfile
           platforms: linux/amd64
-          push: true
-          tags: ${{ env.BACKEND_IMAGE }}:${{ github.sha }}
+          outputs: type=image,name=${{ env.BACKEND_IMAGE }},push-by-digest=true,name-canonical=true,push=true
+          provenance: mode=max
+          sbom: true
+          labels: |
+            org.opencontainers.image.source=https://github.com/TrinyxAI/Trinyx
+            org.opencontainers.image.revision=${{ github.sha }}
           cache-from: type=gha,scope=trinyx-backend
           cache-to: type=gha,mode=max,scope=trinyx-backend
+      - name: Create immutable backend full-SHA tag
+        shell: bash
+        env:
+          IMAGE_DIGEST: ${{ steps.build.outputs.digest }}
+        run: |
+          set -euo pipefail
+          [[ "${GITHUB_SHA}" =~ ^[0-9a-f]{40}$ ]]
+          [[ "${IMAGE_DIGEST}" =~ ^sha256:[0-9a-f]{64}$ ]]
+          sha_ref="${BACKEND_IMAGE}:${GITHUB_SHA}"
+          inspect_digest() {
+            docker buildx imagetools inspect "$1" 2>/dev/null |
+              awk '$1 == "Digest:" { print $2; exit }'
+          }
+          existing="$(inspect_digest "${sha_ref}" || true)"
+          if [[ -n "${existing}" && "${existing}" != "${IMAGE_DIGEST}" ]]; then
+            echo "Refusing to move immutable ${sha_ref}: ${existing} != ${IMAGE_DIGEST}" >&2
+            exit 1
+          fi
+          if [[ -z "${existing}" ]]; then
+            docker buildx imagetools create \
+              --tag "${sha_ref}" "${BACKEND_IMAGE}@${IMAGE_DIGEST}"
+          fi
+          test "$(inspect_digest "${sha_ref}")" = "${IMAGE_DIGEST}"
+          echo "Backend immutable reference: ${BACKEND_IMAGE}@${IMAGE_DIGEST}" >> "${GITHUB_STEP_SUMMARY}"
+
+  publish-cloud-runtime:
+    if: github.event_name == 'workflow_dispatch'
+    needs: [test, frontend-test, publish]
+    permissions:
+      contents: read
+      packages: write
+    uses: ./.github/workflows/build-trinyx-cloud-images.yml
+    with:
+      publish: true

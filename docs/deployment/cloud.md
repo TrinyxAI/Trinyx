@@ -462,9 +462,12 @@ machine-readable inventory is `docker/cloud-images.json`; it currently contains
   `trinyx-cloud-websearch`.
 
 Pull requests build these images on `linux/amd64` without registry login or
-push. A manually selected ref in the **Build Trinyx Cloud runtime images**
-workflow builds exactly `GITHUB_SHA`, publishes only the full-SHA tag, records
-each produced digest, and uploads
+push. Before this new workflow exists on the default branch, dispatch **Build
+Trinyx Backend** (which already exists on `main`) and select the PR branch. Its
+manual-only bootstrap job publishes the backend SHA artifact first, then calls
+the reusable Cloud workflow from the same commit. After merge, the Cloud
+workflow can also be dispatched directly. Both paths build exactly `GITHUB_SHA`,
+publish only full-SHA tags, record each produced digest, and upload
 `trinyx-cloud-image-manifest-<full-sha>/cloud-image-manifest.json`. It creates
 no release, mutable alias or deployment.
 

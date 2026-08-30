@@ -19,12 +19,12 @@ x-java-service: &java-service
     WORKFLOW_NODE_BILLING_ENABLED: "true"
     CREDENTIALS_PLATFORM_MARKUP_ENABLED: "true"
     MARKETPLACE_CE_DOWNLOAD_ENABLED: "true"
-    APP_PUBLIC_URL: https://cloud.trinyx.fr
-    WEBHOOK_BASE_URL: https://cloud.trinyx.fr
-    CHAT_ENDPOINT_BASE_URL: https://cloud.trinyx.fr
-    FORM_ENDPOINT_BASE_URL: https://cloud.trinyx.fr
-    AGENT_WEBHOOK_BASE_URL: https://cloud.trinyx.fr
-    WEBSEARCH_PUBLIC_WS_BASE: https://cloud.trinyx.fr
+    APP_PUBLIC_URL: ${CLOUD_PUBLIC_URL:-https://cloud.trinyx.fr}
+    WEBHOOK_BASE_URL: ${CLOUD_PUBLIC_URL:-https://cloud.trinyx.fr}
+    CHAT_ENDPOINT_BASE_URL: ${CLOUD_PUBLIC_URL:-https://cloud.trinyx.fr}
+    FORM_ENDPOINT_BASE_URL: ${CLOUD_PUBLIC_URL:-https://cloud.trinyx.fr}
+    AGENT_WEBHOOK_BASE_URL: ${CLOUD_PUBLIC_URL:-https://cloud.trinyx.fr}
+    WEBSEARCH_PUBLIC_WS_BASE: ${CLOUD_PUBLIC_URL:-https://cloud.trinyx.fr}
     ORCHESTRATOR_CATALOG_BASE_URL: http://catalog-service:8081
     ORCHESTRATOR_CONVERSATION_BASE_URL: http://conversation-service:8087
     AUTH_SERVICE_URL: http://auth-service:8083
@@ -53,8 +53,8 @@ x-java-service: &java-service
     REDIS_HOST: cloud-redis
     REDIS_PORT: "6379"
     SPRING_DATA_REDIS_PASSWORD: ${CLOUD_REDIS_PASSWORD:?set CLOUD_REDIS_PASSWORD}
-    KEYCLOAK_ISSUER_URI: https://auth.trinyx.fr/realms/${KEYCLOAK_REALM_NAME:-trinyx}
-    SPRING_SECURITY_OAUTH2_RESOURCESERVER_JWT_ISSUER_URI: https://auth.trinyx.fr/realms/${KEYCLOAK_REALM_NAME:-trinyx}
+    KEYCLOAK_ISSUER_URI: ${KEYCLOAK_PUBLIC_URL:-https://auth.trinyx.fr}/realms/${KEYCLOAK_REALM_NAME:-trinyx}
+    SPRING_SECURITY_OAUTH2_RESOURCESERVER_JWT_ISSUER_URI: ${KEYCLOAK_PUBLIC_URL:-https://auth.trinyx.fr}/realms/${KEYCLOAK_REALM_NAME:-trinyx}
     SPRING_SECURITY_OAUTH2_RESOURCESERVER_JWT_JWK_SET_URI: http://keycloak:8080/realms/${KEYCLOAK_REALM_NAME:-trinyx}/protocol/openid-connect/certs
     KEYCLOAK_AUDIENCE: ${KEYCLOAK_FRONTEND_CLIENT_ID:-trinyx-frontend}
     KEYCLOAK_REALM: ${KEYCLOAK_REALM_NAME:-trinyx}
@@ -88,10 +88,10 @@ x-java-service: &java-service
     CATALOG_BUNDLE_SIGNING_PUBLIC_KEY: ${CATALOG_BUNDLE_SIGNING_PUBLIC_KEY:?set CATALOG_BUNDLE_SIGNING_PUBLIC_KEY}
     CATALOG_BUNDLE_SIGNING_KEY_ID: ${CATALOG_BUNDLE_SIGNING_KEY_ID:-trinyx-cloud-1}
     CATALOG_BUNDLE_ISSUER: ${CATALOG_BUNDLE_ISSUER:-trinyx-cloud}
-    TRINYX_IDENTITY_ISSUER: https://app.trinyx.fr
+    TRINYX_IDENTITY_ISSUER: ${PAID_PUBLIC_URL:-https://app.trinyx.fr}
     TRINYX_IDENTITY_AUDIENCE: trinyx-cloud
     TRINYX_IDENTITY_VERIFICATION_KEYS: ${TRINYX_IDENTITY_VERIFICATION_KEYS:?set TRINYX_IDENTITY_VERIFICATION_KEYS}
-    TRINYX_ENTITLEMENT_ISSUER: https://app.trinyx.fr
+    TRINYX_ENTITLEMENT_ISSUER: ${PAID_PUBLIC_URL:-https://app.trinyx.fr}
     TRINYX_ENTITLEMENT_AUDIENCE: trinyx-cloud
     TRINYX_ENTITLEMENT_VERIFICATION_KEYS: ${TRINYX_ENTITLEMENT_VERIFICATION_KEYS:?set TRINYX_ENTITLEMENT_VERIFICATION_KEYS}
     PAID_MONOLITH_BILLING_URL: ${PAID_MONOLITH_BILLING_URL:-https://billing-internal.trinyx.private}
@@ -123,8 +123,8 @@ x-java-service: &java-service
     MOONSHOT_API_KEY: ${MOONSHOT_API_KEY:-}
     MINIMAX_API_KEY: ${MINIMAX_API_KEY:-}
     MINIMAX_API_URL: ${MINIMAX_API_URL:-https://api.minimax.io/v1/chat/completions}
-    OAUTH2_FRONTEND_URL: https://cloud.trinyx.fr
-    OAUTH2_CALLBACK_URL: https://cloud.trinyx.fr/api/credentials/oauth2/callback
+    OAUTH2_FRONTEND_URL: ${CLOUD_PUBLIC_URL:-https://cloud.trinyx.fr}
+    OAUTH2_CALLBACK_URL: ${CLOUD_PUBLIC_URL:-https://cloud.trinyx.fr}/api/credentials/oauth2/callback
   depends_on: &java-dependencies
     migration-service:
       condition: service_completed_successfully
@@ -229,7 +229,11 @@ services:
       KC_DB_USERNAME: ${CLOUD_DB_USERNAME:?set CLOUD_DB_USERNAME}
       KC_DB_PASSWORD: ${CLOUD_DB_PASSWORD:?set CLOUD_DB_PASSWORD}
       KC_HTTP_ENABLED: "true"
-      KC_HOSTNAME: https://auth.trinyx.fr
+      # Keycloak expands these values inside the imported realm JSON.
+      CLOUD_PUBLIC_URL: ${CLOUD_PUBLIC_URL:-https://cloud.trinyx.fr}
+      KEYCLOAK_PUBLIC_URL: ${KEYCLOAK_PUBLIC_URL:-https://auth.trinyx.fr}
+      PAID_PUBLIC_URL: ${PAID_PUBLIC_URL:-https://app.trinyx.fr}
+      KC_HOSTNAME: ${KEYCLOAK_PUBLIC_URL:-https://auth.trinyx.fr}
       KC_HOSTNAME_BACKCHANNEL_DYNAMIC: "true"
       KC_PROXY_HEADERS: xforwarded
       KC_HEALTH_ENABLED: "true"
@@ -405,8 +409,8 @@ services:
       <<: *cloud-environment
       PORT: "8091"
       SPRING_DATASOURCE_URL: jdbc:postgresql://cloud-postgres:5432/${CLOUD_DB_NAME:-trinyx_cloud}?currentSchema=trigger
-      ORCHESTRATOR_CHAT_ENDPOINT_BASE_URL: https://cloud.trinyx.fr
-      ORCHESTRATOR_FORM_ENDPOINT_BASE_URL: https://cloud.trinyx.fr
+      ORCHESTRATOR_CHAT_ENDPOINT_BASE_URL: ${CLOUD_PUBLIC_URL:-https://cloud.trinyx.fr}
+      ORCHESTRATOR_FORM_ENDPOINT_BASE_URL: ${CLOUD_PUBLIC_URL:-https://cloud.trinyx.fr}
       INTERNAL_S2S_SERVICE_SECRET: ${TRIGGER_SERVICE_S2S_SECRET:?set TRIGGER_SERVICE_S2S_SECRET}
     healthcheck:
       <<: *java-healthcheck
@@ -517,7 +521,7 @@ services:
       CLOUD_GATEWAY_RATE_LIMIT_REQUESTS: ${CLOUD_GATEWAY_RATE_LIMIT_REQUESTS:-120}
       CLOUD_GATEWAY_RATE_LIMIT_WINDOW_MS: ${CLOUD_GATEWAY_RATE_LIMIT_WINDOW_MS:-60000}
       KEYCLOAK_JWK_SET_URI: http://keycloak:8080/realms/${KEYCLOAK_REALM_NAME:-trinyx}/protocol/openid-connect/certs
-      KEYCLOAK_ISSUER: https://auth.trinyx.fr/realms/${KEYCLOAK_REALM_NAME:-trinyx}
+      KEYCLOAK_ISSUER: ${KEYCLOAK_PUBLIC_URL:-https://auth.trinyx.fr}/realms/${KEYCLOAK_REALM_NAME:-trinyx}
       KEYCLOAK_AUDIENCE: ${KEYCLOAK_FRONTEND_CLIENT_ID:-trinyx-frontend}
       REDIS_HOST: cloud-redis
       REDIS_PORT: "6379"

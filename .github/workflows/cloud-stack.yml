@@ -68,6 +68,165 @@ jobs:
           set -euo pipefail
           docker compose             --env-file docker/.env.cloud.example             -f docker/docker-compose.cloud.yml             config --quiet
           docker compose             --env-file docker/.env.cloud.example             -f docker/docker-compose.cloud.yml             config > /tmp/trinyx-cloud.rendered.yml
+          CLOUD_PUBLIC_URL=https://cloud-staging.example.invalid \
+            KEYCLOAK_PUBLIC_URL=https://auth-staging.example.invalid \
+            PAID_PUBLIC_URL=https://app-staging.example.invalid \
+            docker compose --env-file docker/.env.cloud.example \
+              -f docker/docker-compose.cloud.yml config --format json \
+              > /tmp/trinyx-cloud.staging.json
+          docker compose -f docker-compose.yml config --format json \
+            > /tmp/trinyx-paid.defaults.json
+          env \
+            CLOUD_PUBLIC_URL=https://cloud-staging.example.invalid \
+            KEYCLOAK_PUBLIC_URL=https://auth-staging.example.invalid \
+            PAID_PUBLIC_URL=https://app-staging.example.invalid \
+            KEYCLOAK_REALM_NAME=trinyx-staging \
+            KEYCLOAK_FRONTEND_CLIENT_ID=trinyx-staging-frontend \
+            MARKETPLACE_MODE=local \
+            BILLING_AUTHORITY_MODE=paid-monolith-authority \
+            CLOUD_LINK_ENABLED=true \
+            CLOUD_LINK_ENCRYPTION_KEY=test-only-cloud-link-encryption-key \
+            CATALOG_BUNDLE_TRUSTED_KEYS=test-catalog-key=test-only-public-key \
+            TRINYX_IDENTITY_SIGNING_KID=test-identity-kid \
+            TRINYX_IDENTITY_SIGNING_KEY=test-only-identity-private-key \
+            TRINYX_ENTITLEMENT_SIGNING_KID=test-entitlement-kid \
+            TRINYX_ENTITLEMENT_SIGNING_KEY=test-only-entitlement-private-key \
+            TRINYX_S2S_SIGNING_ISSUER=test-paid-authority \
+            TRINYX_S2S_SIGNING_AUDIENCE=test-cloud-internal \
+            TRINYX_S2S_SIGNING_KID=test-workload-kid \
+            TRINYX_S2S_SIGNING_KEY=test-only-workload-private-key \
+            TRINYX_S2S_VERIFICATION_ISSUER=test-cloud \
+            TRINYX_S2S_VERIFICATION_AUDIENCE=test-billing-authority \
+            TRINYX_S2S_VERIFICATION_KEYS=test-cloud-kid=test-only-public-key \
+            TRINYX_ENTITLEMENT_CLOUD_INGEST_URL=https://cloud-internal-staging.example.invalid:8443/internal/v1/entitlement-projections \
+            TRINYX_IDENTITY_CLOUD_REVOCATION_URL=https://cloud-internal-staging.example.invalid:8443/internal/v1/identity-bindings/revocations \
+            docker compose -f docker-compose.yml config --format json \
+              > /tmp/trinyx-paid.cloud-link.json
+
+      - name: Assert staging origins and paid CloudLink Compose contracts
+        shell: bash
+        run: |
+          set -euo pipefail
+          node <<'NODE'
+          const fs = require('node:fs');
+          const stagingCloud = JSON.parse(fs.readFileSync('/tmp/trinyx-cloud.staging.json', 'utf8'));
+          const paidDefaults = JSON.parse(fs.readFileSync('/tmp/trinyx-paid.defaults.json', 'utf8'));
+          const paidCloudLink = JSON.parse(fs.readFileSync('/tmp/trinyx-paid.cloud-link.json', 'utf8'));
+
+          const cloudUrl = 'https://cloud-staging.example.invalid';
+          const keycloakUrl = 'https://auth-staging.example.invalid';
+          const paidUrl = 'https://app-staging.example.invalid';
+          const forbidden = [
+            'https://cloud.trinyx.fr',
+            'https://auth.trinyx.fr',
+            'https://app.trinyx.fr',
+          ];
+          const assertEqual = (actual, expected, label) => {
+            if (actual !== expected) {
+              throw new Error(label + ': expected ' + expected + ', got ' + actual);
+            }
+          };
+          for (const value of forbidden) {
+            if (JSON.stringify(stagingCloud).includes(value)) {
+              throw new Error('staging Cloud render retained production origin ' + value);
+            }
+            if (JSON.stringify(paidCloudLink).includes(value)) {
+              throw new Error('paid CloudLink render retained production origin ' + value);
+            }
+          }
+
+          const auth = stagingCloud.services['auth-service'].environment;
+          const trigger = stagingCloud.services['trigger-service'].environment;
+          const gateway = stagingCloud.services['gateway-service'].environment;
+          const keycloak = stagingCloud.services.keycloak.environment;
+          for (const name of [
+            'APP_PUBLIC_URL', 'WEBHOOK_BASE_URL', 'CHAT_ENDPOINT_BASE_URL',
+            'FORM_ENDPOINT_BASE_URL', 'AGENT_WEBHOOK_BASE_URL',
+            'WEBSEARCH_PUBLIC_WS_BASE', 'OAUTH2_FRONTEND_URL',
+          ]) assertEqual(auth[name], cloudUrl, 'Cloud ' + name);
+          assertEqual(auth.OAUTH2_CALLBACK_URL, cloudUrl + '/api/credentials/oauth2/callback', 'Cloud OAuth callback');
+          assertEqual(auth.KEYCLOAK_ISSUER_URI, keycloakUrl + '/realms/trinyx', 'Cloud Keycloak issuer');
+          assertEqual(auth.SPRING_SECURITY_OAUTH2_RESOURCESERVER_JWT_ISSUER_URI, keycloakUrl + '/realms/trinyx', 'resource server issuer');
+          assertEqual(auth.TRINYX_IDENTITY_ISSUER, paidUrl, 'identity issuer');
+          assertEqual(auth.TRINYX_ENTITLEMENT_ISSUER, paidUrl, 'entitlement issuer');
+          assertEqual(trigger.ORCHESTRATOR_CHAT_ENDPOINT_BASE_URL, cloudUrl, 'trigger chat origin');
+          assertEqual(trigger.ORCHESTRATOR_FORM_ENDPOINT_BASE_URL, cloudUrl, 'trigger form origin');
+          assertEqual(gateway.KEYCLOAK_ISSUER, keycloakUrl + '/realms/trinyx', 'gateway issuer');
+          assertEqual(keycloak.KC_HOSTNAME, keycloakUrl, 'Keycloak hostname');
+          assertEqual(keycloak.CLOUD_PUBLIC_URL, cloudUrl, 'Keycloak realm Cloud origin');
+          assertEqual(keycloak.KEYCLOAK_PUBLIC_URL, keycloakUrl, 'Keycloak public origin');
+          assertEqual(keycloak.PAID_PUBLIC_URL, paidUrl, 'Keycloak realm paid origin');
+
+          let realmSource = fs.readFileSync('docker/cloud/keycloak/trinyx-realm.json', 'utf8');
+          realmSource = realmSource
+            .replaceAll('${CLOUD_PUBLIC_URL}', cloudUrl)
+            .replaceAll('${PAID_PUBLIC_URL}', paidUrl);
+          const realm = JSON.parse(realmSource);
+          const frontend = realm.clients.find((client) => client.clientId === '${KEYCLOAK_FRONTEND_CLIENT_ID}');
+          if (!frontend) throw new Error('Keycloak frontend client missing');
+          assertEqual(frontend.redirectUris[0], paidUrl + '/api/cloud-link/callback', 'paid callback');
+          assertEqual(frontend.redirectUris[1], cloudUrl + '/*', 'Cloud redirect URI');
+          assertEqual(frontend.webOrigins[0], paidUrl, 'paid web origin');
+          assertEqual(frontend.webOrigins[1], cloudUrl, 'Cloud web origin');
+          assertEqual(
+            frontend.attributes['post.logout.redirect.uris'],
+            paidUrl + '/*##' + cloudUrl + '/*',
+            'logout redirects',
+          );
+          for (const value of forbidden) {
+            if (JSON.stringify(realm).includes(value)) {
+              throw new Error('staging realm retained production origin ' + value);
+            }
+          }
+
+          const ce = paidDefaults.services.livecontext.environment;
+          assertEqual(ce.MARKETPLACE_MODE, 'remote', 'CE marketplace default');
+          assertEqual(ce.BILLING_AUTHORITY_MODE, 'native', 'CE billing authority default');
+          assertEqual(ce.CLOUD_LINK_ENABLED, 'false', 'CE CloudLink default');
+          assertEqual(ce.CLOUD_LINK_PENDING_STATE_STORE, 'in-memory', 'CE pending state default');
+          assertEqual(ce.CLOUD_LINK_REPLICA_COUNT, '1', 'CE replica default');
+          for (const name of [
+            'CLOUD_LINK_ENCRYPTION_KEY', 'CATALOG_BUNDLE_TRUSTED_KEYS',
+            'TRINYX_IDENTITY_SIGNING_KID', 'TRINYX_IDENTITY_SIGNING_KEY',
+            'TRINYX_ENTITLEMENT_SIGNING_KID', 'TRINYX_ENTITLEMENT_SIGNING_KEY',
+            'TRINYX_S2S_SIGNING_KID', 'TRINYX_S2S_SIGNING_KEY',
+            'TRINYX_S2S_VERIFICATION_KEYS',
+          ]) assertEqual(ce[name] || '', '', 'CE safe empty ' + name);
+
+          const enabled = paidCloudLink.services.livecontext.environment;
+          const expected = {
+            MARKETPLACE_MODE: 'local',
+            BILLING_AUTHORITY_MODE: 'paid-monolith-authority',
+            CLOUD_LINK_ENABLED: 'true',
+            MARKETPLACE_CLOUD_API_URL: cloudUrl + '/api',
+            CATALOG_BUNDLE_CLOUD_URL: cloudUrl,
+            API_CATALOG_BUNDLE_CLOUD_URL: cloudUrl,
+            SKILL_BUNDLE_CLOUD_URL: cloudUrl,
+            CLOUD_KEYCLOAK_URL: keycloakUrl + '/realms/trinyx-staging',
+            CLOUD_LINK_CLIENT_ID: 'trinyx-staging-frontend',
+            CLOUD_LINK_REDIRECT_URI: paidUrl + '/api/cloud-link/callback',
+            CLOUD_LINK_ENCRYPTION_KEY: 'test-only-cloud-link-encryption-key',
+            CATALOG_BUNDLE_TRUSTED_KEYS: 'test-catalog-key=test-only-public-key',
+            TRINYX_IDENTITY_ISSUER: paidUrl,
+            TRINYX_IDENTITY_SIGNING_KID: 'test-identity-kid',
+            TRINYX_IDENTITY_SIGNING_KEY: 'test-only-identity-private-key',
+            TRINYX_ENTITLEMENT_ISSUER: paidUrl,
+            TRINYX_ENTITLEMENT_SIGNING_KID: 'test-entitlement-kid',
+            TRINYX_ENTITLEMENT_SIGNING_KEY: 'test-only-entitlement-private-key',
+            TRINYX_S2S_SIGNING_ISSUER: 'test-paid-authority',
+            TRINYX_S2S_SIGNING_AUDIENCE: 'test-cloud-internal',
+            TRINYX_S2S_SIGNING_KID: 'test-workload-kid',
+            TRINYX_S2S_SIGNING_KEY: 'test-only-workload-private-key',
+            TRINYX_S2S_VERIFICATION_ISSUER: 'test-cloud',
+            TRINYX_S2S_VERIFICATION_AUDIENCE: 'test-billing-authority',
+            TRINYX_S2S_VERIFICATION_KEYS: 'test-cloud-kid=test-only-public-key',
+            TRINYX_ENTITLEMENT_CLOUD_INGEST_URL: 'https://cloud-internal-staging.example.invalid:8443/internal/v1/entitlement-projections',
+            TRINYX_IDENTITY_CLOUD_REVOCATION_URL: 'https://cloud-internal-staging.example.invalid:8443/internal/v1/identity-bindings/revocations',
+          };
+          for (const [name, value] of Object.entries(expected)) {
+            assertEqual(enabled[name], value, 'paid CloudLink ' + name);
+          }
+          NODE
 
       - name: Assert Cloud modes and service DNS
         shell: bash
@@ -437,11 +596,3 @@ jobs:
         shell: bash
         run: node --test mcp/bridge/lib/__tests__/gatewayAuth.test.mjs
 
-      - name: Ensure paid-monolith files are untouched
-        if: github.event_name == 'pull_request'
-        shell: bash
-        env:
-          BASE_SHA: ${{ github.event.pull_request.base.sha }}
-        run: |
-          set -euo pipefail
-          git diff --exit-code "${BASE_SHA}" --             docker-compose.yml             docker/.env.ce             docker/.env.paid-monolith

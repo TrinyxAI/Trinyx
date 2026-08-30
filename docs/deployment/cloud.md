@@ -239,6 +239,28 @@ traffic.
 The downstream service URLs use Docker DNS names; no service uses localhost.
 Keycloak is externally reachable only through `auth.trinyx.fr`.
 
+## Public origins and staging isolation
+
+The stack has exactly three configurable public origins:
+
+```dotenv
+CLOUD_PUBLIC_URL=https://cloud.trinyx.fr
+KEYCLOAK_PUBLIC_URL=https://auth.trinyx.fr
+PAID_PUBLIC_URL=https://app.trinyx.fr
+```
+
+These production values remain the Compose defaults for compatibility. Staging
+must override all three before rendering either Compose project. Cloud service
+URLs, OAuth callbacks, webhook bases, Keycloak issuer/hostname, assertion
+issuers and the imported realm redirect/web-origin/logout settings are derived
+from these origins. Never render a staging stack while any of the three still
+points at production.
+
+Keycloak expands `${CLOUD_PUBLIC_URL}` and `${PAID_PUBLIC_URL}` in the
+realm import from environment values supplied by Compose. The paid monolith
+derives its Cloud API, bundle endpoints, Keycloak realm and callback from the
+same origins, so no second staging URL namespace is required.
+
 ## Key material and required environment
 
 No private key belongs in Git. Use a secret manager and separate Ed25519 key
@@ -279,7 +301,13 @@ verification issuer=trinyx-paid-authority
 verification audience=trinyx-cloud-internal
 ```
 
-Before staging, paid-monolith must receive external secrets/configuration for
+Before staging, the root Compose forwards the CloudLink contract to the
+`livecontext` container. CE defaults remain `MARKETPLACE_MODE=remote`,
+`BILLING_AUTHORITY_MODE=native`, `CLOUD_LINK_ENABLED=false`, in-memory state
+with one declared replica, and empty signing/trust material. Enabling CloudLink
+requires the three public origins above plus a non-empty
+`CLOUD_LINK_ENCRYPTION_KEY`; all private keys still come from the runtime secret
+store. Paid-monolith must receive external secrets/configuration for
 the opposite direction:
 
 ```text

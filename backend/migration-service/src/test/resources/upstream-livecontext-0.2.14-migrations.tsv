@@ -1,4 +1,4 @@
-# LiveContext v0.2.13 migration inventory at 999aec1208a9eb1ddcc3691e466f0087fc819979
+# LiveContext v0.2.14 migration inventory at cda5dbe4293f099a7b3c4f8bfe02d44073029aa3
 # git-blob-sha\trepository-path
 195f32bbbc106a1f076457b205b741e6ac5dfe85	backend/migration-service/src/main/java/com/apimarketplace/migration/MigrationServiceApplication.java
 dfa2130a17a394f21d3320628d2daecc015000c0	backend/migration-service/src/main/java/db/migration/V151__backfill_scope_id.java
@@ -438,3 +438,6 @@ fbde807fdae5a545817b971d2bf58f9031e72d2f	backend/migration-service/src/main/reso
 934819472fa5b699dda95fce6f5f7cc3d6b90f2e	backend/migration-service/src/main/resources/db/migration/V97__fix_datasource_trigger_docs_agent_pov.sql
 e4d4ce499d41363c9f42abe6828aaae420b2732d	backend/migration-service/src/main/resources/db/migration/V98__add_resource_publication_support.sql
 6f5ea79e024d4e5b7ecc0e74be23390b145bad1d	backend/migration-service/src/main/resources/db/migration/V99__agent_guard_overrides.sql
+f2f8d8d8cb3babe6f68a1088eb5c32f429598a3d	backend/migration-service/src/main/resources/db/migration/V454__ce_install_telemetry.sql
+e1325db2ec5b3ca588f9d010e83313b04287abb0	backend/migration-service/src/main/resources/db/migration/V455__repair_table_media_cells.sql
+303c5b1b7f5e179b13facffcbf26d23d109308f4	backend/migration-service/src/main/resources/db/migration/V456__merge_docs_state_the_all_skipped_rule.sql

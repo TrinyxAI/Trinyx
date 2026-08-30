@@ -25,8 +25,8 @@ import static org.assertj.core.api.Assertions.assertThat;
  */
 class FlywayLifecycleContractTest {
 
-    private static final int EXPECTED_VERSIONED_HISTORY_ENTRIES = 441; // baseline V0 + 439 SQL + V151 Java
-    private static final String EXPECTED_CURRENT_VERSION = "453.3";
+    private static final int EXPECTED_VERSIONED_HISTORY_ENTRIES = 444; // baseline V0 + 442 SQL + V151 Java
+    private static final String EXPECTED_CURRENT_VERSION = "456";
 
     @Test
     @Timeout(value = 15, unit = TimeUnit.MINUTES)
@@ -101,6 +101,23 @@ class FlywayLifecycleContractTest {
                     .isEqualTo(EXPECTED_CURRENT_VERSION);
             assertThat(upgrade.validateWithResult().validationSuccessful).isTrue();
             assertThat(upgrade.migrate().migrationsExecuted).isZero();
+
+            // A database that already contains the complete v0.2.13 + draft Trinyx tail
+            // must apply exactly the three byte-identical upstream v0.2.14 migrations.
+            flyway.clean();
+            Flyway v0213 = configured(postgres, "453.3");
+            assertThat(v0213.migrate().success).isTrue();
+            assertThat(v0213.info().current().getVersion().toString()).isEqualTo("453.3");
+            assertThat(v0213.validateWithResult().validationSuccessful).isTrue();
+
+            Flyway v0214 = configured(postgres, null);
+            var fromV0213 = v0214.migrate();
+            assertThat(fromV0213.success).isTrue();
+            assertThat(fromV0213.migrationsExecuted).isEqualTo(3);
+            assertThat(v0214.info().current().getVersion().toString())
+                    .isEqualTo(EXPECTED_CURRENT_VERSION);
+            assertThat(v0214.validateWithResult().validationSuccessful).isTrue();
+            assertThat(v0214.migrate().migrationsExecuted).isZero();
         }
     }
 

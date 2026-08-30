@@ -234,7 +234,7 @@ services:
       # update check while staying unidentified, or ENABLED=false to drop the request
       # entirely (no badge either). See README-CE.md.
       CE_VERSIONCHECK_ENABLED: ${CE_VERSIONCHECK_ENABLED:-true}
-      CE_VERSIONCHECK_SENDINSTALLID: ${CE_VERSIONCHECK_SENDINSTALLID:-true}
+      CE_VERSIONCHECK_SENDINSTALLID: ${CE_VERSIONCHECK_SENDINSTALLID:-false}
       # Browser agent (agent_browse) - OFF by default. Opt in with the
       # `browser-agent` profile + WEBSEARCH_ENABLED=true (both set by
       # docker/.env.ce.browser-agent). When enabled, the orchestrator talks to

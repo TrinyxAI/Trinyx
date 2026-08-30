@@ -31,7 +31,7 @@ class UpstreamMigrationIntegrityTest {
         Path repository = repositoryRoot();
         List<String> manifest;
         try (InputStream input = getClass().getResourceAsStream(
-                "/upstream-livecontext-0.2.13-migrations.tsv")) {
+                "/upstream-livecontext-0.2.14-migrations.tsv")) {
             assertThat(input).as("upstream SHA manifest must be packaged").isNotNull();
             manifest = new String(input.readAllBytes(), StandardCharsets.UTF_8)
                     .lines().filter(line -> !line.isBlank() && !line.startsWith("#"))
@@ -67,7 +67,7 @@ class UpstreamMigrationIntegrityTest {
             }
         }
 
-        assertThat(status).hasSize(438);
+        assertThat(status).hasSize(441);
         assertThat(status.get(ROOT + "V149__credit_ledger_pin_id_index.sql"))
                 .startsWith("MATCH 2b51b8c976fb162297a894a9fd0341e7f1b7d614");
         assertThat(status.get(ROOT + "V150__credit_ledger_expires_at_index.sql"))
@@ -76,6 +76,12 @@ class UpstreamMigrationIntegrityTest {
                 "backend/migration-service/src/main/java/db/migration/"
                         + "V151__backfill_scope_id.java"))
                 .startsWith("MATCH dfa2130a17a394f21d3320628d2daecc015000c0");
+        assertThat(status.get(ROOT + "V454__ce_install_telemetry.sql"))
+                .startsWith("MATCH f2f8d8d8cb3babe6f68a1088eb5c32f429598a3d");
+        assertThat(status.get(ROOT + "V455__repair_table_media_cells.sql"))
+                .startsWith("MATCH e1325db2ec5b3ca588f9d010e83313b04287abb0");
+        assertThat(status.get(ROOT + "V456__merge_docs_state_the_all_skipped_rule.sql"))
+                .startsWith("MATCH 303c5b1b7f5e179b13facffcbf26d23d109308f4");
         assertThat(repository.resolve(ROOT
                 + "V148_1__empty_credit_ledger_indexes.sql")).doesNotExist();
 
@@ -97,7 +103,7 @@ class UpstreamMigrationIntegrityTest {
         status.forEach((path, result) ->
                 System.out.println(path + "\t" + result));
         System.out.printf(
-                "Upstream integrity: %d inventory entries; V435 content relocated; "
+                "Upstream v0.2.14 integrity: %d inventory entries; V435 content relocated; "
                         + "callback limited to session reset; Trinyx-only=%s%n",
                 status.size(), currentVersioned);
     }

@@ -237,10 +237,10 @@ docker compose -f cli/assets/docker-compose.yml --env-file docker/.env.ce.render
 - Set only one half and it stays off (a container the app never calls, or the URL
   with no container) - always use the env file so they stay coupled.
 
-## Update check and anonymous install count
+## Update check and optional anonymous install count
 
 Once a day (and once shortly after startup) your install asks
-`https://livecontext.ai/api/ce/releases/latest` whether a newer release exists.
+`https://app.trinyx.fr/api/ce/releases/latest` whether a newer release exists.
 That is what puts the "Update available" badge on the Settings > Information
 card. The app never updates itself: the badge only shows you the
 `docker compose pull` commands.
@@ -250,30 +250,30 @@ default `User-Agent` naming the Java runtime, as any HTTP client sends)**:**
 
 ```
 GET /api/ce/releases/latest?current=0.2.13
-X-LiveContext-Anon-Install-Id: 8f2c1a44-...   # random UUID, generated once at first boot
+# No install-id header is sent by the Trinyx default configuration.
 ```
 
-The install id is a random UUID generated once and kept in your own database
-(`auth.ce_install`). It is derived from nothing: not your IP, not your hostname,
-not your licence, not any user account. It exists so the number of live
-self-hosted installs can be counted, so the cloud stores it too, alongside
-exactly three things: the version above and the dates it was first and last
-seen. That is the whole record. **No IP address is stored in it**, and it is
-deliberately not the cloud-link install id, so the record itself carries no link
-or account information. A build made from source reports itself as `dev` rather
-than by its commit id. Records not seen for 180 days are deleted.
+Trinyx disables persistent install-id transmission by default. Operators may
+explicitly opt in to the upstream-compatible anonymous fleet count with
+`CE_VERSIONCHECK_SENDINSTALLID=true`. When enabled, the install id is a random
+UUID generated once and kept in your own database (`auth.ce_install`). It is
+derived from nothing: not your IP, hostname, licence or user account. The fleet
+record contains only that UUID, the reported version, and first/last-seen dates;
+records not seen for 180 days are deleted. The compatibility header remains
+`X-LiveContext-Anon-Install-Id`; it is deliberately distinct from the
+tenant-bound CloudLink install id.
 
 To be precise about what that does and does not promise: like any HTTP request
 to any service, this one reaches our edge with your IP visible to the web server
-and its access log, exactly as your browser does when you open livecontext.ai.
+and its access log, exactly as your browser does when you open app.trinyx.fr.
 What the claim above is about is the fleet record itself, which is the only
 thing derived from this feature and the only thing it keeps.
 
-**Turning it off**, in `docker/.env.ce`:
+**Opting in or disabling the check**, in `docker/.env.ce`:
 
 ```bash
-# Keep the update check, stop identifying this install:
-CE_VERSIONCHECK_SENDINSTALLID=false
+# Optional: keep the update check and opt in to the anonymous fleet count:
+CE_VERSIONCHECK_SENDINSTALLID=true
 
 # Or drop the request entirely (no update badge either):
 CE_VERSIONCHECK_ENABLED=false

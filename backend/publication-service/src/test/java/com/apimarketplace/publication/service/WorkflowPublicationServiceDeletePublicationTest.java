@@ -78,7 +78,8 @@ class WorkflowPublicationServiceDeletePublicationTest {
                 new ObjectMapper(),
                 snapshotCloneService,
                 entitlementGuard,
-                authClient);
+                authClient,
+                new com.apimarketplace.publication.service.PublicationFileUrlResolver(new com.apimarketplace.common.storage.signing.ShowcaseUrlSigner("test-secret-32-bytes-long-enough-for-hmac")));
     }
 
     @Test

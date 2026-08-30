@@ -1,5 +1,7 @@
 package com.apimarketplace.publication.service.resource;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.core.type.TypeReference;
 import com.apimarketplace.datasource.client.dto.ColumnMappingSpecDto;
 import com.apimarketplace.datasource.client.dto.ColumnTypeDto;
 import com.apimarketplace.publication.config.OrchestratorInternalClient;
@@ -23,8 +25,12 @@ import java.util.Set;
  * <ul>
  *   <li><b>sourceConfig.file_path</b> - set when the DataSource's sourceType is FILE
  *       (see {@code DataSourceModels.FileConfig}).</li>
- *   <li><b>Row data, for FILE / IMAGE columns</b> - the row value is either a string
- *       path or a {@code {path,name,mimeType}} map, mirroring the DataInput shape.</li>
+ *   <li><b>Row data, for FILE / IMAGE columns</b> - the asset map
+ *       ({@code {_type:"file", id, path, url, name, mimeType, size}}), that same map serialized as a
+ *       JSON string (how the CRUD path persists it), or a bare URL string (how a legacy image cell
+ *       was stored). It is NOT a bare bucket key: assuming so is what made this pass the whole
+ *       serialized cell to {@code copyFile} as if it were a path, so nothing was ever copied and the
+ *       acquirer kept a cross-tenant reference that 404s.</li>
  * </ul>
  *
  * <p>Both are re-uploaded via {@link OrchestratorInternalClient#copyFile} under the
@@ -37,6 +43,8 @@ import java.util.Set;
  */
 @Service
 public class DataSourceFileCloneService {
+
+    private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper();
 
     private static final Logger logger = LoggerFactory.getLogger(DataSourceFileCloneService.class);
 
@@ -136,15 +144,46 @@ public class DataSourceFileCloneService {
     private Object copyValueIfFile(Object val, String tenantId, String scopeId, String organizationId) {
         if (val == null) return null;
         if (val instanceof String s) {
-            if (!isCopyable(s)) return val;
+            // A media cell is persisted as a JSON string on the CRUD write path. Rewrite it as a
+            // map and re-serialize, so the acquirer keeps the encoding the column already had.
+            String trimmed = s.trim();
+            if (trimmed.startsWith("{")) {
+                try {
+                    Map<String, Object> parsed = OBJECT_MAPPER.readValue(trimmed, new TypeReference<Map<String, Object>>() {});
+                    Object rewritten = copyValueIfFile(parsed, tenantId, scopeId, organizationId);
+                    if (rewritten == parsed) return val;
+                    return OBJECT_MAPPER.writeValueAsString(rewritten);
+                } catch (Exception e) {
+                    logger.warn("Row file value looked like JSON but could not be rewritten: {}", e.getMessage());
+                    return val;
+                }
+            }
+            if (!isCopyable(s)) {
+                // Symmetry with the map branch below: a cell addressing one of our files by URL
+                // carries no bucket key, so the bytes cannot follow the table to the acquirer.
+                if (s.startsWith("/api/")) {
+                    logger.warn("Row file value is a serving URL with no storage key - it cannot be "
+                            + "cloned across tenants and will not resolve for the acquirer: {}", s);
+                }
+                return val;
+            }
             String newPath = copyFile(s, tenantId, scopeId, STEP_ALIAS_ROW,
                     extractFileName(s), "application/octet-stream", organizationId);
             return newPath != null ? newPath : val;
         }
         if (val instanceof Map<?, ?> m) {
             Map<String, Object> fileMap = (Map<String, Object>) m;
-            Object pathRaw = fileMap.get("path");
-            if (!(pathRaw instanceof String pathStr) || !isCopyable(pathStr)) return val;
+            String pathStr = firstString(fileMap, "path", "storageKey", "s3Key", "key");
+            if (pathStr == null || !isCopyable(pathStr)) {
+                // No bucket key: the bytes cannot be copied, and keeping the publisher's id would
+                // hand the acquirer a reference that resolves in nobody's tenant. Say so, loudly,
+                // rather than shipping a cell that 404s with no trace.
+                if (fileMap.containsKey("id") || fileMap.containsKey("url")) {
+                    logger.warn("Row file reference has no storage key - it cannot be cloned across tenants "
+                            + "and will not resolve for the acquirer (id={})", fileMap.get("id"));
+                }
+                return val;
+            }
 
             String name = fileMap.get("name") != null ? fileMap.get("name").toString()
                     : extractFileName(pathStr);
@@ -160,8 +199,12 @@ public class DataSourceFileCloneService {
             // tenant; a leftover source id would 403/404 cross-tenant. Drop a stale id otherwise.
             if (result.get("newId") instanceof String newId) {
                 copy.put("id", newId);
+                // The URL embeds the id, so leaving the publisher's URL behind would undo the
+                // re-homing for every reader that trusts the stored url over the id.
+                copy.put("url", "/api/proxy/files/by-id/" + newId + "/raw?disposition=inline");
             } else {
                 copy.remove("id");
+                copy.remove("url");
             }
             return copy;
         }
@@ -198,9 +241,21 @@ public class DataSourceFileCloneService {
     private boolean isCopyable(String path) {
         if (path == null || path.isBlank()) return false;
         if (path.startsWith("http://") || path.startsWith("https://")) return false;
+        // Our own serving routes and inline data are not bucket keys. Treating them as keys is
+        // what made a legacy image cell ("/api/proxy/files/by-id/<uuid>/raw") get copied as if the
+        // route were an object path.
+        if (path.startsWith("/api/") || path.startsWith("data:") || path.contains("?")) return false;
         // Any scheme other than http(s) - e.g. s3://, gs:// - is treated as storage and copied.
         // Paths with no scheme are treated as bucket keys (the canonical internal form).
         return true;
+    }
+
+    /** First non-blank string among the given keys. */
+    private static String firstString(Map<String, Object> map, String... keys) {
+        for (String key : keys) {
+            if (map.get(key) instanceof String value && !value.isBlank()) return value;
+        }
+        return null;
     }
 
     private String extractFileName(String path) {

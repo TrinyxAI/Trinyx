@@ -34,6 +34,9 @@ public class ColumnValueCoercer {
     private static final Logger log = LoggerFactory.getLogger(ColumnValueCoercer.class);
     private static final ObjectMapper objectMapper = new ObjectMapper();
 
+    /** FileRef discriminator - the value every platform gate keys on. */
+    private static final String FILE_REF_TYPE = "file";
+
     private static final Set<String> TRUTHY = Set.of("true", "yes", "1", "on");
     private static final Set<String> FALSY_NULL = Set.of("", "null", "none", "nil");
     private static final Set<String> SENTIMENT_UP = Set.of("up", "positive", "yes", "good", "like", "thumbsup", "thumbs_up");
@@ -137,8 +140,9 @@ public class ColumnValueCoercer {
                 case RATING -> coerceRating(value, display);
                 case SENTIMENT -> coerceSentiment(value);
                 case PROGRESS -> coerceProgress(value, display);
-                case FILE -> coerceFile(value);
-                case IMAGE -> coerceImage(value);
+                // FILE and IMAGE are ONE value contract (the asset map). IMAGE survives only as a
+                // display variant, so a legacy image column keeps working and produces the same shape.
+                case FILE, IMAGE -> coerceAsset(value);
                 case EMAIL -> coerceEmail(value);
                 case PHONE -> coercePhone(value);
                 case URL -> coerceUrl(value);
@@ -601,143 +605,130 @@ public class ColumnValueCoercer {
         return clampWithWarning(rounded, 0, max, "progress", null);
     }
 
-    // ── FILE ─────────────────────────────────────────────────────────────
+    // -- ASSET (FILE / IMAGE) --------------------------------------------
     //
-    // Normalizes all known file formats to canonical: {url, name, mimeType, size}
-    // Input formats:
-    //   1. FileRef:          {_type:"file", path:"s3/key", name, mimeType, size}
-    //   2. DB flattened:     {file_url:"/api/proxy/files/proxy?key=...", file_name, content_type, file_size}
-    //   3. Generic upload:   {url, storageKey, fileName, mimeType, size}
-    //   4. Frontend cell:    {url, name, mimeType, size}  (already canonical)
-    //   5. URL string:       "https://..." or "/api/..."
-    //   6. JSON string:      any of the above serialized as JSON
+    // ONE canonical shape for every media cell, whatever it was built from:
+    //     {_type:"file", id?, path?, url, name?, mimeType?, size?, source_url?}
+    //
+    // {@code url} is the invariant: a cell that carries one is renderable. {@code id} (the
+    // storage.storage row UUID) is what makes it OURS - re-derivable from a by-id URL, which is how
+    // a legacy image cell (a bare URL string) upgrades itself on the next write.
+    //
+    // Accepted inputs:
+    //   1. Canonical asset       {_type:"file", id, url, ...}                (idempotent)
+    //   2. FileRef               {_type:"file", path, name, mimeType, size, id?}
+    //   3. Generic upload        {url, id, storageKey, fileName, mimeType, size}
+    //   4. Storage explorer row  {id, fileName, mimeType, sizeBytes, s3Key}  (the Files picker)
+    //   5. DB flattened          {file_url, file_name, content_type, file_size}
+    //   6. URL string            "https://...", "/api/proxy/files/by-id/<uuid>/raw", "data:..."
+    //   7. JSON string           any of the above, serialized
 
-    private CoercionResult coerceFile(Object value) {
+    /**
+     * Only a UUID is one of OUR storage ids. Third-party payloads carry an {@code id} too (an
+     * Airtable attachment is {@code {id:"attABC", url:"https://dl.airtable.com/..."}}), and minting
+     * {@code /api/proxy/files/by-id/attABC/raw} from it would replace a URL that works with one
+     * that resolves to nothing - and persist that. Read ids permissively, mint URLs only from ours.
+     */
+    private static final Pattern OUR_ID = Pattern.compile(
+            "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$");
+
+    /** {@code /api/proxy/files/by-id/<uuid>/raw} - the id is the only part worth keeping. */
+    private static final Pattern BY_ID_URL = Pattern.compile(
+            "/files/by-id/([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})(?:/raw)?");
+
+    /** Pre-cutover {@code /api/proxy/files/proxy?key=<urlencoded s3 key>}: dead since the opaque-URL
+     *  cutover, but the key it carries is what lets a repair find the row again. */
+    private static final Pattern LEGACY_KEY_URL = Pattern.compile("/files/proxy\\?key=([^&]+)");
+
+    private CoercionResult coerceAsset(Object value) {
         if (value instanceof Map<?, ?> map) {
-            return normalizeFileMap(map);
+            return normalizeAssetMap(map);
         }
         if (!(value instanceof String str)) return CoercionResult.ok(value);
 
         String trimmed = str.trim();
         if (trimmed.isEmpty()) return CoercionResult.ok(null);
 
-        // Try JSON parse
         if (trimmed.startsWith("{")) {
             try {
                 Map<String, Object> parsed = objectMapper.readValue(trimmed, new TypeReference<>() {});
-                return normalizeFileMap(parsed);
+                return normalizeAssetMap(parsed);
             } catch (Exception ignored) {
+                // Not JSON after all - fall through and judge it as a URL.
             }
         }
 
-        // Treat as URL string → build minimal map
         if (looksLikeUrl(trimmed)) {
-            Map<String, Object> fileMap = new LinkedHashMap<>();
-            fileMap.put("url", trimmed);
-            fileMap.put("name", extractFilename(trimmed));
-            return CoercionResult.ok(fileMap);
+            Map<String, Object> fromUrl = new LinkedHashMap<>();
+            fromUrl.put("url", trimmed);
+            return normalizeAssetMap(fromUrl);
         }
 
         return CoercionResult.withWarning(value, "Value does not look like a file URL: '" + trimmed + "'");
     }
 
     /**
-     * Normalize any known file map format to canonical {url, name, mimeType, size}.
+     * Normalize any known media map to the canonical asset shape. Idempotent: feeding it its own
+     * output returns the same map.
      */
-    private CoercionResult normalizeFileMap(Map<?, ?> map) {
-        // Already canonical format (has 'url' key)
-        if (map.containsKey("url") && !map.containsKey("_type") && !map.containsKey("storageKey")) {
-            return CoercionResult.ok(map);
-        }
-
-        Map<String, Object> normalized = new LinkedHashMap<>();
-
-        // Extract URL - try all known key names
+    private CoercionResult normalizeAssetMap(Map<?, ?> map) {
+        String rawId = extractStringKey(map, "id", "storage_id", "storageId", "fileId");
+        // A foreign id is not ours to address by; ignore it rather than storing it as if it were.
+        String id = (rawId != null && OUR_ID.matcher(rawId).matches()) ? rawId : null;
+        String path = extractStringKey(map, "path", "storageKey", "storage_key", "s3Key", "s3_key", "key");
         String url = extractStringKey(map, "url", "file_url", "href", "src", "link");
 
-        // FileRef format: {_type:"file", path:"s3/key", name, mimeType, size, id}
-        // Build the opaque URL from the storage-row id (no tenant id / s3 key).
-        if ("file".equals(map.get("_type"))) {
-            String opaque = opaqueFileUrl(map);
-            if (opaque != null) {
-                url = opaque;
-            }
+        // A by-id URL carries the id even when no id field was supplied - recover it, so a legacy
+        // image cell stops being an opaque string the moment it is rewritten.
+        if (id == null && url != null) {
+            Matcher m = BY_ID_URL.matcher(url);
+            if (m.find()) id = m.group(1);
+        }
+        // Same for the dead pre-cutover URL: the s3 key is the only handle left on those rows.
+        if (path == null && url != null) {
+            Matcher m = LEGACY_KEY_URL.matcher(url);
+            if (m.find()) path = urlDecode(m.group(1));
         }
 
-        // Generic upload format: {storageKey:"s3/key", url, fileName, mimeType, size, id}
-        if (map.containsKey("storageKey") && (url == null || url.isEmpty())) {
-            url = opaqueFileUrl(map);
-        }
+        // The id wins over any supplied URL: it is the only form that resolves without leaking the
+        // tenant id, and it re-points a cell whose stored URL is a dead generation.
+        String canonicalUrl = id != null ? opaqueFileUrlForId(id) : url;
 
-        if (url == null || url.isEmpty()) {
-            return CoercionResult.withWarning(map, "File map has no recognizable URL field");
-        }
+        Map<String, Object> normalized = new LinkedHashMap<>();
+        normalized.put("_type", FILE_REF_TYPE);
+        if (id != null) normalized.put("id", id);
+        if (path != null) normalized.put("path", path);
+        if (canonicalUrl != null && !canonicalUrl.isEmpty()) normalized.put("url", canonicalUrl);
 
-        normalized.put("url", url);
-
-        // Extract name - try all known key names
         String name = extractStringKey(map, "name", "file_name", "fileName", "filename");
+        if (name == null && path != null) name = extractFilename(path);
+        if (name == null && id == null && canonicalUrl != null) name = extractFilename(canonicalUrl);
         if (name != null) normalized.put("name", name);
 
-        // Extract mimeType - try all known key names
         String mimeType = extractStringKey(map, "mimeType", "content_type", "contentType", "mime_type", "mime");
         if (mimeType != null) normalized.put("mimeType", mimeType);
 
-        // Extract size - try all known key names
-        Number size = extractNumberKey(map, "size", "file_size", "fileSize");
+        Number size = extractNumberKey(map, "size", "file_size", "fileSize", "sizeBytes", "size_bytes");
         if (size != null) normalized.put("size", size);
 
-        // Preserve source_url if present (from DownloadFileOutputSchemaMapper)
         String sourceUrl = extractStringKey(map, "source_url", "sourceUrl");
         if (sourceUrl != null) normalized.put("source_url", sourceUrl);
 
+        if (canonicalUrl == null || canonicalUrl.isEmpty()) {
+            // Keep the value rather than dropping it: the path is what a repair needs to find the row.
+            return CoercionResult.withWarning(normalized,
+                    "File reference has no id and no URL - it cannot be displayed"
+                            + (path != null ? " (storage key: " + path + ")" : ""));
+        }
         return CoercionResult.ok(normalized);
     }
 
-    // ── IMAGE ────────────────────────────────────────────────────────────
-    //
-    // Normalizes to a URL string (ImageCell.tsx stores/displays URL directly).
-    // Accepts same input formats as FILE, but extracts only the URL.
-
-    private CoercionResult coerceImage(Object value) {
-        if (value instanceof Map<?, ?> map) {
-            return extractImageUrl(map);
+    private static String urlDecode(String encoded) {
+        try {
+            return java.net.URLDecoder.decode(encoded, java.nio.charset.StandardCharsets.UTF_8);
+        } catch (Exception e) {
+            return encoded;
         }
-        if (!(value instanceof String str)) return CoercionResult.ok(value);
-
-        String trimmed = str.trim();
-        if (trimmed.isEmpty()) return CoercionResult.ok(null);
-
-        // Try JSON parse to extract url field
-        if (trimmed.startsWith("{")) {
-            try {
-                Map<String, Object> parsed = objectMapper.readValue(trimmed, new TypeReference<>() {});
-                return extractImageUrl(parsed);
-            } catch (Exception ignored) {
-            }
-        }
-
-        // Accept as URL string
-        if (looksLikeUrl(trimmed)) return CoercionResult.ok(trimmed);
-
-        return CoercionResult.withWarning(trimmed, "Value does not look like an image URL: '" + trimmed + "'");
-    }
-
-    /**
-     * Extract a displayable URL from any known file map format.
-     */
-    private CoercionResult extractImageUrl(Map<?, ?> map) {
-        // Direct url field
-        String url = extractStringKey(map, "url", "file_url", "href", "src", "link");
-
-        // FileRef / generic upload: build the opaque URL from the storage-row id (no tenant id / key)
-        if ((url == null || url.isEmpty())
-                && ("file".equals(map.get("_type")) || map.containsKey("storageKey"))) {
-            url = opaqueFileUrl(map);
-        }
-
-        if (url != null && !url.isEmpty()) return CoercionResult.ok(url);
-        return CoercionResult.withWarning(map, "Image map has no recognizable URL field");
     }
 
     // ── EMAIL ────────────────────────────────────────────────────────────
@@ -1022,9 +1013,12 @@ public class ColumnValueCoercer {
      */
     private String opaqueFileUrl(Map<?, ?> map) {
         String id = extractStringKey(map, "id");
-        return (id != null && !id.isEmpty())
-                ? "/api/proxy/files/by-id/" + id + "/raw?disposition=inline"
-                : null;
+        return (id != null && !id.isEmpty()) ? opaqueFileUrlForId(id) : null;
+    }
+
+    /** Same URL, built from a bare id. */
+    private String opaqueFileUrlForId(String id) {
+        return "/api/proxy/files/by-id/" + id + "/raw?disposition=inline";
     }
 
     // ── File-like detection ─────────────────────────────────────────────

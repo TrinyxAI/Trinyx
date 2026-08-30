@@ -2,7 +2,6 @@
 
 import React, { useState, useEffect, useCallback, useRef } from "react";
 import { createPortal } from "react-dom";
-import { useRouter } from "next/navigation";
 import { ChevronDown, Pencil, Check, X, Save, Pin, PinOff } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
@@ -11,6 +10,8 @@ import { orchestratorApi } from "@/lib/api";
 import { formatUtcDateTime } from "@/lib/utils/dateFormatters";
 import type { WorkflowPlanVersion } from "@/lib/api/orchestrator/types";
 import { useTranslations } from "next-intl";
+import { isEventForWorkflow } from "@/lib/workflow/workflowEventScope";
+import { useEnterRunMode } from "@/hooks/useEnterRunMode";
 
 interface WorkflowSaveWithVersionsProps {
   workflowId: string;
@@ -23,6 +24,13 @@ interface WorkflowSaveWithVersionsProps {
   isAgentStreaming?: boolean;
   /** When true, the workflow is in run mode - reset to latest version on transition */
   isRunMode?: boolean;
+  /**
+   * Which way the version dropdown opens. 'below' suits a top header; 'above' is
+   * for a control docked at the BOTTOM of its container (the side panel's
+   * sub-tab bar), where a downward dropdown would open past the panel's last row
+   * and be clipped away entirely.
+   */
+  placement?: 'below' | 'above';
 }
 
 export const WorkflowSaveWithVersions: React.FC<WorkflowSaveWithVersionsProps> = ({
@@ -33,9 +41,10 @@ export const WorkflowSaveWithVersions: React.FC<WorkflowSaveWithVersionsProps> =
   desktop = true,
   isAgentStreaming = false,
   isRunMode = false,
+  placement = 'below',
 }) => {
   const t = useTranslations();
-  const router = useRouter();
+  const enterRunMode = useEnterRunMode(workflowId);
   const [showVersions, setShowVersions] = useState(false);
   const [versions, setVersions] = useState<WorkflowPlanVersion[]>([]);
   const [currentVersion, setCurrentVersion] = useState<number>(0);
@@ -45,7 +54,7 @@ export const WorkflowSaveWithVersions: React.FC<WorkflowSaveWithVersionsProps> =
     activeVersionRef.current = v;
     _setActiveVersion(v);
     if (v !== null) {
-      window.dispatchEvent(new CustomEvent('workflowActiveVersionChange', { detail: { version: v } }));
+      window.dispatchEvent(new CustomEvent('workflowActiveVersionChange', { detail: { version: v, workflowId } }));
     }
   };
   const [loading, setLoading] = useState(false);
@@ -120,11 +129,15 @@ export const WorkflowSaveWithVersions: React.FC<WorkflowSaveWithVersionsProps> =
   // dropdown's pin badge stays stale while it's open.
   useEffect(() => {
     const handler = (e: Event) => {
-      setPinnedVersion((e as CustomEvent).detail?.pinnedVersion ?? null);
+      const detail = (e as CustomEvent).detail;
+      // Two of these controls can be on screen at once (page header + side
+      // panel), each for its own workflow: a pin badge must not track the other.
+      if (!isEventForWorkflow(detail, workflowId)) return;
+      setPinnedVersion(detail?.pinnedVersion ?? null);
     };
     window.addEventListener('workflowPinnedVersionChange', handler);
     return () => window.removeEventListener('workflowPinnedVersionChange', handler);
-  }, []);
+  }, [workflowId]);
 
   // Close on click outside (same pattern as model selector)
   useEffect(() => {
@@ -155,8 +168,13 @@ export const WorkflowSaveWithVersions: React.FC<WorkflowSaveWithVersionsProps> =
     try {
       const result = await orchestratorApi.restoreVersion(workflowId, version);
       if (result.success && result.plan) {
+        // Named, and it MUST stay named: the listener re-imports this plan into
+        // the canvas it is mounted on. Since the side panel can mount a second
+        // canvas for a DIFFERENT workflow, an unnamed restore loaded this
+        // workflow's old version into that one, and the next save there
+        // persisted it - silent cross-workflow data loss.
         window.dispatchEvent(new CustomEvent('workflowPlanRestore', {
-          detail: { plan: result.plan }
+          detail: { plan: result.plan, workflowId }
         }));
         setActiveVersion(version);
         setShowVersions(false);
@@ -194,7 +212,7 @@ export const WorkflowSaveWithVersions: React.FC<WorkflowSaveWithVersionsProps> =
       if (result.success) {
         setPinnedVersion(result.pinnedVersion);
         window.dispatchEvent(new CustomEvent('workflowPinnedVersionChange', {
-          detail: { pinnedVersion: result.pinnedVersion }
+          detail: { pinnedVersion: result.pinnedVersion, workflowId }
         }));
 
         // Pinning a version (not unpinning) freezes that plan as production:
@@ -209,7 +227,9 @@ export const WorkflowSaveWithVersions: React.FC<WorkflowSaveWithVersionsProps> =
         // as getPinnedWorkflowRun. Falls through silently when the field is
         // null (unpin or no production run yet).
         if (result.productionRunIdPublic) {
-          router.push(`/app/workflow/${workflowId}/run/${result.productionRunIdPublic}`);
+          // From the side panel this binds in place instead of routing: the
+          // control is mounted next to a page the user asked to stay on.
+          enterRunMode(result.productionRunIdPublic);
         }
       }
     } catch (err: any) {
@@ -289,7 +309,9 @@ export const WorkflowSaveWithVersions: React.FC<WorkflowSaveWithVersionsProps> =
 
       {/* Version dropdown - same style as model selector */}
       {showVersions && (
-        <div className="absolute top-full right-0 mt-2 w-72 bg-theme-primary border border-theme rounded-2xl shadow-lg z-50 p-2">
+        <div className={`absolute right-0 w-72 bg-theme-primary border border-theme rounded-2xl shadow-lg z-50 p-2 ${
+          placement === 'above' ? 'bottom-full mb-2' : 'top-full mt-2'
+        }`}>
           {/* Header */}
           <div className="px-3 py-2">
             <div className="text-sm font-medium text-theme-primary">{t('versionHistory.title')}</div>

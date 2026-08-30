@@ -7,6 +7,7 @@ import { useTranslations } from 'next-intl';
 import { cn } from '@/lib/utils';
 import { canvasNodeButtonClass, canvasNodeButtonShimmerRadiusClass } from '@/components/ui/canvas-chrome';
 import { useCanMutateInCurrentOrg } from '@/lib/stores/current-org-store';
+import { useWorkflowMode } from '@/contexts/WorkflowModeContext';
 import { usePortalMenu } from '../../hooks/usePortalMenu';
 import type { TriggerButtonVariant } from '../NodePlayButton';
 
@@ -52,6 +53,9 @@ export function TriggerEditLaunchButton({ nodeId, variant, borderColor }: Trigge
   // run auto-saves the plan and the backend 403s VIEWER, so the launcher hides
   // (useWorkflowExecution also no-ops the events as a second line of defense).
   const canMutate = useCanMutateInCurrentOrg();
+  // Names the workflow on both start events: several canvases can be mounted at
+  // once (the right side panel embeds its own), and an unscoped start ran them all.
+  const { workflowId } = useWorkflowMode();
   // Anchored just below the button, centered on its horizontal axis.
   const { open, isVisible, toggle, close, triggerRef, menuRef, menuStyle } = usePortalMenu('below');
 
@@ -60,15 +64,15 @@ export function TriggerEditLaunchButton({ nodeId, variant, borderColor }: Trigge
     // Auto mode: enter run mode and fire THIS trigger directly. handleStartEvent
     // fires only the selected trigger (no-payload types) when startFromNode is set;
     // the header run button sends no startFromNode and keeps firing all root triggers.
-    window.dispatchEvent(new CustomEvent('workflowViewStart', { detail: { startFromNode: nodeId } }));
-  }, [nodeId, close]);
+    window.dispatchEvent(new CustomEvent('workflowViewStart', { detail: { workflowId, startFromNode: nodeId } }));
+  }, [nodeId, close, workflowId]);
 
   const startStepByStep = React.useCallback(() => {
     close();
     window.dispatchEvent(new CustomEvent('workflowStartStepByStep', {
-      detail: { startFromNode: nodeId },
+      detail: { workflowId, startFromNode: nodeId },
     }));
-  }, [nodeId, close]);
+  }, [nodeId, close, workflowId]);
 
   // After every hook (rules of hooks): read-only VIEWERs get no launcher at all.
   if (!canMutate) return null;

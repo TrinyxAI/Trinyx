@@ -191,3 +191,55 @@ describe('ChatHeader desktop dock buttons', () => {
     expect(rightBtn()).toHaveAttribute('aria-pressed', 'false');
   });
 });
+
+describe('ChatHeader dock buttons with a DETACHED panel', () => {
+  it('marks neither dock button pressed - a detached panel is on no dock', () => {
+    window.localStorage.setItem(POSITION_KEY, 'floating');
+    renderHeader({ isSidePanelOpen: true });
+    expect(rightBtn()).toHaveAttribute('aria-pressed', 'false');
+    expect(bottomBtn()).toHaveAttribute('aria-pressed', 'false');
+  });
+
+  it('offers "open here", never "close", on both buttons', () => {
+    window.localStorage.setItem(POSITION_KEY, 'floating');
+    renderHeader({ isSidePanelOpen: true });
+    expect(rightBtn()).toHaveAttribute('title', 'sidePanel.openRight');
+    expect(bottomBtn()).toHaveAttribute('title', 'sidePanel.openBottom');
+  });
+
+  it('open + right click: re-docks right WITHOUT toggling the panel closed', () => {
+    // The old rule read "not right => bottom", so a detached panel counted as the
+    // active bottom dock and the right button closed it instead of re-docking it.
+    window.localStorage.setItem(POSITION_KEY, 'floating');
+    renderHeader({ isSidePanelOpen: true });
+    act(() => rightBtn().click());
+    expect(window.localStorage.getItem(POSITION_KEY)).toBe('right');
+    expect(onToggle).not.toHaveBeenCalled();
+  });
+
+  it('open + bottom click: re-docks bottom WITHOUT toggling the panel closed', () => {
+    window.localStorage.setItem(POSITION_KEY, 'floating');
+    renderHeader({ isSidePanelOpen: true });
+    act(() => bottomBtn().click());
+    expect(window.localStorage.getItem(POSITION_KEY)).toBe('bottom-full');
+    expect(onToggle).not.toHaveBeenCalled();
+  });
+
+  it('keeps the compact toggle on the right-dock glyph while detached', () => {
+    // The single mobile toggle mirrors the ACTIVE dock, and the icon is derived
+    // from "is this a bottom variant" - a rule that used to read "not right", so a
+    // detached panel showed the bottom glyph while sitting on no dock at all.
+    window.localStorage.setItem(POSITION_KEY, 'floating');
+    renderHeader({ isSidePanelOpen: true });
+    expect(document.querySelectorAll('.lucide-panel-bottom').length, 'only the bottom DOCK button')
+      .toBe(1);
+  });
+
+  it('closed + right click: re-docks AND opens', () => {
+    window.localStorage.setItem(POSITION_KEY, 'floating');
+    renderHeader();
+    act(() => rightBtn().click());
+    expect(window.localStorage.getItem(POSITION_KEY)).toBe('right');
+    expect(onToggle).toHaveBeenCalledTimes(1);
+  });
+});

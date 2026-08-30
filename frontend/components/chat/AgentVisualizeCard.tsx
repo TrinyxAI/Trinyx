@@ -56,7 +56,10 @@ export function AgentVisualizeCard({ agentId, title, onDelete }: AgentVisualizeC
   }, [agentId]);
 
   const tabId = `agent-${agentId}`;
-  const isTabActive = sidePanel?.isOpen && sidePanel?.activeTabId === tabId;
+  // `isForward`, not `isOpen`: a detached window collapsed to a strip is open and
+  // shows nothing, so this card would paint its "click to close" state over a panel
+  // nobody can see - and the click would then destroy the tab instead of revealing it.
+  const isTabActive = sidePanel?.isForward && sidePanel?.activeTabId === tabId;
 
   const handleOpenAgent = () => {
     window.open(`/app/agent?id=${agentId}`, '_blank');

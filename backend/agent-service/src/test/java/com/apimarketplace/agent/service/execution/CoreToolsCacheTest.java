@@ -1,6 +1,7 @@
 package com.apimarketplace.agent.service.execution;
 
 import com.apimarketplace.agent.domain.ToolDefinition;
+import com.apimarketplace.agent.domain.ToolParameter;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -99,6 +100,34 @@ class CoreToolsCacheTest {
             assertThat(tools).hasSize(3); // only core tools, not unknown_tool
             assertThat(tools.stream().map(ToolDefinition::name))
                 .containsExactlyInAnyOrder("agent", "workflow", "table");
+        }
+
+        @Test
+        @DisplayName("should keep an array parameter's item type, which decides what the model is told to send")
+        void shouldKeepArrayItemTypeFromTheWire() {
+            // The tool declares the item type; this payload is how it travels; and the schema this
+            // service hands the model is rebuilt from what is parsed here. Dropping it turns an
+            // array of objects back into an array of strings for every CLI session, with nothing
+            // failing anywhere in between.
+            Map<String, Object> objects = new HashMap<>(Map.of(
+                "name", "rows", "type", "array", "description", "Rows", "required", false));
+            objects.put("itemType", "object");
+            Map<String, Object> strings = new HashMap<>(Map.of(
+                "name", "tags", "type", "array", "description", "Tags", "required", false));
+
+            ResponseEntity<Map> response = new ResponseEntity<>(wrapTools(List.of(Map.of(
+                "name", "table", "description", "Table tool", "id", "table-1",
+                "parameters", List.of(objects, strings)))), HttpStatus.OK);
+            when(restTemplate.exchange(anyString(), eq(HttpMethod.GET), any(HttpEntity.class), eq(Map.class)))
+                .thenReturn(response);
+
+            cache.refreshCoreTools();
+
+            List<ToolParameter> params = cache.getCoreTools().get(0).parameters();
+            assertThat(params).extracting(ToolParameter::name).containsExactly("rows", "tags");
+            assertThat(params.get(0).itemType()).isEqualTo("object");
+            // Absent on the wire means the reader's default, not a value invented here.
+            assertThat(params.get(1).itemType()).isNull();
         }
 
         @Test

@@ -34,6 +34,12 @@ export interface AppVersionInfo {
   securityFix: boolean;
   /** ISO-8601 timestamp of the last successful update-feed check, or null. */
   checkedAt: string | null;
+  /**
+   * Whether this install actually presents its anonymous install id on the update check.
+   * NOT implied by selfHosted: self-hosted enterprise runs no poller, and either opt-out removes
+   * the identity. The disclosure on the version card is driven by this and not by the edition.
+   */
+  identifiesInstall: boolean;
 }
 
 export interface UseAppVersionResult {

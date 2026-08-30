@@ -51,6 +51,7 @@ vi.mock('@/components/marketplace/PublicationInfoPanel', () => ({ PublicationInf
 vi.mock('@/lib/hooks/useOrgScopedReset', () => ({ useOrgScopedReset: () => undefined }));
 vi.mock('@/lib/stores/interface-pagination-store', () => ({
   useInterfacePaginationStore: { getState: () => ({ setCarouselIndex: vi.fn() }) },
+  carouselKeyFor: (workflowId?: string | null, runId?: string | null) => `${workflowId ?? ''}:${runId ?? ''}`,
 }));
 vi.mock('@/app/workflows/builder/utils/labelNormalizer', () => ({ normalizeLabel: (s: string) => s }));
 vi.mock('../workflow/WorkflowLoadingState', () => ({ WorkflowLoadingState: () => null }));

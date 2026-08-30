@@ -306,9 +306,14 @@ public class TemplateEngine implements TemplateResolver {
             Object evaluated = evaluateExpressionWithContext(innerExpression, context);
 
             String replacement;
+            String fileUrl = com.apimarketplace.orchestrator.domain.file.FileRef.displayUrl(evaluated);
             if (evaluated == null) {
                 replacement = "";
                 logger.warn("Expression not resolved: {{}}", innerExpression);
+            } else if (fileUrl != null) {
+                // A file-shaped value in a string context is its URL, never its JSON. See
+                // FileRef.displayUrl: JSON here silently breaks every <img src="{{col}}">.
+                replacement = fileUrl;
             } else if (evaluated instanceof Map || evaluated instanceof java.util.Collection
                        || evaluated.getClass().isArray()) {
                 // Map/List/array → JSON literal so embedding in a JSON template stays parseable.
@@ -840,8 +845,12 @@ public class TemplateEngine implements TemplateResolver {
             Object evaluated = spelEvaluator.evaluateWithMap(innerExpression, context, pathNavigator);
 
             String replacement;
+            String fileUrl = com.apimarketplace.orchestrator.domain.file.FileRef.displayUrl(evaluated);
             if (evaluated == null) {
                 replacement = "";
+            } else if (fileUrl != null) {
+                // Mirror of resolveExpressions: a file-shaped value interpolates as its URL.
+                replacement = fileUrl;
             } else if (evaluated instanceof Map || evaluated instanceof java.util.Collection
                        || evaluated.getClass().isArray()) {
                 // Mirror of resolveExpressions: encode Map/List/array as JSON, not Java toString.

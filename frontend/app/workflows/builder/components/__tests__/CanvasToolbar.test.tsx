@@ -58,6 +58,9 @@ const baseProps = () => ({
   isSettingsOpen: false,
   nodes: [],
   showRunControls: false,
+  // This file is about the RUN controls; the relations menu has its own cases in
+  // CanvasToolbar.chromeStyle.test.tsx, and leaving it off keeps these counts honest.
+  showRelations: false,
   workflowId: 'wf-1',
   onZoomIn: vi.fn(),
   onZoomOut: vi.fn(),

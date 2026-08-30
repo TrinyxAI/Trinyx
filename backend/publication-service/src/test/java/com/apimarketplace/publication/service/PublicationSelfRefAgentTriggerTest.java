@@ -54,7 +54,8 @@ class PublicationSelfRefAgentTriggerTest {
                 mock(PublicationReceiptRepository.class), mock(PublicationReviewRepository.class),
                 mock(OrchestratorInternalClient.class), mock(AgentClient.class), mock(InterfaceClient.class),
                 mock(DataSourceClient.class), mock(StorageBreakdownService.class), new ObjectMapper(),
-                mock(SnapshotCloneService.class), mock(EntitlementGuard.class), mock(AuthClient.class));
+                mock(SnapshotCloneService.class), mock(EntitlementGuard.class), mock(AuthClient.class),
+                new com.apimarketplace.publication.service.PublicationFileUrlResolver(new com.apimarketplace.common.storage.signing.ShowcaseUrlSigner("test-secret-32-bytes-long-enough-for-hmac")));
         cloneService = new SnapshotCloneService(
                 mock(OrchestratorInternalClient.class), mock(AgentClient.class), mock(InterfaceClient.class),
                 mock(DataSourceClient.class), mock(StorageBreakdownService.class), new ObjectMapper(),

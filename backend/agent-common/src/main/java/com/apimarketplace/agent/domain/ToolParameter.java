@@ -70,5 +70,16 @@ public record ToolParameter(
     /**
      * Pattern (regex) for string validation
      */
-    String pattern
+    String pattern,
+
+    /**
+     * What one element of an array parameter is, as a JSON Schema type name.
+     *
+     * <p>Only read for {@code type = "array"}, and null means "string", which is what every array
+     * parameter emitted before this field existed. It exists because the emitted schema is the
+     * only description of a parameter a strict provider will honour: a parameter that carries
+     * objects while its schema says its elements are strings can be refused or stringified before
+     * the call is ever made, and the prose in the description cannot override it.
+     */
+    String itemType
 ) {}

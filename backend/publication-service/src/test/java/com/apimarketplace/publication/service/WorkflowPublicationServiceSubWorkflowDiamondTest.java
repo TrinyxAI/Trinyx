@@ -81,7 +81,8 @@ class WorkflowPublicationServiceSubWorkflowDiamondTest {
         service = new WorkflowPublicationService(
                 publicationRepository, snapshotVersionRepository, receiptRepository, reviewRepository,
                 orchestratorClient, agentClient, interfaceClient, dataSourceClient, breakdownService,
-                new ObjectMapper(), snapshotCloneService, entitlementGuard, authClient);
+                new ObjectMapper(), snapshotCloneService, entitlementGuard, authClient,
+                new com.apimarketplace.publication.service.PublicationFileUrlResolver(new com.apimarketplace.common.storage.signing.ShowcaseUrlSigner("test-secret-32-bytes-long-enough-for-hmac")));
     }
 
     @Test

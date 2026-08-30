@@ -15,7 +15,9 @@ import { render } from '@testing-library/react';
 let mockMode: { isRunMode: boolean; isPreviewOnly: boolean };
 let mockPathname: string;
 // null => outside a SidePanelProvider (useSidePanelSafe returns null).
-let mockSidePanelValue: { isOpen: boolean } | null;
+// The gate asks `isForward`: the composer must come back when the panel is
+// shaded, since a strip shows no chat to duplicate.
+let mockSidePanelValue: { isOpen: boolean; isForward: boolean } | null;
 
 vi.mock('next/navigation', () => ({
   usePathname: () => mockPathname,
@@ -113,7 +115,7 @@ beforeEach(() => {
   };
   mockMode = { isRunMode: false, isPreviewOnly: false };
   mockPathname = '/app/workflow/wf-1';
-  mockSidePanelValue = { isOpen: false };
+  mockSidePanelValue = { isOpen: false, isForward: false };
 });
 
 const baseProps = () => ({
@@ -132,15 +134,24 @@ const baseProps = () => ({
 
 describe('BuilderCanvas - empty-canvas hero hidden while the right side panel is open', () => {
   it('shows the hero on the workflow page when the side panel is CLOSED', () => {
-    mockSidePanelValue = { isOpen: false };
+    mockSidePanelValue = { isOpen: false, isForward: false };
     const { queryAllByTestId } = render(<BuilderCanvas {...baseProps()} />);
     expect(queryAllByTestId('empty-canvas-chat').length).toBeGreaterThan(0);
   });
 
   it('hides the hero on the workflow page when the side panel is OPEN', () => {
-    mockSidePanelValue = { isOpen: true };
+    mockSidePanelValue = { isOpen: true, isForward: true };
     const { queryAllByTestId } = render(<BuilderCanvas {...baseProps()} />);
     expect(queryAllByTestId('empty-canvas-chat')).toHaveLength(0);
+  });
+
+  it('brings the hero BACK when the panel is open but shaded to a strip', () => {
+    // The gate exists so this composer does not duplicate the panel's own AI Chat
+    // tab. A collapsed window shows no chat, so hiding the composer leaves an empty
+    // canvas with no way to start and nothing on screen explaining why.
+    mockSidePanelValue = { isOpen: true, isForward: false };
+    const { queryAllByTestId } = render(<BuilderCanvas {...baseProps()} />);
+    expect(queryAllByTestId('empty-canvas-chat').length).toBeGreaterThan(0);
   });
 
   it('shows the hero when rendered outside a SidePanelProvider (useSidePanelSafe returns null)', () => {

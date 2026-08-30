@@ -42,6 +42,14 @@ import java.time.Instant;
  * @param releaseUrl     release-notes link for the latest version, or {@code null}.
  * @param securityFix    whether the available update carries a security fix (false when no update).
  * @param checkedAt      ISO-8601 timestamp of the last successful update-feed check, or {@code null}.
+ * @param identifiesInstall whether this install is CONFIGURED to present its anonymous install id
+ *                       on the update check. Configuration, not the wire: a poll still goes out
+ *                       unidentified if the id cannot be read (database down, row absent), and the
+ *                       card cannot know that. It is NOT implied by {@code selfHosted}: a self-hosted
+ *                       enterprise install (keycloak mode) runs no poller at all, and either
+ *                       opt-out removes the identity bean. The UI needs the real answer, because a
+ *                       notice telling an operator who turned it off that they are being counted
+ *                       is worse than no notice.
  */
 public record VersionInfo(
         String version,
@@ -54,7 +62,8 @@ public record VersionInfo(
         String latestVersion,
         String releaseUrl,
         boolean securityFix,
-        String checkedAt) {
+        String checkedAt,
+        boolean identifiesInstall) {
 
     private static final String UNKNOWN_VERSION = "dev";
 
@@ -83,7 +92,8 @@ public record VersionInfo(
      */
     public static VersionInfo from(AppEditionProvider editionProvider,
                                    GitProperties git,
-                                   VersionUpdateView update) {
+                                   VersionUpdateView update,
+                                   boolean identifiesInstall) {
         String gitSha = git != null ? git.getShortCommitId() : null;
         // GitProperties normalises build.time to epoch millis internally; getInstant
         // gives it back as an Instant, whose toString() is ISO-8601 UTC.
@@ -101,7 +111,8 @@ public record VersionInfo(
                 update.latestVersion(),
                 update.releaseUrl(),
                 update.securityFix(),
-                update.checkedAt());
+                update.checkedAt(),
+                identifiesInstall);
     }
 
     /**

@@ -1,5 +1,6 @@
 package com.apimarketplace.orchestrator.services.publication;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.apimarketplace.interfaces.client.InterfaceClient;
 import com.apimarketplace.orchestrator.domain.WorkflowRunEntity;
 import com.apimarketplace.orchestrator.domain.execution.DagState;
@@ -9,9 +10,11 @@ import com.apimarketplace.orchestrator.domain.workflow.ExecutionMode;
 import com.apimarketplace.orchestrator.domain.workflow.RunStatus;
 import com.apimarketplace.orchestrator.repository.SignalWaitRepository;
 import com.apimarketplace.orchestrator.repository.WorkflowEpochRepository;
+import com.apimarketplace.orchestrator.persistence.WorkflowStepDataRepository;
 import com.apimarketplace.orchestrator.repository.WorkflowRunRepository;
 import com.apimarketplace.orchestrator.services.InterfaceRenderService;
 import com.apimarketplace.orchestrator.services.StepAggregationService;
+import com.apimarketplace.orchestrator.services.StorageSkeletonService;
 import com.apimarketplace.orchestrator.services.epoch.WorkflowEpochService;
 import com.apimarketplace.orchestrator.services.resume.WorkflowResumeService;
 import com.apimarketplace.orchestrator.services.resume.WorkflowRunState;
@@ -58,6 +61,8 @@ class ShowcaseSnapshotBuilderScrubTest {
     @Mock private SignalWaitRepository signalWaitRepository;
     @Mock private InterfaceRenderService interfaceRenderService;
     @Mock private InterfaceClient interfaceClient;
+    @Mock private WorkflowStepDataRepository workflowStepDataRepository;
+    @Mock private StorageSkeletonService storageSkeletonService;
 
     @Test
     @DisplayName("scrubMap redacts values whose key matches a credential hint, recursively")
@@ -117,7 +122,10 @@ class ShowcaseSnapshotBuilderScrubTest {
                 stepAggregationService,
                 signalWaitRepository,
                 interfaceRenderService,
-                interfaceClient);
+                interfaceClient,
+                workflowStepDataRepository,
+                storageSkeletonService,
+                new ObjectMapper());
 
         Optional<Map<String, Object>> snapshot = builder.capture("run-org", "tenant-owner", null, null);
 
@@ -168,7 +176,10 @@ class ShowcaseSnapshotBuilderScrubTest {
                 stepAggregationService,
                 signalWaitRepository,
                 interfaceRenderService,
-                interfaceClient);
+                interfaceClient,
+                workflowStepDataRepository,
+                storageSkeletonService,
+                new ObjectMapper());
 
         Optional<Map<String, Object>> snapshot = builder.capture("run-org", "tenant-caller", "org-acme", 2);
 
@@ -237,11 +248,20 @@ class ShowcaseSnapshotBuilderScrubTest {
                 stepAggregationService,
                 signalWaitRepository,
                 interfaceRenderService,
-                interfaceClient);
+                interfaceClient,
+                workflowStepDataRepository,
+                storageSkeletonService,
+                new ObjectMapper());
 
         Optional<Map<String, Object>> snapshot = builder.capture("run-epochs", "tenant-caller", "org-acme", 2);
 
         assertThat(snapshot).isPresent();
+        // The tenant that OWNS the run, which here is not the caller. publication-service
+        // uses it to tell a file the publication may legitimately copy from one a publisher
+        // merely named in a hand-written value, so the capture has to state it: nobody
+        // downstream can work it out, and inferring it from the path being checked is what
+        // the guard exists to avoid.
+        assertThat(snapshot.get()).containsEntry("_sourceTenantId", "tenant-owner");
         @SuppressWarnings("unchecked")
         Map<String, Object> runState = (Map<String, Object>) snapshot.get().get("runState");
         @SuppressWarnings("unchecked")
@@ -311,7 +331,10 @@ class ShowcaseSnapshotBuilderScrubTest {
                 stepAggregationService,
                 signalWaitRepository,
                 interfaceRenderService,
-                interfaceClient);
+                interfaceClient,
+                workflowStepDataRepository,
+                storageSkeletonService,
+                new ObjectMapper());
 
         Optional<Map<String, Object>> snapshot = builder.capture("run-renumber", "tenant-caller", "org-acme", 7);
 
@@ -355,7 +378,10 @@ class ShowcaseSnapshotBuilderScrubTest {
                 stepAggregationService,
                 signalWaitRepository,
                 interfaceRenderService,
-                interfaceClient);
+                interfaceClient,
+                workflowStepDataRepository,
+                storageSkeletonService,
+                new ObjectMapper());
 
         Optional<Map<String, Object>> snapshot = builder.capture("run-invalid-epoch", "tenant-caller", "org-acme", 99);
 

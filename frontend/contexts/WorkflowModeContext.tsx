@@ -3,6 +3,7 @@
 import React, { createContext, useContext, useState, useEffect, useCallback, useMemo, useRef, ReactNode } from 'react';
 import { usePathname, useRouter } from 'next/navigation';
 import { orchestratorApi } from '@/lib/api';
+import { isEventForWorkflow } from '@/lib/workflow/workflowEventScope';
 import { usePendingInterfacesStore } from '@/lib/stores/pending-interfaces-store';
 import { useInterfacePaginationStore } from '@/lib/stores/interface-pagination-store';
 import { VIEWING_EPOCH_EVENT, shouldAdoptEpochEvent, type EpochEventDetail } from '@/lib/workflow/epochEventScope';
@@ -156,17 +157,29 @@ export function WorkflowModeProvider({ children, workflowId, initialRunId, readO
   // WorkflowVersionHistory / useDirtyState / BuilderCanvas.
   useEffect(() => {
     const onPin = (e: Event) => {
-      setPinnedVersion((e as CustomEvent).detail?.pinnedVersion ?? null);
+      const detail = (e as CustomEvent).detail;
+      if (!isEventForWorkflow(detail, workflowId)) return;
+      setPinnedVersion(detail?.pinnedVersion ?? null);
     };
     const onActive = (e: Event) => {
-      const v = (e as CustomEvent).detail?.version;
+      const detail = (e as CustomEvent).detail;
+      // Not cosmetic: `activeVersion` is what the pin buttons pin
+      // (`versionToPin = activeVersion ?? currentVersion`), so adopting another
+      // workflow's version number here pins the wrong plan.
+      if (!isEventForWorkflow(detail, workflowId)) return;
+      const v = detail?.version;
       setActiveVersion(typeof v === 'number' ? v : null);
     };
     const onDirty = (e: Event) => {
-      setWorkflowDirty(!!(e as CustomEvent).detail?.isDirty);
+      const detail = (e as CustomEvent).detail;
+      // Another canvas's dirty state is not ours: the right side panel mounts its
+      // own, and unscoped this provider adopted whichever edited last.
+      if (!isEventForWorkflow(detail, workflowId)) return;
+      setWorkflowDirty(!!detail?.isDirty);
     };
     const onSaveComplete = async (e: Event) => {
       const detail = (e as CustomEvent).detail;
+      if (!isEventForWorkflow(detail, workflowId)) return;
       if (!detail?.success || !workflowId) return;
       try {
         const data = await orchestratorApi.listVersions(workflowId);
@@ -268,7 +281,19 @@ export function WorkflowModeProvider({ children, workflowId, initialRunId, readO
       const fromRunId = localRunSwitch ? prevRunId : previousObservedRunId;
       console.log('[WorkflowModeContext] Run switch detected:', fromRunId, '->', runId, '- clearing interface stores');
       usePendingInterfacesStore.getState().clear();
-      useInterfacePaginationStore.getState().clear();
+      // Epoch cursors and pending interfaces go wholesale, as before: they are
+      // keyed by interfaceId, which a new run reuses.
+      //
+      // The carousel page is keyed per SURFACE, so only a LOCAL switch forgets
+      // one - this provider genuinely moving from one run to another. The other
+      // branch (a fresh provider mounting on a different run than the world last
+      // saw) says nothing about the surfaces already on screen: treating it as a
+      // reason to forget meant that opening a second application tab reset the
+      // page every other tab was showing, which is what keying the index per
+      // surface exists to prevent.
+      useInterfacePaginationStore.getState().clearForRunSwitch(
+        localRunSwitch ? prevRunId ?? undefined : undefined,
+      );
     }
   }, [runId]);
 

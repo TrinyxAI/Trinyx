@@ -302,12 +302,12 @@ export function NodeContextMenu({
           <ContextMenuItem
             icon={<Play className="h-3.5 w-3.5" fill="currentColor" />}
             label={tCanvas('runAuto')}
-            onClick={run(() => window.dispatchEvent(new CustomEvent('workflowViewStart', { detail: { startFromNode: nodeId } })))}
+            onClick={run(() => window.dispatchEvent(new CustomEvent('workflowViewStart', { detail: { workflowId, startFromNode: nodeId } })))}
           />
           <ContextMenuItem
             icon={<Bug className="h-3.5 w-3.5" />}
             label={tCanvas('runStepByStep')}
-            onClick={run(() => window.dispatchEvent(new CustomEvent('workflowStartStepByStep', { detail: { startFromNode: nodeId } })))}
+            onClick={run(() => window.dispatchEvent(new CustomEvent('workflowStartStepByStep', { detail: { workflowId, startFromNode: nodeId } })))}
           />
         </>
       )}

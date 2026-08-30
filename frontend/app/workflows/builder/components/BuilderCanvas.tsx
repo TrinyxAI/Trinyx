@@ -44,6 +44,7 @@ import { useWorkflowMode } from '@/contexts/WorkflowModeContext';
 import { useWorkflowLayoutDirectionSafe } from '@/contexts/WorkflowLayoutDirectionContext';
 import { isFlowBackward } from './nodes/handleGeometry';
 import { useSidePanelSafe } from '@/contexts/SidePanelContext';
+import { isEventForWorkflow } from '@/lib/workflow/workflowEventScope';
 import { isEmbeddedWorkflowCanvas } from '@/lib/workflow/canvasEmbedding';
 import { useSvgSafeId } from '@/hooks/useSvgSafeId';
 import LoadingSpinner from '@/components/LoadingSpinner';
@@ -360,7 +361,10 @@ export function BuilderCanvas({
   const isEmbedded = isEmbeddedWorkflowCanvas(pathname, workflowId);
   // When the right side panel is open, its AI Chat tab already shows the (now
   // centered) composer, so the empty-canvas hero would be a duplicate - hide it.
-  const isSidePanelOpen = useSidePanelSafe()?.isOpen ?? false;
+  // `isForward`, not `isOpen`: the gate exists so this composer does not duplicate
+  // the panel's own AI Chat tab, and a panel collapsed to a strip shows no chat -
+  // leaving an empty canvas with no way to start and nothing explaining why.
+  const isSidePanelOpen = useSidePanelSafe()?.isForward ?? false;
   // ReactFlow's <Background> builds its SVG <pattern> id from the store rfId,
   // which is "1" for every <ReactFlow> mounted without an explicit id. With
   // several canvases mounted at once (keepMounted SidePanel tabs), every
@@ -544,14 +548,18 @@ export function BuilderCanvas({
     return () => window.removeEventListener('resize', checkSize);
   }, []);
 
-  // Listen for streaming state changes
+  // Listen for streaming state changes. Scoped: an application panel mounts a
+  // whole workflow panel of its own, so a second chat can stream next to this
+  // canvas and used to put THIS one in streaming chrome.
   React.useEffect(() => {
-    const handleStreamingChange = (event: CustomEvent<{ isStreaming: boolean }>) => {
-      setIsCanvasStreaming(event.detail.isStreaming);
+    const handleStreamingChange = (event: Event) => {
+      const detail = (event as CustomEvent<{ isStreaming: boolean }>).detail;
+      if (!isEventForWorkflow(detail, workflowId)) return;
+      setIsCanvasStreaming(!!detail?.isStreaming);
     };
-    window.addEventListener('workflowStreamingStateChange', handleStreamingChange as EventListener);
-    return () => window.removeEventListener('workflowStreamingStateChange', handleStreamingChange as EventListener);
-  }, []);
+    window.addEventListener('workflowStreamingStateChange', handleStreamingChange);
+    return () => window.removeEventListener('workflowStreamingStateChange', handleStreamingChange);
+  }, [workflowId]);
 
   // Listen for toast events from parent views (e.g. cancel failure)
   React.useEffect(() => {
@@ -652,7 +660,10 @@ export function BuilderCanvas({
 
   // Save event listener
   React.useEffect(() => {
-    const handleSaveEvent = async () => {
+    const handleSaveEvent = async (event: Event) => {
+      // A Save addressed to another workflow is not ours: the side panel mounts
+      // its own canvas, so several listeners are bound at once.
+      if (!isEventForWorkflow((event as CustomEvent).detail, workflowId)) return;
       if (isPreviewOnly || !workflowId || !onSaveWorkflow) return;
       setIsSaving(true);
       try {
@@ -1273,6 +1284,7 @@ export function BuilderCanvas({
                 isSettingsOpen={isSettingsOpen}
                 nodes={nodes}
                 showRunControls={isRunMode && !isPreviewOnly}
+                showRelations={!isPreviewOnly}
                 workflowId={workflowId}
                 onUndo={onUndo}
                 onRedo={onRedo}

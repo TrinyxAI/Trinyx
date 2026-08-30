@@ -2,7 +2,7 @@
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslations } from 'next-intl';
-import { ArrowLeft, History, Loader2, Play } from 'lucide-react';
+import { ArrowLeft, History, Loader2, Play, Workflow } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import type { WorkflowRun } from '@/lib/api/orchestrator';
 import { useWorkflowMode } from '@/contexts/WorkflowModeContext';
@@ -44,6 +44,16 @@ export interface RunPanelContentProps {
    * there would rewrite the page's URL whenever both show the same workflow.
    */
   surfaceId?: string;
+  /**
+   * Return to the workflow view of the host panel. Set only where there IS one to
+   * return to (the workflow canvas sub-tab); the run bar then carries it as its
+   * left-most control.
+   *
+   * The sub-tab bar already offers the same jump, but it sits at the BOTTOM of the
+   * panel, below a run's epochs and steps: from the top of a long run the way back
+   * to the canvas is off screen. This puts it next to the run identity it belongs to.
+   */
+  onBackToWorkflow?: () => void;
 }
 
 /**
@@ -55,7 +65,7 @@ export interface RunPanelContentProps {
  * the canvas pill uses - so the user never loses track of which run the epochs
  * and steps below belong to, and can walk back up with one click.
  */
-export function RunPanelContent({ workflowId, allowHistory = false, viewRequest, surfaceId }: RunPanelContentProps) {
+export function RunPanelContent({ workflowId, allowHistory = false, viewRequest, surfaceId, onBackToWorkflow }: RunPanelContentProps) {
   const t = useTranslations();
   const { runId: contextRunId, setRunId, viewingEpoch, setViewingEpoch } = useWorkflowMode();
 
@@ -187,10 +197,42 @@ export function RunPanelContent({ workflowId, allowHistory = false, viewRequest,
 
   const isRunActive = useMemo(() => isRunStatusActive(data.runInfo?.status), [data.runInfo?.status]);
 
+  /**
+   * Back to the canvas. Rendered on BOTH levels of this tab.
+   *
+   * The history is not a lesser case: a workflow with no runs opens the Run tab
+   * straight onto it, and a long list of runs pushes the panel's sub-tab bar off
+   * the bottom exactly like a long list of steps does. Leaving it out made the
+   * one state a user reaches before their first run a dead end.
+   */
+  const backToWorkflowButton = onBackToWorkflow ? (
+    <button
+      type="button"
+      data-run-panel-to-workflow
+      onClick={onBackToWorkflow}
+      title={t('workflow.runInfo.backToWorkflow')}
+      className="flex items-center gap-1 h-6 pl-1.5 pr-2 rounded-lg border border-theme text-sm font-medium text-theme-secondary hover:bg-theme-secondary hover:text-theme-primary transition-colors min-w-0"
+    >
+      <Workflow className="w-3.5 h-3.5 flex-shrink-0" />
+      {/* The LABEL gives up the room, not the run identity. This control sits in
+          the bar's leading slot, before an overflow-hidden chip track: pinned at
+          its full width it would push the run's status and version out of the bar
+          entirely once the panel is narrow (a detached window goes down to 320px).
+          Shrinking to the icon degrades to exactly what the history arrow beside
+          it already is. */}
+      <span className="truncate">{t('common.workflow')}</span>
+    </button>
+  ) : null;
+
   // ── History level ──
   if (view === 'history') {
     return (
       <div className="flex-1 min-h-0 flex flex-col">
+        {backToWorkflowButton && (
+          <div className="flex items-center px-3 sm:px-4 py-2 flex-shrink-0 border-b border-theme">
+            {backToWorkflowButton}
+          </div>
+        )}
         <RunHistoryList
           workflowId={workflowId}
           currentRunId={runId}
@@ -217,11 +259,24 @@ export function RunPanelContent({ workflowId, allowHistory = false, viewRequest,
             <p className="text-sm text-theme-secondary">{t('runs.noRuns')}</p>
           </>
         )}
-        {canBrowseHistory && (
-          <Button variant="outline" size="sm" onClick={() => setView('history')}>
-            <History className="w-3.5 h-3.5 mr-1.5" />
-            {t('runs.title')}
-          </Button>
+        {(onBackToWorkflow || canBrowseHistory) && (
+          <div className="flex items-center gap-2">
+            {/* Same escape hatch as the run header below. Without it this state is
+                the one place in the Run tab with no way back to the canvas - and it
+                is the state the tab opens on while a freshly launched run attaches. */}
+            {onBackToWorkflow && (
+              <Button variant="outline" size="sm" data-run-panel-to-workflow onClick={onBackToWorkflow}>
+                <Workflow className="w-3.5 h-3.5 mr-1.5" />
+                {t('common.workflow')}
+              </Button>
+            )}
+            {canBrowseHistory && (
+              <Button variant="outline" size="sm" onClick={() => setView('history')}>
+                <History className="w-3.5 h-3.5 mr-1.5" />
+                {t('runs.title')}
+              </Button>
+            )}
+          </div>
         )}
       </div>
     );
@@ -244,19 +299,27 @@ export function RunPanelContent({ workflowId, allowHistory = false, viewRequest,
         onVersionClick={canBrowseHistory ? () => setView('history') : undefined}
         size="panel"
         className="border-b border-theme"
-        leading={canBrowseHistory ? (
-          /* Arrow + history icon: the arrow alone says "back", the icon says
-             back TO WHAT - the list of runs this one was picked from. */
-          <button
-            type="button"
-            data-run-panel-back
-            onClick={() => setView('history')}
-            title={t('runs.title')}
-            className="flex items-center gap-0.5 h-5 pl-1 pr-1.5 rounded-lg text-theme-secondary hover:bg-theme-secondary hover:text-theme-primary transition-colors flex-shrink-0"
-          >
-            <ArrowLeft className="w-3 h-3" />
-            <History className="w-3.5 h-3.5" />
-          </button>
+        leading={(onBackToWorkflow || canBrowseHistory) ? (
+          <span className="flex items-center gap-1 min-w-0">
+            {/* Back to the canvas. Labelled, unlike the history arrow next to it:
+                it leaves the Run view entirely, so it names where it goes instead
+                of relying on a glyph, and it comes first as the outermost step out. */}
+            {backToWorkflowButton}
+            {canBrowseHistory && (
+              /* Arrow + history icon: the arrow alone says "back", the icon says
+                 back TO WHAT - the list of runs this one was picked from. */
+              <button
+                type="button"
+                data-run-panel-back
+                onClick={() => setView('history')}
+                title={t('runs.title')}
+                className="flex items-center gap-0.5 h-5 pl-1 pr-1.5 rounded-lg text-theme-secondary hover:bg-theme-secondary hover:text-theme-primary transition-colors flex-shrink-0"
+              >
+                <ArrowLeft className="w-3 h-3" />
+                <History className="w-3.5 h-3.5" />
+              </button>
+            )}
+          </span>
         ) : undefined}
       />
 

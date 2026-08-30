@@ -594,6 +594,27 @@ export interface WorkflowCategory {
   updatedAt?: string;
 }
 
+/**
+ * One end of a sub-workflow relation, as the relations menu renders it.
+ *
+ * `resolved` is false when the workflow could not be found in the active workspace (deleted, or
+ * belonging to another one); the backend then withholds `name`. Such a row is still listed - a plan
+ * that calls a workflow nobody can open is worth SEEING - but it is not clickable.
+ */
+export interface WorkflowRelationRef {
+  id: string;
+  name: string | null;
+  resolved: boolean;
+}
+
+/** The sub-workflow neighbourhood of one workflow: who calls it, and who it calls. */
+export interface WorkflowRelations {
+  /** Workflows whose plan calls this one through a `core:sub_workflow` node. */
+  parents: WorkflowRelationRef[];
+  /** Workflows this one calls through its own `core:sub_workflow` nodes. */
+  children: WorkflowRelationRef[];
+}
+
 export interface WorkflowPublication {
   id: string;
   publicationType?: 'WORKFLOW' | 'AGENT' | 'TABLE' | 'INTERFACE' | 'SKILL';

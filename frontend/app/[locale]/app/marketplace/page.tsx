@@ -26,6 +26,7 @@ import { cloudLinkService } from '@/lib/api/cloud-link.service';
 import { clearModelsCache } from '@/hooks/useModels';
 import { PublicationCard, PublicationCardSkeleton } from '@/components/marketplace/PublicationCard';
 import type { MarketplaceRefinements } from '@/lib/api/orchestrator/publication.service';
+import { samePageUrl, showSamePageUrl } from '@/lib/navigation/showSamePageUrl';
 
 // Card + preview helpers extracted to a shared component so the onboarding
 // "suggested apps" modal reuses the exact same markup (no style fork).
@@ -136,20 +137,23 @@ function useQueryParamState<T extends string>(
   allowed: readonly T[],
   fallback: T,
 ): [T, (next: T) => void] {
-  const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
 
   const raw = searchParams.get(key);
   const value = (allowed as readonly string[]).includes(raw ?? '') ? (raw as T) : fallback;
 
+  // A refinement is a change of ADDRESS on the page already on screen, not a change of page,
+  // so it goes through the history API. Returning a select to its fallback removes the last
+  // param, and a router push of the bare pathname is dropped when the page was loaded at it -
+  // so on a page opened directly on `?type=agents`, clearing the filter did nothing at all.
   const setValue = useCallback((next: T) => {
     const params = new URLSearchParams(searchParams.toString());
     if (next === fallback) params.delete(key);
     else params.set(key, next);
     const qs = params.toString();
-    router.replace(qs ? `${pathname}?${qs}` : pathname, { scroll: false });
-  }, [router, pathname, searchParams, key, fallback]);
+    showSamePageUrl(qs ? `${pathname}?${qs}` : pathname, samePageUrl(pathname, searchParams), 'replace');
+  }, [pathname, searchParams, key, fallback]);
 
   return [value, setValue];
 }
@@ -163,7 +167,6 @@ function useQueryParamState<T extends string>(
  * write survives - the other two params would silently stay in the URL.
  */
 function useQueryParamReset(keys: readonly string[]): () => void {
-  const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
 
@@ -171,8 +174,8 @@ function useQueryParamReset(keys: readonly string[]): () => void {
     const params = new URLSearchParams(searchParams.toString());
     keys.forEach((key) => params.delete(key));
     const qs = params.toString();
-    router.replace(qs ? `${pathname}?${qs}` : pathname, { scroll: false });
-  }, [router, pathname, searchParams, keys]);
+    showSamePageUrl(qs ? `${pathname}?${qs}` : pathname, samePageUrl(pathname, searchParams), 'replace');
+  }, [pathname, searchParams, keys]);
 }
 
 /**

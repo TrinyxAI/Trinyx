@@ -10,19 +10,19 @@ import { act, cleanup, fireEvent, render, screen } from '@testing-library/react'
  *
  * The application is live HTML in a sandboxed, cross-origin frame, so this page
  * can neither silence it nor see whether it has anything to play. It starts the
- * application MUTED - an app that talks the moment its page opens is startling,
- * and on a shared link the visitor had not decided to be there yet - and puts the
- * switch in the settings cog.
+ * application MUTED (an app that talks the moment its page opens is startling,
+ * and on a shared link the visitor had not decided to be there yet) and hands the
+ * switch to the application controls, where the speaker sits next to pagination
+ * and fullscreen.
  *
- * The consequence this suite exists for: the cog's existence is now a
- * DISJUNCTION. An app with audio and no editable copy on offer still needs one,
- * because the cog is the only place its sound can be turned on. An app with
- * neither still gets none.
+ * The consequence this suite exists for: the sound no longer depends on the
+ * settings cog. The cog is back to a single reason to exist (the editable copy),
+ * and an app whose visitor gets no cog at all still has its sound within reach.
  */
 
 const carouselProps = vi.hoisted(() => ({
   mediaMuted: undefined as boolean | undefined,
-  announcePresence: null as null | ((hasAudio: boolean) => void),
+  toggleSound: null as null | (() => void),
 }));
 const cogProps = vi.hoisted(() => [] as Array<{
   canCreateEditableCopy?: boolean;
@@ -86,28 +86,39 @@ vi.mock('@/components/marketplace/PublicationInfoPanel', () => ({ PublicationInf
 vi.mock('@/lib/hooks/useOrgScopedReset', () => ({ useOrgScopedReset: () => undefined }));
 vi.mock('@/lib/stores/interface-pagination-store', () => ({
   useInterfacePaginationStore: { getState: () => ({ setCarouselIndex: vi.fn() }) },
+  carouselKeyFor: (workflowId?: string | null, runId?: string | null) => `${workflowId ?? ''}:${runId ?? ''}`,
 }));
 vi.mock('@/app/workflows/builder/utils/labelNormalizer', () => ({ normalizeLabel: (s: string) => s }));
 vi.mock('../workflow/WorkflowLoadingState', () => ({ WorkflowLoadingState: () => null }));
 vi.mock('../workflow/WorkflowUnauthorizedState', () => ({ WorkflowUnauthorizedState: () => null }));
 vi.mock('../workflow/hooks', () => ({ useAutoCollapseSidebar: () => undefined }));
 
-// Stand-in for the interface frames: records the mute state it is handed and
-// exposes the presence callback, so a test can play the part of an application
-// that turns out to contain media.
+// Stand-in for the interface frames and the controls toolbar they carry: records
+// the mute state it is handed and exposes the toggle, which is what the speaker
+// in the toolbar calls. Whether the speaker is shown at all (only for an app the
+// frame reports has media) is the toolbar's own contract, covered in
+// ApplicationTabContent.sound.test.tsx.
 vi.mock('@/components/chat/ApplicationCarousel', () => ({
   ApplicationCarousel: (p: {
     mediaMuted?: boolean;
-    onMediaAudioPresence?: (hasAudio: boolean) => void;
+    onToggleMediaMuted?: () => void;
   }) => {
     carouselProps.mediaMuted = p.mediaMuted;
-    carouselProps.announcePresence = p.onMediaAudioPresence ?? null;
-    return <div data-testid="application-carousel" />;
+    carouselProps.toggleSound = p.onToggleMediaMuted ?? null;
+    return (
+      <button
+        type="button"
+        data-testid="toolbar-sound"
+        onClick={p.onToggleMediaMuted}
+      >
+        carousel
+      </button>
+    );
   },
 }));
 
 // Real cog behaviour is covered by ApplicationSettingsMenu's own suite; here we
-// only need what this page hands it, plus a button to drive the toggle.
+// only need what this page hands it - including what it must NOT hand it any more.
 vi.mock('@/components/marketplace/ApplicationSettingsMenu', () => ({
   ApplicationSettingsMenu: (p: {
     canCreateEditableCopy?: boolean;
@@ -119,9 +130,7 @@ vi.mock('@/components/marketplace/ApplicationSettingsMenu', () => ({
       soundMuted: p.soundMuted,
       onToggleSound: p.onToggleSound,
     });
-    return (
-      <button type="button" data-testid="cog-sound" onClick={p.onToggleSound}>cog</button>
-    );
+    return <button type="button" data-testid="cog">cog</button>;
   },
 }));
 
@@ -157,17 +166,13 @@ function renderView(props: Partial<React.ComponentProps<typeof ApplicationDetail
   return result;
 }
 
-/** Play the part of the frame reporting that it does contain media. */
-function reportAudioPresent() {
-  act(() => carouselProps.announcePresence?.(true));
-}
-
-const cog = () => screen.queryByTestId('cog-sound');
+const cog = () => screen.queryByTestId('cog');
+const toolbarSound = () => screen.getByTestId('toolbar-sound');
 
 beforeEach(() => {
   cogProps.length = 0;
   carouselProps.mediaMuted = undefined;
-  carouselProps.announcePresence = null;
+  carouselProps.toggleSound = null;
   isPreviewOnly.value = false;
   numericUserId.value = 42;
 });
@@ -182,57 +187,43 @@ describe('ApplicationDetailView - the application starts silent', () => {
     expect(carouselProps.mediaMuted).toBe(true);
   });
 
-  it('tells the cog there is no sound entry to offer until the frame says there is media', () => {
+  it('unmutes the application when the controls speaker is used, and mutes it again', () => {
     renderView();
 
-    // undefined, not false: "nothing to hear" is a different statement from
-    // "there is sound and it is currently on".
-    expect(cogProps.at(-1)?.soundMuted).toBeUndefined();
-  });
-
-  it('offers the sound entry once the frame reports media', () => {
-    renderView();
-
-    reportAudioPresent();
-
-    expect(cogProps.at(-1)?.soundMuted).toBe(true);
-  });
-
-  it('unmutes the application when the cog entry is used, and mutes it again', () => {
-    renderView();
-    reportAudioPresent();
-
-    fireEvent.click(cog()!);
+    fireEvent.click(toolbarSound());
     expect(carouselProps.mediaMuted).toBe(false);
 
-    fireEvent.click(cog()!);
+    fireEvent.click(toolbarSound());
     expect(carouselProps.mediaMuted).toBe(true);
   });
 });
 
-describe('ApplicationDetailView - audio alone justifies the cog', () => {
-  it('mounts the cog for an app that has sound but no editable copy on offer', () => {
-    // The publisher's own view: no clone to copy, so pre-fix there was no cog at
-    // all - and therefore no way to turn the sound on.
-    renderView({ publication: pub({ publisherId: '42' }) });
-    expect(cog()).toBeNull();
-
-    reportAudioPresent();
-
-    expect(cog()).not.toBeNull();
-    expect(cogProps.at(-1)?.canCreateEditableCopy).toBe(false);
-    expect(cogProps.at(-1)?.soundMuted).toBe(true);
-  });
-
-  it('still mounts no cog for an app with neither sound nor a copy to offer', () => {
-    renderView({ publication: pub({ publisherId: '42' }) });
-
-    expect(cog()).toBeNull();
-  });
-
-  it('keeps passing canCreateEditableCopy so the copy entry is unaffected', () => {
+describe('ApplicationDetailView - the sound no longer hangs off the settings cog', () => {
+  it('hands the cog no sound state and no sound toggle', () => {
+    // Both live in the controls toolbar now. Leaving them here too would offer
+    // the same switch twice, in two places that can disagree.
     renderView();
 
+    expect(cogProps.at(-1)?.soundMuted).toBeUndefined();
+    expect(cogProps.at(-1)?.onToggleSound).toBeUndefined();
+  });
+
+  it('keeps the sound reachable for a visitor who gets no cog at all', () => {
+    // The publisher's own view: no clone to copy, so no cog. Pre-fix that was
+    // exactly the view whose sound could never be turned on.
+    renderView({ publication: pub({ publisherId: '42' }) });
+
+    expect(cog()).toBeNull();
+    expect(carouselProps.toggleSound).not.toBeNull();
+
+    fireEvent.click(toolbarSound());
+    expect(carouselProps.mediaMuted).toBe(false);
+  });
+
+  it('still mounts the cog for the copy entry, which is now its only reason to exist', () => {
+    renderView();
+
+    expect(cog()).not.toBeNull();
     expect(cogProps.at(-1)?.canCreateEditableCopy).toBe(true);
   });
 });

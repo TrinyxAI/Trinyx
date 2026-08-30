@@ -16,6 +16,11 @@ vi.mock('next-intl', () => ({
 vi.mock('@/contexts/SidePanelContext', () => ({
   useSidePanelSafe: () => ({
     isOpen: false,
+    // `isForward`, not `isOpen`: a detached window collapsed to a strip is open and
+    // shows nothing, so that is the question the card asks. It deliberately does NOT
+    // un-shade first - shaded, `isTabActive` is already false, so the click takes the
+    // openTab branch, which lifts the shade AND activates THIS card's tab.
+    isForward: false,
     activeTabId: null,
     tabs: [],
     openTab: openTabMock,

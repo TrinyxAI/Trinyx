@@ -41,6 +41,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.atLeastOnce;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -83,7 +84,8 @@ class WorkflowPublicationServiceShowcaseEpochClearTest {
                 new ObjectMapper(),
                 snapshotCloneService,
                 entitlementGuard,
-                authClient);
+                authClient,
+                new com.apimarketplace.publication.service.PublicationFileUrlResolver(new com.apimarketplace.common.storage.signing.ShowcaseUrlSigner("test-secret-32-bytes-long-enough-for-hmac")));
         // Default AuthClient.getPublisherProfile stub for every test - the
         // (re)publish path snapshots publisher identity server-side via this
         // call, see WorkflowPublicationService line ~384. Lenient so tests
@@ -277,14 +279,8 @@ class WorkflowPublicationServiceShowcaseEpochClearTest {
                 .thenReturn(workflowData);
         when(publicationRepository.findByWorkflowId(WORKFLOW_ID)).thenReturn(Optional.empty());
         when(publicationRepository.save(any(WorkflowPublicationEntity.class)))
-                .thenAnswer(invocation -> {
-                    WorkflowPublicationEntity publication = invocation.getArgument(0);
-                    if (publication.getId() == null) {
-                        publication.setId(PUBLICATION_ID);
-                    }
-                    return publication;
-                });
-        when(snapshotVersionRepository.getMaxVersion(PUBLICATION_ID)).thenReturn(Optional.empty());
+                .thenAnswer(invocation -> invocation.getArgument(0));
+        when(snapshotVersionRepository.getMaxVersion(any(UUID.class))).thenReturn(Optional.empty());
         when(orchestratorClient.getLatestPlanVersion(WORKFLOW_ID, TENANT_ID)).thenReturn(1);
         when(orchestratorClient.createApplicationWorkflow(any(), eq(TENANT_ID)))
                 .thenReturn(Map.of("id", UUID.randomUUID().toString()));
@@ -341,16 +337,10 @@ class WorkflowPublicationServiceShowcaseEpochClearTest {
                 .thenReturn(workflowData);
         when(publicationRepository.findByWorkflowId(WORKFLOW_ID)).thenReturn(Optional.empty());
         when(publicationRepository.save(any(WorkflowPublicationEntity.class)))
-                .thenAnswer(invocation -> {
-                    WorkflowPublicationEntity publication = invocation.getArgument(0);
-                    if (publication.getId() == null) {
-                        publication.setId(PUBLICATION_ID);
-                    }
-                    return publication;
-                });
-        when(snapshotVersionRepository.getMaxVersion(PUBLICATION_ID)).thenReturn(Optional.empty());
+                .thenAnswer(invocation -> invocation.getArgument(0));
+        when(snapshotVersionRepository.getMaxVersion(any(UUID.class))).thenReturn(Optional.empty());
         when(orchestratorClient.getLatestPlanVersion(WORKFLOW_ID, TENANT_ID)).thenReturn(1);
-        when(orchestratorClient.findBySourcePublication(PUBLICATION_ID, TENANT_ID))
+        when(orchestratorClient.findBySourcePublication(any(UUID.class), eq(TENANT_ID)))
                 .thenReturn(Map.of("title", "stale application without id"));
         when(orchestratorClient.createApplicationWorkflow(any(), eq(TENANT_ID)))
                 .thenReturn(Map.of("id", UUID.randomUUID().toString()));
@@ -374,8 +364,11 @@ class WorkflowPublicationServiceShowcaseEpochClearTest {
         @SuppressWarnings("unchecked")
         ArgumentCaptor<Map<String, Object>> createCaptor = ArgumentCaptor.forClass(Map.class);
         verify(orchestratorClient).createApplicationWorkflow(createCaptor.capture(), eq(TENANT_ID));
+        ArgumentCaptor<WorkflowPublicationEntity> saved =
+                ArgumentCaptor.forClass(WorkflowPublicationEntity.class);
+        verify(publicationRepository, atLeastOnce()).save(saved.capture());
         assertThat(createCaptor.getValue())
-                .containsEntry("sourcePublicationId", PUBLICATION_ID.toString());
+                .containsEntry("sourcePublicationId", saved.getValue().getId().toString());
         verify(orchestratorClient, never()).cleanupApplicationRuns(any(UUID.class), any(), any());
         verify(orchestratorClient, never()).refreshApplicationFromPublication(any(UUID.class), any(), any());
     }
@@ -512,14 +505,8 @@ class WorkflowPublicationServiceShowcaseEpochClearTest {
                 .thenReturn(Map.of("isStepByStep", false, "publishable", true, "status", "COMPLETED"));
         when(publicationRepository.findByWorkflowId(WORKFLOW_ID)).thenReturn(Optional.empty());
         when(publicationRepository.save(any(WorkflowPublicationEntity.class)))
-                .thenAnswer(invocation -> {
-                    WorkflowPublicationEntity publication = invocation.getArgument(0);
-                    if (publication.getId() == null) {
-                        publication.setId(PUBLICATION_ID);
-                    }
-                    return publication;
-                });
-        when(snapshotVersionRepository.getMaxVersion(PUBLICATION_ID)).thenReturn(Optional.empty());
+                .thenAnswer(invocation -> invocation.getArgument(0));
+        when(snapshotVersionRepository.getMaxVersion(any(UUID.class))).thenReturn(Optional.empty());
         when(orchestratorClient.getLatestPlanVersion(WORKFLOW_ID, TENANT_ID)).thenReturn(1);
         when(orchestratorClient.captureShowcaseSnapshot("run-publish", TENANT_ID, organizationId, 4))
                 .thenReturn(filteredShowcaseSnapshot(4));
@@ -569,7 +556,7 @@ class WorkflowPublicationServiceShowcaseEpochClearTest {
     }
 
     @Test
-    @DisplayName("DataInput publish snapshot copies files from the publisher tenant into the publication namespace")
+    @DisplayName("DataInput publish snapshot copies the publisher own files into the publication namespace, letting the endpoint infer the owner from the path it has just validated")
     void snapshotDataInputFilesUsesPublisherSourceTenant() {
         Map<String, Object> file = new HashMap<>();
         file.put("path", TENANT_ID + "/workflow/run/upload.txt");
@@ -583,12 +570,24 @@ class WorkflowPublicationServiceShowcaseEpochClearTest {
         when(orchestratorClient.copyFile(any(), any()))
                 .thenReturn(Map.of("newPath", "_publications/" + PUBLICATION_ID + "/upload.txt"));
 
-        service.snapshotDataInputFiles(plan, PUBLICATION_ID, TENANT_ID);
+        service.snapshotDataInputFiles(plan, PUBLICATION_ID,
+                WorkflowPublicationService.CopyScope.of(TENANT_ID, null, PUBLICATION_ID));
 
         @SuppressWarnings("unchecked")
         ArgumentCaptor<Map<String, Object>> requestCaptor = ArgumentCaptor.forClass(Map.class);
         verify(orchestratorClient).copyFile(requestCaptor.capture(), any());
+        // No forced sourceTenantId: the scope has already decided the path is one this
+        // publication may read, so the endpoint infers the owner from it - the same contract
+        // every other copy pass uses. Forcing the publisher here used to 403 a legitimate
+        // cross-org file, and is no guard at all on CE (the monolith adapter ignores the
+        // tenant argument).
+        // The owner is INFERRED from the path rather than forced to the publisher, which is
+        // the same value here and the right one in a cross-org publish, where the file lives
+        // under another member path. Safe only because the scope above has already decided
+        // this path is one the publication may read - forcing it looked like a guard but was
+        // none, and is no guard at all on CE (the monolith adapter ignores the tenant).
         assertThat(requestCaptor.getValue()).containsEntry("sourceTenantId", TENANT_ID);
+        assertThat(requestCaptor.getValue()).containsEntry("sourcePath", TENANT_ID + "/workflow/run/upload.txt");
         assertThat(requestCaptor.getValue()).containsEntry("tenantId", "_publications");
         assertThat(file).containsEntry("path", "_publications/" + PUBLICATION_ID + "/upload.txt");
     }
@@ -843,14 +842,8 @@ class WorkflowPublicationServiceShowcaseEpochClearTest {
                 .thenReturn(Map.of("isStepByStep", false, "publishable", true, "status", "COMPLETED"));
         when(publicationRepository.findByWorkflowId(WORKFLOW_ID)).thenReturn(Optional.empty());
         when(publicationRepository.save(any(WorkflowPublicationEntity.class)))
-                .thenAnswer(invocation -> {
-                    WorkflowPublicationEntity publication = invocation.getArgument(0);
-                    if (publication.getId() == null) {
-                        publication.setId(PUBLICATION_ID);
-                    }
-                    return publication;
-                });
-        when(snapshotVersionRepository.getMaxVersion(PUBLICATION_ID)).thenReturn(Optional.empty());
+                .thenAnswer(invocation -> invocation.getArgument(0));
+        when(snapshotVersionRepository.getMaxVersion(any(UUID.class))).thenReturn(Optional.empty());
         when(orchestratorClient.getLatestPlanVersion(WORKFLOW_ID, TENANT_ID)).thenReturn(1);
         when(orchestratorClient.captureShowcaseSnapshot("run-publish", TENANT_ID, null, epochFilter))
                 .thenReturn(capturedSnapshot);

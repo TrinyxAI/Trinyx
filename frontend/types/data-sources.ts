@@ -34,6 +34,12 @@ export interface ColumnDisplayConfig {
   options?: Array<{ label: string; value: string; color?: string }> | string[];
   imageFit?: 'cover' | 'contain';
   ratio?: string;
+  /**
+   * Media columns (`file` / `image`): how the asset is drawn. `thumbnail` is the round preview a
+   * legacy `image` column shows, `card` the name + size row a `file` column shows. The stored value
+   * is identical either way - this is presentation only.
+   */
+  render?: 'thumbnail' | 'card';
   palette?: Record<string, string>;
   format?: 'plain' | 'currency' | 'percentage';
   decimals?: number;

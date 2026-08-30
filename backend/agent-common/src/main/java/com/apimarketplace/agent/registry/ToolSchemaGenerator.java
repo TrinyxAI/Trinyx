@@ -71,12 +71,26 @@ public final class ToolSchemaGenerator {
             paramSchema.put("properties", param.properties());
         }
 
-        // Handle array items
+        // Handle array items. Default to string, which is what every array parameter emitted
+        // before itemType existed, so a parameter that does not declare one is unchanged.
         if ("array".equals(type)) {
-            paramSchema.put("items", Map.of("type", "string")); // Default to string items
+            paramSchema.put("items", Map.of("type", itemTypeOf(param.itemType())));
         }
 
         return paramSchema;
+    }
+
+    /**
+     * The JSON Schema type for one element of an array parameter.
+     *
+     * <p>Every emitter goes through this, and none of them puts a raw declaration into a schema
+     * {@code type} field. The value can arrive from another service over the wire, so it is not
+     * something this process chose: an unrecognised one (a typo, or a name from a newer build)
+     * becomes {@code "string"} rather than an invalid schema, which is what a strict provider
+     * would reject the whole call for. Null means undeclared, which is also {@code "string"}.
+     */
+    public static String itemTypeOf(String declared) {
+        return mapType(declared);
     }
 
     /**
@@ -162,11 +176,24 @@ public final class ToolSchemaGenerator {
      * Create an array parameter.
      */
     public static ToolParameter arrayParam(String name, String description, boolean required) {
+        return arrayParam(name, description, required, "string");
+    }
+
+    /**
+     * Create an array parameter whose elements are of {@code itemType}.
+     *
+     * <p>Use this rather than describing the element shape in prose: the emitted schema is what a
+     * strict provider validates the call against, so an array of objects declared as an array of
+     * strings can be refused or stringified before the tool is reached.
+     */
+    public static ToolParameter arrayParam(String name, String description, boolean required,
+                                           String itemType) {
         return ToolParameter.builder()
             .name(name)
             .type("array")
             .description(description)
             .required(required)
+            .itemType(itemType)
             .build();
     }
 

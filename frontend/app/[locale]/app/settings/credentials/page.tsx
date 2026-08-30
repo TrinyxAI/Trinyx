@@ -26,6 +26,7 @@ import { useTranslations } from "next-intl";
 import { Button } from "@/components/ui/button";
 import { PageHeader } from "@/components/settings";
 import { CredentialsListSkeleton } from "@/components/skeletons";
+import { showSamePageUrl } from '@/lib/navigation/showSamePageUrl';
 
 export default function CredentialsPage() {
   const { isAuthenticated, isAuthChecking } = useAuthGuard();
@@ -85,14 +86,20 @@ export default function CredentialsPage() {
     if (oauthCallbackHandledRef.current) return;
     oauthCallbackHandledRef.current = true;
 
+    // The same move the rest of the app makes, through the shared helper rather than by hand:
+    // this page is reached by a full load from the provider, where a router replace of the
+    // bare pathname is dropped.
     const cleanCallbackUrl = () => {
       const params = new URLSearchParams(window.location.search);
       params.delete('success');
       params.delete('error');
       params.delete('credentialId');
       const nextQuery = params.toString();
-      const nextUrl = `${window.location.pathname}${nextQuery ? `?${nextQuery}` : ''}${window.location.hash}`;
-      window.history.replaceState(window.history.state, '', nextUrl);
+      showSamePageUrl(
+        `${window.location.pathname}${nextQuery ? `?${nextQuery}` : ''}`,
+        `${window.location.pathname}${window.location.search}`,
+        'replace',
+      );
     };
 
     if (success === 'true') {

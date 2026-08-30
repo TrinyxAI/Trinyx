@@ -2,7 +2,7 @@ import * as React from 'react';
 import { GripVertical, ChevronRight } from 'lucide-react';
 import clsx from 'clsx';
 import { normalizeColumnType } from '../../utils/typeNormalizer';
-import { getFieldTypeColor, normalizeFieldType } from '../../types';
+import { getFieldTypeTextColor, normalizeFieldType } from '../../types';
 
 interface GlobalVariable {
   name: string;
@@ -89,8 +89,8 @@ export const GlobalVariablesInspector = React.memo(function GlobalVariablesInspe
             </div>
             <div className="flex items-center gap-2 flex-shrink-0">
               <span className={clsx(
-                "text-xs px-1.5 py-0.5 rounded uppercase tracking-wider font-mono flex-shrink-0",
-                getFieldTypeColor(normalizeFieldType(normalizedType))
+                "text-xs uppercase tracking-wider font-mono flex-shrink-0",
+                getFieldTypeTextColor(normalizeFieldType(normalizedType))
               )}>{normalizeFieldType(normalizedType)}</span>
             </div>
           </div>
@@ -123,8 +123,8 @@ export const GlobalVariablesInspector = React.memo(function GlobalVariablesInspe
                       </div>
                       <div className="flex items-center gap-2 flex-shrink-0">
                         <span className={clsx(
-                          "text-xs px-1.5 py-0.5 rounded uppercase tracking-wider font-mono flex-shrink-0",
-                          getFieldTypeColor(normalizeFieldType(propNormalizedType))
+                          "text-xs uppercase tracking-wider font-mono flex-shrink-0",
+                          getFieldTypeTextColor(normalizeFieldType(propNormalizedType))
                         )}>{normalizeFieldType(propNormalizedType)}</span>
                       </div>
                     </div>

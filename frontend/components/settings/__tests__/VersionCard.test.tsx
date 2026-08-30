@@ -6,7 +6,7 @@
  * an update affordance.
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen } from '@testing-library/react';
+import { render, screen, cleanup } from '@testing-library/react';
 import * as React from 'react';
 import VersionCard from '../VersionCard';
 import type { AppVersionInfo } from '@/hooks/useAppVersion';
@@ -32,6 +32,11 @@ const labels: Record<string, string> = {
   howToUpdate: 'How to update',
   releaseNotes: 'Release notes',
   lastChecked: 'Checked {date}',
+  anonymousCheckNotice:
+    'The daily update check sends this version and a random install id, so live self-hosted installs can be counted. '
+    + 'The record kept contains no IP address, hostname or account. '
+    + 'Set CE_VERSIONCHECK_SENDINSTALLID=false to stop sending the id, '
+    + 'or CE_VERSIONCHECK_ENABLED=false to disable the check.',
 };
 vi.mock('next-intl', () => ({
   useTranslations: () => (key: string, params?: Record<string, unknown>) => {
@@ -64,6 +69,9 @@ function v(overrides: Partial<AppVersionInfo> = {}): AppVersionInfo {
     latestVersion: null,
     releaseUrl: null,
     securityFix: false,
+    // Default false: the notice must be opted IN by a test that means to assert it, so a test
+    // about something else cannot accidentally certify that an install identifies itself.
+    identifiesInstall: false,
     checkedAt: null,
     ...overrides,
   };
@@ -182,5 +190,40 @@ describe('VersionCard', () => {
 
     expect(screen.queryByText('How to update')).toBeNull();
     expect(screen.queryByText("You're on the latest version")).toBeNull();
+  });
+
+  it('discloses the anonymous install id when the install actually sends one', () => {
+    show(v({ updateAvailable: false, latestVersion: null, identifiesInstall: true }));
+
+    // The disclosure must not be attached to the update section: an install whose feed says
+    // nothing still sends the id, and that is the state most installs are in most of the time.
+    expect(screen.getByText(/random install id/)).toBeTruthy();
+    expect(screen.getByText(/CE_VERSIONCHECK_SENDINSTALLID=false/)).toBeTruthy();
+  });
+
+  it('says nothing when the install does not identify itself, whatever its edition', () => {
+    // The component reads identifiesInstall and nothing else, so one case is one case: three tests
+    // varying selfHosted or edition would differ only in props it never inspects. What each of
+    // these states has in common is the thing that matters, and the CE opted-out one is the reason
+    // this is gated on a flag at all: telling an operator who turned it off that they are counted
+    // would be worse than showing nothing.
+    for (const state of [
+      { selfHosted: false, managedCloud: true, edition: 'cloud' },        // managed cloud: no poll
+      { selfHosted: true, edition: 'self-hosted-enterprise' },            // keycloak mode: no poller
+      { selfHosted: true, edition: 'ce', updateAvailable: true, latestVersion: '0.3.0' }, // opted out
+    ]) {
+      cleanup();
+      show(v({ ...state, identifiesInstall: false }));
+      expect(screen.queryByText(/random install id/)).toBeNull();
+    }
+  });
+
+  it('shows the disclosure outside the update block, not nested in it', () => {
+    show(v({ identifiesInstall: true, updateAvailable: true, latestVersion: '0.3.0' }));
+
+    // The state that ships most often. The notice must survive next to an update banner, and it
+    // must not be attached to it: an install with nothing to update still sends the id.
+    expect(screen.getByText('Update available')).toBeTruthy();
+    expect(screen.getByText(/random install id/)).toBeTruthy();
   });
 });

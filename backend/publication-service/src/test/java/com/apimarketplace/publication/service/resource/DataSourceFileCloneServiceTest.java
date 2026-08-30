@@ -252,6 +252,116 @@ class DataSourceFileCloneServiceTest {
         verify(orchestratorClient, never()).copyFile(any(), any());
     }
 
+
+    // -- The shapes a media cell ACTUALLY holds ------------------------------
+    //
+    // The service was written against "a bare bucket key, or a {path,name,mimeType} map". Neither
+    // is what the product writes: the grid and the CRUD path both persist the asset as a JSON
+    // STRING, and a legacy image cell is a bare by-id URL. So every real cell fell into the string
+    // branch and was handed to copyFile as if the whole serialized value were an object key. The
+    // copy failed, the warning was swallowed, and the acquirer kept a cross-tenant reference.
+
+    @Test
+    @DisplayName("A JSON-string media cell is rewritten and stays a JSON string")
+    void jsonStringMediaCellIsRewritten() {
+        doReturn(Map.of("newPath", "copied/bucket/photo.png", "newId", "new-id-777"))
+                .when(orchestratorClient).copyFile(any(), any());
+        Map<String, ColumnMappingSpecDto> spec = Map.of("photo", columnSpec(ColumnTypeDto.FILE));
+
+        Map<String, Object> row = new HashMap<>();
+        row.put("data", new HashMap<>(Map.of("photo",
+                "{\"_type\":\"file\",\"id\":\"old-id\",\"path\":\"bucket/photo.png\","
+                        + "\"url\":\"/api/proxy/files/by-id/old-id/raw?disposition=inline\","
+                        + "\"name\":\"photo.png\",\"mimeType\":\"image/png\"}")));
+        List<Map<String, Object>> items = new ArrayList<>(List.of(row));
+
+        service.rewriteFilePaths("INLINE", Map.of(), items, spec, TENANT, SCOPE, ORG);
+
+        @SuppressWarnings("unchecked")
+        Map<String, Object> data = (Map<String, Object>) row.get("data");
+        assertThat(data.get("photo")).isInstanceOf(String.class);
+        String rewritten = (String) data.get("photo");
+        assertThat(rewritten).contains("copied/bucket/photo.png");
+        assertThat(rewritten).contains("new-id-777");
+        assertThat(rewritten).doesNotContain("old-id");
+    }
+
+    @Test
+    @DisplayName("The stored url is re-pointed at the new id, not left on the publisher's file")
+    void storedUrlFollowsTheNewId() {
+        doReturn(Map.of("newPath", "copied/bucket/photo.png", "newId", "new-id-777"))
+                .when(orchestratorClient).copyFile(any(), any());
+        Map<String, ColumnMappingSpecDto> spec = Map.of("photo", columnSpec(ColumnTypeDto.IMAGE));
+
+        Map<String, Object> photo = new LinkedHashMap<>();
+        photo.put("_type", "file");
+        photo.put("id", "old-id");
+        photo.put("path", "bucket/photo.png");
+        photo.put("url", "/api/proxy/files/by-id/old-id/raw?disposition=inline");
+        Map<String, Object> row = new HashMap<>();
+        row.put("data", new HashMap<>(Map.of("photo", photo)));
+
+        service.rewriteFilePaths("INLINE", Map.of(), new ArrayList<>(List.of(row)), spec, TENANT, SCOPE, ORG);
+
+        @SuppressWarnings("unchecked")
+        Map<String, Object> data = (Map<String, Object>) row.get("data");
+        @SuppressWarnings("unchecked")
+        Map<String, Object> rewritten = (Map<String, Object>) data.get("photo");
+        assertThat(rewritten.get("url")).isEqualTo("/api/proxy/files/by-id/new-id-777/raw?disposition=inline");
+    }
+
+    @Test
+    @DisplayName("A by-id URL string is never mistaken for a bucket key")
+    void byIdUrlIsNotTreatedAsAStorageKey() {
+        // Regression: isCopyable() only refused http(s), so "/api/proxy/files/by-id/<uuid>/raw"
+        // was passed to copyFile as an object key. Nothing to copy, and a bogus request per row.
+        Map<String, ColumnMappingSpecDto> spec = Map.of("photo", columnSpec(ColumnTypeDto.IMAGE));
+
+        Map<String, Object> row = new HashMap<>();
+        row.put("data", new HashMap<>(Map.of("photo",
+                "/api/proxy/files/by-id/44444444-4444-4444-4444-444444444444/raw?disposition=inline")));
+
+        service.rewriteFilePaths("INLINE", Map.of(), new ArrayList<>(List.of(row)), spec, TENANT, SCOPE, ORG);
+
+        verify(orchestratorClient, never()).copyFile(any(), any());
+    }
+
+    @Test
+    @DisplayName("A generic-upload map keyed storageKey is copied like one keyed path")
+    void storageKeyAliasIsCopied() {
+        Map<String, ColumnMappingSpecDto> spec = Map.of("photo", columnSpec(ColumnTypeDto.FILE));
+
+        Map<String, Object> photo = new LinkedHashMap<>();
+        photo.put("storageKey", "bucket/photo.png");
+        photo.put("name", "photo.png");
+        Map<String, Object> row = new HashMap<>();
+        row.put("data", new HashMap<>(Map.of("photo", photo)));
+
+        service.rewriteFilePaths("INLINE", Map.of(), new ArrayList<>(List.of(row)), spec, TENANT, SCOPE, ORG);
+
+        verify(orchestratorClient).copyFile(any(), any());
+    }
+
+    @Test
+    @DisplayName("A reference with no storage key is left alone rather than copied wrongly")
+    void referenceWithoutKeyIsLeftAlone() {
+        Map<String, ColumnMappingSpecDto> spec = Map.of("photo", columnSpec(ColumnTypeDto.FILE));
+
+        Map<String, Object> photo = new LinkedHashMap<>();
+        photo.put("_type", "file");
+        photo.put("id", "only-an-id");
+        photo.put("url", "/api/proxy/files/by-id/only-an-id/raw?disposition=inline");
+        Map<String, Object> row = new HashMap<>();
+        row.put("data", new HashMap<>(Map.of("photo", photo)));
+
+        service.rewriteFilePaths("INLINE", Map.of(), new ArrayList<>(List.of(row)), spec, TENANT, SCOPE, ORG);
+
+        verify(orchestratorClient, never()).copyFile(any(), any());
+        @SuppressWarnings("unchecked")
+        Map<String, Object> data = (Map<String, Object>) row.get("data");
+        assertThat(data.get("photo")).isSameAs(photo);
+    }
+
     private ColumnMappingSpecDto columnSpec(ColumnTypeDto type) {
         return new ColumnMappingSpecDto("", type, ColumnStructureDto.SCALAR, Map.of(), Map.of());
     }

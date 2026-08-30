@@ -20,7 +20,7 @@ import { useNodeExecutionStatus } from '../../contexts/StepByStepContext';
 
 import { useWorkflowLayoutDirectionSafe } from '@/contexts/WorkflowLayoutDirectionContext';
 import { getSourceHandleGeometry, getTargetHandleGeometry } from './handleGeometry';
-import { workflowPanelTabId } from '@/lib/sidePanel/tabResource';
+import { openWorkflowBuilderTab, requestOpenRelatedWorkflow } from '@/lib/sidePanel/openWorkflowBuilderTab';
 /**
  * WorkflowNode - A specialized node for workflow triggers
  *
@@ -150,12 +150,12 @@ export function WorkflowNode({ data, selected, id }: NodeProps<BuilderNodeData>)
             icon: <Workflow className="h-3 w-3" strokeWidth={2} />,
             title: referencedWorkflowName,
             onClick: () => {
+              // Same two routes as every other "open that workflow" affordance - see
+              // openWorkflowBuilderTab, which is where both now live.
               if (isRunMode) {
-                window.dispatchEvent(new CustomEvent('workflowOpenSubWorkflow', { detail: { workflowId: referencedWorkflowId, workflowName: referencedWorkflowName, nodeId: id } }));
+                requestOpenRelatedWorkflow(referencedWorkflowId, referencedWorkflowName, id);
               } else {
-                import('@/components/app/WorkflowBuilderPanelContent').then(({ WorkflowBuilderPanelContent }) => {
-                  sidePanel?.openTab({ id: workflowPanelTabId(referencedWorkflowId), label: referencedWorkflowName, icon: React.createElement(Workflow, { className: 'w-4 h-4' }), content: React.createElement(WorkflowBuilderPanelContent, { workflowId: referencedWorkflowId }), preferredWidth: 0.5, keepMounted: true });
-                });
+                openWorkflowBuilderTab(sidePanel, { workflowId: referencedWorkflowId, workflowName: referencedWorkflowName });
               }
             },
           });

@@ -32,6 +32,17 @@ interface InterfacePreviewProps {
    * keeps the natural, container-width rendering.
    */
   format?: string | null;
+  /**
+   * Whether the page's own `<audio>`/`<video>` should be silenced.
+   *
+   * <p>Leaving it UNDEFINED is meaningful: the in-frame controller then only reports whether
+   * the page has any media and otherwise leaves it exactly as authored, which is what every
+   * surface that does not offer a sound control wants. Passing a boolean is what claims the
+   * volume, so pass one only alongside a control the reader can use to give it back.
+   */
+  mediaMuted?: boolean;
+  /** Whether the page turned out to have any audio at all, reported once the frame has loaded. */
+  onMediaAudioPresence?: (hasAudio: boolean) => void;
 }
 
 /**
@@ -51,6 +62,8 @@ export function InterfacePreview({
   emptyLabel = 'No HTML template available',
   mode: modeOverride,
   format,
+  mediaMuted,
+  onMediaAudioPresence,
 }: InterfacePreviewProps) {
   const formatViewport = resolveInterfaceFormat(format);
   // Hooks must run unconditionally, so measure before the empty-template early return.
@@ -110,6 +123,8 @@ export function InterfacePreview({
                 // branch passes autoFit={false}, so dropping it would stack two scalers.
                 autoFit={autoFit}
                 removeScripts={dropJs}
+                mediaMuted={mediaMuted}
+                onMediaAudioPresence={onMediaAudioPresence}
               />
             </div>
           </div>
@@ -135,6 +150,8 @@ export function InterfacePreview({
         style={style}
         autoFit={autoFit}
         removeScripts={dropJs}
+        mediaMuted={mediaMuted}
+        onMediaAudioPresence={onMediaAudioPresence}
       />
       {/* Loading overlay */}
       {isLoading && (

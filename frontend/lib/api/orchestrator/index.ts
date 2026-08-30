@@ -178,6 +178,8 @@ export const orchestratorApi = {
   getWorkflowsPage: workflowService.getWorkflowsPage.bind(workflowService),
   getWorkflowBoard: workflowService.getWorkflowBoard.bind(workflowService),
   getWorkflow: workflowService.getWorkflow.bind(workflowService),
+  getWorkflowRelations: workflowService.getWorkflowRelations.bind(workflowService),
+  getWorkflowRelationsBatch: workflowService.getWorkflowRelationsBatch.bind(workflowService),
   createWorkflow: workflowService.createWorkflow.bind(workflowService),
   updateWorkflow: workflowService.updateWorkflow.bind(workflowService),
   deleteWorkflow: workflowService.deleteWorkflow.bind(workflowService),

@@ -237,3 +237,61 @@ describe('VirtualFolderCard', () => {
     expect(onOpen).not.toHaveBeenCalled();
   });
 });
+
+/**
+ * The card root IS the drag handle, so a press that reaches it arms a drag. Which press arms
+ * it depends on the browser's sensors (a mouse press, a finger), and the card cannot see which
+ * ones the grid installed - so the controls sitting ON the card have to stop all of them. A
+ * guard written for one event went dead the day the grid swapped its sensors, and pressing the
+ * checkbox began dragging the folder away instead of selecting it.
+ */
+describe('FolderCard - pressing a control must not pick the card up', () => {
+  it.each(['pointerDown', 'mouseDown', 'touchStart'] as const)(
+    'stops %s on the selection checkbox from reaching the card',
+    (event) => {
+      const onCardPress = vi.fn();
+      const { container } = render(
+        <div onPointerDown={onCardPress} onMouseDown={onCardPress} onTouchStart={onCardPress}>
+          <FolderCard
+            entry={makeFolder({})}
+            selected={false}
+            onToggleSelect={vi.fn()}
+            onOpen={vi.fn()}
+            label="Reports"
+            countLabel="0 items"
+          />
+        </div>,
+      );
+
+      fireEvent[event](container.querySelector('input[type="checkbox"]')!);
+
+      expect(onCardPress).not.toHaveBeenCalled();
+    },
+  );
+
+  it('still selects when the checkbox is used', () => {
+    const onToggleSelect = vi.fn();
+    const { container } = render(
+      <FolderCard
+        entry={makeFolder({})}
+        selected={false}
+        onToggleSelect={onToggleSelect}
+        onOpen={vi.fn()}
+        label="Reports"
+        countLabel="0 items"
+      />,
+    );
+
+    fireEvent.click(container.querySelector('input[type="checkbox"]')!);
+
+    expect(onToggleSelect).toHaveBeenCalledWith('folder-1');
+  });
+});
+
+describe('FolderCard - scrolling past it on a phone', () => {
+  it('lets a finger scroll past the card it makes draggable', () => {
+    const { container } = renderFolder(makeFolder({}));
+
+    expect(container.firstElementChild?.className).toContain('touch-manipulation');
+  });
+});

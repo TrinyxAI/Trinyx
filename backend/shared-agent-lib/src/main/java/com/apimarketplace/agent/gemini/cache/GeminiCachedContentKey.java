@@ -205,6 +205,9 @@ public final class GeminiCachedContentKey {
                 .minimum(p.minimum())
                 .maximum(p.maximum())
                 .pattern(normaliseText(p.pattern()))
+                // Part of the schema that is cached, so it has to be part of what identifies it.
+                // Omitting it would let a changed item type reuse content built from the old one.
+                .itemType(normaliseText(p.itemType()))
                 .build();
     }
 

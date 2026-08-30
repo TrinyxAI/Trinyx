@@ -42,7 +42,16 @@ RUN npm install -g @google/gemini-cli
 RUN npm install -g @openai/codex
 
 # Python for Mistral Vibe
-RUN pip3 install --break-system-packages mistral-vibe
+# arm64 note: tree-sitter (a mistral-vibe dependency) publishes musllinux wheels for
+# x86_64 ONLY, so on this alpine image pip falls back to building it from source on
+# aarch64 - and the image carries no C toolchain, so the step died with
+# "error: [Errno 2] No such file or directory: 'cc'" on the first multi-arch release.
+# The toolchain is a virtual apk package installed and removed inside the SAME layer, so
+# neither published arch ships it. Every other dependency resolved to a wheel on both
+# arches; if a future one needs Rust instead, this is the step that will say so.
+RUN apk add --no-cache --virtual .py-build-deps build-base python3-dev \
+    && pip3 install --break-system-packages mistral-vibe \
+    && apk del .py-build-deps
 
 # Install root MCP dependencies (@modelcontextprotocol/sdk for agent-cli-server.mjs)
 COPY package.json package-lock.json ./

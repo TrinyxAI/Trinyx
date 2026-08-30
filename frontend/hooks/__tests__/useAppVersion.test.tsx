@@ -41,6 +41,7 @@ const CLOUD: AppVersionInfo = {
   latestVersion: null,
   releaseUrl: null,
   securityFix: false,
+  identifiesInstall: false,
   checkedAt: null,
 };
 

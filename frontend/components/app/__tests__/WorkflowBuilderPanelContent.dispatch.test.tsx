@@ -95,4 +95,50 @@ describe('WorkflowBuilderPanelContent - forwards run-mode configs without a runI
       window.removeEventListener('workflowPanelTriggerDataChange', triggerHandler);
     }
   });
+
+  /**
+   * Found by the side-panel application e2e (PANELAPP-001): the tab opened on
+   * "no interfaces configured", with no Application sub-tab, even though its
+   * host had resolved both pages before mounting this.
+   *
+   * The dispatch above fires on mount too, so an empty initial state is not
+   * neutral - it broadcast [] and wiped the interfaces the host had just handed
+   * down. What the host knows has to be in the FIRST emission, not only after
+   * the canvas has loaded a plan.
+   */
+  it('broadcasts the interfaces the host handed down, instead of an empty first emission', () => {
+    const appEvents: any[] = [];
+    const appHandler = (e: Event) => appEvents.push((e as CustomEvent).detail);
+    window.addEventListener('workflowPanelApplicationConfigsChange', appHandler);
+
+    try {
+      render(
+        <WorkflowBuilderPanelContent
+          workflowId="wf-1"
+          runId="run-1"
+          applicationFirst
+          initialApplicationConfigs={[
+            { interfaceId: 'iface-entry', label: 'Entry', actionMapping: {}, isEntryInterface: true },
+            { interfaceId: 'iface-details', label: 'Details', actionMapping: {} },
+          ]}
+        />,
+      );
+
+      expect(appEvents.length).toBeGreaterThan(0);
+      expect(appEvents[0].configs, 'the FIRST emission already carries them').toHaveLength(2);
+      expect(appEvents[0].configs[0].interfaceId).toBe('iface-entry');
+
+      // ...and the canvas still owns the list once it has one of its own.
+      act(() => {
+        canvasProps.current.onApplicationConfigsChange([
+          { interfaceId: 'iface-entry', label: 'Entry', actionMapping: {}, nodeId: 'interface:entry' },
+        ]);
+      });
+      const last = appEvents[appEvents.length - 1];
+      expect(last.configs).toHaveLength(1);
+      expect(last.configs[0].nodeId, 'the canvas list, not the seed').toBe('interface:entry');
+    } finally {
+      window.removeEventListener('workflowPanelApplicationConfigsChange', appHandler);
+    }
+  });
 });

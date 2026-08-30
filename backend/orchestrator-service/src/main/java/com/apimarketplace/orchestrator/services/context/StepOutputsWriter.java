@@ -87,6 +87,54 @@ public final class StepOutputsWriter {
     }
 
     /**
+     * Remove step outputs under BOTH their full key and their bare alias - the exact
+     * counterpart of {@link #writeWithAlias}.
+     *
+     * <p>Why this has to exist: every output is stored twice, under {@code core:step_a}
+     * AND under {@code step_a}, because a template may address a node either way. A
+     * removal that drops only the full key therefore does not remove the output, it
+     * makes it INCONSISTENT: {@code {{core:step_a.output}}} resolves to nothing while
+     * {@code {{step_a.output}}} (and a code node's {@code $input.step_a}) still returns
+     * the old value. That is what let a loop body read the PREVIOUS iteration of a node
+     * the back-edge had just reset, so an accumulator carried across iterations silently
+     * lost entries.
+     *
+     * <p>A bare alias is ambiguous by construction ({@code mcp:foo} and {@code core:foo}
+     * share the alias {@code foo}, last write wins). So the alias is dropped only when no
+     * SURVIVING full key still owns it: resetting one node must not blank the bare-form
+     * lookup of a sibling that was not reset.
+     *
+     * @param outputs  the stepOutputs map (mutated in place)
+     * @param fullKeys the node keys to remove
+     */
+    public static void removeWithAlias(Map<String, Object> outputs, java.util.Set<String> fullKeys) {
+        if (outputs == null || fullKeys == null || fullKeys.isEmpty()) return;
+
+        java.util.Set<String> freedAliases = new java.util.HashSet<>();
+        for (String fullKey : fullKeys) {
+            if (fullKey == null) continue;
+            outputs.remove(fullKey);
+            String alias = bareAlias(fullKey);
+            if (alias != null && !alias.equals(fullKey)) {
+                freedAliases.add(alias);
+            }
+        }
+        if (freedAliases.isEmpty()) return;
+
+        // An alias still owned by a surviving full key must stay: it is that node's value,
+        // not the removed one's.
+        java.util.Set<String> stillOwned = new java.util.HashSet<>();
+        for (String key : outputs.keySet()) {
+            String alias = bareAlias(key);
+            if (alias != null && freedAliases.contains(alias)) {
+                stillOwned.add(alias);
+            }
+        }
+        freedAliases.removeAll(stillOwned);
+        freedAliases.forEach(outputs::remove);
+    }
+
+    /**
      * Normalize wrongly-prefixed entries already present in {@code outputs}.
      *
      * <p>Storage rows can land with an incorrect prefix - e.g. a trigger output written

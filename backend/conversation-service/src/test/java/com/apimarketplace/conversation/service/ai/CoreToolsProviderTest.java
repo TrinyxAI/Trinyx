@@ -489,6 +489,36 @@ class CoreToolsProviderTest {
         }
 
         @Test
+        @DisplayName("should keep an array parameter's item type, which decides what the model is told to send")
+        void shouldKeepArrayItemType() {
+            // The schema this service hands the model is rebuilt from what is parsed here, so
+            // dropping the item type turns an array of objects back into an array of strings for
+            // every direct-API chat agent, with nothing failing in between.
+            Map<String, Object> toolData = Map.of(
+                    "name", "catalog",
+                    "description", "Search the catalog",
+                    "parameters", List.of(
+                            Map.of("name", "rows", "type", "array", "description", "Rows",
+                                    "required", false, "itemType", "object"),
+                            Map.of("name", "tags", "type", "array", "description", "Tags",
+                                    "required", false)
+                    )
+            );
+
+            when(restTemplate.getForEntity(anyString(), eq(Map.class)))
+                    .thenReturn(new ResponseEntity<>(Map.of("tools", List.of(toolData)), HttpStatus.OK));
+
+            coreToolsProvider.refreshCoreTools();
+
+            ToolDefinition catalog = coreToolsProvider.getCoreTools(false).stream()
+                    .filter(t -> "catalog".equals(t.name())).findFirst().orElseThrow();
+
+            assertThat(catalog.parameters().get(0).itemType()).isEqualTo("object");
+            // Absent on the wire means the reader's default, not a value invented here.
+            assertThat(catalog.parameters().get(1).itemType()).isNull();
+        }
+
+        @Test
         @DisplayName("should parse tool with only requiredParams fallback")
         void shouldParseToolWithFallback() {
             Map<String, Object> toolData = Map.of(

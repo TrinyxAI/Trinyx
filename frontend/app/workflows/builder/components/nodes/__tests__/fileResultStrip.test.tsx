@@ -429,3 +429,62 @@ describe('getFileKindIcon', () => {
     expect(getFileKindIcon(mime)).toBe(expected);
   });
 });
+
+describe('FileResultStrip - showcase file (pre-signed URL, no storage handle)', () => {
+  // On a marketplace canvas the file lives in the publication's storage namespace and the
+  // visitor's only channel to it is an HMAC-signed URL minted server-side. There is no storage
+  // path, no storage id, and no session token.
+  const showcaseFile = {
+    path: '',
+    name: 'clip.mp4',
+    mimeType: 'video/mp4',
+    size: 2048,
+    previewUrl: '/api/files/proxy-signed?key=x&exp=1&sig=y',
+  };
+
+  it('hands the signed URL straight to the media element instead of the authenticated blob fetch', () => {
+    // Routing it through useAuthedObjectUrl would rewrite the path to /api/proxy/files/... and
+    // attach a bearer the visitor does not have: the preview would 401 for every visitor.
+    const c = render(<FileResultStrip file={showcaseFile} />);
+    expand(c);
+    const video = c.container.querySelector('video') as HTMLVideoElement;
+    expect(video.getAttribute('src')).toBe(showcaseFile.previewUrl);
+    const urlArgs = useAuthedObjectUrlMock.mock.calls.map((call: unknown[]) => call[0]);
+    expect(urlArgs.every((u) => u === null || u === undefined)).toBe(true);
+  });
+
+  it('renders the preview even while the authenticated hook reports loading, which it never leaves', () => {
+    // The hook is called with a null src, so it stays {url:null, loading:false} forever. Reading
+    // its loading flag would pin the card on its skeleton.
+    mockObjectUrl = { url: null, loading: true, error: true };
+    const c = render(<FileResultStrip file={showcaseFile} />);
+    expand(c);
+    expect(c.container.querySelector('video')).not.toBeNull();
+    expect(c.queryByText('noPreview')).toBeNull();
+  });
+
+  it('drops the open-in-Files control: there is no storage row for the panel to open', () => {
+    const c = render(<FileResultStrip file={showcaseFile} />);
+    expect(c.queryByLabelText('openInPanel')).toBeNull();
+    expand(c);
+    expect(c.queryByLabelText('openInPanel')).toBeNull();
+  });
+
+  it('still shows the file name and human size - the pill is labelled, not a bare thumbnail', () => {
+    const c = render(<FileResultStrip file={showcaseFile} />);
+    expect(c.getByText('clip.mp4')).not.toBeNull();
+    expect(c.getByText('2048 B')).not.toBeNull();
+  });
+
+  it('a file that DOES have a storage handle keeps its open-in-Files control', () => {
+    // Guard against the showcase change quietly removing the control on the owner's canvas.
+    const c = render(<FileResultStrip file={videoFile} />);
+    expect(c.getByLabelText('openInPanel')).not.toBeNull();
+  });
+
+  it('an unpreviewable kind still shows the hint rather than a broken element', () => {
+    const c = render(<FileResultStrip file={{ ...showcaseFile, name: 'data.bin', mimeType: 'application/octet-stream' }} />);
+    expand(c);
+    expect(c.getByText('noPreview')).not.toBeNull();
+  });
+});

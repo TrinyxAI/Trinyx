@@ -1,6 +1,7 @@
 import * as React from 'react';
-import { usePathname, useRouter, useSearchParams } from 'next/navigation';
+import { usePathname, useSearchParams } from 'next/navigation';
 import { useQueryClient } from '@tanstack/react-query';
+import { samePageUrl, showSamePageUrl } from '@/lib/navigation/showSamePageUrl';
 
 interface OAuthCallbackToast {
   type: 'success' | 'error';
@@ -52,7 +53,6 @@ export function useOAuthCredentialCallback({
   addToast,
   tCredentials,
 }: UseOAuthCredentialCallbackParams): void {
-  const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
   const queryClient = useQueryClient();
@@ -91,6 +91,9 @@ export function useOAuthCredentialCallback({
         duration: 7000,
       });
     }
-    router.replace(pathname, { scroll: false });
-  }, [searchParams, addToast, tCredentials, router, pathname, queryClient]);
+    // Through the history API: the provider sends the browser back with a full load onto
+    // `?success=true`, and a router replace of the bare pathname is dropped from there - so the
+    // param stuck and a reload re-showed the toast.
+    showSamePageUrl(pathname, samePageUrl(pathname, searchParams), 'replace');
+  }, [searchParams, addToast, tCredentials, pathname, queryClient]);
 }

@@ -356,6 +356,81 @@ class WorkflowStepDataRepositoryIntegrationTest {
     }
 
     @Nested
+    @DisplayName("findTerminalStatusesForItem - per-item predecessor statuses")
+    class TerminalStatusesForItem {
+
+        private void persistAt(String normalizedKey, int epoch, int itemIndex, String status) {
+            WorkflowStepDataEntity step = createStepData(RUN_ID, normalizedKey, "tool-" + normalizedKey, status);
+            step.setNormalizedKey(normalizedKey);
+            step.setEpoch(epoch);
+            step.setItemIndex(itemIndex);
+            entityManager.persist(step);
+            entityManager.flush();
+        }
+
+        private Map<String, String> statusesFor(int epoch, int itemIndex, String... keys) {
+            return stepDataRepository
+                .findTerminalStatusesForItem(RUN_ID, List.of(keys), epoch, itemIndex)
+                .stream()
+                .collect(java.util.stream.Collectors.toMap(
+                    row -> (String) row[0], row -> (String) row[1], (a, b) -> a));
+        }
+
+        @Test
+        @DisplayName("should return one row per predecessor key with its status")
+        void shouldReturnStatusPerKey() {
+            persistAt("core:move_clients", 7, 2, "SKIPPED");
+            persistAt("core:move_prospects", 7, 2, "SKIPPED");
+            entityManager.clear();
+
+            assertThat(statusesFor(7, 2, "core:move_clients", "core:move_prospects"))
+                .containsExactlyInAnyOrderEntriesOf(Map.of(
+                    "core:move_clients", "SKIPPED",
+                    "core:move_prospects", "SKIPPED"));
+        }
+
+        @Test
+        @DisplayName("should scope to the requested item, not the whole node")
+        void shouldScopeToItem() {
+            persistAt("core:move_clients", 7, 0, "COMPLETED");
+            persistAt("core:move_clients", 7, 2, "SKIPPED");
+            entityManager.clear();
+
+            assertThat(statusesFor(7, 0, "core:move_clients")).containsEntry("core:move_clients", "COMPLETED");
+            assertThat(statusesFor(7, 2, "core:move_clients")).containsEntry("core:move_clients", "SKIPPED");
+        }
+
+        @Test
+        @DisplayName("should scope to the requested epoch")
+        void shouldScopeToEpoch() {
+            persistAt("core:move_clients", 6, 0, "COMPLETED");
+            entityManager.clear();
+
+            assertThat(statusesFor(7, 0, "core:move_clients")).isEmpty();
+        }
+
+        @Test
+        @DisplayName("should ignore non-terminal rows so a running predecessor reads as silent")
+        void shouldIgnoreNonTerminalRows() {
+            persistAt("core:move_clients", 7, 0, "RUNNING");
+            persistAt("core:move_prospects", 7, 0, "PENDING");
+            entityManager.clear();
+
+            assertThat(statusesFor(7, 0, "core:move_clients", "core:move_prospects")).isEmpty();
+        }
+
+        @Test
+        @DisplayName("should omit a key that has no row at all")
+        void shouldOmitKeyWithoutRow() {
+            persistAt("core:move_clients", 7, 0, "SKIPPED");
+            entityManager.clear();
+
+            assertThat(statusesFor(7, 0, "core:move_clients", "core:never_ran"))
+                .containsOnlyKeys("core:move_clients");
+        }
+    }
+
+    @Nested
     @DisplayName("Empty results edge cases")
     class EmptyResults {
 

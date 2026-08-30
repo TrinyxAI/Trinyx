@@ -26,6 +26,9 @@ class FakeFolderRouter {
   // only when the query actually changes - a fresh one per call would loop forever.
   private snapshot = new URLSearchParams();
   private readonly listeners = new Set<() => void>();
+  // Once bridged, it stays bridged for the rest of the file. Each vitest file gets its own
+  // environment, and every test in a file that mocks the router wants the same fake.
+  private historyBridged = false;
 
   /** Every path the code asked to navigate to, in order. */
   readonly visited: string[] = [];
@@ -40,6 +43,7 @@ class FakeFolderRouter {
 
   /** Start a test at a given page with an empty query. */
   reset(pathname = '/en/app/list'): void {
+    this.bridgeHistory();
     this.pathname = pathname;
     this.currentSearch = '';
     this.snapshot = new URLSearchParams();
@@ -63,6 +67,26 @@ class FakeFolderRouter {
     this.snapshot = new URLSearchParams(next);
     this.listeners.forEach((listener) => listener());
   };
+
+  /**
+   * Play the part Next plays in a browser: `history.pushState`/`replaceState` for the page
+   * already on screen IS a navigation, and `useSearchParams` has to see it. The lists change
+   * the open folder that way (see {@code showFolderLevel}), because a router push of the bare
+   * pathname is dropped when the page was loaded straight into a folder. Without this bridge a
+   * test would watch the address change and the page keep showing the level it had.
+   */
+  private bridgeHistory(): void {
+    if (this.historyBridged || typeof window === 'undefined') return;
+    this.historyBridged = true;
+    // A call with no url changes only the state object and never the address; forwarding it
+    // would navigate to the literal string "undefined".
+    window.history.pushState = (_data: unknown, _unused: string, url?: string | URL | null) => {
+      if (url != null) this.navigate(String(url), 'push');
+    };
+    window.history.replaceState = (_data: unknown, _unused: string, url?: string | URL | null) => {
+      if (url != null) this.navigate(String(url), 'replace');
+    };
+  }
 
   private subscribe = (listener: () => void): (() => void) => {
     this.listeners.add(listener);

@@ -1070,10 +1070,29 @@ class ColumnValueCoercerTest {
         // --- Canonical format {url, name, mimeType, size} passthrough ---
 
         @Test
-        void canonicalMapPassesThrough() {
+        @DisplayName("A canonical map keeps its fields and gains the FileRef discriminator")
+        void canonicalMapGainsTypeDiscriminator() {
             Map<String, Object> fileMap = Map.of("url", "https://example.com/file.pdf", "name", "file.pdf");
-            assertEquals(fileMap, coerce(fileMap, ColumnType.FILE).value());
-            assertFalse(coerce(fileMap, ColumnType.FILE).hasWarnings());
+
+            CoercionResult r = coerce(fileMap, ColumnType.FILE);
+
+            // _type is what makes the value recognisable to the interface iframe, the showcase
+            // signer and the publication copier - all of which key on it and skipped media cells.
+            assertEquals("file", asMap(r.value()).get("_type"));
+            assertEquals("https://example.com/file.pdf", asMap(r.value()).get("url"));
+            assertEquals("file.pdf", asMap(r.value()).get("name"));
+            assertFalse(r.hasWarnings());
+        }
+
+        @Test
+        @DisplayName("Normalizing an already canonical value changes nothing")
+        void normalizationIsIdempotent() {
+            Map<String, Object> once = asMap(coerce(
+                    Map.of("url", "https://example.com/file.pdf", "name", "file.pdf"), ColumnType.FILE).value());
+
+            Map<String, Object> twice = asMap(coerce(once, ColumnType.FILE).value());
+
+            assertEquals(once, twice);
         }
 
         // --- FileRef format {_type:"file", path, name, mimeType, size} ---
@@ -1226,36 +1245,62 @@ class ColumnValueCoercerTest {
         }
     }
 
-    // ── IMAGE ────────────────────────────────────────────────────────────
+    /** The asset contract is a map; this keeps the assertions readable. */
+    @SuppressWarnings("unchecked")
+    private static Map<String, Object> asMap(Object value) {
+        assertInstanceOf(Map.class, value, "a media column coerces to the asset map");
+        return (Map<String, Object>) value;
+    }
+
+    // -- IMAGE (same contract as FILE) ------------------------------------
 
     @Nested
-    @DisplayName("IMAGE coercion")
+    @DisplayName("IMAGE coercion - one asset contract shared with FILE")
     class ImageCoercion {
 
-        // --- URL string passthrough ---
-
         @Test
-        void urlStringPassesThrough() {
-            assertEquals("https://example.com/img.png", coerce("https://example.com/img.png", ColumnType.IMAGE).value());
+        @DisplayName("An image column produces the same asset map as a file column")
+        void imageAndFileShareOneContract() {
+            Map<String, Object> input = Map.of("url", "https://example.com/img.png", "name", "img.png");
+
+            assertEquals(coerce(input, ColumnType.FILE).value(), coerce(input, ColumnType.IMAGE).value());
         }
 
         @Test
-        void proxyUrlPassesThrough() {
-            assertEquals("/api/proxy/files/proxy?key=t%2Fimg.png", coerce("/api/proxy/files/proxy?key=t%2Fimg.png", ColumnType.IMAGE).value());
+        @DisplayName("An external URL string becomes an asset that keeps the URL")
+        void urlStringBecomesAsset() {
+            Map<String, Object> asset = asMap(coerce("https://example.com/img.png", ColumnType.IMAGE).value());
+
+            assertEquals("https://example.com/img.png", asset.get("url"));
+            assertEquals("img.png", asset.get("name"));
+            assertNull(asset.get("id"), "an external URL was never uploaded, so it has no storage id");
         }
 
-        // --- Map with url ---
-
         @Test
-        void mapWithUrlExtracted() {
-            Map<String, Object> map = Map.of("url", "https://example.com/img.png", "alt", "test");
-            assertEquals("https://example.com/img.png", coerce(map, ColumnType.IMAGE).value());
+        @DisplayName("The dead pre-cutover URL keeps its storage key so the row can be repaired")
+        void legacyProxyUrlKeepsItsStorageKey() {
+            // /api/proxy/files/proxy?key=... stopped resolving at the opaque-URL cutover and no
+            // migration rewrote the rows. The key inside is the only handle left on the file.
+            CoercionResult r = coerce("/api/proxy/files/proxy?key=t%2Fimg.png", ColumnType.IMAGE);
+
+            assertEquals("t/img.png", asMap(r.value()).get("path"), "the percent-encoded key is decoded");
         }
 
-        // --- FileRef → proxy URL ---
+        @Test
+        @DisplayName("A by-id URL string recovers the storage id it embeds")
+        void byIdUrlRecoversTheId() {
+            // This is how a legacy image cell (a bare URL string) upgrades itself: the id is in the
+            // URL, so the value stops being opaque the moment it is rewritten.
+            CoercionResult r = coerce(
+                    "/api/proxy/files/by-id/44444444-4444-4444-4444-444444444444/raw?disposition=inline",
+                    ColumnType.IMAGE);
+
+            assertEquals("44444444-4444-4444-4444-444444444444", asMap(r.value()).get("id"));
+        }
 
         @Test
-        void fileRefConvertsToProxyUrl() {
+        @DisplayName("A FileRef keeps its id, path and metadata, and gets the id-based URL")
+        void fileRefBecomesAsset() {
             Map<String, Object> fileRef = new java.util.LinkedHashMap<>();
             fileRef.put("_type", "file");
             fileRef.put("path", "tenant/wf/run/step/img.png");
@@ -1264,54 +1309,119 @@ class ColumnValueCoercerTest {
             fileRef.put("size", 5000);
             fileRef.put("id", "44444444-4444-4444-4444-444444444444");
 
-            CoercionResult r = coerce(fileRef, ColumnType.IMAGE);
+            Map<String, Object> asset = asMap(coerce(fileRef, ColumnType.IMAGE).value());
+
+            assertEquals("44444444-4444-4444-4444-444444444444", asset.get("id"));
+            assertEquals("tenant/wf/run/step/img.png", asset.get("path"));
+            assertEquals("image/png", asset.get("mimeType"));
+            assertEquals(5000, asset.get("size"));
             assertEquals("/api/proxy/files/by-id/44444444-4444-4444-4444-444444444444/raw?disposition=inline",
-                    r.value());
+                    asset.get("url"));
         }
 
-        // --- DB flattened → extracts file_url ---
+        @Test
+        @DisplayName("The id wins over a stored URL of a dead generation")
+        void idOverridesAStaleStoredUrl() {
+            Map<String, Object> map = new java.util.LinkedHashMap<>();
+            map.put("id", "77777777-7777-7777-7777-777777777777");
+            map.put("url", "/api/proxy/files/proxy?key=t%2Fold.png");
+
+            Map<String, Object> asset = asMap(coerce(map, ColumnType.IMAGE).value());
+
+            assertEquals("/api/proxy/files/by-id/77777777-7777-7777-7777-777777777777/raw?disposition=inline",
+                    asset.get("url"), "the resolvable form replaces the dead one");
+        }
 
         @Test
-        void dbFlattenedExtractsFileUrl() {
+        @DisplayName("A third-party id never replaces a URL that works")
+        void foreignIdDoesNotHijackTheUrl() {
+            // An Airtable attachment carries both an id and a working url. Minting
+            // /api/proxy/files/by-id/attABC123/raw from that id replaced a resolvable URL with one
+            // that resolves to nothing - and this path PERSISTS what it returns.
+            Map<String, Object> airtable = new java.util.LinkedHashMap<>();
+            airtable.put("id", "attABC123");
+            airtable.put("url", "https://dl.airtable.com/x/photo.png");
+            airtable.put("filename", "photo.png");
+            airtable.put("type", "image/png");
+
+            Map<String, Object> asset = asMap(coerce(airtable, ColumnType.FILE).value());
+
+            assertEquals("https://dl.airtable.com/x/photo.png", asset.get("url"));
+            assertNull(asset.get("id"), "a foreign id is not one of our storage ids");
+        }
+
+        @Test
+        @DisplayName("A storage-explorer row (the Files picker) is accepted as-is")
+        void storageExplorerEntryAccepted() {
+            Map<String, Object> entry = new java.util.LinkedHashMap<>();
+            entry.put("id", "88888888-8888-8888-8888-888888888888");
+            entry.put("fileName", "picked.png");
+            entry.put("mimeType", "image/png");
+            entry.put("sizeBytes", 1234);
+            entry.put("s3Key", "tenant/general/datatable/ab12cd34_picked.png");
+
+            Map<String, Object> asset = asMap(coerce(entry, ColumnType.IMAGE).value());
+
+            assertEquals("picked.png", asset.get("name"));
+            assertEquals(1234, asset.get("size"));
+            assertEquals("tenant/general/datatable/ab12cd34_picked.png", asset.get("path"));
+        }
+
+        @Test
+        @DisplayName("The DB-flattened shape maps onto the same fields")
+        void dbFlattenedAccepted() {
             Map<String, Object> dbFormat = Map.of(
-                    "file_url", "/api/proxy/files/proxy?key=t%2Fimg.png",
+                    "file_url", "https://cdn.example.com/img.png",
                     "file_name", "img.png",
                     "content_type", "image/png",
                     "file_size", 5000
             );
-            assertEquals("/api/proxy/files/proxy?key=t%2Fimg.png", coerce(dbFormat, ColumnType.IMAGE).value());
-        }
 
-        // --- storageKey only → builds proxy URL ---
+            Map<String, Object> asset = asMap(coerce(dbFormat, ColumnType.IMAGE).value());
 
-        @Test
-        void storageKeyBuildsProxyUrl() {
-            Map<String, Object> map = Map.of("storageKey", "tenant/img.png", "id", "55555555-5555-5555-5555-555555555555");
-            CoercionResult r = coerce(map, ColumnType.IMAGE);
-            assertTrue(r.value().toString().contains("/api/proxy/files/by-id/"));
-        }
-
-        // --- JSON string ---
-
-        @Test
-        void jsonStringExtractsUrl() {
-            CoercionResult r = coerce("{\"url\":\"https://example.com/img.png\"}", ColumnType.IMAGE);
-            assertEquals("https://example.com/img.png", r.value());
+            assertEquals("https://cdn.example.com/img.png", asset.get("url"));
+            assertEquals("img.png", asset.get("name"));
+            assertEquals("image/png", asset.get("mimeType"));
+            assertEquals(5000, asset.get("size"));
         }
 
         @Test
-        void jsonFileRefExtractsProxyUrl() {
-            String json = "{\"_type\":\"file\",\"path\":\"t/img.png\",\"name\":\"img.png\",\"mimeType\":\"image/png\",\"size\":100,\"id\":\"66666666-6666-6666-6666-666666666666\"}";
-            CoercionResult r = coerce(json, ColumnType.IMAGE);
-            assertTrue(r.value().toString().contains("/api/proxy/files/by-id/"));
+        @DisplayName("A JSON string is parsed, not stored as text")
+        void jsonStringParsed() {
+            CoercionResult r = coerce("{\"url\":\"https://example.com/img.png\",\"name\":\"img.png\"}",
+                    ColumnType.IMAGE);
+
+            assertEquals("https://example.com/img.png", asMap(r.value()).get("url"));
         }
 
-        // --- Edge cases ---
+        @Test
+        @DisplayName("A data: URI is kept whole")
+        void dataUriAccepted() {
+            String dataUri = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJ";
+
+            CoercionResult r = coerce(dataUri, ColumnType.IMAGE);
+
+            assertEquals(dataUri, asMap(r.value()).get("url"));
+            assertFalse(r.hasWarnings());
+        }
+
+        @Test
+        @DisplayName("A reference with neither id nor URL is kept and reported, never silently dropped")
+        void unresolvableRefIsKeptWithAWarning() {
+            // What a CE workflow FileRef used to look like. Dropping it would destroy the only
+            // handle (the path) a repair can use.
+            Map<String, Object> pathOnly = Map.of("_type", "file", "path", "t/img.png", "name", "img.png");
+
+            CoercionResult r = coerce(pathOnly, ColumnType.IMAGE);
+
+            assertTrue(r.hasWarnings());
+            assertEquals("t/img.png", asMap(r.value()).get("path"));
+        }
 
         @Test
         void mapWithNoUrlWarns() {
-            Map<String, Object> map = Map.of("name", "img.png");
-            CoercionResult r = coerce(map, ColumnType.IMAGE);
+            CoercionResult r = coerce(Map.of("name", "img.png"), ColumnType.IMAGE);
+
             assertTrue(r.hasWarnings());
         }
 
@@ -1323,15 +1433,8 @@ class ColumnValueCoercerTest {
         @Test
         void nonUrlStringWarns() {
             CoercionResult r = coerce("not-a-url", ColumnType.IMAGE);
-            assertTrue(r.hasWarnings());
-        }
 
-        @Test
-        void dataUriAccepted() {
-            String dataUri = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJ";
-            CoercionResult r = coerce(dataUri, ColumnType.IMAGE);
-            assertEquals(dataUri, r.value());
-            assertFalse(r.hasWarnings());
+            assertTrue(r.hasWarnings());
         }
     }
 

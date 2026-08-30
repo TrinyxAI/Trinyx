@@ -243,7 +243,7 @@ jobs:
           test -n "${port}"
 
           set +e
-          curl --silent --show-error --output /dev/null \
+          curl --silent --show-error --output /dev/null --noproxy '*' \
             --resolve "${host}:${port}:127.0.0.1" \
             "https://${host}:${port}/not-allowlisted"
           curl_without_ca=$?
@@ -254,7 +254,7 @@ jobs:
             exit 1
           fi
 
-          status="$(curl --silent --show-error --output /dev/null \
+          status="$(curl --silent --show-error --output /dev/null --noproxy '*' \
             --write-out '%{http_code}' \
             --cacert "${ca_file}" \
             --resolve "${host}:${port}:127.0.0.1" \

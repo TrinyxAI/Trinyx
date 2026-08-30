@@ -251,7 +251,7 @@ export default function ContactPage() {
         <div className="space-y-2 text-sm leading-relaxed" style={{ color: 'var(--text-secondary)' }}>
           <p>
             <strong>{t('emailLabel')}</strong>{' '}
-            <a href="mailto:trinyx12@gmail.com" style={{ color: 'var(--expression-color)' }}>trinyx12@gmail.com</a>
+            <a href="mailto:contact@trinyx.fr" style={{ color: 'var(--expression-color)' }}>contact@trinyx.fr</a>
           </p>
           <p><strong>{t('postalLabel')}</strong> {t('postalAddress')}</p>
           <p>{t.rich('securityNote', { code: (chunks) => <code>{chunks}</code> })}</p>

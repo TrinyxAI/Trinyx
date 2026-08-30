@@ -19,6 +19,18 @@ if git grep -nEI 'eddine[r]abii|eddine[.]rabii|ghcr[.]io/eddine[r]abii|github[.]
   exit 1
 fi
 
+if git grep -nEI 'security@livecontext[.]ai|trinyx12@gmail[.]com' -- \
+  SECURITY.md frontend; then
+  echo "A retired security or public contact identity remains in Trinyx product surfaces" >&2
+  exit 1
+fi
+
+grep -Fq '# Contributing to Trinyx Community Edition' CONTRIBUTING.md
+grep -Fq 'docker compose -f cli/assets/docker-compose.yml up -d' CONTRIBUTING.md
+grep -Fq 'https://trinyx.fr/contact?category=security' SECURITY.md
+grep -Fq 'contact@trinyx.fr' frontend/app/contact/page.tsx
+grep -Fq 'contact@trinyx.fr' frontend/components/about/AboutInformationContent.tsx
+
 grep -Fq '"homepage": "https://github.com/TrinyxAI/Trinyx"' cli/package.json
 grep -Fq 'github.com/TrinyxAI/Trinyx' frontend/public/llms.txt
 grep -Fq 'github.com/TrinyxAI/Trinyx' README.md

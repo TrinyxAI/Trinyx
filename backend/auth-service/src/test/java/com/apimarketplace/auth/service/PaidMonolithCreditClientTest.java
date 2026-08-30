@@ -30,7 +30,7 @@ class PaidMonolithCreditClientTest {
         when(builder.build()).thenReturn(http);
         when(workloads.issue("trinyx-cloud-runtime")).thenReturn("workload-jwt");
         client = new PaidMonolithCreditClient(
-                builder, workloads, "https://billing-internal.trinyx.private/");
+                builder, workloads, "https://billing-internal.trinyx.private:8443/");
     }
 
     @Test
@@ -52,7 +52,7 @@ class PaidMonolithCreditClientTest {
         verify(http).exchange(url.capture(), eq(HttpMethod.POST), entity.capture(),
                 eq(CloudCreditAuthorityService.SettlementResponse.class));
         assertThat(url.getValue()).isEqualTo(
-                "https://billing-internal.trinyx.private/internal/v1/credit-reservations/"
+                "https://billing-internal.trinyx.private:8443/internal/v1/credit-reservations/"
                         + operationId + "/dispatching");
         assertThat(entity.getValue().getHeaders().getFirst(HttpHeaders.AUTHORIZATION))
                 .isEqualTo("Bearer workload-jwt");

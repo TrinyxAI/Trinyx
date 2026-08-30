@@ -209,9 +209,52 @@ Private Caddy remains exactly:
 
 CI performs a real TLS handshake, not only `caddy validate`.
 
+The Cloud-to-paid wallet edge uses a separate private listener and trust chain:
+
+- listener `billing-internal.trinyx.private:8443`;
+- `admin off` and `auto_https disable_redirects`;
+- operator-provided certificate/key trusted by the dedicated Cloud JVM truststore;
+- exact wallet POST allowlist and default 404;
+- no public `/internal/v1/**` route.
+
+CI performs a second real TLS handshake against this paid edge and verifies both
+the untrusted-client failure and the trusted 404 response. The source default,
+Compose example and Java client all include the required private `:8443` port.
+
 Gateway HMAC v2, Ed25519 workload auth, replay stores, body-buffer semaphore and atomic Redis rate limit remain covered. No new v0.2.14 endpoint was made public by wildcard.
 
 `CLOUD_PUBLIC_URL`, `KEYCLOAK_PUBLIC_URL` and `PAID_PUBLIC_URL` remain the only public-origin inputs. The staging render uses `.example.invalid` and rejects production-origin leakage. No staging secret or real hostname is committed.
+
+## Trinyx product identity and legal surface follow-up
+
+Status: **PASS BRANDING / LEGAL CONTENT REQUIRED BEFORE PRODUCTION**
+
+External product surfaces use Trinyx while LiveContext remains the preserved
+upstream engine and compatibility layer:
+
+- security reporting routes privately through the Trinyx contact surface;
+- contributor onboarding names Trinyx and uses the canonical Trinyx CE Compose;
+- public support/contact copy uses `contact@trinyx.fr` consistently;
+- the branding gate rejects the retired upstream security address and the old
+  public Gmail contact;
+- LiveContext Java packages, database/schema names, Flyway history,
+  `X-LiveContext-Install-Id`, legacy container/volume names and legally required
+  upstream attribution remain intentionally unchanged.
+
+The repository currently links and advertises `/legal/privacy`, `/legal/terms`
+and `/legal/mentions`, but the corresponding page sources are absent. The
+Marketplace copy also refers to Terms sections. Approved legal text cannot be
+generated from technical assumptions, so this remains an explicit production
+gate: the three pages must be supplied and legally reviewed before Marketplace
+or the hosted product is represented as production-ready. This absence predates
+the v0.2.14 merge and is not an upstream-engine regression.
+
+The optional per-session Docker browser path also retains its historical
+`livecontext/browser-agent:1` image reference. It is disabled in the canonical
+CE/Cloud deployments and is not part of the immutable 14-image Cloud runtime.
+Do not enable that experimental path until a reviewed Trinyx-owned image and
+publication contract exist; the in-process browser-agent path is the supported
+current runtime.
 
 ## Immutable Cloud image inventory
 
@@ -268,6 +311,6 @@ The immutable runtime model requires full `package@sha256:digest` references, cl
 ## Verdict
 
 - **LiveContext parity:** PASS. Upstream v0.2.14 remains canonical and its true Git ancestry is preserved.
-- **Source merge verdict:** GO only when the required checks on the commit containing this report are green; the PR check suite is the live authority.
+- **Source merge verdict:** CONDITIONAL GO only after the approved legal pages are restored and the required checks on the resulting commit are green; the PR check suite is the live authority.
 - **Production verdict:** NO-GO until the external staging and governance gates above are evidenced.
 - **Safety:** PR25 remains Draft; no merge, deploy, AWS mutation, package publication, tag, release or secret was performed.

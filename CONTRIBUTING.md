@@ -1,6 +1,6 @@
-# Contributing to LiveContext Community Edition
+# Contributing to Trinyx Community Edition
 
-Thanks for your interest in improving LiveContext CE. This guide covers how to
+Thanks for your interest in improving Trinyx CE. This guide covers how to
 build, test, and submit changes.
 
 ## Getting started
@@ -8,8 +8,11 @@ build, test, and submit changes.
 The fastest way to run CE is the prebuilt stack:
 
 ```bash
-docker compose up -d
+docker compose -f cli/assets/docker-compose.yml up -d
 ```
+
+The root `docker-compose.yml` is retained as a legacy compatibility surface;
+new Trinyx CE installations use the canonical Compose bundle above.
 
 To build from source you need JDK 21, Maven, and Node.js 20+. The backend is a
 single Spring Boot monolith built with the `ce` Maven profile:
@@ -53,10 +56,12 @@ identity.
 
 ## License of contributions
 
-LiveContext CE is licensed under the GNU Affero General Public License v3.0
-(AGPL-3.0), see [LICENSE](LICENSE). By contributing, you agree that your
-contributions are submitted under that same license (AGPL-3.0), and you confirm
-this with the DCO sign-off described above.
+Trinyx CE is licensed under the GNU Affero General Public License v3.0
+(AGPL-3.0), see [LICENSE](LICENSE). It incorporates the LiveContext upstream
+project; required upstream copyright, license and compatibility notices remain
+intact. By contributing, you agree that your contributions are submitted under
+the same AGPL-3.0 license, and you confirm this with the DCO sign-off described
+above.
 
 ## Reporting security issues
 

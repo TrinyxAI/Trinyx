@@ -78,12 +78,12 @@ const faqCategories: FaqCategory[] = [
       {
         question: "What should I do if something doesn't work?",
         answer:
-          'First check your internet connection. If the problem persists, contact our support team at trinyx12@gmail.com and we will respond within 24 hours.',
+          'First check your internet connection. If the problem persists, contact our support team at contact@trinyx.fr and we will respond within 24 hours.',
       },
       {
         question: 'How do I report a bug or request a feature?',
         answer:
-          'Send us an email at trinyx12@gmail.com with a description of the issue or your feature idea. We actively review all feedback.',
+          'Send us an email at contact@trinyx.fr with a description of the issue or your feature idea. We actively review all feedback.',
       },
       {
         question: 'What MCP tools are available?',
@@ -195,7 +195,7 @@ export default function AboutInformationContent() {
 
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           <a
-            href="mailto:trinyx12@gmail.com"
+            href="mailto:contact@trinyx.fr"
             className="bg-theme-secondary rounded-xl p-4 hover:bg-theme-tertiary transition-colors group"
           >
             <div className="flex items-center gap-3">
@@ -204,7 +204,7 @@ export default function AboutInformationContent() {
               </div>
               <div className="min-w-0">
                 <p className="text-sm font-semibold text-theme-primary">Email</p>
-                <p className="text-xs text-theme-secondary truncate">trinyx12@gmail.com</p>
+                <p className="text-xs text-theme-secondary truncate">contact@trinyx.fr</p>
               </div>
             </div>
           </a>

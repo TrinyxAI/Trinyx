@@ -24,7 +24,7 @@ cloud.trinyx.fr -> Caddy :8188 -> gateway-service :8086
 
 auth.trinyx.fr -> Caddy :8280 -> Keycloak :8080
 
-Cloud -- private TLS + short Ed25519 workload JWT --> billing-internal.trinyx.private
+Cloud -- private TLS + short Ed25519 workload JWT --> billing-internal.trinyx.private:8443
        reserve / commit / release                         (paid-monolith wallet authority)
 
 app.trinyx.fr -- private TLS + workload JWT --> Cloud auth-service
@@ -289,7 +289,7 @@ TRINYX_ENTITLEMENT_VERIFICATION_KEYS
 TRINYX_S2S_SIGNING_KID
 TRINYX_S2S_SIGNING_KEY
 TRINYX_S2S_VERIFICATION_KEYS
-PAID_MONOLITH_BILLING_URL=https://billing-internal.trinyx.private
+PAID_MONOLITH_BILLING_URL=https://billing-internal.trinyx.private:8443
 ```
 
 Cloud S2S direction is fixed by Compose:
@@ -606,6 +606,8 @@ Wallet reservations must never traverse the public `app.trinyx.fr` virtual host.
 `docker/paid-monolith-internal/Caddyfile` on the paid-monolith host with these invariants:
 
 - bind the listener only to its private VPC address;
+- keep `PAID_MONOLITH_INTERNAL_PORT=8443` (the Caddyfile default) and expose it
+  only on that private address;
 - allow ingress only from the Cloud security group;
 - use a certificate trusted by the Cloud JVM;
 - route only the explicit POST reservation/commit/release/outcome-unknown shapes;
@@ -616,7 +618,7 @@ Wallet reservations must never traverse the public `app.trinyx.fr` virtual host.
 non-forwarded loopback hop. It does not parse the Ed25519 bearer as an embedded user JWT;
 `WorkloadAuthenticationService` remains the sole token verifier in the controller.
 
-Set `PAID_MONOLITH_BILLING_URL=https://billing-internal.trinyx.private` in the Cloud secret
+Set `PAID_MONOLITH_BILLING_URL=https://billing-internal.trinyx.private:8443` in the Cloud secret
 environment. Do not publish that hostname in public DNS and do not add `/internal/v1/**`
 to the public app proxy.
 

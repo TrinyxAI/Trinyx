@@ -34,7 +34,7 @@ public class PaidMonolithCreditClient {
     public PaidMonolithCreditClient(
             RestTemplateBuilder builder,
             WorkloadAuthenticationService workloads,
-            @Value("${paid-monolith.billing-url:https://billing-internal.trinyx.private}") String baseUrl,
+            @Value("${paid-monolith.billing-url:https://billing-internal.trinyx.private:8443}") String baseUrl,
             @Value("${PAID_MONOLITH_TRUSTSTORE_FILE:}") String trustStoreFile,
             @Value("${PAID_MONOLITH_TRUSTSTORE_PASSWORD_FILE:}") String passwordFile) {
         SSLContext sslContext =

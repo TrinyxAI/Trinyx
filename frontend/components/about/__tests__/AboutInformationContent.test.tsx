@@ -33,8 +33,9 @@ describe('AboutInformationContent public links', () => {
 
     expect(screen.getByRole('link', { name: /Email/i })).toHaveAttribute(
       'href',
-      'mailto:trinyx12@gmail.com',
+      'mailto:contact@trinyx.fr',
     );
+    expect(container.innerHTML).not.toContain('trinyx12@gmail.com');
     expect(container.innerHTML).not.toMatch(/livecontext/i);
   });
 });

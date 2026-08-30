@@ -2,7 +2,7 @@
 import '@testing-library/jest-dom/vitest';
 import React from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { render, screen } from '@testing-library/react';
+import { cleanup, render, screen } from '@testing-library/react';
 
 // Regression pin: useSearchParams() at page level opts /contact out of server
 // rendering entirely (empty HTML for crawlers). The prefill must come from
@@ -71,5 +71,19 @@ describe('ContactPage query prefill', () => {
 
     expect(screen.getByLabelText('Category')).toHaveValue('support');
     expect(screen.getByLabelText('Message')).toHaveValue('');
+  });
+});
+
+describe('ContactPage public identity', () => {
+  afterEach(cleanup);
+
+  it('publishes the canonical Trinyx contact address', () => {
+    render(<ContactPage />);
+
+    expect(screen.getByRole('link', { name: 'contact@trinyx.fr' })).toHaveAttribute(
+      'href',
+      'mailto:contact@trinyx.fr',
+    );
+    expect(document.body.innerHTML).not.toContain('trinyx12@gmail.com');
   });
 });

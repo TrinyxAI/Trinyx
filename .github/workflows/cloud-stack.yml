@@ -568,7 +568,13 @@ jobs:
         run: |
           set -euo pipefail
           private_edge=docker/paid-monolith-internal/Caddyfile
-          grep -q 'billing-internal.trinyx.private' "${private_edge}"
+          grep -Fq 'auto_https disable_redirects' "${private_edge}"
+          if grep -Eq '^[[:space:]]*auto_https[[:space:]]+off([[:space:]]|$)' "${private_edge}"; then
+            echo "Private paid TLS requires certificate handling; auto_https off is forbidden" >&2
+            exit 1
+          fi
+          grep -Eq '^[[:space:]]*admin[[:space:]]+off([[:space:]]|$)' "${private_edge}"
+          grep -Fq 'https://{$PAID_MONOLITH_INTERNAL_HOST:billing-internal.trinyx.private}:{$PAID_MONOLITH_INTERNAL_PORT:8443}' "${private_edge}"
           grep -q '@wallet {' "${private_edge}"
           grep -q '/internal/v1/credit-reservations/\*/dispatching' "${private_edge}"
           grep -q '/internal/v1/credit-reservations/\*/commit' "${private_edge}"
@@ -579,6 +585,85 @@ jobs:
             echo "The public Cloud edge must not expose the paid-monolith wallet" >&2
             exit 1
           fi
+          grep -Fq 'PAID_MONOLITH_BILLING_URL: ${PAID_MONOLITH_BILLING_URL:-https://billing-internal.trinyx.private:8443}' docker/docker-compose.cloud.yml
+          grep -Fxq 'PAID_MONOLITH_BILLING_URL=https://billing-internal.trinyx.private:8443' docker/.env.cloud.example
+
+      - name: Prove private paid-monolith TLS handshake at runtime
+        shell: bash
+        run: |
+          set -euo pipefail
+          host=billing-internal.trinyx.private
+          container=trinyx-paid-caddy-tls-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}
+          cert_dir="${RUNNER_TEMP}/${container}-certs"
+
+          cleanup() {
+            docker rm -f "${container}" >/dev/null 2>&1 || true
+            rm -rf "${cert_dir}"
+          }
+          trap cleanup EXIT
+
+          mkdir -p "${cert_dir}"
+          openssl req -x509 -newkey rsa:2048 -sha256 -nodes -days 1 \
+            -subj "/CN=${host}" \
+            -addext "subjectAltName=DNS:${host}" \
+            -keyout "${cert_dir}/server.key" \
+            -out "${cert_dir}/server.crt" >/dev/null 2>&1
+
+          docker run --detach --name "${container}" \
+            --publish 127.0.0.1::8443 \
+            --env PAID_MONOLITH_INTERNAL_HOST="${host}" \
+            --env PAID_MONOLITH_INTERNAL_PORT=8443 \
+            --env PAID_MONOLITH_INTERNAL_CERT_FILE=/certs/server.crt \
+            --env PAID_MONOLITH_INTERNAL_KEY_FILE=/certs/server.key \
+            --volume "${PWD}/docker/paid-monolith-internal/Caddyfile:/etc/caddy/Caddyfile:ro" \
+            --volume "${cert_dir}:/certs:ro" \
+            caddy:2.11.4-alpine >/dev/null
+
+          for attempt in $(seq 1 30); do
+            if docker inspect --format '{{.State.Running}}' "${container}" | grep -qx true; then
+              endpoint="$(docker port "${container}" 8443/tcp | head -n1)"
+              if [[ -n "${endpoint}" ]]; then break; fi
+            else
+              docker logs "${container}" >&2
+              exit 1
+            fi
+            sleep 1
+          done
+
+          endpoint="$(docker port "${container}" 8443/tcp | head -n1)"
+          port="${endpoint##*:}"
+          test -n "${port}"
+
+          set +e
+          curl --silent --show-error --output /dev/null --noproxy '*' \
+            --resolve "${host}:${port}:127.0.0.1" \
+            "https://${host}:${port}/not-allowlisted"
+          curl_without_ca=$?
+          set -e
+          if [[ ${curl_without_ca} -ne 60 ]]; then
+            echo "Expected curl error 60 without the private paid CA, got ${curl_without_ca}" >&2
+            docker logs "${container}" >&2
+            exit 1
+          fi
+
+          status="$(curl --silent --show-error --output /dev/null --noproxy '*' \
+            --write-out '%{http_code}' \
+            --cacert "${cert_dir}/server.crt" \
+            --resolve "${host}:${port}:127.0.0.1" \
+            "https://${host}:${port}/not-allowlisted")"
+          test "${status}" = 404
+
+          openssl_output="$(openssl s_client \
+            -connect "127.0.0.1:${port}" \
+            -servername "${host}" \
+            -CAfile "${cert_dir}/server.crt" </dev/null 2>&1)"
+          printf '%s\n' "${openssl_output}"
+          grep -q 'TLSv1.3' <<<"${openssl_output}"
+          if grep -q 'Cipher is (NONE)' <<<"${openssl_output}"; then
+            echo "Paid Caddy accepted TCP but did not negotiate a TLS cipher" >&2
+            exit 1
+          fi
+          grep -q 'Verify return code: 0 (ok)' <<<"${openssl_output}"
 
       - name: Set up Java
         uses: actions/setup-java@cf277c60eb25467037889841efdb72551f06f6c3 # actions/setup-java v4
@@ -644,4 +729,3 @@ jobs:
       - name: Verify Java and Node HMAC v1/v2 parity
         shell: bash
         run: node --test mcp/bridge/lib/__tests__/gatewayAuth.test.mjs
-

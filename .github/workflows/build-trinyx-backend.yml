@@ -4,6 +4,8 @@ on:
   pull_request:
     paths:
       - 'backend/**'
+      - 'frontend/app/contact/**'
+      - 'frontend/components/about/**'
       - 'docker-compose.yml'
       - '.github/workflows/build-trinyx-backend.yml'
       - '.github/workflows/build-trinyx-cloud-images.yml'
@@ -12,6 +14,8 @@ on:
     branches: [main]
     paths:
       - 'backend/**'
+      - 'frontend/app/contact/**'
+      - 'frontend/components/about/**'
       - 'docker-compose.yml'
       - '.github/workflows/build-trinyx-backend.yml'
       - '.github/workflows/build-trinyx-cloud-images.yml'
@@ -104,6 +108,8 @@ jobs:
           app/workflows/builder/components/__tests__/BuilderCanvas.runControlsWiring.test.tsx
           components/workflow/relations/__tests__/WorkflowRelationsMenu.test.tsx
           components/files/__tests__/FileBrowser.navigation.test.tsx
+          app/contact/__tests__/contact-page.test.tsx
+          components/about/__tests__/AboutInformationContent.test.tsx
       - name: Build frontend (${{ matrix.mode }})
         run: npm run build
 

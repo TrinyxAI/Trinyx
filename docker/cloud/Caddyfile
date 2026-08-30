@@ -1,5 +1,7 @@
 {
-	auto_https off
+	# Keep HTTPS certificate automation active for the private tls-internal listener,
+	# but never create an HTTP redirect listener.
+	auto_https disable_redirects
 	admin off
 }
 

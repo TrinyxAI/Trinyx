@@ -407,9 +407,14 @@ The Compose stack also publishes port 8443 only on `CLOUD_INTERNAL_BIND`.
 Set that value to the Cloud EC2 private VPC address, create private DNS
 `cloud-internal.trinyx.private`, and allow the port only from the paid-monolith
 security group. Caddy uses a persisted internal CA; export its root certificate
-into the paid-monolith JVM trust store before enabling dispatch. The public
-host never routes `/internal/**`. Workload JWT remains mandatory in addition
-to TLS and the network allowlist.
+into the paid-monolith JVM trust store before enabling dispatch. Its global
+`auto_https disable_redirects` setting deliberately keeps certificate
+automation active for the explicit `tls internal` listener while suppressing
+automatic HTTP redirect listeners. Do not replace it with `auto_https off`:
+that disables the automation required to provision the private certificate and
+causes the TLS handshake to fail before trust verification. The public host
+never routes `/internal/**`. Workload JWT remains mandatory in addition to TLS
+and the network allowlist.
 
 ## Validation and deployment commands
 

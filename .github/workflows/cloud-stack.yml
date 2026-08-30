@@ -3,6 +3,7 @@ name: Validate Cloud stack
 on:
   pull_request:
     paths:
+      - "docker-compose.yml"
       - "docker/docker-compose.cloud.yml"
       - "backend/**"
       - "frontend/**"

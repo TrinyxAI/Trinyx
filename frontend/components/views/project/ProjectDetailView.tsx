@@ -26,7 +26,6 @@ import { InterfaceThumbnail } from '@/app/workflows/builder/components/interface
 import { resolveInterfaceFormat } from '@/lib/interfaces/interfaceFormats';
 import { formatRelativeDate } from '@/lib/utils/dateFormatters';
 import { useSidePanel } from '@/contexts/SidePanelContext';
-import { WorkflowBuilderPanelContent } from '@/components/app/WorkflowBuilderPanelContent';
 import { AgentPanelContent } from '@/components/app/AgentPanelContent';
 import { InterfacePanelContent } from '@/components/app/InterfacePanelContent';
 import { DataSourcePanelContent } from '@/components/app/DataSourcePanelContent';
@@ -87,12 +86,16 @@ export function ProjectDetailView({ projectId }: ProjectDetailViewProps) {
 
     switch (type) {
       case 'workflow':
-        sidePanel.openTab({
-          id: workflowPanelTabId(id),
-          label,
-          icon: <WorkflowIcon className="w-4 h-4" />,
-          content: <WorkflowBuilderPanelContent workflowId={id} />,
-          preferredWidth: 0.35,
+        // Lazy: the builder panel pulls in the whole workflow canvas, and this view
+        // must not carry it statically (same rule as openWorkflowBuilderTab).
+        void import('@/components/app/WorkflowBuilderPanelContent').then(({ WorkflowBuilderPanelContent }) => {
+          sidePanel.openTab({
+            id: workflowPanelTabId(id),
+            label,
+            icon: <WorkflowIcon className="w-4 h-4" />,
+            content: <WorkflowBuilderPanelContent workflowId={id} />,
+            preferredWidth: 0.35,
+          });
         });
         break;
       case 'agent':

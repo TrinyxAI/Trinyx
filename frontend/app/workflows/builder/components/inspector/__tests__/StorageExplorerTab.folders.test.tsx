@@ -6,9 +6,10 @@
  * {@code focusS3Key}) the tab opts the hook into the folder-aware listing,
  * renders compact folder rows (manual + virtual) ahead of file rows, navigates
  * by the correct key (virtualId for virtual, id for manual), keeps file rows
- * opening the detail view, and shows the breadcrumb. With a {@code focusS3Key}
- * deep-link OR in picker mode ({@code onSelect}), folder mode is OFF - the hook
- * is NOT folder-aware and no folder rows render (legacy FLAT path preserved).
+ * opening the detail view, and shows the breadcrumb.
+ *
+ * Folder mode is on for BOTH modes; only the explicit {@code flat} prop (the image-gen
+ * deep-link) opts out, and the tests below pin both halves of that.
  *
  * The heavy {@code useStorageExplorer} hook is mocked so the test drives the
  * entries + captures {@code navigateToFolder} and the folder options it was
@@ -244,7 +245,7 @@ describe('StorageExplorerTab - folder mode (explorer, no deep-link)', () => {
   });
 });
 
-describe('StorageExplorerTab - flat mode (deep-link or picker)', () => {
+describe('StorageExplorerTab - flat mode (the deep-link opt-out)', () => {
   it('with focusS3Key set, folder mode STAYS ON: the list keeps its folders (focus highlights, never flattens)', () => {
     // A focus key no longer flattens the list - folders + files share one per-day timeline,
     // so the focused file is highlighted AND the folders stay visible (the back-from-detail fix).
@@ -267,14 +268,29 @@ describe('StorageExplorerTab - flat mode (deep-link or picker)', () => {
     expect(queryByText('itemCount:0')).toBeNull();
   });
 
-  it('in picker mode (onSelect provided), folder mode is OFF and no folder rows render', () => {
-    hookState.parentFolderId = undefined;
+  it('in picker mode, folder mode is ON so a file can be found by where it lives', () => {
+    // Reversed deliberately. A flat picker listed every file in the org as one undifferentiated
+    // stream - no folders, and files nested inside folders mixed in with the rest - which is the
+    // hardest possible way to find one thing. `flat` still opts out, for the deep-link caller.
+    hookState.parentFolderId = null;
     hookState.entries = [folder('f1', 'Reports'), file('a', 'a.png')];
     const onSelect = vi.fn();
-    const { queryByText } = render(<StorageExplorerTab onSelect={onSelect} />);
+
+    const { getByText } = render(<StorageExplorerTab onSelect={onSelect} />);
+
+    expect(lastHookOptions?.folderAware).toBe(true);
+    expect(lastHookOptions?.virtualWorkflowFolders).toBe(true);
+    expect(getByText('Reports')).toBeTruthy();
+  });
+
+  it('a picker told to be flat still is', () => {
+    hookState.parentFolderId = undefined;
+    hookState.entries = [folder('f1', 'Reports'), file('a', 'a.png')];
+
+    render(<StorageExplorerTab onSelect={vi.fn()} flat />);
+
     expect(lastHookOptions?.folderAware).toBe(false);
     expect(lastHookOptions?.virtualWorkflowFolders).toBe(false);
-    expect(queryByText('itemCount:0')).toBeNull();
   });
 
   it('picker mode lists S3 files only - the hook gets S3_FILES_FILTER (filesOnly + s3Only), '

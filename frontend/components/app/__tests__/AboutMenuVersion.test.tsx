@@ -24,6 +24,7 @@ function info(overrides: Partial<AppVersionInfo> = {}): AppVersionInfo {
     latestVersion: null,
     releaseUrl: null,
     securityFix: false,
+    identifiesInstall: false,
     checkedAt: null,
     ...overrides,
   };

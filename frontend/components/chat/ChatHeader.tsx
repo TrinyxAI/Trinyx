@@ -2,7 +2,7 @@
 
 import React, { useMemo, useState, useEffect } from "react";
 import { SelectedModel, AIModel } from "@/hooks/useModels";
-import { PanelLeft, PanelRight, PanelBottom, ChevronLeft, ChevronRight, ChevronDown, Home, Sparkles, Minimize2, Play, FileText, Pencil, Globe, ArrowLeft, Download, List, Bug } from "lucide-react";
+import { PanelLeft, PanelRight, PanelBottom, ChevronLeft, ChevronRight, Home, Sparkles, Minimize2, FileText, Pencil, Globe, ArrowLeft, Download, List, SlidersHorizontal } from "lucide-react";
 import { useSidePanelLayoutSafe } from "@/contexts/SidePanelLayoutContext";
 import { useConversationActivity } from "@/contexts/ConversationActivityContext";
 import LoadingSpinner from "@/components/LoadingSpinner";
@@ -17,12 +17,13 @@ import { useWorkflowMode } from "@/contexts/WorkflowModeContext";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
-import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { StepDataTable } from "@/app/workflows/builder/components/inspector/StepDataTable";
 import { WorkflowRunResultModalContent } from "@/components/WorkflowRunResultModalContent";
 import { orchestratorApi } from "@/lib/api";
 import { useTranslations } from "next-intl";
 import { PublishWorkflowModal } from "@/components/workflow/ShareWorkflowModal";
+import { useWorkflowSaveState } from "@/hooks/useWorkflowSaveState";
+import { WorkflowRunSplitButton } from "@/components/workflow/WorkflowRunSplitButton";
 import { WorkflowSaveWithVersions } from "@/components/workflow/WorkflowVersionHistory";
 import { MarketplaceHeaderActions } from "@/components/marketplace/MarketplaceHeaderActions";
 import { NotificationBell } from "@/components/chat/NotificationBell";
@@ -114,6 +115,15 @@ interface ChatHeaderProps {
   isInterfacePage?: boolean;
   interfaceId?: string | null;
   onEditInterface?: () => void;
+  /**
+   * Open the controls for the page being viewed (its volume, today). Absent when there is
+   * nothing to control, so the button does not sit there promising something.
+   */
+  onToggleInterfaceControls?: () => void;
+  /** Whether those controls are showing, so the button says what pressing it does. */
+  interfaceControlsOpen?: boolean;
+  /** Whether the page is making a sound, so that is visible with the controls dismissed. */
+  interfaceSoundOn?: boolean;
   // Application page props (simplified header: only Logs + Messages toggle)
   isApplicationPage?: boolean;
   // Marketplace preview props
@@ -205,6 +215,9 @@ export const ChatHeader: React.FC<ChatHeaderProps> = ({
   isInterfacePage = false,
   interfaceId = null,
   onEditInterface,
+  onToggleInterfaceControls,
+  interfaceControlsOpen = false,
+  interfaceSoundOn = false,
   // Application page props
   isApplicationPage = false,
   // Marketplace preview props
@@ -246,8 +259,17 @@ export const ChatHeader: React.FC<ChatHeaderProps> = ({
     setPosition: setSidePanelPosition,
     bottomMode: sidePanelBottomMode,
   } = useSidePanelLayoutSafe();
-  const SidePanelToggleIcon = sidePanelPosition === 'right' ? PanelRight : PanelBottom;
-  const activeDock: 'right' | 'bottom' = sidePanelPosition === 'right' ? 'right' : 'bottom';
+  // A DETACHED panel is on no dock at all, so `activeDock` is 'none': neither button
+  // reads as active, and the "same dock -> close" rule below can never match, which
+  // is what turns both buttons into a plain re-dock. That one value is the whole
+  // behaviour - an explicit detached branch here would only restate it.
+  // Derived from the bottom variants explicitly rather than from "not right", which
+  // would have counted 'floating' as a bottom dock.
+  const isBottomDock = sidePanelPosition === 'bottom' || sidePanelPosition === 'bottom-full';
+  const SidePanelToggleIcon = isBottomDock ? PanelBottom : PanelRight;
+  const activeDock: 'right' | 'bottom' | 'none' = sidePanelPosition === 'floating'
+    ? 'none'
+    : (isBottomDock ? 'bottom' : 'right');
   const handleDockToggle = (dock: 'right' | 'bottom') => {
     const target = dock === 'right' ? 'right' : sidePanelBottomMode;
     // Setting the position first is deliberate even on a close click: it normalizes
@@ -299,71 +321,15 @@ export const ChatHeader: React.FC<ChatHeaderProps> = ({
 
 
 
-  // Workflow save status for button feedback (idle, saving, saved, error)
-  const [workflowSaveStatus, setWorkflowSaveStatus] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle');
-
-  // Track whether the workflow has unsaved changes (from useDirtyState via CustomEvent)
-  const [isWorkflowDirty, setIsWorkflowDirty] = useState(false);
-
-  useEffect(() => {
-    if (!isWorkflowPage) return;
-
-    const handler = (e: CustomEvent) => {
-      setIsWorkflowDirty(e.detail.isDirty);
-    };
-    window.addEventListener('workflowDirtyChange', handler as EventListener);
-    return () => window.removeEventListener('workflowDirtyChange', handler as EventListener);
-  }, [isWorkflowPage]);
-
-  // Track whether the agent is currently streaming (disable Save during streaming)
-  const [isAgentStreaming, setIsAgentStreaming] = useState(false);
-
-  useEffect(() => {
-    if (!isWorkflowPage) return;
-    const handler = (event: CustomEvent<{ isStreaming: boolean }>) => {
-      setIsAgentStreaming(event.detail.isStreaming);
-    };
-    window.addEventListener('workflowStreamingStateChange', handler as EventListener);
-    return () => window.removeEventListener('workflowStreamingStateChange', handler as EventListener);
-  }, [isWorkflowPage]);
-
-  // Step-by-step mode state (allows saving even in run mode)
-  const [isStepByStepMode, setIsStepByStepMode] = useState(false);
-
-  // Listen for save completion events from BuilderCanvas
-  useEffect(() => {
-    if (!isWorkflowPage) return;
-
-    const handleSaveComplete = (event: CustomEvent) => {
-      const { success } = event.detail;
-      setWorkflowSaveStatus(success ? 'saved' : 'error');
-      if (success) {
-        setIsWorkflowDirty(false);
-      }
-      // Reset to idle after 2 seconds
-      setTimeout(() => setWorkflowSaveStatus('idle'), 2000);
-    };
-
-    window.addEventListener('workflowViewSaveComplete', handleSaveComplete as EventListener);
-    return () => {
-      window.removeEventListener('workflowViewSaveComplete', handleSaveComplete as EventListener);
-    };
-  }, [isWorkflowPage]);
-
-  // Listen for step-by-step mode changes from workflow builder
-  useEffect(() => {
-    if (!isWorkflowPage) return;
-
-    const handleStepByStepModeChange = (event: CustomEvent) => {
-      const { isEnabled } = event.detail;
-      setIsStepByStepMode(isEnabled || false);
-    };
-
-    window.addEventListener('workflowStepByStepModeChange', handleStepByStepModeChange as EventListener);
-    return () => {
-      window.removeEventListener('workflowStepByStepModeChange', handleStepByStepModeChange as EventListener);
-    };
-  }, [isWorkflowPage]);
+  // Save status, dirty flag and agent-streaming gate of THIS workflow's canvas.
+  // Shared with the side panel's workflow sub-tab, which offers the same Save -
+  // and scoped by workflowId, because both canvases can be mounted at once.
+  const {
+    saveStatus: workflowSaveStatus,
+    isDirty: isWorkflowDirty,
+    isAgentStreaming,
+    requestSave: requestWorkflowSave,
+  } = useWorkflowSaveState(workflowId, isWorkflowPage);
 
   // RUN BUTTON VALIDATION - COMMENTED OUT
   // Original validation logic that disabled the Run button when validation errors existed:
@@ -719,6 +685,10 @@ export const ChatHeader: React.FC<ChatHeaderProps> = ({
   return (
     <div>
       <div
+        // Named so a test can tell the PAGE header's controls from the side
+        // panel's: since the panel gained its own Save / Run / Share, several
+        // buttons with the same title live on screen at once.
+        data-testid="app-header"
         className="h-14 bg-theme-secondary flex flex-nowrap items-center justify-between gap-2 px-4 flex-shrink-0"
       >
         {/* Desktop Layout - Model and Mode on left */}
@@ -802,6 +772,26 @@ export const ChatHeader: React.FC<ChatHeaderProps> = ({
               className="w-8 h-8"
             >
               <Minimize2 className="w-4 h-4" />
+            </Button>
+          )}
+          {isInterfacePage && interfaceId && onToggleInterfaceControls && (
+            <Button
+              variant="ghost"
+              size="icon"
+              onClick={onToggleInterfaceControls}
+              // The name carries the sound state, not just the tint: colour alone says nothing
+              // to a screen reader, and nothing at all to a reader who cannot tell these two
+              // shades apart. The panel can be dismissed with the sound still playing, and
+              // audio with nothing on screen accounting for it is what every sibling surface
+              // takes care to avoid.
+              title={t(interfaceSoundOn ? 'actions.interfaceControlsSoundOn' : 'actions.interfaceControls')}
+              aria-label={t(interfaceSoundOn ? 'actions.interfaceControlsSoundOn' : 'actions.interfaceControls')}
+              aria-expanded={interfaceControlsOpen}
+              aria-controls="interface-viewer-controls"
+              data-testid="interface-controls-toggle"
+              className={`w-8 h-8${interfaceSoundOn ? ' text-[var(--accent-primary)]' : ''}`}
+            >
+              <SlidersHorizontal className="w-4 h-4" />
             </Button>
           )}
           {isInterfacePage && interfaceId && onEditInterface && (
@@ -911,12 +901,7 @@ export const ChatHeader: React.FC<ChatHeaderProps> = ({
                 isDirty={isWorkflowDirty}
                 isAgentStreaming={isAgentStreaming}
                 isRunMode={isRunMode}
-                onSave={() => {
-                  setWorkflowSaveStatus('saving');
-                  window.dispatchEvent(new CustomEvent('workflowViewSave', {
-                    detail: { workflowId }
-                  }));
-                }}
+                onSave={requestWorkflowSave}
                 desktop={true}
               />
               {isRunMode ? (
@@ -1104,6 +1089,26 @@ export const ChatHeader: React.FC<ChatHeaderProps> = ({
         {/* Mobile Layout - Messages Panel Toggle Button on right */}
         <div className="md:hidden flex items-center gap-1.5 flex-shrink-0">
           {mobileSearchSlot}
+          {isInterfacePage && interfaceId && onToggleInterfaceControls && (
+            <Button
+              variant="ghost"
+              size="icon"
+              onClick={onToggleInterfaceControls}
+              // The name carries the sound state, not just the tint: colour alone says nothing
+              // to a screen reader, and nothing at all to a reader who cannot tell these two
+              // shades apart. The panel can be dismissed with the sound still playing, and
+              // audio with nothing on screen accounting for it is what every sibling surface
+              // takes care to avoid.
+              title={t(interfaceSoundOn ? 'actions.interfaceControlsSoundOn' : 'actions.interfaceControls')}
+              aria-label={t(interfaceSoundOn ? 'actions.interfaceControlsSoundOn' : 'actions.interfaceControls')}
+              aria-expanded={interfaceControlsOpen}
+              aria-controls="interface-viewer-controls"
+              data-testid="interface-controls-toggle"
+              className={`w-8 h-8${interfaceSoundOn ? ' text-[var(--accent-primary)]' : ''}`}
+            >
+              <SlidersHorizontal className="w-4 h-4" />
+            </Button>
+          )}
           {isInterfacePage && interfaceId && onEditInterface && (
             <Button
               variant="default"
@@ -1209,12 +1214,7 @@ export const ChatHeader: React.FC<ChatHeaderProps> = ({
                 isDirty={isWorkflowDirty}
                 isAgentStreaming={isAgentStreaming}
                 isRunMode={isRunMode}
-                onSave={() => {
-                  setWorkflowSaveStatus('saving');
-                  window.dispatchEvent(new CustomEvent('workflowViewSave', {
-                    detail: { workflowId }
-                  }));
-                }}
+                onSave={requestWorkflowSave}
                 desktop={false}
               />
               {isRunMode ? (
@@ -1325,91 +1325,3 @@ export const ChatHeader: React.FC<ChatHeaderProps> = ({
     </div>
   );
 };
-
-/**
- * Header Run control for the workflow builder, as a split button:
- *  - primary click = automatic run (unchanged `workflowViewStart` event;
- *    per-node mocks apply on their own, they are never a run-level choice),
- *  - a chevron opening a small menu (same visual pattern as the version
- *    history dropdown) with the two execution modes: Auto (default) and
- *    Step-by-step (`workflowStartStepByStep`, read by useWorkflowExecution).
- * Desktop shows icon + label on the primary; mobile is icon-only.
- */
-function WorkflowRunSplitButton({ workflowId, desktop }: { workflowId: string; desktop: boolean }) {
-  const t = useTranslations();
-  const [isMenuOpen, setIsMenuOpen] = useState(false);
-
-  const dispatchRun = () => {
-    setIsMenuOpen(false);
-    window.dispatchEvent(new CustomEvent('workflowViewStart', { detail: { workflowId } }));
-  };
-
-  const dispatchStepByStep = () => {
-    setIsMenuOpen(false);
-    window.dispatchEvent(new CustomEvent('workflowStartStepByStep', { detail: { workflowId } }));
-  };
-
-  return (
-    <div className="flex items-center">
-      <Button
-        variant="default"
-        size="sm"
-        onClick={(e) => {
-          e.stopPropagation();
-          dispatchRun();
-        }}
-        title={t('actions.run')}
-        className={desktop ? "h-8 px-2 lg:px-3 rounded-r-none" : "h-8 px-2 rounded-r-none"}
-      >
-        <Play className={desktop ? "w-4 h-4 lg:mr-1" : "w-4 h-4"} />
-        {desktop && <span className="hidden lg:inline">{t('actions.run')}</span>}
-      </Button>
-      <Popover open={isMenuOpen} onOpenChange={setIsMenuOpen}>
-        <PopoverTrigger asChild>
-          <Button
-            variant="default"
-            size="sm"
-            onClick={(e) => e.stopPropagation()}
-            aria-label={t('actions.run')}
-            aria-haspopup="menu"
-            aria-expanded={isMenuOpen}
-            className="h-8 px-1 rounded-l-none border-l border-white/20 dark:border-black/20"
-          >
-            <ChevronDown className={`w-3.5 h-3.5 transition-transform duration-200 ${isMenuOpen ? 'rotate-180' : ''}`} />
-          </Button>
-        </PopoverTrigger>
-        <PopoverContent
-          align="end"
-          className="w-56 p-2 rounded-2xl bg-theme-primary border border-theme shadow-lg"
-          onClick={(e) => e.stopPropagation()}
-        >
-          <div className="px-3 py-2">
-            <div className="text-sm font-medium text-theme-primary">
-              {t('workflowBuilder.canvas.runWorkflow')}
-            </div>
-          </div>
-          <div role="menu" className="space-y-1">
-            <button
-              type="button"
-              role="menuitem"
-              className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl cursor-pointer transition-colors text-theme-primary hover:bg-gray-100 dark:hover:bg-gray-800"
-              onClick={dispatchRun}
-            >
-              <Play className="h-4 w-4 flex-shrink-0" strokeWidth={2} fill="currentColor" />
-              <span className="text-sm flex-1 text-left truncate">{t('workflowBuilder.canvas.runAuto')}</span>
-            </button>
-            <button
-              type="button"
-              role="menuitem"
-              className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl cursor-pointer transition-colors text-theme-primary hover:bg-gray-100 dark:hover:bg-gray-800"
-              onClick={dispatchStepByStep}
-            >
-              <Bug className="h-4 w-4 flex-shrink-0" strokeWidth={2} />
-              <span className="text-sm flex-1 text-left truncate">{t('workflowBuilder.canvas.runStepByStep')}</span>
-            </button>
-          </div>
-        </PopoverContent>
-      </Popover>
-    </div>
-  );
-}

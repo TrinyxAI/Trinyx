@@ -80,7 +80,10 @@ export function FileVisualizeCard({ fileId, title }: FileVisualizeCardProps) {
     return () => { cancelled = true; };
   }, [fileId, t]);
 
-  const isTabActive = sidePanel?.isOpen && sidePanel?.activeTabId === FILES_TAB_ID;
+  // `isForward`, not `isOpen`: a detached window collapsed to a strip is open and
+  // shows nothing, so this card would paint its "click to close" state over a panel
+  // nobody can see - and the click would then destroy the tab instead of revealing it.
+  const isTabActive = sidePanel?.isForward && sidePanel?.activeTabId === FILES_TAB_ID;
 
   /** Switch the panel to the Files list (optionally focused on a file). */
   const openFilesList = useCallback((focusS3Key?: string) => {
@@ -125,7 +128,18 @@ export function FileVisualizeCard({ fileId, title }: FileVisualizeCardProps) {
   const autoOpenedRef = useRef(false);
   useEffect(() => {
     if (autoOpenedRef.current || !sidePanel || !preview) return;
-    if (!sidePanel.isOpen) return;
+    // `isForward`: a shaded window reads as open, so this would pop one the user
+    // deliberately collapsed - the opposite of the non-intrusive policy above.
+    //
+    // Declining CLAIMS the one-shot, it does not defer it. The effect depends on the
+    // context value, which changes the moment the shade lifts, so a merely-skipped
+    // pass fires again on the very next render - the one caused by the user pressing
+    // the header button. They would press to get their window back and land on the
+    // Files tab instead, which is the exact swap `bringForward` exists to prevent.
+    if (!sidePanel.isForward) {
+      autoOpenedRef.current = true;
+      return;
+    }
     const seenKey = `lc_filecard_seen:${fileId}`;
     try {
       if (sessionStorage.getItem(seenKey)) { autoOpenedRef.current = true; return; }

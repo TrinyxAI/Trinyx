@@ -2,6 +2,7 @@ package com.apimarketplace.auth.web;
 
 import com.apimarketplace.auth.web.version.VersionUpdateService;
 import com.apimarketplace.common.web.AppEditionProvider;
+import com.apimarketplace.auth.web.version.CeInstallIdProvider;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.boot.info.GitProperties;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -31,20 +32,26 @@ public class VersionController {
     private final AppEditionProvider editionProvider;
     private final VersionUpdateService versionUpdateService;
     private final GitProperties gitProperties;
+    private final ObjectProvider<CeInstallIdProvider> installId;
 
     public VersionController(AppEditionProvider editionProvider,
                              VersionUpdateService versionUpdateService,
-                             ObjectProvider<GitProperties> gitProperties) {
+                             ObjectProvider<GitProperties> gitProperties,
+                             ObjectProvider<CeInstallIdProvider> installId) {
         this.editionProvider = editionProvider;
         this.versionUpdateService = versionUpdateService;
         // Absent when the build carried no git.properties (graceful "dev" fallback).
         this.gitProperties = gitProperties.getIfAvailable();
+        // Absent unless this install both polls for updates and identifies itself. That bean's own
+        // conditions ARE the answer, so the card cannot drift from what the install actually does.
+        this.installId = installId;
     }
 
     @GetMapping("/api/version")
     public VersionInfo getVersion() {
         String runningVersion = VersionInfo.resolveVersion(gitProperties);
         var update = versionUpdateService.resolve(runningVersion, editionProvider.isSelfHosted());
-        return VersionInfo.from(editionProvider, gitProperties, update);
+        return VersionInfo.from(editionProvider, gitProperties, update,
+                installId.getIfAvailable() != null);
     }
 }

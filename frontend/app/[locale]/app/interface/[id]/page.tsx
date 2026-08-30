@@ -5,6 +5,11 @@ import { useRouter } from 'next/navigation';
 import { useTranslations } from 'next-intl';
 
 import { InterfacePreview } from '@/components/InterfacePreview';
+import { InterfaceViewerControls } from '@/components/interfaces/InterfaceViewerControls';
+import {
+  emitInterfaceViewerControls,
+  onInterfaceViewerControlsToggle,
+} from '@/lib/interfaces/interfaceViewerBus';
 import { CreateInterfaceModal } from '@/components/chat/CreateInterfaceModal';
 import { useAuthGuard } from '@/hooks/useAuthGuard';
 import LoadingSpinner from '@/components/LoadingSpinner';
@@ -70,6 +75,17 @@ export default function InterfaceDetailPage({ params }: { params: Promise<{ id: 
 
   // Edit modal state
   const [showEditModal, setShowEditModal] = useState(false);
+
+  // What the reader can change about the page on screen.
+  //
+  // Sound starts OFF. A page opened from the list is something you look at, and a page that
+  // starts talking the moment it is opened has taken a decision that belongs to the reader -
+  // the same reason an application's preview starts silent. Claiming the volume here is what
+  // earns the control: everywhere that offers no control passes nothing and the page plays
+  // exactly as authored.
+  const [soundOn, setSoundOn] = useState(false);
+  const [hasAudio, setHasAudio] = useState(false);
+  const [controlsOpen, setControlsOpen] = useState(false);
 
   // Render data for interfaces with datasource
   const [renderResult, setRenderResult] = useState<RenderResult | null>(null);
@@ -177,6 +193,41 @@ export default function InterfaceDetailPage({ params }: { params: Promise<{ id: 
     };
   }, []);
 
+  // The header owns the button beside Edit, and only this page knows whether pressing it would
+  // show anything: a page with no media has nothing to control yet. Cleared on the way out, or
+  // the header would keep offering controls for a page that is gone.
+  useEffect(() => {
+    emitInterfaceViewerControls({ available: hasAudio, open: controlsOpen, soundOn });
+  }, [hasAudio, controlsOpen, soundOn]);
+  useEffect(
+    () => () => emitInterfaceViewerControls({ available: false, open: false, soundOn: false }),
+    [],
+  );
+
+  useEffect(() => onInterfaceViewerControlsToggle(() => setControlsOpen((open) => !open)), []);
+
+  // A page with nothing to control must not leave its panel stranded on screen.
+  useEffect(() => {
+    if (!hasAudio) setControlsOpen(false);
+  }, [hasAudio]);
+
+  // A page whose template goes away takes its frame with it, so nothing is left to report that
+  // the media has gone. Without this the header would go on offering a control over a page that
+  // is no longer rendered.
+  useEffect(() => {
+    if (!resolvedHtmlTemplate?.trim()) setHasAudio(false);
+  }, [resolvedHtmlTemplate]);
+
+  // Escape closes the controls, the way it closes everything else that floats over a page.
+  useEffect(() => {
+    if (!controlsOpen) return;
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setControlsOpen(false);
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [controlsOpen]);
+
   // Live sync: when the LLM updates this interface via chat (StreamingContext
   // dispatches `interfaceModified` on interface tool completion), re-fetch so an
   // already-open detail page doesn't stay frozen on the pre-mutation template
@@ -272,7 +323,24 @@ export default function InterfaceDetailPage({ params }: { params: Promise<{ id: 
           // in whatever box the layout gave it - the reason vertical interfaces looked broken.
           format={renderResult?.format ?? interfaceData?.format}
           emptyLabel={t('chat.interfaceBlock.noTemplate')}
+          mediaMuted={!soundOn}
+          onMediaAudioPresence={setHasAudio}
         />
+
+        {/* What can be changed about the page, opened from the header button beside Edit. */}
+        {controlsOpen && (
+          <div
+            id="interface-viewer-controls"
+            className="absolute bottom-4 left-1/2 -translate-x-1/2 z-20"
+          >
+            <InterfaceViewerControls
+              soundOn={soundOn}
+              onToggleSound={() => setSoundOn((on) => !on)}
+              hasAudio={hasAudio}
+              onClose={() => setControlsOpen(false)}
+            />
+          </div>
+        )}
 
         {/* Pagination controls - show if there are multiple items */}
         {totalItems > 1 && (

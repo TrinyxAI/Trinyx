@@ -881,7 +881,7 @@ public class CrudExecutorService {
         for (CreateRowRequest.RowData row : rows) {
             if (row.columns() == null) continue;
             for (Map.Entry<String, Object> entry : row.columns().entrySet()) {
-                ColumnMappingSpec spec = mappingSpec.get(entry.getKey());
+                ColumnMappingSpec spec = mappingSpec.get(stripDataPrefix(entry.getKey()));
                 if (spec != null && spec.type() != null) {
                     CoercionResult result = columnValueCoercer.coerce(
                             entry.getValue(), spec.type(), spec.display());
@@ -921,7 +921,10 @@ public class CrudExecutorService {
 
         List<String> warnings = new ArrayList<>();
         for (Map.Entry<String, Object> entry : setValues.entrySet()) {
-            ColumnMappingSpec spec = mappingSpec.get(entry.getKey());
+            // The "data." prefix is stripped later, in CrudRepository.updateRows, so looking the
+            // spec up on the raw key found nothing for a caller writing set={"data.photo": ...}
+            // and the value skipped coercion entirely - silently, and only for that spelling.
+            ColumnMappingSpec spec = mappingSpec.get(stripDataPrefix(entry.getKey()));
             if (spec != null && spec.type() != null) {
                 CoercionResult result = columnValueCoercer.coerce(
                         entry.getValue(), spec.type(), spec.display());
@@ -931,6 +934,14 @@ public class CrudExecutorService {
             }
         }
         return warnings;
+    }
+
+    /**
+     * mapping_spec is keyed by the BARE column name, while a caller may address a column either way
+     * ("photo" or "data.photo") - both are accepted at write time, so both must find their spec.
+     */
+    private static String stripDataPrefix(String column) {
+        return (column != null && column.startsWith("data.")) ? column.substring("data.".length()) : column;
     }
 
     private Map<String, ColumnMappingSpec> loadMappingSpecSafe(DataSource dataSource, String tenantId) {

@@ -8,6 +8,7 @@ import { orchestratorApi, type EdgeState, type StepState } from '@/lib/api';
 import type { Agent } from '@/lib/api/orchestrator/types';
 import { normalizeLabel } from '../utils/labelNormalizer';
 import { getActivePublicPreview } from '@/contexts/PublicationSnapshotContext';
+import { isEventForWorkflow } from '@/lib/workflow/workflowEventScope';
 import { WorkflowPlanImporter } from '../services/workflowPlanImporter/WorkflowPlanImporter';
 import {
   updateNodesFromBatchSteps,
@@ -656,6 +657,10 @@ export function useWorkflowLoader(config: UseWorkflowLoaderConfig): UseWorkflowL
   // Listen for version restore events to re-import plan without page reload
   React.useEffect(() => {
     const handlePlanRestore = async (event: CustomEvent) => {
+      // A restore re-imports a plan into THIS canvas. Refusing one addressed to
+      // another workflow is the difference between "restore v3 of B" and
+      // "load B's v3 into A, then persist it there on A's next save".
+      if (!isEventForWorkflow(event.detail, workflowId)) return;
       const plan = event.detail?.plan;
       if (!plan) return;
 
@@ -715,7 +720,7 @@ export function useWorkflowLoader(config: UseWorkflowLoaderConfig): UseWorkflowL
     return () => {
       window.removeEventListener('workflowPlanRestore', handlePlanRestore as EventListener);
     };
-  }, [setNodes, setEdges, nodesRef, edgesRef]);
+  }, [setNodes, setEdges, nodesRef, edgesRef, workflowId]);
 
   return {
     isLoadingWorkflow,

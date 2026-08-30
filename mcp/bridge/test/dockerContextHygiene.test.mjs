@@ -51,3 +51,22 @@ test('npm ci skips the audit request so a TLS-MITM proxy cannot crash the build'
     assert.match(cmd, /--no-audit/, `npm ci must pass --no-audit: ${cmd}`);
   }
 });
+
+test('the pip install carries its own C toolchain, and drops it in the same layer', () => {
+  // tree-sitter, a mistral-vibe dependency, publishes musllinux wheels for x86_64 only,
+  // so on aarch64 pip builds it from source. Without a compiler in the image that step
+  // dies with "No such file or directory: 'cc'", which is how the first multi-arch CE
+  // release failed - 40 minutes in, on a runner, with nothing published. The toolchain
+  // must be installed AND removed inside the same RUN, or the published image grows by
+  // an entire build-base on both arches.
+  const runLayers = dockerfile
+    .replace(/\\\r?\n/g, ' ') // one RUN per line, line continuations joined
+    .split(/\r?\n/)
+    .filter((line) => line.startsWith('RUN '));
+  const layer = runLayers.find((line) => line.includes('pip3 install'));
+  assert.ok(layer, 'expected a RUN layer that pip-installs mistral-vibe');
+  assert.match(layer, /--virtual \.py-build-deps/, 'the toolchain must be a virtual apk package');
+  assert.match(layer, /build-base/, 'a C compiler is required to build tree-sitter on aarch64');
+  assert.match(layer, /python3-dev/, 'Python.h is required to build a CPython extension');
+  assert.match(layer, /apk del \.py-build-deps/, 'the toolchain must be removed in the same layer');
+});

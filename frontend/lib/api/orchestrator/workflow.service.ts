@@ -6,7 +6,7 @@
  */
 
 import { apiClient } from '../api-client';
-import type { Workflow, WorkflowRun, WorkflowStep, PagedStepsResponse, WorkflowBoardResponse, WorkflowsPage, ApplicationRunVersionEntry } from './types';
+import type { Workflow, WorkflowRun, WorkflowStep, PagedStepsResponse, WorkflowBoardResponse, WorkflowsPage, ApplicationRunVersionEntry, WorkflowRelations } from './types';
 
 export interface WorkflowsListOptions {
   /** Zero-based page index. */
@@ -330,6 +330,39 @@ export class WorkflowService {
    */
   async getAggregatedSteps(runId: string): Promise<any[]> {
     return apiClient.get<any[]>(`/v2/workflows/dag/instances/${runId}/steps/aggregated`);
+  }
+
+  /**
+   * The sub-workflow neighbourhood of one workflow: the workflows that call it (parents) and the
+   * ones it calls (children).
+   *
+   * <p>Best-effort: a failure yields empty lists, so the surfaces that show this (a canvas toolbar,
+   * a card footer) degrade to "no relations" instead of failing the page around them.
+   */
+  async getWorkflowRelations(workflowId: string): Promise<WorkflowRelations> {
+    try {
+      return await apiClient.get<WorkflowRelations>(`/workflows/${workflowId}/relations`);
+    } catch {
+      return { parents: [], children: [] };
+    }
+  }
+
+  /**
+   * Batch sibling of getWorkflowRelations, for a card grid: one request for a whole page of cards
+   * instead of one per card. A workflowId with no relation is present with empty lists (or absent
+   * if it could not be resolved at all); both read the same way at the call site.
+   */
+  async getWorkflowRelationsBatch(workflowIds: string[]): Promise<Record<string, WorkflowRelations>> {
+    const ids = Array.from(new Set(workflowIds.filter(Boolean)));
+    if (ids.length === 0) return {};
+    try {
+      return await apiClient.post<Record<string, WorkflowRelations>>(
+        '/workflows/relations-batch',
+        { workflowIds: ids },
+      );
+    } catch {
+      return {};
+    }
   }
 
   /**

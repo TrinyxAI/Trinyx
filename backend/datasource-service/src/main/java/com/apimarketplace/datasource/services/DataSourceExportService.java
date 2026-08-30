@@ -211,7 +211,7 @@ public class DataSourceExportService {
                 csv.append(",");
                 Object value = data.get(col);
                 if (value != null) {
-                    csv.append(escapeCsvField(String.valueOf(value)));
+                    csv.append(escapeCsvField(exportText(value)));
                 }
             }
             csv.append("\n");
@@ -406,7 +406,7 @@ public class DataSourceExportService {
         } else if (value instanceof Instant) {
             cell.setCellValue(formatDate((Instant) value));
         } else {
-            cell.setCellValue(value.toString());
+            cell.setCellValue(exportText(value));
         }
     }
     
@@ -560,5 +560,50 @@ public class DataSourceExportService {
     }
     
     public record ExportResult(byte[] data, HttpHeaders headers, boolean compressed) {}
+
+    /** Reused: a new ObjectMapper per cell would be built once per exported row. */
+    private static final com.fasterxml.jackson.databind.ObjectMapper EXPORT_MAPPER =
+            new com.fasterxml.jackson.databind.ObjectMapper();
+
+    /**
+     * One line of text for an exported cell. A media cell exports as its file NAME: a column of
+     * {@code {_type=file, id=..., url=...}} blobs is unreadable in a spreadsheet, and the Java map
+     * rendering it used to produce was not even valid JSON. Everything else is unchanged.
+     */
+    private static String exportText(Object value) {
+        if (value == null) return "";
+        String fileName = fileNameOf(value);
+        return fileName != null ? fileName : String.valueOf(value);
+    }
+
+    /** The display name of a media reference, or null when the value is not one. */
+    private static String fileNameOf(Object value) {
+        // The CRUD write path stringifies the map before the JSONB insert, so the SAME cell is a
+        // Map on one write route and text on another. Reading only the Map made the server export
+        // disagree with the client export on the very rows agents write.
+        if (value instanceof String text) {
+            String trimmed = text.trim();
+            // Not keyed on "name": normalizeAssetMap omits it for a reference recovered from a bare
+            // by-id URL, which is exactly what the repaired population becomes on its next write.
+            if (!trimmed.startsWith("{")
+                    || (!trimmed.contains("\"_type\"") && !trimmed.contains("\"file_url\""))) {
+                return null;
+            }
+            try {
+                return fileNameOf(EXPORT_MAPPER.readValue(trimmed, java.util.Map.class));
+            } catch (Exception e) {
+                return null;
+            }
+        }
+        if (!(value instanceof java.util.Map<?, ?> map)) return null;
+        if (!"file".equals(map.get("_type")) && !map.containsKey("file_url")) return null;
+        for (String key : new String[]{"name", "file_name", "fileName"}) {
+            if (map.get(key) instanceof String name && !name.isBlank()) return name;
+        }
+        for (String key : new String[]{"url", "file_url"}) {
+            if (map.get(key) instanceof String url && !url.isBlank()) return url;
+        }
+        return null;
+    }
 }
 

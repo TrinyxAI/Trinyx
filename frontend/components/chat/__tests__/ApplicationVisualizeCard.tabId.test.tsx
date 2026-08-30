@@ -18,8 +18,15 @@ const getPublicationByIdMock = vi.hoisted(() => vi.fn());
 const openTabMock = vi.hoisted(() => vi.fn());
 
 vi.mock('@/contexts/SidePanelContext', () => ({
-  // isOpen:false → isTabActive is false → clicking always routes to openInPanel.
-  useSidePanelSafe: () => ({ isOpen: false, activeTabId: null, openTab: openTabMock, removeTab: vi.fn(), close: vi.fn() }),
+  // isForward:false → isTabActive is false → clicking always routes to openInPanel.
+  // (`isForward`, not `isOpen`: a detached window shaded to a strip is open and
+  // shows nothing, so that is the question the card asks. The card deliberately does
+  // not un-shade first: that would reveal whichever tab was shaded and waste the
+  // click, while the openTab branch lifts the shade AND activates the right tab.)
+  useSidePanelSafe: () => ({
+    isOpen: false, isForward: false,
+    activeTabId: null, openTab: openTabMock, removeTab: vi.fn(), close: vi.fn(),
+  }),
 }));
 
 vi.mock('@/lib/providers/smart-providers', () => ({

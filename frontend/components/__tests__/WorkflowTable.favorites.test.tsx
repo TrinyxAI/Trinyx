@@ -14,7 +14,12 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
  * (addToFavorites / removeFromFavorites).
  */
 
-const mocks = vi.hoisted(() => ({ getWorkflowsPage: vi.fn() }));
+const mocks = vi.hoisted(() => ({
+  getWorkflowsPage: vi.fn(),
+  // Relations are secondary card data, resolved for the whole page in one call.
+  // Stubbed empty here: no card in these fixtures calls a sub-workflow.
+  getWorkflowRelationsBatch: vi.fn().mockResolvedValue({}),
+}));
 const favs = vi.hoisted(() => ({ getFavoriteIds: vi.fn(), addFavorite: vi.fn(), removeFavorite: vi.fn() }));
 
 // The lists keep the open folder in the address, so they read next/navigation. This fake

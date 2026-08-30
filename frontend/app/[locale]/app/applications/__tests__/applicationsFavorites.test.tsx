@@ -45,7 +45,7 @@ vi.mock('@/lib/api/orchestrator/publication.service', () => ({
   },
 }));
 vi.mock('@/lib/api/orchestrator/workflow.service', () => ({
-  workflowService: { getApplicationRunVersionBatch: mocks.getApplicationRunVersionBatch, deleteWorkflow: vi.fn() },
+  workflowService: { getApplicationRunVersionBatch: mocks.getApplicationRunVersionBatch, getWorkflowRelationsBatch: vi.fn().mockResolvedValue({}), deleteWorkflow: vi.fn() },
 }));
 vi.mock('@/lib/api/orchestrator/favorite.service', () => ({
   favoriteService: {

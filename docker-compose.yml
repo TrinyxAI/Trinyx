@@ -108,7 +108,7 @@ services:
     restart: "no"
 
   bridge:
-    image: ghcr.io/livecontext-ai/livecontext-ce-bridge:v0.2.13
+    image: ghcr.io/livecontext-ai/livecontext-ce-bridge:v0.2.14
     container_name: livecontext-bridge
     restart: unless-stopped
     depends_on:
@@ -136,7 +136,7 @@ services:
           memory: 512M
 
   livecontext:
-    image: ${BACKEND_IMAGE:-ghcr.io/livecontext-ai/livecontext-ce:v0.2.13}
+    image: ${BACKEND_IMAGE:-ghcr.io/livecontext-ai/livecontext-ce:v0.2.14}
     container_name: livecontext-app
     restart: unless-stopped
     depends_on:
@@ -195,6 +195,15 @@ services:
       # Docker profile starts that container. docker/.env.ce.renderer sets both in one shot.
       # Maps to services.screenshot-renderer-url via Spring relaxed binding.
       SERVICES_SCREENSHOT_RENDERER_URL: ${SCREENSHOT_RENDERER_URL:-}
+      # Daily update check against the public release feed. It is what puts the
+      # "Update available" badge on Settings > Information; the app never updates itself.
+      # The request carries the running version and an anonymous install id (a random UUID
+      # stored in your own database, derived from nothing - no IP, hostname or account),
+      # so live self-hosted installs can be counted. Set SENDINSTALLID=false to keep the
+      # update check while staying unidentified, or ENABLED=false to drop the request
+      # entirely (no badge either). See README-CE.md.
+      CE_VERSIONCHECK_ENABLED: ${CE_VERSIONCHECK_ENABLED:-true}
+      CE_VERSIONCHECK_SENDINSTALLID: ${CE_VERSIONCHECK_SENDINSTALLID:-true}
       # Browser agent (agent_browse) - OFF by default. Opt in with the
       # `browser-agent` profile + WEBSEARCH_ENABLED=true (both set by
       # docker/.env.ce.browser-agent). When enabled, the orchestrator talks to
@@ -353,7 +362,7 @@ services:
   # secrets - HTML in, bytes out; reached only by the app over the compose network.
   screenshot-renderer:
     profiles: ["renderer"]
-    image: ghcr.io/livecontext-ai/livecontext-ce-screenshot-renderer:v0.2.13
+    image: ghcr.io/livecontext-ai/livecontext-ce-screenshot-renderer:v0.2.14
     container_name: livecontext-screenshot-renderer
     restart: unless-stopped
     environment:
@@ -377,7 +386,7 @@ services:
           memory: 1024M
 
   frontend:
-    image: ${FRONTEND_IMAGE:-ghcr.io/livecontext-ai/livecontext-ce-frontend:v0.2.13}
+    image: ${FRONTEND_IMAGE:-ghcr.io/livecontext-ai/livecontext-ce-frontend:v0.2.14}
     container_name: livecontext-frontend
     restart: unless-stopped
     depends_on:

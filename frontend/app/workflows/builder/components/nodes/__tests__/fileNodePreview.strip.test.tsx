@@ -29,8 +29,12 @@ vi.mock('@/contexts/WorkflowModeContext', () => ({
 vi.mock('@/contexts/WorkflowRunContext', () => ({
   useRun: () => [{ runStatus: 'completed', completedSteps: new Set(['a']), failedSteps: new Set(), skippedSteps: new Set() }],
 }));
+// useQuery is what the showcase fallback (useShowcaseStepFiles) runs on. It is disabled
+// outside a publication preview, which is this suite's context, so an undefined result is the
+// truthful stand-in: these cases pin the OWNER's canvas, fed by useRunOutputData below.
 vi.mock('@tanstack/react-query', () => ({
   useQueryClient: () => ({ invalidateQueries: vi.fn() }),
+  useQuery: () => ({ data: undefined }),
 }));
 vi.mock('../../../hooks/useRunOutputData', () => ({
   useRunOutputData: () => ({

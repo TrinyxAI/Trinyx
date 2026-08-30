@@ -1161,9 +1161,13 @@ public abstract class AbstractLLMProvider implements LLMProvider {
                 if (param.enumValues() != null && !param.enumValues().isEmpty()) {
                     paramSchema.put("enum", param.enumValues());
                 }
-                // OpenAI requires array types to have items schema
+                // OpenAI requires array types to have items schema. Honour what the parameter
+                // declares: an array of objects advertised as an array of strings can be refused
+                // or have its entries stringified by a strict provider, and the description
+                // telling the agent to send objects cannot override the schema.
                 if ("array".equals(type)) {
-                    paramSchema.put("items", Map.of("type", "string"));
+                    paramSchema.put("items",
+                        Map.of("type", com.apimarketplace.agent.registry.ToolSchemaGenerator.itemTypeOf(param.itemType())));
                 }
                 properties.put(param.name(), paramSchema);
 

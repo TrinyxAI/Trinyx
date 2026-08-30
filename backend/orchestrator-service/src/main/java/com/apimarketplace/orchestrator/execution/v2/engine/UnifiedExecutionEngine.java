@@ -131,6 +131,36 @@ public class UnifiedExecutionEngine {
         return nodeCreditGate != null ? nodeCreditGate.denyOrNull(nodeId, tenantId) : null;
     }
 
+    // Unreachable-merge gate applied before EVERY node body in both dispatch paths
+    // (executeSingleNode = SBS, executeNodeCore = AUTO traversal). A merge fires once all
+    // its predecessors are terminal, SKIPPED included - which also lets it fire when NO
+    // branch was taken, running the node on an item routed somewhere else. Optional:
+    // plain unit-test construction leaves it null and executes unchanged.
+    private com.apimarketplace.orchestrator.execution.v2.services.MergeReachabilityGuard mergeReachabilityGuard;
+
+    @Autowired(required = false)
+    public void setMergeReachabilityGuard(
+            com.apimarketplace.orchestrator.execution.v2.services.MergeReachabilityGuard mergeReachabilityGuard) {
+        this.mergeReachabilityGuard = mergeReachabilityGuard;
+    }
+
+    /**
+     * Null-safe delegation to the unreachable-merge gate - returns the SKIPPED result to
+     * persist instead of executing {@code node}, or {@code null} to execute normally.
+     *
+     * <p>The substitute CASCADES: a merge no branch reached leaves its whole downstream
+     * chain unreachable too, and those nodes must carry a SKIPPED row rather than no row
+     * at all (see {@code shouldCascadeSkipFromResult}).
+     */
+    private NodeExecutionResult unreachableMergeSkipOrNull(ExecutionNode node, ExecutionContext context) {
+        if (mergeReachabilityGuard == null || !mergeReachabilityGuard.isUnreachableForItem(node, context)) {
+            return null;
+        }
+        return NodeExecutionResult.skippedWithCascade(
+            node.getNodeId(),
+            com.apimarketplace.orchestrator.execution.v2.services.MergeReachabilityGuard.SKIP_REASON);
+    }
+
     /**
      * Run owner for credit decisions.
      *
@@ -475,7 +505,12 @@ public class UnifiedExecutionEngine {
             // nodes re-run their side effects (documented on NodePolicy - opt-in per node).
             com.apimarketplace.orchestrator.domain.workflow.NodePolicy policy =
                 nodePolicyRunner.resolve(context.plan(), nodeId);
-            result = nodePolicyRunner.run(policy, nodeId,
+            // Merge that no branch reached for this item: persist the SKIPPED instead of
+            // running the body. Substituted HERE rather than returned early so the result
+            // still flows through step 4/7 - context, row, event, cascade - exactly like a
+            // node that ran and skipped itself.
+            NodeExecutionResult unreachableMerge = unreachableMergeSkipOrNull(node, contextWithStart);
+            result = unreachableMerge != null ? unreachableMerge : nodePolicyRunner.run(policy, nodeId,
                 () -> executeNodeWithSplitAwareness(node, contextWithStart, runId, execution, eventService, item, itemIndex),
                 (annotatedFailure, attempt, maxAttempts) -> {
                     // Every NON-final failed attempt is surfaced through the ATTEMPT-AWARE
@@ -1176,8 +1211,24 @@ public class UnifiedExecutionEngine {
         NodeExecutionResult creditDenial = creditDenialOrNull(
             nodeId, resolveTenantId(contextWithStart, execution));
 
+        // Unreachable-merge gate: ahead of the credit gate and of every dispatch branch, so
+        // no node type (split merge, split aggregate, split-aware body) can run for an item
+        // that no incoming branch reached.
+        //
+        // Deliberately NOT applied to a per-item continuation walk, for the same reason the
+        // canExecute check above is not: that walk owns its own durable idempotency and
+        // fail-closed deferral, and routing there is only final at seal. Every occurrence
+        // found in prod took the ordinary resume path, so this exclusion costs nothing
+        // observed and keeps the change out of the approval-continuation machinery.
+        NodeExecutionResult unreachableMerge = perItemContinuationWalk
+            ? null
+            : unreachableMergeSkipOrNull(node, contextWithStart);
+
         // === NEW SIMPLIFIED SPLIT HANDLING ===
-        if (creditDenial != null) {
+        if (unreachableMerge != null) {
+            result = unreachableMerge;
+
+        } else if (creditDenial != null) {
             result = creditDenial;
 
         } else if (node.isSplitNode()) {

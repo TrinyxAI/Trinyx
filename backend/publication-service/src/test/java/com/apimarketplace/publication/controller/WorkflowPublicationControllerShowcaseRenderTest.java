@@ -160,6 +160,86 @@ class WorkflowPublicationControllerShowcaseRenderTest {
     }
 
     @Test
+    @DisplayName("step-files - 503 when snapshot missing; orchestrator never called")
+    void stepFilesReturns503WhenSnapshotMissing() {
+        WorkflowPublicationEntity pub = activePublic();
+        when(publicationService.getPublicationById(PUBLICATION_UUID)).thenReturn(Optional.of(pub));
+        when(showcaseSnapshotReader.hasSnapshot(pub)).thenReturn(false);
+
+        ResponseEntity<?> response = controller.getPublicShowcaseStepFiles(PUBLICATION_UUID.toString());
+
+        assertThat(response.getStatusCode().value()).isEqualTo(503);
+        verifyNoOrchestratorReadCalls();
+    }
+
+    @Test
+    @DisplayName("step-files - 200 with the signed per-node map when the snapshot has one")
+    void stepFilesReturnsSignedMap() {
+        WorkflowPublicationEntity pub = activePublic();
+        when(publicationService.getPublicationById(PUBLICATION_UUID)).thenReturn(Optional.of(pub));
+        when(showcaseSnapshotReader.hasSnapshot(pub)).thenReturn(true);
+        Map<String, Object> body = Map.of("1", Map.of("download_file",
+                Map.of("name", "clip.mp4", "mimeType", "video/mp4", "size", 2048L,
+                        "url", "/api/files/proxy-signed?key=x&sig=y")));
+        when(showcaseSnapshotReader.readStepFiles(pub)).thenReturn(Optional.of(body));
+
+        ResponseEntity<?> response = controller.getPublicShowcaseStepFiles(PUBLICATION_UUID.toString());
+
+        assertThat(response.getStatusCode().value()).isEqualTo(200);
+        assertThat(response.getBody()).isEqualTo(body);
+        verifyNoOrchestratorReadCalls();
+    }
+
+    @Test
+    @DisplayName("step-files - 204, NOT 404, when the publication is fine but produced no file")
+    void stepFilesReturns204WhenNothingToShow() {
+        // The distinction is load-bearing for the caller: 404 means "wrong id" and is worth
+        // reporting, 204 means "this canvas simply has no file pills" and is the normal state
+        // of most publications. Answering 404 here (the run-state sibling's contract) would
+        // make a legitimate empty look like a broken link.
+        WorkflowPublicationEntity pub = activePublic();
+        when(publicationService.getPublicationById(PUBLICATION_UUID)).thenReturn(Optional.of(pub));
+        when(showcaseSnapshotReader.hasSnapshot(pub)).thenReturn(true);
+        when(showcaseSnapshotReader.readStepFiles(pub)).thenReturn(Optional.empty());
+
+        ResponseEntity<?> response = controller.getPublicShowcaseStepFiles(PUBLICATION_UUID.toString());
+
+        assertThat(response.getStatusCode().value()).isEqualTo(204);
+    }
+
+    @Test
+    @DisplayName("step-files - 404 for an id no publication carries")
+    void stepFilesReturns404ForUnknownPublication() {
+        when(publicationService.getPublicationById(PUBLICATION_UUID)).thenReturn(Optional.empty());
+
+        assertThat(controller.getPublicShowcaseStepFiles(PUBLICATION_UUID.toString())
+                .getStatusCode().value()).isEqualTo(404);
+    }
+
+    @Test
+    @DisplayName("step-files - 403 for a publication that is not publicly available, and the snapshot is never read")
+    void stepFilesReturns403ForNonPublicPublication() {
+        // Same gate as every sibling read: an INACTIVE or PRIVATE publication must not serve
+        // signed URLs to an anonymous caller, and the refusal has to come BEFORE the read that
+        // would mint them.
+        WorkflowPublicationEntity pub = activePublic();
+        pub.setVisibility(PublicationVisibility.PRIVATE);
+        when(publicationService.getPublicationById(PUBLICATION_UUID)).thenReturn(Optional.of(pub));
+
+        ResponseEntity<?> response = controller.getPublicShowcaseStepFiles(PUBLICATION_UUID.toString());
+
+        assertThat(response.getStatusCode().value()).isEqualTo(403);
+        verify(showcaseSnapshotReader, never()).readStepFiles(any());
+        verifyNoOrchestratorReadCalls();
+    }
+
+    @Test
+    @DisplayName("step-files - 400 on a malformed publication id rather than a 500")
+    void stepFilesReturns400ForMalformedId() {
+        assertThat(controller.getPublicShowcaseStepFiles("not-a-uuid").getStatusCode().value()).isEqualTo(400);
+    }
+
+    @Test
     @DisplayName("epoch-signals - 503 when snapshot missing; orchestrator never called")
     void epochSignalsReturns503WhenSnapshotMissing() {
         WorkflowPublicationEntity pub = activePublic();

@@ -724,4 +724,33 @@ class CliAgentServiceTest {
                 .isNotEqualTo(RemoteToolExecutionService.class);
         }
     }
+    @org.junit.jupiter.api.Test
+    @org.junit.jupiter.api.DisplayName("an array parameter tells a CLI agent what it holds")
+    void arraysDeclareTheirItemTypeToCliAgents() {
+        // A CLI agent reads this schema to decide what to send. Arrays used to carry no items key
+        // at all here, so an array of objects was filled in as an array of strings with nothing
+        // to say otherwise, and the two other schema emitters disagreed with this one.
+        com.apimarketplace.agent.domain.ToolDefinition td =
+            com.apimarketplace.agent.domain.ToolDefinition.builder()
+                .name("t").description("T")
+                .parameters(java.util.List.of(
+                    com.apimarketplace.agent.domain.ToolParameter.builder()
+                        .name("rows").type("array").description("Rows").required(false)
+                        .itemType("object").build(),
+                    com.apimarketplace.agent.domain.ToolParameter.builder()
+                        .name("tags").type("array").description("Tags").required(false).build()))
+                .build();
+
+        @SuppressWarnings("unchecked")
+        java.util.Map<String, Object> props =
+            (java.util.Map<String, Object>) service.buildInputSchema(td).get("properties");
+
+        @SuppressWarnings("unchecked")
+        java.util.Map<String, Object> rows = (java.util.Map<String, Object>) props.get("rows");
+        @SuppressWarnings("unchecked")
+        java.util.Map<String, Object> tags = (java.util.Map<String, Object>) props.get("tags");
+        assertThat(rows.get("items")).isEqualTo(java.util.Map.of("type", "object"));
+        assertThat(tags.get("items")).isEqualTo(java.util.Map.of("type", "string"));
+    }
+
 }

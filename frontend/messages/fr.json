@@ -419,7 +419,6 @@
     "noImage": "Aucune image",
     "view": "Voir",
     "download": "Télécharger",
-    "removeImage": "Supprimer l'image",
     "noFile": "Aucun fichier",
     "removeFile": "Supprimer le fichier",
     "file": "Fichier",
@@ -431,7 +430,16 @@
     "noRows": "Aucune ligne",
     "showingRows": "{visible} sur {total} lignes affichées",
     "previous": "Précédent",
-    "next": "Suivant"
+    "next": "Suivant",
+    "pickFromFiles": "Fichiers",
+    "pickFromFilesTitle": "Choisir un fichier",
+    "assetUrl": "Utiliser un lien",
+    "assetUrlPlaceholder": "Coller l'URL d'une image ou d'un fichier",
+    "assetUrlConfirm": "Utiliser",
+    "assetUrlInvalid": "Cette URL ne semble pas utilisable",
+    "assetExternal": "Lien externe",
+    "assetUnresolvableHint": "Ce fichier n'est plus disponible. Il a peut-être été supprimé de Fichiers.",
+    "uploadFailed": "Échec de l'envoi"
   },
   "auth": {
     "signIn": "Se connecter",
@@ -484,6 +492,13 @@
     "addTab": "Ajouter un onglet",
     "openRight": "Ouvrir le panneau à droite",
     "openBottom": "Ouvrir le panneau en bas",
+    "detach": "Détacher le panneau",
+    "attach": "Rattacher le panneau",
+    "moveWindow": "Déplacer le panneau",
+    "moveWindowHint": "Déplacer le panneau : par glisser-déposer, ou avec les flèches (Maj pour redimensionner depuis le coin bas-droit, Ctrl+Maj depuis le coin haut-gauche, Alt pour un pas de 1px)",
+    "collapseWindow": "Réduire le panneau",
+    "expandWindow": "Agrandir le panneau",
+    "expandWindowHint": "Agrandir le panneau : cliquer, glisser pour le déplacer, ou les flèches (Alt pour un pas de 1px)",
     "searchPlaceholder": "Rechercher...",
     "applications": "Applications",
     "interfaces": "Interfaces",
@@ -1139,12 +1154,23 @@
       "budgetBlockedTitle": "Budget atteint",
       "budgetBlockedMessage": "Dépensé {spent} sur {budget}. Aucune nouvelle exécution n'a démarré.",
       "openInPanel": "Ouvrir le détail du run dans le panneau",
+      "backToWorkflow": "Retour au workflow",
       "scrollLeft": "Afficher les détails précédents",
       "scrollRight": "Afficher plus de détails",
       "cost": "Coût",
       "scopeAll": "toutes les époques",
       "scopeEpoch": "époque {epoch}"
     }
+  },
+  "workflowRelations": {
+    "menuLabel": "{count, plural, one {# workflow lié} other {# workflows liés}}",
+    "parentsTitle": "Appelé par",
+    "parentsHint": "Workflows dont le plan exécute celui-ci en sous-workflow",
+    "childrenTitle": "Appelle",
+    "childrenHint": "Workflows que celui-ci exécute en sous-workflow",
+    "openHint": "Ouvrir dans le panneau latéral",
+    "unavailable": "Workflow indisponible",
+    "unavailableHint": "Ce workflow n'est pas dans votre espace de travail, ou a été supprimé"
   },
   "data": {
     "title": "Tables",
@@ -1316,6 +1342,8 @@
   "actions": {
     "running": "En cours",
     "edit": "Modifier",
+    "interfaceControls": "Commandes de la page",
+    "interfaceControlsSoundOn": "Commandes de la page (son activé)",
     "save": "Enregistrer",
     "run": "Exécuter",
     "share": "Partager",
@@ -2312,11 +2340,11 @@
         },
         "file": {
           "label": "Pièce jointe",
-          "description": "Télécharger ou lier un document"
+          "description": "Un fichier, affiché en carte avec son nom et sa taille"
         },
         "image": {
-          "label": "Aperçu image",
-          "description": "Miniature responsive"
+          "label": "Image",
+          "description": "La même colonne fichier, affichée en vignette"
         },
         "date": {
           "label": "Date",
@@ -2358,7 +2386,12 @@
       "configVectorDimension": "Dimension de l'embedding",
       "configVectorMetric": "Métrique de distance",
       "ceOnlyBadge": "CE uniquement",
-      "ceOnlyTooltip": "Disponible uniquement sur la Community Edition auto-hébergée"
+      "ceOnlyTooltip": "Disponible uniquement sur la Community Edition auto-hébergée",
+      "mediaRender": {
+        "label": "Afficher en",
+        "thumbnail": "Vignette",
+        "card": "Carte avec nom et taille"
+      }
     },
     "createAgent": {
       "title": "Créer un nouvel agent",
@@ -2517,6 +2550,10 @@
       "agentUpdated": "Agent modifié avec succès",
       "error": "Erreur",
       "createFailed": "Impossible de créer l'agent",
+      "deleteAgent": "Supprimer l'agent",
+      "deleteTitle": "Supprimer l'agent",
+      "deleteConfirmation": "Êtes-vous sûr de vouloir supprimer « {name} » ? Cette action est irréversible.",
+      "deleteFailed": "Impossible de supprimer l'agent",
       "widgetCreateFailed": "Impossible de sauvegarder la configuration du widget",
       "scheduleLabel": "Planification",
       "scheduleDescription": "Exécuter cet agent automatiquement selon un planning",
@@ -9895,7 +9932,8 @@
     "updateIntro": "Récupérez la dernière version et redémarrez votre stack. Le fichier Compose épingle le tag d’image de la version, exécutez donc git pull d’abord. Vos données sont conservées et les migrations de base de données s’exécutent automatiquement au démarrage.",
     "updateRunFrom": "Exécutez ces commandes depuis votre dossier Trinyx cloné :",
     "copy": "Copier",
-    "copied": "Copié"
+    "copied": "Copié",
+    "anonymousCheckNotice": "La vérification quotidienne des mises à jour envoie cette version et un identifiant d'installation aléatoire, afin de compter les installations auto-hébergées actives. L'enregistrement conservé ne contient aucune adresse IP, aucun nom d'hôte et aucun compte. Définissez CE_VERSIONCHECK_SENDINSTALLID=false pour ne plus envoyer l'identifiant, ou CE_VERSIONCHECK_ENABLED=false pour désactiver la vérification."
   },
   "optionalComponents": {
     "title": "Composants optionnels",

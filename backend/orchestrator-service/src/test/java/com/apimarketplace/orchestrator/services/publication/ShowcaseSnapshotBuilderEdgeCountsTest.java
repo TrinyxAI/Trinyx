@@ -1,5 +1,6 @@
 package com.apimarketplace.orchestrator.services.publication;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.apimarketplace.interfaces.client.InterfaceClient;
 import com.apimarketplace.orchestrator.domain.WorkflowRunEntity;
 import com.apimarketplace.orchestrator.domain.execution.DagState;
@@ -8,9 +9,11 @@ import com.apimarketplace.orchestrator.domain.execution.StateSnapshot;
 import com.apimarketplace.orchestrator.domain.workflow.ExecutionMode;
 import com.apimarketplace.orchestrator.domain.workflow.RunStatus;
 import com.apimarketplace.orchestrator.repository.SignalWaitRepository;
+import com.apimarketplace.orchestrator.persistence.WorkflowStepDataRepository;
 import com.apimarketplace.orchestrator.repository.WorkflowRunRepository;
 import com.apimarketplace.orchestrator.services.InterfaceRenderService;
 import com.apimarketplace.orchestrator.services.StepAggregationService;
+import com.apimarketplace.orchestrator.services.StorageSkeletonService;
 import com.apimarketplace.orchestrator.services.epoch.WorkflowEpochService;
 import com.apimarketplace.orchestrator.services.resume.WorkflowResumeService;
 import com.apimarketplace.orchestrator.services.resume.WorkflowRunState;
@@ -58,6 +61,8 @@ class ShowcaseSnapshotBuilderEdgeCountsTest {
     @Mock private SignalWaitRepository signalWaitRepository;
     @Mock private InterfaceRenderService interfaceRenderService;
     @Mock private InterfaceClient interfaceClient;
+    @Mock private WorkflowStepDataRepository workflowStepDataRepository;
+    @Mock private StorageSkeletonService storageSkeletonService;
 
     private ShowcaseSnapshotBuilder builder() {
         return new ShowcaseSnapshotBuilder(
@@ -68,7 +73,10 @@ class ShowcaseSnapshotBuilderEdgeCountsTest {
                 stepAggregationService,
                 signalWaitRepository,
                 interfaceRenderService,
-                interfaceClient);
+                interfaceClient,
+                workflowStepDataRepository,
+                storageSkeletonService,
+                new ObjectMapper());
     }
 
     private WorkflowRunEntity run(String runId) {

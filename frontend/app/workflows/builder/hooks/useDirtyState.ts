@@ -8,6 +8,12 @@ import { computeGraphSignature } from './graphSignature';
 interface UseDirtyStateOptions {
   nodes: Node[];
   edges: Edge[];
+  /**
+   * Names the workflow on the broadcast `workflowDirtyChange` event. Several
+   * canvases can be mounted at once (the right side panel embeds its own), and
+   * without it every listener adopted whichever canvas edited last.
+   */
+  workflowId?: string;
   workflowLoaded: boolean;
   isRunMode: boolean;
   onDirtyChange?: (isDirty: boolean) => void;
@@ -29,6 +35,7 @@ interface UseDirtyStateReturn {
 export function useDirtyState({
   nodes,
   edges,
+  workflowId,
   workflowLoaded,
   isRunMode,
   onDirtyChange,
@@ -94,9 +101,9 @@ export function useDirtyState({
   React.useEffect(() => {
     onDirtyChange?.(isDirty);
     window.dispatchEvent(new CustomEvent('workflowDirtyChange', {
-      detail: { isDirty }
+      detail: { isDirty, workflowId }
     }));
-  }, [isDirty, onDirtyChange]);
+  }, [isDirty, onDirtyChange, workflowId]);
 
   // Intercept F5/Ctrl+R to show modal instead of browser alert
   // Skip in run mode - no unsaved changes warning needed

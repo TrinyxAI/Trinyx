@@ -111,4 +111,69 @@ class StepOutputsWriterUsageTest {
                 offenders)
             .isEmpty();
     }
+
+    /**
+     * Patterns that drop a step output by its FULL key only, leaving the bare alias behind.
+     *
+     * <p>This is the mirror of the write-side guard above, and it exists because the write side
+     * was centralised on its own: {@code withResult} started writing TWO keys while
+     * {@code withoutNodes} kept removing ONE, so a "removed" output still answered under its
+     * alias. A loop body then read the iteration the engine had just reset. The write guard
+     * could not see it - it only looks for alias EXTRACTION - which is precisely why half a
+     * contract with a guard on one half is more dangerous than no guard at all.
+     */
+    private static final java.util.List<Pattern> UNPAIRED_REMOVAL_PATTERNS = java.util.List.of(
+        // outputs.forEach(map::remove) / nodeIds.forEach(newOutputs::remove)
+        Pattern.compile("forEach\\(\\s*\\w*[Oo]utputs\\s*::\\s*remove\\s*\\)"),
+        // stepOutputs.remove(nodeId) / newOutputs.remove(key)
+        Pattern.compile("\\w*[Oo]utputs\\.remove\\(")
+    );
+
+    @Test
+    @DisplayName("No production file drops a step output by its full key alone - "
+            + "use StepOutputsWriter.removeWithAlias so the bare alias goes with it")
+    void noUnpairedStepOutputRemovalOutsideWriter() throws IOException {
+        Path srcRoot = Paths.get("src", "main", "java", "com", "apimarketplace", "orchestrator");
+        if (!Files.exists(srcRoot)) {
+            srcRoot = Paths.get("backend", "orchestrator-service", "src", "main", "java",
+                "com", "apimarketplace", "orchestrator");
+        }
+        assertThat(Files.exists(srcRoot))
+            .as("Source root not found. cwd=%s", System.getProperty("user.dir"))
+            .isTrue();
+
+        List<String> offenders = new ArrayList<>();
+        final Path root = srcRoot;
+        try (Stream<Path> stream = Files.walk(root)) {
+            stream.filter(p -> p.toString().endsWith(".java"))
+                .filter(p -> !p.getFileName().toString().equals("StepOutputsWriter.java"))
+                .forEach(p -> {
+                    try {
+                        String content = Files.readString(p);
+                        // The invariant only exists where the map is alias-DOUBLED, i.e. in files
+                        // that write through the writer. A map filled with a plain put() carries a
+                        // single key, so removing that key is already symmetric - flagging it would
+                        // be noise, and a guard that cries wolf gets switched off.
+                        if (!content.contains("writeWithAlias")) {
+                            return;
+                        }
+                        for (Pattern pat : UNPAIRED_REMOVAL_PATTERNS) {
+                            if (pat.matcher(content).find()) {
+                                offenders.add(p.getFileName().toString()
+                                    + " (matches: " + pat.pattern() + ")");
+                                break;
+                            }
+                        }
+                    } catch (IOException e) {
+                        throw new RuntimeException(e);
+                    }
+                });
+        }
+
+        assertThat(offenders)
+            .as("These files remove a step output under its full key only, which leaves the bare "
+                + "alias holding the value and makes the two lookups disagree. Use "
+                + "StepOutputsWriter.removeWithAlias instead. Offenders: %s", offenders)
+            .isEmpty();
+    }
 }

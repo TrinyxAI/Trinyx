@@ -14,7 +14,7 @@ import { Table, Bot, Workflow } from 'lucide-react';
 import type { Node } from 'reactflow';
 import type { BuilderNodeData } from '@/app/workflows/builder/types';
 import type { TriggerDataForPanel } from '@/app/workflows/builder/components/WorkflowBuilder';
-import type { ApplicationConfig } from '@/components/chat/ApplicationTabContent';
+import type { ApplicationConfig, ApplicationTemplateSource } from '@/components/chat/ApplicationTabContent';
 import type { AgentSnapshotConfig } from '@/app/workflows/builder/types/agentSnapshot';
 import { WorkflowRunCanvas } from '@/components/workflow/WorkflowRunCanvas';
 import { WorkflowPanelContent } from '@/components/app/WorkflowPanelContent';
@@ -24,12 +24,37 @@ import { useSidePanelSafe } from '@/contexts/SidePanelContext';
 import { orchestratorApi } from '@/lib/api';
 import { useOrgScopedReset } from '@/lib/hooks/useOrgScopedReset';
 import { subscribeBindRun } from '@/components/workflow/run-panel/runPanelBus';
+import { openWorkflowBuilderTab } from '@/lib/sidePanel/openWorkflowBuilderTab';
 import { workflowPanelTabId } from '@/lib/sidePanel/tabResource';
 
 interface WorkflowBuilderPanelContentProps {
   workflowId: string;
   runId?: string;
   readOnly?: boolean;
+  /**
+   * This tab was opened ON an application: the Application sub-tab is the
+   * default view and the canvas is what the user switches to in order to watch
+   * the run. Forwarded to WorkflowPanelContent.
+   */
+  applicationFirst?: boolean;
+  /** Interfaces already resolved by the host, shown until the canvas emits its own. */
+  initialApplicationConfigs?: ApplicationConfig[];
+  /** Publication this application was installed from - enables the template actions. */
+  applicationTemplateSource?: ApplicationTemplateSource;
+  /**
+   * Frozen publication snapshot to render instead of fetching the plan. Set for
+   * a marketplace preview, whose viewer has no access to the tenant's workflow.
+   */
+  planOverride?: any;
+  /**
+   * The workflow is the caller's to change. False on a surface that resolved to
+   * SOMEONE ELSE's workflow - the application panel does, for a publication the
+   * caller has not acquired. It drops the canvas' edit/run toggle AND the
+   * Share / Save / Run bar: the workflow stays readable and the application
+   * stays interactive, but nothing offers an action that would be refused.
+   * Defaults to true, the answer for every surface inside the caller's tenant.
+   */
+  canEditWorkflow?: boolean;
 }
 
 /**
@@ -70,7 +95,7 @@ function BindCanvasToRun({
   return null;
 }
 
-export function WorkflowBuilderPanelContent({ workflowId, runId, readOnly = false }: WorkflowBuilderPanelContentProps) {
+export function WorkflowBuilderPanelContent({ workflowId, runId, readOnly = false, applicationFirst, initialApplicationConfigs, applicationTemplateSource, planOverride, canEditWorkflow = true }: WorkflowBuilderPanelContentProps) {
   const sidePanel = useSidePanelSafe();
   const canvasNodesRef = useRef<Node<BuilderNodeData>[]>([]);
   /**
@@ -83,7 +108,18 @@ export function WorkflowBuilderPanelContent({ workflowId, runId, readOnly = fals
   const surfaceId = useId();
 
   const [triggerData, setTriggerData] = useState<TriggerDataForPanel | null>(null);
-  const [applicationConfigs, setApplicationConfigs] = useState<ApplicationConfig[]>([]);
+  /**
+   * Seeded with what the HOST already resolved, not empty.
+   *
+   * This state is broadcast to the panel on every change, mount included, so an
+   * empty initial value is not neutral: it immediately overwrote the interfaces
+   * an application panel had just handed down, and the tab opened on "no
+   * interfaces configured" with no Application sub-tab at all. The canvas
+   * replaces it with its own list as soon as it has loaded the plan.
+   */
+  const [applicationConfigs, setApplicationConfigs] = useState<ApplicationConfig[]>(
+    () => initialApplicationConfigs ?? [],
+  );
   const [agentConfigs, setAgentConfigs] = useState<AgentSnapshotConfig[]>([]);
 
   /**
@@ -249,14 +285,7 @@ export function WorkflowBuilderPanelContent({ workflowId, runId, readOnly = fals
           keepMounted: true,
         });
       } else {
-        sidePanel.openTab({
-          id: workflowPanelTabId(subWfId),
-          label: wfName,
-          icon: React.createElement(Workflow, { className: 'w-4 h-4' }),
-          content: React.createElement(WorkflowBuilderPanelContent, { workflowId: subWfId, readOnly }),
-          preferredWidth: 0.5,
-          keepMounted: true,
-        });
+        openWorkflowBuilderTab(sidePanel, { workflowId: subWfId, workflowName: wfName, readOnly });
       }
     };
     window.addEventListener('workflowOpenSubWorkflow', handler as EventListener);
@@ -292,6 +321,10 @@ export function WorkflowBuilderPanelContent({ workflowId, runId, readOnly = fals
                run for it. */
             allowRunHistory
             runSurfaceId={surfaceId}
+            applicationFirst={applicationFirst}
+            initialApplicationConfigs={initialApplicationConfigs}
+            applicationTemplateSource={applicationTemplateSource}
+            canEditWorkflow={canEditWorkflow}
             workflowCanvasSlot={
               <WorkflowModeProvider key={`${seedRunId ?? 'edit'}-org-${orgEpoch}`} workflowId={workflowId} initialRunId={seedRunId} readOnly={readOnly}>
                 {/* `initialRunId` only SEEDS the provider, and the provider's run
@@ -304,6 +337,8 @@ export function WorkflowBuilderPanelContent({ workflowId, runId, readOnly = fals
                   <WorkflowRunCanvas
                     workflowId={workflowId}
                     runId={boundRunId}
+                    planOverride={planOverride}
+                    hideToggle={!canEditWorkflow}
                     onTriggerConfigsChange={setTriggerData}
                     onApplicationConfigsChange={setApplicationConfigs}
                     onAgentConfigsChange={setAgentConfigs}

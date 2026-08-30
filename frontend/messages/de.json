@@ -419,7 +419,6 @@
     "noImage": "No image",
     "view": "View",
     "download": "Download",
-    "removeImage": "Bild entfernen",
     "noFile": "No file",
     "removeFile": "Datei entfernen",
     "file": "File",
@@ -431,7 +430,16 @@
     "noRows": "Keine Zeilen",
     "showingRows": "{visible} von {total} Zeilen",
     "previous": "Zurück",
-    "next": "Weiter"
+    "next": "Weiter",
+    "pickFromFiles": "Dateien",
+    "pickFromFilesTitle": "Datei auswählen",
+    "assetUrl": "Link verwenden",
+    "assetUrlPlaceholder": "URL eines Bildes oder einer Datei einfügen",
+    "assetUrlConfirm": "Verwenden",
+    "assetUrlInvalid": "Diese URL scheint nicht verwendbar zu sein",
+    "assetExternal": "Externer Link",
+    "assetUnresolvableHint": "Diese Datei ist nicht mehr verfügbar. Möglicherweise wurde sie aus Dateien gelöscht.",
+    "uploadFailed": "Upload fehlgeschlagen"
   },
   "auth": {
     "signIn": "Anmelden",
@@ -484,6 +492,13 @@
     "addTab": "Tab hinzufügen",
     "openRight": "Panel rechts öffnen",
     "openBottom": "Panel unten öffnen",
+    "detach": "Panel ablösen",
+    "attach": "Panel wieder andocken",
+    "moveWindow": "Panel verschieben",
+    "moveWindowHint": "Panel verschieben: ziehen oder die Pfeiltasten benutzen (Umschalt zum Anpassen der Größe von unten rechts, Strg+Umschalt von oben links, Alt für 1px-Schritte)",
+    "collapseWindow": "Panel einklappen",
+    "expandWindow": "Panel ausklappen",
+    "expandWindowHint": "Panel ausklappen: klicken, ziehen zum Verschieben, oder die Pfeiltasten (Alt für 1px-Schritte)",
     "searchPlaceholder": "Suchen...",
     "applications": "Anwendungen",
     "interfaces": "Schnittstellen",
@@ -1134,12 +1149,23 @@
       "budgetBlockedTitle": "Budget erreicht",
       "budgetBlockedMessage": "{spent} von {budget} ausgegeben. Es wurde keine neue Ausführung gestartet.",
       "openInPanel": "Ausführungsdetails im Panel öffnen",
+      "backToWorkflow": "Zurück zum Workflow",
       "scrollLeft": "Vorherige Details anzeigen",
       "scrollRight": "Weitere Details anzeigen",
       "cost": "Kosten",
       "scopeAll": "alle Epochen",
       "scopeEpoch": "Epoche {epoch}"
     }
+  },
+  "workflowRelations": {
+    "menuLabel": "{count, plural, one {# verknüpfter Workflow} other {# verknüpfte Workflows}}",
+    "parentsTitle": "Aufgerufen von",
+    "parentsHint": "Workflows, deren Plan diesen als Unter-Workflow ausführt",
+    "childrenTitle": "Ruft auf",
+    "childrenHint": "Workflows, die dieser als Unter-Workflow ausführt",
+    "openHint": "Im Seitenbereich öffnen",
+    "unavailable": "Workflow nicht verfügbar",
+    "unavailableHint": "Dieser Workflow ist nicht in Ihrem Arbeitsbereich oder wurde gelöscht"
   },
   "data": {
     "title": "Tabellen",
@@ -1248,6 +1274,8 @@
   "actions": {
     "running": "Läuft",
     "edit": "Bearbeiten",
+    "interfaceControls": "Seitensteuerung",
+    "interfaceControlsSoundOn": "Seitensteuerung (Ton an)",
     "save": "Speichern",
     "run": "Ausführen",
     "share": "Teilen",
@@ -2218,11 +2246,11 @@
         },
         "file": {
           "label": "Anhang",
-          "description": "Dokument hochladen oder verlinken"
+          "description": "Eine Datei, als Karte mit Name und Größe dargestellt"
         },
         "image": {
-          "label": "Bildvorschau",
-          "description": "Responsives Miniaturbild"
+          "label": "Bild",
+          "description": "Dieselbe Dateispalte, als Miniaturansicht dargestellt"
         },
         "date": {
           "label": "Datum",
@@ -2264,7 +2292,12 @@
       "configVectorDimension": "Embedding-Dimension",
       "configVectorMetric": "Distanzmetrik",
       "ceOnlyBadge": "Nur CE",
-      "ceOnlyTooltip": "Nur in der selbst gehosteten Community Edition verfügbar"
+      "ceOnlyTooltip": "Nur in der selbst gehosteten Community Edition verfügbar",
+      "mediaRender": {
+        "label": "Anzeigen als",
+        "thumbnail": "Miniaturansicht",
+        "card": "Karte mit Name und Größe"
+      }
     },
     "createAgent": {
       "title": "Neuen Agent erstellen",
@@ -2413,6 +2446,10 @@
       "agentUpdated": "Agent erfolgreich aktualisiert",
       "error": "Fehler",
       "createFailed": "Agent konnte nicht erstellt werden",
+      "deleteAgent": "Agent löschen",
+      "deleteTitle": "Agent löschen",
+      "deleteConfirmation": "Möchten Sie „{name}“ wirklich löschen? Diese Aktion kann nicht rückgängig gemacht werden.",
+      "deleteFailed": "Agent konnte nicht gelöscht werden",
       "widgetCreateFailed": "Widget-Konfiguration konnte nicht gespeichert werden",
       "skillsLabel": "Skills",
       "skillsInfo": "Wiederverwendbare Skill-Pakete zuweisen, um die Fähigkeiten des Agenten zu erweitern.",
@@ -9895,7 +9932,8 @@
     "updateIntro": "Holen Sie die neueste Version und starten Sie Ihren Stack neu. Die Compose-Datei pinnt das Image-Tag der Version, führen Sie daher zuerst git pull aus. Ihre Daten bleiben erhalten und Datenbankmigrationen laufen beim Start automatisch.",
     "updateRunFrom": "Führen Sie diese Befehle in Ihrem geklonten Trinyx-Ordner aus:",
     "copy": "Kopieren",
-    "copied": "Kopiert"
+    "copied": "Kopiert",
+    "anonymousCheckNotice": "Die tägliche Update-Prüfung sendet diese Version und eine zufällige Installations-ID, damit aktive selbst gehostete Installationen gezählt werden können. Der gespeicherte Eintrag enthält keine IP-Adresse, keinen Hostnamen und kein Konto. Setzen Sie CE_VERSIONCHECK_SENDINSTALLID=false, um die ID nicht mehr zu senden, oder CE_VERSIONCHECK_ENABLED=false, um die Prüfung zu deaktivieren."
   },
   "optionalComponents": {
     "title": "Optionale Komponenten",

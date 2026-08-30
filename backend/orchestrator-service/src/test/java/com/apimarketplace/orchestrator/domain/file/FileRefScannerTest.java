@@ -6,6 +6,7 @@ import org.junit.jupiter.api.Test;
 
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
@@ -19,7 +20,7 @@ import static org.assertj.core.api.Assertions.assertThat;
  * levels down), and it must never throw - it runs on the output of a step that has already
  * succeeded, and nothing here is worth failing that step over.</p>
  */
-@DisplayName("FileRefScanner.collectFileIds")
+@DisplayName("FileRefScanner")
 class FileRefScannerTest {
 
     private static Map<String, Object> fileRef(String id) {
@@ -172,6 +173,109 @@ class FileRefScannerTest {
             }
 
             assertThat(FileRefScanner.collectFileIds(node)).isEmpty();
+        }
+    }
+
+    @Nested
+    @DisplayName("collectRefs - the refs themselves, for the showcase snapshot")
+    class CollectRefs {
+
+        @Test
+        @DisplayName("keeps the display fields a file pill renders, not just the id")
+        void keepsDisplayFields() {
+            // The showcase canvas shows the file's NAME and human SIZE before anything is
+            // expanded; an id-only scan could not have fed it.
+            Map<String, Object> output = new HashMap<>();
+            output.put("file", fileRef("st-1"));
+
+            List<Map<String, Object>> refs = FileRefScanner.collectRefs(output);
+
+            assertThat(refs).hasSize(1);
+            assertThat(refs.get(0))
+                    .containsEntry("_type", "file")
+                    .containsEntry("path", "1/general/catalog-binary/x.mp3")
+                    .containsEntry("name", "x.mp3")
+                    .containsEntry("mimeType", "audio/mpeg")
+                    .containsEntry("size", 218800L)
+                    .containsEntry("id", "st-1");
+        }
+
+        @Test
+        @DisplayName("size is normalized to a long whatever number type the payload used")
+        void sizeIsAlwaysLong() {
+            // A ref parsed from JSON hands back an Integer, one built in-process a long. A
+            // consumer comparing across the two would otherwise see values that are never equal.
+            Map<String, Object> intSize = fileRef("st-int");
+            intSize.put("size", 42);
+
+            List<Map<String, Object>> refs = FileRefScanner.collectRefs(Map.of("file", intSize));
+
+            assertThat(refs.get(0).get("size")).isEqualTo(42L);
+        }
+
+        @Test
+        @DisplayName("keeps a ref that carries no id - it still has a path, and a path still renders")
+        void keepsIdLessRef() {
+            // collectFileIds drops these (there is no storage row to adopt); the showcase needs
+            // them, because the path is what gets copied into the publication and signed.
+            List<Map<String, Object>> refs = FileRefScanner.collectRefs(Map.of("file", fileRef(null)));
+
+            assertThat(refs).hasSize(1);
+            assertThat(refs.get(0)).doesNotContainKey("id");
+            assertThat(refs.get(0)).containsEntry("path", "1/general/catalog-binary/x.mp3");
+        }
+
+        @Test
+        @DisplayName("reads a FileRef record, not only a deserialized map")
+        void readsTheRecord() {
+            // A node that builds its result in-process hands back the record itself.
+            FileRef record = FileRef.of("2/run/out.png", "out.png", "image/png", 900, "st-rec");
+
+            List<Map<String, Object>> refs = FileRefScanner.collectRefs(Map.of("generated", record));
+
+            assertThat(refs).hasSize(1);
+            assertThat(refs.get(0))
+                    .containsEntry("path", "2/run/out.png")
+                    .containsEntry("name", "out.png")
+                    .containsEntry("size", 900L)
+                    .containsEntry("id", "st-rec");
+        }
+
+        @Test
+        @DisplayName("returns refs in encounter order and does NOT deduplicate them")
+        void keepsEveryEncounter() {
+            // Unlike collectFileIds, whose caller wants a set of storage rows: here two
+            // encounters of the same ref are two places the UI could show it, and the caller
+            // decides what that means.
+            Map<String, Object> first = fileRef("st-1");
+            Map<String, Object> second = fileRef("st-2");
+            Map<String, Object> output = new LinkedHashMap<>();
+            output.put("a", first);
+            output.put("b", List.of(second, fileRef("st-1")));
+
+            List<Map<String, Object>> refs = FileRefScanner.collectRefs(output);
+
+            assertThat(refs).hasSize(3);
+            assertThat(refs).extracting(r -> r.get("id")).containsExactly("st-1", "st-2", "st-1");
+        }
+
+        @Test
+        @DisplayName("a self-referencing payload terminates instead of spinning")
+        void survivesACycle() {
+            Map<String, Object> output = new HashMap<>();
+            output.put("file", fileRef("st-1"));
+            output.put("self", output);
+
+            List<Map<String, Object>> refs = FileRefScanner.collectRefs(output);
+
+            assertThat(refs).hasSize(1);
+        }
+
+        @Test
+        @DisplayName("no ref anywhere yields an empty list, never null")
+        void emptyWhenNoRef() {
+            assertThat(FileRefScanner.collectRefs(Map.of("status", "ok"))).isEmpty();
+            assertThat(FileRefScanner.collectRefs(null)).isEmpty();
         }
     }
 }

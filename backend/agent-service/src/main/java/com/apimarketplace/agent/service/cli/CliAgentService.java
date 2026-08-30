@@ -506,7 +506,9 @@ public class CliAgentService {
      * Build a JSON Schema "inputSchema" from ToolDefinition parameters.
      * This allows MCP clients to register tools with proper parameter definitions.
      */
-    private Map<String, Object> buildInputSchema(ToolDefinition td) {
+    // Package-visible so a test can read the schema this service actually hands a CLI agent,
+    // rather than the layer above it.
+    Map<String, Object> buildInputSchema(ToolDefinition td) {
         Map<String, Object> schema = new LinkedHashMap<>();
         schema.put("type", "object");
 
@@ -550,6 +552,14 @@ public class CliAgentService {
         if (param.minimum() != null) prop.put("minimum", param.minimum());
         if (param.maximum() != null) prop.put("maximum", param.maximum());
         if (param.pattern() != null) prop.put("pattern", param.pattern());
+
+        // An array says what it holds, the same as the other two emitters. A CLI agent reads this
+        // schema to decide what to send, so an array of objects left undeclared is filled in as an
+        // array of strings.
+        if ("array".equals(param.type())) {
+            prop.put("items", Map.of("type",
+                com.apimarketplace.agent.registry.ToolSchemaGenerator.itemTypeOf(param.itemType())));
+        }
 
         // Nested object properties
         if (param.properties() != null && !param.properties().isEmpty()) {

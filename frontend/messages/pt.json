@@ -419,7 +419,6 @@
     "noImage": "No image",
     "view": "View",
     "download": "Download",
-    "removeImage": "Remover imagem",
     "noFile": "No file",
     "removeFile": "Remover arquivo",
     "file": "File",
@@ -431,7 +430,16 @@
     "noRows": "Nenhuma linha",
     "showingRows": "Mostrando {visible} de {total} linhas",
     "previous": "Anterior",
-    "next": "Próximo"
+    "next": "Próximo",
+    "pickFromFiles": "Ficheiros",
+    "pickFromFilesTitle": "Escolher um ficheiro",
+    "assetUrl": "Usar uma ligação",
+    "assetUrlPlaceholder": "Cole o URL de uma imagem ou ficheiro",
+    "assetUrlConfirm": "Usar",
+    "assetUrlInvalid": "Este URL não parece utilizável",
+    "assetExternal": "Ligação externa",
+    "assetUnresolvableHint": "Este ficheiro já não está disponível. Pode ter sido eliminado de Ficheiros.",
+    "uploadFailed": "Falha no envio"
   },
   "auth": {
     "signIn": "Entrar",
@@ -484,6 +492,13 @@
     "addTab": "Adicionar aba",
     "openRight": "Abrir o painel à direita",
     "openBottom": "Abrir o painel embaixo",
+    "detach": "Desacoplar o painel",
+    "attach": "Reacoplar o painel",
+    "moveWindow": "Mover o painel",
+    "moveWindowHint": "Mover o painel: arraste-o ou use as setas (Shift para redimensionar a partir do canto inferior direito, Ctrl+Shift a partir do superior esquerdo, Alt para passos de 1px)",
+    "collapseWindow": "Recolher o painel",
+    "expandWindow": "Expandir o painel",
+    "expandWindowHint": "Expandir o painel: clique, arraste para movê-lo ou use as setas (Alt para passos de 1px)",
     "searchPlaceholder": "Buscar...",
     "applications": "Aplicações",
     "interfaces": "Interfaces",
@@ -1134,12 +1149,23 @@
       "budgetBlockedTitle": "Orçamento atingido",
       "budgetBlockedMessage": "Gasto {spent} de {budget}. Nenhuma nova execução foi iniciada.",
       "openInPanel": "Abrir os detalhes da execução no painel",
+      "backToWorkflow": "Voltar ao workflow",
       "scrollLeft": "Mostrar os detalhes anteriores",
       "scrollRight": "Mostrar mais detalhes",
       "cost": "Custo",
       "scopeAll": "todas as épocas",
       "scopeEpoch": "época {epoch}"
     }
+  },
+  "workflowRelations": {
+    "menuLabel": "{count, plural, one {# workflow ligado} other {# workflows ligados}}",
+    "parentsTitle": "Chamado por",
+    "parentsHint": "Workflows cujo plano executa este como sub-workflow",
+    "childrenTitle": "Chama",
+    "childrenHint": "Workflows que este executa como sub-workflows",
+    "openHint": "Abrir no painel lateral",
+    "unavailable": "Workflow indisponível",
+    "unavailableHint": "Este workflow não está no seu espaço de trabalho ou foi eliminado"
   },
   "data": {
     "title": "Tabelas",
@@ -1248,6 +1274,8 @@
   "actions": {
     "running": "Em execução",
     "edit": "Editar",
+    "interfaceControls": "Controles da página",
+    "interfaceControlsSoundOn": "Controles da página (som ligado)",
     "save": "Salvar",
     "run": "Executar",
     "share": "Compartilhar",
@@ -2218,11 +2246,11 @@
         },
         "file": {
           "label": "Anexo",
-          "description": "Enviar ou vincular um documento"
+          "description": "Um ficheiro, apresentado como cartão com o nome e o tamanho"
         },
         "image": {
-          "label": "Pré-visualização de imagem",
-          "description": "Miniatura responsiva"
+          "label": "Imagem",
+          "description": "A mesma coluna de ficheiro, apresentada como miniatura"
         },
         "date": {
           "label": "Data",
@@ -2264,7 +2292,12 @@
       "configVectorDimension": "Dimensão de embedding",
       "configVectorMetric": "Métrica de distância",
       "ceOnlyBadge": "Somente CE",
-      "ceOnlyTooltip": "Disponível apenas na Community Edition auto-hospedada"
+      "ceOnlyTooltip": "Disponível apenas na Community Edition auto-hospedada",
+      "mediaRender": {
+        "label": "Mostrar como",
+        "thumbnail": "Miniatura",
+        "card": "Cartão com nome e tamanho"
+      }
     },
     "createAgent": {
       "title": "Criar Novo Agente",
@@ -2413,6 +2446,10 @@
       "agentUpdated": "Agente atualizado com sucesso",
       "error": "Erro",
       "createFailed": "Falha ao criar agente",
+      "deleteAgent": "Excluir agente",
+      "deleteTitle": "Excluir agente",
+      "deleteConfirmation": "Tem certeza de que deseja excluir \"{name}\"? Esta ação não pode ser desfeita.",
+      "deleteFailed": "Falha ao excluir agente",
       "widgetCreateFailed": "Falha ao salvar configuração do widget",
       "skillsLabel": "Habilidades",
       "skillsInfo": "Atribuir pacotes de habilidades reutilizáveis para aprimorar as capacidades do agente.",
@@ -9895,7 +9932,8 @@
     "updateIntro": "Obtenha a versão mais recente e reinicie sua stack. O arquivo Compose fixa a tag de imagem da versão, então execute git pull primeiro. Seus dados são mantidos e as migrações de banco de dados são executadas automaticamente na inicialização.",
     "updateRunFrom": "Execute estes comandos na sua pasta clonada do Trinyx:",
     "copy": "Copiar",
-    "copied": "Copiado"
+    "copied": "Copiado",
+    "anonymousCheckNotice": "A verificação diária de atualizações envia esta versão e um identificador de instalação aleatório, para que as instalações auto-hospedadas ativas possam ser contadas. O registo guardado não contém qualquer endereço IP, nome de host ou conta. Defina CE_VERSIONCHECK_SENDINSTALLID=false para parar de enviar o identificador, ou CE_VERSIONCHECK_ENABLED=false para desativar a verificação."
   },
   "optionalComponents": {
     "title": "Componentes opcionais",

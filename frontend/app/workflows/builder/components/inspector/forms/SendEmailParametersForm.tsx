@@ -5,7 +5,6 @@ import { Info } from 'lucide-react';
 import type { Node } from 'reactflow';
 import type { Connection } from '../useInspectorConnections';
 import { useTranslations } from 'next-intl';
-import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { ExpressionEditor } from '@/components/ui/expression-editor';
@@ -73,11 +72,6 @@ export function SendEmailParametersForm({
   const handleFieldChange = React.useCallback((key: string) => (value: string) => {
     if (isRunMode) return;
     onUpdate({ ...data, [key]: value } as BuilderNodeData);
-  }, [data, isRunMode, onUpdate]);
-
-  const handleInputChange = React.useCallback((key: string) => (event: React.ChangeEvent<HTMLInputElement>) => {
-    if (isRunMode) return;
-    onUpdate({ ...data, [key]: event.target.value } as BuilderNodeData);
   }, [data, isRunMode, onUpdate]);
 
   const handleSelectChange = React.useCallback((key: string) => (value: string) => {
@@ -153,12 +147,20 @@ export function SendEmailParametersForm({
       {/* CC */}
       <div className="space-y-1">
         <span className="text-sm font-semibold text-slate-500 dark:text-slate-400">{t('cc')}</span>
-        <Input
-          type="text"
+        <ExpressionEditor
           value={cc}
-          onChange={handleInputChange('emailCc')}
-          className="w-full"
+          onChange={handleFieldChange('emailCc')}
           placeholder={t('ccPlaceholder')}
+          className="w-full"
+          unknownVariables={findUnknownVariables({ emailCc: cc })}
+          handleId={`email-cc-${node.id}`}
+          connections={connections}
+          onHandleClick={handleHandleClick}
+          draggingFromHandle={draggingFromHandle}
+          onHandleMouseDown={handleHandleMouseDown}
+          onHandleMouseUp={handleHandleMouseUp}
+          hoveredTargetHandle={hoveredTargetHandle}
+          onSetHandleRef={handleSetHandleRef}
           readOnly={isRunMode}
         />
       </div>
@@ -166,12 +168,20 @@ export function SendEmailParametersForm({
       {/* BCC */}
       <div className="space-y-1">
         <span className="text-sm font-semibold text-slate-500 dark:text-slate-400">{t('bcc')}</span>
-        <Input
-          type="text"
+        <ExpressionEditor
           value={bcc}
-          onChange={handleInputChange('emailBcc')}
-          className="w-full"
+          onChange={handleFieldChange('emailBcc')}
           placeholder={t('bccPlaceholder')}
+          className="w-full"
+          unknownVariables={findUnknownVariables({ emailBcc: bcc })}
+          handleId={`email-bcc-${node.id}`}
+          connections={connections}
+          onHandleClick={handleHandleClick}
+          draggingFromHandle={draggingFromHandle}
+          onHandleMouseDown={handleHandleMouseDown}
+          onHandleMouseUp={handleHandleMouseUp}
+          hoveredTargetHandle={hoveredTargetHandle}
+          onSetHandleRef={handleSetHandleRef}
           readOnly={isRunMode}
         />
       </div>
@@ -179,12 +189,20 @@ export function SendEmailParametersForm({
       {/* From Name (optional override) */}
       <div className="space-y-1">
         <span className="text-sm font-semibold text-slate-500 dark:text-slate-400">{t('fromName')}</span>
-        <Input
-          type="text"
+        <ExpressionEditor
           value={fromName}
-          onChange={handleInputChange('emailFromName')}
-          className="w-full"
+          onChange={handleFieldChange('emailFromName')}
           placeholder={t('fromNamePlaceholder')}
+          className="w-full"
+          unknownVariables={findUnknownVariables({ emailFromName: fromName })}
+          handleId={`email-from-name-${node.id}`}
+          connections={connections}
+          onHandleClick={handleHandleClick}
+          draggingFromHandle={draggingFromHandle}
+          onHandleMouseDown={handleHandleMouseDown}
+          onHandleMouseUp={handleHandleMouseUp}
+          hoveredTargetHandle={hoveredTargetHandle}
+          onSetHandleRef={handleSetHandleRef}
           readOnly={isRunMode}
         />
       </div>
@@ -192,12 +210,20 @@ export function SendEmailParametersForm({
       {/* From Email (optional override of the credential's sender address) */}
       <div className="space-y-1">
         <span className="text-sm font-semibold text-slate-500 dark:text-slate-400">{t('fromEmail')}</span>
-        <Input
-          type="text"
+        <ExpressionEditor
           value={fromEmail}
-          onChange={handleInputChange('emailFromEmail')}
-          className="w-full"
+          onChange={handleFieldChange('emailFromEmail')}
           placeholder={t('fromEmailPlaceholder')}
+          className="w-full"
+          unknownVariables={findUnknownVariables({ emailFromEmail: fromEmail })}
+          handleId={`email-from-email-${node.id}`}
+          connections={connections}
+          onHandleClick={handleHandleClick}
+          draggingFromHandle={draggingFromHandle}
+          onHandleMouseDown={handleHandleMouseDown}
+          onHandleMouseUp={handleHandleMouseUp}
+          hoveredTargetHandle={hoveredTargetHandle}
+          onSetHandleRef={handleSetHandleRef}
           readOnly={isRunMode}
         />
         <p className="text-sm text-slate-400 dark:text-slate-500">{t('fromEmailHint')}</p>
@@ -206,12 +232,20 @@ export function SendEmailParametersForm({
       {/* Reply-To (optional) */}
       <div className="space-y-1">
         <span className="text-sm font-semibold text-slate-500 dark:text-slate-400">{t('replyTo')}</span>
-        <Input
-          type="text"
+        <ExpressionEditor
           value={replyTo}
-          onChange={handleInputChange('emailReplyTo')}
-          className="w-full"
+          onChange={handleFieldChange('emailReplyTo')}
           placeholder={t('replyToPlaceholder')}
+          className="w-full"
+          unknownVariables={findUnknownVariables({ emailReplyTo: replyTo })}
+          handleId={`email-reply-to-${node.id}`}
+          connections={connections}
+          onHandleClick={handleHandleClick}
+          draggingFromHandle={draggingFromHandle}
+          onHandleMouseDown={handleHandleMouseDown}
+          onHandleMouseUp={handleHandleMouseUp}
+          hoveredTargetHandle={hoveredTargetHandle}
+          onSetHandleRef={handleSetHandleRef}
           readOnly={isRunMode}
         />
       </div>
@@ -282,12 +316,20 @@ export function SendEmailParametersForm({
       {/* In-Reply-To */}
       <div className="space-y-1">
         <span className="text-sm font-semibold text-slate-500 dark:text-slate-400">{t('inReplyTo')}</span>
-        <Input
-          type="text"
+        <ExpressionEditor
           value={inReplyTo}
-          onChange={handleInputChange('emailInReplyTo')}
-          className="w-full"
+          onChange={handleFieldChange('emailInReplyTo')}
           placeholder={t('inReplyToPlaceholder')}
+          className="w-full"
+          unknownVariables={findUnknownVariables({ emailInReplyTo: inReplyTo })}
+          handleId={`email-in-reply-to-${node.id}`}
+          connections={connections}
+          onHandleClick={handleHandleClick}
+          draggingFromHandle={draggingFromHandle}
+          onHandleMouseDown={handleHandleMouseDown}
+          onHandleMouseUp={handleHandleMouseUp}
+          hoveredTargetHandle={hoveredTargetHandle}
+          onSetHandleRef={handleSetHandleRef}
           readOnly={isRunMode}
         />
       </div>
@@ -295,12 +337,20 @@ export function SendEmailParametersForm({
       {/* References */}
       <div className="space-y-1">
         <span className="text-sm font-semibold text-slate-500 dark:text-slate-400">{t('references')}</span>
-        <Input
-          type="text"
+        <ExpressionEditor
           value={references}
-          onChange={handleInputChange('emailReferences')}
-          className="w-full"
+          onChange={handleFieldChange('emailReferences')}
           placeholder={t('referencesPlaceholder')}
+          className="w-full"
+          unknownVariables={findUnknownVariables({ emailReferences: references })}
+          handleId={`email-references-${node.id}`}
+          connections={connections}
+          onHandleClick={handleHandleClick}
+          draggingFromHandle={draggingFromHandle}
+          onHandleMouseDown={handleHandleMouseDown}
+          onHandleMouseUp={handleHandleMouseUp}
+          hoveredTargetHandle={hoveredTargetHandle}
+          onSetHandleRef={handleSetHandleRef}
           readOnly={isRunMode}
         />
       </div>

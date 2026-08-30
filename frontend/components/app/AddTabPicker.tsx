@@ -13,7 +13,6 @@ import { interfaceService } from '@/lib/api/orchestrator/interface.service';
 import { ApplicationPanelContent } from '@/components/app/ApplicationSidePanel';
 import { InterfacePanelContent } from '@/components/app/InterfacePanelContent';
 import { DataSourcePanelContent } from '@/components/app/DataSourcePanelContent';
-import { WorkflowBuilderPanelContent } from '@/components/app/WorkflowBuilderPanelContent';
 import { AgentPanelContent } from '@/components/app/AgentPanelContent';
 import { StorageExplorerTab } from '@/app/workflows/builder/components/inspector/StorageExplorerTab';
 import { ConversationPanelContent } from '@/components/app/ConversationPanelContent';
@@ -372,15 +371,21 @@ export function AddTabPicker({ variant = 'tab-bar' }: AddTabPickerProps) {
           preferredWidth: 0.35,
         });
         break;
-      case 'workflow':
-        sidePanel.openTab({
-          id: item.id,
-          label: item.label,
-          icon: <Workflow className="w-4 h-4" />,
-          content: <WorkflowBuilderPanelContent workflowId={parseTabResource(item.id)?.id ?? ''} />,
-          preferredWidth: 0.35,
+      case 'workflow': {
+        // Lazy: the builder panel pulls in the whole workflow canvas, and the app
+        // shell must not carry it statically (same rule as openWorkflowBuilderTab).
+        const workflowId = parseTabResource(item.id)?.id ?? '';
+        void import('@/components/app/WorkflowBuilderPanelContent').then(({ WorkflowBuilderPanelContent }) => {
+          sidePanel.openTab({
+            id: item.id,
+            label: item.label,
+            icon: <Workflow className="w-4 h-4" />,
+            content: <WorkflowBuilderPanelContent workflowId={workflowId} />,
+            preferredWidth: 0.35,
+          });
         });
         break;
+      }
       case 'agent': {
         const rawAgentId = parseTabResource(item.id)?.id ?? '';
         sidePanel.openTab({

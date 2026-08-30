@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
-import { useSearchParams, useRouter, usePathname } from 'next/navigation';
+import { useSearchParams, usePathname } from 'next/navigation';
 import { createPortal } from 'react-dom';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
@@ -29,12 +29,13 @@ import { SelectionActionBar, BulkBarButton } from '@/components/ui/SelectionActi
 import { EmptyState } from '@/components/ui/EmptyState';
 import { CardSkeletonGrid } from '@/components/ui/CardSkeletonGrid';
 import { PaginationBar } from '@/components/ui/PaginationBar';
-import { DndContext, DragOverlay } from '@dnd-kit/core';
 import { FolderPlus } from 'lucide-react';
 import { AgentFolderFace } from '@/components/folders/AgentFolderFace';
 import { FolderBreadcrumb } from '@/components/folders/FolderBreadcrumb';
 import { FolderTilesGrid } from '@/components/folders/FolderTilesGrid';
 import { FolderDialogs } from '@/components/folders/FolderDialogs';
+import { FolderDragContext } from '@/components/folders/FolderDragContext';
+import { samePageUrl, showSamePageUrl } from '@/lib/navigation/showSamePageUrl';
 import { DraggableResourceCard } from '@/components/folders/DraggableResourceCard';
 import { useListFolders } from '@/hooks/useListFolders';
 import { useDebouncedValue } from '@/hooks/useDebouncedValue';
@@ -404,10 +405,9 @@ export function AgentTable({ className = '' }: AgentTableProps) {
   // panel for the target agent once the list has loaded. Used by the
   // NotificationBell rows (TRIGGER + recent-activity AGENT subjects) because
   // no per-agent page exists - the legacy /app/agent/<id> route 404s.
-  // One-shot: the param is stripped via router.replace after the first match
-  // so a manual reload doesn't re-pop the panel.
+  // One-shot: the param is stripped from the address after the first match so a manual reload
+  // doesn't re-pop the panel.
   const searchParams = useSearchParams();
-  const router = useRouter();
   const pathname = usePathname();
   const openAgentParam = searchParams.get('openAgent');
   const handledOpenAgentRef = useRef<string | null>(null);
@@ -419,15 +419,26 @@ export function AgentTable({ className = '' }: AgentTableProps) {
     if (!target) return;
     handledOpenAgentRef.current = openAgentParam;
     openAgentPanel(target);
-    // Strip the query param so a reload doesn't re-open the panel forever.
+    // Strip the query param so a reload doesn't re-open the panel forever. Through the
+    // history API, not the router: when `openAgent` is the only param this removes the last
+    // one, and a router replace of the bare pathname is dropped on a page loaded at it - so
+    // the param survived and the panel re-opened on every reload, which is the very thing
+    // this is here to prevent.
     const next = new URLSearchParams(searchParams.toString());
     next.delete('openAgent');
     const qs = next.toString();
-    router.replace(qs ? `${pathname}?${qs}` : pathname);
-  }, [openAgentParam, loading, agents, openAgentPanel, router, pathname, searchParams]);
+    showSamePageUrl(
+      qs ? `${pathname}?${qs}` : pathname,
+      samePageUrl(pathname, searchParams),
+      'replace',
+    );
+  }, [openAgentParam, loading, agents, openAgentPanel, pathname, searchParams]);
 
 
   return (
+    // The drag surface covers the header too: the folder path in it is a drop target, so a
+    // card can be dragged out of a folder onto the level it belongs to.
+    <FolderDragContext folders={folders} nameOf={(id) => agents.find((a) => a.id === id)?.name}>
     <div className={`space-y-4 w-full overflow-visible ${className}`}>
       {/* Header actions */}
       {/* Header always rendered (mirrors WorkflowTable): the templates button must
@@ -629,15 +640,7 @@ export function AgentTable({ className = '' }: AgentTableProps) {
         {loading ? (
           <CardSkeletonGrid columnsClassName="grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4" />
         ) : (
-          /* One drag context over the folders AND the cards: a card dropped on a tile is
-             filed there, a tile dropped on another tile is nested inside it. */
-          <DndContext
-            sensors={folders.sensors}
-            onDragStart={(event) => folders.handleDragStart(
-              event, (id) => agents.find((a) => a.id === id)?.name)}
-            onDragEnd={folders.handleDragEnd}
-            onDragCancel={folders.cancelDrag}
-          >
+          <>
             <FolderTilesGrid
               folders={folders}
               countLabel={folderCountLabel}
@@ -767,18 +770,7 @@ export function AgentTable({ className = '' }: AgentTableProps) {
           </div>
             )}
 
-            {/* What is being dragged, following the pointer. A multi-selection drag says how
-                many cards are travelling, so a drop never moves more than you meant. */}
-            <DragOverlay>
-              {folders.activeDrag && (
-                <div className="rounded-xl border border-[var(--accent-primary)] bg-theme-secondary px-3 py-2 text-sm text-theme-primary shadow-lg">
-                  {folders.activeDrag.count > 1
-                    ? t('folders.draggingCount', { count: folders.activeDrag.count })
-                    : folders.activeDrag.label}
-                </div>
-              )}
-            </DragOverlay>
-          </DndContext>
+          </>
         )}
       </div>
 
@@ -858,5 +850,6 @@ export function AgentTable({ className = '' }: AgentTableProps) {
 
       <ToastContainer toasts={toasts} onRemoveToast={removeToast} />
     </div>
+    </FolderDragContext>
   );
 }

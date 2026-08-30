@@ -10,6 +10,7 @@ import com.apimarketplace.publication.service.PublicationPendingReviewException;
 import com.apimarketplace.publication.service.PublicationValidationException;
 import com.apimarketplace.publication.service.RemoteMarketplaceService;
 import com.apimarketplace.publication.service.ResourcePublicationService;
+import com.apimarketplace.publication.service.ShowcaseFileNamespaceRepairService;
 import com.apimarketplace.publication.service.ShowcaseSnapshotBackfillService;
 import com.apimarketplace.publication.service.WorkflowPublicationService;
 import org.slf4j.Logger;
@@ -40,6 +41,7 @@ public class InternalPublicationController {
     private final ResourcePublicationService resourcePublicationService;
     private final OrchestratorInternalClient orchestratorClient;
     private final ShowcaseSnapshotBackfillService backfillService;
+    private final ShowcaseFileNamespaceRepairService fileNamespaceRepairService;
     /**
      * Present ONLY in a CE monolith ({@code marketplace.mode=remote}; bean created by the
      * gated {@code RemoteMarketplaceConfig}). When present, the marketplace LIST/SEARCH
@@ -56,6 +58,7 @@ public class InternalPublicationController {
                                           ResourcePublicationService resourcePublicationService,
                                           OrchestratorInternalClient orchestratorClient,
                                           ShowcaseSnapshotBackfillService backfillService,
+                                          ShowcaseFileNamespaceRepairService fileNamespaceRepairService,
                                           ObjectProvider<RemoteMarketplaceService> remoteMarketplaceProvider) {
         this.publicationRepository = publicationRepository;
         this.publicationService = publicationService;
@@ -63,6 +66,7 @@ public class InternalPublicationController {
         this.resourcePublicationService = resourcePublicationService;
         this.orchestratorClient = orchestratorClient;
         this.backfillService = backfillService;
+        this.fileNamespaceRepairService = fileNamespaceRepairService;
         this.remoteMarketplaceProvider = remoteMarketplaceProvider;
     }
 
@@ -74,6 +78,36 @@ public class InternalPublicationController {
     @PostMapping("/backfill-showcase-snapshot")
     public ResponseEntity<List<Map<String, Object>>> backfillShowcaseSnapshot() {
         return ResponseEntity.ok(backfillService.backfillAll());
+    }
+
+    /**
+     * Copy into {@code _publications/{pubId}/} every file an already-published showcase or
+     * landing page still reads from the publisher's own storage, so deleting the source run
+     * stops breaking the published page. Idempotent; a publication already self-contained is
+     * left out of the response. Pass {@code dryRun=true} to see the scope first, or
+     * {@code publicationId} to repair a single one.
+     *
+     * <p>A row reporting {@code refused: N} is one the sweep may NOT touch: its files belong
+     * to neither the publication nor anyone it may read from. That is normally an ORG
+     * publication whose showcase run belongs to another member, on a snapshot captured before
+     * the capture began stating the run owner. The sweep cannot repair those - only a
+     * re-publish can - so they are reported rather than counted as clean.
+     *
+     * <p>Side effect worth knowing before running it fleet-wide: a publication whose files
+     * move also has its CE-exclusive label recomputed with today's detector rules, because
+     * the label is derived from the snapshot being written. An old publication carrying a
+     * feature the detector has since learned about (a vector column, a local-CLI agent) will
+     * therefore start refusing managed-cloud installs. That is the label being made correct,
+     * but it is a visible change to a live listing, so run {@code dryRun=true} first.
+     */
+    @PostMapping("/repair-showcase-file-namespace")
+    public ResponseEntity<?> repairShowcaseFileNamespace(
+            @RequestParam(required = false) UUID publicationId,
+            @RequestParam(defaultValue = "false") boolean dryRun) {
+        if (publicationId != null) {
+            return ResponseEntity.ok(fileNamespaceRepairService.repairById(publicationId, dryRun));
+        }
+        return ResponseEntity.ok(fileNamespaceRepairService.repairAll(dryRun));
     }
 
     // ========== Workflow-level queries ==========

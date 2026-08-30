@@ -6,6 +6,7 @@
  */
 
 import { isFileRef, fileRefToUrl, normalizeFileRef, type FileRef } from '@/lib/api/orchestrator/file.service';
+import { assetDisplayUrl } from '@/lib/datatable/assetValue';
 
 // =============================================================================
 // HTML Processing
@@ -734,6 +735,12 @@ function injectFileProxyUrls(data: Record<string, unknown>, resolveFileUrl?: (ra
       // <img src="{{var}}"> works on dynamic JS-template data. Replacement is a
       // STRING - js_template iteration loses .name/.mimeType by design; map name
       // separately if needed (see file_storage help).
+      // A table media cell is an asset map: it always carries a URL but not always a path,
+      // mimeType or size, so it fails isFileRef's stricter shape test and would otherwise reach
+      // the template as JSON - a broken <img src>. Checked first, and strictly (_type must be
+      // 'file'), so no ordinary object is turned into a bare URL.
+      const assetUrl = assetDisplayUrl(val);
+      if (assetUrl) return resolveFileUrl(assetUrl);
       if (isFileRef(val)) {
         // normalize first so a flat {file_url,...} ref recovers its opaque id before building the URL.
         const raw = fileRefToUrl(normalizeFileRef(val as unknown as FileRef), { inline: true });
@@ -986,6 +993,9 @@ function rewriteFileProxyUrls(value: unknown, resolveFileUrl: (rawUrl: string) =
     // FileRef object → blob: URL string. Same contract as injectFileProxyUrls
     // above. Required so HTML template substitution `<img src="{{photo}}">`
     // sees a URL string instead of JSON-stringifying the FileRef Map.
+    // Same contract as injectFileProxyUrls above: a table asset resolves to its URL.
+    const assetUrl = assetDisplayUrl(value);
+    if (assetUrl) return resolveFileUrl(assetUrl);
     if (isFileRef(value)) {
       const raw = fileRefToUrl(normalizeFileRef(value as unknown as FileRef), { inline: true });
       return raw ? resolveFileUrl(raw) : '';

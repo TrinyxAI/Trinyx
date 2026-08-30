@@ -46,6 +46,7 @@ import { useLinkedAgentLoader } from '@/hooks/chat/useLinkedAgentLoader';
 import { useSidePanelSafe } from '@/contexts/SidePanelContext';
 import { buildAgentConfigPanelTab } from '@/lib/sidePanel/agentConfigPanelTab';
 import { useChatHandoff } from '@/hooks/chat/useChatHandoff';
+import { togglePanelFromHeader } from '@/lib/sidePanel/togglePanelFromHeader';
 import { PROVIDER_ICON_MAP } from '@/lib/ai-providers/providerIcons';
 
 export interface ChatPageV2Props {
@@ -591,12 +592,14 @@ export function ChatPageV2({ conversationIdFromParams, enableDataSource = false 
   // Open the agent config in the right side panel, exactly like the header
   // toggle does (same tab id => merges, no duplicate). Toggle when already open.
   const handleOpenAgentPanel = useCallback(() => {
-    if (!sidePanel || !resolvedAgentId) return;
-    if (sidePanel.isOpen) {
-      sidePanel.close();
-    } else {
-      sidePanel.openTab(buildAgentConfigPanelTab({ agentId: resolvedAgentId, agentName, agentAvatarUrl }));
-    }
+    if (!resolvedAgentId) return;
+    // The header's own decision, not a copy of it: shaded, the panel is open and
+    // showing nothing, so the press has to reveal it rather than dismiss the very
+    // thing it was made to bring up. Restating those four lines here is how the two
+    // drift apart, silently, in the one state nobody checks.
+    togglePanelFromHeader(sidePanel, (panel) => {
+      panel.openTab(buildAgentConfigPanelTab({ agentId: resolvedAgentId, agentName, agentAvatarUrl }));
+    });
   }, [sidePanel, resolvedAgentId, agentName, agentAvatarUrl]);
 
   // Agent conversation -> avatar (click opens the agent config panel); otherwise

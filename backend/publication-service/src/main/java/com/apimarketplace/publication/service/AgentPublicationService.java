@@ -378,6 +378,14 @@ public class AgentPublicationService {
             saved = publicationRepository.save(saved);
         }
 
+        // Same reason, for the landing page: it is rendered for every marketplace visitor,
+        // so its media must belong to the publication and not to the publisher's tenant.
+        // Also after the save - the namespace is keyed on the id @PrePersist just assigned.
+        //
+        // Best-effort by construction: materializeLandingFiles reports rather than throws
+        // (it cannot be allowed to fail a publish), so there is nothing to catch here.
+        workflowPublicationService.materializeLandingFiles(saved, tenantId);
+
         return saved;
     }
 
@@ -395,7 +403,12 @@ public class AgentPublicationService {
                 if (!(val instanceof Map<?, ?> wfSnapshot)) continue;
                 Object plan = wfSnapshot.get("plan");
                 if (plan instanceof Map<?, ?>) {
-                    workflowPublicationService.snapshotDataInputFiles((Map<String, Object>) plan, publicationId, sourceTenantId);
+                    // The publishing tenant is the only owner in scope here: an agent snapshot
+                    // carries no statement of who owns each embedded workflow, so nothing
+                    // authoritative names a second one.
+                    workflowPublicationService.snapshotDataInputFiles(
+                            (Map<String, Object>) plan, publicationId,
+                            WorkflowPublicationService.CopyScope.of(sourceTenantId, null, publicationId));
                     processed = true;
                 }
             }

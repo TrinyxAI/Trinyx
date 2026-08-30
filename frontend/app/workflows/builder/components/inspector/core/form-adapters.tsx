@@ -761,12 +761,16 @@ export function TaskFormAdapter(props: InspectorFormProps) {
 }
 
 export function SubWorkflowFormAdapter(props: InspectorFormProps) {
+  const legacyProps = unpackConnectionProps(props.connectionProps, props.node.id);
+
   return (
     <SubWorkflowParametersForm
       node={props.node}
       data={props.node.data}
       isRunMode={props.isRunMode}
       onUpdate={(data) => props.onUpdate(data)}
+      connectionProps={legacyProps}
+      findUnknownVariables={props.findUnknownVariables}
     />
   );
 }
@@ -850,45 +854,61 @@ export function CodeFormAdapter(props: InspectorFormProps) {
 }
 
 export function StopOnErrorFormAdapter(props: InspectorFormProps) {
+  const legacyProps = unpackConnectionProps(props.connectionProps, props.node.id);
+
   return (
     <StopOnErrorParametersForm
       node={props.node}
       data={props.node.data}
       isRunMode={props.isRunMode}
       onUpdate={(data) => props.onUpdate(data)}
+      connectionProps={legacyProps}
+      findUnknownVariables={props.findUnknownVariables}
     />
   );
 }
 
 export function SshFormAdapter(props: InspectorFormProps) {
+  const legacyProps = unpackConnectionProps(props.connectionProps, props.node.id);
+
   return (
     <SshParametersForm
       node={props.node}
       data={props.node.data}
       isRunMode={props.isRunMode}
       onUpdate={(data) => props.onUpdate(data)}
+      connectionProps={legacyProps}
+      findUnknownVariables={props.findUnknownVariables}
     />
   );
 }
 
 export function SftpFormAdapter(props: InspectorFormProps) {
+  const legacyProps = unpackConnectionProps(props.connectionProps, props.node.id);
+
   return (
     <SftpParametersForm
       node={props.node}
       data={props.node.data}
       isRunMode={props.isRunMode}
       onUpdate={(data) => props.onUpdate(data)}
+      connectionProps={legacyProps}
+      findUnknownVariables={props.findUnknownVariables}
     />
   );
 }
 
 export function DatabaseFormAdapter(props: InspectorFormProps) {
+  const legacyProps = unpackConnectionProps(props.connectionProps, props.node.id);
+
   return (
     <DatabaseParametersForm
       node={props.node}
       data={props.node.data}
       isRunMode={props.isRunMode}
       onUpdate={(data) => props.onUpdate(data)}
+      connectionProps={legacyProps}
+      findUnknownVariables={props.findUnknownVariables}
     />
   );
 }

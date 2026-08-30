@@ -44,7 +44,12 @@ describe('WorkflowModeProvider initialRunId lifecycle', () => {
     await act(async () => {});
 
     useInterfacePaginationStore.getState().setPage('run-a-interface', 4);
-    useInterfacePaginationStore.getState().setCarouselIndex(1);
+    useInterfacePaginationStore.getState().setCarouselIndex('workflow-a:run-a', 1);
+    // Two surfaces, neither of which is the provider that remounts below. They
+    // used to be wiped along with everything else, which handed back the
+    // per-surface isolation the keyed index exists to provide: opening a second
+    // application tab reset the page every other tab was showing.
+    useInterfacePaginationStore.getState().setCarouselIndex('workflow-c:run-c', 2);
     usePendingInterfacesStore.getState().addPending({
       nodeId: 'interface:first',
       interfaceId: 'iface-a',
@@ -64,7 +69,10 @@ describe('WorkflowModeProvider initialRunId lifecycle', () => {
     await act(async () => {});
 
     expect(useInterfacePaginationStore.getState().pages).toEqual({});
-    expect(useInterfacePaginationStore.getState().carouselIndex).toBe(0);
+    expect(
+      useInterfacePaginationStore.getState().carouselIndex,
+      'a provider mounting on another run leaves every live surface alone',
+    ).toEqual({ 'workflow-a:run-a': 1, 'workflow-c:run-c': 2 });
     expect(usePendingInterfacesStore.getState().interfaces.size).toBe(0);
     expect(usePendingInterfacesStore.getState().activeNodeId).toBeNull();
   });

@@ -13,15 +13,17 @@ vi.mock('@/lib/utils/dateFormatters', () => ({
 // Stub the leaf tiles/rows so the test asserts the BODY's layout contract (folder/file
 // split, ordering, day grouping, variant routing), not the children's internals.
 vi.mock('../FileCard', () => ({
-  FileCard: ({ entry, onOpen, onToggleSelect, selected, draggable }: any) => (
+  FileCard: ({ entry, onOpen, onToggleSelect, onDownload, selected, draggable }: any) => (
     <button
       data-testid={`grid-file-${entry.id}`}
       data-selected={String(selected)}
       data-draggable={String(draggable)}
+      data-has-select={String(!!onToggleSelect)}
+      data-has-download={String(!!onDownload)}
       onClick={() => onOpen(entry)}
     >
       file:{entry.fileName}
-      <span data-testid={`grid-file-sel-${entry.id}`} onClick={(e) => { e.stopPropagation(); onToggleSelect(entry.id); }} />
+      <span data-testid={`grid-file-sel-${entry.id}`} onClick={(e) => { e.stopPropagation(); onToggleSelect?.(entry.id); }} />
     </button>
   ),
 }));
@@ -290,5 +292,96 @@ describe('FilesExplorerBody - groupByDay', () => {
     expect(screen.queryByText(/^Day /)).toBeNull();
     expect(screen.getByTestId('row-folder-fA')).toBeInTheDocument();
     expect(screen.getByTestId('row-file-zzz')).toBeInTheDocument();
+  });
+});
+
+describe('grid tiles in picker mode', () => {
+  const pickerEntries = [file('zzz', '2026-03-19T10:00:00Z', 'photo.png')];
+
+  it('a tile click SELECTS when the caller is a picker, instead of doing nothing', () => {
+    // A picker passes no onOpenFile - it has no detail view to open. The grid used to wire the
+    // tile click to onOpenFile alone, so a grid picker looked interactive and swallowed clicks.
+    const onSelectFile = vi.fn();
+    render(
+      <FilesExplorerBody
+        variant="grid"
+        entries={pickerEntries}
+        enableFolders
+        {...baseProps}
+        onOpenFile={undefined}
+        onSelectFile={onSelectFile}
+      />,
+    );
+
+    fireEvent.click(screen.getByTestId('grid-file-zzz'));
+
+    expect(onSelectFile).toHaveBeenCalledWith(expect.objectContaining({ id: 'zzz' }));
+  });
+
+  it('still opens the detail view when the caller is the explorer', () => {
+    const onOpenFile = vi.fn();
+    render(
+      <FilesExplorerBody variant="grid" entries={pickerEntries} enableFolders {...baseProps} onOpenFile={onOpenFile} />,
+    );
+
+    fireEvent.click(screen.getByTestId('grid-file-zzz'));
+
+    expect(onOpenFile).toHaveBeenCalledWith(expect.objectContaining({ id: 'zzz' }));
+  });
+});
+
+describe('the picker grid draws no control it cannot honour', () => {
+  const entries = [file('zzz', '2026-03-19T10:00:00Z', 'photo.png')];
+
+  it('passes no select handler when the caller offers no selection', () => {
+    // The picker has no selection bar, so a checkbox there could be ticked and acted on by
+    // nothing. Asserted at the prop boundary because the tile mock is what the suite renders.
+    const seen: Record<string, unknown> = {};
+    render(
+      <FilesExplorerBody
+        variant="grid"
+        entries={entries}
+        enableFolders
+        {...baseProps}
+        selectable={false}
+        onOpenFile={undefined}
+        onSelectFile={(e) => { seen.selected = e; }}
+      />,
+    );
+
+    expect(screen.getByTestId('grid-file-zzz')).toBeInTheDocument();
+    expect(screen.getByTestId('grid-file-zzz').getAttribute('data-has-select')).toBe('false');
+  });
+
+  it('passes no download handler when the caller cannot download', () => {
+    render(
+      <FilesExplorerBody
+        variant="grid"
+        entries={entries}
+        enableFolders
+        {...baseProps}
+        selectable={false}
+        onOpenFile={undefined}
+        onSelectFile={() => {}}
+      />,
+    );
+
+    expect(screen.getByTestId('grid-file-zzz').getAttribute('data-has-download')).toBe('false');
+  });
+
+  it('still passes both to the explorer, which can act on them', () => {
+    render(
+      <FilesExplorerBody
+        variant="grid"
+        entries={entries}
+        enableFolders
+        {...baseProps}
+        onDownloadFile={() => {}}
+        downloadLabel="dl"
+      />,
+    );
+
+    expect(screen.getByTestId('grid-file-zzz').getAttribute('data-has-select')).toBe('true');
+    expect(screen.getByTestId('grid-file-zzz').getAttribute('data-has-download')).toBe('true');
   });
 });

@@ -58,3 +58,22 @@ describe('Breadcrumb favorite star', () => {
     expect(onToggle).toHaveBeenCalledTimes(1);
   });
 });
+
+describe('Breadcrumb - a last crumb that is still a way out', () => {
+  it('renders the last crumb inert by default, because it is the page you are on', () => {
+    render(<Breadcrumb items={[{ label: 'Home', onClick: vi.fn() }, { label: 'Workflows', onClick: vi.fn() }]} />);
+
+    expect(screen.queryByRole('button', { name: 'Workflows' })).toBeNull();
+  });
+
+  it('keeps it clickable when it is marked as the way out', () => {
+    // A list showing a folder it cannot name yet prints no segment after its own crumb, so
+    // that crumb is last - and is the only exit.
+    const onClick = vi.fn();
+    render(<Breadcrumb items={[{ label: 'Home', onClick: vi.fn() }, { label: 'Workflows', onClick, alwaysClickable: true }]} />);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Workflows' }));
+
+    expect(onClick).toHaveBeenCalled();
+  });
+});

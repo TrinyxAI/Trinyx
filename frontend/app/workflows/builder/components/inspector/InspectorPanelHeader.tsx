@@ -18,6 +18,7 @@ import { Popover, PopoverTrigger, PopoverContent } from '@/components/ui/popover
 import { useWorkflowMode } from '@/contexts/WorkflowModeContext';
 import { useSidePanelSafe } from '@/contexts/SidePanelContext';
 import { DataSourcePanelContent } from '@/components/app/DataSourcePanelContent';
+import { panelDragHandleClass } from '@/components/ui/panel-drag-handle';
 
 /**
  * A "secondary" node action. Rendered as an inline icon button on wide panels
@@ -146,7 +147,9 @@ export function InspectorPanelHeader({
   onReportNode,
 }: InspectorPanelHeaderProps) {
   const t = useTranslations('workflowBuilder.inspector');
-  const { isPreviewOnly } = useWorkflowMode();
+  // `workflowId` names the start event: the right side panel mounts its own
+  // canvas, so an unscoped start entered step-by-step on every mounted workflow.
+  const { isPreviewOnly, workflowId } = useWorkflowMode();
   const sidePanel = useSidePanelSafe();
 
   // Wide panels (advanced or fullscreen) have room to show the secondary
@@ -269,22 +272,22 @@ export function InspectorPanelHeader({
     e.stopPropagation();
     if (isTriggerNode && !hasGlobalValidationErrors) {
       window.dispatchEvent(new CustomEvent('workflowStartStepByStep', {
-        detail: { startFromNode: node.id }
+        detail: { workflowId, startFromNode: node.id }
       }));
     }
-  }, [isTriggerNode, hasGlobalValidationErrors, node.id]);
+  }, [isTriggerNode, hasGlobalValidationErrors, node.id, workflowId]);
 
   return (
     <div className={clsx(
       "flex gap-3 px-5 pt-5 pb-3 relative group/header flex-shrink-0",
       viewMode === 'result' ? "items-start" : "items-center"
     )}>
-      {/* Drag handle - visible only on desktop and when not fullscreen */}
+      {/* Drag handle - desktop only, and not while fullscreen (nothing to move) */}
       {!isFullscreen && onDragHandleMouseDown && (
         <div
           data-drag-handle
           onMouseDown={onDragHandleMouseDown}
-          className="absolute left-0 top-0 bottom-0 w-6 cursor-grab active:cursor-grabbing rounded-l-[32px] flex items-center justify-center lg:flex hidden opacity-0 group-hover/inspector:opacity-100 transition-opacity hover:bg-slate-100 dark:hover:bg-slate-800"
+          className={panelDragHandleClass}
           title={t('dragToMove')}
         >
           <GripVertical className="h-4 w-4 text-slate-400 dark:text-slate-500" />

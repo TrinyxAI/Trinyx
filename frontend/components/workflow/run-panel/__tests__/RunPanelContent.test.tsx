@@ -58,6 +58,8 @@ import { resetEpochSelectionState } from '@/components/workflow/run-panel/useDef
 
 /** The back arrow rendered inside the summary bar's `leading` slot. */
 const backButton = () => document.querySelector<HTMLElement>('[data-run-panel-back]');
+/** The "back to the canvas" control, also in the `leading` slot. */
+const workflowButton = () => document.querySelector<HTMLElement>('[data-run-panel-to-workflow]');
 
 function publish(overrides: Record<string, unknown> = {}) {
   publishRunPanelData({
@@ -346,5 +348,90 @@ describe('RunPanelContent - epoch selection', () => {
 
     expect(setViewingEpoch).toHaveBeenLastCalledWith(null);
     expect(getPickedEpoch('run-1')).toBeNull();
+  });
+});
+
+describe('RunPanelContent - the way back to the workflow canvas', () => {
+  it('offers a labelled control in the run header when the host has a canvas tab', () => {
+    const onBackToWorkflow = vi.fn();
+    render(<RunPanelContent workflowId="wf-1" onBackToWorkflow={onBackToWorkflow} />);
+
+    const button = workflowButton();
+    expect(button).toBeTruthy();
+    // Labelled, not a bare glyph: it leaves the Run view entirely, unlike the
+    // history arrow, which only walks one level up inside it.
+    expect(button!.textContent).toContain('common.workflow');
+    fireEvent.click(button!);
+    expect(onBackToWorkflow).toHaveBeenCalledTimes(1);
+  });
+
+  it('omits it when there is no canvas tab to go back to', () => {
+    // Without a workflow slot the host renders no Workflow sub-tab, so the button
+    // would lead nowhere.
+    render(<RunPanelContent workflowId="wf-1" allowHistory />);
+    expect(workflowButton()).toBeNull();
+    expect(backButton()).toBeTruthy();
+  });
+
+  it('shows it beside the run-history arrow, not instead of it', () => {
+    // The application panel has no history, but the sub-workflow tab has both, and
+    // one leading control must not evict the other.
+    render(<RunPanelContent workflowId="wf-1" allowHistory onBackToWorkflow={vi.fn()} />);
+    expect(workflowButton()).toBeTruthy();
+    expect(backButton()).toBeTruthy();
+  });
+
+  it('stays available on the "All epochs" view, where the sub-tab bar is furthest away', () => {
+    // All epochs is the default view and the tallest one: its steps push the panel's
+    // own tab bar off the bottom of the screen, which is what made the way back to
+    // the canvas unreachable from the top of the run.
+    ctxEpoch.value = null;
+    render(<RunPanelContent workflowId="wf-1" onBackToWorkflow={vi.fn()} />);
+    expect(stepsProps.current.selectedEpoch).toBeNull();
+    expect(workflowButton()).toBeTruthy();
+  });
+
+  it('is offered on the loading state too, the state the tab opens on after a launch', () => {
+    // A run whose snapshot has not arrived yet renders a placeholder, not the run
+    // header - which used to be the one place in the Run tab with no way back to
+    // the canvas, reached every time a user presses Run and opens the tab.
+    publish({ runInfo: null });
+    render(<RunPanelContent workflowId="wf-1" onBackToWorkflow={vi.fn()} />);
+    expect(screen.queryByTestId('summary'), 'no run header yet').toBeNull();
+    expect(workflowButton()).toBeTruthy();
+  });
+
+  it('is offered on the run HISTORY level too, which is where a workflow with no runs lands', () => {
+    // A canvas whose host can rebind it auto-switches to the history when there is
+    // no run, so this is the FIRST thing a user sees before their first run - and a
+    // long list of runs pushes the sub-tab bar off the bottom exactly like a long
+    // list of steps does. Leaving it out made that state a dead end.
+    publish({ runId: null, runInfo: null });
+    ctxRunId.value = null;
+    const onBackToWorkflow = vi.fn();
+    render(<RunPanelContent workflowId="wf-1" allowHistory onBackToWorkflow={onBackToWorkflow} />);
+
+    expect(screen.getByTestId('history')).toBeTruthy();
+    const button = workflowButton();
+    expect(button).toBeTruthy();
+    fireEvent.click(button!);
+    expect(onBackToWorkflow).toHaveBeenCalledTimes(1);
+  });
+
+  it('leaves the history level bare when the host has no canvas tab', () => {
+    publish({ runId: null, runInfo: null });
+    ctxRunId.value = null;
+    render(<RunPanelContent workflowId="wf-1" allowHistory />);
+    expect(screen.getByTestId('history')).toBeTruthy();
+    expect(workflowButton()).toBeNull();
+  });
+
+  it('shows both ways out side by side on the loading state', () => {
+    // The two controls answer different questions (which run? / leave the run
+    // view), so a surface that offers both must render both.
+    publish({ runInfo: null });
+    render(<RunPanelContent workflowId="wf-1" allowHistory onBackToWorkflow={vi.fn()} />);
+    expect(workflowButton()).toBeTruthy();
+    expect(screen.getByText('runs.title')).toBeTruthy();
   });
 });

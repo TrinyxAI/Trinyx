@@ -136,12 +136,20 @@ export function EmailInboxParametersForm({
       {/* Folder */}
       <div className="space-y-1">
         <span className="text-sm font-semibold text-slate-500 dark:text-slate-400">{t('folder')}</span>
-        <Input
-          type="text"
+        <ExpressionEditor
           value={folder}
-          onChange={handleInputChange('emailFolder')}
-          className="w-full"
+          onChange={handleFieldChange('emailFolder')}
           placeholder={t('folderPlaceholder')}
+          className="w-full"
+          unknownVariables={findUnknownVariables({ emailFolder: folder })}
+          handleId={`email-folder-${node.id}`}
+          connections={connections}
+          onHandleClick={handleHandleClick}
+          draggingFromHandle={draggingFromHandle}
+          onHandleMouseDown={handleHandleMouseDown}
+          onHandleMouseUp={handleHandleMouseUp}
+          hoveredTargetHandle={hoveredTargetHandle}
+          onSetHandleRef={handleSetHandleRef}
           readOnly={isRunMode}
         />
       </div>
@@ -253,12 +261,20 @@ export function EmailInboxParametersForm({
           {/* From contains */}
           <div className="space-y-1">
             <span className="text-sm font-semibold text-slate-500 dark:text-slate-400">{t('fromContains')}</span>
-            <Input
-              type="text"
+            <ExpressionEditor
               value={fromContains}
-              onChange={handleInputChange('emailFromContains')}
-              className="w-full"
+              onChange={handleFieldChange('emailFromContains')}
               placeholder={t('fromContainsPlaceholder')}
+              className="w-full"
+              unknownVariables={findUnknownVariables({ emailFromContains: fromContains })}
+              handleId={`email-from-contains-${node.id}`}
+              connections={connections}
+              onHandleClick={handleHandleClick}
+              draggingFromHandle={draggingFromHandle}
+              onHandleMouseDown={handleHandleMouseDown}
+              onHandleMouseUp={handleHandleMouseUp}
+              hoveredTargetHandle={hoveredTargetHandle}
+              onSetHandleRef={handleSetHandleRef}
               readOnly={isRunMode}
             />
           </div>
@@ -266,12 +282,20 @@ export function EmailInboxParametersForm({
           {/* Subject contains */}
           <div className="space-y-1">
             <span className="text-sm font-semibold text-slate-500 dark:text-slate-400">{t('subjectContains')}</span>
-            <Input
-              type="text"
+            <ExpressionEditor
               value={subjectContains}
-              onChange={handleInputChange('emailSubjectContains')}
-              className="w-full"
+              onChange={handleFieldChange('emailSubjectContains')}
               placeholder={t('subjectContainsPlaceholder')}
+              className="w-full"
+              unknownVariables={findUnknownVariables({ emailSubjectContains: subjectContains })}
+              handleId={`email-subject-contains-${node.id}`}
+              connections={connections}
+              onHandleClick={handleHandleClick}
+              draggingFromHandle={draggingFromHandle}
+              onHandleMouseDown={handleHandleMouseDown}
+              onHandleMouseUp={handleHandleMouseUp}
+              hoveredTargetHandle={hoveredTargetHandle}
+              onSetHandleRef={handleSetHandleRef}
               readOnly={isRunMode}
             />
           </div>
@@ -279,12 +303,20 @@ export function EmailInboxParametersForm({
           {/* Body contains */}
           <div className="space-y-1">
             <span className="text-sm font-semibold text-slate-500 dark:text-slate-400">{t('bodyContains')}</span>
-            <Input
-              type="text"
+            <ExpressionEditor
               value={bodyContains}
-              onChange={handleInputChange('emailBodyContains')}
-              className="w-full"
+              onChange={handleFieldChange('emailBodyContains')}
               placeholder={t('bodyContainsPlaceholder')}
+              className="w-full"
+              unknownVariables={findUnknownVariables({ emailBodyContains: bodyContains })}
+              handleId={`email-body-contains-${node.id}`}
+              connections={connections}
+              onHandleClick={handleHandleClick}
+              draggingFromHandle={draggingFromHandle}
+              onHandleMouseDown={handleHandleMouseDown}
+              onHandleMouseUp={handleHandleMouseUp}
+              hoveredTargetHandle={hoveredTargetHandle}
+              onSetHandleRef={handleSetHandleRef}
               readOnly={isRunMode}
             />
           </div>
@@ -340,12 +372,20 @@ export function EmailInboxParametersForm({
               <span className="text-sm font-semibold text-slate-500 dark:text-slate-400">
                 {isCreateFolder ? t('folderToCreate') : t('targetFolder')} <span className="text-red-500">*</span>
               </span>
-              <Input
-                type="text"
+              <ExpressionEditor
                 value={targetFolder}
-                onChange={handleInputChange('emailTargetFolder')}
-                className="w-full"
+                onChange={handleFieldChange('emailTargetFolder')}
                 placeholder={t('targetFolderPlaceholder')}
+                className="w-full"
+                unknownVariables={findUnknownVariables({ emailTargetFolder: targetFolder })}
+                handleId={`email-target-folder-${node.id}`}
+                connections={connections}
+                onHandleClick={handleHandleClick}
+                draggingFromHandle={draggingFromHandle}
+                onHandleMouseDown={handleHandleMouseDown}
+                onHandleMouseUp={handleHandleMouseUp}
+                hoveredTargetHandle={hoveredTargetHandle}
+                onSetHandleRef={handleSetHandleRef}
                 readOnly={isRunMode}
               />
               <p className="text-sm text-slate-400 dark:text-slate-500">{t('targetFolderHint')}</p>

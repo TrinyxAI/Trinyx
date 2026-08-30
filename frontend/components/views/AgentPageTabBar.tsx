@@ -1,8 +1,9 @@
 'use client';
 
-import { useRouter, usePathname } from 'next/navigation';
+import { usePathname, useSearchParams } from 'next/navigation';
 import { Bot, Network, Zap, BarChart3 } from 'lucide-react';
 import { useTranslations } from 'next-intl';
+import { samePageUrl, showSamePageUrl } from '@/lib/navigation/showSamePageUrl';
 
 export type AgentPageTab = 'agents' | 'skills' | 'fleet' | 'metrics';
 
@@ -18,8 +19,8 @@ interface AgentPageTabBarProps {
  */
 export function AgentPageTabBar({ activeTab, onLocalTabChange }: AgentPageTabBarProps) {
   const t = useTranslations('emptyState.agent');
-  const router = useRouter();
   const pathname = usePathname();
+  const searchParams = useSearchParams();
 
   const goToAgentView = (tab: AgentPageTab) => {
     if (onLocalTabChange) {
@@ -27,12 +28,14 @@ export function AgentPageTabBar({ activeTab, onLocalTabChange }: AgentPageTabBar
       return;
     }
     // 'agents' is the default (clean URL); every other tab is encoded in ?view=
-    // so the URL stays the single source of truth (see AgentView).
-    if (tab === 'agents') {
-      router.push(pathname);
-    } else {
-      router.push(`${pathname}?view=${tab}`);
-    }
+    // so the URL stays the single source of truth (see AgentView). A tab is a change of
+    // ADDRESS on the page already on screen, and going BACK to the default removes the last
+    // param - which a router push of the bare pathname cannot do when the page was loaded at
+    // it, so the tab did nothing on a page opened directly on `?view=skills`.
+    showSamePageUrl(
+      tab === 'agents' ? pathname : `${pathname}?view=${tab}`,
+      samePageUrl(pathname, searchParams),
+    );
   };
 
   const tabClass = (tab: AgentPageTab) =>

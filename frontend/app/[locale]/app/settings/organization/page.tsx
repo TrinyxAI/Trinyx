@@ -51,6 +51,7 @@ import { useRouter, useSearchParams, usePathname } from "next/navigation";
 import { useQueryClient } from "@tanstack/react-query";
 import { useCurrentOrgStore, reconcileCurrentOrgFromMemberships, type OrgRole } from "@/lib/stores/current-org-store";
 import { formatUtcDate } from "@/lib/utils/dateFormatters";
+import { samePageUrl, showSamePageUrl } from '@/lib/navigation/showSamePageUrl';
 
 const ROLE_ICONS: Record<string, React.ReactNode> = {
   OWNER: <Crown className="h-3.5 w-3.5 text-amber-500" />,
@@ -271,11 +272,19 @@ export default function OrganizationSettingsPage() {
     // the user lands on the relevant section.
     setActiveTab("members");
     setInviteModalOpen(true);
+    // Through the history API: the invite arrives as a full page load onto `?invite`, and a
+    // router replace of the bare pathname is dropped from there, so the param would survive and
+    // the modal would re-open on every reload.
     const next = new URLSearchParams(searchParams?.toString() ?? "");
     next.delete("invite");
     const qs = next.toString();
-    router.replace(qs ? `${pathname}?${qs}` : (pathname ?? "/app/settings/organization"));
-  }, [currentOrg, searchParams, router, pathname]);
+    const here = pathname ?? "/app/settings/organization";
+    showSamePageUrl(
+      qs ? `${here}?${qs}` : here,
+      samePageUrl(here, searchParams ?? new URLSearchParams()),
+      'replace',
+    );
+  }, [currentOrg, searchParams, pathname]);
 
   // Deep-link support: ?tab=members|workspaces|security|advanced selects a tab.
   const tabParam = searchParams?.get("tab");

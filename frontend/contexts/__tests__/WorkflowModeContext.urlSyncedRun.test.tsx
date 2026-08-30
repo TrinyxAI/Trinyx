@@ -30,7 +30,7 @@ vi.mock('@/lib/stores/pending-interfaces-store', () => ({
   usePendingInterfacesStore: { getState: () => ({ clear: vi.fn() }) },
 }));
 vi.mock('@/lib/stores/interface-pagination-store', () => ({
-  useInterfacePaginationStore: { getState: () => ({ clear: vi.fn() }) },
+  useInterfacePaginationStore: { getState: () => ({ clear: vi.fn(), clearForRunSwitch: vi.fn() }) },
 }));
 
 import { WorkflowModeProvider, useWorkflowMode } from '../WorkflowModeContext';

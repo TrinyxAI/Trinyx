@@ -15,6 +15,7 @@ import org.junit.jupiter.api.Test;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatCode;
@@ -82,6 +83,79 @@ class StepOutputsWriterTest {
             // Multi-segment IDs like "core:loop:iterate" become alias "loop:iterate"
             // - matching the legacy extractor semantics.
             assertThat(StepOutputsWriter.bareAlias("core:loop:iterate")).isEqualTo("loop:iterate");
+        }
+    }
+
+    @Nested
+    @DisplayName("removeWithAlias()")
+    class RemoveWithAlias {
+
+        @Test
+        @DisplayName("Removes the bare alias together with the full key")
+        void removesAliasWithFullKey() {
+            Map<String, Object> outputs = new HashMap<>();
+            StepOutputsWriter.writeWithAlias(outputs, "core:prep", Map.of("n", 1));
+
+            StepOutputsWriter.removeWithAlias(outputs, Set.of("core:prep"));
+
+            assertThat(outputs).doesNotContainKey("core:prep");
+            assertThat(outputs)
+                .as("leaving the alias behind is what let a reset node still answer with its old value")
+                .doesNotContainKey("prep");
+        }
+
+        @Test
+        @DisplayName("Keeps an alias that a surviving node still owns")
+        void keepsAliasOwnedByAnotherNode() {
+            Map<String, Object> outputs = new HashMap<>();
+            StepOutputsWriter.writeWithAlias(outputs, "mcp:foo", Map.of("from", "mcp"));
+            StepOutputsWriter.writeWithAlias(outputs, "core:foo", Map.of("from", "core"));
+
+            StepOutputsWriter.removeWithAlias(outputs, Set.of("core:foo"));
+
+            assertThat(outputs).doesNotContainKey("core:foo");
+            assertThat(outputs).containsKey("mcp:foo");
+            assertThat(outputs)
+                .as("the alias belongs to the surviving mcp:foo")
+                .containsKey("foo");
+        }
+
+        @Test
+        @DisplayName("Removing several nodes clears every alias they owned")
+        void removesAliasesForEveryKey() {
+            Map<String, Object> outputs = new HashMap<>();
+            StepOutputsWriter.writeWithAlias(outputs, "core:prep", Map.of("n", 1));
+            StepOutputsWriter.writeWithAlias(outputs, "core:clip", Map.of("n", 2));
+            StepOutputsWriter.writeWithAlias(outputs, "core:keep", Map.of("n", 3));
+
+            StepOutputsWriter.removeWithAlias(outputs, Set.of("core:prep", "core:clip"));
+
+            assertThat(outputs).doesNotContainKeys("prep", "clip", "core:prep", "core:clip");
+            assertThat(outputs).containsKeys("core:keep", "keep");
+        }
+
+        @Test
+        @DisplayName("A key with no prefix is removed as-is")
+        void removesUnprefixedKey() {
+            Map<String, Object> outputs = new HashMap<>();
+            outputs.put("bare", Map.of("n", 1));
+
+            StepOutputsWriter.removeWithAlias(outputs, Set.of("bare"));
+
+            assertThat(outputs).isEmpty();
+        }
+
+        @Test
+        @DisplayName("Null and empty inputs are no-ops")
+        void toleratesNullAndEmpty() {
+            Map<String, Object> outputs = new HashMap<>();
+            StepOutputsWriter.writeWithAlias(outputs, "core:prep", Map.of("n", 1));
+
+            StepOutputsWriter.removeWithAlias(null, Set.of("core:prep"));
+            StepOutputsWriter.removeWithAlias(outputs, null);
+            StepOutputsWriter.removeWithAlias(outputs, Set.of());
+
+            assertThat(outputs).containsKeys("core:prep", "prep");
         }
     }
 

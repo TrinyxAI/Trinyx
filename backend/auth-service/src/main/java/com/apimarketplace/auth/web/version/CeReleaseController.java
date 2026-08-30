@@ -5,13 +5,22 @@ import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
+import java.util.UUID;
+
 /**
  * Cloud-side public feed of the latest published self-hosted release, polled by CE installs to
- * learn whether they are behind. Anonymous (no auth, no install identifier). Same model as n8n's
- * public {@code /api/versions} feed.
+ * learn whether they are behind. Unauthenticated, same model as n8n's public {@code /api/versions}
+ * feed.
+ *
+ * <p>A caller MAY present its anonymous install id ({@link CeInstallHeaders#INSTALL_ID}); when it
+ * does, and only where collection is switched on, the sighting is recorded so the live self-hosted
+ * fleet can be counted. The header is optional and the answer does not depend on it: an install
+ * that opted out is served identically. Nothing identifying is read from the request - notably not
+ * the IP, which unlike an opaque per-instance UUID would be personal data.
  *
  * <p>Resolution order: the {@code ce.release.*} properties WIN when set, then the announced row
  * ({@link CeReleaseStore}), then "no release". The properties are the manual override for pinning,
@@ -39,30 +48,55 @@ public class CeReleaseController {
     private final boolean securityFix;
     private final String publishedAt;
     private final ObjectProvider<CeReleaseStore> store;
+    private final ObjectProvider<CeInstallPingRecorder> pingRecorder;
 
     /**
-     * @param store the announced-release row, injected as an {@link ObjectProvider} so this
-     *              controller still constructs in a context without persistence (CE, slice tests).
+     * @param store        the announced-release row, injected as an {@link ObjectProvider} so this
+     *                     controller still constructs in a context without persistence (CE, slice tests).
+     * @param pingRecorder present only where fleet collection is switched on (the cloud
+     *                     deployment); absent everywhere else, and the feed then ignores the header
+     *                     entirely.
      */
     public CeReleaseController(
             @Value("${ce.release.latest-version:}") String latestVersion,
             @Value("${ce.release.url:}") String releaseUrl,
             @Value("${ce.release.security:false}") boolean securityFix,
             @Value("${ce.release.published-at:}") String publishedAt,
-            ObjectProvider<CeReleaseStore> store) {
+            ObjectProvider<CeReleaseStore> store,
+            ObjectProvider<CeInstallPingRecorder> pingRecorder) {
         this.latestVersion = blankToNull(latestVersion);
         this.releaseUrl = blankToNull(releaseUrl);
         this.securityFix = securityFix;
         this.publishedAt = blankToNull(publishedAt);
         this.store = store;
+        this.pingRecorder = pingRecorder;
     }
 
     /**
-     * @param current the caller's running version (optional, accepted for future
-     *                analytics; the comparison is done client-side by the CE install).
+     * @param current   the caller's running version (optional). The comparison is still done
+     *                  client-side by the CE install; this only tells the fleet ledger which
+     *                  release an install is actually running.
+     * @param installId the caller's anonymous install id (optional). Unparseable values are
+     *                  ignored rather than rejected: this header must never be able to fail an
+     *                  update check.
      */
     @GetMapping("/api/ce/releases/latest")
-    public LatestRelease latest(@RequestParam(value = "current", required = false) String current) {
+    public LatestRelease latest(
+            @RequestParam(value = "current", required = false) String current,
+            @RequestHeader(value = CeInstallHeaders.INSTALL_ID, required = false) String installId) {
+
+        LatestRelease answer = resolveLatest();
+        // After the answer, not before. The write is inline on the request thread of the endpoint
+        // the whole fleet polls for security releases, so anything it might cost - a contended row,
+        // a saturated pool - is paid once the payload is already in hand rather than in front of
+        // it. A lookup that could not be answered at all therefore records no sighting, which is
+        // also the honest outcome: we never served that install anything.
+        recordSighting(installId, current);
+        return answer;
+    }
+
+    /** Resolves what to advertise: the pin if usable, else the announced row, else no release. */
+    private LatestRelease resolveLatest() {
         // Config WINS when set: it is the manual override for pinning, rolling back, or hiding a
         // bad release without waiting on a release run. In normal operation it is blank and the
         // announced row answers. Leaving a value in config freezes the feed at it.
@@ -89,6 +123,38 @@ public class CeReleaseController {
                 blankToNull(announced.releaseUrl()),
                 announced.securityFix(),
                 blankToNull(announced.publishedAt()));
+    }
+
+    /**
+     * Notes that this install exists, when collection is on. Best-effort: the recorder cannot
+     * throw, and the release feed returns the same payload whether or not the sighting was stored.
+     * Called AFTER the answer is resolved, for the reason given at the call site.
+     */
+    private void recordSighting(String installId, String version) {
+        if (pingRecorder == null || installId == null || installId.isBlank()) {
+            return;
+        }
+        UUID parsed;
+        try {
+            parsed = UUID.fromString(installId.trim());
+        } catch (IllegalArgumentException notAUuid) {
+            log.debug("Ignoring malformed install id on the release feed");
+            return;
+        }
+        try {
+            // Resolving the bean is inside the guard too: a lazy bean whose creation fails would
+            // otherwise throw here and 500 the endpoint the whole fleet polls for security
+            // releases.
+            CeInstallPingRecorder recorder = pingRecorder.getIfAvailable();
+            if (recorder != null) {
+                recorder.record(parsed, version);
+            }
+        } catch (RuntimeException failure) {
+            // The recorder promises never to throw, but that promise lives across a class boundary
+            // and this is the whole fleet's update lifeline. Cheap insurance against a future edit
+            // to the recorder turning every release check into a 500.
+            log.warn("CE install sighting not recorded: {}", failure.getMessage());
+        }
     }
 
     private static String blankToNull(String s) {

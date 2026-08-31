@@ -2,12 +2,19 @@ package com.apimarketplace.auth.service;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 import org.springframework.boot.web.client.RestTemplateBuilder;
 import org.springframework.http.*;
+import org.springframework.http.client.JdkClientHttpRequestFactory;
+import org.springframework.test.util.ReflectionTestUtils;
 import org.springframework.web.client.*;
 
+import java.io.OutputStream;
 import java.math.BigDecimal;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.security.KeyStore;
 import java.time.Duration;
 import java.util.UUID;
 
@@ -31,6 +38,31 @@ class PaidMonolithCreditClientTest {
         when(workloads.issue("trinyx-cloud-runtime")).thenReturn("workload-jwt");
         client = new PaidMonolithCreditClient(
                 builder, workloads, "https://billing-internal.trinyx.private:8443/");
+    }
+
+    @Test
+    void buildsDedicatedTlsRequestFactoryWithRealSpringBootBuilder(
+            @TempDir Path tempDir) throws Exception {
+        String password = "test-truststore-password";
+        Path trustStore = tempDir.resolve("paid-truststore.p12");
+        Path passwordFile = tempDir.resolve("paid-truststore.password");
+        KeyStore keyStore = KeyStore.getInstance("PKCS12");
+        keyStore.load(null, password.toCharArray());
+        try (OutputStream output = Files.newOutputStream(trustStore)) {
+            keyStore.store(output, password.toCharArray());
+        }
+        Files.writeString(passwordFile, password + System.lineSeparator());
+
+        PaidMonolithCreditClient tlsClient = new PaidMonolithCreditClient(
+                new RestTemplateBuilder(), workloads,
+                "https://billing-internal.trinyx.private:8443",
+                trustStore.toString(), passwordFile.toString());
+
+        RestTemplate configuredHttp =
+                (RestTemplate) ReflectionTestUtils.getField(tlsClient, "http");
+        assertThat(configuredHttp).isNotNull();
+        assertThat(configuredHttp.getRequestFactory())
+                .isInstanceOf(JdkClientHttpRequestFactory.class);
     }
 
     @Test

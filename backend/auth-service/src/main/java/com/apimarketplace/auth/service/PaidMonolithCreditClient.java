@@ -3,9 +3,9 @@ package com.apimarketplace.auth.service;
 import com.apimarketplace.auth.config.PaidMonolithSslContextFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.boot.http.client.ClientHttpRequestFactoryBuilder;
 import org.springframework.boot.web.client.RestTemplateBuilder;
 import org.springframework.http.*;
-import org.springframework.http.client.JdkClientHttpRequestFactory;
 import org.springframework.stereotype.Service;
 import org.springframework.web.client.ResourceAccessException;
 import org.springframework.web.client.RestClientException;
@@ -13,7 +13,6 @@ import org.springframework.web.client.RestClientResponseException;
 import org.springframework.web.client.RestTemplate;
 
 import javax.net.ssl.SSLContext;
-import java.net.http.HttpClient;
 import java.time.Duration;
 import java.util.UUID;
 
@@ -43,14 +42,10 @@ public class PaidMonolithCreditClient {
                 .connectTimeout(Duration.ofSeconds(5))
                 .readTimeout(Duration.ofSeconds(15));
         if (sslContext != null) {
-            HttpClient client = HttpClient.newBuilder()
-                    .connectTimeout(Duration.ofSeconds(5))
-                    .sslContext(sslContext)
-                    .build();
-            JdkClientHttpRequestFactory requestFactory =
-                    new JdkClientHttpRequestFactory(client);
-            requestFactory.setReadTimeout(Duration.ofSeconds(15));
-            configured = configured.requestFactory(() -> requestFactory);
+            configured = configured.requestFactoryBuilder(
+                    ClientHttpRequestFactoryBuilder.jdk()
+                            .withHttpClientCustomizer(
+                                    client -> client.sslContext(sslContext)));
         }
         this.http = configured.build();
         this.workloads = workloads;

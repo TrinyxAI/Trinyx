@@ -27,8 +27,8 @@ class OrchestratorSettlementOutboxBootstrapTest {
             "test-only-internal-secret-with-at-least-thirty-two-characters";
 
     @Test
-    void unfilteredCreditPackageScanReproducesEarlyAutoConfigurationFailure() {
-        runner(UnsafeCreditPackageScan.class).run(context -> {
+    void componentScannedAutoConfigurationEvaluatesBeforeRedisTemplate() {
+        runner(UnsafeCreditPackageScan.class, false).run(context -> {
             assertThat(context).hasFailed();
             assertThat(context.getStartupFailure())
                     .hasRootCauseMessage(
@@ -51,7 +51,7 @@ class OrchestratorSettlementOutboxBootstrapTest {
 
     @Test
     void bootAutoConfigurationCreatesDurableStoreBeforeCreditClientValidation() {
-        runner(SafeCreditPackageScan.class).run(context -> {
+        runner(SafeCreditPackageScan.class, true).run(context -> {
             assertThat(context).hasNotFailed();
             assertThat(context).hasBean("stringRedisTemplate");
             assertThat(context).hasSingleBean(ExternalSettlementIntentStore.class);
@@ -70,11 +70,17 @@ class OrchestratorSettlementOutboxBootstrapTest {
         });
     }
 
-    private ApplicationContextRunner runner(Class<?> scanConfiguration) {
-        return new ApplicationContextRunner()
-                .withConfiguration(AutoConfigurations.of(
+    private ApplicationContextRunner runner(
+            Class<?> scanConfiguration,
+            boolean importSettlementAutoConfiguration) {
+        AutoConfigurations autoConfigurations = importSettlementAutoConfiguration
+                ? AutoConfigurations.of(
                         RedisAutoConfiguration.class,
-                        ExternalSettlementOutboxAutoConfiguration.class))
+                        ExternalSettlementOutboxAutoConfiguration.class)
+                : AutoConfigurations.of(RedisAutoConfiguration.class);
+
+        return new ApplicationContextRunner()
+                .withConfiguration(autoConfigurations)
                 .withUserConfiguration(scanConfiguration)
                 .withBean(ObjectMapper.class, ObjectMapper::new)
                 .withBean(RedisConnectionFactory.class,

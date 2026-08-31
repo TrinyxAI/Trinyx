@@ -302,6 +302,59 @@ jobs:
           grep -q -- 'noeviction' "${rendered}"
           grep -q 'cloud-redis-data:' "${rendered}"
 
+      - name: Prove authenticated Cloud Redis healthcheck at runtime
+        shell: bash
+        run: |
+          set -euo pipefail
+          project="trinyx-redis-health-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          compose=(
+            docker compose
+            --project-name "${project}"
+            --env-file docker/.env.cloud.example
+            -f docker/docker-compose.cloud.yml
+          )
+
+          cleanup() {
+            "${compose[@]}" down --volumes --remove-orphans >/dev/null 2>&1 || true
+          }
+          trap cleanup EXIT
+
+          "${compose[@]}" up --detach cloud-redis
+          container="$("${compose[@]}" ps -q cloud-redis)"
+          test -n "${container}"
+
+          health=""
+          for attempt in $(seq 1 30); do
+            health="$(docker inspect --format '{{.State.Health.Status}}' "${container}")"
+            case "${health}" in
+              healthy) break ;;
+              unhealthy)
+                docker inspect "${container}" >&2
+                docker logs "${container}" >&2
+                exit 1
+                ;;
+            esac
+            sleep 1
+          done
+          test "${health}" = healthy
+
+          docker exec "${container}" sh -ec \
+            'test "$(REDISCLI_AUTH="$CLOUD_REDIS_PASSWORD" redis-cli --raw ping)" = PONG'
+
+          docker inspect --format '{{json .Config.Healthcheck.Test}}' "${container}" \
+            > /tmp/trinyx-cloud-redis-healthcheck.json
+          node <<'NODE'
+          const assert = require('node:assert/strict');
+          const fs = require('node:fs');
+          const actual = JSON.parse(
+            fs.readFileSync('/tmp/trinyx-cloud-redis-healthcheck.json', 'utf8')
+          );
+          assert.deepEqual(actual, [
+            'CMD-SHELL',
+            "REDISCLI_AUTH=\"$CLOUD_REDIS_PASSWORD\" redis-cli ping | grep -q '^PONG$'",
+          ]);
+          NODE
+
       - name: Assert Cloud provider wiring matches relay support
         shell: bash
         run: |

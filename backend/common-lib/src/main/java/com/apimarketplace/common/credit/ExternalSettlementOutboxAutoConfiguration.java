@@ -1,6 +1,7 @@
 package com.apimarketplace.common.credit;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.boot.autoconfigure.AutoConfiguration;
 import org.springframework.boot.autoconfigure.data.redis.RedisAutoConfiguration;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnBean;
@@ -16,9 +17,10 @@ import org.springframework.data.redis.core.StringRedisTemplate;
 public class ExternalSettlementOutboxAutoConfiguration {
 
     @Bean
-    @ConditionalOnBean(StringRedisTemplate.class)
+    @ConditionalOnBean(name = "stringRedisTemplate")
     ExternalSettlementIntentStore externalSettlementIntentStore(
-            StringRedisTemplate redis, ObjectMapper json) {
+            @Qualifier("stringRedisTemplate") StringRedisTemplate redis,
+            ObjectMapper json) {
         return new RedisExternalSettlementIntentStore(redis, json);
     }
 

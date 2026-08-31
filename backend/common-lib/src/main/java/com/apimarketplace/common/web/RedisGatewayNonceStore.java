@@ -1,5 +1,6 @@
 package com.apimarketplace.common.web;
 
+import org.springframework.data.redis.connection.RedisConnection;
 import org.springframework.data.redis.core.StringRedisTemplate;
 
 import java.time.Duration;
@@ -24,5 +25,21 @@ public final class RedisGatewayNonceStore implements GatewayNonceStore {
     @Override
     public boolean distributed() {
         return true;
+    }
+
+    @Override
+    public void assertAvailable() {
+        try (RedisConnection connection =
+                     Objects.requireNonNull(redis.getConnectionFactory(), "redis connection factory")
+                             .getConnection()) {
+            String response = connection.ping();
+            if (!"PONG".equalsIgnoreCase(response)) {
+                throw new IllegalStateException(
+                        "Gateway distributed nonce store Redis ping did not return PONG");
+            }
+        } catch (RuntimeException failure) {
+            throw new IllegalStateException(
+                    "Gateway distributed nonce store Redis is unavailable", failure);
+        }
     }
 }

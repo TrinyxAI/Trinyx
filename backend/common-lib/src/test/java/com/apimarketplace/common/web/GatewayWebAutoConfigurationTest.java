@@ -4,11 +4,13 @@ import org.junit.jupiter.api.Test;
 import org.springframework.boot.autoconfigure.AutoConfigurations;
 import org.springframework.boot.test.context.FilteredClassLoader;
 import org.springframework.boot.test.context.runner.WebApplicationContextRunner;
+import org.springframework.data.redis.connection.RedisConnection;
 import org.springframework.data.redis.connection.RedisConnectionFactory;
 import org.springframework.data.redis.core.StringRedisTemplate;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.when;
 
 class GatewayWebAutoConfigurationTest {
 
@@ -42,7 +44,7 @@ class GatewayWebAutoConfigurationTest {
 
     @Test
     void createsDistributedStoreFromCanonicalConnectionFactory() {
-        RedisConnectionFactory connectionFactory = mock(RedisConnectionFactory.class);
+        RedisConnectionFactory connectionFactory = availableConnectionFactory();
 
         contextRunner
                 .withBean(RedisConnectionFactory.class, () -> connectionFactory)
@@ -59,7 +61,7 @@ class GatewayWebAutoConfigurationTest {
 
     @Test
     void ignoresMultipleWorkloadSpecificStringRedisTemplates() {
-        RedisConnectionFactory connectionFactory = mock(RedisConnectionFactory.class);
+        RedisConnectionFactory connectionFactory = availableConnectionFactory();
 
         contextRunner
                 .withBean(RedisConnectionFactory.class, () -> connectionFactory)
@@ -77,6 +79,22 @@ class GatewayWebAutoConfigurationTest {
     }
 
     @Test
+    void refusesStartupWhenDistributedStoreCannotReachRedis() {
+        RedisConnectionFactory connectionFactory = mock(RedisConnectionFactory.class);
+        when(connectionFactory.getConnection()).thenThrow(new IllegalStateException("redis offline"));
+
+        contextRunner
+                .withBean(RedisConnectionFactory.class, () -> connectionFactory)
+                .withPropertyValues("gateway.filter.require-distributed-nonce-store=true")
+                .run(context -> {
+                    assertThat(context).hasFailed();
+                    assertThat(context.getStartupFailure())
+                            .hasStackTraceContaining(
+                                    "Gateway distributed nonce store Redis is unavailable");
+                });
+    }
+
+    @Test
     void refusesStartupWhenDistributedStoreIsRequiredButOnlyMemoryIsAvailable() {
         contextRunner
                 .withClassLoader(new FilteredClassLoader("org.springframework.data.redis"))
@@ -87,5 +105,13 @@ class GatewayWebAutoConfigurationTest {
                             .hasRootCauseMessage(
                                     "Gateway HMAC v2 requires a distributed nonce store in this environment");
                 });
+    }
+
+    private RedisConnectionFactory availableConnectionFactory() {
+        RedisConnectionFactory connectionFactory = mock(RedisConnectionFactory.class);
+        RedisConnection connection = mock(RedisConnection.class);
+        when(connectionFactory.getConnection()).thenReturn(connection);
+        when(connection.ping()).thenReturn("PONG");
+        return connectionFactory;
     }
 }

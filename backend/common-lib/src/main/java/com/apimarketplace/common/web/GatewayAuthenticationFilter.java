@@ -60,11 +60,12 @@ public class GatewayAuthenticationFilter implements Filter {
                 }
             });
         }
-        if (properties.isVerificationEnabled()
-                && properties.isRequireDistributedNonceStore()
-                && !nonceStore.distributed()) {
-            throw new IllegalStateException(
-                    "Gateway HMAC v2 requires a distributed nonce store in this environment");
+        if (properties.isVerificationEnabled() && properties.isRequireDistributedNonceStore()) {
+            if (!nonceStore.distributed()) {
+                throw new IllegalStateException(
+                        "Gateway HMAC v2 requires a distributed nonce store in this environment");
+            }
+            nonceStore.assertAvailable();
         }
         if (!properties.isVerificationEnabled()) {
             log.warn("SECURITY WARNING: gateway HMAC verification is disabled");

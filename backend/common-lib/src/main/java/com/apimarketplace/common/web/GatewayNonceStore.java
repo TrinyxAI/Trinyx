@@ -19,4 +19,12 @@ public interface GatewayNonceStore {
     default boolean distributed() {
         return false;
     }
+
+    /**
+     * Verifies that the backing store can actually accept replay state.
+     * Called during startup when Cloud requires a distributed store.
+     */
+    default void assertAvailable() {
+        // Non-distributed implementations are rejected before this hook.
+    }
 }

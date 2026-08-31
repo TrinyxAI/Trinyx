@@ -9,6 +9,12 @@ public final class InMemoryGatewayNonceStore implements GatewayNonceStore {
     private final ConcurrentHashMap<String, Long> expirations = new ConcurrentHashMap<>();
 
     @Override
+    public void assertAvailable() {
+        throw new IllegalStateException(
+                "In-memory gateway nonce store is not a distributed backend");
+    }
+
+    @Override
     public boolean consume(String providerId, String nonce, Duration ttl) {
         long now = System.currentTimeMillis();
         if ((expirations.size() & 255) == 0) {

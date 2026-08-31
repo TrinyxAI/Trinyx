@@ -9,6 +9,7 @@ import org.springframework.data.redis.connection.RedisConnectionFactory;
 import org.springframework.data.redis.core.StringRedisTemplate;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
@@ -27,6 +28,14 @@ class GatewayWebAutoConfigurationTest {
                             "gateway.filter.verification-enabled=true",
                             "gateway.filter.secret-key=" + TEST_SECRET,
                             "gateway.filter.accept-v1=false");
+
+    @Test
+    void availabilityContractCannotDefaultToSuccess() throws NoSuchMethodException {
+        assertThat(GatewayNonceStore.class.getMethod("assertAvailable").isDefault()).isFalse();
+        assertThatThrownBy(new InMemoryGatewayNonceStore()::assertAvailable)
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessage("In-memory gateway nonce store is not a distributed backend");
+    }
 
     @Test
     void loadsWithoutSpringDataRedisAndUsesMemoryOnlyWhenDistributedStoreIsNotRequired() {

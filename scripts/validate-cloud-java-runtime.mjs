@@ -71,6 +71,8 @@ assert.match(redisAutoConfiguration, /new StringRedisTemplate\(connectionFactory
 
 const compose = fs.readFileSync(path.join(repositoryRoot, 'docker', 'docker-compose.cloud.yml'), 'utf8');
 assert.match(compose, /GATEWAY_FILTER_REQUIRE_DISTRIBUTED_NONCE_STORE:\s*"true"/);
+assert.match(compose, /SPRING_DATA_REDIS_HOST:\s*cloud-redis/);
+assert.match(compose, /SPRING_DATA_REDIS_PORT:\s*"6379"/);
 assert.match(compose, /paid-monolith-truststore[.]p12:ro/);
 
 console.log(`Validated distributed nonce packaging for ${redisNonceModules.length} services.`);

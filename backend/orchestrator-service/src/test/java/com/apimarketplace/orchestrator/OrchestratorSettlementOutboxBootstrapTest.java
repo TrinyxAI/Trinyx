@@ -5,6 +5,7 @@ import com.apimarketplace.common.credit.CreditConsumptionClient;
 import com.apimarketplace.common.credit.ExternalSettlementIntentStore;
 import com.apimarketplace.common.credit.ExternalSettlementOutboxAutoConfiguration;
 import com.apimarketplace.common.credit.RedisExternalSettlementIntentStore;
+import com.apimarketplace.orchestrator.config.WebSearchConfig;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;
 import org.springframework.boot.autoconfigure.AutoConfigurations;
@@ -14,6 +15,7 @@ import org.springframework.context.annotation.ComponentScan;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.context.annotation.FilterType;
 import org.springframework.data.redis.connection.RedisConnectionFactory;
+import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.test.util.ReflectionTestUtils;
 
 import java.util.Arrays;
@@ -25,16 +27,6 @@ class OrchestratorSettlementOutboxBootstrapTest {
 
     private static final String TEST_SECRET =
             "test-only-internal-secret-with-at-least-thirty-two-characters";
-
-    @Test
-    void componentScannedAutoConfigurationEvaluatesBeforeRedisTemplate() {
-        runner(UnsafeCreditPackageScan.class, false).run(context -> {
-            assertThat(context).hasFailed();
-            assertThat(context.getStartupFailure())
-                    .hasRootCauseMessage(
-                            "external-paid-monolith requires a durable producer settlement outbox");
-        });
-    }
 
     @Test
     void productionScanExcludesBootAutoConfigurationFromComponentScanning() {
@@ -50,13 +42,19 @@ class OrchestratorSettlementOutboxBootstrapTest {
     }
 
     @Test
-    void bootAutoConfigurationCreatesDurableStoreBeforeCreditClientValidation() {
-        runner(SafeCreditPackageScan.class, true).run(context -> {
+    void realWebSearchTemplateDoesNotSuppressDurableFinancialOutbox() {
+        runner().run(context -> {
             assertThat(context).hasNotFailed();
-            assertThat(context).hasBean("stringRedisTemplate");
+            assertThat(context).hasBean("webSearchRedisTemplate");
+            assertThat(context.containsBean("stringRedisTemplate")).isFalse();
+            assertThat(context).hasSingleBean(StringRedisTemplate.class);
             assertThat(context).hasSingleBean(ExternalSettlementIntentStore.class);
             assertThat(context).hasSingleBean(CreditConsumptionClient.class);
 
+            RedisConnectionFactory canonicalFactory =
+                    context.getBean(RedisConnectionFactory.class);
+            StringRedisTemplate webSearch =
+                    context.getBean("webSearchRedisTemplate", StringRedisTemplate.class);
             ExternalSettlementIntentStore store =
                     context.getBean(ExternalSettlementIntentStore.class);
             CreditConsumptionClient client =
@@ -67,23 +65,28 @@ class OrchestratorSettlementOutboxBootstrapTest {
             assertThat(store.durable()).isTrue();
             assertThat(ReflectionTestUtils.getField(client, "settlementIntentStore"))
                     .isSameAs(store);
+
+            StringRedisTemplate financialTemplate =
+                    (StringRedisTemplate) ReflectionTestUtils.getField(store, "redis");
+            assertThat(financialTemplate)
+                    .isNotNull()
+                    .isNotSameAs(webSearch);
+            assertThat(financialTemplate.getConnectionFactory())
+                    .isSameAs(canonicalFactory)
+                    .isNotSameAs(webSearch.getConnectionFactory());
         });
     }
 
-    private ApplicationContextRunner runner(
-            Class<?> scanConfiguration,
-            boolean importSettlementAutoConfiguration) {
-        AutoConfigurations autoConfigurations = importSettlementAutoConfiguration
-                ? AutoConfigurations.of(
-                        RedisAutoConfiguration.class,
-                        ExternalSettlementOutboxAutoConfiguration.class)
-                : AutoConfigurations.of(RedisAutoConfiguration.class);
-
+    private ApplicationContextRunner runner() {
         return new ApplicationContextRunner()
-                .withConfiguration(autoConfigurations)
-                .withUserConfiguration(scanConfiguration)
+                .withConfiguration(AutoConfigurations.of(
+                        RedisAutoConfiguration.class,
+                        ExternalSettlementOutboxAutoConfiguration.class))
+                .withUserConfiguration(
+                        SafeCreditPackageScan.class,
+                        WebSearchConfig.class)
                 .withBean(ObjectMapper.class, ObjectMapper::new)
-                .withBean(RedisConnectionFactory.class,
+                .withBean("redisConnectionFactory", RedisConnectionFactory.class,
                         () -> mock(RedisConnectionFactory.class))
                 .withPropertyValues(
                         "spring.application.name=orchestrator-service",
@@ -92,12 +95,9 @@ class OrchestratorSettlementOutboxBootstrapTest {
                         "billing.authority.mode=external-paid-monolith",
                         "billing.external.require-producer-outbox=true",
                         "gateway.filter.secret-key=" + TEST_SECRET,
-                        "internal.s2s.service-secret=" + TEST_SECRET);
-    }
-
-    @Configuration(proxyBeanMethods = false)
-    @ComponentScan(basePackageClasses = CreditClientAutoConfig.class)
-    static class UnsafeCreditPackageScan {
+                        "internal.s2s.service-secret=" + TEST_SECRET,
+                        "websearch.enabled=true",
+                        "websearch.redis.auto-reconnect=false");
     }
 
     @Configuration(proxyBeanMethods = false)

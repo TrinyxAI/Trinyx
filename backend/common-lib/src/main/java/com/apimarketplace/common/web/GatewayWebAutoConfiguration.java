@@ -1,13 +1,11 @@
 package com.apimarketplace.common.web;
 
-import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.boot.autoconfigure.AutoConfiguration;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnWebApplication;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.context.annotation.Bean;
-import org.springframework.data.redis.core.StringRedisTemplate;
 
 @AutoConfiguration
 @ConditionalOnWebApplication(type = ConditionalOnWebApplication.Type.SERVLET)
@@ -29,9 +27,8 @@ public class GatewayWebAutoConfiguration {
     @Bean
     @ConditionalOnMissingBean(GatewayNonceStore.class)
     @ConditionalOnProperty(name = "deployment.mode", havingValue = "microservice", matchIfMissing = true)
-    public GatewayNonceStore gatewayNonceStore(ObjectProvider<StringRedisTemplate> redisProvider) {
-        StringRedisTemplate redis = redisProvider.getIfAvailable();
-        return redis == null ? new InMemoryGatewayNonceStore() : new RedisGatewayNonceStore(redis);
+    public GatewayNonceStore gatewayNonceStore() {
+        return new InMemoryGatewayNonceStore();
     }
 
     @Bean

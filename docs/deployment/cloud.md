@@ -637,6 +637,12 @@ PAID_MONOLITH_TRUSTSTORE_PASSWORD_PATH=/absolute/host/path/to/paid-monolith-trus
 The password file must contain only the truststore password and remain outside Git with
 restrictive host permissions. Compose mounts both files read-only only into Cloud
 `auth-service`; the JVM reads the password file before the Spring context creates HTTP clients.
+The container deliberately runs as UID/GID `1001:1001`. A bind-mounted truststore must
+therefore remain owned by root but be readable by that exact container group, for example
+`root:1001` with mode `0640`; apply the same least-privilege rule to the password file and
+ensure every parent directory is traversable by GID 1001. A host-side `root:root 0600` file
+is correctly rejected as unreadable. Do not solve that rejection with `0644`, by running the
+container as root, or by weakening the TLS client.
 Never put the password in an environment variable or JVM startup option. Certificate rotation must
 publish the new CA alongside the old one, restart the Cloud auth container, rotate the server
 certificate, then remove the retired CA. Never use an insecure trust-all client.

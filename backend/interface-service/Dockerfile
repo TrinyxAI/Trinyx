@@ -20,11 +20,13 @@ RUN mvn -B -DskipTests -pl interface-service -am dependency:go-offline
 
 COPY . .
 RUN mvn -B -DskipTests -pl interface-service -am clean package
+RUN jar tf /app/interface-service/target/app.jar | grep -q '^BOOT-INF/lib/spring-data-redis-.*[.]jar$'
 
 # Runtime stage
 FROM ${JRE_IMAGE}
 RUN apk add --no-cache curl
 RUN addgroup -g 1001 -S appgroup && adduser -u 1001 -S appuser -G appgroup
+RUN mkdir -p /app/logs && chown 1001:1001 /app/logs && chmod 0750 /app/logs
 
 WORKDIR /app
 COPY --from=build /app/interface-service/target/app.jar /app/app.jar

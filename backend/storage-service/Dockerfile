@@ -20,12 +20,14 @@ RUN mvn -B -DskipTests -pl storage-service -am dependency:go-offline
 
 COPY . .
 RUN mvn -B -DskipTests -pl storage-service -am clean package
+RUN jar tf /app/storage-service/target/app.jar | grep -q '^BOOT-INF/lib/spring-data-redis-.*[.]jar$'
 
 # ---- Runtime stage ----
 FROM ${JRE_IMAGE}
 # curl est utile pour le healthcheck de docker-compose
 RUN apk add --no-cache curl
 RUN addgroup -g 1001 -S appgroup && adduser -u 1001 -S appuser -G appgroup
+RUN mkdir -p /app/logs && chown 1001:1001 /app/logs && chmod 0750 /app/logs
 WORKDIR /app
 
 # Copier le JAR bootable DU storage-service

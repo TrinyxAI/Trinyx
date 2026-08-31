@@ -1,3 +1,4 @@
+com.apimarketplace.common.web.GatewayRedisNonceStoreAutoConfiguration
 com.apimarketplace.common.web.GatewayWebAutoConfiguration
 com.apimarketplace.common.web.AppEditionAutoConfiguration
 com.apimarketplace.common.web.CommonAsyncConfig

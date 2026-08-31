@@ -69,6 +69,31 @@ assert.match(redisAutoConfiguration, /@ConditionalOnClass\(\{RedisConnectionFact
 assert.match(redisAutoConfiguration, /@ConditionalOnSingleCandidate\(RedisConnectionFactory[.]class\)/);
 assert.match(redisAutoConfiguration, /new StringRedisTemplate\(connectionFactory\)/);
 
+const gatewayPom = fs.readFileSync(
+  path.join(backendRoot, 'gateway-service', 'pom.xml'),
+  'utf8',
+);
+assert.match(gatewayPom, /<goal>repackage<\/goal>/);
+assert.match(
+  gatewayPom,
+  /<mainClass>com[.]apimarketplace[.]gateway[.]TrinyxGatewayApplication<\/mainClass>/,
+);
+
+const gatewayDockerfile = fs.readFileSync(
+  path.join(backendRoot, 'gateway-service', 'Dockerfile'),
+  'utf8',
+);
+assert.match(
+  gatewayDockerfile,
+  /Main-Class: org[.]springframework[.]boot[.]loader[.]launch[.]JarLauncher/,
+);
+assert.match(
+  gatewayDockerfile,
+  /Start-Class: com[.]apimarketplace[.]gateway[.]TrinyxGatewayApplication/,
+);
+assert.match(gatewayDockerfile, /USER appuser/);
+assert.match(gatewayDockerfile, /ENTRYPOINT \["java","-jar","\/app\/app[.]jar"\]/);
+
 const compose = fs.readFileSync(path.join(repositoryRoot, 'docker', 'docker-compose.cloud.yml'), 'utf8');
 assert.match(compose, /GATEWAY_FILTER_REQUIRE_DISTRIBUTED_NONCE_STORE:\s*"true"/);
 assert.match(compose, /SPRING_DATA_REDIS_HOST:\s*cloud-redis/);
@@ -77,3 +102,4 @@ assert.match(compose, /paid-monolith-truststore[.]p12:ro/);
 
 console.log(`Validated distributed nonce packaging for ${redisNonceModules.length} services.`);
 console.log(`Validated non-root log directories for ${fileLoggingModules.length} services.`);
+console.log('Validated executable non-root Gateway packaging contract.');

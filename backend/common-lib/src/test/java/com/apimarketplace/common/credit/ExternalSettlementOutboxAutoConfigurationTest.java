@@ -23,6 +23,14 @@ class ExternalSettlementOutboxAutoConfigurationTest {
                             "billing.authority.mode=external-paid-monolith")
                     .withBean(ObjectMapper.class, ObjectMapper::new);
 
+    private final ApplicationContextRunner outboxOnlyContextRunner =
+            new ApplicationContextRunner()
+                    .withConfiguration(AutoConfigurations.of(
+                            ExternalSettlementOutboxAutoConfiguration.class))
+                    .withPropertyValues(
+                            "billing.authority.mode=external-paid-monolith")
+                    .withBean(ObjectMapper.class, ObjectMapper::new);
+
     @Test
     void webSearchTemplateCannotSuppressCanonicalFinancialOutbox() {
         RedisConnectionFactory canonicalFactory = mock(RedisConnectionFactory.class);
@@ -78,7 +86,7 @@ class ExternalSettlementOutboxAutoConfigurationTest {
         RedisConnectionFactory webSearchFactory = mock(RedisConnectionFactory.class);
         StringRedisTemplate webSearch = new StringRedisTemplate(webSearchFactory);
 
-        contextRunner
+        outboxOnlyContextRunner
                 .withBean("webSearchRedisTemplate", StringRedisTemplate.class,
                         () -> webSearch)
                 .run(context -> {

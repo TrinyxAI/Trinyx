@@ -1,0 +1,9 @@
+[Unit]
+Description=Trinyx Cloud pre-Docker runtime prerequisites
+After=local-fs.target
+Before=docker.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/lib/trinyx/pre-docker-cloud.sh
+RemainAfterExit=yes

@@ -1,0 +1,18 @@
+[Unit]
+Description=Trinyx Cloud runtime materializer
+Wants=network-online.target
+Requires=trinyx-pre-docker.service
+After=network-online.target trinyx-pre-docker.service
+StartLimitIntervalSec=0
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/lib/trinyx/runtime-materialize-cloud.sh
+RemainAfterExit=yes
+Restart=on-failure
+RestartSec=60s
+TimeoutStartSec=120s
+UMask=0077
+
+[Install]
+WantedBy=multi-user.target

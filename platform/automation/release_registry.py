@@ -48,6 +48,15 @@ else:
 
 OBJECT_FILES = ("release.json", "release-images.json", "deployment-bundle.json", "deployment-bundle.tar", "provenance.json")
 REPOSITORY = "TrinyxAI/Trinyx"
+APPROVED_BUILDER_WORKFLOW_COMMIT = "114a2613e8090f034925a1bcf148f055653c3a06"
+FROZEN_CANDIDATE = {
+    "sourceCommit": "f3a4c1ddcf6a17bfc837071f9046ac4c38a38b47",
+    "releaseId": "rel-v1-b5ba70c23b9f529ac8228a7b00b4faa4",
+    "bundleDigest": "sha256:c9df14dcd1dbc24b31b926d3778bef2e208b59824c78f24292608284f3579892",
+    "artifactId": "9791964215",
+    "runId": "33485509832",
+    "artifactDigest": "sha256:755594078d9da7e19406e01187534132920a31f87804c1b33baa28fa96559152",
+}
 
 
 @dataclass(frozen=True)
@@ -237,7 +246,9 @@ def validate_candidate(directory: Path) -> tuple[dict[str, Any], dict[str, bytes
     required_provenance = {
         "schemaVersion",
         "repository",
-        "workflow",
+        "signerWorkflow",
+        "signerDigest",
+        "compatibility",
         "sourceCommit",
         "artifactId",
         "runId",
@@ -245,11 +256,32 @@ def validate_candidate(directory: Path) -> tuple[dict[str, Any], dict[str, bytes
         "verifiedAt",
     }
     require(isinstance(provenance, dict) and set(provenance) == required_provenance, "provenance schema mismatch")
-    require(provenance["schemaVersion"] == 1 and provenance["repository"] == REPOSITORY, "wrong provenance repository")
-    require(provenance["workflow"] == "build-release-candidate.yml", "wrong provenance workflow")
+    require(provenance["schemaVersion"] == 2 and provenance["repository"] == REPOSITORY, "wrong provenance repository")
     require(re.fullmatch(r"[0-9]+", str(provenance["runId"])) is not None, "bad provenance run ID")
     require(provenance["sourceCommit"] == manifest["sourceCommit"], "provenance/source commit mismatch")
     require(re.fullmatch(r"sha256:[0-9a-f]{64}", str(provenance["artifactDigest"])) is not None, "bad artifact provenance digest")
+    signer = (provenance["signerWorkflow"], provenance["signerDigest"], provenance["compatibility"])
+    if signer == (
+        "build-release-candidate-impl.yml",
+        APPROVED_BUILDER_WORKFLOW_COMMIT,
+        "pinned-reusable-builder",
+    ):
+        pass
+    else:
+        require(
+            signer == (
+                "build-release-candidate.yml",
+                FROZEN_CANDIDATE["sourceCommit"],
+                "frozen-historical-builder",
+            )
+            and provenance["sourceCommit"] == FROZEN_CANDIDATE["sourceCommit"]
+            and manifest["releaseId"] == FROZEN_CANDIDATE["releaseId"]
+            and manifest["deploymentBundle"]["digest"] == FROZEN_CANDIDATE["bundleDigest"]
+            and str(provenance["artifactId"]) == FROZEN_CANDIDATE["artifactId"]
+            and str(provenance["runId"]) == FROZEN_CANDIDATE["runId"]
+            and provenance["artifactDigest"] == FROZEN_CANDIDATE["artifactDigest"],
+            "historical builder compatibility is restricted to the frozen candidate",
+        )
     assert_no_secret_material(provenance, "provenance")
     return manifest, files
 

@@ -51,9 +51,11 @@ def make_candidate(directory: Path) -> tuple[str, str]:
     write_json(
         directory / "provenance.json",
         {
-            "schemaVersion": 1,
+            "schemaVersion": 2,
             "repository": "TrinyxAI/Trinyx",
-            "workflow": "build-release-candidate.yml",
+            "signerWorkflow": "build-release-candidate-impl.yml",
+            "signerDigest": "114a2613e8090f034925a1bcf148f055653c3a06",
+            "compatibility": "pinned-reusable-builder",
             "sourceCommit": manifest["sourceCommit"],
             "artifactId": "9791964215",
             "runId": "33485509832",
@@ -105,6 +107,16 @@ class RegistryTests(unittest.TestCase):
         key = f"staging/release-ids/{self.release_id}.json"
         self.registry.objects[key] = b'{"different":true}\n'
         with self.assertRaisesRegex(InvariantError, "collision"):
+            register(self.registry, self.candidate)
+
+    def test_historical_signer_is_rejected_for_any_non_frozen_candidate(self) -> None:
+        provenance_path = self.candidate / "provenance.json"
+        provenance = json.loads(provenance_path.read_text())
+        provenance["signerWorkflow"] = "build-release-candidate.yml"
+        provenance["signerDigest"] = provenance["sourceCommit"]
+        provenance["compatibility"] = "frozen-historical-builder"
+        write_json(provenance_path, provenance)
+        with self.assertRaisesRegex(InvariantError, "restricted to the frozen candidate"):
             register(self.registry, self.candidate)
 
     def test_wrong_sha_tampered_bundle_and_internal_hash(self) -> None:

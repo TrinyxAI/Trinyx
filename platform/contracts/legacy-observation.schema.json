@@ -18,7 +18,7 @@
   ],
   "properties": {
     "schemaVersion": {
-      "const": 2
+      "const": 3
     },
     "environment": {
       "const": "staging"
@@ -66,7 +66,9 @@
           "configuredImage",
           "repoDigests",
           "composeProject",
-          "composeService"
+          "composeService",
+          "composeConfigHash",
+          "mounts"
         ],
         "properties": {
           "containerId": {
@@ -97,6 +99,40 @@
           "composeService": {
             "type": "string",
             "pattern": "^[a-z0-9][a-z0-9_.-]{0,127}$"
+          },
+          "composeConfigHash": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$"
+          },
+          "mounts": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "type",
+                "source",
+                "destination",
+                "readOnly"
+              ],
+              "properties": {
+                "type": {
+                  "type": "string",
+                  "pattern": "^[a-z][a-z0-9_-]{0,31}$"
+                },
+                "source": {
+                  "type": "string",
+                  "maxLength": 4096
+                },
+                "destination": {
+                  "type": "string",
+                  "pattern": "^/[^\\u0000\\n]{0,4095}$"
+                },
+                "readOnly": {
+                  "type": "boolean"
+                }
+              }
+            }
           }
         }
       }

@@ -34,6 +34,7 @@ if __package__:
         validate_deployment_record,
         validate_release_directory,
     )
+    from .legacy_runtime import SERVICES, compose_runtime_state
 else:
     sys.path.insert(0, str(Path(__file__).resolve().parent))
     from invariants import (  # type: ignore
@@ -49,6 +50,7 @@ else:
         validate_deployment_record,
         validate_release_directory,
     )
+    from legacy_runtime import SERVICES, compose_runtime_state  # type: ignore
 
 DEPLOYMENT_RE = re.compile(r"^dep-[0-9a-f]{32}$")
 LEGACY_TARGET_RE = re.compile(r"^deployments/stg-bootstrap-[A-Za-z0-9._-]{1,64}$")
@@ -264,6 +266,10 @@ class Adapter(Protocol):
 
     def render_model(self, base: Path, release_dir: Path, plan: HostPlan) -> dict[str, Any]: ...
 
+    def compose_config_hashes(self, base: Path, release_dir: Path, plan: HostPlan) -> dict[str, str]: ...
+
+    def current_compose_runtime(self, plan: HostPlan) -> dict[str, dict[str, Any]]: ...
+
     def run_migrations(self, base: Path, release_dir: Path, plan: HostPlan, services: tuple[str, ...]) -> None: ...
 
     def materialize(self, role: str) -> None: ...
@@ -342,6 +348,40 @@ class ShellAdapter:
             return json.loads(rendered.stdout)
         except json.JSONDecodeError as exc:
             raise InvariantError("Compose render returned invalid JSON") from exc
+
+    def compose_config_hashes(self, base: Path, release_dir: Path, plan: HostPlan) -> dict[str, str]:
+        result = self._run(
+            [*self._compose_argv(base, release_dir, plan), "config", "--hash", *plan.services],
+            timeout=60,
+            capture=True,
+        )
+        hashes: dict[str, str] = {}
+        for line in result.stdout.splitlines():
+            parts = line.split()
+            require(len(parts) == 2, "invalid Compose config-hash output")
+            service, config_hash = parts
+            require(service in plan.services and service not in hashes, "unexpected Compose config-hash service")
+            require(re.fullmatch(r"[0-9a-f]{64}", config_hash) is not None, "invalid Compose config hash")
+            hashes[service] = config_hash
+        require(set(hashes) == set(plan.services), "Compose config-hash inventory mismatch")
+        return hashes
+
+    def current_compose_runtime(self, plan: HostPlan) -> dict[str, dict[str, Any]]:
+        inventory = self._run(
+            ["docker", "ps", "-a", "--no-trunc", "--format", "{{.ID}}"],
+            timeout=30,
+            capture=True,
+        )
+        ids = [line.strip() for line in inventory.stdout.splitlines() if line.strip()]
+        require(ids, "empty Docker container inventory")
+        inspected = self._run(["docker", "inspect", *ids], timeout=60, capture=True)
+        try:
+            containers = json.loads(inspected.stdout)
+        except json.JSONDecodeError as exc:
+            raise InvariantError("Docker container inspection returned invalid JSON") from exc
+        require(isinstance(containers, list), "invalid Docker container inspection")
+        _, state = compose_runtime_state(plan.role, containers)
+        return state
 
     def preflight(self, base: Path, release_dir: Path, plan: HostPlan) -> dict[str, Any]:
         for binary in ("bash", "docker", "aws", "amazon-ssm-agent"):
@@ -550,7 +590,7 @@ class HostDeployment:
         require(
             isinstance(observation, dict)
             and set(observation) == observation_keys
-            and observation["schemaVersion"] == 2
+            and observation["schemaVersion"] == 3
             and observation["environment"] == "staging"
             and observation["role"] == self.role
             and observation["releaseEligible"] is False
@@ -568,14 +608,23 @@ class HostDeployment:
         require(len(role_images) == expected_count, "LEGACY_BASELINE_PROOF_REQUIRED")
         expected_by_service = {item["service"]: item["immutableRef"] for item in role_images}
         require(len(expected_by_service) == expected_count, "LEGACY_BASELINE_PROOF_REQUIRED")
-        plan_services = set(load_host_plan(self.base / "config" / "deployment-plan.json", self.role).services)
+        plan = load_host_plan(self.base / "config" / "deployment-plan.json", self.role)
+        plan_services = set(plan.services)
         require(set(expected_by_service) == plan_services, "LEGACY_BASELINE_PROOF_REQUIRED")
         require(set(observation["services"]) == plan_services, "LEGACY_BASELINE_PROOF_REQUIRED")
+        expected_config_hashes = self.adapter.compose_config_hashes(self.base, release_dir, plan)
+        current_runtime = self.adapter.current_compose_runtime(plan)
+        require(
+            set(expected_config_hashes) == plan_services and set(current_runtime) == plan_services,
+            "LEGACY_BASELINE_EFFECTIVE_CONFIG_MISMATCH",
+        )
 
         service_keys = {
             "containerId", "containerImageId", "configuredImage", "repoDigests",
-            "composeProject", "composeService",
+            "composeProject", "composeService", "composeConfigHash", "mounts",
         }
+        runtime_keys = {"containerId", "composeProject", "composeService", "composeConfigHash", "mounts"}
+        mount_keys = {"type", "source", "destination", "readOnly"}
         for service, expected_ref in expected_by_service.items():
             actual = observation["services"].get(service)
             require(
@@ -595,6 +644,29 @@ class HostDeployment:
                 )
                 and expected_ref in actual["repoDigests"],
                 "LEGACY_BASELINE_RUNTIME_IMAGE_MISMATCH",
+            )
+            mounts = actual["mounts"]
+            require(
+                isinstance(mounts, list)
+                and all(
+                    isinstance(mount, dict)
+                    and set(mount) == mount_keys
+                    and isinstance(mount["type"], str)
+                    and isinstance(mount["source"], str)
+                    and isinstance(mount["destination"], str)
+                    and isinstance(mount["readOnly"], bool)
+                    and "/srv/trinyx/pr25-" not in mount["source"]
+                    for mount in mounts
+                ),
+                "LEGACY_BASELINE_EFFECTIVE_CONFIG_MISMATCH",
+            )
+            runtime = current_runtime.get(service)
+            require(
+                isinstance(runtime, dict)
+                and set(runtime) == runtime_keys
+                and {key: actual[key] for key in runtime_keys} == runtime
+                and actual["composeConfigHash"] == expected_config_hashes[service],
+                "LEGACY_BASELINE_EFFECTIVE_CONFIG_MISMATCH",
             )
         return evidence
 

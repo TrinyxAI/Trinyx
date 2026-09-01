@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import sys
@@ -20,6 +21,28 @@ from deploy_engine import (
 )
 from invariants import InvariantError, environment_config_digest, validate_active_pointer
 from helpers import make_host
+
+
+def compose_hash(service: str) -> str:
+    return hashlib.sha256(f"compose:{service}".encode()).hexdigest()
+
+
+def runtime_state(plan: HostPlan) -> dict[str, dict[str, Any]]:
+    state: dict[str, dict[str, Any]] = {}
+    for index, service in enumerate(sorted(plan.services), start=1):
+        state[service] = {
+            "containerId": f"{index:064x}",
+            "composeProject": "trinyx-paid-staging",
+            "composeService": service,
+            "composeConfigHash": compose_hash(service),
+            "mounts": [{
+                "type": "bind",
+                "source": f"/etc/trinyx/staging/paid/config/{service}.conf",
+                "destination": f"/etc/trinyx/{service}.conf",
+                "readOnly": True,
+            }],
+        }
+    return state
 
 
 class FakeAdapter:
@@ -43,6 +66,12 @@ class FakeAdapter:
 
     def render_model(self, base: Path, release_dir: Path, plan: HostPlan) -> dict[str, Any]:
         return self.models[release_dir.name]
+
+    def compose_config_hashes(self, base: Path, release_dir: Path, plan: HostPlan) -> dict[str, str]:
+        return {service: compose_hash(service) for service in plan.services}
+
+    def current_compose_runtime(self, plan: HostPlan) -> dict[str, dict[str, Any]]:
+        return runtime_state(plan)
 
     def run_migrations(self, base: Path, release_dir: Path, plan: HostPlan, services: tuple[str, ...]) -> None:
         self._step("migration")
@@ -218,7 +247,12 @@ class DeploymentEngineTests(unittest.TestCase):
         with self.assertRaisesRegex(InvariantError, "differs from SSM contract"):
             engine.verify_bundle_digest(self.candidate, "sha256:" + "0" * 64)
 
-    def write_legacy_proof(self, mismatched_service: str | None = None) -> None:
+    def write_legacy_proof(
+        self,
+        mismatched_service: str | None = None,
+        mismatched_config_service: str | None = None,
+        mutable_mount_service: str | None = None,
+    ) -> None:
         manifest = json.loads((self.base / "releases" / self.previous / "manifest.json").read_text())
         expected = {
             image["service"]: image["immutableRef"]
@@ -233,6 +267,12 @@ class DeploymentEngineTests(unittest.TestCase):
             if service == mismatched_service:
                 configured = immutable_ref.rsplit("sha256:", 1)[0] + "sha256:" + "f" * 64
                 repo_digests = [configured]
+            effective_hash = "f" * 64 if service == mismatched_config_service else compose_hash(service)
+            mount_source = (
+                "/srv/trinyx/pr25-aeb2a44/docker/Caddyfile"
+                if service == mutable_mount_service
+                else f"/etc/trinyx/staging/paid/config/{service}.conf"
+            )
             services[service] = {
                 "containerId": f"{index:064x}",
                 "containerImageId": "sha256:" + f"{index + 1000:064x}",
@@ -240,9 +280,16 @@ class DeploymentEngineTests(unittest.TestCase):
                 "repoDigests": repo_digests,
                 "composeProject": "trinyx-paid-staging",
                 "composeService": service,
+                "composeConfigHash": effective_hash,
+                "mounts": [{
+                    "type": "bind",
+                    "source": mount_source,
+                    "destination": f"/etc/trinyx/{service}.conf",
+                    "readOnly": True,
+                }],
             }
         observation = {
-            "schemaVersion": 2,
+            "schemaVersion": 3,
             "environment": "staging",
             "role": "paid",
             "observedAt": "2026-09-01T00:00:00Z",
@@ -318,6 +365,32 @@ class DeploymentEngineTests(unittest.TestCase):
         self.assertEqual("legacy:deployments/stg-bootstrap-001", engine.active_status())
         record = json.loads((self.base / "deployments" / f"{deployment_id}-adopt.json").read_text())
         self.assertEqual("FAILED", record["state"])
+
+    @unittest.skipIf(os.name == "nt", "Linux CI executes symlink adoption semantics")
+    def test_legacy_adoption_rejects_effective_container_config_mismatch(self) -> None:
+        self.make_legacy_active()
+        self.write_legacy_proof(mismatched_config_service="livecontext")
+        engine = HostDeployment(self.base, "paid", FakeAdapter(self.models))
+        deployment_id = "dep-" + "a" * 32
+        with self.assertRaisesRegex(InvariantError, "LEGACY_BASELINE_EFFECTIVE_CONFIG_MISMATCH"):
+            engine.adopt_legacy_baseline(
+                deployment_id, self.previous, "config-legacy", "1" * 40,
+            )
+        self.assertEqual("legacy:deployments/stg-bootstrap-001", engine.active_status())
+        record = json.loads((self.base / "deployments" / f"{deployment_id}-adopt.json").read_text())
+        self.assertEqual("FAILED", record["state"])
+
+    @unittest.skipIf(os.name == "nt", "Linux CI executes symlink adoption semantics")
+    def test_legacy_adoption_rejects_mutable_checkout_mount(self) -> None:
+        self.make_legacy_active()
+        self.write_legacy_proof(mutable_mount_service="paid-edge")
+        engine = HostDeployment(self.base, "paid", FakeAdapter(self.models))
+        deployment_id = "dep-" + "b" * 32
+        with self.assertRaisesRegex(InvariantError, "LEGACY_BASELINE_EFFECTIVE_CONFIG_MISMATCH"):
+            engine.adopt_legacy_baseline(
+                deployment_id, self.previous, "config-legacy", "1" * 40,
+            )
+        self.assertEqual("legacy:deployments/stg-bootstrap-001", engine.active_status())
 
     @unittest.skipIf(os.name == "nt", "Linux CI executes symlink adoption semantics")
     def test_legacy_adoption_rejects_materialized_config_drift(self) -> None:

@@ -197,6 +197,7 @@ def build_desired(role: str, rendered: Path, metadata: dict[str, str]) -> tuple[
     if environment == "staging":
         common.extend([
             DesiredFile(REPO_ROOT / "platform/automation/invariants.py", "/usr/local/lib/trinyx/invariants.py", 0o750),
+            DesiredFile(REPO_ROOT / "platform/automation/legacy_runtime.py", "/usr/local/lib/trinyx/legacy_runtime.py", 0o750),
             DesiredFile(REPO_ROOT / "platform/automation/baseline_observation.py", "/usr/local/lib/trinyx/baseline-observation", 0o750),
             DesiredFile(REPO_ROOT / "platform/automation/deploy_engine.py", "/usr/local/lib/trinyx/deploy_engine.py", 0o750),
             DesiredFile(REPO_ROOT / "platform/automation/release_registry.py", "/usr/local/lib/trinyx/release_registry.py", 0o750),

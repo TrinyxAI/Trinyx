@@ -176,8 +176,16 @@ def build_desired(role: str, rendered: Path, metadata: dict[str, str]) -> tuple[
         fail("renderer produced invalid environment")
 
     common = [
-        DesiredFile(REPO_ROOT / "platform/host/common/runtime-env.sh", "/usr/local/lib/trinyx/runtime-env.sh", 0o750),
-        DesiredFile(REPO_ROOT / "platform/host/common/staging-deploy.sh", "/usr/local/lib/trinyx/staging-deploy", 0o750),
+        DesiredFile(
+            REPO_ROOT / "platform/host/common/runtime-env.sh",
+            "/usr/local/lib/trinyx/runtime-env.sh",
+            0o750,
+        ),
+        DesiredFile(
+            REPO_ROOT / "platform/host/common/staging-deploy.sh",
+            "/usr/local/lib/trinyx/staging-deploy",
+            0o750,
+        ),
         DesiredFile(rendered / "metadata.env", "/etc/trinyx/platform/environment.env", 0o600),
         DesiredFile(
             REPO_ROOT / "platform/bootstrap/cloud/staging/rootfs/etc/docker/daemon.json",
@@ -256,39 +264,65 @@ def main() -> None:
 
         dirs, files = build_desired(args.role, rendered, metadata)
 
-        changes: list[str] = []
+        changes: list[tuple[str, str]] = []
         for item in dirs:
-            for action in dir_actions(root, item):
-                changes.append(f"{action} {item.target}")
+            actions = dir_actions(root, item)
+            if actions:
+                changes.append((item.target, "+".join(actions)))
         for item in files:
-            for action in file_actions(root, item):
-                changes.append(f"{action} {item.target}")
+            actions = file_actions(root, item)
+            if actions:
+                changes.append((item.target, "+".join(actions)))
 
-        for line in changes:
-            print(f"PLAN {line}")
-        print(f"HOST_RECONCILE_PLAN_OK role={args.role} changes={len(changes)}")
+        systemd_enable_needed = False
+        if root == Path("/"):
+            service = service_for(args.role)
+            enabled = subprocess.run(
+                ["systemctl", "is-enabled", "--quiet", service], check=False
+            ).returncode == 0
+            if not enabled:
+                systemd_enable_needed = True
+                changes.append((f"systemd:{service}", "ENABLE"))
+
+        for target, action in changes:
+            print(f"PLAN action={action} target={target}")
+
+        print(
+            f"HOST_RECONCILE_PLAN_OK role={args.role} "
+            f"environment={metadata['TRINYX_ENVIRONMENT']} changes={len(changes)}"
+        )
 
         if not args.apply:
             return
 
+        if root == Path("/") and os.geteuid() != 0:
+            fail("--apply against live root requires root")
+
         for item in dirs:
-            apply_dir(root, item)
+            if dir_actions(root, item):
+                apply_dir(root, item)
         for item in files:
-            atomic_install(root, item)
+            if file_actions(root, item):
+                atomic_install(root, item)
 
         if root == Path("/"):
             subprocess.run(["systemctl", "daemon-reload"], check=True)
-            subprocess.run(["systemctl", "enable", service_for(args.role)], check=True, stdout=subprocess.DEVNULL)
+            if systemd_enable_needed:
+                subprocess.run(["systemctl", "enable", service_for(args.role)], check=True)
 
-        remaining: list[str] = []
+        residual = 0
         for item in dirs:
-            remaining.extend(dir_actions(root, item))
+            residual += bool(dir_actions(root, item))
         for item in files:
-            remaining.extend(file_actions(root, item))
-        if remaining:
-            fail("host reconcile apply was not idempotent")
+            residual += bool(file_actions(root, item))
+        if residual:
+            fail(f"reconcile left {residual} residual filesystem changes")
 
-        print(f"HOST_RECONCILE_APPLY_OK role={args.role} changes={len(changes)}")
+        print(
+            f"HOST_RECONCILE_APPLY_OK role={args.role} "
+            f"environment={metadata['TRINYX_ENVIRONMENT']} changes={len(changes)} "
+            f"runtime_refresh_required={'yes' if changes else 'no'}"
+        )
 
 
 if __name__ == "__main__":

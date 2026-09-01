@@ -1,0 +1,33 @@
+{
+  "schemaVersion": 1,
+  "images": [
+    {"name":"cloud-agent","role":"cloud","service":"agent-service","environment":"TRINYX_CLOUD_AGENT_IMAGE"},
+    {"name":"cloud-auth","role":"cloud","service":"auth-service","environment":"TRINYX_CLOUD_AUTH_IMAGE"},
+    {"name":"cloud-catalog","role":"cloud","service":"catalog-service","environment":"TRINYX_CLOUD_CATALOG_IMAGE"},
+    {"name":"cloud-conversation","role":"cloud","service":"conversation-service","environment":"TRINYX_CLOUD_CONVERSATION_IMAGE"},
+    {"name":"cloud-datasource","role":"cloud","service":"datasource-service","environment":"TRINYX_CLOUD_DATASOURCE_IMAGE"},
+    {"name":"cloud-gateway","role":"cloud","service":"gateway-service","environment":"TRINYX_CLOUD_GATEWAY_IMAGE"},
+    {"name":"cloud-interface","role":"cloud","service":"interface-service","environment":"TRINYX_CLOUD_INTERFACE_IMAGE"},
+    {"name":"cloud-keycloak","role":"cloud","service":"keycloak","environment":"TRINYX_CLOUD_KEYCLOAK_IMAGE"},
+    {"name":"cloud-migration","role":"cloud","service":"migration-service","environment":"TRINYX_CLOUD_MIGRATION_IMAGE"},
+    {"name":"cloud-orchestrator","role":"cloud","service":"orchestrator-service","environment":"TRINYX_CLOUD_ORCHESTRATOR_IMAGE"},
+    {"name":"cloud-publication","role":"cloud","service":"publication-service","environment":"TRINYX_CLOUD_PUBLICATION_IMAGE"},
+    {"name":"cloud-storage","role":"cloud","service":"storage-service","environment":"TRINYX_CLOUD_STORAGE_IMAGE"},
+    {"name":"cloud-trigger","role":"cloud","service":"trigger-service","environment":"TRINYX_CLOUD_TRIGGER_IMAGE"},
+    {"name":"cloud-websearch","role":"cloud","service":"websearch-service","environment":"TRINYX_CLOUD_WEBSEARCH_IMAGE"},
+    {"name":"cloud-postgres","role":"cloud","service":"cloud-postgres","environment":"TRINYX_CLOUD_POSTGRES_IMAGE"},
+    {"name":"cloud-redis","role":"cloud","service":"cloud-redis","environment":"TRINYX_CLOUD_REDIS_IMAGE"},
+    {"name":"cloud-minio","role":"cloud","service":"cloud-minio","environment":"TRINYX_CLOUD_MINIO_IMAGE"},
+    {"name":"cloud-minio-init","role":"cloud","service":"cloud-minio-init","environment":"TRINYX_CLOUD_MINIO_MC_IMAGE"},
+    {"name":"cloud-searxng","role":"cloud","service":"searxng","environment":"TRINYX_CLOUD_SEARXNG_IMAGE"},
+    {"name":"cloud-edge","role":"cloud","service":"cloud-edge","environment":"TRINYX_CLOUD_EDGE_IMAGE"},
+    {"name":"paid-backend","role":"paid","service":"livecontext","environment":"BACKEND_IMAGE"},
+    {"name":"paid-frontend","role":"paid","service":"frontend","environment":"FRONTEND_IMAGE"},
+    {"name":"paid-postgres","role":"paid","service":"postgres","environment":"TRINYX_PAID_POSTGRES_IMAGE"},
+    {"name":"paid-redis","role":"paid","service":"redis","environment":"TRINYX_PAID_REDIS_IMAGE"},
+    {"name":"paid-minio","role":"paid","service":"minio","environment":"TRINYX_PAID_MINIO_IMAGE"},
+    {"name":"paid-minio-init","role":"paid","service":"minio-init","environment":"TRINYX_PAID_MINIO_MC_IMAGE"},
+    {"name":"paid-bridge","role":"paid","service":"bridge","environment":"TRINYX_PAID_BRIDGE_IMAGE"},
+    {"name":"paid-edge","role":"paid","service":"paid-edge","environment":"TRINYX_PAID_EDGE_IMAGE"}
+  ]
+}

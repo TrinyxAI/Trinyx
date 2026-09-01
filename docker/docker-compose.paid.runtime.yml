@@ -1,0 +1,17 @@
+services:
+  postgres:
+    image: ${TRINYX_PAID_POSTGRES_IMAGE:?set TRINYX_PAID_POSTGRES_IMAGE to an immutable @sha256 reference}
+  redis:
+    image: ${TRINYX_PAID_REDIS_IMAGE:?set TRINYX_PAID_REDIS_IMAGE to an immutable @sha256 reference}
+  minio:
+    image: ${TRINYX_PAID_MINIO_IMAGE:?set TRINYX_PAID_MINIO_IMAGE to an immutable @sha256 reference}
+  minio-init:
+    image: ${TRINYX_PAID_MINIO_MC_IMAGE:?set TRINYX_PAID_MINIO_MC_IMAGE to an immutable @sha256 reference}
+  bridge:
+    image: ${TRINYX_PAID_BRIDGE_IMAGE:?set TRINYX_PAID_BRIDGE_IMAGE to an immutable @sha256 reference}
+  livecontext:
+    image: ${BACKEND_IMAGE:?set BACKEND_IMAGE to an immutable @sha256 reference}
+  frontend:
+    image: ${FRONTEND_IMAGE:?set FRONTEND_IMAGE to an immutable @sha256 reference}
+  paid-edge:
+    image: ${TRINYX_PAID_EDGE_IMAGE:?set TRINYX_PAID_EDGE_IMAGE to an immutable @sha256 reference}

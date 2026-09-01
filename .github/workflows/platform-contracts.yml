@@ -4,12 +4,16 @@ on:
   pull_request:
     paths:
       - 'platform/**'
+      - 'docker/docker-compose.cloud.runtime.yml'
+      - 'docker/docker-compose.paid.runtime.yml'
       - '.github/workflows/platform-contracts.yml'
   push:
     branches:
       - codex/platform-release-automation
     paths:
       - 'platform/**'
+      - 'docker/docker-compose.cloud.runtime.yml'
+      - 'docker/docker-compose.paid.runtime.yml'
       - '.github/workflows/platform-contracts.yml'
   workflow_dispatch:
 
@@ -42,12 +46,14 @@ jobs:
           bash -n platform/tests/test-staging-render.sh
           bash -n platform/tests/test-host-reconciler.sh
           bash -n platform/tests/test-release-contract.sh
+          bash -n platform/tests/test-runtime-image-lock.sh
 
       - name: Compile Python platform tools
         run: |
           python3 -m py_compile platform/render/render-environment.py
           python3 -m py_compile platform/install/reconcile-host.py
           python3 -m py_compile platform/release/release.py
+          python3 -m py_compile platform/release/validate-runtime-images.py
 
       - name: Verify staging render parity
         run: bash platform/tests/test-staging-render.sh
@@ -57,6 +63,9 @@ jobs:
 
       - name: Verify immutable release contract
         run: bash platform/tests/test-release-contract.sh
+
+      - name: Verify complete runtime image digest lock
+        run: bash platform/tests/test-runtime-image-lock.sh
 
       - name: Reject secret material in platform tree
         shell: bash

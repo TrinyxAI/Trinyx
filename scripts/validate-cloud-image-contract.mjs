@@ -7,6 +7,7 @@ const root = process.cwd();
 const inventoryPath = path.join(root, 'docker/cloud-images.json');
 const composePath = path.join(root, 'docker/docker-compose.cloud.yml');
 const runtimePath = path.join(root, 'docker/docker-compose.cloud.runtime.yml');
+const thirdPartyPath = path.join(root, 'platform/release/third-party-images.json');
 
 function fail(message) {
   throw new Error('[cloud-images] ' + message);
@@ -35,6 +36,11 @@ function parseServices(source, label) {
   return services;
 }
 
+function serviceKeys(lines) {
+  return lines.map((line) => line.match(/^    ([A-Za-z0-9_-]+):/))
+    .filter(Boolean).map((match) => match[1]).sort();
+}
+
 const inventory = JSON.parse(fs.readFileSync(inventoryPath, 'utf8'));
 if (inventory.schemaVersion !== 1 || !Array.isArray(inventory.images)) {
   fail('docker/cloud-images.json must use schemaVersion 1 with an images array');
@@ -47,8 +53,6 @@ for (const field of ['name', 'service', 'package', 'environment', 'context', 'do
   if (values.some((value) => typeof value !== 'string' || value.length === 0)) {
     fail('every image must define ' + field);
   }
-  // Backend services intentionally share one Docker build context. Their
-  // logical names, service bindings, packages, env keys and Dockerfiles do not.
   if (field !== 'context' && new Set(values).size !== values.length) {
     fail('duplicate image ' + field);
   }
@@ -64,6 +68,31 @@ for (const item of inventory.images) {
   if (!fs.existsSync(path.join(root, item.dockerfile))) fail(item.name + ' Dockerfile is missing');
 }
 
+const thirdParty = JSON.parse(fs.readFileSync(thirdPartyPath, 'utf8'));
+if (thirdParty.schemaVersion !== 1 || thirdParty.kind !== 'static-third-party' || !Array.isArray(thirdParty.images)) {
+  fail('platform/release/third-party-images.json has an invalid schema');
+}
+const cloudDependencies = thirdParty.images.filter((item) => item.role === 'cloud');
+if (cloudDependencies.length !== 6) {
+  fail('expected exactly 6 pinned Cloud dependencies, got ' + cloudDependencies.length);
+}
+for (const item of cloudDependencies) {
+  for (const field of ['name', 'service', 'package', 'environment', 'digest', 'immutableRef']) {
+    if (typeof item[field] !== 'string' || item[field].length === 0) {
+      fail('Cloud dependency ' + (item.name || '<unnamed>') + ' is missing ' + field);
+    }
+  }
+  if (!/^sha256:[0-9a-f]{64}$/.test(item.digest)) {
+    fail(item.name + ' has an invalid pinned digest');
+  }
+  if (item.immutableRef !== item.package + '@' + item.digest) {
+    fail(item.name + ' immutableRef does not match package + digest');
+  }
+  if (!/^TRINYX_CLOUD_[A-Z0-9_]+_IMAGE$/.test(item.environment)) {
+    fail(item.name + ' has an invalid environment binding: ' + item.environment);
+  }
+}
+
 const composeServices = parseServices(fs.readFileSync(composePath, 'utf8'), 'development Compose');
 const builtServices = [...composeServices]
   .filter(([, lines]) => lines.some((line) => /^    build:/.test(line)))
@@ -77,14 +106,20 @@ if (JSON.stringify(builtServices) !== JSON.stringify(inventoryServices)) {
 
 const runtimeServices = parseServices(
   fs.readFileSync(runtimePath, 'utf8'), 'immutable runtime override');
-if (runtimeServices.size !== inventory.images.length) {
-  fail('runtime override must contain only the 14 repository-built services');
+const expectedRuntimeServices = [
+  ...inventory.images.map((item) => item.service),
+  ...cloudDependencies.map((item) => item.service),
+].sort();
+const actualRuntimeServices = [...runtimeServices.keys()].sort();
+if (JSON.stringify(actualRuntimeServices) !== JSON.stringify(expectedRuntimeServices)) {
+  fail('runtime override service set mismatch: expected=' + expectedRuntimeServices.join(',') +
+    ' actual=' + actualRuntimeServices.join(','));
 }
+
 for (const item of inventory.images) {
   const lines = runtimeServices.get(item.service);
   if (!lines) fail('runtime override omits ' + item.service);
-  const keys = lines.map((line) => line.match(/^    ([A-Za-z0-9_-]+):/))
-    .filter(Boolean).map((match) => match[1]).sort();
+  const keys = serviceKeys(lines);
   if (JSON.stringify(keys) !== JSON.stringify(['build', 'image'])) {
     fail(item.service + ' runtime override may change only build and image');
   }
@@ -98,11 +133,25 @@ for (const item of inventory.images) {
   }
 }
 
+for (const item of cloudDependencies) {
+  const lines = runtimeServices.get(item.service);
+  if (!lines) fail('runtime override omits dependency ' + item.service);
+  const keys = serviceKeys(lines);
+  if (JSON.stringify(keys) !== JSON.stringify(['image'])) {
+    fail(item.service + ' dependency runtime override may change only image');
+  }
+  const imageLine = lines.find((line) => line.trimStart().startsWith('image: ')) || '';
+  if (!imageLine.includes('${' + item.environment + ':?')) {
+    fail(item.service + ' does not require its pinned dependency environment value');
+  }
+}
+
 const renderedArg = process.argv.indexOf('--rendered');
 if (renderedArg !== -1) {
   const renderedPath = process.argv[renderedArg + 1];
   if (!renderedPath) fail('--rendered requires a Compose JSON path');
   const rendered = JSON.parse(fs.readFileSync(renderedPath, 'utf8'));
+
   for (const item of inventory.images) {
     const service = rendered.services?.[item.service];
     if (!service) fail('rendered runtime omits ' + item.service);
@@ -115,6 +164,15 @@ if (renderedArg !== -1) {
       fail(item.service + ' is not digest-pinned: ' + (service.image || '<missing>'));
     }
   }
+
+  for (const item of cloudDependencies) {
+    const service = rendered.services?.[item.service];
+    if (!service) fail('rendered runtime omits dependency ' + item.service);
+    if (service.image !== item.immutableRef) {
+      fail(item.service + ' dependency digest mismatch: ' + (service.image || '<missing>'));
+    }
+  }
+
   for (const [serviceName, service] of Object.entries(rendered.services || {})) {
     const image = service.image || '';
     if (image.startsWith('trinyx-cloud/') || /:local(?:$|@)|:latest(?:$|@)/.test(image)) {
@@ -123,5 +181,4 @@ if (renderedArg !== -1) {
   }
 }
 
-console.log('[cloud-images] validated ' + inventory.images.length +
-  ' repository-built images and immutable runtime coverage');
+console.log('[cloud-images] validated 14 repository-built images + 6 pinned dependencies = 20 immutable Cloud runtime services');

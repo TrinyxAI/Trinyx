@@ -36,11 +36,19 @@ jobs:
     environment: staging
     runs-on: ubuntu-24.04
     timeout-minutes: 45
+    env:
+      CONTROL_PLANE_COMMIT: 07b0efc867fbe695a062ef31e2099c7fe1abd941
     steps:
       - name: Checkout reviewed control plane
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1, Node 24
         with:
+          ref: 07b0efc867fbe695a062ef31e2099c7fe1abd941
           persist-credentials: false
+      - name: Verify immutable control-plane checkout
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$CONTROL_PLANE_COMMIT"
       - name: Validate immutable identities and inputs
         shell: bash
         env:
@@ -77,7 +85,7 @@ jobs:
           DOCUMENT_VERSION: ${{ inputs.document_version }}
         run: |
           set -euo pipefail
-          common=(--document-version "$DOCUMENT_VERSION" --registry-bucket "$REGISTRY_BUCKET" --config-revision "$CONFIG_REVISION" --platform-commit "$GITHUB_SHA")
+          common=(--document-version "$DOCUMENT_VERSION" --registry-bucket "$REGISTRY_BUCKET" --config-revision "$CONFIG_REVISION" --platform-commit "$CONTROL_PLANE_COMMIT")
           python3 platform/automation/ssm_orchestrator.py install "${common[@]}" --release-id "$BASELINE_RELEASE_ID" --bundle-digest "$BASELINE_BUNDLE_DIGEST" --previous-cloud "$BASELINE_RELEASE_ID" --previous-paid "$BASELINE_RELEASE_ID"
           python3 platform/automation/ssm_orchestrator.py adopt "${common[@]}" --release-id "$BASELINE_RELEASE_ID" --bundle-digest "$BASELINE_BUNDLE_DIGEST"
           python3 platform/automation/ssm_orchestrator.py health "${common[@]}" --release-id "$BASELINE_RELEASE_ID" --bundle-digest "$BASELINE_BUNDLE_DIGEST" --previous-cloud "$BASELINE_RELEASE_ID" --previous-paid "$BASELINE_RELEASE_ID"

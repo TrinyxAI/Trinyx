@@ -87,11 +87,20 @@ jobs:
     environment: staging
     runs-on: ubuntu-24.04
     timeout-minutes: 360
+    env:
+      CONTROL_PLANE_COMMIT: 07b0efc867fbe695a062ef31e2099c7fe1abd941
+      BUILDER_WORKFLOW_COMMIT: 114a2613e8090f034925a1bcf148f055653c3a06
     steps:
       - name: Checkout reviewed control plane
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1, Node 24
         with:
+          ref: 07b0efc867fbe695a062ef31e2099c7fe1abd941
           persist-credentials: false
+      - name: Verify immutable control-plane checkout
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$CONTROL_PLANE_COMMIT"
       - name: Fail closed on identities and unsafe inputs
         shell: bash
         env:
@@ -194,12 +203,29 @@ jobs:
           unzip -q artifacts/candidate.zip -d candidate
           for name in baseline candidate; do
             upper=${name^^}
-            source_var="${upper}_SOURCE_COMMIT"
-            source_digest="${!source_var}"
+            source_var="${upper}_SOURCE_COMMIT"; source_digest="${!source_var}"
+            run_var="${upper}_RUN_ID"; run_id="${!run_var}"
+            artifact_var="${upper}_ARTIFACT_ID"; artifact_id="${!artifact_var}"
+            artifact_digest_var="${upper}_ARTIFACT_DIGEST"; artifact_digest="${!artifact_digest_var}"
+            release_var="${upper}_RELEASE_ID"; release_id="${!release_var}"
+            bundle_var="${upper}_BUNDLE_DIGEST"; bundle_digest="${!bundle_var}"
+            if [[ "$run_id" == 33485509832 \
+               && "$artifact_id" == 9791964215 \
+               && "$artifact_digest" == sha256:755594078d9da7e19406e01187534132920a31f87804c1b33baa28fa96559152 \
+               && "$source_digest" == f3a4c1ddcf6a17bfc837071f9046ac4c38a38b47 \
+               && "$release_id" == rel-v1-b5ba70c23b9f529ac8228a7b00b4faa4 \
+               && "$bundle_digest" == sha256:c9df14dcd1dbc24b31b926d3778bef2e208b59824c78f24292608284f3579892 ]]; then
+              signer_workflow=build-release-candidate.yml
+              signer_digest="$source_digest"
+            else
+              signer_workflow=build-release-candidate-impl.yml
+              signer_digest="$BUILDER_WORKFLOW_COMMIT"
+            fi
             for subject in release.json release-images.json deployment-bundle.json deployment-bundle.tar; do
               gh attestation verify "$name/$subject" \
                 --repo "$GITHUB_REPOSITORY" \
-                --signer-workflow TrinyxAI/Trinyx/.github/workflows/build-release-candidate.yml \
+                --signer-workflow "TrinyxAI/Trinyx/.github/workflows/$signer_workflow" \
+                --signer-digest "$signer_digest" \
                 --source-digest "$source_digest" \
                 --deny-self-hosted-runners
             done
@@ -207,14 +233,31 @@ jobs:
           python3 - <<'PY'
           import datetime,json,os
           from pathlib import Path
+          frozen={
+            'sourceCommit':'f3a4c1ddcf6a17bfc837071f9046ac4c38a38b47',
+            'releaseId':'rel-v1-b5ba70c23b9f529ac8228a7b00b4faa4',
+            'bundleDigest':'sha256:c9df14dcd1dbc24b31b926d3778bef2e208b59824c78f24292608284f3579892',
+            'artifactId':'9791964215','runId':'33485509832',
+            'artifactDigest':'sha256:755594078d9da7e19406e01187534132920a31f87804c1b33baa28fa96559152',
+          }
           for name in ('baseline','candidate'):
             upper=name.upper()
             release=json.loads(Path(name,'release.json').read_text())
             assert release['releaseId']==os.environ[upper+'_RELEASE_ID']
             assert release['deploymentBundle']['digest']==os.environ[upper+'_BUNDLE_DIGEST']
             assert release['sourceCommit']==os.environ[upper+'_SOURCE_COMMIT']
+            actual={
+              'sourceCommit':release['sourceCommit'],'releaseId':release['releaseId'],
+              'bundleDigest':release['deploymentBundle']['digest'],
+              'artifactId':os.environ[upper+'_ARTIFACT_ID'],'runId':os.environ[upper+'_RUN_ID'],
+              'artifactDigest':os.environ[upper+'_ARTIFACT_DIGEST'],
+            }
+            historical=actual==frozen
             Path(name,'provenance.json').write_text(json.dumps({
-              'schemaVersion':1,'repository':'TrinyxAI/Trinyx','workflow':'build-release-candidate.yml',
+              'schemaVersion':2,'repository':'TrinyxAI/Trinyx',
+              'signerWorkflow':'build-release-candidate.yml' if historical else 'build-release-candidate-impl.yml',
+              'signerDigest':release['sourceCommit'] if historical else os.environ['BUILDER_WORKFLOW_COMMIT'],
+              'compatibility':'frozen-historical-builder' if historical else 'pinned-reusable-builder',
               'sourceCommit':release['sourceCommit'],'artifactId':os.environ[upper+'_ARTIFACT_ID'],'runId':os.environ[upper+'_RUN_ID'],
               'artifactDigest':os.environ[upper+'_ARTIFACT_DIGEST'],
               'verifiedAt':datetime.datetime.now(datetime.timezone.utc).isoformat().replace('+00:00','Z')
@@ -254,7 +297,7 @@ jobs:
           CANDIDATE_BUNDLE_DIGEST: ${{ inputs.candidate_bundle_digest }}
         run: |
           set -euo pipefail
-          common=(--document-version "$DOCUMENT_VERSION" --registry-bucket "$REGISTRY_BUCKET" --config-revision "$CONFIG_REVISION" --platform-commit "$GITHUB_SHA")
+          common=(--document-version "$DOCUMENT_VERSION" --registry-bucket "$REGISTRY_BUCKET" --config-revision "$CONFIG_REVISION" --platform-commit "$CONTROL_PLANE_COMMIT")
           python3 platform/automation/ssm_orchestrator.py install "${common[@]}" --release-id "$BASELINE_RELEASE_ID" --bundle-digest "$BASELINE_BUNDLE_DIGEST" --previous-cloud "$BASELINE_RELEASE_ID" --previous-paid "$BASELINE_RELEASE_ID" --previous-cloud-bundle-digest "$BASELINE_BUNDLE_DIGEST" --previous-paid-bundle-digest "$BASELINE_BUNDLE_DIGEST"
           python3 platform/automation/ssm_orchestrator.py install "${common[@]}" --release-id "$CANDIDATE_RELEASE_ID" --bundle-digest "$CANDIDATE_BUNDLE_DIGEST" --previous-cloud "$BASELINE_RELEASE_ID" --previous-paid "$BASELINE_RELEASE_ID" --previous-cloud-bundle-digest "$BASELINE_BUNDLE_DIGEST" --previous-paid-bundle-digest "$BASELINE_BUNDLE_DIGEST"
       - name: Deploy candidate then full smoke (O11)
@@ -269,7 +312,7 @@ jobs:
           CANDIDATE_BUNDLE_DIGEST: ${{ inputs.candidate_bundle_digest }}
         run: |
           set -euo pipefail
-          common=(--document-version "$DOCUMENT_VERSION" --registry-bucket "$REGISTRY_BUCKET" --config-revision "$CONFIG_REVISION" --platform-commit "$GITHUB_SHA")
+          common=(--document-version "$DOCUMENT_VERSION" --registry-bucket "$REGISTRY_BUCKET" --config-revision "$CONFIG_REVISION" --platform-commit "$CONTROL_PLANE_COMMIT")
           python3 platform/automation/ssm_orchestrator.py deploy "${common[@]}" --release-id "$CANDIDATE_RELEASE_ID" --bundle-digest "$CANDIDATE_BUNDLE_DIGEST" --previous-cloud "$BASELINE_RELEASE_ID" --previous-paid "$BASELINE_RELEASE_ID" --previous-cloud-bundle-digest "$BASELINE_BUNDLE_DIGEST" --previous-paid-bundle-digest "$BASELINE_BUNDLE_DIGEST"
           echo O11_DEPLOY_SUCCESS > qualification.markers
       - name: Roll back immutable baseline then full smoke (O12)
@@ -284,7 +327,7 @@ jobs:
           CANDIDATE_BUNDLE_DIGEST: ${{ inputs.candidate_bundle_digest }}
         run: |
           set -euo pipefail
-          common=(--document-version "$DOCUMENT_VERSION" --registry-bucket "$REGISTRY_BUCKET" --config-revision "$CONFIG_REVISION" --platform-commit "$GITHUB_SHA")
+          common=(--document-version "$DOCUMENT_VERSION" --registry-bucket "$REGISTRY_BUCKET" --config-revision "$CONFIG_REVISION" --platform-commit "$CONTROL_PLANE_COMMIT")
           python3 platform/automation/ssm_orchestrator.py rollback "${common[@]}" --release-id "$BASELINE_RELEASE_ID" --bundle-digest "$BASELINE_BUNDLE_DIGEST" --candidate-id "$CANDIDATE_RELEASE_ID" --candidate-bundle-digest "$CANDIDATE_BUNDLE_DIGEST" --previous-cloud "$CANDIDATE_RELEASE_ID" --previous-paid "$CANDIDATE_RELEASE_ID" --previous-cloud-bundle-digest "$CANDIDATE_BUNDLE_DIGEST" --previous-paid-bundle-digest "$CANDIDATE_BUNDLE_DIGEST"
           echo O12_ROLLBACK_SUCCESS >> qualification.markers
       - name: Redeploy the same frozen candidate and prove idempotence
@@ -299,7 +342,7 @@ jobs:
           CANDIDATE_BUNDLE_DIGEST: ${{ inputs.candidate_bundle_digest }}
         run: |
           set -euo pipefail
-          common=(--document-version "$DOCUMENT_VERSION" --registry-bucket "$REGISTRY_BUCKET" --config-revision "$CONFIG_REVISION" --platform-commit "$GITHUB_SHA")
+          common=(--document-version "$DOCUMENT_VERSION" --registry-bucket "$REGISTRY_BUCKET" --config-revision "$CONFIG_REVISION" --platform-commit "$CONTROL_PLANE_COMMIT")
           python3 platform/automation/ssm_orchestrator.py deploy "${common[@]}" --release-id "$CANDIDATE_RELEASE_ID" --bundle-digest "$CANDIDATE_BUNDLE_DIGEST" --previous-cloud "$BASELINE_RELEASE_ID" --previous-paid "$BASELINE_RELEASE_ID" --previous-cloud-bundle-digest "$BASELINE_BUNDLE_DIGEST" --previous-paid-bundle-digest "$BASELINE_BUNDLE_DIGEST"
           python3 platform/automation/ssm_orchestrator.py deploy "${common[@]}" --release-id "$CANDIDATE_RELEASE_ID" --bundle-digest "$CANDIDATE_BUNDLE_DIGEST" --previous-cloud "$CANDIDATE_RELEASE_ID" --previous-paid "$CANDIDATE_RELEASE_ID" --previous-cloud-bundle-digest "$CANDIDATE_BUNDLE_DIGEST" --previous-paid-bundle-digest "$CANDIDATE_BUNDLE_DIGEST"
           python3 platform/automation/ssm_orchestrator.py health "${common[@]}" --release-id "$CANDIDATE_RELEASE_ID" --bundle-digest "$CANDIDATE_BUNDLE_DIGEST" --previous-cloud "$CANDIDATE_RELEASE_ID" --previous-paid "$CANDIDATE_RELEASE_ID"

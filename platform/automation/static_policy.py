@@ -56,6 +56,8 @@ def check_workflows() -> None:
     cloud = head((WORKFLOWS / "cloud-stack.yml").read_text(encoding="utf-8"))
     require("'docs/**'" not in cloud, "docs trigger cloud stack")
     require("'.github/workflows/**'" not in cloud, "workflow wildcard triggers cloud stack")
+    qualification = (WORKFLOWS / "staging-qualification.yml").read_text(encoding="utf-8")
+    require("timeout-minutes: 360" in qualification, "qualification lacks maximum bounded job budget")
 
 
 def check_iac() -> None:
@@ -71,6 +73,12 @@ def check_iac() -> None:
     require("environment:staging" in encoded, "deploy trust is not environment-bound")
     require("s3:PutObject" not in encoded, "deploy role can publish")
     require("DocumentVersionName" in deploy["Parameters"], "SSM version is not pinned")
+    step = deploy["Resources"]["StagingDeployDocument"]["Properties"]["Content"]["mainSteps"][0]
+    require(step["inputs"]["timeoutSeconds"] == "900", "SSM execution timeout drift")
+    orchestrator = (ROOT / "platform/automation/ssm_orchestrator.py").read_text(encoding="utf-8")
+    require("SSM_EXECUTION_TIMEOUT_SECONDS = 900" in orchestrator, "orchestrator execution budget drift")
+    require("SSM_POLL_GRACE_SECONDS = 60" in orchestrator, "orchestrator polling grace drift")
+    require("range(90)" not in orchestrator, "orchestrator restored magic 180-second polling loop")
     pca = json.loads((ROOT / "platform/aws/staging/private-ca-plan.json").read_text(encoding="utf-8"))
     require(pca["Parameters"]["PcaLiveApproval"]["Default"] == "AWS_PCA_LIVE_APPROVAL_REQUIRED", "PCA stop absent")
     for resource in pca["Resources"].values():
@@ -79,12 +87,25 @@ def check_iac() -> None:
 
 
 def check_source() -> None:
-    files = [path for path in (ROOT / "platform").rglob("*.sh") if "tests" not in path.parts]
-    text = "\n".join(path.read_text(encoding="utf-8") for path in files)
-    require("docker system prune" not in text, "destructive Docker prune")
-    require("/srv/trinyx/pr25-" not in text, "mutable checkout dependency")
-    require("curl -k" not in text and "--insecure" not in text, "TLS bypass")
-    for line in text.splitlines():
+    platform = ROOT / "platform"
+    checkout_needle = "/srv/trinyx/" + "pr25-"
+    checkout_offenders: list[str] = []
+    for path in platform.rglob("*"):
+        if not path.is_file() or "tests" in path.parts or "__pycache__" in path.parts:
+            continue
+        try:
+            content = path.read_text(encoding="utf-8")
+        except (OSError, UnicodeDecodeError):
+            continue
+        if checkout_needle in content:
+            checkout_offenders.append(path.relative_to(ROOT).as_posix())
+    require(not checkout_offenders, "mutable checkout dependency:" + ",".join(checkout_offenders))
+
+    shell_files = [path for path in platform.rglob("*.sh") if "tests" not in path.parts]
+    shell_text = "\n".join(path.read_text(encoding="utf-8") for path in shell_files)
+    require("docker system prune" not in shell_text, "destructive Docker prune")
+    require("curl -k" not in shell_text and "--insecure" not in shell_text, "TLS bypass")
+    for line in shell_text.splitlines():
         if "docker" in line and "compose" in line and "up" in line and "-d" in line:
             require("--no-deps" in line, "global compose apply")
 

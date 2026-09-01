@@ -31,11 +31,22 @@ class IacContractTests(unittest.TestCase):
             self.assertIn("s3:GetObject", policy)
             self.assertNotIn("s3:PutObject", policy)
 
+        endpoint = template["Resources"]["S3GatewayEndpoint"]["Properties"]
+        self.assertEqual("Gateway", endpoint["VpcEndpointType"])
+        endpoint_statement = endpoint["PolicyDocument"]["Statement"][0]
+        self.assertEqual("*", endpoint_statement["Principal"])
+        principal_arns = endpoint_statement["Condition"]["ArnEquals"]["aws:PrincipalArn"]
+        self.assertEqual(2, len(principal_arns))
+        self.assertTrue(all("Fn::Sub" in arn for arn in principal_arns))
+        self.assertIn("CloudInstanceRoleName", json.dumps(principal_arns))
+        self.assertIn("PaidInstanceRoleName", json.dumps(principal_arns))
+
     def test_deploy_role_and_fixed_document_boundaries(self) -> None:
         template = self.load("platform/aws/staging/deploy-control-plane.json")
         role = json.dumps(template["Resources"]["StagingDeployRole"], sort_keys=True)
         self.assertIn("environment:staging", role)
         self.assertIn("ssm:SendCommand", role)
+        self.assertIn("ssm:ListCommands", role)
         self.assertNotIn("s3:PutObject", role)
         self.assertNotIn("iam:PassRole", role)
         document = template["Resources"]["StagingDeployDocument"]["Properties"]
@@ -44,7 +55,9 @@ class IacContractTests(unittest.TestCase):
         parameters = document["Content"]["parameters"]
         self.assertTrue(all(value["interpolationType"] == "ENV_VAR" for value in parameters.values()))
         self.assertEqual(["install", "plan", "apply", "rollback", "health"], parameters["Mode"]["allowedValues"])
-        command = document["Content"]["mainSteps"][0]["inputs"]["runCommand"]
+        step = document["Content"]["mainSteps"][0]
+        self.assertEqual("900", step["inputs"]["timeoutSeconds"])
+        command = step["inputs"]["runCommand"]
         self.assertEqual(1, len(command))
         self.assertIn("/usr/local/lib/trinyx/staging-deploy", command[0])
         self.assertNotIn("AWS-RunShellScript", json.dumps(template))

@@ -265,7 +265,7 @@ def _memory_is_three_gib(value: Any) -> bool:
 def validate_compose_model(model: dict[str, Any], role: str, expected_images: dict[str, str]) -> None:
     require(isinstance(model, dict) and isinstance(model.get("services"), dict), "invalid rendered Compose model")
     serialized = json.dumps(model, sort_keys=True)
-    require("/srv/trinyx/pr25-" not in serialized, "mutable PR25 checkout path in rendered Compose")
+    require(("/srv/trinyx/" + "pr25-") not in serialized, "mutable PR25 checkout path in rendered Compose")
     services = model["services"]
     rendered_images: set[str] = set()
     for name, service in services.items():

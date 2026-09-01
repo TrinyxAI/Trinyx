@@ -19,6 +19,7 @@ assert parameters['Role']['allowedValues']==['cloud','paid']
 assert all(value['interpolationType']=='ENV_VAR' for value in parameters.values())
 steps=properties['Content']['mainSteps']
 assert len(steps)==1 and steps[0]['action']=='aws:runShellScript'
+assert steps[0]['inputs']['timeoutSeconds']=='900'
 command=steps[0]['inputs']['runCommand']
 assert len(command)==1 and '/usr/local/lib/trinyx/staging-deploy' in command[0]
 role=doc['Resources']['StagingDeployRole']['Properties']
@@ -30,6 +31,8 @@ assert send['Action']=='ssm:SendCommand' and len(send['Resource'])==3
 lock=next(item for item in statements if item['Sid']=='CoordinateOneNonSecretStagingDeployment')
 assert set(lock['Action'])=={'ssm:PutParameter','ssm:GetParameter','ssm:DeleteParameter'}
 assert 'parameter/trinyx/staging/control-plane/deployment-lock' in json.dumps(lock)
+inspect=next(item for item in statements if item['Sid']=='InspectCommandsBeforeManualLockBreak')
+assert inspect=={'Sid':'InspectCommandsBeforeManualLockBreak','Effect':'Allow','Action':'ssm:ListCommands','Resource':'*'}
 encoded=json.dumps(doc,sort_keys=True)
 for forbidden in ('AWS-RunShellScript','s3:PutObject','kms:Decrypt','secretsmanager:','AdministratorAccess','ec2:TerminateInstances','iam:PassRole'):
   assert forbidden not in encoded

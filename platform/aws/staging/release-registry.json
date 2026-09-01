@@ -227,11 +227,14 @@
           "Statement": [
             {
               "Effect": "Allow",
-              "Principal": {
-                "AWS": [
-                  {"Fn::Sub": "arn:${AWS::Partition}:iam::${AWS::AccountId}:role/${CloudInstanceRoleName}"},
-                  {"Fn::Sub": "arn:${AWS::Partition}:iam::${AWS::AccountId}:role/${PaidInstanceRoleName}"}
-                ]
+              "Principal": "*",
+              "Condition": {
+                "ArnEquals": {
+                  "aws:PrincipalArn": [
+                    {"Fn::Sub": "arn:${AWS::Partition}:iam::${AWS::AccountId}:role/${CloudInstanceRoleName}"},
+                    {"Fn::Sub": "arn:${AWS::Partition}:iam::${AWS::AccountId}:role/${PaidInstanceRoleName}"}
+                  ]
+                }
               },
               "Action": ["s3:ListBucket", "s3:GetObject", "s3:GetObjectVersion"],
               "Resource": [

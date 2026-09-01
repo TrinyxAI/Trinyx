@@ -5,7 +5,9 @@ from __future__ import annotations
 
 import argparse
 import contextlib
+import datetime as dt
 import json
+import os
 import re
 import subprocess
 import sys
@@ -13,7 +15,7 @@ import time
 import uuid
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Iterator, Protocol
+from typing import Callable, Iterator, Protocol
 
 if __package__:
     from .invariants import InvariantError, RELEASE_RE, require, validate_release_manifest
@@ -22,6 +24,11 @@ else:
     from invariants import InvariantError, RELEASE_RE, require, validate_release_manifest  # type: ignore
 
 INSTANCES = {"cloud": "i-06f414cdb30078a9d", "paid": "i-0b8fd709ff82f6dd2"}
+SSM_EXECUTION_TIMEOUT_SECONDS = 900
+SSM_POLL_GRACE_SECONDS = 60
+SSM_POLL_INTERVAL_SECONDS = 2.0
+ACTIVE_COMMAND_STATUSES = {"Pending", "InProgress", "Delayed", "Cancelling"}
+STALE_LOCK_CONFIRMATION = "AWS_STAGING_STALE_LOCK_BREAK_APPROVED"
 
 
 @dataclass(frozen=True)
@@ -56,14 +63,29 @@ class NoopSagaLock:
 
 
 class AwsCliSsmTransport:
-    def __init__(self, document: str, document_version: str, registry_bucket: str, region: str = "us-east-1"):
+    def __init__(
+        self,
+        document: str,
+        document_version: str,
+        registry_bucket: str,
+        region: str = "us-east-1",
+        execution_timeout_seconds: int = SSM_EXECUTION_TIMEOUT_SECONDS,
+        poll_grace_seconds: int = SSM_POLL_GRACE_SECONDS,
+        monotonic: Callable[[], float] = time.monotonic,
+        sleep: Callable[[float], None] = time.sleep,
+    ):
         require(document == "Trinyx-Staging-Deploy", "unexpected SSM document")
         require(re.fullmatch(r"[1-9][0-9]*", document_version) is not None, "SSM document version must be numeric and pinned")
         require(re.fullmatch(r"[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]", registry_bucket) is not None, "bad registry bucket")
+        require(1 <= execution_timeout_seconds <= 3600, "SSM execution timeout out of bounds")
+        require(1 <= poll_grace_seconds <= 300, "SSM polling grace out of bounds")
         self.document = document
         self.document_version = document_version
         self.registry_bucket = registry_bucket
         self.region = region
+        self.poll_budget_seconds = execution_timeout_seconds + poll_grace_seconds
+        self.monotonic = monotonic
+        self.sleep = sleep
 
     def _aws(self, argv: list[str], timeout: int = 45) -> subprocess.CompletedProcess[str]:
         try:
@@ -114,7 +136,8 @@ class AwsCliSsmTransport:
         )
         require(sent.returncode == 0 and re.fullmatch(r"[0-9a-f-]{36}\n?", sent.stdout) is not None, "SSM SendCommand failed")
         command_id = sent.stdout.strip()
-        for _ in range(90):
+        deadline = self.monotonic() + self.poll_budget_seconds
+        while self.monotonic() < deadline:
             result = self._aws(
                 [
                     "ssm",
@@ -128,15 +151,19 @@ class AwsCliSsmTransport:
                 ]
             )
             if result.returncode != 0:
-                time.sleep(2)
+                remaining = deadline - self.monotonic()
+                if remaining > 0:
+                    self.sleep(min(SSM_POLL_INTERVAL_SECONDS, remaining))
                 continue
             try:
                 payload = json.loads(result.stdout)
             except json.JSONDecodeError as exc:
                 raise InvariantError("invalid SSM result") from exc
             status = payload.get("Status")
-            if status in {"Pending", "InProgress", "Delayed"}:
-                time.sleep(2)
+            if status in ACTIVE_COMMAND_STATUSES:
+                remaining = deadline - self.monotonic()
+                if remaining > 0:
+                    self.sleep(min(SSM_POLL_INTERVAL_SECONDS, remaining))
                 continue
             require(status == "Success", f"SSM command failed with status {status}")
             require(not payload.get("StandardErrorContent"), "SSM command returned stderr")
@@ -144,34 +171,99 @@ class AwsCliSsmTransport:
             require("ERROR_" not in output, "SSM output contains a fail-closed marker")
             # Output is reduced to contract markers by the fixed host dispatcher.
             return output
-        raise InvariantError("SSM command timed out")
+        raise InvariantError(
+            f"SSM command exceeded orchestrator budget of {self.poll_budget_seconds} seconds"
+        )
 
 
 class AwsCliStagingLock:
-    """Atomic account/region-wide lock. It contains only a random deployment ID."""
+    """Atomic account/region lock with explicit, proof-gated stale recovery."""
 
     NAME = "/trinyx/staging/control-plane/deployment-lock"
 
     def __init__(self, transport: AwsCliSsmTransport):
         self.transport = transport
 
+    @staticmethod
+    def _value(owner: str) -> str:
+        run_id = os.environ.get("GITHUB_RUN_ID", "manual")
+        run_attempt = os.environ.get("GITHUB_RUN_ATTEMPT", "manual")
+        require(run_id == "manual" or re.fullmatch(r"[0-9]{1,20}", run_id) is not None, "bad GitHub run ID")
+        require(run_attempt == "manual" or re.fullmatch(r"[0-9]{1,10}", run_attempt) is not None, "bad GitHub run attempt")
+        return json.dumps(
+            {
+                "schemaVersion": 1,
+                "owner": owner,
+                "createdAt": dt.datetime.now(dt.timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z"),
+                "githubRunId": run_id,
+                "githubRunAttempt": run_attempt,
+            },
+            sort_keys=True,
+            separators=(",", ":"),
+        )
+
+    def _read(self) -> str:
+        current = self.transport._aws([
+            "ssm", "get-parameter", "--name", self.NAME,
+            "--query", "Parameter.Value", "--output", "text",
+        ])
+        require(current.returncode == 0, "staging deployment lock is missing or unreadable")
+        return current.stdout.strip()
+
     @contextlib.contextmanager
     def hold(self, owner: str) -> Iterator[None]:
         require(re.fullmatch(r"dep-[0-9a-f]{32}", owner) is not None, "bad lock owner")
+        value = self._value(owner)
         created = self.transport._aws([
-            "ssm", "put-parameter", "--name", self.NAME, "--type", "String", "--value", owner,
-            "--description", "Trinyx staging deployment lock; non-secret", "--no-overwrite",
+            "ssm", "put-parameter", "--name", self.NAME, "--type", "String", "--value", value,
+            "--description", "Trinyx staging deployment lock; non-secret metadata", "--no-overwrite",
         ])
-        require(created.returncode == 0, "concurrent staging deployment refused")
+        require(created.returncode == 0, "concurrent or stale staging deployment lock refused")
         try:
             yield
         finally:
-            current = self.transport._aws([
-                "ssm", "get-parameter", "--name", self.NAME, "--query", "Parameter.Value", "--output", "text"
-            ])
-            if current.returncode == 0 and current.stdout.strip() == owner:
+            if self._read() == value:
                 deleted = self.transport._aws(["ssm", "delete-parameter", "--name", self.NAME])
                 require(deleted.returncode == 0, "staging deployment lock release failed")
+
+    def break_stale(self, owner: str, confirmation: str) -> None:
+        require(re.fullmatch(r"dep-[0-9a-f]{32}", owner) is not None, "bad stale lock owner")
+        require(confirmation == STALE_LOCK_CONFIRMATION, "stale lock break lacks explicit approval")
+        raw = self._read()
+        try:
+            lock = json.loads(raw)
+        except json.JSONDecodeError as exc:
+            raise InvariantError("stale lock metadata is not valid JSON; manual AWS review required") from exc
+        require(
+            isinstance(lock, dict)
+            and set(lock) == {"schemaVersion", "owner", "createdAt", "githubRunId", "githubRunAttempt"}
+            and lock.get("schemaVersion") == 1
+            and lock.get("owner") == owner,
+            "stale lock owner/schema mismatch",
+        )
+        commands = self.transport._aws([
+            "ssm", "list-commands",
+            "--filters",
+            f"key=DocumentName,value={self.transport.document}",
+            f"key=InvokedAfter,value={lock['createdAt']}",
+            "--output", "json",
+        ])
+        require(commands.returncode == 0, "cannot prove absence of active SSM commands")
+        try:
+            command_list = json.loads(commands.stdout).get("Commands", [])
+        except json.JSONDecodeError as exc:
+            raise InvariantError("invalid SSM command inventory") from exc
+        require(isinstance(command_list, list), "invalid SSM command inventory")
+        active = [
+            command for command in command_list
+            if isinstance(command, dict)
+            and owner in str(command.get("Comment", ""))
+            and command.get("Status") in ACTIVE_COMMAND_STATUSES
+        ]
+        require(not active, "stale lock break refused: associated SSM command is still active")
+        require(self._read() == raw, "staging deployment lock changed during recovery proof")
+        deleted = self.transport._aws(["ssm", "delete-parameter", "--name", self.NAME])
+        require(deleted.returncode == 0, "stale staging deployment lock deletion failed")
 
 
 def new_deployment_id() -> str:
@@ -216,56 +308,66 @@ class StagingSaga:
             output = self._request("install", role, release_id, bundle_digest, previous_cloud, previous_paid)
             require(f"RELEASE_INSTALL_APPLY_OK role={role}" in output, f"{role} release installation not acknowledged")
 
-    def plan_both(self, release_id: str, bundle_digest: str, previous_cloud: str, previous_paid: str) -> None:
+    def plan_both(
+        self, release_id: str, bundle_digest: str, previous_cloud: str, previous_paid: str,
+        deployment_id: str | None = None,
+    ) -> None:
         for role in ("paid", "cloud"):
-            output = self._request("plan", role, release_id, bundle_digest, previous_cloud, previous_paid)
+            output = self._request(
+                "plan", role, release_id, bundle_digest, previous_cloud, previous_paid, deployment_id
+            )
             require(f"STAGING_DEPLOY_PLAN_OK role={role} release_id={release_id}" in output, f"{role} preflight failed")
 
-    def full_health(self, release_id: str, bundle_digest: str, previous_cloud: str, previous_paid: str) -> None:
+    def full_health(
+        self, release_id: str, bundle_digest: str, previous_cloud: str, previous_paid: str,
+        deployment_id: str | None = None,
+    ) -> None:
         # Paid liveness first; Cloud health includes Cloud->Paid strict TLS and edge smoke.
         for role in ("paid", "cloud"):
-            output = self._request("health", role, release_id, bundle_digest, previous_cloud, previous_paid)
+            output = self._request(
+                "health", role, release_id, bundle_digest, previous_cloud, previous_paid, deployment_id
+            )
             require(f"STAGING_DEPLOY_HEALTH_OK role={role} release_id={release_id}" in output, f"{role} health failed")
 
     def deploy(self, release_id: str, bundle_digest: str, previous_cloud: str, previous_paid: str) -> None:
         owner = new_deployment_id()
         with self.lock.hold(owner):
-            self.plan_both(release_id, bundle_digest, previous_cloud, previous_paid)
+            self.plan_both(release_id, bundle_digest, previous_cloud, previous_paid, owner)
             paid_applied = False
             try:
-                paid = self._request("apply", "paid", release_id, bundle_digest, previous_cloud, previous_paid)
+                paid = self._request("apply", "paid", release_id, bundle_digest, previous_cloud, previous_paid, owner)
                 require(f"STAGING_DEPLOY_APPLY_OK role=paid release_id={release_id}" in paid, "Paid apply not acknowledged")
                 paid_applied = True
-                cloud = self._request("apply", "cloud", release_id, bundle_digest, previous_cloud, previous_paid)
+                cloud = self._request("apply", "cloud", release_id, bundle_digest, previous_cloud, previous_paid, owner)
                 require(f"STAGING_DEPLOY_APPLY_OK role=cloud release_id={release_id}" in cloud, "Cloud apply not acknowledged")
-                self.full_health(release_id, bundle_digest, previous_cloud, previous_paid)
+                self.full_health(release_id, bundle_digest, previous_cloud, previous_paid, owner)
             except Exception:
                 # The host engine first compensates its own partial mutation. Cloud is
                 # restored before Paid so a failed Cloud edge cannot keep sending new
                 # traffic while Paid is being restored.
                 with suppress_invariant():
-                    self._request("rollback", "cloud", previous_cloud, bundle_digest, release_id, release_id)
+                    self._request("rollback", "cloud", previous_cloud, bundle_digest, release_id, release_id, owner)
                 if paid_applied:
                     with suppress_invariant():
-                        self._request("rollback", "paid", previous_paid, bundle_digest, previous_cloud, release_id)
+                        self._request("rollback", "paid", previous_paid, bundle_digest, previous_cloud, release_id, owner)
                 raise
 
     def rollback(self, baseline_id: str, baseline_digest: str, candidate_id: str) -> None:
         owner = new_deployment_id()
         with self.lock.hold(owner):
             # Cloud first removes the candidate-facing edge, then Paid returns.
-            cloud = self._request("rollback", "cloud", baseline_id, baseline_digest, candidate_id, candidate_id)
+            cloud = self._request("rollback", "cloud", baseline_id, baseline_digest, candidate_id, candidate_id, owner)
             require(f"STAGING_DEPLOY_ROLLBACK_OK role=cloud release_id={baseline_id}" in cloud, "Cloud rollback not acknowledged")
             try:
-                paid = self._request("rollback", "paid", baseline_id, baseline_digest, baseline_id, candidate_id)
+                paid = self._request("rollback", "paid", baseline_id, baseline_digest, baseline_id, candidate_id, owner)
                 require(f"STAGING_DEPLOY_ROLLBACK_OK role=paid release_id={baseline_id}" in paid, "Paid rollback not acknowledged")
             except Exception:
                 # Paid host rollback compensates itself to candidate. Restore Cloud
                 # to candidate as well so a partial O12 does not leave mixed stacks.
                 with suppress_invariant():
-                    self._request("rollback", "cloud", candidate_id, baseline_digest, baseline_id, candidate_id)
+                    self._request("rollback", "cloud", candidate_id, baseline_digest, baseline_id, candidate_id, owner)
                 raise
-            self.full_health(baseline_id, baseline_digest, baseline_id, baseline_id)
+            self.full_health(baseline_id, baseline_digest, baseline_id, baseline_id, owner)
 
 
 class suppress_invariant:
@@ -291,7 +393,7 @@ def meaningful_runtime_difference(baseline_manifest: Path, candidate_manifest: P
 
 def main() -> None:
     parser = argparse.ArgumentParser()
-    parser.add_argument("command", choices=("install", "deploy", "rollback", "health", "diff"))
+    parser.add_argument("command", choices=("install", "deploy", "rollback", "health", "diff", "break-lock"))
     parser.add_argument("--document", default="Trinyx-Staging-Deploy")
     parser.add_argument("--document-version")
     parser.add_argument("--registry-bucket")
@@ -304,11 +406,20 @@ def main() -> None:
     parser.add_argument("--candidate-id")
     parser.add_argument("--baseline-manifest", type=Path)
     parser.add_argument("--candidate-manifest", type=Path)
+    parser.add_argument("--lock-owner")
+    parser.add_argument("--confirm-break-lock")
     args = parser.parse_args()
     if args.command == "diff":
         require(args.baseline_manifest and args.candidate_manifest, "manifest paths required")
         changed = meaningful_runtime_difference(args.baseline_manifest, args.candidate_manifest)
         print("QUALIFICATION_MEANINGFUL_DIFF_OK components=" + ",".join(changed))
+        return
+    if args.command == "break-lock":
+        require(args.document_version and args.registry_bucket, "lock control inputs required")
+        require(args.lock_owner and args.confirm_break_lock, "stale lock owner and confirmation required")
+        transport = AwsCliSsmTransport(args.document, args.document_version, args.registry_bucket)
+        AwsCliStagingLock(transport).break_stale(args.lock_owner, args.confirm_break_lock)
+        print(f"STAGING_STALE_LOCK_BREAK_OK owner={args.lock_owner}")
         return
     require(all((args.document_version, args.registry_bucket, args.config_revision, args.platform_commit)), "control-plane inputs required")
     transport = AwsCliSsmTransport(args.document, args.document_version, args.registry_bucket)

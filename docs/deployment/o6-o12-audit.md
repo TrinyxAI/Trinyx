@@ -121,3 +121,29 @@ repository ruleset list is empty.
 O10 in this pass is repository-side design/IaC/runbooks only. It must stop with
 `AWS_PCA_LIVE_APPROVAL_REQUIRED`; no PCA, certificate, key, trust store, DNS,
 load balancer or production resource is created or modified.
+
+## Post-implementation corrective review
+
+A repository-only review after commit `a449ac80903ace4bb60ddb180ddf6cac9daa34f7`
+found four pre-live inconsistencies. They are treated as controls to validate in
+CI, not evidence of live readiness:
+
+- **LIVE_BLOCKER / SECURITY+RELIABILITY — mutable checkout:** Paid Caddy now
+  mounts the Caddyfile contained in each immutable release bundle. The staging
+  inventory no longer accepts a checkout path, and static policy scans all
+  operational platform text formats rather than shell files alone.
+- **LIVE_BLOCKER / SECURITY+RELIABILITY — gateway endpoint semantics:** the
+  optional S3 Gateway endpoint now uses `Principal: "*"` with exact
+  `aws:PrincipalArn` conditions for Cloud/Paid. A semantic contract test
+  prevents regression.
+- **RELIABILITY_CRITICAL — SSM polling race:** the client now uses a monotonic
+  960-second deadline for a 900-second document execution budget. Failure
+  injection proves a command completing after 182 seconds is still accepted.
+- **RELIABILITY_CRITICAL — stale global lock:** lock metadata is structured and
+  recovery is an explicit approval-gated operation. It refuses deletion unless
+  no owner-associated SSM command is active and the lock is unchanged.
+
+The deploy role adds only `ssm:ListCommands` on `Resource: "*"`, because that
+read/list API has no resource-level ARN boundary. Parameter mutation remains
+limited to the single staging lock ARN. Direct verification of the original
+builder attestations remains a non-blocking provenance hardening backlog item.

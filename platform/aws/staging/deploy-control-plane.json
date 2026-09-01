@@ -154,6 +154,12 @@
                   "Effect": "Allow",
                   "Action": ["ssm:PutParameter", "ssm:GetParameter", "ssm:DeleteParameter"],
                   "Resource": {"Fn::Sub": "arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:parameter/trinyx/staging/control-plane/deployment-lock"}
+                },
+                {
+                  "Sid": "InspectCommandsBeforeManualLockBreak",
+                  "Effect": "Allow",
+                  "Action": "ssm:ListCommands",
+                  "Resource": "*"
                 }
               ]
             }

@@ -36,7 +36,6 @@ REQUIRED = {
 OPTIONAL = {
     "CLOUD_PRIVATE_IP",
     "PAID_PRIVATE_IP",
-    "PAID_CADDYFILE_PATH",
 }
 
 FORBIDDEN_NAME_PARTS = (
@@ -150,10 +149,6 @@ def validate(values: dict[str, str]) -> None:
         if values.get(key):
             validate_ip(key, values[key])
 
-    caddy = values.get("PAID_CADDYFILE_PATH")
-    if caddy:
-        validate_path("PAID_CADDYFILE_PATH", caddy, "/srv/trinyx/")
-
     validate_path(
         "PAID_MONOLITH_TRUSTSTORE_SOURCE_PATH",
         values["PAID_MONOLITH_TRUSTSTORE_SOURCE_PATH"],
@@ -264,10 +259,9 @@ def render(values: dict[str, str], out: Path) -> None:
         "      PAID_MONOLITH_INTERNAL_CERT_FILE: /run/tls/billing-internal.crt",
         "      PAID_MONOLITH_INTERNAL_KEY_FILE: /run/tls/billing-internal.key",
         "    volumes:",
+        "      - ./docker/paid-monolith-internal/Caddyfile:/etc/caddy/Caddyfile:ro",
     ]
 
-    if values.get("PAID_CADDYFILE_PATH"):
-        paid_lines.append(f"      - {values['PAID_CADDYFILE_PATH']}:/etc/caddy/Caddyfile:ro")
     paid_lines.extend(
         [
             "      - /etc/trinyx/tls/billing-internal.crt:/run/tls/billing-internal.crt:ro",

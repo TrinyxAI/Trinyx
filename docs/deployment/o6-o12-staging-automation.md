@@ -23,6 +23,16 @@ template deliberately contains none. AWS documents S3 Gateway endpoints as
 having no additional endpoint charge; normal S3 request/storage and any other
 network charges still apply.
 
+The Gateway endpoint policy uses the AWS-required `Principal: "*"` form and
+restricts callers with `ArnEquals` on `aws:PrincipalArn` for exactly the Cloud
+and Paid instance roles. Never replace this with role ARNs directly in
+`Principal`; gateway endpoint policy validation rejects that form.
+
+Paid Caddy configuration is release-owned. The override mounts
+`./docker/paid-monolith-internal/Caddyfile`, resolved by Compose relative to the
+first Compose file in the installed immutable bundle. No environment inventory,
+captured override or steady-state host path may reference a mutable checkout.
+
 ## Required non-secret environment files
 
 Before any qualification, independently render and install on each host:
@@ -51,6 +61,39 @@ release ID, deterministic bundle or internal hashes. O12 qualification requires
 a genuine existing release artifact containing the complete manifest, exact
 bundle and image bindings. Do not invent a release ID and do not rebuild the
 frozen candidate.
+
+## SSM execution budget and stale-lock recovery
+
+The fixed SSM document grants each dispatcher invocation 900 seconds. The
+orchestrator uses a monotonic 960-second poll budget (900 plus 60 seconds for
+status propagation) rather than a fixed poll count. The qualification job uses
+GitHub's bounded 360-minute maximum. A command may never be compensated merely
+because the old 180-second client loop expired.
+
+The global Parameter Store lock contains only non-secret JSON metadata:
+`owner`, `createdAt`, GitHub run ID/attempt and schema version. It has no
+automatic TTL. If a runner dies, do not delete the parameter directly and do
+not retry an apply. From an independently approved `staging` Environment
+session using the deploy role:
+
+1. read the lock and record its exact owner and GitHub run;
+2. inspect that run and both staging hosts;
+3. execute the proof-gated command below with the exact owner;
+4. the command lists the pinned document's SSM commands since `createdAt`,
+   refuses while an owner-associated command is active, rereads the unchanged
+   lock, and only then deletes it.
+
+```bash
+python3 platform/automation/ssm_orchestrator.py break-lock \
+  --document-version "$DOCUMENT_VERSION" \
+  --registry-bucket "$RELEASE_REGISTRY_BUCKET" \
+  --lock-owner 'dep-REPLACE_WITH_EXACT_32_HEX_OWNER' \
+  --confirm-break-lock AWS_STAGING_STALE_LOCK_BREAK_APPROVED
+```
+
+This is manual recovery, not liveness automation. An unreadable/legacy lock,
+AWS inventory error, active command, owner mismatch or concurrent lock change
+remains fail-closed and requires direct AWS review.
 
 ## Approved live sequence (not executed by this change)
 

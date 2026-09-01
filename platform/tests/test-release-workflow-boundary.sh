@@ -30,6 +30,7 @@ assert 'TrinyxStagingReleasePublisherRole' in register
 for required in ('baseline','candidate','O11_DEPLOY_SUCCESS','O12_ROLLBACK_SUCCESS','SAME_CANDIDATE_REDEPLOY_AND_IDEMPOTENCE_SUCCESS'):
     assert required in qualify
 assert 'test "$BASELINE_RELEASE_ID" != "$CANDIDATE_RELEASE_ID"' in qualify
+assert 'timeout-minutes: 360' in qualify
 for path in Path(sys.argv[1]).parents[2].joinpath('.github/workflows').glob('*.yml'):
     text=path.read_text(encoding='utf-8')
     for match in re.finditer(r'^\s*uses:\s*([^\s@]+)@([^\s#]+)',text,re.M):

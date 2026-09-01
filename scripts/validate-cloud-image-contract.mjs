@@ -8,6 +8,7 @@ const inventoryPath = path.join(root, 'docker/cloud-images.json');
 const composePath = path.join(root, 'docker/docker-compose.cloud.yml');
 const runtimePath = path.join(root, 'docker/docker-compose.cloud.runtime.yml');
 const thirdPartyPath = path.join(root, 'platform/release/third-party-images.json');
+const runtimeInventoryPath = path.join(root, 'platform/release/runtime-inventory.json');
 
 function fail(message) {
   throw new Error('[cloud-images] ' + message);
@@ -58,6 +59,9 @@ for (const field of ['name', 'service', 'package', 'environment', 'context', 'do
   }
 }
 for (const item of inventory.images) {
+  if (!/^cloud-[a-z0-9-]+$/.test(item.name)) {
+    fail(item.name + ' is not a canonical cloud-* release name');
+  }
   if (!/^ghcr\.io\/trinyxai\/trinyx-cloud-[a-z0-9-]+$/.test(item.package)) {
     fail(item.name + ' has a non-canonical GHCR package: ' + item.package);
   }
@@ -66,6 +70,28 @@ for (const item of inventory.images) {
   }
   if (!fs.existsSync(path.join(root, item.context))) fail(item.name + ' build context is missing');
   if (!fs.existsSync(path.join(root, item.dockerfile))) fail(item.name + ' Dockerfile is missing');
+}
+
+const runtimeInventory = JSON.parse(fs.readFileSync(runtimeInventoryPath, 'utf8'));
+if (runtimeInventory.schemaVersion !== 1 || !Array.isArray(runtimeInventory.images)) {
+  fail('platform/release/runtime-inventory.json has an invalid schema');
+}
+const canonicalBuiltCloud = runtimeInventory.images
+  .filter((item) => item.role === 'cloud' && /^cloud-/.test(item.name))
+  .filter((item) => !['cloud-postgres', 'cloud-redis', 'cloud-minio', 'cloud-minio-init', 'cloud-searxng', 'cloud-edge'].includes(item.name));
+if (canonicalBuiltCloud.length !== 14) {
+  fail('runtime inventory must contain exactly 14 repository-built Cloud entries');
+}
+const canonicalByName = new Map(canonicalBuiltCloud.map((item) => [item.name, item]));
+for (const item of inventory.images) {
+  const expected = canonicalByName.get(item.name);
+  if (!expected) fail('repository-built Cloud image is missing from runtime inventory: ' + item.name);
+  if (expected.service !== item.service || expected.environment !== item.environment) {
+    fail('runtime inventory binding mismatch for ' + item.name);
+  }
+}
+if (canonicalByName.size !== inventory.images.length) {
+  fail('repository-built Cloud image name set differs from runtime inventory');
 }
 
 const thirdParty = JSON.parse(fs.readFileSync(thirdPartyPath, 'utf8'));
@@ -181,4 +207,4 @@ if (renderedArg !== -1) {
   }
 }
 
-console.log('[cloud-images] validated 14 repository-built images + 6 pinned dependencies = 20 immutable Cloud runtime services');
+console.log('[cloud-images] validated canonical 14 built + 6 dependencies = 20 immutable Cloud runtime services');

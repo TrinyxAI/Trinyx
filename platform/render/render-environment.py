@@ -10,6 +10,7 @@ from urllib.parse import urlparse
 KEY_RE = re.compile(r"^[A-Z][A-Z0-9_]*$")
 HOST_RE = re.compile(r"^[a-z0-9](?:[a-z0-9.-]*[a-z0-9])?$")
 KID_RE = re.compile(r"^[A-Za-z0-9._-]{1,128}$")
+REGION_RE = re.compile(r"^[a-z]{2}-[a-z]+-\d$")
 
 REQUIRED = {
     "TRINYX_ENVIRONMENT",
@@ -21,6 +22,8 @@ REQUIRED = {
     "PAID_INTERNAL_HOST",
     "CLOUD_INTERNAL_HOST",
     "BILLING_PROVIDER",
+    "PAID_MONOLITH_TRUSTSTORE_SOURCE_PATH",
+    "PAID_MONOLITH_TRUSTSTORE_PASSWORD_SOURCE_PATH",
     "TRINYX_IDENTITY_SIGNING_KID",
     "TRINYX_ENTITLEMENT_SIGNING_KID",
     "TRINYX_S2S_SIGNING_KID",
@@ -66,9 +69,8 @@ def load_env(path: Path) -> dict[str, str]:
         if name in values:
             fail(f"duplicate key: {name}")
         if any(part in name for part in FORBIDDEN_NAME_PARTS):
-            # Public verification/config KIDs are explicitly allowed, but literal
-            # secret/key material must never enter this non-secret environment file.
-            if not name.endswith("_KID"):
+            # A KID and a filesystem PATH are metadata, not key/secret material.
+            if not (name.endswith("_KID") or name.endswith("_PATH")):
                 fail(f"secret-bearing key name is forbidden in environment inventory: {name}")
         values[name] = value
 
@@ -99,8 +101,21 @@ def validate_ip(name: str, value: str) -> None:
         address = ipaddress.ip_address(value)
     except ValueError:
         fail(f"invalid IPv4 address: {name}")
-    if address.version != 4 or not address.is_private:
-        fail(f"{name} must be a private IPv4 address")
+    private_ranges = (
+        ipaddress.ip_network("10.0.0.0/8"),
+        ipaddress.ip_network("172.16.0.0/12"),
+        ipaddress.ip_network("192.168.0.0/16"),
+    )
+    if address.version != 4 or not any(address in network for network in private_ranges):
+        fail(f"{name} must be an RFC1918 private IPv4 address")
+
+
+def validate_path(name: str, value: str, prefix: str) -> None:
+    path = Path(value)
+    if not value.startswith(prefix) or not path.is_absolute() or ".." in path.parts:
+        fail(f"{name} must be an absolute path under {prefix}")
+    if any(ch in value for ch in ("\n", "\r", "\x00")):
+        fail(f"invalid control character in {name}")
 
 
 def validate(values: dict[str, str]) -> None:
@@ -108,7 +123,7 @@ def validate(values: dict[str, str]) -> None:
     if env not in {"staging", "production"}:
         fail("TRINYX_ENVIRONMENT must be staging or production")
 
-    if not re.fullmatch(r"[a-z]{2}-[a-z]+-\d", values["AWS_REGION"]):
+    if not REGION_RE.fullmatch(values["AWS_REGION"]):
         fail("invalid AWS_REGION")
 
     if not re.fullmatch(r"[a-z_][a-z0-9_]{0,62}", values["CLOUD_DB_USERNAME"]):
@@ -120,7 +135,7 @@ def validate(values: dict[str, str]) -> None:
     for key in ("PAID_INTERNAL_HOST", "CLOUD_INTERNAL_HOST"):
         validate_host(key, values[key])
 
-    if values["BILLING_PROVIDER"] not in {"stripe"}:
+    if values["BILLING_PROVIDER"] != "stripe":
         fail("unsupported BILLING_PROVIDER")
 
     for key in (
@@ -137,14 +152,28 @@ def validate(values: dict[str, str]) -> None:
 
     caddy = values.get("PAID_CADDYFILE_PATH")
     if caddy:
-        if not caddy.startswith("/srv/trinyx/") or ".." in Path(caddy).parts:
-            fail("PAID_CADDYFILE_PATH must be an absolute /srv/trinyx path")
+        validate_path("PAID_CADDYFILE_PATH", caddy, "/srv/trinyx/")
 
-    # Prevent accidental reuse of staging endpoints in production inventory.
+    validate_path(
+        "PAID_MONOLITH_TRUSTSTORE_SOURCE_PATH",
+        values["PAID_MONOLITH_TRUSTSTORE_SOURCE_PATH"],
+        "/opt/trinyx/",
+    )
+    validate_path(
+        "PAID_MONOLITH_TRUSTSTORE_PASSWORD_SOURCE_PATH",
+        values["PAID_MONOLITH_TRUSTSTORE_PASSWORD_SOURCE_PATH"],
+        "/etc/trinyx/",
+    )
+
+    # Production may never point at staging endpoints or staging trust material.
     if env == "production":
         for key in ("CLOUD_PUBLIC_URL", "KEYCLOAK_PUBLIC_URL", "PAID_PUBLIC_URL"):
             if "staging" in values[key].lower():
                 fail(f"production inventory contains staging URL in {key}")
+        if "/production/" not in values["PAID_MONOLITH_TRUSTSTORE_SOURCE_PATH"]:
+            fail("production truststore source must be production-scoped")
+        if "/production/" not in values["PAID_MONOLITH_TRUSTSTORE_PASSWORD_SOURCE_PATH"]:
+            fail("production truststore password source must be production-scoped")
 
 
 def write(path: Path, content: str) -> None:
@@ -238,13 +267,11 @@ def render(values: dict[str, str], out: Path) -> None:
     ]
 
     if values.get("PAID_CADDYFILE_PATH"):
-        paid_lines.append(
-            f"      - {values['PAID_CADDYFILE_PATH']}:/etc/caddy/Caddyfile:ro"
-        )
+        paid_lines.append(f"      - {values['PAID_CADDYFILE_PATH']}:/etc/caddy/Caddyfile:ro")
     paid_lines.extend(
         [
-            f"      - /etc/trinyx/tls/billing-internal.crt:/run/tls/billing-internal.crt:ro",
-            f"      - /etc/trinyx/tls/billing-internal.key:/run/tls/billing-internal.key:ro",
+            "      - /etc/trinyx/tls/billing-internal.crt:/run/tls/billing-internal.crt:ro",
+            "      - /etc/trinyx/tls/billing-internal.key:/run/tls/billing-internal.key:ro",
             "",
         ]
     )
@@ -281,20 +308,20 @@ def render(values: dict[str, str], out: Path) -> None:
         "          memory: 3G\n",
     )
 
-    write(
-        out / "metadata.env",
-        "\n".join(
-            [
-                f"TRINYX_ENVIRONMENT={env}",
-                f"AWS_REGION={values['AWS_REGION']}",
-                f"CLOUD_BASE={cloud_base}",
-                f"PAID_BASE={paid_base}",
-                f"CLOUD_SSM_PATH=/trinyx/{env}/cloud/",
-                f"PAID_SSM_PATH=/trinyx/{env}/paid/",
-                "",
-            ]
-        ),
-    )
+    metadata = [
+        f"TRINYX_ENVIRONMENT={env}",
+        f"AWS_REGION={values['AWS_REGION']}",
+        f"CLOUD_BASE={cloud_base}",
+        f"PAID_BASE={paid_base}",
+        f"CLOUD_SSM_PATH=/trinyx/{env}/cloud/",
+        f"PAID_SSM_PATH=/trinyx/{env}/paid/",
+        f"CLOUD_PRIVATE_IP={values.get('CLOUD_PRIVATE_IP', '')}",
+        f"PAID_PRIVATE_IP={values.get('PAID_PRIVATE_IP', '')}",
+        f"PAID_MONOLITH_TRUSTSTORE_SOURCE_PATH={values['PAID_MONOLITH_TRUSTSTORE_SOURCE_PATH']}",
+        f"PAID_MONOLITH_TRUSTSTORE_PASSWORD_SOURCE_PATH={values['PAID_MONOLITH_TRUSTSTORE_PASSWORD_SOURCE_PATH']}",
+        "",
+    ]
+    write(out / "metadata.env", "\n".join(metadata))
 
 
 def main() -> None:

@@ -36,13 +36,23 @@ jobs:
           bash -n platform/bootstrap/cloud/staging/rootfs/usr/local/lib/trinyx/pre-docker-cloud.sh
           bash -n platform/bootstrap/cloud/staging/rootfs/usr/local/lib/trinyx/runtime-materialize-cloud.sh
           bash -n platform/bootstrap/paid/staging/rootfs/usr/local/lib/trinyx/runtime-materialize-paid.sh
+          bash -n platform/host/common/runtime-env.sh
+          bash -n platform/host/cloud/pre-docker-cloud.sh
+          bash -n platform/host/cloud/runtime-materialize-cloud.sh
+          bash -n platform/host/paid/runtime-materialize-paid.sh
           bash -n platform/tests/test-staging-render.sh
+          bash -n platform/tests/test-host-reconciler.sh
 
-      - name: Compile Python renderer
-        run: python3 -m py_compile platform/render/render-environment.py
+      - name: Compile Python platform tools
+        run: |
+          python3 -m py_compile platform/render/render-environment.py
+          python3 -m py_compile platform/install/reconcile-host.py
 
       - name: Verify staging render parity
         run: bash platform/tests/test-staging-render.sh
+
+      - name: Verify host reconciler plan/apply/idempotence
+        run: bash platform/tests/test-host-reconciler.sh
 
       - name: Reject secret material in platform tree
         shell: bash
@@ -64,6 +74,9 @@ jobs:
             platform/bootstrap/cloud/staging/rootfs/usr/local/lib/trinyx/pre-docker-cloud.sh
             platform/bootstrap/cloud/staging/rootfs/usr/local/lib/trinyx/runtime-materialize-cloud.sh
             platform/bootstrap/paid/staging/rootfs/usr/local/lib/trinyx/runtime-materialize-paid.sh
+            platform/host/cloud/pre-docker-cloud.sh
+            platform/host/cloud/runtime-materialize-cloud.sh
+            platform/host/paid/runtime-materialize-paid.sh
           )
           if grep -Eiq -- 'git (clone|pull|fetch|checkout)|github[.]com|ghcr[.]io.*pull|docker compose .*up -d' "${files[@]}"; then
             echo 'ERROR_BOOT_RECOVERY_CONTAINS_DEPLOYMENT_LOGIC' >&2
@@ -74,11 +87,18 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          if grep -RIEq -- 'docker compose([^\n]*)? up -d([[:space:]]|$)' platform/ \
+          if grep -RIE -- 'docker compose([^\n]*)? up -d([[:space:]]|$)' platform/ \
             | grep -Ev -- '--no-deps' >/dev/null; then
             echo 'ERROR_GLOBAL_COMPOSE_UP_FOUND' >&2
             exit 1
           fi
+
+      - name: Enforce canonical SSM schemas
+        shell: bash
+        run: |
+          set -euo pipefail
+          diff -u platform/contracts/ssm/cloud-required.txt platform/bootstrap/cloud/staging/rootfs/etc/trinyx/staging/cloud/config/ssm-required.txt
+          diff -u platform/contracts/ssm/paid-required.txt platform/bootstrap/paid/staging/rootfs/etc/trinyx/staging/paid/config/ssm-required.txt
 
       - name: Contract complete
         run: echo PLATFORM_CONTRACTS_OK

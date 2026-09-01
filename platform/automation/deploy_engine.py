@@ -22,9 +22,11 @@ from typing import Any, Protocol
 
 if __package__:
     from .invariants import (
+        DIGEST_RE,
         InvariantError,
         RELEASE_RE,
         SERVICE_RE,
+        environment_config_digest,
         parse_images_env,
         require,
         validate_active_pointer,
@@ -35,9 +37,11 @@ if __package__:
 else:
     sys.path.insert(0, str(Path(__file__).resolve().parent))
     from invariants import (  # type: ignore
+        DIGEST_RE,
         InvariantError,
         RELEASE_RE,
         SERVICE_RE,
+        environment_config_digest,
         parse_images_env,
         require,
         validate_active_pointer,
@@ -507,20 +511,21 @@ class HostDeployment:
     ) -> dict[str, Any]:
         evidence_path = self.base / "config" / "legacy-adoption.json"
         observation_path = self.base / "config" / "legacy-observation.json"
+        release_dir = self.base / "releases" / release_id
         try:
             evidence = json.loads(evidence_path.read_text(encoding="utf-8"))
             observation = json.loads(observation_path.read_text(encoding="utf-8"))
-            manifest = json.loads(
-                (self.base / "releases" / release_id / "manifest.json").read_text(encoding="utf-8")
-            )
+            manifest = json.loads((release_dir / "manifest.json").read_text(encoding="utf-8"))
         except (OSError, json.JSONDecodeError) as exc:
             raise InvariantError("LEGACY_BASELINE_PROOF_REQUIRED") from exc
+
         required = {
             "schemaVersion", "environment", "role", "legacyActiveTarget", "baselineRelease",
             "bundleDigest", "imagesEnvSha256", "observationSha256", "environmentConfigRevision",
-            "platformCommit", "approvalScope", "approvedForPointerAdoption",
+            "environmentConfigDigest", "platformCommit", "approvalScope", "approvedForPointerAdoption",
         }
         require(isinstance(evidence, dict) and set(evidence) == required, "LEGACY_BASELINE_PROOF_REQUIRED")
+        current_config_digest = environment_config_digest(self.base, self.role)
         require(
             evidence["schemaVersion"] == 1
             and evidence["environment"] == "staging"
@@ -528,26 +533,69 @@ class HostDeployment:
             and evidence["legacyActiveTarget"] == legacy_target
             and evidence["baselineRelease"] == release_id
             and evidence["bundleDigest"] == manifest.get("deploymentBundle", {}).get("digest")
-            and evidence["imagesEnvSha256"] == sha256_path(self.base / "releases" / release_id / "images.env")
+            and evidence["imagesEnvSha256"] == sha256_path(release_dir / "images.env")
             and evidence["observationSha256"] == sha256_path(observation_path)
             and evidence["environmentConfigRevision"] == config_revision
+            and evidence["environmentConfigDigest"] == current_config_digest
             and evidence["platformCommit"] == platform_commit
             and evidence["approvalScope"] == "pointer-only-no-runtime-recreation"
             and evidence["approvedForPointerAdoption"] is True,
             "LEGACY_BASELINE_PROOF_REQUIRED",
         )
+
+        observation_keys = {
+            "schemaVersion", "environment", "role", "observedAt", "releaseEligible", "reason",
+            "environmentConfigRevision", "environmentConfigDigest", "composeProject", "services",
+        }
         require(
             isinstance(observation, dict)
-            and observation.get("schemaVersion") == 1
-            and observation.get("environment") == "staging"
-            and observation.get("role") == self.role
-            and observation.get("releaseEligible") is False
-            and isinstance(observation.get("services"), dict)
-            and set(observation["services"]) == set(
-                load_host_plan(self.base / "config" / "deployment-plan.json", self.role).services
-            ),
+            and set(observation) == observation_keys
+            and observation["schemaVersion"] == 2
+            and observation["environment"] == "staging"
+            and observation["role"] == self.role
+            and observation["releaseEligible"] is False
+            and observation["environmentConfigRevision"] == config_revision
+            and observation["environmentConfigDigest"] == current_config_digest
+            and isinstance(observation["composeProject"], str)
+            and re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,127}", observation["composeProject"]) is not None
+            and isinstance(observation["services"], dict),
             "LEGACY_BASELINE_PROOF_REQUIRED",
         )
+
+        validated_manifest = validate_release_directory(release_dir, self.role)
+        role_images = [item for item in validated_manifest["images"] if item["role"] == self.role]
+        expected_count = 20 if self.role == "cloud" else 8
+        require(len(role_images) == expected_count, "LEGACY_BASELINE_PROOF_REQUIRED")
+        expected_by_service = {item["service"]: item["immutableRef"] for item in role_images}
+        require(len(expected_by_service) == expected_count, "LEGACY_BASELINE_PROOF_REQUIRED")
+        plan_services = set(load_host_plan(self.base / "config" / "deployment-plan.json", self.role).services)
+        require(set(expected_by_service) == plan_services, "LEGACY_BASELINE_PROOF_REQUIRED")
+        require(set(observation["services"]) == plan_services, "LEGACY_BASELINE_PROOF_REQUIRED")
+
+        service_keys = {
+            "containerId", "containerImageId", "configuredImage", "repoDigests",
+            "composeProject", "composeService",
+        }
+        for service, expected_ref in expected_by_service.items():
+            actual = observation["services"].get(service)
+            require(
+                isinstance(actual, dict)
+                and set(actual) == service_keys
+                and re.fullmatch(r"[0-9a-f]{64}", str(actual["containerId"])) is not None
+                and re.fullmatch(r"sha256:[0-9a-f]{64}", str(actual["containerImageId"])) is not None
+                and actual["configuredImage"] == expected_ref
+                and actual["composeProject"] == observation["composeProject"]
+                and actual["composeService"] == service
+                and isinstance(actual["repoDigests"], list)
+                and actual["repoDigests"]
+                and all(
+                    isinstance(value, str)
+                    and re.fullmatch(r"[^@\\s]+@sha256:[0-9a-f]{64}", value) is not None
+                    for value in actual["repoDigests"]
+                )
+                and expected_ref in actual["repoDigests"],
+                "LEGACY_BASELINE_RUNTIME_IMAGE_MISMATCH",
+            )
         return evidence
 
     def adopt_legacy_baseline(

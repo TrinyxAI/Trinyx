@@ -85,6 +85,35 @@ def read_json(path: Path) -> Any:
         raise InvariantError(f"invalid JSON {path}: {exc}") from exc
 
 
+def environment_config_digest(base: Path, role: str) -> str:
+    """Hash only reviewed, non-secret materialized config inputs used by the host plan."""
+    require(role in {"cloud", "paid"}, "invalid role for environment config digest")
+    plan_path = base / "config" / "deployment-plan.json"
+    plan = read_json(plan_path)
+    require(
+        isinstance(plan, dict)
+        and plan.get("schemaVersion") == 1
+        and plan.get("role") == role
+        and isinstance(plan.get("requiredFiles"), list),
+        "invalid deployment plan for environment config digest",
+    )
+    relative_paths = ["config/deployment-plan.json", *plan["requiredFiles"]]
+    require(len(relative_paths) == len(set(relative_paths)), "duplicate non-secret config input")
+    entries: list[dict[str, str]] = []
+    for relative in sorted(relative_paths):
+        require(
+            isinstance(relative, str)
+            and relative.startswith("config/")
+            and not Path(relative).is_absolute()
+            and ".." not in Path(relative).parts,
+            "unsafe non-secret config input",
+        )
+        path = base / relative
+        require(path.is_file() and not path.is_symlink(), f"missing/unsafe non-secret config input: {relative}")
+        entries.append({"path": relative, "digest": sha256_bytes(path.read_bytes())})
+    return sha256_bytes(canonical_json({"schemaVersion": 1, "role": role, "files": entries}))
+
+
 def identity_payload(manifest: dict[str, Any]) -> dict[str, Any]:
     return {
         "schemaVersion": manifest["schemaVersion"],

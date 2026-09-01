@@ -1,0 +1,734 @@
+name: Build Trinyx CE runtime images implementation
+
+on:
+  workflow_call:
+
+permissions:
+  contents: read
+
+# Stable tags share one queue so two releases cannot race while moving
+# vX, vX.Y or latest. Pull requests keep independent concurrency.
+concurrency:
+  group: ${{ startsWith(github.ref, 'refs/tags/v') && 'trinyx-ce-stable-release' || format('trinyx-ce-images-{0}', github.event.pull_request.number || github.ref) }}
+  cancel-in-progress: ${{ !startsWith(github.ref, 'refs/tags/v') }}
+
+jobs:
+  prepare:
+    runs-on: ubuntu-latest
+    outputs:
+      release: ${{ steps.release.outputs.release }}
+      version: ${{ steps.release.outputs.version }}
+      patch: ${{ steps.release.outputs.patch }}
+      minor: ${{ steps.release.outputs.minor }}
+      major: ${{ steps.release.outputs.major }}
+      staging_tag: ${{ steps.release.outputs.staging_tag }}
+      release_commit: ${{ steps.release.outputs.release_commit }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # actions/checkout v7, Node 24
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+
+      - name: Test fail-closed release guard fixtures
+        shell: bash
+        run: bash scripts/release/test-release-guards.sh
+
+      - name: Validate source and release contract
+        id: release
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          package_version="$(node -p "require('./cli/package.json').version")"
+          if [[ ! "${package_version}" =~ ^(0|[1-9][0-9]*)[.](0|[1-9][0-9]*)[.](0|[1-9][0-9]*)$ ]]; then
+            echo "cli/package.json must contain an exact stable SemVer version" >&2
+            exit 1
+          fi
+
+          VERSION="${package_version}" node <<'NODE'
+          const fs = require('fs');
+          const compose = fs.readFileSync('cli/assets/docker-compose.yml', 'utf8');
+          const version = process.env.VERSION;
+          const images = [
+            'ghcr.io/trinyxai/trinyx-ce',
+            'ghcr.io/trinyxai/trinyx-ce-bridge',
+            'ghcr.io/trinyxai/trinyx-ce-frontend',
+            'ghcr.io/trinyxai/trinyx-ce-screenshot-renderer',
+            'ghcr.io/trinyxai/trinyx-ce-websearch'
+          ];
+          for (const image of images) {
+            const expected = image + ':v' + version;
+            if (!compose.includes(expected)) {
+              throw new Error('Canonical Compose is not pinned to ' + expected);
+            }
+          }
+          NODE
+
+          {
+            echo "release=false"
+            echo "version=${package_version}"
+            echo "patch="
+            echo "minor="
+            echo "major="
+            echo "staging_tag="
+            echo "release_commit=${GITHUB_SHA}"
+          } >> "${GITHUB_OUTPUT}"
+
+          if [[ "${GITHUB_REF}" != refs/tags/v* ]]; then
+            exit 0
+          fi
+
+          if [[ ! "${GITHUB_REF_NAME}" =~ ^v(0|[1-9][0-9]*)[.](0|[1-9][0-9]*)[.](0|[1-9][0-9]*)$ ]]; then
+            echo "Release tags must use exact stable SemVer: vX.Y.Z" >&2
+            exit 1
+          fi
+
+          release_major="${BASH_REMATCH[1]}"
+          release_minor="${BASH_REMATCH[2]}"
+          if [[ "v${package_version}" != "${GITHUB_REF_NAME}" ]]; then
+            echo "Tag ${GITHUB_REF_NAME} does not match cli/package.json version ${package_version}" >&2
+            exit 1
+          fi
+
+          git fetch --force --no-tags origin             '+refs/heads/main:refs/remotes/origin/main'
+          git fetch --force --tags origin
+          release_commit="$(git rev-parse "${GITHUB_SHA}^{commit}")"
+          tag_commit="$(git rev-parse "${GITHUB_REF_NAME}^{commit}")"
+          if [[ "${tag_commit}" != "${release_commit}" ]]; then
+            echo "Release ref does not resolve to the checked-out commit" >&2
+            exit 1
+          fi
+          if ! git merge-base --is-ancestor "${release_commit}" origin/main; then
+            echo "Release commit ${release_commit} is not contained in origin/main" >&2
+            exit 1
+          fi
+
+          latest_stable_tag="$(git tag --merged origin/main --list 'v*' |
+            grep -E '^v(0|[1-9][0-9]*)[.](0|[1-9][0-9]*)[.](0|[1-9][0-9]*)$' |
+            sort -V |
+            tail -n 1)"
+          if [[ "${latest_stable_tag}" != "${GITHUB_REF_NAME}" ]]; then
+            echo "Refusing alias rollback: newest stable tag on main is ${latest_stable_tag}" >&2
+            exit 1
+          fi
+
+          {
+            echo "release=true"
+            echo "patch=${GITHUB_REF_NAME}"
+            echo "minor=v${release_major}.${release_minor}"
+            echo "major=v${release_major}"
+            echo "staging_tag=staging-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+            echo "release_commit=${release_commit}"
+          } >> "${GITHUB_OUTPUT}"
+
+  release-preflight:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: read
+    needs: prepare
+    steps:
+      - name: Require npm publishing credentials
+        if: needs.prepare.outputs.release == 'true'
+        shell: bash
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          set -euo pipefail
+          if [[ -z "${NODE_AUTH_TOKEN}" ]]; then
+            echo "NPM_TOKEN is required for stable releases" >&2
+            exit 1
+          fi
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # actions/setup-node v7, Node 24
+        if: needs.prepare.outputs.release == 'true'
+        with:
+          node-version: 22
+          registry-url: https://registry.npmjs.org
+
+      - name: Validate npm credentials
+        if: needs.prepare.outputs.release == 'true'
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: npm whoami --registry=https://registry.npmjs.org
+
+      - name: Validate GHCR credentials
+        if: needs.prepare.outputs.release == 'true'
+        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # docker/login-action v4, Node 24
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+  package-npm:
+    runs-on: ubuntu-latest
+    needs: prepare
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # actions/checkout v7, Node 24
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # actions/setup-node v7, Node 24
+        with:
+          node-version: 22
+
+      - name: Pack and validate trinyx npm artifact
+        working-directory: cli
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm pack --json > npm-release-metadata.json
+          EXPECTED_VERSION="${{ needs.prepare.outputs.version }}" node <<'NODE'
+          const fs = require('fs');
+          const metadata = JSON.parse(fs.readFileSync('npm-release-metadata.json', 'utf8'))[0];
+          if (metadata.name !== 'trinyx') {
+            throw new Error('Unexpected npm package: ' + metadata.name);
+          }
+          if (metadata.version !== process.env.EXPECTED_VERSION) {
+            throw new Error('Unexpected npm version: ' + metadata.version);
+          }
+          if (!metadata.filename || !metadata.integrity) {
+            throw new Error('npm pack did not return a filename and integrity');
+          }
+          if (!fs.existsSync(metadata.filename)) {
+            throw new Error('Missing npm tarball: ' + metadata.filename);
+          }
+          const packedPaths = new Set((metadata.files || []).map(file => file.path));
+          for (const required of ['package.json', 'bin/trinyx.mjs', 'assets/docker-compose.yml']) {
+            if (!packedPaths.has(required)) {
+              throw new Error('npm package is missing ' + required);
+            }
+          }
+          NODE
+
+      - name: Upload npm release candidate
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # actions/upload-artifact v7, Node 24
+        with:
+          name: trinyx-npm-release-candidate
+          path: |
+            cli/*.tgz
+            cli/npm-release-metadata.json
+          if-no-files-found: error
+          retention-days: 30
+
+  build-validation:
+    if: needs.prepare.outputs.release != 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    needs:
+      - prepare
+      - release-preflight
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: backend
+            context: ./backend
+            file: ./backend/monolith-service/Dockerfile
+            image: ghcr.io/trinyxai/trinyx-ce
+            build_args: ""
+          - name: bridge
+            context: ./mcp
+            file: ./mcp/bridge/Dockerfile
+            image: ghcr.io/trinyxai/trinyx-ce-bridge
+            build_args: ""
+          - name: frontend
+            context: ./frontend
+            file: ./frontend/Dockerfile
+            image: ghcr.io/trinyxai/trinyx-ce-frontend
+            build_args: |
+              NEXT_PUBLIC_APP_EDITION=ce
+              NEXT_PUBLIC_AUTH_MODE=embedded
+              NEXT_PUBLIC_BILLING_ENABLED=false
+          - name: screenshot-renderer
+            context: ./screenshot-renderer
+            file: ./screenshot-renderer/Dockerfile
+            image: ghcr.io/trinyxai/trinyx-ce-screenshot-renderer
+            build_args: ""
+          - name: websearch
+            context: ./websearch-service
+            file: ./websearch-service/Dockerfile
+            image: ghcr.io/trinyxai/trinyx-ce-websearch
+            build_args: ""
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # actions/checkout v7, Node 24
+        with:
+          persist-credentials: false
+      - uses: docker/setup-buildx-action@37fe631027851001ddb9b187196cc803df7f5f0e # docker/setup-buildx-action v4, Node 24
+
+      - name: Build ${{ matrix.name }}
+        id: build
+        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # docker/build-push-action v7, Node 24
+        with:
+          context: ${{ matrix.context }}
+          file: ${{ matrix.file }}
+          platforms: linux/amd64
+          push: false
+          tags: ${{ matrix.image }}:${{ github.sha }}
+          labels: |
+            org.opencontainers.image.source=https://github.com/TrinyxAI/Trinyx
+            org.opencontainers.image.revision=${{ needs.prepare.outputs.release_commit }}
+            org.opencontainers.image.version=${{ needs.prepare.outputs.version }}
+          provenance: false
+          sbom: false
+          build-args: ${{ matrix.build_args }}
+          cache-from: type=gha,scope=trinyx-ce-${{ matrix.name }}
+          cache-to: type=gha,mode=max,scope=trinyx-ce-${{ matrix.name }}
+
+
+  build:
+    if: needs.prepare.outputs.release == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
+    needs:
+      - prepare
+      - release-preflight
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: backend
+            context: ./backend
+            file: ./backend/monolith-service/Dockerfile
+            image: ghcr.io/trinyxai/trinyx-ce
+            build_args: ""
+          - name: bridge
+            context: ./mcp
+            file: ./mcp/bridge/Dockerfile
+            image: ghcr.io/trinyxai/trinyx-ce-bridge
+            build_args: ""
+          - name: frontend
+            context: ./frontend
+            file: ./frontend/Dockerfile
+            image: ghcr.io/trinyxai/trinyx-ce-frontend
+            build_args: |
+              NEXT_PUBLIC_APP_EDITION=ce
+              NEXT_PUBLIC_AUTH_MODE=embedded
+              NEXT_PUBLIC_BILLING_ENABLED=false
+          - name: screenshot-renderer
+            context: ./screenshot-renderer
+            file: ./screenshot-renderer/Dockerfile
+            image: ghcr.io/trinyxai/trinyx-ce-screenshot-renderer
+            build_args: ""
+          - name: websearch
+            context: ./websearch-service
+            file: ./websearch-service/Dockerfile
+            image: ghcr.io/trinyxai/trinyx-ce-websearch
+            build_args: ""
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # actions/checkout v7, Node 24
+        with:
+          persist-credentials: false
+      - uses: docker/setup-buildx-action@37fe631027851001ddb9b187196cc803df7f5f0e # docker/setup-buildx-action v4, Node 24
+
+      - name: Log in to GHCR
+        if: needs.prepare.outputs.release == 'true'
+        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # docker/login-action v4, Node 24
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build ${{ matrix.name }}
+        id: build
+        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # docker/build-push-action v7, Node 24
+        with:
+          context: ${{ matrix.context }}
+          file: ${{ matrix.file }}
+          platforms: linux/amd64
+          push: ${{ needs.prepare.outputs.release == 'true' }}
+          tags: ${{ matrix.image }}:${{ needs.prepare.outputs.release == 'true' && needs.prepare.outputs.staging_tag || github.sha }}
+          labels: |
+            org.opencontainers.image.source=https://github.com/TrinyxAI/Trinyx
+            org.opencontainers.image.revision=${{ needs.prepare.outputs.release_commit }}
+            org.opencontainers.image.version=${{ needs.prepare.outputs.version }}
+          provenance: ${{ needs.prepare.outputs.release == 'true' && 'mode=max' || 'false' }}
+          sbom: ${{ needs.prepare.outputs.release == 'true' }}
+          build-args: ${{ matrix.build_args }}
+          cache-from: type=gha,scope=trinyx-ce-${{ matrix.name }}
+          cache-to: type=gha,mode=max,scope=trinyx-ce-${{ matrix.name }}
+
+      - name: Record staged release digest
+        if: needs.prepare.outputs.release == 'true'
+        shell: bash
+        env:
+          IMAGE_NAME: ${{ matrix.image }}
+          COMPONENT_NAME: ${{ matrix.name }}
+          IMAGE_DIGEST: ${{ steps.build.outputs.digest }}
+          STAGING_TAG: ${{ needs.prepare.outputs.staging_tag }}
+        run: |
+          set -euo pipefail
+          mkdir -p release-digests
+          jq -n             --arg name "${COMPONENT_NAME}"             --arg image "${IMAGE_NAME}"             --arg digest "${IMAGE_DIGEST}"             --arg staging "${IMAGE_NAME}:${STAGING_TAG}"             --arg subject "${IMAGE_NAME}@${IMAGE_DIGEST}"             '{name: $name, image: $image, digest: $digest, staging: $staging,
+              attestations: {
+                sbom: {format: "spdx", subject: $subject, storage: "oci-referrer"},
+                provenance: {format: "slsa", subject: $subject, storage: "oci-referrer"}
+              }}'             > "release-digests/${COMPONENT_NAME}.json"
+
+      - name: Upload staged release digest
+        if: needs.prepare.outputs.release == 'true'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # actions/upload-artifact v7, Node 24
+        with:
+          name: ce-release-digest-${{ matrix.name }}
+          path: release-digests/${{ matrix.name }}.json
+          if-no-files-found: error
+          retention-days: 30
+
+  promote-patch:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    needs:
+      - prepare
+      - build
+      - package-npm
+    if: needs.prepare.outputs.release == 'true'
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # actions/checkout v7, Node 24
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # actions/download-artifact v8, Node 24
+        with:
+          pattern: ce-release-digest-*
+          path: release-digests
+          merge-multiple: true
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # actions/download-artifact v8, Node 24
+        with:
+          name: trinyx-npm-release-candidate
+          path: npm-package
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # actions/setup-node v7, Node 24
+        with:
+          node-version: 22
+          registry-url: https://registry.npmjs.org
+      - name: Preflight immutable npm package
+        shell: bash
+        env:
+          RELEASE_VERSION: ${{ needs.prepare.outputs.version }}
+        run: >-
+          bash scripts/release/preflight-npm-package.sh
+          npm-package/npm-release-metadata.json
+          "${RELEASE_VERSION}"
+      - uses: docker/setup-buildx-action@37fe631027851001ddb9b187196cc803df7f5f0e # docker/setup-buildx-action v4, Node 24
+      - uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # docker/login-action v4, Node 24
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Promote and verify immutable release tags
+        shell: bash
+        env:
+          PATCH_TAG: ${{ needs.prepare.outputs.patch }}
+          RELEASE_VERSION: ${{ needs.prepare.outputs.version }}
+          RELEASE_COMMIT: ${{ needs.prepare.outputs.release_commit }}
+        run: |
+          set -euo pipefail
+
+          mapfile -t digest_files < <(find release-digests -maxdepth 1 -name '*.json' -type f | sort)
+          if [[ "${#digest_files[@]}" -ne 5 ]]; then
+            echo "Expected five staged image digest files, found ${#digest_files[@]}" >&2
+            exit 1
+          fi
+
+          inspect_digest() {
+            docker buildx imagetools inspect "$1" 2>/dev/null |
+              awk '$1 == "Digest:" { print $2; exit }'
+          }
+
+          bash scripts/release/revalidate-release-source.sh "${PATCH_TAG}" "${RELEASE_COMMIT}"
+          bash scripts/release/preflight-immutable-images.sh release-digests "${PATCH_TAG}" "${RELEASE_COMMIT}"
+
+          # No immutable mutation is permitted until all five images pass.
+          for file in "${digest_files[@]}"; do
+            image="$(jq -er '.image' "${file}")"
+            expected="$(jq -er '.digest' "${file}")"
+            staging="$(jq -er '.staging' "${file}")"
+            patch_ref="${image}:${PATCH_TAG}"
+            sha_ref="${image}:${RELEASE_COMMIT}"
+
+            staging_digest="$(inspect_digest "${staging}")"
+            if [[ "${staging_digest}" != "${expected}" ]]; then
+              echo "Staging digest mismatch for ${staging}" >&2
+              exit 1
+            fi
+
+            for immutable_ref in "${patch_ref}" "${sha_ref}"; do
+              existing="$(inspect_digest "${immutable_ref}" || true)"
+              if [[ -n "${existing}" && "${existing}" != "${expected}" ]]; then
+                echo "Refusing to overwrite immutable ${immutable_ref}: ${existing} != ${expected}" >&2
+                exit 1
+              fi
+              if [[ -z "${existing}" ]]; then
+                docker buildx imagetools create                   --tag "${immutable_ref}"                   "${image}@${expected}"
+              fi
+              promoted="$(inspect_digest "${immutable_ref}")"
+              if [[ "${promoted}" != "${expected}" ]]; then
+                echo "Registry verification failed for ${immutable_ref}" >&2
+                exit 1
+              fi
+            done
+
+            jq               --arg patch "${patch_ref}"               --arg sha "${sha_ref}"               '. + {patch: $patch, sha: $sha}'               "${file}" > "${file}.promoted"
+            mv "${file}.promoted" "${file}"
+          done
+
+          jq -s             --arg version "${RELEASE_VERSION}"             --arg tag "${PATCH_TAG}"             --arg commit "${RELEASE_COMMIT}"             --arg generated_at "$(date -u +%Y-%m-%dT%H:%M:%SZ)"             '{schemaVersion: 2, version: $version, tag: $tag, commit: $commit,
+              generatedAt: $generated_at, images: .}'             "${digest_files[@]}" > release-manifest-patch.json
+
+      - name: Upload immutable release manifest
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # actions/upload-artifact v7, Node 24
+        with:
+          name: trinyx-ce-patch-manifest-${{ needs.prepare.outputs.version }}
+          path: release-manifest-patch.json
+          if-no-files-found: error
+          retention-days: 90
+
+  publish-npm:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    needs:
+      - prepare
+      - promote-patch
+      - package-npm
+    if: needs.prepare.outputs.release == 'true'
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # actions/checkout v7, Node 24
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # actions/download-artifact v8, Node 24
+        with:
+          name: trinyx-npm-release-candidate
+          path: npm-package
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # actions/setup-node v7, Node 24
+        with:
+          node-version: 22
+          registry-url: https://registry.npmjs.org
+
+      - name: Publish immutable npm package
+        shell: bash
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+          RELEASE_VERSION: ${{ needs.prepare.outputs.version }}
+          PATCH_TAG: ${{ needs.prepare.outputs.patch }}
+          RELEASE_COMMIT: ${{ needs.prepare.outputs.release_commit }}
+        run: |
+          set -euo pipefail
+          bash scripts/release/revalidate-release-source.sh "${PATCH_TAG}" "${RELEASE_COMMIT}"
+          metadata="npm-package/npm-release-metadata.json"
+          tarball="$(find npm-package -maxdepth 1 -name '*.tgz' -type f -print -quit)"
+          if [[ -z "${tarball}" || ! -f "${metadata}" ]]; then
+            echo "npm release candidate is incomplete" >&2
+            exit 1
+          fi
+
+          local_integrity="$(jq -er '.[0].integrity' "${metadata}")"
+          existing_integrity="$(npm view "trinyx@${RELEASE_VERSION}" dist.integrity 2>/dev/null || true)"
+          if [[ -n "${existing_integrity}" ]]; then
+            if [[ "${existing_integrity}" != "${local_integrity}" ]]; then
+              echo "Refusing to overwrite trinyx@${RELEASE_VERSION}: npm integrity differs" >&2
+              exit 1
+            fi
+            echo "trinyx@${RELEASE_VERSION} already has the expected integrity; publication is idempotent."
+          else
+            npm publish "${tarball}" --access public --provenance
+          fi
+
+          published_integrity=""
+          for attempt in {1..12}; do
+            published_integrity="$(npm view "trinyx@${RELEASE_VERSION}" dist.integrity 2>/dev/null || true)"
+            if [[ -n "${published_integrity}" ]]; then
+              break
+            fi
+            sleep 5
+          done
+          if [[ "${published_integrity}" != "${local_integrity}" ]]; then
+            echo "Published npm integrity verification failed" >&2
+            exit 1
+          fi
+
+          npm_tarball_url="https://registry.npmjs.org/trinyx/-/trinyx-${RELEASE_VERSION}.tgz"
+          npm_provenance_url="https://www.npmjs.com/package/trinyx/v/${RELEASE_VERSION}"
+          jq -n             --arg name "trinyx"             --arg version "${RELEASE_VERSION}"             --arg integrity "${published_integrity}"             --arg tarball "${npm_tarball_url}"             --arg provenance "${npm_provenance_url}"             '{name: $name, version: $version, integrity: $integrity, tarball: $tarball,
+              provenance: {type: "npm-provenance", reference: $provenance}}'             > npm-published.json
+
+          {
+            echo "### npm"
+            echo "trinyx@${RELEASE_VERSION}"
+            echo "Integrity: ${published_integrity}"
+          } >> "${GITHUB_STEP_SUMMARY}"
+
+      - name: Upload verified npm publication metadata
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # actions/upload-artifact v7, Node 24
+        with:
+          name: trinyx-npm-published-${{ needs.prepare.outputs.version }}
+          path: npm-published.json
+          if-no-files-found: error
+          retention-days: 365
+
+  promote-aliases:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    needs:
+      - prepare
+      - promote-patch
+      - publish-npm
+    if: needs.prepare.outputs.release == 'true'
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # actions/checkout v7, Node 24
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # actions/download-artifact v8, Node 24
+        with:
+          name: trinyx-ce-patch-manifest-${{ needs.prepare.outputs.version }}
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # actions/download-artifact v8, Node 24
+        with:
+          name: trinyx-npm-published-${{ needs.prepare.outputs.version }}
+      - uses: docker/setup-buildx-action@37fe631027851001ddb9b187196cc803df7f5f0e # docker/setup-buildx-action v4, Node 24
+      - uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # docker/login-action v4, Node 24
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Recheck monotonic release order
+        shell: bash
+        env:
+          PATCH_TAG: ${{ needs.prepare.outputs.patch }}
+          RELEASE_COMMIT: ${{ needs.prepare.outputs.release_commit }}
+        run: |
+          set -euo pipefail
+          bash scripts/release/revalidate-release-source.sh "${PATCH_TAG}" "${RELEASE_COMMIT}"
+          latest_stable_tag="$(git tag --merged origin/main --list 'v*' |
+            grep -E '^v(0|[1-9][0-9]*)[.](0|[1-9][0-9]*)[.](0|[1-9][0-9]*)$' |
+            sort -V |
+            tail -n 1)"
+          if [[ "${latest_stable_tag}" != "${PATCH_TAG}" ]]; then
+            echo "Refusing alias rollback: newest stable tag on main is ${latest_stable_tag}" >&2
+            exit 1
+          fi
+
+      - name: Promote mutable aliases and verify registry
+        shell: bash
+        env:
+          PATCH_TAG: ${{ needs.prepare.outputs.patch }}
+          MINOR_TAG: ${{ needs.prepare.outputs.minor }}
+          MAJOR_TAG: ${{ needs.prepare.outputs.major }}
+          RELEASE_VERSION: ${{ needs.prepare.outputs.version }}
+        run: |
+          set -euo pipefail
+
+          inspect_digest() {
+            docker buildx imagetools inspect "$1" 2>/dev/null |
+              awk '$1 == "Digest:" { print $2; exit }'
+          }
+
+          image_count="$(jq '.images | length' release-manifest-patch.json)"
+          if [[ "${image_count}" -ne 5 ]]; then
+            echo "Release manifest must contain exactly five images" >&2
+            exit 1
+          fi
+
+          for index in $(seq 0 $((image_count - 1))); do
+            image="$(jq -er ".images[${index}].image" release-manifest-patch.json)"
+            expected="$(jq -er ".images[${index}].digest" release-manifest-patch.json)"
+            patch_ref="${image}:${PATCH_TAG}"
+
+            if [[ "$(inspect_digest "${patch_ref}")" != "${expected}" ]]; then
+              echo "Immutable patch verification failed for ${patch_ref}" >&2
+              exit 1
+            fi
+
+            docker buildx imagetools create               --tag "${image}:${MINOR_TAG}"               --tag "${image}:${MAJOR_TAG}"               --tag "${image}:latest"               "${image}@${expected}"
+
+            for ref in               "${patch_ref}"               "${image}:${MINOR_TAG}"               "${image}:${MAJOR_TAG}"               "${image}:latest"; do
+              actual="$(inspect_digest "${ref}")"
+              if [[ "${actual}" != "${expected}" ]]; then
+                echo "Registry verification failed for ${ref}: ${actual} != ${expected}" >&2
+                exit 1
+              fi
+            done
+          done
+
+          jq             --arg verified_at "$(date -u +%Y-%m-%dT%H:%M:%SZ)"             --arg patch "${PATCH_TAG}"             --arg minor "${MINOR_TAG}"             --arg major "${MAJOR_TAG}"             --slurpfile npm npm-published.json             '. + {
+              verifiedAt: $verified_at,
+              npm: $npm[0],
+              aliases: {patch: $patch, minor: $minor, major: $major, latest: "latest"}
+            }' release-manifest-patch.json > release-manifest.json
+
+          {
+            echo "### Trinyx CE ${PATCH_TAG} verified release"
+            echo ""
+            echo "| Component | Immutable digest |"
+            echo "| --- | --- |"
+            jq -r '.images[] | "| " + .name + " | " + .image + "@" + .digest + " |"' release-manifest.json
+            echo ""
+            echo "npm: trinyx@${RELEASE_VERSION}"
+            echo "npm integrity: $(jq -r '.npm.integrity' release-manifest.json)"
+          } >> "${GITHUB_STEP_SUMMARY}"
+
+      - name: Upload verified release manifest
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # actions/upload-artifact v7, Node 24
+        with:
+          name: trinyx-ce-release-manifest-${{ needs.prepare.outputs.version }}
+          path: release-manifest.json
+          if-no-files-found: error
+          retention-days: 365
+
+
+  attach-release-manifest:
+    runs-on: ubuntu-latest
+    needs:
+      - prepare
+      - promote-aliases
+    if: needs.prepare.outputs.release == 'true'
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # actions/checkout v7, Node 24
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # actions/download-artifact v8, Node 24
+        with:
+          name: trinyx-ce-release-manifest-${{ needs.prepare.outputs.version }}
+      - name: Attach immutable manifest to the GitHub Release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PATCH_TAG: ${{ needs.prepare.outputs.patch }}
+          RELEASE_COMMIT: ${{ needs.prepare.outputs.release_commit }}
+        run: |
+          set -euo pipefail
+          bash scripts/release/revalidate-release-source.sh "${PATCH_TAG}" "${RELEASE_COMMIT}"
+          jq -e             --arg tag "${PATCH_TAG}"             --arg commit "${RELEASE_COMMIT}"             '.tag == $tag and .commit == $commit and (.images | length) == 5
+              and (.npm.integrity | type == "string" and length > 0)'             release-manifest.json > /dev/null
+
+          if gh release view "${PATCH_TAG}" > /dev/null 2>&1; then
+            mkdir -p existing-release
+            if gh release download "${PATCH_TAG}" --pattern release-manifest.json --dir existing-release 2>/dev/null; then
+              cmp --silent release-manifest.json existing-release/release-manifest.json || {
+                echo "Existing GitHub Release manifest differs; refusing overwrite" >&2
+                exit 1
+              }
+            else
+              gh release upload "${PATCH_TAG}" release-manifest.json
+            fi
+          else
+            gh release create "${PATCH_TAG}" release-manifest.json               --verify-tag               --title "Trinyx ${PATCH_TAG}"               --generate-notes
+          fi
+
+          mkdir -p verified-release
+          gh release download "${PATCH_TAG}" --pattern release-manifest.json --dir verified-release
+          cmp --silent release-manifest.json verified-release/release-manifest.json
+

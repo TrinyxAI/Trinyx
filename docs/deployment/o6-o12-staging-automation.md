@@ -135,11 +135,11 @@ Do not execute these steps as part of repository implementation. They are the la
 6. Execute approved change sets; no PCA resource is included in this step.
 7. Register the frozen release through the pre-merge bridge operation `staging-release-register`. The workflow verifies the ZIP, the four original builder attestations, release identity, bundle and image inventory before OIDC.
 8. Reconcile both hosts in plan mode. This installs health inventories and the TLS staging tool, but never certificate private keys from Git.
-9. After separate PCA approval/issuance, stage trust/certificate material:
+9. Establish the default offline staging PKI from the O10 runbook (AWS PCA remains an optional paid path behind `AWS_PCA_LIVE_APPROVAL_REQUIRED`), then stage trust/certificate material:
    - Cloud: `stage-staging-tls --role cloud --ca <approved-staging-ca.pem>`
    - Paid: `stage-staging-tls --role paid --ca <approved-staging-ca.pem> --certificate <billing-internal.crt> --private-key <billing-internal.key>`
    The tool verifies chain, `billing-internal.trinyx.private`, certificate/key match, atomicity and mode `0600` for the private key.
-10. Run the baseline observation on each host and independently review a canonical baseline release. Create each root-owned `config/legacy-adoption.json` from the committed schema with the exact hashes. Do not set approval true unless the runtime image and bundle/config compatibility review is complete.
+10. Run `/usr/local/lib/trinyx/baseline-observation` on each host with the approved environment-config revision. Independently review a canonical baseline release. The observation must contain the full container ID, container image object ID, exact configured digest, image `RepoDigests`, Compose project/service labels and the digest of materialized non-secret config for exactly 20 Cloud and 8 Paid services. Create each root-owned `config/legacy-adoption.json` from the committed schema. Do not approve unless every runtime service digest equals the baseline manifest binding.
 11. Use `staging-legacy-adopt` only after that review. It installs without activation, health-checks the existing runtime, atomically adopts the pointer only, health-checks again and compensates on partial failure.
 12. Run install/plan. Stop again before candidate `apply`.
 13. Only after independent review run the single qualification workflow: candidate deploy → health → baseline rollback → health → same-candidate redeploy → health/idempotence.
@@ -155,10 +155,30 @@ sha256sum /etc/trinyx/staging/<role>/releases/<releaseId>/images.env
 sha256sum /etc/trinyx/staging/<role>/config/legacy-observation.json
 ```
 
-Copy the resulting `sha256:<hex>` values into `legacy-adoption.json`. Also bind the manifest's deployment-bundle digest, the approved environment-config revision and the exact 40-character platform commit. The adoption engine recomputes every value and rejects drift.
+Copy the resulting `sha256:<hex>` values into `legacy-adoption.json`. Also copy the observation's `environmentConfigDigest`, bind the manifest deployment-bundle digest, the approved environment-config revision and the exact 40-character platform commit. The adoption engine recomputes the configuration digest, validates the observation hash and requires each observed `configuredImage` and `RepoDigests` entry to contain the exact baseline `package@sha256` for that service. Independent hashes without this relational equality are rejected.
 
 ### Private CA stop
 
 `AWS_PCA_LIVE_APPROVAL_REQUIRED`
 
 No Private CA, certificate, CRL bucket, KMS key or live trust material may be created by these repository workflows. Current Private CA pricing must be rechecked from AWS immediately before the approved live operation.
+
+
+## Third-review closures (repository-only)
+
+- Legacy observations use schema v2 and bind each Compose service to the full
+  container ID, immutable Docker image object, configured digest and image
+  RepoDigests. Adoption requires exact service-by-service equality with the
+  canonical release manifest; 20/20 Cloud and 8/8 Paid are mandatory.
+- The non-secret materialized configuration is content-hashed from
+  `deployment-plan.json` plus every `requiredFiles` entry. Observation,
+  approval evidence and current host bytes must all agree.
+- Every direct workflow job with `id-token: write` delegates to a reusable
+  `workflow_call` implementation. This includes both the release-candidate
+  builder and the CE publisher, preventing the repository-wide custom OIDC
+  template from encountering a direct job without `job_workflow_ref`.
+- AWS role trust is designed to pin reusable workflow identity to a reviewed
+  commit SHA. A mutable branch ref is not accepted for the approved live
+  change set.
+- Offline encrypted staging root/issuer is the O10 default. The optional
+  two-CA AWS PCA hierarchy remains disabled and paid.

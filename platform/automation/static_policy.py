@@ -17,6 +17,10 @@ APP_BUILDS = {
 }
 LIVE_WRAPPERS = {"staging-release-register.yml", "staging-qualification.yml", "staging-oidc-probe.yml", "staging-legacy-adopt.yml"}
 LIVE_IMPLEMENTATIONS = {name.replace(".yml", "-impl.yml") for name in LIVE_WRAPPERS}
+OIDC_IMPLEMENTATIONS = LIVE_IMPLEMENTATIONS | {
+    "build-release-candidate-impl.yml",
+    "build-trinyx-ce-images-impl.yml",
+}
 
 
 def require(ok: bool, message: str) -> None:
@@ -39,6 +43,28 @@ def check_workflows() -> None:
             if not owner.startswith("./"):
                 require(re.fullmatch(r"[0-9a-f]{40}", ref) is not None,
                         f"unpinned action:{path.name}:{owner}@{ref}")
+        if "id-token: write" in text:
+            trigger = head(text)
+            if path.name in OIDC_IMPLEMENTATIONS:
+                require(
+                    "workflow_call:" in trigger
+                    and "workflow_dispatch:" not in trigger
+                    and not any(x in trigger for x in ("\n  push:", "\n  pull_request:", "\n  schedule:")),
+                    f"OIDC implementation is not call-only:{path.name}",
+                )
+            else:
+                job_starts = list(re.finditer(r"^  ([A-Za-z0-9_-]+):\s*$", text, re.M))
+                for index, match in enumerate(job_starts):
+                    finish = job_starts[index + 1].start() if index + 1 < len(job_starts) else len(text)
+                    block = text[match.start():finish]
+                    if "id-token: write" not in block:
+                        continue
+                    require(
+                        re.search(r"^    uses:\s*(?:\./\.github/workflows/|TrinyxAI/Trinyx/\.github/workflows/)", block, re.M)
+                        is not None
+                        and re.search(r"^    steps:\s*$", block, re.M) is None,
+                        f"direct id-token job is not delegated to a reusable workflow:{path.name}:{match.group(1)}",
+                    )
         if path.name in LIVE_WRAPPERS:
             trigger = head(text)
             require("workflow_dispatch:" in trigger, f"live wrapper not manual:{path.name}")
@@ -77,8 +103,20 @@ def check_workflows() -> None:
     ):
         require(f"inputs.operation == '{operation}'" in bridge and target in bridge,
                 f"missing narrow pre-merge bridge:{operation}")
-    require("inputs.operation == 'release-candidate'" in bridge,
-            "manual application build is not separated from platform bridge")
+    require(
+        "inputs.operation == 'release-candidate'" in bridge
+        and "build-release-candidate-impl.yml" in bridge,
+        "manual application build is not separated from reusable implementation",
+    )
+    for wrapper, implementation in (
+        ("build-release-candidate.yml", "build-release-candidate-impl.yml"),
+        ("build-trinyx-ce-images.yml", "build-trinyx-ce-images-impl.yml"),
+    ):
+        wrapper_text = (WORKFLOWS / wrapper).read_text(encoding="utf-8")
+        implementation_text = (WORKFLOWS / implementation).read_text(encoding="utf-8")
+        require("workflow_call:" not in head(wrapper_text), f"direct builder exposes workflow_call:{wrapper}")
+        require("workflow_call:" in head(implementation_text), f"builder implementation is not reusable:{implementation}")
+        require(implementation in wrapper_text, f"builder wrapper does not call implementation:{wrapper}")
     qualification = (WORKFLOWS / "staging-qualification-impl.yml").read_text(encoding="utf-8")
     require("timeout-minutes: 360" in qualification, "qualification lacks maximum bounded job budget")
 
@@ -116,7 +154,16 @@ def check_iac() -> None:
     dispatcher = (ROOT / "platform/host/common/staging-deploy.sh").read_text(encoding="utf-8")
     require("--expected-bundle-digest" in dispatcher, "SSM bundle digest is not checked after install")
     pca = json.loads((ROOT / "platform/aws/staging/private-ca-plan.json").read_text(encoding="utf-8"))
+    require(pca["Parameters"]["StagingPkiMode"]["Default"] == "OFFLINE_SELF_MANAGED",
+            "offline staging PKI is not the default")
     require(pca["Parameters"]["PcaLiveApproval"]["Default"] == "AWS_PCA_LIVE_APPROVAL_REQUIRED", "PCA stop absent")
+    require("AWS_PRIVATE_CA" in json.dumps(pca["Conditions"]["PcaApproved"]),
+            "optional paid PCA mode is not separately gated")
+    engine = (ROOT / "platform/automation/deploy_engine.py").read_text(encoding="utf-8")
+    require("LEGACY_BASELINE_RUNTIME_IMAGE_MISMATCH" in engine and "repoDigests" in engine,
+            "legacy adoption is not bound to runtime image digests")
+    require("environment_config_digest" in engine,
+            "legacy adoption is not bound to materialized non-secret config")
     for resource in pca["Resources"].values():
         if str(resource.get("Type", "")).startswith("AWS::ACMPCA::"):
             require(resource.get("Condition") == "PcaApproved", "PCA resource lacks approval condition")

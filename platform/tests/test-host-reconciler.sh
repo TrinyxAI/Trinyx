@@ -25,6 +25,8 @@ run_role() {
 
   test "$(stat -c %a "$fake/etc/trinyx/platform/environment.env")" = 600
   test "$(stat -c %a "$fake/usr/local/lib/trinyx/runtime-env.sh")" = 750
+  test "$(stat -c %a "$fake/usr/local/lib/trinyx/baseline-observation")" = 750
+  test "$(stat -c %a "$fake/usr/local/lib/trinyx/offline-staging-pki")" = 750
   test "$(stat -c %a "$fake/etc/docker/daemon.json")" = 644
   grep -Fxq 'TRINYX_ENVIRONMENT=staging' "$fake/etc/trinyx/platform/environment.env"
   grep -Fxq 'CLOUD_SSM_PATH=/trinyx/staging/cloud/' "$fake/etc/trinyx/platform/environment.env"

@@ -1,11 +1,23 @@
 {
   "AWSTemplateFormatVersion": "2010-09-09",
-  "Description": "APPROVAL-GATED staging-only Trinyx private CA hierarchy. Default creates nothing. Never use for production.",
+  "Description": "OPTIONAL paid AWS Private CA hierarchy for staging. Default is OFFLINE_SELF_MANAGED and creates no PCA resource.",
   "Parameters": {
+    "StagingPkiMode": {
+      "Type": "String",
+      "Default": "OFFLINE_SELF_MANAGED",
+      "AllowedValues": [
+        "OFFLINE_SELF_MANAGED",
+        "AWS_PRIVATE_CA"
+      ],
+      "Description": "Offline encrypted root/issuer is the default staging path; AWS PCA is an explicitly paid optional path."
+    },
     "PcaLiveApproval": {
       "Type": "String",
       "Default": "AWS_PCA_LIVE_APPROVAL_REQUIRED",
-      "AllowedValues": ["AWS_PCA_LIVE_APPROVAL_REQUIRED", "APPROVED"]
+      "AllowedValues": [
+        "AWS_PCA_LIVE_APPROVAL_REQUIRED",
+        "APPROVED"
+      ]
     },
     "PcaAdministratorPrincipalArn": {
       "Type": "String",
@@ -18,16 +30,47 @@
     "CreateDedicatedAuditTrail": {
       "Type": "String",
       "Default": "false",
-      "AllowedValues": ["false", "true"],
+      "AllowedValues": [
+        "false",
+        "true"
+      ],
       "Description": "Prefer an existing organization/account trail. Enable only if no adequate management-event trail exists."
     }
   },
   "Conditions": {
-    "PcaApproved": {"Fn::Equals": [{"Ref": "PcaLiveApproval"}, "APPROVED"]},
+    "PcaApproved": {
+      "Fn::And": [
+        {
+          "Fn::Equals": [
+            {
+              "Ref": "StagingPkiMode"
+            },
+            "AWS_PRIVATE_CA"
+          ]
+        },
+        {
+          "Fn::Equals": [
+            {
+              "Ref": "PcaLiveApproval"
+            },
+            "APPROVED"
+          ]
+        }
+      ]
+    },
     "CreateAuditTrail": {
       "Fn::And": [
-        {"Condition": "PcaApproved"},
-        {"Fn::Equals": [{"Ref": "CreateDedicatedAuditTrail"}, "true"]}
+        {
+          "Condition": "PcaApproved"
+        },
+        {
+          "Fn::Equals": [
+            {
+              "Ref": "CreateDedicatedAuditTrail"
+            },
+            "true"
+          ]
+        }
       ]
     }
   },
@@ -47,11 +90,24 @@
           "OrganizationalUnit": "Staging PKI",
           "CommonName": "Trinyx Staging Root CA"
         },
-        "RevocationConfiguration": {"OcspConfiguration": {"Enabled": true}},
+        "RevocationConfiguration": {
+          "OcspConfiguration": {
+            "Enabled": true
+          }
+        },
         "Tags": [
-          {"Key": "TrinyxEnvironment", "Value": "staging"},
-          {"Key": "TrinyxPurpose", "Value": "staging-root-ca"},
-          {"Key": "ProductionUse", "Value": "forbidden"}
+          {
+            "Key": "TrinyxEnvironment",
+            "Value": "staging"
+          },
+          {
+            "Key": "TrinyxPurpose",
+            "Value": "staging-root-ca"
+          },
+          {
+            "Key": "ProductionUse",
+            "Value": "forbidden"
+          }
         ]
       }
     },
@@ -59,19 +115,38 @@
       "Type": "AWS::ACMPCA::Certificate",
       "Condition": "PcaApproved",
       "Properties": {
-        "CertificateAuthorityArn": {"Ref": "StagingRootCa"},
-        "CertificateSigningRequest": {"Fn::GetAtt": ["StagingRootCa", "CertificateSigningRequest"]},
+        "CertificateAuthorityArn": {
+          "Ref": "StagingRootCa"
+        },
+        "CertificateSigningRequest": {
+          "Fn::GetAtt": [
+            "StagingRootCa",
+            "CertificateSigningRequest"
+          ]
+        },
         "SigningAlgorithm": "SHA512WITHRSA",
-        "TemplateArn": {"Fn::Sub": "arn:${AWS::Partition}:acm-pca:::template/RootCACertificate/V1"},
-        "Validity": {"Type": "YEARS", "Value": 10}
+        "TemplateArn": {
+          "Fn::Sub": "arn:${AWS::Partition}:acm-pca:::template/RootCACertificate/V1"
+        },
+        "Validity": {
+          "Type": "YEARS",
+          "Value": 10
+        }
       }
     },
     "StagingRootActivation": {
       "Type": "AWS::ACMPCA::CertificateAuthorityActivation",
       "Condition": "PcaApproved",
       "Properties": {
-        "CertificateAuthorityArn": {"Ref": "StagingRootCa"},
-        "Certificate": {"Fn::GetAtt": ["StagingRootCertificate", "Certificate"]},
+        "CertificateAuthorityArn": {
+          "Ref": "StagingRootCa"
+        },
+        "Certificate": {
+          "Fn::GetAtt": [
+            "StagingRootCertificate",
+            "Certificate"
+          ]
+        },
         "Status": "ACTIVE"
       }
     },
@@ -91,11 +166,24 @@
           "OrganizationalUnit": "Staging PKI",
           "CommonName": "Trinyx Staging Internal TLS Issuer"
         },
-        "RevocationConfiguration": {"OcspConfiguration": {"Enabled": true}},
+        "RevocationConfiguration": {
+          "OcspConfiguration": {
+            "Enabled": true
+          }
+        },
         "Tags": [
-          {"Key": "TrinyxEnvironment", "Value": "staging"},
-          {"Key": "TrinyxPurpose", "Value": "staging-internal-tls-issuer"},
-          {"Key": "ProductionUse", "Value": "forbidden"}
+          {
+            "Key": "TrinyxEnvironment",
+            "Value": "staging"
+          },
+          {
+            "Key": "TrinyxPurpose",
+            "Value": "staging-internal-tls-issuer"
+          },
+          {
+            "Key": "ProductionUse",
+            "Value": "forbidden"
+          }
         ]
       }
     },
@@ -104,20 +192,44 @@
       "Condition": "PcaApproved",
       "DependsOn": "StagingRootActivation",
       "Properties": {
-        "CertificateAuthorityArn": {"Ref": "StagingRootCa"},
-        "CertificateSigningRequest": {"Fn::GetAtt": ["StagingIssuerCa", "CertificateSigningRequest"]},
+        "CertificateAuthorityArn": {
+          "Ref": "StagingRootCa"
+        },
+        "CertificateSigningRequest": {
+          "Fn::GetAtt": [
+            "StagingIssuerCa",
+            "CertificateSigningRequest"
+          ]
+        },
         "SigningAlgorithm": "SHA512WITHRSA",
-        "TemplateArn": {"Fn::Sub": "arn:${AWS::Partition}:acm-pca:::template/SubordinateCACertificate_PathLen0/V1"},
-        "Validity": {"Type": "YEARS", "Value": 5}
+        "TemplateArn": {
+          "Fn::Sub": "arn:${AWS::Partition}:acm-pca:::template/SubordinateCACertificate_PathLen0/V1"
+        },
+        "Validity": {
+          "Type": "YEARS",
+          "Value": 5
+        }
       }
     },
     "StagingIssuerActivation": {
       "Type": "AWS::ACMPCA::CertificateAuthorityActivation",
       "Condition": "PcaApproved",
       "Properties": {
-        "CertificateAuthorityArn": {"Ref": "StagingIssuerCa"},
-        "Certificate": {"Fn::GetAtt": ["StagingIssuerCertificate", "Certificate"]},
-        "CertificateChain": {"Fn::GetAtt": ["StagingIssuerCertificate", "CertificateChain"]},
+        "CertificateAuthorityArn": {
+          "Ref": "StagingIssuerCa"
+        },
+        "Certificate": {
+          "Fn::GetAtt": [
+            "StagingIssuerCertificate",
+            "Certificate"
+          ]
+        },
+        "CertificateChain": {
+          "Fn::GetAtt": [
+            "StagingIssuerCertificate",
+            "CertificateChain"
+          ]
+        },
         "Status": "ACTIVE"
       }
     },
@@ -128,7 +240,17 @@
         "RoleName": "TrinyxStagingPcaAdministratorRole",
         "AssumeRolePolicyDocument": {
           "Version": "2012-10-17",
-          "Statement": [{"Effect": "Allow", "Principal": {"AWS": {"Ref": "PcaAdministratorPrincipalArn"}}, "Action": "sts:AssumeRole"}]
+          "Statement": [
+            {
+              "Effect": "Allow",
+              "Principal": {
+                "AWS": {
+                  "Ref": "PcaAdministratorPrincipalArn"
+                }
+              },
+              "Action": "sts:AssumeRole"
+            }
+          ]
         },
         "Policies": [
           {
@@ -145,13 +267,29 @@
                     "acm-pca:ListTags",
                     "acm-pca:UpdateCertificateAuthority"
                   ],
-                  "Resource": [{"Ref": "StagingRootCa"}, {"Ref": "StagingIssuerCa"}]
+                  "Resource": [
+                    {
+                      "Ref": "StagingRootCa"
+                    },
+                    {
+                      "Ref": "StagingIssuerCa"
+                    }
+                  ]
                 }
               ]
             }
           }
         ],
-        "Tags": [{"Key": "TrinyxEnvironment", "Value": "staging"}, {"Key": "TrinyxPurpose", "Value": "pca-administrator"}]
+        "Tags": [
+          {
+            "Key": "TrinyxEnvironment",
+            "Value": "staging"
+          },
+          {
+            "Key": "TrinyxPurpose",
+            "Value": "pca-administrator"
+          }
+        ]
       }
     },
     "StagingPcaIssuerRole": {
@@ -162,7 +300,17 @@
         "RoleName": "TrinyxStagingPcaIssuerRole",
         "AssumeRolePolicyDocument": {
           "Version": "2012-10-17",
-          "Statement": [{"Effect": "Allow", "Principal": {"AWS": {"Ref": "PcaIssuerPrincipalArn"}}, "Action": "sts:AssumeRole"}]
+          "Statement": [
+            {
+              "Effect": "Allow",
+              "Principal": {
+                "AWS": {
+                  "Ref": "PcaIssuerPrincipalArn"
+                }
+              },
+              "Action": "sts:AssumeRole"
+            }
+          ]
         },
         "Policies": [
           {
@@ -172,22 +320,42 @@
               "Statement": [
                 {
                   "Effect": "Allow",
-                  "Action": ["acm-pca:IssueCertificate", "acm-pca:GetCertificate"],
-                  "Resource": {"Ref": "StagingIssuerCa"},
+                  "Action": [
+                    "acm-pca:IssueCertificate",
+                    "acm-pca:GetCertificate"
+                  ],
+                  "Resource": {
+                    "Ref": "StagingIssuerCa"
+                  },
                   "Condition": {
-                    "ArnEquals": {"acm-pca:TemplateArn": {"Fn::Sub": "arn:${AWS::Partition}:acm-pca:::template/EndEntityCertificate/V1"}}
+                    "ArnEquals": {
+                      "acm-pca:TemplateArn": {
+                        "Fn::Sub": "arn:${AWS::Partition}:acm-pca:::template/EndEntityCertificate/V1"
+                      }
+                    }
                   }
                 },
                 {
                   "Effect": "Allow",
                   "Action": "acm-pca:DescribeCertificateAuthority",
-                  "Resource": {"Ref": "StagingIssuerCa"}
+                  "Resource": {
+                    "Ref": "StagingIssuerCa"
+                  }
                 }
               ]
             }
           }
         ],
-        "Tags": [{"Key": "TrinyxEnvironment", "Value": "staging"}, {"Key": "TrinyxPurpose", "Value": "pca-issuer"}]
+        "Tags": [
+          {
+            "Key": "TrinyxEnvironment",
+            "Value": "staging"
+          },
+          {
+            "Key": "TrinyxPurpose",
+            "Value": "pca-issuer"
+          }
+        ]
       }
     },
     "PcaAuditBucket": {
@@ -196,39 +364,92 @@
       "DeletionPolicy": "Retain",
       "UpdateReplacePolicy": "Retain",
       "Properties": {
-        "BucketEncryption": {"ServerSideEncryptionConfiguration": [{"ServerSideEncryptionByDefault": {"SSEAlgorithm": "AES256"}}]},
-        "BucketOwnershipControls": {"Rules": [{"ObjectOwnership": "BucketOwnerEnforced"}]},
-        "PublicAccessBlockConfiguration": {"BlockPublicAcls": true, "BlockPublicPolicy": true, "IgnorePublicAcls": true, "RestrictPublicBuckets": true},
-        "VersioningConfiguration": {"Status": "Enabled"},
-        "Tags": [{"Key": "TrinyxEnvironment", "Value": "staging"}, {"Key": "TrinyxPurpose", "Value": "pca-cloudtrail-audit"}]
+        "BucketEncryption": {
+          "ServerSideEncryptionConfiguration": [
+            {
+              "ServerSideEncryptionByDefault": {
+                "SSEAlgorithm": "AES256"
+              }
+            }
+          ]
+        },
+        "BucketOwnershipControls": {
+          "Rules": [
+            {
+              "ObjectOwnership": "BucketOwnerEnforced"
+            }
+          ]
+        },
+        "PublicAccessBlockConfiguration": {
+          "BlockPublicAcls": true,
+          "BlockPublicPolicy": true,
+          "IgnorePublicAcls": true,
+          "RestrictPublicBuckets": true
+        },
+        "VersioningConfiguration": {
+          "Status": "Enabled"
+        },
+        "Tags": [
+          {
+            "Key": "TrinyxEnvironment",
+            "Value": "staging"
+          },
+          {
+            "Key": "TrinyxPurpose",
+            "Value": "pca-cloudtrail-audit"
+          }
+        ]
       }
     },
     "PcaAuditBucketPolicy": {
       "Type": "AWS::S3::BucketPolicy",
       "Condition": "CreateAuditTrail",
       "Properties": {
-        "Bucket": {"Ref": "PcaAuditBucket"},
+        "Bucket": {
+          "Ref": "PcaAuditBucket"
+        },
         "PolicyDocument": {
           "Version": "2012-10-17",
           "Statement": [
             {
               "Sid": "CloudTrailAclCheck",
               "Effect": "Allow",
-              "Principal": {"Service": "cloudtrail.amazonaws.com"},
+              "Principal": {
+                "Service": "cloudtrail.amazonaws.com"
+              },
               "Action": "s3:GetBucketAcl",
-              "Resource": {"Fn::GetAtt": ["PcaAuditBucket", "Arn"]},
-              "Condition": {"StringEquals": {"aws:SourceArn": {"Fn::Sub": "arn:${AWS::Partition}:cloudtrail:${AWS::Region}:${AWS::AccountId}:trail/trinyx-staging-pca-audit"}}}
+              "Resource": {
+                "Fn::GetAtt": [
+                  "PcaAuditBucket",
+                  "Arn"
+                ]
+              },
+              "Condition": {
+                "StringEquals": {
+                  "aws:SourceArn": {
+                    "Fn::Sub": "arn:${AWS::Partition}:cloudtrail:${AWS::Region}:${AWS::AccountId}:trail/trinyx-staging-pca-audit"
+                  }
+                }
+              }
             },
             {
               "Sid": "CloudTrailWrite",
               "Effect": "Allow",
-              "Principal": {"Service": "cloudtrail.amazonaws.com"},
+              "Principal": {
+                "Service": "cloudtrail.amazonaws.com"
+              },
               "Action": "s3:PutObject",
-              "Resource": {"Fn::Sub": "${PcaAuditBucket.Arn}/AWSLogs/${AWS::AccountId}/*"},
-              "Condition": {"StringEquals": {
-                "aws:SourceArn": {"Fn::Sub": "arn:${AWS::Partition}:cloudtrail:${AWS::Region}:${AWS::AccountId}:trail/trinyx-staging-pca-audit"},
-                "s3:x-amz-acl": "bucket-owner-full-control"
-              }}
+              "Resource": {
+                "Fn::Sub": "${PcaAuditBucket.Arn}/AWSLogs/${AWS::AccountId}/*"
+              },
+              "Condition": {
+                "StringEquals": {
+                  "aws:SourceArn": {
+                    "Fn::Sub": "arn:${AWS::Partition}:cloudtrail:${AWS::Region}:${AWS::AccountId}:trail/trinyx-staging-pca-audit"
+                  },
+                  "s3:x-amz-acl": "bucket-owner-full-control"
+                }
+              }
             },
             {
               "Sid": "DenyInsecureTransport",
@@ -236,10 +457,21 @@
               "Principal": "*",
               "Action": "s3:*",
               "Resource": [
-                {"Fn::GetAtt": ["PcaAuditBucket", "Arn"]},
-                {"Fn::Sub": "${PcaAuditBucket.Arn}/*"}
+                {
+                  "Fn::GetAtt": [
+                    "PcaAuditBucket",
+                    "Arn"
+                  ]
+                },
+                {
+                  "Fn::Sub": "${PcaAuditBucket.Arn}/*"
+                }
               ],
-              "Condition": {"Bool": {"aws:SecureTransport": "false"}}
+              "Condition": {
+                "Bool": {
+                  "aws:SecureTransport": "false"
+                }
+              }
             }
           ]
         }
@@ -251,22 +483,79 @@
       "DependsOn": "PcaAuditBucketPolicy",
       "Properties": {
         "TrailName": "trinyx-staging-pca-audit",
-        "S3BucketName": {"Ref": "PcaAuditBucket"},
+        "S3BucketName": {
+          "Ref": "PcaAuditBucket"
+        },
         "IsLogging": true,
         "IsMultiRegionTrail": false,
         "IncludeGlobalServiceEvents": false,
         "EnableLogFileValidation": true,
-        "EventSelectors": [{"IncludeManagementEvents": true, "ReadWriteType": "All"}],
-        "Tags": [{"Key": "TrinyxEnvironment", "Value": "staging"}, {"Key": "TrinyxPurpose", "Value": "pca-audit"}]
+        "EventSelectors": [
+          {
+            "IncludeManagementEvents": true,
+            "ReadWriteType": "All"
+          }
+        ],
+        "Tags": [
+          {
+            "Key": "TrinyxEnvironment",
+            "Value": "staging"
+          },
+          {
+            "Key": "TrinyxPurpose",
+            "Value": "pca-audit"
+          }
+        ]
       }
     }
   },
   "Outputs": {
-    "ApprovalState": {"Value": {"Ref": "PcaLiveApproval"}},
-    "MandatoryStopMarker": {"Value": "AWS_PCA_LIVE_APPROVAL_REQUIRED"},
-    "StagingRootCaArn": {"Condition": "PcaApproved", "Value": {"Ref": "StagingRootCa"}},
-    "StagingIssuerCaArn": {"Condition": "PcaApproved", "Value": {"Ref": "StagingIssuerCa"}},
-    "StagingPcaAdministratorRoleArn": {"Condition": "PcaApproved", "Value": {"Fn::GetAtt": ["StagingPcaAdministratorRole", "Arn"]}},
-    "StagingPcaIssuerRoleArn": {"Condition": "PcaApproved", "Value": {"Fn::GetAtt": ["StagingPcaIssuerRole", "Arn"]}}
+    "ApprovalState": {
+      "Value": {
+        "Ref": "PcaLiveApproval"
+      }
+    },
+    "MandatoryStopMarker": {
+      "Value": "AWS_PCA_LIVE_APPROVAL_REQUIRED"
+    },
+    "StagingRootCaArn": {
+      "Condition": "PcaApproved",
+      "Value": {
+        "Ref": "StagingRootCa"
+      }
+    },
+    "StagingIssuerCaArn": {
+      "Condition": "PcaApproved",
+      "Value": {
+        "Ref": "StagingIssuerCa"
+      }
+    },
+    "StagingPcaAdministratorRoleArn": {
+      "Condition": "PcaApproved",
+      "Value": {
+        "Fn::GetAtt": [
+          "StagingPcaAdministratorRole",
+          "Arn"
+        ]
+      }
+    },
+    "StagingPcaIssuerRoleArn": {
+      "Condition": "PcaApproved",
+      "Value": {
+        "Fn::GetAtt": [
+          "StagingPcaIssuerRole",
+          "Arn"
+        ]
+      }
+    },
+    "DefaultStagingPkiMode": {
+      "Value": "OFFLINE_SELF_MANAGED"
+    },
+    "AwsPcaApprovalStop": {
+      "Value": "AWS_PCA_LIVE_APPROVAL_REQUIRED"
+    },
+    "AwsPcaEstimatedFixedMonthlyCaCost": {
+      "Value": "Two GENERAL_PURPOSE CAs: 2 x USD 400/month = USD 800/month before leaf issuance and OCSP; reverify current pricing before approval."
+    }
   }
 }

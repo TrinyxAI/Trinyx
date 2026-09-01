@@ -138,7 +138,7 @@ jobs:
       packages: write
       id-token: write
       attestations: write
-    uses: ./.github/workflows/build-release-candidate.yml
+    uses: ./.github/workflows/build-release-candidate-impl.yml
 
   staging_oidc_probe:
     name: Pre-merge staging OIDC probe bridge

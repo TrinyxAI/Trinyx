@@ -109,7 +109,10 @@ class IacContractTests(unittest.TestCase):
 
     def test_pca_is_approval_gated_and_staging_only(self) -> None:
         template = self.load("platform/aws/staging/private-ca-plan.json")
+        self.assertEqual("OFFLINE_SELF_MANAGED", template["Parameters"]["StagingPkiMode"]["Default"])
         self.assertEqual("AWS_PCA_LIVE_APPROVAL_REQUIRED", template["Parameters"]["PcaLiveApproval"]["Default"])
+        self.assertIn("AWS_PRIVATE_CA", json.dumps(template["Conditions"]["PcaApproved"]))
+        self.assertEqual("OFFLINE_SELF_MANAGED", template["Outputs"]["DefaultStagingPkiMode"]["Value"])
         for resource in template["Resources"].values():
             if resource["Type"].startswith("AWS::ACMPCA::"):
                 self.assertEqual("PcaApproved", resource["Condition"])
@@ -129,10 +132,14 @@ class IacContractTests(unittest.TestCase):
                 "schemaVersion", "previousRelease", "candidateRelease", "strategy",
                 "compatible", "evidenceSha256",
             },
+            "platform/contracts/legacy-observation.schema.json": {
+                "schemaVersion", "environment", "role", "observedAt", "releaseEligible",
+                "environmentConfigRevision", "environmentConfigDigest", "composeProject", "services",
+            },
             "platform/contracts/legacy-adoption.schema.json": {
                 "schemaVersion", "environment", "role", "legacyActiveTarget", "baselineRelease",
                 "bundleDigest", "imagesEnvSha256", "observationSha256",
-                "environmentConfigRevision", "platformCommit", "approvalScope",
+                "environmentConfigRevision", "environmentConfigDigest", "platformCommit", "approvalScope",
                 "approvedForPointerAdoption",
             },
         }

@@ -188,3 +188,17 @@ The IaC then trusts only immutable IDs `319253481` / `1342032975`, Environment `
 ### Pre-merge manual entry point
 
 GitHub only dispatches a workflow file registered on the default branch. Until the dedicated workflows are integrated, manually dispatch `build-trinyx-backend.yml` at ref `codex/platform-release-automation` and select one explicit operation. The bridge has no generic command input and calls only pinned repository reusable workflows. Selecting a platform operation does not run backend/frontend tests, Docker build, image publication or any push-triggered staging contact.
+
+
+## Third-review findings and closures
+
+| Severity | Finding | Control | Residual operation |
+| --- | --- | --- | --- |
+| RELIABILITY_CRITICAL / SUPPLY_CHAIN | Observation and baseline `images.env` were individually hashed but not related; a false pointer adoption could corrupt future delta calculation | Observation schema v2 records full container/image identities and Compose labels; adoption requires exact manifest service digest in both configured image and RepoDigests for 20 Cloud/8 Paid | Human must capture evidence from the unchanged legacy runtime |
+| SECURITY_CRITICAL | Repository-wide custom OIDC `sub` requiring `job_workflow_ref` was incompatible with direct release/CE jobs requesting ID tokens | Direct workflows are credential-free callers; all ID-token work runs in call-only implementations; static policy scans every workflow/job | GitHub subject-template mutation remains human-gated |
+| DEFENSE_IN_DEPTH | Exact workflow path was combined with a mutable branch ref | AWS trust parameter accepts a reviewed 40-character commit SHA and callers support SHA-pinned reusable workflows | Each reviewed control-plane revision requires a change-set update |
+| PERFORMANCE_COST | Two AWS general-purpose CAs cost about USD 800/month before leaves | Offline encrypted staging root/issuer is default and integration-tested; AWS PCA remains an explicit optional paid mode | Offline custody, rotation, backup and revocation drills are human operations |
+
+The USD 800 estimate is the operation fee for two managed CA resources, not for
+two TLS leaf certificates. The default offline path creates no AWS PCA resource
+and incurs no AWS managed-CA monthly fee.

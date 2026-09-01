@@ -1,0 +1,105 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://trinyx.fr/schemas/legacy-observation.schema.json",
+  "title": "Trinyx staging legacy runtime observation",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "environment",
+    "role",
+    "observedAt",
+    "releaseEligible",
+    "reason",
+    "environmentConfigRevision",
+    "environmentConfigDigest",
+    "composeProject",
+    "services"
+  ],
+  "properties": {
+    "schemaVersion": {
+      "const": 2
+    },
+    "environment": {
+      "const": "staging"
+    },
+    "role": {
+      "enum": [
+        "cloud",
+        "paid"
+      ]
+    },
+    "observedAt": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "releaseEligible": {
+      "const": false
+    },
+    "reason": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 256
+    },
+    "environmentConfigRevision": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9._-]{1,128}$"
+    },
+    "environmentConfigDigest": {
+      "type": "string",
+      "pattern": "^sha256:[0-9a-f]{64}$"
+    },
+    "composeProject": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$"
+    },
+    "services": {
+      "type": "object",
+      "minProperties": 8,
+      "maxProperties": 20,
+      "additionalProperties": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "containerId",
+          "containerImageId",
+          "configuredImage",
+          "repoDigests",
+          "composeProject",
+          "composeService"
+        ],
+        "properties": {
+          "containerId": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$"
+          },
+          "containerImageId": {
+            "type": "string",
+            "pattern": "^sha256:[0-9a-f]{64}$"
+          },
+          "configuredImage": {
+            "type": "string",
+            "pattern": "^[^@\\s]+@sha256:[0-9a-f]{64}$"
+          },
+          "repoDigests": {
+            "type": "array",
+            "minItems": 1,
+            "uniqueItems": true,
+            "items": {
+              "type": "string",
+              "pattern": "^[^@\\s]+@sha256:[0-9a-f]{64}$"
+            }
+          },
+          "composeProject": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$"
+          },
+          "composeService": {
+            "type": "string",
+            "pattern": "^[a-z0-9][a-z0-9_.-]{0,127}$"
+          }
+        }
+      }
+    }
+  }
+}

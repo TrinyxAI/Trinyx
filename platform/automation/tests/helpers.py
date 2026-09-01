@@ -109,8 +109,6 @@ def make_compose_model(manifest: dict[str, Any], role: str) -> dict[str, Any]:
     for image in manifest["images"]:
         if image["role"] == role:
             services[image["service"]] = {"image": image["immutableRef"]}
-    caddy = next(image for image in manifest["images"] if image["role"] == role and image["name"] == f"{role}-edge")
-    services["platform-caddy"] = {"image": caddy["immutableRef"]}
     if role == "paid":
         services["livecontext"].update(
             {

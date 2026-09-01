@@ -16,6 +16,7 @@ on:
       - 'docker/cloud/**'
       - 'docker/paid-monolith-internal/Caddyfile'
       - '.github/workflows/build-release-candidate.yml'
+      - '.github/workflows/build-release-candidate-impl.yml'
       - '.github/workflows/build-trinyx-frontend.yml'
       - '.github/workflows/platform-release-build-contracts.yml'
   push:
@@ -35,6 +36,7 @@ on:
       - 'docker/cloud/**'
       - 'docker/paid-monolith-internal/Caddyfile'
       - '.github/workflows/build-release-candidate.yml'
+      - '.github/workflows/build-release-candidate-impl.yml'
       - '.github/workflows/build-trinyx-frontend.yml'
       - '.github/workflows/platform-release-build-contracts.yml'
   workflow_dispatch:

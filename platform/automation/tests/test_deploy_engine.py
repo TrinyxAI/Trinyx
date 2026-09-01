@@ -18,7 +18,7 @@ from deploy_engine import (
     atomic_active_pointer,
     sha256_path,
 )
-from invariants import InvariantError, validate_active_pointer
+from invariants import InvariantError, environment_config_digest, validate_active_pointer
 from helpers import make_host
 
 
@@ -218,28 +218,43 @@ class DeploymentEngineTests(unittest.TestCase):
         with self.assertRaisesRegex(InvariantError, "differs from SSM contract"):
             engine.verify_bundle_digest(self.candidate, "sha256:" + "0" * 64)
 
-    @unittest.skipIf(os.name == "nt", "Linux CI executes symlink adoption semantics")
-    def test_legacy_baseline_adoption_and_explicit_restore_are_pointer_only(self) -> None:
-        legacy = self.base / "deployments" / "stg-bootstrap-001"
-        legacy.mkdir(parents=True)
-        os.symlink("deployments/stg-bootstrap-001", self.base / "active", target_is_directory=True)
+    def write_legacy_proof(self, mismatched_service: str | None = None) -> None:
+        manifest = json.loads((self.base / "releases" / self.previous / "manifest.json").read_text())
+        expected = {
+            image["service"]: image["immutableRef"]
+            for image in manifest["images"]
+            if image["role"] == "paid"
+        }
+        config_digest = environment_config_digest(self.base, "paid")
+        services: dict[str, dict[str, Any]] = {}
+        for index, (service, immutable_ref) in enumerate(sorted(expected.items()), start=1):
+            configured = immutable_ref
+            repo_digests = [immutable_ref]
+            if service == mismatched_service:
+                configured = immutable_ref.rsplit("sha256:", 1)[0] + "sha256:" + "f" * 64
+                repo_digests = [configured]
+            services[service] = {
+                "containerId": f"{index:064x}",
+                "containerImageId": "sha256:" + f"{index + 1000:064x}",
+                "configuredImage": configured,
+                "repoDigests": repo_digests,
+                "composeProject": "trinyx-paid-staging",
+                "composeService": service,
+            }
         observation = {
-            "schemaVersion": 1,
+            "schemaVersion": 2,
             "environment": "staging",
             "role": "paid",
             "observedAt": "2026-09-01T00:00:00Z",
             "releaseEligible": False,
-            "reason": "observation is not a release",
-            "services": {
-                service: {"configuredImage": "fixture@sha256:" + "1" * 64, "containerId": "1" * 12}
-                for service in json.loads(
-                    (self.base / "config" / "deployment-plan.json").read_text()
-                )["services"]
-            },
+            "reason": "observation is evidence only and is not a cryptographic release",
+            "environmentConfigRevision": "config-legacy",
+            "environmentConfigDigest": config_digest,
+            "composeProject": "trinyx-paid-staging",
+            "services": services,
         }
         observation_path = self.base / "config" / "legacy-observation.json"
         observation_path.write_text(json.dumps(observation, sort_keys=True) + "\n", encoding="utf-8")
-        manifest = json.loads((self.base / "releases" / self.previous / "manifest.json").read_text())
         evidence = {
             "schemaVersion": 1,
             "environment": "staging",
@@ -250,12 +265,24 @@ class DeploymentEngineTests(unittest.TestCase):
             "imagesEnvSha256": sha256_path(self.base / "releases" / self.previous / "images.env"),
             "observationSha256": sha256_path(observation_path),
             "environmentConfigRevision": "config-legacy",
+            "environmentConfigDigest": config_digest,
             "platformCommit": "1" * 40,
             "approvalScope": "pointer-only-no-runtime-recreation",
             "approvedForPointerAdoption": True,
         }
-        evidence_path = self.base / "config" / "legacy-adoption.json"
-        evidence_path.write_text(json.dumps(evidence, sort_keys=True) + "\n", encoding="utf-8")
+        (self.base / "config" / "legacy-adoption.json").write_text(
+            json.dumps(evidence, sort_keys=True) + "\n", encoding="utf-8"
+        )
+
+    def make_legacy_active(self) -> None:
+        legacy = self.base / "deployments" / "stg-bootstrap-001"
+        legacy.mkdir(parents=True)
+        os.symlink("deployments/stg-bootstrap-001", self.base / "active", target_is_directory=True)
+
+    @unittest.skipIf(os.name == "nt", "Linux CI executes symlink adoption semantics")
+    def test_legacy_baseline_adoption_and_explicit_restore_are_pointer_only(self) -> None:
+        self.make_legacy_active()
+        self.write_legacy_proof()
         adapter = FakeAdapter(self.models)
         engine = HostDeployment(self.base, "paid", adapter)
         self.assertEqual("legacy:deployments/stg-bootstrap-001", engine.active_status())
@@ -277,6 +304,33 @@ class DeploymentEngineTests(unittest.TestCase):
         )
         self.assertEqual("legacy:deployments/stg-bootstrap-001", engine.active_status())
         self.assertNotIn("apply", adapter.calls)
+
+    @unittest.skipIf(os.name == "nt", "Linux CI executes symlink adoption semantics")
+    def test_legacy_adoption_rejects_runtime_digest_not_in_baseline(self) -> None:
+        self.make_legacy_active()
+        self.write_legacy_proof(mismatched_service="livecontext")
+        engine = HostDeployment(self.base, "paid", FakeAdapter(self.models))
+        deployment_id = "dep-" + "8" * 32
+        with self.assertRaisesRegex(InvariantError, "LEGACY_BASELINE_RUNTIME_IMAGE_MISMATCH"):
+            engine.adopt_legacy_baseline(
+                deployment_id, self.previous, "config-legacy", "1" * 40,
+            )
+        self.assertEqual("legacy:deployments/stg-bootstrap-001", engine.active_status())
+        record = json.loads((self.base / "deployments" / f"{deployment_id}-adopt.json").read_text())
+        self.assertEqual("FAILED", record["state"])
+
+    @unittest.skipIf(os.name == "nt", "Linux CI executes symlink adoption semantics")
+    def test_legacy_adoption_rejects_materialized_config_drift(self) -> None:
+        self.make_legacy_active()
+        self.write_legacy_proof()
+        (self.base / "config" / "compose.env").write_text("ENVIRONMENT=drifted\n", encoding="utf-8")
+        engine = HostDeployment(self.base, "paid", FakeAdapter(self.models))
+        deployment_id = "dep-" + "9" * 32
+        with self.assertRaisesRegex(InvariantError, "LEGACY_BASELINE_PROOF_REQUIRED"):
+            engine.adopt_legacy_baseline(
+                deployment_id, self.previous, "config-legacy", "1" * 40,
+            )
+        self.assertEqual("legacy:deployments/stg-bootstrap-001", engine.active_status())
 
     @unittest.skipIf(os.name == "nt", "Linux CI executes symlink adoption semantics")
     def test_unproved_legacy_baseline_fails_closed_before_pointer_mutation(self) -> None:

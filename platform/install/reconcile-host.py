@@ -197,10 +197,12 @@ def build_desired(role: str, rendered: Path, metadata: dict[str, str]) -> tuple[
     if environment == "staging":
         common.extend([
             DesiredFile(REPO_ROOT / "platform/automation/invariants.py", "/usr/local/lib/trinyx/invariants.py", 0o750),
+            DesiredFile(REPO_ROOT / "platform/automation/baseline_observation.py", "/usr/local/lib/trinyx/baseline-observation", 0o750),
             DesiredFile(REPO_ROOT / "platform/automation/deploy_engine.py", "/usr/local/lib/trinyx/deploy_engine.py", 0o750),
             DesiredFile(REPO_ROOT / "platform/automation/release_registry.py", "/usr/local/lib/trinyx/release_registry.py", 0o750),
             DesiredFile(REPO_ROOT / "platform/automation/health_probe.py", "/usr/local/lib/trinyx/health-probe", 0o750),
             DesiredFile(REPO_ROOT / "platform/install/stage-staging-tls.py", "/usr/local/lib/trinyx/stage-staging-tls", 0o750),
+            DesiredFile(REPO_ROOT / "platform/pki/offline_staging_pki.py", "/usr/local/lib/trinyx/offline-staging-pki", 0o750),
             DesiredFile(REPO_ROOT / "platform/install/install-release.py", "/usr/local/lib/trinyx/install-release.py", 0o750),
             DesiredFile(REPO_ROOT / "platform/release/release.py", "/usr/local/lib/trinyx/release.py", 0o750),
             DesiredFile(REPO_ROOT / "platform/release/runtime-inventory.json", "/usr/local/share/trinyx/runtime-inventory.json", 0o644),

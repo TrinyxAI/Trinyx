@@ -13,6 +13,7 @@
     "imagesEnvSha256",
     "observationSha256",
     "environmentConfigRevision",
+    "environmentConfigDigest",
     "platformCommit",
     "approvalScope",
     "approvedForPointerAdoption"
@@ -63,6 +64,10 @@
     "platformCommit": {
       "type": "string",
       "pattern": "^[0-9a-f]{40}$"
+    },
+    "environmentConfigDigest": {
+      "type": "string",
+      "pattern": "^sha256:[0-9a-f]{64}$"
     }
   }
 }

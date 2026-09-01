@@ -33,7 +33,16 @@ env:
   BACKEND_IMAGE: ghcr.io/trinyxai/trinyx-backend
 
 jobs:
+  release_candidate:
+    name: Manual immutable release candidate build
+    if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/codex/platform-release-automation'
+    permissions:
+      contents: read
+      packages: write
+    uses: ./.github/workflows/build-release-candidate.yml
+
   test:
+    if: github.event_name != 'workflow_dispatch' || github.ref != 'refs/heads/codex/platform-release-automation'
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -59,6 +68,7 @@ jobs:
           test
 
   frontend-test:
+    if: github.event_name != 'workflow_dispatch' || github.ref != 'refs/heads/codex/platform-release-automation'
     name: frontend-test (${{ matrix.mode }})
     runs-on: ubuntu-latest
     strategy:
@@ -243,9 +253,8 @@ jobs:
           grep -q '"edition":"paid-monolith"' <<<"${paid_version}"
           echo "Paid monolith edition contract confirmed"
 
-
   publish:
-    if: github.event_name != 'pull_request'
+    if: github.event_name != 'pull_request' && (github.event_name != 'workflow_dispatch' || github.ref != 'refs/heads/codex/platform-release-automation')
     needs: [test, frontend-test]
     runs-on: ubuntu-latest
     permissions:
@@ -301,7 +310,7 @@ jobs:
           echo "Backend immutable reference: ${BACKEND_IMAGE}@${IMAGE_DIGEST}" >> "${GITHUB_STEP_SUMMARY}"
 
   publish-cloud-runtime:
-    if: github.event_name == 'workflow_dispatch'
+    if: github.event_name == 'workflow_dispatch' && github.ref != 'refs/heads/codex/platform-release-automation'
     needs: [test, frontend-test, publish]
     permissions:
       contents: read

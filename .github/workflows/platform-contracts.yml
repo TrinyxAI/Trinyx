@@ -40,6 +40,7 @@ jobs:
           bash -n platform/bootstrap/cloud/staging/rootfs/usr/local/lib/trinyx/pre-docker-cloud.sh
           bash -n platform/bootstrap/paid/staging/rootfs/usr/local/lib/trinyx/runtime-materialize-paid.sh
           bash -n platform/host/common/runtime-env.sh
+          bash -n platform/host/common/staging-deploy.sh
           bash -n platform/host/cloud/pre-docker-cloud.sh
           bash -n platform/host/cloud/runtime-materialize-cloud.sh
           bash -n platform/host/paid/runtime-materialize-paid.sh
@@ -49,6 +50,7 @@ jobs:
           bash -n platform/tests/test-runtime-image-lock.sh
           bash -n platform/tests/test-release-installer.sh
           bash -n platform/tests/test-aws-oidc-bootstrap.sh
+          bash -n platform/tests/test-aws-staging-deploy-control-plane.sh
 
       - name: Compile Python platform tools
         run: |
@@ -75,6 +77,9 @@ jobs:
 
       - name: Verify AWS GitHub OIDC bootstrap contract
         run: bash platform/tests/test-aws-oidc-bootstrap.sh
+
+      - name: Verify AWS staging deploy control-plane contract
+        run: bash platform/tests/test-aws-staging-deploy-control-plane.sh
 
       - name: Reject secret material in platform tree
         shell: bash

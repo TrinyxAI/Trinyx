@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "images": [
     {
-      "name": "agent",
+      "name": "cloud-agent",
       "service": "agent-service",
       "package": "ghcr.io/trinyxai/trinyx-cloud-agent",
       "environment": "TRINYX_CLOUD_AGENT_IMAGE",
@@ -10,7 +10,7 @@
       "dockerfile": "./backend/agent-service/Dockerfile"
     },
     {
-      "name": "auth",
+      "name": "cloud-auth",
       "service": "auth-service",
       "package": "ghcr.io/trinyxai/trinyx-cloud-auth",
       "environment": "TRINYX_CLOUD_AUTH_IMAGE",
@@ -18,7 +18,7 @@
       "dockerfile": "./backend/auth-service/Dockerfile"
     },
     {
-      "name": "catalog",
+      "name": "cloud-catalog",
       "service": "catalog-service",
       "package": "ghcr.io/trinyxai/trinyx-cloud-catalog",
       "environment": "TRINYX_CLOUD_CATALOG_IMAGE",
@@ -26,7 +26,7 @@
       "dockerfile": "./backend/catalog-service/Dockerfile"
     },
     {
-      "name": "conversation",
+      "name": "cloud-conversation",
       "service": "conversation-service",
       "package": "ghcr.io/trinyxai/trinyx-cloud-conversation",
       "environment": "TRINYX_CLOUD_CONVERSATION_IMAGE",
@@ -34,7 +34,7 @@
       "dockerfile": "./backend/conversation-service/Dockerfile"
     },
     {
-      "name": "datasource",
+      "name": "cloud-datasource",
       "service": "datasource-service",
       "package": "ghcr.io/trinyxai/trinyx-cloud-datasource",
       "environment": "TRINYX_CLOUD_DATASOURCE_IMAGE",
@@ -42,7 +42,7 @@
       "dockerfile": "./backend/datasource-service/Dockerfile"
     },
     {
-      "name": "gateway",
+      "name": "cloud-gateway",
       "service": "gateway-service",
       "package": "ghcr.io/trinyxai/trinyx-cloud-gateway",
       "environment": "TRINYX_CLOUD_GATEWAY_IMAGE",
@@ -50,7 +50,7 @@
       "dockerfile": "./backend/gateway-service/Dockerfile"
     },
     {
-      "name": "interface",
+      "name": "cloud-interface",
       "service": "interface-service",
       "package": "ghcr.io/trinyxai/trinyx-cloud-interface",
       "environment": "TRINYX_CLOUD_INTERFACE_IMAGE",
@@ -58,7 +58,7 @@
       "dockerfile": "./backend/interface-service/Dockerfile"
     },
     {
-      "name": "keycloak",
+      "name": "cloud-keycloak",
       "service": "keycloak",
       "package": "ghcr.io/trinyxai/trinyx-cloud-keycloak",
       "environment": "TRINYX_CLOUD_KEYCLOAK_IMAGE",
@@ -66,7 +66,7 @@
       "dockerfile": "./docker/cloud/keycloak/Dockerfile"
     },
     {
-      "name": "migration",
+      "name": "cloud-migration",
       "service": "migration-service",
       "package": "ghcr.io/trinyxai/trinyx-cloud-migration",
       "environment": "TRINYX_CLOUD_MIGRATION_IMAGE",
@@ -74,7 +74,7 @@
       "dockerfile": "./backend/migration-service/Dockerfile"
     },
     {
-      "name": "orchestrator",
+      "name": "cloud-orchestrator",
       "service": "orchestrator-service",
       "package": "ghcr.io/trinyxai/trinyx-cloud-orchestrator",
       "environment": "TRINYX_CLOUD_ORCHESTRATOR_IMAGE",
@@ -82,7 +82,7 @@
       "dockerfile": "./backend/orchestrator-service/Dockerfile"
     },
     {
-      "name": "publication",
+      "name": "cloud-publication",
       "service": "publication-service",
       "package": "ghcr.io/trinyxai/trinyx-cloud-publication",
       "environment": "TRINYX_CLOUD_PUBLICATION_IMAGE",
@@ -90,7 +90,7 @@
       "dockerfile": "./backend/publication-service/Dockerfile"
     },
     {
-      "name": "storage",
+      "name": "cloud-storage",
       "service": "storage-service",
       "package": "ghcr.io/trinyxai/trinyx-cloud-storage",
       "environment": "TRINYX_CLOUD_STORAGE_IMAGE",
@@ -98,7 +98,7 @@
       "dockerfile": "./backend/storage-service/Dockerfile"
     },
     {
-      "name": "trigger",
+      "name": "cloud-trigger",
       "service": "trigger-service",
       "package": "ghcr.io/trinyxai/trinyx-cloud-trigger",
       "environment": "TRINYX_CLOUD_TRIGGER_IMAGE",
@@ -106,7 +106,7 @@
       "dockerfile": "./backend/trigger-service/Dockerfile"
     },
     {
-      "name": "websearch",
+      "name": "cloud-websearch",
       "service": "websearch-service",
       "package": "ghcr.io/trinyxai/trinyx-cloud-websearch",
       "environment": "TRINYX_CLOUD_WEBSEARCH_IMAGE",

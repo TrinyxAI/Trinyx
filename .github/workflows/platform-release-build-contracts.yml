@@ -12,6 +12,8 @@ on:
       - 'docker/docker-compose.paid.runtime.yml'
       - 'docker/cloud/**'
       - 'docker/paid-monolith-internal/Caddyfile'
+      - '.github/workflows/build-release-candidate.yml'
+      - '.github/workflows/build-trinyx-frontend.yml'
       - '.github/workflows/platform-release-build-contracts.yml'
   push:
     branches:
@@ -26,6 +28,8 @@ on:
       - 'docker/docker-compose.paid.runtime.yml'
       - 'docker/cloud/**'
       - 'docker/paid-monolith-internal/Caddyfile'
+      - '.github/workflows/build-release-candidate.yml'
+      - '.github/workflows/build-trinyx-frontend.yml'
       - '.github/workflows/platform-release-build-contracts.yml'
   workflow_dispatch:
 
@@ -56,7 +60,10 @@ jobs:
           python3 -m py_compile platform/release/assemble-release-images.py
           python3 -m py_compile platform/release/build-deployment-bundle.py
           bash -n platform/tests/test-release-build-contract.sh
+          bash -n platform/tests/test-release-workflow-boundary.sh
       - name: Verify immutable build manifest and bundle contracts
         run: bash platform/tests/test-release-build-contract.sh
+      - name: Verify build and deploy workflow separation
+        run: bash platform/tests/test-release-workflow-boundary.sh
       - name: Release build contract complete
         run: echo O5_RELEASE_BUILD_CONTRACT_CI_OK

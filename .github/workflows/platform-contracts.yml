@@ -48,6 +48,7 @@ jobs:
           bash -n platform/tests/test-release-contract.sh
           bash -n platform/tests/test-runtime-image-lock.sh
           bash -n platform/tests/test-release-installer.sh
+          bash -n platform/tests/test-aws-oidc-bootstrap.sh
 
       - name: Compile Python platform tools
         run: |
@@ -71,6 +72,9 @@ jobs:
 
       - name: Verify immutable release installer
         run: bash platform/tests/test-release-installer.sh
+
+      - name: Verify AWS GitHub OIDC bootstrap contract
+        run: bash platform/tests/test-aws-oidc-bootstrap.sh
 
       - name: Reject secret material in platform tree
         shell: bash

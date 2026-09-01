@@ -124,3 +124,64 @@ jobs:
 
       - name: Contract complete
         run: echo PLATFORM_CONTRACTS_OK
+
+  oidc_sts_probe:
+    name: AWS OIDC STS probe
+    needs: contracts
+    if: github.event_name == 'push' && github.ref == 'refs/heads/codex/platform-release-automation'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      id-token: write
+    env:
+      AWS_REGION: us-east-1
+      AWS_DEFAULT_REGION: us-east-1
+      AWS_ROLE_ARN: arn:aws:iam::001634075617:role/TrinyxStagingGitHubOidcBootstrapRole
+    steps:
+      - name: Guard immutable GitHub context
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REPOSITORY" = 'TrinyxAI/Trinyx'
+          test "$GITHUB_REPOSITORY_ID" = '1342032975'
+          test "$GITHUB_REPOSITORY_OWNER_ID" = '319253481'
+          test "$GITHUB_REF" = 'refs/heads/codex/platform-release-automation'
+          test "$AWS_ROLE_ARN" = 'arn:aws:iam::001634075617:role/TrinyxStagingGitHubOidcBootstrapRole'
+          echo OIDC_PROBE_CONTEXT_GUARD_OK
+
+      - name: Exchange GitHub OIDC identity for AWS STS identity
+        shell: bash
+        run: |
+          set -euo pipefail
+          umask 077
+
+          command -v aws >/dev/null
+          command -v curl >/dev/null
+          command -v python3 >/dev/null
+
+          TOKEN_FILE=$(mktemp)
+          trap 'rm -f "$TOKEN_FILE"' EXIT
+
+          curl --fail --silent --show-error \
+            -H "Authorization: bearer ${ACTIONS_ID_TOKEN_REQUEST_TOKEN}" \
+            "${ACTIONS_ID_TOKEN_REQUEST_URL}&audience=sts.amazonaws.com" \
+            | python3 -c 'import json,sys; token=json.load(sys.stdin)["value"]; open(sys.argv[1],"w",encoding="utf-8").write(token)' "$TOKEN_FILE"
+
+          test -s "$TOKEN_FILE"
+          chmod 600 "$TOKEN_FILE"
+
+          export AWS_WEB_IDENTITY_TOKEN_FILE="$TOKEN_FILE"
+          export AWS_ROLE_SESSION_NAME="trinyx-stg-oidc-${GITHUB_RUN_ID}"
+
+          IDENTITY=$(aws sts get-caller-identity --output json)
+
+          printf '%s' "$IDENTITY" | python3 -c '
+          import json, re, sys
+          data = json.load(sys.stdin)
+          assert data["Account"] == "001634075617"
+          expected = r"^arn:aws:sts::001634075617:assumed-role/TrinyxStagingGitHubOidcBootstrapRole/trinyx-stg-oidc-[0-9]+$"
+          assert re.fullmatch(expected, data["Arn"]), data["Arn"]
+          '
+
+          echo AWS_CALLER_ROLE=TrinyxStagingGitHubOidcBootstrapRole
+          echo AWS_GITHUB_OIDC_STS_PROBE_OK

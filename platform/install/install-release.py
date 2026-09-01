@@ -2,16 +2,19 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import importlib.util
 import json
 import os
 import re
 import shutil
+import tarfile
 import tempfile
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Any
 
 ENVIRONMENT_RE = re.compile(r"^[a-z][a-z0-9-]{0,31}$")
+DIGEST_RE = re.compile(r"^sha256:[0-9a-f]{64}$")
 ROLES = {"cloud", "paid"}
 
 
@@ -81,6 +84,14 @@ def canonical_manifest(module, manifest: dict[str, Any]) -> bytes:
     return module.canonical_json(manifest) + b"\n"
 
 
+def canonical_json(value: Any) -> bytes:
+    return json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode("utf-8") + b"\n"
+
+
+def sha256_bytes(content: bytes) -> str:
+    return "sha256:" + hashlib.sha256(content).hexdigest()
+
+
 def fsync_dir(path: Path) -> None:
     fd = os.open(path, os.O_RDONLY | getattr(os, "O_DIRECTORY", 0))
     try:
@@ -102,8 +113,116 @@ def write_file(path: Path, content: bytes, mode: int) -> None:
     os.chmod(path, mode)
 
 
-def existing_matches(target: Path, manifest_bytes: bytes, images_bytes: bytes) -> bool:
-    expected = {"manifest.json", "images.env"}
+def validate_bundle(manifest: dict[str, Any], bundle_manifest_path: Path, bundle_path: Path) -> tuple[dict[str, Any], bytes]:
+    bundle_manifest = load_json(bundle_manifest_path)
+    required = {"schemaVersion", "format", "digest", "sizeBytes", "files"}
+    if not isinstance(bundle_manifest, dict) or set(bundle_manifest) != required:
+        fail("deployment bundle manifest keys do not match schema v1")
+    if bundle_manifest["schemaVersion"] != 1 or bundle_manifest["format"] != "tar":
+        fail("invalid deployment bundle manifest")
+    if not isinstance(bundle_manifest["files"], list) or not bundle_manifest["files"]:
+        fail("deployment bundle manifest contains no files")
+
+    release_bundle = manifest["deploymentBundle"]
+    expected_release_bundle = {
+        "format": bundle_manifest["format"],
+        "digest": bundle_manifest["digest"],
+        "sizeBytes": bundle_manifest["sizeBytes"],
+        "fileCount": len(bundle_manifest["files"]),
+    }
+    if release_bundle != expected_release_bundle:
+        fail("deployment bundle manifest does not match release identity")
+
+    try:
+        bundle_bytes = bundle_path.read_bytes()
+    except OSError as exc:
+        fail(f"cannot read deployment bundle {bundle_path}: {exc}")
+    if len(bundle_bytes) != bundle_manifest["sizeBytes"]:
+        fail("deployment bundle byte size mismatch")
+    if sha256_bytes(bundle_bytes) != bundle_manifest["digest"]:
+        fail("deployment bundle digest mismatch")
+
+    seen: set[str] = set()
+    for item in bundle_manifest["files"]:
+        if not isinstance(item, dict) or set(item) != {"path", "digest", "sizeBytes"}:
+            fail("invalid deployment bundle file entry")
+        name = item["path"]
+        if not isinstance(name, str) or not name or name.startswith("/"):
+            fail("unsafe deployment bundle path")
+        parts = PurePosixPath(name).parts
+        if "." in parts or ".." in parts:
+            fail(f"unsafe deployment bundle path: {name}")
+        if name in seen:
+            fail(f"duplicate deployment bundle path: {name}")
+        seen.add(name)
+        if not isinstance(item["digest"], str) or not DIGEST_RE.fullmatch(item["digest"]):
+            fail(f"invalid deployment bundle file digest: {name}")
+        if not isinstance(item["sizeBytes"], int) or isinstance(item["sizeBytes"], bool) or item["sizeBytes"] < 0:
+            fail(f"invalid deployment bundle file size: {name}")
+
+    try:
+        with tarfile.open(bundle_path, "r") as tar:
+            members = tar.getmembers()
+            if len(members) != len(bundle_manifest["files"]):
+                fail("deployment bundle tar member count mismatch")
+            for member, expected in zip(members, bundle_manifest["files"]):
+                if not member.isfile():
+                    fail(f"deployment bundle tar contains non-file member: {member.name}")
+                if member.name != expected["path"]:
+                    fail(f"deployment bundle tar order/path mismatch: {member.name}")
+                if member.mode not in {0o644, 0o755}:
+                    fail(f"deployment bundle tar mode mismatch: {member.name}")
+                source = tar.extractfile(member)
+                if source is None:
+                    fail(f"cannot read deployment bundle member: {member.name}")
+                content = source.read()
+                if len(content) != expected["sizeBytes"]:
+                    fail(f"deployment bundle file size mismatch: {member.name}")
+                if sha256_bytes(content) != expected["digest"]:
+                    fail(f"deployment bundle file digest mismatch: {member.name}")
+    except (OSError, tarfile.TarError) as exc:
+        fail(f"cannot validate deployment bundle tar: {exc}")
+
+    return bundle_manifest, bundle_bytes
+
+
+def verify_bundle_tree(bundle_dir: Path, bundle_manifest: dict[str, Any]) -> bool:
+    expected_paths = {item["path"] for item in bundle_manifest["files"]}
+    try:
+        actual_files = {
+            path.relative_to(bundle_dir).as_posix()
+            for path in bundle_dir.rglob("*")
+            if path.is_file()
+        }
+        if actual_files != expected_paths:
+            return False
+        if any(path.is_symlink() for path in bundle_dir.rglob("*")):
+            return False
+        for item in bundle_manifest["files"]:
+            path = bundle_dir / item["path"]
+            content = path.read_bytes()
+            if len(content) != item["sizeBytes"] or sha256_bytes(content) != item["digest"]:
+                return False
+            mode = path.stat().st_mode & 0o777
+            if mode not in {0o444, 0o555}:
+                return False
+        for path in [bundle_dir, *[p for p in bundle_dir.rglob("*") if p.is_dir()]]:
+            if (path.stat().st_mode & 0o777) != 0o555:
+                return False
+    except OSError:
+        return False
+    return True
+
+
+def existing_matches(
+    target: Path,
+    manifest_bytes: bytes,
+    images_bytes: bytes,
+    bundle_manifest_bytes: bytes,
+    bundle_bytes: bytes,
+    bundle_manifest: dict[str, Any],
+) -> bool:
+    expected = {"manifest.json", "images.env", "deployment-bundle.json", "deployment-bundle.tar", "bundle"}
     try:
         actual = {entry.name for entry in target.iterdir()}
     except OSError as exc:
@@ -111,16 +230,50 @@ def existing_matches(target: Path, manifest_bytes: bytes, images_bytes: bytes) -
     if actual != expected:
         return False
     try:
-        return target.joinpath("manifest.json").read_bytes() == manifest_bytes and target.joinpath("images.env").read_bytes() == images_bytes
+        return (
+            target.joinpath("manifest.json").read_bytes() == manifest_bytes
+            and target.joinpath("images.env").read_bytes() == images_bytes
+            and target.joinpath("deployment-bundle.json").read_bytes() == bundle_manifest_bytes
+            and target.joinpath("deployment-bundle.tar").read_bytes() == bundle_bytes
+            and verify_bundle_tree(target / "bundle", bundle_manifest)
+        )
     except OSError:
         return False
 
 
+def install_bundle_tree(tmp: Path, bundle_path: Path, bundle_manifest: dict[str, Any]) -> None:
+    bundle_dir = tmp / "bundle"
+    bundle_dir.mkdir(mode=0o700)
+    with tarfile.open(bundle_path, "r") as tar:
+        for member, expected in zip(tar.getmembers(), bundle_manifest["files"]):
+            relative = PurePosixPath(expected["path"])
+            target = bundle_dir.joinpath(*relative.parts)
+            target.parent.mkdir(parents=True, exist_ok=True, mode=0o755)
+            source = tar.extractfile(member)
+            if source is None:
+                fail(f"cannot extract deployment bundle member: {member.name}")
+            mode = 0o555 if member.mode & 0o111 else 0o444
+            write_file(target, source.read(), mode)
+
+    directories = sorted(
+        [path for path in bundle_dir.rglob("*") if path.is_dir()],
+        key=lambda path: len(path.parts),
+        reverse=True,
+    )
+    for directory in directories:
+        os.chmod(directory, 0o555)
+        fsync_dir(directory)
+    os.chmod(bundle_dir, 0o555)
+    fsync_dir(bundle_dir)
+
+
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Install an immutable Trinyx release without activating it")
+    parser = argparse.ArgumentParser(description="Install an immutable autonomous Trinyx release without activating it")
     parser.add_argument("--role", required=True, choices=sorted(ROLES))
     parser.add_argument("--environment", required=True)
     parser.add_argument("--manifest", required=True, type=Path)
+    parser.add_argument("--bundle-manifest", required=True, type=Path)
+    parser.add_argument("--bundle", required=True, type=Path)
     parser.add_argument("--contract", required=True, type=Path)
     parser.add_argument("--release-tool", required=True, type=Path)
     parser.add_argument("--root", type=Path, default=Path("/"))
@@ -133,10 +286,12 @@ def main() -> None:
     module = load_release_module(args.release_tool)
     manifest = module.validate_manifest(load_json(args.manifest))
     validate_complete_runtime(args.contract, manifest)
+    bundle_manifest, bundle_bytes = validate_bundle(manifest, args.bundle_manifest, args.bundle)
 
     release_id = manifest["releaseId"]
     manifest_bytes = canonical_manifest(module, manifest)
     images_bytes = role_env(manifest, args.role)
+    bundle_manifest_bytes = canonical_json(bundle_manifest)
 
     base = args.root / "etc" / "trinyx" / args.environment / args.role
     releases = base / "releases"
@@ -150,7 +305,9 @@ def main() -> None:
         active_before = "<non-symlink>"
 
     if target.exists():
-        if not target.is_dir() or not existing_matches(target, manifest_bytes, images_bytes):
+        if not target.is_dir() or not existing_matches(
+            target, manifest_bytes, images_bytes, bundle_manifest_bytes, bundle_bytes, bundle_manifest
+        ):
             fail(f"immutable release collision: {target}")
         print(f"RELEASE_INSTALL_PLAN_OK role={args.role} environment={args.environment} release_id={release_id} changes=0")
         if args.apply:
@@ -169,6 +326,9 @@ def main() -> None:
         os.chmod(tmp, 0o700)
         write_file(tmp / "manifest.json", manifest_bytes, 0o444)
         write_file(tmp / "images.env", images_bytes, 0o444)
+        write_file(tmp / "deployment-bundle.json", bundle_manifest_bytes, 0o444)
+        write_file(tmp / "deployment-bundle.tar", bundle_bytes, 0o444)
+        install_bundle_tree(tmp, args.bundle, bundle_manifest)
         fsync_dir(tmp)
         os.chmod(tmp, 0o555)
         os.rename(tmp, target)
@@ -176,14 +336,19 @@ def main() -> None:
     except Exception:
         if tmp.exists():
             os.chmod(tmp, 0o700)
+            for path in tmp.rglob("*"):
+                try:
+                    os.chmod(path, 0o700 if path.is_dir() else 0o600)
+                except OSError:
+                    pass
             shutil.rmtree(tmp, ignore_errors=True)
         raise
 
-    if not existing_matches(target, manifest_bytes, images_bytes):
+    if not existing_matches(target, manifest_bytes, images_bytes, bundle_manifest_bytes, bundle_bytes, bundle_manifest):
         fail("post-install release verification failed")
     if (target.stat().st_mode & 0o777) != 0o555:
         fail("installed release directory mode mismatch")
-    for name in ("manifest.json", "images.env"):
+    for name in ("manifest.json", "images.env", "deployment-bundle.json", "deployment-bundle.tar"):
         if (target.joinpath(name).stat().st_mode & 0o777) != 0o444:
             fail(f"installed release file mode mismatch: {name}")
 
@@ -196,6 +361,7 @@ def main() -> None:
         fail("release installation changed active deployment")
 
     print(f"RELEASE_INSTALL_APPLY_OK role={args.role} environment={args.environment} release_id={release_id} changes=1")
+    print(f"RELEASE_BUNDLE_INSTALLED_OK digest={bundle_manifest['digest']} files={len(bundle_manifest['files'])}")
     print("RELEASE_ACTIVE_UNCHANGED=yes")
 
 

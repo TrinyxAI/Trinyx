@@ -8,6 +8,8 @@ trap 'chmod -R u+w "$TMP" 2>/dev/null || true; rm -rf "$TMP"' EXIT
 SOURCE=aeb2a447ea7ce0436a60549713636225dfe1a2c1
 FIXTURE="$ROOT/platform/tests/fixtures/staging-bootstrap-images.json"
 MANIFEST="$TMP/manifest.json"
+BUNDLE="$TMP/deployment-bundle.tar"
+BUNDLE_MANIFEST="$TMP/deployment-bundle.json"
 TOOL="$ROOT/platform/release/release.py"
 INSTALLER="$ROOT/platform/install/install-release.py"
 CONTRACT="$ROOT/platform/release/runtime-inventory.json"
@@ -16,8 +18,8 @@ FAKE="$TMP/root"
 python3 "$ROOT/platform/release/build-deployment-bundle.py" \
   --repo "$ROOT" \
   --contract "$ROOT/platform/release/deployment-bundle-files.json" \
-  --out "$TMP/deployment-bundle.tar" \
-  --manifest-out "$TMP/deployment-bundle.json" >/dev/null
+  --out "$BUNDLE" \
+  --manifest-out "$BUNDLE_MANIFEST" >/dev/null
 
 PLATFORM=$(git -C "$ROOT" rev-parse HEAD)
 [[ "$PLATFORM" =~ ^[0-9a-f]{40}$ ]]
@@ -28,12 +30,27 @@ python3 "$TOOL" create \
   --platform-commit "$PLATFORM" \
   --created-at 2026-09-01T05:23:32Z \
   --images "$FIXTURE" \
-  --bundle-manifest "$TMP/deployment-bundle.json" \
+  --bundle-manifest "$BUNDLE_MANIFEST" \
   --out "$MANIFEST" >/dev/null
 
 RID=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["releaseId"])' "$MANIFEST")
 [[ "$RID" =~ ^rel-v1-[0-9a-f]{32}$ ]]
 EXPECTED_RELEASE="$RID"
+BUNDLE_DIGEST=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["digest"])' "$BUNDLE_MANIFEST")
+BUNDLE_FILES=$(python3 -c 'import json,sys; print(len(json.load(open(sys.argv[1]))["files"]))' "$BUNDLE_MANIFEST")
+
+do_install() {
+  local role="$1" apply="${2:-no}"
+  local args=(
+    python3 "$INSTALLER"
+    --role "$role" --environment staging
+    --manifest "$MANIFEST" --bundle-manifest "$BUNDLE_MANIFEST" --bundle "$BUNDLE"
+    --contract "$CONTRACT" --release-tool "$TOOL"
+    --root "$FAKE"
+  )
+  if [ "$apply" = yes ]; then args+=(--apply); fi
+  "${args[@]}"
+}
 
 for ROLE in cloud paid; do
   BASE="$FAKE/etc/trinyx/staging/$ROLE"
@@ -41,45 +58,61 @@ for ROLE in cloud paid; do
   ln -s deployments/stg-bootstrap-001 "$BASE/active"
   BEFORE=$(readlink "$BASE/active")
 
-  PLAN=$(python3 "$INSTALLER" \
-    --role "$ROLE" --environment staging \
-    --manifest "$MANIFEST" --contract "$CONTRACT" --release-tool "$TOOL" \
-    --root "$FAKE")
+  PLAN=$(do_install "$ROLE")
   printf '%s\n' "$PLAN" | grep -Fq "RELEASE_INSTALL_PLAN_OK role=$ROLE environment=staging release_id=$EXPECTED_RELEASE changes=1"
   test ! -e "$BASE/releases/$EXPECTED_RELEASE"
 
-  APPLY=$(python3 "$INSTALLER" \
-    --role "$ROLE" --environment staging \
-    --manifest "$MANIFEST" --contract "$CONTRACT" --release-tool "$TOOL" \
-    --root "$FAKE" --apply)
+  APPLY=$(do_install "$ROLE" yes)
   printf '%s\n' "$APPLY" | grep -Fq "RELEASE_INSTALL_APPLY_OK role=$ROLE environment=staging release_id=$EXPECTED_RELEASE changes=1"
+  printf '%s\n' "$APPLY" | grep -Fq "RELEASE_BUNDLE_INSTALLED_OK digest=$BUNDLE_DIGEST files=$BUNDLE_FILES"
   printf '%s\n' "$APPLY" | grep -Fq 'RELEASE_ACTIVE_UNCHANGED=yes'
   test "$(readlink "$BASE/active")" = "$BEFORE"
-  test "$(stat -c %a "$BASE/releases/$EXPECTED_RELEASE")" = 555
-  test "$(stat -c %a "$BASE/releases/$EXPECTED_RELEASE/manifest.json")" = 444
-  test "$(stat -c %a "$BASE/releases/$EXPECTED_RELEASE/images.env")" = 444
 
-  POST=$(python3 "$INSTALLER" \
-    --role "$ROLE" --environment staging \
-    --manifest "$MANIFEST" --contract "$CONTRACT" --release-tool "$TOOL" \
-    --root "$FAKE")
+  TARGET="$BASE/releases/$EXPECTED_RELEASE"
+  test "$(stat -c %a "$TARGET")" = 555
+  for name in manifest.json images.env deployment-bundle.json deployment-bundle.tar; do
+    test "$(stat -c %a "$TARGET/$name")" = 444
+  done
+  test "$(stat -c %a "$TARGET/bundle")" = 555
+  test -f "$TARGET/bundle/docker-compose.yml"
+  test -f "$TARGET/bundle/docker/docker-compose.cloud.yml"
+  test -f "$TARGET/bundle/docker/docker-compose.paid.runtime.yml"
+  test "sha256:$(sha256sum "$TARGET/deployment-bundle.tar" | awk '{print $1}')" = "$BUNDLE_DIGEST"
+
+  POST=$(do_install "$ROLE")
   printf '%s\n' "$POST" | grep -Fq "RELEASE_INSTALL_PLAN_OK role=$ROLE environment=staging release_id=$EXPECTED_RELEASE changes=0"
 done
 
+# Any drift inside the immutable extracted bundle must be rejected.
 TARGET="$FAKE/etc/trinyx/staging/cloud/releases/$EXPECTED_RELEASE"
+DRIFT="$TARGET/bundle/docker-compose.yml"
 chmod 755 "$TARGET"
-chmod 644 "$TARGET/images.env"
-printf '# drift\n' >> "$TARGET/images.env"
-chmod 444 "$TARGET/images.env"
+chmod 755 "$TARGET/bundle"
+chmod 644 "$DRIFT"
+printf '\n# drift\n' >> "$DRIFT"
+chmod 444 "$DRIFT"
+chmod 555 "$TARGET/bundle"
 chmod 555 "$TARGET"
-if python3 "$INSTALLER" \
-  --role cloud --environment staging \
-  --manifest "$MANIFEST" --contract "$CONTRACT" --release-tool "$TOOL" \
-  --root "$FAKE" >/dev/null 2>&1; then
-  echo ERROR_IMMUTABLE_RELEASE_COLLISION_ACCEPTED >&2
+if do_install cloud >/dev/null 2>&1; then
+  echo ERROR_IMMUTABLE_RELEASE_BUNDLE_COLLISION_ACCEPTED >&2
   exit 1
 fi
 
+# A mismatched bundle tar must be rejected before filesystem mutation.
+cp "$BUNDLE" "$TMP/tampered.tar"
+printf 'x' >> "$TMP/tampered.tar"
+if python3 "$INSTALLER" \
+  --role paid --environment staging \
+  --manifest "$MANIFEST" --bundle-manifest "$BUNDLE_MANIFEST" --bundle "$TMP/tampered.tar" \
+  --contract "$CONTRACT" --release-tool "$TOOL" \
+  --root "$TMP/other-root" --apply >/dev/null 2>&1; then
+  echo ERROR_TAMPERED_RELEASE_BUNDLE_ACCEPTED >&2
+  exit 1
+fi
+test ! -e "$TMP/other-root/etc/trinyx/staging/paid/releases/$EXPECTED_RELEASE"
+
+echo RELEASE_INSTALLER_BUNDLE_HASH_GATE_OK
+echo RELEASE_INSTALLER_BUNDLE_EXTRACTION_OK
 echo RELEASE_INSTALLER_ATOMIC_PUBLISH_OK
 echo RELEASE_INSTALLER_ACTIVE_BOUNDARY_OK
 echo RELEASE_INSTALLER_CONTRACT_OK

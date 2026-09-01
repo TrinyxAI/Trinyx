@@ -1,0 +1,17 @@
+[Unit]
+Description=Trinyx Paid runtime materializer
+Wants=network-online.target
+After=network-online.target
+StartLimitIntervalSec=0
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/lib/trinyx/runtime-materialize-paid.sh
+RemainAfterExit=yes
+Restart=on-failure
+RestartSec=60s
+TimeoutStartSec=120s
+UMask=0077
+
+[Install]
+WantedBy=multi-user.target

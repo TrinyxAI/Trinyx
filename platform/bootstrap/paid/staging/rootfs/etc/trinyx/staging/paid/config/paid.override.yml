@@ -1,0 +1,58 @@
+services:
+  livecontext:
+    environment:
+      APP_EDITION: paid-monolith
+      DEPLOYMENT_MODE: monolith
+      AUTH_MODE: embedded
+      MARKETPLACE_MODE: local
+      BILLING_PROVIDER: stripe
+      BILLING_AUTHORITY_MODE: paid-monolith-authority
+      CLOUD_LINK_ENABLED: "true"
+      CREDIT_UNLIMITED: "false"
+      CREDIT_CONSUMPTION_ENABLED: "true"
+      PLAN_LIMITS_ENABLED: "true"
+      WORKFLOW_NODE_BILLING_ENABLED: "true"
+      CLOUD_PUBLIC_URL: https://cloud-staging.trinyx.fr
+      KEYCLOAK_PUBLIC_URL: https://auth-staging.trinyx.fr
+      PAID_PUBLIC_URL: https://app-staging.trinyx.fr
+      APP_PUBLIC_URL: https://app-staging.trinyx.fr
+      MARKETPLACE_CLOUD_API_URL: https://cloud-staging.trinyx.fr/api
+      CATALOG_BUNDLE_CLOUD_URL: https://cloud-staging.trinyx.fr
+      API_CATALOG_BUNDLE_CLOUD_URL: https://cloud-staging.trinyx.fr
+      SKILL_BUNDLE_CLOUD_URL: https://cloud-staging.trinyx.fr
+      CLOUD_KEYCLOAK_URL: https://auth-staging.trinyx.fr/realms/trinyx
+      CLOUD_LINK_REDIRECT_URI: https://app-staging.trinyx.fr/api/cloud-link/callback
+      TRINYX_IDENTITY_ISSUER: https://app-staging.trinyx.fr
+      TRINYX_IDENTITY_SIGNING_KID: authority-identity-1
+      TRINYX_ENTITLEMENT_ISSUER: https://app-staging.trinyx.fr
+      TRINYX_ENTITLEMENT_SIGNING_KID: authority-entitlement-1
+      TRINYX_S2S_SIGNING_ISSUER: trinyx-paid-authority
+      TRINYX_S2S_SIGNING_AUDIENCE: trinyx-cloud-internal
+      TRINYX_S2S_SIGNING_KID: paid-authority-1
+      TRINYX_S2S_VERIFICATION_ISSUER: trinyx-cloud
+      TRINYX_S2S_VERIFICATION_AUDIENCE: trinyx-billing-authority
+      TRINYX_ENTITLEMENT_CLOUD_INGEST_URL: https://cloud-internal.trinyx.private:8443/internal/v1/entitlement-projections
+      TRINYX_IDENTITY_CLOUD_REVOCATION_URL: https://cloud-internal.trinyx.private:8443/internal/v1/identity-bindings/revocations
+      OAUTH2_FRONTEND_URL: https://app-staging.trinyx.fr
+      OAUTH2_CALLBACK_URL: https://app-staging.trinyx.fr/api/credentials/oauth2/callback
+  frontend:
+    environment:
+      GATEWAY_PUBLIC_URL: https://app-staging.trinyx.fr
+      BACKEND_PORT: "8080"
+  paid-edge:
+    image: caddy:2.11.4-alpine
+    container_name: trinyx-paid-private-edge
+    restart: unless-stopped
+    network_mode: service:livecontext
+    depends_on:
+      livecontext:
+        condition: service_healthy
+    environment:
+      PAID_MONOLITH_INTERNAL_HOST: billing-internal.trinyx.private
+      PAID_MONOLITH_INTERNAL_PORT: "8443"
+      PAID_MONOLITH_INTERNAL_CERT_FILE: /run/tls/billing-internal.crt
+      PAID_MONOLITH_INTERNAL_KEY_FILE: /run/tls/billing-internal.key
+    volumes:
+      - /srv/trinyx/pr25-aeb2a44/docker/paid-monolith-internal/Caddyfile:/etc/caddy/Caddyfile:ro
+      - /etc/trinyx/tls/billing-internal.crt:/run/tls/billing-internal.crt:ro
+      - /etc/trinyx/tls/billing-internal.key:/run/tls/billing-internal.key:ro

@@ -1,0 +1,8 @@
+services:
+  livecontext:
+    ports: !override
+      - "127.0.0.1:8080:8080"
+      - "10.30.1.217:8443:8443"
+  frontend:
+    ports: !override
+      - "10.30.1.217:3000:3000"

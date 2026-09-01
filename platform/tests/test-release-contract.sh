@@ -11,7 +11,7 @@ SOURCE=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
 PLATFORM=bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
 CONFIG=cccccccccccccccccccccccccccccccccccccccc
 
-python3 "$TOOL" create \
+PYTHONHASHSEED=1 python3 "$TOOL" create \
   --source-commit "$SOURCE" \
   --source-ref codex/trinyx-cloud-gateway-v2 \
   --platform-commit "$PLATFORM" \
@@ -21,6 +21,18 @@ python3 "$TOOL" create \
   --out "$TMP/release-a.json" >/dev/null
 
 python3 "$TOOL" validate --manifest "$TMP/release-a.json" | grep -Fq 'RELEASE_VALIDATE_OK release_id=rel-v1-'
+
+# Identical release inputs must produce byte-for-byte identical artifacts,
+# independently of Python hash randomization.
+PYTHONHASHSEED=987654 python3 "$TOOL" create \
+  --source-commit "$SOURCE" \
+  --source-ref codex/trinyx-cloud-gateway-v2 \
+  --platform-commit "$PLATFORM" \
+  --config-revision "$CONFIG" \
+  --created-at 2026-09-01T00:00:00Z \
+  --images "$FIXTURE" \
+  --out "$TMP/release-byte-identical.json" >/dev/null
+cmp -s "$TMP/release-a.json" "$TMP/release-byte-identical.json"
 
 # Provenance-only changes do not create another release identity.
 python3 "$TOOL" create \

@@ -90,7 +90,7 @@ class InvariantTests(unittest.TestCase):
             validate_compose_model(model, "paid", expected)
         model = deepcopy(self.models[self.releases[0]])
         expected = {name: service["image"] for name, service in model["services"].items() if service.get("image")}
-        model["services"]["platform-caddy"]["image"] = "caddy:latest"
+        model["services"]["paid-edge"]["image"] = "caddy:latest"
         with self.assertRaisesRegex(InvariantError, "mutable image"):
             validate_compose_model(model, "paid", expected)
 

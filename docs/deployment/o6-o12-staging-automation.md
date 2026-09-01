@@ -177,8 +177,8 @@ No Private CA, certificate, CRL bucket, KMS key or live trust material may be cr
   `workflow_call` implementation. This includes both the release-candidate
   builder and the CE publisher, preventing the repository-wide custom OIDC
   template from encountering a direct job without `job_workflow_ref`.
-- AWS role trust is designed to pin reusable workflow identity to a reviewed
-  commit SHA. A mutable branch ref is not accepted for the approved live
-  change set.
+- Every OIDC-capable reusable workflow caller and AWS role subject is pinned to
+  reviewed implementation commit `114a2613e8090f034925a1bcf148f055653c3a06`. A mutable branch ref is rejected
+  by the CloudFormation parameter contract.
 - Offline encrypted staging root/issuer is the O10 default. The optional
   two-CA AWS PCA hierarchy remains disabled and paid.

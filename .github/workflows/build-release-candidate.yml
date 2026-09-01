@@ -13,4 +13,4 @@ jobs:
       contents: read
       id-token: write
       packages: write
-    uses: ./.github/workflows/build-release-candidate-impl.yml
+    uses: TrinyxAI/Trinyx/.github/workflows/build-release-candidate-impl.yml@114a2613e8090f034925a1bcf148f055653c3a06

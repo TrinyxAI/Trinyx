@@ -37,9 +37,9 @@
     },
     "PlatformWorkflowRef": {
       "Type": "String",
-      "Default": "refs/heads/codex/platform-release-automation",
-      "AllowedPattern": "^refs/heads/[A-Za-z0-9._/-]{1,200}$",
-      "Description": "Reviewed branch ref embedded in GitHub custom OIDC subjects; update through a reviewed change set after merge."
+      "Default": "114a2613e8090f034925a1bcf148f055653c3a06",
+      "AllowedPattern": "^[0-9a-f]{40}$",
+      "Description": "Reviewed immutable control-plane commit SHA embedded in GitHub custom OIDC subjects."
     }
   },
   "Conditions": {

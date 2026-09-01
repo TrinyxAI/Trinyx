@@ -9,6 +9,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 WORKFLOWS = ROOT / ".github" / "workflows"
+PINNED_CONTROL_PLANE_COMMIT = "114a2613e8090f034925a1bcf148f055653c3a06"
 ANY_USE = re.compile(r"^\s*uses:\s*([^\s@]+)@([^\s#]+)", re.M)
 APP_BUILDS = {
     "build-release-candidate.yml", "build-trinyx-backend.yml",
@@ -43,6 +44,14 @@ def check_workflows() -> None:
             if not owner.startswith("./"):
                 require(re.fullmatch(r"[0-9a-f]{40}", ref) is not None,
                         f"unpinned action:{path.name}:{owner}@{ref}")
+        for match in re.finditer(
+            r"uses:\s*TrinyxAI/Trinyx/\.github/workflows/([A-Za-z0-9_.-]+-impl\.yml)@([^\s#]+)",
+            text,
+        ):
+            require(
+                match.group(2) == PINNED_CONTROL_PLANE_COMMIT,
+                f"reusable control-plane workflow is not pinned to reviewed commit:{path.name}:{match.group(1)}",
+            )
         if "id-token: write" in text:
             trigger = head(text)
             if path.name in OIDC_IMPLEMENTATIONS:
@@ -122,7 +131,17 @@ def check_workflows() -> None:
 
 
 def check_iac() -> None:
+    bootstrap = json.loads(
+        (ROOT / "platform/aws/bootstrap/github-oidc-staging-bootstrap.json").read_text(encoding="utf-8")
+    )
     registry = json.loads((ROOT / "platform/aws/staging/release-registry.json").read_text(encoding="utf-8"))
+    for name, template in (("bootstrap", bootstrap), ("registry", registry)):
+        workflow_ref = template["Parameters"]["PlatformWorkflowRef"]
+        require(
+            workflow_ref["Default"] == PINNED_CONTROL_PLANE_COMMIT
+            and workflow_ref["AllowedPattern"] == "^[0-9a-f]{40}$",
+            f"{name} OIDC workflow identity is not immutable",
+        )
     encoded = json.dumps(registry, sort_keys=True)
     for value in ("BucketOwnerEnforced", "PublicAccessBlockConfiguration", "VersioningConfiguration",
                   "aws:SecureTransport", "s3:PutObject", "s3:GetObject", "environment:staging"):
@@ -137,6 +156,12 @@ def check_iac() -> None:
             "publisher OIDC principal lacks immutable workflow identity")
     deploy = json.loads((ROOT / "platform/aws/staging/deploy-control-plane.json").read_text(encoding="utf-8"))
     encoded = json.dumps(deploy, sort_keys=True)
+    workflow_ref = deploy["Parameters"]["PlatformWorkflowRef"]
+    require(
+        workflow_ref["Default"] == PINNED_CONTROL_PLANE_COMMIT
+        and workflow_ref["AllowedPattern"] == "^[0-9a-f]{40}$",
+        "deploy OIDC workflow identity is not immutable",
+    )
     require("environment:staging" in encoded, "deploy trust is not environment-bound")
     require("staging-qualification-impl.yml" in encoded and "staging-legacy-adopt-impl.yml" in encoded
             and "staging-release-register-impl.yml" not in encoded,

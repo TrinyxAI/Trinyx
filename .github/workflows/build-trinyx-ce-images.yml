@@ -27,4 +27,4 @@ jobs:
       contents: write
       id-token: write
       packages: write
-    uses: ./.github/workflows/build-trinyx-ce-images-impl.yml
+    uses: TrinyxAI/Trinyx/.github/workflows/build-trinyx-ce-images-impl.yml@114a2613e8090f034925a1bcf148f055653c3a06

@@ -8,6 +8,8 @@ DISPATCHER="$ROOT/platform/host/common/staging-deploy.sh"
 python3 - "$TEMPLATE" <<'PY'
 import json,sys
 doc=json.load(open(sys.argv[1],encoding='utf-8'))
+assert doc['Parameters']['PlatformWorkflowRef']['Default']=='114a2613e8090f034925a1bcf148f055653c3a06'
+assert doc['Parameters']['PlatformWorkflowRef']['AllowedPattern']=='^[0-9a-f]{40}$'
 resource=doc['Resources']['StagingDeployDocument']
 properties=resource['Properties']
 assert properties['Name']=='Trinyx-Staging-Deploy'

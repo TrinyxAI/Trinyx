@@ -190,3 +190,141 @@ jobs:
 
           echo AWS_CALLER_ROLE=TrinyxStagingGitHubOidcBootstrapRole
           echo AWS_GITHUB_OIDC_STS_PROBE_OK
+
+  staging_ssm_plan:
+    name: AWS SSM staging plan
+    needs:
+      - contracts
+      - oidc_sts_probe
+    if: github.event_name == 'push' && github.ref == 'refs/heads/codex/platform-release-automation'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 8
+    permissions:
+      id-token: write
+    env:
+      AWS_REGION: us-east-1
+      AWS_DEFAULT_REGION: us-east-1
+      AWS_ROLE_ARN: arn:aws:iam::001634075617:role/TrinyxStagingDeployRole
+      SSM_DOCUMENT: Trinyx-Staging-Deploy
+      CLOUD_INSTANCE_ID: i-06f414cdb30078a9d
+      PAID_INSTANCE_ID: i-0b8fd709ff82f6dd2
+      RELEASE_ID: rel-v1-082bd961a3ef556fc849e3555d804a5a
+    steps:
+      - name: Guard exact staging targets
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REPOSITORY" = 'TrinyxAI/Trinyx'
+          test "$GITHUB_REPOSITORY_ID" = '1342032975'
+          test "$GITHUB_REPOSITORY_OWNER_ID" = '319253481'
+          test "$GITHUB_REF" = 'refs/heads/codex/platform-release-automation'
+          test "$AWS_ROLE_ARN" = 'arn:aws:iam::001634075617:role/TrinyxStagingDeployRole'
+          test "$SSM_DOCUMENT" = 'Trinyx-Staging-Deploy'
+          test "$CLOUD_INSTANCE_ID" = 'i-06f414cdb30078a9d'
+          test "$PAID_INSTANCE_ID" = 'i-0b8fd709ff82f6dd2'
+          [[ "$RELEASE_ID" =~ ^rel-v1-[0-9a-f]{32}$ ]]
+          echo STAGING_SSM_TARGET_GUARD_OK
+
+      - name: Assume least-privilege staging deploy role
+        shell: bash
+        run: |
+          set -euo pipefail
+          umask 077
+
+          TOKEN_FILE=$(mktemp)
+          trap 'rm -f "$TOKEN_FILE"' EXIT
+
+          curl --fail --silent --show-error \
+            -H "Authorization: bearer ${ACTIONS_ID_TOKEN_REQUEST_TOKEN}" \
+            "${ACTIONS_ID_TOKEN_REQUEST_URL}&audience=sts.amazonaws.com" \
+            | python3 -c 'import json,sys; token=json.load(sys.stdin)["value"]; open(sys.argv[1],"w",encoding="utf-8").write(token)' "$TOKEN_FILE"
+
+          test -s "$TOKEN_FILE"
+          chmod 600 "$TOKEN_FILE"
+
+          echo "AWS_WEB_IDENTITY_TOKEN_FILE=$TOKEN_FILE" >> "$GITHUB_ENV"
+          echo "AWS_ROLE_SESSION_NAME=trinyx-stg-plan-${GITHUB_RUN_ID}" >> "$GITHUB_ENV"
+          echo "OIDC_TOKEN_FILE=$TOKEN_FILE" >> "$GITHUB_ENV"
+
+      - name: Verify deploy-role AWS identity
+        shell: bash
+        run: |
+          set -euo pipefail
+          IDENTITY=$(aws sts get-caller-identity --output json)
+          printf '%s' "$IDENTITY" | python3 -c '
+          import json, re, sys
+          data = json.load(sys.stdin)
+          assert data["Account"] == "001634075617"
+          expected = r"^arn:aws:sts::001634075617:assumed-role/TrinyxStagingDeployRole/trinyx-stg-plan-[0-9]+$"
+          assert re.fullmatch(expected, data["Arn"]), data["Arn"]
+          '
+          echo AWS_STAGING_DEPLOY_ROLE_IDENTITY_OK
+
+      - name: Run Cloud and Paid SSM plans
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          run_plan() {
+            local role="$1"
+            local instance_id="$2"
+            local command_id status output error response
+
+            command_id=$(aws ssm send-command \
+              --document-name "$SSM_DOCUMENT" \
+              --instance-ids "$instance_id" \
+              --parameters "{\"Mode\":[\"plan\"],\"Role\":[\"$role\"],\"ReleaseId\":[\"$RELEASE_ID\"]}" \
+              --comment "Trinyx staging plan ${GITHUB_RUN_ID} ${role}" \
+              --query 'Command.CommandId' \
+              --output text)
+
+            [[ "$command_id" =~ ^[0-9a-f-]{36}$ ]]
+            echo "SSM_${role^^}_COMMAND_ACCEPTED=yes"
+
+            status=""
+            for attempt in $(seq 1 60); do
+              status=$(aws ssm get-command-invocation \
+                --command-id "$command_id" \
+                --instance-id "$instance_id" \
+                --query 'Status' \
+                --output text 2>/dev/null || true)
+
+              case "$status" in
+                Success) break ;;
+                Pending|InProgress|Delayed|"") sleep 2 ;;
+                *) echo "ERROR_SSM_${role^^}_STATUS=$status" >&2; exit 1 ;;
+              esac
+            done
+
+            test "$status" = Success
+
+            response=$(aws ssm get-command-invocation \
+              --command-id "$command_id" \
+              --instance-id "$instance_id" \
+              --output json)
+
+            output=$(printf '%s' "$response" | python3 -c 'import json,sys; print(json.load(sys.stdin)["StandardOutputContent"], end="")')
+            error=$(printf '%s' "$response" | python3 -c 'import json,sys; print(json.load(sys.stdin)["StandardErrorContent"], end="")')
+
+            test -z "$error"
+            ! grep -Fq 'ERROR_' <<<"$output"
+            grep -Fxq "STAGING_DEPLOY_ROLE=$role" <<<"$output"
+            grep -Fxq "STAGING_DEPLOY_RELEASE=$RELEASE_ID" <<<"$output"
+            grep -Fxq "STAGING_DEPLOY_PLAN_OK role=$role release_id=$RELEASE_ID" <<<"$output"
+
+            echo "SSM_${role^^}_PLAN_OK"
+          }
+
+          run_plan cloud "$CLOUD_INSTANCE_ID"
+          run_plan paid "$PAID_INSTANCE_ID"
+
+          echo AWS_GITHUB_SSM_STAGING_PLAN_E2E_OK
+
+      - name: Remove temporary OIDC token
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ -n "${OIDC_TOKEN_FILE:-}" ]; then
+            rm -f "$OIDC_TOKEN_FILE"
+          fi

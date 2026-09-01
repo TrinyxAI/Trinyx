@@ -147,3 +147,44 @@ The deploy role adds only `ssm:ListCommands` on `Resource: "*"`, because that
 read/list API has no resource-level ARN boundary. Parameter mutation remains
 limited to the single staging lock ARN. Direct verification of the original
 builder attestations remains a non-blocking provenance hardening backlog item.
+
+
+## Corrective readiness closure (repository-only)
+
+The final pre-live review found and closed these additional gaps:
+
+| Classification | Risk / failure mode | Implemented control | Operational cost |
+| --- | --- | --- | --- |
+| SECURITY_CRITICAL | A buggy or compromised publisher could omit `If-None-Match` and replace the current S3 object version | Bucket policy denies every release-prefix `PutObject` without `s3:if-none-match`; the client still sends `If-None-Match: *` | No steady-state charge; copy operations to the immutable prefix are intentionally unavailable |
+| RELIABILITY_CRITICAL | Rollback preflight could mask the original exception with an uninitialized `mutated` local | Initialize mutation state before rollback preflight and fixture-test failure before mutation | None |
+| RELIABILITY_CRITICAL | The legacy `active -> deployments/stg-bootstrap-001` pointer prevented even a candidate plan and made the first safe transition undefined | Plan reports a validated legacy status; a separate pointer-only adoption saga requires a canonical installed release, full observation, exact evidence hashes, pre/post health and atomic compensation | One explicit reviewed adoption operation |
+| SECURITY_CRITICAL | Publisher and deploy roles shared a generic Environment OIDC principal | Custom GitHub OIDC subjects bind immutable owner/repository IDs, `staging`, and the exact called workflow; register cannot assume deploy | One GitHub subject-template change during approved bootstrap |
+| RELIABILITY_CRITICAL | SSM `BundleDigest` was informational after installation and rollback compensation reused the candidate digest for a previous release | Every non-install host mode verifies the installed manifest against the requested digest; the saga carries candidate and previous digests separately | Extra local hash/manifest validation only |
+| RELIABILITY_CRITICAL | Runner/AWS clock skew could hide an active command during stale-lock recovery | Query from `createdAt - 5 minutes`, then filter the exact deployment owner and active statuses | Negligible extra ListCommands results |
+| RELIABILITY_CRITICAL | Required health inventory and TLS paths were not materialized by bootstrap | Commit non-secret strict-TLS endpoint inventories; reconcile them; stage CA/certificate/key only through a bounded atomic root tool that validates chain, hostname and key match without logging material | Human certificate issuance/staging remains required |
+| PERFORMANCE_COST | New live workflows do not receive `workflow_dispatch` until present on the default branch | The existing default-branch backend workflow is a narrow pre-merge dispatcher to reusable live workflows; every operation is branch- and Environment-gated and application builds run only for `release-candidate` | Temporary bridge removed after normal workflow integration |
+| DEFENSE_IN_DEPTH | Registration verified a publisher attestation created immediately before consumption | Also verify the four original builder subjects with expected signer workflow/source and deny self-hosted provenance | Four GitHub attestation lookups per release |
+
+### Honest legacy adoption contract
+
+The observation remains `releaseEligible=false`; it is never renamed or promoted into a release. Pointer adoption is allowed only when all of the following are available on each host:
+
+1. an independently built, canonical and installed baseline `rel-v1-*`;
+2. `legacy-observation.json` produced from the complete live service inventory;
+3. a reviewed `legacy-adoption.json` matching role, exact legacy target, release ID, bundle digest, `images.env` hash, observation hash, environment-config revision and platform commit;
+4. full preflight and health proving the existing containers use the baseline release's exact digest model;
+5. post-pointer health after an atomic pointer-only update.
+
+The adoption path never calls Compose `up`, never runs a one-shot, and compensates the pointer to the legacy target on failure. If any proof is absent, the durable record is `FAILED` and the surfaced marker is `LEGACY_BASELINE_PROOF_REQUIRED`. A one-way cutover without a cryptographically honest baseline is deliberately not automated because it cannot satisfy O12 rollback safety.
+
+### OIDC principal boundary
+
+Before STS is used, configure the repository OIDC subject template with these ordered claim keys:
+
+`repository_owner_id, repository_id, context, job_workflow_ref`
+
+The IaC then trusts only immutable IDs `319253481` / `1342032975`, Environment `staging`, and exact reusable workflow paths at the reviewed `PlatformWorkflowRef`. The bootstrap probe, release registration, baseline adoption and qualification identities are distinct. Changing the workflow ref after merge is a reviewed CloudFormation/GitHub trust migration, never a compatibility wildcard.
+
+### Pre-merge manual entry point
+
+GitHub only dispatches a workflow file registered on the default branch. Until the dedicated workflows are integrated, manually dispatch `build-trinyx-backend.yml` at ref `codex/platform-release-automation` and select one explicit operation. The bridge has no generic command input and calls only pinned repository reusable workflows. Selecting a platform operation does not run backend/frontend tests, Docker build, image publication or any push-triggered staging contact.

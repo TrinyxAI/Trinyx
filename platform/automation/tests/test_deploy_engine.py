@@ -16,6 +16,7 @@ from deploy_engine import (
     HostDeployment,
     HostPlan,
     atomic_active_pointer,
+    sha256_path,
 )
 from invariants import InvariantError, validate_active_pointer
 from helpers import make_host
@@ -191,6 +192,108 @@ class DeploymentEngineTests(unittest.TestCase):
             "IDEMPOTENT",
             engine.rollback(args["deployment_id"], self.previous, args["config_revision"], args["platform_commit"], None, self.previous),
         )
+
+    def test_rollback_preflight_failure_preserves_original_error_and_record(self) -> None:
+        self.pointer.activate(self.base, self.candidate)
+        self.args["deployment_id"] = "dep-" + "4" * 32
+        engine, adapter = self.engine("preflight")
+        with self.assertRaisesRegex(InvariantError, "injected preflight failure"):
+            engine.rollback(
+                self.args["deployment_id"],
+                self.previous,
+                self.args["config_revision"],
+                self.args["platform_commit"],
+                None,
+                self.candidate,
+            )
+        self.assertEqual(self.candidate, self.pointer.release_id)
+        self.assertNotIn("apply", adapter.calls)
+        self.assertEqual("FAILED", self.record()["state"])
+
+    def test_installed_bundle_digest_is_bound_to_dispatch_contract(self) -> None:
+        engine, _ = self.engine()
+        manifest = json.loads((self.base / "releases" / self.candidate / "manifest.json").read_text())
+        expected = manifest["deploymentBundle"]["digest"]
+        engine.verify_bundle_digest(self.candidate, expected)
+        with self.assertRaisesRegex(InvariantError, "differs from SSM contract"):
+            engine.verify_bundle_digest(self.candidate, "sha256:" + "0" * 64)
+
+    @unittest.skipIf(os.name == "nt", "Linux CI executes symlink adoption semantics")
+    def test_legacy_baseline_adoption_and_explicit_restore_are_pointer_only(self) -> None:
+        legacy = self.base / "deployments" / "stg-bootstrap-001"
+        legacy.mkdir(parents=True)
+        os.symlink("deployments/stg-bootstrap-001", self.base / "active", target_is_directory=True)
+        observation = {
+            "schemaVersion": 1,
+            "environment": "staging",
+            "role": "paid",
+            "observedAt": "2026-09-01T00:00:00Z",
+            "releaseEligible": False,
+            "reason": "observation is not a release",
+            "services": {
+                service: {"configuredImage": "fixture@sha256:" + "1" * 64, "containerId": "1" * 12}
+                for service in json.loads(
+                    (self.base / "config" / "deployment-plan.json").read_text()
+                )["services"]
+            },
+        }
+        observation_path = self.base / "config" / "legacy-observation.json"
+        observation_path.write_text(json.dumps(observation, sort_keys=True) + "\n", encoding="utf-8")
+        manifest = json.loads((self.base / "releases" / self.previous / "manifest.json").read_text())
+        evidence = {
+            "schemaVersion": 1,
+            "environment": "staging",
+            "role": "paid",
+            "legacyActiveTarget": "deployments/stg-bootstrap-001",
+            "baselineRelease": self.previous,
+            "bundleDigest": manifest["deploymentBundle"]["digest"],
+            "imagesEnvSha256": sha256_path(self.base / "releases" / self.previous / "images.env"),
+            "observationSha256": sha256_path(observation_path),
+            "environmentConfigRevision": "config-legacy",
+            "platformCommit": "1" * 40,
+            "approvalScope": "pointer-only-no-runtime-recreation",
+            "approvedForPointerAdoption": True,
+        }
+        evidence_path = self.base / "config" / "legacy-adoption.json"
+        evidence_path.write_text(json.dumps(evidence, sort_keys=True) + "\n", encoding="utf-8")
+        adapter = FakeAdapter(self.models)
+        engine = HostDeployment(self.base, "paid", adapter)
+        self.assertEqual("legacy:deployments/stg-bootstrap-001", engine.active_status())
+        adoption_id = "dep-" + "5" * 32
+        self.assertEqual(
+            "ADOPTED",
+            engine.adopt_legacy_baseline(adoption_id, self.previous, "config-legacy", "1" * 40),
+        )
+        self.assertEqual(self.previous, engine.current_release())
+        self.assertNotIn("apply", adapter.calls)
+        adoption_record = json.loads(
+            (self.base / "deployments" / f"{adoption_id}-adopt.json").read_text()
+        )
+        self.assertEqual("SUCCESS", adoption_record["state"])
+        restore_id = "dep-" + "6" * 32
+        self.assertEqual(
+            "LEGACY_POINTER_RESTORED",
+            engine.restore_legacy_pointer(restore_id, self.previous, "config-legacy", "1" * 40),
+        )
+        self.assertEqual("legacy:deployments/stg-bootstrap-001", engine.active_status())
+        self.assertNotIn("apply", adapter.calls)
+
+    @unittest.skipIf(os.name == "nt", "Linux CI executes symlink adoption semantics")
+    def test_unproved_legacy_baseline_fails_closed_before_pointer_mutation(self) -> None:
+        legacy = self.base / "deployments" / "stg-bootstrap-001"
+        legacy.mkdir(parents=True)
+        os.symlink("deployments/stg-bootstrap-001", self.base / "active", target_is_directory=True)
+        engine = HostDeployment(self.base, "paid", FakeAdapter(self.models))
+        deployment_id = "dep-" + "7" * 32
+        with self.assertRaisesRegex(InvariantError, "LEGACY_BASELINE_PROOF_REQUIRED"):
+            engine.adopt_legacy_baseline(
+                deployment_id, self.previous, "config-legacy", "1" * 40,
+            )
+        self.assertEqual("legacy:deployments/stg-bootstrap-001", engine.active_status())
+        record = json.loads(
+            (self.base / "deployments" / f"{deployment_id}-adopt.json").read_text()
+        )
+        self.assertEqual("FAILED", record["state"])
 
     def test_concurrent_deployment_refusal(self) -> None:
         with DeploymentLock(self.base / "deploy.lock"):

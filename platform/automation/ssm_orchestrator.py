@@ -26,6 +26,7 @@ else:
 INSTANCES = {"cloud": "i-06f414cdb30078a9d", "paid": "i-0b8fd709ff82f6dd2"}
 SSM_EXECUTION_TIMEOUT_SECONDS = 900
 SSM_POLL_GRACE_SECONDS = 60
+STALE_LOCK_LOOKBACK = dt.timedelta(minutes=5)
 SSM_POLL_INTERVAL_SECONDS = 2.0
 ACTIVE_COMMAND_STATUSES = {"Pending", "InProgress", "Delayed", "Cancelling"}
 STALE_LOCK_CONFIRMATION = "AWS_STAGING_STALE_LOCK_BREAK_APPROVED"
@@ -241,11 +242,18 @@ class AwsCliStagingLock:
             and lock.get("owner") == owner,
             "stale lock owner/schema mismatch",
         )
+        try:
+            created_at = dt.datetime.fromisoformat(str(lock["createdAt"]).replace("Z", "+00:00"))
+        except ValueError as exc:
+            raise InvariantError("stale lock timestamp is invalid; manual AWS review required") from exc
+        require(created_at.tzinfo is not None, "stale lock timestamp lacks timezone")
+        invoked_after = (created_at - STALE_LOCK_LOOKBACK).astimezone(dt.timezone.utc)
+        invoked_after_text = invoked_after.isoformat(timespec="seconds").replace("+00:00", "Z")
         commands = self.transport._aws([
             "ssm", "list-commands",
             "--filters",
             f"key=DocumentName,value={self.transport.document}",
-            f"key=InvokedAfter,value={lock['createdAt']}",
+            f"key=InvokedAfter,value={invoked_after_text}",
             "--output", "json",
         ])
         require(commands.returncode == 0, "cannot prove absence of active SSM commands")
@@ -329,7 +337,37 @@ class StagingSaga:
             )
             require(f"STAGING_DEPLOY_HEALTH_OK role={role} release_id={release_id}" in output, f"{role} health failed")
 
-    def deploy(self, release_id: str, bundle_digest: str, previous_cloud: str, previous_paid: str) -> None:
+    def adopt_legacy_baseline(self, release_id: str, bundle_digest: str) -> None:
+        owner = new_deployment_id()
+        with self.lock.hold(owner):
+            paid_adopted = False
+            try:
+                paid = self._request("adopt", "paid", release_id, bundle_digest, None, None, owner)
+                require(
+                    f"STAGING_LEGACY_ADOPTION_OK role=paid release_id={release_id}" in paid,
+                    "Paid legacy adoption not acknowledged",
+                )
+                paid_adopted = True
+                cloud = self._request("adopt", "cloud", release_id, bundle_digest, None, None, owner)
+                require(
+                    f"STAGING_LEGACY_ADOPTION_OK role=cloud release_id={release_id}" in cloud,
+                    "Cloud legacy adoption not acknowledged",
+                )
+            except Exception:
+                if paid_adopted:
+                    with suppress_invariant():
+                        self._request("restore-legacy", "paid", release_id, bundle_digest, None, None, owner)
+                raise
+
+    def deploy(
+        self,
+        release_id: str,
+        bundle_digest: str,
+        previous_cloud: str,
+        previous_paid: str,
+        previous_cloud_bundle_digest: str,
+        previous_paid_bundle_digest: str,
+    ) -> None:
         owner = new_deployment_id()
         with self.lock.hold(owner):
             self.plan_both(release_id, bundle_digest, previous_cloud, previous_paid, owner)
@@ -346,13 +384,21 @@ class StagingSaga:
                 # restored before Paid so a failed Cloud edge cannot keep sending new
                 # traffic while Paid is being restored.
                 with suppress_invariant():
-                    self._request("rollback", "cloud", previous_cloud, bundle_digest, release_id, release_id, owner)
+                    self._request(
+                        "rollback", "cloud", previous_cloud, previous_cloud_bundle_digest,
+                        release_id, release_id, owner,
+                    )
                 if paid_applied:
                     with suppress_invariant():
-                        self._request("rollback", "paid", previous_paid, bundle_digest, previous_cloud, release_id, owner)
+                        self._request(
+                            "rollback", "paid", previous_paid, previous_paid_bundle_digest,
+                            previous_cloud, release_id, owner,
+                        )
                 raise
 
-    def rollback(self, baseline_id: str, baseline_digest: str, candidate_id: str) -> None:
+    def rollback(
+        self, baseline_id: str, baseline_digest: str, candidate_id: str, candidate_digest: str,
+    ) -> None:
         owner = new_deployment_id()
         with self.lock.hold(owner):
             # Cloud first removes the candidate-facing edge, then Paid returns.
@@ -365,7 +411,7 @@ class StagingSaga:
                 # Paid host rollback compensates itself to candidate. Restore Cloud
                 # to candidate as well so a partial O12 does not leave mixed stacks.
                 with suppress_invariant():
-                    self._request("rollback", "cloud", candidate_id, baseline_digest, baseline_id, candidate_id, owner)
+                    self._request("rollback", "cloud", candidate_id, candidate_digest, baseline_id, candidate_id, owner)
                 raise
             self.full_health(baseline_id, baseline_digest, baseline_id, baseline_id, owner)
 
@@ -393,7 +439,7 @@ def meaningful_runtime_difference(baseline_manifest: Path, candidate_manifest: P
 
 def main() -> None:
     parser = argparse.ArgumentParser()
-    parser.add_argument("command", choices=("install", "deploy", "rollback", "health", "diff", "break-lock"))
+    parser.add_argument("command", choices=("install", "adopt", "deploy", "rollback", "health", "diff", "break-lock"))
     parser.add_argument("--document", default="Trinyx-Staging-Deploy")
     parser.add_argument("--document-version")
     parser.add_argument("--registry-bucket")
@@ -404,6 +450,9 @@ def main() -> None:
     parser.add_argument("--previous-cloud")
     parser.add_argument("--previous-paid")
     parser.add_argument("--candidate-id")
+    parser.add_argument("--candidate-bundle-digest")
+    parser.add_argument("--previous-cloud-bundle-digest")
+    parser.add_argument("--previous-paid-bundle-digest")
     parser.add_argument("--baseline-manifest", type=Path)
     parser.add_argument("--candidate-manifest", type=Path)
     parser.add_argument("--lock-owner")
@@ -424,16 +473,30 @@ def main() -> None:
     require(all((args.document_version, args.registry_bucket, args.config_revision, args.platform_commit)), "control-plane inputs required")
     transport = AwsCliSsmTransport(args.document, args.document_version, args.registry_bucket)
     saga = StagingSaga(transport, args.config_revision, args.platform_commit, AwsCliStagingLock(transport))
-    require(args.release_id and args.bundle_digest and args.previous_cloud and args.previous_paid, "release inputs required")
+    require(args.release_id and args.bundle_digest, "release identity inputs required")
+    if args.command != "adopt":
+        require(args.previous_cloud and args.previous_paid, "previous release inputs required")
     if args.command == "install":
         saga.install(args.release_id, args.bundle_digest, args.previous_cloud, args.previous_paid)
         print(f"STAGING_SAGA_INSTALL_OK release_id={args.release_id}")
+    elif args.command == "adopt":
+        saga.adopt_legacy_baseline(args.release_id, args.bundle_digest)
+        print(f"STAGING_SAGA_LEGACY_ADOPTION_OK release_id={args.release_id}")
     elif args.command == "deploy":
-        saga.deploy(args.release_id, args.bundle_digest, args.previous_cloud, args.previous_paid)
+        require(
+            args.previous_cloud_bundle_digest and args.previous_paid_bundle_digest,
+            "previous bundle digest inputs required",
+        )
+        saga.deploy(
+            args.release_id, args.bundle_digest, args.previous_cloud, args.previous_paid,
+            args.previous_cloud_bundle_digest, args.previous_paid_bundle_digest,
+        )
         print(f"STAGING_SAGA_DEPLOY_OK release_id={args.release_id}")
     elif args.command == "rollback":
-        require(args.candidate_id, "candidate ID required")
-        saga.rollback(args.release_id, args.bundle_digest, args.candidate_id)
+        require(args.candidate_id and args.candidate_bundle_digest, "candidate identity required")
+        saga.rollback(
+            args.release_id, args.bundle_digest, args.candidate_id, args.candidate_bundle_digest,
+        )
         print(f"STAGING_SAGA_ROLLBACK_OK release_id={args.release_id}")
     else:
         saga.full_health(args.release_id, args.bundle_digest, args.previous_cloud, args.previous_paid)

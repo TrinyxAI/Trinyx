@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import contextlib
 import copy
 import datetime as dt
@@ -46,6 +47,7 @@ else:
     )
 
 DEPLOYMENT_RE = re.compile(r"^dep-[0-9a-f]{32}$")
+LEGACY_TARGET_RE = re.compile(r"^deployments/stg-bootstrap-[A-Za-z0-9._-]{1,64}$")
 REVISION_RE = re.compile(r"^[A-Za-z0-9._-]{1,128}$")
 SHA_RE = re.compile(r"^[0-9a-f]{40}$")
 TRANSITIONS = {
@@ -86,13 +88,21 @@ def atomic_write_json(path: Path, value: Any) -> None:
             os.close(directory_fd)
 
 
-def atomic_active_pointer(base: Path, release_id: str) -> None:
-    require(RELEASE_RE.fullmatch(release_id) is not None, "invalid active release ID")
-    target = base / "releases" / release_id
-    require(target.is_dir() and not target.is_symlink(), "activation target is not an immutable installed release")
+def sha256_path(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for block in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(block)
+    return "sha256:" + digest.hexdigest()
+
+
+def atomic_pointer_target(base: Path, relative_target: str) -> None:
+    require(not relative_target.startswith("/") and ".." not in Path(relative_target).parts, "unsafe active target")
+    target = base / relative_target
+    require(target.is_dir() and not target.is_symlink(), "active target is not an existing immutable directory")
     temp = base / f".active.{os.getpid()}.{uuid.uuid4().hex}"
     try:
-        os.symlink(f"releases/{release_id}", temp, target_is_directory=True)
+        os.symlink(relative_target, temp, target_is_directory=True)
         os.replace(temp, base / "active")
         if os.name != "nt":
             directory_fd = os.open(base, os.O_RDONLY)
@@ -103,6 +113,11 @@ def atomic_active_pointer(base: Path, release_id: str) -> None:
     finally:
         with contextlib.suppress(FileNotFoundError):
             temp.unlink()
+
+
+def atomic_active_pointer(base: Path, release_id: str) -> None:
+    require(RELEASE_RE.fullmatch(release_id) is not None, "invalid active release ID")
+    atomic_pointer_target(base, f"releases/{release_id}")
 
 
 class DeploymentLock:
@@ -458,6 +473,191 @@ class HostDeployment:
     def current_release(self) -> str:
         return self.pointer.current(self.base, self.role)
 
+    def _legacy_active_target(self) -> str:
+        active = self.base / "active"
+        require(active.is_symlink(), "legacy active pointer is not a symlink")
+        target = os.readlink(active)
+        require(LEGACY_TARGET_RE.fullmatch(target) is not None,
+                "active pointer is neither a release nor an approved legacy bootstrap")
+        resolved = (self.base / target).resolve(strict=True)
+        deployments = (self.base / "deployments").resolve(strict=True)
+        require(resolved.parent == deployments and resolved.is_dir(), "legacy active target escapes deployments")
+        return target
+
+    def active_status(self) -> str:
+        try:
+            return self.current_release()
+        except InvariantError:
+            return "legacy:" + self._legacy_active_target()
+
+    def verify_bundle_digest(self, release_id: str, expected_digest: str) -> None:
+        require(re.fullmatch(r"sha256:[0-9a-f]{64}", expected_digest) is not None,
+                "bad expected bundle digest")
+        release_dir = self.base / "releases" / release_id
+        validate_release_directory(release_dir, self.role)
+        try:
+            manifest = json.loads((release_dir / "manifest.json").read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as exc:
+            raise InvariantError("installed release manifest unreadable") from exc
+        require(manifest.get("deploymentBundle", {}).get("digest") == expected_digest,
+                "installed release bundle digest differs from SSM contract")
+
+    def _legacy_adoption_evidence(
+        self, release_id: str, config_revision: str, platform_commit: str, legacy_target: str,
+    ) -> dict[str, Any]:
+        evidence_path = self.base / "config" / "legacy-adoption.json"
+        observation_path = self.base / "config" / "legacy-observation.json"
+        try:
+            evidence = json.loads(evidence_path.read_text(encoding="utf-8"))
+            observation = json.loads(observation_path.read_text(encoding="utf-8"))
+            manifest = json.loads(
+                (self.base / "releases" / release_id / "manifest.json").read_text(encoding="utf-8")
+            )
+        except (OSError, json.JSONDecodeError) as exc:
+            raise InvariantError("LEGACY_BASELINE_PROOF_REQUIRED") from exc
+        required = {
+            "schemaVersion", "environment", "role", "legacyActiveTarget", "baselineRelease",
+            "bundleDigest", "imagesEnvSha256", "observationSha256", "environmentConfigRevision",
+            "platformCommit", "approvalScope", "approvedForPointerAdoption",
+        }
+        require(isinstance(evidence, dict) and set(evidence) == required, "LEGACY_BASELINE_PROOF_REQUIRED")
+        require(
+            evidence["schemaVersion"] == 1
+            and evidence["environment"] == "staging"
+            and evidence["role"] == self.role
+            and evidence["legacyActiveTarget"] == legacy_target
+            and evidence["baselineRelease"] == release_id
+            and evidence["bundleDigest"] == manifest.get("deploymentBundle", {}).get("digest")
+            and evidence["imagesEnvSha256"] == sha256_path(self.base / "releases" / release_id / "images.env")
+            and evidence["observationSha256"] == sha256_path(observation_path)
+            and evidence["environmentConfigRevision"] == config_revision
+            and evidence["platformCommit"] == platform_commit
+            and evidence["approvalScope"] == "pointer-only-no-runtime-recreation"
+            and evidence["approvedForPointerAdoption"] is True,
+            "LEGACY_BASELINE_PROOF_REQUIRED",
+        )
+        require(
+            isinstance(observation, dict)
+            and observation.get("schemaVersion") == 1
+            and observation.get("environment") == "staging"
+            and observation.get("role") == self.role
+            and observation.get("releaseEligible") is False
+            and isinstance(observation.get("services"), dict)
+            and set(observation["services"]) == set(
+                load_host_plan(self.base / "config" / "deployment-plan.json", self.role).services
+            ),
+            "LEGACY_BASELINE_PROOF_REQUIRED",
+        )
+        return evidence
+
+    def adopt_legacy_baseline(
+        self, deployment_id: str, release_id: str, config_revision: str, platform_commit: str,
+    ) -> str:
+        self._validate_inputs(deployment_id, release_id, config_revision, platform_commit)
+        with DeploymentLock(self.base / "deploy.lock"):
+            legacy_target = self._legacy_active_target()
+            record = DeploymentRecord(
+                self.base / "deployments" / f"{deployment_id}-adopt.json",
+                deployment_id, release_id, config_revision, platform_commit, None, None,
+            )
+            mutated = False
+            plan: HostPlan | None = None
+            try:
+                record.transition("PREFLIGHT")
+                self._legacy_adoption_evidence(release_id, config_revision, platform_commit, legacy_target)
+                plan, _ = self.plan(release_id)
+                self.adapter.health(
+                    self.base, self.base / "releases" / release_id, plan, self._runtime_services(plan)
+                )
+                record.transition("READY")
+                record.transition("ACTIVATING")
+                atomic_active_pointer(self.base, release_id)
+                mutated = True
+                self.adapter.materialize(self.role)
+                record.transition("HEALTH_CHECKING")
+                self.adapter.health(
+                    self.base, self.base / "releases" / release_id, plan, self._runtime_services(plan)
+                )
+                require(self.current_release() == release_id, "adopted baseline pointer mismatch")
+                self._publish_config_revision(config_revision)
+                record.transition("SUCCESS")
+                return "ADOPTED"
+            except Exception as exc:
+                safe = type(exc).__name__ + ": legacy baseline adoption failed"
+                if not mutated:
+                    record.transition("FAILED", failure=safe, rollback_result="NOT_NEEDED")
+                    raise
+                try:
+                    record.transition("ROLLING_BACK", failure=safe)
+                    atomic_pointer_target(self.base, legacy_target)
+                    self.adapter.materialize(self.role)
+                    if plan is not None:
+                        self.adapter.health(
+                            self.base, self.base / "releases" / release_id, plan, self._runtime_services(plan)
+                        )
+                    record.transition("ROLLED_BACK", rollback_result="LEGACY_POINTER_RESTORED")
+                except Exception as rollback_exc:
+                    if record.value["state"] == "ROLLING_BACK":
+                        record.transition("ROLLBACK_FAILED", rollback_result=type(rollback_exc).__name__)
+                    raise InvariantError("legacy adoption failed and pointer restoration failed") from rollback_exc
+                raise
+
+    def restore_legacy_pointer(
+        self, deployment_id: str, release_id: str, config_revision: str, platform_commit: str,
+    ) -> str:
+        self._validate_inputs(deployment_id, release_id, config_revision, platform_commit)
+        with DeploymentLock(self.base / "deploy.lock"):
+            require(self.current_release() == release_id,
+                    "legacy restore requires the adopted baseline to be active")
+            try:
+                evidence = json.loads(
+                    (self.base / "config" / "legacy-adoption.json").read_text(encoding="utf-8")
+                )
+            except (OSError, json.JSONDecodeError) as exc:
+                raise InvariantError("LEGACY_BASELINE_PROOF_REQUIRED") from exc
+            legacy_target = str(evidence.get("legacyActiveTarget", ""))
+            self._legacy_adoption_evidence(release_id, config_revision, platform_commit, legacy_target)
+            record = DeploymentRecord(
+                self.base / "deployments" / f"{deployment_id}-restore-legacy.json",
+                deployment_id, release_id, config_revision, platform_commit, None, None,
+            )
+            mutated = False
+            plan: HostPlan | None = None
+            try:
+                record.transition("PREFLIGHT")
+                plan, _ = self.plan(release_id)
+                self.adapter.health(
+                    self.base, self.base / "releases" / release_id, plan, self._runtime_services(plan)
+                )
+                record.transition("READY")
+                record.transition("ACTIVATING")
+                atomic_pointer_target(self.base, legacy_target)
+                mutated = True
+                self.adapter.materialize(self.role)
+                record.transition("HEALTH_CHECKING")
+                self.adapter.health(
+                    self.base, self.base / "releases" / release_id, plan, self._runtime_services(plan)
+                )
+                record.transition("ROLLED_BACK", rollback_result="LEGACY_POINTER_RESTORED")
+                return "LEGACY_POINTER_RESTORED"
+            except Exception as exc:
+                safe = type(exc).__name__ + ": legacy pointer restoration failed"
+                if not mutated:
+                    record.transition("FAILED", failure=safe, rollback_result="NOT_NEEDED")
+                    raise
+                try:
+                    record.transition("ROLLING_BACK", failure=safe)
+                    atomic_active_pointer(self.base, release_id)
+                    self.adapter.materialize(self.role)
+                    if plan is not None:
+                        self.adapter.health(
+                            self.base, self.base / "releases" / release_id, plan, self._runtime_services(plan)
+                        )
+                finally:
+                    if record.value["state"] == "ROLLING_BACK":
+                        record.transition("ROLLBACK_FAILED", rollback_result="FAILED")
+                raise
+
     def _record(
         self,
         deployment_id: str,
@@ -640,6 +840,7 @@ class HostDeployment:
                 previous_cloud,
                 previous_paid,
             )
+            mutated = False
             try:
                 record.transition("PREFLIGHT")
                 plan, target_model = self.plan(target_release)
@@ -690,7 +891,7 @@ def rooted(root: Path, absolute: str) -> Path:
 
 def main() -> None:
     parser = argparse.ArgumentParser()
-    parser.add_argument("mode", choices=("plan", "apply", "rollback", "health"))
+    parser.add_argument("mode", choices=("plan", "adopt", "restore-legacy", "apply", "rollback", "health"))
     parser.add_argument("role", choices=("cloud", "paid"))
     parser.add_argument("release_id")
     parser.add_argument("--deployment-id", default="dep-" + uuid.uuid4().hex)
@@ -698,18 +899,33 @@ def main() -> None:
     parser.add_argument("--platform-commit", default="0" * 40)
     parser.add_argument("--previous-cloud-release")
     parser.add_argument("--previous-paid-release")
+    parser.add_argument("--expected-bundle-digest", required=True)
     parser.add_argument("--root", type=Path, default=Path("/"))
     args = parser.parse_args()
     base = rooted(args.root, f"/etc/trinyx/staging/{args.role}")
     engine = HostDeployment(base, args.role, ShellAdapter())
+    engine.verify_bundle_digest(args.release_id, args.expected_bundle_digest)
     if args.mode == "plan":
         engine.plan(args.release_id)
-        print(f"STAGING_DEPLOY_PLAN_OK role={args.role} release_id={args.release_id} active={engine.current_release()}")
+        print(
+            f"STAGING_DEPLOY_PLAN_OK role={args.role} release_id={args.release_id} "
+            f"active={engine.active_status()}"
+        )
     elif args.mode == "health":
         plan, _ = engine.plan(args.release_id)
         engine.adapter.health(base, base / "releases" / args.release_id, plan, engine._runtime_services(plan))
         require(engine.current_release() == args.release_id, "health target is not active")
         print(f"STAGING_DEPLOY_HEALTH_OK role={args.role} release_id={args.release_id}")
+    elif args.mode == "adopt":
+        result = engine.adopt_legacy_baseline(
+            args.deployment_id, args.release_id, args.environment_config_revision, args.platform_commit,
+        )
+        print(f"STAGING_LEGACY_ADOPTION_OK role={args.role} release_id={args.release_id} result={result}")
+    elif args.mode == "restore-legacy":
+        result = engine.restore_legacy_pointer(
+            args.deployment_id, args.release_id, args.environment_config_revision, args.platform_commit,
+        )
+        print(f"STAGING_LEGACY_RESTORE_OK role={args.role} release_id={args.release_id} result={result}")
     elif args.mode == "apply":
         result = engine.apply(
             args.deployment_id,
@@ -730,6 +946,7 @@ def main() -> None:
             args.previous_paid_release,
         )
         print(f"STAGING_DEPLOY_ROLLBACK_OK role={args.role} release_id={args.release_id} result={result}")
+
 
 
 if __name__ == "__main__":

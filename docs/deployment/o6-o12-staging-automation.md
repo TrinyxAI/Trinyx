@@ -121,3 +121,44 @@ remains fail-closed and requires direct AWS review.
 Never use `$DEFAULT` SSM document version, SSH, a GitHub token on EC2, static AWS
 credentials, `curl -k`, global Compose apply, destructive DB down-migrations,
 Docker prune, volume deletion, DB drop or Redis flush.
+
+
+## Required pre-live sequence added by the final review
+
+Do not execute these steps as part of repository implementation. They are the later human-gated sequence.
+
+1. Review the branch CI and exact commit.
+2. Create/protect GitHub Environment `staging` for only the reviewed platform branch.
+3. Configure the repository OIDC subject template with `repository_owner_id,repository_id,context,job_workflow_ref`.
+4. Create CloudFormation change sets only for the OIDC bootstrap, release registry and deploy control plane. Keep `EnableS3GatewayEndpoint=false` until real VPC and route-table IDs have been independently supplied.
+5. Review that registration subjects cannot assume the deploy role and the OIDC probe cannot assume either publisher or deploy.
+6. Execute approved change sets; no PCA resource is included in this step.
+7. Register the frozen release through the pre-merge bridge operation `staging-release-register`. The workflow verifies the ZIP, the four original builder attestations, release identity, bundle and image inventory before OIDC.
+8. Reconcile both hosts in plan mode. This installs health inventories and the TLS staging tool, but never certificate private keys from Git.
+9. After separate PCA approval/issuance, stage trust/certificate material:
+   - Cloud: `stage-staging-tls --role cloud --ca <approved-staging-ca.pem>`
+   - Paid: `stage-staging-tls --role paid --ca <approved-staging-ca.pem> --certificate <billing-internal.crt> --private-key <billing-internal.key>`
+   The tool verifies chain, `billing-internal.trinyx.private`, certificate/key match, atomicity and mode `0600` for the private key.
+10. Run the baseline observation on each host and independently review a canonical baseline release. Create each root-owned `config/legacy-adoption.json` from the committed schema with the exact hashes. Do not set approval true unless the runtime image and bundle/config compatibility review is complete.
+11. Use `staging-legacy-adopt` only after that review. It installs without activation, health-checks the existing runtime, atomically adopts the pointer only, health-checks again and compensates on partial failure.
+12. Run install/plan. Stop again before candidate `apply`.
+13. Only after independent review run the single qualification workflow: candidate deploy → health → baseline rollback → health → same-candidate redeploy → health/idempotence.
+
+The current task performs none of these live operations. Paid process health continues to come from the Compose `/actuator/health/liveness` container healthcheck; the public smoke inventory does not query aggregate `/actuator/health`, so absent Stripe TEST configuration cannot create a false process failure.
+
+### Evidence hash preparation
+
+On each host, after the canonical baseline has been installed and observation captured, compute only non-secret hashes:
+
+```text
+sha256sum /etc/trinyx/staging/<role>/releases/<releaseId>/images.env
+sha256sum /etc/trinyx/staging/<role>/config/legacy-observation.json
+```
+
+Copy the resulting `sha256:<hex>` values into `legacy-adoption.json`. Also bind the manifest's deployment-bundle digest, the approved environment-config revision and the exact 40-character platform commit. The adoption engine recomputes every value and rejects drift.
+
+### Private CA stop
+
+`AWS_PCA_LIVE_APPROVAL_REQUIRED`
+
+No Private CA, certificate, CRL bucket, KMS key or live trust material may be created by these repository workflows. Current Private CA pricing must be rechecked from AWS immediately before the approved live operation.

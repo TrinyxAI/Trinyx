@@ -8,6 +8,13 @@ on:
         required: true
         type: string
 
+  workflow_call:
+    inputs:
+      role_arn:
+        description: 'CloudFormation StagingBootstrapRoleArn output'
+        required: true
+        type: string
+
 permissions:
   contents: read
   id-token: write

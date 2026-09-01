@@ -15,7 +15,7 @@ APP_BUILDS = {
     "build-trinyx-ce-images.yml", "build-trinyx-cloud-images.yml",
     "build-trinyx-frontend.yml", "cloud-stack.yml",
 }
-LIVE = {"staging-release-register.yml", "staging-qualification.yml", "staging-oidc-probe.yml"}
+LIVE = {"staging-release-register.yml", "staging-qualification.yml", "staging-oidc-probe.yml", "staging-legacy-adopt.yml"}
 
 
 def require(ok: bool, message: str) -> None:
@@ -41,6 +41,7 @@ def check_workflows() -> None:
         if path.name in LIVE:
             trigger = head(text)
             require("workflow_dispatch:" in trigger, f"live workflow not manual:{path.name}")
+            require("workflow_call:" in trigger, f"live workflow lacks pre-merge reusable entry:{path.name}")
             require(not any(x in trigger for x in ("\n  push:", "\n  pull_request:", "\n  schedule:")),
                     f"automatic live trigger:{path.name}")
             require("environment: staging" in text, f"missing staging environment:{path.name}")
@@ -56,6 +57,17 @@ def check_workflows() -> None:
     cloud = head((WORKFLOWS / "cloud-stack.yml").read_text(encoding="utf-8"))
     require("'docs/**'" not in cloud, "docs trigger cloud stack")
     require("'.github/workflows/**'" not in cloud, "workflow wildcard triggers cloud stack")
+    bridge = (WORKFLOWS / "build-trinyx-backend.yml").read_text(encoding="utf-8")
+    for operation, target in (
+        ("staging-oidc-probe", "staging-oidc-probe.yml"),
+        ("staging-release-register", "staging-release-register.yml"),
+        ("staging-legacy-adopt", "staging-legacy-adopt.yml"),
+        ("staging-qualification", "staging-qualification.yml"),
+    ):
+        require(f"inputs.operation == '{operation}'" in bridge and target in bridge,
+                f"missing narrow pre-merge bridge:{operation}")
+    require("inputs.operation == 'release-candidate'" in bridge,
+            "manual application build is not separated from platform bridge")
     qualification = (WORKFLOWS / "staging-qualification.yml").read_text(encoding="utf-8")
     require("timeout-minutes: 360" in qualification, "qualification lacks maximum bounded job budget")
 
@@ -68,9 +80,18 @@ def check_iac() -> None:
         require(value in encoded, f"registry control missing:{value}")
     require("ssm:SendCommand" not in encoded, "publisher can deploy")
     require("kms:Decrypt" not in encoded and "AWS::KMS::Key" not in encoded, "unjustified KMS")
+    require("s3:if-none-match" in encoded, "S3 immutability is not server-enforced")
+    require("RouteTableIds is required" in encoded and "Fn::Split" in encoded,
+            "gateway endpoint route tables are not fail-closed")
+    require("job_workflow_ref" in encoded and "repository_owner_id:319253481" in encoded
+            and "repository_id:1342032975" in encoded,
+            "publisher OIDC principal lacks immutable workflow identity")
     deploy = json.loads((ROOT / "platform/aws/staging/deploy-control-plane.json").read_text(encoding="utf-8"))
     encoded = json.dumps(deploy, sort_keys=True)
     require("environment:staging" in encoded, "deploy trust is not environment-bound")
+    require("staging-qualification.yml" in encoded and "staging-legacy-adopt.yml" in encoded
+            and "staging-release-register.yml" not in encoded,
+            "deploy OIDC principal boundary is not workflow-specific")
     require("s3:PutObject" not in encoded, "deploy role can publish")
     require("DocumentVersionName" in deploy["Parameters"], "SSM version is not pinned")
     step = deploy["Resources"]["StagingDeployDocument"]["Properties"]["Content"]["mainSteps"][0]
@@ -79,6 +100,10 @@ def check_iac() -> None:
     require("SSM_EXECUTION_TIMEOUT_SECONDS = 900" in orchestrator, "orchestrator execution budget drift")
     require("SSM_POLL_GRACE_SECONDS = 60" in orchestrator, "orchestrator polling grace drift")
     require("range(90)" not in orchestrator, "orchestrator restored magic 180-second polling loop")
+    require("STALE_LOCK_LOOKBACK = dt.timedelta(minutes=5)" in orchestrator,
+            "stale-lock AWS clock-skew margin missing")
+    dispatcher = (ROOT / "platform/host/common/staging-deploy.sh").read_text(encoding="utf-8")
+    require("--expected-bundle-digest" in dispatcher, "SSM bundle digest is not checked after install")
     pca = json.loads((ROOT / "platform/aws/staging/private-ca-plan.json").read_text(encoding="utf-8"))
     require(pca["Parameters"]["PcaLiveApproval"]["Default"] == "AWS_PCA_LIVE_APPROVAL_REQUIRED", "PCA stop absent")
     for resource in pca["Resources"].values():

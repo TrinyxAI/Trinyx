@@ -42,6 +42,47 @@ on:
         required: true
         type: string
 
+  workflow_call:
+    inputs:
+      run_id:
+        description: GitHub Actions build workflow run ID
+        required: true
+        default: '33485509832'
+        type: string
+      artifact_id:
+        description: GitHub Actions artifact ID
+        required: true
+        default: '9791964215'
+        type: string
+      artifact_digest:
+        description: GitHub artifact ZIP digest
+        required: true
+        default: 'sha256:755594078d9da7e19406e01187534132920a31f87804c1b33baa28fa96559152'
+        type: string
+      source_commit:
+        description: Frozen application source commit
+        required: true
+        default: 'f3a4c1ddcf6a17bfc837071f9046ac4c38a38b47'
+        type: string
+      release_id:
+        description: Expected frozen release ID
+        required: true
+        default: 'rel-v1-b5ba70c23b9f529ac8228a7b00b4faa4'
+        type: string
+      bundle_digest:
+        description: Expected deployment bundle digest
+        required: true
+        default: 'sha256:c9df14dcd1dbc24b31b926d3778bef2e208b59824c78f24292608284f3579892'
+        type: string
+      registry_bucket:
+        description: Approved ReleaseRegistryBucketName stack output
+        required: true
+        type: string
+      publisher_role_arn:
+        description: Approved ReleasePublisherRoleArn stack output
+        required: true
+        type: string
+
 permissions:
   actions: read
   attestations: write
@@ -134,6 +175,13 @@ jobs:
           gh attestation verify candidate.zip --repo "$GITHUB_REPOSITORY"
           mkdir candidate
           unzip -q candidate.zip -d candidate
+          for subject in release.json release-images.json deployment-bundle.json deployment-bundle.tar; do
+            gh attestation verify "candidate/$subject" \
+              --repo "$GITHUB_REPOSITORY" \
+              --signer-workflow TrinyxAI/Trinyx/.github/workflows/build-release-candidate.yml \
+              --source-digest "$SOURCE_COMMIT" \
+              --deny-self-hosted-runners
+          done
           python3 - <<'PY'
           import datetime, json, os
           from pathlib import Path

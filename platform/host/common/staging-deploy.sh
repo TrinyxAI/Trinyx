@@ -13,7 +13,7 @@ PREVIOUS_CLOUD_RELEASE=${9:-}
 PREVIOUS_PAID_RELEASE=${10:-}
 
 case "$MODE" in
-  install|plan|apply|rollback|health) ;;
+  install|plan|adopt|restore-legacy|apply|rollback|health) ;;
   *) echo "ERROR_INVALID_DEPLOY_MODE" >&2; exit 64 ;;
 esac
 
@@ -119,6 +119,7 @@ ARGS=(
   --deployment-id "$DEPLOYMENT_ID"
   --environment-config-revision "$CONFIG_REVISION"
   --platform-commit "$PLATFORM_COMMIT"
+  --expected-bundle-digest "$BUNDLE_DIGEST"
 )
 if [ -n "$PREVIOUS_CLOUD_RELEASE" ]; then
   ARGS+=(--previous-cloud-release "$PREVIOUS_CLOUD_RELEASE")

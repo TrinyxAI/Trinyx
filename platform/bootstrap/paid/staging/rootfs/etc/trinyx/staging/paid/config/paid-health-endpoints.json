@@ -1,0 +1,30 @@
+{
+  "schemaVersion": 1,
+  "checks": [
+    {
+      "name": "paid-public-edge",
+      "url": "https://app-staging.trinyx.fr/",
+      "expectedStatuses": [
+        200,
+        301,
+        302,
+        307,
+        308
+      ],
+      "timeoutSeconds": 15,
+      "caFile": "/etc/ssl/certs/ca-certificates.crt",
+      "method": "GET"
+    },
+    {
+      "name": "paid-to-cloud-unauthenticated",
+      "url": "https://cloud-internal.trinyx.private:8443/internal/v1/entitlement-projections",
+      "expectedStatuses": [
+        401,
+        403
+      ],
+      "timeoutSeconds": 15,
+      "caFile": "/etc/trinyx/staging/paid/config/tls/staging-ca.pem",
+      "method": "POST"
+    }
+  ]
+}

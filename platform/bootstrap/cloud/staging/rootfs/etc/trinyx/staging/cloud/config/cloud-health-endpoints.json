@@ -1,0 +1,43 @@
+{
+  "schemaVersion": 1,
+  "checks": [
+    {
+      "name": "cloud-public-edge",
+      "url": "https://cloud-staging.trinyx.fr/",
+      "expectedStatuses": [
+        200,
+        301,
+        302,
+        307,
+        308,
+        401,
+        403,
+        404
+      ],
+      "timeoutSeconds": 15,
+      "caFile": "/etc/ssl/certs/ca-certificates.crt",
+      "method": "GET"
+    },
+    {
+      "name": "cloud-auth-realm",
+      "url": "https://auth-staging.trinyx.fr/realms/trinyx",
+      "expectedStatuses": [
+        200
+      ],
+      "timeoutSeconds": 15,
+      "caFile": "/etc/ssl/certs/ca-certificates.crt",
+      "method": "GET"
+    },
+    {
+      "name": "cloud-to-paid-unauthenticated",
+      "url": "https://billing-internal.trinyx.private:8443/internal/v1/credit-reservations",
+      "expectedStatuses": [
+        401,
+        403
+      ],
+      "timeoutSeconds": 15,
+      "caFile": "/etc/trinyx/staging/cloud/config/tls/paid-ca.pem",
+      "method": "POST"
+    }
+  ]
+}

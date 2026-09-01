@@ -21,15 +21,23 @@ class HealthProbeContractTests(unittest.TestCase):
     def test_rejects_http_tls_bypass(self) -> None:
         result = self.run_config({"schemaVersion": 1, "checks": [{
             "name": "bad", "url": "http://example.test/health", "expectedStatuses": [200],
-            "timeoutSeconds": 1, "caFile": "/missing"
+            "timeoutSeconds": 1, "caFile": "/missing", "method": "GET"
         }]})
         self.assertNotEqual(0, result.returncode)
         self.assertIn("HEALTH_PROBE_FAILED=bad_url", result.stdout + result.stderr)
 
+    def test_rejects_unsafe_method(self) -> None:
+        result = self.run_config({"schemaVersion": 1, "checks": [{
+            "name": "bad", "url": "https://example.test/health", "expectedStatuses": [200],
+            "timeoutSeconds": 1, "caFile": "/missing", "method": "DELETE"
+        }]})
+        self.assertNotEqual(0, result.returncode)
+        self.assertIn("HEALTH_PROBE_FAILED=bad_method", result.stdout + result.stderr)
+
     def test_rejects_credentials_in_url(self) -> None:
         result = self.run_config({"schemaVersion": 1, "checks": [{
             "name": "bad", "url": "https://user:password@example.test/health", "expectedStatuses": [401],
-            "timeoutSeconds": 1, "caFile": "/missing"
+            "timeoutSeconds": 1, "caFile": "/missing", "method": "GET"
         }]})
         self.assertNotEqual(0, result.returncode)
         self.assertNotIn("password", result.stdout + result.stderr)

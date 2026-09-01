@@ -26,6 +26,14 @@ class IacContractTests(unittest.TestCase):
         self.assertNotIn("ssm:SendCommand", publisher)
         self.assertNotIn("kms:Decrypt", publisher)
         self.assertIn("environment:staging", publisher)
+        self.assertIn("repository_owner_id:319253481", publisher)
+        self.assertIn("repository_id:1342032975", publisher)
+        self.assertIn("staging-release-register.yml", publisher)
+        self.assertNotIn("staging-oidc-probe.yml", publisher)
+        bucket_policy = template["Resources"]["ReleaseRegistryBucketPolicy"]["Properties"]["PolicyDocument"]["Statement"]
+        immutable = next(item for item in bucket_policy if item["Sid"] == "DenyUnconditionalImmutableReleaseWrites")
+        self.assertEqual("Deny", immutable["Effect"])
+        self.assertEqual({"s3:if-none-match": "true"}, immutable["Condition"]["Null"])
         for name in ("CloudReleaseRegistryReadPolicy", "PaidReleaseRegistryReadPolicy"):
             policy = json.dumps(template["Resources"][name], sort_keys=True)
             self.assertIn("s3:GetObject", policy)
@@ -40,11 +48,20 @@ class IacContractTests(unittest.TestCase):
         self.assertTrue(all("Fn::Sub" in arn for arn in principal_arns))
         self.assertIn("CloudInstanceRoleName", json.dumps(principal_arns))
         self.assertIn("PaidInstanceRoleName", json.dumps(principal_arns))
+        self.assertEqual(
+            {"Fn::Split": [",", {"Ref": "RouteTableIds"}]},
+            endpoint["RouteTableIds"],
+        )
+        assertions = template["Rules"]["GatewayEndpointInputsRequired"]["Assertions"]
+        self.assertTrue(any("RouteTableIds is required" in item["AssertDescription"] for item in assertions))
 
     def test_deploy_role_and_fixed_document_boundaries(self) -> None:
         template = self.load("platform/aws/staging/deploy-control-plane.json")
         role = json.dumps(template["Resources"]["StagingDeployRole"], sort_keys=True)
         self.assertIn("environment:staging", role)
+        self.assertIn("staging-qualification.yml", role)
+        self.assertIn("staging-legacy-adopt.yml", role)
+        self.assertNotIn("staging-release-register.yml", role)
         self.assertIn("ssm:SendCommand", role)
         self.assertIn("ssm:ListCommands", role)
         self.assertNotIn("s3:PutObject", role)
@@ -54,7 +71,10 @@ class IacContractTests(unittest.TestCase):
         self.assertEqual({"Ref": "DocumentVersionName"}, document["VersionName"])
         parameters = document["Content"]["parameters"]
         self.assertTrue(all(value["interpolationType"] == "ENV_VAR" for value in parameters.values()))
-        self.assertEqual(["install", "plan", "apply", "rollback", "health"], parameters["Mode"]["allowedValues"])
+        self.assertEqual(
+            ["install", "plan", "adopt", "restore-legacy", "apply", "rollback", "health"],
+            parameters["Mode"]["allowedValues"],
+        )
         step = document["Content"]["mainSteps"][0]
         self.assertEqual("900", step["inputs"]["timeoutSeconds"])
         command = step["inputs"]["runCommand"]
@@ -72,6 +92,20 @@ class IacContractTests(unittest.TestCase):
         paid_runtime = (ROOT / "platform/bootstrap/paid/staging/rootfs/etc/trinyx/staging/paid/config/paid-runtime.override.yml").read_text()
         self.assertIn("memory: 3G", paid_runtime)
         self.assertIn("/actuator/health/liveness", paid_runtime)
+
+    def test_health_and_tls_prerequisites_are_materialized_without_private_keys_in_git(self) -> None:
+        for role, name in (("cloud", "cloud-health-endpoints.json"), ("paid", "paid-health-endpoints.json")):
+            path = ROOT / f"platform/bootstrap/{role}/staging/rootfs/etc/trinyx/staging/{role}/config/{name}"
+            document = json.loads(path.read_text(encoding="utf-8"))
+            self.assertEqual(1, document["schemaVersion"])
+            self.assertTrue(document["checks"])
+            self.assertTrue(all(item["url"].startswith("https://") for item in document["checks"]))
+            self.assertNotIn("PRIVATE KEY", path.read_text(encoding="utf-8"))
+        paid_override = (
+            ROOT / "platform/bootstrap/paid/staging/rootfs/etc/trinyx/staging/paid/config/paid.override.yml"
+        ).read_text(encoding="utf-8")
+        self.assertIn("/etc/trinyx/staging/paid/config/tls/paid-server.key", paid_override)
+        self.assertNotIn("/etc/trinyx/tls/billing-internal.key", paid_override)
 
     def test_pca_is_approval_gated_and_staging_only(self) -> None:
         template = self.load("platform/aws/staging/private-ca-plan.json")
@@ -94,6 +128,12 @@ class IacContractTests(unittest.TestCase):
             "platform/contracts/rollback-safety.schema.json": {
                 "schemaVersion", "previousRelease", "candidateRelease", "strategy",
                 "compatible", "evidenceSha256",
+            },
+            "platform/contracts/legacy-adoption.schema.json": {
+                "schemaVersion", "environment", "role", "legacyActiveTarget", "baselineRelease",
+                "bundleDigest", "imagesEnvSha256", "observationSha256",
+                "environmentConfigRevision", "platformCommit", "approvalScope",
+                "approvedForPointerAdoption",
             },
         }
         for path, required in expected.items():

@@ -1,1 +1,137 @@
-{"AWSTemplateFormatVersion":"2010-09-09","Description":"Bootstrap GitHub Actions OIDC trust for Trinyx staging. This stack intentionally grants no AWS deployment permissions.","Parameters":{"ExistingGitHubOidcProviderArn":{"Type":"String","Default":"","AllowedPattern":"^$|^arn:aws:iam::[0-9]{12}:oidc-provider/token\\.actions\\.githubusercontent\\.com$","Description":"Existing token.actions.githubusercontent.com IAM OIDC provider ARN. Leave empty to create it."}},"Conditions":{"CreateGitHubOidcProvider":{"Fn::Equals":[{"Ref":"ExistingGitHubOidcProviderArn"},""]}},"Resources":{"GitHubActionsOidcProvider":{"Type":"AWS::IAM::OIDCProvider","Condition":"CreateGitHubOidcProvider","Properties":{"Url":"https://token.actions.githubusercontent.com","ClientIdList":["sts.amazonaws.com"],"Tags":[{"Key":"TrinyxManaged","Value":"true"},{"Key":"TrinyxPurpose","Value":"github-oidc"}]}},"StagingGitHubOidcBootstrapRole":{"Type":"AWS::IAM::Role","Properties":{"RoleName":"TrinyxStagingGitHubOidcBootstrapRole","Description":"Identity-only bootstrap role for proving GitHub Actions OIDC trust before deployment permissions are introduced.","MaxSessionDuration":3600,"AssumeRolePolicyDocument":{"Version":"2012-10-17","Statement":[{"Effect":"Allow","Principal":{"Federated":{"Fn::If":["CreateGitHubOidcProvider",{"Ref":"GitHubActionsOidcProvider"},{"Ref":"ExistingGitHubOidcProviderArn"}]}},"Action":"sts:AssumeRoleWithWebIdentity","Condition":{"StringEquals":{"token.actions.githubusercontent.com:aud":"sts.amazonaws.com","token.actions.githubusercontent.com:sub":"repo:TrinyxAI@319253481/Trinyx@1342032975:environment:staging"}}}]},"Tags":[{"Key":"TrinyxManaged","Value":"true"},{"Key":"TrinyxEnvironment","Value":"staging"},{"Key":"TrinyxPurpose","Value":"github-oidc-bootstrap"}]}}},"Outputs":{"GitHubOidcProviderArn":{"Description":"GitHub Actions OIDC provider ARN used by the bootstrap role.","Value":{"Fn::If":["CreateGitHubOidcProvider",{"Ref":"GitHubActionsOidcProvider"},{"Ref":"ExistingGitHubOidcProviderArn"}]}},"StagingBootstrapRoleArn":{"Description":"Identity-only GitHub Actions OIDC bootstrap role ARN.","Value":{"Fn::GetAtt":["StagingGitHubOidcBootstrapRole","Arn"]}},"TrustedGitHubSubject":{"Description":"Exact immutable GitHub OIDC subject trusted by the bootstrap role.","Value":"repo:TrinyxAI@319253481/Trinyx@1342032975:environment:staging"}}}
+{
+  "AWSTemplateFormatVersion": "2010-09-09",
+  "Description": "Bootstrap GitHub Actions OIDC trust for Trinyx staging. This stack intentionally grants no AWS deployment permissions.",
+  "Parameters": {
+    "ExistingGitHubOidcProviderArn": {
+      "Type": "String",
+      "Default": "",
+      "AllowedPattern": "^$|^arn:aws:iam::[0-9]{12}:oidc-provider/token\\.actions\\.githubusercontent\\.com$",
+      "Description": "Existing token.actions.githubusercontent.com IAM OIDC provider ARN. Leave empty to create it."
+    },
+    "PlatformWorkflowRef": {
+      "Type": "String",
+      "Default": "refs/heads/codex/platform-release-automation",
+      "AllowedPattern": "^refs/heads/[A-Za-z0-9._/-]{1,200}$",
+      "Description": "Reviewed branch ref embedded in GitHub custom OIDC subjects; update through a reviewed change set after merge."
+    }
+  },
+  "Conditions": {
+    "CreateGitHubOidcProvider": {
+      "Fn::Equals": [
+        {
+          "Ref": "ExistingGitHubOidcProviderArn"
+        },
+        ""
+      ]
+    }
+  },
+  "Resources": {
+    "GitHubActionsOidcProvider": {
+      "Type": "AWS::IAM::OIDCProvider",
+      "Condition": "CreateGitHubOidcProvider",
+      "Properties": {
+        "Url": "https://token.actions.githubusercontent.com",
+        "ClientIdList": [
+          "sts.amazonaws.com"
+        ],
+        "Tags": [
+          {
+            "Key": "TrinyxManaged",
+            "Value": "true"
+          },
+          {
+            "Key": "TrinyxPurpose",
+            "Value": "github-oidc"
+          }
+        ]
+      }
+    },
+    "StagingGitHubOidcBootstrapRole": {
+      "Type": "AWS::IAM::Role",
+      "Properties": {
+        "RoleName": "TrinyxStagingGitHubOidcBootstrapRole",
+        "Description": "Identity-only bootstrap role for proving GitHub Actions OIDC trust before deployment permissions are introduced.",
+        "MaxSessionDuration": 3600,
+        "AssumeRolePolicyDocument": {
+          "Version": "2012-10-17",
+          "Statement": [
+            {
+              "Effect": "Allow",
+              "Principal": {
+                "Federated": {
+                  "Fn::If": [
+                    "CreateGitHubOidcProvider",
+                    {
+                      "Ref": "GitHubActionsOidcProvider"
+                    },
+                    {
+                      "Ref": "ExistingGitHubOidcProviderArn"
+                    }
+                  ]
+                }
+              },
+              "Action": "sts:AssumeRoleWithWebIdentity",
+              "Condition": {
+                "StringEquals": {
+                  "token.actions.githubusercontent.com:aud": "sts.amazonaws.com",
+                  "token.actions.githubusercontent.com:sub": {
+                    "Fn::Sub": "repository_owner_id:319253481:repository_id:1342032975:environment:staging:job_workflow_ref:TrinyxAI/Trinyx/.github/workflows/staging-oidc-probe.yml@${PlatformWorkflowRef}"
+                  }
+                }
+              }
+            }
+          ]
+        },
+        "Tags": [
+          {
+            "Key": "TrinyxManaged",
+            "Value": "true"
+          },
+          {
+            "Key": "TrinyxEnvironment",
+            "Value": "staging"
+          },
+          {
+            "Key": "TrinyxPurpose",
+            "Value": "github-oidc-bootstrap"
+          }
+        ]
+      }
+    }
+  },
+  "Outputs": {
+    "GitHubOidcProviderArn": {
+      "Description": "GitHub Actions OIDC provider ARN used by the bootstrap role.",
+      "Value": {
+        "Fn::If": [
+          "CreateGitHubOidcProvider",
+          {
+            "Ref": "GitHubActionsOidcProvider"
+          },
+          {
+            "Ref": "ExistingGitHubOidcProviderArn"
+          }
+        ]
+      }
+    },
+    "StagingBootstrapRoleArn": {
+      "Description": "Identity-only GitHub Actions OIDC bootstrap role ARN.",
+      "Value": {
+        "Fn::GetAtt": [
+          "StagingGitHubOidcBootstrapRole",
+          "Arn"
+        ]
+      }
+    },
+    "TrustedGitHubSubject": {
+      "Description": "Exact immutable GitHub OIDC subject trusted by the bootstrap role.",
+      "Value": {
+        "Fn::Sub": "repository_owner_id:319253481:repository_id:1342032975:environment:staging:job_workflow_ref:TrinyxAI/Trinyx/.github/workflows/staging-oidc-probe.yml@${PlatformWorkflowRef}"
+      }
+    },
+    "RequiredGitHubOidcSubjectTemplate": {
+      "Description": "GitHub repository OIDC subject customization required before live STS: immutable repository IDs, staging Environment and called workflow identity.",
+      "Value": "repository_owner_id,repository_id,context,job_workflow_ref"
+    }
+  }
+}

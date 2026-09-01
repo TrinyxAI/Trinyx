@@ -36,7 +36,7 @@ def main() -> None:
     if not isinstance(checks, list) or not checks:
         fail("empty")
     for check in checks:
-        if not isinstance(check, dict) or set(check) != {"name", "url", "expectedStatuses", "timeoutSeconds", "caFile"}:
+        if not isinstance(check, dict) or set(check) != {"name", "url", "method", "expectedStatuses", "timeoutSeconds", "caFile"}:
             fail("check_schema")
         name = str(check["name"])
         if re.fullmatch(r"[a-z][a-z0-9-]{0,63}", name) is None:
@@ -44,6 +44,9 @@ def main() -> None:
         parsed = urlparse(str(check["url"]))
         if parsed.scheme != "https" or not parsed.hostname or parsed.username or parsed.password or parsed.fragment:
             fail(name + "_url")
+        method = check["method"]
+        if method not in {"GET", "POST"}:
+            fail(name + "_method")
         ca_file = Path(str(check["caFile"]))
         if not ca_file.is_file() or ca_file.is_symlink():
             fail(name + "_trust")
@@ -54,7 +57,11 @@ def main() -> None:
         if not isinstance(timeout, int) or not 1 <= timeout <= 30:
             fail(name + "_timeout")
         context = ssl.create_default_context(cafile=str(ca_file))
-        request = urllib.request.Request(str(check["url"]), method="GET", headers={"User-Agent": "trinyx-staging-health/1"})
+        data = b"{}" if method == "POST" else None
+        request = urllib.request.Request(
+            str(check["url"]), data=data, method=method,
+            headers={"User-Agent": "trinyx-staging-health/1", "Content-Type": "application/json"},
+        )
         opener = urllib.request.build_opener(urllib.request.HTTPSHandler(context=context), NoRedirect())
         try:
             with opener.open(request, timeout=timeout) as response:

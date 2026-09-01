@@ -18,6 +18,12 @@
       "Type": "String",
       "AllowedPattern": "^platform-[0-9a-f]{12}$",
       "Description": "Reviewed platform commit prefix used to identify the immutable SSM document version."
+    },
+    "PlatformWorkflowRef": {
+      "Type": "String",
+      "Default": "refs/heads/codex/platform-release-automation",
+      "AllowedPattern": "^refs/heads/[A-Za-z0-9._/-]{1,200}$",
+      "Description": "Reviewed branch ref embedded in GitHub custom OIDC subjects; update through a reviewed change set after merge."
     }
   },
   "Resources": {
@@ -29,19 +35,32 @@
         "DocumentFormat": "JSON",
         "TargetType": "/AWS::EC2::Instance",
         "UpdateMethod": "NewVersion",
-        "VersionName": {"Ref": "DocumentVersionName"},
+        "VersionName": {
+          "Ref": "DocumentVersionName"
+        },
         "Content": {
           "schemaVersion": "2.2",
           "description": "Run the fixed Trinyx staging deployment dispatcher. Arbitrary shell input is not accepted.",
           "parameters": {
             "Mode": {
               "type": "String",
-              "allowedValues": ["install", "plan", "apply", "rollback", "health"],
+              "allowedValues": [
+                "install",
+                "plan",
+                "adopt",
+                "restore-legacy",
+                "apply",
+                "rollback",
+                "health"
+              ],
               "interpolationType": "ENV_VAR"
             },
             "Role": {
               "type": "String",
-              "allowedValues": ["cloud", "paid"],
+              "allowedValues": [
+                "cloud",
+                "paid"
+              ],
               "interpolationType": "ENV_VAR"
             },
             "ReleaseId": {
@@ -99,9 +118,18 @@
           ]
         },
         "Tags": [
-          {"Key": "TrinyxManaged", "Value": "true"},
-          {"Key": "TrinyxEnvironment", "Value": "staging"},
-          {"Key": "TrinyxPurpose", "Value": "deployment-command"}
+          {
+            "Key": "TrinyxManaged",
+            "Value": "true"
+          },
+          {
+            "Key": "TrinyxEnvironment",
+            "Value": "staging"
+          },
+          {
+            "Key": "TrinyxPurpose",
+            "Value": "deployment-command"
+          }
         ]
       }
     },
@@ -116,12 +144,23 @@
           "Statement": [
             {
               "Effect": "Allow",
-              "Principal": {"Federated": {"Ref": "GitHubOidcProviderArn"}},
+              "Principal": {
+                "Federated": {
+                  "Ref": "GitHubOidcProviderArn"
+                }
+              },
               "Action": "sts:AssumeRoleWithWebIdentity",
               "Condition": {
                 "StringEquals": {
                   "token.actions.githubusercontent.com:aud": "sts.amazonaws.com",
-                  "token.actions.githubusercontent.com:sub": "repo:TrinyxAI@319253481/Trinyx@1342032975:environment:staging"
+                  "token.actions.githubusercontent.com:sub": [
+                    {
+                      "Fn::Sub": "repository_owner_id:319253481:repository_id:1342032975:environment:staging:job_workflow_ref:TrinyxAI/Trinyx/.github/workflows/staging-qualification.yml@${PlatformWorkflowRef}"
+                    },
+                    {
+                      "Fn::Sub": "repository_owner_id:319253481:repository_id:1342032975:environment:staging:job_workflow_ref:TrinyxAI/Trinyx/.github/workflows/staging-legacy-adopt.yml@${PlatformWorkflowRef}"
+                    }
+                  ]
                 }
               }
             }
@@ -138,9 +177,15 @@
                   "Effect": "Allow",
                   "Action": "ssm:SendCommand",
                   "Resource": [
-                    {"Fn::Sub": "arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:document/Trinyx-Staging-Deploy"},
-                    {"Fn::Sub": "arn:${AWS::Partition}:ec2:${AWS::Region}:${AWS::AccountId}:instance/${CloudInstanceId}"},
-                    {"Fn::Sub": "arn:${AWS::Partition}:ec2:${AWS::Region}:${AWS::AccountId}:instance/${PaidInstanceId}"}
+                    {
+                      "Fn::Sub": "arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:document/Trinyx-Staging-Deploy"
+                    },
+                    {
+                      "Fn::Sub": "arn:${AWS::Partition}:ec2:${AWS::Region}:${AWS::AccountId}:instance/${CloudInstanceId}"
+                    },
+                    {
+                      "Fn::Sub": "arn:${AWS::Partition}:ec2:${AWS::Region}:${AWS::AccountId}:instance/${PaidInstanceId}"
+                    }
                   ]
                 },
                 {
@@ -152,8 +197,14 @@
                 {
                   "Sid": "CoordinateOneNonSecretStagingDeployment",
                   "Effect": "Allow",
-                  "Action": ["ssm:PutParameter", "ssm:GetParameter", "ssm:DeleteParameter"],
-                  "Resource": {"Fn::Sub": "arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:parameter/trinyx/staging/control-plane/deployment-lock"}
+                  "Action": [
+                    "ssm:PutParameter",
+                    "ssm:GetParameter",
+                    "ssm:DeleteParameter"
+                  ],
+                  "Resource": {
+                    "Fn::Sub": "arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:parameter/trinyx/staging/control-plane/deployment-lock"
+                  }
                 },
                 {
                   "Sid": "InspectCommandsBeforeManualLockBreak",
@@ -166,19 +217,68 @@
           }
         ],
         "Tags": [
-          {"Key": "TrinyxManaged", "Value": "true"},
-          {"Key": "TrinyxEnvironment", "Value": "staging"},
-          {"Key": "TrinyxPurpose", "Value": "github-deploy"}
+          {
+            "Key": "TrinyxManaged",
+            "Value": "true"
+          },
+          {
+            "Key": "TrinyxEnvironment",
+            "Value": "staging"
+          },
+          {
+            "Key": "TrinyxPurpose",
+            "Value": "github-deploy"
+          }
         ]
       }
     }
   },
   "Outputs": {
-    "StagingDeployRoleArn": {"Value": {"Fn::GetAtt": ["StagingDeployRole", "Arn"]}},
-    "StagingDeployDocumentName": {"Value": {"Ref": "StagingDeployDocument"}},
-    "StagingDeployDocumentVersionName": {"Value": {"Ref": "DocumentVersionName"}},
-    "StagingDeployOidcSubject": {"Value": "repo:TrinyxAI@319253481/Trinyx@1342032975:environment:staging"},
-    "CloudInstanceId": {"Value": {"Ref": "CloudInstanceId"}},
-    "PaidInstanceId": {"Value": {"Ref": "PaidInstanceId"}}
+    "StagingDeployRoleArn": {
+      "Value": {
+        "Fn::GetAtt": [
+          "StagingDeployRole",
+          "Arn"
+        ]
+      }
+    },
+    "StagingDeployDocumentName": {
+      "Value": {
+        "Ref": "StagingDeployDocument"
+      }
+    },
+    "StagingDeployDocumentVersionName": {
+      "Value": {
+        "Ref": "DocumentVersionName"
+      }
+    },
+    "CloudInstanceId": {
+      "Value": {
+        "Ref": "CloudInstanceId"
+      }
+    },
+    "PaidInstanceId": {
+      "Value": {
+        "Ref": "PaidInstanceId"
+      }
+    },
+    "RequiredGitHubOidcSubjectTemplate": {
+      "Value": "repository_owner_id,repository_id,context,job_workflow_ref"
+    },
+    "StagingDeployOidcSubjects": {
+      "Value": {
+        "Fn::Join": [
+          ",",
+          [
+            {
+              "Fn::Sub": "repository_owner_id:319253481:repository_id:1342032975:environment:staging:job_workflow_ref:TrinyxAI/Trinyx/.github/workflows/staging-qualification.yml@${PlatformWorkflowRef}"
+            },
+            {
+              "Fn::Sub": "repository_owner_id:319253481:repository_id:1342032975:environment:staging:job_workflow_ref:TrinyxAI/Trinyx/.github/workflows/staging-legacy-adopt.yml@${PlatformWorkflowRef}"
+            }
+          ]
+        ]
+      }
+    }
   }
 }

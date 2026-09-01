@@ -16,7 +16,7 @@ role=resources['StagingGitHubOidcBootstrapRole']['Properties']
 assert role['RoleName']=='TrinyxStagingGitHubOidcBootstrapRole'
 assert all(key not in role for key in ('Policies','ManagedPolicyArns','PermissionsBoundary'))
 statement=role['AssumeRolePolicyDocument']['Statement'][0]
-expected='repo:TrinyxAI@319253481/Trinyx@1342032975:environment:staging'
+expected={'Fn::Sub':'repository_owner_id:319253481:repository_id:1342032975:environment:staging:job_workflow_ref:TrinyxAI/Trinyx/.github/workflows/staging-oidc-probe.yml@${PlatformWorkflowRef}'}
 assert statement['Action']=='sts:AssumeRoleWithWebIdentity'
 assert statement['Condition']['StringEquals']=={
   'token.actions.githubusercontent.com:aud':'sts.amazonaws.com',

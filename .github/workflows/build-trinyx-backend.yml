@@ -21,9 +21,106 @@ on:
       - '.github/workflows/build-trinyx-cloud-images.yml'
       - 'scripts/validate-cloud-publisher-bootstrap.mjs'
   workflow_dispatch:
+    inputs:
+      operation:
+        description: Narrow pre-merge bridge; live operations remain staging Environment gated
+        type: choice
+        required: true
+        default: release-candidate
+        options:
+          - release-candidate
+          - staging-oidc-probe
+          - staging-release-register
+          - staging-legacy-adopt
+          - staging-qualification
+      run_id:
+        required: false
+        type: string
+        default: '33485509832'
+      artifact_id:
+        required: false
+        type: string
+        default: '9791964215'
+      artifact_digest:
+        required: false
+        type: string
+        default: 'sha256:755594078d9da7e19406e01187534132920a31f87804c1b33baa28fa96559152'
+      source_commit:
+        required: false
+        type: string
+        default: 'f3a4c1ddcf6a17bfc837071f9046ac4c38a38b47'
+      release_id:
+        required: false
+        type: string
+        default: 'rel-v1-b5ba70c23b9f529ac8228a7b00b4faa4'
+      bundle_digest:
+        required: false
+        type: string
+        default: 'sha256:c9df14dcd1dbc24b31b926d3778bef2e208b59824c78f24292608284f3579892'
+      baseline_run_id:
+        required: false
+        type: string
+      baseline_artifact_id:
+        required: false
+        type: string
+      baseline_artifact_digest:
+        required: false
+        type: string
+      baseline_source_commit:
+        required: false
+        type: string
+      baseline_release_id:
+        required: false
+        type: string
+      baseline_bundle_digest:
+        required: false
+        type: string
+      candidate_artifact_id:
+        required: false
+        type: string
+        default: '9791964215'
+      candidate_run_id:
+        required: false
+        type: string
+        default: '33485509832'
+      candidate_artifact_digest:
+        required: false
+        type: string
+        default: 'sha256:755594078d9da7e19406e01187534132920a31f87804c1b33baa28fa96559152'
+      candidate_source_commit:
+        required: false
+        type: string
+        default: 'f3a4c1ddcf6a17bfc837071f9046ac4c38a38b47'
+      candidate_release_id:
+        required: false
+        type: string
+        default: 'rel-v1-b5ba70c23b9f529ac8228a7b00b4faa4'
+      candidate_bundle_digest:
+        required: false
+        type: string
+        default: 'sha256:c9df14dcd1dbc24b31b926d3778bef2e208b59824c78f24292608284f3579892'
+      environment_config_revision:
+        required: false
+        type: string
+      registry_bucket:
+        required: false
+        type: string
+      publisher_role_arn:
+        required: false
+        type: string
+      deploy_role_arn:
+        required: false
+        type: string
+        default: 'arn:aws:iam::001634075617:role/TrinyxStagingDeployRole'
+      document_version:
+        required: false
+        type: string
+      role_arn:
+        required: false
+        type: string
 
 concurrency:
-  group: ${{ github.event_name == 'workflow_dispatch' && format('trinyx-runtime-publish-{0}', github.sha) || format('trinyx-backend-{0}-{1}', github.workflow, github.event.pull_request.number || github.ref) }}
+  group: ${{ github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/codex/platform-release-automation' && format('trinyx-premerge-{0}-{1}', inputs.operation, github.sha) || format('trinyx-backend-{0}-{1}', github.workflow, github.event.pull_request.number || github.ref) }}
   cancel-in-progress: ${{ github.event_name != 'workflow_dispatch' }}
 
 permissions:
@@ -35,13 +132,85 @@ env:
 jobs:
   release_candidate:
     name: Manual immutable release candidate build
-    if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/codex/platform-release-automation'
+    if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/codex/platform-release-automation' && inputs.operation == 'release-candidate'
     permissions:
       contents: read
       packages: write
       id-token: write
       attestations: write
     uses: ./.github/workflows/build-release-candidate.yml
+
+  staging_oidc_probe:
+    name: Pre-merge staging OIDC probe bridge
+    if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/codex/platform-release-automation' && inputs.operation == 'staging-oidc-probe'
+    permissions:
+      contents: read
+      id-token: write
+    uses: ./.github/workflows/staging-oidc-probe.yml
+    with:
+      role_arn: ${{ inputs.role_arn }}
+
+  staging_release_register:
+    name: Pre-merge staging release registration bridge
+    if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/codex/platform-release-automation' && inputs.operation == 'staging-release-register'
+    permissions:
+      actions: read
+      attestations: write
+      contents: read
+      id-token: write
+    uses: ./.github/workflows/staging-release-register.yml
+    with:
+      run_id: ${{ inputs.run_id }}
+      artifact_id: ${{ inputs.artifact_id }}
+      artifact_digest: ${{ inputs.artifact_digest }}
+      source_commit: ${{ inputs.source_commit }}
+      release_id: ${{ inputs.release_id }}
+      bundle_digest: ${{ inputs.bundle_digest }}
+      registry_bucket: ${{ inputs.registry_bucket }}
+      publisher_role_arn: ${{ inputs.publisher_role_arn }}
+
+  staging_legacy_adopt:
+    name: Pre-merge proven legacy baseline adoption bridge
+    if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/codex/platform-release-automation' && inputs.operation == 'staging-legacy-adopt'
+    permissions:
+      contents: read
+      id-token: write
+    uses: ./.github/workflows/staging-legacy-adopt.yml
+    with:
+      baseline_release_id: ${{ inputs.baseline_release_id }}
+      baseline_bundle_digest: ${{ inputs.baseline_bundle_digest }}
+      environment_config_revision: ${{ inputs.environment_config_revision }}
+      registry_bucket: ${{ inputs.registry_bucket }}
+      deploy_role_arn: ${{ inputs.deploy_role_arn }}
+      document_version: ${{ inputs.document_version }}
+
+  staging_qualification:
+    name: Pre-merge staging qualification bridge
+    if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/codex/platform-release-automation' && inputs.operation == 'staging-qualification'
+    permissions:
+      actions: read
+      attestations: write
+      contents: read
+      id-token: write
+    uses: ./.github/workflows/staging-qualification.yml
+    with:
+      baseline_run_id: ${{ inputs.baseline_run_id }}
+      baseline_artifact_id: ${{ inputs.baseline_artifact_id }}
+      baseline_artifact_digest: ${{ inputs.baseline_artifact_digest }}
+      baseline_source_commit: ${{ inputs.baseline_source_commit }}
+      baseline_release_id: ${{ inputs.baseline_release_id }}
+      baseline_bundle_digest: ${{ inputs.baseline_bundle_digest }}
+      candidate_artifact_id: ${{ inputs.candidate_artifact_id }}
+      candidate_run_id: ${{ inputs.candidate_run_id }}
+      candidate_artifact_digest: ${{ inputs.candidate_artifact_digest }}
+      candidate_release_id: ${{ inputs.candidate_release_id }}
+      candidate_bundle_digest: ${{ inputs.candidate_bundle_digest }}
+      candidate_source_commit: ${{ inputs.candidate_source_commit }}
+      environment_config_revision: ${{ inputs.environment_config_revision }}
+      registry_bucket: ${{ inputs.registry_bucket }}
+      publisher_role_arn: ${{ inputs.publisher_role_arn }}
+      deploy_role_arn: ${{ inputs.deploy_role_arn }}
+      document_version: ${{ inputs.document_version }}
 
   test:
     if: github.event_name != 'workflow_dispatch' || github.ref != 'refs/heads/codex/platform-release-automation'

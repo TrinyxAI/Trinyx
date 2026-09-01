@@ -1,0 +1,68 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://trinyx.ai/contracts/legacy-adoption.schema.json",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "environment",
+    "role",
+    "legacyActiveTarget",
+    "baselineRelease",
+    "bundleDigest",
+    "imagesEnvSha256",
+    "observationSha256",
+    "environmentConfigRevision",
+    "platformCommit",
+    "approvalScope",
+    "approvedForPointerAdoption"
+  ],
+  "properties": {
+    "schemaVersion": {
+      "const": 1
+    },
+    "environment": {
+      "const": "staging"
+    },
+    "role": {
+      "enum": [
+        "cloud",
+        "paid"
+      ]
+    },
+    "legacyActiveTarget": {
+      "type": "string",
+      "pattern": "^deployments/stg-bootstrap-[A-Za-z0-9._-]{1,64}$"
+    },
+    "baselineRelease": {
+      "type": "string",
+      "pattern": "^rel-v1-[0-9a-f]{32}$"
+    },
+    "bundleDigest": {
+      "type": "string",
+      "pattern": "^sha256:[0-9a-f]{64}$"
+    },
+    "imagesEnvSha256": {
+      "type": "string",
+      "pattern": "^sha256:[0-9a-f]{64}$"
+    },
+    "observationSha256": {
+      "type": "string",
+      "pattern": "^sha256:[0-9a-f]{64}$"
+    },
+    "environmentConfigRevision": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9._-]{1,128}$"
+    },
+    "approvalScope": {
+      "const": "pointer-only-no-runtime-recreation"
+    },
+    "approvedForPointerAdoption": {
+      "const": true
+    },
+    "platformCommit": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{40}$"
+    }
+  }
+}

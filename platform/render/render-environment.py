@@ -262,10 +262,11 @@ def render(values: dict[str, str], out: Path) -> None:
         "      - ./docker/paid-monolith-internal/Caddyfile:/etc/caddy/Caddyfile:ro",
     ]
 
+    paid_tls_base = f"/etc/trinyx/{values['TRINYX_ENVIRONMENT']}/paid/config/tls"
     paid_lines.extend(
         [
-            "      - /etc/trinyx/tls/billing-internal.crt:/run/tls/billing-internal.crt:ro",
-            "      - /etc/trinyx/tls/billing-internal.key:/run/tls/billing-internal.key:ro",
+            f"      - {paid_tls_base}/paid-server.crt:/run/tls/billing-internal.crt:ro",
+            f"      - {paid_tls_base}/paid-server.key:/run/tls/billing-internal.key:ro",
             "",
         ]
     )

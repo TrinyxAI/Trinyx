@@ -14,7 +14,7 @@ assert properties['Name']=='Trinyx-Staging-Deploy'
 assert properties['UpdateMethod']=='NewVersion'
 assert properties['VersionName']=={'Ref':'DocumentVersionName'}
 parameters=properties['Content']['parameters']
-assert parameters['Mode']['allowedValues']==['install','plan','apply','rollback','health']
+assert parameters['Mode']['allowedValues']==['install','plan','adopt','restore-legacy','apply','rollback','health']
 assert parameters['Role']['allowedValues']==['cloud','paid']
 assert all(value['interpolationType']=='ENV_VAR' for value in parameters.values())
 steps=properties['Content']['mainSteps']
@@ -24,7 +24,12 @@ command=steps[0]['inputs']['runCommand']
 assert len(command)==1 and '/usr/local/lib/trinyx/staging-deploy' in command[0]
 role=doc['Resources']['StagingDeployRole']['Properties']
 trust=role['AssumeRolePolicyDocument']['Statement'][0]['Condition']['StringEquals']
-assert trust['token.actions.githubusercontent.com:sub']=='repo:TrinyxAI@319253481/Trinyx@1342032975:environment:staging'
+subjects=trust['token.actions.githubusercontent.com:sub']
+assert len(subjects)==2
+assert all('repository_owner_id:319253481:repository_id:1342032975:environment:staging:job_workflow_ref:' in json.dumps(item) for item in subjects)
+assert 'staging-qualification.yml' in json.dumps(subjects)
+assert 'staging-legacy-adopt.yml' in json.dumps(subjects)
+assert 'staging-release-register.yml' not in json.dumps(subjects)
 statements=role['Policies'][0]['PolicyDocument']['Statement']
 send=next(item for item in statements if item['Sid']=='SendOnlyDedicatedDocumentToStagingHosts')
 assert send['Action']=='ssm:SendCommand' and len(send['Resource'])==3
@@ -40,6 +45,7 @@ print('AWS_STAGING_DEPLOY_CONTROL_PLANE_CONTRACT_OK')
 PY
 
 bash -n "$DISPATCHER"
-grep -Fq 'install|plan|apply|rollback|health' "$DISPATCHER"
+grep -Fq 'install|plan|adopt|restore-legacy|apply|rollback|health' "$DISPATCHER"
+grep -Fq -- '--expected-bundle-digest "$BUNDLE_DIGEST"' "$DISPATCHER"
 grep -Fq 'exec /usr/bin/env python3 "$ENGINE"' "$DISPATCHER"
 echo STAGING_DEPLOY_DISPATCHER_FIXED_PROGRAM_OK

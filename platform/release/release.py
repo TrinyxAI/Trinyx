@@ -15,6 +15,15 @@ NAME_RE = re.compile(r"^[a-z0-9][a-z0-9._-]{0,127}$")
 ENV_RE = re.compile(r"^[A-Z][A-Z0-9_]*$")
 RELEASE_RE = re.compile(r"^rel-v1-[0-9a-f]{32}$")
 ROLES = {"cloud", "paid", "shared"}
+IMAGE_FIELDS = (
+    "name",
+    "role",
+    "service",
+    "package",
+    "environment",
+    "digest",
+    "immutableRef",
+)
 
 
 def fail(message: str) -> None:
@@ -33,11 +42,11 @@ def canonical_json(value: Any) -> bytes:
 
 
 def normalize_image(item: dict[str, Any]) -> dict[str, str]:
-    required = {"name", "role", "service", "package", "environment", "digest", "immutableRef"}
+    required = set(IMAGE_FIELDS)
     if set(item) != required:
         fail("image entry keys must be exactly: " + ",".join(sorted(required)))
 
-    result = {key: str(item[key]) for key in required}
+    result = {key: str(item[key]) for key in IMAGE_FIELDS}
     if not NAME_RE.fullmatch(result["name"]):
         fail(f"invalid image name: {result['name']}")
     if result["role"] not in ROLES:
@@ -171,7 +180,7 @@ def create_manifest(args: argparse.Namespace) -> dict[str, Any]:
 
 def write_json(path: Path, value: Any) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(value, indent=2, sort_keys=False) + "\n", encoding="utf-8")
+    path.write_text(json.dumps(value, indent=2, sort_keys=True) + "\n", encoding="utf-8")
 
 
 def command_create(args: argparse.Namespace) -> None:

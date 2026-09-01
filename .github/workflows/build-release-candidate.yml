@@ -1,0 +1,197 @@
+name: Build Release Candidate
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: trinyx-release-candidate-${{ github.sha }}
+  cancel-in-progress: false
+
+jobs:
+  cloud:
+    permissions:
+      contents: read
+      packages: write
+    uses: ./.github/workflows/build-trinyx-cloud-images.yml
+    with:
+      publish: true
+
+  paid-images:
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      packages: write
+    outputs:
+      backend_digest: ${{ steps.backend.outputs.digest }}
+      frontend_digest: ${{ steps.frontend.outputs.digest }}
+    steps:
+      - name: Checkout exact commit
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - name: Verify exact checkout
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          [[ "$GITHUB_SHA" =~ ^[0-9a-f]{40}$ ]]
+      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f
+      - name: Log in to GHCR
+        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Build and push paid backend by digest
+        id: backend
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8
+        with:
+          context: ./backend
+          file: ./backend/monolith-service/Dockerfile
+          platforms: linux/amd64
+          outputs: type=image,name=ghcr.io/trinyxai/trinyx-backend,push-by-digest=true,name-canonical=true,push=true
+          provenance: mode=max
+          sbom: true
+          labels: |
+            org.opencontainers.image.source=https://github.com/TrinyxAI/Trinyx
+            org.opencontainers.image.revision=${{ github.sha }}
+          cache-from: type=gha,scope=trinyx-backend
+          cache-to: type=gha,mode=max,scope=trinyx-backend
+      - name: Build and push paid frontend by digest
+        id: frontend
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8
+        with:
+          context: ./frontend
+          file: ./frontend/Dockerfile
+          platforms: linux/amd64
+          outputs: type=image,name=ghcr.io/trinyxai/trinyx-frontend,push-by-digest=true,name-canonical=true,push=true
+          provenance: mode=max
+          sbom: true
+          build-args: |
+            NEXT_PUBLIC_APP_EDITION=paid-monolith
+            NEXT_PUBLIC_AUTH_MODE=embedded
+            NEXT_PUBLIC_BILLING_ENABLED=true
+            NEXT_PUBLIC_SPRING_BASE_URL=http://livecontext-app:8080
+          cache-from: type=gha,scope=app
+          cache-to: type=gha,mode=max,scope=app
+      - name: Publish immutable full-SHA aliases and manifests
+        shell: bash
+        env:
+          BACKEND_DIGEST: ${{ steps.backend.outputs.digest }}
+          FRONTEND_DIGEST: ${{ steps.frontend.outputs.digest }}
+        run: |
+          set -euo pipefail
+          [[ "$BACKEND_DIGEST" =~ ^sha256:[0-9a-f]{64}$ ]]
+          [[ "$FRONTEND_DIGEST" =~ ^sha256:[0-9a-f]{64}$ ]]
+
+          pin() {
+            local package="$1" digest="$2"
+            local tag="${package}:${GITHUB_SHA}"
+            local existing
+            existing=$(docker buildx imagetools inspect "$tag" 2>/dev/null | awk '$1 == "Digest:" {print $2; exit}' || true)
+            if [[ -n "$existing" && "$existing" != "$digest" ]]; then
+              echo "ERROR_IMMUTABLE_TAG_COLLISION=$tag:$existing:$digest" >&2
+              exit 1
+            fi
+            if [[ -z "$existing" ]]; then
+              docker buildx imagetools create --tag "$tag" "${package}@${digest}"
+            fi
+            test "$(docker buildx imagetools inspect "$tag" | awk '$1 == "Digest:" {print $2; exit}')" = "$digest"
+          }
+
+          pin ghcr.io/trinyxai/trinyx-backend "$BACKEND_DIGEST"
+          pin ghcr.io/trinyxai/trinyx-frontend "$FRONTEND_DIGEST"
+
+          mkdir -p release-image-manifests
+          jq -n --arg commit "$GITHUB_SHA" --arg digest "$BACKEND_DIGEST" '
+            {schemaVersion:1,commit:$commit,images:[{
+              name:"paid-backend",service:"livecontext",package:"ghcr.io/trinyxai/trinyx-backend",
+              environment:"BACKEND_IMAGE",digest:$digest,
+              immutableRef:("ghcr.io/trinyxai/trinyx-backend@"+$digest)
+            }]}' > release-image-manifests/backend.json
+          jq -n --arg commit "$GITHUB_SHA" --arg digest "$FRONTEND_DIGEST" '
+            {schemaVersion:1,commit:$commit,images:[{
+              name:"paid-frontend",service:"frontend",package:"ghcr.io/trinyxai/trinyx-frontend",
+              environment:"FRONTEND_IMAGE",digest:$digest,
+              immutableRef:("ghcr.io/trinyxai/trinyx-frontend@"+$digest)
+            }]}' > release-image-manifests/frontend.json
+      - name: Upload paid image manifests
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: trinyx-paid-image-manifests-${{ github.sha }}
+          path: release-image-manifests/*.json
+          if-no-files-found: error
+          retention-days: 365
+
+  release:
+    needs:
+      - cloud
+      - paid-images
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout exact commit
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - name: Download Cloud image manifest
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          name: trinyx-cloud-image-manifest-${{ github.sha }}
+          path: release-input/cloud
+      - name: Download Paid image manifests
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          name: trinyx-paid-image-manifests-${{ github.sha }}
+          path: release-input/paid
+      - name: Assemble exact 28-image release inventory
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 platform/release/assemble-release-images.py \
+            --source-commit "$GITHUB_SHA" \
+            --inventory platform/release/runtime-inventory.json \
+            --manifest release-input/cloud/cloud-image-manifest.json \
+            --manifest release-input/paid/backend.json \
+            --manifest release-input/paid/frontend.json \
+            --manifest platform/release/third-party-images.json \
+            --out release-images.json
+          python3 platform/release/validate-runtime-images.py \
+            --contract platform/release/runtime-inventory.json \
+            --images release-images.json
+      - name: Build deterministic deployment bundle
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 platform/release/build-deployment-bundle.py \
+            --repo . \
+            --contract platform/release/deployment-bundle-files.json \
+            --out deployment-bundle.tar \
+            --manifest-out deployment-bundle.json
+      - name: Create immutable release manifest
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 platform/release/release.py create \
+            --source-commit "$GITHUB_SHA" \
+            --source-ref "$GITHUB_REF" \
+            --platform-commit "$GITHUB_SHA" \
+            --images release-images.json \
+            --bundle-manifest deployment-bundle.json \
+            --out release.json
+          python3 platform/release/release.py validate --manifest release.json
+          RID=$(python3 -c 'import json; print(json.load(open("release.json"))["releaseId"])')
+          [[ "$RID" =~ ^rel-v1-[0-9a-f]{32}$ ]]
+          echo "RELEASE_ID=$RID" >> "$GITHUB_ENV"
+          echo "O5_RELEASE_CANDIDATE_BUILD_OK release_id=$RID"
+      - name: Upload immutable release candidate
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: trinyx-release-candidate-${{ github.sha }}
+          path: |
+            release.json
+            release-images.json
+            deployment-bundle.json
+            deployment-bundle.tar
+          if-no-files-found: error
+          retention-days: 365

@@ -1,0 +1,31 @@
+{
+  "images": [
+    {
+      "name": "cloud-auth",
+      "role": "cloud",
+      "service": "auth-service",
+      "environment": "AUTH_SERVICE_IMAGE",
+      "package": "ghcr.io/trinyxai/trinyx-cloud-auth",
+      "digest": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+      "immutableRef": "ghcr.io/trinyxai/trinyx-cloud-auth@sha256:1111111111111111111111111111111111111111111111111111111111111111"
+    },
+    {
+      "name": "paid-backend",
+      "role": "paid",
+      "service": "livecontext",
+      "environment": "BACKEND_IMAGE",
+      "package": "ghcr.io/trinyxai/trinyx-backend",
+      "digest": "sha256:2222222222222222222222222222222222222222222222222222222222222222",
+      "immutableRef": "ghcr.io/trinyxai/trinyx-backend@sha256:2222222222222222222222222222222222222222222222222222222222222222"
+    },
+    {
+      "name": "shared-edge",
+      "role": "shared",
+      "service": "edge",
+      "environment": "EDGE_IMAGE",
+      "package": "caddy",
+      "digest": "sha256:3333333333333333333333333333333333333333333333333333333333333333",
+      "immutableRef": "caddy@sha256:3333333333333333333333333333333333333333333333333333333333333333"
+    }
+  ]
+}

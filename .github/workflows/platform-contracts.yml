@@ -34,7 +34,6 @@ jobs:
           set -euo pipefail
           bash -n platform/bootstrap/host-base/user-data.sh
           bash -n platform/bootstrap/cloud/staging/rootfs/usr/local/lib/trinyx/pre-docker-cloud.sh
-          bash -n platform/bootstrap/cloud/staging/rootfs/usr/local/lib/trinyx/runtime-materialize-cloud.sh
           bash -n platform/bootstrap/paid/staging/rootfs/usr/local/lib/trinyx/runtime-materialize-paid.sh
           bash -n platform/host/common/runtime-env.sh
           bash -n platform/host/cloud/pre-docker-cloud.sh
@@ -42,17 +41,22 @@ jobs:
           bash -n platform/host/paid/runtime-materialize-paid.sh
           bash -n platform/tests/test-staging-render.sh
           bash -n platform/tests/test-host-reconciler.sh
+          bash -n platform/tests/test-release-contract.sh
 
       - name: Compile Python platform tools
         run: |
           python3 -m py_compile platform/render/render-environment.py
           python3 -m py_compile platform/install/reconcile-host.py
+          python3 -m py_compile platform/release/release.py
 
       - name: Verify staging render parity
         run: bash platform/tests/test-staging-render.sh
 
       - name: Verify host reconciler plan/apply/idempotence
         run: bash platform/tests/test-host-reconciler.sh
+
+      - name: Verify immutable release contract
+        run: bash platform/tests/test-release-contract.sh
 
       - name: Reject secret material in platform tree
         shell: bash

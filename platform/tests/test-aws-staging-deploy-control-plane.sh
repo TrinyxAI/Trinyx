@@ -34,10 +34,10 @@ steps=content['mainSteps']
 assert len(steps)==1 and steps[0]['action']=='aws:runShellScript'
 commands=steps[0]['inputs']['runCommand']
 assert commands==[
- 'set -euo pipefail',
- 'test -x /usr/local/lib/trinyx/staging-deploy',
- 'exec /usr/local/lib/trinyx/staging-deploy "$SSM_Mode" "$SSM_Role" "$SSM_ReleaseId"',
+ 'exec /usr/bin/env bash -c \'set -euo pipefail; test -x /usr/local/lib/trinyx/staging-deploy; exec /usr/local/lib/trinyx/staging-deploy "$SSM_Mode" "$SSM_Role" "$SSM_ReleaseId"\'',
 ]
+assert '/usr/bin/env bash -c' in commands[0]
+assert '$SSM_Mode' in commands[0] and '$SSM_Role' in commands[0] and '$SSM_ReleaseId' in commands[0]
 
 role=res['StagingDeployRole']['Properties']
 trust=role['AssumeRolePolicyDocument']['Statement']
@@ -77,7 +77,6 @@ printf 'IMAGE=x@sha256:%064d\n' 0 > "$BASE/releases/$RID/images.env"
 mkdir -p "$BASE/deployments/legacy"
 ln -s deployments/legacy "$BASE/active"
 
-# Rewrite the fixed /etc prefix only inside a temporary copy for a safe fixture test.
 sed "s#BASE=\"/etc/trinyx/staging/\$ROLE\"#BASE=\"$TMP/etc/trinyx/staging/\$ROLE\"#" "$DISPATCHER" > "$TMP/dispatcher"
 chmod +x "$TMP/dispatcher"
 "$TMP/dispatcher" plan cloud "$RID" | grep -Fq "STAGING_DEPLOY_PLAN_OK role=cloud release_id=$RID"

@@ -5,6 +5,9 @@ on:
     paths:
       - 'platform/release/**'
       - 'platform/tests/**'
+      - 'scripts/validate-cloud-image-contract.mjs'
+      - '.github/workflows/build-trinyx-cloud-images.yml'
+      - 'docker/cloud-images.json'
       - 'docker-compose.yml'
       - 'catalog-seeds/**'
       - 'docker/docker-compose.cloud.yml'
@@ -21,6 +24,9 @@ on:
     paths:
       - 'platform/release/**'
       - 'platform/tests/**'
+      - 'scripts/validate-cloud-image-contract.mjs'
+      - '.github/workflows/build-trinyx-cloud-images.yml'
+      - 'docker/cloud-images.json'
       - 'docker-compose.yml'
       - 'catalog-seeds/**'
       - 'docker/docker-compose.cloud.yml'
@@ -65,5 +71,31 @@ jobs:
         run: bash platform/tests/test-release-build-contract.sh
       - name: Verify build and deploy workflow separation
         run: bash platform/tests/test-release-workflow-boundary.sh
+      - name: Verify complete Cloud runtime image contract
+        shell: bash
+        run: |
+          set -euo pipefail
+          node scripts/validate-cloud-image-contract.mjs
+          cp docker/.env.cloud.example /tmp/trinyx-cloud-runtime.env
+          node <<'NODE'
+          const fs = require('node:fs');
+          const inventory = JSON.parse(fs.readFileSync('docker/cloud-images.json', 'utf8'));
+          const thirdParty = JSON.parse(fs.readFileSync('platform/release/third-party-images.json', 'utf8'));
+          const built = inventory.images.map((item, index) => {
+            const digest = (index + 1).toString(16).padStart(64, '0');
+            return item.environment + '=' + item.package + '@sha256:' + digest;
+          });
+          const dependencies = thirdParty.images
+            .filter((item) => item.role === 'cloud')
+            .map((item) => item.environment + '=' + item.immutableRef);
+          if (built.length !== 14 || dependencies.length !== 6) throw new Error('bad Cloud runtime cardinality');
+          fs.appendFileSync('/tmp/trinyx-cloud-runtime.env', '\n' + [...built, ...dependencies].join('\n') + '\n');
+          NODE
+          docker compose --env-file /tmp/trinyx-cloud-runtime.env \
+            -f docker/docker-compose.cloud.yml \
+            -f docker/docker-compose.cloud.runtime.yml \
+            config --format json > /tmp/trinyx-cloud-runtime.json
+          node scripts/validate-cloud-image-contract.mjs --rendered /tmp/trinyx-cloud-runtime.json
+          echo CLOUD_RUNTIME_20_IMAGE_CONTRACT_OK
       - name: Release build contract complete
         run: echo O5_RELEASE_BUILD_CONTRACT_CI_OK

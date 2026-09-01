@@ -4,8 +4,9 @@ set -euo pipefail
 ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
 FRONTEND="$ROOT/.github/workflows/build-trinyx-frontend.yml"
 CANDIDATE="$ROOT/.github/workflows/build-release-candidate.yml"
+PLATFORM="$ROOT/.github/workflows/platform-contracts.yml"
 
-for file in "$FRONTEND" "$CANDIDATE"; do
+for file in "$FRONTEND" "$CANDIDATE" "$PLATFORM"; do
   test -s "$file"
 done
 
@@ -27,14 +28,16 @@ for pattern in "${forbidden_frontend[@]}"; do
   fi
 done
 
-# Release candidate construction is manual-only: no push/PR/schedule trigger.
+# Release candidate construction can be started manually or by an explicitly
+# guarded reusable-workflow caller. It must never have push/PR/schedule triggers.
 python3 - "$CANDIDATE" <<'PY'
 from pathlib import Path
 import sys
 text = Path(sys.argv[1]).read_text(encoding='utf-8')
 head = text.split('\npermissions:', 1)[0]
-if 'workflow_dispatch:' not in head:
-    raise SystemExit('ERROR_RELEASE_CANDIDATE_NOT_MANUAL')
+for required in ('workflow_dispatch:', 'workflow_call:'):
+    if required not in head:
+        raise SystemExit('ERROR_RELEASE_CANDIDATE_TRIGGER_MISSING=' + required)
 for forbidden in ('\n  push:', '\n  pull_request:', '\n  schedule:'):
     if forbidden in head:
         raise SystemExit('ERROR_RELEASE_CANDIDATE_AUTOMATIC_TRIGGER=' + forbidden.strip())
@@ -61,4 +64,27 @@ grep -Fq 'build-deployment-bundle.py' "$CANDIDATE"
 grep -Fq 'release.py create' "$CANDIDATE"
 grep -Fq 'trinyx-release-candidate-${{ github.sha }}' "$CANDIDATE"
 
+# The existing Platform Contracts workflow is the manual UI gateway while the
+# candidate workflow is not yet present on main. It may call the builder only
+# for workflow_dispatch on the exact platform branch.
+grep -Fq 'manual_release_candidate:' "$PLATFORM"
+grep -Fq "if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/codex/platform-release-automation'" "$PLATFORM"
+grep -Fq 'uses: ./.github/workflows/build-release-candidate.yml' "$PLATFORM"
+
+python3 - "$PLATFORM" <<'PY'
+from pathlib import Path
+import sys
+text = Path(sys.argv[1]).read_text(encoding='utf-8')
+start = text.index('  manual_release_candidate:')
+end = text.index('\n  oidc_sts_probe:', start)
+block = text[start:end]
+for required in ('contents: read', 'packages: write'):
+    if required not in block:
+        raise SystemExit('ERROR_MANUAL_RELEASE_GATEWAY_PERMISSION_MISSING=' + required)
+for forbidden in ('id-token: write', 'aws ssm', 'TrinyxStagingDeployRole', 'AWS-RunShellScript'):
+    if forbidden in block:
+        raise SystemExit('ERROR_MANUAL_RELEASE_GATEWAY_DEPLOY_CAPABILITY=' + forbidden)
+PY
+
 echo RELEASE_WORKFLOW_BUILD_DEPLOY_BOUNDARY_OK
+echo MANUAL_RELEASE_BUILD_GATEWAY_CONTRACT_OK

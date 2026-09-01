@@ -6,8 +6,6 @@ TMP=$(mktemp -d)
 trap 'chmod -R u+w "$TMP" 2>/dev/null || true; rm -rf "$TMP"' EXIT
 
 SOURCE=aeb2a447ea7ce0436a60549713636225dfe1a2c1
-PLATFORM=ae045447fce099f6bffd43b399b6964f29820a0a
-EXPECTED_RELEASE=rel-v1-082bd961a3ef556fc849e3555d804a5a
 FIXTURE="$ROOT/platform/tests/fixtures/staging-bootstrap-images.json"
 MANIFEST="$TMP/manifest.json"
 TOOL="$ROOT/platform/release/release.py"
@@ -15,16 +13,27 @@ INSTALLER="$ROOT/platform/install/install-release.py"
 CONTRACT="$ROOT/platform/release/runtime-inventory.json"
 FAKE="$TMP/root"
 
+python3 "$ROOT/platform/release/build-deployment-bundle.py" \
+  --repo "$ROOT" \
+  --contract "$ROOT/platform/release/deployment-bundle-files.json" \
+  --out "$TMP/deployment-bundle.tar" \
+  --manifest-out "$TMP/deployment-bundle.json" >/dev/null
+
+PLATFORM=$(git -C "$ROOT" rev-parse HEAD)
+[[ "$PLATFORM" =~ ^[0-9a-f]{40}$ ]]
+
 python3 "$TOOL" create \
   --source-commit "$SOURCE" \
   --source-ref codex/trinyx-cloud-gateway-v2 \
   --platform-commit "$PLATFORM" \
   --created-at 2026-09-01T05:23:32Z \
   --images "$FIXTURE" \
+  --bundle-manifest "$TMP/deployment-bundle.json" \
   --out "$MANIFEST" >/dev/null
 
 RID=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["releaseId"])' "$MANIFEST")
-test "$RID" = "$EXPECTED_RELEASE"
+[[ "$RID" =~ ^rel-v1-[0-9a-f]{32}$ ]]
+EXPECTED_RELEASE="$RID"
 
 for ROLE in cloud paid; do
   BASE="$FAKE/etc/trinyx/staging/$ROLE"
@@ -55,10 +64,8 @@ for ROLE in cloud paid; do
     --manifest "$MANIFEST" --contract "$CONTRACT" --release-tool "$TOOL" \
     --root "$FAKE")
   printf '%s\n' "$POST" | grep -Fq "RELEASE_INSTALL_PLAN_OK role=$ROLE environment=staging release_id=$EXPECTED_RELEASE changes=0"
-
 done
 
-# Collision with same release id but changed installed bytes must fail closed.
 TARGET="$FAKE/etc/trinyx/staging/cloud/releases/$EXPECTED_RELEASE"
 chmod 755 "$TARGET"
 chmod 644 "$TARGET/images.env"

@@ -1,0 +1,62 @@
+name: Platform Release Build Contracts
+
+on:
+  pull_request:
+    paths:
+      - 'platform/release/**'
+      - 'platform/tests/**'
+      - 'docker-compose.yml'
+      - 'catalog-seeds/**'
+      - 'docker/docker-compose.cloud.yml'
+      - 'docker/docker-compose.cloud.runtime.yml'
+      - 'docker/docker-compose.paid.runtime.yml'
+      - 'docker/cloud/**'
+      - 'docker/paid-monolith-internal/Caddyfile'
+      - '.github/workflows/platform-release-build-contracts.yml'
+  push:
+    branches:
+      - codex/platform-release-automation
+    paths:
+      - 'platform/release/**'
+      - 'platform/tests/**'
+      - 'docker-compose.yml'
+      - 'catalog-seeds/**'
+      - 'docker/docker-compose.cloud.yml'
+      - 'docker/docker-compose.cloud.runtime.yml'
+      - 'docker/docker-compose.paid.runtime.yml'
+      - 'docker/cloud/**'
+      - 'docker/paid-monolith-internal/Caddyfile'
+      - '.github/workflows/platform-release-build-contracts.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: platform-release-build-contracts-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  release-build-contracts:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Checkout exact commit
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - name: Verify exact checkout
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+      - name: Validate release build tools
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -m py_compile platform/release/release.py
+          python3 -m py_compile platform/release/assemble-release-images.py
+          python3 -m py_compile platform/release/build-deployment-bundle.py
+          bash -n platform/tests/test-release-build-contract.sh
+      - name: Verify immutable build manifest and bundle contracts
+        run: bash platform/tests/test-release-build-contract.sh
+      - name: Release build contract complete
+        run: echo O5_RELEASE_BUILD_CONTRACT_CI_OK

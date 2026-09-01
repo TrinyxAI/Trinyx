@@ -24,6 +24,7 @@ IMAGE_FIELDS = (
     "digest",
     "immutableRef",
 )
+BUNDLE_FIELDS = ("format", "digest", "sizeBytes", "fileCount")
 
 
 def fail(message: str) -> None:
@@ -90,11 +91,52 @@ def normalize_images(document: Any) -> list[dict[str, str]]:
     return sorted(images, key=lambda item: item["name"])
 
 
+def normalize_bundle(document: Any) -> dict[str, Any]:
+    if not isinstance(document, dict):
+        fail("deployment bundle manifest must be a JSON object")
+
+    if "files" in document:
+        required = {"schemaVersion", "format", "digest", "sizeBytes", "files"}
+        if set(document) != required:
+            fail("deployment bundle manifest keys do not match schema v1")
+        if document["schemaVersion"] != 1:
+            fail("unsupported deployment bundle schemaVersion")
+        files = document["files"]
+        if not isinstance(files, list) or not files:
+            fail("deployment bundle must contain files")
+        file_count = len(files)
+    else:
+        required = set(BUNDLE_FIELDS)
+        if set(document) != required:
+            fail("deploymentBundle keys do not match release schema")
+        file_count = document["fileCount"]
+
+    fmt = document["format"]
+    digest = document["digest"]
+    size_bytes = document["sizeBytes"]
+    if fmt != "tar":
+        fail("deployment bundle format must be tar")
+    if not isinstance(digest, str) or not DIGEST_RE.fullmatch(digest):
+        fail("invalid deployment bundle digest")
+    if not isinstance(size_bytes, int) or isinstance(size_bytes, bool) or size_bytes <= 0:
+        fail("invalid deployment bundle sizeBytes")
+    if not isinstance(file_count, int) or isinstance(file_count, bool) or file_count <= 0:
+        fail("invalid deployment bundle fileCount")
+
+    return {
+        "format": fmt,
+        "digest": digest,
+        "sizeBytes": size_bytes,
+        "fileCount": file_count,
+    }
+
+
 def identity_payload(manifest: dict[str, Any]) -> dict[str, Any]:
     return {
         "schemaVersion": manifest["schemaVersion"],
         "sourceCommit": manifest["sourceCommit"],
         "platformCommit": manifest["platformCommit"],
+        "deploymentBundle": manifest["deploymentBundle"],
         "images": manifest["images"],
     }
 
@@ -115,6 +157,7 @@ def validate_manifest(manifest: Any) -> dict[str, Any]:
         "sourceRef",
         "platformCommit",
         "createdAt",
+        "deploymentBundle",
         "images",
     }
     if set(manifest) != required:
@@ -139,6 +182,7 @@ def validate_manifest(manifest: Any) -> dict[str, Any]:
         fail("createdAt must be RFC3339/ISO-8601")
 
     manifest = dict(manifest)
+    manifest["deploymentBundle"] = normalize_bundle(manifest["deploymentBundle"])
     manifest["images"] = normalize_images(manifest["images"])
 
     release_id = manifest["releaseId"]
@@ -160,6 +204,7 @@ def create_manifest(args: argparse.Namespace) -> dict[str, Any]:
             fail(f"invalid {label}")
 
     images = normalize_images(load_json(args.images))
+    bundle = normalize_bundle(load_json(args.bundle_manifest))
     created_at = args.created_at or datetime.now(timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z")
     manifest: dict[str, Any] = {
         "schemaVersion": 1,
@@ -168,6 +213,7 @@ def create_manifest(args: argparse.Namespace) -> dict[str, Any]:
         "sourceRef": args.source_ref,
         "platformCommit": args.platform_commit,
         "createdAt": created_at,
+        "deploymentBundle": bundle,
         "images": images,
     }
     manifest["releaseId"] = calculate_release_id(manifest)
@@ -182,12 +228,18 @@ def write_json(path: Path, value: Any) -> None:
 def command_create(args: argparse.Namespace) -> None:
     manifest = create_manifest(args)
     write_json(args.out, manifest)
-    print(f"RELEASE_CREATE_OK release_id={manifest['releaseId']} images={len(manifest['images'])}")
+    print(
+        f"RELEASE_CREATE_OK release_id={manifest['releaseId']} "
+        f"images={len(manifest['images'])} bundle={manifest['deploymentBundle']['digest']}"
+    )
 
 
 def command_validate(args: argparse.Namespace) -> None:
     manifest = validate_manifest(load_json(args.manifest))
-    print(f"RELEASE_VALIDATE_OK release_id={manifest['releaseId']} images={len(manifest['images'])}")
+    print(
+        f"RELEASE_VALIDATE_OK release_id={manifest['releaseId']} "
+        f"images={len(manifest['images'])} bundle={manifest['deploymentBundle']['digest']}"
+    )
 
 
 def command_render_env(args: argparse.Namespace) -> None:
@@ -216,6 +268,7 @@ def main() -> None:
     create.add_argument("--source-ref", required=True)
     create.add_argument("--platform-commit", required=True)
     create.add_argument("--images", required=True, type=Path)
+    create.add_argument("--bundle-manifest", required=True, type=Path)
     create.add_argument("--created-at")
     create.add_argument("--out", required=True, type=Path)
     create.set_defaults(func=command_create)

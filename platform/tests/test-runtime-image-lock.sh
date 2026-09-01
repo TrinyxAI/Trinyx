@@ -8,24 +8,31 @@ CONTRACT="$ROOT/platform/release/runtime-inventory.json"
 IMAGES="$ROOT/platform/tests/fixtures/staging-bootstrap-images.json"
 TOOL="$ROOT/platform/release/release.py"
 RELEASE="$TMP/release.json"
-EXPECTED_RELEASE=rel-v1-082bd961a3ef556fc849e3555d804a5a
 
 python3 "$ROOT/platform/release/validate-runtime-images.py" --contract "$CONTRACT" --images "$IMAGES"
 
-# Reproduce the environment-independent bootstrap release from its source,
-# platform revision and exact 28-image inventory.
+python3 "$ROOT/platform/release/build-deployment-bundle.py" \
+  --repo "$ROOT" \
+  --contract "$ROOT/platform/release/deployment-bundle-files.json" \
+  --out "$TMP/deployment-bundle.tar" \
+  --manifest-out "$TMP/deployment-bundle.json" >/dev/null
+
+PLATFORM_COMMIT=$(git -C "$ROOT" rev-parse HEAD)
+[[ "$PLATFORM_COMMIT" =~ ^[0-9a-f]{40}$ ]]
+
 python3 "$TOOL" create \
   --source-commit aeb2a447ea7ce0436a60549713636225dfe1a2c1 \
   --source-ref codex/trinyx-cloud-gateway-v2 \
-  --platform-commit ae045447fce099f6bffd43b399b6964f29820a0a \
+  --platform-commit "$PLATFORM_COMMIT" \
   --created-at 2026-09-01T05:23:32Z \
   --images "$IMAGES" \
+  --bundle-manifest "$TMP/deployment-bundle.json" \
   --out "$RELEASE" >/dev/null
 
 python3 "$TOOL" validate --manifest "$RELEASE"
 python3 "$ROOT/platform/release/validate-runtime-images.py" --contract "$CONTRACT" --images "$RELEASE"
 RID=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["releaseId"])' "$RELEASE")
-test "$RID" = "$EXPECTED_RELEASE"
+[[ "$RID" =~ ^rel-v1-[0-9a-f]{32}$ ]]
 
 python3 "$TOOL" render-env --manifest "$RELEASE" --role cloud --out "$TMP/cloud.env" >/dev/null
 python3 "$TOOL" render-env --manifest "$RELEASE" --role paid --out "$TMP/paid.env" >/dev/null

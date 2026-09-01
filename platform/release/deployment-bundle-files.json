@@ -1,0 +1,15 @@
+{
+  "schemaVersion": 1,
+  "paths": [
+    "docker-compose.yml",
+    "catalog-seeds",
+    "docker/docker-compose.cloud.yml",
+    "docker/docker-compose.cloud.runtime.yml",
+    "docker/docker-compose.paid.runtime.yml",
+    "docker/cloud/Caddyfile",
+    "docker/cloud/postgres/00-keycloak-schema.sql",
+    "docker/cloud/keycloak/trinyx-realm.json",
+    "docker/cloud/searxng/settings.yml",
+    "docker/paid-monolith-internal/Caddyfile"
+  ]
+}

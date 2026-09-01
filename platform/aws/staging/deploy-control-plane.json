@@ -1,1 +1,129 @@
-{"AWSTemplateFormatVersion":"2010-09-09","Description":"Least-privilege GitHub OIDC to SSM control plane for Trinyx staging deployments.","Parameters":{"GitHubOidcProviderArn":{"Type":"String","AllowedPattern":"^arn:aws:iam::[0-9]{12}:oidc-provider/token\\.actions\\.githubusercontent\\.com$"},"CloudInstanceId":{"Type":"String","AllowedPattern":"^i-[0-9a-f]{17}$"},"PaidInstanceId":{"Type":"String","AllowedPattern":"^i-[0-9a-f]{17}$"}},"Resources":{"StagingDeployDocument":{"Type":"AWS::SSM::Document","Properties":{"Name":"Trinyx-Staging-Deploy","DocumentType":"Command","DocumentFormat":"JSON","TargetType":"/AWS::EC2::Instance","UpdateMethod":"NewVersion","Content":{"schemaVersion":"2.2","description":"Run the fixed Trinyx staging deployment dispatcher. Arbitrary shell input is not accepted.","parameters":{"Mode":{"type":"String","allowedValues":["plan","apply"],"interpolationType":"ENV_VAR"},"Role":{"type":"String","allowedValues":["cloud","paid"],"interpolationType":"ENV_VAR"},"ReleaseId":{"type":"String","allowedPattern":"^rel-v1-[0-9a-f]{32}$","interpolationType":"ENV_VAR"}},"mainSteps":[{"action":"aws:runShellScript","name":"runTrinyxStagingDeploy","inputs":{"timeoutSeconds":"120","runCommand":["exec /usr/bin/env bash -c 'set -euo pipefail; test -x /usr/local/lib/trinyx/staging-deploy; exec /usr/local/lib/trinyx/staging-deploy \"$SSM_Mode\" \"$SSM_Role\" \"$SSM_ReleaseId\"'"]}}]}},"Tags":[{"Key":"TrinyxManaged","Value":"true"},{"Key":"TrinyxEnvironment","Value":"staging"},{"Key":"TrinyxPurpose","Value":"deployment-command"}]}}},"StagingDeployRole":{"Type":"AWS::IAM::Role","Properties":{"RoleName":"TrinyxStagingDeployRole","Description":"Least-privilege GitHub Actions role for the dedicated Trinyx staging SSM deployment document.","MaxSessionDuration":3600,"AssumeRolePolicyDocument":{"Version":"2012-10-17","Statement":[{"Effect":"Allow","Principal":{"Federated":{"Ref":"GitHubOidcProviderArn"}},"Action":"sts:AssumeRoleWithWebIdentity","Condition":{"StringEquals":{"token.actions.githubusercontent.com:aud":"sts.amazonaws.com","token.actions.githubusercontent.com:sub":"repo:TrinyxAI@319253481/Trinyx@1342032975:ref:refs/heads/codex/platform-release-automation"}}}]},"Policies":[{"PolicyName":"TrinyxStagingSsmDeployOnly","PolicyDocument":{"Version":"2012-10-17","Statement":[{"Sid":"SendOnlyDedicatedDocumentToStagingHosts","Effect":"Allow","Action":"ssm:SendCommand","Resource":[{"Fn::Sub":"arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:document/Trinyx-Staging-Deploy"},{"Fn::Sub":"arn:${AWS::Partition}:ec2:${AWS::Region}:${AWS::AccountId}:instance/${CloudInstanceId}"},{"Fn::Sub":"arn:${AWS::Partition}:ec2:${AWS::Region}:${AWS::AccountId}:instance/${PaidInstanceId}"}]},{"Sid":"ReadOwnCommandResult","Effect":"Allow","Action":"ssm:GetCommandInvocation","Resource":"*"}]}}],"Tags":[{"Key":"TrinyxManaged","Value":"true"},{"Key":"TrinyxEnvironment","Value":"staging"},{"Key":"TrinyxPurpose","Value":"github-deploy"}]}}},"Outputs":{"StagingDeployRoleArn":{"Value":{"Fn::GetAtt":["StagingDeployRole","Arn"]}},"StagingDeployDocumentName":{"Value":{"Ref":"StagingDeployDocument"}},"CloudInstanceId":{"Value":{"Ref":"CloudInstanceId"}},"PaidInstanceId":{"Value":{"Ref":"PaidInstanceId"}}}}
+{
+  "AWSTemplateFormatVersion": "2010-09-09",
+  "Description": "Least-privilege GitHub OIDC to SSM control plane for Trinyx staging deployments.",
+  "Parameters": {
+    "GitHubOidcProviderArn": {
+      "Type": "String",
+      "AllowedPattern": "^arn:aws:iam::[0-9]{12}:oidc-provider/token\\.actions\\.githubusercontent\\.com$"
+    },
+    "CloudInstanceId": {
+      "Type": "String",
+      "AllowedPattern": "^i-[0-9a-f]{17}$"
+    },
+    "PaidInstanceId": {
+      "Type": "String",
+      "AllowedPattern": "^i-[0-9a-f]{17}$"
+    }
+  },
+  "Resources": {
+    "StagingDeployDocument": {
+      "Type": "AWS::SSM::Document",
+      "Properties": {
+        "Name": "Trinyx-Staging-Deploy",
+        "DocumentType": "Command",
+        "DocumentFormat": "JSON",
+        "TargetType": "/AWS::EC2::Instance",
+        "UpdateMethod": "NewVersion",
+        "Content": {
+          "schemaVersion": "2.2",
+          "description": "Run the fixed Trinyx staging deployment dispatcher. Arbitrary shell input is not accepted.",
+          "parameters": {
+            "Mode": {
+              "type": "String",
+              "allowedValues": ["plan", "apply"],
+              "interpolationType": "ENV_VAR"
+            },
+            "Role": {
+              "type": "String",
+              "allowedValues": ["cloud", "paid"],
+              "interpolationType": "ENV_VAR"
+            },
+            "ReleaseId": {
+              "type": "String",
+              "allowedPattern": "^rel-v1-[0-9a-f]{32}$",
+              "interpolationType": "ENV_VAR"
+            }
+          },
+          "mainSteps": [
+            {
+              "action": "aws:runShellScript",
+              "name": "runTrinyxStagingDeploy",
+              "inputs": {
+                "timeoutSeconds": "120",
+                "runCommand": [
+                  "exec /usr/bin/env bash -c 'set -euo pipefail; test -x /usr/local/lib/trinyx/staging-deploy; exec /usr/local/lib/trinyx/staging-deploy \"$SSM_Mode\" \"$SSM_Role\" \"$SSM_ReleaseId\"'"
+                ]
+              }
+            }
+          ]
+        },
+        "Tags": [
+          {"Key": "TrinyxManaged", "Value": "true"},
+          {"Key": "TrinyxEnvironment", "Value": "staging"},
+          {"Key": "TrinyxPurpose", "Value": "deployment-command"}
+        ]
+      }
+    },
+    "StagingDeployRole": {
+      "Type": "AWS::IAM::Role",
+      "Properties": {
+        "RoleName": "TrinyxStagingDeployRole",
+        "Description": "Least-privilege GitHub Actions role for the dedicated Trinyx staging SSM deployment document.",
+        "MaxSessionDuration": 3600,
+        "AssumeRolePolicyDocument": {
+          "Version": "2012-10-17",
+          "Statement": [
+            {
+              "Effect": "Allow",
+              "Principal": {"Federated": {"Ref": "GitHubOidcProviderArn"}},
+              "Action": "sts:AssumeRoleWithWebIdentity",
+              "Condition": {
+                "StringEquals": {
+                  "token.actions.githubusercontent.com:aud": "sts.amazonaws.com",
+                  "token.actions.githubusercontent.com:sub": "repo:TrinyxAI@319253481/Trinyx@1342032975:ref:refs/heads/codex/platform-release-automation"
+                }
+              }
+            }
+          ]
+        },
+        "Policies": [
+          {
+            "PolicyName": "TrinyxStagingSsmDeployOnly",
+            "PolicyDocument": {
+              "Version": "2012-10-17",
+              "Statement": [
+                {
+                  "Sid": "SendOnlyDedicatedDocumentToStagingHosts",
+                  "Effect": "Allow",
+                  "Action": "ssm:SendCommand",
+                  "Resource": [
+                    {"Fn::Sub": "arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:document/Trinyx-Staging-Deploy"},
+                    {"Fn::Sub": "arn:${AWS::Partition}:ec2:${AWS::Region}:${AWS::AccountId}:instance/${CloudInstanceId}"},
+                    {"Fn::Sub": "arn:${AWS::Partition}:ec2:${AWS::Region}:${AWS::AccountId}:instance/${PaidInstanceId}"}
+                  ]
+                },
+                {
+                  "Sid": "ReadOwnCommandResult",
+                  "Effect": "Allow",
+                  "Action": "ssm:GetCommandInvocation",
+                  "Resource": "*"
+                }
+              ]
+            }
+          }
+        ],
+        "Tags": [
+          {"Key": "TrinyxManaged", "Value": "true"},
+          {"Key": "TrinyxEnvironment", "Value": "staging"},
+          {"Key": "TrinyxPurpose", "Value": "github-deploy"}
+        ]
+      }
+    }
+  },
+  "Outputs": {
+    "StagingDeployRoleArn": {"Value": {"Fn::GetAtt": ["StagingDeployRole", "Arn"]}},
+    "StagingDeployDocumentName": {"Value": {"Ref": "StagingDeployDocument"}},
+    "CloudInstanceId": {"Value": {"Ref": "CloudInstanceId"}},
+    "PaidInstanceId": {"Value": {"Ref": "PaidInstanceId"}}
+  }
+}

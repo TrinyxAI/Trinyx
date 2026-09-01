@@ -231,8 +231,8 @@ jobs:
           set -euo pipefail
           umask 077
 
-          TOKEN_FILE=$(mktemp)
-          trap 'rm -f "$TOKEN_FILE"' EXIT
+          TOKEN_FILE="$RUNNER_TEMP/trinyx-staging-plan-oidc-${GITHUB_RUN_ID}.jwt"
+          rm -f "$TOKEN_FILE"
 
           curl --fail --silent --show-error \
             -H "Authorization: bearer ${ACTIONS_ID_TOKEN_REQUEST_TOKEN}" \

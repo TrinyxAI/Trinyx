@@ -9,7 +9,9 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 WORKFLOWS = ROOT / ".github" / "workflows"
-PINNED_CONTROL_PLANE_COMMIT = "114a2613e8090f034925a1bcf148f055653c3a06"
+PINNED_BUILDER_WORKFLOW_COMMIT = "114a2613e8090f034925a1bcf148f055653c3a06"
+PINNED_CONTROL_PLANE_CODE_COMMIT = "1884e7d6e2621109f0d0595f974552521933e22d"
+PINNED_PRIVILEGED_WORKFLOW_COMMIT = "e01dc32f89385e85dbb900986348d8a77c9d2255"
 ANY_USE = re.compile(r"^\s*uses:\s*([^\s@]+)@([^\s#]+)", re.M)
 APP_BUILDS = {
     "build-release-candidate.yml", "build-trinyx-backend.yml",
@@ -48,9 +50,15 @@ def check_workflows() -> None:
             r"uses:\s*TrinyxAI/Trinyx/\.github/workflows/([A-Za-z0-9_.-]+-impl\.yml)@([^\s#]+)",
             text,
         ):
+            implementation = match.group(1)
+            expected_commit = (
+                PINNED_PRIVILEGED_WORKFLOW_COMMIT
+                if implementation in LIVE_IMPLEMENTATIONS
+                else PINNED_BUILDER_WORKFLOW_COMMIT
+            )
             require(
-                match.group(2) == PINNED_CONTROL_PLANE_COMMIT,
-                f"reusable control-plane workflow is not pinned to reviewed commit:{path.name}:{match.group(1)}",
+                match.group(2) == expected_commit,
+                f"reusable workflow is not pinned to its reviewed commit:{path.name}:{implementation}",
             )
         if "id-token: write" in text:
             trigger = head(text)
@@ -91,6 +99,20 @@ def check_workflows() -> None:
             require(not any(x in trigger for x in ("\n  push:", "\n  pull_request:", "\n  schedule:")),
                     f"automatic live implementation trigger:{path.name}")
             require("environment: staging" in text, f"missing staging environment:{path.name}")
+            if path.name != "staging-oidc-probe-impl.yml":
+                require(
+                    f"ref: {PINNED_CONTROL_PLANE_CODE_COMMIT}" in text
+                    and f"CONTROL_PLANE_COMMIT: {PINNED_CONTROL_PLANE_CODE_COMMIT}" in text
+                    and 'test "$(git rev-parse HEAD)" = "$CONTROL_PLANE_COMMIT"' in text,
+                    f"privileged workflow checkout is not bound to audited control-plane code:{path.name}",
+                )
+                require('--platform-commit' not in text, f"ambiguous platform commit argument:{path.name}")
+                if path.name in {"staging-legacy-adopt-impl.yml", "staging-qualification-impl.yml"}:
+                    require(
+                        '--control-plane-commit "$CONTROL_PLANE_COMMIT"' in text
+                        and '--control-plane-commit "$GITHUB_SHA"' not in text,
+                        f"deployment audit identity comes from caller SHA:{path.name}",
+                    )
         if path.name == "platform-contracts.yml":
             lower = text.lower()
             for forbidden in ("configure-aws-credentials", "aws ssm", "aws sts",
@@ -138,7 +160,7 @@ def check_iac() -> None:
     for name, template in (("bootstrap", bootstrap), ("registry", registry)):
         workflow_ref = template["Parameters"]["PlatformWorkflowRef"]
         require(
-            workflow_ref["Default"] == PINNED_CONTROL_PLANE_COMMIT
+            workflow_ref["Default"] == PINNED_PRIVILEGED_WORKFLOW_COMMIT
             and workflow_ref["AllowedPattern"] == "^[0-9a-f]{40}$",
             f"{name} OIDC workflow identity is not immutable",
         )
@@ -152,22 +174,28 @@ def check_iac() -> None:
     require("RouteTableIds is required" in encoded and "Fn::Split" in encoded,
             "gateway endpoint route tables are not fail-closed")
     require("job_workflow_ref" in encoded and "repository_owner_id:319253481" in encoded
-            and "repository_id:1342032975" in encoded,
-            "publisher OIDC principal lacks immutable workflow identity")
+            and "repository_id:1342032975" in encoded
+            and "ref:refs/heads/codex/platform-release-automation" in encoded,
+            "publisher OIDC principal lacks immutable workflow and caller-ref identity")
     deploy = json.loads((ROOT / "platform/aws/staging/deploy-control-plane.json").read_text(encoding="utf-8"))
     encoded = json.dumps(deploy, sort_keys=True)
     workflow_ref = deploy["Parameters"]["PlatformWorkflowRef"]
     require(
-        workflow_ref["Default"] == PINNED_CONTROL_PLANE_COMMIT
+        workflow_ref["Default"] == PINNED_PRIVILEGED_WORKFLOW_COMMIT
         and workflow_ref["AllowedPattern"] == "^[0-9a-f]{40}$",
         "deploy OIDC workflow identity is not immutable",
     )
     require("environment:staging" in encoded, "deploy trust is not environment-bound")
+    require("ref:refs/heads/codex/platform-release-automation" in encoded,
+            "deploy trust is not restricted to the reviewed caller branch")
     require("staging-qualification-impl.yml" in encoded and "staging-legacy-adopt-impl.yml" in encoded
             and "staging-release-register-impl.yml" not in encoded,
             "deploy OIDC principal boundary is not workflow-specific")
     require("s3:PutObject" not in encoded, "deploy role can publish")
     require("DocumentVersionName" in deploy["Parameters"], "SSM version is not pinned")
+    parameters = deploy["Resources"]["StagingDeployDocument"]["Properties"]["Content"]["parameters"]
+    require("ControlPlaneCommit" in parameters and "PlatformCommit" not in parameters,
+            "SSM deployment identity is not explicitly control-plane scoped")
     step = deploy["Resources"]["StagingDeployDocument"]["Properties"]["Content"]["mainSteps"][0]
     require(step["inputs"]["timeoutSeconds"] == "900", "SSM execution timeout drift")
     orchestrator = (ROOT / "platform/automation/ssm_orchestrator.py").read_text(encoding="utf-8")
@@ -189,6 +217,15 @@ def check_iac() -> None:
             "legacy adoption is not bound to runtime image digests")
     require("environment_config_digest" in engine,
             "legacy adoption is not bound to materialized non-secret config")
+    require("LEGACY_BASELINE_EFFECTIVE_CONFIG_MISMATCH" in engine
+            and "compose_config_hashes" in engine and "current_compose_runtime" in engine,
+            "legacy adoption is not bound to effective container Compose config")
+    registry_client = (ROOT / "platform/automation/release_registry.py").read_text(encoding="utf-8")
+    require(
+        f'APPROVED_BUILDER_WORKFLOW_COMMIT = "{PINNED_BUILDER_WORKFLOW_COMMIT}"' in registry_client
+        and "historical builder compatibility is restricted to the frozen candidate" in registry_client,
+        "builder provenance compatibility is not exact",
+    )
     for resource in pca["Resources"].values():
         if str(resource.get("Type", "")).startswith("AWS::ACMPCA::"):
             require(resource.get("Condition") == "PcaApproved", "PCA resource lacks approval condition")

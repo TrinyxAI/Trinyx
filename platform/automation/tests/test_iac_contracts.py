@@ -16,7 +16,7 @@ class IacContractTests(unittest.TestCase):
         template = self.load("platform/aws/staging/release-registry.json")
         bucket = template["Resources"]["ReleaseRegistryBucket"]
         properties = bucket["Properties"]
-        self.assertEqual("114a2613e8090f034925a1bcf148f055653c3a06", template["Parameters"]["PlatformWorkflowRef"]["Default"])
+        self.assertEqual("e01dc32f89385e85dbb900986348d8a77c9d2255", template["Parameters"]["PlatformWorkflowRef"]["Default"])
         self.assertEqual("^[0-9a-f]{40}$", template["Parameters"]["PlatformWorkflowRef"]["AllowedPattern"])
         self.assertEqual("Retain", bucket["DeletionPolicy"])
         self.assertEqual("BucketOwnerEnforced", properties["BucketOwnershipControls"]["Rules"][0]["ObjectOwnership"])
@@ -30,6 +30,7 @@ class IacContractTests(unittest.TestCase):
         self.assertIn("environment:staging", publisher)
         self.assertIn("repository_owner_id:319253481", publisher)
         self.assertIn("repository_id:1342032975", publisher)
+        self.assertIn("ref:refs/heads/codex/platform-release-automation", publisher)
         self.assertIn("staging-release-register-impl.yml", publisher)
         self.assertNotIn("staging-oidc-probe-impl.yml", publisher)
         bucket_policy = template["Resources"]["ReleaseRegistryBucketPolicy"]["Properties"]["PolicyDocument"]["Statement"]
@@ -59,10 +60,11 @@ class IacContractTests(unittest.TestCase):
 
     def test_deploy_role_and_fixed_document_boundaries(self) -> None:
         template = self.load("platform/aws/staging/deploy-control-plane.json")
-        self.assertEqual("114a2613e8090f034925a1bcf148f055653c3a06", template["Parameters"]["PlatformWorkflowRef"]["Default"])
+        self.assertEqual("e01dc32f89385e85dbb900986348d8a77c9d2255", template["Parameters"]["PlatformWorkflowRef"]["Default"])
         self.assertEqual("^[0-9a-f]{40}$", template["Parameters"]["PlatformWorkflowRef"]["AllowedPattern"])
         role = json.dumps(template["Resources"]["StagingDeployRole"], sort_keys=True)
         self.assertIn("environment:staging", role)
+        self.assertIn("ref:refs/heads/codex/platform-release-automation", role)
         self.assertIn("staging-qualification-impl.yml", role)
         self.assertIn("staging-legacy-adopt-impl.yml", role)
         self.assertNotIn("staging-release-register-impl.yml", role)
@@ -74,6 +76,8 @@ class IacContractTests(unittest.TestCase):
         self.assertEqual("NewVersion", document["UpdateMethod"])
         self.assertEqual({"Ref": "DocumentVersionName"}, document["VersionName"])
         parameters = document["Content"]["parameters"]
+        self.assertIn("ControlPlaneCommit", parameters)
+        self.assertNotIn("PlatformCommit", parameters)
         self.assertTrue(all(value["interpolationType"] == "ENV_VAR" for value in parameters.values()))
         self.assertEqual(
             ["install", "plan", "adopt", "restore-legacy", "apply", "rollback", "health"],

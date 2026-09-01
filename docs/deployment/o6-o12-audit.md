@@ -202,3 +202,25 @@ GitHub only dispatches a workflow file registered on the default branch. Until t
 The USD 800 estimate is the operation fee for two managed CA resources, not for
 two TLS leaf certificates. The default offline path creates no AWS PCA resource
 and incurs no AWS managed-CA monthly fee.
+
+
+## Fourth independent review closures
+
+- **SECURITY_CRITICAL — privileged code identity:** the reusable workflow YAML and
+  its executable checkout are now separate immutable identities. AWS-privileged
+  workflows at `e01dc32f89385e85dbb900986348d8a77c9d2255` checkout `1884e7d6e2621109f0d0595f974552521933e22d`, assert `git rev-parse HEAD` before
+  credentials, and write that code SHA as `controlPlaneCommit`. IAM also requires
+  the exact caller branch ref. A mutable caller checkout cannot supply privileged
+  Python.
+- **RELIABILITY_CRITICAL — effective legacy configuration:** schema v3 captures
+  `com.docker.compose.config-hash` and normalized mounts for all 28 containers.
+  Adoption recomputes `docker compose config --hash`, re-inspects current
+  container IDs/hashes/mounts and rejects any mutable PR checkout mount before
+  pointer mutation.
+- **SUPPLY_CHAIN — signer transition:** the legacy builder signer is permitted
+  only for frozen run 33485509832 / artifact 9791964215 and its exact source,
+  release, bundle and ZIP digests. Future candidates require reusable builder
+  `build-release-candidate-impl.yml@114a2613e8090f034925a1bcf148f055653c3a06` with `--signer-digest`.
+- **OIDC migration availability:** AWS trust is reviewed/executed before GitHub
+  custom-sub activation; the OIDC probe follows immediately and all mismatch
+  paths stop fail-closed.

@@ -20,6 +20,9 @@ BRIDGE="$ROOT/.github/workflows/build-trinyx-backend.yml"
 python3 - "$CANDIDATE_WRAPPER" "$CANDIDATE" "$CE_WRAPPER" "$CE" "$PLATFORM" "$REGISTER_WRAPPER" "$QUALIFY_WRAPPER" "$ADOPT_WRAPPER" "$PROBE_WRAPPER" "$REGISTER" "$QUALIFY" "$ADOPT" "$PROBE" "$BRIDGE" <<'PY'
 from pathlib import Path
 import re,sys
+BUILDER="114a2613e8090f034925a1bcf148f055653c3a06"
+CONTROL_PLANE_CODE="1884e7d6e2621109f0d0595f974552521933e22d"
+PRIVILEGED_WORKFLOW="e01dc32f89385e85dbb900986348d8a77c9d2255"
 (candidate_wrapper,candidate,ce_wrapper,ce,platform,register_wrapper,qualify_wrapper,
  adopt_wrapper,probe_wrapper,register,qualify,adopt,probe,bridge)=(
     Path(x).read_text(encoding='utf-8') for x in sys.argv[1:]
@@ -56,6 +59,7 @@ for wrapper,target in pairs:
     assert 'workflow_dispatch:' in head and 'workflow_call:' not in head
     assert not any(x in head for x in ('\n  push:','\n  pull_request:','\n  schedule:'))
     assert target in wrapper
+    assert f'@{PRIVILEGED_WORKFLOW}' in wrapper
     assert 'configure-aws-credentials' not in wrapper
     assert 'environment: staging' not in wrapper
 
@@ -65,6 +69,23 @@ for implementation in (register,qualify,adopt,probe):
     assert not any(x in head for x in ('\n  push:','\n  pull_request:','\n  schedule:'))
     assert 'environment: staging' in implementation
     assert 'id-token: write' in implementation
+for implementation in (register,qualify,adopt):
+    assert f'ref: {CONTROL_PLANE_CODE}' in implementation
+    assert f'CONTROL_PLANE_COMMIT: {CONTROL_PLANE_CODE}' in implementation
+    assert 'test "$(git rev-parse HEAD)" = "$CONTROL_PLANE_COMMIT"' in implementation
+    assert '--platform-commit' not in implementation
+for implementation in (qualify,adopt):
+    assert '--control-plane-commit "$CONTROL_PLANE_COMMIT"' in implementation
+    assert '--control-plane-commit "$GITHUB_SHA"' not in implementation
+assert '--signer-digest "$SIGNER_DIGEST"' in register
+assert '--signer-digest "$signer_digest"' in qualify
+for frozen in (
+    '33485509832','9791964215','755594078d9da7e19406e01187534132920a31f87804c1b33baa28fa96559152',
+    'f3a4c1ddcf6a17bfc837071f9046ac4c38a38b47','rel-v1-b5ba70c23b9f529ac8228a7b00b4faa4',
+    'c9df14dcd1dbc24b31b926d3778bef2e208b59824c78f24292608284f3579892',
+):
+    assert frozen in register and frozen in qualify
+assert BUILDER in register and BUILDER in qualify
 assert 'TrinyxStagingReleasePublisherRole' in register
 for required in ('baseline','candidate','O11_DEPLOY_SUCCESS','O12_ROLLBACK_SUCCESS','SAME_CANDIDATE_REDEPLOY_AND_IDEMPOTENCE_SUCCESS'):
     assert required in qualify
@@ -81,6 +102,8 @@ for operation,target in (
 ):
     assert f"inputs.operation == '{operation}'" in bridge
     assert target in bridge
+    expected=BUILDER if operation=='release-candidate' else PRIVILEGED_WORKFLOW
+    assert f'{target}@{expected}' in bridge
 
 for path in Path(sys.argv[1]).parents[2].joinpath('.github/workflows').glob('*.yml'):
     text=path.read_text(encoding='utf-8')

@@ -10,9 +10,9 @@
     },
     "PlatformWorkflowRef": {
       "Type": "String",
-      "Default": "114a2613e8090f034925a1bcf148f055653c3a06",
+      "Default": "e01dc32f89385e85dbb900986348d8a77c9d2255",
       "AllowedPattern": "^[0-9a-f]{40}$",
-      "Description": "Reviewed immutable control-plane commit SHA embedded in GitHub custom OIDC subjects."
+      "Description": "Reviewed immutable privileged reusable-workflow commit SHA embedded in GitHub custom OIDC subjects."
     }
   },
   "Conditions": {
@@ -75,7 +75,7 @@
                 "StringEquals": {
                   "token.actions.githubusercontent.com:aud": "sts.amazonaws.com",
                   "token.actions.githubusercontent.com:sub": {
-                    "Fn::Sub": "repository_owner_id:319253481:repository_id:1342032975:environment:staging:job_workflow_ref:TrinyxAI/Trinyx/.github/workflows/staging-oidc-probe-impl.yml@${PlatformWorkflowRef}"
+                    "Fn::Sub": "repository_owner_id:319253481:repository_id:1342032975:environment:staging:ref:refs/heads/codex/platform-release-automation:job_workflow_ref:TrinyxAI/Trinyx/.github/workflows/staging-oidc-probe-impl.yml@${PlatformWorkflowRef}"
                   }
                 }
               }
@@ -126,12 +126,12 @@
     "TrustedGitHubSubject": {
       "Description": "Exact immutable GitHub OIDC subject trusted by the bootstrap role.",
       "Value": {
-        "Fn::Sub": "repository_owner_id:319253481:repository_id:1342032975:environment:staging:job_workflow_ref:TrinyxAI/Trinyx/.github/workflows/staging-oidc-probe-impl.yml@${PlatformWorkflowRef}"
+        "Fn::Sub": "repository_owner_id:319253481:repository_id:1342032975:environment:staging:ref:refs/heads/codex/platform-release-automation:job_workflow_ref:TrinyxAI/Trinyx/.github/workflows/staging-oidc-probe-impl.yml@${PlatformWorkflowRef}"
       }
     },
     "RequiredGitHubOidcSubjectTemplate": {
-      "Description": "GitHub repository OIDC subject customization required before live STS: immutable repository IDs, staging Environment and called workflow identity.",
-      "Value": "repository_owner_id,repository_id,context,job_workflow_ref"
+      "Description": "GitHub repository OIDC subject customization required before live STS: immutable repository IDs, staging Environment, exact caller branch ref and called workflow identity.",
+      "Value": "repository_owner_id,repository_id,context,ref,job_workflow_ref"
     }
   }
 }

@@ -8,7 +8,7 @@ DISPATCHER="$ROOT/platform/host/common/staging-deploy.sh"
 python3 - "$TEMPLATE" <<'PY'
 import json,sys
 doc=json.load(open(sys.argv[1],encoding='utf-8'))
-assert doc['Parameters']['PlatformWorkflowRef']['Default']=='114a2613e8090f034925a1bcf148f055653c3a06'
+assert doc['Parameters']['PlatformWorkflowRef']['Default']=='e01dc32f89385e85dbb900986348d8a77c9d2255'
 assert doc['Parameters']['PlatformWorkflowRef']['AllowedPattern']=='^[0-9a-f]{40}$'
 resource=doc['Resources']['StagingDeployDocument']
 properties=resource['Properties']
@@ -19,16 +19,18 @@ parameters=properties['Content']['parameters']
 assert parameters['Mode']['allowedValues']==['install','plan','adopt','restore-legacy','apply','rollback','health']
 assert parameters['Role']['allowedValues']==['cloud','paid']
 assert all(value['interpolationType']=='ENV_VAR' for value in parameters.values())
+assert 'ControlPlaneCommit' in parameters and 'PlatformCommit' not in parameters
 steps=properties['Content']['mainSteps']
 assert len(steps)==1 and steps[0]['action']=='aws:runShellScript'
 assert steps[0]['inputs']['timeoutSeconds']=='900'
 command=steps[0]['inputs']['runCommand']
 assert len(command)==1 and '/usr/local/lib/trinyx/staging-deploy' in command[0]
+assert '$SSM_ControlPlaneCommit' in command[0] and '$SSM_PlatformCommit' not in command[0]
 role=doc['Resources']['StagingDeployRole']['Properties']
 trust=role['AssumeRolePolicyDocument']['Statement'][0]['Condition']['StringEquals']
 subjects=trust['token.actions.githubusercontent.com:sub']
 assert len(subjects)==2
-assert all('repository_owner_id:319253481:repository_id:1342032975:environment:staging:job_workflow_ref:' in json.dumps(item) for item in subjects)
+assert all('repository_owner_id:319253481:repository_id:1342032975:environment:staging:ref:refs/heads/codex/platform-release-automation:job_workflow_ref:' in json.dumps(item) for item in subjects)
 assert 'staging-qualification-impl.yml' in json.dumps(subjects)
 assert 'staging-legacy-adopt-impl.yml' in json.dumps(subjects)
 assert 'staging-release-register-impl.yml' not in json.dumps(subjects)

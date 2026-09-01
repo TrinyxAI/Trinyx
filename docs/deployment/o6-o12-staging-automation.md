@@ -97,23 +97,31 @@ remains fail-closed and requires direct AWS review.
 
 ## Approved live sequence (not executed by this change)
 
-1. Create/configure GitHub Environment `staging`; restrict it to
-   `codex/platform-release-automation`, add an independent reviewer if the plan
-   supports it, prevent self-review, and never expose environment secrets to PR.
-2. Review CloudFormation change sets for the registry and deploy-control-plane
-   stacks in account `001634075617`, region `us-east-1`. Capture the generated
-   bucket, publisher role ARN and numeric SSM document version.
-3. Optionally enable the S3 Gateway endpoint only after supplying independently
-   verified VPC/route-table IDs.
-4. Install the exact reviewed control-plane files using the existing approved
+1. Protect branch `codex/platform-release-automation` and GitHub Environment
+   `staging`; restrict deployment branches, add an independent reviewer if the
+   plan supports it, prevent self-review, and never expose environment secrets to PR.
+2. Prepare and review CloudFormation change sets for the *new* exact OIDC subjects,
+   registry and deploy-control-plane stacks in account `001634075617`, region
+   `us-east-1`. The subjects include immutable repository IDs, Environment,
+   caller `ref:refs/heads/codex/platform-release-automation`, and privileged
+   reusable-workflow commit `e01dc32f89385e85dbb900986348d8a77c9d2255`.
+3. Execute the reviewed AWS trust migration using the existing administrative
+   path. Only then configure the GitHub repository custom subject template as
+   `repository_owner_id,repository_id,context,ref,job_workflow_ref`.
+4. Immediately run the OIDC probe only and verify the exact STS identity. Stop on
+   any mismatch; remove any reviewed temporary compatibility before continuing.
+5. Capture the generated bucket, publisher role ARN and numeric SSM document
+   version. Optionally enable the S3 Gateway endpoint only after supplying
+   independently verified VPC/route-table IDs.
+6. Install the exact reviewed control-plane files using the existing approved
    bootstrap/reconciler path. Verify their SHA-256 and host modes. This is the
    only checkout-dependent bootstrap; steady-state deployment is checkout-free.
-5. Stop for `AWS_PCA_LIVE_APPROVAL_REQUIRED`; follow the separate O10 runbook.
-6. Prove a genuine baseline artifact. Review migration expand/contract evidence
+7. Stop for `AWS_PCA_LIVE_APPROVAL_REQUIRED`; follow the separate O10 runbook.
+8. Prove a genuine baseline artifact. Review migration expand/contract evidence
    and install the non-secret config/trust/health files.
-7. Manually run `Register Staging Release` for baseline and candidate. Confirm
+9. Manually run `Register Staging Release` for baseline and candidate. Confirm
    artifact/run/source/release/bundle identities and native GitHub attestation.
-8. Manually run the single qualification workflow. It installs both releases,
+10. Manually run the single qualification workflow. It installs both releases,
    deploys candidate Paid then Cloud, smokes, rolls back Cloud then Paid, smokes,
    redeploys the same candidate, smokes, proves idempotence and leaves that same
    candidate active.
@@ -127,19 +135,19 @@ Docker prune, volume deletion, DB drop or Redis flush.
 
 Do not execute these steps as part of repository implementation. They are the later human-gated sequence.
 
-1. Review the branch CI and exact commit.
-2. Create/protect GitHub Environment `staging` for only the reviewed platform branch.
-3. Configure the repository OIDC subject template with `repository_owner_id,repository_id,context,job_workflow_ref`.
-4. Create CloudFormation change sets only for the OIDC bootstrap, release registry and deploy control plane. Keep `EnableS3GatewayEndpoint=false` until real VPC and route-table IDs have been independently supplied.
-5. Review that registration subjects cannot assume the deploy role and the OIDC probe cannot assume either publisher or deploy.
-6. Execute approved change sets; no PCA resource is included in this step.
-7. Register the frozen release through the pre-merge bridge operation `staging-release-register`. The workflow verifies the ZIP, the four original builder attestations, release identity, bundle and image inventory before OIDC.
-8. Reconcile both hosts in plan mode. This installs health inventories and the TLS staging tool, but never certificate private keys from Git.
-9. Establish the default offline staging PKI from the O10 runbook (AWS PCA remains an optional paid path behind `AWS_PCA_LIVE_APPROVAL_REQUIRED`), then stage trust/certificate material:
+1. Review the branch CI and exact identity chain: builder workflow `114a2613e8090f034925a1bcf148f055653c3a06`, audited executable control-plane code `1884e7d6e2621109f0d0595f974552521933e22d`, and AWS-privileged reusable workflow `e01dc32f89385e85dbb900986348d8a77c9d2255`.
+2. Protect branch `codex/platform-release-automation` and GitHub Environment `staging` for only that branch.
+3. Prepare/review the AWS trust change sets for the new subject containing `repository_owner_id,repository_id,context,ref,job_workflow_ref`; keep `EnableS3GatewayEndpoint=false` until real route-table IDs exist.
+4. Execute the reviewed AWS trust migration through the existing administrative path.
+5. Configure the GitHub custom subject template, immediately run OIDC probe only, verify exact STS identity, and stop on any error. Remove any temporary compatibility.
+6. Verify that registration subjects cannot assume deploy and the probe cannot assume publisher/deploy. No PCA resource is included.
+7. Register the frozen release through `staging-release-register`. Its historical signer is accepted only for the exact run/artifact/source/release/bundle/ZIP tuple. Every future release requires signer `build-release-candidate-impl.yml` with signer digest `114a2613e8090f034925a1bcf148f055653c3a06`.
+8. Reconcile both hosts in plan mode. This installs health inventories and TLS/runtime verification tools, but never certificate private keys from Git.
+9. Establish the default offline staging PKI from the O10 runbook (AWS PCA remains optional behind `AWS_PCA_LIVE_APPROVAL_REQUIRED`), then stage trust/certificate material:
    - Cloud: `stage-staging-tls --role cloud --ca <approved-staging-ca.pem>`
    - Paid: `stage-staging-tls --role paid --ca <approved-staging-ca.pem> --certificate <billing-internal.crt> --private-key <billing-internal.key>`
    The tool verifies chain, `billing-internal.trinyx.private`, certificate/key match, atomicity and mode `0600` for the private key.
-10. Run `/usr/local/lib/trinyx/baseline-observation` on each host with the approved environment-config revision. Independently review a canonical baseline release. The observation must contain the full container ID, container image object ID, exact configured digest, image `RepoDigests`, Compose project/service labels and the digest of materialized non-secret config for exactly 20 Cloud and 8 Paid services. Create each root-owned `config/legacy-adoption.json` from the committed schema. Do not approve unless every runtime service digest equals the baseline manifest binding.
+10. Install the canonical baseline without activation, then run `/usr/local/lib/trinyx/baseline-observation --baseline-release <releaseId>` on each host with the approved environment-config revision. Schema v3 records full container/image IDs, exact `RepoDigests`, Compose project/service/config-hash and normalized effective mounts for exactly 20 Cloud and 8 Paid services. Expected hashes are recomputed with `docker compose config --hash` from the immutable baseline plus materialized environment. Any hash drift or effective mount under `/srv/trinyx/pr25-*` fails before pointer mutation.
 11. Use `staging-legacy-adopt` only after that review. It installs without activation, health-checks the existing runtime, atomically adopts the pointer only, health-checks again and compensates on partial failure.
 12. Run install/plan. Stop again before candidate `apply`.
 13. Only after independent review run the single qualification workflow: candidate deploy → health → baseline rollback → health → same-candidate redeploy → health/idempotence.
@@ -155,7 +163,7 @@ sha256sum /etc/trinyx/staging/<role>/releases/<releaseId>/images.env
 sha256sum /etc/trinyx/staging/<role>/config/legacy-observation.json
 ```
 
-Copy the resulting `sha256:<hex>` values into `legacy-adoption.json`. Also copy the observation's `environmentConfigDigest`, bind the manifest deployment-bundle digest, the approved environment-config revision and the exact 40-character platform commit. The adoption engine recomputes the configuration digest, validates the observation hash and requires each observed `configuredImage` and `RepoDigests` entry to contain the exact baseline `package@sha256` for that service. Independent hashes without this relational equality are rejected.
+Copy the resulting `sha256:<hex>` values into `legacy-adoption.json`. Also copy the observation's `environmentConfigDigest`, bind the manifest deployment-bundle digest, the approved environment-config revision and the exact 40-character platform commit. The adoption engine recomputes the configuration digest, validates the observation hash, re-inspects the same current container IDs/config-hashes/mounts, recomputes baseline Compose hashes, and requires each observed `configuredImage` and `RepoDigests` entry to contain the exact baseline `package@sha256`. Independent hashes or stale observations are rejected.
 
 ### Private CA stop
 
@@ -166,10 +174,10 @@ No Private CA, certificate, CRL bucket, KMS key or live trust material may be cr
 
 ## Third-review closures (repository-only)
 
-- Legacy observations use schema v2 and bind each Compose service to the full
-  container ID, immutable Docker image object, configured digest and image
-  RepoDigests. Adoption requires exact service-by-service equality with the
-  canonical release manifest; 20/20 Cloud and 8/8 Paid are mandatory.
+- Legacy observations use schema v3 and bind each Compose service to the full
+  container ID, immutable image object/digest, Compose config-hash and normalized
+  effective mounts. Adoption re-inspects runtime and recomputes expected hashes;
+  20/20 Cloud and 8/8 Paid are mandatory.
 - The non-secret materialized configuration is content-hashed from
   `deployment-plan.json` plus every `requiredFiles` entry. Observation,
   approval evidence and current host bytes must all agree.
@@ -177,8 +185,11 @@ No Private CA, certificate, CRL bucket, KMS key or live trust material may be cr
   `workflow_call` implementation. This includes both the release-candidate
   builder and the CE publisher, preventing the repository-wide custom OIDC
   template from encountering a direct job without `job_workflow_ref`.
-- Every OIDC-capable reusable workflow caller and AWS role subject is pinned to
-  reviewed implementation commit `114a2613e8090f034925a1bcf148f055653c3a06`. A mutable branch ref is rejected
-  by the CloudFormation parameter contract.
+- The immutable identity chain is explicit: builder workflow `114a2613e8090f034925a1bcf148f055653c3a06`,
+  executable control-plane code `1884e7d6e2621109f0d0595f974552521933e22d`, and privileged reusable workflow
+  `e01dc32f89385e85dbb900986348d8a77c9d2255`. The latter checks out the former by exact SHA and asserts HEAD before
+  credentials. AWS IAM pins the privileged workflow plus exact caller branch ref.
+- Deployment/adoption records use `controlPlaneCommit`; release `sourceCommit`
+  and builder `platformCommit` retain their distinct meanings.
 - Offline encrypted staging root/issuer is the O10 default. The optional
   two-CA AWS PCA hierarchy remains disabled and paid.

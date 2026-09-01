@@ -6,7 +6,7 @@ python3 - "$ROOT/platform/aws/bootstrap/github-oidc-staging-bootstrap.json" <<'P
 import json,re,sys
 doc=json.load(open(sys.argv[1],encoding='utf-8'))
 resources=doc['Resources']
-assert doc['Parameters']['PlatformWorkflowRef']['Default']=='114a2613e8090f034925a1bcf148f055653c3a06'
+assert doc['Parameters']['PlatformWorkflowRef']['Default']=='e01dc32f89385e85dbb900986348d8a77c9d2255'
 assert doc['Parameters']['PlatformWorkflowRef']['AllowedPattern']=='^[0-9a-f]{40}$'
 provider=resources['GitHubActionsOidcProvider']
 assert provider['Type']=='AWS::IAM::OIDCProvider'
@@ -18,13 +18,14 @@ role=resources['StagingGitHubOidcBootstrapRole']['Properties']
 assert role['RoleName']=='TrinyxStagingGitHubOidcBootstrapRole'
 assert all(key not in role for key in ('Policies','ManagedPolicyArns','PermissionsBoundary'))
 statement=role['AssumeRolePolicyDocument']['Statement'][0]
-expected={'Fn::Sub':'repository_owner_id:319253481:repository_id:1342032975:environment:staging:job_workflow_ref:TrinyxAI/Trinyx/.github/workflows/staging-oidc-probe-impl.yml@${PlatformWorkflowRef}'}
+expected={'Fn::Sub':'repository_owner_id:319253481:repository_id:1342032975:environment:staging:ref:refs/heads/codex/platform-release-automation:job_workflow_ref:TrinyxAI/Trinyx/.github/workflows/staging-oidc-probe-impl.yml@${PlatformWorkflowRef}'}
 assert statement['Action']=='sts:AssumeRoleWithWebIdentity'
 assert statement['Condition']['StringEquals']=={
   'token.actions.githubusercontent.com:aud':'sts.amazonaws.com',
   'token.actions.githubusercontent.com:sub':expected,
 }
 assert doc['Outputs']['TrustedGitHubSubject']['Value']==expected
+assert doc['Outputs']['RequiredGitHubOidcSubjectTemplate']['Value']=='repository_owner_id,repository_id,context,ref,job_workflow_ref'
 encoded=json.dumps(doc,sort_keys=True)
 for forbidden in ('AWS_ACCESS_KEY_ID','AWS_SECRET_ACCESS_KEY','AdministratorAccess','ssm:SendCommand','s3:PutObject','kms:Decrypt'):
   assert forbidden not in encoded

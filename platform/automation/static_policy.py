@@ -15,7 +15,8 @@ APP_BUILDS = {
     "build-trinyx-ce-images.yml", "build-trinyx-cloud-images.yml",
     "build-trinyx-frontend.yml", "cloud-stack.yml",
 }
-LIVE = {"staging-release-register.yml", "staging-qualification.yml", "staging-oidc-probe.yml", "staging-legacy-adopt.yml"}
+LIVE_WRAPPERS = {"staging-release-register.yml", "staging-qualification.yml", "staging-oidc-probe.yml", "staging-legacy-adopt.yml"}
+LIVE_IMPLEMENTATIONS = {name.replace(".yml", "-impl.yml") for name in LIVE_WRAPPERS}
 
 
 def require(ok: bool, message: str) -> None:
@@ -38,12 +39,22 @@ def check_workflows() -> None:
             if not owner.startswith("./"):
                 require(re.fullmatch(r"[0-9a-f]{40}", ref) is not None,
                         f"unpinned action:{path.name}:{owner}@{ref}")
-        if path.name in LIVE:
+        if path.name in LIVE_WRAPPERS:
             trigger = head(text)
-            require("workflow_dispatch:" in trigger, f"live workflow not manual:{path.name}")
-            require("workflow_call:" in trigger, f"live workflow lacks pre-merge reusable entry:{path.name}")
+            require("workflow_dispatch:" in trigger, f"live wrapper not manual:{path.name}")
+            require("workflow_call:" not in trigger, f"live wrapper exposes implementation:{path.name}")
             require(not any(x in trigger for x in ("\n  push:", "\n  pull_request:", "\n  schedule:")),
                     f"automatic live trigger:{path.name}")
+            require(path.name.replace(".yml", "-impl.yml") in text,
+                    f"manual wrapper does not call exact implementation:{path.name}")
+            require("configure-aws-credentials" not in text,
+                    f"manual wrapper assumes AWS directly:{path.name}")
+        if path.name in LIVE_IMPLEMENTATIONS:
+            trigger = head(text)
+            require("workflow_call:" in trigger and "workflow_dispatch:" not in trigger,
+                    f"live implementation is not call-only:{path.name}")
+            require(not any(x in trigger for x in ("\n  push:", "\n  pull_request:", "\n  schedule:")),
+                    f"automatic live implementation trigger:{path.name}")
             require("environment: staging" in text, f"missing staging environment:{path.name}")
         if path.name == "platform-contracts.yml":
             lower = text.lower()
@@ -59,16 +70,16 @@ def check_workflows() -> None:
     require("'.github/workflows/**'" not in cloud, "workflow wildcard triggers cloud stack")
     bridge = (WORKFLOWS / "build-trinyx-backend.yml").read_text(encoding="utf-8")
     for operation, target in (
-        ("staging-oidc-probe", "staging-oidc-probe.yml"),
-        ("staging-release-register", "staging-release-register.yml"),
-        ("staging-legacy-adopt", "staging-legacy-adopt.yml"),
-        ("staging-qualification", "staging-qualification.yml"),
+        ("staging-oidc-probe", "staging-oidc-probe-impl.yml"),
+        ("staging-release-register", "staging-release-register-impl.yml"),
+        ("staging-legacy-adopt", "staging-legacy-adopt-impl.yml"),
+        ("staging-qualification", "staging-qualification-impl.yml"),
     ):
         require(f"inputs.operation == '{operation}'" in bridge and target in bridge,
                 f"missing narrow pre-merge bridge:{operation}")
     require("inputs.operation == 'release-candidate'" in bridge,
             "manual application build is not separated from platform bridge")
-    qualification = (WORKFLOWS / "staging-qualification.yml").read_text(encoding="utf-8")
+    qualification = (WORKFLOWS / "staging-qualification-impl.yml").read_text(encoding="utf-8")
     require("timeout-minutes: 360" in qualification, "qualification lacks maximum bounded job budget")
 
 
@@ -89,8 +100,8 @@ def check_iac() -> None:
     deploy = json.loads((ROOT / "platform/aws/staging/deploy-control-plane.json").read_text(encoding="utf-8"))
     encoded = json.dumps(deploy, sort_keys=True)
     require("environment:staging" in encoded, "deploy trust is not environment-bound")
-    require("staging-qualification.yml" in encoded and "staging-legacy-adopt.yml" in encoded
-            and "staging-release-register.yml" not in encoded,
+    require("staging-qualification-impl.yml" in encoded and "staging-legacy-adopt-impl.yml" in encoded
+            and "staging-release-register-impl.yml" not in encoded,
             "deploy OIDC principal boundary is not workflow-specific")
     require("s3:PutObject" not in encoded, "deploy role can publish")
     require("DocumentVersionName" in deploy["Parameters"], "SSM version is not pinned")

@@ -27,9 +27,9 @@ trust=role['AssumeRolePolicyDocument']['Statement'][0]['Condition']['StringEqual
 subjects=trust['token.actions.githubusercontent.com:sub']
 assert len(subjects)==2
 assert all('repository_owner_id:319253481:repository_id:1342032975:environment:staging:job_workflow_ref:' in json.dumps(item) for item in subjects)
-assert 'staging-qualification.yml' in json.dumps(subjects)
-assert 'staging-legacy-adopt.yml' in json.dumps(subjects)
-assert 'staging-release-register.yml' not in json.dumps(subjects)
+assert 'staging-qualification-impl.yml' in json.dumps(subjects)
+assert 'staging-legacy-adopt-impl.yml' in json.dumps(subjects)
+assert 'staging-release-register-impl.yml' not in json.dumps(subjects)
 statements=role['Policies'][0]['PolicyDocument']['Statement']
 send=next(item for item in statements if item['Sid']=='SendOnlyDedicatedDocumentToStagingHosts')
 assert send['Action']=='ssm:SendCommand' and len(send['Resource'])==3

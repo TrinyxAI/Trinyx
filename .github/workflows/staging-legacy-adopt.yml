@@ -4,33 +4,6 @@ on:
   workflow_dispatch:
     inputs:
       baseline_release_id:
-        description: Canonical installed baseline release to adopt
-        required: true
-        type: string
-      baseline_bundle_digest:
-        description: Canonical baseline deployment bundle digest
-        required: true
-        type: string
-      environment_config_revision:
-        description: Revision bound by each host legacy-adoption.json
-        required: true
-        type: string
-      registry_bucket:
-        description: Approved private registry stack output
-        required: true
-        type: string
-      deploy_role_arn:
-        description: Approved deploy-only role ARN
-        required: true
-        default: arn:aws:iam::001634075617:role/TrinyxStagingDeployRole
-        type: string
-      document_version:
-        description: Reviewed numeric SSM document version
-        required: true
-        type: string
-  workflow_call:
-    inputs:
-      baseline_release_id:
         required: true
         type: string
       baseline_bundle_digest:
@@ -45,67 +18,25 @@ on:
       deploy_role_arn:
         required: true
         type: string
+        default: 'arn:aws:iam::001634075617:role/TrinyxStagingDeployRole'
       document_version:
         required: true
         type: string
 
 permissions:
   contents: read
-  id-token: write
-
-concurrency:
-  group: trinyx-staging-legacy-adoption
-  cancel-in-progress: false
 
 jobs:
-  adopt:
+  run:
     if: github.ref == 'refs/heads/codex/platform-release-automation'
-    environment: staging
-    runs-on: ubuntu-24.04
-    timeout-minutes: 45
-    steps:
-      - name: Checkout reviewed control plane
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1, Node 24
-        with:
-          persist-credentials: false
-      - name: Validate immutable identities and inputs
-        shell: bash
-        env:
-          BASELINE_RELEASE_ID: ${{ inputs.baseline_release_id }}
-          BASELINE_BUNDLE_DIGEST: ${{ inputs.baseline_bundle_digest }}
-          CONFIG_REVISION: ${{ inputs.environment_config_revision }}
-          REGISTRY_BUCKET: ${{ inputs.registry_bucket }}
-          DEPLOY_ROLE_ARN: ${{ inputs.deploy_role_arn }}
-          DOCUMENT_VERSION: ${{ inputs.document_version }}
-        run: |
-          set -euo pipefail
-          test "$GITHUB_REPOSITORY" = TrinyxAI/Trinyx
-          test "$GITHUB_REPOSITORY_ID" = 1342032975
-          test "$GITHUB_REPOSITORY_OWNER_ID" = 319253481
-          [[ "$BASELINE_RELEASE_ID" =~ ^rel-v1-[0-9a-f]{32}$ ]]
-          [[ "$BASELINE_BUNDLE_DIGEST" =~ ^sha256:[0-9a-f]{64}$ ]]
-          [[ "$CONFIG_REVISION" =~ ^[A-Za-z0-9._-]{1,128}$ ]]
-          [[ "$REGISTRY_BUCKET" =~ ^[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]$ ]]
-          [[ "$DEPLOY_ROLE_ARN" =~ ^arn:aws:iam::001634075617:role/TrinyxStagingDeployRole$ ]]
-          [[ "$DOCUMENT_VERSION" =~ ^[1-9][0-9]*$ ]]
-      - name: Assume deploy-only AWS role
-        uses: aws-actions/configure-aws-credentials@cbe3b392738ccf3f987d68400dafcf4b0624a56c # v6.2.4, Node 24
-        with:
-          role-to-assume: ${{ inputs.deploy_role_arn }}
-          aws-region: us-east-1
-          role-session-name: trinyx-staging-adopt-${{ github.run_id }}
-      - name: Install without activation then adopt pointer only
-        shell: bash
-        env:
-          BASELINE_RELEASE_ID: ${{ inputs.baseline_release_id }}
-          BASELINE_BUNDLE_DIGEST: ${{ inputs.baseline_bundle_digest }}
-          CONFIG_REVISION: ${{ inputs.environment_config_revision }}
-          REGISTRY_BUCKET: ${{ inputs.registry_bucket }}
-          DOCUMENT_VERSION: ${{ inputs.document_version }}
-        run: |
-          set -euo pipefail
-          common=(--document-version "$DOCUMENT_VERSION" --registry-bucket "$REGISTRY_BUCKET" --config-revision "$CONFIG_REVISION" --platform-commit "$GITHUB_SHA")
-          python3 platform/automation/ssm_orchestrator.py install "${common[@]}" --release-id "$BASELINE_RELEASE_ID" --bundle-digest "$BASELINE_BUNDLE_DIGEST" --previous-cloud "$BASELINE_RELEASE_ID" --previous-paid "$BASELINE_RELEASE_ID"
-          python3 platform/automation/ssm_orchestrator.py adopt "${common[@]}" --release-id "$BASELINE_RELEASE_ID" --bundle-digest "$BASELINE_BUNDLE_DIGEST"
-          python3 platform/automation/ssm_orchestrator.py health "${common[@]}" --release-id "$BASELINE_RELEASE_ID" --bundle-digest "$BASELINE_BUNDLE_DIGEST" --previous-cloud "$BASELINE_RELEASE_ID" --previous-paid "$BASELINE_RELEASE_ID"
-          echo LEGACY_BASELINE_POINTER_ADOPTION_SUCCESS
+    permissions:
+      contents: read
+      id-token: write
+    uses: ./.github/workflows/staging-legacy-adopt-impl.yml
+    with:
+      baseline_release_id: ${{ inputs.baseline_release_id }}
+      baseline_bundle_digest: ${{ inputs.baseline_bundle_digest }}
+      environment_config_revision: ${{ inputs.environment_config_revision }}
+      registry_bucket: ${{ inputs.registry_bucket }}
+      deploy_role_arn: ${{ inputs.deploy_role_arn }}
+      document_version: ${{ inputs.document_version }}

@@ -146,7 +146,7 @@ jobs:
     permissions:
       contents: read
       id-token: write
-    uses: ./.github/workflows/staging-oidc-probe.yml
+    uses: ./.github/workflows/staging-oidc-probe-impl.yml
     with:
       role_arn: ${{ inputs.role_arn }}
 
@@ -158,7 +158,7 @@ jobs:
       attestations: write
       contents: read
       id-token: write
-    uses: ./.github/workflows/staging-release-register.yml
+    uses: ./.github/workflows/staging-release-register-impl.yml
     with:
       run_id: ${{ inputs.run_id }}
       artifact_id: ${{ inputs.artifact_id }}
@@ -175,7 +175,7 @@ jobs:
     permissions:
       contents: read
       id-token: write
-    uses: ./.github/workflows/staging-legacy-adopt.yml
+    uses: ./.github/workflows/staging-legacy-adopt-impl.yml
     with:
       baseline_release_id: ${{ inputs.baseline_release_id }}
       baseline_bundle_digest: ${{ inputs.baseline_bundle_digest }}
@@ -192,7 +192,7 @@ jobs:
       attestations: write
       contents: read
       id-token: write
-    uses: ./.github/workflows/staging-qualification.yml
+    uses: ./.github/workflows/staging-qualification-impl.yml
     with:
       baseline_run_id: ${{ inputs.baseline_run_id }}
       baseline_artifact_id: ${{ inputs.baseline_artifact_id }}

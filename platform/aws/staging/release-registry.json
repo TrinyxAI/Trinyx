@@ -177,10 +177,10 @@
                   "token.actions.githubusercontent.com:aud": "sts.amazonaws.com",
                   "token.actions.githubusercontent.com:sub": [
                     {
-                      "Fn::Sub": "repository_owner_id:319253481:repository_id:1342032975:environment:staging:job_workflow_ref:TrinyxAI/Trinyx/.github/workflows/staging-release-register.yml@${PlatformWorkflowRef}"
+                      "Fn::Sub": "repository_owner_id:319253481:repository_id:1342032975:environment:staging:job_workflow_ref:TrinyxAI/Trinyx/.github/workflows/staging-release-register-impl.yml@${PlatformWorkflowRef}"
                     },
                     {
-                      "Fn::Sub": "repository_owner_id:319253481:repository_id:1342032975:environment:staging:job_workflow_ref:TrinyxAI/Trinyx/.github/workflows/staging-qualification.yml@${PlatformWorkflowRef}"
+                      "Fn::Sub": "repository_owner_id:319253481:repository_id:1342032975:environment:staging:job_workflow_ref:TrinyxAI/Trinyx/.github/workflows/staging-qualification-impl.yml@${PlatformWorkflowRef}"
                     }
                   ]
                 }
@@ -495,10 +495,10 @@
           ",",
           [
             {
-              "Fn::Sub": "repository_owner_id:319253481:repository_id:1342032975:environment:staging:job_workflow_ref:TrinyxAI/Trinyx/.github/workflows/staging-release-register.yml@${PlatformWorkflowRef}"
+              "Fn::Sub": "repository_owner_id:319253481:repository_id:1342032975:environment:staging:job_workflow_ref:TrinyxAI/Trinyx/.github/workflows/staging-release-register-impl.yml@${PlatformWorkflowRef}"
             },
             {
-              "Fn::Sub": "repository_owner_id:319253481:repository_id:1342032975:environment:staging:job_workflow_ref:TrinyxAI/Trinyx/.github/workflows/staging-qualification.yml@${PlatformWorkflowRef}"
+              "Fn::Sub": "repository_owner_id:319253481:repository_id:1342032975:environment:staging:job_workflow_ref:TrinyxAI/Trinyx/.github/workflows/staging-qualification-impl.yml@${PlatformWorkflowRef}"
             }
           ]
         ]

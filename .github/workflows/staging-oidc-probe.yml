@@ -4,58 +4,18 @@ on:
   workflow_dispatch:
     inputs:
       role_arn:
-        description: 'CloudFormation StagingBootstrapRoleArn output'
-        required: true
-        type: string
-
-  workflow_call:
-    inputs:
-      role_arn:
-        description: 'CloudFormation StagingBootstrapRoleArn output'
         required: true
         type: string
 
 permissions:
   contents: read
-  id-token: write
-
-concurrency:
-  group: staging-oidc-probe
-  cancel-in-progress: false
 
 jobs:
-  probe:
+  run:
     if: github.ref == 'refs/heads/codex/platform-release-automation'
-    environment: staging
-    runs-on: ubuntu-24.04
-    timeout-minutes: 5
-    steps:
-      - name: Guard repository identity and bootstrap role
-        shell: bash
-        env:
-          ROLE_ARN: ${{ inputs.role_arn }}
-        run: |
-          set -euo pipefail
-          test "$GITHUB_REPOSITORY" = 'TrinyxAI/Trinyx'
-          test "$GITHUB_REPOSITORY_ID" = '1342032975'
-          test "$GITHUB_REPOSITORY_OWNER_ID" = '319253481'
-          test "$GITHUB_REF" = 'refs/heads/codex/platform-release-automation'
-          [[ "$ROLE_ARN" =~ ^arn:aws:iam::[0-9]{12}:role/TrinyxStagingGitHubOidcBootstrapRole$ ]]
-          echo OIDC_PROBE_CONTEXT_GUARD_OK
-
-      - name: Exchange GitHub OIDC token for AWS identity
-        uses: aws-actions/configure-aws-credentials@cbe3b392738ccf3f987d68400dafcf4b0624a56c # v6.2.4, Node 24
-        with:
-          role-to-assume: ${{ inputs.role_arn }}
-          aws-region: us-east-1
-          role-session-name: trinyx-stg-oidc-${{ github.run_id }}
-
-      - name: Prove exact assumed role
-        shell: bash
-        run: |
-          set -euo pipefail
-          IDENTITY=$(aws sts get-caller-identity --output json)
-          CALLER_ARN=$(printf '%s' "$IDENTITY" | python3 -c 'import json,sys; print(json.load(sys.stdin)["Arn"])')
-          [[ "$CALLER_ARN" =~ ^arn:aws:sts::[0-9]{12}:assumed-role/TrinyxStagingGitHubOidcBootstrapRole/trinyx-stg-oidc-[0-9]+$ ]]
-          echo AWS_CALLER_ROLE=TrinyxStagingGitHubOidcBootstrapRole
-          echo AWS_GITHUB_OIDC_STS_PROBE_OK
+    permissions:
+      contents: read
+      id-token: write
+    uses: ./.github/workflows/staging-oidc-probe-impl.yml
+    with:
+      role_arn: ${{ inputs.role_arn }}

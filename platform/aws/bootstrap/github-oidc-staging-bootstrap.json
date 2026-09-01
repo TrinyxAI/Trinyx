@@ -75,7 +75,7 @@
                 "StringEquals": {
                   "token.actions.githubusercontent.com:aud": "sts.amazonaws.com",
                   "token.actions.githubusercontent.com:sub": {
-                    "Fn::Sub": "repository_owner_id:319253481:repository_id:1342032975:environment:staging:job_workflow_ref:TrinyxAI/Trinyx/.github/workflows/staging-oidc-probe.yml@${PlatformWorkflowRef}"
+                    "Fn::Sub": "repository_owner_id:319253481:repository_id:1342032975:environment:staging:job_workflow_ref:TrinyxAI/Trinyx/.github/workflows/staging-oidc-probe-impl.yml@${PlatformWorkflowRef}"
                   }
                 }
               }
@@ -126,7 +126,7 @@
     "TrustedGitHubSubject": {
       "Description": "Exact immutable GitHub OIDC subject trusted by the bootstrap role.",
       "Value": {
-        "Fn::Sub": "repository_owner_id:319253481:repository_id:1342032975:environment:staging:job_workflow_ref:TrinyxAI/Trinyx/.github/workflows/staging-oidc-probe.yml@${PlatformWorkflowRef}"
+        "Fn::Sub": "repository_owner_id:319253481:repository_id:1342032975:environment:staging:job_workflow_ref:TrinyxAI/Trinyx/.github/workflows/staging-oidc-probe-impl.yml@${PlatformWorkflowRef}"
       }
     },
     "RequiredGitHubOidcSubjectTemplate": {

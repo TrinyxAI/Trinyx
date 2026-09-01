@@ -1,0 +1,314 @@
+name: Qualify Staging Deploy Rollback Redeploy Implementation
+
+on:
+  workflow_call:
+    inputs:
+      baseline_run_id:
+        description: Baseline build workflow run ID
+        required: true
+        type: string
+      baseline_artifact_id:
+        description: Cryptographically honest baseline GitHub artifact ID
+        required: true
+        type: string
+      baseline_artifact_digest:
+        description: Baseline artifact ZIP sha256 digest
+        required: true
+        type: string
+      baseline_release_id:
+        description: Baseline immutable release ID currently active on both hosts
+        required: true
+        type: string
+      baseline_bundle_digest:
+        description: Baseline deployment bundle sha256 digest
+        required: true
+        type: string
+      candidate_artifact_id:
+        required: true
+        default: '9791964215'
+        type: string
+      candidate_run_id:
+        required: true
+        default: '33485509832'
+        type: string
+      candidate_artifact_digest:
+        required: true
+        default: 'sha256:755594078d9da7e19406e01187534132920a31f87804c1b33baa28fa96559152'
+        type: string
+      candidate_release_id:
+        required: true
+        default: 'rel-v1-b5ba70c23b9f529ac8228a7b00b4faa4'
+        type: string
+      candidate_bundle_digest:
+        required: true
+        default: 'sha256:c9df14dcd1dbc24b31b926d3778bef2e208b59824c78f24292608284f3579892'
+        type: string
+      candidate_source_commit:
+        required: true
+        default: 'f3a4c1ddcf6a17bfc837071f9046ac4c38a38b47'
+        type: string
+      environment_config_revision:
+        description: Approved non-secret staging config revision
+        required: true
+        type: string
+      registry_bucket:
+        description: Approved private registry stack output
+        required: true
+        type: string
+      publisher_role_arn:
+        required: true
+        type: string
+      deploy_role_arn:
+        required: true
+        default: 'arn:aws:iam::001634075617:role/TrinyxStagingDeployRole'
+        type: string
+      document_version:
+        description: Reviewed numeric SSM document version, never $DEFAULT
+        required: true
+        type: string
+      baseline_source_commit:
+        description: Baseline builder source commit bound by GitHub attestation
+        required: true
+        type: string
+
+permissions:
+  actions: read
+  attestations: write
+  contents: read
+  id-token: write
+
+concurrency:
+  group: trinyx-staging-live-qualification
+  cancel-in-progress: false
+
+jobs:
+  qualify:
+    if: github.ref == 'refs/heads/codex/platform-release-automation'
+    environment: staging
+    runs-on: ubuntu-24.04
+    timeout-minutes: 360
+    steps:
+      - name: Checkout reviewed control plane
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1, Node 24
+        with:
+          persist-credentials: false
+      - name: Fail closed on identities and unsafe inputs
+        shell: bash
+        env:
+          BASELINE_ARTIFACT_ID: ${{ inputs.baseline_artifact_id }}
+          BASELINE_RUN_ID: ${{ inputs.baseline_run_id }}
+          BASELINE_ARTIFACT_DIGEST: ${{ inputs.baseline_artifact_digest }}
+          BASELINE_RELEASE_ID: ${{ inputs.baseline_release_id }}
+          BASELINE_BUNDLE_DIGEST: ${{ inputs.baseline_bundle_digest }}
+          CANDIDATE_ARTIFACT_ID: ${{ inputs.candidate_artifact_id }}
+          CANDIDATE_RUN_ID: ${{ inputs.candidate_run_id }}
+          CANDIDATE_ARTIFACT_DIGEST: ${{ inputs.candidate_artifact_digest }}
+          CANDIDATE_RELEASE_ID: ${{ inputs.candidate_release_id }}
+          CANDIDATE_BUNDLE_DIGEST: ${{ inputs.candidate_bundle_digest }}
+          CANDIDATE_SOURCE_COMMIT: ${{ inputs.candidate_source_commit }}
+          BASELINE_SOURCE_COMMIT: ${{ inputs.baseline_source_commit }}
+          CONFIG_REVISION: ${{ inputs.environment_config_revision }}
+          REGISTRY_BUCKET: ${{ inputs.registry_bucket }}
+          PUBLISHER_ROLE_ARN: ${{ inputs.publisher_role_arn }}
+          DEPLOY_ROLE_ARN: ${{ inputs.deploy_role_arn }}
+          DOCUMENT_VERSION: ${{ inputs.document_version }}
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REPOSITORY:$GITHUB_REPOSITORY_ID:$GITHUB_REPOSITORY_OWNER_ID" = 'TrinyxAI/Trinyx:1342032975:319253481'
+          for id in "$BASELINE_ARTIFACT_ID" "$CANDIDATE_ARTIFACT_ID" "$BASELINE_RUN_ID" "$CANDIDATE_RUN_ID"; do [[ "$id" =~ ^[0-9]+$ ]]; done
+          for value in "$BASELINE_ARTIFACT_DIGEST" "$CANDIDATE_ARTIFACT_DIGEST" "$BASELINE_BUNDLE_DIGEST" "$CANDIDATE_BUNDLE_DIGEST"; do [[ "$value" =~ ^sha256:[0-9a-f]{64}$ ]]; done
+          for value in "$BASELINE_RELEASE_ID" "$CANDIDATE_RELEASE_ID"; do [[ "$value" =~ ^rel-v1-[0-9a-f]{32}$ ]]; done
+          [[ "$CANDIDATE_SOURCE_COMMIT" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$BASELINE_SOURCE_COMMIT" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$CONFIG_REVISION" =~ ^[A-Za-z0-9._-]{1,128}$ ]]
+          [[ "$REGISTRY_BUCKET" =~ ^[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]$ ]]
+          [[ "$DOCUMENT_VERSION" =~ ^[1-9][0-9]*$ ]]
+          test "$PUBLISHER_ROLE_ARN" = arn:aws:iam::001634075617:role/TrinyxStagingReleasePublisherRole
+          test "$DEPLOY_ROLE_ARN" = arn:aws:iam::001634075617:role/TrinyxStagingDeployRole
+          test "$BASELINE_RELEASE_ID" != "$CANDIDATE_RELEASE_ID"
+      - name: Download and verify exact baseline and candidate artifact ZIPs
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BASELINE_ARTIFACT_ID: ${{ inputs.baseline_artifact_id }}
+          BASELINE_RUN_ID: ${{ inputs.baseline_run_id }}
+          BASELINE_ARTIFACT_DIGEST: ${{ inputs.baseline_artifact_digest }}
+          CANDIDATE_ARTIFACT_ID: ${{ inputs.candidate_artifact_id }}
+          CANDIDATE_RUN_ID: ${{ inputs.candidate_run_id }}
+          CANDIDATE_ARTIFACT_DIGEST: ${{ inputs.candidate_artifact_digest }}
+          CANDIDATE_SOURCE_COMMIT: ${{ inputs.candidate_source_commit }}
+          BASELINE_SOURCE_COMMIT: ${{ inputs.baseline_source_commit }}
+        run: |
+          set -euo pipefail
+          umask 077
+          mkdir artifacts
+          gh api "repos/$GITHUB_REPOSITORY/actions/artifacts/$BASELINE_ARTIFACT_ID" > artifacts/baseline-metadata.json
+          gh api "repos/$GITHUB_REPOSITORY/actions/runs/$BASELINE_RUN_ID" > artifacts/baseline-run.json
+          gh api "repos/$GITHUB_REPOSITORY/actions/artifacts/$CANDIDATE_ARTIFACT_ID" > artifacts/candidate-metadata.json
+          gh api "repos/$GITHUB_REPOSITORY/actions/runs/$CANDIDATE_RUN_ID" > artifacts/candidate-run.json
+          python3 - <<'PY'
+          import json,os
+          for name in ('baseline','candidate'):
+            upper=name.upper()
+            artifact=json.load(open(f'artifacts/{name}-metadata.json'))
+            run=json.load(open(f'artifacts/{name}-run.json'))
+            assert str(artifact['id'])==os.environ[upper+'_ARTIFACT_ID']
+            assert str(artifact['workflow_run']['id'])==os.environ[upper+'_RUN_ID']
+            assert artifact['workflow_run']['head_sha']==run['head_sha']
+            assert artifact['name']=='trinyx-release-candidate-'+run['head_sha']
+            assert artifact['expired'] is False
+            assert run['path'].endswith('/build-release-candidate.yml')
+            assert run['conclusion']=='success' and run['repository']['full_name']=='TrinyxAI/Trinyx'
+            assert run['head_sha']==os.environ[upper+'_SOURCE_COMMIT']
+          PY
+          gh api "repos/$GITHUB_REPOSITORY/actions/artifacts/$BASELINE_ARTIFACT_ID/zip" > artifacts/baseline.zip
+          gh api "repos/$GITHUB_REPOSITORY/actions/artifacts/$CANDIDATE_ARTIFACT_ID/zip" > artifacts/candidate.zip
+          printf '%s  artifacts/baseline.zip\n' "${BASELINE_ARTIFACT_DIGEST#sha256:}" | sha256sum -c --strict
+          printf '%s  artifacts/candidate.zip\n' "${CANDIDATE_ARTIFACT_DIGEST#sha256:}" | sha256sum -c --strict
+      - name: Attest the exact qualification inputs
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2, Node 24
+        with:
+          subject-path: artifacts/*.zip
+      - name: Verify provenance contracts and meaningful runtime difference
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BASELINE_ARTIFACT_ID: ${{ inputs.baseline_artifact_id }}
+          BASELINE_RUN_ID: ${{ inputs.baseline_run_id }}
+          BASELINE_ARTIFACT_DIGEST: ${{ inputs.baseline_artifact_digest }}
+          BASELINE_RELEASE_ID: ${{ inputs.baseline_release_id }}
+          BASELINE_BUNDLE_DIGEST: ${{ inputs.baseline_bundle_digest }}
+          CANDIDATE_ARTIFACT_ID: ${{ inputs.candidate_artifact_id }}
+          CANDIDATE_RUN_ID: ${{ inputs.candidate_run_id }}
+          CANDIDATE_ARTIFACT_DIGEST: ${{ inputs.candidate_artifact_digest }}
+          CANDIDATE_RELEASE_ID: ${{ inputs.candidate_release_id }}
+          CANDIDATE_BUNDLE_DIGEST: ${{ inputs.candidate_bundle_digest }}
+          CANDIDATE_SOURCE_COMMIT: ${{ inputs.candidate_source_commit }}
+          BASELINE_SOURCE_COMMIT: ${{ inputs.baseline_source_commit }}
+        run: |
+          set -euo pipefail
+          gh attestation verify artifacts/baseline.zip --repo "$GITHUB_REPOSITORY"
+          gh attestation verify artifacts/candidate.zip --repo "$GITHUB_REPOSITORY"
+          mkdir baseline candidate
+          unzip -q artifacts/baseline.zip -d baseline
+          unzip -q artifacts/candidate.zip -d candidate
+          for name in baseline candidate; do
+            upper=${name^^}
+            source_var="${upper}_SOURCE_COMMIT"
+            source_digest="${!source_var}"
+            for subject in release.json release-images.json deployment-bundle.json deployment-bundle.tar; do
+              gh attestation verify "$name/$subject" \
+                --repo "$GITHUB_REPOSITORY" \
+                --signer-workflow TrinyxAI/Trinyx/.github/workflows/build-release-candidate.yml \
+                --source-digest "$source_digest" \
+                --deny-self-hosted-runners
+            done
+          done
+          python3 - <<'PY'
+          import datetime,json,os
+          from pathlib import Path
+          for name in ('baseline','candidate'):
+            upper=name.upper()
+            release=json.loads(Path(name,'release.json').read_text())
+            assert release['releaseId']==os.environ[upper+'_RELEASE_ID']
+            assert release['deploymentBundle']['digest']==os.environ[upper+'_BUNDLE_DIGEST']
+            assert release['sourceCommit']==os.environ[upper+'_SOURCE_COMMIT']
+            Path(name,'provenance.json').write_text(json.dumps({
+              'schemaVersion':1,'repository':'TrinyxAI/Trinyx','workflow':'build-release-candidate.yml',
+              'sourceCommit':release['sourceCommit'],'artifactId':os.environ[upper+'_ARTIFACT_ID'],'runId':os.environ[upper+'_RUN_ID'],
+              'artifactDigest':os.environ[upper+'_ARTIFACT_DIGEST'],
+              'verifiedAt':datetime.datetime.now(datetime.timezone.utc).isoformat().replace('+00:00','Z')
+            },sort_keys=True,separators=(',',':'))+'\n')
+          PY
+          python3 -c "from pathlib import Path; from platform.automation.release_registry import validate_candidate; validate_candidate(Path('baseline')); validate_candidate(Path('candidate'))"
+          python3 platform/automation/ssm_orchestrator.py diff --baseline-manifest baseline/release.json --candidate-manifest candidate/release.json
+      - name: Assume release publisher role only
+        uses: aws-actions/configure-aws-credentials@cbe3b392738ccf3f987d68400dafcf4b0624a56c # v6.2.4, Node 24
+        with:
+          role-to-assume: ${{ inputs.publisher_role_arn }}
+          aws-region: us-east-1
+          role-session-name: trinyx-staging-publish-${{ github.run_id }}
+      - name: Register baseline and candidate immutably
+        shell: bash
+        env:
+          REGISTRY_BUCKET: ${{ inputs.registry_bucket }}
+        run: |
+          set -euo pipefail
+          python3 platform/automation/release_registry.py register --bucket "$REGISTRY_BUCKET" --candidate-dir baseline
+          python3 platform/automation/release_registry.py register --bucket "$REGISTRY_BUCKET" --candidate-dir candidate
+      - name: Assume deploy-only role
+        uses: aws-actions/configure-aws-credentials@cbe3b392738ccf3f987d68400dafcf4b0624a56c # v6.2.4, Node 24
+        with:
+          role-to-assume: ${{ inputs.deploy_role_arn }}
+          aws-region: us-east-1
+          role-session-name: trinyx-staging-qualify-${{ github.run_id }}
+      - name: Install baseline and candidate without activation
+        shell: bash
+        env:
+          REGISTRY_BUCKET: ${{ inputs.registry_bucket }}
+          CONFIG_REVISION: ${{ inputs.environment_config_revision }}
+          DOCUMENT_VERSION: ${{ inputs.document_version }}
+          BASELINE_RELEASE_ID: ${{ inputs.baseline_release_id }}
+          BASELINE_BUNDLE_DIGEST: ${{ inputs.baseline_bundle_digest }}
+          CANDIDATE_RELEASE_ID: ${{ inputs.candidate_release_id }}
+          CANDIDATE_BUNDLE_DIGEST: ${{ inputs.candidate_bundle_digest }}
+        run: |
+          set -euo pipefail
+          common=(--document-version "$DOCUMENT_VERSION" --registry-bucket "$REGISTRY_BUCKET" --config-revision "$CONFIG_REVISION" --platform-commit "$GITHUB_SHA")
+          python3 platform/automation/ssm_orchestrator.py install "${common[@]}" --release-id "$BASELINE_RELEASE_ID" --bundle-digest "$BASELINE_BUNDLE_DIGEST" --previous-cloud "$BASELINE_RELEASE_ID" --previous-paid "$BASELINE_RELEASE_ID" --previous-cloud-bundle-digest "$BASELINE_BUNDLE_DIGEST" --previous-paid-bundle-digest "$BASELINE_BUNDLE_DIGEST"
+          python3 platform/automation/ssm_orchestrator.py install "${common[@]}" --release-id "$CANDIDATE_RELEASE_ID" --bundle-digest "$CANDIDATE_BUNDLE_DIGEST" --previous-cloud "$BASELINE_RELEASE_ID" --previous-paid "$BASELINE_RELEASE_ID" --previous-cloud-bundle-digest "$BASELINE_BUNDLE_DIGEST" --previous-paid-bundle-digest "$BASELINE_BUNDLE_DIGEST"
+      - name: Deploy candidate then full smoke (O11)
+        shell: bash
+        env:
+          REGISTRY_BUCKET: ${{ inputs.registry_bucket }}
+          CONFIG_REVISION: ${{ inputs.environment_config_revision }}
+          DOCUMENT_VERSION: ${{ inputs.document_version }}
+          BASELINE_RELEASE_ID: ${{ inputs.baseline_release_id }}
+          BASELINE_BUNDLE_DIGEST: ${{ inputs.baseline_bundle_digest }}
+          CANDIDATE_RELEASE_ID: ${{ inputs.candidate_release_id }}
+          CANDIDATE_BUNDLE_DIGEST: ${{ inputs.candidate_bundle_digest }}
+        run: |
+          set -euo pipefail
+          common=(--document-version "$DOCUMENT_VERSION" --registry-bucket "$REGISTRY_BUCKET" --config-revision "$CONFIG_REVISION" --platform-commit "$GITHUB_SHA")
+          python3 platform/automation/ssm_orchestrator.py deploy "${common[@]}" --release-id "$CANDIDATE_RELEASE_ID" --bundle-digest "$CANDIDATE_BUNDLE_DIGEST" --previous-cloud "$BASELINE_RELEASE_ID" --previous-paid "$BASELINE_RELEASE_ID" --previous-cloud-bundle-digest "$BASELINE_BUNDLE_DIGEST" --previous-paid-bundle-digest "$BASELINE_BUNDLE_DIGEST"
+          echo O11_DEPLOY_SUCCESS > qualification.markers
+      - name: Roll back immutable baseline then full smoke (O12)
+        shell: bash
+        env:
+          REGISTRY_BUCKET: ${{ inputs.registry_bucket }}
+          CONFIG_REVISION: ${{ inputs.environment_config_revision }}
+          DOCUMENT_VERSION: ${{ inputs.document_version }}
+          BASELINE_RELEASE_ID: ${{ inputs.baseline_release_id }}
+          BASELINE_BUNDLE_DIGEST: ${{ inputs.baseline_bundle_digest }}
+          CANDIDATE_RELEASE_ID: ${{ inputs.candidate_release_id }}
+          CANDIDATE_BUNDLE_DIGEST: ${{ inputs.candidate_bundle_digest }}
+        run: |
+          set -euo pipefail
+          common=(--document-version "$DOCUMENT_VERSION" --registry-bucket "$REGISTRY_BUCKET" --config-revision "$CONFIG_REVISION" --platform-commit "$GITHUB_SHA")
+          python3 platform/automation/ssm_orchestrator.py rollback "${common[@]}" --release-id "$BASELINE_RELEASE_ID" --bundle-digest "$BASELINE_BUNDLE_DIGEST" --candidate-id "$CANDIDATE_RELEASE_ID" --candidate-bundle-digest "$CANDIDATE_BUNDLE_DIGEST" --previous-cloud "$CANDIDATE_RELEASE_ID" --previous-paid "$CANDIDATE_RELEASE_ID" --previous-cloud-bundle-digest "$CANDIDATE_BUNDLE_DIGEST" --previous-paid-bundle-digest "$CANDIDATE_BUNDLE_DIGEST"
+          echo O12_ROLLBACK_SUCCESS >> qualification.markers
+      - name: Redeploy the same frozen candidate and prove idempotence
+        shell: bash
+        env:
+          REGISTRY_BUCKET: ${{ inputs.registry_bucket }}
+          CONFIG_REVISION: ${{ inputs.environment_config_revision }}
+          DOCUMENT_VERSION: ${{ inputs.document_version }}
+          BASELINE_RELEASE_ID: ${{ inputs.baseline_release_id }}
+          BASELINE_BUNDLE_DIGEST: ${{ inputs.baseline_bundle_digest }}
+          CANDIDATE_RELEASE_ID: ${{ inputs.candidate_release_id }}
+          CANDIDATE_BUNDLE_DIGEST: ${{ inputs.candidate_bundle_digest }}
+        run: |
+          set -euo pipefail
+          common=(--document-version "$DOCUMENT_VERSION" --registry-bucket "$REGISTRY_BUCKET" --config-revision "$CONFIG_REVISION" --platform-commit "$GITHUB_SHA")
+          python3 platform/automation/ssm_orchestrator.py deploy "${common[@]}" --release-id "$CANDIDATE_RELEASE_ID" --bundle-digest "$CANDIDATE_BUNDLE_DIGEST" --previous-cloud "$BASELINE_RELEASE_ID" --previous-paid "$BASELINE_RELEASE_ID" --previous-cloud-bundle-digest "$BASELINE_BUNDLE_DIGEST" --previous-paid-bundle-digest "$BASELINE_BUNDLE_DIGEST"
+          python3 platform/automation/ssm_orchestrator.py deploy "${common[@]}" --release-id "$CANDIDATE_RELEASE_ID" --bundle-digest "$CANDIDATE_BUNDLE_DIGEST" --previous-cloud "$CANDIDATE_RELEASE_ID" --previous-paid "$CANDIDATE_RELEASE_ID" --previous-cloud-bundle-digest "$CANDIDATE_BUNDLE_DIGEST" --previous-paid-bundle-digest "$CANDIDATE_BUNDLE_DIGEST"
+          python3 platform/automation/ssm_orchestrator.py health "${common[@]}" --release-id "$CANDIDATE_RELEASE_ID" --bundle-digest "$CANDIDATE_BUNDLE_DIGEST" --previous-cloud "$CANDIDATE_RELEASE_ID" --previous-paid "$CANDIDATE_RELEASE_ID"
+          echo SAME_CANDIDATE_REDEPLOY_AND_IDEMPOTENCE_SUCCESS >> qualification.markers
+          echo CANDIDATE_FINAL_ACTIVE >> qualification.markers
+      - name: Preserve non-secret qualification markers
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1, Node 24
+        with:
+          name: staging-qualification-${{ github.run_id }}
+          path: qualification.markers
+          if-no-files-found: error
+          retention-days: 30

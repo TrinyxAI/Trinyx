@@ -47,11 +47,13 @@ jobs:
           bash -n platform/tests/test-host-reconciler.sh
           bash -n platform/tests/test-release-contract.sh
           bash -n platform/tests/test-runtime-image-lock.sh
+          bash -n platform/tests/test-release-installer.sh
 
       - name: Compile Python platform tools
         run: |
           python3 -m py_compile platform/render/render-environment.py
           python3 -m py_compile platform/install/reconcile-host.py
+          python3 -m py_compile platform/install/install-release.py
           python3 -m py_compile platform/release/release.py
           python3 -m py_compile platform/release/validate-runtime-images.py
 
@@ -66,6 +68,9 @@ jobs:
 
       - name: Verify complete runtime image digest lock
         run: bash platform/tests/test-runtime-image-lock.sh
+
+      - name: Verify immutable release installer
+        run: bash platform/tests/test-release-installer.sh
 
       - name: Reject secret material in platform tree
         shell: bash

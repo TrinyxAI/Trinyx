@@ -130,6 +130,15 @@ jobs:
       - name: Contract complete
         run: echo PLATFORM_CONTRACTS_OK
 
+  manual_release_candidate:
+    name: Manual immutable release candidate build
+    needs: contracts
+    if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/codex/platform-release-automation'
+    permissions:
+      contents: read
+      packages: write
+    uses: ./.github/workflows/build-release-candidate.yml
+
   oidc_sts_probe:
     name: AWS OIDC STS probe
     needs: contracts

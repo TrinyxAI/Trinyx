@@ -460,19 +460,19 @@ class DeploymentRecord:
         deployment_id: str,
         release_id: str,
         config_revision: str,
-        platform_commit: str,
+        control_plane_commit: str,
         previous_cloud: str | None,
         previous_paid: str | None,
     ):
         now = utc_now()
         self.path = path
         self.value: dict[str, Any] = {
-            "schemaVersion": 1,
+            "schemaVersion": 2,
             "deploymentId": deployment_id,
             "environment": "staging",
             "releaseId": release_id,
             "environmentConfigRevision": config_revision,
-            "platformCommit": platform_commit,
+            "controlPlaneCommit": control_plane_commit,
             "previousCloudRelease": previous_cloud,
             "previousPaidRelease": previous_paid,
             "state": "CREATED",
@@ -547,7 +547,7 @@ class HostDeployment:
                 "installed release bundle digest differs from SSM contract")
 
     def _legacy_adoption_evidence(
-        self, release_id: str, config_revision: str, platform_commit: str, legacy_target: str,
+        self, release_id: str, config_revision: str, control_plane_commit: str, legacy_target: str,
     ) -> dict[str, Any]:
         evidence_path = self.base / "config" / "legacy-adoption.json"
         observation_path = self.base / "config" / "legacy-observation.json"
@@ -562,12 +562,12 @@ class HostDeployment:
         required = {
             "schemaVersion", "environment", "role", "legacyActiveTarget", "baselineRelease",
             "bundleDigest", "imagesEnvSha256", "observationSha256", "environmentConfigRevision",
-            "environmentConfigDigest", "platformCommit", "approvalScope", "approvedForPointerAdoption",
+            "environmentConfigDigest", "controlPlaneCommit", "approvalScope", "approvedForPointerAdoption",
         }
         require(isinstance(evidence, dict) and set(evidence) == required, "LEGACY_BASELINE_PROOF_REQUIRED")
         current_config_digest = environment_config_digest(self.base, self.role)
         require(
-            evidence["schemaVersion"] == 1
+            evidence["schemaVersion"] == 2
             and evidence["environment"] == "staging"
             and evidence["role"] == self.role
             and evidence["legacyActiveTarget"] == legacy_target
@@ -577,7 +577,7 @@ class HostDeployment:
             and evidence["observationSha256"] == sha256_path(observation_path)
             and evidence["environmentConfigRevision"] == config_revision
             and evidence["environmentConfigDigest"] == current_config_digest
-            and evidence["platformCommit"] == platform_commit
+            and evidence["controlPlaneCommit"] == control_plane_commit
             and evidence["approvalScope"] == "pointer-only-no-runtime-recreation"
             and evidence["approvedForPointerAdoption"] is True,
             "LEGACY_BASELINE_PROOF_REQUIRED",
@@ -671,20 +671,20 @@ class HostDeployment:
         return evidence
 
     def adopt_legacy_baseline(
-        self, deployment_id: str, release_id: str, config_revision: str, platform_commit: str,
+        self, deployment_id: str, release_id: str, config_revision: str, control_plane_commit: str,
     ) -> str:
-        self._validate_inputs(deployment_id, release_id, config_revision, platform_commit)
+        self._validate_inputs(deployment_id, release_id, config_revision, control_plane_commit)
         with DeploymentLock(self.base / "deploy.lock"):
             legacy_target = self._legacy_active_target()
             record = DeploymentRecord(
                 self.base / "deployments" / f"{deployment_id}-adopt.json",
-                deployment_id, release_id, config_revision, platform_commit, None, None,
+                deployment_id, release_id, config_revision, control_plane_commit, None, None,
             )
             mutated = False
             plan: HostPlan | None = None
             try:
                 record.transition("PREFLIGHT")
-                self._legacy_adoption_evidence(release_id, config_revision, platform_commit, legacy_target)
+                self._legacy_adoption_evidence(release_id, config_revision, control_plane_commit, legacy_target)
                 plan, _ = self.plan(release_id)
                 self.adapter.health(
                     self.base, self.base / "releases" / release_id, plan, self._runtime_services(plan)
@@ -723,9 +723,9 @@ class HostDeployment:
                 raise
 
     def restore_legacy_pointer(
-        self, deployment_id: str, release_id: str, config_revision: str, platform_commit: str,
+        self, deployment_id: str, release_id: str, config_revision: str, control_plane_commit: str,
     ) -> str:
-        self._validate_inputs(deployment_id, release_id, config_revision, platform_commit)
+        self._validate_inputs(deployment_id, release_id, config_revision, control_plane_commit)
         with DeploymentLock(self.base / "deploy.lock"):
             require(self.current_release() == release_id,
                     "legacy restore requires the adopted baseline to be active")
@@ -736,10 +736,10 @@ class HostDeployment:
             except (OSError, json.JSONDecodeError) as exc:
                 raise InvariantError("LEGACY_BASELINE_PROOF_REQUIRED") from exc
             legacy_target = str(evidence.get("legacyActiveTarget", ""))
-            self._legacy_adoption_evidence(release_id, config_revision, platform_commit, legacy_target)
+            self._legacy_adoption_evidence(release_id, config_revision, control_plane_commit, legacy_target)
             record = DeploymentRecord(
                 self.base / "deployments" / f"{deployment_id}-restore-legacy.json",
-                deployment_id, release_id, config_revision, platform_commit, None, None,
+                deployment_id, release_id, config_revision, control_plane_commit, None, None,
             )
             mutated = False
             plan: HostPlan | None = None
@@ -783,7 +783,7 @@ class HostDeployment:
         deployment_id: str,
         release_id: str,
         config_revision: str,
-        platform_commit: str,
+        control_plane_commit: str,
         previous_cloud: str | None,
         previous_paid: str | None,
     ) -> DeploymentRecord:
@@ -792,16 +792,16 @@ class HostDeployment:
             deployment_id,
             release_id,
             config_revision,
-            platform_commit,
+            control_plane_commit,
             previous_cloud,
             previous_paid,
         )
 
-    def _validate_inputs(self, deployment_id: str, release_id: str, config_revision: str, platform_commit: str) -> None:
+    def _validate_inputs(self, deployment_id: str, release_id: str, config_revision: str, control_plane_commit: str) -> None:
         require(DEPLOYMENT_RE.fullmatch(deployment_id) is not None, "invalid deployment ID")
         require(RELEASE_RE.fullmatch(release_id) is not None, "invalid release ID")
         require(REVISION_RE.fullmatch(config_revision) is not None, "invalid environment config revision")
-        require(SHA_RE.fullmatch(platform_commit) is not None, "invalid platform commit")
+        require(SHA_RE.fullmatch(control_plane_commit) is not None, "invalid control-plane commit")
 
     def _migration_rollback_safe(self, plan: HostPlan, previous: str, candidate: str) -> bool:
         if plan.one_shot.rollback_safe:
@@ -857,11 +857,11 @@ class HostDeployment:
         deployment_id: str,
         release_id: str,
         config_revision: str,
-        platform_commit: str,
+        control_plane_commit: str,
         previous_cloud: str | None,
         previous_paid: str | None,
     ) -> str:
-        self._validate_inputs(deployment_id, release_id, config_revision, platform_commit)
+        self._validate_inputs(deployment_id, release_id, config_revision, control_plane_commit)
         with DeploymentLock(self.base / "deploy.lock"):
             previous = self.current_release()
             previous_config_revision = self._current_config_revision()
@@ -871,7 +871,7 @@ class HostDeployment:
                 deployment_id,
                 release_id,
                 config_revision,
-                platform_commit,
+                control_plane_commit,
                 previous_cloud,
                 previous_paid,
             )
@@ -944,11 +944,11 @@ class HostDeployment:
         deployment_id: str,
         target_release: str,
         config_revision: str,
-        platform_commit: str,
+        control_plane_commit: str,
         previous_cloud: str | None,
         previous_paid: str | None,
     ) -> str:
-        self._validate_inputs(deployment_id, target_release, config_revision, platform_commit)
+        self._validate_inputs(deployment_id, target_release, config_revision, control_plane_commit)
         with DeploymentLock(self.base / "deploy.lock"):
             current = self.current_release()
             previous_config_revision = self._current_config_revision()
@@ -956,7 +956,7 @@ class HostDeployment:
                 deployment_id,
                 target_release,
                 config_revision,
-                platform_commit,
+                control_plane_commit,
                 previous_cloud,
                 previous_paid,
             )
@@ -1016,7 +1016,7 @@ def main() -> None:
     parser.add_argument("release_id")
     parser.add_argument("--deployment-id", default="dep-" + uuid.uuid4().hex)
     parser.add_argument("--environment-config-revision", default="unknown")
-    parser.add_argument("--platform-commit", default="0" * 40)
+    parser.add_argument("--control-plane-commit", default="0" * 40)
     parser.add_argument("--previous-cloud-release")
     parser.add_argument("--previous-paid-release")
     parser.add_argument("--expected-bundle-digest", required=True)
@@ -1038,12 +1038,12 @@ def main() -> None:
         print(f"STAGING_DEPLOY_HEALTH_OK role={args.role} release_id={args.release_id}")
     elif args.mode == "adopt":
         result = engine.adopt_legacy_baseline(
-            args.deployment_id, args.release_id, args.environment_config_revision, args.platform_commit,
+            args.deployment_id, args.release_id, args.environment_config_revision, args.control_plane_commit,
         )
         print(f"STAGING_LEGACY_ADOPTION_OK role={args.role} release_id={args.release_id} result={result}")
     elif args.mode == "restore-legacy":
         result = engine.restore_legacy_pointer(
-            args.deployment_id, args.release_id, args.environment_config_revision, args.platform_commit,
+            args.deployment_id, args.release_id, args.environment_config_revision, args.control_plane_commit,
         )
         print(f"STAGING_LEGACY_RESTORE_OK role={args.role} release_id={args.release_id} result={result}")
     elif args.mode == "apply":
@@ -1051,7 +1051,7 @@ def main() -> None:
             args.deployment_id,
             args.release_id,
             args.environment_config_revision,
-            args.platform_commit,
+            args.control_plane_commit,
             args.previous_cloud_release,
             args.previous_paid_release,
         )
@@ -1061,7 +1061,7 @@ def main() -> None:
             args.deployment_id,
             args.release_id,
             args.environment_config_revision,
-            args.platform_commit,
+            args.control_plane_commit,
             args.previous_cloud_release,
             args.previous_paid_release,
         )

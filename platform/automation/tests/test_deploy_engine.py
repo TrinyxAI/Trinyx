@@ -113,7 +113,7 @@ class DeploymentEngineTests(unittest.TestCase):
             "deployment_id": "dep-" + "1" * 32,
             "release_id": self.candidate,
             "config_revision": "config-1",
-            "platform_commit": "1" * 40,
+            "control_plane_commit": "1" * 40,
             "previous_cloud": None,
             "previous_paid": self.previous,
         }
@@ -210,7 +210,7 @@ class DeploymentEngineTests(unittest.TestCase):
                 args["deployment_id"],
                 self.previous,
                 args["config_revision"],
-                args["platform_commit"],
+                args["control_plane_commit"],
                 None,
                 self.candidate,
             ),
@@ -219,7 +219,7 @@ class DeploymentEngineTests(unittest.TestCase):
         args["deployment_id"] = "dep-" + "3" * 32
         self.assertEqual(
             "IDEMPOTENT",
-            engine.rollback(args["deployment_id"], self.previous, args["config_revision"], args["platform_commit"], None, self.previous),
+            engine.rollback(args["deployment_id"], self.previous, args["config_revision"], args["control_plane_commit"], None, self.previous),
         )
 
     def test_rollback_preflight_failure_preserves_original_error_and_record(self) -> None:
@@ -231,7 +231,7 @@ class DeploymentEngineTests(unittest.TestCase):
                 self.args["deployment_id"],
                 self.previous,
                 self.args["config_revision"],
-                self.args["platform_commit"],
+                self.args["control_plane_commit"],
                 None,
                 self.candidate,
             )
@@ -303,7 +303,7 @@ class DeploymentEngineTests(unittest.TestCase):
         observation_path = self.base / "config" / "legacy-observation.json"
         observation_path.write_text(json.dumps(observation, sort_keys=True) + "\n", encoding="utf-8")
         evidence = {
-            "schemaVersion": 1,
+            "schemaVersion": 2,
             "environment": "staging",
             "role": "paid",
             "legacyActiveTarget": "deployments/stg-bootstrap-001",
@@ -313,7 +313,7 @@ class DeploymentEngineTests(unittest.TestCase):
             "observationSha256": sha256_path(observation_path),
             "environmentConfigRevision": "config-legacy",
             "environmentConfigDigest": config_digest,
-            "platformCommit": "1" * 40,
+            "controlPlaneCommit": "1" * 40,
             "approvalScope": "pointer-only-no-runtime-recreation",
             "approvedForPointerAdoption": True,
         }

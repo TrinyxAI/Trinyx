@@ -102,12 +102,12 @@ class InvariantTests(unittest.TestCase):
 
     def test_deployment_record_rejects_secret_logging(self) -> None:
         record = {
-            "schemaVersion": 1,
+            "schemaVersion": 2,
             "deploymentId": "dep-" + "1" * 32,
             "environment": "staging",
             "releaseId": self.releases[0],
             "environmentConfigRevision": "rev-1",
-            "platformCommit": "1" * 40,
+            "controlPlaneCommit": "1" * 40,
             "previousCloudRelease": None,
             "previousPaidRelease": self.releases[0],
             "state": "FAILED",

@@ -34,7 +34,7 @@ DEPLOYMENT_KEYS = {
     "environment",
     "releaseId",
     "environmentConfigRevision",
-    "platformCommit",
+    "controlPlaneCommit",
     "previousCloudRelease",
     "previousPaidRelease",
     "state",
@@ -325,12 +325,12 @@ def validate_compose_model(model: dict[str, Any], role: str, expected_images: di
 
 def validate_deployment_record(record: Any) -> dict[str, Any]:
     require(isinstance(record, dict) and set(record) == DEPLOYMENT_KEYS, "deployment record schema mismatch")
-    require(record["schemaVersion"] == 1, "unsupported deployment record schema")
+    require(record["schemaVersion"] == 2, "unsupported deployment record schema")
     require(re.fullmatch(r"^dep-[0-9a-f]{32}$", str(record["deploymentId"])) is not None, "bad deployment ID")
     require(record["environment"] == "staging", "deployment environment must be staging")
     require(RELEASE_RE.fullmatch(str(record["releaseId"])) is not None, "bad deployment release ID")
     require(re.fullmatch(r"^[A-Za-z0-9._-]{1,128}$", str(record["environmentConfigRevision"])) is not None, "bad environment config revision")
-    require(SHA_RE.fullmatch(str(record["platformCommit"])) is not None, "bad platform commit")
+    require(SHA_RE.fullmatch(str(record["controlPlaneCommit"])) is not None, "bad control-plane commit")
     for key in ("previousCloudRelease", "previousPaidRelease"):
         require(record[key] is None or RELEASE_RE.fullmatch(str(record[key])) is not None, f"bad {key}")
     require(record["state"] in DEPLOYMENT_STATES, "bad deployment state")

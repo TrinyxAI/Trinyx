@@ -14,13 +14,13 @@
     "observationSha256",
     "environmentConfigRevision",
     "environmentConfigDigest",
-    "platformCommit",
+    "controlPlaneCommit",
     "approvalScope",
     "approvedForPointerAdoption"
   ],
   "properties": {
     "schemaVersion": {
-      "const": 1
+      "const": 2
     },
     "environment": {
       "const": "staging"
@@ -61,13 +61,13 @@
     "approvedForPointerAdoption": {
       "const": true
     },
-    "platformCommit": {
-      "type": "string",
-      "pattern": "^[0-9a-f]{40}$"
-    },
     "environmentConfigDigest": {
       "type": "string",
       "pattern": "^sha256:[0-9a-f]{64}$"
+    },
+    "controlPlaneCommit": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{40}$"
     }
   }
 }

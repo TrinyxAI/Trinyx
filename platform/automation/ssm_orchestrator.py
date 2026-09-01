@@ -40,7 +40,7 @@ class Request:
     bundle_digest: str
     deployment_id: str
     config_revision: str
-    platform_commit: str
+    control_plane_commit: str
     previous_cloud: str | None
     previous_paid: str | None
 
@@ -111,7 +111,7 @@ class AwsCliSsmTransport:
             "RegistryBucket": [self.registry_bucket],
             "DeploymentId": [request.deployment_id],
             "EnvironmentConfigRevision": [request.config_revision],
-            "PlatformCommit": [request.platform_commit],
+            "ControlPlaneCommit": [request.control_plane_commit],
             "PreviousCloudRelease": [request.previous_cloud or ""],
             "PreviousPaidRelease": [request.previous_paid or ""],
         }
@@ -279,12 +279,12 @@ def new_deployment_id() -> str:
 
 
 class StagingSaga:
-    def __init__(self, transport: Transport, config_revision: str, platform_commit: str, lock: SagaLock):
+    def __init__(self, transport: Transport, config_revision: str, control_plane_commit: str, lock: SagaLock):
         require(re.fullmatch(r"[A-Za-z0-9._-]{1,128}", config_revision) is not None, "bad config revision")
-        require(re.fullmatch(r"[0-9a-f]{40}", platform_commit) is not None, "bad platform commit")
+        require(re.fullmatch(r"[0-9a-f]{40}", control_plane_commit) is not None, "bad control-plane commit")
         self.transport = transport
         self.config_revision = config_revision
-        self.platform_commit = platform_commit
+        self.control_plane_commit = control_plane_commit
         self.lock = lock
 
     def _request(
@@ -305,7 +305,7 @@ class StagingSaga:
                 bundle_digest,
                 deployment_id or new_deployment_id(),
                 self.config_revision,
-                self.platform_commit,
+                self.control_plane_commit,
                 previous_cloud,
                 previous_paid,
             )
@@ -444,7 +444,7 @@ def main() -> None:
     parser.add_argument("--document-version")
     parser.add_argument("--registry-bucket")
     parser.add_argument("--config-revision")
-    parser.add_argument("--platform-commit")
+    parser.add_argument("--control-plane-commit")
     parser.add_argument("--release-id")
     parser.add_argument("--bundle-digest")
     parser.add_argument("--previous-cloud")
@@ -470,9 +470,9 @@ def main() -> None:
         AwsCliStagingLock(transport).break_stale(args.lock_owner, args.confirm_break_lock)
         print(f"STAGING_STALE_LOCK_BREAK_OK owner={args.lock_owner}")
         return
-    require(all((args.document_version, args.registry_bucket, args.config_revision, args.platform_commit)), "control-plane inputs required")
+    require(all((args.document_version, args.registry_bucket, args.config_revision, args.control_plane_commit)), "control-plane inputs required")
     transport = AwsCliSsmTransport(args.document, args.document_version, args.registry_bucket)
-    saga = StagingSaga(transport, args.config_revision, args.platform_commit, AwsCliStagingLock(transport))
+    saga = StagingSaga(transport, args.config_revision, args.control_plane_commit, AwsCliStagingLock(transport))
     require(args.release_id and args.bundle_digest, "release identity inputs required")
     if args.command != "adopt":
         require(args.previous_cloud and args.previous_paid, "previous release inputs required")

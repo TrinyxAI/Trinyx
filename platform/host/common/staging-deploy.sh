@@ -8,7 +8,7 @@ BUNDLE_DIGEST=${4:-}
 REGISTRY_BUCKET=${5:-}
 DEPLOYMENT_ID=${6:-}
 CONFIG_REVISION=${7:-}
-PLATFORM_COMMIT=${8:-}
+CONTROL_PLANE_COMMIT=${8:-}
 PREVIOUS_CLOUD_RELEASE=${9:-}
 PREVIOUS_PAID_RELEASE=${10:-}
 
@@ -43,8 +43,8 @@ esac
   echo "ERROR_INVALID_CONFIG_REVISION" >&2
   exit 64
 }
-[[ "$PLATFORM_COMMIT" =~ ^[0-9a-f]{40}$ ]] || {
-  echo "ERROR_INVALID_PLATFORM_COMMIT" >&2
+[[ "$CONTROL_PLANE_COMMIT" =~ ^[0-9a-f]{40}$ ]] || {
+  echo "ERROR_INVALID_CONTROL_PLANE_COMMIT" >&2
   exit 64
 }
 for previous in "$PREVIOUS_CLOUD_RELEASE" "$PREVIOUS_PAID_RELEASE"; do
@@ -118,7 +118,7 @@ ARGS=(
   "$MODE" "$ROLE" "$RELEASE_ID"
   --deployment-id "$DEPLOYMENT_ID"
   --environment-config-revision "$CONFIG_REVISION"
-  --platform-commit "$PLATFORM_COMMIT"
+  --control-plane-commit "$CONTROL_PLANE_COMMIT"
   --expected-bundle-digest "$BUNDLE_DIGEST"
 )
 if [ -n "$PREVIOUS_CLOUD_RELEASE" ]; then

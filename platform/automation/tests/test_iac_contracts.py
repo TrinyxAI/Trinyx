@@ -128,7 +128,7 @@ class IacContractTests(unittest.TestCase):
         expected = {
             "platform/contracts/deployment-record.schema.json": {
                 "deploymentId", "environment", "releaseId", "environmentConfigRevision",
-                "platformCommit", "previousCloudRelease", "previousPaidRelease", "state",
+                "controlPlaneCommit", "previousCloudRelease", "previousPaidRelease", "state",
                 "createdAt", "startedAt", "completedAt", "failure", "rollbackResult",
             },
             "platform/contracts/health-endpoints.schema.json": {"schemaVersion", "checks"},
@@ -143,7 +143,7 @@ class IacContractTests(unittest.TestCase):
             "platform/contracts/legacy-adoption.schema.json": {
                 "schemaVersion", "environment", "role", "legacyActiveTarget", "baselineRelease",
                 "bundleDigest", "imagesEnvSha256", "observationSha256",
-                "environmentConfigRevision", "environmentConfigDigest", "platformCommit", "approvalScope",
+                "environmentConfigRevision", "environmentConfigDigest", "controlPlaneCommit", "approvalScope",
                 "approvedForPointerAdoption",
             },
         }

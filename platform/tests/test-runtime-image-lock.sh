@@ -6,24 +6,26 @@ TMP=$(mktemp -d)
 trap 'rm -rf "$TMP"' EXIT
 CONTRACT="$ROOT/platform/release/runtime-inventory.json"
 IMAGES="$ROOT/platform/tests/fixtures/staging-bootstrap-images.json"
-RELEASE="$ROOT/platform/releases/rel-v1-de31904a66fbef13c2042cc0652b94bc/manifest.json"
 TOOL="$ROOT/platform/release/release.py"
+RELEASE="$TMP/release.json"
+EXPECTED_RELEASE=rel-v1-082bd961a3ef556fc849e3555d804a5a
 
 python3 "$ROOT/platform/release/validate-runtime-images.py" --contract "$CONTRACT" --images "$IMAGES"
-python3 "$TOOL" validate --manifest "$RELEASE"
-python3 "$ROOT/platform/release/validate-runtime-images.py" --contract "$CONTRACT" --images "$RELEASE"
 
-# The checked-in bootstrap release must be exactly reproducible from its
-# source commit, platform revision, config revision and 28 immutable images.
+# Reproduce the environment-independent bootstrap release from its source,
+# platform revision and exact 28-image inventory.
 python3 "$TOOL" create \
   --source-commit aeb2a447ea7ce0436a60549713636225dfe1a2c1 \
   --source-ref codex/trinyx-cloud-gateway-v2 \
-  --platform-commit b19beff636e7665941c73dd94e03726858c5559d \
-  --config-revision c18c450be61b18dce167bb7fd726b224f989eecf \
-  --created-at 2026-09-01T05:10:48Z \
+  --platform-commit ae045447fce099f6bffd43b399b6964f29820a0a \
+  --created-at 2026-09-01T05:23:32Z \
   --images "$IMAGES" \
-  --out "$TMP/release.json" >/dev/null
-cmp -s "$RELEASE" "$TMP/release.json"
+  --out "$RELEASE" >/dev/null
+
+python3 "$TOOL" validate --manifest "$RELEASE"
+python3 "$ROOT/platform/release/validate-runtime-images.py" --contract "$CONTRACT" --images "$RELEASE"
+RID=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["releaseId"])' "$RELEASE")
+test "$RID" = "$EXPECTED_RELEASE"
 
 python3 "$TOOL" render-env --manifest "$RELEASE" --role cloud --out "$TMP/cloud.env" >/dev/null
 python3 "$TOOL" render-env --manifest "$RELEASE" --role paid --out "$TMP/paid.env" >/dev/null
@@ -67,5 +69,5 @@ for item in contract['images']:
 print('RUNTIME_COMPOSE_DIGEST_LOCK_OK images=28')
 PY
 
-echo BOOTSTRAP_RELEASE_REPRODUCIBLE_OK
+echo BOOTSTRAP_PROMOTABLE_RELEASE_REPRODUCIBLE_OK
 echo RUNTIME_IMAGE_LOCK_CONTRACT_OK

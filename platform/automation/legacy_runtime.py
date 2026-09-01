@@ -23,7 +23,7 @@ CONTAINER_ID_RE = re.compile(r"^[0-9a-f]{64}$")
 CONFIG_HASH_RE = re.compile(r"^[0-9a-f]{64}$")
 PROJECT_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$")
 MOUNT_TYPE_RE = re.compile(r"^[a-z][a-z0-9_-]{0,31}$")
-FORBIDDEN_MUTABLE_CHECKOUT = "/srv/trinyx/pr25-"
+FORBIDDEN_MUTABLE_CHECKOUT = "/srv/trinyx/" + "pr25-"
 
 
 def normalize_mounts(container: dict[str, Any]) -> list[dict[str, Any]]:

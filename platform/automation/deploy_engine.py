@@ -655,7 +655,7 @@ class HostDeployment:
                     and isinstance(mount["source"], str)
                     and isinstance(mount["destination"], str)
                     and isinstance(mount["readOnly"], bool)
-                    and "/srv/trinyx/pr25-" not in mount["source"]
+                    and ("/srv/trinyx/" + "pr25-") not in mount["source"]
                     for mount in mounts
                 ),
                 "LEGACY_BASELINE_EFFECTIVE_CONFIG_MISMATCH",

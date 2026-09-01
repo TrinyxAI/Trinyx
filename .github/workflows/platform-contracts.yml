@@ -1,0 +1,84 @@
+name: Platform Contracts
+
+on:
+  pull_request:
+    paths:
+      - 'platform/**'
+      - '.github/workflows/platform-contracts.yml'
+  push:
+    branches:
+      - codex/platform-release-automation
+    paths:
+      - 'platform/**'
+      - '.github/workflows/platform-contracts.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: platform-contracts-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  contracts:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout exact commit
+        uses: actions/checkout@v4
+
+      - name: Validate shell syntax
+        shell: bash
+        run: |
+          set -euo pipefail
+          bash -n platform/bootstrap/host-base/user-data.sh
+          bash -n platform/bootstrap/cloud/staging/rootfs/usr/local/lib/trinyx/pre-docker-cloud.sh
+          bash -n platform/bootstrap/cloud/staging/rootfs/usr/local/lib/trinyx/runtime-materialize-cloud.sh
+          bash -n platform/bootstrap/paid/staging/rootfs/usr/local/lib/trinyx/runtime-materialize-paid.sh
+          bash -n platform/tests/test-staging-render.sh
+
+      - name: Compile Python renderer
+        run: python3 -m py_compile platform/render/render-environment.py
+
+      - name: Verify staging render parity
+        run: bash platform/tests/test-staging-render.sh
+
+      - name: Reject secret material in platform tree
+        shell: bash
+        run: |
+          set -euo pipefail
+          if grep -RIEq --exclude='platform-contracts.yml' -- \
+            '-----BEGIN ([A-Z0-9 ]+ )?PRIVATE KEY-----|AKIA[0-9A-Z]{16}|ASIA[0-9A-Z]{16}|sk_live_[A-Za-z0-9]+|sk_test_[A-Za-z0-9]+|whsec_[A-Za-z0-9]+|github_pat_[A-Za-z0-9_]+|ghp_[A-Za-z0-9]+' \
+            platform/
+          then
+            echo 'ERROR_PLATFORM_SECRET_SIGNATURE_FOUND' >&2
+            exit 1
+          fi
+
+      - name: Enforce recovery boundary
+        shell: bash
+        run: |
+          set -euo pipefail
+          files=(
+            platform/bootstrap/cloud/staging/rootfs/usr/local/lib/trinyx/pre-docker-cloud.sh
+            platform/bootstrap/cloud/staging/rootfs/usr/local/lib/trinyx/runtime-materialize-cloud.sh
+            platform/bootstrap/paid/staging/rootfs/usr/local/lib/trinyx/runtime-materialize-paid.sh
+          )
+          if grep -Eiq -- 'git (clone|pull|fetch|checkout)|github[.]com|ghcr[.]io.*pull|docker compose .*up -d' "${files[@]}"; then
+            echo 'ERROR_BOOT_RECOVERY_CONTAINS_DEPLOYMENT_LOGIC' >&2
+            exit 1
+          fi
+
+      - name: Enforce no global compose deployment
+        shell: bash
+        run: |
+          set -euo pipefail
+          if grep -RIEq -- 'docker compose([^\n]*)? up -d([[:space:]]|$)' platform/ \
+            | grep -Ev -- '--no-deps' >/dev/null; then
+            echo 'ERROR_GLOBAL_COMPOSE_UP_FOUND' >&2
+            exit 1
+          fi
+
+      - name: Contract complete
+        run: echo PLATFORM_CONTRACTS_OK

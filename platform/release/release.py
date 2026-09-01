@@ -95,7 +95,6 @@ def identity_payload(manifest: dict[str, Any]) -> dict[str, Any]:
         "schemaVersion": manifest["schemaVersion"],
         "sourceCommit": manifest["sourceCommit"],
         "platformCommit": manifest["platformCommit"],
-        "configRevision": manifest["configRevision"],
         "images": manifest["images"],
     }
 
@@ -115,7 +114,6 @@ def validate_manifest(manifest: Any) -> dict[str, Any]:
         "sourceCommit",
         "sourceRef",
         "platformCommit",
-        "configRevision",
         "createdAt",
         "images",
     }
@@ -124,7 +122,7 @@ def validate_manifest(manifest: Any) -> dict[str, Any]:
     if manifest["schemaVersion"] != 1:
         fail("unsupported schemaVersion")
 
-    for key in ("sourceCommit", "platformCommit", "configRevision"):
+    for key in ("sourceCommit", "platformCommit"):
         if not isinstance(manifest[key], str) or not SHA_RE.fullmatch(manifest[key]):
             fail(f"invalid {key}")
 
@@ -157,7 +155,6 @@ def create_manifest(args: argparse.Namespace) -> dict[str, Any]:
     for label, value in (
         ("sourceCommit", args.source_commit),
         ("platformCommit", args.platform_commit),
-        ("configRevision", args.config_revision),
     ):
         if not SHA_RE.fullmatch(value):
             fail(f"invalid {label}")
@@ -170,7 +167,6 @@ def create_manifest(args: argparse.Namespace) -> dict[str, Any]:
         "sourceCommit": args.source_commit,
         "sourceRef": args.source_ref,
         "platformCommit": args.platform_commit,
-        "configRevision": args.config_revision,
         "createdAt": created_at,
         "images": images,
     }
@@ -212,14 +208,13 @@ def command_render_env(args: argparse.Namespace) -> None:
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Create and validate immutable Trinyx release manifests")
+    parser = argparse.ArgumentParser(description="Create and validate immutable promotable Trinyx release manifests")
     sub = parser.add_subparsers(dest="command", required=True)
 
     create = sub.add_parser("create")
     create.add_argument("--source-commit", required=True)
     create.add_argument("--source-ref", required=True)
     create.add_argument("--platform-commit", required=True)
-    create.add_argument("--config-revision", required=True)
     create.add_argument("--images", required=True, type=Path)
     create.add_argument("--created-at")
     create.add_argument("--out", required=True, type=Path)

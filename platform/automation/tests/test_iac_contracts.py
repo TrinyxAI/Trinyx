@@ -70,6 +70,32 @@ class IacContractTests(unittest.TestCase):
         self.assertNotIn("TrinyxProduction", encoded)
         self.assertNotIn("/trinyx/production", encoded)
 
+    def test_o6_o12_contract_schemas_are_committed_and_closed(self) -> None:
+        expected = {
+            "platform/contracts/deployment-record.schema.json": {
+                "deploymentId", "environment", "releaseId", "environmentConfigRevision",
+                "platformCommit", "previousCloudRelease", "previousPaidRelease", "state",
+                "createdAt", "startedAt", "completedAt", "failure", "rollbackResult",
+            },
+            "platform/contracts/health-endpoints.schema.json": {"schemaVersion", "checks"},
+            "platform/contracts/rollback-safety.schema.json": {
+                "schemaVersion", "previousRelease", "candidateRelease", "strategy",
+                "compatible", "evidenceSha256",
+            },
+        }
+        for path, required in expected.items():
+            schema = self.load(path)
+            self.assertEqual("https://json-schema.org/draft/2020-12/schema", schema["$schema"])
+            self.assertFalse(schema["additionalProperties"])
+            self.assertTrue(required.issubset(set(schema["required"])), path)
+            for name, definition in schema["properties"].items():
+                if "pattern" in definition:
+                    field_type = definition.get("type")
+                    self.assertTrue(
+                        field_type == "string" or isinstance(field_type, list) and "string" in field_type,
+                        f"{path}:{name}",
+                    )
+
 
 if __name__ == "__main__":
     unittest.main()

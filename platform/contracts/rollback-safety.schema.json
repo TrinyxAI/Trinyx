@@ -1,0 +1,15 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://trinyx.ai/contracts/rollback-safety.schema.json",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "previousRelease", "candidateRelease", "strategy", "compatible", "evidenceSha256"],
+  "properties": {
+    "schemaVersion": {"const": 1},
+    "previousRelease": {"type": "string", "pattern": "^rel-v1-[0-9a-f]{32}$"},
+    "candidateRelease": {"type": "string", "pattern": "^rel-v1-[0-9a-f]{32}$"},
+    "strategy": {"const": "expand-contract"},
+    "compatible": {"const": true},
+    "evidenceSha256": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"}
+  }
+}

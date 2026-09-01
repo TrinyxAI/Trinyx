@@ -1,0 +1,75 @@
+from __future__ import annotations
+
+import json
+import unittest
+from pathlib import Path
+
+
+ROOT = Path(__file__).resolve().parents[3]
+
+
+class IacContractTests(unittest.TestCase):
+    def load(self, relative: str) -> dict:
+        return json.loads((ROOT / relative).read_text(encoding="utf-8"))
+
+    def test_registry_security_and_iam_separation(self) -> None:
+        template = self.load("platform/aws/staging/release-registry.json")
+        bucket = template["Resources"]["ReleaseRegistryBucket"]
+        properties = bucket["Properties"]
+        self.assertEqual("Retain", bucket["DeletionPolicy"])
+        self.assertEqual("BucketOwnerEnforced", properties["BucketOwnershipControls"]["Rules"][0]["ObjectOwnership"])
+        self.assertTrue(all(properties["PublicAccessBlockConfiguration"].values()))
+        self.assertEqual("Enabled", properties["VersioningConfiguration"]["Status"])
+        self.assertEqual("AES256", properties["BucketEncryption"]["ServerSideEncryptionConfiguration"][0]["ServerSideEncryptionByDefault"]["SSEAlgorithm"])
+        publisher = json.dumps(template["Resources"]["ReleasePublisherRole"], sort_keys=True)
+        self.assertIn("s3:PutObject", publisher)
+        self.assertNotIn("ssm:SendCommand", publisher)
+        self.assertNotIn("kms:Decrypt", publisher)
+        self.assertIn("environment:staging", publisher)
+        for name in ("CloudReleaseRegistryReadPolicy", "PaidReleaseRegistryReadPolicy"):
+            policy = json.dumps(template["Resources"][name], sort_keys=True)
+            self.assertIn("s3:GetObject", policy)
+            self.assertNotIn("s3:PutObject", policy)
+
+    def test_deploy_role_and_fixed_document_boundaries(self) -> None:
+        template = self.load("platform/aws/staging/deploy-control-plane.json")
+        role = json.dumps(template["Resources"]["StagingDeployRole"], sort_keys=True)
+        self.assertIn("environment:staging", role)
+        self.assertIn("ssm:SendCommand", role)
+        self.assertNotIn("s3:PutObject", role)
+        self.assertNotIn("iam:PassRole", role)
+        document = template["Resources"]["StagingDeployDocument"]["Properties"]
+        self.assertEqual("NewVersion", document["UpdateMethod"])
+        self.assertEqual({"Ref": "DocumentVersionName"}, document["VersionName"])
+        parameters = document["Content"]["parameters"]
+        self.assertTrue(all(value["interpolationType"] == "ENV_VAR" for value in parameters.values()))
+        self.assertEqual(["install", "plan", "apply", "rollback", "health"], parameters["Mode"]["allowedValues"])
+        command = document["Content"]["mainSteps"][0]["inputs"]["runCommand"]
+        self.assertEqual(1, len(command))
+        self.assertIn("/usr/local/lib/trinyx/staging-deploy", command[0])
+        self.assertNotIn("AWS-RunShellScript", json.dumps(template))
+
+    def test_exact_runtime_plan_cardinality_and_paid_invariants(self) -> None:
+        cloud = self.load("platform/bootstrap/cloud/staging/rootfs/etc/trinyx/staging/cloud/config/deployment-plan.json")
+        paid = self.load("platform/bootstrap/paid/staging/rootfs/etc/trinyx/staging/paid/config/deployment-plan.json")
+        self.assertEqual(20, len(cloud["services"]))
+        self.assertEqual(8, len(paid["services"]))
+        self.assertEqual(["migration-service", "cloud-minio-init"], cloud["oneShot"]["services"])
+        self.assertFalse(cloud["oneShot"]["rollbackSafe"])
+        paid_runtime = (ROOT / "platform/bootstrap/paid/staging/rootfs/etc/trinyx/staging/paid/config/paid-runtime.override.yml").read_text()
+        self.assertIn("memory: 3G", paid_runtime)
+        self.assertIn("/actuator/health/liveness", paid_runtime)
+
+    def test_pca_is_approval_gated_and_staging_only(self) -> None:
+        template = self.load("platform/aws/staging/private-ca-plan.json")
+        self.assertEqual("AWS_PCA_LIVE_APPROVAL_REQUIRED", template["Parameters"]["PcaLiveApproval"]["Default"])
+        for resource in template["Resources"].values():
+            if resource["Type"].startswith("AWS::ACMPCA::"):
+                self.assertEqual("PcaApproved", resource["Condition"])
+        encoded = json.dumps(template)
+        self.assertNotIn("TrinyxProduction", encoded)
+        self.assertNotIn("/trinyx/production", encoded)
+
+
+if __name__ == "__main__":
+    unittest.main()

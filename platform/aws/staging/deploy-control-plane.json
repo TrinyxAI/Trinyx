@@ -13,6 +13,11 @@
     "PaidInstanceId": {
       "Type": "String",
       "AllowedPattern": "^i-[0-9a-f]{17}$"
+    },
+    "DocumentVersionName": {
+      "Type": "String",
+      "AllowedPattern": "^platform-[0-9a-f]{12}$",
+      "Description": "Reviewed platform commit prefix used to identify the immutable SSM document version."
     }
   },
   "Resources": {
@@ -24,13 +29,14 @@
         "DocumentFormat": "JSON",
         "TargetType": "/AWS::EC2::Instance",
         "UpdateMethod": "NewVersion",
+        "VersionName": {"Ref": "DocumentVersionName"},
         "Content": {
           "schemaVersion": "2.2",
           "description": "Run the fixed Trinyx staging deployment dispatcher. Arbitrary shell input is not accepted.",
           "parameters": {
             "Mode": {
               "type": "String",
-              "allowedValues": ["plan", "apply"],
+              "allowedValues": ["install", "plan", "apply", "rollback", "health"],
               "interpolationType": "ENV_VAR"
             },
             "Role": {
@@ -42,6 +48,41 @@
               "type": "String",
               "allowedPattern": "^rel-v1-[0-9a-f]{32}$",
               "interpolationType": "ENV_VAR"
+            },
+            "BundleDigest": {
+              "type": "String",
+              "allowedPattern": "^sha256:[0-9a-f]{64}$",
+              "interpolationType": "ENV_VAR"
+            },
+            "RegistryBucket": {
+              "type": "String",
+              "allowedPattern": "^[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]$",
+              "interpolationType": "ENV_VAR"
+            },
+            "DeploymentId": {
+              "type": "String",
+              "allowedPattern": "^dep-[0-9a-f]{32}$",
+              "interpolationType": "ENV_VAR"
+            },
+            "EnvironmentConfigRevision": {
+              "type": "String",
+              "allowedPattern": "^[A-Za-z0-9._-]{1,128}$",
+              "interpolationType": "ENV_VAR"
+            },
+            "PlatformCommit": {
+              "type": "String",
+              "allowedPattern": "^[0-9a-f]{40}$",
+              "interpolationType": "ENV_VAR"
+            },
+            "PreviousCloudRelease": {
+              "type": "String",
+              "allowedPattern": "^$|^rel-v1-[0-9a-f]{32}$",
+              "interpolationType": "ENV_VAR"
+            },
+            "PreviousPaidRelease": {
+              "type": "String",
+              "allowedPattern": "^$|^rel-v1-[0-9a-f]{32}$",
+              "interpolationType": "ENV_VAR"
             }
           },
           "mainSteps": [
@@ -49,9 +90,9 @@
               "action": "aws:runShellScript",
               "name": "runTrinyxStagingDeploy",
               "inputs": {
-                "timeoutSeconds": "120",
+                "timeoutSeconds": "900",
                 "runCommand": [
-                  "exec /usr/bin/env bash -c 'set -euo pipefail; test -x /usr/local/lib/trinyx/staging-deploy; exec /usr/local/lib/trinyx/staging-deploy \"$SSM_Mode\" \"$SSM_Role\" \"$SSM_ReleaseId\"'"
+                  "exec /usr/bin/env bash -c 'set -euo pipefail; test -x /usr/local/lib/trinyx/staging-deploy; exec /usr/local/lib/trinyx/staging-deploy \"$SSM_Mode\" \"$SSM_Role\" \"$SSM_ReleaseId\" \"$SSM_BundleDigest\" \"$SSM_RegistryBucket\" \"$SSM_DeploymentId\" \"$SSM_EnvironmentConfigRevision\" \"$SSM_PlatformCommit\" \"$SSM_PreviousCloudRelease\" \"$SSM_PreviousPaidRelease\"'"
                 ]
               }
             }
@@ -80,7 +121,7 @@
               "Condition": {
                 "StringEquals": {
                   "token.actions.githubusercontent.com:aud": "sts.amazonaws.com",
-                  "token.actions.githubusercontent.com:sub": "repo:TrinyxAI@319253481/Trinyx@1342032975:ref:refs/heads/codex/platform-release-automation"
+                  "token.actions.githubusercontent.com:sub": "repo:TrinyxAI@319253481/Trinyx@1342032975:environment:staging"
                 }
               }
             }
@@ -107,6 +148,12 @@
                   "Effect": "Allow",
                   "Action": "ssm:GetCommandInvocation",
                   "Resource": "*"
+                },
+                {
+                  "Sid": "CoordinateOneNonSecretStagingDeployment",
+                  "Effect": "Allow",
+                  "Action": ["ssm:PutParameter", "ssm:GetParameter", "ssm:DeleteParameter"],
+                  "Resource": {"Fn::Sub": "arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:parameter/trinyx/staging/control-plane/deployment-lock"}
                 }
               ]
             }
@@ -123,6 +170,8 @@
   "Outputs": {
     "StagingDeployRoleArn": {"Value": {"Fn::GetAtt": ["StagingDeployRole", "Arn"]}},
     "StagingDeployDocumentName": {"Value": {"Ref": "StagingDeployDocument"}},
+    "StagingDeployDocumentVersionName": {"Value": {"Ref": "DocumentVersionName"}},
+    "StagingDeployOidcSubject": {"Value": "repo:TrinyxAI@319253481/Trinyx@1342032975:environment:staging"},
     "CloudInstanceId": {"Value": {"Ref": "CloudInstanceId"}},
     "PaidInstanceId": {"Value": {"Ref": "PaidInstanceId"}}
   }

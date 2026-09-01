@@ -1,0 +1,364 @@
+#!/usr/bin/env python3
+"""Immutable, content-addressed staging release registry client.
+
+The S3 implementation uses conditional puts. `registration.json` is written
+last and is the only commit marker. Matching partial objects are retryable;
+different bytes at an existing key are an immutable collision.
+"""
+
+from __future__ import annotations
+
+import argparse
+import base64
+import hashlib
+import json
+import os
+import re
+import shutil
+import stat
+import subprocess
+import sys
+import tarfile
+import tempfile
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Any, Protocol
+
+if __package__:
+    from .invariants import (
+        InvariantError,
+        assert_no_secret_material,
+        canonical_json,
+        read_json,
+        require,
+        sha256_bytes,
+        validate_release_manifest,
+    )
+else:
+    sys.path.insert(0, str(Path(__file__).resolve().parent))
+    from invariants import (  # type: ignore
+        InvariantError,
+        assert_no_secret_material,
+        canonical_json,
+        read_json,
+        require,
+        sha256_bytes,
+        validate_release_manifest,
+    )
+
+OBJECT_FILES = ("release.json", "release-images.json", "deployment-bundle.json", "deployment-bundle.tar", "provenance.json")
+REPOSITORY = "TrinyxAI/Trinyx"
+
+
+@dataclass(frozen=True)
+class ObjectInfo:
+    key: str
+    sha256: str
+    size: int
+
+
+class Registry(Protocol):
+    def put_if_absent(self, key: str, content: bytes, sha256_hex: str) -> str: ...
+
+    def get_required(self, key: str) -> bytes: ...
+
+
+class AwsCliRegistry:
+    def __init__(self, bucket: str, region: str):
+        require(re.fullmatch(r"[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]", bucket) is not None, "invalid bucket name")
+        require(re.fullmatch(r"[a-z]{2}-[a-z]+-[0-9]", region) is not None, "invalid AWS region")
+        self.bucket = bucket
+        self.region = region
+
+    def _run(self, argv: list[str], capture: bool = True) -> subprocess.CompletedProcess[bytes]:
+        try:
+            return subprocess.run(
+                argv,
+                check=False,
+                stdout=subprocess.PIPE if capture else subprocess.DEVNULL,
+                stderr=subprocess.PIPE,
+                timeout=60,
+            )
+        except (OSError, subprocess.TimeoutExpired) as exc:
+            raise InvariantError("bounded AWS CLI operation failed") from exc
+
+    def _head(self, key: str) -> dict[str, Any] | None:
+        result = self._run(
+            [
+                "aws",
+                "s3api",
+                "head-object",
+                "--bucket",
+                self.bucket,
+                "--key",
+                key,
+                "--region",
+                self.region,
+                "--output",
+                "json",
+            ]
+        )
+        if result.returncode == 0:
+            try:
+                return json.loads(result.stdout)
+            except json.JSONDecodeError as exc:
+                raise InvariantError("invalid S3 head-object response") from exc
+        error = result.stderr.decode("utf-8", "replace")
+        if any(marker in error for marker in ("404", "Not Found", "NoSuchKey")):
+            return None
+        raise InvariantError("S3 access denied or unavailable")
+
+    def put_if_absent(self, key: str, content: bytes, sha256_hex: str) -> str:
+        existing = self._head(key)
+        if existing is not None:
+            metadata = existing.get("Metadata", {})
+            require(metadata.get("sha256") == sha256_hex and existing.get("ContentLength") == len(content), "immutable S3 object collision")
+            return "EXISTS_MATCHING"
+        with tempfile.NamedTemporaryFile(delete=False) as handle:
+            temp_name = handle.name
+            handle.write(content)
+        try:
+            checksum = base64.b64encode(bytes.fromhex(sha256_hex)).decode("ascii")
+            result = self._run(
+                [
+                    "aws",
+                    "s3api",
+                    "put-object",
+                    "--bucket",
+                    self.bucket,
+                    "--key",
+                    key,
+                    "--body",
+                    temp_name,
+                    "--if-none-match",
+                    "*",
+                    "--server-side-encryption",
+                    "AES256",
+                    "--checksum-algorithm",
+                    "SHA256",
+                    "--checksum-sha256",
+                    checksum,
+                    "--metadata",
+                    f"sha256={sha256_hex}",
+                    "--region",
+                    self.region,
+                ]
+            )
+            if result.returncode != 0:
+                raise InvariantError("conditional S3 put failed")
+            return "CREATED"
+        finally:
+            with contextlib_suppress(FileNotFoundError):
+                os.unlink(temp_name)
+
+    def get_required(self, key: str) -> bytes:
+        with tempfile.NamedTemporaryFile(delete=False) as handle:
+            temp_name = handle.name
+        try:
+            result = self._run(
+                [
+                    "aws",
+                    "s3api",
+                    "get-object",
+                    "--bucket",
+                    self.bucket,
+                    "--key",
+                    key,
+                    "--checksum-mode",
+                    "ENABLED",
+                    "--region",
+                    self.region,
+                    temp_name,
+                ]
+            )
+            if result.returncode != 0:
+                error = result.stderr.decode("utf-8", "replace")
+                if any(marker in error for marker in ("404", "Not Found", "NoSuchKey")):
+                    raise InvariantError("required S3 object missing")
+                raise InvariantError("S3 access denied or unavailable")
+            return Path(temp_name).read_bytes()
+        finally:
+            with contextlib_suppress(FileNotFoundError):
+                os.unlink(temp_name)
+
+
+class contextlib_suppress:
+    """Tiny local equivalent avoids hiding broad exceptions in registry logic."""
+
+    def __init__(self, exception: type[BaseException]):
+        self.exception = exception
+
+    def __enter__(self) -> None:
+        return None
+
+    def __exit__(self, exc_type: Any, exc: Any, traceback: Any) -> bool:
+        return exc_type is not None and issubclass(exc_type, self.exception)
+
+
+def validate_candidate(directory: Path) -> tuple[dict[str, Any], dict[str, bytes]]:
+    files: dict[str, bytes] = {}
+    for name in OBJECT_FILES:
+        path = directory / name
+        require(path.is_file() and not path.is_symlink(), f"candidate file missing/unsafe: {name}")
+        files[name] = path.read_bytes()
+    manifest = validate_release_manifest(json.loads(files["release.json"]))
+    images = json.loads(files["release-images.json"])
+    require(isinstance(images, dict) and images.get("images") == manifest["images"], "release image inventory differs from manifest")
+    bundle_manifest = json.loads(files["deployment-bundle.json"])
+    require(isinstance(bundle_manifest, dict)
+            and set(bundle_manifest) == {"schemaVersion", "format", "digest", "sizeBytes", "files"}
+            and bundle_manifest.get("schemaVersion") == 1 and bundle_manifest.get("format") == "tar",
+            "bad bundle manifest")
+    entries = bundle_manifest.get("files")
+    require(isinstance(entries, list) and len(entries) == manifest["deploymentBundle"]["fileCount"], "bundle file count mismatch")
+    tar_bytes = files["deployment-bundle.tar"]
+    require(sha256_bytes(tar_bytes) == manifest["deploymentBundle"]["digest"], "wrong bundle SHA")
+    require(len(tar_bytes) == manifest["deploymentBundle"]["sizeBytes"], "wrong bundle size")
+    try:
+        with tarfile.open(fileobj=__import__("io").BytesIO(tar_bytes), mode="r") as archive:
+            members = archive.getmembers()
+            require(len(members) == len(entries), "bundle member count mismatch")
+            names: set[str] = set()
+            for member, expected in zip(members, entries):
+                require(isinstance(expected, dict) and set(expected) == {"path", "digest", "sizeBytes", "mode"},
+                        "bad bundle file contract")
+                name = expected.get("path")
+                require(isinstance(name, str) and name and not name.startswith("/") and ".." not in Path(name).parts,
+                        "unsafe bundle member")
+                require(name not in names and member.isfile() and member.name == name, "unsafe/unexpected bundle member")
+                require(member.size == expected.get("sizeBytes") and stat.S_IMODE(member.mode) == expected.get("mode"),
+                        "bundle member size/mode mismatch")
+                content = archive.extractfile(member)
+                require(content is not None and sha256_bytes(content.read()) == expected.get("digest"), "bad internal file hash")
+                names.add(name)
+    except tarfile.TarError as exc:
+        raise InvariantError("tampered bundle") from exc
+    provenance = json.loads(files["provenance.json"])
+    required_provenance = {
+        "schemaVersion",
+        "repository",
+        "workflow",
+        "sourceCommit",
+        "artifactId",
+        "runId",
+        "artifactDigest",
+        "verifiedAt",
+    }
+    require(isinstance(provenance, dict) and set(provenance) == required_provenance, "provenance schema mismatch")
+    require(provenance["schemaVersion"] == 1 and provenance["repository"] == REPOSITORY, "wrong provenance repository")
+    require(provenance["workflow"] == "build-release-candidate.yml", "wrong provenance workflow")
+    require(re.fullmatch(r"[0-9]+", str(provenance["runId"])) is not None, "bad provenance run ID")
+    require(provenance["sourceCommit"] == manifest["sourceCommit"], "provenance/source commit mismatch")
+    require(re.fullmatch(r"sha256:[0-9a-f]{64}", str(provenance["artifactDigest"])) is not None, "bad artifact provenance digest")
+    assert_no_secret_material(provenance, "provenance")
+    return manifest, files
+
+
+def release_prefix(manifest: dict[str, Any]) -> str:
+    bundle_hex = manifest["deploymentBundle"]["digest"].removeprefix("sha256:")
+    return f"staging/releases/{manifest['releaseId']}/{bundle_hex}"
+
+
+def register(registry: Registry, candidate_dir: Path) -> dict[str, Any]:
+    manifest, files = validate_candidate(candidate_dir)
+    prefix = release_prefix(manifest)
+    reservation = {
+        "schemaVersion": 1,
+        "environment": "staging",
+        "releaseId": manifest["releaseId"],
+        "bundleDigest": manifest["deploymentBundle"]["digest"],
+        "prefix": prefix,
+    }
+    reservation_content = canonical_json(reservation) + b"\n"
+    registry.put_if_absent(
+        f"staging/release-ids/{manifest['releaseId']}.json",
+        reservation_content,
+        hashlib.sha256(reservation_content).hexdigest(),
+    )
+    objects: list[dict[str, Any]] = []
+    for name in OBJECT_FILES:
+        content = files[name]
+        digest = hashlib.sha256(content).hexdigest()
+        registry.put_if_absent(f"{prefix}/{name}", content, digest)
+        objects.append({"key": f"{prefix}/{name}", "sha256": digest, "sizeBytes": len(content)})
+    registration = {
+        "schemaVersion": 1,
+        "environment": "staging",
+        "releaseId": manifest["releaseId"],
+        "bundleDigest": manifest["deploymentBundle"]["digest"],
+        "objects": objects,
+    }
+    assert_no_secret_material(registration, "release registration")
+    content = canonical_json(registration) + b"\n"
+    registry.put_if_absent(f"{prefix}/registration.json", content, hashlib.sha256(content).hexdigest())
+    return registration
+
+
+def fetch(registry: Registry, release_id: str, bundle_digest: str, destination: Path) -> Path:
+    require(re.fullmatch(r"rel-v1-[0-9a-f]{32}", release_id) is not None, "bad release ID")
+    require(re.fullmatch(r"sha256:[0-9a-f]{64}", bundle_digest) is not None, "bad bundle digest")
+    if destination.exists():
+        require(destination.is_dir() and not destination.is_symlink(), "existing candidate destination is unsafe")
+        existing, _ = validate_candidate(destination)
+        require(
+            existing["releaseId"] == release_id and existing["deploymentBundle"]["digest"] == bundle_digest,
+            "immutable candidate destination collision",
+        )
+        return destination
+    prefix = f"staging/releases/{release_id}/{bundle_digest.removeprefix('sha256:')}"
+    marker = registry.get_required(f"{prefix}/registration.json")
+    try:
+        registration = json.loads(marker)
+    except json.JSONDecodeError as exc:
+        raise InvariantError("invalid registration marker") from exc
+    require(registration.get("releaseId") == release_id and registration.get("bundleDigest") == bundle_digest, "registration identity mismatch")
+    objects = registration.get("objects")
+    require(isinstance(objects, list) and len(objects) == len(OBJECT_FILES), "registration object inventory mismatch")
+    staging = destination.parent / f".{destination.name}.{os.getpid()}.staging"
+    require(not staging.exists(), "staging download path already exists")
+    staging.mkdir(parents=True, mode=0o700)
+    try:
+        for item in objects:
+            require(isinstance(item, dict) and set(item) == {"key", "sha256", "sizeBytes"}, "bad registration object")
+            require(str(item["key"]).startswith(prefix + "/"), "registration key escapes release prefix")
+            name = str(item["key"]).rsplit("/", 1)[-1]
+            require(name in OBJECT_FILES, "unexpected release object")
+            content = registry.get_required(item["key"])
+            require(len(content) == item["sizeBytes"] and hashlib.sha256(content).hexdigest() == item["sha256"], "downloaded object checksum mismatch")
+            (staging / name).write_bytes(content)
+        manifest, _ = validate_candidate(staging)
+        require(manifest["releaseId"] == release_id, "downloaded release ID mismatch")
+        os.replace(staging, destination)
+        return destination
+    except Exception:
+        shutil.rmtree(staging, ignore_errors=True)
+        raise
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("command", choices=("register", "fetch"))
+    parser.add_argument("--bucket", required=True)
+    parser.add_argument("--region", default="us-east-1")
+    parser.add_argument("--candidate-dir", type=Path)
+    parser.add_argument("--release-id")
+    parser.add_argument("--bundle-digest")
+    parser.add_argument("--destination", type=Path)
+    args = parser.parse_args()
+    registry = AwsCliRegistry(args.bucket, args.region)
+    if args.command == "register":
+        require(args.candidate_dir is not None, "candidate directory required")
+        result = register(registry, args.candidate_dir)
+        print(f"RELEASE_REGISTRATION_OK release_id={result['releaseId']} bundle={result['bundleDigest']}")
+    else:
+        require(args.release_id and args.bundle_digest and args.destination, "fetch arguments required")
+        fetch(registry, args.release_id, args.bundle_digest, args.destination)
+        print(f"RELEASE_FETCH_OK release_id={args.release_id}")
+
+
+if __name__ == "__main__":
+    try:
+        main()
+    except (InvariantError, OSError, json.JSONDecodeError) as exc:
+        print(f"ERROR_RELEASE_REGISTRY={type(exc).__name__}", file=sys.stderr)
+        raise SystemExit(1)

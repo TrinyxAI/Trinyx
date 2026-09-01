@@ -194,6 +194,17 @@ def build_desired(role: str, rendered: Path, metadata: dict[str, str]) -> tuple[
         ),
     ]
 
+    if environment == "staging":
+        common.extend([
+            DesiredFile(REPO_ROOT / "platform/automation/invariants.py", "/usr/local/lib/trinyx/invariants.py", 0o750),
+            DesiredFile(REPO_ROOT / "platform/automation/deploy_engine.py", "/usr/local/lib/trinyx/deploy_engine.py", 0o750),
+            DesiredFile(REPO_ROOT / "platform/automation/release_registry.py", "/usr/local/lib/trinyx/release_registry.py", 0o750),
+            DesiredFile(REPO_ROOT / "platform/automation/health_probe.py", "/usr/local/lib/trinyx/health-probe", 0o750),
+            DesiredFile(REPO_ROOT / "platform/install/install-release.py", "/usr/local/lib/trinyx/install-release.py", 0o750),
+            DesiredFile(REPO_ROOT / "platform/release/release.py", "/usr/local/lib/trinyx/release.py", 0o750),
+            DesiredFile(REPO_ROOT / "platform/release/runtime-inventory.json", "/usr/local/share/trinyx/runtime-inventory.json", 0o644),
+        ])
+
     dirs = [DesiredDir("/etc/trinyx/platform", 0o700)]
 
     if role == "cloud":
@@ -211,6 +222,7 @@ def build_desired(role: str, rendered: Path, metadata: dict[str, str]) -> tuple[
             DesiredFile(REPO_ROOT / "platform/host/cloud/cloud-auth-files.sh", f"{base}/cloud-auth-files.sh", 0o600),
             DesiredFile(rendered / "cloud/runtime-static.env", f"{base}/runtime-static.env", 0o600),
             DesiredFile(rendered / "cloud/cloud-paid.override.yml", f"{base}/cloud-paid.override.yml", 0o600),
+            *([DesiredFile(REPO_ROOT / "platform/bootstrap/cloud/staging/rootfs/etc/trinyx/staging/cloud/config/deployment-plan.json", f"{base}/deployment-plan.json", 0o600)] if environment == "staging" else []),
         ]
         return dirs, files
 
@@ -226,6 +238,7 @@ def build_desired(role: str, rendered: Path, metadata: dict[str, str]) -> tuple[
         DesiredFile(rendered / "paid/paid.override.yml", f"{base}/paid.override.yml", 0o600),
         DesiredFile(rendered / "paid/paid-bind.override.yml", f"{base}/paid-bind.override.yml", 0o600),
         DesiredFile(rendered / "paid/paid-runtime.override.yml", f"{base}/paid-runtime.override.yml", 0o600),
+        *([DesiredFile(REPO_ROOT / "platform/bootstrap/paid/staging/rootfs/etc/trinyx/staging/paid/config/deployment-plan.json", f"{base}/deployment-plan.json", 0o600)] if environment == "staging" else []),
     ]
     return dirs, files
 

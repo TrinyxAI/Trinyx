@@ -1,0 +1,253 @@
+{
+  "AWSTemplateFormatVersion": "2010-09-09",
+  "Description": "Private immutable Trinyx staging release registry. This stack does not deploy application runtime.",
+  "Parameters": {
+    "GitHubOidcProviderArn": {
+      "Type": "String",
+      "AllowedPattern": "^arn:aws:iam::[0-9]{12}:oidc-provider/token\\.actions\\.githubusercontent\\.com$"
+    },
+    "CloudInstanceRoleName": {
+      "Type": "String",
+      "Default": "trinyx-cloud-staging-role",
+      "AllowedPattern": "^[A-Za-z0-9+=,.@_-]{1,64}$"
+    },
+    "PaidInstanceRoleName": {
+      "Type": "String",
+      "Default": "trinyx-paid-staging-role",
+      "AllowedPattern": "^[A-Za-z0-9+=,.@_-]{1,64}$"
+    },
+    "EnableS3GatewayEndpoint": {
+      "Type": "String",
+      "Default": "false",
+      "AllowedValues": ["false", "true"]
+    },
+    "VpcId": {
+      "Type": "String",
+      "Default": "",
+      "AllowedPattern": "^$|^vpc-[0-9a-f]{8,17}$"
+    },
+    "RouteTableIds": {
+      "Type": "CommaDelimitedList",
+      "Default": ""
+    }
+  },
+  "Conditions": {
+    "CreateS3GatewayEndpoint": {"Fn::Equals": [{"Ref": "EnableS3GatewayEndpoint"}, "true"]}
+  },
+  "Rules": {
+    "GatewayEndpointInputsRequired": {
+      "RuleCondition": {"Fn::Equals": [{"Ref": "EnableS3GatewayEndpoint"}, "true"]},
+      "Assertions": [
+        {
+          "Assert": {"Fn::Not": [{"Fn::Equals": [{"Ref": "VpcId"}, ""]}]},
+          "AssertDescription": "VpcId is required when the S3 Gateway endpoint is enabled. RouteTableIds must also be supplied and reviewed."
+        }
+      ]
+    }
+  },
+  "Resources": {
+    "ReleaseRegistryBucket": {
+      "Type": "AWS::S3::Bucket",
+      "DeletionPolicy": "Retain",
+      "UpdateReplacePolicy": "Retain",
+      "Properties": {
+        "BucketEncryption": {
+          "ServerSideEncryptionConfiguration": [
+            {"ServerSideEncryptionByDefault": {"SSEAlgorithm": "AES256"}, "BucketKeyEnabled": false}
+          ]
+        },
+        "BucketOwnershipControls": {"Rules": [{"ObjectOwnership": "BucketOwnerEnforced"}]},
+        "PublicAccessBlockConfiguration": {
+          "BlockPublicAcls": true,
+          "BlockPublicPolicy": true,
+          "IgnorePublicAcls": true,
+          "RestrictPublicBuckets": true
+        },
+        "VersioningConfiguration": {"Status": "Enabled"},
+        "LifecycleConfiguration": {
+          "Rules": [
+            {"Id": "AbortIncompleteMultipartUploads", "Status": "Enabled", "AbortIncompleteMultipartUpload": {"DaysAfterInitiation": 7}}
+          ]
+        },
+        "Tags": [
+          {"Key": "TrinyxManaged", "Value": "true"},
+          {"Key": "TrinyxEnvironment", "Value": "staging"},
+          {"Key": "TrinyxPurpose", "Value": "immutable-release-registry"}
+        ]
+      }
+    },
+    "ReleasePublisherRole": {
+      "Type": "AWS::IAM::Role",
+      "Properties": {
+        "RoleName": "TrinyxStagingReleasePublisherRole",
+        "Description": "GitHub staging Environment role that can register immutable release objects but cannot deploy.",
+        "MaxSessionDuration": 3600,
+        "AssumeRolePolicyDocument": {
+          "Version": "2012-10-17",
+          "Statement": [
+            {
+              "Effect": "Allow",
+              "Principal": {"Federated": {"Ref": "GitHubOidcProviderArn"}},
+              "Action": "sts:AssumeRoleWithWebIdentity",
+              "Condition": {
+                "StringEquals": {
+                  "token.actions.githubusercontent.com:aud": "sts.amazonaws.com",
+                  "token.actions.githubusercontent.com:sub": "repo:TrinyxAI@319253481/Trinyx@1342032975:environment:staging"
+                }
+              }
+            }
+          ]
+        },
+        "Policies": [
+          {
+            "PolicyName": "PublishImmutableStagingReleasesOnly",
+            "PolicyDocument": {
+              "Version": "2012-10-17",
+              "Statement": [
+                {
+                  "Sid": "ListOnlyStagingReleasePrefix",
+                  "Effect": "Allow",
+                  "Action": "s3:ListBucket",
+                  "Resource": {"Fn::GetAtt": ["ReleaseRegistryBucket", "Arn"]},
+                  "Condition": {"StringLike": {"s3:prefix": ["staging/releases/*", "staging/release-ids/*"]}}
+                },
+                {
+                  "Sid": "ReadAndConditionalWriteStagingReleaseObjects",
+                  "Effect": "Allow",
+                  "Action": ["s3:GetObject", "s3:GetObjectVersion", "s3:PutObject"],
+                  "Resource": [
+                    {"Fn::Sub": "${ReleaseRegistryBucket.Arn}/staging/releases/*"},
+                    {"Fn::Sub": "${ReleaseRegistryBucket.Arn}/staging/release-ids/*"}
+                  ]
+                }
+              ]
+            }
+          }
+        ],
+        "Tags": [
+          {"Key": "TrinyxManaged", "Value": "true"},
+          {"Key": "TrinyxEnvironment", "Value": "staging"},
+          {"Key": "TrinyxPurpose", "Value": "github-release-publisher"}
+        ]
+      }
+    },
+    "CloudReleaseRegistryReadPolicy": {
+      "Type": "AWS::IAM::Policy",
+      "Properties": {
+        "PolicyName": "TrinyxStagingReleaseRegistryReadOnly",
+        "Roles": [{"Ref": "CloudInstanceRoleName"}],
+        "PolicyDocument": {
+          "Version": "2012-10-17",
+          "Statement": [
+            {
+              "Sid": "ListOnlyStagingReleasePrefix",
+              "Effect": "Allow",
+              "Action": "s3:ListBucket",
+              "Resource": {"Fn::GetAtt": ["ReleaseRegistryBucket", "Arn"]},
+              "Condition": {"StringLike": {"s3:prefix": ["staging/releases/*"]}}
+            },
+            {
+              "Sid": "ReadOnlyStagingReleaseObjects",
+              "Effect": "Allow",
+              "Action": ["s3:GetObject", "s3:GetObjectVersion"],
+              "Resource": {"Fn::Sub": "${ReleaseRegistryBucket.Arn}/staging/releases/*"}
+            }
+          ]
+        }
+      }
+    },
+    "PaidReleaseRegistryReadPolicy": {
+      "Type": "AWS::IAM::Policy",
+      "Properties": {
+        "PolicyName": "TrinyxStagingReleaseRegistryReadOnly",
+        "Roles": [{"Ref": "PaidInstanceRoleName"}],
+        "PolicyDocument": {
+          "Version": "2012-10-17",
+          "Statement": [
+            {
+              "Sid": "ListOnlyStagingReleasePrefix",
+              "Effect": "Allow",
+              "Action": "s3:ListBucket",
+              "Resource": {"Fn::GetAtt": ["ReleaseRegistryBucket", "Arn"]},
+              "Condition": {"StringLike": {"s3:prefix": ["staging/releases/*"]}}
+            },
+            {
+              "Sid": "ReadOnlyStagingReleaseObjects",
+              "Effect": "Allow",
+              "Action": ["s3:GetObject", "s3:GetObjectVersion"],
+              "Resource": {"Fn::Sub": "${ReleaseRegistryBucket.Arn}/staging/releases/*"}
+            }
+          ]
+        }
+      }
+    },
+    "ReleaseRegistryBucketPolicy": {
+      "Type": "AWS::S3::BucketPolicy",
+      "Properties": {
+        "Bucket": {"Ref": "ReleaseRegistryBucket"},
+        "PolicyDocument": {
+          "Version": "2012-10-17",
+          "Statement": [
+            {
+              "Sid": "DenyInsecureTransport",
+              "Effect": "Deny",
+              "Principal": "*",
+              "Action": "s3:*",
+              "Resource": [
+                {"Fn::GetAtt": ["ReleaseRegistryBucket", "Arn"]},
+                {"Fn::Sub": "${ReleaseRegistryBucket.Arn}/*"}
+              ],
+              "Condition": {"Bool": {"aws:SecureTransport": "false"}}
+            },
+            {
+              "Sid": "DenyNonSseS3ReleaseWrites",
+              "Effect": "Deny",
+              "Principal": "*",
+              "Action": "s3:PutObject",
+              "Resource": [
+                {"Fn::Sub": "${ReleaseRegistryBucket.Arn}/staging/releases/*"},
+                {"Fn::Sub": "${ReleaseRegistryBucket.Arn}/staging/release-ids/*"}
+              ],
+              "Condition": {"StringNotEquals": {"s3:x-amz-server-side-encryption": "AES256"}}
+            }
+          ]
+        }
+      }
+    },
+    "S3GatewayEndpoint": {
+      "Type": "AWS::EC2::VPCEndpoint",
+      "Condition": "CreateS3GatewayEndpoint",
+      "Properties": {
+        "VpcEndpointType": "Gateway",
+        "VpcId": {"Ref": "VpcId"},
+        "ServiceName": {"Fn::Sub": "com.amazonaws.${AWS::Region}.s3"},
+        "RouteTableIds": {"Ref": "RouteTableIds"},
+        "PolicyDocument": {
+          "Version": "2012-10-17",
+          "Statement": [
+            {
+              "Effect": "Allow",
+              "Principal": {
+                "AWS": [
+                  {"Fn::Sub": "arn:${AWS::Partition}:iam::${AWS::AccountId}:role/${CloudInstanceRoleName}"},
+                  {"Fn::Sub": "arn:${AWS::Partition}:iam::${AWS::AccountId}:role/${PaidInstanceRoleName}"}
+                ]
+              },
+              "Action": ["s3:ListBucket", "s3:GetObject", "s3:GetObjectVersion"],
+              "Resource": [
+                {"Fn::GetAtt": ["ReleaseRegistryBucket", "Arn"]},
+                {"Fn::Sub": "${ReleaseRegistryBucket.Arn}/staging/releases/*"}
+              ]
+            }
+          ]
+        }
+      }
+    }
+  },
+  "Outputs": {
+    "ReleaseRegistryBucketName": {"Value": {"Ref": "ReleaseRegistryBucket"}},
+    "ReleasePublisherRoleArn": {"Value": {"Fn::GetAtt": ["ReleasePublisherRole", "Arn"]}},
+    "ReleasePublisherOidcSubject": {"Value": "repo:TrinyxAI@319253481/Trinyx@1342032975:environment:staging"},
+    "S3EncryptionDecision": {"Value": "SSE-S3: release objects are non-secret; avoids KMS permissions, cost and outage boundary while TLS plus application hashes provide confidentiality-in-transit and integrity"}
+  }
+}

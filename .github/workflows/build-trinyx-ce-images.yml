@@ -37,8 +37,9 @@ jobs:
       staging_tag: ${{ steps.release.outputs.staging_tag }}
       release_commit: ${{ steps.release.outputs.release_commit }}
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # actions/checkout v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # actions/checkout v7, Node 24
         with:
+          persist-credentials: false
           fetch-depth: 0
 
       - name: Test fail-closed release guard fixtures
@@ -152,7 +153,7 @@ jobs:
             exit 1
           fi
 
-      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # actions/setup-node v4
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # actions/setup-node v7, Node 24
         if: needs.prepare.outputs.release == 'true'
         with:
           node-version: 22
@@ -166,7 +167,7 @@ jobs:
 
       - name: Validate GHCR credentials
         if: needs.prepare.outputs.release == 'true'
-        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # docker/login-action v3
+        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # docker/login-action v4, Node 24
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
@@ -176,8 +177,10 @@ jobs:
     runs-on: ubuntu-latest
     needs: prepare
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # actions/checkout v4
-      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # actions/setup-node v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # actions/checkout v7, Node 24
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # actions/setup-node v7, Node 24
         with:
           node-version: 22
 
@@ -211,7 +214,7 @@ jobs:
           NODE
 
       - name: Upload npm release candidate
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # actions/upload-artifact v4
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # actions/upload-artifact v7, Node 24
         with:
           name: trinyx-npm-release-candidate
           path: |
@@ -261,12 +264,14 @@ jobs:
             image: ghcr.io/trinyxai/trinyx-ce-websearch
             build_args: ""
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # actions/checkout v4
-      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # docker/setup-buildx-action v3
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # actions/checkout v7, Node 24
+        with:
+          persist-credentials: false
+      - uses: docker/setup-buildx-action@37fe631027851001ddb9b187196cc803df7f5f0e # docker/setup-buildx-action v4, Node 24
 
       - name: Build ${{ matrix.name }}
         id: build
-        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # docker/build-push-action v6
+        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # docker/build-push-action v7, Node 24
         with:
           context: ${{ matrix.context }}
           file: ${{ matrix.file }}
@@ -327,12 +332,14 @@ jobs:
             image: ghcr.io/trinyxai/trinyx-ce-websearch
             build_args: ""
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # actions/checkout v4
-      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # docker/setup-buildx-action v3
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # actions/checkout v7, Node 24
+        with:
+          persist-credentials: false
+      - uses: docker/setup-buildx-action@37fe631027851001ddb9b187196cc803df7f5f0e # docker/setup-buildx-action v4, Node 24
 
       - name: Log in to GHCR
         if: needs.prepare.outputs.release == 'true'
-        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # docker/login-action v3
+        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # docker/login-action v4, Node 24
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
@@ -340,7 +347,7 @@ jobs:
 
       - name: Build ${{ matrix.name }}
         id: build
-        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # docker/build-push-action v6
+        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # docker/build-push-action v7, Node 24
         with:
           context: ${{ matrix.context }}
           file: ${{ matrix.file }}
@@ -376,7 +383,7 @@ jobs:
 
       - name: Upload staged release digest
         if: needs.prepare.outputs.release == 'true'
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # actions/upload-artifact v4
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # actions/upload-artifact v7, Node 24
         with:
           name: ce-release-digest-${{ matrix.name }}
           path: release-digests/${{ matrix.name }}.json
@@ -394,19 +401,20 @@ jobs:
       - package-npm
     if: needs.prepare.outputs.release == 'true'
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # actions/checkout v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # actions/checkout v7, Node 24
         with:
+          persist-credentials: false
           fetch-depth: 0
-      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # actions/download-artifact v4
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # actions/download-artifact v8, Node 24
         with:
           pattern: ce-release-digest-*
           path: release-digests
           merge-multiple: true
-      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # actions/download-artifact v4
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # actions/download-artifact v8, Node 24
         with:
           name: trinyx-npm-release-candidate
           path: npm-package
-      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # actions/setup-node v4
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # actions/setup-node v7, Node 24
         with:
           node-version: 22
           registry-url: https://registry.npmjs.org
@@ -418,8 +426,8 @@ jobs:
           bash scripts/release/preflight-npm-package.sh
           npm-package/npm-release-metadata.json
           "${RELEASE_VERSION}"
-      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # docker/setup-buildx-action v3
-      - uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # docker/login-action v3
+      - uses: docker/setup-buildx-action@37fe631027851001ddb9b187196cc803df7f5f0e # docker/setup-buildx-action v4, Node 24
+      - uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # docker/login-action v4, Node 24
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
@@ -486,7 +494,7 @@ jobs:
               generatedAt: $generated_at, images: .}'             "${digest_files[@]}" > release-manifest-patch.json
 
       - name: Upload immutable release manifest
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # actions/upload-artifact v4
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # actions/upload-artifact v7, Node 24
         with:
           name: trinyx-ce-patch-manifest-${{ needs.prepare.outputs.version }}
           path: release-manifest-patch.json
@@ -504,14 +512,15 @@ jobs:
       - package-npm
     if: needs.prepare.outputs.release == 'true'
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # actions/checkout v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # actions/checkout v7, Node 24
         with:
+          persist-credentials: false
           fetch-depth: 0
-      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # actions/download-artifact v4
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # actions/download-artifact v8, Node 24
         with:
           name: trinyx-npm-release-candidate
           path: npm-package
-      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # actions/setup-node v4
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # actions/setup-node v7, Node 24
         with:
           node-version: 22
           registry-url: https://registry.npmjs.org
@@ -570,7 +579,7 @@ jobs:
           } >> "${GITHUB_STEP_SUMMARY}"
 
       - name: Upload verified npm publication metadata
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # actions/upload-artifact v4
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # actions/upload-artifact v7, Node 24
         with:
           name: trinyx-npm-published-${{ needs.prepare.outputs.version }}
           path: npm-published.json
@@ -588,17 +597,18 @@ jobs:
       - publish-npm
     if: needs.prepare.outputs.release == 'true'
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # actions/checkout v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # actions/checkout v7, Node 24
         with:
+          persist-credentials: false
           fetch-depth: 0
-      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # actions/download-artifact v4
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # actions/download-artifact v8, Node 24
         with:
           name: trinyx-ce-patch-manifest-${{ needs.prepare.outputs.version }}
-      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # actions/download-artifact v4
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # actions/download-artifact v8, Node 24
         with:
           name: trinyx-npm-published-${{ needs.prepare.outputs.version }}
-      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # docker/setup-buildx-action v3
-      - uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # docker/login-action v3
+      - uses: docker/setup-buildx-action@37fe631027851001ddb9b187196cc803df7f5f0e # docker/setup-buildx-action v4, Node 24
+      - uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # docker/login-action v4, Node 24
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
@@ -681,7 +691,7 @@ jobs:
           } >> "${GITHUB_STEP_SUMMARY}"
 
       - name: Upload verified release manifest
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # actions/upload-artifact v4
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # actions/upload-artifact v7, Node 24
         with:
           name: trinyx-ce-release-manifest-${{ needs.prepare.outputs.version }}
           path: release-manifest.json
@@ -698,10 +708,11 @@ jobs:
     permissions:
       contents: write
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # actions/checkout v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # actions/checkout v7, Node 24
         with:
+          persist-credentials: false
           fetch-depth: 0
-      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # actions/download-artifact v4
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # actions/download-artifact v8, Node 24
         with:
           name: trinyx-ce-release-manifest-${{ needs.prepare.outputs.version }}
       - name: Attach immutable manifest to the GitHub Release
@@ -733,3 +744,4 @@ jobs:
           mkdir -p verified-release
           gh release download "${PATCH_TAG}" --pattern release-manifest.json --dir verified-release
           cmp --silent release-manifest.json verified-release/release-manifest.json
+

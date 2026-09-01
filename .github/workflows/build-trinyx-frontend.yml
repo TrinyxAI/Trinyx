@@ -26,17 +26,19 @@ jobs:
       app_digest: ${{ steps.app.outputs.digest }}
       landing_digest: ${{ steps.landing.outputs.digest }}
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # actions/checkout v4
-      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # docker/setup-buildx-action v3
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # actions/checkout v7, Node 24
+        with:
+          persist-credentials: false
+      - uses: docker/setup-buildx-action@37fe631027851001ddb9b187196cc803df7f5f0e # docker/setup-buildx-action v4, Node 24
       - name: Log in to GHCR
-        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # docker/login-action v3
+        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # docker/login-action v4, Node 24
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
       - name: Build Trinyx app
         id: app
-        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # docker/build-push-action v6
+        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # docker/build-push-action v7, Node 24
         with:
           context: ./frontend
           file: ./frontend/Dockerfile
@@ -52,7 +54,7 @@ jobs:
           cache-to: type=gha,mode=max,scope=app
       - name: Build Trinyx landing
         id: landing
-        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # docker/build-push-action v6
+        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # docker/build-push-action v7, Node 24
         with:
           context: ./frontend
           file: ./frontend/Dockerfile
@@ -72,10 +74,12 @@ jobs:
     permissions:
       contents: read
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # actions/checkout v4
-      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # docker/setup-buildx-action v3
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # actions/checkout v7, Node 24
+        with:
+          persist-credentials: false
+      - uses: docker/setup-buildx-action@37fe631027851001ddb9b187196cc803df7f5f0e # docker/setup-buildx-action v4, Node 24
       - name: Build Trinyx app without publication
-        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # docker/build-push-action v6
+        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # docker/build-push-action v7, Node 24
         with:
           context: ./frontend
           file: ./frontend/Dockerfile
@@ -90,7 +94,7 @@ jobs:
           cache-from: type=gha,scope=app
           cache-to: type=gha,mode=max,scope=app
       - name: Build Trinyx landing without publication
-        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # docker/build-push-action v6
+        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # docker/build-push-action v7, Node 24
         with:
           context: ./frontend
           file: ./frontend/Dockerfile
@@ -103,3 +107,4 @@ jobs:
             NEXT_PUBLIC_SPRING_BASE_URL=http://livecontext-app:8080
           cache-from: type=gha,scope=landing
           cache-to: type=gha,mode=max,scope=landing
+

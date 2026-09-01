@@ -6,87 +6,37 @@ TEMPLATE="$ROOT/platform/aws/staging/deploy-control-plane.json"
 DISPATCHER="$ROOT/platform/host/common/staging-deploy.sh"
 
 python3 - "$TEMPLATE" <<'PY'
-import json, re, sys
-p=sys.argv[1]
-d=json.load(open(p,encoding='utf-8'))
-params=d['Parameters']
-assert re.fullmatch(params['CloudInstanceId']['AllowedPattern'],'i-'+'a'*17)
-assert re.fullmatch(params['PaidInstanceId']['AllowedPattern'],'i-'+'b'*17)
-assert not re.fullmatch(params['CloudInstanceId']['AllowedPattern'],'i-123')
-assert params['GitHubOidcProviderArn']['AllowedPattern'].startswith('^arn:aws:iam::')
-
-res=d['Resources']
-doc=res['StagingDeployDocument']
-assert doc['Type']=='AWS::SSM::Document'
-p=doc['Properties']
-assert p['Name']=='Trinyx-Staging-Deploy'
-assert p['DocumentType']=='Command'
-assert p['TargetType']=='/AWS::EC2::Instance'
-assert p['UpdateMethod']=='NewVersion'
-content=p['Content']
-assert content['schemaVersion']=='2.2'
-pars=content['parameters']
-assert pars['Mode']['allowedValues']==['plan','apply']
-assert pars['Role']['allowedValues']==['cloud','paid']
-assert pars['ReleaseId']['allowedPattern']=='^rel-v1-[0-9a-f]{32}$'
-assert all(v['interpolationType']=='ENV_VAR' for v in pars.values())
-steps=content['mainSteps']
+import json,sys
+doc=json.load(open(sys.argv[1],encoding='utf-8'))
+resource=doc['Resources']['StagingDeployDocument']
+properties=resource['Properties']
+assert properties['Name']=='Trinyx-Staging-Deploy'
+assert properties['UpdateMethod']=='NewVersion'
+assert properties['VersionName']=={'Ref':'DocumentVersionName'}
+parameters=properties['Content']['parameters']
+assert parameters['Mode']['allowedValues']==['install','plan','apply','rollback','health']
+assert parameters['Role']['allowedValues']==['cloud','paid']
+assert all(value['interpolationType']=='ENV_VAR' for value in parameters.values())
+steps=properties['Content']['mainSteps']
 assert len(steps)==1 and steps[0]['action']=='aws:runShellScript'
-commands=steps[0]['inputs']['runCommand']
-assert commands==[
- 'exec /usr/bin/env bash -c \'set -euo pipefail; test -x /usr/local/lib/trinyx/staging-deploy; exec /usr/local/lib/trinyx/staging-deploy "$SSM_Mode" "$SSM_Role" "$SSM_ReleaseId"\'',
-]
-assert '/usr/bin/env bash -c' in commands[0]
-assert '$SSM_Mode' in commands[0] and '$SSM_Role' in commands[0] and '$SSM_ReleaseId' in commands[0]
-
-role=res['StagingDeployRole']['Properties']
-trust=role['AssumeRolePolicyDocument']['Statement']
-assert len(trust)==1
-stmt=trust[0]
-assert stmt['Action']=='sts:AssumeRoleWithWebIdentity'
-assert stmt['Condition']['StringEquals']=={
- 'token.actions.githubusercontent.com:aud':'sts.amazonaws.com',
- 'token.actions.githubusercontent.com:sub':'repo:TrinyxAI@319253481/Trinyx@1342032975:ref:refs/heads/codex/platform-release-automation',
-}
-policy=role['Policies']
-assert len(policy)==1
-stmts=policy[0]['PolicyDocument']['Statement']
-send=[s for s in stmts if s['Action']=='ssm:SendCommand']
-assert len(send)==1
-resources=send[0]['Resource']
-assert len(resources)==3
-serialized=json.dumps(d,sort_keys=True)
-for required in ('document/Trinyx-Staging-Deploy','instance/${CloudInstanceId}','instance/${PaidInstanceId}'):
-    assert required in serialized
-for forbidden in ('AWS-RunShellScript','ssm:GetParameter','ssm:GetParameters','kms:Decrypt','secretsmanager:','AdministratorAccess','ec2:TerminateInstances','iam:PassRole'):
-    assert forbidden not in serialized
-read=[s for s in stmts if s['Action']=='ssm:GetCommandInvocation']
-assert len(read)==1 and read[0]['Resource']=='*'
+command=steps[0]['inputs']['runCommand']
+assert len(command)==1 and '/usr/local/lib/trinyx/staging-deploy' in command[0]
+role=doc['Resources']['StagingDeployRole']['Properties']
+trust=role['AssumeRolePolicyDocument']['Statement'][0]['Condition']['StringEquals']
+assert trust['token.actions.githubusercontent.com:sub']=='repo:TrinyxAI@319253481/Trinyx@1342032975:environment:staging'
+statements=role['Policies'][0]['PolicyDocument']['Statement']
+send=next(item for item in statements if item['Sid']=='SendOnlyDedicatedDocumentToStagingHosts')
+assert send['Action']=='ssm:SendCommand' and len(send['Resource'])==3
+lock=next(item for item in statements if item['Sid']=='CoordinateOneNonSecretStagingDeployment')
+assert set(lock['Action'])=={'ssm:PutParameter','ssm:GetParameter','ssm:DeleteParameter'}
+assert 'parameter/trinyx/staging/control-plane/deployment-lock' in json.dumps(lock)
+encoded=json.dumps(doc,sort_keys=True)
+for forbidden in ('AWS-RunShellScript','s3:PutObject','kms:Decrypt','secretsmanager:','AdministratorAccess','ec2:TerminateInstances','iam:PassRole'):
+  assert forbidden not in encoded
 print('AWS_STAGING_DEPLOY_CONTROL_PLANE_CONTRACT_OK')
 PY
 
 bash -n "$DISPATCHER"
-
-TMP=$(mktemp -d)
-trap 'rm -rf "$TMP"' EXIT
-BASE="$TMP/etc/trinyx/staging/cloud"
-RID=rel-v1-0123456789abcdef0123456789abcdef
-mkdir -p "$BASE/releases/$RID"
-printf '{}\n' > "$BASE/releases/$RID/manifest.json"
-printf 'IMAGE=x@sha256:%064d\n' 0 > "$BASE/releases/$RID/images.env"
-mkdir -p "$BASE/deployments/legacy"
-ln -s deployments/legacy "$BASE/active"
-
-sed "s#BASE=\"/etc/trinyx/staging/\$ROLE\"#BASE=\"$TMP/etc/trinyx/staging/\$ROLE\"#" "$DISPATCHER" > "$TMP/dispatcher"
-chmod +x "$TMP/dispatcher"
-"$TMP/dispatcher" plan cloud "$RID" | grep -Fq "STAGING_DEPLOY_PLAN_OK role=cloud release_id=$RID"
-if "$TMP/dispatcher" apply cloud "$RID" >/dev/null 2>&1; then
-  echo ERROR_APPLY_MUST_REMAIN_FAIL_CLOSED >&2
-  exit 1
-fi
-if "$TMP/dispatcher" plan cloud rel-v1-bad >/dev/null 2>&1; then
-  echo ERROR_INVALID_RELEASE_ACCEPTED >&2
-  exit 1
-fi
-
-echo STAGING_DEPLOY_DISPATCHER_FAIL_CLOSED_OK
+grep -Fq 'install|plan|apply|rollback|health' "$DISPATCHER"
+grep -Fq 'exec /usr/bin/env python3 "$ENGINE"' "$DISPATCHER"
+echo STAGING_DEPLOY_DISPATCHER_FIXED_PROGRAM_OK

@@ -1,0 +1,48 @@
+{
+  "schemaVersion": 1,
+  "role": "cloud",
+  "composeFiles": [
+    "release/docker/docker-compose.cloud.yml",
+    "release/docker/docker-compose.cloud.runtime.yml",
+    "/run/trinyx/cloud-paid.override.yml"
+  ],
+  "services": [
+    "agent-service", "auth-service", "catalog-service", "conversation-service",
+    "datasource-service", "gateway-service", "interface-service", "keycloak",
+    "migration-service", "orchestrator-service", "publication-service", "storage-service",
+    "trigger-service", "websearch-service", "cloud-postgres", "cloud-redis",
+    "cloud-minio", "cloud-minio-init", "searxng", "cloud-edge"
+  ],
+  "configSensitiveServices": [
+    "agent-service", "auth-service", "catalog-service", "conversation-service", "datasource-service",
+    "gateway-service", "interface-service", "keycloak", "orchestrator-service", "publication-service",
+    "storage-service", "trigger-service", "websearch-service", "searxng", "cloud-edge"
+  ],
+  "requiredFiles": [
+    "config/cloud-paid.override.yml", "config/runtime-static.env", "config/ssm-required.txt",
+    "config/cloud-health-endpoints.json"
+  ],
+  "tlsFiles": ["config/tls/paid-ca.pem"],
+  "requiredSecretNames": [
+    "AGENT_SERVICE_S2S_SECRET", "AUDIT_HMAC_KEY", "AUDIT_UA_PEPPER", "AUTH_SERVICE_S2S_SECRET",
+    "CATALOG_BUNDLE_SIGNING_KEY_PEM", "CATALOG_BUNDLE_SIGNING_PUBLIC_KEY", "CATALOG_SERVICE_S2S_SECRET",
+    "CLOUD_DB_PASSWORD", "CLOUD_GATEWAY_SECRET_KEY", "CLOUD_MINIO_ROOT_PASSWORD", "CLOUD_MINIO_ROOT_USER",
+    "CLOUD_REDIS_PASSWORD", "CREDENTIAL_ENCRYPTION_PASSWORD", "CREDENTIAL_ENCRYPTION_SALT",
+    "DATASOURCE_SERVICE_S2S_SECRET", "GATEWAY_SERVICE_S2S_SECRET", "INTERFACE_SERVICE_S2S_SECRET",
+    "IP_HASH_HMAC_KEY_V1", "KEYCLOAK_ADMIN_CLIENT_SECRET", "KEYCLOAK_BOOTSTRAP_ADMIN_PASSWORD",
+    "KEYCLOAK_BOOTSTRAP_ADMIN_USERNAME", "MODEL_AUDIT_HMAC_KEY", "ORCHESTRATOR_SERVICE_S2S_SECRET",
+    "PAID_MONOLITH_TRUSTSTORE_PASSWORD", "PUBLICATION_SERVICE_S2S_SECRET", "SEARXNG_SECRET",
+    "SMTP_HOST", "SMTP_PASSWORD", "SMTP_USER", "STORAGE_SERVICE_S2S_SECRET", "STORAGE_SHOWCASE_HMAC_SECRET",
+    "TRIGGER_SERVICE_S2S_SECRET", "TRINYX_ENTITLEMENT_VERIFICATION_KEYS", "TRINYX_IDENTITY_VERIFICATION_KEYS",
+    "TRINYX_S2S_SIGNING_KEY", "TRINYX_S2S_VERIFICATION_KEYS", "TRINYX_TENANT_DELEGATION_SECRET",
+    "WEBSEARCH_CDP_JWT_SECRET", "WEBSEARCH_GATEWAY_SECRET"
+  ],
+  "health": [{
+    "name": "cloud-cross-stack-public-smoke",
+    "argv": ["python3", "/usr/local/lib/trinyx/health-probe", "--config", "/etc/trinyx/staging/cloud/config/cloud-health-endpoints.json"],
+    "timeoutSeconds": 90
+  }],
+  "minFreeBytes": 10737418240,
+  "maxRestartCount": 3,
+  "oneShot": {"services": ["migration-service", "cloud-minio-init"], "rollbackSafe": false}
+}

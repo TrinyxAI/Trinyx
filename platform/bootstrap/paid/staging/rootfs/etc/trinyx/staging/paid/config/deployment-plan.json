@@ -1,0 +1,30 @@
+{
+  "schemaVersion": 1,
+  "role": "paid",
+  "composeFiles": [
+    "release/docker-compose.yml", "release/docker/docker-compose.paid.runtime.yml",
+    "/run/trinyx/paid.override.yml", "/run/trinyx/paid-bind.override.yml", "/run/trinyx/paid-runtime.override.yml"
+  ],
+  "services": ["postgres", "redis", "minio", "minio-init", "bridge", "livecontext", "frontend", "paid-edge"],
+  "configSensitiveServices": ["bridge", "livecontext", "frontend", "paid-edge"],
+  "requiredFiles": [
+    "config/paid.override.yml", "config/paid-bind.override.yml", "config/paid-runtime.override.yml",
+    "config/ssm-required.txt", "config/paid-health-endpoints.json"
+  ],
+  "tlsFiles": ["config/tls/paid-server.crt", "config/tls/paid-server.key", "config/tls/staging-ca.pem"],
+  "requiredSecretNames": [
+    "CATALOG_BUNDLE_TRUSTED_KEYS", "CLOUD_LINK_ENCRYPTION_KEY", "CREDENTIAL_ENCRYPTION_PASSWORD",
+    "CREDENTIAL_ENCRYPTION_SALT", "DB_PASSWORD", "JWT_SECRET", "MINIO_ROOT_PASSWORD", "MINIO_ROOT_USER",
+    "SEARXNG_SECRET", "STORAGE_SHOWCASE_HMAC_SECRET", "TRINYX_ENTITLEMENT_SIGNING_KEY",
+    "TRINYX_IDENTITY_SIGNING_KEY", "TRINYX_S2S_SIGNING_KEY", "TRINYX_S2S_VERIFICATION_KEYS",
+    "WEBSEARCH_CDP_JWT_SECRET", "WEBSEARCH_GATEWAY_SECRET"
+  ],
+  "health": [{
+    "name": "paid-liveness-public-smoke",
+    "argv": ["python3", "/usr/local/lib/trinyx/health-probe", "--config", "/etc/trinyx/staging/paid/config/paid-health-endpoints.json"],
+    "timeoutSeconds": 90
+  }],
+  "minFreeBytes": 10737418240,
+  "maxRestartCount": 3,
+  "oneShot": {"services": ["minio-init"], "rollbackSafe": true}
+}

@@ -22,13 +22,13 @@ def config_hash(service: str) -> str:
 
 
 class LegacyNormalizationPlanTests(unittest.TestCase):
-    def fixture(self) -> tuple[list[dict], dict, dict[str, str]]:
+    def fixture(self, role: str = "paid") -> tuple[list[dict], dict, dict[str, str]]:
         containers: list[dict] = []
         models: dict[str, dict] = {}
         hashes: dict[str, str] = {}
-        for index, service in enumerate(sorted(SERVICES["paid"]), start=1):
+        for index, service in enumerate(sorted(SERVICES[role]), start=1):
             image = f"ghcr.io/trinyxai/{service}@sha256:{index:064x}"
-            source = f"/etc/trinyx/staging/paid/config/{service}.conf"
+            source = f"/etc/trinyx/staging/{role}/config/{service}.conf"
             destination = f"/etc/trinyx/{service}.conf"
             hashes[service] = config_hash(service)
             containers.append({
@@ -37,7 +37,7 @@ class LegacyNormalizationPlanTests(unittest.TestCase):
                 "Config": {
                     "Image": image,
                     "Labels": {
-                        "com.docker.compose.project": "trinyx-paid-staging",
+                        "com.docker.compose.project": f"trinyx-{role}-staging",
                         "com.docker.compose.service": service,
                         "com.docker.compose.config-hash": hashes[service],
                     },
@@ -60,9 +60,9 @@ class LegacyNormalizationPlanTests(unittest.TestCase):
             }
         return containers, {"services": models}, hashes
 
-    def build(self, containers: list[dict], model: dict, hashes: dict[str, str]) -> dict:
+    def build(self, containers: list[dict], model: dict, hashes: dict[str, str], role: str = "paid") -> dict:
         return build_normalization_plan(
-            "paid",
+            role,
             "rel-v1-" + "a" * 32,
             containers,
             model,
@@ -150,6 +150,27 @@ class LegacyNormalizationPlanTests(unittest.TestCase):
         self.assertRegex(lines[-1], r"report_sha256=sha256:[0-9a-f]{64}$")
         self.assertEqual(8, sum(line.startswith("NORMALIZATION ") for line in lines))
         self.assertFalse(any("/etc/" + "x" * 100 in line for line in lines))
+
+
+    def test_all_28_services_remain_bounded_at_realistic_path_limits(self) -> None:
+        total = 0
+        for role in ("paid", "cloud"):
+            containers, model, hashes = self.fixture(role)
+            for index, container in enumerate(containers):
+                service = sorted(SERVICES[role])[index]
+                long_source = "/etc/" + ("y" * 3900) + f"/{service}"
+                container["Mounts"][0]["Source"] = long_source
+                model["services"][service]["volumes"][0]["source"] = long_source
+            output = render_ssm_protocol(self.build(containers, model, hashes, role))
+            self.assertLess(len(output.encode("utf-8")), SSM_STDOUT_MAX_BYTES)
+            self.assertTrue(
+                output.rstrip("\n").splitlines()[-1].startswith(
+                    f"LEGACY_NORMALIZATION_PLAN_COMPLETE role={role} "
+                )
+            )
+            total += len(SERVICES[role])
+        self.assertEqual(28, total)
+
 
 
 if __name__ == "__main__":

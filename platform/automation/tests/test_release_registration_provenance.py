@@ -382,5 +382,42 @@ class ReleaseRegistrationProvenanceTests(unittest.TestCase):
         self.assertEqual(0, result.returncode, result.stderr)
 
 
+    def test_workflow_uses_package_safe_release_registry_validation_import(self) -> None:
+        expected = (
+            'PYTHONPATH=platform python3 -c "from pathlib import Path; '
+            "from automation.release_registry import validate_candidate; "
+            "validate_candidate(Path('candidate'))\""
+        )
+        self.assertIn(expected, self.workflow)
+        self.assertNotIn(
+            "from platform.automation.release_registry import validate_candidate",
+            self.workflow,
+        )
+
+        process_env = os.environ.copy()
+        process_env["PYTHONPATH"] = str(ROOT / "platform")
+        with tempfile.TemporaryDirectory() as raw:
+            result = subprocess.run(
+                [
+                    sys.executable,
+                    "-c",
+                    (
+                        "from pathlib import Path; "
+                        "from automation.release_registry import validate_candidate; "
+                        "validate_candidate(Path('candidate'))"
+                    ),
+                ],
+                cwd=raw,
+                env=process_env,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                check=False,
+            )
+        self.assertNotEqual(0, result.returncode)
+        self.assertNotIn("ModuleNotFoundError", result.stderr)
+        self.assertIn("candidate file missing/unsafe", result.stderr)
+
+
 if __name__ == "__main__":
     unittest.main()

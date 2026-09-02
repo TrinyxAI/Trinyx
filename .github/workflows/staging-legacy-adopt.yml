@@ -40,7 +40,7 @@ jobs:
     permissions:
       contents: read
       id-token: write
-    uses: TrinyxAI/Trinyx/.github/workflows/staging-legacy-adopt-impl.yml@f25b094611c01f45d3876425a86fb6fdd9b00d91
+    uses: TrinyxAI/Trinyx/.github/workflows/staging-legacy-adopt-impl.yml@f5fc438d9d0ce785e5a6716e41be199bc97591e0
     with:
       action: ${{ inputs.action }}
       baseline_release_id: ${{ inputs.baseline_release_id }}

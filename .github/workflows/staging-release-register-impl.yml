@@ -104,23 +104,72 @@ jobs:
           RUN_ID: ${{ inputs.run_id }}
           ARTIFACT_DIGEST: ${{ inputs.artifact_digest }}
           SOURCE_COMMIT: ${{ inputs.source_commit }}
+          RELEASE_ID: ${{ inputs.release_id }}
+          BUNDLE_DIGEST: ${{ inputs.bundle_digest }}
         run: |
           set -euo pipefail
           umask 077
           gh api "repos/$GITHUB_REPOSITORY/actions/artifacts/$ARTIFACT_ID" > artifact-metadata.json
           gh api "repos/$GITHUB_REPOSITORY/actions/runs/$RUN_ID" > run-metadata.json
           python3 - <<'PY'
-          import json,os
-          artifact=json.load(open('artifact-metadata.json'))
-          run=json.load(open('run-metadata.json'))
-          assert str(artifact['id'])==os.environ['ARTIFACT_ID']
-          assert artifact['name']=='trinyx-release-candidate-'+os.environ['SOURCE_COMMIT']
-          assert artifact['expired'] is False
-          assert str(artifact['workflow_run']['id'])==os.environ['RUN_ID']
-          assert artifact['workflow_run']['head_sha']==os.environ['SOURCE_COMMIT']
-          assert run['id']==int(os.environ['RUN_ID']) and run['head_sha']==os.environ['SOURCE_COMMIT']
-          assert run['path'].endswith('/build-release-candidate.yml')
-          assert run['conclusion']=='success' and run['repository']['full_name']=='TrinyxAI/Trinyx'
+          # BEGIN STAGING_RELEASE_RUN_PROVENANCE_VALIDATION
+          import json
+          import os
+
+          artifact = json.load(open("artifact-metadata.json", encoding="utf-8"))
+          run = json.load(open("run-metadata.json", encoding="utf-8"))
+
+          repository = "TrinyxAI/Trinyx"
+          caller_ref = "refs/heads/codex/platform-release-automation"
+          historical_source = "f3a4c1ddcf6a17bfc837071f9046ac4c38a38b47"
+          historical_inputs = {
+              "ARTIFACT_ID": "9791964215",
+              "RUN_ID": "33485509832",
+              "ARTIFACT_DIGEST": "sha256:755594078d9da7e19406e01187534132920a31f87804c1b33baa28fa96559152",
+              "SOURCE_COMMIT": historical_source,
+              "RELEASE_ID": "rel-v1-b5ba70c23b9f529ac8228a7b00b4faa4",
+              "BUNDLE_DIGEST": "sha256:c9df14dcd1dbc24b31b926d3778bef2e208b59824c78f24292608284f3579892",
+          }
+          is_historical = all(os.environ.get(key) == value for key, value in historical_inputs.items())
+
+          assert str(artifact["id"]) == os.environ["ARTIFACT_ID"]
+          assert artifact["name"] == "trinyx-release-candidate-" + os.environ["SOURCE_COMMIT"]
+          assert artifact["expired"] is False
+          assert str(artifact["workflow_run"]["id"]) == os.environ["RUN_ID"]
+          assert artifact["workflow_run"]["head_sha"] == os.environ["SOURCE_COMMIT"]
+          assert run["id"] == int(os.environ["RUN_ID"])
+          assert run["head_sha"] == os.environ["SOURCE_COMMIT"]
+          assert run["conclusion"] == "success"
+          assert run["repository"]["full_name"] == repository
+
+          referenced = run.get("referenced_workflows")
+          assert isinstance(referenced, list)
+          if is_historical:
+              assert run["path"] == ".github/workflows/build-trinyx-backend.yml"
+              expected_sha = historical_source
+              expected_path = (
+                  f"{repository}/.github/workflows/build-release-candidate.yml@{historical_source}"
+              )
+          else:
+              assert run["path"] in {
+                  ".github/workflows/build-trinyx-backend.yml",
+                  ".github/workflows/build-release-candidate.yml",
+              }
+              expected_sha = os.environ["BUILDER_WORKFLOW_COMMIT"]
+              assert expected_sha == "114a2613e8090f034925a1bcf148f055653c3a06"
+              expected_path = (
+                  f"{repository}/.github/workflows/build-release-candidate-impl.yml@{expected_sha}"
+              )
+
+          matches = [item for item in referenced if item.get("path") == expected_path]
+          assert len(matches) == 1
+          assert matches[0].get("sha") == expected_sha
+          if is_historical:
+              assert matches[0].get("ref") == caller_ref
+          else:
+              # GitHub omits ref when a reusable workflow is invoked by immutable SHA.
+              assert matches[0].get("ref") is None
+          # END STAGING_RELEASE_RUN_PROVENANCE_VALIDATION
           PY
           gh api "repos/$GITHUB_REPOSITORY/actions/artifacts/$ARTIFACT_ID/zip" > candidate.zip
           printf '%s  %s\n' "${ARTIFACT_DIGEST#sha256:}" candidate.zip | sha256sum --check --strict

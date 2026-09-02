@@ -231,9 +231,10 @@ jobs:
               if is_frozen_historical_candidate(env):
                   for name, expected in HISTORICAL_INTERNAL_SHA256.items():
                       actual = file_sha256(candidate / name)
-                      assert hmac.compare_digest(actual, expected), (
-                          f"historical candidate internal digest mismatch:{name}"
-                      )
+                      if not hmac.compare_digest(actual, expected):
+                          raise SystemExit(
+                              f"historical candidate internal digest mismatch:{name}"
+                          )
                   return {
                       "SIGNER_WORKFLOW": "build-release-candidate.yml",
                       "SIGNER_DIGEST": HISTORICAL_IDENTITY["SOURCE_COMMIT"],
@@ -261,16 +262,28 @@ jobs:
           source attestation-policy.env
           export SIGNER_WORKFLOW SIGNER_DIGEST COMPATIBILITY
           # BEGIN STAGING_RELEASE_INTERNAL_ATTESTATION_VERIFICATION
-          if [[ "$REQUIRE_INTERNAL_ATTESTATIONS" == true ]]; then
-            for subject in release.json release-images.json deployment-bundle.json deployment-bundle.tar; do
-              gh attestation verify "candidate/$subject" \
-                --repo "$GITHUB_REPOSITORY" \
-                --signer-workflow "TrinyxAI/Trinyx/.github/workflows/$SIGNER_WORKFLOW" \
-                --signer-digest "$SIGNER_DIGEST" \
-                --source-digest "$SOURCE_COMMIT" \
-                --deny-self-hosted-runners
-            done
-          fi
+          case "$REQUIRE_INTERNAL_ATTESTATIONS" in
+            true)
+              for subject in release.json release-images.json deployment-bundle.json deployment-bundle.tar; do
+                gh attestation verify "candidate/$subject" \
+                  --repo "$GITHUB_REPOSITORY" \
+                  --signer-workflow "TrinyxAI/Trinyx/.github/workflows/$SIGNER_WORKFLOW" \
+                  --signer-digest "$SIGNER_DIGEST" \
+                  --source-digest "$SOURCE_COMMIT" \
+                  --deny-self-hosted-runners
+              done
+              ;;
+            false)
+              if [[ "$COMPATIBILITY" != frozen-historical-builder ]]; then
+                echo "ERROR_INVALID_ATTESTATION_POLICY" >&2
+                exit 1
+              fi
+              ;;
+            *)
+              echo "ERROR_INVALID_ATTESTATION_POLICY" >&2
+              exit 1
+              ;;
+          esac
           # END STAGING_RELEASE_INTERNAL_ATTESTATION_VERIFICATION
           python3 - <<'PY'
           import datetime, json, os

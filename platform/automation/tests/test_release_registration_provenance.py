@@ -260,7 +260,7 @@ class ReleaseRegistrationProvenanceTests(unittest.TestCase):
             with self.subTest(name=name):
                 changed = expected.copy()
                 changed[name] = "0" * 64
-                with self.assertRaises(AssertionError):
+                with self.assertRaises(SystemExit):
                     self.compatibility_policy(env, changed)
 
         missing = expected.copy()
@@ -296,7 +296,11 @@ class ReleaseRegistrationProvenanceTests(unittest.TestCase):
                 )
                 self.assertEqual(BUILDER_COMMIT, policy["SIGNER_DIGEST"])
 
-    def run_attestation_block(self, require_attestations: str) -> subprocess.CompletedProcess[str]:
+    def run_attestation_block(
+        self,
+        require_attestations: str,
+        compatibility: str = "pinned-reusable-builder",
+    ) -> subprocess.CompletedProcess[str]:
         bash = shutil.which("bash")
         if bash is None:
             self.skipTest("bash is required to exercise the workflow shell block")
@@ -315,6 +319,7 @@ class ReleaseRegistrationProvenanceTests(unittest.TestCase):
                 {
                     "PATH": str(fake_bin) + os.pathsep + env.get("PATH", ""),
                     "REQUIRE_INTERNAL_ATTESTATIONS": require_attestations,
+                    "COMPATIBILITY": compatibility,
                     "GITHUB_REPOSITORY": "TrinyxAI/Trinyx",
                     "SIGNER_WORKFLOW": "build-release-candidate-impl.yml",
                     "SIGNER_DIGEST": BUILDER_COMMIT,
@@ -331,13 +336,49 @@ class ReleaseRegistrationProvenanceTests(unittest.TestCase):
                 check=False,
             )
 
+    def test_optimized_python_cannot_disable_historical_hash_gate(self) -> None:
+        _, _, env = self.historical_fixture()
+        namespace = self.compatibility_namespace()
+        with tempfile.TemporaryDirectory() as raw:
+            directory = Path(raw)
+            candidate = directory / "candidate"
+            candidate.mkdir()
+            for name in namespace["HISTORICAL_INTERNAL_SHA256"]:
+                (candidate / name).write_bytes(b"tampered")
+            process_env = os.environ.copy()
+            process_env.update(env)
+            result = subprocess.run(
+                [sys.executable, "-O", "-c", self.compatibility_script],
+                cwd=directory,
+                env=process_env,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                check=False,
+            )
+        self.assertNotEqual(0, result.returncode)
+        self.assertIn("historical candidate internal digest mismatch:", result.stderr)
+
+    def test_unexpected_attestation_policy_value_is_rejected(self) -> None:
+        for value, compatibility in (
+            ("garbage", "pinned-reusable-builder"),
+            ("false", "pinned-reusable-builder"),
+        ):
+            with self.subTest(value=value, compatibility=compatibility):
+                result = self.run_attestation_block(value, compatibility)
+                self.assertNotEqual(0, result.returncode)
+                self.assertIn("ERROR_INVALID_ATTESTATION_POLICY", result.stderr)
+
     def test_non_historical_attestation_404_remains_fail_closed(self) -> None:
         result = self.run_attestation_block("true")
         self.assertNotEqual(0, result.returncode)
         self.assertIn("HTTP 404: Not Found", result.stderr)
 
     def test_historical_path_does_not_request_nonexistent_internal_attestations(self) -> None:
-        result = self.run_attestation_block("false")
+        result = self.run_attestation_block(
+            "false",
+            compatibility="frozen-historical-builder",
+        )
         self.assertEqual(0, result.returncode, result.stderr)
 
 

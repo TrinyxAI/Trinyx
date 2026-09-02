@@ -10,7 +10,7 @@
     },
     "PlatformWorkflowRef": {
       "Type": "String",
-      "Default": "b5000a7167f12a555ca351c78af1079cabe4486c",
+      "Default": "9954d6b56a5d06b9d053cd8748df50bcf516a82f",
       "AllowedPattern": "^[0-9a-f]{40}$",
       "Description": "Reviewed immutable privileged reusable-workflow commit SHA embedded in GitHub custom OIDC subjects."
     }

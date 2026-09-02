@@ -6,8 +6,8 @@ import test from 'node:test';
 
 import { validateCloudPublisherOidcBoundary } from './cloud-publisher-oidc-policy.mjs';
 
-const backend = fs.readFileSync('.github/workflows/build-trinyx-backend.yml', 'utf8');
-const cloud = fs.readFileSync('.github/workflows/build-trinyx-cloud-images.yml', 'utf8');
+const backend = fs.readFileSync('.github/workflows/build-trinyx-backend.yml', 'utf8').replace(/\r\n/g, '\n');
+const cloud = fs.readFileSync('.github/workflows/build-trinyx-cloud-images.yml', 'utf8').replace(/\r\n/g, '\n');
 
 function mutateJob(source, jobName, mutate) {
   const jobs = /^jobs:\s*$/m.exec(source);

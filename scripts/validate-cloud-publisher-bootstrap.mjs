@@ -5,8 +5,8 @@ import { validateCloudPublisherOidcBoundary } from './cloud-publisher-oidc-polic
 
 const backendPath = '.github/workflows/build-trinyx-backend.yml';
 const cloudPath = '.github/workflows/build-trinyx-cloud-images.yml';
-const backend = fs.readFileSync(backendPath, 'utf8');
-const cloud = fs.readFileSync(cloudPath, 'utf8');
+const backend = fs.readFileSync(backendPath, 'utf8').replace(/\r\n/g, '\n');
+const cloud = fs.readFileSync(cloudPath, 'utf8').replace(/\r\n/g, '\n');
 
 function requireText(source, expected, label) {
   if (!source.includes(expected)) throw new Error('[cloud-bootstrap] missing ' + label);

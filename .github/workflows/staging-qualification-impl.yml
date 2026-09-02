@@ -156,19 +156,99 @@ jobs:
           gh api "repos/$GITHUB_REPOSITORY/actions/artifacts/$CANDIDATE_ARTIFACT_ID" > artifacts/candidate-metadata.json
           gh api "repos/$GITHUB_REPOSITORY/actions/runs/$CANDIDATE_RUN_ID" > artifacts/candidate-run.json
           python3 - <<'PY'
-          import json,os
-          for name in ('baseline','candidate'):
-            upper=name.upper()
-            artifact=json.load(open(f'artifacts/{name}-metadata.json'))
-            run=json.load(open(f'artifacts/{name}-run.json'))
-            assert str(artifact['id'])==os.environ[upper+'_ARTIFACT_ID']
-            assert str(artifact['workflow_run']['id'])==os.environ[upper+'_RUN_ID']
-            assert artifact['workflow_run']['head_sha']==run['head_sha']
-            assert artifact['name']=='trinyx-release-candidate-'+run['head_sha']
-            assert artifact['expired'] is False
-            assert run['path'].endswith('/build-release-candidate.yml')
-            assert run['conclusion']=='success' and run['repository']['full_name']=='TrinyxAI/Trinyx'
-            assert run['head_sha']==os.environ[upper+'_SOURCE_COMMIT']
+          # BEGIN STAGING_QUALIFICATION_RUN_PROVENANCE_VALIDATION
+          import json
+          import os
+
+          REPOSITORY = "TrinyxAI/Trinyx"
+          CALLER_REF = "refs/heads/codex/platform-release-automation"
+          BUILDER_COMMIT = "114a2613e8090f034925a1bcf148f055653c3a06"
+          HISTORICAL_SOURCE = "f3a4c1ddcf6a17bfc837071f9046ac4c38a38b47"
+          HISTORICAL_IDENTITY = {
+              "GITHUB_REPOSITORY": REPOSITORY,
+              "GITHUB_REPOSITORY_ID": "1342032975",
+              "GITHUB_REPOSITORY_OWNER_ID": "319253481",
+              "RUN_ID": "33485509832",
+              "ARTIFACT_ID": "9791964215",
+              "ARTIFACT_DIGEST": "sha256:755594078d9da7e19406e01187534132920a31f87804c1b33baa28fa96559152",
+              "SOURCE_COMMIT": HISTORICAL_SOURCE,
+              "RELEASE_ID": "rel-v1-b5ba70c23b9f529ac8228a7b00b4faa4",
+              "BUNDLE_DIGEST": "sha256:c9df14dcd1dbc24b31b926d3778bef2e208b59824c78f24292608284f3579892",
+          }
+
+          def identity(prefix):
+              return {
+                  "GITHUB_REPOSITORY": os.environ["GITHUB_REPOSITORY"],
+                  "GITHUB_REPOSITORY_ID": os.environ["GITHUB_REPOSITORY_ID"],
+                  "GITHUB_REPOSITORY_OWNER_ID": os.environ["GITHUB_REPOSITORY_OWNER_ID"],
+                  "RUN_ID": os.environ[f"${prefix}_RUN_ID"],
+                  "ARTIFACT_ID": os.environ[f"${prefix}_ARTIFACT_ID"],
+                  "ARTIFACT_DIGEST": os.environ[f"${prefix}_ARTIFACT_DIGEST"],
+                  "SOURCE_COMMIT": os.environ[f"${prefix}_SOURCE_COMMIT"],
+                  "RELEASE_ID": os.environ[f"${prefix}_RELEASE_ID"],
+                  "BUNDLE_DIGEST": os.environ[f"${prefix}_BUNDLE_DIGEST"],
+              }
+
+          for name in ("baseline", "candidate"):
+              prefix = name.upper()
+              artifact = json.load(open(f"artifacts/${name}-metadata.json", encoding="utf-8"))
+              run = json.load(open(f"artifacts/${name}-run.json", encoding="utf-8"))
+              current = identity(prefix)
+              historical = current == HISTORICAL_IDENTITY
+
+              if str(artifact["id"]) != current["ARTIFACT_ID"]:
+                  raise SystemExit(f"artifact id mismatch:${name}")
+              if artifact["name"] != "trinyx-release-candidate-" + current["SOURCE_COMMIT"]:
+                  raise SystemExit(f"artifact name mismatch:${name}")
+              if artifact["expired"] is not False:
+                  raise SystemExit(f"artifact expired:${name}")
+              if str(artifact["workflow_run"]["id"]) != current["RUN_ID"]:
+                  raise SystemExit(f"artifact/run mismatch:${name}")
+              if artifact["workflow_run"]["head_sha"] != current["SOURCE_COMMIT"]:
+                  raise SystemExit(f"artifact/source mismatch:${name}")
+              if run["id"] != int(current["RUN_ID"]):
+                  raise SystemExit(f"run id mismatch:${name}")
+              if run["head_sha"] != current["SOURCE_COMMIT"]:
+                  raise SystemExit(f"run source mismatch:${name}")
+              if run["conclusion"] != "success":
+                  raise SystemExit(f"run conclusion mismatch:${name}")
+              if run["repository"]["full_name"] != REPOSITORY:
+                  raise SystemExit(f"run repository mismatch:${name}")
+
+              referenced = run.get("referenced_workflows")
+              if not isinstance(referenced, list):
+                  raise SystemExit(f"referenced workflows missing:${name}")
+              if historical:
+                  if run["path"] != ".github/workflows/build-trinyx-backend.yml":
+                      raise SystemExit(f"historical caller mismatch:${name}")
+                  expected_sha = HISTORICAL_SOURCE
+                  expected_path = (
+                      f"${REPOSITORY}/.github/workflows/"
+                      f"build-release-candidate.yml@${HISTORICAL_SOURCE}"
+                  )
+              else:
+                  if run["path"] not in {
+                      ".github/workflows/build-trinyx-backend.yml",
+                      ".github/workflows/build-release-candidate.yml",
+                  }:
+                      raise SystemExit(f"modern caller mismatch:${name}")
+                  expected_sha = os.environ["BUILDER_WORKFLOW_COMMIT"]
+                  if expected_sha != BUILDER_COMMIT:
+                      raise SystemExit("builder commit mismatch")
+                  expected_path = (
+                      f"${REPOSITORY}/.github/workflows/"
+                      f"build-release-candidate-impl.yml@${expected_sha}"
+                  )
+
+              matches = [item for item in referenced if item.get("path") == expected_path]
+              if len(matches) != 1 or matches[0].get("sha") != expected_sha:
+                  raise SystemExit(f"builder provenance mismatch:${name}")
+              if historical:
+                  if matches[0].get("ref") != CALLER_REF:
+                      raise SystemExit(f"historical builder ref mismatch:${name}")
+              elif matches[0].get("ref") is not None:
+                  raise SystemExit(f"SHA-pinned builder unexpectedly has ref:${name}")
+          # END STAGING_QUALIFICATION_RUN_PROVENANCE_VALIDATION
           PY
           gh api "repos/$GITHUB_REPOSITORY/actions/artifacts/$BASELINE_ARTIFACT_ID/zip" > artifacts/baseline.zip
           gh api "repos/$GITHUB_REPOSITORY/actions/artifacts/$CANDIDATE_ARTIFACT_ID/zip" > artifacts/candidate.zip
@@ -201,69 +281,222 @@ jobs:
           mkdir baseline candidate
           unzip -q artifacts/baseline.zip -d baseline
           unzip -q artifacts/candidate.zip -d candidate
+          python3 - <<'PY'
+          # BEGIN STAGING_QUALIFICATION_ATTESTATION_COMPATIBILITY
+          import hashlib
+          import hmac
+          import json
+          import os
+          from pathlib import Path
+
+          HISTORICAL_IDENTITY = {
+              "GITHUB_REPOSITORY": "TrinyxAI/Trinyx",
+              "GITHUB_REPOSITORY_ID": "1342032975",
+              "GITHUB_REPOSITORY_OWNER_ID": "319253481",
+              "RUN_ID": "33485509832",
+              "ARTIFACT_ID": "9791964215",
+              "ARTIFACT_DIGEST": "sha256:755594078d9da7e19406e01187534132920a31f87804c1b33baa28fa96559152",
+              "SOURCE_COMMIT": "f3a4c1ddcf6a17bfc837071f9046ac4c38a38b47",
+              "RELEASE_ID": "rel-v1-b5ba70c23b9f529ac8228a7b00b4faa4",
+              "BUNDLE_DIGEST": "sha256:c9df14dcd1dbc24b31b926d3778bef2e208b59824c78f24292608284f3579892",
+          }
+          HISTORICAL_INTERNAL_SHA256 = {
+              "release.json": "ad5a5b702d9659e0af5d5b82a422953ba2390a94396949f897757568c9b59789",
+              "release-images.json": "fe1134c3920af0f2f9f0027082f25ec5adb1cbb6d41a1053bada7ef730f66a8a",
+              "deployment-bundle.json": "b101918414ee9d113d4ef54d32c9f438005d8ebee7bde2e62f72d58a16cfdd7b",
+              "deployment-bundle.tar": "c9df14dcd1dbc24b31b926d3778bef2e208b59824c78f24292608284f3579892",
+          }
+
+          def identity(env, prefix):
+              return {
+                  "GITHUB_REPOSITORY": env["GITHUB_REPOSITORY"],
+                  "GITHUB_REPOSITORY_ID": env["GITHUB_REPOSITORY_ID"],
+                  "GITHUB_REPOSITORY_OWNER_ID": env["GITHUB_REPOSITORY_OWNER_ID"],
+                  "RUN_ID": env[f"${prefix}_RUN_ID"],
+                  "ARTIFACT_ID": env[f"${prefix}_ARTIFACT_ID"],
+                  "ARTIFACT_DIGEST": env[f"${prefix}_ARTIFACT_DIGEST"],
+                  "SOURCE_COMMIT": env[f"${prefix}_SOURCE_COMMIT"],
+                  "RELEASE_ID": env[f"${prefix}_RELEASE_ID"],
+                  "BUNDLE_DIGEST": env[f"${prefix}_BUNDLE_DIGEST"],
+              }
+
+          def file_sha256(path):
+              digest = hashlib.sha256()
+              with path.open("rb") as handle:
+                  for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+                      digest.update(chunk)
+              return digest.hexdigest()
+
+          def resolve_attestation_policy(env, directory, prefix):
+              current = identity(env, prefix)
+              release = json.loads((directory / "release.json").read_text(encoding="utf-8"))
+              if (
+                  release.get("releaseId") != current["RELEASE_ID"]
+                  or release.get("sourceCommit") != current["SOURCE_COMMIT"]
+                  or release.get("deploymentBundle", {}).get("digest") != current["BUNDLE_DIGEST"]
+              ):
+                  raise SystemExit(f"release/input identity mismatch:${directory.name}")
+              if current == HISTORICAL_IDENTITY:
+                  for name, expected in HISTORICAL_INTERNAL_SHA256.items():
+                      actual = file_sha256(directory / name)
+                      if not hmac.compare_digest(actual, expected):
+                          raise SystemExit(
+                              f"historical candidate internal digest mismatch:${directory.name}:${name}"
+                          )
+                  return {
+                      "SIGNER_WORKFLOW": "build-release-candidate.yml",
+                      "SIGNER_DIGEST": HISTORICAL_IDENTITY["SOURCE_COMMIT"],
+                      "COMPATIBILITY": "frozen-historical-builder",
+                      "REQUIRE_INTERNAL_ATTESTATIONS": "false",
+                  }
+              return {
+                  "SIGNER_WORKFLOW": "build-release-candidate-impl.yml",
+                  "SIGNER_DIGEST": env["BUILDER_WORKFLOW_COMMIT"],
+                  "COMPATIBILITY": "pinned-reusable-builder",
+                  "REQUIRE_INTERNAL_ATTESTATIONS": "true",
+              }
+
+          def main():
+              for name in ("baseline", "candidate"):
+                  policy = resolve_attestation_policy(os.environ, Path(name), name.upper())
+                  target = Path(f"${name}-attestation-policy.env")
+                  target.write_text(
+                      "".join(f"${key}=${value}\n" for key, value in policy.items()),
+                      encoding="utf-8",
+                  )
+                  target.chmod(0o600)
+
+          if __name__ == "__main__":
+              main()
+          # END STAGING_QUALIFICATION_ATTESTATION_COMPATIBILITY
+          PY
+          # BEGIN STAGING_QUALIFICATION_INTERNAL_ATTESTATION_VERIFICATION
           for name in baseline candidate; do
             upper=${name^^}
             source_var="${upper}_SOURCE_COMMIT"; source_digest="${!source_var}"
-            run_var="${upper}_RUN_ID"; run_id="${!run_var}"
-            artifact_var="${upper}_ARTIFACT_ID"; artifact_id="${!artifact_var}"
-            artifact_digest_var="${upper}_ARTIFACT_DIGEST"; artifact_digest="${!artifact_digest_var}"
-            release_var="${upper}_RELEASE_ID"; release_id="${!release_var}"
-            bundle_var="${upper}_BUNDLE_DIGEST"; bundle_digest="${!bundle_var}"
-            if [[ "$run_id" == 33485509832 \
-               && "$artifact_id" == 9791964215 \
-               && "$artifact_digest" == sha256:755594078d9da7e19406e01187534132920a31f87804c1b33baa28fa96559152 \
-               && "$source_digest" == f3a4c1ddcf6a17bfc837071f9046ac4c38a38b47 \
-               && "$release_id" == rel-v1-b5ba70c23b9f529ac8228a7b00b4faa4 \
-               && "$bundle_digest" == sha256:c9df14dcd1dbc24b31b926d3778bef2e208b59824c78f24292608284f3579892 ]]; then
-              signer_workflow=build-release-candidate.yml
-              signer_digest="$source_digest"
-            else
-              signer_workflow=build-release-candidate-impl.yml
-              signer_digest="$BUILDER_WORKFLOW_COMMIT"
-            fi
-            for subject in release.json release-images.json deployment-bundle.json deployment-bundle.tar; do
-              gh attestation verify "$name/$subject" \
-                --repo "$GITHUB_REPOSITORY" \
-                --signer-workflow "TrinyxAI/Trinyx/.github/workflows/$signer_workflow" \
-                --signer-digest "$signer_digest" \
-                --source-digest "$source_digest" \
-                --deny-self-hosted-runners
-            done
+            source "$name-attestation-policy.env"
+            case "$REQUIRE_INTERNAL_ATTESTATIONS" in
+              true)
+                test "$COMPATIBILITY" = pinned-reusable-builder
+                test "$SIGNER_WORKFLOW" = build-release-candidate-impl.yml
+                test "$SIGNER_DIGEST" = "$BUILDER_WORKFLOW_COMMIT"
+                for subject in release.json release-images.json deployment-bundle.json deployment-bundle.tar; do
+                  gh attestation verify "$name/$subject" \
+                    --repo "$GITHUB_REPOSITORY" \
+                    --signer-workflow "TrinyxAI/Trinyx/.github/workflows/$SIGNER_WORKFLOW" \
+                    --signer-digest "$SIGNER_DIGEST" \
+                    --source-digest "$source_digest" \
+                    --deny-self-hosted-runners
+                done
+                ;;
+              false)
+                test "$COMPATIBILITY" = frozen-historical-builder
+                test "$SIGNER_WORKFLOW" = build-release-candidate.yml
+                test "$SIGNER_DIGEST" = f3a4c1ddcf6a17bfc837071f9046ac4c38a38b47
+                ;;
+              *)
+                echo "ERROR_INVALID_ATTESTATION_POLICY:$name" >&2
+                exit 1
+                ;;
+            esac
           done
+          # END STAGING_QUALIFICATION_INTERNAL_ATTESTATION_VERIFICATION
           python3 - <<'PY'
-          import datetime,json,os
+          # BEGIN STAGING_QUALIFICATION_PROVENANCE_GENERATION
+          import datetime
+          import json
+          import os
           from pathlib import Path
-          frozen={
-            'sourceCommit':'f3a4c1ddcf6a17bfc837071f9046ac4c38a38b47',
-            'releaseId':'rel-v1-b5ba70c23b9f529ac8228a7b00b4faa4',
-            'bundleDigest':'sha256:c9df14dcd1dbc24b31b926d3778bef2e208b59824c78f24292608284f3579892',
-            'artifactId':'9791964215','runId':'33485509832',
-            'artifactDigest':'sha256:755594078d9da7e19406e01187534132920a31f87804c1b33baa28fa96559152',
+
+          EXPECTED_POLICY_KEYS = {
+              "SIGNER_WORKFLOW",
+              "SIGNER_DIGEST",
+              "COMPATIBILITY",
+              "REQUIRE_INTERNAL_ATTESTATIONS",
           }
-          for name in ('baseline','candidate'):
-            upper=name.upper()
-            release=json.loads(Path(name,'release.json').read_text())
-            assert release['releaseId']==os.environ[upper+'_RELEASE_ID']
-            assert release['deploymentBundle']['digest']==os.environ[upper+'_BUNDLE_DIGEST']
-            assert release['sourceCommit']==os.environ[upper+'_SOURCE_COMMIT']
-            actual={
-              'sourceCommit':release['sourceCommit'],'releaseId':release['releaseId'],
-              'bundleDigest':release['deploymentBundle']['digest'],
-              'artifactId':os.environ[upper+'_ARTIFACT_ID'],'runId':os.environ[upper+'_RUN_ID'],
-              'artifactDigest':os.environ[upper+'_ARTIFACT_DIGEST'],
-            }
-            historical=actual==frozen
-            Path(name,'provenance.json').write_text(json.dumps({
-              'schemaVersion':2,'repository':'TrinyxAI/Trinyx',
-              'signerWorkflow':'build-release-candidate.yml' if historical else 'build-release-candidate-impl.yml',
-              'signerDigest':release['sourceCommit'] if historical else os.environ['BUILDER_WORKFLOW_COMMIT'],
-              'compatibility':'frozen-historical-builder' if historical else 'pinned-reusable-builder',
-              'sourceCommit':release['sourceCommit'],'artifactId':os.environ[upper+'_ARTIFACT_ID'],'runId':os.environ[upper+'_RUN_ID'],
-              'artifactDigest':os.environ[upper+'_ARTIFACT_DIGEST'],
-              'verifiedAt':datetime.datetime.now(datetime.timezone.utc).isoformat().replace('+00:00','Z')
-            },sort_keys=True,separators=(',',':'))+'\n')
+          HISTORICAL = {
+              "sourceCommit": "f3a4c1ddcf6a17bfc837071f9046ac4c38a38b47",
+              "releaseId": "rel-v1-b5ba70c23b9f529ac8228a7b00b4faa4",
+              "bundleDigest": "sha256:c9df14dcd1dbc24b31b926d3778bef2e208b59824c78f24292608284f3579892",
+              "artifactId": "9791964215",
+              "runId": "33485509832",
+              "artifactDigest": "sha256:755594078d9da7e19406e01187534132920a31f87804c1b33baa28fa96559152",
+          }
+
+          def read_policy(path):
+              policy = {}
+              for line in path.read_text(encoding="utf-8").splitlines():
+                  if "=" not in line:
+                      raise SystemExit("invalid attestation policy record")
+                  key, value = line.split("=", 1)
+                  if key in policy:
+                      raise SystemExit("duplicate attestation policy key")
+                  policy[key] = value
+              if set(policy) != EXPECTED_POLICY_KEYS:
+                  raise SystemExit("invalid attestation policy keys")
+              if policy["REQUIRE_INTERNAL_ATTESTATIONS"] not in {"true", "false"}:
+                  raise SystemExit("invalid attestation policy value")
+              return policy
+
+          for name in ("baseline", "candidate"):
+              prefix = name.upper()
+              release = json.loads(Path(name, "release.json").read_text(encoding="utf-8"))
+              actual = {
+                  "sourceCommit": release["sourceCommit"],
+                  "releaseId": release["releaseId"],
+                  "bundleDigest": release["deploymentBundle"]["digest"],
+                  "artifactId": os.environ[f"${prefix}_ARTIFACT_ID"],
+                  "runId": os.environ[f"${prefix}_RUN_ID"],
+                  "artifactDigest": os.environ[f"${prefix}_ARTIFACT_DIGEST"],
+              }
+              if (
+                  actual["sourceCommit"] != os.environ[f"${prefix}_SOURCE_COMMIT"]
+                  or actual["releaseId"] != os.environ[f"${prefix}_RELEASE_ID"]
+                  or actual["bundleDigest"] != os.environ[f"${prefix}_BUNDLE_DIGEST"]
+              ):
+                  raise SystemExit(f"release/input identity mismatch:${name}")
+              policy = read_policy(Path(f"${name}-attestation-policy.env"))
+              if actual == HISTORICAL:
+                  expected = {
+                      "SIGNER_WORKFLOW": "build-release-candidate.yml",
+                      "SIGNER_DIGEST": HISTORICAL["sourceCommit"],
+                      "COMPATIBILITY": "frozen-historical-builder",
+                      "REQUIRE_INTERNAL_ATTESTATIONS": "false",
+                  }
+              else:
+                  expected = {
+                      "SIGNER_WORKFLOW": "build-release-candidate-impl.yml",
+                      "SIGNER_DIGEST": os.environ["BUILDER_WORKFLOW_COMMIT"],
+                      "COMPATIBILITY": "pinned-reusable-builder",
+                      "REQUIRE_INTERNAL_ATTESTATIONS": "true",
+                  }
+              if policy != expected:
+                  raise SystemExit(f"attestation/provenance policy mismatch:${name}")
+              Path(name, "provenance.json").write_text(
+                  json.dumps(
+                      {
+                          "schemaVersion": 2,
+                          "repository": "TrinyxAI/Trinyx",
+                          "signerWorkflow": policy["SIGNER_WORKFLOW"],
+                          "signerDigest": policy["SIGNER_DIGEST"],
+                          "compatibility": policy["COMPATIBILITY"],
+                          "sourceCommit": release["sourceCommit"],
+                          "artifactId": actual["artifactId"],
+                          "runId": actual["runId"],
+                          "artifactDigest": actual["artifactDigest"],
+                          "verifiedAt": datetime.datetime.now(datetime.timezone.utc)
+                              .isoformat()
+                              .replace("+00:00", "Z"),
+                      },
+                      sort_keys=True,
+                      separators=(",", ":"),
+                  )
+                  + "\n",
+                  encoding="utf-8",
+              )
+          # END STAGING_QUALIFICATION_PROVENANCE_GENERATION
           PY
-          python3 -c "from pathlib import Path; from platform.automation.release_registry import validate_candidate; validate_candidate(Path('baseline')); validate_candidate(Path('candidate'))"
+          PYTHONPATH=platform python3 -c "from pathlib import Path; from automation.release_registry import validate_candidate; validate_candidate(Path('baseline')); validate_candidate(Path('candidate'))"
           python3 platform/automation/ssm_orchestrator.py diff --baseline-manifest baseline/release.json --candidate-manifest candidate/release.json
       - name: Assume release publisher role only
         uses: aws-actions/configure-aws-credentials@cbe3b392738ccf3f987d68400dafcf4b0624a56c # v6.2.4, Node 24

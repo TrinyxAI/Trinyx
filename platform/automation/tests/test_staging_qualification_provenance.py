@@ -27,12 +27,12 @@ HISTORICAL_INTERNAL = {
 
 def extract(text: str, marker: str) -> str:
     match = re.search(
-        rf"# BEGIN ${marker}\n(?P<body>.*?)# END ${marker}",
+        rf"# BEGIN {marker}\n(?P<body>.*?)# END {marker}",
         text,
         re.DOTALL,
     )
     if match is None:
-        raise AssertionError(f"workflow marker missing: ${marker}")
+        raise AssertionError(f"workflow marker missing: {marker}")
     return textwrap.dedent(match.group("body"))
 
 
@@ -51,12 +51,12 @@ class StagingQualificationProvenanceTests(unittest.TestCase):
             "GITHUB_REPOSITORY": "TrinyxAI/Trinyx",
             "GITHUB_REPOSITORY_ID": "1342032975",
             "GITHUB_REPOSITORY_OWNER_ID": "319253481",
-            f"${prefix}_RUN_ID": "33485509832",
-            f"${prefix}_ARTIFACT_ID": "9791964215",
-            f"${prefix}_ARTIFACT_DIGEST": "sha256:755594078d9da7e19406e01187534132920a31f87804c1b33baa28fa96559152",
-            f"${prefix}_SOURCE_COMMIT": HISTORICAL_SOURCE,
-            f"${prefix}_RELEASE_ID": "rel-v1-b5ba70c23b9f529ac8228a7b00b4faa4",
-            f"${prefix}_BUNDLE_DIGEST": "sha256:c9df14dcd1dbc24b31b926d3778bef2e208b59824c78f24292608284f3579892",
+            f"{prefix}_RUN_ID": "33485509832",
+            f"{prefix}_ARTIFACT_ID": "9791964215",
+            f"{prefix}_ARTIFACT_DIGEST": "sha256:755594078d9da7e19406e01187534132920a31f87804c1b33baa28fa96559152",
+            f"{prefix}_SOURCE_COMMIT": HISTORICAL_SOURCE,
+            f"{prefix}_RELEASE_ID": "rel-v1-b5ba70c23b9f529ac8228a7b00b4faa4",
+            f"{prefix}_BUNDLE_DIGEST": "sha256:c9df14dcd1dbc24b31b926d3778bef2e208b59824c78f24292608284f3579892",
             "BUILDER_WORKFLOW_COMMIT": BUILDER_COMMIT,
         }
 
@@ -65,12 +65,12 @@ class StagingQualificationProvenanceTests(unittest.TestCase):
             "GITHUB_REPOSITORY": "TrinyxAI/Trinyx",
             "GITHUB_REPOSITORY_ID": "1342032975",
             "GITHUB_REPOSITORY_OWNER_ID": "319253481",
-            f"${prefix}_RUN_ID": "40000000000" if prefix == "BASELINE" else "40000000001",
-            f"${prefix}_ARTIFACT_ID": "50000000000" if prefix == "BASELINE" else "50000000001",
-            f"${prefix}_ARTIFACT_DIGEST": "sha256:" + ("a" if prefix == "BASELINE" else "b") * 64,
-            f"${prefix}_SOURCE_COMMIT": ("c" if prefix == "BASELINE" else "d") * 40,
-            f"${prefix}_RELEASE_ID": "rel-v1-" + ("e" if prefix == "BASELINE" else "f") * 32,
-            f"${prefix}_BUNDLE_DIGEST": "sha256:" + ("1" if prefix == "BASELINE" else "2") * 64,
+            f"{prefix}_RUN_ID": "40000000000" if prefix == "BASELINE" else "40000000001",
+            f"{prefix}_ARTIFACT_ID": "50000000000" if prefix == "BASELINE" else "50000000001",
+            f"{prefix}_ARTIFACT_DIGEST": "sha256:" + ("a" if prefix == "BASELINE" else "b") * 64,
+            f"{prefix}_SOURCE_COMMIT": ("c" if prefix == "BASELINE" else "d") * 40,
+            f"{prefix}_RELEASE_ID": "rel-v1-" + ("e" if prefix == "BASELINE" else "f") * 32,
+            f"{prefix}_BUNDLE_DIGEST": "sha256:" + ("1" if prefix == "BASELINE" else "2") * 64,
             "BUILDER_WORKFLOW_COMMIT": BUILDER_COMMIT,
         }
 
@@ -81,10 +81,10 @@ class StagingQualificationProvenanceTests(unittest.TestCase):
         return env
 
     def artifact_run(self, env: dict[str, str], prefix: str, historical: bool) -> tuple[dict, dict]:
-        source = env[f"${prefix}_SOURCE_COMMIT"]
-        run_id = int(env[f"${prefix}_RUN_ID"])
+        source = env[f"{prefix}_SOURCE_COMMIT"]
+        run_id = int(env[f"{prefix}_RUN_ID"])
         artifact = {
-            "id": int(env[f"${prefix}_ARTIFACT_ID"]),
+            "id": int(env[f"{prefix}_ARTIFACT_ID"]),
             "name": "trinyx-release-candidate-" + source,
             "expired": False,
             "workflow_run": {"id": run_id, "head_sha": source},
@@ -121,8 +121,8 @@ class StagingQualificationProvenanceTests(unittest.TestCase):
             if mutate is not None:
                 mutate(pairs)
             for name, (artifact, run) in pairs.items():
-                (artifacts / f"${name}-metadata.json").write_text(json.dumps(artifact), encoding="utf-8")
-                (artifacts / f"${name}-run.json").write_text(json.dumps(run), encoding="utf-8")
+                (artifacts / f"{name}-metadata.json").write_text(json.dumps(artifact), encoding="utf-8")
+                (artifacts / f"{name}-run.json").write_text(json.dumps(run), encoding="utf-8")
             return subprocess.run(
                 [sys.executable, "-c", self.run_script], cwd=directory, env=env,
                 text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=False,
@@ -138,9 +138,9 @@ class StagingQualificationProvenanceTests(unittest.TestCase):
         if historical_hashes is not None:
             namespace["file_sha256"] = lambda path: historical_hashes[path.name]
         release = {
-            "releaseId": env[f"${prefix}_RELEASE_ID"],
-            "sourceCommit": env[f"${prefix}_SOURCE_COMMIT"],
-            "deploymentBundle": {"digest": env[f"${prefix}_BUNDLE_DIGEST"]},
+            "releaseId": env[f"{prefix}_RELEASE_ID"],
+            "sourceCommit": env[f"{prefix}_SOURCE_COMMIT"],
+            "deploymentBundle": {"digest": env[f"{prefix}_BUNDLE_DIGEST"]},
         }
         with tempfile.TemporaryDirectory() as raw:
             directory = Path(raw) / prefix.lower()
@@ -246,8 +246,8 @@ class StagingQualificationProvenanceTests(unittest.TestCase):
             )
             gh.chmod(0o755)
             for name, policy in (("baseline", baseline_policy), ("candidate", candidate_policy)):
-                (directory / f"${name}-attestation-policy.env").write_text(
-                    "".join(f"${key}=${value}\n" for key, value in policy.items()), encoding="utf-8"
+                (directory / f"{name}-attestation-policy.env").write_text(
+                    "".join(f"{key}={value}\n" for key, value in policy.items()), encoding="utf-8"
                 )
             env = self.combined_env(False, False)
             env.update({
@@ -290,9 +290,9 @@ class StagingQualificationProvenanceTests(unittest.TestCase):
         directory.mkdir()
         (directory / "release.json").write_text(
             json.dumps({
-                "releaseId": env[f"${prefix}_RELEASE_ID"],
-                "sourceCommit": env[f"${prefix}_SOURCE_COMMIT"],
-                "deploymentBundle": {"digest": env[f"${prefix}_BUNDLE_DIGEST"]},
+                "releaseId": env[f"{prefix}_RELEASE_ID"],
+                "sourceCommit": env[f"{prefix}_SOURCE_COMMIT"],
+                "deploymentBundle": {"digest": env[f"{prefix}_BUNDLE_DIGEST"]},
             }), encoding="utf-8",
         )
 
@@ -303,8 +303,8 @@ class StagingQualificationProvenanceTests(unittest.TestCase):
             for name, historical in (("baseline", baseline_historical), ("candidate", candidate_historical)):
                 self.write_release(directory / name, env, name.upper())
                 policy = self.historical_policy() if historical else self.modern_policy()
-                (directory / f"${name}-attestation-policy.env").write_text(
-                    "".join(f"${key}=${value}\n" for key, value in policy.items()), encoding="utf-8"
+                (directory / f"{name}-attestation-policy.env").write_text(
+                    "".join(f"{key}={value}\n" for key, value in policy.items()), encoding="utf-8"
                 )
             result = subprocess.run(
                 [sys.executable, "-c", self.provenance_script], cwd=directory, env=env,

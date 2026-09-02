@@ -181,73 +181,73 @@ jobs:
                   "GITHUB_REPOSITORY": os.environ["GITHUB_REPOSITORY"],
                   "GITHUB_REPOSITORY_ID": os.environ["GITHUB_REPOSITORY_ID"],
                   "GITHUB_REPOSITORY_OWNER_ID": os.environ["GITHUB_REPOSITORY_OWNER_ID"],
-                  "RUN_ID": os.environ[f"${prefix}_RUN_ID"],
-                  "ARTIFACT_ID": os.environ[f"${prefix}_ARTIFACT_ID"],
-                  "ARTIFACT_DIGEST": os.environ[f"${prefix}_ARTIFACT_DIGEST"],
-                  "SOURCE_COMMIT": os.environ[f"${prefix}_SOURCE_COMMIT"],
-                  "RELEASE_ID": os.environ[f"${prefix}_RELEASE_ID"],
-                  "BUNDLE_DIGEST": os.environ[f"${prefix}_BUNDLE_DIGEST"],
+                  "RUN_ID": os.environ[f"{prefix}_RUN_ID"],
+                  "ARTIFACT_ID": os.environ[f"{prefix}_ARTIFACT_ID"],
+                  "ARTIFACT_DIGEST": os.environ[f"{prefix}_ARTIFACT_DIGEST"],
+                  "SOURCE_COMMIT": os.environ[f"{prefix}_SOURCE_COMMIT"],
+                  "RELEASE_ID": os.environ[f"{prefix}_RELEASE_ID"],
+                  "BUNDLE_DIGEST": os.environ[f"{prefix}_BUNDLE_DIGEST"],
               }
 
           for name in ("baseline", "candidate"):
               prefix = name.upper()
-              artifact = json.load(open(f"artifacts/${name}-metadata.json", encoding="utf-8"))
-              run = json.load(open(f"artifacts/${name}-run.json", encoding="utf-8"))
+              artifact = json.load(open(f"artifacts/{name}-metadata.json", encoding="utf-8"))
+              run = json.load(open(f"artifacts/{name}-run.json", encoding="utf-8"))
               current = identity(prefix)
               historical = current == HISTORICAL_IDENTITY
 
               if str(artifact["id"]) != current["ARTIFACT_ID"]:
-                  raise SystemExit(f"artifact id mismatch:${name}")
+                  raise SystemExit(f"artifact id mismatch:{name}")
               if artifact["name"] != "trinyx-release-candidate-" + current["SOURCE_COMMIT"]:
-                  raise SystemExit(f"artifact name mismatch:${name}")
+                  raise SystemExit(f"artifact name mismatch:{name}")
               if artifact["expired"] is not False:
-                  raise SystemExit(f"artifact expired:${name}")
+                  raise SystemExit(f"artifact expired:{name}")
               if str(artifact["workflow_run"]["id"]) != current["RUN_ID"]:
-                  raise SystemExit(f"artifact/run mismatch:${name}")
+                  raise SystemExit(f"artifact/run mismatch:{name}")
               if artifact["workflow_run"]["head_sha"] != current["SOURCE_COMMIT"]:
-                  raise SystemExit(f"artifact/source mismatch:${name}")
+                  raise SystemExit(f"artifact/source mismatch:{name}")
               if run["id"] != int(current["RUN_ID"]):
-                  raise SystemExit(f"run id mismatch:${name}")
+                  raise SystemExit(f"run id mismatch:{name}")
               if run["head_sha"] != current["SOURCE_COMMIT"]:
-                  raise SystemExit(f"run source mismatch:${name}")
+                  raise SystemExit(f"run source mismatch:{name}")
               if run["conclusion"] != "success":
-                  raise SystemExit(f"run conclusion mismatch:${name}")
+                  raise SystemExit(f"run conclusion mismatch:{name}")
               if run["repository"]["full_name"] != REPOSITORY:
-                  raise SystemExit(f"run repository mismatch:${name}")
+                  raise SystemExit(f"run repository mismatch:{name}")
 
               referenced = run.get("referenced_workflows")
               if not isinstance(referenced, list):
-                  raise SystemExit(f"referenced workflows missing:${name}")
+                  raise SystemExit(f"referenced workflows missing:{name}")
               if historical:
                   if run["path"] != ".github/workflows/build-trinyx-backend.yml":
-                      raise SystemExit(f"historical caller mismatch:${name}")
+                      raise SystemExit(f"historical caller mismatch:{name}")
                   expected_sha = HISTORICAL_SOURCE
                   expected_path = (
-                      f"${REPOSITORY}/.github/workflows/"
-                      f"build-release-candidate.yml@${HISTORICAL_SOURCE}"
+                      f"{REPOSITORY}/.github/workflows/"
+                      f"build-release-candidate.yml@{HISTORICAL_SOURCE}"
                   )
               else:
                   if run["path"] not in {
                       ".github/workflows/build-trinyx-backend.yml",
                       ".github/workflows/build-release-candidate.yml",
                   }:
-                      raise SystemExit(f"modern caller mismatch:${name}")
+                      raise SystemExit(f"modern caller mismatch:{name}")
                   expected_sha = os.environ["BUILDER_WORKFLOW_COMMIT"]
                   if expected_sha != BUILDER_COMMIT:
                       raise SystemExit("builder commit mismatch")
                   expected_path = (
-                      f"${REPOSITORY}/.github/workflows/"
-                      f"build-release-candidate-impl.yml@${expected_sha}"
+                      f"{REPOSITORY}/.github/workflows/"
+                      f"build-release-candidate-impl.yml@{expected_sha}"
                   )
 
               matches = [item for item in referenced if item.get("path") == expected_path]
               if len(matches) != 1 or matches[0].get("sha") != expected_sha:
-                  raise SystemExit(f"builder provenance mismatch:${name}")
+                  raise SystemExit(f"builder provenance mismatch:{name}")
               if historical:
                   if matches[0].get("ref") != CALLER_REF:
-                      raise SystemExit(f"historical builder ref mismatch:${name}")
+                      raise SystemExit(f"historical builder ref mismatch:{name}")
               elif matches[0].get("ref") is not None:
-                  raise SystemExit(f"SHA-pinned builder unexpectedly has ref:${name}")
+                  raise SystemExit(f"SHA-pinned builder unexpectedly has ref:{name}")
           # END STAGING_QUALIFICATION_RUN_PROVENANCE_VALIDATION
           PY
           gh api "repos/$GITHUB_REPOSITORY/actions/artifacts/$BASELINE_ARTIFACT_ID/zip" > artifacts/baseline.zip
@@ -312,12 +312,12 @@ jobs:
                   "GITHUB_REPOSITORY": env["GITHUB_REPOSITORY"],
                   "GITHUB_REPOSITORY_ID": env["GITHUB_REPOSITORY_ID"],
                   "GITHUB_REPOSITORY_OWNER_ID": env["GITHUB_REPOSITORY_OWNER_ID"],
-                  "RUN_ID": env[f"${prefix}_RUN_ID"],
-                  "ARTIFACT_ID": env[f"${prefix}_ARTIFACT_ID"],
-                  "ARTIFACT_DIGEST": env[f"${prefix}_ARTIFACT_DIGEST"],
-                  "SOURCE_COMMIT": env[f"${prefix}_SOURCE_COMMIT"],
-                  "RELEASE_ID": env[f"${prefix}_RELEASE_ID"],
-                  "BUNDLE_DIGEST": env[f"${prefix}_BUNDLE_DIGEST"],
+                  "RUN_ID": env[f"{prefix}_RUN_ID"],
+                  "ARTIFACT_ID": env[f"{prefix}_ARTIFACT_ID"],
+                  "ARTIFACT_DIGEST": env[f"{prefix}_ARTIFACT_DIGEST"],
+                  "SOURCE_COMMIT": env[f"{prefix}_SOURCE_COMMIT"],
+                  "RELEASE_ID": env[f"{prefix}_RELEASE_ID"],
+                  "BUNDLE_DIGEST": env[f"{prefix}_BUNDLE_DIGEST"],
               }
 
           def file_sha256(path):
@@ -335,13 +335,13 @@ jobs:
                   or release.get("sourceCommit") != current["SOURCE_COMMIT"]
                   or release.get("deploymentBundle", {}).get("digest") != current["BUNDLE_DIGEST"]
               ):
-                  raise SystemExit(f"release/input identity mismatch:${directory.name}")
+                  raise SystemExit(f"release/input identity mismatch:{directory.name}")
               if current == HISTORICAL_IDENTITY:
                   for name, expected in HISTORICAL_INTERNAL_SHA256.items():
                       actual = file_sha256(directory / name)
                       if not hmac.compare_digest(actual, expected):
                           raise SystemExit(
-                              f"historical candidate internal digest mismatch:${directory.name}:${name}"
+                              f"historical candidate internal digest mismatch:{directory.name}:{name}"
                           )
                   return {
                       "SIGNER_WORKFLOW": "build-release-candidate.yml",
@@ -359,9 +359,9 @@ jobs:
           def main():
               for name in ("baseline", "candidate"):
                   policy = resolve_attestation_policy(os.environ, Path(name), name.upper())
-                  target = Path(f"${name}-attestation-policy.env")
+                  target = Path(f"{name}-attestation-policy.env")
                   target.write_text(
-                      "".join(f"${key}=${value}\n" for key, value in policy.items()),
+                      "".join(f"{key}={value}\n" for key, value in policy.items()),
                       encoding="utf-8",
                   )
                   target.chmod(0o600)
@@ -445,17 +445,17 @@ jobs:
                   "sourceCommit": release["sourceCommit"],
                   "releaseId": release["releaseId"],
                   "bundleDigest": release["deploymentBundle"]["digest"],
-                  "artifactId": os.environ[f"${prefix}_ARTIFACT_ID"],
-                  "runId": os.environ[f"${prefix}_RUN_ID"],
-                  "artifactDigest": os.environ[f"${prefix}_ARTIFACT_DIGEST"],
+                  "artifactId": os.environ[f"{prefix}_ARTIFACT_ID"],
+                  "runId": os.environ[f"{prefix}_RUN_ID"],
+                  "artifactDigest": os.environ[f"{prefix}_ARTIFACT_DIGEST"],
               }
               if (
-                  actual["sourceCommit"] != os.environ[f"${prefix}_SOURCE_COMMIT"]
-                  or actual["releaseId"] != os.environ[f"${prefix}_RELEASE_ID"]
-                  or actual["bundleDigest"] != os.environ[f"${prefix}_BUNDLE_DIGEST"]
+                  actual["sourceCommit"] != os.environ[f"{prefix}_SOURCE_COMMIT"]
+                  or actual["releaseId"] != os.environ[f"{prefix}_RELEASE_ID"]
+                  or actual["bundleDigest"] != os.environ[f"{prefix}_BUNDLE_DIGEST"]
               ):
-                  raise SystemExit(f"release/input identity mismatch:${name}")
-              policy = read_policy(Path(f"${name}-attestation-policy.env"))
+                  raise SystemExit(f"release/input identity mismatch:{name}")
+              policy = read_policy(Path(f"{name}-attestation-policy.env"))
               if actual == HISTORICAL:
                   expected = {
                       "SIGNER_WORKFLOW": "build-release-candidate.yml",
@@ -471,7 +471,7 @@ jobs:
                       "REQUIRE_INTERNAL_ATTESTATIONS": "true",
                   }
               if policy != expected:
-                  raise SystemExit(f"attestation/provenance policy mismatch:${name}")
+                  raise SystemExit(f"attestation/provenance policy mismatch:{name}")
               Path(name, "provenance.json").write_text(
                   json.dumps(
                       {

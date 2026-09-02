@@ -4,6 +4,7 @@ import copy
 import json
 import os
 import re
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -32,6 +33,27 @@ class ReleaseRegistrationProvenanceTests(unittest.TestCase):
         if match is None:
             raise AssertionError("workflow provenance validator markers are missing")
         cls.script = textwrap.dedent(match.group("body"))
+
+        compatibility = re.search(
+            r"# BEGIN STAGING_RELEASE_ATTESTATION_COMPATIBILITY\n"
+            r"(?P<body>.*?)"
+            r"# END STAGING_RELEASE_ATTESTATION_COMPATIBILITY",
+            cls.workflow,
+            re.DOTALL,
+        )
+        if compatibility is None:
+            raise AssertionError("workflow attestation compatibility markers are missing")
+        cls.compatibility_script = textwrap.dedent(compatibility.group("body"))
+        attestation = re.search(
+            r"# BEGIN STAGING_RELEASE_INTERNAL_ATTESTATION_VERIFICATION\n"
+            r"(?P<body>.*?)"
+            r"# END STAGING_RELEASE_INTERNAL_ATTESTATION_VERIFICATION",
+            cls.workflow,
+            re.DOTALL,
+        )
+        if attestation is None:
+            raise AssertionError("workflow internal attestation markers are missing")
+        cls.attestation_script = textwrap.dedent(attestation.group("body"))
 
     def historical_fixture(self) -> tuple[dict, dict, dict[str, str]]:
         artifact = {
@@ -66,6 +88,9 @@ class ReleaseRegistrationProvenanceTests(unittest.TestCase):
             ],
         }
         env = {
+            "GITHUB_REPOSITORY": "TrinyxAI/Trinyx",
+            "GITHUB_REPOSITORY_ID": "1342032975",
+            "GITHUB_REPOSITORY_OWNER_ID": "319253481",
             "ARTIFACT_ID": "9791964215",
             "RUN_ID": "33485509832",
             "ARTIFACT_DIGEST": (
@@ -198,6 +223,122 @@ class ReleaseRegistrationProvenanceTests(unittest.TestCase):
         )
         self.assert_rejected(artifact, contradictory_ref_run, env)
         self.assertIn(f"BUILDER_WORKFLOW_COMMIT: {BUILDER_COMMIT}", self.workflow)
+
+
+    def compatibility_namespace(self) -> dict:
+        namespace = {"__name__": "release_registration_compatibility_test"}
+        exec(self.compatibility_script, namespace)
+        return namespace
+
+    def compatibility_policy(
+        self,
+        env: dict[str, str],
+        digests: dict[str, str],
+    ) -> tuple[dict, dict]:
+        namespace = self.compatibility_namespace()
+        namespace["file_sha256"] = lambda path: digests[path.name]
+        policy = namespace["resolve_attestation_policy"](env, Path("candidate"))
+        return policy, namespace
+
+    def test_exact_historical_tuple_accepts_only_exact_internal_hashes(self) -> None:
+        _, _, env = self.historical_fixture()
+        namespace = self.compatibility_namespace()
+        expected = {
+            "release.json": "ad5a5b702d9659e0af5d5b82a422953ba2390a94396949f897757568c9b59789",
+            "release-images.json": "fe1134c3920af0f2f9f0027082f25ec5adb1cbb6d41a1053bada7ef730f66a8a",
+            "deployment-bundle.json": "b101918414ee9d113d4ef54d32c9f438005d8ebee7bde2e62f72d58a16cfdd7b",
+            "deployment-bundle.tar": "c9df14dcd1dbc24b31b926d3778bef2e208b59824c78f24292608284f3579892",
+        }
+        self.assertEqual(expected, namespace["HISTORICAL_INTERNAL_SHA256"])
+        policy, _ = self.compatibility_policy(env, expected)
+        self.assertEqual("false", policy["REQUIRE_INTERNAL_ATTESTATIONS"])
+        self.assertEqual("frozen-historical-builder", policy["COMPATIBILITY"])
+        self.assertEqual("build-release-candidate.yml", policy["SIGNER_WORKFLOW"])
+        self.assertEqual(HISTORICAL_SOURCE, policy["SIGNER_DIGEST"])
+
+        for name in expected:
+            with self.subTest(name=name):
+                changed = expected.copy()
+                changed[name] = "0" * 64
+                with self.assertRaises(AssertionError):
+                    self.compatibility_policy(env, changed)
+
+        missing = expected.copy()
+        del missing["release.json"]
+        with self.assertRaises(KeyError):
+            self.compatibility_policy(env, missing)
+
+    def test_each_historical_identity_drift_requires_modern_attestations(self) -> None:
+        _, _, exact_env = self.historical_fixture()
+        critical = (
+            "GITHUB_REPOSITORY",
+            "GITHUB_REPOSITORY_ID",
+            "GITHUB_REPOSITORY_OWNER_ID",
+            "RUN_ID",
+            "ARTIFACT_ID",
+            "ARTIFACT_DIGEST",
+            "SOURCE_COMMIT",
+            "RELEASE_ID",
+            "BUNDLE_DIGEST",
+        )
+        namespace = self.compatibility_namespace()
+        digests = namespace["HISTORICAL_INTERNAL_SHA256"]
+        for key in critical:
+            with self.subTest(key=key):
+                env = exact_env.copy()
+                env[key] = "not-the-approved-value"
+                policy, _ = self.compatibility_policy(env, digests)
+                self.assertEqual("true", policy["REQUIRE_INTERNAL_ATTESTATIONS"])
+                self.assertEqual("pinned-reusable-builder", policy["COMPATIBILITY"])
+                self.assertEqual(
+                    "build-release-candidate-impl.yml",
+                    policy["SIGNER_WORKFLOW"],
+                )
+                self.assertEqual(BUILDER_COMMIT, policy["SIGNER_DIGEST"])
+
+    def run_attestation_block(self, require_attestations: str) -> subprocess.CompletedProcess[str]:
+        bash = shutil.which("bash")
+        if bash is None:
+            self.skipTest("bash is required to exercise the workflow shell block")
+        with tempfile.TemporaryDirectory() as raw:
+            directory = Path(raw)
+            fake_bin = directory / "bin"
+            fake_bin.mkdir()
+            fake_gh = fake_bin / "gh"
+            fake_gh.write_text(
+                "#!/usr/bin/env bash\necho 'HTTP 404: Not Found' >&2\nexit 22\n",
+                encoding="utf-8",
+            )
+            fake_gh.chmod(0o755)
+            env = os.environ.copy()
+            env.update(
+                {
+                    "PATH": str(fake_bin) + os.pathsep + env.get("PATH", ""),
+                    "REQUIRE_INTERNAL_ATTESTATIONS": require_attestations,
+                    "GITHUB_REPOSITORY": "TrinyxAI/Trinyx",
+                    "SIGNER_WORKFLOW": "build-release-candidate-impl.yml",
+                    "SIGNER_DIGEST": BUILDER_COMMIT,
+                    "SOURCE_COMMIT": "a" * 40,
+                }
+            )
+            return subprocess.run(
+                [bash, "-c", "set -euo pipefail\n" + self.attestation_script],
+                cwd=directory,
+                env=env,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                check=False,
+            )
+
+    def test_non_historical_attestation_404_remains_fail_closed(self) -> None:
+        result = self.run_attestation_block("true")
+        self.assertNotEqual(0, result.returncode)
+        self.assertIn("HTTP 404: Not Found", result.stderr)
+
+    def test_historical_path_does_not_request_nonexistent_internal_attestations(self) -> None:
+        result = self.run_attestation_block("false")
+        self.assertEqual(0, result.returncode, result.stderr)
 
 
 if __name__ == "__main__":

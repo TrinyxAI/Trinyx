@@ -192,29 +192,86 @@ jobs:
           gh attestation verify candidate.zip --repo "$GITHUB_REPOSITORY"
           mkdir candidate
           unzip -q candidate.zip -d candidate
-          if [[ "$RUN_ID" == 33485509832 \
-             && "$ARTIFACT_ID" == 9791964215 \
-             && "$ARTIFACT_DIGEST" == sha256:755594078d9da7e19406e01187534132920a31f87804c1b33baa28fa96559152 \
-             && "$SOURCE_COMMIT" == f3a4c1ddcf6a17bfc837071f9046ac4c38a38b47 \
-             && "$RELEASE_ID" == rel-v1-b5ba70c23b9f529ac8228a7b00b4faa4 \
-             && "$BUNDLE_DIGEST" == sha256:c9df14dcd1dbc24b31b926d3778bef2e208b59824c78f24292608284f3579892 ]]; then
-            SIGNER_WORKFLOW=build-release-candidate.yml
-            SIGNER_DIGEST="$SOURCE_COMMIT"
-            COMPATIBILITY=frozen-historical-builder
-          else
-            SIGNER_WORKFLOW=build-release-candidate-impl.yml
-            SIGNER_DIGEST="$BUILDER_WORKFLOW_COMMIT"
-            COMPATIBILITY=pinned-reusable-builder
-          fi
+          python3 - <<'PY'
+          # BEGIN STAGING_RELEASE_ATTESTATION_COMPATIBILITY
+          import hashlib
+          import hmac
+          import os
+          from pathlib import Path
+
+          HISTORICAL_IDENTITY = {
+              "GITHUB_REPOSITORY": "TrinyxAI/Trinyx",
+              "GITHUB_REPOSITORY_ID": "1342032975",
+              "GITHUB_REPOSITORY_OWNER_ID": "319253481",
+              "RUN_ID": "33485509832",
+              "ARTIFACT_ID": "9791964215",
+              "ARTIFACT_DIGEST": "sha256:755594078d9da7e19406e01187534132920a31f87804c1b33baa28fa96559152",
+              "SOURCE_COMMIT": "f3a4c1ddcf6a17bfc837071f9046ac4c38a38b47",
+              "RELEASE_ID": "rel-v1-b5ba70c23b9f529ac8228a7b00b4faa4",
+              "BUNDLE_DIGEST": "sha256:c9df14dcd1dbc24b31b926d3778bef2e208b59824c78f24292608284f3579892",
+          }
+          HISTORICAL_INTERNAL_SHA256 = {
+              "release.json": "ad5a5b702d9659e0af5d5b82a422953ba2390a94396949f897757568c9b59789",
+              "release-images.json": "fe1134c3920af0f2f9f0027082f25ec5adb1cbb6d41a1053bada7ef730f66a8a",
+              "deployment-bundle.json": "b101918414ee9d113d4ef54d32c9f438005d8ebee7bde2e62f72d58a16cfdd7b",
+              "deployment-bundle.tar": "c9df14dcd1dbc24b31b926d3778bef2e208b59824c78f24292608284f3579892",
+          }
+
+          def is_frozen_historical_candidate(env):
+              return all(env.get(key) == value for key, value in HISTORICAL_IDENTITY.items())
+
+          def file_sha256(path):
+              digest = hashlib.sha256()
+              with path.open("rb") as handle:
+                  for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+                      digest.update(chunk)
+              return digest.hexdigest()
+
+          def resolve_attestation_policy(env, candidate):
+              if is_frozen_historical_candidate(env):
+                  for name, expected in HISTORICAL_INTERNAL_SHA256.items():
+                      actual = file_sha256(candidate / name)
+                      assert hmac.compare_digest(actual, expected), (
+                          f"historical candidate internal digest mismatch:{name}"
+                      )
+                  return {
+                      "SIGNER_WORKFLOW": "build-release-candidate.yml",
+                      "SIGNER_DIGEST": HISTORICAL_IDENTITY["SOURCE_COMMIT"],
+                      "COMPATIBILITY": "frozen-historical-builder",
+                      "REQUIRE_INTERNAL_ATTESTATIONS": "false",
+                  }
+              return {
+                  "SIGNER_WORKFLOW": "build-release-candidate-impl.yml",
+                  "SIGNER_DIGEST": env["BUILDER_WORKFLOW_COMMIT"],
+                  "COMPATIBILITY": "pinned-reusable-builder",
+                  "REQUIRE_INTERNAL_ATTESTATIONS": "true",
+              }
+
+          def main():
+              policy = resolve_attestation_policy(os.environ, Path("candidate"))
+              output = "".join(f"{key}={value}\n" for key, value in policy.items())
+              target = Path("attestation-policy.env")
+              target.write_text(output, encoding="utf-8")
+              target.chmod(0o600)
+
+          if __name__ == "__main__":
+              main()
+          # END STAGING_RELEASE_ATTESTATION_COMPATIBILITY
+          PY
+          source attestation-policy.env
           export SIGNER_WORKFLOW SIGNER_DIGEST COMPATIBILITY
-          for subject in release.json release-images.json deployment-bundle.json deployment-bundle.tar; do
-            gh attestation verify "candidate/$subject" \
-              --repo "$GITHUB_REPOSITORY" \
-              --signer-workflow "TrinyxAI/Trinyx/.github/workflows/$SIGNER_WORKFLOW" \
-              --signer-digest "$SIGNER_DIGEST" \
-              --source-digest "$SOURCE_COMMIT" \
-              --deny-self-hosted-runners
-          done
+          # BEGIN STAGING_RELEASE_INTERNAL_ATTESTATION_VERIFICATION
+          if [[ "$REQUIRE_INTERNAL_ATTESTATIONS" == true ]]; then
+            for subject in release.json release-images.json deployment-bundle.json deployment-bundle.tar; do
+              gh attestation verify "candidate/$subject" \
+                --repo "$GITHUB_REPOSITORY" \
+                --signer-workflow "TrinyxAI/Trinyx/.github/workflows/$SIGNER_WORKFLOW" \
+                --signer-digest "$SIGNER_DIGEST" \
+                --source-digest "$SOURCE_COMMIT" \
+                --deny-self-hosted-runners
+            done
+          fi
+          # END STAGING_RELEASE_INTERNAL_ATTESTATION_VERIFICATION
           python3 - <<'PY'
           import datetime, json, os
           from pathlib import Path

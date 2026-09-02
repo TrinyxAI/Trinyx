@@ -56,6 +56,9 @@ FROZEN_CANDIDATE = {
     "artifactId": "9791964215",
     "runId": "33485509832",
     "artifactDigest": "sha256:755594078d9da7e19406e01187534132920a31f87804c1b33baa28fa96559152",
+    "releaseManifestDigest": "sha256:ad5a5b702d9659e0af5d5b82a422953ba2390a94396949f897757568c9b59789",
+    "imageInventoryDigest": "sha256:fe1134c3920af0f2f9f0027082f25ec5adb1cbb6d41a1053bada7ef730f66a8a",
+    "bundleManifestDigest": "sha256:b101918414ee9d113d4ef54d32c9f438005d8ebee7bde2e62f72d58a16cfdd7b",
 }
 
 
@@ -213,35 +216,6 @@ def validate_candidate(directory: Path) -> tuple[dict[str, Any], dict[str, bytes
     manifest = validate_release_manifest(json.loads(files["release.json"]))
     images = json.loads(files["release-images.json"])
     require(isinstance(images, dict) and images.get("images") == manifest["images"], "release image inventory differs from manifest")
-    bundle_manifest = json.loads(files["deployment-bundle.json"])
-    require(isinstance(bundle_manifest, dict)
-            and set(bundle_manifest) == {"schemaVersion", "format", "digest", "sizeBytes", "files"}
-            and bundle_manifest.get("schemaVersion") == 1 and bundle_manifest.get("format") == "tar",
-            "bad bundle manifest")
-    entries = bundle_manifest.get("files")
-    require(isinstance(entries, list) and len(entries) == manifest["deploymentBundle"]["fileCount"], "bundle file count mismatch")
-    tar_bytes = files["deployment-bundle.tar"]
-    require(sha256_bytes(tar_bytes) == manifest["deploymentBundle"]["digest"], "wrong bundle SHA")
-    require(len(tar_bytes) == manifest["deploymentBundle"]["sizeBytes"], "wrong bundle size")
-    try:
-        with tarfile.open(fileobj=__import__("io").BytesIO(tar_bytes), mode="r") as archive:
-            members = archive.getmembers()
-            require(len(members) == len(entries), "bundle member count mismatch")
-            names: set[str] = set()
-            for member, expected in zip(members, entries):
-                require(isinstance(expected, dict) and set(expected) == {"path", "digest", "sizeBytes", "mode"},
-                        "bad bundle file contract")
-                name = expected.get("path")
-                require(isinstance(name, str) and name and not name.startswith("/") and ".." not in Path(name).parts,
-                        "unsafe bundle member")
-                require(name not in names and member.isfile() and member.name == name, "unsafe/unexpected bundle member")
-                require(member.size == expected.get("sizeBytes") and stat.S_IMODE(member.mode) == expected.get("mode"),
-                        "bundle member size/mode mismatch")
-                content = archive.extractfile(member)
-                require(content is not None and sha256_bytes(content.read()) == expected.get("digest"), "bad internal file hash")
-                names.add(name)
-    except tarfile.TarError as exc:
-        raise InvariantError("tampered bundle") from exc
     provenance = json.loads(files["provenance.json"])
     required_provenance = {
         "schemaVersion",
@@ -261,6 +235,7 @@ def validate_candidate(directory: Path) -> tuple[dict[str, Any], dict[str, bytes
     require(provenance["sourceCommit"] == manifest["sourceCommit"], "provenance/source commit mismatch")
     require(re.fullmatch(r"sha256:[0-9a-f]{64}", str(provenance["artifactDigest"])) is not None, "bad artifact provenance digest")
     signer = (provenance["signerWorkflow"], provenance["signerDigest"], provenance["compatibility"])
+    historical_candidate = False
     if signer == (
         "build-release-candidate-impl.yml",
         APPROVED_BUILDER_WORKFLOW_COMMIT,
@@ -268,7 +243,7 @@ def validate_candidate(directory: Path) -> tuple[dict[str, Any], dict[str, bytes
     ):
         pass
     else:
-        require(
+        historical_candidate = (
             signer == (
                 "build-release-candidate.yml",
                 FROZEN_CANDIDATE["sourceCommit"],
@@ -279,10 +254,51 @@ def validate_candidate(directory: Path) -> tuple[dict[str, Any], dict[str, bytes
             and manifest["deploymentBundle"]["digest"] == FROZEN_CANDIDATE["bundleDigest"]
             and str(provenance["artifactId"]) == FROZEN_CANDIDATE["artifactId"]
             and str(provenance["runId"]) == FROZEN_CANDIDATE["runId"]
-            and provenance["artifactDigest"] == FROZEN_CANDIDATE["artifactDigest"],
+            and provenance["artifactDigest"] == FROZEN_CANDIDATE["artifactDigest"]
+            and sha256_bytes(files["release.json"]) == FROZEN_CANDIDATE["releaseManifestDigest"]
+            and sha256_bytes(files["release-images.json"]) == FROZEN_CANDIDATE["imageInventoryDigest"]
+            and sha256_bytes(files["deployment-bundle.json"]) == FROZEN_CANDIDATE["bundleManifestDigest"]
+        )
+        require(
+            historical_candidate,
             "historical builder compatibility is restricted to the frozen candidate",
         )
     assert_no_secret_material(provenance, "provenance")
+    bundle_manifest = json.loads(files["deployment-bundle.json"])
+    require(isinstance(bundle_manifest, dict)
+            and set(bundle_manifest) == {"schemaVersion", "format", "digest", "sizeBytes", "files"}
+            and bundle_manifest.get("schemaVersion") == 1 and bundle_manifest.get("format") == "tar",
+            "bad bundle manifest")
+    entries = bundle_manifest.get("files")
+    require(isinstance(entries, list) and len(entries) == manifest["deploymentBundle"]["fileCount"], "bundle file count mismatch")
+    tar_bytes = files["deployment-bundle.tar"]
+    require(sha256_bytes(tar_bytes) == manifest["deploymentBundle"]["digest"], "wrong bundle SHA")
+    require(len(tar_bytes) == manifest["deploymentBundle"]["sizeBytes"], "wrong bundle size")
+    try:
+        with tarfile.open(fileobj=__import__("io").BytesIO(tar_bytes), mode="r") as archive:
+            members = archive.getmembers()
+            require(len(members) == len(entries), "bundle member count mismatch")
+            names: set[str] = set()
+            expected_entry_keys = (
+                {"path", "digest", "sizeBytes"}
+                if historical_candidate
+                else {"path", "digest", "sizeBytes", "mode"}
+            )
+            for member, expected in zip(members, entries):
+                require(isinstance(expected, dict) and set(expected) == expected_entry_keys,
+                        "bad bundle file contract")
+                name = expected.get("path")
+                require(isinstance(name, str) and name and not name.startswith("/") and ".." not in Path(name).parts,
+                        "unsafe bundle member")
+                require(name not in names and member.isfile() and member.name == name, "unsafe/unexpected bundle member")
+                expected_mode = 0o644 if historical_candidate else expected.get("mode")
+                require(member.size == expected.get("sizeBytes") and stat.S_IMODE(member.mode) == expected_mode,
+                        "bundle member size/mode mismatch")
+                content = archive.extractfile(member)
+                require(content is not None and sha256_bytes(content.read()) == expected.get("digest"), "bad internal file hash")
+                names.add(name)
+    except tarfile.TarError as exc:
+        raise InvariantError("tampered bundle") from exc
     return manifest, files
 
 

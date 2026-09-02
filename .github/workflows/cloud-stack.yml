@@ -27,6 +27,8 @@ on:
       - "scripts/validate-phase2-reachability.mjs"
       - "scripts/validate-cloud-image-contract.mjs"
       - "scripts/validate-cloud-publisher-bootstrap.mjs"
+      - "platform/release/third-party-images.json"
+      - "scripts/cloud-publisher-oidc-policy.mjs"
   workflow_dispatch:
 
 permissions:

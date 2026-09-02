@@ -164,7 +164,11 @@ jobs:
           matches = [item for item in referenced if item.get("path") == expected_path]
           assert len(matches) == 1
           assert matches[0].get("sha") == expected_sha
-          assert matches[0].get("ref") == caller_ref
+          if is_historical:
+              assert matches[0].get("ref") == caller_ref
+          else:
+              # GitHub omits ref when a reusable workflow is invoked by immutable SHA.
+              assert matches[0].get("ref") is None
           # END STAGING_RELEASE_RUN_PROVENANCE_VALIDATION
           PY
           gh api "repos/$GITHUB_REPOSITORY/actions/artifacts/$ARTIFACT_ID/zip" > candidate.zip

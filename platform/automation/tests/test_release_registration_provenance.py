@@ -133,6 +133,18 @@ class ReleaseRegistrationProvenanceTests(unittest.TestCase):
         run["referenced_workflows"][0]["sha"] = "0" * 40
         self.assert_rejected(artifact, run, env)
 
+    def test_historical_wrong_referenced_workflow_ref_is_rejected(self) -> None:
+        artifact, run, env = self.historical_fixture()
+        run["referenced_workflows"][0]["ref"] = "refs/heads/main"
+        self.assert_rejected(artifact, run, env)
+
+    def test_duplicate_expected_builder_identity_is_rejected(self) -> None:
+        artifact, run, env = self.historical_fixture()
+        run["referenced_workflows"].append(
+            copy.deepcopy(run["referenced_workflows"][0])
+        )
+        self.assert_rejected(artifact, run, env)
+
     def test_other_identity_does_not_receive_historical_exception(self) -> None:
         for changed in ("run", "artifact", "source"):
             with self.subTest(changed=changed):
@@ -152,7 +164,7 @@ class ReleaseRegistrationProvenanceTests(unittest.TestCase):
                     run["head_sha"] = source
                 self.assert_rejected(artifact, run, env)
 
-    def test_future_release_requires_exact_pinned_reusable_builder(self) -> None:
+    def test_future_sha_pinned_builder_without_ref_is_accepted(self) -> None:
         artifact, run, env = self.historical_fixture()
         env["RUN_ID"] = "40000000000"
         artifact["workflow_run"]["id"] = 40000000000
@@ -164,7 +176,6 @@ class ReleaseRegistrationProvenanceTests(unittest.TestCase):
                     "build-release-candidate-impl.yml@" + BUILDER_COMMIT
                 ),
                 "sha": BUILDER_COMMIT,
-                "ref": "refs/heads/codex/platform-release-automation",
             }
         ]
         accepted = self.execute(artifact, run, env)
@@ -173,6 +184,19 @@ class ReleaseRegistrationProvenanceTests(unittest.TestCase):
         wrong_sha_run = copy.deepcopy(run)
         wrong_sha_run["referenced_workflows"][0]["sha"] = "0" * 40
         self.assert_rejected(artifact, wrong_sha_run, env)
+
+        wrong_path_run = copy.deepcopy(run)
+        wrong_path_run["referenced_workflows"][0]["path"] = (
+            "TrinyxAI/Trinyx/.github/workflows/build-release-candidate.yml@"
+            + BUILDER_COMMIT
+        )
+        self.assert_rejected(artifact, wrong_path_run, env)
+
+        contradictory_ref_run = copy.deepcopy(run)
+        contradictory_ref_run["referenced_workflows"][0]["ref"] = (
+            "refs/heads/codex/platform-release-automation"
+        )
+        self.assert_rejected(artifact, contradictory_ref_run, env)
         self.assertIn(f"BUILDER_WORKFLOW_COMMIT: {BUILDER_COMMIT}", self.workflow)
 
 
